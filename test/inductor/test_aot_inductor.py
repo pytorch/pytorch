@@ -6042,9 +6042,15 @@ class AOTInductorTestsTemplate:
         inputs = tuple(inputs)
         model = Model()
         with torch.no_grad():
+            # This test calls compile directly rather than self.check_model, so
+            # propagate the copied test class' ArrayRef settings explicitly.
             AOTIRunnerUtil.compile(
                 model,
                 inputs,
+                inductor_configs={
+                    "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                    "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+                },
             )
 
     def test_runtime_checks_complex(self):
