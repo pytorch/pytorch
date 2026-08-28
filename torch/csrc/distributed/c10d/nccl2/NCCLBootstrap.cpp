@@ -2,7 +2,6 @@
 
 #ifdef USE_C10D_NCCL
 
-#include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <fmt/core.h>
 #include <nccl.h>
@@ -11,7 +10,6 @@
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLBootstrap.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
-#include <torch/csrc/distributed/c10d/nccl2/Utils.hpp>
 #include <cstring>
 #include <exception>
 #include <set>
@@ -172,6 +170,13 @@ void populateNcclConfigFromHints(
       config.nvlinkCentricSched = std::stoi(val);
       TC_LOG(INFO) << "[comm=" << name << "] Setting config.nvlinkCentricSched="
                    << config.nvlinkCentricSched;
+    }
+#endif
+#ifdef NCCL_HAS_HOST_CFT_MODE
+    else if (key == "hostCftMode" || key == "host_cft_mode") {
+      config.hostCftMode = std::stoi(val);
+      TC_LOG(INFO) << "[comm=" << name
+                   << "] Setting config.hostCftMode=" << config.hostCftMode;
     }
 #endif
     else {
