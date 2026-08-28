@@ -189,22 +189,27 @@ def maybe_handle_backward_generation(
     # See [Backward Generation Handling]
     # if cudagraph'd the forward and set the device, we need to let the cudagraph manager
     # know we are running the backward even if we will not run it in cudagraphs
-    if is_backward and config.triton.cudagraph_trees:
-        if boxed_forward_device_index is None:
-            raise AssertionError("boxed_forward_device_index must not be None")
-        if boxed_forward_device_index.value is None:
-            raise AssertionError("boxed_forward_device_index.value must not be None")
+    if (
+        is_backward
+        and config.triton.cudagraph_trees
+        and boxed_forward_device_index is not None
+        and boxed_forward_device_index.value is not None
+    ):
         compiled_graph_callable = compiled_graph.current_callable
-
-        manager = torch._inductor.cudagraph_trees.get_manager(
-            boxed_forward_device_index.value, create_if_none_exists=False
-        )
-        # should already exist from forward
-        if manager is None:
-            raise AssertionError("CUDAGraph manager must not be None")
+        forward_device_index = boxed_forward_device_index.value
+        manager = None
 
         def compiled_artifact(new_inputs: Sequence[InputType]) -> object:
-            manager.set_to_running_backward()  # type: ignore[union-attr]
+            nonlocal manager
+            # On an AOTAutograd cache hit, post_compile runs before the forward
+            # creates its manager. Resolve it when the backward first executes;
+            # runtime capture-size filtering may legitimately leave it absent.
+            if manager is None:
+                manager = torch._inductor.cudagraph_trees.get_manager(
+                    forward_device_index, create_if_none_exists=False
+                )
+            if manager is not None:
+                manager.set_to_running_backward()
             return compiled_graph_callable(new_inputs)
 
         compiled_graph.current_callable = compiled_artifact

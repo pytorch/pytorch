@@ -346,6 +346,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
 
         self.assertTrue(captured_kwargs)
         self.assertNotIn("cudagraphs_post_compile_override", captured_kwargs)
+        self.assertNotIn("cudagraph_partition_only_regions", captured_kwargs)
         self.assertNotIn(
             "cudagraphs_post_compile_override",
             autograd_cache.create_fx_config(compiler_config_extra),
