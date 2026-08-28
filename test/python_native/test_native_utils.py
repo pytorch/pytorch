@@ -82,12 +82,12 @@ class TestNativeUtils(TestCase):
             "get_device_capability",
             side_effect=AssertionError("queried the device"),
         ):
-            self.assertFalse(cap.device_ok(torch.empty(2)))
-            self.assertFalse(cap.device_ok(torch.empty(2, device="meta")))
+            self.assertFalse(cap.device_ok(torch.empty(2), 9))
+            self.assertFalse(cap.device_ok(torch.empty(2, device="meta"), 9))
 
     def test_device_ok_memoizes_per_device(self):
         # The arch answer is immutable per device, so it is asked once. Assert that as BEHAVIOUR
-        # -- the second call must not query the device -- rather than by inspecting the memo dict,
+        # -- the second call must not query the device -- rather than by inspecting the memo,
         # which would weld the test to the cache's representation.
         from unittest.mock import patch
 
@@ -95,19 +95,37 @@ class TestNativeUtils(TestCase):
 
         if not torch.cuda.is_available():
             self.skipTest("needs a CUDA device to populate the arch cache")
-        prior = cap._ARCH_OK.copy()
-        self.addCleanup(lambda: (cap._ARCH_OK.clear(), cap._ARCH_OK.update(prior)))
-        cap._ARCH_OK.clear()
+        self.addCleanup(cap._arch_ok.cache_clear)
+        cap._arch_ok.cache_clear()
         x = torch.empty(2, device="cuda")
         with patch.object(
             torch.cuda,
             "get_device_capability",
             side_effect=torch.cuda.get_device_capability,
         ) as query:
-            first = cap.device_ok(x)
+            first = cap.device_ok(x, 9)
             self.assertEqual(query.call_count, 1)
-            self.assertEqual(cap.device_ok(x), first)
+            self.assertEqual(cap.device_ok(x, 9), first)
             self.assertEqual(query.call_count, 1, "the arch query was repeated")
+
+    def test_device_ok_honours_the_callers_bound(self):
+        # The bound is the caller's, so it has to be part of the memo KEY: families disagree
+        # about the minimum (topk sm100+, reductions sm90+) and one must not be served the
+        # other's answer. Asserting both directions on one device is what catches that.
+        from unittest.mock import patch
+
+        from torch._native.utils import capability as cap
+
+        if not torch.cuda.is_available():
+            self.skipTest("needs a CUDA device to reach the arch query")
+        self.addCleanup(cap._arch_ok.cache_clear)
+        cap._arch_ok.cache_clear()
+        x = torch.empty(2, device="cuda")
+        with patch.object(torch.cuda, "get_device_capability", return_value=(9, 0)):
+            self.assertTrue(cap.device_ok(x, 9))
+            self.assertFalse(
+                cap.device_ok(x, 10), "the sm90 answer was reused for sm100+"
+            )
 
     def test_on_current_device_never_raises(self):
         # capability.py's contract is that a cond NEVER raises -- a throwing cond takes down the
