@@ -1064,6 +1064,17 @@ def main(argv: list[str] | None = None) -> None:
                             f"tree; generation cannot be forced past a schema "
                             f"change."
                         )
+                    # kind beside version, because the stale check below reads it
+                    # (export_mod.runtimes_current) before anything else here does.
+                    # Absent, it used to be defaulted to cutedsl, judging whatever
+                    # built this artifact by that toolchain's compiler versions.
+                    if "kind" not in sc:
+                        raise RuntimeError(
+                            f"{path}: sidecar names no kind, so nothing can say "
+                            f"which toolchain built the artifacts beside it. "
+                            f"Re-export this arch ({sc.get('arch') or 'unknown'}) "
+                            f"or delete the tree."
+                        )
                     # The prefix names the extern "C" entry points and the
                     # launcher, so a non-identifier reaches the compiler as a
                     # syntax error inside a @generated file.
