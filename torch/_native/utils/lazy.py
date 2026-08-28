@@ -3,7 +3,12 @@
 # binding is created. This keeps `import torch` (and native-op registration) free of
 # DSL runtimes like cutlass -- the lazy-DSL-import contract enforced by
 # test_no_dsl_imports_after_import_torch -- while call sites keep writing `mod.attr`
-# unchanged. Mirrors torch/onnx/_internal/_lazy_import._LazyModule.
+# unchanged.
+#
+# torch/onnx/_internal/_lazy_import._LazyModule is the same 10 lines. The duplication is
+# deliberate: this module is imported during native-op registration, and reaching into
+# torch.onnx for it would put an onnx dependency on that path. Do not "deduplicate" them
+# without moving one somewhere neutral.
 #
 # Use the TYPE_CHECKING-real / else-lazy idiom so static tooling still resolves attrs:
 #
