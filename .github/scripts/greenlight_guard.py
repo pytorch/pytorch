@@ -29,6 +29,7 @@ from greenlight_ledger import (
     STATUS_FAILED,
     STATUS_LAND,
     STATUS_NO_LAND,
+    STATUS_REVERTED,
 )
 from greenlight_messages import (
     describe_ledger,
@@ -46,7 +47,7 @@ from greenlight_messages import (
     timeout_suffix,
     transport_timeout_suffix,
 )
-from greenlight_preflight import cannot_review
+from greenlight_preflight import cannot_review, FIX_REVERTED
 
 
 if TYPE_CHECKING:
@@ -72,9 +73,11 @@ TRANSPORT_MAX_WAIT = timedelta(minutes=TRANSPORT_MAX_WAIT_MINUTES)
 DEAD_REVIEW_AGE = timedelta(minutes=50)
 
 # Not one of greenlight's groupings: upstream splits NO_LAND (terminal) from CANCELLED
-# and FAILED (retry-eligible). At land time all three mean the same thing, namely that
+# and FAILED (retry-eligible). At land time they all mean the same thing, namely that
 # greenlight did not say LAND for the commit in front of us.
-NEGATIVE_STATUSES = frozenset({STATUS_NO_LAND, STATUS_CANCELLED, STATUS_FAILED})
+NEGATIVE_STATUSES = frozenset(
+    {STATUS_NO_LAND, STATUS_CANCELLED, STATUS_FAILED, STATUS_REVERTED}
+)
 
 _SHA_RE = re.compile(r"[0-9a-f]{40}")
 
@@ -224,15 +227,14 @@ def _settled_outcome(pr: PRUnderMerge, state: LedgerState, now: datetime) -> Out
         )
     if state.status == STATUS_LAND:
         return Outcome(GuardVerdict.ALLOW, "LAND", "", pr.pr_num, pr.head_sha, ledger)
+    fix = FIX_REVERTED if state.status == STATUS_REVERTED else FIX_HUMAN
     if state.status in NEGATIVE_STATUSES:
         detail = f"greenlight recorded {state.status} for this exact commit"
         kind = "NEGATIVE_VERDICT"
     else:
         detail = f"greenlight recorded the unrecognized status {state.status} for this commit"
         kind = "UNKNOWN_STATUS"
-    return Outcome(
-        GuardVerdict.DENY, kind, detail, pr.pr_num, pr.head_sha, ledger, FIX_HUMAN
-    )
+    return Outcome(GuardVerdict.DENY, kind, detail, pr.pr_num, pr.head_sha, ledger, fix)
 
 
 def _evaluate_pr(pr: PRUnderMerge, state: LedgerState | None, now: datetime) -> Outcome:
