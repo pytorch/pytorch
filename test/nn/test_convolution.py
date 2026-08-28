@@ -19,6 +19,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
     dtypesIfMPS,
+    dtypesIfXPU,
     expectedFailureMeta,
     expectedFailureMPS,
     expectedFailureXPU,
@@ -1253,7 +1254,12 @@ class TestConvolutionNNDevice(NNTestCase):
                 lx, lweight = inputs
                 lbias = None
             # We disable cudnn during forward to avoid finite difference imprecision issues
-            with cudnn.flags(enabled=False):
+            ctx_mgr = (
+                torch.backends.mkldnn.flags(enabled=False)
+                if device.type == "xpu"
+                else cudnn.flags(enabled=False)
+            )
+            with ctx_mgr:
                 out = F.conv2d(lx, lweight, lbias, stride, padding, dilation, groups)
             return out
 
@@ -1302,11 +1308,20 @@ class TestConvolutionNNDevice(NNTestCase):
                 bias = torch.randn(
                     2, dtype=torch.double, device=device, requires_grad=True
                 )
-                with torch.backends.cudnn.flags(enabled=False):
+
+                device_type = torch.device(device).type
+                ctx_mgr = (
+                    torch.backends.mkldnn.flags(enabled=False)
+                    if device_type == "xpu"
+                    else torch.backends.cudnn.flags(enabled=False)
+                )
+
+                with ctx_mgr:
                     res = convfn(inputs, weight, bias, **kwargs)
                 res_cpu = convfn(inputs.cpu(), weight.cpu(), bias.cpu(), **kwargs)
                 self.assertEqual(res, res_cpu)
-                with torch.backends.cudnn.flags(enabled=False):
+
+                with ctx_mgr:
                     torch.autograd.gradcheck(
                         lambda x, w, b: convfn(x, w, b, **kwargs),
                         (inputs, weight, bias),
@@ -1354,6 +1369,7 @@ class TestConvolutionNNDevice(NNTestCase):
             output.mean().backward()
 
     @dtypesIfCUDA(torch.float, torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else [])
+    @dtypesIfXPU(torch.float, torch.half)
     @dtypes(torch.float)
     @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
     @torch.backends.miopen.flags(immediate=True)
@@ -1394,6 +1410,7 @@ class TestConvolutionNNDevice(NNTestCase):
     # Covering special case when group > 1, input-channel / group < 16
     # and output-channel is multiple of 16
     @dtypesIfCUDA(torch.float, torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else [])
+    @dtypesIfXPU(torch.float, torch.half)
     @dtypes(torch.float)
     @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
     @torch.backends.miopen.flags(immediate=True)
@@ -1592,6 +1609,7 @@ class TestConvolutionNNDevice(NNTestCase):
     @dtypes(
         *floating_types_and(torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else [])
     )
+    @dtypesIfXPU(torch.half, torch.bfloat16)
     @dtypesIfMPS(torch.float, torch.half)
     def test_noncontig_conv_grad(self, device, dtype):
         # FIXME: remove after adding non-contiguous grad tests for all modules
@@ -1618,6 +1636,7 @@ class TestConvolutionNNDevice(NNTestCase):
     @dtypes(torch.double)
     @skipMPS
     @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
+    @torch.backends.mkldnn.flags(enabled=True, deterministic=True)
     @torch.backends.miopen.flags(immediate=True)
     def test_conv_double_backward(self, device, dtype):
         # Double backward only runs with DoubleTensor due to precision reason
@@ -3344,6 +3363,7 @@ class TestConvolutionNNDevice(NNTestCase):
     @onlyAccelerator
     @largeTensorTest("20GB", "cpu")
     @largeTensorTest("60GB", "cuda")
+    @largeTensorTest("60GB", "xpu")
     @serialTest()
     @expectedFailureMPS
     def test_conv_large_batch_1(self, device):
@@ -3471,6 +3491,7 @@ class TestConvolutionNNDevice(NNTestCase):
     @dtypesIfCUDA(
         *floating_types_and(torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else [])
     )
+    @dtypesIfXPU(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
     @torch.backends.miopen.flags(immediate=True)
@@ -3720,6 +3741,7 @@ class TestConvolutionNNDevice(NNTestCase):
     @onlyAccelerator
     @largeTensorTest("40GB")
     @largeTensorTest("24GB", "cpu")
+    @largeTensorTest("24GB", "xpu")
     @serialTest()
     @tf32_on_and_off(0.005)
     def test_conv3d_64bit_indexing(self, device):
