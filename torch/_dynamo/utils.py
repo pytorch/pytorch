@@ -2573,6 +2573,7 @@ def copy_dynamo_tensor_attributes(src: torch.Tensor, dst: torch.Tensor) -> None:
     _copy_dynamo_attr(src, dst, "_dynamo_shape_ids")
     _copy_dynamo_attr(src, dst, "_dynamo_strict_unbacked_indices")
     _copy_dynamo_attr(src, dst, "_dynamo_weak_dynamic_indices")
+    _copy_dynamo_attr(src, dst, "_dynamo_dynamic_range")
     _copy_dynamo_attr(src, dst, "_dynamo_propagated_dynamic_indices")
     _copy_dynamo_attr(src, dst, "_has_dynamo_dim_marking")
 
@@ -4745,11 +4746,15 @@ def nn_module_has_global_hooks() -> bool:
 DynamoRuntimeModuleRef = weakref.ReferenceType[torch.nn.Module]
 
 
-class _DynamoRuntimeModule(torch.nn.Module):
+class _DynamoRuntimeModuleProvider:
     """Compiler-owned wrapper that declares its runtime module values."""
 
     def _dynamo_runtime_module_values(self) -> tuple[Any, ...]:
         return ()
+
+
+class _DynamoRuntimeModule(torch.nn.Module, _DynamoRuntimeModuleProvider):
+    """Compiler-owned module that may contain more runtime module values."""
 
 
 class _DynamoRuntimeModuleTLS(threading.local):
@@ -4798,32 +4803,29 @@ def get_dynamo_runtime_module_refs(*values: Any) -> tuple[DynamoRuntimeModuleRef
     """
     refs: list[DynamoRuntimeModuleRef] = []
     seen: set[int] = set()
-    pending: list[torch.nn.Module] = []
-    for value in values:
-        module = None
-        if isinstance(value, torch.nn.Module):
-            module = value
-        elif isinstance(
-            value, (types.MethodType, types.BuiltinMethodType)
-        ) and isinstance(value.__self__, torch.nn.Module):
-            module = value.__self__
-
-        if module is not None:
-            pending.append(module)
+    pending = list(values)
 
     while pending:
-        module = pending.pop()
-        if id(module) in seen:
+        value = pending.pop()
+        if isinstance(
+            value, (types.MethodType, types.BuiltinMethodType)
+        ) and isinstance(value.__self__, torch.nn.Module):
+            value = value.__self__
+        if not isinstance(value, (torch.nn.Module, _DynamoRuntimeModuleProvider)):
             continue
-        seen.add(id(module))
-        refs.append(weakref.ref(module))
+        if id(value) in seen:
+            continue
+        seen.add(id(value))
 
-        if isinstance(module, torch.fx.GraphModule):
-            for node in module.graph.nodes:
+        if isinstance(value, torch.nn.Module):
+            refs.append(weakref.ref(value))
+
+        if isinstance(value, torch.fx.GraphModule):
+            for node in value.graph.nodes:
                 if node.op not in ("call_module", "get_attr"):
                     continue
                 try:
-                    submodule = module.get_submodule(str(node.target))
+                    submodule = value.get_submodule(str(node.target))
                 except AttributeError:
                     continue
                 if (
@@ -4832,14 +4834,8 @@ def get_dynamo_runtime_module_refs(*values: Any) -> tuple[DynamoRuntimeModuleRef
                 ) or isinstance(submodule, _DynamoRuntimeModule):
                     pending.append(submodule)
 
-        if isinstance(module, _DynamoRuntimeModule):
-            for value in module._dynamo_runtime_module_values():
-                if isinstance(value, torch.nn.Module):
-                    pending.append(value)
-                elif isinstance(
-                    value, (types.MethodType, types.BuiltinMethodType)
-                ) and isinstance(value.__self__, torch.nn.Module):
-                    pending.append(value.__self__)
+        if isinstance(value, _DynamoRuntimeModuleProvider):
+            pending.extend(value._dynamo_runtime_module_values())
     return tuple(refs)
 
 
@@ -4880,9 +4876,13 @@ def wrap_dynamo_runtime_module_call(
 
     @functools.wraps(fn)
     def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> R:
-        with dynamo_runtime_modules(refs):
+        if not torch.nn.modules.module._has_any_global_hook():
+            return fn(*args, **kwargs)
+        with _DynamoRuntimeModuleContext(refs):
             return fn(*args, **kwargs)
 
+    if (boxed_call := getattr(fn, "_boxed_call", None)) is not None:
+        wrapped._boxed_call = boxed_call  # type: ignore[attr-defined]
     return wrapped
 
 

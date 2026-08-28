@@ -31,7 +31,13 @@ from typing import Any, cast, Protocol, TYPE_CHECKING, TypeAlias
 
 import torch
 from torch._custom_class_base import CustomClassBase
-from torch._dynamo.utils import counters, get_runtime_metrics_context
+from torch._dynamo.utils import (
+    counters,
+    dynamo_runtime_modules,
+    DynamoRuntimeModuleRef,
+    get_dynamo_runtime_module_refs,
+    get_runtime_metrics_context,
+)
 from torch._guards import compile_context, CompileContext
 from torch._higher_order_ops.wrap import inductor_compiled_code
 from torch._inductor.cudagraph_utils import (
@@ -1213,6 +1219,10 @@ class RegionalOutputCode(OutputCode):
     # Optional filter for ops during serialization
     _ops_filter: Callable[[str], bool] | None = None
 
+    _runtime_module_refs: tuple[DynamoRuntimeModuleRef, ...] = dataclasses.field(
+        default=(), init=False, repr=False
+    )
+
     def __init__(
         self,
         graph_module: torch.fx.GraphModule,
@@ -1233,6 +1243,9 @@ class RegionalOutputCode(OutputCode):
         self._serialized_wrappers = []
         self._boxed_call = True
         _, module = self._unwrap_graph_module()
+        self._runtime_module_refs = get_dynamo_runtime_module_refs(
+            self._graph_module, module
+        )
         self._inner_boxed_call = isinstance(
             module.graph._codegen, torch.fx.graph._BoxedCodeGen
         )
@@ -1255,9 +1268,10 @@ class RegionalOutputCode(OutputCode):
                 "Did you forget to call post_compile()?"
             )
 
-        if self._inner_boxed_call:
-            return self._graph_module(inputs)
-        return self._graph_module(*inputs)
+        with dynamo_runtime_modules(self._runtime_module_refs):
+            if self._inner_boxed_call:
+                return self._graph_module(inputs)
+            return self._graph_module(*inputs)
 
     @property
     def graph(self):
@@ -1317,9 +1331,11 @@ class RegionalOutputCode(OutputCode):
         if not isinstance(gm, torch.fx.GraphModule):
             raise AssertionError(f"Expected torch.fx.GraphModule, got {type(gm)}")
         gm.recompile()
+        graph_module = gm
         for fn, kwargs in reversed(self._serialized_wrappers):
             gm = fn(gm, **kwargs)
         self._graph_module = gm
+        self._runtime_module_refs = get_dynamo_runtime_module_refs(gm, graph_module)
 
     def set_triton_bundle(self, triton_bundle: Any) -> None:
         """Regional inductor doesn't use triton bundles directly."""
@@ -1347,3 +1363,4 @@ class RegionalOutputCode(OutputCode):
             )
             # Clear the graph module to avoid pickling it with standard pickle
             self._graph_module = None
+            self._runtime_module_refs = ()

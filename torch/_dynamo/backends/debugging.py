@@ -502,8 +502,8 @@ register_backend(
 )
 
 
-# aot_eager_decomp_partition_with_mode is similar as aot_eager_decomp_partition,
-# except that it takes a TorchDispatchMode mode and run the fw/bw in the mode
+# aot_eager_decomp_partition_with_mode is similar to aot_eager_decomp_partition,
+# except that it takes a TorchDispatchMode mode and runs the fw/bw in the mode
 def aot_eager_decomp_partition_with_mode(
     gm: torch.fx.GraphModule,
     fake_tensor_inputs: list[torch.Tensor],
@@ -558,12 +558,7 @@ def _aot_ts_compile(
     gm: torch.fx.GraphModule, fake_tensor_inputs: list[torch.Tensor]
 ) -> Callable[..., Any]:
     with dynamo_compiler_modules():
-        compiled_fn = ts_compile(gm, fake_tensor_inputs)
-    return wrap_dynamo_runtime_module_call(
-        compiled_fn,
-        # make_boxed_compiler preserves the compiled ScriptModule here.
-        get_dynamo_runtime_module_refs(compiled_fn.__wrapped__),  # type: ignore[attr-defined]
-    )
+        return ts_compile(gm, fake_tensor_inputs)
 
 
 aot_ts = aot_autograd(fw_compiler=_aot_ts_compile)

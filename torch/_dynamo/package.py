@@ -40,7 +40,13 @@ from .bytecode_transformation import (
     get_code_keys,
     is_compiled_fn_name,
 )
-from .utils import CleanupHook, counters, dynamo_timed, increment_frame
+from .utils import (
+    CleanupHook,
+    counters,
+    dynamo_timed,
+    get_dynamo_runtime_module_refs,
+    increment_frame,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -886,6 +892,7 @@ class CompilePackage:
         from torch._C._dynamo.eval_frame import _load_precompile_entry
 
         from .convert_frame import input_codes
+        from .decorators import _disable_with_runtime_module_refs
         from .output_graph import get_builtins_dict
 
         self.uninstall()
@@ -945,10 +952,15 @@ class CompilePackage:
                         "after_deserialization", phase_name="backend_compile"
                     ):
                         backend = backends[backend_id].after_deserialization()
+                        runtime_module_refs = get_dynamo_runtime_module_refs(backend)
                         self._install_global(
                             module,
                             backend_id,
-                            torch._dynamo.disable(backend),
+                            _disable_with_runtime_module_refs(
+                                backend,
+                                reason="do not trace Dynamo-compiled graph",
+                                runtime_module_refs=runtime_module_refs,
+                            ),
                         )
 
                 if len(entry.guarded_codes) == 0:

@@ -4,12 +4,19 @@ from copy import copy
 
 import torch
 from torch import nn
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 from torch.utils.checkpoint import checkpoint
 from torch.utils.module_tracker import ModuleTracker
 
 
 class TestModuleTracker(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_module_hierarchy(self):
         seen_fw = []
         seen_bw = []
@@ -498,6 +505,135 @@ class TestModuleTracker(TestCase):
         for module_name, parents, is_dynamo_runtime in seen:
             self.assertNotIn(module_name, parents)
             self.assertTrue(is_dynamo_runtime)
+
+    @skipIfTorchDynamo("test itself calls torch.compile with an AOT backend")
+    def test_aot_autograd_compiler_output_hierarchy(self):
+        from torch._dynamo.backends.common import aot_autograd
+
+        seen = []
+        compiled_graphs = []
+
+        def make_compiler(kind):
+            def compiler(gm, example_inputs):
+                compiled_graphs.append(kind)
+
+                def record(module, args):
+                    seen.append(
+                        (
+                            kind,
+                            tracker.parents.copy(),
+                            tracker.is_bw,
+                            torch._dynamo.utils.is_dynamo_runtime_module(module),
+                        )
+                    )
+
+                gm.register_forward_pre_hook(record)
+                gm(*example_inputs)
+
+                def run(args):
+                    return gm(*args)
+
+                run._boxed_call = True
+                return run
+
+            return compiler
+
+        class Leaf(nn.Module):
+            def forward(self, x):
+                return x.sin().cos()
+
+        backend = aot_autograd(
+            fw_compiler=make_compiler("forward"),
+            bw_compiler=make_compiler("backward"),
+            inference_compiler=make_compiler("inference"),
+        )
+        compiled = torch.compile(Leaf(), backend=backend, fullgraph=True)
+        with (
+            torch._functorch.config.patch(force_non_lazy_backward_lowering=False),
+            ModuleTracker() as tracker,
+        ):
+            output = compiled(torch.randn(3, requires_grad=True))
+            self.assertEqual(compiled_graphs, ["forward"])
+            output.sum().backward()
+
+        self.assertEqual(compiled_graphs, ["forward", "backward"])
+        torch._dynamo.reset()
+        inference_compiled = torch.compile(Leaf(), backend=backend, fullgraph=True)
+        with torch.no_grad(), ModuleTracker() as tracker:
+            inference_compiled(torch.randn(3))
+
+        self.assertEqual(compiled_graphs, ["forward", "backward", "inference"])
+        self.assertTrue(
+            any(kind == "forward" and not is_bw for kind, _, is_bw, _ in seen)
+        )
+        self.assertTrue(any(kind == "backward" and is_bw for kind, _, is_bw, _ in seen))
+        self.assertTrue(
+            any(kind == "inference" and not is_bw for kind, _, is_bw, _ in seen)
+        )
+        for _, parents, _, is_dynamo_runtime in seen:
+            self.assertEqual(parents, {"Global", "Leaf"})
+            self.assertTrue(is_dynamo_runtime)
+
+    @skipIfTorchDynamo("test itself calls torch.compile with an AOT backend")
+    def test_cached_regional_aot_runtime_module_hierarchy(self):
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
+        from torch._inductor.utils import fresh_inductor_cache
+        from torch.fx.passes.regional_inductor import regional_inductor
+
+        class Leaf(nn.Module):
+            def forward(self, x):
+                return x.sin().cos()
+
+        backend = aot_autograd(
+            fw_compiler=regional_inductor,
+            bw_compiler=regional_inductor,
+            inference_compiler=regional_inductor,
+        )
+        mod = Leaf()
+        x = torch.randn(3)
+
+        def run():
+            seen = []
+            with torch.no_grad(), ModuleTracker() as tracker:
+                handle = nn.modules.module.register_module_forward_pre_hook(
+                    lambda module, args: seen.append(
+                        (
+                            copy(tracker.parents),
+                            torch._dynamo.utils.is_dynamo_runtime_module(module),
+                        )
+                    )
+                    if isinstance(module, torch.fx.GraphModule)
+                    else None
+                )
+                try:
+                    torch.compile(mod, backend=backend, fullgraph=True)(x)
+                finally:
+                    handle.remove()
+            return seen
+
+        with (
+            fresh_inductor_cache(),
+            torch._functorch.config.patch(
+                bundled_autograd_cache=True,
+                force_autograd_cache=True,
+                strict_autograd_cache=True,
+            ),
+        ):
+            AOTAutogradCache.clear()
+            torch._dynamo.utils.counters.clear()
+            first_seen = run()
+            torch._dynamo.reset()
+            cached_seen = run()
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["aot_autograd"]["autograd_cache_hit"], 1
+        )
+        for seen in (first_seen, cached_seen):
+            self.assertTrue(seen)
+            for parents, is_dynamo_runtime in seen:
+                self.assertEqual(parents, {"Global", "Leaf"})
+                self.assertTrue(is_dynamo_runtime)
 
     @skipIfTorchDynamo("test itself calls torch.compile with an AOT backend")
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)

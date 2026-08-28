@@ -19,6 +19,7 @@ optimization of both forward and backward passes.
 from __future__ import annotations
 
 import contextlib
+import copy
 import functools
 import logging
 from typing import Any, TYPE_CHECKING
@@ -28,7 +29,14 @@ from unittest.mock import patch
 import torch
 from torch._dynamo import disable
 from torch._dynamo.exc import TensorifyScalarRestartAnalysis
-from torch._dynamo.utils import counters, defake, flatten_graph_inputs
+from torch._dynamo.utils import (
+    counters,
+    defake,
+    dynamo_runtime_modules,
+    flatten_graph_inputs,
+    get_dynamo_runtime_module_refs,
+    wrap_dynamo_runtime_module_call,
+)
 from torch._functorch.aot_autograd import (
     aot_module_simplified,
     SerializableAOTDispatchCompiler,
@@ -103,27 +111,62 @@ class AotAutograd:
         # NB: don't delete counter increment
         counters["aot_autograd"]["total"] += 1
 
-        def wrap_bw_compiler(bw_compiler_fn: Callable[P, R]) -> Callable[..., R]:
-            def _wrapped_bw_compiler(*args: P.args, **kwargs: P.kwargs) -> R:
+        def runtime_module_refs(
+            graph: torch.fx.GraphModule, compiled_fn: Callable[..., Any]
+        ) -> tuple[Any, ...]:
+            return get_dynamo_runtime_module_refs(
+                graph,
+                compiled_fn,
+                getattr(compiled_fn, "__wrapped__", None),
+            )
+
+        def wrap_compiler_output(
+            compiler: Callable[..., Any],
+        ) -> Callable[..., Any]:
+            if isinstance(compiler, SerializableAOTDispatchCompiler):
+                serializable_compiler = copy.copy(compiler)
+                serializable_compiler.compiler_fn = wrap_compiler_output(
+                    compiler.compiler_fn
+                )
+                return serializable_compiler
+
+            @functools.wraps(compiler)
+            def wrapped(gm: torch.fx.GraphModule, *args: Any, **kwargs: Any) -> Any:
+                with dynamo_runtime_modules(get_dynamo_runtime_module_refs(gm)):
+                    compiled_fn = compiler(gm, *args, **kwargs)
+                return wrap_dynamo_runtime_module_call(
+                    compiled_fn, runtime_module_refs(gm, compiled_fn)
+                )
+
+            return wrapped
+
+        def wrap_bw_compiler(
+            bw_compiler_fn: Callable[..., Any],
+        ) -> Callable[..., Any]:
+            @functools.wraps(bw_compiler_fn)
+            def wrapped(gm: torch.fx.GraphModule, *args: Any, **kwargs: Any) -> Any:
                 # Note [Wrapping bw_compiler in disable]
                 # The two disables here:
                 # - stop TorchDynamo from trying to compile the bw_compiler function itself
-                # - stop TorchDynamo from trying to compile our the generated backwards pass bw_compiler produces
+                # - stop TorchDynamo from trying to compile the generated backwards pass bw_compiler produces
+                from torch._dynamo.decorators import _disable_with_runtime_module_refs
 
-                return disable(
-                    disable(
-                        bw_compiler_fn, reason="do not trace backward compiler function"
-                    )(*args, **kwargs),  # type: ignore[misc]
+                compiled_fn = _disable_with_runtime_module_refs(
+                    bw_compiler_fn,
+                    reason="do not trace backward compiler function",
+                    runtime_module_refs=get_dynamo_runtime_module_refs(gm),
+                )(gm, *args, **kwargs)
+                return _disable_with_runtime_module_refs(  # type: ignore[return-value]
+                    compiled_fn,
                     reason="do not trace generated backwards pass",
+                    runtime_module_refs=runtime_module_refs(gm, compiled_fn),
                 )
 
-            _wrapped_bw_compiler._is_wrapped_bw_compiler = (  # pyrefly: ignore [missing-attribute]
-                True
-            )
-            return _wrapped_bw_compiler
+            wrapped._is_wrapped_bw_compiler = True  # type: ignore[attr-defined]
+            return wrapped
 
-        bw_compiler = self.kwargs.get("bw_compiler") or self.kwargs["fw_compiler"]
-
+        fw_compiler = self.kwargs["fw_compiler"]
+        bw_compiler = self.kwargs.get("bw_compiler") or fw_compiler
         if isinstance(bw_compiler, SerializableAOTDispatchCompiler):
             if not getattr(bw_compiler.compiler_fn, "_is_wrapped_bw_compiler", False):
                 bw_compiler.compiler_fn = wrap_bw_compiler(bw_compiler.compiler_fn)
@@ -132,7 +175,12 @@ class AotAutograd:
 
         self.kwargs["bw_compiler"] = bw_compiler
         self.kwargs["inference_compiler"] = (
-            self.kwargs.get("inference_compiler") or self.kwargs["fw_compiler"]
+            self.kwargs.get("inference_compiler") or fw_compiler
+        )
+        compiler_kwargs = self.kwargs.copy()
+        compiler_kwargs["fw_compiler"] = wrap_compiler_output(fw_compiler)
+        compiler_kwargs["inference_compiler"] = wrap_compiler_output(
+            self.kwargs["inference_compiler"]
         )
 
         from functorch.compile import nop
@@ -140,7 +188,7 @@ class AotAutograd:
 
         # debug asserts slow down compile time noticeably,
         # So only default them on when the aot_eager backend is used.
-        if self.kwargs.get("fw_compiler", None) is nop:
+        if fw_compiler is nop:
             patch_config: contextlib.AbstractContextManager[Any] = patch(
                 "functorch.compile.config.debug_assert", True
             )
@@ -156,7 +204,7 @@ class AotAutograd:
                 cg = aot_module_simplified(
                     gm,
                     example_inputs,
-                    **self.kwargs,  # pyrefly: ignore [bad-argument-type]
+                    **compiler_kwargs,  # pyrefly: ignore [bad-argument-type]
                 )
                 counters["aot_autograd"]["ok"] += 1
                 return disable(cg, reason="do not trace AOT-compiled graph")

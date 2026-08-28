@@ -1,5 +1,6 @@
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/autocast_mode.h>
+#include <ATen/core/functional.h>
 #include <c10/core/SafePyObject.h>
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/util/Exception.h>
@@ -1655,10 +1656,8 @@ class StorageOverlapChecker {
     if (_expected_overlapping == _overlapping.size() &&
         _expected_non_overlapping == _non_overlapping.size()) {
       // Transform each list of PyObject* into an actual list of Tensors.
-      auto overlapping_tensors =
-          _tensors_from(_overlapping, _expected_overlapping);
-      auto non_overlapping_tensors =
-          _tensors_from(_non_overlapping, _expected_non_overlapping);
+      auto overlapping_tensors = _tensors_from(_overlapping);
+      auto non_overlapping_tensors = _tensors_from(_non_overlapping);
       return check_overlapping(overlapping_tensors, non_overlapping_tensors);
     } else {
       // If we haven't collected them all yet, keep on running.
@@ -1678,16 +1677,9 @@ class StorageOverlapChecker {
   /**
    * Transforms a given list of PyObject* into a list of Tensor.
    */
-  std::vector<Tensor> _tensors_from(
-      const std::vector<PyObject*>& objects,
-      size_t size) {
-    std::vector<Tensor> tensors;
-    tensors.reserve(size);
-    std::ranges::transform(
-        objects, std::back_inserter(tensors), [](PyObject* obj) {
-          return THPVariable_Unpack(obj);
-        });
-    return tensors;
+  std::vector<Tensor> _tensors_from(const std::vector<PyObject*>& objects) {
+    return c10::fmap(
+        objects, [](PyObject* obj) { return THPVariable_Unpack(obj); });
   }
 
   // Expected number of possibly overlapping tensors.
