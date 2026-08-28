@@ -36,7 +36,10 @@ import torch.random
 from torch import sym_float, sym_int
 from torch._custom_class_base import CustomClassBase
 from torch._dynamo import compiled_autograd
-from torch._library.opaque_object import is_opaque_symbolic_type
+from torch._library.opaque_object import (
+    is_opaque_constant_type,
+    is_opaque_symbolic_type,
+)
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental.symbolic_shapes import (
     guard_scalar,
@@ -62,7 +65,7 @@ from ..exc import (
 )
 from ..external_utils import call_hook_from_backward_state
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, TypeSource
+from ..source import AttrSource
 from ..utils import (
     cmp_name_to_op_mapping,
     fqn,
@@ -478,8 +481,11 @@ class TensorVariable(VariableTracker):
             ):
                 return CustomClassObjectVariable.create(proxy, example_value, tx=tx)
             # any other attributes on the subclass (that are not methods)
-            # are assumed to be constant metadata.
-            elif not callable(example_value):
+            # are assumed to be constant metadata. Opaque constant types are also
+            # constant metadata even if they are callable.
+            elif not callable(example_value) or is_opaque_constant_type(
+                type(example_value)
+            ):
                 return VariableTracker.build(tx, example_value)
 
         if not (self.source and self.source.subguards_allowed()):
@@ -744,15 +750,6 @@ class TensorVariable(VariableTracker):
                     f"Unknown property {name} during speculating backward, dynamo will insert contiguous call ahead and speculate it again"
                 )
 
-        if name == "__class__":
-            # Carry provenance on the class, mirroring BuiltinVariable.call_type.
-            # A sourced class self-guards when observed downstream (e.g.
-            # `w.__class__ is SomeType`), which keeps type observation sound even
-            # when the input's own class guard is relaxed (see
-            # VariableBuilder.wrap_tensor and ACT input polymorphism).
-            source = self.source and TypeSource(self.source)
-            return VariableTracker.build(tx, self.python_type(), source)
-
         handler = getattr(self, f"method_attr_{name}", None)
         result = handler(tx) if handler is not None else None
 
@@ -772,7 +769,17 @@ class TensorVariable(VariableTracker):
             )
         ):
             install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
-            result.source = AttrSource(self.source, name)
+            if result.is_python_constant():
+                # ConstantVariable.create(None) is a process-wide singleton, and
+                # method_attr_grad hands it back for a pending `p.grad = None`; a
+                # source written onto it leaks into every later compile. Non-constants
+                # keep the in-place write: .data's tracker is AttributeMutationNew,
+                # which __init__ rejects a source for.
+                result = result.clone(
+                    source=AttrSource(self.source, name), source_location=None
+                )
+            else:
+                result.source = AttrSource(self.source, name)
 
         # It's hard to get inplace view (metadata mutation) on graph input work properly across
         # dynamo/aot/inductor, just fall back.
@@ -1233,6 +1240,28 @@ class TensorVariable(VariableTracker):
             return VariableTracker.build(
                 tx, fake.is_contiguous(memory_format=memory_format_const)
             )
+        return None
+
+    def method_is_pinned(
+        self,
+        tx: "InstructionTranslatorBase",
+        device: VariableTracker | None = None,
+    ) -> ConstantVariable | None:
+        # ATen is_pinned() is always false for non-CPU tensors. CPU pinning can
+        # vary without changing Dynamo's tensor metadata guards, so leave it to
+        # the generic path. Tensor subclasses can override is_pinned through
+        # __torch_dispatch__, so preserve dispatch for them too.
+        no_device = device is None or (
+            isinstance(device, ConstantVariable) and device.value is None
+        )
+        example_value = self.proxy.node.meta.get("example_value")
+        if (
+            no_device
+            and self.device is not None
+            and self.device.type != "cpu"
+            and not is_traceable_wrapper_subclass(example_value)
+        ):
+            return VariableTracker.build(tx, False)
         return None
 
     def method_type(
@@ -1802,6 +1831,9 @@ class TensorVariable(VariableTracker):
 
     def method___invert__(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self.nb_invert_impl(tx)
+
+    def method___index__(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return self.nb_index_impl(tx)
 
     def method___getitem__(
         self,
@@ -2433,6 +2465,7 @@ class TensorVariable(VariableTracker):
         "is_floating_point": Method(method_is_floating_point),
         "is_inference": Method(method_is_inference),
         "is_complex": Method(method_is_complex),
+        "is_pinned": Method(method_is_pinned),
         "is_contiguous": Method(method_is_contiguous),
         "type": Method(method_type),
         "as_subclass": Method(method_as_subclass),
@@ -2451,6 +2484,7 @@ class TensorVariable(VariableTracker):
         "__pos__": Method(method___pos__),
         "__abs__": Method(method___abs__),
         "__invert__": Method(method___invert__),
+        "__index__": Method(method___index__),
         "__getitem__": Method(method___getitem__),
         "__len__": Method(method___len__),
         "__iter__": Method(method___iter__),
@@ -3658,6 +3692,16 @@ class DataPtrVariable(VariableTracker):
             context=f"tp_richcompare_impl {self} {op} {other}",
             explanation="Dynamo can only trace data pointer comparisons "
             "when it can prove both operands have the same data pointer.",
+            hints=[],
+        )
+
+    def nb_bool_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        """DataPtr nb_bool: mirrors long_bool, but the address is runtime-only."""
+        unimplemented(
+            gb_type="Data pointer truth value",
+            context=f"nb_bool_impl {self}",
+            explanation="Dynamo cannot decide the truth value of a data pointer "
+            "because the address is only known at runtime.",
             hints=[],
         )
 

@@ -11,6 +11,7 @@ import sys
 import tempfile
 import time
 import unittest
+import weakref
 from datetime import timedelta
 from unittest import mock
 
@@ -68,6 +69,34 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    def test_wait_tensor_releases_work_tensors(self) -> None:
+        output = torch.ops._c10d_functional.all_reduce(
+            torch.ones(4, device=self.device), "sum", dist.group.WORLD
+        )
+        output_ref = weakref.ref(output)
+
+        torch.ops._c10d_functional.wait_tensor(output)
+        del output
+
+        self.assertIsNone(output_ref())
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_wait_tensors_releases_coalesced_work_tensors(self) -> None:
+        outputs = torch.ops._c10d_functional.all_reduce_coalesced(
+            [torch.ones(4, device=self.device) for _ in range(2)],
+            "sum",
+            dist.group.WORLD,
+        )
+        output_refs = [weakref.ref(output) for output in outputs]
+
+        torch.ops._c10d_functional.wait_tensors(outputs)
+        del outputs
+
+        self.assertEqual([ref() for ref in output_refs], [None, None])
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
     def test_shared_options_type(self) -> None:
         self.assertIs(dist.ProcessGroupNCCL2.Options, dist.ProcessGroupNCCL.Options)
         opts = dist.ProcessGroupNCCL2.Options()
@@ -82,8 +111,6 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
     def test_time_estimate(self) -> None:
         torch.cuda.set_device(self.device)
         process_group = dist.distributed_c10d._get_default_group()
-        warmup = torch.ones(1, device=self.device)
-        dist.all_reduce(warmup)
         tensor = torch.full((1024,), self.rank, device=self.device)
         with dist._time_estimator(group=process_group, device=self.device) as context:
             dist.all_reduce(tensor)
@@ -408,6 +435,7 @@ class ProcessGroupNCCL2ScalableInitTest(_ProcessGroupNCCL2OptionsTest):
         self._check_all_reduce()
 
 
+@unittest.skipIf(torch.cuda.device_count() < 3, "requires at least 3 GPUs")
 class ProcessGroupNCCL2UnevenScalableInitTest(ProcessGroupNCCL2ScalableInitTest):
     world_size = 3
     ranks_per_root = 2
@@ -1135,7 +1163,7 @@ dist.init_process_group(
     rank=0,
     world_size=1,
     store=dist.HashStore(),
-    device_id=torch.device("cuda:0"),
+    device_id={device_id},
 )
 assert not torch.cuda.is_initialized(), "creating a process group initialized CUDA"
 {extra}
@@ -1146,20 +1174,27 @@ dist.destroy_process_group()
 class ProcessGroupNCCL2UninitializedCudaTest(TestCase):
     """Constructing a process group must not need the CUDA caching allocator up.
 
-    Eager init (`init_process_group(device_id=...)`) allocated the barrier
-    buffer from the caching allocator, so a process that had made no torch.cuda
-    call died inside init_process_group with "Allocator not initialized for
-    device 0". Any external launcher or library that builds the PG before
-    touching CUDA hits this. Runs in a subprocess because the harness (and
-    every other test here) calls torch.cuda.set_device in setUp, which hides it.
+    Eager init allocates the barrier buffer before a process necessarily makes
+    a torch.cuda call. Runs in a subprocess because the harness calls
+    torch.cuda.set_device in setUp, which hides uninitialized-allocator bugs.
     """
 
-    def _run_child(self, extra: str = "") -> None:
+    def _run_child(
+        self,
+        extra: str = "",
+        device_id: str = 'torch.device("cuda:0")',
+        child_env: dict[str, str] | None = None,
+    ) -> None:
         try:
             subprocess.check_output(
-                [sys.executable, "-c", _UNINITIALIZED_CUDA_SCRIPT.format(extra=extra)],
+                [
+                    sys.executable,
+                    "-c",
+                    _UNINITIALIZED_CUDA_SCRIPT.format(device_id=device_id, extra=extra),
+                ],
                 stderr=subprocess.STDOUT,
                 cwd=os.path.dirname(os.path.realpath(__file__)),
+                env=child_env,
                 timeout=300,
             )
         except subprocess.TimeoutExpired:
@@ -1172,6 +1207,42 @@ class ProcessGroupNCCL2UninitializedCudaTest(TestCase):
     @skip_if_lt_x_gpu(1)
     def test_eager_init(self) -> None:
         self._run_child()
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_eager_init_without_device_id(self) -> None:
+        self._run_child(device_id="None")
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @requires_nccl()
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires at least 2 GPUs")
+    def test_eager_init_with_per_rank_visible_device(self) -> None:
+        child_env = os.environ.copy()
+        visible_devices = child_env.get("CUDA_VISIBLE_DEVICES")
+        child_env["CUDA_VISIBLE_DEVICES"] = (
+            visible_devices.split(",")[1].strip() if visible_devices else "1"
+        )
+        child_env["LOCAL_RANK"] = "1"
+        self._run_child(device_id="None", child_env=child_env)
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_creator_without_process_group(self) -> None:
+        self._run_child(
+            """
+opts = torch._C._distributed_c10d._DistributedBackendOptions()
+opts.store = dist.HashStore()
+opts.group_rank = 0
+opts.group_size = 1
+opts.timeout = dist.constants.default_pg_timeout
+opts.group_id = "standalone"
+opts.global_ranks_in_group = [0]
+backend = dist.distributed_c10d._create_nccl2_process_group(opts, None)
+backend.shutdown()
+"""
+        )
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
     @requires_nccl()

@@ -39,6 +39,7 @@
 #include <torch/csrc/distributed/c10d/nccl/NCCLXStub.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCLLazy.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/intra_node_comm.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #endif
@@ -190,6 +191,63 @@ std::vector<std::vector<uint8_t>> toVec8(const std::vector<std::string>& data) {
   }
   return out;
 }
+
+using SymmetricMemoryPtr =
+    c10::intrusive_ptr<::c10d::symmetric_memory::SymmetricMemory>;
+
+// Host-side CFT (Compute Fabric Transport) logical-endpoint coordinates for a
+// symmetric memory buffer, as the `(le_id, le_offset)` pair that the
+// device-side `ncclCft` put/get/red family takes. Returned as plain ints so
+// they can be handed straight to a custom kernel; `le_offset` is a byte
+// offset, so advancing into the buffer is just `le_offset + n`.
+//
+// Spelled as two complementary `#if` blocks rather than `#if`/`#else`: an
+// `#else` anywhere in this file sends clang-format down the alternate branch,
+// where it then reformats unrelated code thousands of lines below.
+#if defined(USE_C10D_NCCL) && defined(NCCL_HAS_SYMMEM_SUPPORT)
+::c10d::symmetric_memory::NCCLSymmetricMemory* asNcclSymmetricMemory(
+    const SymmetricMemoryPtr& symm_mem) {
+  auto* mem = dynamic_cast<::c10d::symmetric_memory::NCCLSymmetricMemory*>(
+      symm_mem.get());
+  TORCH_CHECK(
+      mem != nullptr,
+      "CFT handles are only available on the NCCL symmetric memory backend");
+  return mem;
+}
+
+// Both queries raise on their own when the build predates the host-side CFT
+// API, so there is nothing extra to check here.
+std::tuple<int64_t, int64_t> getPeerCftHandle(
+    const SymmetricMemoryPtr& symm_mem,
+    int64_t peer) {
+  auto* mem = asNcclSymmetricMemory(symm_mem);
+  const auto handle = mem->get_peer_cft_handle(static_cast<int>(peer));
+  return {handle.le_id, static_cast<int64_t>(handle.le_offset)};
+}
+
+std::tuple<int64_t, int64_t> getMultimemCftHandle(
+    const SymmetricMemoryPtr& symm_mem) {
+  auto* mem = asNcclSymmetricMemory(symm_mem);
+  const auto handle = mem->get_multimem_cft_handle();
+  return {handle.le_id, static_cast<int64_t>(handle.le_offset)};
+}
+#endif
+
+#if !defined(USE_C10D_NCCL) || !defined(NCCL_HAS_SYMMEM_SUPPORT)
+constexpr const char* kNoNcclSymmMem =
+    "CFT handles require a build with NCCL symmetric memory support";
+
+std::tuple<int64_t, int64_t> getPeerCftHandle(
+    const SymmetricMemoryPtr& /* symm_mem */,
+    int64_t /* peer */) {
+  TORCH_CHECK(false, kNoNcclSymmMem);
+}
+
+std::tuple<int64_t, int64_t> getMultimemCftHandle(
+    const SymmetricMemoryPtr& /* symm_mem */) {
+  TORCH_CHECK(false, kNoNcclSymmMem);
+}
+#endif
 
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
@@ -484,14 +542,10 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
   C10_LOG_API_USAGE_ONCE("c10d.python.import");
 
   auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
-  if (!c10d_module) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(c10d_module);
 
   auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
-  if (!torch_C_module) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(torch_C_module);
 
   auto torch_C_m = py::handle(torch_C_module).cast<py::module>();
   auto m =
@@ -1048,6 +1102,14 @@ Example:
       },
       py::arg("group_name"));
 
+  // Check the native registry without throwing on unknown group names
+  module.def(
+      "_is_process_group_registered",
+      [](const std::string& group_name) {
+        return ::c10d::is_process_group_registered(group_name);
+      },
+      py::arg("group_name"));
+
   module.def(
       "_register_work",
       [](const at::Tensor& tensor,
@@ -1435,6 +1497,28 @@ Example:
           py::arg("peer"),
           py::arg("sizes"),
           py::arg("dtype"))
+      // A CFT handle is only valid for the group this SymmetricMemory was
+      // rendezvoused with -- each group owns a separate set of logical
+      // endpoints over the same allocation. Requires the group's communicator
+      // to have been created with `host_cft_mode` enabled.
+      .def(
+          "get_peer_cft_handle",
+          getPeerCftHandle,
+          py::arg("peer"),
+          "Return the (le_id, le_offset) CFT logical-endpoint coordinates "
+          "addressing `peer`'s copy of this buffer, for use with the "
+          "device-side ncclCft put/get/reduce API. NCCL backend only; the "
+          "group's communicator must have been created with host_cft_mode "
+          "enabled (see ncclConfig_t.host_cft_mode), and raises RuntimeError "
+          "if the endpoints do not exist (unsupported GPU/driver/NCCL or "
+          "host_cft_mode fallback on an unsupported stack).")
+      .def(
+          "get_multimem_cft_handle",
+          getMultimemCftHandle,
+          "Return the (le_id, le_offset) multicast CFT logical-endpoint "
+          "coordinates for this buffer. Requires NVLS multicast support in "
+          "addition to the get_peer_cft_handle requirements; the first call "
+          "may be collective, so every rank of the group must reach it.")
       // Util functions that are often used together with symmetric memory but
       // not necessarily directly on symmetric memory.
       .def_static(
@@ -3953,6 +4037,21 @@ for details.
             self.commName = strdup(tmp);
           })
 #endif
+#ifdef NCCL_HAS_HOST_CFT_MODE
+      .def_readwrite(
+          "host_cft_mode",
+          &ncclConfig_t::hostCftMode,
+          "Whether NCCL creates CFT (Compute Fabric Transport) logical "
+          "endpoints for this communicator (ncclHostCftMode_t): 1 = enable "
+          "(fail communicator init if the stack cannot support them), 2 = "
+          "disable, 3 = fallback (create them if possible, silently proceed "
+          "without otherwise). Defaults to disable: the endpoints are a "
+          "limited per-device resource, so host-side CFT is opt-in. Must be "
+          "identical on every rank and set before the communicator is "
+          "created. Requires NCCL >= 2.31.2 built with CUDA >= 13.3, a "
+          "driver reporting CUDA >= 13.3, and a GPU with logical-endpoint "
+          "support (sm_100+); NCCL_CFT_ENABLE=0 disables CFT globally.")
+#endif
       .def(
           "unsafe_get_ptr",
           [](const ncclConfig_t& self) {
@@ -4173,22 +4272,26 @@ Returns:
       intrusive_ptr_no_gil_destructor_class_<::c10d::nccl2::ProcessGroupNCCL>(
           module, "ProcessGroupNCCL2", backend)
           .def(
-              py::init(
-                  [](const c10::intrusive_ptr<::c10d::Store>& store,
-                     int rank,
-                     int size,
-                     c10::intrusive_ptr<
-                         ::c10d::nccl2::ProcessGroupNCCL::Options> options) {
-                    // gil_scoped_release is not safe as a call_guard in init.
-                    // https://github.com/pybind/pybind11/issues/5473
-                    py::gil_scoped_release nogil{};
-                    return c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCL>(
+              py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
+                          int rank,
+                          int size,
+                          c10::intrusive_ptr<
+                              ::c10d::nccl2::ProcessGroupNCCL::Options> options,
+                          std::optional<at::Device> device_id) {
+                // gil_scoped_release is not safe as a call_guard in init.
+                // https://github.com/pybind/pybind11/issues/5473
+                py::gil_scoped_release nogil{};
+                auto backend =
+                    c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCL>(
                         store, rank, size, std::move(options));
-                  }),
+                backend->setBoundDeviceId(device_id);
+                return backend;
+              }),
               py::arg("store"),
               py::arg("rank"),
               py::arg("size"),
               py::arg("options"),
+              py::arg("device_id") = std::nullopt,
               R"(Create a new ProcessGroupNCCL2 instance.)")
           .def(
               py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
@@ -4197,8 +4300,11 @@ Returns:
                 py::gil_scoped_release nogil{};
                 auto options =
                     ::c10d::nccl2::ProcessGroupNCCL::Options::create();
-                return c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCL>(
-                    store, rank, size, options);
+                auto backend =
+                    c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCL>(
+                        store, rank, size, options);
+                backend->setBoundDeviceId(std::nullopt);
+                return backend;
               }),
               py::arg("store"),
               py::arg("rank"),
@@ -4233,15 +4339,20 @@ Returns:
                       int rank,
                       int size,
                       const c10::intrusive_ptr<
-                          ::c10d::nccl2::ProcessGroupNCCL::Options>& options) {
+                          ::c10d::nccl2::ProcessGroupNCCL::Options>& options,
+                      std::optional<at::Device> device_id) {
             py::gil_scoped_release nogil{};
-            return c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCLLazy>(
-                store, rank, size, options);
+            auto backend =
+                c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCLLazy>(
+                    store, rank, size, options);
+            backend->setBoundDeviceId(device_id);
+            return backend;
           }),
           py::arg("store"),
           py::arg("rank"),
           py::arg("size"),
           py::arg("options"),
+          py::arg("device_id") = std::nullopt,
           R"(Create a new ProcessGroupNCCLLazy instance.)")
       .def(
           py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
@@ -4249,8 +4360,11 @@ Returns:
                       int size) {
             py::gil_scoped_release nogil{};
             auto options = ::c10d::nccl2::ProcessGroupNCCL::Options::create();
-            return c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCLLazy>(
-                store, rank, size, options);
+            auto backend =
+                c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCLLazy>(
+                    store, rank, size, options);
+            backend->setBoundDeviceId(std::nullopt);
+            return backend;
           }),
           py::arg("store"),
           py::arg("rank"),
@@ -4567,6 +4681,9 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       .def_readwrite(
           "error_on_collective",
           &::c10d::FakeProcessGroup::Options::error_on_collective)
+      .def_readwrite(
+          "simulate_uniform_ranks",
+          &::c10d::FakeProcessGroup::Options::simulate_uniform_ranks)
       .def(
           "__copy__",
           [](const ::c10d::FakeProcessGroup::Options& self) {
@@ -4582,6 +4699,13 @@ such as `dist.all_reduce(tensor, async_op=True)`.
   fakeProcessGroup
       .def_static(
           "_create_internal",
+          [](int rank, int size) {
+            return ::c10d::FakeProcessGroup::_create_internal(rank, size);
+          },
+          py::arg("rank"),
+          py::arg("world_size"))
+      .def_static(
+          "_create_internal",
           [](int rank,
              int size,
              c10::intrusive_ptr<::c10d::FakeProcessGroup::Options> options) {
@@ -4590,8 +4714,7 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           },
           py::arg("rank"),
           py::arg("world_size"),
-          py::arg("options") =
-              c10::make_intrusive<::c10d::FakeProcessGroup::Options>())
+          py::arg("options"))
       .def_property_readonly("options", &::c10d::FakeProcessGroup::getOptions);
   auto fakeWork =
       intrusive_ptr_no_gil_destructor_class_<::c10d::FakeWork>(

@@ -222,8 +222,8 @@ static void check_argmax_argmin(
     const char* name,
     const Tensor& self,
     const std::optional<int64_t>& dim) {
-  TORCH_CHECK(!self.is_complex(), name, ": does not support complex input");
-  TORCH_CHECK(!(self.scalar_type() == kBool), name, ": does not support bool input");
+  TORCH_CHECK_TYPE(!self.is_complex(), name, ": does not support complex input");
+  TORCH_CHECK_NOT_IMPLEMENTED(!(self.scalar_type() == kBool), name, ": does not support bool input");
   if (dim.has_value()) {
     auto dim_ = maybe_wrap_dim(dim.value(), self.dim());
     native::zero_numel_check_dims(self, dim_, name);
@@ -306,7 +306,7 @@ TORCH_META_FUNC2(mean, dim)
       dtype = toString(opt_dtype.value());
     }
 
-    TORCH_CHECK(
+    TORCH_CHECK_NOT_IMPLEMENTED(
         false,
         "mean(): could not infer output dtype. ",
         what, " dtype must be either a floating point or complex dtype. ",
@@ -356,6 +356,7 @@ TORCH_META_FUNC2(norm, ScalarOpt_dim_dtype)
 
 TORCH_META_FUNC(aminmax)
 (const Tensor& self, std::optional<int64_t> dim_opt, bool keepdim) {
+  TORCH_CHECK_TYPE(!self.is_complex(), "aminmax not implemented for ", self.scalar_type());
   const auto& min = maybe_get_output(0);
   const auto& max = maybe_get_output(1);
   TORCH_CHECK(
@@ -1080,7 +1081,7 @@ Tensor& diff_out(const Tensor& self, int64_t n, int64_t dim, const std::optional
 
 static void pre_check_gradient(const Tensor& self, std::optional<int64_t> spacing_size, at::OptionalIntArrayRef dim,  int64_t edge_order) {
   // Helper for gradient function to make sure input data satisfies prerequisites
-  TORCH_CHECK(self.scalar_type() != ScalarType::Byte, "torch.gradient does not support uint8 input.");
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != ScalarType::Byte, "torch.gradient does not support uint8 input.");
   if (spacing_size.has_value() && !dim.has_value()) {
     // NOTE: If spacing was given as a scalar, the callers of this function
     // create a spacing vector of the expected size, and this check passes
@@ -1309,7 +1310,7 @@ Tensor sum(const Tensor &self, std::optional<ScalarType> dtype) {
 Tensor& nansum_out(const Tensor& self, at::OptionalIntArrayRef dim,
                        bool keepdim, std::optional<ScalarType> opt_dtype, Tensor& result) {
   if (self.device().is_cpu()) {
-    TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "nansum on CPU does not support complex inputs");
+    TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(self.scalar_type()), "nansum on CPU does not support complex inputs");
   }
 
   // For integral types, use existing sum as
@@ -1500,10 +1501,10 @@ Tensor& nanmean_out(
     std::optional<ScalarType> opt_dtype,
     Tensor& result) {
   // Check if input dtype is an integral type or Bool and raise an error
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
     !at::isIntegralType(self.scalar_type(), /*includeBool=*/true),
     "nanmean(): integral types and 'Bool' are not supported for nanmean, even for empty tensors.");
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
       self.is_floating_point() || self.is_complex(),
       "nanmean(): expected input to have floating point or complex dtype but got ",
       self.scalar_type());
@@ -1524,7 +1525,7 @@ Tensor nanmean(
     at::OptionalIntArrayRef dim,
     bool keepdim,
     std::optional<ScalarType> opt_dtype) {
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
       self.is_floating_point() || self.is_complex(),
       "nanmean(): expected input to have floating point or complex dtype but got ",
       self.scalar_type());
@@ -1924,7 +1925,7 @@ static Tensor& std_var_out(
               self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "std and var only supports strided layout, got: ", self.layout());
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
+  TORCH_CHECK_NOT_IMPLEMENTED(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
               "std and var only support floating point and complex dtypes");
 
   if (at::isComplexType(self.scalar_type())) {
@@ -1997,7 +1998,7 @@ static std::tuple<Tensor&, Tensor&> std_var_mean_out(
               self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               fname, " only supports strided layout, got: ", self.layout());
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
+  TORCH_CHECK_NOT_IMPLEMENTED(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
               fname, " only support floating point and complex dtypes");
   TORCH_CHECK(result1.scalar_type() == c10::toRealValueType(result2.scalar_type()),
               fname, " expected result1 to be real and match the precision of result2. Got ",
