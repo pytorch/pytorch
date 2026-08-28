@@ -14,12 +14,14 @@
 #include <ATen/ops/aminmax.h>
 #include <ATen/ops/avg_pool2d.h>
 #include <ATen/ops/avg_pool2d_backward.h>
-#include <ATen/ops/fractional_max_pool2d_backward_native.h>
-#include <ATen/ops/fractional_max_pool2d_native.h>
 #include <ATen/ops/avg_pool2d_backward_native.h>
 #include <ATen/ops/avg_pool2d_native.h>
 #include <ATen/ops/avg_pool3d_backward_native.h>
 #include <ATen/ops/avg_pool3d_native.h>
+#include <ATen/ops/fractional_max_pool2d_backward_native.h>
+#include <ATen/ops/fractional_max_pool2d_native.h>
+#include <ATen/ops/fractional_max_pool3d_backward_native.h>
+#include <ATen/ops/fractional_max_pool3d_native.h>
 #include <ATen/ops/max_pool2d_backward_native.h>
 #include <ATen/ops/max_pool2d_native.h>
 #include <ATen/ops/max_pool2d_with_indices_backward_native.h>
@@ -643,6 +645,81 @@ static void fractional_max_pool2d_backward_out_mps_template(const Tensor& grad_i
   });
 }
 
+static void fractional_max_pool3d_out_mps_template(const Tensor& output,
+                                                   const Tensor& indices,
+                                                   const Tensor& input,
+                                                   const FractionalMaxPool3dParams& params,
+                                                   const Tensor& random_samples,
+                                                   int64_t num_planes,
+                                                   int64_t num_batch) {
+  if (output.numel() == 0) {
+    return;
+  }
+  const auto input_c = input.contiguous();
+  const auto samples_c = random_samples.contiguous();
+  const auto numThreads =
+      static_cast<uint32_t>(num_batch * num_planes) * params.outputT * params.outputH * params.outputW;
+
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = stream->commandEncoder();
+      auto pso = lib.getPipelineStateForFunc("fractional_max_pool3d_" + scalarToMetalTypeString(input));
+      getMPSProfiler().beginProfileKernel(pso, "fractional_max_pool3d", {input}, stream);
+      [computeEncoder setComputePipelineState:pso];
+      mtl_setArgs(computeEncoder, input_c, samples_c, output, indices, params);
+      mtl_dispatch1DJob(computeEncoder, pso, numThreads);
+      getMPSProfiler().endProfileKernel(pso, stream);
+    }
+  });
+}
+
+static void fractional_max_pool3d_backward_out_mps_template(const Tensor& grad_input,
+                                                            const Tensor& grad_output,
+                                                            const Tensor& input,
+                                                            IntArrayRef output_size,
+                                                            const Tensor& indices) {
+  const auto ndims = input.dim();
+  const auto num_planes = input.size(ndims == 5 ? 1 : 0);
+  const auto num_batch = ndims == 5 ? input.size(0) : 1;
+
+  grad_input.resize_as_(input);
+  grad_input.zero_();
+  if (grad_input.numel() == 0) {
+    return;
+  }
+
+  const FractionalMaxPool3dParams params{
+      .inputT = safe_downcast<int32_t, int64_t>(input.size(ndims - 3)),
+      .inputH = safe_downcast<int32_t, int64_t>(input.size(ndims - 2)),
+      .inputW = safe_downcast<int32_t, int64_t>(input.size(ndims - 1)),
+      .outputT = safe_downcast<int32_t, int64_t>(output_size[0]),
+      .outputH = safe_downcast<int32_t, int64_t>(output_size[1]),
+      .outputW = safe_downcast<int32_t, int64_t>(output_size[2]),
+      .poolT = 0,
+      .poolH = 0,
+      .poolW = 0,
+  };
+
+  const auto grad_output_c = grad_output.contiguous();
+  const auto indices_c = indices.contiguous();
+  const auto numThreads =
+      static_cast<uint32_t>(num_batch * num_planes) * params.outputT * params.outputH * params.outputW;
+
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = stream->commandEncoder();
+      auto pso = lib.getPipelineStateForFunc("fractional_max_pool3d_backward_" + scalarToMetalTypeString(input));
+      getMPSProfiler().beginProfileKernel(pso, "fractional_max_pool3d_backward", {grad_output}, stream);
+      [computeEncoder setComputePipelineState:pso];
+      mtl_setArgs(computeEncoder, grad_input, grad_output_c, indices_c, params);
+      mtl_dispatch1DJob(computeEncoder, pso, numThreads);
+      getMPSProfiler().endProfileKernel(pso, stream);
+    }
+  });
+}
+
 static void max_pool_backward_out_mps_template(Tensor& grad_input,
                                                const Tensor& indices,
                                                const Tensor& input,
@@ -1238,6 +1315,56 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_backward_mps)
  const Tensor& indices,
  const Tensor& grad_input) {
   mps::fractional_max_pool2d_backward_out_mps_template(grad_input, grad_output, input, output_size, indices);
+}
+
+TORCH_IMPL_FUNC(fractional_max_pool3d_out_mps)
+(const Tensor& input,
+ int64_t poolSizeT,
+ int64_t poolSizeH,
+ int64_t poolSizeW,
+ int64_t outputT,
+ int64_t outputH,
+ int64_t outputW,
+ const Tensor& random_samples,
+ int64_t numBatch,
+ int64_t numPlanes,
+ int64_t inputT,
+ int64_t inputH,
+ int64_t inputW,
+ const Tensor& output,
+ const Tensor& indices) {
+  const FractionalMaxPool3dParams params{
+      .inputT = safe_downcast<int32_t, int64_t>(inputT),
+      .inputH = safe_downcast<int32_t, int64_t>(inputH),
+      .inputW = safe_downcast<int32_t, int64_t>(inputW),
+      .outputT = safe_downcast<int32_t, int64_t>(outputT),
+      .outputH = safe_downcast<int32_t, int64_t>(outputH),
+      .outputW = safe_downcast<int32_t, int64_t>(outputW),
+      .poolT = safe_downcast<int32_t, int64_t>(poolSizeT),
+      .poolH = safe_downcast<int32_t, int64_t>(poolSizeH),
+      .poolW = safe_downcast<int32_t, int64_t>(poolSizeW),
+  };
+  mps::fractional_max_pool3d_out_mps_template(output, indices, input, params, random_samples, numPlanes, numBatch);
+}
+
+Tensor& fractional_max_pool3d_backward_out_mps(const Tensor& grad_output,
+                                               const Tensor& input,
+                                               IntArrayRef pool_size,
+                                               IntArrayRef output_size,
+                                               const Tensor& indices,
+                                               Tensor& grad_input) {
+  mps::fractional_max_pool3d_backward_out_mps_template(grad_input, grad_output, input, output_size, indices);
+  return grad_input;
+}
+
+Tensor fractional_max_pool3d_backward_mps(const Tensor& grad_output,
+                                          const Tensor& input,
+                                          IntArrayRef pool_size,
+                                          IntArrayRef output_size,
+                                          const Tensor& indices) {
+  Tensor grad_input = at::empty({0}, input.options());
+  mps::fractional_max_pool3d_backward_out_mps_template(grad_input, grad_output, input, output_size, indices);
+  return grad_input;
 }
 
 std::tuple<Tensor&, Tensor&> max_pool3d_with_indices_out_mps(const Tensor& input,

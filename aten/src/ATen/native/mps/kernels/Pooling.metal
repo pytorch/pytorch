@@ -941,3 +941,105 @@ kernel void fractional_max_pool2d_backward(
 REGISTER_FRACTIONAL_MAX_POOL2D(float);
 REGISTER_FRACTIONAL_MAX_POOL2D(half);
 REGISTER_FRACTIONAL_MAX_POOL2D(bfloat);
+
+// One thread per output element of an NCDHW tensor. Note the sample order
+// differs from the 2-D case: here it is (T, H, W), matching CPU and CUDA.
+template <typename T>
+kernel void fractional_max_pool3d(
+    constant T* input [[buffer(0)]],
+    constant T* samples [[buffer(1)]],
+    device T* output [[buffer(2)]],
+    device int64_t* indices [[buffer(3)]],
+    constant FractionalMaxPool3dParams& params [[buffer(4)]],
+    uint tid [[thread_position_in_grid]]) {
+  const int32_t outputW = params.outputW;
+  const int32_t outputH = params.outputH;
+  const int32_t outputT = params.outputT;
+  const int32_t inputW = params.inputW;
+  const int32_t inputH = params.inputH;
+  const int32_t inputT = params.inputT;
+
+  const int32_t index = static_cast<int32_t>(tid);
+  const int32_t ow = index % outputW;
+  const int32_t oh = (index / outputW) % outputH;
+  const int32_t ot = (index / (outputW * outputH)) % outputT;
+  const int32_t plane = index / (outputW * outputH * outputT);
+
+  const int32_t poolT = fractional_pool_start(
+      static_cast<float>(samples[3 * plane]),
+      ot,
+      inputT,
+      outputT,
+      params.poolT);
+  const int32_t poolH = fractional_pool_start(
+      static_cast<float>(samples[3 * plane + 1]),
+      oh,
+      inputH,
+      outputH,
+      params.poolH);
+  const int32_t poolW = fractional_pool_start(
+      static_cast<float>(samples[3 * plane + 2]),
+      ow,
+      inputW,
+      outputW,
+      params.poolW);
+
+  constant T* plane_input =
+      input + static_cast<long>(plane) * inputT * inputH * inputW;
+
+  int32_t max_index = (poolT * inputH + poolH) * inputW + poolW;
+  T max_val = plane_input[max_index];
+
+  for (int32_t t = poolT; t < poolT + params.poolT; ++t) {
+    for (int32_t h = poolH; h < poolH + params.poolH; ++h) {
+      for (int32_t w = poolW; w < poolW + params.poolW; ++w) {
+        const T val = plane_input[(t * inputH + h) * inputW + w];
+        // For consistency with the CPU implementation, favor the first max.
+        if (val > max_val || ::metal::isnan(static_cast<float>(val))) {
+          max_index = (t * inputH + h) * inputW + w;
+          max_val = val;
+        }
+      }
+    }
+  }
+
+  output[tid] = max_val;
+  indices[tid] = max_index;
+}
+
+template <typename T>
+kernel void fractional_max_pool3d_backward(
+    device ::c10::metal::AtomicType_t<T>* grad_input [[buffer(0)]],
+    constant T* grad_output [[buffer(1)]],
+    constant int64_t* indices [[buffer(2)]],
+    constant FractionalMaxPool3dParams& params [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  const int32_t plane = static_cast<int32_t>(tid) /
+      (params.outputW * params.outputH * params.outputT);
+  const long plane_offset =
+      static_cast<long>(plane) * params.inputT * params.inputH * params.inputW;
+
+  ::c10::metal::AtomicType<T>::atomic_add(
+      grad_input, plane_offset + indices[tid], grad_output[tid]);
+}
+
+#define REGISTER_FRACTIONAL_MAX_POOL3D(T)                                  \
+  template [[host_name("fractional_max_pool3d_" #T)]] kernel void          \
+  fractional_max_pool3d<T>(                                                \
+      constant T * input [[buffer(0)]],                                    \
+      constant T * samples [[buffer(1)]],                                  \
+      device T * output [[buffer(2)]],                                     \
+      device int64_t* indices [[buffer(3)]],                               \
+      constant FractionalMaxPool3dParams& params [[buffer(4)]],            \
+      uint tid [[thread_position_in_grid]]);                               \
+  template [[host_name("fractional_max_pool3d_backward_" #T)]] kernel void \
+  fractional_max_pool3d_backward<T>(                                       \
+      device ::c10::metal::AtomicType_t<T> * grad_input [[buffer(0)]],     \
+      constant T * grad_output [[buffer(1)]],                              \
+      constant int64_t* indices [[buffer(2)]],                             \
+      constant FractionalMaxPool3dParams& params [[buffer(3)]],            \
+      uint tid [[thread_position_in_grid]]);
+
+REGISTER_FRACTIONAL_MAX_POOL3D(float);
+REGISTER_FRACTIONAL_MAX_POOL3D(half);
+REGISTER_FRACTIONAL_MAX_POOL3D(bfloat);

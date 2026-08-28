@@ -915,6 +915,36 @@ class TestFractionalMaxPool(TestCaseMPS):
         mps_out.backward(grad.to("mps"))
         self.assertEqual(mps_x.grad.cpu(), cpu_x.grad)
 
+    @parametrize("shape,kernel,output_size", [
+        ((1, 3, 7, 7, 7), (3, 3, 3), (2, 2, 3)),
+        ((2, 2, 6, 8, 5), (2, 3, 2), (3, 2, 2)),
+        ((3, 5, 5, 5), (2, 2, 2), (2, 3, 2)),
+        ((1, 1, 4, 4, 4), (2, 2, 2), (1, 1, 1)),
+    ])
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_fractional_max_pool3d(self, shape, kernel, output_size, dtype):
+        torch.manual_seed(0)
+        x = torch.randn(shape, dtype=dtype)
+        sample_shape = (shape[0], shape[1], 3) if len(shape) == 5 else (1, shape[0], 3)
+        samples = torch.rand(sample_shape, dtype=dtype)
+
+        cpu_x = x.clone().requires_grad_(True)
+        mps_x = x.to("mps").clone().requires_grad_(True)
+
+        cpu_out, cpu_idx = F.fractional_max_pool3d(
+            cpu_x, kernel, output_size=output_size, return_indices=True, _random_samples=samples)
+        mps_out, mps_idx = F.fractional_max_pool3d(
+            mps_x, kernel, output_size=output_size, return_indices=True,
+            _random_samples=samples.to("mps"))
+
+        self.assertEqual(mps_out.cpu(), cpu_out)
+        self.assertEqual(mps_idx.cpu(), cpu_idx)
+
+        grad = torch.randn_like(cpu_out)
+        cpu_out.backward(grad)
+        mps_out.backward(grad.to("mps"))
+        self.assertEqual(mps_x.grad.cpu(), cpu_x.grad)
+
 
 class TestMPS(TestCaseMPS):
     def ulpAssertAllClose(self, output, reference, n_ulps):
@@ -16117,6 +16147,7 @@ class TestConsistency(TestCaseMPS):
         # `_random_samples` is passed, which the OpInfo samples do not do.
         # Deterministic coverage lives in TestFractionalMaxPool.
         'nn.functional.fractional_max_pool2d',
+        'nn.functional.fractional_max_pool3d',
     }
 
     def _assert_random_op_match(self, mps_out, cpu_out):

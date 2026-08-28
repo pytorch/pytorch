@@ -70,3 +70,15 @@ struct FractionalMaxPoolParams {
   int32_t poolH;
   int32_t poolW;
 };
+
+struct FractionalMaxPool3dParams {
+  int32_t inputT;
+  int32_t inputH;
+  int32_t inputW;
+  int32_t outputT;
+  int32_t outputH;
+  int32_t outputW;
+  int32_t poolT;
+  int32_t poolH;
+  int32_t poolW;
+};
