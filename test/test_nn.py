@@ -3627,6 +3627,28 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         x_grad_ref = torch.where(mask, grad, z)
         self.assertEqual(x.grad, x_grad_ref)
 
+    # Regression test for https://github.com/pytorch/pytorch/issues/195075:
+    # cpu_kernel_vec's vectorized and scalar-remainder lambdas disagreed on
+    # NaN, so the same op returned a different gradient at a NaN element
+    # depending only on unrelated tensor length/alignment.
+    def test_activation_backward_nan_length_invariant(self):
+        size = 128 + 1  # exceed AVX512 width so a scalar remainder tail runs
+        ops = (F.hardtanh, F.elu, F.hardswish, F.hardshrink, F.softshrink)
+        for op in ops:
+            for nan_pos in (0, size // 2, size - 1):
+                x = torch.full((size,), 0.3, dtype=torch.float32)
+                x[nan_pos] = float("nan")
+                x.requires_grad_(True)
+                (long_grad,) = torch.autograd.grad(op(x), x, torch.ones(size))
+
+                x1 = torch.tensor([float("nan")], dtype=torch.float32, requires_grad=True)
+                (short_grad,) = torch.autograd.grad(op(x1), x1, torch.ones(1))
+
+                self.assertEqual(
+                    long_grad[nan_pos], short_grad[0], equal_nan=True,
+                    msg=f"{op.__name__} backward depends on tensor length at NaN (pos {nan_pos}/{size})",
+                )
+
     def test_batchnorm_nhwc_cpu(self):
         def helper(self, mod, size, dtype, mixed_dtype=False, format=torch.channels_last, precision=None):
             channels = size[1]
