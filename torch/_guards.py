@@ -699,7 +699,7 @@ class GuardsSet:
         return list(self.source_to_guards[source])
 
     def remove_guards_with_source(self, source: Source) -> None:
-        """Delete all guards that contains a given source"""
+        """Delete all guards that contain a given source"""
         from ._dynamo.source import is_from_source
 
         self.inner = OrderedSet(
@@ -1228,7 +1228,7 @@ class TracingContext:
             except Exception as e:
                 # Prevent real_stack from getting attached
                 #
-                # The invariant is that if an Exception as real_stack, we've
+                # The invariant is that if an Exception has real_stack, we've
                 # appropriately attached a user stack and we no longer need to
                 # attach anything. Because we cannot conveniently interpose
                 # when an exception is thrown, we instead interpose everywhere
