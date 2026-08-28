@@ -688,20 +688,23 @@ def _reject_unlabelled_block_scale(
         )
 
 
-def _check_mx_platform() -> None:
+def _check_mx_device(operand: torch.Tensor) -> None:
     """This implementation is built on the NVIDIA swizzled scale layout.
 
-    ROCm's block-scaled GEMM takes an unpadded scale
-    (`ceil_div(M, 32) * K` elements, `aten/src/ATen/native/cuda/ScaledBlas.cpp`)
-    with no 128-row tiling, so neither the numel validation here nor the
-    gather-by-concatenation it licenses carries over. Fail clearly instead of
-    computing against the wrong layout.
+    Both ROCm and XPU block-scaled GEMMs take an *unpadded* scale with no 128-row
+    tiling and NO_SWIZZLE (`aten/src/ATen/native/cuda/ScaledBlas.cpp` and
+    `ScaledBlasUtils.cpp`), so neither the numel validation here nor the
+    gather-by-concatenation it licenses carries over. These ops are registered for
+    XPU too, so gate on the device rather than on ROCm alone -- otherwise an XPU
+    caller passing the layout its own GEMM wants is told to swizzle, which is the
+    wrong advice. Fail clearly instead of computing against the wrong layout.
     """
-    if torch.version.hip is not None:
+    if operand.device.type != "cuda" or torch.version.hip is not None:
         raise ValueError(
-            "MXFP8 async-TP is not supported on ROCm: it relies on the swizzled "
-            "32x4x4 scale layout, and ROCm's block-scaled GEMM expects an "
-            "unpadded scale layout instead."
+            "MXFP8 async-TP is only supported on NVIDIA CUDA devices: it relies "
+            "on the swizzled 32x4x4 scale layout, while the ROCm and XPU "
+            "block-scaled GEMMs expect an unpadded, unswizzled scale layout "
+            f"(got device {operand.device})."
         )
 
 
@@ -716,10 +719,11 @@ def _check_mx_swizzle(swizzle: list[int] | None, operand: str) -> None:
     from torch.nn.functional import SwizzleType
 
     expected = SwizzleType.SWIZZLE_32_4_4.value
-    if swizzle is not None and list(swizzle) != [expected]:
+    if swizzle is None or list(swizzle) != [expected]:
         raise ValueError(
             f"MXFP8 requires swizzle_{operand}=[SwizzleType.SWIZZLE_32_4_4] "
-            f"(got {swizzle})."
+            f"(got {swizzle}). It is not defaulted: the layout cannot be inferred "
+            "from the scale, so it has to be stated the same way the recipe is."
         )
 
 
@@ -766,6 +770,41 @@ def _resolve_recipe(
     return [ScalingType.RowWise.value], [SwizzleType.NO_SWIZZLE.value]
 
 
+def _check_mx_reduce_scatter(
+    A: torch.Tensor,
+    scale: torch.Tensor,
+    scatter_dim: int,
+    group_size: int,
+) -> None:
+    """Preconditions for slicing a swizzled scale per reduce-scatter chunk.
+
+    Nothing crosses the wire here -- only the bf16 partials are communicated -- so
+    this is a local slicing constraint, but it is the same 128-row tile arithmetic
+    the all-gather relies on. Lives in a shared helper because the Meta kernel is
+    the fallback, which would otherwise trace clean and fail at runtime.
+    """
+    _check_mx_device(A)
+    _check_mx_leading_dim(scatter_dim, "scatter_dim_after_maybe_reshape")
+
+    rows = math.prod(A.shape[:-1])
+    rows_per_chunk = rows // group_size
+    if rows_per_chunk % _MX_SCALE_ROW_ALIGNMENT != 0:
+        raise ValueError(
+            "MXFP8 matmul-reduce-scatter requires the scattered dim divided by "
+            f"the group size to be a multiple of {_MX_SCALE_ROW_ALIGNMENT} "
+            f"(got {rows_per_chunk}). The swizzled scale layout pads each chunk's "
+            "tail to a 128-row tile, so a shorter chunk cannot be sliced out of it."
+        )
+
+    expected = _mx_swizzled_scale_numel(rows, A.shape[-1])
+    if scale.numel() != expected:
+        raise ValueError(
+            f"MXFP8 scale has {scale.numel()} elements, expected {expected} for a "
+            f"{tuple(A.shape)} operand in the swizzled 32x4x4 layout. Pass the "
+            "scale as `to_blocked(...)` output."
+        )
+
+
 def _check_mx_gather_alignment(shard: torch.Tensor) -> None:
     """The shard's *flattened* row count must be a whole number of 128-row tiles.
 
@@ -801,6 +840,8 @@ def _check_and_verify_fp8_all_gather_scale_mode(
     if scale is None:
         return _ScaleMode.UNSCALED
     elif _is_mx_scale(scale_recipe):
+        _check_mx_device(shard)
+        _check_mx_leading_dim(gather_dim, "gather_dim")
         _check_mx_gather_alignment(shard)
         expected = _mx_swizzled_scale_numel(
             math.prod(shard.shape[:-1]), shard.shape[-1]
@@ -917,7 +958,7 @@ def _fused_all_gather_matmul_impl(
         # is the swizzled scale of the corresponding data chunk. Both hold only
         # because the shard's gather-dim extent is 128-aligned, checked in
         # _check_and_verify_fp8_all_gather_scale_mode.
-        A_scale = A_scale.contiguous()
+        A_scale = A_scale.flatten().contiguous()
         A_scale_flat = A_scale.new_empty(A_scale.numel() * group.size())
 
         def mx_block_wise_consumer(shard: list[torch.Tensor], rank: int) -> None:
@@ -1501,7 +1542,10 @@ def _fused_all_gather_scaled_matmul(
     **multiple of 128**: the swizzled
     layout pads each shard's tail to a 128-row tile, so a shorter shard cannot be
     gathered by concatenation. A shard that is not 128-aligned raises rather than
-    producing a wrong result.
+    producing a wrong result. `use_fast_accum` is accepted but has no
+    effect: the block-scaled kernel hardcodes it off
+    (`aten/src/ATen/native/cuda/ScaledBlas.cpp`), so this op matches `scaled_mm`
+    rather than being stricter than it.
 
     Optimal stride order for `A_shard` - if `A_shard.movedim(gather_dim, 0)` is
     contiguous, no extra copy is required for input layout transformation.
@@ -1510,7 +1554,7 @@ def _fused_all_gather_scaled_matmul(
     out_dtypes = _maybe_convert_scalar_types_to_dtypes(out_dtypes)
 
     if _is_mx_scale(scale_recipe_a):
-        _check_mx_platform()
+        _check_mx_device(A_shard)
         _check_mx_leading_dim(gather_dim, "gather_dim")
         # The fp8 operand dtype is not a usable output dtype for block scaling, so
         # `out_dtype or A.dtype` would hand cuBLAS an fp8 output and fail deep in
@@ -1805,10 +1849,13 @@ def _fused_scaled_matmul_reduce_scatter(
     returns). No scales are communicated here -- only the bf16 partials are -- so
     the scale is simply sliced per chunk, which requires the scattered dim divided
     by the group size to be a **multiple of 128**. A shorter chunk raises rather
-    than producing a wrong result. `result_scale` is not supported for MXFP8.
+    than producing a wrong result. `result_scale` is not supported for MXFP8. `use_fast_accum` is accepted but has no
+    effect: the block-scaled kernel hardcodes it off
+    (`aten/src/ATen/native/cuda/ScaledBlas.cpp`), so this op matches `scaled_mm`
+    rather than being stricter than it.
     """
     if _is_mx_scale(scale_recipe_a):
-        _check_mx_platform()
+        _check_mx_device(A)
         _check_mx_leading_dim(
             scatter_dim_after_maybe_reshape, "scatter_dim_after_maybe_reshape"
         )
@@ -1908,6 +1955,12 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
     A_2d = A.flatten(0, -2).contiguous()
     _reject_unlabelled_block_scale(A_scale, scale_recipe_a)
     mx_scaling = _is_mx_scale(scale_recipe_a)
+
+    if mx_scaling:
+        group_size = c10d._get_group_size_by_name(group_name)
+        _check_mx_reduce_scatter(
+            A, A_scale, scatter_dim_after_maybe_reshape, group_size
+        )
 
     # A swizzled scale is already shaped for the whole (unchunked) A, so it needs
     # none of the reshaping the other modes do.
@@ -2018,19 +2071,12 @@ def _fused_scaled_matmul_reduce_scatter_impl(
 
     # MXFP8's swizzled scale is a flat buffer whose leading axis is the 128-row tile,
     # so slicing it per chunk is the same even split as the data -- and each slice is
-    # itself a valid swizzled scale for its chunk. Both need the chunk's row count to
-    # be 128-aligned; unlike the all-gather case nothing crosses the wire here, since
-    # only the bf16 partials are communicated.
+    # itself a valid swizzled scale for its chunk.
     if mx_scaling:
-        rows_per_chunk = A_2D_with_scatter_dim_0.shape[0] // group.size()
-        if rows_per_chunk % _MX_SCALE_ROW_ALIGNMENT != 0:
-            raise ValueError(
-                "MXFP8 matmul-reduce-scatter requires the scattered dim divided by "
-                f"the group size to be a multiple of {_MX_SCALE_ROW_ALIGNMENT} "
-                f"(got {rows_per_chunk}). The swizzled scale layout pads each chunk's "
-                "tail to a 128-row tile, so a shorter chunk cannot be sliced out of it."
-            )
-        A_scale_shards = list(A_scale.chunk(group.size()))
+        if A_scale is None:
+            raise AssertionError
+        _check_mx_reduce_scatter(A_2D_with_scatter_dim_0, A_scale, 0, group.size())
+        A_scale_shards = [t.contiguous() for t in A_scale.flatten().chunk(group.size())]
 
     # For tensorwise scaling, the scale should be replicated so each shard has a copy.
     elif tensorwise_scaling:
