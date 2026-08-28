@@ -1253,13 +1253,16 @@ class TestConvolutionNNDevice(NNTestCase):
             else:
                 lx, lweight = inputs
                 lbias = None
+
             # We disable cudnn during forward to avoid finite difference imprecision issues
-            ctx_mgr = (
-                torch.backends.mkldnn.flags(enabled=False)
-                if device.type == "xpu"
-                else cudnn.flags(enabled=False)
-            )
-            with ctx_mgr:
+            def ctx_mgr():
+                return (
+                    torch.backends.mkldnn.flags(enabled=False)
+                    if device.type == "xpu"
+                    else cudnn.flags(enabled=False)
+                )
+
+            with ctx_mgr():
                 out = F.conv2d(lx, lweight, lbias, stride, padding, dilation, groups)
             return out
 
@@ -1309,19 +1312,20 @@ class TestConvolutionNNDevice(NNTestCase):
                     2, dtype=torch.double, device=device, requires_grad=True
                 )
 
-                device_type = torch.device(device).type
-                ctx_mgr = (
-                    torch.backends.mkldnn.flags(enabled=False)
-                    if device_type == "xpu"
-                    else torch.backends.cudnn.flags(enabled=False)
-                )
+                def ctx_mgr():
+                    device_type = torch.device(device).type
+                    return (
+                        torch.backends.mkldnn.flags(enabled=False)
+                        if device_type == "xpu"
+                        else torch.backends.cudnn.flags(enabled=False)
+                    )
 
-                with ctx_mgr:
+                with ctx_mgr():
                     res = convfn(inputs, weight, bias, **kwargs)
                 res_cpu = convfn(inputs.cpu(), weight.cpu(), bias.cpu(), **kwargs)
                 self.assertEqual(res, res_cpu)
 
-                with ctx_mgr:
+                with ctx_mgr():
                     torch.autograd.gradcheck(
                         lambda x, w, b: convfn(x, w, b, **kwargs),
                         (inputs, weight, bias),
