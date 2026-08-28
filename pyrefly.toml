@@ -103,6 +103,7 @@ ignore-missing-imports = [
     "cutlass.*",
     "cutlass_library.*",
     "cutlass_api.*",
+    "flydsl.*",
     # nvidia cuda-python. Ships alongside cutlass (the CuteDSL kernels use both) and
     # is likewise absent from the linter image, so it needs the same treatment.
     "cuda.bindings.*",
