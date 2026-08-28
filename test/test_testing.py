@@ -2807,11 +2807,16 @@ class TestImports(TestCase):
                            "torch.ao.pruning._experimental.",  # depends on pytorch_lightning, not user-facing
                            "torch.onnx._internal",  # depends on onnx-script
                            "torch._inductor.runtime.triton_helpers",  # depends on triton
+                           "torch._native.ops._cutedsl",  # depends on cutlass
                            "torch._native.ops.bmm_outer_product.triton_kernels",  # depends on triton
                            "torch._native.ops.foreach_mm",  # depends on nvmath-python, cuda-python
                            "torch._native.ops.norm.flydsl_rmsnorm_fwd",  # depends on flydsl
                            "torch._native.ops.polar.nvmath_impl",  # depends on nvmath-python, cuda-python
                            "torch._native.ops.reductions.inner_tree_kernel",  # depends on cutlass
+                           "torch._native.ops.reductions.kernel_general",  # depends on cutlass
+                           "torch._native.ops.reductions.kernel_rowtile",  # depends on cutlass
+                           "torch._native.ops.reductions.tile",  # depends on cutlass
+                           "torch._native.ops.reductions.kernel_xcta",  # depends on cutlass
                            "torch._native.ops.scatter_add",  # depends on cutlass
                            "torch._native.ops.topk",  # depends on cutlass
                            "torch._inductor.codegen.cuda",  # depends on cutlass
