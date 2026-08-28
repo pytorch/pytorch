@@ -207,6 +207,11 @@ def _make_wrapper(
     only ``sample`` (and the reported ``dsl``) differ.
     """
 
+    # THIS frame is the runtime proof of instrumentation: a coverage test walks the stack
+    # from inside a real cute.compile and asserts that some frame running this very code
+    # object encloses it, which holds however the op is factored (a decorator on its own
+    # compile fn, or a shared helper reached through cached_plan(op=...)). Nothing has to be
+    # stored in the frame for that -- the frame's identity is the signal.
     @functools.wraps(fn)
     def wrapper(*args: Any, **kwargs: Any) -> R:
         # Fast path: do nothing extra unless a sink is listening. This runs on
