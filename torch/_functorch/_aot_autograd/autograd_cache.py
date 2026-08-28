@@ -932,16 +932,22 @@ def create_fx_config(
     compile_region_name: str | None = None,
 ) -> _CompileFxKwargs:
     if compiler_config_extra is None:
-        cudagraphs = BoxedBool(torch._inductor.config.triton.cudagraphs)
+        forward_cudagraphs = BoxedBool(torch._inductor.config.triton.cudagraphs)
+        cudagraphs_post_compile_override = None
         boxed_forward_device_index = None
     else:
-        cudagraphs = compiler_config_extra.cudagraphs
-        boxed_forward_device_index = compiler_config_extra.forward_device
-    return {
-        "cudagraphs": cudagraphs,
+        forward_cudagraphs = compiler_config_extra.forward_cudagraphs
+        cudagraphs_post_compile_override = compiler_config_extra.cudagraphs_bwd_override
+        boxed_forward_device_index = compiler_config_extra.forward_device_index
+    fx_config: _CompileFxKwargs = {
+        "cudagraphs": forward_cudagraphs,
         "boxed_forward_device_index": boxed_forward_device_index,
         "compile_region_name": compile_region_name,  # pyrefly: ignore[bad-typed-dict-key]
     }
+    if cudagraphs_post_compile_override is not None:
+        # Cache-key-only here; post_compile reads the value serialized in the graph.
+        fx_config["cudagraphs_post_compile_override"] = cudagraphs_post_compile_override
+    return fx_config
 
 
 def _check_triton_cache_version() -> None:
