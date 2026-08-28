@@ -543,7 +543,8 @@ void rsqrt_kernel(TensorIteratorBase& iter) {
 }
 
 // -x * log(x) is already NaN for a NaN x, so keying the first blend on x < 0
-// (not x > 0) leaves those lanes alone and saves a third blend.
+// (not x > 0) leaves those lanes alone and saves a third blend. This flips
+// a NaN input's sign bit, unlike the scalar tail; entr(nan)'s sign is unpinned.
 template <typename scalar_t>
 inline Vectorized<scalar_t> entr_vec(const Vectorized<scalar_t>& x) {
   using vec_t = Vectorized<scalar_t>;

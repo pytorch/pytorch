@@ -4855,8 +4855,7 @@ class TestBinaryUfuncsDevice(TestCase):
         ys = [b for _, b in pairs]
         x = torch.tensor(xs, dtype=dtype, device=device)
         y = torch.tensor(ys, dtype=dtype, device=device)
-        # numpy has no bfloat16; every other dtype reaches scipy unwidened, so
-        # the float64 reference keeps its precision.
+        # numpy has no bfloat16, so only it needs a manual upcast here.
         lhs = x.detach().cpu()
         if dtype is torch.bfloat16:
             lhs = lhs.float()
