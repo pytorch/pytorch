@@ -2980,9 +2980,10 @@ class FakeTensorMode(TorchDispatchMode):
                     t.real_tensor = real_t
                     for s, real_s in zip(t.size(), real_t.size()):
                         go(s, real_s)  # type: ignore[arg-type]
-                    for s, real_s in zip(t.stride(), real_t.stride()):
-                        go(s, real_s)  # type: ignore[arg-type]
-                    go(t.storage_offset(), real_t.storage_offset())  # type: ignore[arg-type]
+                    if t.layout == torch.strided:
+                        for s, real_s in zip(t.stride(), real_t.stride()):
+                            go(s, real_s)  # type: ignore[arg-type]
+                        go(t.storage_offset(), real_t.storage_offset())  # type: ignore[arg-type]
                 elif isinstance(t, py_sym_types) and free_unbacked_symbols(t):
                     if isinstance(t.node.expr, sympy.Symbol):
                         if self.shape_env is None:
@@ -3210,7 +3211,14 @@ class FakeTensorMode(TorchDispatchMode):
         # python meta registrations, prims, decomps, and c++ meta fns (structured kernels)
         # It's possible that the kernel will return NotImplementedError
         try:
-            with in_kernel_invocation_manager(self):
+            # sparse invariant checks read index data, which meta tensors lack
+            suppress_invariants = (
+                torch.sparse.check_sparse_tensor_invariants(False)
+                if torch.sparse.check_sparse_tensor_invariants.is_enabled()
+                and any(is_sparse_any(t) for t in flat_arg_fake_tensors)
+                else contextlib.nullcontext()
+            )
+            with in_kernel_invocation_manager(self), suppress_invariants:
                 r = func(*args, **kwargs)
         except NotImplementedError as not_implemented_error:
             return maybe_run_unsafe_fallback(not_implemented_error)

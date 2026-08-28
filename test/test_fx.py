@@ -1489,6 +1489,26 @@ class TestFX(JitTestCase):
                 f"Expected 2 occurrences of '_torch__ops_aten_aten_relu_', got {count}"
             )
 
+    def test_print_sparse_tensor_metadata(self):
+        crow = torch.tensor([0, 1, 2])
+        col = torch.tensor([0, 1])
+        vals = [
+            torch.sparse_coo_tensor(torch.tensor([[0, 1], [0, 1]]), torch.randn(2), (2, 2)),
+            torch.sparse_csr_tensor(crow, col, torch.randn(2), size=(2, 2)),
+            torch.sparse_csc_tensor(crow, col, torch.randn(2), size=(2, 2)),
+            torch.sparse_bsr_tensor(crow, col, torch.randn(2, 2, 2), size=(4, 4)),
+            torch.sparse_bsc_tensor(crow, col, torch.randn(2, 2, 2), size=(4, 4)),
+        ]
+
+        for val in vals:
+            graph: torch.fx.Graph = torch.fx.Graph()
+            node: torch.fx.Node = graph.create_node("placeholder", "x")
+            node.meta["val"] = val
+            graph.output(node)
+            gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+            gm.print_readable(print_output=False, include_stride=True, include_device=True)
+            node.format_node(include_tensor_metadata=True)
+
     def test_print_readable_no_trailing_whitespace_with_inner_graph(self):
         # When a GraphModule has a child GraphModule (e.g., from invoke_subgraph),
         # print_readable() should not produce lines with trailing whitespace.
