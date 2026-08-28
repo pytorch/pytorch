@@ -1880,6 +1880,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.asin",
         "torch.asinh_",
         "torch.asinh",
+        "torch.associative_scan",
         "torch.atan_",
         "torch.atan",
         "torch.atan2",
