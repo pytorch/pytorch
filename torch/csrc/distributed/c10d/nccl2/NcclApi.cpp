@@ -7,7 +7,6 @@
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NcclApi.hpp>
 #include <string_view>
-#include <tuple>
 
 namespace c10d::nccl2 {
 
