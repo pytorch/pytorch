@@ -25,7 +25,6 @@ from torch.testing._internal.common_device_type import (
     dtypesIfXPU,
     expectedFailureMeta,
     instantiate_device_type_tests,
-    onlyCPU,
     onlyNativeDeviceTypes,
     onlyOn,
     OpDTypes,
@@ -350,10 +349,9 @@ class TestBinaryUfuncsDevice(TestCase):
             ):
                 exact_dtype = False
 
-            if expected.dtype == np.float32 and dtype in (torch.bfloat16, torch.half):
+            if expected.dtype == np.float32 and dtype is torch.bfloat16:
                 # A scipy reference has no reduced-type loop, so it widens and
                 # the comparison must absorb the rounding back down.
-                rtol = 16e-3 if dtype is torch.bfloat16 else 1.2e-3
                 self.assertEqualHelper(
                     actual,
                     expected,
@@ -361,7 +359,7 @@ class TestBinaryUfuncsDevice(TestCase):
                     dtype=dtype,
                     exact_dtype=exact_dtype,
                     equal_nan=equal_nan,
-                    rtol=rtol,
+                    rtol=16e-3,
                     atol=1e-5,
                 )
             else:
@@ -4840,7 +4838,7 @@ class TestBinaryUfuncsDevice(TestCase):
     # case the vectorized kernel's isnan term exists for. The tensor here is
     # long enough that the vector body actually runs, not just the scalar tail.
     @skipIf(not TEST_SCIPY, "Scipy required for the test.")
-    @onlyCPU
+    @onlyNativeDeviceTypes
     # scipy computes in float32, so the reduced types need extra slack.
     @precisionOverride({torch.float16: 1e-1, torch.bfloat16: 1e-1})
     @dtypes(torch.float32, torch.float64, torch.float16, torch.bfloat16)
