@@ -53,4 +53,9 @@ def on_current_device(x: torch.Tensor) -> bool:
     # device; launching a cuda:0-compiled kernel on a cuda:1 tensor raises
     # cudaErrorInvalidResourceHandle. Until the caches are per-device, decline when
     # the input is not on the current device and let aten handle it.
+    #
+    # The non-CUDA check comes first because current_device() RAISES without CUDA, and the
+    # contract at the top of this file is that a cond never raises.
+    if x.device.type != "cuda":
+        return False
     return x.device.index == torch.cuda.current_device()
