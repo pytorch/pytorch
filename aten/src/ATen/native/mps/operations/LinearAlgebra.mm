@@ -34,6 +34,7 @@
 #include <ATen/ops/eye.h>
 #include <ATen/ops/eye_native.h>
 #include <ATen/ops/linalg_cholesky_ex_native.h>
+#include <ATen/ops/linalg_householder_product.h>
 #include <ATen/ops/linalg_inv_ex_native.h>
 #include <ATen/ops/linalg_lstsq_native.h>
 #include <ATen/ops/linalg_lu_factor_ex_native.h>
@@ -1785,6 +1786,30 @@ static void cholesky_stub_impl(const Tensor& out, const Tensor& info, bool upper
   }
 }
 
+// `other` arrives pre-filled with the input matrix and is updated in place.
+// Rather than applying the reflectors one at a time, this materializes Q with
+// the existing orgqr kernel and multiplies, which trades some arithmetic for
+// reusing a path that is already tested.
+static void ormqr_stub_impl(const Tensor& input, const Tensor& tau, const Tensor& other, bool left, bool transpose) {
+  if (other.numel() == 0 || tau.numel() == 0) {
+    // An empty tau means Q is the identity, so `other` is already the answer.
+    return;
+  }
+
+  const auto k = tau.size(-1);
+  const auto order = left ? other.size(-2) : other.size(-1);
+
+  auto q_sizes = input.sizes().vec();
+  q_sizes[input.dim() - 2] = order;
+  q_sizes[input.dim() - 1] = order;
+  auto reflectors = at::zeros(q_sizes, input.options());
+  reflectors.narrow(-1, 0, k).copy_(input.narrow(-1, 0, k));
+
+  const auto Q = at::linalg_householder_product(reflectors, tau);
+  const auto op = transpose ? Q.mH() : Q;
+  other.copy_(left ? op.matmul(other) : other.matmul(op));
+}
+
 static Tensor& orgqr_stub_impl(Tensor& self, const Tensor& tau) {
   if (self.numel() == 0) {
     return self;
@@ -2488,6 +2513,7 @@ TORCH_IMPL_FUNC(linalg_inv_ex_out_mps)(const Tensor& A, bool check_errors, const
 REGISTER_DISPATCH(cholesky_stub, mps::cholesky_stub_impl)
 REGISTER_DISPATCH(unpack_pivots_stub, mps::unpack_pivots_stub_impl)
 REGISTER_DISPATCH(orgqr_stub, mps::orgqr_stub_impl);
+REGISTER_DISPATCH(ormqr_stub, mps::ormqr_stub_impl);
 REGISTER_DISPATCH(cholesky_inverse_stub, mps::cholesky_inverse_kernel_impl_mps);
 REGISTER_DISPATCH(svd_stub, mps::svd_kernel_mps);
 REGISTER_DISPATCH(linalg_eigh_stub, mps::eigh_kernel_mps);

@@ -571,7 +571,6 @@ if torch.backends.mps.is_available():
                 torch.int8,
                 torch.int16,
             ],
-            "ormqr": None,
             "rounddecimals_0": [
                 torch.uint8,
                 torch.int8,
