@@ -90,6 +90,33 @@ class ErrorHandlerTest(unittest.TestCase):
                 err = json.load(fp)
             self.assertNotIn("fn_name", err["message"]["extraInfo"])
 
+    def test_record_success_with_fn_name(self):
+        eh = ErrorHandler()
+        eh.set_entrypoint_fn_name("good_fn")
+
+        with self.assertLogs(error_handler_mod.logger, level="DEBUG") as logs:
+            eh.record_success()
+
+        self.assertTrue(any("good_fn" in line for line in logs.output))
+
+    def test_record_success_no_fn_name_does_not_log(self):
+        # without an entrypoint fn_name the base handler is a no-op and must not log
+        eh = ErrorHandler()
+
+        with patch.object(error_handler_mod.logger, "debug") as debug_mock:
+            eh.record_success()
+
+        debug_mock.assert_not_called()
+
+    def test_record_success_does_not_write_error_file(self):
+        # success must never produce an error file
+        with patch.dict(os.environ, {"TORCHELASTIC_ERROR_FILE": self.test_error_file}):
+            eh = ErrorHandler()
+            eh.set_entrypoint_fn_name("good_fn")
+            eh.record_success()
+
+        self.assertFalse(os.path.isfile(self.test_error_file))
+
     def test_record_exception_no_error_file(self):
         # make sure record does not fail when no error file is specified in env vars
         with patch.dict(os.environ, {}):
