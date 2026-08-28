@@ -8,6 +8,7 @@ import multiprocessing
 import operator
 import os
 import pickle
+import random
 import shutil
 import unittest
 from collections.abc import Sequence
@@ -32,6 +33,7 @@ from torch._functorch._aot_autograd.autograd_cache import (
     autograd_cache_key,
     BypassAOTAutogradCache,
     check_cacheable,
+    check_node_safe,
     sanitize_gm_for_cache,
 )
 from torch._functorch._aot_autograd.schemas import AOTConfig, CacheableAOTConfig
@@ -3568,6 +3570,33 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
                     act_input_paths=act_input_paths,
                 )
 
+    @functorch_config.patch({"bypass_autograd_cache_key": True})
+    def test_fallback_nonce_cache_dirs_are_unique(self):
+        def fn(x):
+            return x.sin()
+
+        config = self.default_config()
+        with (
+            fresh_cache(),
+            patch.object(
+                autograd_cache,
+                "check_cacheable",
+                side_effect=BypassAOTAutogradCache("test fallback"),
+            ),
+        ):
+            random.seed(0)
+            key1, _ = self.gen_cache_key(fn, config)
+            random.seed(0)
+            key2, _ = self.gen_cache_key(fn, config)
+
+            AOTAutogradCache._write_to_local_cache(key1, b"first")
+            AOTAutogradCache._write_to_local_cache(key2, b"second")
+
+            self.assertNotEqual(key1, key2)
+            self.assertCountEqual(
+                os.listdir(AOTAutogradCache._get_tmp_dir()), [key1, key2]
+            )
+
     def test_basic_hash_key(self):
         def fn(x):
             return x.sin().cos()
@@ -3825,6 +3854,43 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             BypassAOTAutogradCache, "Unsupported call_function target"
         ):
             check_cacheable(gm)
+
+    def test_call_method_bypass_names_the_method_and_the_receiver(self):
+        graph = torch.fx.Graph()
+        xs = graph.placeholder("xs")
+        value = graph.call_function(torch.sym_int, (xs,))
+        graph.output(graph.call_method("size", (value,)))
+        gm = torch.fx.GraphModule({}, graph)
+
+        with self.assertRaises(BypassAOTAutogradCache) as ctx:
+            check_cacheable(gm)
+        message = str(ctx.exception)
+        self.assertIn("'size'", message)
+        self.assertIn("target=torch.sym_int", message)
+        self.assertIn("example_value", message)
+
+    def test_call_method_bypass_formats_bound_builtin_receiver(self):
+        graph = torch.fx.Graph()
+        xs = graph.placeholder("xs")
+        receiver = graph.call_function([].append, (xs,))
+        method = graph.call_method("size", (receiver,))
+
+        with self.assertRaises(BypassAOTAutogradCache) as ctx:
+            check_node_safe(method)
+        self.assertIn("%append : call_function", str(ctx.exception))
+
+    def test_call_method_bypass_names_unsupported_method(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        x.meta["example_value"] = torch.empty(0)
+        method = graph.call_method("size", (x,))
+        method.target = operator.getitem
+
+        with self.assertRaisesRegex(
+            BypassAOTAutogradCache,
+            r"Unsupported call_method method <built-in function getitem>$",
+        ):
+            check_node_safe(method)
 
     def test_numpy_wrapper_cache_key_does_not_cache_unknown_callable_ids(self):
         torch._dynamo.utils._torch_numpy_callable_cache_key_by_id.cache_clear()
