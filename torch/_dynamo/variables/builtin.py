@@ -1664,7 +1664,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             if fn in IN_PLACE_DESUGARING_MAP and isinstance(
                 args[0], variables.ConstantVariable
             ):
-                # In-place operators like += usually mustate tensor
+                # In-place operators like += usually mutate tensor
                 # values, but in the edge case of immutable values they
                 # re-bind the variable.
                 #
@@ -1672,6 +1672,15 @@ class BuiltinVariable(BaseBuiltinVariable):
                 # scenario is to de-sugar eagerly.
                 fn = IN_PLACE_DESUGARING_MAP[fn]
                 args = [args[0], args[1]]  # type: ignore[assignment]
+
+            # Constants were already desugared above because in-place operators
+            # re-bind immutable values. Remaining in-place operators mutate.
+            if (
+                fn in IN_PLACE_DESUGARING_MAP
+                and tx.output.side_effects.is_reconstructing_generator()
+                and args[0].is_tensor()
+            ):
+                tx.output.side_effects.check_allowed_side_effect(args[0])
 
             if fn is operator.getitem:
                 if kwargs:
@@ -3692,6 +3701,9 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
                                     "the mutation out of `torch.compile` region",
                                 ],
                             )
+
+                    if tx.output.side_effects.is_reconstructing_generator():
+                        tx.output.side_effects.check_allowed_side_effect(obj)
 
                     # Remove the old reference in tracked fakes - if we don't
                     # do this, .data value size/shape differences cause

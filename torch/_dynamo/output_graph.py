@@ -124,7 +124,12 @@ from .graph_id_filter import (
 from .graph_region_tracker import GraphRegionTracker
 from .guards import GuardBuilder, install_guard
 from .mutation_guard import is_dynamic_nn_module
-from .side_effects import AttributeMutationExisting, SideEffects, ValueMutationExisting
+from .side_effects import (
+    AttributeMutationExisting,
+    GeneratorReconstructionMode,
+    SideEffects,
+    ValueMutationExisting,
+)
 from .source import (
     _get_source_debug_name,
     AttrSource,
@@ -732,6 +737,9 @@ class OutputGraph(OutputGraphCommon):
             _guards=torch._guards.GuardsSet(),
             _aotautograd_guards=[],
         )
+        # Generator reconstruction is a frame-wide dynamic scope. Keep it on
+        # OutputGraph so nested higher-order-op tracers observe the same mode.
+        self.generator_reconstruction_mode = GeneratorReconstructionMode.OFF
         self.tracers = [SubgraphTracer(self, is_export=export)]
         # Map from graph input's `Source` to its `VariableTracker` to
         # de-duplicate graph inputs by source and reuse the tracker
@@ -3937,9 +3945,6 @@ class SubgraphTracer(fx.Tracer):
         # this subtracer's trace. Used by invoke_subgraph reuse to collect
         # guards and detect mutations on captured variables.
         self.traced_sources: OrderedSet[Source] = OrderedSet()
-
-        # True if this tracer is currently tracing (reconstructing) into a Python generator
-        self.is_reconstructing_generator = False
 
         self.debug_level: int = parent.debug_level + 1 if parent is not None else 0
 

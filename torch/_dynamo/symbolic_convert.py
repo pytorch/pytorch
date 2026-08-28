@@ -1502,6 +1502,9 @@ class InstructionTranslatorBase(
     # Does this tx currently have a child tx tracing?
     # Used to correctly implement should_compile_partial_graph
     is_child_tracer_active: bool
+    generated_items: list[VariableTracker] | None
+    generator_reconstruction_return_value: VariableTracker | None
+    is_inlining_dynamo_polyfill: bool
     debug_locals: list[tuple[VariableTracker, list[VariableTracker]]]
     package: CompilePackage | None
     latest_bytecode_queue: deque[str]
@@ -4251,6 +4254,7 @@ class InstructionTranslatorBase(
             defaults,
             kwdefaults,
             closure,
+            is_dynamo_polyfill_function=self.is_inlining_dynamo_polyfill,
         )
         if annotations:
             if not isinstance(annotations, TupleVariable):
@@ -5549,6 +5553,9 @@ class InstructionTranslatorBase(
         self.has_no_inlined_calls = True
         self.parent = None
         self.is_child_tracer_active = False
+        self.generated_items = None
+        self.generator_reconstruction_return_value = None
+        self.is_inlining_dynamo_polyfill = False
         self.debug_locals = []
 
         self.package = package
@@ -5863,13 +5870,27 @@ class InstructionTranslator(InstructionTranslatorBase):
             and (tos := self.stack[-1])
             and isinstance(tos, LocalGeneratorObjectVariable)
         ):
+            from torch._dynamo.side_effects import (
+                disallow_side_effects_in_generator,
+                GeneratorReconstructionMode,
+            )
+
+            mode = (
+                GeneratorReconstructionMode.TENSOR_ONLY
+                if tos.is_dynamo_polyfill()
+                else GeneratorReconstructionMode.STRICT
+            )
+            with disallow_side_effects_in_generator(self, mode=mode):
+                remaining_items = unpack_iterable(self, tos)
             self.stack[-1] = ListIteratorVariable(
-                unpack_iterable(self, tos),
+                remaining_items,
                 mutation_type=ValueMutationNew(),
             )
 
     def _return(self, inst: Instruction) -> None:
         self.replace_tos_if_return_is_generator()
+        if inst.opname == "RETURN_VALUE":
+            self.generator_reconstruction_return_value = self.stack[-1]
         if self.instruction_pointer is None:
             raise AssertionError(
                 "expected self.instruction_pointer is not None to be true"
@@ -6379,6 +6400,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             indexof=indexof,
         )
         self.funcvar = funcvar
+        self.is_inlining_dynamo_polyfill = funcvar.is_dynamo_polyfill()
         self.parent = parent
         self.num_calls = parent.num_calls
         self.symbolic_result = None
@@ -6525,6 +6547,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
+    # pyrefly: ignore [bad-override]
     generated_items: list[VariableTracker]
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
