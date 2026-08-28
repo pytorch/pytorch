@@ -425,7 +425,6 @@ if torch.backends.mps.is_available():
                 torch.int16,
                 torch.int32,
             ],
-            "nn.functional.fractional_max_pool2d": None,
             "nn.functional.fractional_max_pool3d": None,
             "nn.functional.glu": [
                 torch.int32,
@@ -886,6 +885,12 @@ if torch.backends.mps.is_available():
                 torch.float16,
                 torch.float32,
             ],
+            # fractional_max_pool draws its pooling regions from the device
+            # RNG unless `_random_samples` is passed, and the OpInfo samples do
+            # not pass it, so MPS and CPU pool over different regions and the
+            # gradients legitimately diverge. Deterministic coverage lives in
+            # TestFractionalMaxPool in test_mps.py.
+            "nn.functional.fractional_max_pool2d": [torch.float16, torch.float32],
             # PCA singular vectors are sign-ambiguous - same root cause as the
             # forward leg above. RNG shift lands seeded samples on different
             # sign choices.

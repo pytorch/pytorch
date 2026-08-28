@@ -60,3 +60,13 @@ struct MaxUnpoolingParams {
   ::c10::metal::array<idx_type_t, N> output_strides;
   ::c10::metal::array<idx_type_t, N> indices_strides;
 };
+
+struct FractionalMaxPoolParams {
+  int32_t numPlanes;
+  int32_t inputH;
+  int32_t inputW;
+  int32_t outputH;
+  int32_t outputW;
+  int32_t poolH;
+  int32_t poolW;
+};
