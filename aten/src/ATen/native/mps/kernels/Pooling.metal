@@ -838,3 +838,116 @@ REGISTER_POOL_OP(bool);
 REGISTER_POOL_BACKWARD_OP(float);
 REGISTER_POOL_BACKWARD_OP(half);
 REGISTER_POOL_BACKWARD_OP(bfloat);
+
+// Adaptive pooling region for one output index along a dimension.
+inline int32_t adaptive_start(
+    int32_t index,
+    int32_t outputSize,
+    int32_t inputSize) {
+  return (index * inputSize) / outputSize;
+}
+
+inline int32_t adaptive_end(
+    int32_t index,
+    int32_t outputSize,
+    int32_t inputSize) {
+  return ((index + 1) * inputSize + outputSize - 1) / outputSize;
+}
+
+// One thread per output element of an NCDHW tensor.
+template <typename T>
+kernel void adaptive_avg_pool3d(
+    constant T* input [[buffer(0)]],
+    device T* output [[buffer(1)]],
+    constant AdaptiveAvgPool3dParams& params [[buffer(2)]],
+    uint tid [[thread_position_in_grid]]) {
+  const int32_t index = static_cast<int32_t>(tid);
+  const int32_t ow = index % params.outputW;
+  const int32_t oh = (index / params.outputW) % params.outputH;
+  const int32_t ot =
+      (index / (params.outputW * params.outputH)) % params.outputT;
+  const int32_t plane =
+      index / (params.outputW * params.outputH * params.outputT);
+
+  const int32_t t0 = adaptive_start(ot, params.outputT, params.inputT);
+  const int32_t t1 = adaptive_end(ot, params.outputT, params.inputT);
+  const int32_t h0 = adaptive_start(oh, params.outputH, params.inputH);
+  const int32_t h1 = adaptive_end(oh, params.outputH, params.inputH);
+  const int32_t w0 = adaptive_start(ow, params.outputW, params.inputW);
+  const int32_t w1 = adaptive_end(ow, params.outputW, params.inputW);
+
+  constant T* plane_input = input +
+      static_cast<long>(plane) * params.inputT * params.inputH * params.inputW;
+
+  float sum = 0.0;
+  for (int32_t t = t0; t < t1; ++t) {
+    for (int32_t h = h0; h < h1; ++h) {
+      for (int32_t w = w0; w < w1; ++w) {
+        sum += static_cast<float>(
+            plane_input[(t * params.inputH + h) * params.inputW + w]);
+      }
+    }
+  }
+
+  const float count = static_cast<float>((t1 - t0) * (h1 - h0) * (w1 - w0));
+  output[tid] = static_cast<T>(sum / count);
+}
+
+// One thread per grad output element; the pooling regions of neighbouring
+// output elements can overlap, so the scatter has to be atomic.
+template <typename T>
+kernel void adaptive_avg_pool3d_backward(
+    device ::c10::metal::AtomicType_t<T>* grad_input [[buffer(0)]],
+    constant T* grad_output [[buffer(1)]],
+    constant AdaptiveAvgPool3dParams& params [[buffer(2)]],
+    uint tid [[thread_position_in_grid]]) {
+  const int32_t index = static_cast<int32_t>(tid);
+  const int32_t ow = index % params.outputW;
+  const int32_t oh = (index / params.outputW) % params.outputH;
+  const int32_t ot =
+      (index / (params.outputW * params.outputH)) % params.outputT;
+  const int32_t plane =
+      index / (params.outputW * params.outputH * params.outputT);
+
+  const int32_t t0 = adaptive_start(ot, params.outputT, params.inputT);
+  const int32_t t1 = adaptive_end(ot, params.outputT, params.inputT);
+  const int32_t h0 = adaptive_start(oh, params.outputH, params.inputH);
+  const int32_t h1 = adaptive_end(oh, params.outputH, params.inputH);
+  const int32_t w0 = adaptive_start(ow, params.outputW, params.inputW);
+  const int32_t w1 = adaptive_end(ow, params.outputW, params.inputW);
+
+  const float count = static_cast<float>((t1 - t0) * (h1 - h0) * (w1 - w0));
+  const T contribution =
+      static_cast<T>(static_cast<float>(grad_output[tid]) / count);
+  const long plane_offset =
+      static_cast<long>(plane) * params.inputT * params.inputH * params.inputW;
+
+  for (int32_t t = t0; t < t1; ++t) {
+    for (int32_t h = h0; h < h1; ++h) {
+      for (int32_t w = w0; w < w1; ++w) {
+        ::c10::metal::AtomicType<T>::atomic_add(
+            grad_input,
+            plane_offset + (t * params.inputH + h) * params.inputW + w,
+            contribution);
+      }
+    }
+  }
+}
+
+#define REGISTER_ADAPTIVE_AVG_POOL3D(T)                                  \
+  template [[host_name("adaptive_avg_pool3d_" #T)]] kernel void          \
+  adaptive_avg_pool3d<T>(                                                \
+      constant T * input [[buffer(0)]],                                  \
+      device T * output [[buffer(1)]],                                   \
+      constant AdaptiveAvgPool3dParams & params [[buffer(2)]],           \
+      uint tid [[thread_position_in_grid]]);                             \
+  template [[host_name("adaptive_avg_pool3d_backward_" #T)]] kernel void \
+  adaptive_avg_pool3d_backward<T>(                                       \
+      device ::c10::metal::AtomicType_t<T> * grad_input [[buffer(0)]],   \
+      constant T * grad_output [[buffer(1)]],                            \
+      constant AdaptiveAvgPool3dParams & params [[buffer(2)]],           \
+      uint tid [[thread_position_in_grid]]);
+
+REGISTER_ADAPTIVE_AVG_POOL3D(float);
+REGISTER_ADAPTIVE_AVG_POOL3D(half);
+REGISTER_ADAPTIVE_AVG_POOL3D(bfloat);
