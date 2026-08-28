@@ -24,7 +24,7 @@ from .._cutedsl.traits import WARP
 from . import tile
 
 
-_compile = _L.compile
+_compile = _L.compile_kernel
 _stream = _L.stream
 _CACHE = {}
 
