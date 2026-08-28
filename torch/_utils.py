@@ -21,7 +21,7 @@ import torch
 
 
 @functools.cache
-def _scalar_type_to_dtype() -> tuple[torch.dtype, ...]:
+def _scalar_type_to_dtype() -> "tuple[torch.dtype, ...]":
     # Indexed by c10::ScalarType (see ScalarType.h's
     # AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS); append-only.
     #
@@ -62,7 +62,7 @@ def _scalar_type_to_dtype() -> tuple[torch.dtype, ...]:
     )
 
 
-def _decode_scalar_type(scalar_type: int) -> torch.dtype:
+def _decode_scalar_type(scalar_type: int) -> "torch.dtype":
     dtypes = _scalar_type_to_dtype()
     if not (0 <= scalar_type < len(dtypes)):
         raise IndexError(scalar_type)
