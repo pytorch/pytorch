@@ -20,8 +20,6 @@ from torch.testing._internal.common_utils import (
 
 
 class GeneratorTestsBase(torch._dynamo.test_case.TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     def setUp(self):
         super().setUp()
         self._prev = torch._dynamo.config.enable_trace_load_build_class
@@ -44,6 +42,8 @@ class GeneratorTestsBase(torch._dynamo.test_case.TestCase):
 
 
 class GeneratorTests(GeneratorTestsBase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_generator_simple(self):
         def whoo():
             yield 1
@@ -1098,6 +1098,8 @@ class GraphModule(torch.nn.Module):
 
 
 class TestGeneratorSend(GeneratorTestsBase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_send(self):
         def double():
             x = yield
@@ -1237,6 +1239,8 @@ class TestGeneratorSend(GeneratorTestsBase):
 
 
 class TestGeneratorClose(GeneratorTestsBase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_close(self):
         def whoo(t):
             yield t.sin()
@@ -1687,6 +1691,8 @@ class TestGeneratorClose(GeneratorTestsBase):
 
 
 class TestGeneratorThrow(GeneratorTestsBase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_throw(self):
         def whoo(t):
             try:
@@ -1991,6 +1997,8 @@ class TestGeneratorThrow(GeneratorTestsBase):
 
 
 class TestGeneratorPEP(GeneratorTestsBase):
+    hw_classification = HardwareClassification.GENERIC
+
     # Ported from CPython Lib/test/test_generators.py `pep_tests` doctest block.
 
     @make_dynamo_test
@@ -2095,6 +2103,8 @@ class TestGeneratorPEP(GeneratorTestsBase):
 
 
 class TestGeneratorCoroutine(GeneratorTestsBase):
+    hw_classification = HardwareClassification.GENERIC
+
     # Ported from CPython Lib/test/test_generators.py `coroutine_tests` doctest
     # block. Cases relying on stdout capture were rewritten to record into a
     # list and assert; cases relying on gc finalization, traceback-level or
@@ -2335,6 +2345,8 @@ class _DelegatingIterator:
 
 
 class TestSubgeneratorDelegation(GeneratorTestsBase):
+    hw_classification = HardwareClassification.GENERIC
+
     # Delegation semantics for send/throw/close through `yield from`. CPython
     # forwards throw() and close() into the subiterator the delegating
     # generator is suspended on; these tests assert the subgenerator's own
