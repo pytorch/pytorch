@@ -13,9 +13,11 @@ from torch.distributed.tensor import (
     Shard,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -53,7 +55,18 @@ def output_fn(mod, outputs, device_mesh):
     return outputs.redistribute(placements=[Replicate()] * device_mesh.ndim).to_local()
 
 
-class TestDTensorOptimizer(DTensorTestBase):
+class TestDTensorOptimizerGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_optimizer_foreach_supported_types_include_DTensor(self):
+        from torch.optim.optimizer import _foreach_supported_types
+
+        self.assertTrue(DTensor in _foreach_supported_types)
+
+
+class TestDTensorOptimizerAccelerator(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _assert_optimizer(
         self,
         mesh,
@@ -86,11 +99,6 @@ class TestDTensorOptimizer(DTensorTestBase):
                 p2 = p2.full_tensor()
                 # Default 'rtol' and 'atol' for attr:`~torch.float32` are ``1.3e-6`` and ``1e-5``
                 self.assertEqual(p1, p2, atol=atol, rtol=rtol)
-
-    def test_optimizer_foreach_supported_types_include_DTensor(self):
-        from torch.optim.optimizer import _foreach_supported_types
-
-        self.assertTrue(DTensor in _foreach_supported_types)
 
     @with_comms
     def test_adam_1d_sharding(self):
@@ -776,11 +784,11 @@ class TestDTensorOptimizer(DTensorTestBase):
         )
 
 
-instantiate_parametrized_tests(TestDTensorOptimizer)
-
+instantiate_parametrized_tests(TestDTensorOptimizerAccelerator)
 TestDTensorOptimizerWithLocalTensor = create_local_tensor_test_class(
-    TestDTensorOptimizer,
+    TestDTensorOptimizerAccelerator,
 )
+
 
 if __name__ == "__main__":
     run_tests()
