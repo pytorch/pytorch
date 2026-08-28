@@ -93,9 +93,11 @@ class HWCaps:
 
 
 def caps(device=None):
-    idx = (
-        torch.cuda.current_device()
-        if device is None
-        else (device if isinstance(device, int) else torch.cuda.current_device())
-    )
-    return cached_plan(_CACHE, idx, lambda: HWCaps(device))
+    # Key on the DEVICE INDEX, resolving whatever form the caller passed (an index,
+    # torch.device, "cuda:1", or a tensor's device). Falling back to current_device() for
+    # anything non-int silently returned ANOTHER device's properties, which is a wrong launch
+    # shape rather than an error.
+    idx = torch.cuda.current_device() if device is None else torch.device(device).index
+    if idx is None:  # torch.device("cuda") carries no index: that means the current one
+        idx = torch.cuda.current_device()
+    return cached_plan(_CACHE, idx, lambda: HWCaps(idx))
