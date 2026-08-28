@@ -8,6 +8,17 @@
 #include <array>
 #include <cctype>
 #include <string>
+#include <string_view>
+
+#if defined(USE_ROCM) && defined(__has_include) && \
+    __has_include(<ATen/ROCmCKSDPAConfig.h>)
+#include <ATen/ROCmCKSDPAConfig.h>
+#endif
+#ifndef AT_ROCM_CK_SDPA_ARCHS
+// Non-CMake builds could define USE_ROCM but not generate this header;
+// empty disables the runtime check.
+#define AT_ROCM_CK_SDPA_ARCHS ""
+#endif
 
 #include <ATen/cpu/FlushDenormal.h>
 
@@ -577,9 +588,24 @@ at::BlasBackend Context::blasPreferredBackend() {
 bool Context::ckSDPASupported() {
 #ifdef USE_ROCM
   // CK SDPA is only built for a subset of architectures to limit compile time.
-  static const std::vector<std::string> supported_archs = {
-      "gfx942", "gfx950",
-  };
+  // AT_ROCM_CK_SDPA_ARCHS is the set this build was compiled for, so the check
+  // stays in step with the build. It is empty when CK SDPA was not built.
+  static const std::vector<std::string> supported_archs = [] {
+    std::vector<std::string> archs;
+    std::string_view rest{AT_ROCM_CK_SDPA_ARCHS};
+    while (!rest.empty()) {
+      const auto comma = rest.find(',');
+      archs.emplace_back(rest.substr(0, comma));
+      if (comma == std::string_view::npos) {
+        break;
+      }
+      rest.remove_prefix(comma + 1);
+    }
+    return archs;
+  }();
+  if (supported_archs.empty()) {
+    return false;
+  }
   for (auto index : c10::irange(detail::getCUDAHooks().deviceCount())) {
     if (!detail::getCUDAHooks().isGPUArch(supported_archs, index)) {
       TORCH_WARN_ONCE(
