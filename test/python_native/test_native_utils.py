@@ -1,12 +1,13 @@
 # Owner(s): ["module: dsl-native-ops"]
 #
-# Tests for the DSL-agnostic native-op utils. torch-only helpers (no cutlass), so no GPU or DSL
-# is needed and both branches of every cond primitive are reachable here.
+# Tests for the DSL-agnostic native-op utils. torch-only helpers (no cutlass), so no DSL is
+# needed; the is_traced and device_ok branches below run without a GPU, and the arch-cache and
+# current-device cases skip when there is no CUDA.
 
 import sys
 
 import torch
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode, is_fake
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -38,6 +39,21 @@ class TestNativeUtils(TestCase):
         self.assertTrue(cap.is_traced(torch.empty(2, device="meta")))
         self.assertFalse(cap.is_traced(torch.empty(2)))
 
+    def test_is_traced_exact_type_cpp_wrappers(self):
+        # The fast path's premise is that an exact-type tensor cannot be traced except on meta.
+        # That is false for the two C++-level wrappers, which are dispatch-key wrappers rather
+        # than Python subclasses: functionalization over a fake tensor is EXACTLY torch.Tensor,
+        # is_fake() says True, and answering False here would launch a kernel mid-trace.
+        from torch._native.utils import capability as cap
+
+        with FakeTensorMode() as mode:
+            wrapped = torch._to_functional_tensor(mode.from_tensor(torch.empty(2)))
+            self.assertIs(
+                type(wrapped), torch.Tensor
+            )  # the premise the fast path relied on
+            self.assertTrue(is_fake(wrapped))
+            self.assertTrue(cap.is_traced(wrapped))
+
     def test_is_traced_fake_tensor_branch(self):
         # The slow branch, and the reason the helper is more than a device read: a FakeTensor is
         # never EXACTLY torch.Tensor, so it falls through to is_fake(). Declining these is what
@@ -49,31 +65,44 @@ class TestNativeUtils(TestCase):
             self.assertTrue(cap.is_traced(ft))
 
     def test_device_ok_short_circuits_off_cuda(self):
-        # Must answer False for a CPU tensor WITHOUT touching torch.cuda: these conds run on
-        # every eager dispatch, including on builds with no CUDA at all.
+        # False for a non-CUDA tensor, and reached WITHOUT querying the device -- these conds run
+        # on every eager dispatch, including on builds with no CUDA at all. Patching the query
+        # asserts the short-circuit; a return value alone cannot tell the two apart.
+        from unittest.mock import patch
+
         from torch._native.utils import capability as cap
 
-        self.assertFalse(cap.device_ok(torch.empty(2)))
-        self.assertFalse(cap.device_ok(torch.empty(2, device="meta")))
+        with patch.object(
+            torch.cuda,
+            "get_device_capability",
+            side_effect=AssertionError("queried the device"),
+        ):
+            self.assertFalse(cap.device_ok(torch.empty(2)))
+            self.assertFalse(cap.device_ok(torch.empty(2, device="meta")))
 
     def test_device_ok_memoizes_per_device(self):
-        # The arch answer is immutable per device and the query is ~1.4us, so it is cached by
-        # device index. Assert the cache is populated once and reused (a miss on every call
-        # would put a device-property query on the hot path).
+        # The arch answer is immutable per device, so it is asked once. Assert that as BEHAVIOUR
+        # -- the second call must not query the device -- rather than by inspecting the memo dict,
+        # which would weld the test to the cache's representation.
+        from unittest.mock import patch
+
         from torch._native.utils import capability as cap
 
         if not torch.cuda.is_available():
             self.skipTest("needs a CUDA device to populate the arch cache")
-        idx = torch.cuda.current_device()
         prior = cap._ARCH_OK.copy()
         self.addCleanup(lambda: (cap._ARCH_OK.clear(), cap._ARCH_OK.update(prior)))
         cap._ARCH_OK.clear()
         x = torch.empty(2, device="cuda")
-        first = cap.device_ok(x)
-        self.assertIn(idx, cap._ARCH_OK)
-        # Poison the cache: a second call that re-queried the device would disagree.
-        cap._ARCH_OK[idx] = not first
-        self.assertEqual(cap.device_ok(x), not first)
+        with patch.object(
+            torch.cuda,
+            "get_device_capability",
+            side_effect=torch.cuda.get_device_capability,
+        ) as query:
+            first = cap.device_ok(x)
+            self.assertEqual(query.call_count, 1)
+            self.assertEqual(cap.device_ok(x), first)
+            self.assertEqual(query.call_count, 1, "the arch query was repeated")
 
     def test_on_current_device_never_raises(self):
         # capability.py's contract is that a cond NEVER raises -- a throwing cond takes down the
