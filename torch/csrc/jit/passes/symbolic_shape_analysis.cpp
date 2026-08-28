@@ -922,7 +922,7 @@ struct SymbolicShapeGraphAnalyzer {
         bool changed = false;
         std::vector<at::ShapeSymbol> shape_vec = *tt->symbolic_sizes().sizes();
         auto new_sizes =
-            c10::fmap(shape_vec, [&](const at::ShapeSymbol& shape) {
+            c10::fmap(std::move(shape_vec), [&](const at::ShapeSymbol& shape) {
               auto value = shape.value();
               if (sym_shape_equalities.contains(value)) {
                 changed = true;

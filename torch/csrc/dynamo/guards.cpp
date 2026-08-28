@@ -18,7 +18,6 @@
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/python_arg_parser.h>
-#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/python_symnode.h>
@@ -26,8 +25,6 @@
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/extension.h>
 #include <cstdint>
-
-#include <torch/csrc/dynamo/debug_macros.h>
 
 #include <nlohmann/json.hpp>
 

@@ -2,7 +2,6 @@
 
 #include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
-#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/import_read.h>
