@@ -1,7 +1,7 @@
 import threading
 
 
-_PATCH_LOCK = threading.Lock()
+_PATCH_LOCK = threading.RLock()
 
 
 def _compile_with_safe_names(compile_fn):

@@ -103,6 +103,7 @@ ignore-missing-imports = [
     "cutlass.*",
     "cutlass_library.*",
     "cutlass_api.*",
+    "flydsl.*",
     "cuda.bindings.*",
     "deeplearning.*",
     "einops.*",

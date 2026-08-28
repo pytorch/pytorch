@@ -10,7 +10,6 @@
 #include <ATen/cuda/tunable/TunableGemm.h>
 #include <c10/macros/Export.h>
 #include <c10/util/irange.h>
-#include <c10/core/ScalarType.h>
 
 #include <ATen/cuda/detail/BLASConstants.h>
 #include <ATen/cuda/detail/CublasLtUtils.h>

@@ -355,6 +355,9 @@ cmake_dependent_option(
 cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX OR WIN32" OFF)
 cmake_dependent_option(USE_ROCM_CK_GEMM "Use ROCm Composable Kernel for GEMMs" ON "USE_ROCM;NOT WIN32" OFF)
 cmake_dependent_option(USE_ROCM_CK_SDPA "Use ROCm Composable Kernel for SDPA" ON "USE_ROCM;NOT WIN32" OFF)
+# Off by default because enabling gfx12 adds CK SDPA code generation and compile
+# cost to ROCm builds that already target gfx1200/gfx1201.
+cmake_dependent_option(USE_ROCM_CK_SDPA_GFX12 "Also build ROCm Composable Kernel SDPA for gfx12 (RDNA4)" OFF "USE_ROCM_CK_SDPA" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(USE_CUDNN "Use cuDNN" ON "USE_CUDA" OFF)
 cmake_dependent_option(USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
@@ -886,15 +889,18 @@ elseif(LINUX AND CPU_AARCH64)
 endif()
 
 if(USE_LLVM_BOLT)
-  # BOLT requires -fno-reorder-blocks-and-partition for the compiler and
-  # --emit-relocs for the linker. Since --emit-relocs increases the binary
-  # size, we limit the use to libraries that are actually optimized by BOLT
-  # instead of applying globally (see torch_optimize_layout_if_enabled)
-  # NVIDIA internal benchmarking shows -fno-plt also provides a perf boost.
-  append_cxx_flag_if_supported("-fno-plt" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-fno-reorder-blocks-and-partition" CMAKE_CXX_FLAGS)
-  append_c_flag_if_supported("-fno-plt" CMAKE_C_FLAGS)
-  append_c_flag_if_supported("-fno-reorder-blocks-and-partition" CMAKE_C_FLAGS)
+  # In addition to the flags below, BOLT also requires --emit-relocs for the
+  # linker. Since --emit-relocs increases the binary size, we limit the use to
+  # libraries that are actually optimized by BOLT instead of applying globally
+  # (see torch_optimize_layout_if_enabled)
+  list(APPEND _bolt_flags
+    "-fno-plt" # shows a perf boost in NVIDIA internal CI
+    "-fno-reorder-blocks-and-partition" # required by BOLT when using GCC>=8
+  )
+  foreach(_flag IN LISTS _bolt_flags)
+    append_c_flag_if_supported("${_flag}" CMAKE_C_FLAGS)
+    append_cxx_flag_if_supported("${_flag}" CMAKE_CXX_FLAGS)
+  endforeach()
 
   # Extract the committed BOLT profiles for the build-time optimization
   # step (torch_optimize_layout_if_enabled in cmake/public/utils.cmake).
