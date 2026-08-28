@@ -182,6 +182,50 @@ def _precompile_dynamo_box_scale(x, box):
     return x * box.scale
 
 
+class _PrecompileDynamoAliasPayload:
+    pass
+
+
+class _PrecompileDynamoAliasHolder:
+    payload = None
+
+
+def _precompile_dynamo_class_attr_alias(x, p):
+    return x * 2 if _PrecompileDynamoAliasHolder.payload is p else x * 3
+
+
+_DYNAMO_ALIAS_MODULE = types.ModuleType("_precompile_dynamo_alias_module")
+_DYNAMO_ALIAS_MODULE.payload = None
+
+
+def _precompile_dynamo_module_attr_alias(x, p):
+    return x * 2 if _DYNAMO_ALIAS_MODULE.payload is p else x * 3
+
+
+class _PrecompileDynamoSlottedModuleBox:
+    __slots__ = ("helper",)
+
+    def __init__(self):
+        self.helper = torch.nn.Linear(2, 2)
+
+
+def _precompile_dynamo_slotted_box_call(x, box):
+    return box.helper(x)
+
+
+class _PrecompileDynamoSlottedTensorBox:
+    __slots__ = ("t",)
+
+    def __init__(self):
+        self.t = torch.randn(3)
+
+
+def _precompile_dynamo_slotted_tensor_default(
+    x, box=_PrecompileDynamoSlottedTensorBox()
+):
+    return x + box.t
+
+
 def _precompile_dynamo_stateful_flaky(x, mode):
     if mode == 3:
         torch._dynamo.graph_break()
@@ -1349,6 +1393,92 @@ class TestPrecompile(TestCase):
                         tracer="dynamo",
                         backend="eager",
                     )
+
+    def test_tracer_dynamo_rejects_input_aliased_via_class_or_module_attr(self):
+        # An input reachable through a global class or user-module attribute
+        # would have its identity guard minimized away as environment, then
+        # silently serve the capture-time branch for inputs that no longer
+        # alias.
+        x = torch.randn(3)
+        # A pytree-leaf object: the alias scan keys on example leaf identity,
+        # so a container payload (a bare list) would flatten away.
+        payload = _PrecompileDynamoAliasPayload()
+        cases = (
+            (_precompile_dynamo_class_attr_alias, _PrecompileDynamoAliasHolder),
+            (_precompile_dynamo_module_attr_alias, _DYNAMO_ALIAS_MODULE),
+        )
+        for fn, holder in cases:
+            with self.subTest(fn=fn.__name__):
+                holder.payload = payload
+                try:
+                    with self.assertRaisesRegex(
+                        PrecompileError, "aliases the Python environment"
+                    ):
+                        torch.compiler.precompile(
+                            fn,
+                            example_inputs=[(x, payload)],
+                            tracer="dynamo",
+                            backend="eager",
+                        )
+                finally:
+                    holder.payload = None
+
+    def test_tracer_dynamo_rejects_module_carried_in_argument_slot(self):
+        # Slot values are instance state: an nn.Module carried in a slot is
+        # rejected exactly like one carried in __dict__.
+        box = _PrecompileDynamoSlottedModuleBox()
+        with self.assertRaisesRegex(NotImplementedError, "nn.Module arguments"):
+            torch.compiler.precompile(
+                _precompile_dynamo_slotted_box_call,
+                example_inputs=[(torch.randn(2), box)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_rejects_tensor_in_slotted_default(self):
+        with self.assertRaisesRegex(PrecompileError, "tensor-valued function"):
+            torch.compiler.precompile(
+                _precompile_dynamo_slotted_tensor_default,
+                example_inputs=[(torch.randn(3),)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_rejects_jagged_layout_input(self):
+        # NJT aliasing cannot be verified by the storage-overlap probe, and
+        # Dynamo does not reject jagged inputs itself; both capture and the
+        # loaded artifact must refuse them loudly.
+        nt = torch.nested.nested_tensor(
+            [torch.randn(2), torch.randn(3)], layout=torch.jagged
+        )
+        with self.assertRaisesRegex(PrecompileError, "cannot verify storage overlap"):
+            torch.compiler.precompile(
+                _precompile_dynamo_torch_sin,
+                example_inputs=[(nt,)],
+                tracer="dynamo",
+                backend="eager",
+            )
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_torch_sin,
+            example_inputs=[(torch.randn(3),)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        with self.assertRaisesRegex(PrecompileError, "cannot verify storage overlap"):
+            loaded(nt)
+
+    def test_tracer_dynamo_sparse_input_gets_dynamo_diagnostics(self):
+        # Sparse layouts skip the overlap probe so Dynamo's own clearer
+        # rejection surfaces instead of "cannot verify storage overlap".
+        sparse = torch.eye(3).to_sparse()
+        with self.assertRaisesRegex(PrecompileError, "(?i)sparse"):
+            torch.compiler.precompile(
+                _precompile_dynamo_torch_sin,
+                example_inputs=[(sparse,)],
+                tracer="dynamo",
+                backend="eager",
+            )
 
     def test_tracer_dynamo_accepts_argument_with_module_class_attribute(self):
         # The widened tensor-global walk must not leak into the per-argument

@@ -1840,13 +1840,16 @@ def _validate_dynamo_capture(
         follow_types: bool = False,
     ) -> bool:
         # follow_types widens the walk to non-library modules, classes (through
-        # the MRO), slot values, and each instance's type. The tensor-global
-        # scan needs that breadth (a tensor on a class or module attribute
-        # serves a raw NameError); the per-argument checks must NOT use it -- an
-        # argument is rejected only for what it carries, not for unrelated
-        # attributes of its type.
+        # the MRO), and each instance's type. The global scans (tensor-global
+        # and input-alias) need that breadth -- a tensor or aliased input on a
+        # class or module attribute is invisible otherwise; the per-argument
+        # checks must NOT use it, so an argument is rejected only for what it
+        # carries (its __dict__ and slot values), not for unrelated attributes
+        # of its type.
         if predicate(value):
             return True
+        if value is None or type(value) in (bool, int, float, complex, str, bytes):
+            return False
         value_id = id(value)
         if value_id in seen:
             return False
@@ -1882,16 +1885,14 @@ def _validate_dynamo_capture(
             )
         if isinstance(value, (types.FunctionType, torch.Tensor)):
             return False
-        # Instance state: __dict__ if present, plus slot values, plus (when
-        # following types) the class itself -- __dict__-less (slotted or
-        # C-extension) instances still reach their type this way.
+        # Instance state is __dict__ contents AND slot values -- both are what
+        # the object carries, so both are walked for every caller. Only the
+        # type itself (class attributes) is gated on follow_types.
         if hasattr(value, "__dict__") and any(
             reaches(item, predicate, seen, follow_types=follow_types)
             for item in vars(value).values()
         ):
             return True
-        if not follow_types:
-            return False
         for cls in type(value).__mro__:
             for descriptor in vars(cls).values():
                 if isinstance(descriptor, types.MemberDescriptorType):
@@ -1899,8 +1900,10 @@ def _validate_dynamo_capture(
                         slot_value = descriptor.__get__(value, type(value))
                     except AttributeError:
                         continue
-                    if reaches(slot_value, predicate, seen, follow_types=True):
+                    if reaches(slot_value, predicate, seen, follow_types=follow_types):
                         return True
+        if not follow_types:
+            return False
         return reaches(type(value), predicate, seen, follow_types=True)
 
     def has_storage_overlap(values: object) -> bool:
@@ -1912,14 +1915,27 @@ def _validate_dynamo_capture(
         # (non-overlapping views of one buffer are also rejected) because
         # AOTAutograd's synthetic-base mutation handling keys on shared
         # storage, not on element overlap, so storage identity is the
-        # boundary the missing guards would have enforced. Non-strided
-        # layouts are skipped here so Dynamo can reject them with its own
-        # clearer diagnostics.
-        tensors = [
-            value
-            for value in pytree.tree_leaves(values)
-            if isinstance(value, torch.Tensor) and value.layout is torch.strided
-        ]
+        # boundary the missing guards would have enforced. Only SPARSE layouts
+        # are skipped (Dynamo rejects those with its own clearer diagnostics);
+        # any other non-strided layout (e.g. jagged) is rejected outright,
+        # regardless of tensor count, because its aliasing cannot be verified.
+        sparse_layouts = (
+            torch.sparse_coo,
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+        )
+        tensors = []
+        for value in pytree.tree_leaves(values):
+            if not isinstance(value, torch.Tensor) or value.layout in sparse_layouts:
+                continue
+            if value.layout is not torch.strided:
+                raise PrecompileError(
+                    "precompile tracer='dynamo' cannot verify storage overlap "
+                    f"for a {value.layout} layout tensor input."
+                )
+            tensors.append(value)
         if len(tensors) < 2:
             return False
         storage_ranges: dict[tuple[str, int | None], list[tuple[int, int]]] = {}
@@ -2046,11 +2062,20 @@ def _validate_dynamo_capture(
         if not isinstance(value, (type(None), bool, int, float, complex, str, bytes))
     }
 
+    # follow_types: like the tensor-global scan, this walks a global's class
+    # and module attributes -- an input aliased through them would have its
+    # identity guard classified as environment and dropped, silently serving
+    # the capture-time branch for inputs that no longer alias.
     aliased_globals = [
         name
         for name in loaded_global_names(target.__code__)
         if name in target.__globals__
-        and reaches(target.__globals__[name], lambda v: id(v) in input_ids, set())
+        and reaches(
+            target.__globals__[name],
+            lambda v: id(v) in input_ids,
+            set(),
+            follow_types=True,
+        )
     ]
     if aliased_globals:
         raise PrecompileError(

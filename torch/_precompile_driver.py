@@ -473,13 +473,28 @@ def _build_dynamo_forward():
         # not (their AOT StorageOverlap relation has no serialized form), and a
         # mutating variant could silently compute the wrong thing. Deliberately
         # STORAGE-granular: AOTAutograd's synthetic-base mutation handling keys
-        # on shared storage, not element overlap. Non-strided layouts are left
-        # for the guard checks to reject with their own diagnostics.
-        tensors = [
-            value
-            for value in pytree.tree_leaves(values)
-            if isinstance(value, torch.Tensor) and value.layout is torch.strided
-        ]
+        # on shared storage, not element overlap. Sparse layouts are left for
+        # the guard checks to reject; any other non-strided layout (e.g.
+        # jagged) is rejected outright since its aliasing cannot be verified.
+        sparse_layouts = (
+            torch.sparse_coo,
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+        )
+        tensors = []
+        for value in pytree.tree_leaves(values):
+            if not isinstance(value, torch.Tensor) or value.layout in sparse_layouts:
+                continue
+            if value.layout is not torch.strided:
+                from torch._precompile import PrecompileError
+
+                raise PrecompileError(
+                    "precompile: cannot verify storage overlap for a "
+                    f"{value.layout} layout runtime tensor input."
+                )
+            tensors.append(value)
         if len(tensors) < 2:
             return False
         storage_ranges: dict = {}
