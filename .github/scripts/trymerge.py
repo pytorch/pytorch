@@ -11,6 +11,7 @@ import traceback
 import urllib.parse
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from functools import cache, partial
 from pathlib import Path
 from re import Pattern
@@ -462,6 +463,12 @@ IGNORABLE_FAILED_CHECKS_THESHOLD = 10
 # a rule author opting out of flaky noise is not the same decision as letting a
 # classifier clear an unbounded number of failures.
 AI_NOT_RELATED_CHECKS_THRESHOLD = 3
+
+# How long one merge command will wait for an advisor verdict on a failure that
+# arrived mid-merge. The merge loop retries every 5 minutes, so this is three
+# attempts. Requesting Dr.CI's classification is itself what dispatches the
+# analysis, so the wait starts the clock rather than joining one already running.
+AI_VERDICT_MAX_WAIT = timedelta(minutes=15)
 
 REVIEWS_PER_PAGE = 100
 REVIEW_PAGE_LIMIT = 10
@@ -2494,6 +2501,22 @@ def is_crcr_l3(check: JobCheckState, drci_classifications: Any) -> bool:
     )
 
 
+def is_ai_pending(check: JobCheckState, drci_classifications: Any) -> bool:
+    """Return True if the AI CI Advisor is still analyzing this failure.
+
+    Dr.CI returns a blocking failure under ``AI_PENDING`` while its advisor
+    dispatch is live at the current head. Same job-id-only match as
+    ``is_ai_not_related``, for the same reason.
+    """
+    if not check or not drci_classifications or not check.job_id:
+        return False
+
+    return any(
+        check.job_id == awaiting["id"]
+        for awaiting in drci_classifications.get("AI_PENDING", [])
+    )
+
+
 def is_ai_not_related(check: JobCheckState, drci_classifications: Any) -> bool:
     """Return True if the AI CI Advisor cleared this failure as unrelated.
 
@@ -2641,6 +2664,26 @@ def get_classifications(
                 check.url,
                 check.status,
                 "AI_NOT_RELATED",
+                check.job_id,
+                check.title,
+                check.summary,
+            )
+            continue
+
+        # Last of the Dr.CI categories: every branch above is a settled answer,
+        # and this one only says an answer is still coming. It also yields to
+        # --ignore-current, unlike the branches above -- those all end in a
+        # non-blocking classification, so which one wins does not change the
+        # merge, whereas waiting for a verdict on a check the author explicitly
+        # told us to ignore would break that command's snapshot semantics.
+        elif is_ai_pending(check, drci_classifications) and not (
+            ignore_current_checks is not None and name in ignore_current_checks
+        ):
+            checks_with_classifications[name] = JobCheckState(
+                check.name,
+                check.url,
+                check.status,
+                "AI_PENDING",
                 check.job_id,
                 check.title,
                 check.summary,
@@ -2930,6 +2973,13 @@ def categorize_checks(
             # ignored anyway. This is useful to not need to wait for scarce resources
             # like ROCm, which is also frequently in unstable mode
             pending_checks.append((checkname, url, job_id))
+        elif classification == "AI_PENDING":
+            # The job has finished, but the advisor analysis that decides whether
+            # it blocks has not. Pending, so both this gate and
+            # find_matching_merge_rule stay retriable -- a failure here raises an
+            # error the merge loop does not catch, which would end the merge
+            # before the answer arrives. merge() bounds how long that wait runs.
+            pending_checks.append((checkname, url, job_id))
         elif classification == "INVALID_CANCEL":
             continue
         elif not is_passing_status(check_runs[checkname].status):
@@ -2990,6 +3040,61 @@ def categorize_checks(
 
     # The list of failed_checks_categorization is returned so that it can be saved into the s3 merge record
     return (pending_checks, failed_checks, failed_checks_categorization)
+
+
+@dataclass
+class AdvisorWaitWindow:
+    """Bounds how long one merge command waits for advisor verdicts.
+
+    ``categorize_checks`` calls an unanalyzed failure pending unconditionally,
+    because both merge gates have to agree it is retriable. That alone would
+    wait out the whole merge timeout if a verdict never arrived, so the bound
+    lives here, where elapsed time across retries can be measured.
+
+    The budget opens at the first wait rather than when the merge command was
+    issued: a merge can sit in ordinary CI for hours before any job fails, and a
+    budget anchored at the command would already be spent by then.
+    """
+
+    opened_at: datetime | None = None
+
+    def apply(
+        self,
+        checks: JobNameToStateDict,
+        pending: list[tuple[str, str | None, int | None]],
+        failing: list[tuple[str, str | None, int | None]],
+    ) -> tuple[
+        list[tuple[str, str | None, int | None]],
+        list[tuple[str, str | None, int | None]],
+    ]:
+        """Move awaited checks back to failing once the budget is spent."""
+        awaited = {
+            name
+            for name, check in checks.items()
+            if check.classification == "AI_PENDING"
+        }
+        if not awaited:
+            return pending, failing
+
+        now = datetime.now(timezone.utc)
+        if self.opened_at is None:
+            self.opened_at = now
+        if now - self.opened_at < AI_VERDICT_MAX_WAIT:
+            print(
+                f"Waiting for the AI CI Advisor to classify {len(awaited)} failed "
+                f"{'check' if len(awaited) == 1 else 'checks'}: "
+                + ", ".join(sorted(awaited)[:5])
+            )
+            return pending, failing
+
+        # No verdict in time. An unclassified failure is a failure.
+        print(
+            f"Gave up waiting for an AI CI Advisor verdict after {AI_VERDICT_MAX_WAIT}; "
+            "treating the unclassified failures as blocking."
+        )
+        still_pending = [entry for entry in pending if entry[0] not in awaited]
+        gave_up = [entry for entry in pending if entry[0] in awaited]
+        return still_pending, failing + gave_up
 
 
 def merge(
@@ -3067,6 +3172,9 @@ def merge(
     # Owned out here so the greenlight wait budget spans every iteration below rather
     # than restarting each time merge_into is re-entered.
     greenlight_wait = GreenlightWaitWindow()
+    # Same reason as greenlight's window: the budget has to span merge_into
+    # re-entries, or every retry would restart it and the wait would never end.
+    advisor_wait = AdvisorWaitWindow()
     ignore_current_checks = [
         x[0] for x in ignore_current_checks_info
     ]  # convert to List[str] for convenience
@@ -3111,6 +3219,7 @@ def merge(
                 if ignore_flaky_failures
                 else 0,
             )
+            pending, failing = advisor_wait.apply(checks, pending, failing)
             # HACK until GitHub will be better about surfacing those
             startup_failures = filter_checks_with_lambda(
                 checks, lambda status: status == "STARTUP_FAILURE"
