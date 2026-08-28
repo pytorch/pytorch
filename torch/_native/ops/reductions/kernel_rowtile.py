@@ -815,7 +815,7 @@ def reduce_row_tile(
     # wide load survives) and one compiled kernel serves the whole vec class; the TMA box
     # shape is compile-time, so that variant bakes N and only M stays dynamic.
     isz = x.element_size()
-    align = op.tm.align_bytes(isz) if use_tma else tile.align_bytes(N, isz)
+    align = op.tilemap.align_bytes(isz) if use_tma else tile.align_bytes(N, isz)
 
     def _wrap():
         mX = (

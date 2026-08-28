@@ -125,5 +125,26 @@ class TestKernelColTile(TestCase):
         )
 
 
+@skipIfNoCuteDSL
+class TestColTileHost(TestCase):
+    def test_col_axis_carries_no_tile(self):
+        # Host-only, so it runs wherever the DSL imports. The col axis takes `vec` from the
+        # driver (accumulators per thread) rather than from a load width, so it has no tile --
+        # and asking for one must fail loudly, not dereference None inside a kernel build.
+        import cutlass
+
+        from torch._native.ops._cutedsl import traits as T
+        from torch._native.ops.reductions import tile
+
+        trait = T.SumOps(acc=cutlass.Float32)
+        row = tile.TileReduce(trait, cutlass.Float32, "row", 1024, tpr=32)
+        self.assertIs(row.tilemap, row.tm)
+
+        col = tile.TileReduce(trait, cutlass.Float32, "col", 1024, vec=4)
+        self.assertIsNone(col.tm)
+        with self.assertRaisesRegex(AssertionError, "no tile"):
+            col.tilemap
+
+
 if __name__ == "__main__":
     run_tests()
