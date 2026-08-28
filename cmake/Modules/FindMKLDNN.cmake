@@ -26,6 +26,14 @@ IF(NOT MKLDNN_FOUND)
       set(DNNL_C_COMPILER "icx")
       set(SYCL_CXX_DRIVER "icx")
       set(DNNL_LIB_NAME "dnnl.lib")
+      # on Windows debug builds, oneDNN should use RelWithMdd build type so
+      # that dnnl.lib links against the debug CRT (/MDd), matching the rest of
+      # PyTorch
+      if (CMAKE_BUILD_TYPE STREQUAL Debug)
+        set(DNNL_BUILD_TYPE "RelWithMdd")
+      else()
+        set(DNNL_BUILD_TYPE "${CMAKE_BUILD_TYPE}")
+      endif()
     elseif(LINUX)
       # Linux
       # g++ is soft linked to /usr/bin/cxx, oneDNN would not treat it as an absolute path
@@ -40,12 +48,13 @@ IF(NOT MKLDNN_FOUND)
         message(FATAL_ERROR "Unsupported SYCL compiler: ${XPU_SYCL_COMPILER}")
       endif()
       set(DNNL_LIB_NAME "libdnnl.a")
+      set(DNNL_BUILD_TYPE "${CMAKE_BUILD_TYPE}")
     else()
       MESSAGE(FATAL_ERROR "OneDNN for Intel GPU in PyTorch currently supports only Windows and Linux.
                            Detected system '${CMAKE_SYSTEM_NAME}' is not supported.")
     endif()
 
-    set(DNNL_MAKE_COMMAND "cmake" "--build" ".")
+    set(DNNL_MAKE_COMMAND "cmake" "--build" "." "--config" "${DNNL_BUILD_TYPE}")
     include(ProcessorCount)
     ProcessorCount(proc_cnt)
     if((DEFINED ENV{MAX_JOBS}) AND ("$ENV{MAX_JOBS}" LESS_EQUAL ${proc_cnt}))
@@ -68,6 +77,7 @@ IF(NOT MKLDNN_FOUND)
       -DONEDNN_BUILD_GRAPH=ON
       -DDNNL_LIBRARY_TYPE=STATIC
       -DDNNL_DPCPP_HOST_COMPILER=${DNNL_HOST_COMPILER} # Use global cxx compiler as host compiler
+      -DCMAKE_BUILD_TYPE=${DNNL_BUILD_TYPE}
       -G ${CMAKE_GENERATOR} # Align Generator to Torch
       BUILD_COMMAND ${DNNL_MAKE_COMMAND}
       BUILD_BYPRODUCTS "xpu_mkldnn_proj-prefix/src/xpu_mkldnn_proj-build/src/${DNNL_LIB_NAME}"

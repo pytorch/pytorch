@@ -449,6 +449,10 @@ endif()
 
 install(TARGETS torch_python DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
+if(MSVC AND BUILD_SHARED_LIBS)
+  install(FILES $<TARGET_PDB_FILE:torch_python> DESTINATION "${TORCH_INSTALL_LIB_DIR}" OPTIONAL)
+endif()
+
 # Build the torch._C Python extension module from the thin stub that
 # forwards to torch_python.  This was historically built by setuptools;
 # building it here lets both setuptools and scikit-build-core use the
@@ -456,6 +460,13 @@ install(TARGETS torch_python DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
   Python_add_library(_C MODULE WITH_SOABI "${TORCH_SRC_DIR}/csrc/stub.c")
   target_link_libraries(_C PRIVATE torch_python)
+  if(MSVC AND CMAKE_BUILD_TYPE MATCHES Debug)
+    # Mirror torch_python's /NODEFAULTLIB:LIBCMT.LIB (the release static CRT)
+    # with the debug static CRT, so _C's /MDd compile (picked up from CMake's
+    # default CMAKE_CXX_FLAGS_DEBUG, see top-level CMakeLists.txt) can't have
+    # LIBCMTD.LIB injected as a conflicting default lib at link time.
+    target_link_options(_C PRIVATE "/NODEFAULTLIB:LIBCMTD.LIB")
+  endif()
   set_target_properties(_C PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/torch"
     # libtorch_python.so is installed to lib/ relative to _C, so use
@@ -476,6 +487,9 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
     LIBRARY DESTINATION "."
     ARCHIVE DESTINATION "lib"
   )
+  if(MSVC AND BUILD_SHARED_LIBS)
+    install(FILES $<TARGET_PDB_FILE:_C> DESTINATION "." OPTIONAL)
+  endif()
 
   # ---[ NCCL EP extension (torch._nccl_ep)
   # Optional standalone extension holding the NCCL EP bindings, imported lazily
@@ -516,6 +530,9 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
       set_target_properties(_nccl_ep PROPERTIES C_VISIBILITY_PRESET "default")
     endif()
     install(TARGETS _nccl_ep RUNTIME DESTINATION "." LIBRARY DESTINATION ".")
+    if(MSVC AND BUILD_SHARED_LIBS)
+      install(FILES $<TARGET_PDB_FILE:_nccl_ep> DESTINATION "." OPTIONAL)
+    endif()
   endif()
 endif()
 
