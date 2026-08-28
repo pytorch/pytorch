@@ -645,6 +645,15 @@ class TestArch(unittest.TestCase):
         self.assertEqual(f("10.0;10.0+PTX"), ["sm_100"])
         self.assertEqual(f("10.0a 10.0a"), ["sm_100a"])
 
+    def test_the_shipped_arches_are_ones_the_tooling_can_target(self):
+        # The two sets live beside each other so they cannot drift; the import-time
+        # check is what makes that true rather than merely intended.
+        self.assertLessEqual(
+            set(native_aot_decl.EXPORTABLE_ARCHES), set(native_aot_decl.KNOWN_ARCHES)
+        )
+        # ...and the exporter's name is the same object, not a copy that could age.
+        self.assertIs(export.EXPORTABLE_ARCHES, native_aot_decl.EXPORTABLE_ARCHES)
+
     def test_archs_from_cuda_arch_list_collapses_one_capability(self):
         # Both spellings of a capability are the same hardware, and generation
         # can only use one of them (_by_arch prefers the arch-conditional
