@@ -31,7 +31,6 @@ class TestFsdpTpCheckpointConversion(DTensorTestBase):
     @skip_if_lt_x_gpu(2)
     @with_temp_dir
     def test_fsdp_to_tp(self, device):
-        self.device_type = torch.device(device).type
         CHECKPOINT_DIR = self.temp_dir
 
         model = MLPModule(self.device_type).to(self.rank)
