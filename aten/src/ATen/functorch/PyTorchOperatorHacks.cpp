@@ -1,13 +1,10 @@
 #include <ATen/functorch/DynamicLayer.h>
 #include <torch/library.h>
 #include <ATen/ATen.h>
-#include <ATen/WrapDimUtils.h>
-#include <ATen/functorch/TensorWrapper.h>
 #include <ATen/functorch/BatchedTensorImpl.h>
 #include <ATen/Dispatch.h>
 #include <c10/util/irange.h>
 #include <c10/util/Exception.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/xnnpack/Engine.h>
 
@@ -220,13 +217,11 @@ ALIAS_SPECIALIZATION(_feature_alpha_dropout, true,  true )
 
 Tensor dropout(const Tensor& input, double p, bool train) {
   auto result = [&]() {
-    NoNamesGuard guard;
     if (train && is_fused_kernel_acceptable(input, p)) {
       return std::get<0>(at::native_dropout(input, p, train));
     }
     return _dropout<false>(input, p, train);
   }();
-  namedinference::propagate_names(result, input);
   return result;
 }
 
