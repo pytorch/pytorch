@@ -404,6 +404,9 @@ class MPSHeapAllocatorImpl {
   // currently active memory allocations in use (i.e., blocks not in pools);
   // tracked as a Stat to expose current/peak/accumulated allocated bytes
   c10::CachingAllocator::Stat m_current_allocated_memory;
+  // bytes unavailable for reuse: in-use plus freed-but-pending GPU completion;
+  // feeds active_bytes in getDeviceStats (semantics follow CUDACachingAllocator)
+  c10::CachingAllocator::Stat m_active_bytes;
   // max buffer size allowed by Metal
   size_t m_max_buffer_size = 0;
   // maximum total size allowed to be allocated

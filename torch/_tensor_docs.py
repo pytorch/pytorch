@@ -2362,7 +2362,7 @@ Note:
 
 Args:
     dim (int): dimension along which to index
-    index (Tensor): indices of ``source`` to select from,
+    index (Tensor): indices of :attr:`self` to add to,
             should have dtype either `torch.int64` or `torch.int32`
     source (Tensor): the tensor containing values to add
 
@@ -6569,8 +6569,9 @@ The allowed dtype of :attr:``grad`` for this tensor.
 
 :attr:``grad_dtype`` can be set to a specific dtype or ``None``. By default,
 ``t.grad_dtype == t.dtype``. When not None, the autograd engine casts
-incoming gradients to this dtype. This attribute is only accessible and
-settable for leaf tensors.
+incoming gradients to this dtype. This attribute is readable for both leaf and
+non-leaf tensors, but can only be set for leaf tensors. For a non-leaf tensor,
+it reports the gradient dtype declared by the Function that produced the tensor.
 
 .. warning::
     Use with caution. Diverging the dtypes of a tensor and its gradient may

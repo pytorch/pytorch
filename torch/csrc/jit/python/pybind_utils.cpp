@@ -115,10 +115,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
 
         if (save_symint) {
           auto py_tensor = py::cast(tensor);
-          if (PyObject_SetAttrString(
-                  py_tensor.ptr(), "_wrapped_number", obj.ptr()) < 0) {
-            throw python_error();
-          }
+          TORCH_CHECK_PYTHON(
+              PyObject_SetAttrString(
+                  py_tensor.ptr(), "_wrapped_number", obj.ptr()) >= 0);
         }
 
         return tensor;
@@ -709,8 +708,9 @@ py::object toPyObject(IValue ivalue) {
           std::back_inserter(defaults),
           [](const Argument& arg) { return toPyObject(*arg.default_value()); });
 
-      std::vector<std::string> fieldNames =
-          fmap(tuple_args, [](const Argument& arg) { return arg.name(); });
+      std::vector<std::string> fieldNames = fmap(
+          std::move(tuple_args),
+          [](const Argument& arg) { return arg.name(); });
 
       return py::module::import("torch._jit_internal")
           .attr("_create_named_tuple")(

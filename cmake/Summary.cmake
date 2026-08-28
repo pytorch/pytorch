@@ -23,6 +23,7 @@ function(caffe2_print_configuration_summary)
   message(STATUS "  CMAKE_PREFIX_PATH     : ${CMAKE_PREFIX_PATH}")
   message(STATUS "  CMAKE_INSTALL_PREFIX  : ${CMAKE_INSTALL_PREFIX}")
   message(STATUS "  USE_GOLD_LINKER       : ${USE_GOLD_LINKER}")
+  message(STATUS "  USE_CMAKE_INSTRUMENTATION: ${USE_CMAKE_INSTRUMENTATION}")
   message(STATUS "")
 
   message(STATUS "  TORCH_VERSION         : ${TORCH_VERSION}")
