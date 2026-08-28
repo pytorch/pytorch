@@ -30,7 +30,7 @@ inline std::ostream& operator<<(std::ostream& out, const Match& match) {
     const Node* patternNode = kv.first;
     Node* targetNode = kv.second;
     out << "  Pattern Node: " << *patternNode
-        << " -> Target Node: " << *targetNode << "\n";
+        << " -> Target Node: " << *targetNode << '\n';
   }
 
   out << "Value mapping:\n";
@@ -38,7 +38,7 @@ inline std::ostream& operator<<(std::ostream& out, const Match& match) {
     const Value* patternValue = kv.first;
     Value* targetValue = kv.second;
     out << "  Pattern Value: " << *patternValue
-        << " -> Target Value: " << *targetValue << "\n";
+        << " -> Target Value: " << *targetValue << '\n';
   }
 
   return out;
@@ -57,7 +57,7 @@ inline std::ostream& operator<<(std::ostream& out, const Match& match) {
  *
  * Constraints for Patterns with Multiple Output Nodes:
  * To avoid an exponential increase in the search space, this implementation
- * starts searching from the first output node as an anchor as an heuristic. It
+ * starts searching from the first output node as an anchor as a heuristic. It
  * assumes that all other output nodes in the pattern are interconnected through
  * the graph from this anchor node, allowing the matcher to traverse from the
  * anchor to other outputs.

@@ -1,5 +1,6 @@
 # Owner(s): ["module: PrivateUse1"]
 
+import inspect
 import unittest
 from collections import defaultdict
 from contextlib import contextmanager
@@ -7,12 +8,15 @@ from contextlib import contextmanager
 import torch
 import torch.distributed as dist
 from torch.testing._internal.common_device_type import (
+    Capability,
+    dtypes,
     instantiate_device_type_tests,
     onlyCUDA,
     onlyOn,
     ops,
     precisionOverride,
     PrivateUse1TestBase,
+    requires_capabilities,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.opinfo.core import DecorateInfo, OpInfo
@@ -131,7 +135,7 @@ class TestDeviceTypeOpenReg(TestCase):
                 self.precision,
                 1e-2,
                 msg=(
-                    f"Expected op_overrides precisionOverride (1e-2) to win over "
+                    lambda msg: f"{msg}\nExpected op_overrides precisionOverride (1e-2) to win over "
                     f"OpInfo precisionOverride (1e-5), but got {self.precision}"
                 ),
             )
@@ -175,6 +179,38 @@ class TestSkippedSpecificTestCases(TestCase):
 class TestSkippedWholeTestClass(TestCase):
     def test_skipped_class_member(self, device):
         self.fail("This class should not be instantiated for openreg")
+
+
+class TestDtypeAwareExclusions(TestCase):
+    executed_dtypes: dict = defaultdict(list)
+
+    @classmethod
+    def tearDownClass(cls):
+        expected = {
+            "test_dtype_filter": [torch.float64],
+            "test_dtype_tuple_filter": [(torch.float64, torch.int64)],
+        }
+        if cls.executed_dtypes != expected:
+            raise AssertionError(
+                f"Dtype-aware exclusions failed: expected {expected}, "
+                f"got {cls.executed_dtypes}"
+            )
+        super().tearDownClass()
+
+    @dtypes(torch.float32, torch.float64)
+    def test_dtype_filter(self, device, dtype):
+        self.assertEqual(torch.device(device).type, "openreg")
+        type(self).executed_dtypes["test_dtype_filter"].append(dtype)
+
+    @dtypes(torch.float32, torch.float64)
+    def test_all_dtypes_excluded(self, device, dtype):
+        self.assertEqual(torch.device(device).type, "openreg")
+        self.fail("This method should not have any dtype variants for openreg")
+
+    @dtypes((torch.float64, torch.int32), (torch.float64, torch.int64))
+    def test_dtype_tuple_filter(self, device, dtypes):
+        self.assertEqual(torch.device(device).type, "openreg")
+        type(self).executed_dtypes["test_dtype_tuple_filter"].append(dtypes)
 
 
 class TestSupportedOpsWithOverrides(TestCase):
@@ -236,6 +272,26 @@ with _temp_test_configs(PrivateUse1TestBase, test_exclusions=OPENREG_TEST_EXCLUS
         TestSkippedWholeTestClass, globals(), only_for="openreg"
     )
 
+OPENREG_DTYPE_TEST_EXCLUSIONS = {
+    "TestDtypeAwareExclusions": {
+        "test_dtype_filter": {
+            "dtypes": [torch.float32],
+        },
+        "test_all_dtypes_excluded": {
+            "dtypes": [torch.float32, torch.float64],
+        },
+        "test_dtype_tuple_filter": {
+            "dtypes": [torch.int32],
+        },
+    },
+}
+with _temp_test_configs(
+    PrivateUse1TestBase, test_exclusions=OPENREG_DTYPE_TEST_EXCLUSIONS
+):
+    instantiate_device_type_tests(
+        TestDtypeAwareExclusions, globals(), only_for="openreg"
+    )
+
 with _temp_test_configs(
     PrivateUse1TestBase,
     op_overrides={
@@ -246,6 +302,82 @@ with _temp_test_configs(
     instantiate_device_type_tests(
         TestSupportedOpsWithOverrides, globals(), only_for=("openreg",)
     )
+
+
+class TestCapabilityGating(TestCase):
+    """Verify that @requires_capabilities gates tests on PrivateUse1 backends."""
+
+    executed_count = 0
+
+    @classmethod
+    def setUpClass(cls):
+        cls._saved_capabilities = inspect.getattr_static(
+            PrivateUse1TestBase, "_capabilities"
+        )
+        PrivateUse1TestBase._capabilities = classmethod(
+            lambda cls: {
+                Capability.dtype.fp8: lambda: True,
+                Capability.dtype.bf16: lambda: False,
+            }
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        PrivateUse1TestBase._capabilities = cls._saved_capabilities
+        expected_runs = 3
+        if cls.executed_count != expected_runs:
+            raise AssertionError(
+                f"Capability gating failed! "
+                f"Expected {expected_runs} tests to run, "
+                f"but {cls.executed_count} tests executed."
+            )
+        super().tearDownClass()
+
+    @requires_capabilities(Capability.dtype.fp8)
+    def test_capability_supported(self, device):
+        type(self).executed_count += 1
+        self.assertEqual(torch.device(device).type, "openreg")
+
+    @requires_capabilities(Capability.dtype.bf16)
+    def test_capability_unsupported(self, device):
+        type(self).executed_count += 1
+        self.fail("Expected skip: dtype.bf16 is unsupported on this device")
+
+    def test_capability_missing(self, device):
+        """@requires_capabilities raises AssertionError for undeclared capabilities."""
+
+        @requires_capabilities(Capability.attention.flash_attention)
+        def dummy(self):
+            self.fail("should not execute")
+
+        with self.assertRaisesRegex(
+            AssertionError,
+            r"has not declared capabilities: attention\.flash_attention",
+        ):
+            dummy(self)
+        type(self).executed_count += 1
+
+    def test_capability_combined(self, device):
+        """@requires_capabilities raises AssertionError when a combined set
+        includes an undeclared capability."""
+
+        @requires_capabilities(
+            Capability.dtype.fp8,
+            Capability.dtype.bf16,
+            Capability.attention.flash_attention,
+        )
+        def dummy(self):
+            self.fail("should not execute")
+
+        with self.assertRaisesRegex(
+            AssertionError,
+            r"has not declared capabilities: attention\.flash_attention",
+        ):
+            dummy(self)
+        type(self).executed_count += 1
+
+
+instantiate_device_type_tests(TestCapabilityGating, globals(), only_for="openreg")
 
 
 @unittest.skipIf(not dist.is_available(), "Distributed not available, skipping tests")

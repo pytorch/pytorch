@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <torch/torch.h>
+#include <ATen/mps/MPSAllocatorInterface.h>
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
 
@@ -19,6 +20,74 @@ kernel void add_arrays(device const float* inA,
 
 static inline id<MTLBuffer> getMTLBufferStorage(const torch::Tensor& tensor) {
   return __builtin_bit_cast(id<MTLBuffer>, tensor.storage().data());
+}
+
+static inline id<MTLBuffer> getMTLBuffer(const c10::DataPtr& data_ptr) {
+  return __builtin_bit_cast(id<MTLBuffer>, data_ptr.get());
+}
+
+TEST(MPSObjCInterfaceTest, MPSPlacementHeapCoalescing) {
+  ASSERT_TRUE(torch::mps::is_available());
+
+  auto* allocator = at::mps::getIMPSAllocator();
+  allocator->emptyCache();
+  constexpr size_t block_size = 8 * 1024 * 1024;
+
+  auto first = allocator->allocate(block_size);
+  auto second = allocator->allocate(block_size);
+  auto third = allocator->allocate(block_size);
+  id<MTLHeap> heap = [getMTLBuffer(first) heap];
+  ASSERT_NE(heap, nil);
+  ASSERT_EQ([heap type], MTLHeapTypePlacement);
+  ASSERT_EQ([getMTLBuffer(second) heap], heap);
+  ASSERT_EQ([getMTLBuffer(third) heap], heap);
+  const NSUInteger second_offset = [getMTLBuffer(second) heapOffset];
+  ASSERT_EQ(second_offset, [getMTLBuffer(first) heapOffset] + [getMTLBuffer(first) length]);
+  ASSERT_EQ([getMTLBuffer(third) heapOffset], second_offset + [getMTLBuffer(second) length]);
+
+  second.clear();
+  third.clear();
+  auto merged = allocator->allocate(2 * block_size);
+  ASSERT_EQ([getMTLBuffer(merged) heap], heap);
+  ASSERT_EQ([getMTLBuffer(merged) heapOffset], second_offset);
+
+  first.clear();
+  merged.clear();
+  allocator->emptyCache();
+}
+
+TEST(MPSObjCInterfaceTest, MPSPlacementHeapSplitting) {
+  ASSERT_TRUE(torch::mps::is_available());
+
+  auto* allocator = at::mps::getIMPSAllocator();
+  allocator->emptyCache();
+  const size_t reserved = allocator->getTotalAllocatedMemory();
+
+  // small allocations are placed by the allocator as well
+  auto small = allocator->allocate(4096);
+  ASSERT_EQ([[getMTLBuffer(small) heap] type], MTLHeapTypePlacement);
+
+  // a free range larger than the request is cut down to it, and the remainder
+  // stays available for the next allocation
+  constexpr size_t block_size = 8 * 1024 * 1024;
+  auto whole = allocator->allocate(block_size);
+  id<MTLHeap> heap = [getMTLBuffer(whole) heap];
+  const NSUInteger offset = [getMTLBuffer(whole) heapOffset];
+  whole.clear();
+
+  auto head = allocator->allocate(block_size / 2);
+  auto tail = allocator->allocate(block_size / 2);
+  ASSERT_EQ([getMTLBuffer(head) heap], heap);
+  ASSERT_EQ([getMTLBuffer(head) heapOffset], offset);
+  ASSERT_EQ([getMTLBuffer(tail) heap], heap);
+  ASSERT_EQ([getMTLBuffer(tail) heapOffset], offset + block_size / 2);
+
+  // heaps are handed back to the system once no allocation is left in them
+  small.clear();
+  head.clear();
+  tail.clear();
+  allocator->emptyCache();
+  ASSERT_EQ(allocator->getTotalAllocatedMemory(), reserved);
 }
 
 TEST(MPSObjCInterfaceTest, MPSCustomKernel) {

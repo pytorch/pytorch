@@ -17,8 +17,7 @@ static PyObject* THPUpperModuleOfDevice = nullptr;
 PyObject* THPDevice_New(const at::Device& device) {
   auto type = &THPDeviceType;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
-  if (!self)
-    throw python_error();
+  TORCH_CHECK_PYTHON(self);
   auto self_ = reinterpret_cast<THPDevice*>(self.get());
   self_->device = device;
   return self.release();
@@ -34,13 +33,13 @@ static PyObject* THPDevice_repr(THPDevice* self) {
     oss << ", index=" << static_cast<uint16_t>(self->device.index());
   }
   oss << ')';
-  return THPUtils_packString(oss.str().c_str());
+  return THPUtils_packString(std::move(oss).str().c_str());
 }
 
 static PyObject* THPDevice_str(THPDevice* self) {
   std::ostringstream oss;
   oss << self->device;
-  return THPUtils_packString(oss.str().c_str());
+  return THPUtils_packString(std::move(oss).str().c_str());
 }
 
 static PyObject* THPDevice_pynew(
@@ -89,7 +88,7 @@ static PyObject* THPDevice_type(THPDevice* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   std::ostringstream oss;
   oss << self->device.type();
-  return THPUtils_packString(oss.str().c_str());
+  return THPUtils_packString(std::move(oss).str().c_str());
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -148,8 +147,7 @@ static PyObject* THPDevice_reduce(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   auto self = reinterpret_cast<THPDevice*>(_self);
   auto ret = THPObjectPtr{PyTuple_New(2)};
-  if (!ret)
-    throw python_error();
+  TORCH_CHECK_PYTHON(ret);
 
   py::object torch_module = py::module::import("torch");
   py::object torch_device = torch_module.attr("device");
@@ -162,10 +160,9 @@ static PyObject* THPDevice_reduce(PyObject* _self, PyObject* noargs) {
     args = THPObjectPtr{Py_BuildValue(
         "(si)", oss.str().c_str(), static_cast<int>(self->device.index()))};
   } else {
-    args = THPObjectPtr{Py_BuildValue("(s)", oss.str().c_str())};
+    args = THPObjectPtr{Py_BuildValue("(s)", std::move(oss).str().c_str())};
   }
-  if (!args)
-    throw python_error();
+  TORCH_CHECK_PYTHON(args);
   PyTuple_SET_ITEM(ret.get(), 1, args.release());
 
   return ret.release();
@@ -284,7 +281,5 @@ PyTypeObject THPDeviceType = {
 
 void THPDevice_init(PyObject* module) {
   THPUpperModuleOfDevice = module;
-  if (PyModule_AddType(module, &THPDeviceType) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyModule_AddType(module, &THPDeviceType) >= 0);
 }

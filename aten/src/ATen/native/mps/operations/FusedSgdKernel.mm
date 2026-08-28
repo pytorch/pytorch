@@ -29,7 +29,7 @@ static void _fused_sgd_with_momentum_kernel_mps_(TensorList params,
   TORCH_CHECK_GT(momentum, 0);
   TORCH_CHECK(native::check_fast_path_restrictions({params, grads, momentum_buffer_list}));
 
-  std::vector<std::vector<Tensor>> tensor_lists{params.vec(), grads.vec(), momentum_buffer_list.vec()};
+  auto tensor_lists = c10::make_nested<Tensor>(params.vec(), grads.vec(), momentum_buffer_list.vec());
 
   const std::string kernel_name = "fused_sgd_momentum_" + scalarToMetalTypeString(params[0].scalar_type());
 
@@ -45,7 +45,9 @@ static void _fused_sgd_with_momentum_kernel_mps_(TensorList params,
                                                  dampening,
                                                  nesterov,
                                                  maximize,
-                                                 is_first_step);
+                                                 is_first_step,
+                                                 grad_scale,
+                                                 found_inf);
 }
 
 static void _fused_sgd_with_momentum_kernel_mps_(TensorList params,
@@ -79,7 +81,7 @@ static void _fused_sgd_with_momentum_kernel_mps_(TensorList params,
 
   TORCH_CHECK(lr_tensor.device() == params[0].device(), "lr must be on the same GPU device as the params");
 
-  std::vector<std::vector<Tensor>> tensor_lists{params.vec(), grads.vec(), momentum_buffer_list.vec()};
+  auto tensor_lists = c10::make_nested<Tensor>(params.vec(), grads.vec(), momentum_buffer_list.vec());
 
   const auto kernel_name = "fused_sgd_momentum_" + scalarToMetalTypeString(params[0].scalar_type());
 
@@ -95,7 +97,9 @@ static void _fused_sgd_with_momentum_kernel_mps_(TensorList params,
                                                  dampening,
                                                  nesterov,
                                                  maximize,
-                                                 is_first_step);
+                                                 is_first_step,
+                                                 grad_scale,
+                                                 found_inf);
 }
 
 } // namespace mps
@@ -134,7 +138,7 @@ void _fused_sgd_kernel_mps_(TensorList params,
     TORCH_WARN_ONCE("`is_first_step` argument has no effect when `momentum_buffer_list` is empty");
   }
 
-  std::vector<std::vector<Tensor>> tensor_lists{params.vec(), grads.vec()};
+  auto tensor_lists = c10::make_nested<Tensor>(params.vec(), grads.vec());
 
   const auto kernel_name = "fused_sgd_" + scalarToMetalTypeString(params[0].scalar_type());
 
@@ -146,7 +150,9 @@ void _fused_sgd_kernel_mps_(TensorList params,
                                                  FusedSgdEncodingFunctor<false /*momentum*/>(),
                                                  weight_decay,
                                                  lr,
-                                                 maximize);
+                                                 maximize,
+                                                 grad_scale,
+                                                 found_inf);
 }
 
 void _fused_sgd_kernel_mps_(TensorList params,
@@ -197,7 +203,7 @@ void _fused_sgd_kernel_mps_(TensorList params,
 
   TORCH_CHECK(lr_tensor.device() == params[0].device(), "lr must be on the same GPU device as the params");
 
-  std::vector<std::vector<Tensor>> tensor_lists{params.vec(), grads.vec()};
+  auto tensor_lists = c10::make_nested<Tensor>(params.vec(), grads.vec());
 
   const std::string kernel_name = "fused_sgd_" + mps::scalarToMetalTypeString(params[0].scalar_type());
 
@@ -209,7 +215,9 @@ void _fused_sgd_kernel_mps_(TensorList params,
                                                  FusedSgdEncodingFunctor<false /*momentum*/>(),
                                                  weight_decay,
                                                  lr_tensor,
-                                                 maximize);
+                                                 maximize,
+                                                 grad_scale,
+                                                 found_inf);
 }
 
 } // namespace at::native

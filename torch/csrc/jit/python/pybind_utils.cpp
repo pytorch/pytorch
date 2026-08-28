@@ -7,6 +7,7 @@
 
 #ifdef USE_DISTRIBUTED
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/Types.hpp>
 #endif
 
 #include <ATen/ScalarOps.h>
@@ -114,10 +115,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
 
         if (save_symint) {
           auto py_tensor = py::cast(tensor);
-          if (PyObject_SetAttrString(
-                  py_tensor.ptr(), "_wrapped_number", obj.ptr()) < 0) {
-            throw python_error();
-          }
+          TORCH_CHECK_PYTHON(
+              PyObject_SetAttrString(
+                  py_tensor.ptr(), "_wrapped_number", obj.ptr()) >= 0);
         }
 
         return tensor;
@@ -455,7 +455,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
     }
     case TypeKind::InterfaceType: {
       auto interfaceType = type->expect<InterfaceType>();
-      // When converting an pyobj to an interface, we check if rhs
+      // When converting a pyobj to an interface, we check if rhs
       // is module or normal torchscript class, get the type and ivalue
       // from them correspondingly.
       c10::ClassTypePtr classType = nullptr;
@@ -493,7 +493,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
             " is not compatible with interface ",
             interfaceType->repr_str(),
             "\n",
-            why_not.str()));
+            std::move(why_not).str()));
       }
       return res;
     }
@@ -544,14 +544,19 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
 #ifdef USE_DISTRIBUTED
       // Handle ProcessGroup custom class as a capsule.  FakeScriptObject
       // (used during Dynamo tracing with CooR) passes py::isinstance via
-      // OpaqueBaseMeta but cannot be cast directly; unwrap real_obj first.
+      // CustomClassBaseMeta but cannot be cast directly; unwrap real_obj first.
       if (py::isinstance<c10d::ProcessGroup>(obj)) {
         py::handle target = obj;
         if (py::hasattr(obj, "real_obj")) {
           target = obj.attr("real_obj");
         }
         auto cpp_obj = target.cast<c10::intrusive_ptr<c10d::ProcessGroup>>();
-        return IValue::make_capsule(cpp_obj);
+        return IValue::make_capsule(std::move(cpp_obj));
+      }
+      if (py::isinstance<c10d::ReduceOp>(obj)) {
+        const auto& op = obj.cast<const c10d::ReduceOp&>();
+        auto cpp_obj = c10::make_intrusive<c10d::ReduceOp>(op);
+        return IValue::make_capsule(std::move(cpp_obj));
       }
 #endif
 
@@ -703,8 +708,9 @@ py::object toPyObject(IValue ivalue) {
           std::back_inserter(defaults),
           [](const Argument& arg) { return toPyObject(*arg.default_value()); });
 
-      std::vector<std::string> fieldNames =
-          fmap(tuple_args, [](const Argument& arg) { return arg.name(); });
+      std::vector<std::string> fieldNames = fmap(
+          std::move(tuple_args),
+          [](const Argument& arg) { return arg.name(); });
 
       return py::module::import("torch._jit_internal")
           .attr("_create_named_tuple")(
@@ -771,6 +777,11 @@ py::object toPyObject(IValue ivalue) {
   } else if (ivalue.isCapsule()) {
     auto capsule = ivalue.toCapsule();
 #ifdef USE_DISTRIBUTED
+    if (dynamic_cast<c10d::ReduceOp*>(capsule.get())) {
+      auto op = c10::static_intrusive_pointer_cast<c10d::ReduceOp>(
+          std::move(capsule));
+      return py::cast(*op);
+    }
     {
       auto pg = c10::static_intrusive_pointer_cast<c10d::ProcessGroup>(capsule);
       if (pg != nullptr) {
@@ -850,7 +861,7 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
       for (const auto& err : errors) {
         ss << err.what() << "\n\n";
       }
-      throw std::runtime_error(ss.str());
+      throw std::runtime_error(std::move(ss).str());
     }
 
     return std::make_pair(std::move(found_op), std::move(stack));
@@ -1014,10 +1025,13 @@ std::optional<InferredType> detail::_tryToInferTypeImpl(py::handle input) {
   if (py::isinstance<c10d::ProcessGroup>(input)) {
     return InferredType(CapsuleType::get());
   }
+  if (py::isinstance<c10d::ReduceOp>(input)) {
+    return InferredType(CapsuleType::get());
+  }
   // During Dynamo tracing with compile-on-one-rank (CooR), opaque reference
   // types like ProcessGroup are wrapped in FakeScriptObject.  Python-level
-  // isinstance() sees through the wrapper (via OpaqueBaseMeta), but the C++
-  // py::isinstance above does too — yet the subsequent pybind11 cast would
+  // isinstance() sees through the wrapper (via CustomClassBaseMeta), but the
+  // C++ py::isinstance above does too -- yet the subsequent pybind11 cast would
   // fail because FakeScriptObject is not a C++ bound object.  Detect this
   // case by checking for the wrapped real_obj attribute.
   if (py::hasattr(input, "real_obj")) {

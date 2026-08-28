@@ -7,12 +7,11 @@
 #include <optional>
 #include <vector>
 
-// NCCL BFloat16 is enabled only for CUDA 11+ and NCCL versions 2.10+, or for
-// HIP 3.1+
+// NCCL BFloat16 is enabled for CUDA builds where the bf16 type exists and NCCL
+// is present (NCCL is required to be 2.23+), or on HIP builds.
 #if defined(__CUDA_BF16_TYPES_EXIST__)
-#define HAS_NCCL_BF16_DATATYPE \
-  ((NCCL_MAJOR > 2) || (NCCL_MAJOR == 2) && (NCCL_MINOR >= 10))
-#elif defined(USE_ROCM) && (TORCH_HIP_VERSION >= 301)
+#define HAS_NCCL_BF16_DATATYPE (NCCL_MAJOR >= 2)
+#elif defined(USE_ROCM)
 #define HAS_NCCL_BF16_DATATYPE 1
 #else
 #define HAS_NCCL_BF16_DATATYPE 0
@@ -29,7 +28,7 @@ namespace torch::cuda::nccl {
 typedef void* ncclComm_t;
 
 /** redefine nccl unique ID in torch scope. this should be identical to native
- * nccl impp. */
+ * nccl impl. */
 #define NCCL_UNIQUE_ID_BYTES 128
 typedef struct {
   // NOLINTNEXTLINE(*array*)
@@ -126,6 +125,7 @@ TORCH_CUDA_CPP_API void comm_destroy(ncclComm_t comm);
 
 TORCH_CUDA_CPP_API void broadcast(
     at::TensorList tensors,
+    int32_t root = 0,
     const stream_list& streams = {},
     const comm_list& user_comms = {});
 

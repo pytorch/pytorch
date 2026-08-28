@@ -29,7 +29,7 @@ and the optimized code.
 The FrameState is a PyDict that enables sharing between different frames. This
 is used to detect dynamism in automatic dynamic shapes.
 
-These two are encapsulated into a ExtraState.
+These two are encapsulated into an ExtraState.
 */
 
 typedef struct CacheEntry CacheEntry;

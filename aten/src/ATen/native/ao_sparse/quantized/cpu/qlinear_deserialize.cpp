@@ -26,7 +26,7 @@ constexpr int64_t num_input_channels_index [[maybe_unused]] = 11;
 template <typename TENSOR_DTYPE, typename VEC_DTYPE>
 std::vector<VEC_DTYPE> unwrap_vector(at::Tensor tensor) {
   std::vector<VEC_DTYPE> vec(tensor.numel());
-  TENSOR_DTYPE* tensor_data_ptr = tensor.data_ptr<TENSOR_DTYPE>();
+  const TENSOR_DTYPE* tensor_data_ptr = tensor.const_data_ptr<TENSOR_DTYPE>();
   std::copy(tensor_data_ptr, tensor_data_ptr + tensor.numel(), vec.data());
   return vec;
 }
@@ -112,7 +112,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::deserialize(
   const at::Tensor loaded_weight_values =
       std::get<weight_values_index>(serialized);
   const uint8_t* loaded_weight_values_ptr =
-      loaded_weight_values.data_ptr<uint8_t>();
+      loaded_weight_values.const_data_ptr<uint8_t>();
   const int64_t loaded_weight_values_size = loaded_weight_values.numel();
   // Subtract 128 because we serialize as +128, which s best for
   // minimizing memory footprint for QNNPack
@@ -249,9 +249,9 @@ PackedLinearWeightQnnp::PackedLinearWeightQnnp(
       std::vector<uint8_t>(output_channels_padded, 0); // Pad with 0;
 
   const float* w_scales_orig_data_ptr =
-      std::get<weight_scales_index>(serialized).data_ptr<float>();
+      std::get<weight_scales_index>(serialized).const_data_ptr<float>();
   const int8_t* w_zp_orig_data_ptr =
-      std::get<weight_zero_point_index>(serialized).data_ptr<int8_t>();
+      std::get<weight_zero_point_index>(serialized).const_data_ptr<int8_t>();
 
   const std::function<uint8_t(int8_t)> add_128 = [](int8_t v) {
     return static_cast<uint8_t>(static_cast<int16_t>(v) + 128);

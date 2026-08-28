@@ -4,22 +4,26 @@
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/core/grad_mode.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/detail/CUDAHooksInterface.h>
-#include <ATen/native/DispatchStub.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
-#include <c10/util/Array.h>
+#include <array>
 #include <c10/util/Exception.h>
 #include <c10/util/string_view.h>
 
+#include <algorithm>
+#include <vector>
+
 #if AT_CUDNN_ENABLED()
 #include <ATen/cudnn/cudnn-wrapper.h>
+#if defined(__has_include) && __has_include(<cudnn_frontend_version.h>)
+#include <cudnn_frontend_version.h>
+#endif
 #endif
 
 #include <c10/core/SymBool.h>
@@ -62,6 +66,14 @@
 
 namespace sdp {
 namespace {
+
+constexpr long kMinCuDNNFrontendVersionForD256 = 12400;
+#if AT_CUDNN_ENABLED() && defined(CUDNN_FRONTEND_VERSION)
+constexpr bool kCuDNNFrontendSupportsD256 =
+    CUDNN_FRONTEND_VERSION >= kMinCuDNNFrontendVersionForD256;
+#else
+constexpr bool kCuDNNFrontendSupportsD256 = false;
+#endif
 
 // tracks whether we've set the default priority order once, to avoid setting
 // it redundantly or overwriting a user-specified priority order
@@ -178,27 +190,92 @@ inline int aotriton_max_hdim() {
 // check_head_dim_size_flash because it changes the backend selection logic for
 // FA, which can break certain workloads that rely on the behavior of rejecting
 // FA for hdim_qk != hdim_vo
+bool check_fa4_constraints(sdp_params const& params, bool debug) {
+#if USE_ROCM_ATTENTION
+  return true;
+#else
+  if (!at::globalContext().userEnabledFA4SDP()) {
+    return true;
+  }
+
+  const auto* dprop = at::cuda::getCurrentDeviceProperties();
+  if (dprop->major != 9 && dprop->major != 10) {
+    if (debug) {
+      TORCH_WARN("FA4 requires compute capability 9.0 or 10.0.");
+    }
+    return false;
+  }
+  if (params.dropout != 0.0) {
+    if (debug) {
+      TORCH_WARN("FA4 does not support dropout.");
+    }
+    return false;
+  }
+  return true;
+#endif
+}
+
+#if !USE_ROCM_ATTENTION
+bool check_head_dim_size_fa4(sdp_params const& params) {
+  const auto query_size_last = params.query.sym_size(-1);
+  const auto key_size_last = params.key.sym_size(-1);
+  const auto value_size_last = params.value.sym_size(-1);
+  if (query_size_last != key_size_last) {
+    return false;
+  }
+
+  const auto* dprop = at::cuda::getCurrentDeviceProperties();
+  if (dprop->major == 9) {
+    return query_size_last > 0 && query_size_last <= 256 &&
+        value_size_last > 0 && value_size_last <= 256;
+  }
+  if (dprop->major == 10) {
+    const bool standard_head_dims = query_size_last > 0 &&
+        query_size_last <= 128 && value_size_last > 0 &&
+        value_size_last <= 128;
+    const bool deepseek_head_dims =
+        query_size_last == 192 && value_size_last == 128;
+    const bool head_dim_256 =
+        query_size_last == 256 && value_size_last == 256;
+    return standard_head_dims || deepseek_head_dims || head_dim_256;
+  }
+  return false;
+}
+#endif
+
 template<bool caller_is_meff = false>
 bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
+  const auto query_size_last = params.query.sym_size(-1);
+  const auto key_size_last = params.key.sym_size(-1);
+  const auto value_size_last = params.value.sym_size(-1);
+  bool supported_head_dim;
 #if USE_ROCM_ATTENTION
   if (at::cuda::device_count() == 0) {
     return false;
   }
   const auto max_size = c10::SymInt(aotriton_max_hdim());
+  supported_head_dim =
+      query_size_last == key_size_last && query_size_last == value_size_last &&
+      query_size_last <= max_size;
 #else
-  // All head_dim sizes must be equal and less than 256
-  const auto max_size = c10::SymInt(256);
+  supported_head_dim = at::globalContext().userEnabledFA4SDP()
+      ? check_head_dim_size_fa4(params)
+      : query_size_last == key_size_last &&
+          query_size_last == value_size_last && query_size_last <= 256;
 #endif
-  const auto query_size_last = params.query.sym_size(-1);
-  const auto key_size_last = params.key.sym_size(-1);
-  const auto value_size_last = params.value.sym_size(-1);
-  bool same_head_dim_size =
-      query_size_last == key_size_last && query_size_last == value_size_last;
-  if (!(same_head_dim_size && (query_size_last <= max_size))) {
+  if (!supported_head_dim) {
     if (debug) {
+#if USE_ROCM_ATTENTION
+      const char* requirement = caller_is_meff
+          ? "Efficient attention on ROCM requires q,k,v to have the same last dimension and to be less than or equal to 256."
+          : "Flash attention requires q,k,v to have the same last dimension and to be less than or equal to 256.";
+#else
+      const char* requirement = at::globalContext().userEnabledFA4SDP()
+          ? "FA4 does not support the provided head dimensions."
+          : "Flash attention requires q,k,v to have the same last dimension and to be less than or equal to 256.";
+#endif
       TORCH_WARN(
-          caller_is_meff ? "Efficient attention on ROCM" : "Flash attention",
-          " requires q,k,v to have the same last dimension and to be less than or equal to 256.",
+          requirement,
           " Got Query.size(-1): ",
           query_size_last,
           ", Key.size(-1): ",
@@ -627,20 +704,31 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
     return false;
   }
   auto head_dim_limit = 128;
-  // Hopper: head_dim<=256 support with cuDNN >= 9.10.0
-  if (cudnn_version >= 91000) {
-    auto dprops = at::cuda::getCurrentDeviceProperties();
-    if (dprops->major == 9 && !dprops->minor) {
-      head_dim_limit = 256;
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  if (TORCH_GUARD_OR_FALSE(s_q.sym_eq(1)) &&
+      is_cudnn_attention_decode_disabled()) {
+    if (debug) {
+      TORCH_WARN(
+          "cuDNN SDPA decode is disabled on SM ",
+          dprops->major,
+          ".",
+          dprops->minor,
+          " for cuDNN versions 9.19-9.25.0 (except 9.24.1)");
     }
+    return false;
   }
-  // Blackwell GPUs: B200, GB200 (SM 10.0), B300, GB300 (SM 10.3)
-  // Special case allowed by cuDNN frontend to support DeepSeek dimensions
-  if (cudnn_version >= 91100) {
-    auto dprops = at::cuda::getCurrentDeviceProperties();
-    if (dprops->major == 10 && d_qk == 192 && d_v == 128) {
-      head_dim_limit = 192;
-    }
+  const bool is_sm90_or_sm10x =
+      (dprops->major == 9 && !dprops->minor) || dprops->major == 10;
+  const bool is_unsupported_sm107 =
+      dprops->major == 10 && dprops->minor == 7 &&
+      cudnn_version <= 92500;
+  if (is_sm90_or_sm10x && !is_unsupported_sm107 && cudnn_version > 92200 &&
+      kCuDNNFrontendSupportsD256) {
+    head_dim_limit = 256;
+  } else if (
+      is_sm90_or_sm10x && cudnn_version >= 91100 && d_qk == 192 &&
+      d_v == 128) {
+    head_dim_limit = 192;
   }
   if (d_qk > head_dim_limit || d_v > head_dim_limit) {
     if (debug) {
@@ -686,6 +774,72 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
       TORCH_WARN_ONCE("cudnn SDPA does not support query sequence length 1 with dropout.");
     }
     return false;
+  }
+  return true;
+}
+
+bool check_cudnn_query_seq_len_nested(sdp_params const& params, bool debug) {
+  if (!params.query.is_nested()) {
+    return true;
+  }
+
+  const auto nt_q_tensor_impl =
+      at::native::get_nested_tensor_impl(params.query);
+  const at::Tensor& sizes = nt_q_tensor_impl->get_nested_sizes();
+  const auto* sizes_ptr = sizes.const_data_ptr<int64_t>();
+  const int64_t n_tensors = params.query.size(0);
+  const int64_t size_tensor_stride = sizes.stride(0);
+
+  int64_t max_seqlen_q = 0;
+  // This is being called inside SDPA with shape [batch, heads, {seq_len}, dim].
+  for (const auto i : c10::irange(n_tensors)) {
+    max_seqlen_q = std::max(
+        max_seqlen_q, sizes_ptr[(i * size_tensor_stride) + 1]);
+  }
+
+  if (max_seqlen_q <= 128) {
+    if (debug) {
+      TORCH_WARN_ONCE(
+          "cuDNN attention does not support nested tensor query sequence "
+          "length <= 128.");
+    }
+    return false;
+  }
+  return true;
+}
+
+bool check_cudnn_d256_bprop_head_dim(
+    sdp_params const& params,
+    bool debug) {
+  if (!input_requires_grad(params)) {
+    return true;
+  }
+
+  long cudnn_version = at::detail::getCUDAHooks().versionRuntimeCuDNN();
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  const auto d_qk = params.query.sym_size(3);
+  const auto d_v = params.value.sym_size(3);
+  const bool is_sm90_or_sm10x =
+      (dprops->major == 9 && !dprops->minor) || dprops->major == 10;
+  const bool is_unsupported_sm107 =
+      dprops->major == 10 && dprops->minor == 7 &&
+      cudnn_version <= 92500;
+  const bool supports_d256 =
+      cudnn_version > 92200 && kCuDNNFrontendSupportsD256 &&
+      is_sm90_or_sm10x && !is_unsupported_sm107;
+  if (supports_d256) {
+    const bool supports_bprop = (d_qk <= 128 && d_v <= 128) ||
+        (d_qk == 192 && d_v == 128) || (d_qk == 256 && d_v == 256);
+    if (!supports_bprop) {
+      if (debug) {
+        TORCH_WARN(
+            "cuDNN SDPA on SM 9.0/10.x does not support backward with these head dimensions. Got d_qk: ",
+            d_qk,
+            ", d_v: ",
+            d_v);
+      }
+      return false;
+    }
   }
   return true;
 }
@@ -804,10 +958,10 @@ bool check_dtypes_low_precision(sdp_params const& params, bool debug) {
   auto dprop = at::cuda::getCurrentDeviceProperties();
   if (dprop->major >= 8) {
     constexpr auto sm80_dtypes =
-        c10::array_of<at::ScalarType>(at::kHalf, at::kBFloat16);
+        std::to_array<at::ScalarType>({at::kHalf, at::kBFloat16});
     return check_tensor_dtype(params, sm80_dtypes, debug);
   } else {
-    constexpr auto default_dtypes = c10::array_of<at::ScalarType>(at::kHalf);
+    constexpr auto default_dtypes = std::to_array<at::ScalarType>({at::kHalf});
     return check_tensor_dtype(params, default_dtypes, debug);
   }
 }
@@ -816,7 +970,7 @@ bool check_dtypes_flash_attention(sdp_params const& params, bool debug) {
   auto dprop = at::cuda::getCurrentDeviceProperties();
   if (dprop->major >= 9 and at::globalContext().userEnabledFA3SDP()) {
     constexpr auto fa3_dtypes =
-        c10::array_of<at::ScalarType>(at::kFloat8_e4m3fn, at::kHalf, at::kBFloat16);
+        std::to_array<at::ScalarType>({at::kFloat8_e4m3fn, at::kHalf, at::kBFloat16});
     return check_tensor_dtype(params, fa3_dtypes, debug);
   } else {
     return check_dtypes_low_precision(params, debug);
@@ -850,6 +1004,30 @@ bool check_cudnn_deterministic(const sdp_params& params, bool debug) {
 
 } // namespace
 
+// See #193893 and #194927 for reasoning
+// TODO: Remove this and all associated calls/imports when fixed
+bool is_cudnn_attention_decode_disabled() {
+#if AT_CUDNN_ENABLED() && defined(CUDNN_VERSION)
+  static const std::vector<bool> disabled_by_device = [] {
+    const auto cudnn_version = at::detail::getCUDAHooks().versionRuntimeCuDNN();
+    std::vector<bool> disabled(at::cuda::device_count());
+    // cuDNN versions 9.19-9.25.0 (except 9.24.1) on SM 10.x and 11.x are disabled
+    // This check also allows possible future 9.24 patch versions without a rewrite
+    if (cudnn_version < 91900 || cudnn_version > 92500 || (cudnn_version > 92400 && cudnn_version < 92500)) {
+      return disabled;
+    }
+    for (const auto device : c10::irange(at::cuda::device_count())) {
+      const auto* dprops = at::cuda::getDeviceProperties(device);
+      disabled[device] = dprops->major == 10 || dprops->major == 11;
+    }
+    return disabled;
+  }();
+  return disabled_by_device.at(at::cuda::current_device());
+#else
+  return false;
+#endif
+}
+
 bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
 #if defined(USE_ROCM) || !AT_CUDNN_ENABLED() || !defined(CUDNN_VERSION)
   if (debug) {
@@ -873,9 +1051,8 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
   }
 #endif
   // Define gate functions that determine if a flash kernel can be ran
-  // Replace with std::to_array when we migrate to c++20
   constexpr auto general_constraints =
-      c10::array_of<bool (*)(sdp_params const&, bool)>(
+      std::to_array<bool (*)(sdp_params const&, bool)>({
           check_runtime_disabled_cudnn,
           check_for_nested_inputs,
           check_all_tensors_on_device,
@@ -885,22 +1062,35 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
           check_attn_mask_shape,
           check_cudnn_hardware_support,
           check_cudnn_dropout
-          );
+          });
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
       return false;
     }
   }
   constexpr auto dense_constraints =
-      c10::array_of<bool (*)(sdp_params const&, bool)>(
+      std::to_array<bool (*)(sdp_params const&, bool)>({
       check_nonzero_sequence_lengths_dense,
       check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim=*/>,
-      check_batch_size_and_num_heads_dense<true /*enable_gqa*/, false /*requires_same_num_heads*/>,
-      check_cudnn_tensor_shapes
-  );
+      check_batch_size_and_num_heads_dense<true /*supports_gqa*/, false /*requires_same_num_heads*/, true /*supports_mqa*/>,
+      check_cudnn_tensor_shapes,
+      check_cudnn_d256_bprop_head_dim
+  });
 
   if (has_only_dense_inputs(params)) {
     for (auto& constraint : dense_constraints) {
+      if (!constraint(params, debug)) {
+        return false;
+      }
+    }
+  }
+  constexpr auto nested_constraints =
+      std::to_array<bool (*)(sdp_params const&, bool)>({
+          check_cudnn_query_seq_len_nested,
+      });
+
+  if (has_for_nested_inputs(params)) {
+    for (auto& constraint : nested_constraints) {
       if (!constraint(params, debug)) {
         return false;
       }
@@ -925,17 +1115,17 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
   return false;
 #else // defined(USE_FLASH_ATTENTION)
   // Define gate functions that determine if a flash kernel can be ran
-  // Replace with std::to_array when we migrate to c++20
-  constexpr auto general_constraints = c10::array_of<bool (*)(sdp_params const&, bool)>(
+  constexpr auto general_constraints = std::to_array<bool (*)(sdp_params const&, bool)>({
       check_runtime_disabled_flash,
       check_all_tensors_on_device,
       check_tensor_shapes,
       check_for_attn_mask,
+      check_fa4_constraints,
       check_head_dim_size_flash<false /*caller_is_meff*/>,
       check_flash_attention_hardware_support,
       check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89_or_120,
       check_flash_causal_non_square_seqlens,
-      check_dtypes_flash_attention);
+      check_dtypes_flash_attention});
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
       return false;
@@ -943,10 +1133,10 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
   }
 
   if (has_for_nested_inputs(params)) {
-    constexpr auto nested_constraints = c10::array_of<bool (*)(sdp_params const&, bool)>(
+    constexpr auto nested_constraints = std::to_array<bool (*)(sdp_params const&, bool)>({
         check_batch_size_nested,
         check_head_dim_size_flash_nested<false /*caller_is_meff*/>,
-        check_for_seq_len_0_nested_tensor);
+        check_for_seq_len_0_nested_tensor});
     for (auto& constraint : nested_constraints) {
       if (!constraint(params, debug)) {
         return false;
@@ -955,10 +1145,10 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
   }
   constexpr bool backend_supports_grouped_query_attention = true;
   if (has_only_dense_inputs(params)) {
-    constexpr auto dense_constraints = c10::array_of<bool (*)(sdp_params const&, bool)>(
-        check_batch_size_and_num_heads_dense<backend_supports_grouped_query_attention>,
+    constexpr auto dense_constraints = std::to_array<bool (*)(sdp_params const&, bool)>({
+        check_batch_size_and_num_heads_dense<backend_supports_grouped_query_attention, true, true /*supports_mqa*/>,
         check_nonzero_sequence_lengths_dense,
-        check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim=*/>);
+        check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim=*/>});
     for (auto& constraint : dense_constraints) {
       if (!constraint(params, debug)) {
         return false;
@@ -976,26 +1166,26 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
 #endif
   // Constraints specific to mem efficient attention
   constexpr auto less_than_sm80_mem_efficient_dtypes =
-      c10::array_of<at::ScalarType>(at::kHalf, at::kFloat);
+      std::to_array<at::ScalarType>({at::kHalf, at::kFloat});
 #ifdef USE_ROCM
   constexpr auto aotriton_mem_efficient_dtypes =
-      c10::array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
+      std::to_array<at::ScalarType>({at::kHalf, at::kFloat, at::kBFloat16});
   constexpr auto ck_mem_efficient_dtypes =
-      c10::array_of<at::ScalarType>(at::kHalf, at::kBFloat16);
+      std::to_array<at::ScalarType>({at::kHalf, at::kBFloat16});
 #else
   constexpr auto greater_than_or_equal_sm80_mem_efficient_dtypes =
-      c10::array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
+      std::to_array<at::ScalarType>({at::kHalf, at::kFloat, at::kBFloat16});
 #endif
 
   //  Define gate functions that determine if a mem efficient kernel can be ran
-  constexpr auto general_constraints = c10::array_of<bool (*)(sdp_params const&, bool)>(
+  constexpr auto general_constraints = std::to_array<bool (*)(sdp_params const&, bool)>({
       check_runtime_disabled_mem_efficient,
       check_all_tensors_on_device,
       check_mem_efficient_hardware_support,
       check_tensor_shapes,
       check_head_dim_size_mem_efficient,
       check_data_ptr_alignment_mem_efficient
-  );
+  });
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
       return false;
@@ -1003,9 +1193,12 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
   }
 
   if (has_for_nested_inputs(params)) {
-    constexpr auto nested_constraints = c10::array_of<bool (*)(sdp_params const&, bool)>(
+    constexpr auto nested_constraints = std::to_array<bool (*)(sdp_params const&, bool)>({
+#ifndef USE_ROCM  // ME and FA share the backend on ROCM and thus support training
+        check_requires_grad_and_nested,
+#endif
         check_batch_size_nested,
-        check_for_seq_len_0_nested_tensor);
+        check_for_seq_len_0_nested_tensor});
     for (auto& constraint : nested_constraints) {
       if (!constraint(params, debug)) {
         return false;
@@ -1013,10 +1206,17 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
     }
   }
   if (has_only_dense_inputs(params)) {
-    constexpr auto dense_constraints = c10::array_of<bool (*)(sdp_params const&, bool)>(
+#ifdef USE_ROCM
+    constexpr bool supports_gqa = false;
+    constexpr bool supports_mqa = false;
+#else
+    constexpr bool supports_gqa = true;
+    constexpr bool supports_mqa = true;
+#endif
+    constexpr auto dense_constraints = std::to_array<bool (*)(sdp_params const&, bool)>({
         check_nonzero_sequence_lengths_dense,
         check_last_dim_stride_equals_1_dense<false /*ignore_singleton_dim=*/>,
-        check_batch_size_and_num_heads_dense<false /*supports_grouped_query_attention=*/>);
+        check_batch_size_and_num_heads_dense<supports_gqa, true, supports_mqa>});
     for (auto& constraint : dense_constraints) {
       if (!constraint(params, debug)) {
         return false;
