@@ -9,6 +9,7 @@
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+#include <torch/custom_class.h>
 
 // Use torch's cub wrapper instead of CUDA's <cub/cub.cuh>, see #55292
 #include <ATen/cuda/cub.cuh>
@@ -144,6 +145,62 @@ void nvshmem_get(at::Tensor& tensor, const int64_t peer) {
   c10::cuda::CUDAGuard guard(tensor.device());
   auto stream = at::cuda::getCurrentCUDAStream();
   nvshmemx_getmem_on_stream(tensor.mutable_data_ptr(), buffer_ptr, buffer_size, peer, stream);
+}
+
+void nvshmem_get_out(
+    at::Tensor& dst,
+    const c10::intrusive_ptr<c10d::symmetric_memory::SymmetricMemory>& hdl,
+    int64_t offset,
+    int64_t size,
+    int64_t peer) {
+  TORCH_CHECK(dst.is_cuda(), "symm_mem.get: expected a CUDA tensor");
+  TORCH_CHECK(
+      dst.device() == hdl->get_device(),
+      "symm_mem.get: dst must be on the same device as hdl");
+  TORCH_CHECK(
+      dst.is_contiguous(),
+      "symm_mem.get: dst must be backed by contiguous memory");
+  TORCH_CHECK(offset >= 0, "symm_mem.get: offset must be non-negative");
+  TORCH_CHECK(size >= 0, "symm_mem.get: size must be non-negative");
+  TORCH_CHECK(
+      dst.numel() >= size,
+      "symm_mem.get: dst must contain at least `size` elements");
+  TORCH_CHECK(
+      peer >= 0 && peer < hdl->get_world_size(), "symm_mem.get: invalid peer");
+  auto global_peer = hdl->get_rank_to_global_rank().at(peer);
+  auto element_size = static_cast<size_t>(dst.element_size());
+  auto buffer_offset = hdl->get_offset();
+  TORCH_CHECK(
+      buffer_offset % element_size == 0,
+      "symm_mem.get: handle offset is not element-aligned");
+  auto buffer_size = hdl->get_buffer_size();
+  TORCH_CHECK(
+      buffer_offset <= buffer_size,
+      "symm_mem.get: handle offset exceeds symmetric allocation");
+  auto available_bytes = buffer_size - buffer_offset;
+  TORCH_CHECK(
+      static_cast<size_t>(offset) <= available_bytes / element_size &&
+          static_cast<size_t>(size) <=
+              (available_bytes - static_cast<size_t>(offset) * element_size) /
+                  element_size,
+      "symm_mem.get: requested range exceeds symmetric allocation");
+  auto nbytes = static_cast<size_t>(size) * element_size;
+  if (nbytes == 0) {
+    return;
+  }
+
+  // Local symmetric source pointer for this rank's allocation. NVSHMEM
+  // translates it to the peer's allocation internally.
+  auto src_byte_offset =
+      buffer_offset + static_cast<size_t>(offset) * element_size;
+  void* src_ptr = reinterpret_cast<uint8_t*>(
+                      hdl->get_buffer_ptrs()[hdl->get_rank()]) +
+      src_byte_offset;
+
+  c10::cuda::CUDAGuard guard(dst.device());
+  auto stream = at::cuda::getCurrentCUDAStream();
+  nvshmemx_getmem_on_stream(
+      dst.mutable_data_ptr(), src_ptr, nbytes, global_peer, stream);
 }
 
 at::Tensor nvshmem_all_to_all(
@@ -446,7 +503,7 @@ __global__ void exchangeSplitAndOffset_2d(int64_t* in_splits_offsets, int64_t* o
 #endif
 }
 
-// This is an warp-scope, exclusive prefix sum. When called by a block of
+// This is a warp-scope, exclusive prefix sum. When called by a block of
 // threads, each warp will perform an independent prefix sum, concurrently.
 // Returns the sum of all elements in the warp.
 // `NUM_WARPS` is the number of warps participating the concurrent prefix sum.
@@ -473,8 +530,11 @@ __device__ int64_t prefixSum_warp(int64_t *odata, int64_t *idata, int n) {
   // Compute the warp-wide exclusive prefix sum
   WarpScan(temp_storage[warp_id]).ExclusiveSum(thread_data, thread_data, warp_aggregate);
 
-  // Store the result
-  odata[tid] = thread_data;
+  // Store the result. Callers size `odata` to `n`, not to WARP_SIZE, so the
+  // lanes past `n` must not write.
+  if (tid < n) {
+    odata[tid] = thread_data;
+  }
   return warp_aggregate;
 }
 
@@ -520,6 +580,15 @@ __global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_split
 
   // Total length of each tile
   __shared__ int64_t len_per_tile[NUM_TILES];
+  // Tiles with no splits skip the prefix sum below, and lanes past
+  // `nsplits_per_tile` are never written by it. Zero both arrays first so the
+  // second scan and the offset fix-up do not read uninitialized shared memory.
+  // NUM_TILES * A2AV_TILE_SIZE == THREADS_PER_BLOCK, so this covers every entry.
+  tile_prefix_sums[tileId][laneId] = 0;
+  if (tid < NUM_TILES) {
+    len_per_tile[tid] = 0;
+  }
+  __syncthreads();
   // When `nsplits` is small, not every tile gets data to sum. They can skip
   // this local prefix sum.
   if (nsplits_per_tile > 0) {
@@ -571,13 +640,66 @@ __global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_split
       peer_size,
       peer_global);  // peer's global index
   }
-  // Write out the output offsets (to the scratchpad line)
-  if (bid == 0 && tid < nsplits) {
-    source_offsets[tid] = tile_prefix_sums[tid / minor_size][tid % minor_size];
-  }
   // Make sure getmem_nbi calls finish
   nvshmem_quiet();
 #endif
+}
+
+// Writes the output offsets to the scratchpad line of `out_splits_offsets`.
+// This is a separate kernel, and not the tail of `allToAllV_2d`, because every
+// block of `allToAllV_2d` reads that same line as `source_offsets` during the
+// exchange, and that kernel has no grid-wide barrier to order the write after
+// those reads. Recomputing the offsets in one block is cheaper than the
+// synchronization would be, and the kernel boundary is the barrier.
+__global__ void writeOutputOffsets_2d(
+    int64_t* out_splits_offsets,
+    int minor_size,
+    int major_size,
+    int64_t major_align) {
+  int nsplits = minor_size * major_size;
+  auto output_splits = out_splits_offsets;
+  auto source_offsets = out_splits_offsets + nsplits;
+  int tid = threadIdx.x;
+
+  constexpr int NUM_TILES = THREADS_PER_BLOCK / A2AV_TILE_SIZE;
+  int tileId = tid / A2AV_TILE_SIZE;
+  int laneId = tid % A2AV_TILE_SIZE;
+  __shared__ int64_t tile_prefix_sums[NUM_TILES][A2AV_TILE_SIZE];
+  int nsplits_per_tile = min(minor_size, nsplits - tileId * minor_size);
+
+  __shared__ int64_t len_per_tile[NUM_TILES];
+  // See the matching comment in `allToAllV_2d`: tiles that skip the prefix sum
+  // below would otherwise leave these reading as uninitialized shared memory.
+  tile_prefix_sums[tileId][laneId] = 0;
+  if (tid < NUM_TILES) {
+    len_per_tile[tid] = 0;
+  }
+  __syncthreads();
+
+  if (nsplits_per_tile > 0) {
+    int64_t my_tile_len = prefixSum_warp<NUM_TILES>(tile_prefix_sums[tileId], output_splits + tileId * minor_size, nsplits_per_tile);
+    if (laneId == A2AV_TILE_SIZE - 1) {
+      if (major_align != 0) {
+        auto aligned_len = (my_tile_len + major_align - 1) / major_align * major_align;
+        len_per_tile[tileId] = max(aligned_len, major_align);
+      } else {
+        len_per_tile[tileId] = my_tile_len;
+      }
+    }
+  }
+  __syncthreads();
+
+  __shared__ int64_t start_offset_per_tile[NUM_TILES];
+  static_assert(NUM_TILES <= WARP_SIZE);
+  prefixSum_warp<1>(start_offset_per_tile, len_per_tile, NUM_TILES);
+  __syncthreads();
+
+  tile_prefix_sums[tileId][laneId] += start_offset_per_tile[tileId];
+  __syncthreads();
+
+  if (tid < nsplits) {
+    source_offsets[tid] = tile_prefix_sums[tid / minor_size][tid % minor_size];
+  }
 }
 
 void all_to_all_vdev_2d(
@@ -728,6 +850,11 @@ void all_to_all_vdev_2d(
       args1,
       0,
       stream);
+
+  // Separate launch so the write is ordered after every block's reads above.
+  writeOutputOffsets_2d<<<dim3(1), dim3(THREADS_PER_BLOCK), 0, stream>>>(
+      out_splits_offsets_ptr, world_size, ne, major_align_val);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 void all_to_all_vdev_2d_offset(
@@ -863,6 +990,11 @@ void all_to_all_vdev_2d_offset(
       args1,
       0,
       stream);
+
+  // Separate launch so the write is ordered after every block's reads above.
+  writeOutputOffsets_2d<<<dim3(1), dim3(THREADS_PER_BLOCK), 0, stream>>>(
+      out_splits_offsets_ptr, ne, world_size, major_align_val);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 /* Tiled Communication */
@@ -1057,11 +1189,31 @@ void multi_root_tile_reduce(
 
 } // namespace c10d::nvshmem_extension
 
+namespace {
+// Boxed function for `nvshmem_get_out`, which accepts the custom class
+// `SymmetricMemory`. See the note in nccl_extension.cu about why a boxed
+// kernel is needed for ops that take a TorchBind custom class.
+void nvshmem_get_out_boxed(
+    const c10::OperatorHandle& op,
+    c10::DispatchKeySet ks,
+    c10::Stack* stack) {
+  auto peer = torch::jit::pop(*stack).toInt();
+  auto size = torch::jit::pop(*stack).toInt();
+  auto offset = torch::jit::pop(*stack).toInt();
+  auto hdl = torch::jit::pop(*stack)
+                 .toCustomClass<c10d::symmetric_memory::SymmetricMemory>();
+  auto dst = torch::jit::pop(*stack).toTensor();
+  c10d::nvshmem_extension::nvshmem_get_out(dst, hdl, offset, size, peer);
+}
+} // namespace
 
 TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("nvshmem_broadcast", c10d::nvshmem_extension::nvshmem_broadcast);
   m.impl("nvshmem_put", c10d::nvshmem_extension::nvshmem_put);
   m.impl("nvshmem_get", c10d::nvshmem_extension::nvshmem_get);
+  m.impl(
+      "nvshmem_get_out",
+      torch::CppFunction::makeFromBoxedFunction<&nvshmem_get_out_boxed>());
   m.impl("nvshmem_wait_for_signal", c10d::nvshmem_extension::nvshmem_wait_for_signal);
   m.impl("nvshmem_put_with_signal", c10d::nvshmem_extension::nvshmem_put_with_signal);
   m.impl("nvshmem_all_to_all", c10d::nvshmem_extension::nvshmem_all_to_all);

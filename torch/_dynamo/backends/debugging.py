@@ -152,7 +152,9 @@ def eager_debug(
 def torchscript(
     gm: torch.fx.GraphModule, fake_tensor_inputs: list[torch.Tensor]
 ) -> torch.jit.ScriptModule:
-    return torch.jit.script(gm)
+    from torch.fx._lazy_graph_module import _unwrap_lazy_graph_module
+
+    return torch.jit.script(_unwrap_lazy_graph_module(gm))
 
 
 def invoke_subgraph_inner_compiler(
@@ -166,15 +168,19 @@ def invoke_subgraph_inner_compiler(
     from torch._dynamo import disable
     from torch._higher_order_ops.invoke_subgraph import invoke_subgraph_infer
 
-    @disable
     # pyrefly: ignore [deprecated]
     @torch._dynamo.allow_in_graph
+    @disable
     def invoke_subgraph_wrapper_unboxed(*operands: Any) -> Any:
         return invoke_subgraph_infer(subgraph, *operands)
 
     # NB: The direct to unboxed path is broken, you MUST DO THIS
 
     def invoke_subgraph_wrapper(args: list[Any]) -> Any:
+        # `allow_in_graph` is untyped and its `list` branch leaks a
+        # `list | fn` union into the inferred return; as the outer decorator
+        # here that makes `invoke_subgraph_wrapper_unboxed` look non-callable.
+        # pyrefly: ignore [not-callable]
         return invoke_subgraph_wrapper_unboxed(*args)
 
     invoke_subgraph_wrapper._boxed_call = True  # type: ignore[attr-defined]
@@ -475,8 +481,8 @@ register_backend(
 )
 
 
-# aot_eager_decomp_partition_with_mode is similar as aot_eager_decomp_partition,
-# except that it takes a TorchDispatchMode mode and run the fw/bw in the mode
+# aot_eager_decomp_partition_with_mode is similar to aot_eager_decomp_partition,
+# except that it takes a TorchDispatchMode mode and runs the fw/bw in the mode
 def aot_eager_decomp_partition_with_mode(
     gm: torch.fx.GraphModule,
     fake_tensor_inputs: list[torch.Tensor],

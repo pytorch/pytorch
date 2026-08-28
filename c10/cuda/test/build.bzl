@@ -20,6 +20,28 @@ def define_targets(rules, gtest_deps):
         ] + gtest_deps,
     )
 
+    rules.cc_test(
+        name = "expandable_segment_reserve_test",
+        srcs = [
+            "impl/CUDACachingAllocatorReserveTest.cpp",
+        ],
+        target_compatible_with = rules.requires_cuda_enabled(),
+        deps = [
+            "//c10/cuda",
+        ] + gtest_deps,
+    )
+
+    rules.cc_test(
+        name = "expandable_segment_reserve_device_test",
+        srcs = [
+            "impl/CUDACachingAllocatorReserveDeviceTest.cpp",
+        ],
+        target_compatible_with = rules.requires_cuda_enabled(),
+        deps = [
+            "//c10/cuda",
+        ] + gtest_deps,
+    )
+
     for src in dsa_tests:
         name = src.replace("impl/", "").replace(".cu", "")
         rules.cuda_library(

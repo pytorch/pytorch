@@ -2,12 +2,17 @@
 
 import torch
 import torch._dynamo.test_case
-from torch.testing._internal.common_utils import make_dynamo_test
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    make_dynamo_test,
+)
 
 
 @torch._dynamo.config.patch(enable_trace_unittest=True)
 @torch._dynamo.config.patch(enable_trace_load_build_class=True)
 class TestNbLshift(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # --- Integer lshift ---
     @make_dynamo_test
     def test_lshift_integers(self):
@@ -191,6 +196,31 @@ class TestNbLshift(torch._dynamo.test_case.TestCase):
 
     # --- SymNode lshift ---
 
+    def test_lshift_tensor_and_int(self):
+        def fn(x):
+            return x << 2
+
+        x = torch.tensor([1, 2, 3], dtype=torch.int64)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_lshift_int_and_tensor(self):
+        def fn(x):
+            return 2 << x
+
+        x = torch.tensor([1, 2, 3], dtype=torch.int64)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_lshift_tensor_and_tensor(self):
+        def fn(x, y):
+            return x << y
+
+        x = torch.tensor([1, 2, 3], dtype=torch.int64)
+        y = torch.tensor([1, 0, 2], dtype=torch.int64)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, y), fn(x, y))
+
     def test_lshift_symnode_and_int(self):
         def fn(x):
             s = x.shape[0]
@@ -215,6 +245,8 @@ class TestNbLshift(torch._dynamo.test_case.TestCase):
 @torch._dynamo.config.patch(enable_trace_unittest=True)
 @torch._dynamo.config.patch(enable_trace_load_build_class=True)
 class TestNbRshift(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # --- Integer rshift ---
     @make_dynamo_test
     def test_rshift_integers(self):
@@ -401,6 +433,31 @@ class TestNbRshift(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, "B.__rrshift__ called")
 
     # --- SymNode rshift ---
+
+    def test_rshift_tensor_and_int(self):
+        def fn(x):
+            return x >> 1
+
+        x = torch.tensor([16, 8, 4], dtype=torch.int64)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_rshift_int_and_tensor(self):
+        def fn(x):
+            return 32 >> x
+
+        x = torch.tensor([1, 2, 3], dtype=torch.int64)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_rshift_tensor_and_tensor(self):
+        def fn(x, y):
+            return x >> y
+
+        x = torch.tensor([16, 8, 4], dtype=torch.int64)
+        y = torch.tensor([1, 2, 0], dtype=torch.int64)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, y), fn(x, y))
 
     def test_rshift_symnode_and_int(self):
         def fn(x):

@@ -5,6 +5,7 @@ import contextlib
 import contextvars
 import copy
 import hashlib
+import importlib
 import itertools
 import linecache
 import sys
@@ -93,6 +94,7 @@ class _EvalCacheLoader:
         globals_copy["__file__"] = key
         globals_copy["__name__"] = key
         globals_copy["__loader__"] = self
+        globals_copy["__spec__"] = importlib.machinery.ModuleSpec(key, self)  # type: ignore[bad-argument-type]
         linecache.lazycache(key, globals_copy)
 
         return key
@@ -175,9 +177,13 @@ def _format_import_statement(name: str, obj: object, importer: Importer) -> str:
 
 
 def _format_import_block(globals: dict[str, Any], importer: Importer) -> str:
-    import_strs: set[str] = {
-        _format_import_statement(name, obj, importer) for name, obj in globals.items()
-    }
+    import_strs: set[str] = set()
+    for name, obj in globals.items():
+        if isinstance(obj, str):
+            # Forward-reference string annotations are globals in generated code.
+            import_strs.add(f"{name} = {obj!r}")
+        else:
+            import_strs.add(_format_import_statement(name, obj, importer))
     # Sort the imports so we have a stable import block that allows us to
     # hash the graph module and get a consistent key for use in a cache.
     return "\n".join(sorted(import_strs))
@@ -224,10 +230,10 @@ def _deserialize_graph_module(
     # Try to retrieve the forward source in a backward-compatible way
     _CodeOnlyModule.forward = forward
 
+    from ._symbolic_trace import Tracer
+
     tracer_cls = body.get("_tracer_cls")
     if tracer_cls is None:
-        from ._symbolic_trace import Tracer
-
         tracer_cls = Tracer
 
     graphmodule_cls_name = body.get("_graphmodule_cls_name", "GraphModule")
@@ -245,7 +251,8 @@ def _deserialize_graph_module(
     com = _CodeOnlyModule(body)
 
     tracer_extras = body.get("_tracer_extras", {})
-    graph = KeepModules().trace(com, **tracer_extras)
+    tracer = KeepModules._graph_module_deserialization_tracer(com)
+    graph = tracer.trace(com, **tracer_extras)
 
     # Recover node.meta["stack_trace"] after re-tracing
     node_meta_stack_trace = body.get("_graphmodule_graph_node_meta_stack_trace")
@@ -299,7 +306,8 @@ def _copy_attr(
     # If it is a tensor and not a parameter attribute of a module, it should be a named buffer.
     # So, we register it as a named buffer in the target module.
     if isinstance(orig, torch.Tensor) and not isinstance(orig, torch.nn.Parameter):
-        to_module.register_buffer(field, orig)
+        persistent = field not in from_module._non_persistent_buffers_set
+        to_module.register_buffer(field, orig, persistent=persistent)
     else:
         setattr(to_module, field, orig)
 
@@ -861,7 +869,7 @@ class {module_name}(torch.nn.Module):
         This method can be called to clean up an ``nn.Module`` without
         manually calling ``delete_submodule`` on each unused submodule.
         """
-        used: list[str] = []
+        used: set[str] = set()
 
         for node in self.graph.nodes:
             if node.op in ("call_module", "get_attr") and isinstance(node.target, str):
@@ -870,7 +878,7 @@ class {module_name}(torch.nn.Module):
                 # ["foo", "bar", "baz"]
                 fullpath = node.target.split(".")
 
-                # If we're looking at multiple parts of a path, join
+                # If we're looking at multiple parts of a path,
                 # join them with a dot. Otherwise, return that single
                 # element without doing anything to it.
                 def join_fn(x: str, y: str) -> str:
@@ -879,8 +887,8 @@ class {module_name}(torch.nn.Module):
                 # Progressively collect all the names of intermediate
                 # modules. For example, if we have the target
                 # `foo.bar.baz`, we'll add `foo`, `foo.bar`, and
-                # `foo.bar.baz` to the list.
-                used.extend(itertools.accumulate(fullpath, join_fn))
+                # `foo.bar.baz` to the set.
+                used.update(itertools.accumulate(fullpath, join_fn))
 
                 # For a `call_module` node, also register all recursive submodules
                 # as used
@@ -891,7 +899,7 @@ class {module_name}(torch.nn.Module):
 
                         for submod_name, _ in submod.named_modules():
                             if submod_name != "":
-                                used.append(".".join([str_target, submod_name]))
+                                used.add(".".join([str_target, submod_name]))
                     except AttributeError:
                         # Node referenced nonexistent submodule, don't need to
                         # worry about GCing anything

@@ -13,9 +13,11 @@ import os.path
 import re
 import warnings
 from collections import defaultdict, deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, replace
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
+
+import sympy
 
 import torch
 import torch._inductor.inductor_prims
@@ -26,24 +28,33 @@ from torch._dynamo.utils import counters, is_node_meta_valid
 from torch._functorch._activation_checkpointing.ac_logging_utils import (
     create_structured_trace_for_min_cut_info,
 )
+from torch._functorch._aot_autograd.streams import _SYNC_OPS
 from torch._functorch._aot_autograd.utils import is_with_effects
 from torch._inductor import config as inductor_config
 from torch._inductor.custom_graph_pass import (
     CustomKnapsackSolver,
     CustomRuntimeEstimator,
 )
+from torch._inductor.fx_passes.control_dependencies import (
+    control_deps as control_deps_hop,
+    get_subgraph_name,
+)
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_value
 from torch._library.utils import is_builtin
 from torch._logging import LazyString, trace_structured
 from torch._logging._internal import trace_log
 from torch._subclasses.fake_tensor import extract_tensor_metadata
+from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
-from torch.fx.experimental.sym_node import magic_methods, method_to_operator
+from torch.fx.experimental.sym_node import magic_methods, method_to_operator, SymNode
 from torch.fx.experimental.symbolic_shapes import (
+    _get_placeholder_expr,
     find_symbol_binding_fx_nodes,
     free_symbols,
     is_symbol_binding_fx_node,
+    is_symbolic,
     optimization_hint,
     statically_known_false,
     statically_known_true,
@@ -84,7 +95,6 @@ from .compile_utils import fx_graph_cse, get_aten_target, raise_getitems
 
 if TYPE_CHECKING:
     import networkx as nx
-    import sympy
 
 
 AOT_PARTITIONER_DEBUG: bool = config.debug_partitioner
@@ -170,6 +180,53 @@ def must_recompute(node: fx.Node) -> bool:
     ]
 
 
+def get_schema_arg_idx(target: object, arg_name: str) -> int | None:
+    """Return the positional schema index for an operator argument name."""
+    if not isinstance(target, torch._ops.OpOverload):
+        return None
+    for idx, arg in enumerate(target._schema.arguments):
+        if arg.name == arg_name:
+            return idx
+    return None
+
+
+def is_nonzero_dropout_sdpa(node: fx.Node) -> bool:
+    """Return True unless SDPA-family dropout is statically known to be disabled."""
+    target = node.target
+    if not isinstance(target, torch._ops.OpOverload):
+        return True
+
+    dropout_arg_idx = get_schema_arg_idx(target, "dropout_p")
+    if dropout_arg_idx is None:
+        return True
+
+    dropout_arg = target._schema.arguments[dropout_arg_idx]
+    if len(node.args) > dropout_arg_idx:
+        dropout_p = node.args[dropout_arg_idx]
+    elif "dropout_p" in node.kwargs:
+        dropout_p = node.kwargs["dropout_p"]
+    elif dropout_arg.default_value is not None:
+        dropout_p = dropout_arg.default_value
+    else:
+        return True
+
+    return not statically_known_true(cast(bool | torch.SymBool, dropout_p == 0.0))
+
+
+def is_rng_op(node: fx.Node) -> bool:
+    """Return True when a node's seeded nondeterminism cannot be statically ruled out."""
+    if not (
+        hasattr(node.target, "tags")
+        and torch.Tag.nondeterministic_seeded in node.target.tags
+    ):
+        return False
+
+    if get_schema_arg_idx(node.target, "dropout_p") is not None:
+        return is_nonzero_dropout_sdpa(node)
+
+    return True
+
+
 def _is_assert_only_symbool(node: fx.Node) -> bool:
     return (
         isinstance(node.meta.get("val"), torch.SymBool)
@@ -189,11 +246,7 @@ def has_recomputable_ops(fx_g: fx.GraphModule) -> bool:
 
 def has_recomputable_rng_ops(fx_g: fx.GraphModule) -> bool:
     for node in fx_g.graph.nodes:
-        if (
-            must_recompute(node)
-            and hasattr(node.target, "tags")
-            and torch.Tag.nondeterministic_seeded in node.target.tags
-        ):
+        if must_recompute(node) and is_rng_op(node):
             return True
     return False
 
@@ -291,6 +344,173 @@ def _find_input_for_invalid_output(
     return None
 
 
+def _control_deps_has_sync_op(node: fx.Node) -> bool:
+    """Check if a control_deps node's subgraph has a sync operation."""
+    sg_node = node.args[1]
+    if not (
+        isinstance(sg_node, fx.Node)
+        and sg_node.op == "get_attr"
+        and isinstance(sg_node.target, str)
+    ):
+        raise AssertionError(f"expected get_attr subgraph node, got {sg_node}")
+    owning_mod = node.graph.owning_module
+    if owning_mod is None:
+        raise AssertionError("expected graph to have an owning_module")
+    sg_mod = getattr(owning_mod, sg_node.target)
+    if not isinstance(sg_mod, fx.GraphModule):
+        raise AssertionError(f"expected GraphModule, got {type(sg_mod)}")
+    return any(
+        n.op == "call_function" and n.target in _SYNC_OPS for n in sg_mod.graph.nodes
+    )
+
+
+def _build_see_through_map(cd_node: fx.Node) -> dict[int, fx.Node]:
+    """Build a mapping from getitem indices to underlying dep nodes.
+
+    For a control_deps(additional_deps, subgraph, *deps), getitem index k
+    (k >= 1) corresponds to deps[k-1] which is args[k+1].
+    """
+    deps = cd_node.args[2:]
+    return {i + 1: dep for i, dep in enumerate(deps) if isinstance(dep, fx.Node)}
+
+
+def _try_clone_subgraph_filtering_deps(
+    original_sg_mod: fx.GraphModule,
+    valid_dep_indices: list[int],
+) -> tuple[fx.Graph, dict[int, int]] | None:
+    """Clone a control_deps subgraph, keeping only valid-dep placeholders.
+
+    Preserves any call_function nodes (the side-effecting operation) as long
+    as all placeholders they reference are in the valid set.  Returns
+    (new_graph, idx_remap) where idx_remap maps old getitem indices to new
+    ones, or None if the operation uses an invalid dep.
+    """
+    orig_phs = original_sg_mod.graph.find_nodes(op="placeholder")
+    valid_dep_set = OrderedSet(valid_dep_indices)
+    dropped_phs = OrderedSet(
+        [ph for i, ph in enumerate(orig_phs) if i not in valid_dep_set]
+    )
+
+    for n in original_sg_mod.graph.nodes:
+        if n.op == "call_function":
+            if any(inp in dropped_phs for inp in n.all_input_nodes):
+                return None
+
+    sg = fx.Graph()
+    sg_env: dict[fx.Node, fx.Node] = {}
+    for n in original_sg_mod.graph.nodes:
+        if n.op == "output" or n in dropped_phs:
+            continue
+        sg_env[n] = sg.node_copy(n, lambda x, _env=sg_env: _env[x])
+
+    orig_out_arg = original_sg_mod.graph.output_node().args[0]
+    if isinstance(orig_out_arg, tuple):
+        sg.output(
+            tuple(
+                sg_env[item] if isinstance(item, fx.Node) else item
+                for item in orig_out_arg
+                if not isinstance(item, fx.Node) or item in sg_env
+            )
+        )
+    elif isinstance(orig_out_arg, fx.Node) and orig_out_arg in sg_env:
+        sg.output(sg_env[orig_out_arg])
+    else:
+        sg.output(orig_out_arg)
+
+    preserved_op = any(n.op == "call_function" for n in sg.nodes)
+    idx_remap: dict[int, int] = {
+        old_i + 1: new_j + 1 for new_j, old_i in enumerate(valid_dep_indices)
+    }
+    if preserved_op:
+        idx_remap[0] = 0
+    return sg, idx_remap
+
+
+def _rebuild_control_deps_for_extract(
+    node: fx.Node,
+    env: dict[fx.Node, Any],
+    new_graph: fx.Graph,
+) -> tuple[fx.Node, dict[int, int]] | None:
+    """Rebuild a control_deps node with only valid deps for graph extraction.
+
+    When a control_deps node mixes valid (forward) and invalid (backward) args,
+    this creates a new control_deps in new_graph with only the valid deps and a
+    matching subgraph.  Returns (new_node, idx_remap) where idx_remap maps old
+    getitem indices to new getitem indices, or None if no valid deps remain.
+
+    additional_deps (args[0]) and deps (args[2:]) are filtered independently --
+    additional_deps are ordering-only constraints and may reference nodes that
+    are not in the deps set.
+    """
+    deps = node.args[2:]
+    valid_dep_indices = [
+        i
+        for i, dep in enumerate(deps)
+        if isinstance(dep, fx.Node) and not isinstance(env.get(dep), InvalidNodeBase)
+    ]
+    if not valid_dep_indices:
+        return None
+
+    # pyrefly: ignore [bad-index]
+    new_deps = tuple(env[deps[i]] for i in valid_dep_indices)
+
+    additional_deps = node.args[0]
+    if not isinstance(additional_deps, (tuple, list)):
+        raise AssertionError(
+            f"expected tuple/list additional_deps, got {type(additional_deps)}"
+        )
+    valid_additional_deps = tuple(
+        env[d]
+        for d in additional_deps
+        if isinstance(d, fx.Node) and not isinstance(env.get(d), InvalidNodeBase)
+    )
+
+    owning_mod = node.graph.owning_module
+    if owning_mod is None:
+        raise AssertionError("expected graph to have an owning_module")
+
+    sg_node = node.args[1]
+    if not (
+        isinstance(sg_node, fx.Node)
+        and sg_node.op == "get_attr"
+        and isinstance(sg_node.target, str)
+    ):
+        raise AssertionError(f"expected get_attr subgraph node, got {sg_node}")
+    original_sg_mod = getattr(owning_mod, sg_node.target)
+    if not isinstance(original_sg_mod, fx.GraphModule):
+        raise AssertionError(f"expected GraphModule, got {type(original_sg_mod)}")
+
+    result = _try_clone_subgraph_filtering_deps(original_sg_mod, valid_dep_indices)
+    if result is not None:
+        sg, idx_remap = result
+    else:
+        sg = fx.Graph()
+        sg_placeholders = [sg.placeholder(f"dep_{i}") for i in range(len(new_deps))]
+        sg.output((None, *sg_placeholders))
+        idx_remap = {
+            old_i + 1: new_j + 1 for new_j, old_i in enumerate(valid_dep_indices)
+        }
+
+    sg_name = get_subgraph_name(owning_mod, "cd_extract")
+    setattr(owning_mod, sg_name, fx.GraphModule(torch.nn.Module(), sg))
+    new_sg_node = new_graph.get_attr(sg_name)
+
+    new_cd = new_graph.create_node(
+        "call_function",
+        control_deps_hop,
+        args=(valid_additional_deps, new_sg_node, *new_deps),
+        name=node.name,
+    )
+    new_cd.meta = node.meta.copy()
+    if "val" in node.meta and isinstance(node.meta["val"], tuple):
+        orig_val = node.meta["val"]
+        new_cd.meta["val"] = (orig_val[0],) + tuple(
+            orig_val[i + 1] for i in valid_dep_indices if i + 1 < len(orig_val)
+        )
+
+    return new_cd, idx_remap
+
+
 def _extract_graph_with_inputs_outputs(
     joint_graph: fx.Graph,
     inputs: list[fx.Node],
@@ -311,6 +531,15 @@ def _extract_graph_with_inputs_outputs(
     """
     new_graph = fx.Graph()
     env: dict[fx.Node, fx.Node] = {}
+    # For control_deps nodes with mixed valid/invalid args, we create a new
+    # control_deps with only the valid deps.  This dict maps the original
+    # control_deps node to a {old_getitem_idx: new_getitem_idx} remapping so
+    # downstream getitem nodes can be rewritten to the correct indices.
+    _control_deps_idx_remap: dict[fx.Node, dict[int, int]] = {}
+    # For forward sync control_deps eliminated during backward extraction,
+    # maps the control_deps node to {getitem_idx: joint_graph_dep_node}.
+    # Getitems resolve directly to env[dep_node], bypassing the control_deps.
+    _control_deps_see_through: dict[fx.Node, dict[int, fx.Node]] = {}
 
     # Add new placeholder nodes in the order specified by the inputs
     for node in inputs:
@@ -346,6 +575,37 @@ def _extract_graph_with_inputs_outputs(
         elif node.op == "placeholder":
             env[node] = InvalidNode  # type: ignore[assignment]
         elif node.op == "call_function":
+            if (
+                node.target is operator.getitem
+                and node.args[0] in _control_deps_see_through
+            ):
+                dep_map = _control_deps_see_through[node.args[0]]
+                idx = node.args[1]
+                if idx in dep_map:
+                    env[node] = env[dep_map[idx]]
+                else:
+                    env[node] = InvalidNode  # type: ignore[assignment]
+                continue
+            if (
+                node.target is operator.getitem
+                and node.args[0] in _control_deps_idx_remap
+            ):
+                idx_map = _control_deps_idx_remap[node.args[0]]
+                idx = node.args[1]
+                if idx in idx_map:
+                    new_idx = idx_map[idx]
+                    new_getitem = new_graph.create_node(
+                        "call_function",
+                        operator.getitem,
+                        args=(env[node.args[0]], new_idx),
+                        name=node.name,
+                    )
+                    new_getitem.meta = node.meta
+                    env[node] = new_getitem
+                else:
+                    env[node] = InvalidNode  # type: ignore[assignment]
+                continue
+
             all_args = pytree.arg_tree_leaves(*node.args, **node.kwargs)
             all_args = [
                 isinstance(env[x], InvalidNodeBase)
@@ -353,6 +613,43 @@ def _extract_graph_with_inputs_outputs(
                 if isinstance(x, fx.Node)
             ]
             if any(all_args):
+                if node.target is control_deps_hop:
+                    # During backward extraction, eliminate forward sync
+                    # control_deps entirely -- their subgraphs reference
+                    # forward-only runtime state (streams/events) that is
+                    # dead at backward time.  Getitems are resolved directly
+                    # to the underlying deps via _control_deps_see_through.
+                    if (
+                        subgraph == "backward"
+                        and not (
+                            _has_tag_is_backward(node)
+                            or _has_tag_must_be_in_backward(node)
+                        )
+                        and _control_deps_has_sync_op(node)
+                    ):
+                        _control_deps_see_through[node] = _build_see_through_map(node)
+                        env[node] = InvalidNode  # type: ignore[assignment]
+                        continue
+                    new_cd_node = _rebuild_control_deps_for_extract(
+                        node, env, new_graph
+                    )
+                    if new_cd_node is not None:
+                        env[node] = new_cd_node[0]
+                        _control_deps_idx_remap[node] = new_cd_node[1]
+                        continue
+                env[node] = InvalidNode  # type: ignore[assignment]
+                continue
+            # During backward extraction, eliminate forward sync control_deps
+            # entirely.  See above for rationale.
+            if (
+                node.target is control_deps_hop
+                and subgraph == "backward"
+                and not (
+                    _has_tag_is_backward(node) or _has_tag_must_be_in_backward(node)
+                )
+                and _control_deps_has_sync_op(node)
+            ):
+                _control_deps_see_through[node] = _build_see_through_map(node)
                 env[node] = InvalidNode  # type: ignore[assignment]
                 continue
             # pyrefly: ignore [unsupported-operation, bad-argument-type]
@@ -458,6 +755,46 @@ def _must_be_in_backward(node: fx.Node) -> bool:
         and node.target._schema.is_mutable
     )
     return _has_tag_is_backward(node) and is_mutable
+
+
+def _iter_input_exprs_without_replacements(val: Any) -> Iterator[sympy.Basic]:
+    # Keep this traversal in sync with symbolic_shapes._iterate_exprs.
+    if isinstance(val, py_sym_types):
+        if is_symbolic(val):
+            yield _get_placeholder_expr(val.node)
+    elif isinstance(val, SymNode):
+        yield _get_placeholder_expr(val)
+    elif isinstance(val, sympy.Basic):
+        yield val
+    elif isinstance(val, (int, float, bool, str)):
+        pass
+    elif isinstance(val, (tuple, list)):
+        for s in val:
+            yield from _iter_input_exprs_without_replacements(s)
+    elif isinstance(val, dict):
+        for s in itertools.chain(val.keys(), val.values()):
+            yield from _iter_input_exprs_without_replacements(s)
+    elif is_sparse_any(val):
+        yield from _iter_input_exprs_without_replacements(val.size())
+    elif isinstance(val, torch.Tensor):
+        yield from _iter_input_exprs_without_replacements(val.size())
+        yield from _iter_input_exprs_without_replacements(val.stride())
+        yield from _iter_input_exprs_without_replacements(val.storage_offset())
+    elif val is None:
+        pass
+    elif isinstance(val, torch.Generator) or is_opaque_value(val):
+        pass
+    elif isinstance(val, FakeScriptObject):
+        pass
+    else:
+        raise AssertionError(f"cannot extract sympy expressions from {val} {type(val)}")
+
+
+def _free_symbols_without_replacements(val: Any) -> OrderedSet[sympy.Symbol]:
+    symbols: OrderedSet[sympy.Symbol] = OrderedSet()
+    for expr in _iter_input_exprs_without_replacements(val):
+        symbols.update(expr.free_symbols)
+    return symbols
 
 
 def _extract_fwd_bwd_outputs(
@@ -992,7 +1329,7 @@ def enable_activation_quantization(
                 continue
             node.meta["saved_for_quantization"] = True
             node.meta["dequant_type"] = node.meta["val"].dtype
-            # some of the fwd outputs and bwd inputs are not share the same object
+            # some of the fwd outputs and bwd inputs do not share the same object
             bwd_module_inputs[node.name].meta["saved_for_quantization"] = True
             bwd_module_inputs[node.name].meta["dequant_type"] = node.meta["val"].dtype
             should_perform_fp8_quant = True
@@ -1033,6 +1370,24 @@ def _extract_fwd_bwd_modules(
     )
     placeholders = joint_module.graph.find_nodes(op="placeholder")
     primal_inputs = [*filter(_is_primal, placeholders)]
+    # Stamp is_static_input on primal placeholders for the backward
+    # compiler; see Note: [static_input_idxs semantics] in
+    # torch/_inductor/compile_fx.py. This must happen here, while primals
+    # are still 1:1 with flat forward inputs, because staticness is tracked
+    # positionally (static_lifetime_input_nodes derives from
+    # fw_metadata.static_input_indices) and the backward graph's input
+    # ordering destroys that correspondence. The meta dict is shared by
+    # reference with the extracted fwd/bwd placeholder nodes
+    # (_extract_graph_with_inputs_outputs), so the stamp is visible on
+    # bw_module's placeholders regardless of how saving reorders them.
+    #
+    # TODO: staticness arguably belongs on the AOTInput descriptors
+    # (meta["desc"]); today those cannot express it (the dynamo frontend
+    # emits PlainAOTInput even for lifted params, and mark_static_address
+    # lives on the tensor object), so we use a dedicated meta key.
+    if static_lifetime_input_nodes is not None:
+        for node in primal_inputs:
+            node.meta["is_static_input"] = node in static_lifetime_input_nodes
     tangent_inputs = (
         [] if omit_aot_autograd_runtime else [*filter(_is_tangent, placeholders)]
     )
@@ -1069,7 +1424,11 @@ def _extract_fwd_bwd_modules(
         # then the collective will generally by followed by a wait_tensor() call.
         # we need to peek one node further to see if this wait_tensor is dead as well.
         elif distributed_enabled and all(
-            n.target is torch.ops._c10d_functional.wait_tensor.default
+            n.target
+            in (
+                torch.ops._c10d_functional.wait_tensor.default,
+                torch.ops._c10d_functional.wait_tensors.default,
+            )
             and len(n.users) == 0
             for n in node.users
         ):
@@ -1106,7 +1465,17 @@ def _extract_fwd_bwd_modules(
     for node in itertools.chain(saved_sym_nodes_derived, saved_values, tangent_inputs):
         if "val" not in node.meta:
             continue
-        new_symbols = free_symbols(node.meta["val"]) - saved_symbols
+        # Bind both the unreplaced symbols (needed by runtime assertions, which
+        # preserve raw placeholder expressions -- see #155468) and the replaced
+        # symbols (needed by sizevar codegen and FxGraphCache guards, which use
+        # ShapeEnv replacements). Binding only one side can leave the other's
+        # symbols undefined in the backward: e.g. an offsets size that is a
+        # symbol replaced to `s + 1` leaves the base symbol `s` unbound, which
+        # surfaces as a KeyError during backward FxGraphCache guard evaluation.
+        new_symbols = (
+            _free_symbols_without_replacements(node.meta["val"])
+            | free_symbols(node.meta["val"])
+        ) - saved_symbols
         # NB: Deterministic order please!
         for s in sorted(new_symbols, key=lambda s: s.name):
             # NB: For well formed graphs, the symbol should always be present,
@@ -1354,7 +1723,11 @@ def default_partition(
             )
             and (
                 not distributed_enabled
-                or node.target is not torch.ops._c10d_functional.wait_tensor.default
+                or node.target
+                not in (
+                    torch.ops._c10d_functional.wait_tensor.default,
+                    torch.ops._c10d_functional.wait_tensors.default,
+                )
             )
         )
 
@@ -1552,8 +1925,7 @@ def pointwise_ops() -> list[torch._ops.OpOverloadPacket]:
         if not isinstance(opoverloadpacket, torch._ops.OpOverloadPacket):
             continue
 
-        for overload in opoverloadpacket.overloads():
-            op_overload = getattr(opoverloadpacket, overload)
+        for op_overload in opoverloadpacket.op_overloads():
             if torch.Tag.pointwise in op_overload.tags:
                 # currently aot autograd uses packet not overload
                 ops.append(opoverloadpacket)
@@ -1679,9 +2051,6 @@ def apply_graphsafe_rng_functionalization(
     - We save the forward RNG state
     - We update the backward Generator's state before executing backward
 
-    Before each CUDA Graph replay, replay_prologue updates captured RNG pointers with current states, ensuring backward Generator
-    changes are reflected during replay.
-
     This function modifies both forward and backward computation graphs by:
 
     Creating RNG state placeholders for both passes
@@ -1773,11 +2142,7 @@ def functionalize_rng_ops(
     def get_rng_ops(gmod: fx.GraphModule) -> dict[str, fx.Node]:
         random_nodes: dict[str, fx.Node] = {}
         for node in gmod.graph.nodes:
-            if (
-                node.op == "call_function"
-                and hasattr(node.target, "tags")
-                and torch.Tag.nondeterministic_seeded in node.target.tags
-            ):
+            if node.op == "call_function" and is_rng_op(node):
                 random_nodes[node.name] = node
         return random_nodes
 
@@ -1816,11 +2181,7 @@ def functionalize_rng_ops(
     bw_graph_rng_ops = get_rng_ops(bw_module)
     recomputable_rng_ops_map = {}
     for node in joint_module.graph.nodes:
-        if (
-            must_recompute(node)
-            and hasattr(node.target, "tags")
-            and torch.Tag.nondeterministic_seeded in node.target.tags
-        ):
+        if must_recompute(node) and is_rng_op(node):
             # Skip if the node doesn't exist in both forward and backward graphs.
             # This can happen when the RNG op's output is not needed for gradient
             # computation and gets eliminated by dead code elimination.
@@ -1977,13 +2338,23 @@ def force_save_collectives(joint_module: fx.GraphModule) -> None:
     unless they come from a user-annotated AC region.
     See Note [Recomputing collectives in the partitioner]
     """
+
+    def mark_leaf_tensor_outputs(node: fx.Node) -> None:
+        getitem_users = [user for user in node.users if user.target is operator.getitem]
+        if getitem_users:
+            for user in getitem_users:
+                mark_leaf_tensor_outputs(user)
+            return
+        if not isinstance(node.meta.get("val"), (tuple, list)):
+            node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+
     for node in joint_module.graph.nodes:
         if (
             isinstance(node.target, torch._ops.OpOverload)
             and node.target.namespace == "_c10d_functional"
             and not must_recompute(node)
         ):
-            node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+            mark_leaf_tensor_outputs(node)
 
 
 def force_save_effectful_ops(joint_module: fx.GraphModule) -> None:
@@ -2918,6 +3289,7 @@ def get_default_op_list() -> OpTypes:
     default_recomputable_ops += [
         prims.div,
         prims.convert_element_type,
+        prims.prepare_softmax_online,
         aten.clone,
         aten._to_copy,
         aten.full_like,
@@ -3052,12 +3424,10 @@ from torch.utils._mode_utils import no_dispatch
 
 # replace symbols in size and strides with their hints without guarding.
 def _remove_symbols_without_guarding(x: torch.Tensor, fallback: int) -> torch.Tensor:
-    shape = list(x.shape)
-
     def realize_symbol(d: torch.SymInt | int) -> int:
         return optimization_hint(d, fallback=fallback)
 
-    shape = [realize_symbol(s) for s in shape]
+    shape = [realize_symbol(s) for s in x.shape]
     stride = [realize_symbol(s) for s in x.stride()]
     return x.new_empty_strided(shape, stride=stride)
 
@@ -3226,7 +3596,9 @@ def choose_saved_values_set(
         recomputable_banned_nodes, key=_size_of, reverse=True
     )
     if len(all_recomputable_banned_nodes) == 0:
-        return node_info.inputs + must_save_nodes
+        # Nothing left for the knapsack to trade off, so this is the same cut the
+        # knapsack would return with an empty dont_ban.
+        return aggressive_recomputation_saved_values
     memories_banned_nodes = [
         get_normalized_size(_size_of(i)) for i in all_recomputable_banned_nodes
     ]
@@ -3370,6 +3742,24 @@ def choose_saved_values_set(
     )[0]
 
 
+def _stable_target_str(target: Any) -> str:
+    """Stringify a node target stably across processes.
+
+    ``str()`` on a plain Python-function target (e.g. ``torch.sym_not``) renders
+    its ``repr`` including the object's memory address (``<function sym_not at
+    0x...>``), which differs per process. That poisons cross-rank graph hashing.
+    Use FX's qualified name for callables so equal graphs hash equally.
+    """
+    from torch.fx.node import _get_qualified_name
+
+    if callable(target):
+        try:
+            return _get_qualified_name(target)
+        except Exception:
+            return str(target)
+    return str(target)
+
+
 def _cone_hashes(graph: torch.fx.Graph) -> dict[torch.fx.Node, str]:
     """Compute a forward-looking structural hash for each node.
 
@@ -3399,7 +3789,7 @@ def _cone_hashes(graph: torch.fx.Graph) -> dict[torch.fx.Node, str]:
         elif node.op == "output":
             self_key = ("output",)
         else:
-            self_key = (node.op, str(node.target))
+            self_key = (node.op, _stable_target_str(node.target))
 
         user_hashes = tuple(sorted(hashes[u] for u in node.users))
         hashes[node] = hashlib.sha256(
@@ -3449,7 +3839,7 @@ def _canonical_node_names(graph: torch.fx.Graph) -> dict[torch.fx.Node, str]:
             return (3,)
         else:
             input_indices = tuple(canonical_idx[n] for n in node.all_input_nodes)
-            return (2, str(node.target), input_indices)
+            return (2, _stable_target_str(node.target), input_indices)
 
     # Seed the heap with nodes that have no dependencies.
     # The counter ensures deterministic ordering when keys are equal.
@@ -3480,6 +3870,7 @@ def _sync_decision_cross_ranks(
     joint_graph: torch.fx.Graph, saved_values: list[torch.fx.Node]
 ) -> list[torch.fx.Node]:
     # use the same policy across different GPUs
+    from torch._dynamo.distributed import get_compile_sync_pg
     from torch._subclasses.fake_tensor import unset_fake_temporarily
 
     def has_collectives(joint_graph: torch.fx.Graph) -> bool:
@@ -3498,6 +3889,11 @@ def _sync_decision_cross_ranks(
     ):
         return saved_values
 
+    pg = get_compile_sync_pg()
+    if pg is None:
+        raise AssertionError("Compile sync process group must be available here")
+    coll_device = torch.distributed.distributed_c10d._get_object_coll_device(pg)
+
     canonical = _canonical_node_names(joint_graph)
     reverse_canonical = {v: k for k, v in canonical.items()}
 
@@ -3511,28 +3907,34 @@ def _sync_decision_cross_ranks(
             # ranks. Use only the canonical name and op for these.
             if n.op == "placeholder":
                 return f"{canonical[n]}:{n.op}"
-            return f"{canonical[n]}:{n.op}:{n.target}"
+            return f"{canonical[n]}:{n.op}:{_stable_target_str(n.target)}"
 
         node_str = "/".join(
             _node_hash_str(n)
             for n in sorted(joint_graph.nodes, key=lambda n: canonical[n])
         )
         inputs = hashlib.sha256(node_str.encode("utf-8")).hexdigest()
-        all_inputs = [None for _ in range(torch.distributed.get_world_size())]
+        all_inputs = [None for _ in range(pg.size())]
         with no_dispatch(), unset_fake_temporarily():
-            # TODO: maybe use a different process group?
-            torch.distributed.all_gather_object(all_inputs, inputs)
-        return all(all_inputs[0] == x for x in all_inputs)
+            torch.distributed.all_gather_object(all_inputs, inputs, group=pg)
+            for rank, x in enumerate(all_inputs):
+                if all_inputs[0] != x:
+                    log.debug(
+                        "Skipping sync decision cross rank due to different inputs between rank 0 and rank %s",
+                        rank,
+                    )
+                    return False
+        return True
 
     if has_same_nodes(joint_graph):
         with no_dispatch(), unset_fake_temporarily():
             # Communicate saved values using canonical names so that
             # node names (which may differ across ranks) don't matter.
             objects = [[canonical[x] for x in saved_values]]
-            saved_ops_names_all_ranks: list[list[str]] = [
-                [] for _ in range(torch.distributed.get_world_size())
-            ]
-            torch.distributed.all_gather_object(saved_ops_names_all_ranks, objects[0])
+            saved_ops_names_all_ranks: list[list[str]] = [[] for _ in range(pg.size())]
+            torch.distributed.all_gather_object(
+                saved_ops_names_all_ranks, objects[0], group=pg
+            )
             saved_sizes: list[int] = []
             saved_ops_with_sizes: dict[str, int] = {}
 
@@ -3544,17 +3946,16 @@ def _sync_decision_cross_ranks(
                 for node in saved_nodes:
                     size_of_node = _size_of(node)
                     saved_size += size_of_node
-                    if idx == torch.distributed.get_rank():
+                    if idx == pg.rank():
                         saved_ops_with_sizes[node.name] = size_of_node
                 saved_ops_with_sizes["total size"] = saved_size
                 saved_sizes.append(saved_size)
 
-            saved_sizes_tensor = torch.tensor(
-                saved_sizes,
-                device=torch.distributed.distributed_c10d._get_object_coll_device(),
-            )
+            saved_sizes_tensor = torch.tensor(saved_sizes, device=coll_device)
             torch.distributed.all_reduce(
-                saved_sizes_tensor, op=torch.distributed.distributed_c10d.ReduceOp.MAX
+                saved_sizes_tensor,
+                op=torch.distributed.distributed_c10d.ReduceOp.MAX,
+                group=pg,
             )
 
             picked_rank_idx = int(torch.argmin(saved_sizes_tensor).item())
@@ -3671,7 +4072,28 @@ def classify_nodes(
             required_bw_nodes.add(node)
 
         if node in required_bw_nodes:
-            required_bw_nodes.update(node.users)
+            if node.op == "call_function" and node.target is control_deps_hop:
+                # control_deps mixes forward and backward deps.  Only
+                # propagate required_bw to getitem users that extract a
+                # backward-only dep.  getitem(cd, k) with k>=1 maps to
+                # deps[k-1] (args[k+1]).
+                deps = node.args[2:]
+                for user in node.users:
+                    if (
+                        user.target is operator.getitem
+                        and isinstance(user.args[1], int)
+                        and 1 <= user.args[1] <= len(deps)
+                    ):
+                        dep = deps[user.args[1] - 1]
+                        if isinstance(dep, fx.Node) and dep in required_bw_nodes:
+                            required_bw_nodes.add(user)
+                    else:
+                        # Chained control_deps (e.g. wait/sync cd depends on
+                        # the record's cd via additional_deps) -- taint
+                        # conservatively.
+                        required_bw_nodes.add(user)
+            else:
+                required_bw_nodes.update(node.users)
 
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
     fwd_seed_offset_inputs = list(filter(_is_fwd_seed_offset, joint_module.graph.nodes))
@@ -3695,7 +4117,7 @@ def classify_nodes(
     required_fw_nodes: OrderedSet[fx.Node] = OrderedSet(
         name_to_node[node.name]
         for node in forward_only_graph.nodes
-        if node.op != "output"
+        if node.op != "output" and node.name in name_to_node
     )
     unclaimed_nodes: OrderedSet[fx.Node] = OrderedSet(
         node
@@ -3763,7 +4185,30 @@ def min_cut_rematerialization_partition(
 
     #  add the CSE pass
     if config.cse:
-        cse_graph = fx_graph_cse(fx_g)
+        # CSE runs before partitioning, so do not merge a forward-only value
+        # with a value that is also needed by the backward graph. Otherwise the
+        # partitioner may save the merged value as an extra forward output.
+        _, bwd_outputs, _, _ = _extract_fwd_bwd_outputs(
+            joint_module, num_fwd_outputs=num_fwd_outputs
+        )
+        backward_dependencies: OrderedSet[fx.Node] = OrderedSet()
+
+        backward_dependency_stack = [
+            output
+            for output in bwd_outputs
+            if output is not None and output.op != "output"
+        ]
+        while backward_dependency_stack:
+            node = backward_dependency_stack.pop()
+            if node in backward_dependencies:
+                continue
+            backward_dependencies.add(node)
+            backward_dependency_stack.extend(node.all_input_nodes)
+
+        def partition_key(node: fx.Node) -> bool:
+            return node in backward_dependencies
+
+        cse_graph = fx_graph_cse(fx_g, extra_node_key=partition_key)
         joint_module.graph = cse_graph
     joint_graph = joint_module.graph
 

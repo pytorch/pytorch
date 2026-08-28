@@ -3,6 +3,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/core/List.h>
+#include <ATen/Config.h>
 #include <ATen/Context.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/mps/MPSDevice.h>
@@ -15,7 +16,6 @@
 #include <c10/util/irange.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
-#include <ATen/Config.h>
 #if AT_MKLDNN_ENABLED()
 #include <ATen/native/mkldnn/Utils.h>
 #endif
@@ -87,6 +87,12 @@ bool use_mkldnn(const Tensor& input, TensorList params, TensorList hx) {
   if (!at::globalContext().userEnabledMkldnn()) {
     return false;
   }
+  // XPU: oneDNN LSTM for inference (GPU primitive supports f32 and f16)
+  if (input.is_xpu()) {
+    return !at::GradMode::is_enabled() &&
+        (input.scalar_type() == kFloat || input.scalar_type() == kHalf) &&
+        input.numel() != 0;
+  }
   auto is_cpu_backend = [&](const TensorList tensors) {
     bool backend_cpu = true;
     for (const auto& t : tensors) {
@@ -105,6 +111,8 @@ bool use_mkldnn(const Tensor& input, TensorList params, TensorList hx) {
         mkldnn_fp16_device_check())) &&
       input.numel() != 0;
 #else
+  (void)params;
+  (void)hx;
   return false;
 #endif
 }
@@ -1542,6 +1550,29 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
     }
   }
 
+  // If packed sequence has uniform batch size, unwrap to regular tensor
+  // and dispatch to the standard lstm (enables oneDNN path for CPU/XPU)
+  if (!has_projections && use_mkldnn(data, _params, hx) && batch_sizes.size(0) > 0) {
+    const int64_t* bs_ptr = batch_sizes.const_data_ptr<int64_t>();
+    int64_t first_batch = bs_ptr[0];
+    bool uniform = true;
+    for (int64_t i = 1; i < batch_sizes.size(0); i++) {
+      if (bs_ptr[i] != first_batch) {
+        uniform = false;
+        break;
+      }
+    }
+    if (uniform) {
+      int64_t seq_len = batch_sizes.size(0);
+      auto input_3d = data.reshape({seq_len, first_batch, data.size(-1)});
+      auto result = at::native::lstm(input_3d, hx, _params, has_biases,
+          num_layers, dropout_p, train, bidirectional, /*batch_first=*/false);
+      std::get<0>(result) = std::get<0>(result).reshape(
+          {seq_len * first_batch, std::get<0>(result).size(-1)});
+      return result;
+    }
+  }
+
   PackedSequence input { data, batch_sizes };
   auto params = gather_params(_params, has_biases, has_projections);
   auto result = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
@@ -1933,7 +1964,7 @@ auto cell_params_base_registry =
             [](CellParamsSerializationType state)
                 -> c10::intrusive_ptr<CellParamsBase> {
               std::string type = std::get<0>(state);
-              TORCH_INTERNAL_ASSERT(cell_params_deserializers.count(type));
+              TORCH_INTERNAL_ASSERT(cell_params_deserializers.contains(type));
               return cell_params_deserializers[type](std::move(state));
             });
 

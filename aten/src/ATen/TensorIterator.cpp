@@ -10,13 +10,13 @@
 #include <ATen/native/TypeProperties.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/native/Resize.h>
-#include <ATen/TensorOperators.h>
 #include <ATen/TensorIteratorInternal.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
 #include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
 #include <ATen/ops/empty_strided.h>
 #endif
 
@@ -24,7 +24,6 @@
 #include <c10/util/SmallBuffer.h>
 
 #include <array>
-#include <algorithm>
 #include <cmath>
 
 namespace at {
@@ -1491,13 +1490,14 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
 
   if (is_meta_) return;
 
-  auto has_storage = true;
-  for (auto& op : operands_) {
-    has_storage &= op.tensor_base().has_storage();
+  bool privateuse1_without_storage = false;
+  if (common_device_.type() == DeviceType::PrivateUse1) {
+    bool has_storage = true;
+    for (auto& op : operands_) {
+      has_storage &= op.tensor_base().has_storage();
+    }
+    privateuse1_without_storage = !has_storage;
   }
-  auto privateuse1_without_storage =
-     common_device_.type() == DeviceType::PrivateUse1 &&
-     !has_storage;
 
   // XLA and lazy tensors don't have storage, so they don't have an underlying data pointer.
   // Nothing beyond this point is important for meta functions, so it's fine to exit early here.
@@ -1524,7 +1524,7 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
   // So index translations in reduction can access
   // a valid value for the offset
   int64_t ndim_offsets = (ndim() ? ndim() : 1);
-  view_offsets_ = DimVector(ndim_offsets, 0);
+  view_offsets_.assign(ndim_offsets, 0);
 }
 
 // This is the structured kernels' implementation of set_output.  It is
