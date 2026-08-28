@@ -674,11 +674,12 @@ class AMaxOps:
         #
         # Spelled out rather than `max(a, b)` because the two are not interchangeable here: a
         # FURB136 autofix rewrote one such ternary over Int32 bounds in tile.py into the builtin
-        # and changed the emitted bits (a bitwise test caught it), so every min/max ternary in
-        # the datapath carries the noqa. AbsMaxOps below does use builtin max, and it is
-        # verified equal to vector_norm(ord=inf) including NaN rows
-        # (test_absmax_absmin_propagate_nan) -- pinned by test rather than by argument, because
-        # what the builtin lowers to over these accumulators is not evident from the source.
+        # and changed the emitted bits, which a bitwise test caught. (FURB136 does not match this
+        # compound form, so no noqa is needed on it; the plain `a if a > b else b` shapes in the
+        # datapath do carry one.) AbsMaxOps below does use builtin max, and it agrees with
+        # vector_norm(ord=inf) including NaN rows -- pinned by a test that lands with the row
+        # kernel rather than by argument, because what the builtin lowers to over these
+        # accumulators is not evident from the source.
         return b if ((b > a) or (b != b)) else a
 
     @cute.jit
