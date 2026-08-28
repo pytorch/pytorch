@@ -28,20 +28,66 @@ std::string get_cuda_error_help(cudaError_t error) noexcept {
   return help_text;
 }
 
-// NOLINTNEXTLINE(bugprone-exception-escape,-warnings-as-errors)
-const char* get_cuda_check_suffix() noexcept {
+namespace {
+
+const char* get_cuda_blocking_message() noexcept {
+  static const char* default_message =
+      "\nCUDA kernel errors might be asynchronously reported at some"
+      " other API call, so the stacktrace below might be incorrect."
+      "\nFor debugging consider passing CUDA_LAUNCH_BLOCKING=1";
+#ifndef USE_ROCM
   static auto device_blocking_flag =
       c10::utils::check_env("CUDA_LAUNCH_BLOCKING");
-  static bool blocking_enabled =
-      (device_blocking_flag.has_value() && device_blocking_flag.value());
-  if (blocking_enabled) {
+  if (device_blocking_flag.value_or(false)) {
     return "";
   } else {
-    return "\nCUDA kernel errors might be asynchronously reported at some"
-           " other API call, so the stacktrace below might be incorrect."
-           "\nFor debugging consider passing CUDA_LAUNCH_BLOCKING=1";
+    return default_message;
   }
+#else
+  static auto device_blocking_flag =
+      c10::utils::get_env("AMD_SERIALIZE_KERNEL");
+  static auto effective_flag = device_blocking_flag.value_or("0");
+  static std::string rocm_message;
+  static const char* rocm_suffix = [&]() -> const char* {
+    if (effective_flag == "0") {
+      return default_message;
+    }
+    if (effective_flag == "3") {
+      return "";
+    }
+    // Both remaining cases build a dynamic message. Guard the allocating path
+    // so an out-of-memory exception cannot escape the noexcept callers.
+    try {
+      if (effective_flag == "1" || effective_flag == "2") {
+        rocm_message = "\nAMD_SERIALIZE_KERNEL=";
+        rocm_message += effective_flag;
+        rocm_message += " only serializes one side of each kernel launch.";
+      } else {
+        rocm_message = "\nUnsupported AMD_SERIALIZE_KERNEL value ";
+        rocm_message += effective_flag;
+        rocm_message += ".";
+      }
+      // default_message advises CUDA_LAUNCH_BLOCKING=1 in this source file;
+      // hipify rewrites that to AMD_SERIALIZE_KERNEL=3 in the generated HIP
+      // build, so appending it restates the async-misattribution caveat and
+      // gives the correct upgrade advice.
+      rocm_message += default_message;
+      return rocm_message.c_str();
+    } catch (...) {
+      return default_message;
+    }
+  }();
+  return rocm_suffix;
+#endif
 }
+
+} // namespace
+
+// NOLINTNEXTLINE(bugprone-exception-escape,-warnings-as-errors)
+const char* get_cuda_check_suffix() noexcept {
+  return get_cuda_blocking_message();
+}
+
 // NOLINTNEXTLINE(bugprone-exception-escape,-warnings-as-errors)
 const char* get_cuda_async_error_suffix(cudaError_t error) noexcept {
   switch (error) {
@@ -53,19 +99,10 @@ const char* get_cuda_async_error_suffix(cudaError_t error) noexcept {
     case cudaErrorMisalignedAddress:
 #endif
     {
-      static auto device_blocking_flag =
-          c10::utils::check_env("CUDA_LAUNCH_BLOCKING");
-      static bool blocking_enabled = device_blocking_flag.value_or(false);
-      if (!blocking_enabled) {
-        return "\nCUDA kernel errors might be asynchronously reported at some"
-               " other API call, so the stacktrace below might be incorrect."
-               "\nFor debugging consider passing CUDA_LAUNCH_BLOCKING=1";
-      }
-      return "";
+      return get_cuda_blocking_message();
     }
     default:
-      return "\nFor more detailed error information, run with"
-             " CUDA_LOG_FILE=stderr";
+      return "";
   }
 }
 
