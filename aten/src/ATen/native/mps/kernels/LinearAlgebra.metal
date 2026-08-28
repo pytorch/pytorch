@@ -1390,7 +1390,7 @@ kernel void factorPanelLU(
 
   T row[R][W];
   const bool vec4 =
-      !::metal::is_same_v<T, float2> && ((N % 4u) == 0) && (nb == W);
+      !is_complex_v<T> && ((N % 4u) == 0) && (nb == W);
 #pragma unroll
   for (short r = 0; r < R; r++) {
     const uint lr = tid + uint(r) * G;
