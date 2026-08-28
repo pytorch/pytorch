@@ -3622,6 +3622,7 @@ class PythonWrapperCodegen(CodeGen):
             size_dtype=None,  # try to infer based on symints
             indices=arg_indices,
             argdefs=[ArgName(x) for x in kernel.arg_names],
+            use_fp64_for_python_float=False,
         )
         device = V.graph.get_current_device_or_throw()
         device_props = DeviceProperties.create(device)

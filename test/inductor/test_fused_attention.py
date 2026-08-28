@@ -17,7 +17,13 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     SM80OrLater,
 )
-from torch.testing._internal.common_utils import IS_LINUX, skipIfXpu, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import (
+    IS_LINUX,
+    isRocmArchAnyOf,
+    MI200_ARCH,
+    skipIfXpu,
+    TEST_WITH_ROCM,
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -169,6 +175,19 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             if TEST_WITH_ROCM and dtype == torch.float:
                 atol = 3e-3
                 rtol = 1e-2
+            if (
+                self.device == GPU_TYPE
+                and dtype == torch.half
+                and isRocmArchAnyOf(MI200_ARCH)
+            ):
+                # MI200 fp16 backward GEMMs use the bf16-intermediate alt
+                # implementation (fp16_on_mi200 in numerical_accuracy.md), so
+                # the eager reference grads are the less accurate side here
+                # (grad rmse vs fp64 gold ~2e-3 vs ~1e-4 for the fused
+                # kernel). Measured max grad diff 3.4e-3 on 1/4096 elements.
+                # The device check keeps this off test_sdpa_rewriter_1_cpu,
+                # which also binds this helper.
+                atol = 5e-3
             self._check_common(dot_prod_attention, dtype=dtype, atol=atol, rtol=rtol)
             self._check_common(
                 checkpoint_wrapper(dot_prod_attention),
@@ -449,6 +468,11 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         )
 
     def _test_sdpa_rewriter_7(self):
+        # MI200: the eager fp16 reference backward uses the bf16-intermediate
+        # alt implementation and is the less accurate side (see
+        # _test_sdpa_rewriter_1); measured max grad diff 2.7e-3.
+        atol = 4e-3 if isRocmArchAnyOf(MI200_ARCH) else 2e-3
+
         def sfdp_pattern_7(query, key, value, training):
             q = query.permute(0, 2, 1, 3)
             k = key.permute(0, 2, 1, 3)
@@ -484,7 +508,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             contains=SM80OrLater,
             has_dropout=True,
             override_check_equal=True,
-            atol=2e-3,
+            atol=atol,
         )
         args = (
             torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
@@ -497,7 +521,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             contains=False,
             has_dropout=True,
             override_check_equal=True,
-            atol=2e-3,
+            atol=atol,
         )
 
         args = (
@@ -511,7 +535,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             contains=SM80OrLater,
             has_dropout=True,
             override_check_equal=True,
-            atol=2e-3,
+            atol=atol,
         )
         args = (
             torch.randn((2, 8, 4, 16), device=GPU_TYPE, dtype=torch.half),
@@ -524,10 +548,15 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             contains=SM80OrLater,
             has_dropout=True,
             override_check_equal=True,
-            atol=2e-3,
+            atol=atol,
         )
 
     def _test_sdpa_rewriter_8(self):
+        # MI200: the eager fp16 reference backward uses the bf16-intermediate
+        # alt implementation and is the less accurate side (see
+        # _test_sdpa_rewriter_1); measured max grad diff 2.7e-3.
+        atol = 4e-3 if isRocmArchAnyOf(MI200_ARCH) else 2e-3
+
         def sfdp_pattern_8(query, key, value):
             q = query.permute(0, 2, 1, 3)
             k = key.permute(0, 2, 1, 3)
@@ -553,20 +582,20 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
             torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
         )
-        self._check_common(sfdp_pattern_8, args, atol=2e-3)
+        self._check_common(sfdp_pattern_8, args, atol=atol)
         args = (
             torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
             torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
             torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
         )
-        self._check_common(sfdp_pattern_8_v2, args, atol=2e-3, contains=False)
+        self._check_common(sfdp_pattern_8_v2, args, atol=atol, contains=False)
 
         args = (
             torch.randn((2, 8, 4, 16), device=GPU_TYPE, dtype=torch.half),
             torch.randn((2, 8, 4, 16), device=GPU_TYPE, dtype=torch.half),
             torch.randn((2, 8, 4, 16), device=GPU_TYPE, dtype=torch.half),
         )
-        self._check_common(checkpoint_wrapper(sfdp_pattern_8), args, atol=2e-3)
+        self._check_common(checkpoint_wrapper(sfdp_pattern_8), args, atol=atol)
         args = (
             torch.randn((2, 8, 4, 16), device=GPU_TYPE, dtype=torch.half),
             torch.randn((2, 8, 4, 16), device=GPU_TYPE, dtype=torch.half),
@@ -575,7 +604,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(
             checkpoint_wrapper(sfdp_pattern_8_v2),
             args,
-            atol=2e-3,
+            atol=atol,
             contains=False,
         )
 
