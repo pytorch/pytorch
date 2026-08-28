@@ -111,6 +111,7 @@ from .loop_body import LoopBody
 from .ops_handler import OpCounterCSE, OpCountResult, ReductionType, StoreMode
 from .runtime.benchmarking import benchmarker
 from .runtime.hints import DeviceProperties, ReductionHint
+from .sizevars import is_range_bound
 from .utils import (
     argsort,
     argsort_sym,
@@ -9482,6 +9483,8 @@ class AssertScalar(ExternKernel):
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         if not config.scalar_asserts:
+            return
+        if config.unsafe_skip_scalar_range_asserts and is_range_bound(self.scalar):
             return
         # NB: It is EXTREMELY important not to simplify the scalar under assertion here,
         # because simplify is done with respect to runtime asserts.  So if you have
