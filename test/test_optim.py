@@ -739,6 +739,35 @@ class TestOptimRenewed(TestCase):
             self.assertTrue(a1_grad_imags.all_popped())
             self.assertTrue(losses.all_popped())
 
+    def test_adam_beta1_zero_skips_exp_avg(self, device):
+        model = torch.nn.Linear(10, 10).to(device)
+        opt = torch.optim.Adam(model.parameters(), betas=(0.0, 0.999), foreach=False)
+        x = torch.randn(4, 10, device=device)
+        model(x).sum().backward()
+        opt.step()
+        for p in model.parameters():
+            state = opt.state[p]
+            self.assertNotIn("exp_avg", state)
+            self.assertIn("exp_avg_sq", state)
+
+    def test_adam_beta1_zero_correctness(self, device):
+        torch.manual_seed(42)
+        model1 = torch.nn.Linear(10, 10).to(device)
+        model2 = torch.nn.Linear(10, 10).to(device)
+        model2.load_state_dict(model1.state_dict())
+        opt1 = torch.optim.Adam(model1.parameters(), lr=0.01, betas=(0.0, 0.999), foreach=False)
+        opt2 = torch.optim.Adam(model2.parameters(), lr=0.01, betas=(1e-30, 0.999), foreach=False)
+        for _ in range(3):
+            x = torch.randn(4, 10, device=device)
+            model1(x).sum().backward()
+            model2(x).sum().backward()
+            opt1.step()
+            opt2.step()
+            opt1.zero_grad()
+            opt2.zero_grad()
+        for p1, p2 in zip(model1.parameters(), model2.parameters()):
+            self.assertTrue(torch.allclose(p1, p2, atol=1e-5))
+
     def test_adamw_serialization(self, device):
         model = torch.nn.Linear(5, 5).to(device)
         optim = torch.optim.AdamW(model.parameters())
