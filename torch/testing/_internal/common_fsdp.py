@@ -1217,7 +1217,7 @@ class FSDPTestMixin:
 
         print(f"dist init r={self.rank}, world={self.world_size}")
         if DEVICE_TYPE != "cpu" and torch.accelerator.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+            sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
 
         # Specify gloo backend to make 'init_process_group()' succeed,
         # Actual tests will be skipped if there are not enough GPUs.
@@ -1560,7 +1560,7 @@ class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
 
         print(f"dist init r={self.rank}, world={self.world_size}")
         if torch.accelerator.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+            sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
 
         # Specify gloo backend to make 'init_process_group()' succeed,
         # Actual tests will be skipped if there are not enough GPUs.
@@ -1632,7 +1632,7 @@ class FSDPTestContinuous(FSDPTestMixin, MultiProcContinuousTest):
         os.environ["TORCH_NCCL_DESYNC_DEBUG"] = "0"
 
         if torch.accelerator.device_count() < world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
+            sys.exit(TEST_SKIPS[f"multi-device-{world_size}"].exit_code)
 
         device_id = rank % DEVICE_COUNT
         if TEST_CUDA or TEST_XPU:
