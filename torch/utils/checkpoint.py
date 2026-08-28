@@ -97,7 +97,9 @@ def check_backward_validity(inputs: Iterable[Any]) -> None:
         )
 
 
-def _get_device_module(device="cuda"):
+def _get_device_module(device=None):
+    if device is None:
+        device = DefaultDeviceType.get_device_type()
     if device == "meta":
         return torch.device("meta")
     device_module = getattr(torch, device)
@@ -158,7 +160,7 @@ def _infer_device_type(*args):
             "devices will be ignored. Consequently, if any checkpointed functions involve randomness, "
             "this may result in incorrect gradients. (Note that if CUDA devices are among the devices "
             "detected, it will be prioritized; otherwise, the first device encountered will be selected.)"
-            f"\nDevice types: {sorted(device_types_set)} first device type: {device_types[0]}", stacklevel=2
+            f"\nDevice types: {list(dict.fromkeys(device_types))} first device type: {device_types[0]}", stacklevel=2
         )
     if len(device_types) == 0:
         return DefaultDeviceType.get_device_type()
@@ -216,7 +218,9 @@ def set_device_states(devices, states, *, device_type=None) -> None:
             device_module.set_rng_state(state)
 
 
-def _get_autocast_kwargs(device_type="cuda"):
+def _get_autocast_kwargs(device_type=None):
+    if device_type is None:
+        device_type = DefaultDeviceType.get_device_type()
     if torch.amp.is_autocast_available(device_type):
         device_autocast_kwargs = {
             "enabled": torch.is_autocast_enabled(device_type),
