@@ -113,7 +113,6 @@ from .base import (
     Method,
     MutationType,
     NO_SUCH_SUBOBJ,
-    ValueMutationExisting,
     ValueMutationNew,
     VariableTracker,
 )
@@ -1644,8 +1643,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # types.MappingProxyType is a read-only proxy of the dict. If the
             # original dict changes, the changes are reflected in proxy as well.
             dict_arg = args[0]
-            if isinstance(dict_arg, variables.UserDefinedDictVariable):
-                dict_arg = dict_arg._base_vt
             if isinstance(dict_arg, ConstDictVariable):
                 return variables.MappingProxyVariable(dict_arg)
         elif SideEffects.cls_supports_mutation_side_effects(self.value) and (
@@ -1779,13 +1776,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     Mostly objects of defined type.  Catch-all for something where we only know the type.
     """
 
-    # VT representing the base built-in type's data for subclassed built-in types
-    # (e.g., ConstDictVariable for dict subclasses, ListVariable for list subclasses).
-    # None for plain user-defined objects that don't subclass a built-in container.
-    _base_vt: VariableTracker | None = None
-
-    # Set of base class methods that can be delegated to _base_vt.
-    # Used to check whether a method is overridden before delegating.
+    # Set of base class methods that can be delegated to super() in user defined
+    # vars. Used to check whether a method is overridden before delegating.
     _base_methods: set[Any] | None = None
 
     _nonvar_fields = {
@@ -1921,6 +1913,24 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return self.value
         return super().guard_as_python_constant()
 
+    def call_base_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        slotdef = self.lookup_slotdefs(name)
+        if slotdef is None:
+            return super(UserDefinedObjectVariable, self).call_method(  # noqa: UP008
+                tx, name, args, kwargs
+            )
+        mro = type(self).__mro__
+        start = mro.index(UserDefinedObjectVariable) + 1
+        owner = next(c for c in mro[start:] if slotdef.impl in c.__dict__)
+        func = getattr(owner, slotdef.impl)
+        return slotdef.wrapper(self, tx, func, args, kwargs)
+
     def nb_bool_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -1962,6 +1972,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslatorBase",
     ) -> VariableTracker:
         # ref: slot_tp_repr in https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10687-L10698
+        if self.inherits_base_slot("__repr__"):
+            return super().tp_repr_impl(tx)
         if type(self.value).__repr__ is object.__repr__:
             return VariableTracker.build(tx, repr(self.value))
         # A C-implemented __repr__ (e.g. `__repr__ = str.upper`) has no Python
@@ -1984,6 +1996,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # ref: https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/typeobject.c#L9475
         if type(self.value).__str__ is object.__str__:
             return generic_repr(tx, self)
+        if self.inherits_base_slot("__str__"):
+            return super().tp_str_impl(tx)
         return self.SLOT0(tx, "__str__")
 
     def nb_index_impl(
@@ -1991,6 +2005,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslatorBase",
     ) -> VariableTracker:
         # CPython: PyNumber_Index checks tp_as_number->nb_index.
+        if self.inherits_base_slot("__index__"):
+            return super().nb_index_impl(tx)
         return self.SLOT0(tx, "__index__")
 
     def nb_int_impl(
@@ -1999,6 +2015,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         # CPython: slot_nb_int calls __int__(), PyNumber_Long validates the return type.
         # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1538-L1550
+        if self.inherits_base_slot("__int__"):
+            return super().nb_int_impl(tx)
         return self.SLOT0(tx, "__int__")
 
     def nb_float_impl(
@@ -2007,6 +2025,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         # CPython: slot_nb_float calls __float__(), PyNumber_Float validates the return type.
         # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1647-L1658
+        if self.inherits_base_slot("__float__"):
+            return super().nb_float_impl(tx)
         return self.SLOT0(tx, "__float__")
 
     def nb_negative_impl(
@@ -2015,6 +2035,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         # CPython: slot_nb_negative calls __neg__() via vectorcall_method.
         # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L9361
+        if self.inherits_base_slot("__neg__"):
+            return super().nb_negative_impl(tx)
         return self.SLOT0(tx, "__neg__")
 
     def nb_positive_impl(
@@ -2023,6 +2045,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         # CPython: slot_nb_positive calls __pos__() via vectorcall_method.
         # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L9361
+        if self.inherits_base_slot("__pos__"):
+            return super().nb_positive_impl(tx)
         return self.SLOT0(tx, "__pos__")
 
     def nb_absolute_impl(
@@ -2031,6 +2055,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         # CPython: slot_nb_absolute calls __abs__() via vectorcall_method.
         # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L9406
+        if self.inherits_base_slot("__abs__"):
+            return super().nb_absolute_impl(tx)
         return self.SLOT0(tx, "__abs__")
 
     def nb_invert_impl(
@@ -2039,6 +2065,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         # CPython: slot_nb_invert calls __invert__() via vectorcall_method.
         # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L9426
+        if self.inherits_base_slot("__invert__"):
+            return super().nb_invert_impl(tx)
         return self.SLOT0(tx, "__invert__")
 
     def torch_function_check(self) -> None:
@@ -2078,6 +2106,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/4833e1cc666375454e4f86aff11b6587968b3333/Objects/typeobject.c#L9337
+        if self.inherits_base_slot("__contains__"):
+            return super().sq_contains_impl(tx, item)
+
         type_attr = self.lookup_class_mro_attr("__contains__")
         if type_attr is NO_SUCH_SUBOBJ:
             raise_type_error(
@@ -2098,10 +2129,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # https://github.com/python/cpython/blob/1ad0eef8ce8ec3db548be89c40fa427494e82814/Objects/typeobject.c#L10517
+        if self.inherits_base_slot("__next__"):
+            return super().tp_iternext_impl(tx)
+
         return self._vectorcall_method(tx, "__next__", [], {})
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # https://github.com/python/cpython/blob/1ad0eef8ce8ec3db548be89c40fa427494e82814/Objects/typeobject.c#L10496
+        if self.inherits_base_slot("__iter__"):
+            return super().tp_iter_impl(tx)
+
         type_attr = self.lookup_class_mro_attr("__iter__")
         if type_attr is None:
             raise_type_error(
@@ -2141,36 +2178,31 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         key: VariableTracker,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/4833e1cc666375454e4f86aff11b6587968b3333/Objects/typeobject.c#L9370
+        if self.inherits_base_slot("__getitem__"):
+            return super().mp_subscript_impl(tx, key)
         return self.SLOT1(tx, "__getitem__", key)
+
+    def inherits_base_slot(self, name: str) -> bool:
+        method = self._maybe_get_baseclass_method(name)
+        return self._base_methods is not None and method in self._base_methods
 
     def sq_repeat_impl(
         self,
         tx: "InstructionTranslatorBase",
         count: VariableTracker,
     ) -> VariableTracker:
-        method = self._maybe_get_baseclass_method("__mul__")
-        if (
-            self._base_vt is not None
-            and self._base_methods is not None
-            and method in self._base_methods
-        ):
-            return self._base_vt.sq_repeat_impl(tx, count)
-        return super().sq_repeat_impl(tx, count)
+        if self.inherits_base_slot("__mul__"):
+            return super().sq_repeat_impl(tx, count)
+        return self.nb_multiply_impl(tx, count)
 
     def sq_inplace_repeat_impl(
         self,
         tx: "InstructionTranslatorBase",
         count: VariableTracker,
     ) -> VariableTracker:
-        method = self._maybe_get_baseclass_method("__imul__")
-        if (
-            self._base_vt is not None
-            and self._base_methods is not None
-            and method in self._base_methods
-        ):
-            self._base_vt.sq_inplace_repeat_impl(tx, count)
-            return self
-        return super().sq_inplace_repeat_impl(tx, count)
+        if self.inherits_base_slot("__imul__"):
+            return super().sq_inplace_repeat_impl(tx, count)
+        return self.nb_inplace_multiply_impl(tx, count)
 
     def mp_ass_subscript_impl(
         self,
@@ -2179,12 +2211,28 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         value: VariableTracker | None,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/4833e1cc666375454e4f86aff11b6587968b3333/Objects/typeobject.c#L9373
-        if value is None:
+        is_delete = value is None
+        if self.inherits_base_slot("__delitem__" if is_delete else "__setitem__"):
+            return super().mp_ass_subscript_impl(tx, key, value)
+        if is_delete:
             return self._vectorcall_method(tx, "__delitem__", [key], {})
         else:
             return self._vectorcall_method(tx, "__setitem__", [key, value], {})
 
-    sq_ass_item_impl = mp_ass_subscript_impl
+    def sq_ass_item_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        key: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/4833e1cc666375454e4f86aff11b6587968b3333/Objects/typeobject.c#L9373
+        is_delete = value is None
+        if self.inherits_base_slot("__delitem__" if is_delete else "__setitem__"):
+            return super().sq_ass_item_impl(tx, key, value)
+        if is_delete:
+            return self._vectorcall_method(tx, "__delitem__", [key], {})
+        else:
+            return self._vectorcall_method(tx, "__setitem__", [key, value], {})
 
     def _maybe_lookup_method(
         self, tx: "InstructionTranslatorBase", name: str
@@ -2209,11 +2257,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and not isinstance(getattr(type_attr, "__func__", None), types.FunctionType)
         )
         if is_c_special_method:
-            if not (
-                self._base_vt is not None
-                and self._base_methods is not None
-                and type_attr in self._base_methods
-            ):
+            if not (self._base_methods is not None and type_attr in self._base_methods):
                 unimplemented(
                     gb_type="C-implemented special method without VariableTracker model",
                     context=f"name={name}, type={self.python_type_name()}, attr={type_attr}",
@@ -2225,13 +2269,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 )
             if isinstance(type_attr, types.WrapperDescriptorType):
                 # WrapperDescriptor.tp_descr_get -> MethodWrapper
-                return variables.MethodWrapperVariable(
-                    type_attr, self._base_vt, source=source
-                )
+                return variables.MethodWrapperVariable(type_attr, self, source=source)
             elif isinstance(type_attr, types.MethodDescriptorType):
                 # MethodDescriptor.tp_descr_get -> BuiltinMethod
                 return variables.BoundBuiltinMethodVariable(
-                    type_attr, self._base_vt, source=source
+                    type_attr, self, source=source
                 )
 
         if is_cython_function(type_attr):
@@ -2437,6 +2479,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
+        if self.inherits_base_slot("__mul__"):
+            return super().nb_multiply_impl(tx, other, reverse)
         return self.SLOT1BIN(
             tx,
             other,
@@ -2452,6 +2496,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
+        if self.inherits_base_slot("__matmul__"):
+            return super().nb_matrix_multiply_impl(tx, other, reverse)
         return self.SLOT1BIN(
             tx,
             other,
@@ -2466,6 +2512,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
     ) -> VariableTracker:
+        if self.inherits_base_slot("__imatmul__"):
+            return super().nb_inplace_matrix_multiply_impl(tx, other)
         return self.SLOT1(tx, "__imatmul__", other)
 
     def nb_lshift_impl(
@@ -2475,6 +2523,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         reverse: bool = False,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10337-L10340
+        if self.inherits_base_slot("__lshift__"):
+            return super().nb_lshift_impl(tx, other, reverse)
         return self.SLOT1BIN(
             tx,
             other,
@@ -2489,6 +2539,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
     ) -> VariableTracker:
+        if self.inherits_base_slot("__ilshift__"):
+            return super().nb_inplace_lshift_impl(tx, other)
         return self.SLOT1(tx, "__ilshift__", other)
 
     def nb_rshift_impl(
@@ -2498,6 +2550,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         reverse: bool = False,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10341-L10344
+        if self.inherits_base_slot("__rshift__"):
+            return super().nb_rshift_impl(tx, other, reverse)
         return self.SLOT1BIN(
             tx,
             other,
@@ -2512,6 +2566,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
     ) -> VariableTracker:
+        if self.inherits_base_slot("__irshift__"):
+            return super().nb_inplace_rshift_impl(tx, other)
         return self.SLOT1(tx, "__irshift__", other)
 
     def nb_or_impl(
@@ -2521,6 +2577,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         reverse: bool = False,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10354-L10355
+        if self.inherits_base_slot("__or__"):
+            return super().nb_or_impl(tx, other, reverse)
         return self.SLOT1BIN(
             tx,
             other,
@@ -2536,6 +2594,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         other: VariableTracker,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9494
+        if self.inherits_base_slot("__ior__"):
+            return super().nb_inplace_or_impl(tx, other)
         return self.SLOT1(tx, "__ior__", other)
 
     def nb_and_impl(
@@ -2545,6 +2605,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         reverse: bool = False,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9472 (slot_nb_and)
+        if self.inherits_base_slot("__and__"):
+            return super().nb_and_impl(tx, other, reverse)
         return self.SLOT1BIN(
             tx,
             other,
@@ -2559,6 +2621,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
     ) -> VariableTracker:
+        if self.inherits_base_slot("__iand__"):
+            return super().nb_inplace_and_impl(tx, other)
         return self.SLOT1(tx, "__iand__", other)
 
     def nb_xor_impl(
@@ -2568,6 +2632,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         reverse: bool = False,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9473 (slot_nb_xor)
+        if self.inherits_base_slot("__xor__"):
+            return super().nb_xor_impl(tx, other, reverse)
         return self.SLOT1BIN(
             tx,
             other,
@@ -2582,6 +2648,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
     ) -> VariableTracker:
+        if self.inherits_base_slot("__ixor__"):
+            return super().nb_inplace_xor_impl(tx, other)
         return self.SLOT1(tx, "__ixor__", other)
 
     def nb_add_impl(
@@ -2591,6 +2659,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         reverse: bool = False,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10315-L10318
+        if self.inherits_base_slot("__add__"):
+            return super().nb_add_impl(tx, other, reverse)
         return self.SLOT1BIN(
             tx,
             other,
@@ -2606,6 +2676,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         other: VariableTracker,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9494
+        if self.inherits_base_slot("__iadd__"):
+            return super().nb_inplace_add_impl(tx, other)
         return self.SLOT1(tx, "__iadd__", other)
 
     def nb_subtract_impl(
@@ -2615,6 +2687,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         reverse: bool = False,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10319-L10322
+        if self.inherits_base_slot("__sub__"):
+            return super().nb_subtract_impl(tx, other, reverse)
         return self.SLOT1BIN(
             tx,
             other,
@@ -2630,6 +2704,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         other: VariableTracker,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10362-L10363
+        if self.inherits_base_slot("__isub__"):
+            return super().nb_inplace_subtract_impl(tx, other)
         return self.SLOT1(tx, "__isub__", other)
 
     def nb_inplace_multiply_impl(
@@ -2637,6 +2713,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
     ) -> VariableTracker:
+        if self.inherits_base_slot("__imul__"):
+            return super().nb_inplace_multiply_impl(tx, other)
         return self.SLOT1(tx, "__imul__", other)
 
     def nb_floor_divide_impl(
@@ -2646,6 +2724,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         reverse: bool = False,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10323-L10326
+        if self.inherits_base_slot("__floordiv__"):
+            return super().nb_floor_divide_impl(tx, other, reverse)
         return self.SLOT1BIN(
             tx,
             other,
@@ -2660,6 +2740,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
     ) -> VariableTracker:
+        if self.inherits_base_slot("__ifloordiv__"):
+            return super().nb_inplace_floor_divide_impl(tx, other)
         return self.SLOT1(tx, "__ifloordiv__", other)
 
     def nb_true_divide_impl(
@@ -2669,6 +2751,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         reverse: bool = False,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10327-L10330
+        if self.inherits_base_slot("__truediv__"):
+            return super().nb_true_divide_impl(tx, other, reverse)
         return self.SLOT1BIN(
             tx,
             other,
@@ -2683,6 +2767,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
     ) -> VariableTracker:
+        if self.inherits_base_slot("__itruediv__"):
+            return super().nb_inplace_true_divide_impl(tx, other)
         return self.SLOT1(tx, "__itruediv__", other)
 
     def nb_remainder_impl(
@@ -2692,6 +2778,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         reverse: bool = False,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10331-L10334
+        if self.inherits_base_slot("__mod__"):
+            return super().nb_remainder_impl(tx, other, reverse)
         return self.SLOT1BIN(
             tx,
             other,
@@ -2706,6 +2794,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
     ) -> VariableTracker:
+        if self.inherits_base_slot("__imod__"):
+            return super().nb_inplace_remainder_impl(tx, other)
         return self.SLOT1(tx, "__imod__", other)
 
     def nb_divmod_impl(
@@ -2715,6 +2805,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         reverse: bool = False,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10335-L10336
+        if self.inherits_base_slot("__divmod__"):
+            return super().nb_divmod_impl(tx, other, reverse)
         return self.SLOT1BIN(
             tx,
             other,
@@ -2732,6 +2824,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         reverse: bool = False,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10319-L10322
+        if self.inherits_base_slot("__pow__"):
+            return super().nb_power_impl(tx, other, z, reverse)
         if z is not None:
             # Ternary pow(x, y, mod): __rpow__ is never called for 3-arg pow.
             base, exp = (other, self) if reverse else (self, other)
@@ -2751,6 +2845,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         other: VariableTracker,
         z: VariableTracker | None,
     ) -> VariableTracker:
+        if self.inherits_base_slot("__ipow__"):
+            return super().nb_inplace_power_impl(tx, other, z)
         return self.SLOT1(tx, "__ipow__", other)
 
     def nb_power_z_impl(
@@ -2760,6 +2856,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         w: VariableTracker,
     ) -> VariableTracker:
         # CPython: type(z)->nb_power(v, w, z) for a Python class calls v.__pow__(w, z).
+        if self.inherits_base_slot("__pow__"):
+            return super().nb_power_z_impl(tx, v, w)
         return v.call_method(tx, "__pow__", [w, self], {})
 
     def call_method(
@@ -2818,17 +2916,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 if result is not None:
                     return result
 
-            # Delegate to _base_vt for non-overridden base-class methods.
-            # Skip comparison ops: they go through tp_richcompare_impl on the
-            # UserDefined*Variable subclass, which handles _base_vt
-            # unwrapping and avoids tracing tensor elements via list_cmp.
+            # Non-overridden base-class methods dispatch to the base VT via super()
+            # (self is-a base VT under multiple inheritance).  Skip comparison ops:
+            # they go through tp_richcompare_impl on the UserDefined*Variable
+            # subclass, which avoids tracing tensor elements via list_cmp.
             if (
-                self._base_vt is not None
-                and self._base_methods is not None
+                self._base_methods is not None
                 and method in self._base_methods
                 and name not in self._slotdefs
             ):
-                return self._base_vt.call_method(tx, name, args, kwargs)
+                return super().call_method(tx, name, args, kwargs)
 
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):
@@ -2883,6 +2980,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if self.inherits_base_slot("__init__"):
+            return super().tp_init_impl(tx, args, kwargs)
         method = self._maybe_get_baseclass_method("__init__")
         if method is object.__init__:
             return variables.ConstantVariable.create(None)
@@ -2897,31 +2996,23 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self, tx: "InstructionTranslatorBase", other: VariableTracker
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L10373-L10374
-        method = self._maybe_get_baseclass_method("__add__")
-        if (
-            self._base_vt is not None
-            and self._base_methods is not None
-            and method in self._base_methods
-        ):
-            return self._base_vt.sq_concat_impl(tx, other)
-        return super().sq_concat_impl(tx, other)
+        if self.inherits_base_slot("__add__"):
+            return super().sq_concat_impl(tx, other)
+        return self.nb_add_impl(tx, other)
 
     def sq_inplace_concat_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L10387-L10389
-        method = self._maybe_get_baseclass_method("__iadd__")
-        if (
-            self._base_vt is not None
-            and self._base_methods is not None
-            and method in self._base_methods
-        ):
-            self._base_vt.sq_inplace_concat_impl(tx, other)
-            return self
-        return super().sq_inplace_concat_impl(tx, other)
+        if self.inherits_base_slot("__iadd__"):
+            return super().sq_inplace_concat_impl(tx, other)
+        return self.nb_inplace_add_impl(tx, other)
 
     def sq_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/4833e1cc666375454e4f86aff11b6587968b3333/Objects/typeobject.c#L9266
+        if self.inherits_base_slot("__len__"):
+            return super().sq_length_impl(tx)
+
         res = self._vectorcall_method(tx, "__len__", [], {})
 
         # A symbolic length must stay symbolic: coercing it via __index__ /
@@ -2941,7 +3032,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return pynumber_as_ssize_t(tx, res, OverflowError)
 
     # ref: https://github.com/python/cpython/blob/4833e1cc666375454e4f86aff11b6587968b3333/Objects/typeobject.c#L9368
-    mp_length_impl = sq_length_impl
+    def mp_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        if self.inherits_base_slot("__len__"):
+            return super().mp_length_impl(tx)
+        return self.sq_length_impl(tx)
 
     def method_setattr_standard(
         self,
@@ -3847,6 +3941,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # __hash__ = None → PyObject_HashNotImplemented:
         # https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L8066-L8085
 
+        if self.inherits_base_slot("__hash__"):
+            # self is-a base VT (multiple inheritance); use its hash on self.
+            return super().hash_impl(tx)
+
         obj_type = type(self.value)
 
         # Walk the MRO to find the class that defines __hash__.
@@ -3922,8 +4020,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ],
             )
 
-        if self._base_vt is not None:
-            return self._base_vt.hash_impl(tx)
+        if self._base_methods is not None:
+            # self is-a base VT (multiple inheritance); use its hash on self.
+            return super().hash_impl(tx)
         # hash(self.value) calls the real tp_hash — handles both
         # object.__hash__ (identity) and builtin-inherited C hashes
         # (e.g. IntEnum inheriting int.__hash__).
@@ -3968,11 +4067,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                         return resolved.call_function(tx, [other], {})
                 break
 
-            # C comparison method. If _base_vt exists, it already implements
-            # this type's C-level comparison (e.g. ConstDictVariable for dict,
-            # SetVariable for set). Delegate to it instead of constant-folding
-            # or graph-breaking.
-            if self._base_vt is not None:
+            # C comparison method. For a builtin-container subclass (multiple
+            # inheritance) the base VT already implements this type's C-level
+            # comparison (e.g. ConstDictVariable for dict, SetVariable for set).
+            # Delegate to it (below) instead of constant-folding or graph-breaking.
+            if self._base_methods is not None:
                 break
 
             in_allowlist = False
@@ -4006,8 +4105,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ],
             )
 
-        if self._base_vt is not None:
-            return self._base_vt.tp_richcompare_impl(tx, other, op)
+        if self._base_methods is not None:
+            return super().tp_richcompare_impl(tx, other, op)
 
         return object_richcompare(self, tx, other, op)
 
@@ -4313,7 +4412,6 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable, ExceptionVar
     def __init__(self, value: object, **kwargs: Any) -> None:
         init_args = kwargs.get("init_args", [])
         super().__init__(value, exc_type=type(value), args=init_args, **kwargs)
-        # self._base_vt = variables.ExceptionVariable(self.value_type, init_args)
         self._base_methods = (
             exception_methods
             if isinstance(value, Exception)
@@ -4323,12 +4421,6 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable, ExceptionVar
     @property
     def fn(self) -> Callable[..., object]:
         return self.value_type
-
-    @property
-    def exc_vt(self) -> "variables.ExceptionVariable":
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None for exception repr")
-        return cast(variables.ExceptionVariable, self._base_vt)
 
     def call_method(
         self,
@@ -4454,8 +4546,6 @@ class UserDefinedConstantVariable(UserDefinedObjectVariable, ConstantVariable):
     """
     Represents user-defined objects that subclass immutable constant types
     (int, float, str).
-
-    Uses a ConstantVariable as _base_vt for the underlying constant value.
     """
 
     def __init__(self, value: Any, **kwargs: Any) -> None:
@@ -4531,9 +4621,7 @@ class UserDefinedDictVariable(UserDefinedObjectVariable, ConstDictVariable):
 
     A UserDefinedDict is a dict with some extra fields: the object *is* the dict
     storage (self.items) plus its instance __dict__.  Content mutations land on
-    self.items directly; the throwaway _base_vt view (which shares that storage
-    and the composite mutation_type) exists only for the delegation and
-    reconstruction paths that want a plain base dict VT.
+    self.items directly
     """
 
     _nonvar_fields = {
@@ -4550,13 +4638,13 @@ class UserDefinedDictVariable(UserDefinedObjectVariable, ConstDictVariable):
         super().__init__(value, items=items if items is not None else {}, **kwargs)
         self._base_methods = dict_methods
 
-    def len(self) -> int:
-        # Used by nn_module.py to short-circuit the nn.Module forward method
-        # when no hooks are registered.  Calling .len() directly avoids the
-        # overhead of full call_method("__len__") dispatch during tracing.
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None in len")
-        return self._base_vt.len()  # type: ignore[union-attr]
+    def _new_dict(
+        self, items: dict[HashableTracker, VariableTracker]
+    ) -> "ConstDictVariable":
+        # A copy of a dict subclass is a plain dict in CPython, not the
+        # subclass. Also avoids ConstDictVariable._new_dict's type(self)(items),
+        # which would misfire on this class's (value, items) constructor.
+        return ConstDictVariable(self.items.copy(), mutation_type=ValueMutationNew())
 
     def sq_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # Dict implements __len__ via mp_length (mapping protocol), not
@@ -4572,10 +4660,8 @@ class UserDefinedDictVariable(UserDefinedObjectVariable, ConstDictVariable):
         # TODO(follow-up): add test for unhashable/invalid key type, Counter missing key
         method = self._maybe_get_baseclass_method("__getitem__")
         if method in self._base_methods:
-            if self._base_vt is None:
-                raise AssertionError("_base_vt must not be None in mp_subscript_impl")
             try:
-                return self._base_vt.mp_subscript_impl(tx, key)
+                return super().mp_subscript_impl(tx, key)
             except ObservedKeyError:
                 if issubclass(
                     self.python_type(), dict
@@ -4592,9 +4678,9 @@ class UserDefinedDictVariable(UserDefinedObjectVariable, ConstDictVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         # Inherited dict/OrderedDict __init__ populates the underlying storage
-        # (CPython dict_init == dict.update); route to _base_vt so content is
-        # not lost.  defaultdict.__init__'s first arg is the default_factory and
-        # has its own path.  Mirrors call_method's __init__ handling.
+        # (CPython dict_init == dict.update); defaultdict.__init__'s first arg
+        # is the default_factory and has its own path.  Mirrors call_method's
+        # __init__ handling.
         if self._maybe_get_baseclass_method("__init__") in (
             dict.__init__,
             collections.OrderedDict.__init__,
@@ -4608,11 +4694,8 @@ class UserDefinedDictVariable(UserDefinedObjectVariable, ConstDictVariable):
         return super().tp_init_impl(tx, args, kwargs)
 
     def debug_repr(self) -> str:
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None for dict repr")
-        base_vt = cast(ConstDictVariable, self._base_vt)
         if type(self.value).__repr__ is collections.Counter.__repr__:
-            items = list(base_vt.items.items())
+            items = list(self.items.items())
             try:
                 items = sorted(
                     items,
@@ -4627,15 +4710,14 @@ class UserDefinedDictVariable(UserDefinedObjectVariable, ConstDictVariable):
                 f"{key.vt.debug_repr()}: {value.debug_repr()}" for key, value in items
             )
             return f"{type(self.value).__name__}({{{contents}}})"
-        return base_vt.debug_repr()
+        return super().debug_repr()
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # https://github.com/python/cpython/blob/3.13/Lib/collections/__init__.py#L748-L757
-        method = self._maybe_get_baseclass_method("__repr__")
+        if self.inherits_base_slot("__repr__"):
+            return super().tp_repr_impl(tx)
         if type(self.value).__repr__ is collections.Counter.__repr__:
-            if self._base_vt is None:
-                raise AssertionError("_base_vt must not be None for Counter repr")
-            base_vt = cast(ConstDictVariable, self._base_vt)
+            base_vt = cast(ConstDictVariable, self)
             items = list(base_vt.items.items())
             try:
                 items = sorted(
@@ -4654,10 +4736,6 @@ class UserDefinedDictVariable(UserDefinedObjectVariable, ConstDictVariable):
             return VariableTracker.build(
                 tx, f"{type(self.value).__name__}({{{contents}}})"
             )
-        if method in self._base_methods:
-            if self._base_vt is None:
-                raise AssertionError("_base_vt must not be None for dict repr")
-            return self._base_vt.tp_repr_impl(tx)
         return super().tp_repr_impl(tx)
 
 
@@ -4731,7 +4809,7 @@ class DefaultDictVariable(UserDefinedDictVariable):
     def is_python_constant(self) -> bool:
         if not self.default_factory.is_python_constant():
             return False
-        return ConstDictVariable.is_python_constant(self)
+        return super().is_python_constant()
 
     def as_python_constant(self) -> Any:
         if not self.default_factory.is_python_constant():
@@ -4746,21 +4824,16 @@ class DefaultDictVariable(UserDefinedDictVariable):
     def debug_repr(self) -> str:
         if self.default_factory is None:
             raise AssertionError("default_factory must not be None in debug_repr")
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None in debug_repr")
         return (
-            f"defaultdict({self.default_factory.debug_repr()}, "
-            f"{self._base_vt.debug_repr()})"
+            f"defaultdict({self.default_factory.debug_repr()}, {super().debug_repr()})"
         )
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2373-L2405
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None for defaultdict repr")
         return VariableTracker.build(
             tx,
             f"{self.python_type_name()}({tracked_repr(tx, self.default_factory)}, "
-            f"{tracked_repr(tx, self._base_vt)})",
+            f"{tracked_repr(tx, self)})",
         )
 
     # ref: defdict_members[] in CPython Modules/_collectionsmodule.c
@@ -5106,9 +5179,9 @@ class UserDefinedDequeVariable(UserDefinedObjectVariable, DequeVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        # UDOV.tp_init_impl would vectorcall the C deque.__init__ against the
-        # throwaway _base_vt view; route to DequeVariable's, which populates this
-        # object (contents + maxlen + state) in place with the correct semantics.
+        # UDOV.tp_init_impl would vectorcall the C deque.__init__. Route to
+        # DequeVariable's, which populates this object (contents + maxlen +
+        # state) in place with the correct semantics.
         return DequeVariable.tp_init_impl(self, tx, args, kwargs)
 
 
@@ -5543,7 +5616,7 @@ class SimpleNamespaceVariable(UserDefinedObjectVariable):
     ) -> list[tuple[str, VariableTracker]]:
         """The instance dict in insertion order, keyed by plain attribute name."""
         return [
-            (key.vt.as_python_constant(), value)
+            (cast(HashableTracker, key).vt.as_python_constant(), value)
             for key, value in self.get_dict_vt(tx).items.items()
         ]
 

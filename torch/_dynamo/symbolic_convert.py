@@ -4260,8 +4260,11 @@ class InstructionTranslatorBase(
             # Convert the attribute to a dictionary before assigning it
             # https://github.com/python/cpython/blob/28fb13cb33d569720938258db68956b5f9c9eb40/Objects/funcobject.c#L574-L594
             items = annotations.items
+            ann_items: dict[VariableTracker, VariableTracker] = dict(
+                zip(items[::2], items[1::2], strict=True)
+            )
             ann = ConstDictVariable(
-                dict(zip(items[::2], items[1::2], strict=True)),
+                ann_items,
                 mutation_type=ValueMutationNew(),
             )
             fn.annotations = ann
@@ -5072,8 +5075,11 @@ class InstructionTranslatorBase(
             # Convert the attribute to a dictionary before assigning it
             # https://github.com/python/cpython/blob/28fb13cb33d569720938258db68956b5f9c9eb40/Objects/funcobject.c#L574-L594
             items = attr.items
+            ann_items: dict[VariableTracker, VariableTracker] = dict(
+                zip(items[::2], items[1::2], strict=True)
+            )
             ann = ConstDictVariable(
-                dict(zip(items[::2], items[1::2], strict=True)),
+                ann_items,
                 mutation_type=ValueMutationNew(),
             )
             fn.annotations = ann
