@@ -104,7 +104,6 @@ from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_
 from torch.testing._internal.triton_utils import requires_gpu
 from torch.utils import _pytree as pytree
 from torch.utils._triton import (
-    has_triton,
     has_triton_experimental_host_tma,
     has_triton_tensor_descriptor_host_tma,
 )
@@ -249,13 +248,10 @@ def get_triton_grid_info(kernel, total_elements, src_code):
 # copy_tests() only copies test_* methods onto the concrete device classes, so
 # helpers shared by the bmm_shared_a tests have to live at module level.
 def _skip_unless_bmm_shared_a_runnable(test):
-    # Any Triton-capable accelerator can run the template; it is only ever
-    # offered under max-autotune.
+    # The template is only offered under max-autotune on Triton-capable accelerators.
     if test.device != GPU_TYPE:
         raise unittest.SkipTest("requires an accelerator")
-    if not has_triton():
-        raise unittest.SkipTest("requires Triton")
-    if not is_big_gpu():
+    if not IS_BIG_GPU:
         raise unittest.SkipTest("requires modern GPU to run max-autotune")
 
 
