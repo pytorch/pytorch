@@ -835,3 +835,137 @@ REGISTER_UNARY_ALPHA_OP(nan_to_num, half, NanToNumParams_float, half);
 REGISTER_UNARY_ALPHA_OP(nan_to_num, bfloat, NanToNumParams_float, bfloat);
 REGISTER_UNARY_ALPHA_OP(nan_to_num, float2, NanToNumParams_float, float2);
 REGISTER_UNARY_ALPHA_OP(nan_to_num, half2, NanToNumParams_float, half2);
+
+// frexp writes two outputs of different dtypes, which the REGISTER_UNARY_OP
+// machinery cannot express, so it drives the TensorIterator operands directly.
+//
+// The decomposition is done on the bit pattern rather than through
+// ::metal::frexp because Metal flushes denormals to zero in arithmetic (even
+// `x + 0` returns 0 for a denormal on MPS), which would report a zero mantissa
+// and a zero exponent where CPU and CUDA report the true pair. Integer ops are
+// not subject to that, so this matches CPU for every input.
+template <typename T>
+struct frexp_bits {};
+
+template <>
+struct frexp_bits<float> {
+  using type = uint;
+  constant static constexpr int mantissa_bits = 23;
+  constant static constexpr int exponent_bias = 127;
+};
+
+template <>
+struct frexp_bits<half> {
+  using type = ushort;
+  constant static constexpr int mantissa_bits = 10;
+  constant static constexpr int exponent_bias = 15;
+};
+
+template <>
+struct frexp_bits<bfloat> {
+  using type = ushort;
+  constant static constexpr int mantissa_bits = 7;
+  constant static constexpr int exponent_bias = 127;
+};
+
+template <typename T>
+inline T frexp_split(const T x, thread int& exponent) {
+  using bits_t = typename frexp_bits<T>::type;
+  constexpr int mantissa_bits = frexp_bits<T>::mantissa_bits;
+  constexpr int exponent_bias = frexp_bits<T>::exponent_bias;
+  constexpr int width = 8 * sizeof(bits_t);
+  constexpr bits_t sign_mask = bits_t(1) << (width - 1);
+  constexpr bits_t mantissa_mask = (bits_t(1) << mantissa_bits) - 1;
+  constexpr bits_t exponent_mask = sign_mask - 1 - mantissa_mask;
+
+  const auto bits = as_type<bits_t>(x);
+  auto magnitude = bits & (sign_mask - 1);
+
+  // Zeros, infinities and NaNs are returned unchanged with a zero exponent.
+  if (magnitude == 0 || magnitude >= exponent_mask) {
+    exponent = 0;
+    return x;
+  }
+
+  if (magnitude < (bits_t(1) << mantissa_bits)) {
+    // Denormal: renormalize by shifting the leading one out of the field.
+    // clz on a 32-bit value: MSL promotes narrower integer types, so counting
+    // in a fixed width keeps half and bfloat on the same formula as float.
+    const int shift = int(::metal::clz(uint(magnitude))) - (32 - mantissa_bits);
+    magnitude = bits_t((uint(magnitude) << (shift + 1)) & mantissa_mask);
+    exponent = 1 - exponent_bias - shift;
+  } else {
+    exponent = int(magnitude >> mantissa_bits) - exponent_bias + 1;
+    magnitude &= mantissa_mask;
+  }
+
+  // Exponent field of `exponent_bias - 1` puts the mantissa in [0.5, 1).
+  const bits_t result = (bits & sign_mask) |
+      (bits_t(exponent_bias - 1) << mantissa_bits) | magnitude;
+  return as_type<T>(result);
+}
+
+// Dense fast path: with all three operands contiguous the thread index is the
+// element index, so none of the coordinate decomposition below is needed. This
+// is the common case, and it mirrors what unary_dense does for single-output
+// ops.
+template <typename T>
+kernel void frexp_dense(
+    device T* mantissa [[buffer(0)]],
+    device int* exponent [[buffer(1)]],
+    constant T* input [[buffer(2)]],
+    uint tid [[thread_position_in_grid]]) {
+  int e = 0;
+  mantissa[tid] = frexp_split(input[tid], e);
+  exponent[tid] = e;
+}
+
+template <typename T>
+kernel void frexp_impl(
+    device void* mantissa_ptr [[buffer(0)]],
+    device void* exponent_ptr [[buffer(1)]],
+    constant void* input_ptr [[buffer(2)]],
+    constant long* sizes [[buffer(3)]],
+    constant long* mantissa_strides [[buffer(4)]],
+    constant long* exponent_strides [[buffer(5)]],
+    constant long* input_strides [[buffer(6)]],
+    constant uint& ndim [[buffer(7)]],
+    uint tid [[thread_position_in_grid]]) {
+  int pos[c10::metal::max_ndim];
+  c10::metal::pos_from_thread_index(int(tid), pos, sizes, ndim);
+
+  const auto x = c10::metal::val_at_offs<T>(
+      input_ptr, c10::metal::offset_from_coord(pos, input_strides, ndim));
+
+  int exponent = 0;
+  const auto mantissa = frexp_split(x, exponent);
+
+  c10::metal::ref_at_offs<T>(
+      mantissa_ptr,
+      c10::metal::offset_from_coord(pos, mantissa_strides, ndim)) = mantissa;
+  c10::metal::ref_at_offs<int>(
+      exponent_ptr,
+      c10::metal::offset_from_coord(pos, exponent_strides, ndim)) = exponent;
+}
+
+#define REGISTER_FREXP_OP(DTYPE)                                         \
+  template [[host_name("frexp_dense_" #DTYPE)]] kernel void              \
+  frexp_dense<DTYPE>(                                                    \
+      device DTYPE * mantissa [[buffer(0)]],                             \
+      device int* exponent [[buffer(1)]],                                \
+      constant DTYPE* input [[buffer(2)]],                               \
+      uint tid [[thread_position_in_grid]]);                             \
+  template [[host_name("frexp_" #DTYPE)]] kernel void frexp_impl<DTYPE>( \
+      device void* mantissa_ptr [[buffer(0)]],                           \
+      device void* exponent_ptr [[buffer(1)]],                           \
+      constant void* input_ptr [[buffer(2)]],                            \
+      constant long* sizes [[buffer(3)]],                                \
+      constant long* mantissa_strides [[buffer(4)]],                     \
+      constant long* exponent_strides [[buffer(5)]],                     \
+      constant long* input_strides [[buffer(6)]],                        \
+      constant uint& ndim [[buffer(7)]],                                 \
+      uint tid [[thread_position_in_grid]])
+
+REGISTER_FREXP_OP(float);
+REGISTER_FREXP_OP(half);
+REGISTER_FREXP_OP(bfloat);

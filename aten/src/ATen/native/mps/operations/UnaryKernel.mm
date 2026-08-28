@@ -50,6 +50,40 @@ static void pow_tensor_scalar_kernel(TensorIteratorBase& iter, const Scalar& exp
   lib.exec_unary_kernel(iter, "pow_scalar", exp_scalar, ScalarType::Float);
 }
 
+static void frexp_kernel_mps(TensorIteratorBase& iter) {
+  if (iter.numel() == 0) {
+    return;
+  }
+  // uint thread ids and int32 operand offsets cap one dispatch; split first.
+  if (!iter.can_use_32bit_indexing()) {
+    for (auto& sub_iter : iter.with_32bit_indexing()) {
+      frexp_kernel_mps(sub_iter);
+    }
+    return;
+  }
+
+  const auto type_name = mps::scalarToMetalTypeString(iter.dtype(0));
+  const bool is_dense = iter.is_contiguous();
+  auto pso = lib.getPipelineStateForFunc((is_dense ? "frexp_dense_" : "frexp_") + type_name);
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = stream->commandEncoder();
+      [computeEncoder setComputePipelineState:pso];
+      mps::bind_iter_tensors(computeEncoder, iter);
+      if (!is_dense) {
+        mps::mtl_setArgs<3>(computeEncoder,
+                            iter.shape(),
+                            iter.strides(0),
+                            iter.strides(1),
+                            iter.strides(2),
+                            static_cast<uint32_t>(iter.ndim()));
+      }
+      mps::mtl_dispatch1DJob(computeEncoder, pso, static_cast<uint32_t>(iter.numel()));
+    }
+  });
+}
+
 static void erfcx_kernel(TensorIteratorBase& iter) {
   lib.exec_unary_kernel(iter, "erfcx");
 }
@@ -135,4 +169,5 @@ REGISTER_DISPATCH(round_decimals_stub, round_decimals_kernel);
 REGISTER_DISPATCH(pow_tensor_scalar_stub, pow_tensor_scalar_kernel);
 REGISTER_DISPATCH(polygamma_stub, polygamma_kernel);
 REGISTER_DISPATCH(nan_to_num_stub, nan_to_num_kernel_mps);
+REGISTER_DISPATCH(frexp_stub, frexp_kernel_mps);
 } // namespace at::native
