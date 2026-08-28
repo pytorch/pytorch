@@ -1,3 +1,4 @@
+#include <ATen/core/functional.h>
 #include <torch/csrc/python_headers.h>
 
 #include <ATen/NodeCreationHooks.h>
@@ -262,15 +263,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def(
           "concrete_inputs",
           [](const KinetoEvent& e) {
-            std::vector<py::object> as_pyobj;
-            std::transform(
-                e.concreteInputs().begin(),
-                e.concreteInputs().end(),
-                std::back_inserter(as_pyobj),
-                [](const c10::IValue& val) {
-                  return torch::jit::toPyObject(val);
-                });
-            return as_pyobj;
+            return c10::fmap(e.concreteInputs(), [](const c10::IValue& val) {
+              return torch::jit::toPyObject(val);
+            });
           })
       .def(
           "kwinputs",
@@ -1269,7 +1264,7 @@ static PyObject* any_output_is_alias_to_input_or_output(
     if (!cp) {
       return false;
     }
-    if (s.find(cp) != s.end()) {
+    if (s.contains(cp)) {
       ret = true;
       return true;
     }
