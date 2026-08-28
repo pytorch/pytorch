@@ -375,7 +375,6 @@ if torch.backends.mps.is_available():
             "linalg.eigvals": None,
             "frexp": None,
             "hash_tensor": None,
-            "heaviside": None,
             # "kthvalue": None,
             "linalg.ldl_factor": None,
             "linalg.ldl_factor_ex": None,
@@ -899,6 +898,8 @@ if torch.backends.mps.is_available():
             "histogramdd": [torch.float16, torch.float32],
             # derivative for aten::histogram is not implemented
             "histogram": [torch.float16, torch.float32],
+            # derivative for aten::heaviside is not implemented
+            "heaviside": [torch.float16, torch.float32],
             # 'bool' object is not iterable
             "allclose": [torch.float16, torch.float32],
             "equal": [torch.float16, torch.float32],
