@@ -52,6 +52,10 @@ _WORK_CATEGORIES = {"kernel", "gpu_memcpy", "gpu_memset"}
 # verbatim rather than parsed. TestMetadataJsonFormat pins the spelling.
 _GNODE_RE = re.compile(r'"graph node id":\s*(\d+)')
 
+# The hardware stream in that same fragment, rewritten in place when an event is moved to
+# a logical lane so its args do not carry two "stream" keys.
+_STREAM_RE = re.compile(r'"stream":\s*\d+')
+
 # Annotation key naming the lane its events are moved to; lanes without it keep the
 # default "stream N" name. Set by whoever records the annotation (a comms wrapper
 # naming a process group's lane is the motivating case).
@@ -129,44 +133,50 @@ def _device_properties() -> list[dict[str, Any]]:
 
     Every field kineto emits except ``regsPerBlock``, which torch's properties object
     does not carry; it is left out rather than guessed from ``regsPerMultiprocessor``,
-    which only happens to match on current parts.
+    which only happens to match on current parts. ``sharedMemPerBlockOptin`` is
+    NVIDIA-only in that binding, so it is omitted on ROCm rather than raising.
     """
     props: list[dict[str, Any]] = []
     for i in range(torch.cuda.device_count()):
         p = torch.cuda.get_device_properties(i)
-        props.append(
-            {
-                "id": i,
-                "name": p.name,
-                "totalGlobalMem": p.total_memory,
-                "computeMajor": p.major,
-                "computeMinor": p.minor,
-                "maxThreadsPerBlock": p.max_threads_per_block,  # pyrefly: ignore[missing-attribute]
-                "maxThreadsPerMultiprocessor": p.max_threads_per_multi_processor,  # pyrefly: ignore[missing-attribute]
-                "warpSize": p.warp_size,
-                "sharedMemPerBlock": p.shared_memory_per_block,  # pyrefly: ignore[missing-attribute]
-                "numSms": p.multi_processor_count,
-                "regsPerMultiprocessor": p.regs_per_multiprocessor,  # pyrefly: ignore[missing-attribute]
-                "sharedMemPerBlockOptin": p.shared_memory_per_block_optin,  # pyrefly: ignore[missing-attribute]
-                "sharedMemPerMultiprocessor": p.shared_memory_per_multiprocessor,  # pyrefly: ignore[missing-attribute]
-            }
-        )
+        entry = {
+            "id": i,
+            "name": p.name,
+            "totalGlobalMem": p.total_memory,
+            "computeMajor": p.major,
+            "computeMinor": p.minor,
+            "maxThreadsPerBlock": p.max_threads_per_block,  # pyrefly: ignore[missing-attribute]
+            "maxThreadsPerMultiprocessor": p.max_threads_per_multi_processor,  # pyrefly: ignore[missing-attribute]
+            "warpSize": p.warp_size,
+            "sharedMemPerBlock": p.shared_memory_per_block,  # pyrefly: ignore[missing-attribute]
+            "numSms": p.multi_processor_count,
+            "regsPerMultiprocessor": p.regs_per_multiprocessor,  # pyrefly: ignore[missing-attribute]
+            "sharedMemPerMultiprocessor": p.shared_memory_per_multiprocessor,  # pyrefly: ignore[missing-attribute]
+        }
+        # NVIDIA-only in torch's binding, hence the guard rather than a plain read.
+        if hasattr(p, "shared_memory_per_block_optin"):
+            entry["sharedMemPerBlockOptin"] = (
+                p.shared_memory_per_block_optin
+            )  # pyrefly: ignore[missing-attribute]
+        props.append(entry)
     return props
 
 
 def _annotation_args(annotation) -> tuple[str | None, int | None, str | None]:
     """Render one node's annotation into an args fragment, its lane, and its lane name.
 
-    Values are stringified except ``stream``, which stays a number: it drives the
-    event's ``tid``. The whole dict is escaped in one ``json.dumps`` with the braces
-    stripped rather than key by key.
+    Values are stringified, and ``stream`` is returned rather than rendered: it names the
+    lane, which the caller writes into the event's own ``stream`` field. The dict is
+    escaped in one ``json.dumps`` with the braces stripped rather than key by key. A bare
+    string is recorded as ``name``, the same normalization the registry applies, so
+    annotations pickled by an older recorder still read as a name.
     """
     stream: int | None = None
     lane_name: str | None = None
     chunks: list[str] = []
     for ann in annotation if isinstance(annotation, list) else [annotation]:
         if not isinstance(ann, dict):
-            chunks.append(f'"annotation": {_json_escape(str(ann))}')
+            chunks.append(f'"name": {_json_escape(str(ann))}')
             continue
         if lane_name is None and _LANE_NAME_KEY in ann:
             lane_name = str(ann[_LANE_NAME_KEY])
@@ -174,7 +184,6 @@ def _annotation_args(annotation) -> tuple[str | None, int | None, str | None]:
         for key, value in ann.items():
             if key == "stream":
                 stream = int(value)
-                norm["stream"] = stream
             else:
                 norm[str(key)] = str(value)
         if norm:
@@ -192,6 +201,7 @@ def export_chrome_trace(
     path: str,
     metadata: dict[str, str] | None = None,
     annotations: Mapping[int, Any] | None = None,
+    graph_lanes: str = "none",
     default_stream: int = 7,
 ):
     """Export chrome trace from ITraceActivity objects, streaming to disk.
@@ -200,16 +210,29 @@ def export_chrome_trace(
     ``trace_activities()`` and ``trace_start_ns()``.
 
     ``annotations`` maps a CUDA-graph node id to the annotation recorded for it
-    (pass ``torch.cuda.graph_annotations.get_kernel_annotations()``). Graphed work
-    events matching one get its fields spliced into their ``args`` and move to the
-    lane it names; graphed work with no annotation moves to ``default_stream``. This
-    is what a graph replay needs to be readable: CUPTI reports it on whatever
-    hardware streams the graph executor picked, often hundreds of them.
+    (pass ``torch.cuda.graph_annotations.get_kernel_annotations()``); matching events get
+    its fields spliced into their ``args``. An empty mapping means the same as ``None``:
+    events are written exactly as kineto reported them.
+
+    ``graph_lanes`` decides whether graphed events are also moved onto display lanes.
+    With ``"none"`` (default) nothing moves and a recorded ``stream`` is ignored, so the
+    trace keeps the stream layout kineto reported. With ``"all"`` each graphed event moves
+    to the lane its annotation names (what ``mark_stream`` records) and the rest onto
+    ``default_stream`` (7 by convention) -- worth it when a replay is smeared over the
+    hundreds of hardware streams the graph executor picked, and not otherwise, since it
+    piles everything onto one lane when nothing named a stream. A moved event carries its
+    lane in ``tid`` and ``args["stream"]``, and the stream it actually ran on as
+    ``args["original_stream"]``.
 
     Writes ``.json`` or ``.json.gz`` depending on the file extension.
     """
+    if graph_lanes not in ("all", "none"):
+        raise ValueError(f"graph_lanes must be 'all' or 'none', got {graph_lanes!r}")
     activities = kineto_results.trace_activities()
     base_ns = _trimester_base_ns()
+    # No annotations to inject means no graph-lane pass at all: an empty mapping reads the
+    # same as None rather than collapsing every graphed event onto one lane for nothing.
+    annotate_graphs = bool(annotations)
     annotations = annotations or {}
 
     seen_devices: dict[int, int] = {}
@@ -234,7 +257,7 @@ def export_chrome_trace(
         # Whether the envelope flag is written, decided here with an early stop so the
         # common case costs one extra metadata_json() call on one activity. The lookups
         # themselves happen inline in the write pass below, not cached per activity.
-        if not has_annotations and annotations and act.type() in _WORK_CATEGORIES:
+        if not has_annotations and annotate_graphs and act.type() in _WORK_CATEGORIES:
             md = act.metadata_json()
             if md and annotations.get(_graph_node_id(md)):
                 has_annotations = True
@@ -325,6 +348,37 @@ def export_chrome_trace(
                     args_parts.append(f'"External id": {corr}')
 
             md = act.metadata_json()
+            annotation_parts: list[str] = []
+
+            node_id = (
+                _graph_node_id(md)
+                if annotate_graphs and cat in _WORK_CATEGORIES and md
+                else 0
+            )
+            if node_id:
+                annotation = annotations.get(node_id)
+                stream = lane_name = None
+                if annotation:
+                    ann_str, stream, lane_name = _annotation_args(annotation)
+                    if ann_str:
+                        annotation_parts.append(ann_str)
+                if graph_lanes == "all":
+                    out_tid = stream if stream is not None else default_stream
+                if out_tid != rid:
+                    prev = reassigned.get((did, out_tid))
+                    if lane_name is None and prev is not None:
+                        lane_name = prev[1]
+                    reassigned[(did, out_tid)] = (ts, lane_name)
+                    # args.stream has to name the lane the event renders on. Rewrite the
+                    # one kineto put in the metadata fragment rather than appending a
+                    # second: duplicate keys resolve differently from parser to parser.
+                    md, rewritten = _STREAM_RE.subn(f'"stream": {out_tid}', md, count=1)
+                    if not rewritten:
+                        annotation_parts.append(f'"stream": {out_tid}')
+                    # The hardware stream the work ran on is otherwise unrecoverable
+                    # once the tid and args.stream both name the lane.
+                    annotation_parts.append(f'"original_stream": {rid}')
+
             if md:
                 args_parts.append(md)
 
@@ -335,26 +389,7 @@ def export_chrome_trace(
                     if linked_md:
                         args_parts.append(linked_md)
 
-            if annotations and cat in _WORK_CATEGORIES and md and _graph_node_id(md):
-                annotation = annotations.get(_graph_node_id(md))
-                stream = lane_name = None
-                if annotation:
-                    ann_str, stream, lane_name = _annotation_args(annotation)
-                    if ann_str:
-                        args_parts.append(ann_str)
-                out_tid = stream if stream is not None else default_stream
-                if out_tid != rid:
-                    prev = reassigned.get((did, out_tid))
-                    if lane_name is None and prev is not None:
-                        lane_name = prev[1]
-                    reassigned[(did, out_tid)] = (ts, lane_name)
-                    # args.stream has to follow the lane. The annotation supplies it
-                    # when it names one; otherwise override kineto's hardware stream
-                    # (last key wins). Either way the hardware stream would be lost
-                    # with the tid, so keep it as original_stream.
-                    if stream is None:
-                        args_parts.append(f'"stream": {out_tid}')
-                    args_parts.append(f'"original_stream": {rid}')
+            args_parts.extend(annotation_parts)
 
             if cat in _WORK_CATEGORIES:
                 work_tids.add((did, out_tid))
@@ -380,7 +415,7 @@ def export_chrome_trace(
                 event += f',"args":{{{",".join(args_parts)}}}'
             event += "},\n"
 
-            if annotations and cat == "gpu_user_annotation":
+            if annotate_graphs and cat == "gpu_user_annotation":
                 deferred_annotations.append((did, out_tid, event))
                 continue
             f.write(event)

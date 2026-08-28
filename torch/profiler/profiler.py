@@ -471,6 +471,7 @@ class _KinetoProfile:
         path: str,
         use_python_export: bool = False,
         cuda_graph_annotations: Mapping[int, Any] | None = None,
+        graph_lanes: str = "none",
         default_stream: int = 7,
     ):
         """
@@ -478,14 +479,21 @@ class _KinetoProfile:
         last cycle in schedule is exported.
 
         ``cuda_graph_annotations`` bakes CUDA-graph kernel annotations into the trace:
-        graphed work carries its annotation's fields in ``args`` and renders on the
-        lane the annotation names, while graphed work without an annotation renders on
-        ``default_stream``. Pass
+        matching graphed work carries its annotation's fields in ``args``. Pass
         :func:`torch.cuda.graph_annotations.get_kernel_annotations` to use what
         :func:`~torch.cuda.graph_annotations.mark_kernels` recorded, or any mapping in
         that shape -- a filtered or edited copy, or one unpickled from an earlier run.
-        Passing it implies ``use_python_export``, the export path able to inject (the
-        ``cupti_monitor`` backend does its own injection and ignores this argument).
+        An empty mapping is treated as no annotations at all. Passing it implies
+        ``use_python_export``, the export path able to inject (the ``cupti_monitor``
+        backend does its own injection and ignores this argument).
+
+        ``graph_lanes`` decides whether graphed events are moved onto display lanes.
+        ``"none"`` (default) leaves the trace's stream layout alone. ``"all"`` moves each
+        graphed event to the lane its annotation names (as
+        :func:`~torch.cuda.graph_annotations.mark_stream` records) and the rest onto
+        ``default_stream`` -- what a replay scattered over many hardware streams needs,
+        at the cost of piling everything onto one lane when no annotation names a stream.
+        A moved event keeps the stream it ran on as ``args["original_stream"]``.
         """
         if self.profiler is None:
             raise AssertionError(
@@ -526,12 +534,13 @@ class _KinetoProfile:
                 self._cupti_profiler_observer = None
                 self._monitor_window_id = None
             return
-        if use_python_export or cuda_graph_annotations is not None:
+        if use_python_export or cuda_graph_annotations:
             self.profiler.export_chrome_trace(
                 path,
                 self._trace_metadata,
                 use_python_export=True,
                 cuda_graph_annotations=cuda_graph_annotations,
+                graph_lanes=graph_lanes,
                 default_stream=default_stream,
             )
         elif path.endswith(".gz"):

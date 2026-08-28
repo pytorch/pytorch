@@ -551,15 +551,14 @@ class profile:
         metadata=None,
         use_python_export=False,
         cuda_graph_annotations=None,
+        graph_lanes="none",
         default_stream=7,
     ):
         """
         Exports the collected trace in Chrome JSON format. If kineto is enabled, only
         last cycle in schedule is exported.
         """
-        if (
-            use_python_export or cuda_graph_annotations is not None
-        ) and kineto_available():
+        if (use_python_export or cuda_graph_annotations) and kineto_available():
             from torch.profiler._chrome_trace_export import (
                 export_chrome_trace as _export,
             )
@@ -569,6 +568,7 @@ class profile:
                 path,
                 metadata,
                 cuda_graph_annotations,
+                graph_lanes,
                 default_stream,
             )
         elif kineto_available():

@@ -4647,7 +4647,9 @@ class TestPythonChromeTraceExport(TestCase):
             with tempfile.TemporaryDirectory() as tmpdir:
                 path = os.path.join(tmpdir, "trace.json")
                 prof.export_chrome_trace(
-                    path, cuda_graph_annotations=get_kernel_annotations()
+                    path,
+                    cuda_graph_annotations=get_kernel_annotations(),
+                    graph_lanes="all",
                 )
                 with open(path) as f:
                     trace = json.load(f)
@@ -4747,6 +4749,7 @@ class TestChromeTraceInlineAnnotations(TestCase):
         trace = self._export(
             [_StubActivity("kernel", "k", rid=3, metadata_json=self._metadata(42))],
             annotations={42: [{"name": "phase_a", "stream": 61}]},
+            graph_lanes="all",
         )
         self.assertTrue(trace["cudaGraphInlineAnnotated"])
         [kernel] = self._kernels(trace)
@@ -4768,6 +4771,7 @@ class TestChromeTraceInlineAnnotations(TestCase):
         trace = self._export(
             [_StubActivity("kernel", "k", rid=3, metadata_json=self._metadata(42))],
             annotations={42: [{"Process Group Description": "DP", "stream": 61}]},
+            graph_lanes="all",
         )
         [name_event] = [
             e
@@ -4780,6 +4784,7 @@ class TestChromeTraceInlineAnnotations(TestCase):
         trace = self._export(
             [_StubActivity("kernel", "k", rid=3, metadata_json=self._metadata(42))],
             annotations={99: [{"name": "other"}]},
+            graph_lanes="all",
         )
         # Nothing matched, so no inline flag -- but graphed work still collapses onto
         # the default lane instead of scattering over the replay's hardware streams.
@@ -4809,6 +4814,7 @@ class TestChromeTraceInlineAnnotations(TestCase):
                 _StubActivity("gpu_user_annotation", "ann_kept", rid=9),
             ],
             annotations={42: [{"name": "phase_a", "stream": 61}]},
+            graph_lanes="all",
         )
         kept = [
             e["name"]
@@ -4816,6 +4822,74 @@ class TestChromeTraceInlineAnnotations(TestCase):
             if e.get("cat") == "gpu_user_annotation"
         ]
         self.assertEqual(kept, ["ann_kept"])
+
+    def test_args_carry_one_stream_key(self):
+        # The metadata fragment kineto supplies already has a "stream"; the lane must
+        # replace it rather than append a second (duplicate keys are parser-dependent).
+        from torch.profiler._chrome_trace_export import export_chrome_trace
+
+        def reject_duplicates(pairs):
+            keys = [k for k, _ in pairs]
+            self.assertEqual(len(keys), len(set(keys)), f"duplicate keys in {keys}")
+            return dict(pairs)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "trace.json")
+            export_chrome_trace(
+                _StubResults(
+                    [
+                        _StubActivity(
+                            "kernel", "k", rid=3, metadata_json=self._metadata(42)
+                        )
+                    ]
+                ),
+                path,
+                annotations={42: [{"name": "phase_a", "stream": 61}]},
+                graph_lanes="all",
+            )
+            with open(path) as f:
+                trace = json.load(f, object_pairs_hook=reject_duplicates)
+
+        [kernel] = self._kernels(trace)
+        self.assertEqual(kernel["args"]["stream"], 61)
+        self.assertEqual(kernel["args"]["original_stream"], 3)
+
+    def test_empty_annotations_leave_events_alone(self):
+        # Nothing to inject, so no lane pass: an empty mapping reads as None rather than
+        # collapsing every graphed event onto one lane for no benefit.
+        trace = self._export(
+            [_StubActivity("kernel", "k", rid=3, metadata_json=self._metadata(42))],
+            annotations={},
+        )
+        [kernel] = self._kernels(trace)
+        self.assertEqual(kernel["tid"], 3)
+        self.assertNotIn("original_stream", kernel["args"])
+
+    def test_annotations_alone_move_nothing(self):
+        # The default: annotate the events, leave the trace's stream layout alone, even
+        # for an annotation that names a lane.
+        trace = self._export(
+            [_StubActivity("kernel", "k", rid=3, metadata_json=self._metadata(42))],
+            annotations={42: [{"name": "phase_a", "stream": 61}]},
+        )
+        [kernel] = self._kernels(trace)
+        self.assertEqual(kernel["args"]["name"], "phase_a")
+        self.assertEqual(kernel["tid"], 3)
+        self.assertEqual(kernel["args"]["stream"], 3)
+        self.assertNotIn("original_stream", kernel["args"])
+
+    def test_invalid_graph_lanes_rejected(self):
+        with self.assertRaisesRegex(ValueError, "graph_lanes"):
+            self._export([], annotations={1: [{"name": "x"}]}, graph_lanes="lanes")
+
+    def test_bare_string_annotation_reads_as_name(self):
+        # What an older recorder pickled; the registry normalizes these to "name" too.
+        trace = self._export(
+            [_StubActivity("kernel", "k", rid=3, metadata_json=self._metadata(42))],
+            annotations={42: ["phase_a"]},
+        )
+        [kernel] = self._kernels(trace)
+        self.assertEqual(kernel["args"]["name"], "phase_a")
 
     def test_without_annotations_nothing_changes(self):
         activities = [

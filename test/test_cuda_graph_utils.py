@@ -2161,6 +2161,39 @@ class TestCuptiAnnotationBackend(TestCase):
         # No scope was open, so nothing should be attributed to the doomed one.
         self.assertEqual(self._annotations(), {})
 
+    def test_failed_backward_does_not_leak_its_annotation(self):
+        # A node that raises never runs its posthook, so the annotation its bracket
+        # published stays on the module-global stack. If the failure is caught inside the
+        # capture, every later unmarked node would inherit it.
+        class Boom(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad):
+                raise RuntimeError("boom")
+
+        x = torch.randn(64, 64, device="cuda", requires_grad=True)
+        self._warm(x.detach())
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(
+            g, enable_annotations=True, annotation_config={"backend": "cupti"}
+        ):
+            with mark_kernels("fwd"):
+                y = Boom.apply(x)
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                torch.autograd.grad(y.sum(), x)
+            # Outside every scope, and after the failure: must be attributed to nothing.
+            _ = x + 1
+
+        recorded = [
+            entry for entries in self._annotations().values() for entry in entries
+        ]
+        self.assertNotIn("autograd_phase", {k for entry in recorded for k in entry})
+        # The forward scope's own kernels are still attributed.
+        self.assertIn({"name": "fwd"}, recorded)
+
     def test_callback_disarmed_after_capture(self):
         from torch.cuda import _graph_node_callbacks
 
