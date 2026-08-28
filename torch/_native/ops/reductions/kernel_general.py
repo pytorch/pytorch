@@ -537,7 +537,6 @@ def _reduce(trait, trait_key, x, dims, out_dtypes, nouts, block=_K0_BLOCK):
         range(x.dim()) if dims is None else ([dims] if isinstance(dims, int) else dims)
     )
     red_axes = {d % x.dim() for d in red_axes}
-    has_index = getattr(trait, "has_index", False)
     out_shape = [s for i, s in enumerate(x.shape) if i not in red_axes]
 
     # Single output ELEMENT (every kept extent is 1) -> route to reduce_all (the
@@ -565,6 +564,7 @@ def _reduce(trait, trait_key, x, dims, out_dtypes, nouts, block=_K0_BLOCK):
     # and for the case a fast kernel itself declines (e.g. xcta on a prime N).
     if len(out_shape) > 0 and x.is_contiguous():
         red_pairs, kept_pairs = _ti_pairs(x, _probe(x, red_axes))
+        has_index = getattr(trait, "has_index", False)
         kind = fast_kind(red_pairs, kept_pairs, nouts, has_index)
         red_n = x.numel() // max(1, math.prod(out_shape))
         if kind == "row":
