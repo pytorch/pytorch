@@ -1,6 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/Config.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/SpectralOpsUtils.h>
@@ -89,21 +88,21 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device
     device.is_cuda() || device.is_meta() || device.is_xpu()
   );
   if (maybe_support_half) {
-    // XPU has no native float16 or bfloat16 FFT kernel; promote both to float32.
+    // XPU has no native bfloat16 FFT kernel; promote to float32.
     // ROCm (hipFFT) has no native bfloat16 FFT kernel; promote to float32.
     // On CUDA, cuFFT handles them natively (see CuFFTPlanCache.h for constraints),
     // so we leave them unchanged here and let the cuFFT planner decide.
-    if ((type == kHalf || type == kBFloat16) && device.is_xpu()) {
+    if (type == kBFloat16 && device.is_xpu()) {
       type = kFloat;
     }
     // ROCm/hipFFT does not support bfloat16; promote to float32
     if (type == kBFloat16 && device.is_cuda() && at::globalContext().hasROCM()) {
       type = kFloat;
     }
-    TORCH_CHECK(type == kHalf || type == kBFloat16 || type == kFloat || type == kDouble,
+    TORCH_CHECK_NOT_IMPLEMENTED(type == kHalf || type == kBFloat16 || type == kFloat || type == kDouble,
                 "Unsupported dtype ", type);
   } else {
-    TORCH_CHECK(type == kFloat || type == kDouble, "Unsupported dtype ", type);
+    TORCH_CHECK_NOT_IMPLEMENTED(type == kFloat || type == kDouble, "Unsupported dtype ", type);
   }
 
   if (!require_complex) {
@@ -242,10 +241,12 @@ Tensor fft_r2c(std::string_view function_name,
                Tensor out, Tensor input, std::optional<SymInt> n_opt,
                int64_t unwrapped_dim, std::optional<std::string_view> norm_str,
                bool forward, bool onesided) {
-  TORCH_CHECK(!input.is_complex(), function_name,
+  TORCH_CHECK_TYPE(!input.is_complex(), function_name,
               " expects a real input tensor, but got ", input.scalar_type());
   TORCH_CHECK(!out.defined() || out.is_complex(), function_name,
               " expects a complex output tensor, but got ", out.scalar_type());
+  TORCH_CHECK(!out.defined() || out.device() == input.device(), function_name,
+              " expects out tensor on device ", input.device(), " but got ", out.device());
   input = promote_tensor_fft(input);
   const auto input_dim = input.dim();
   const auto dim = maybe_wrap_dim(unwrapped_dim, input_dim, /*wrap_scalar=*/false);
@@ -495,7 +496,7 @@ static Tensor fft_rfftn_impl(Tensor out, const Tensor& self,
                              at::OptionalSymIntArrayRef s,
                              at::OptionalIntArrayRef dim,
                              const std::optional<std::string_view>& norm_str) {
-  TORCH_CHECK(!self.is_complex(), "rfftn expects a real-valued input tensor, but got ", self.scalar_type());
+  TORCH_CHECK_TYPE(!self.is_complex(), "rfftn expects a real-valued input tensor, but got ", self.scalar_type());
   auto desc = canonicalize_fft_shape_and_dim_args(self, s, dim);
   TORCH_CHECK(!desc.shape.empty(), "rfftn must transform at least one axis");
   Tensor input = promote_tensor_fft(self, /*require_complex=*/false);
@@ -901,7 +902,7 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const std::optional<int64_t
   if (!at::isFloatingType(self.scalar_type()) && !at::isComplexType(self.scalar_type())) {
     std::ostringstream ss;
     REPR(ss) << ": expected a tensor of floating point or complex values";
-    TORCH_CHECK(false, std::move(ss).str());
+    TORCH_CHECK_NOT_IMPLEMENTED(false, std::move(ss).str());
   }
   if (self.dim() > 2 || self.dim() < 1) {
     std::ostringstream ss;
@@ -1080,7 +1081,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const std::optional<int64_
   const auto hop_length = hop_lengthOpt.value_or(n_fft >> 2);
   const auto win_length = win_lengthOpt.value_or(n_fft);
 
-  TORCH_CHECK(self.is_complex(),
+  TORCH_CHECK_TYPE(self.is_complex(),
               "istft requires a complex-valued input tensor matching the "
               "output from stft with return_complex=True.");
   Tensor input = at::view_as_real(self.resolve_conj());
