@@ -186,6 +186,14 @@ class _PrecompileDynamoAliasPayload:
     pass
 
 
+class _PrecompileDynamoDtypeConfig:
+    dtype = torch.float32
+
+
+def _precompile_dynamo_dtype_branch(x, dtype):
+    return x * 2 if dtype is _PrecompileDynamoDtypeConfig.dtype else x * 3
+
+
 class _PrecompileDynamoAliasHolder:
     payload = None
 
@@ -1422,6 +1430,23 @@ class TestPrecompile(TestCase):
                         )
                 finally:
                     holder.payload = None
+
+    def test_tracer_dynamo_accepts_dtype_input_shared_with_environment(self):
+        # torch.dtype is a process-wide singleton with value-based guards, so a
+        # dtype passed as input while also living on a referenced config class
+        # is not an aliasing hazard; both dtype variants must capture and serve
+        # their own branch.
+        x = torch.randn(3)
+        examples = [(x, torch.float32), (x, torch.float64)]
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_dtype_branch,
+            example_inputs=examples,
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(loaded(x, torch.float32), x * 2)
+        self.assertEqual(loaded(x, torch.float64), x * 3)
 
     def test_tracer_dynamo_rejects_module_carried_in_argument_slot(self):
         # Slot values are instance state: an nn.Module carried in a slot is

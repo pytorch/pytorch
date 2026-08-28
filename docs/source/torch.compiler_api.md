@@ -94,7 +94,13 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       reproduce the side effect. Distinct tensor inputs must not share or overlap
       storage -- their aliasing relation has no serialized form -- though passing the
       same tensor object more than once is supported; capture rejects overlapping
-      inputs and the loaded artifact raises on them.
+      inputs and the loaded artifact raises on them. An explicit input must not also
+      be reachable through the Python environment (including a referenced global's
+      class or module attributes); such aliasing is rejected at capture, except for
+      process-wide singletons whose guards are value-based (dtypes, layouts, memory
+      formats, enum members). Only strided and sparse input layouts are analyzed --
+      sparse surfaces Dynamo's own rejection, and any other layout (e.g. jagged) is
+      refused at capture and at serve because its aliasing cannot be verified.
 
       Pass ``training=True`` with ``tracer="dynamo"`` and ``backend="inductor"`` to
       capture differentiable graphs. Each compiled segment contains readable Inductor

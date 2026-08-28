@@ -1804,16 +1804,21 @@ def _validate_dynamo_capture(
     example_inputs: Sequence[tuple[object, ...]],
     decompositions: dict | None,
     *,
-    check_environment: bool = True,
-) -> Callable[..., object]:
-    """Reject unsupported dynamo-capture inputs; return the innermost target fn.
+    environment_scan: dict[str, tuple[frozenset[int], bool]] | None = None,
+) -> tuple[Callable[..., object], dict[str, tuple[frozenset[int], bool]]]:
+    """Reject unsupported dynamo-capture inputs; return (target, environment_scan).
 
-    ``check_environment=False`` skips the input-independent scan of the fn's
-    referenced globals (the tensor-global rejection): stateful capture runs it
-    once when the state is created, since the programming model declares the
-    environment invariant between calls and the scan walks whole object graphs.
+    ``environment_scan`` maps each referenced global to (reachable object ids,
+    tensor reached). Walking those object graphs is the expensive part of
+    validation and is input-independent, so stateful capture computes it once
+    when the state is created and passes it back on every resume (the
+    programming model declares the environment invariant during capture); only
+    the cheap per-call id intersection against the current example inputs runs
+    every time. Passing a scan also skips the tensor-global rejection, which
+    was decided at scan time.
     """
     import dis
+    import enum
     import inspect
     import pickle
     import sys
@@ -1833,19 +1838,13 @@ def _validate_dynamo_capture(
         return root == "torch" or root in sys.stdlib_module_names
 
     def reaches(
-        value: object,
-        predicate: Callable[[object], bool],
-        seen: set[int],
-        *,
-        follow_types: bool = False,
+        value: object, predicate: Callable[[object], bool], seen: set[int]
     ) -> bool:
-        # follow_types widens the walk to non-library modules, classes (through
-        # the MRO), and each instance's type. The global scans (tensor-global
-        # and input-alias) need that breadth -- a tensor or aliased input on a
-        # class or module attribute is invisible otherwise; the per-argument
-        # checks must NOT use it, so an argument is rejected only for what it
-        # carries (its __dict__ and slot values), not for unrelated attributes
-        # of its type.
+        # The narrow, per-argument walker: an argument is judged only by what
+        # it carries -- containers, __dict__ contents, and slot values -- not
+        # by attributes of its type or by modules. The wide environment walk
+        # (classes through the MRO, user modules, instance types) lives in
+        # environment_reachable below.
         if predicate(value):
             return True
         if value is None or type(value) in (bool, int, float, complex, str, bytes):
@@ -1856,41 +1855,18 @@ def _validate_dynamo_capture(
         seen.add(value_id)
         if isinstance(value, dict):
             return any(
-                reaches(item, predicate, seen, follow_types=follow_types)
+                reaches(item, predicate, seen)
                 for pair in value.items()
                 for item in pair
             )
         if isinstance(value, (tuple, list, set, frozenset)):
-            return any(
-                reaches(item, predicate, seen, follow_types=follow_types)
-                for item in value
-            )
-        if isinstance(value, types.ModuleType):
-            # User modules can carry tensors as attributes; library modules are
-            # part of the environment and are not traversed.
-            if not follow_types or is_library_module(value.__name__):
-                return False
-            return any(
-                reaches(item, predicate, seen, follow_types=True)
-                for item in vars(value).values()
-            )
-        if isinstance(value, type):
-            if not follow_types or is_library_module(value.__module__):
-                return False
-            return any(
-                reaches(item, predicate, seen, follow_types=True)
-                for cls in value.__mro__
-                if not is_library_module(cls.__module__)
-                for item in vars(cls).values()
-            )
-        if isinstance(value, (types.FunctionType, torch.Tensor)):
+            return any(reaches(item, predicate, seen) for item in value)
+        if isinstance(
+            value, (types.FunctionType, types.ModuleType, type, torch.Tensor)
+        ):
             return False
-        # Instance state is __dict__ contents AND slot values -- both are what
-        # the object carries, so both are walked for every caller. Only the
-        # type itself (class attributes) is gated on follow_types.
         if hasattr(value, "__dict__") and any(
-            reaches(item, predicate, seen, follow_types=follow_types)
-            for item in vars(value).values()
+            reaches(item, predicate, seen) for item in vars(value).values()
         ):
             return True
         for cls in type(value).__mro__:
@@ -1900,11 +1876,74 @@ def _validate_dynamo_capture(
                         slot_value = descriptor.__get__(value, type(value))
                     except AttributeError:
                         continue
-                    if reaches(slot_value, predicate, seen, follow_types=follow_types):
+                    if reaches(slot_value, predicate, seen):
                         return True
-        if not follow_types:
-            return False
-        return reaches(type(value), predicate, seen, follow_types=True)
+        return False
+
+    def environment_reachable(root: object) -> tuple[frozenset[int], bool]:
+        # The wide environment walk: enumerate every object id reachable from a
+        # referenced global -- through containers, instance state, slot values,
+        # class attributes (via the MRO), each instance's type, and user
+        # (non-library) modules -- plus whether a tensor is reachable. A tensor
+        # or an aliased input on a class or module attribute is invisible to
+        # the narrow walk, would have its guard classified as environment, and
+        # would serve a raw NameError or the capture-time branch.
+        ids: set[int] = set()
+        found_tensor = False
+        stack: list[object] = [root]
+        while stack:
+            value = stack.pop()
+            if value is None or type(value) in (
+                bool,
+                int,
+                float,
+                complex,
+                str,
+                bytes,
+            ):
+                continue
+            value_id = id(value)
+            if value_id in ids:
+                continue
+            ids.add(value_id)
+            if isinstance(value, torch.Tensor):
+                found_tensor = True
+                continue
+            if isinstance(value, dict):
+                stack.extend(value.keys())
+                stack.extend(value.values())
+                continue
+            if isinstance(value, (tuple, list, set, frozenset)):
+                stack.extend(value)
+                continue
+            if isinstance(value, types.ModuleType):
+                # Library modules are part of the environment; user modules can
+                # carry tensors or aliased inputs as attributes.
+                if not is_library_module(value.__name__):
+                    stack.extend(vars(value).values())
+                continue
+            if isinstance(value, type):
+                if not is_library_module(value.__module__):
+                    stack.extend(
+                        item
+                        for cls in value.__mro__
+                        if not is_library_module(cls.__module__)
+                        for item in vars(cls).values()
+                    )
+                continue
+            if isinstance(value, types.FunctionType):
+                continue
+            if hasattr(value, "__dict__"):
+                stack.extend(vars(value).values())
+            for cls in type(value).__mro__:
+                for descriptor in vars(cls).values():
+                    if isinstance(descriptor, types.MemberDescriptorType):
+                        try:
+                            stack.append(descriptor.__get__(value, type(value)))
+                        except AttributeError:
+                            pass
+            stack.append(type(value))
+        return frozenset(ids), found_tensor
 
     def has_storage_overlap(values: object) -> bool:
         # The same tensor object passed twice is a supported identity relation
@@ -2055,27 +2094,49 @@ def _validate_dynamo_capture(
             "mutates globals; return the value instead."
         )
 
+    fresh_scan = environment_scan is None
+    if fresh_scan:
+        environment_scan = {
+            name: environment_reachable(target.__globals__[name])
+            for name in sorted(loaded_global_names(target.__code__))
+            if name in target.__globals__
+        }
+
+    # torch.dtype/layout/memory_format and enum members are process-wide
+    # singletons whose guards are value-based and whose pickles return the same
+    # object, so sharing one with the environment carries no identity hazard
+    # (torch.device is NOT exempt: equal devices need not be identical). An
+    # enum input that genuinely needs an identity guard still fails later with
+    # Dynamo's accurate cannot-serialize error.
     input_ids = {
         id(value)
         for example in example_inputs
         for value in pytree.tree_leaves(example)
-        if not isinstance(value, (type(None), bool, int, float, complex, str, bytes))
+        if not isinstance(
+            value,
+            (
+                type(None),
+                bool,
+                int,
+                float,
+                complex,
+                str,
+                bytes,
+                enum.Enum,
+                torch.dtype,
+                torch.layout,
+                torch.memory_format,
+            ),
+        )
     }
-
-    # follow_types: like the tensor-global scan, this walks a global's class
-    # and module attributes -- an input aliased through them would have its
-    # identity guard classified as environment and dropped, silently serving
-    # the capture-time branch for inputs that no longer alias.
+    # An input aliased through the environment (including a global's class or
+    # module attributes) would have its identity guard classified as
+    # environment and dropped, silently serving the capture-time branch for
+    # inputs that no longer alias.
     aliased_globals = [
         name
-        for name in loaded_global_names(target.__code__)
-        if name in target.__globals__
-        and reaches(
-            target.__globals__[name],
-            lambda v: id(v) in input_ids,
-            set(),
-            follow_types=True,
-        )
+        for name, (reachable_ids, _) in environment_scan.items()
+        if not reachable_ids.isdisjoint(input_ids)
     ]
     if aliased_globals:
         raise PrecompileError(
@@ -2083,24 +2144,15 @@ def _validate_dynamo_capture(
             "the Python environment; pass the value only as an input. Aliased global: "
             f"{aliased_globals[0]!r}."
         )
-    # A referenced tensor-valued global would be guarded by identity and read
-    # through the fn's globals at serve time, where the artifact namespace has
-    # no such name: capture would succeed and serving would fail with a raw
-    # NameError. The scan is deliberately conservative: a global is rejected
-    # when ANY tensor is reachable from it (through containers, instance state,
-    # class attributes, or non-library modules), even if the fn never reads the
-    # tensor itself.
-    if check_environment:
+    if fresh_scan:
+        # A referenced tensor-valued global would be guarded by identity and
+        # read through the fn's globals at serve time, where the artifact
+        # namespace has no such name: capture would succeed and serving would
+        # fail with a raw NameError. Deliberately conservative: a global is
+        # rejected when ANY tensor is reachable from it, even if the fn never
+        # reads the tensor itself.
         tensor_globals = [
-            name
-            for name in sorted(loaded_global_names(target.__code__))
-            if name in target.__globals__
-            and reaches(
-                target.__globals__[name],
-                lambda v: isinstance(v, torch.Tensor),
-                set(),
-                follow_types=True,
-            )
+            name for name, (_, found_tensor) in environment_scan.items() if found_tensor
         ]
         if tensor_globals:
             raise PrecompileError(
@@ -2109,7 +2161,7 @@ def _validate_dynamo_capture(
                 "every tensor must be an explicit input, so pass the values the "
                 "function needs as arguments instead."
             )
-    return target
+    return target, environment_scan
 
 
 def _make_dynamo_capture_target(
@@ -2396,7 +2448,9 @@ def _precompile_dynamo(
     from torch._dynamo.package import CompilePackage
     from torch._dynamo.pgo import _new_code_state
 
-    target = _validate_dynamo_capture(fn, example_inputs, decompositions)
+    target, _environment_scan = _validate_dynamo_capture(
+        fn, example_inputs, decompositions
+    )
     capture_target = _make_dynamo_capture_target(target)
     capture_limit = (
         recompile_limit
@@ -2468,6 +2522,7 @@ class _PrecompileDynamoState:
         training: bool,
         capture_limit: int,
         dynamic: bool | None,
+        environment_scan: dict[str, tuple[frozenset[int], bool]],
     ) -> None:
         self.target = target
         self.capture_target = capture_target
@@ -2477,6 +2532,10 @@ class _PrecompileDynamoState:
         self.training = training
         self.capture_limit = capture_limit
         self.dynamic = dynamic
+        # Cached wide walk of the fn's referenced globals (see
+        # _validate_dynamo_capture): resumed calls reuse it instead of
+        # re-walking whole object graphs per call.
+        self.environment_scan = environment_scan
         self.compiled: Callable[..., object] | None = None
         self.backend_fn: Callable[..., object] | None = None
         self.examples: list[tuple[object, ...]] = []
@@ -2575,8 +2634,13 @@ def _precompile_dynamo_stateful(
     from torch._dynamo.package import CompilePackage
     from torch._dynamo.pgo import _new_code_state
 
-    target = _validate_dynamo_capture(
-        fn, example_inputs, decompositions, check_environment=state is None
+    # getattr: a wrong-typed `state` still gets the clean TypeError below
+    # rather than an AttributeError here.
+    target, environment_scan = _validate_dynamo_capture(
+        fn,
+        example_inputs,
+        decompositions,
+        environment_scan=getattr(state, "environment_scan", None),
     )
     with _DYNAMO_COMPILE_LOCK:
         fresh = state is None
@@ -2598,6 +2662,7 @@ def _precompile_dynamo_stateful(
                 training=training,
                 capture_limit=capture_limit,
                 dynamic=dynamic,
+                environment_scan=environment_scan,
             )
         else:
             if not isinstance(state, _PrecompileDynamoState):
@@ -3106,9 +3171,12 @@ class _PrecompileApi:
           arguments or containers of those values (``nn.Module`` arguments are not
           supported yet). A global whose object graph contains a tensor is rejected
           conservatively (every tensor must be an explicit input), as are functions
-          that mutate globals, and distinct tensor inputs that share or overlap
+          that mutate globals, inputs also reachable through the Python environment
+          (value-guarded singletons -- dtypes, layouts, memory formats, enum
+          members -- are exempt), distinct tensor inputs that share or overlap
           storage (the same tensor object may repeat; the loaded artifact also
-          raises on overlapping runtime inputs).
+          raises on overlapping runtime inputs), and non-strided input layouts
+          other than sparse (which surfaces Dynamo's own rejection).
 
         ``decompositions`` is an optional decomposition table (a dict mapping each
         ``OpOverload`` to a decomposition function) forwarded to ``make_fx`` as its
