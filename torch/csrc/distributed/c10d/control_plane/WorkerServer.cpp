@@ -1,4 +1,3 @@
-// @allow-raw-throw
 #include <unordered_map>
 
 #include <c10/util/Exception.h>

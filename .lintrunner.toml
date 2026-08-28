@@ -596,7 +596,9 @@ exclude_patterns = [
     'c10/util/**',
     'test/cpp/**',
     'test/cpp_extensions/**',
-    'torch/csrc/distributed/**',
+    # nccl2 is all that is left of torch/csrc/distributed/**: its NCCLException
+    # needs a decision that does not belong in a mechanical PR.
+    'torch/csrc/distributed/c10d/nccl2/**',
     'torch/csrc/jit/**',
 ]
 command = [
