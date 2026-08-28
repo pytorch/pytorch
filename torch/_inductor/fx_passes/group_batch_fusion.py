@@ -9,6 +9,7 @@ from typing import Any
 
 import torch
 from torch._dynamo.utils import counters, is_node_meta_valid
+from torch._library.utils import get_layout_constraint_tag
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.symbolic_shapes import free_symbols
@@ -528,6 +529,8 @@ class BatchLinearLHSFusion(BatchFusion):
             bias_tensor = None
             if bias is not None:
                 bias_tensor = bias.meta.get("val", bias.meta.get("example_value"))
+                if bias_tensor is None or bias_tensor.ndim != 1:
+                    return None
             bias_dim = None if bias_tensor is None else bias_tensor.ndim  # type: ignore[union-attr]
             group_key = ("batch_linear_lhs", bias_dim, input)
         else:
@@ -637,47 +640,80 @@ def _is_aten_view_name(name: str) -> bool:
     return any(o.is_view for o in packet.op_overloads())
 
 
-# view / as_strided / view_as require a compatible layout and can crash on the
-# non-contiguous fused output; other views (permute, reshape, ...) work on any
-# layout and just propagate it. This is op semantics, not alias info, so it is
-# the one hand-maintained list.
-_CRASH_VIEW_OPS = OrderedSet(["view", "as_strided", "view_as"])
+# These ops require a compatible input layout or can reinterpret the fused
+# storage differently. This is op semantics, not alias info, so it cannot be
+# derived only from OpOverload.is_view.
+_CRASH_VIEW_OPS = OrderedSet(
+    [
+        "view",
+        "_unsafe_view",
+        "view_as",
+        "view_as_complex",
+        "as_strided",
+        "_reshape_alias",
+    ]
+)
 
-# contiguous is alias-annotated (so is_view is True) but its output layout is
-# determined by the call, not by the incoming strides: the result is contiguous
-# for any memory_format. The fused layout does not propagate through it, so the
-# walk stops there (otherwise custom_op(lin(x).contiguous()), the canonical
-# user-side fix, loses the fusion for no correctness benefit).
+# The unsafe split variants return aliases despite omitting alias annotations.
+_PROPAGATE_VIEW_OPS = OrderedSet(
+    ["unsafe_chunk", "unsafe_split", "unsafe_split_with_sizes"]
+)
+
+_LAYOUT_OBSERVING_OPS = OrderedSet(
+    [
+        "stride",
+        "sym_stride",
+        "storage_offset",
+        "sym_storage_offset",
+        "is_contiguous",
+        "sym_is_contiguous",
+        "_has_same_storage_numel",
+        "is_set_to",
+    ]
+)
+
+# Ordinary contiguous() is layout-breaking, so the fused layout does not
+# propagate through it. preserve_format is layout-sensitive and handled in
+# _view_op_kind.
 _LAYOUT_BREAKING_OPS = OrderedSet(["contiguous"])
 
 
+def _target_name(user: torch.fx.Node) -> str | None:
+    if user.op == "call_method":
+        return user.target if isinstance(user.target, str) else None
+    if user.op != "call_function":
+        return None
+    tgt = user.target
+    if isinstance(tgt, torch._ops.OpOverload):
+        tgt = tgt.overloadpacket
+    name = getattr(tgt, "__name__", None)
+    return name if isinstance(name, str) else None
+
+
 def _view_op_kind(user: torch.fx.Node) -> str | None:
-    # "crash" for view/as_strided/view_as (can fail on non-contiguous),
+    # "crash" for layout-sensitive views and observers,
     # "propagate" for the other view-producing ops (layout flows through),
-    # None otherwise. The caller (_has_layout_sensitive_user) checks the target
-    # namespace before this, so only aten ops reach the name lookup below.
+    # None otherwise.
     if user.op == "call_function":
         # operator.getitem unwraps the tuple returned by split/chunk/unbind and
         # is itself an unguarded view producer (lin(x)[0]); walk through it.
         if user.target is operator.getitem:
             return "propagate"
-        # Normalize OpOverload / OpOverloadPacket to the op name ("view").
-        tgt = user.target
-        if isinstance(tgt, torch._ops.OpOverload):
-            tgt = tgt.overloadpacket
-        name = getattr(tgt, "__name__", None)
-    elif user.op == "call_method":
-        name = user.target
-    else:
-        return None
-    # A call_function target without __name__ has no op name to look up; treat
-    # it as opaque and stop the walk rather than letting getattr on a non-string
-    # name raise inside _is_aten_view_name.
-    if not isinstance(name, str):
+    name = _target_name(user)
+    if name is None:
         return None
     if name in _CRASH_VIEW_OPS:
         return "crash"
+    if name in _PROPAGATE_VIEW_OPS:
+        return "propagate"
     if name in _LAYOUT_BREAKING_OPS:
+        memory_format = get_arg_value(user, 1, "memory_format")
+        if memory_format in (None, torch.contiguous_format):
+            return None
+        return "crash"
+    if name in _LAYOUT_OBSERVING_OPS:
+        return "crash"
+    if user.op == "call_function" and _op_namespace(user.target) != "aten":
         return None
     return "propagate" if _is_aten_view_name(name) else None
 
@@ -697,10 +733,14 @@ def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
         for user in queue.pop().users:
             if user.op == "output":
                 return True
-            if user.op == "call_method" and user.target in (
-                "is_contiguous",
-                "storage_offset",
-                "stride",
+            if _is_mutable_node(user.target):
+                return True
+            if isinstance(
+                user.target, torch._ops.OpOverload
+            ) and get_layout_constraint_tag(user.target, with_default=False) in (
+                torch.Tag.needs_exact_strides,
+                torch.Tag.needs_contiguous_strides,
+                torch.Tag.needs_fixed_stride_order,
             ):
                 return True
             if _op_namespace(user.target) not in (None, "aten"):
@@ -717,6 +757,10 @@ def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
 # Poor person's check for if a node in the graph mutates its input.
 # (the graph is torch IR, so we will see torch fns and python operators)
 def _is_mutable_node(tgt):
+    if isinstance(tgt, torch._ops.OpOverload):
+        return tgt._schema.is_mutable
+    if isinstance(tgt, torch._ops.OpOverloadPacket):
+        return any(op._schema.is_mutable for op in tgt.op_overloads())
     if str(tgt).endswith("_"):
         # e.g. torch.mul_, torch.Tensor.mul_
         return True

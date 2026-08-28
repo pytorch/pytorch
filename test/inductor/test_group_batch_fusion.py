@@ -794,6 +794,97 @@ class TestGroupBatchFusion(TestCase):
         )
         self.assertTrue(_has_layout_sensitive_user(linear))
 
+    def test_batch_linear_lhs_layout_observers_are_sensitive(self):
+        from torch._inductor.fx_passes.group_batch_fusion import (
+            _has_layout_sensitive_user,
+        )
+
+        cases = (
+            (torch.ops.aten.sym_stride.int, (0,)),
+            (torch.ops.aten.sym_storage_offset.default, ()),
+            (torch.ops.aten.sym_is_contiguous.default, ()),
+        )
+        for target, extra_args in cases:
+            with self.subTest(target=target):
+                graph = torch.fx.Graph()
+                linear = graph.placeholder("linear")
+                graph.call_function(target, args=(linear, *extra_args))
+                self.assertTrue(_has_layout_sensitive_user(linear))
+
+    def test_batch_linear_lhs_unsafe_views_are_sensitive(self):
+        from torch._inductor.fx_passes.group_batch_fusion import (
+            _has_layout_sensitive_user,
+        )
+
+        cases = (
+            (torch.ops.aten._unsafe_view.default, ((-1,),)),
+            (torch.ops.aten._reshape_alias.default, ((-1,), (1,))),
+            (torch.ops.aten.view_as_complex.default, ()),
+        )
+        for target, extra_args in cases:
+            with self.subTest(target=target):
+                graph = torch.fx.Graph()
+                linear = graph.placeholder("linear")
+                graph.call_function(target, args=(linear, *extra_args))
+                self.assertTrue(_has_layout_sensitive_user(linear))
+
+    def test_batch_linear_lhs_preserve_format_contiguous_is_sensitive(self):
+        from torch._inductor.fx_passes.group_batch_fusion import (
+            _has_layout_sensitive_user,
+        )
+
+        graph = torch.fx.Graph()
+        linear = graph.placeholder("linear")
+        graph.call_method(
+            "contiguous",
+            args=(linear,),
+            kwargs={"memory_format": torch.preserve_format},
+        )
+        self.assertTrue(_has_layout_sensitive_user(linear))
+
+    def test_batch_linear_lhs_mutation_through_view_is_sensitive(self):
+        from torch._inductor.fx_passes.group_batch_fusion import (
+            _has_layout_sensitive_user,
+        )
+
+        graph = torch.fx.Graph()
+        linear = graph.placeholder("linear")
+        transposed = graph.call_function(
+            torch.ops.aten.transpose.int, args=(linear, 0, 1)
+        )
+        graph.call_function(torch.ops.aten.add_.Tensor, args=(transposed, 1))
+        self.assertTrue(_has_layout_sensitive_user(linear))
+
+    def test_batch_linear_lhs_storage_observers_are_sensitive(self):
+        from torch._inductor.fx_passes.group_batch_fusion import (
+            _has_layout_sensitive_user,
+        )
+
+        graph = torch.fx.Graph()
+        linear = graph.placeholder("linear")
+        other = graph.placeholder("other")
+        graph.call_function(
+            torch.ops.aten._has_same_storage_numel.default, args=(linear, other)
+        )
+        self.assertTrue(_has_layout_sensitive_user(linear))
+
+    def test_batch_linear_lhs_rejects_broadcast_bias(self):
+        from torch._inductor.fx_passes.group_batch_fusion import BatchLinearLHSFusion
+
+        graph = torch.fx.Graph()
+        input = graph.placeholder("input")
+        weight = graph.placeholder("weight")
+        bias = graph.placeholder("bias")
+        input.meta["example_value"] = torch.randn(4, 8)
+        weight.meta["example_value"] = torch.randn(6, 8)
+        bias.meta["example_value"] = torch.randn(1, 6)
+        linear = graph.call_function(torch._C._nn.linear, args=(input, weight, bias))
+        linear.meta["example_value"] = torch.randn(4, 6)
+        rule = BatchLinearLHSFusion(
+            graph_search_options={"min_fuse_set_size": 2, "max_fuse_set_size": 300}
+        )
+        self.assertIsNone(rule.match(linear))
+
     @requires_gpu()
     def test_as_strided_storage_offset_after_mm_fusion(self):
         """
