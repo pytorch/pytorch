@@ -25,7 +25,7 @@ from ..utils import (
     raise_args_mismatch,
     unpack_iterable,
 )
-from .base import ValueMutationNew, VariableTracker
+from .base import Method, ValueMutationNew, VariableTracker
 
 
 if TYPE_CHECKING:
@@ -321,6 +321,66 @@ class ConstantVariable(VariableTracker):
                 pass
         return super().tp_iter_impl(tx)
 
+    def format_(
+        self,
+        tx: InstructionTranslatorBase,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        if not istype(self.value, str):
+            return None
+        return variables.BuiltinVariable(str.format).call_function(
+            tx,
+            [self, *args],
+            kwargs,
+        )
+
+    def join(
+        self,
+        tx: InstructionTranslatorBase,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        if not istype(self.value, str):
+            return None
+        arg_unpacked = unpack_iterable(tx, args[0])
+        try:
+            arg_const = [x.as_python_constant() for x in arg_unpacked]
+            return ConstantVariable.create(self.value.join(arg_const))
+        except NotImplementedError:
+            return None
+
+    def iter_(
+        self,
+        tx: InstructionTranslatorBase,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self.tp_iter_impl(tx)
+
+    def decode(
+        self,
+        tx: InstructionTranslatorBase,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        if not isinstance(self.value, bytes):
+            return None
+        try:
+            const_args = [a.as_python_constant() for a in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+        except NotImplementedError:
+            return None
+        method = getattr(self.value, "decode")
+        return ConstantVariable.create(method(*const_args, **const_kwargs))
+
+    tp_methods = {
+        "format": Method(format_),
+        "join": Method(join),
+        "__iter__": Method(iter_),
+        "decode": Method(decode),
+    }
+
     def call_method(
         self,
         tx: InstructionTranslatorBase,
@@ -330,26 +390,11 @@ class ConstantVariable(VariableTracker):
     ) -> VariableTracker:
         from .tensor import SymNodeVariable
 
-        if name == "format" and istype(self.value, str):
-            return variables.BuiltinVariable(str.format).call_function(
-                tx,
-                [self, *args],
-                kwargs,
-            )
-        elif name == "join" and istype(self.value, str):
-            if kwargs or len(args) != 1:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            arg_unpacked = unpack_iterable(tx, args[0])
-            try:
-                arg_const = [x.as_python_constant() for x in arg_unpacked]
-                return ConstantVariable.create(self.value.join(arg_const))
-            except NotImplementedError:
-                return super().call_method(tx, name, args, kwargs)
+        method = self.lookup_tp_method(name)
+        if method is not None:
+            result = method(self, tx, name, args, kwargs)
+            if result is not None:
+                return result
 
         if any(isinstance(x, SymNodeVariable) for x in args):
             # Promote to SymNodeVariable for operations involving dynamic shapes.
@@ -362,9 +407,6 @@ class ConstantVariable(VariableTracker):
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
         except NotImplementedError:
             return super().call_method(tx, name, args, kwargs)
-
-        if name == "__iter__":
-            return self.tp_iter_impl(tx)
 
         if isinstance(self.value, str) and name in str.__dict__:
             method = getattr(self.value, name)
@@ -407,9 +449,6 @@ class ConstantVariable(VariableTracker):
                         return ConstantVariable.create(op(self.value, add_target))
                     except Exception as e:
                         raise_observed_exception(type(e), tx, args=list(e.args))
-        elif isinstance(self.value, bytes) and name == "decode":
-            method = getattr(self.value, name)
-            return ConstantVariable.create(method(*const_args, **const_kwargs))
         elif type(self.value) is complex and name in complex.__dict__:
             method = getattr(self.value, name)
             try:
