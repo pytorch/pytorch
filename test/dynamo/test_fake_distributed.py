@@ -166,6 +166,30 @@ class GraphModule(torch.nn.Module):
         expected = all_gather_single(x, gather_dim=2, group=dist.group.WORLD)
         self.assertEqual(result, expected)
 
+    def test_all_gather_tensor_gather_dim_negative_view_path(self):
+        """gather_dim=-1 on a 2D input must match gather_dim=1 (view path)."""
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(x):
+            return all_gather_single(x, gather_dim=-1, group=dist.group.WORLD)
+
+        x = torch.randn(1, 4)
+        result = fn(x)
+        expected = all_gather_single(x, gather_dim=1, group=dist.group.WORLD)
+        self.assertEqual(result, expected)
+
+    def test_all_gather_tensor_gather_dim_negative_chunk_cat_path(self):
+        """gather_dim=-1 on a 3D input must match gather_dim=2 (chunk+cat path)."""
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(x):
+            return all_gather_single(x, gather_dim=-1, group=dist.group.WORLD)
+
+        x = torch.randn(1, 3, 4)
+        result = fn(x)
+        expected = all_gather_single(x, gather_dim=2, group=dist.group.WORLD)
+        self.assertEqual(result, expected)
+
     def test_device_mesh_get_local_rank(self):
         device_mesh = init_device_mesh(
             device_type="cpu",

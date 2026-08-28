@@ -53,6 +53,10 @@ def raise_sentinel_error_fn():
     raise SentinelError("foobar")
 
 
+def return_ok_fn():
+    return "ok"
+
+
 class FnNameCapturingErrorHandler(ErrorHandler):
     """Captures the entrypoint fn_name that ``@record`` threads via handler state.
 
@@ -64,6 +68,7 @@ class FnNameCapturingErrorHandler(ErrorHandler):
     def __init__(self) -> None:
         self.initialize_fn_name: str | None = None
         self.record_exception_fn_name: str | None = None
+        self.record_success_fn_name: str | None = None
 
     def initialize(self) -> None:
         self.initialize_fn_name = self._fn_name
@@ -72,6 +77,10 @@ class FnNameCapturingErrorHandler(ErrorHandler):
     def record_exception(self, e: BaseException) -> None:
         self.record_exception_fn_name = self._fn_name
         super().record_exception(e)
+
+    def record_success(self) -> None:
+        self.record_success_fn_name = self._fn_name
+        super().record_success()
 
 
 def read_resource_file(resource_file: str) -> str:
@@ -340,3 +349,57 @@ class ApiTest(unittest.TestCase):
         with open(self.test_error_file) as fp:
             err = json.load(fp)
         self.assertNotIn("fn_name", err["message"]["extraInfo"])
+
+    def test_record_calls_record_success_on_success(self):
+        # @record must invoke record_success and return the fn's value on the
+        # no-exception path, without recording an exception or error file
+        error_handler = mock.MagicMock(spec=ErrorHandler)
+        wrapped = record(return_ok_fn, error_handler=error_handler)
+
+        with mock.patch.dict(
+            os.environ, {"TORCHELASTIC_ERROR_FILE": self.test_error_file}
+        ):
+            result = wrapped()
+
+        self.assertEqual("ok", result)
+        error_handler.record_success.assert_called_once()
+        error_handler.record_exception.assert_not_called()
+        self.assertFalse(os.path.isfile(self.test_error_file))
+
+    def test_record_does_not_call_record_success_on_failure(self):
+        error_handler = mock.MagicMock(spec=ErrorHandler)
+        wrapped = record(raise_sentinel_error_fn, error_handler=error_handler)
+
+        with mock.patch.dict(
+            os.environ, {"TORCHELASTIC_ERROR_FILE": self.test_error_file}
+        ):
+            with self.assertRaises(SentinelError):
+                wrapped()
+
+        error_handler.record_success.assert_not_called()
+        error_handler.record_exception.assert_called_once()
+
+    def test_record_success_receives_fn_name(self):
+        # record_success runs while the entrypoint fn_name is still set on the handler
+        error_handler = FnNameCapturingErrorHandler()
+        wrapped = record(return_ok_fn, error_handler=error_handler)
+
+        result = wrapped()
+
+        self.assertEqual("ok", result)
+        self.assertEqual("return_ok_fn", error_handler.record_success_fn_name)
+
+    def test_record_success_error_not_recorded_as_failure(self):
+        # if record_success() raises, it must propagate and NOT be routed through
+        # record_exception (which would misreport a successful run as a failure)
+        error_handler = mock.MagicMock(spec=ErrorHandler)
+        error_handler.record_success.side_effect = RuntimeError("telemetry boom")
+        wrapped = record(return_ok_fn, error_handler=error_handler)
+
+        with mock.patch.dict(
+            os.environ, {"TORCHELASTIC_ERROR_FILE": self.test_error_file}
+        ):
+            with self.assertRaises(RuntimeError):
+                wrapped()
+
+        error_handler.record_exception.assert_not_called()
