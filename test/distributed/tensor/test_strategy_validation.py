@@ -35,11 +35,18 @@ from torch.distributed.tensor._ops.strategy_validation import (
 )
 from torch.distributed.tensor.placement_types import Partial, Shard
 from torch.testing._internal.common_methods_invocations import SampleInput
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_SLOW, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TEST_WITH_SLOW,
+    TestCase,
+)
 
 
 class TestPlacementUtilities(TestCase):
     """Test placement utility functions."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_parse_placement_replicate(self):
         p = parse_placement("R")
@@ -73,6 +80,8 @@ class TestPlacementUtilities(TestCase):
 
 class TestPlacementNormalization(TestCase):
     """Test placement normalization for trivial shard deduplication."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_is_trivial_shard_size_1(self):
         """Shard on size-1 dimension is trivial."""
@@ -214,6 +223,8 @@ class TestPlacementNormalization(TestCase):
 class TestInputPlacements(TestCase):
     """Test input/output placement generation."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_get_1d_input_placements(self):
         t = torch.randn(4, 3)
         placements = get_1d_input_placements_for_tensor(t, include_partial=False)
@@ -293,6 +304,8 @@ class TestInputPlacements(TestCase):
 class TestExtractTensors(TestCase):
     """Test tensor extraction from samples."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_extract_single_input(self):
         sample = SampleInput(torch.randn(4, 3))
         tensors = extract_tensors_from_sample(sample)
@@ -319,6 +332,8 @@ class TestExtractTensors(TestCase):
 
 class TestValidateCombination(TestCase):
     """Test the core validate_combination function."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     world_size = 2
 
@@ -606,6 +621,8 @@ class TestValidateCombination(TestCase):
 class TestCreatePartialInput(TestCase):
     """Test the _create_partial_input helper."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_partial_sum_reduces_correctly(self):
         tensor = torch.randn(4, 3)
         local_tensor = _create_partial_input(tensor, Partial("sum"), world_size=2)
@@ -779,6 +796,8 @@ class TestPartialCombinationValidity(TestCase):
     (e.g., using symmetric splits or ignoring tensor_idx).
     """
 
+    hw_classification = HardwareClassification.GENERIC
+
     world_size = 2
 
     def setUp(self):
@@ -925,6 +944,8 @@ class TestPartialCombinationValidity(TestCase):
 class TestDecompStrategyPath(TestCase):
     """Test that decomposition-based strategy propagation discovers rules."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     world_size = 2
 
     def setUp(self):
@@ -1053,6 +1074,8 @@ class TestDecompStrategyPath(TestCase):
 class TestQuerySingleDimStrategyKwargs(TestCase):
     """Test that query_single_dim_strategy forwards kwargs to strategy functions."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_kwargs_forwarded_to_strategy(self):
         """
         A kwargs-aware strategy should receive the actual kwargs, not {}.
@@ -1116,6 +1139,8 @@ class TestQuerySingleDimStrategyKwargs(TestCase):
 
 class TestCompareRules(TestCase):
     """Test _compare_rules populates per-op statistics correctly."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_true_positives_tracked_by_op(self):
         from torch.distributed.tensor._ops.strategy_validation import (
@@ -1217,6 +1242,8 @@ class TestCompareRules(TestCase):
 
 class TestCompareOperatorEndToEnd(TestCase):
     """End-to-end smoke test for compare_operator."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     world_size = 2
 
@@ -1323,6 +1350,8 @@ class TestCompareOperatorEndToEnd(TestCase):
 class TestAtenLevelValidation(TestCase):
     """Tests for aten-level validation (validate_aten_combination + allow_composite mode)."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     world_size = 2
 
     def setUp(self):
@@ -1427,6 +1456,8 @@ class TestAtenLevelValidation(TestCase):
 class TestMainModule(TestCase):
     """Test that strategy_validation can be run as a main module."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def _run_module(self, *extra_args):
         import subprocess
         import sys
@@ -1466,6 +1497,8 @@ class TestMainModule(TestCase):
 
 class TestOpInfoLookup(TestCase):
     """Tests for get_opinfo_by_name, _find_opinfo_candidates, and resolve_op_names."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_get_opinfo_by_name_exact(self):
         results = get_opinfo_by_name("add")

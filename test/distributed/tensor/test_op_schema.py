@@ -5,10 +5,16 @@ import random
 
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import OpSchema, RuntimeSchemaInfo
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class TestOpSchema(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_equality_checks_lists_of_dtensor_spec(self):
         """If x == y, then we must have h(x) == h(y)."""
         dts = DTensorSpec(mesh=None, placements=tuple(), tensor_meta=None)
