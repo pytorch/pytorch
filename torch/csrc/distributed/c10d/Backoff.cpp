@@ -22,7 +22,9 @@ std::chrono::milliseconds ExponentialBackoffWithJitter::nextBackoff() {
   TORCH_CHECK_VALUE(
       initialInterval <= maxInterval,
       "ExponentialBackoffWithJitter requires initialInterval <= maxInterval");
-  // Negated rather than inverted so that a NaN factor still fails the check.
+  // The two float guards below are negated rather than inverted, so that NaN
+  // keeps the behaviour it had here before: it satisfies none of these
+  // comparisons, so it did not raise and still does not.
   TORCH_CHECK_VALUE(
       !(randomizationFactor >= 1 || randomizationFactor < 0),
       "ExponentialBackoffWithJitter requires randomization factor (0,1]");

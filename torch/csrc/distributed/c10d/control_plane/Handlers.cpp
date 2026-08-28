@@ -1,6 +1,7 @@
 #include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
 
 #include <c10/core/Event.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
 
 #include <fmt/format.h>
@@ -8,7 +9,6 @@
 #include <future>
 #include <mutex>
 #include <shared_mutex>
-#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <utility>

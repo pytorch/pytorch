@@ -21,7 +21,6 @@
 #include <c10/xpu/XPUStream.h>
 #include <torch/csrc/inductor/static_launcher/xpu.h>
 #include <cstdint>
-#include <stdexcept>
 
 #include <level_zero/ze_api.h>
 #include <sycl/sycl.hpp>
