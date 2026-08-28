@@ -7,7 +7,6 @@
 #include <torch/csrc/utils/object_ptr.h>
 
 #include <array>
-#include <stdexcept>
 
 namespace torch {
 namespace {

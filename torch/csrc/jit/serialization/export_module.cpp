@@ -223,12 +223,12 @@ std::pair<IValue, IValue> getFunctionTuple(
           .append(",")
           .append(value_type_str)
           .append("]");
-      types.emplace_back(dict_str);
+      types.emplace_back(std::move(dict_str));
       continue;
     } else if (t->kind() == TypeKind::TupleType) {
       std::string named_tuple_str =
           get_named_tuple_str_or_default(compilation_unit, t, type_str);
-      types.emplace_back(named_tuple_str);
+      types.emplace_back(std::move(named_tuple_str));
       continue;
     } else if (type_str.starts_with(torch_prefix)) {
       TORCH_CHECK(
@@ -239,7 +239,7 @@ std::pair<IValue, IValue> getFunctionTuple(
           "define a pytorch class (class Foo(torch.nn.Module)). The problematic type is: ",
           type_str);
     }
-    types.emplace_back(type_str);
+    types.emplace_back(std::move(type_str));
   }
 
   // since the register location is embedded into the bytecode, pass the
