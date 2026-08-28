@@ -8,9 +8,14 @@ import sys
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensorMode, is_fake
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 
+# These are host-side predicates over tensor IDENTITY, and dynamo rewrites exactly that:
+# it graph-breaks at a FakeTensorMode entry and the resumed frame holds a tensor that is
+# no longer fake, so `is_traced` answers False about it -- correctly, but about the wrong
+# object. Compiling them adds no coverage either way.
+@skipIfTorchDynamo("host-side capability predicates need no dynamo compilation")
 class TestNativeUtils(TestCase):
     def test_lazy_module_defers_import(self):
         # LazyModule must NOT import its target until first attribute access -- this is what
