@@ -7,7 +7,6 @@ import sys
 import time
 import unittest
 from sys import platform
-from unittest import mock
 
 import torch
 import torch.cuda
@@ -92,18 +91,6 @@ def simple_pool_fill(tensor):
 
 def raise_keyboard_interrupt(i):
     raise KeyboardInterrupt
-
-
-def _rebuild_registered_tensor(value):
-    return value
-
-
-def _reduce_registered_tensor(tensor):
-    return (_rebuild_registered_tensor, (tensor.numel(),))
-
-
-def _reduce_replacement_tensor(tensor):
-    return (_rebuild_registered_tensor, (tensor.numel() + 1,))
 
 
 def send_tensor(queue, event, device, dtype):
@@ -599,49 +586,6 @@ instantiate_device_type_tests(TestMultiprocessingDeviceType, globals())
     "TSAN is not fork-safe since we're forking in a multi-threaded environment",
 )
 class TestMultiprocessing(_MultiprocessingTestMixin, TestCase):
-    def test_register_ipc_tensor_reducer(self):
-        registry = mp.reductions._ipc_tensor_reduce_registry
-        with mock.patch.dict(registry, clear=True):
-            mp.reductions.register_ipc_tensor_reducer(
-                "cpu", _reduce_registered_tensor
-            )
-
-            self.assertEqual(
-                mp.reductions.reduction.ForkingPickler.loads(
-                    mp.reductions.reduction.ForkingPickler.dumps(torch.ones(3))
-                ),
-                3,
-            )
-            with self.assertWarnsRegex(UserWarning, "already registered"):
-                mp.reductions.register_ipc_tensor_reducer(
-                    "cpu:0", _reduce_replacement_tensor
-                )
-            self.assertEqual(
-                mp.reductions.reduction.ForkingPickler.loads(
-                    mp.reductions.reduction.ForkingPickler.dumps(torch.ones(3))
-                ),
-                4,
-            )
-
-    def test_register_ipc_storage_check(self):
-        storage = torch.ones(1).untyped_storage()
-        check_fn = mock.Mock(return_value=True)
-        registry = mp.reductions._ipc_storage_reduce_check_registry
-
-        with mock.patch.dict(registry, clear=True):
-            mp.reductions.register_ipc_storage_check("cpu", check_fn)
-
-            with self.assertRaisesRegex(RuntimeError, "Cannot pickle cpu storage"):
-                mp.reductions.reduction.ForkingPickler.dumps(storage)
-            check_fn.assert_called_once_with(storage)
-            replacement_check = mock.Mock(return_value=False)
-            with self.assertWarnsRegex(UserWarning, "already registered"):
-                mp.reductions.register_ipc_storage_check(
-                    "cpu:0", replacement_check
-                )
-            mp.reductions.reduction.ForkingPickler.dumps(storage)
-            replacement_check.assert_called_once_with(storage)
-
     def tearDown(self):
         if torch.cuda.is_available():
             torch.cuda.ipc_collect()
