@@ -11,6 +11,7 @@ import sys
 import tempfile
 import time
 import unittest
+import weakref
 from datetime import timedelta
 from unittest import mock
 
@@ -65,6 +66,34 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
         torch.cuda.synchronize()
         time.sleep(2)
         dist.barrier()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_wait_tensor_releases_work_tensors(self) -> None:
+        output = torch.ops._c10d_functional.all_reduce(
+            torch.ones(4, device=self.device), "sum", dist.group.WORLD
+        )
+        output_ref = weakref.ref(output)
+
+        torch.ops._c10d_functional.wait_tensor(output)
+        del output
+
+        self.assertIsNone(output_ref())
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_wait_tensors_releases_coalesced_work_tensors(self) -> None:
+        outputs = torch.ops._c10d_functional.all_reduce_coalesced(
+            [torch.ones(4, device=self.device) for _ in range(2)],
+            "sum",
+            dist.group.WORLD,
+        )
+        output_refs = [weakref.ref(output) for output in outputs]
+
+        torch.ops._c10d_functional.wait_tensors(outputs)
+        del outputs
+
+        self.assertEqual([ref() for ref in output_refs], [None, None])
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)

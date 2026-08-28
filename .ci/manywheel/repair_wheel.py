@@ -93,7 +93,6 @@ def cuda_rpaths(gpu_arch_version: str) -> str:
         + ":$ORIGIN/../../nvidia/cuda_nvrtc/lib"
         + ":$ORIGIN/../../nvidia/cuda_runtime/lib"
         + ":$ORIGIN/../../nvidia/cufft/lib"
-        + ":$ORIGIN/../../nvidia/curand/lib"
         + ":$ORIGIN/../../nvidia/cusolver/lib"
         + ":$ORIGIN/../../nvidia/cusparse/lib"
         + ":$ORIGIN/../../cusparselt/lib"
