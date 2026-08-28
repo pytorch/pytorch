@@ -97,13 +97,6 @@ _ARTIFACT_NAME = "native_dsl_compile"
 
 log = torch._logging.getArtifactLogger(__name__, _ARTIFACT_NAME)
 
-# Sentinel stored as a local in the instrumentation wrapper's frame (see _make_wrapper).
-# A coverage test walks the stack from inside a real cute.compile and asserts a frame
-# whose f_locals holds this object encloses the compile -- a RUNTIME proof that the
-# compile is instrumented, robust to how each op is factored (direct decorator vs a
-# shared compile helper reached through cached_plan(op=...)).
-_INSTRUMENTED_FRAME_MARKER = object()
-
 R = TypeVar("R")
 
 
@@ -214,15 +207,13 @@ def _make_wrapper(
     only ``sample`` (and the reported ``dsl``) differ.
     """
 
+    # THIS frame is the runtime proof of instrumentation: a coverage test walks the stack
+    # from inside a real cute.compile and asserts that some frame running this very code
+    # object encloses it, which holds however the op is factored (a decorator on its own
+    # compile fn, or a shared helper reached through cached_plan(op=...)). Nothing has to be
+    # stored in the frame for that -- the frame's identity is the signal.
     @functools.wraps(fn)
     def wrapper(*args: Any, **kwargs: Any) -> R:
-        # Stack marker: a local set to the module sentinel so a coverage test can walk
-        # the call stack from inside cute.compile and confirm SOME instrumented frame
-        # encloses it -- proving the compile is instrumented regardless of whether the
-        # op decorates its compile fn directly or reaches cute.compile through a shared
-        # helper + cached_plan(op=...). Assigned before the fast-path return so it holds
-        # on both branches. Costs one local store.
-        _native_dsl_instrumented_frame = _INSTRUMENTED_FRAME_MARKER
         # Fast path: do nothing extra unless a sink is listening. This runs on
         # every call to the wrapped fn (for CuTeDSL, every op invocation), so
         # the no-listener cost must stay at one predicate check.
