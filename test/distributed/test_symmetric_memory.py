@@ -2383,6 +2383,10 @@ class LoweringTest(MultiProcContinuousTest):
 
 
 class SymmMemSingleProcTest(TestCase):
+    def test_initialize_nvshmem_rejects_non_cuda_device(self):
+        with self.assertRaisesRegex(ValueError, "requires a CUDA device"):
+            symm_mem.initialize_nvshmem("cpu")
+
     @requires_cuda
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"

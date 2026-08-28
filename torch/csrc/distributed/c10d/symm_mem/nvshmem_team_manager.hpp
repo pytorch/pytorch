@@ -92,6 +92,20 @@ class TeamManager {
     return std::make_pair(std::cref(team_pool), team_pool_dev);
   }
 
+  void clear() {
+    c10::cuda::CUDAGuard guard(device_);
+    std::vector<nvshmem_team_t*> team_pools;
+    team_pools.reserve(team_pool_devptrs_.size());
+    for (auto& [_, team_pool_dev] : team_pool_devptrs_) {
+      team_pools.push_back(team_pool_dev);
+    }
+    team_pool_devptrs_.clear();
+    group_name_to_team_pool_.clear();
+    for (nvshmem_team_t* team_pool_dev : team_pools) {
+      c10::cuda::CUDACachingAllocator::raw_delete(team_pool_dev);
+    }
+  }
+
   ~TeamManager() noexcept {
     // Free the team pools in device memory
     // Note that we do it in a best effort manner because the team pool is

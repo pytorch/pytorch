@@ -280,6 +280,28 @@ def my_reduce_kernel(
     shmem_backend.reduce(team_handle, dest_tensor, source_tensor, nreduce, operation)
 
 
+class SHMEMTritonExplicitInitTest(MultiProcContinuousTest):
+    def _init_device(self) -> None:
+        device_module.set_device(self.device)
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type, self.rank)
+
+    @requires_triton()
+    @requires_h100()
+    def test_triton_barrier_without_allocation(self) -> None:
+        self._init_device()
+        symm_mem.initialize_nvshmem(self.device)
+
+        my_barrier_all_kernel[(1,)](
+            launch_cooperative_grid=True,
+            num_ctas=1,
+        )
+        torch.cuda.synchronize()
+        dist.barrier()
+
+
 @instantiate_parametrized_tests
 class SHMEMTritonTest(MultiProcContinuousTest):
     def _init_device(self) -> None:
