@@ -73,10 +73,9 @@ def _use_template_autows() -> bool:
 # Check if running on ROCm
 IS_ROCM = torch.version.hip is not None
 
+_rocm_str: str | None = getattr(torch.version, "rocm", None) or torch.version.hip
 _rocm_version = (
-    tuple(int(v) for v in torch.version.rocm.split(".")[:2])  # type: ignore[union-attr]
-    if torch.version.rocm is not None
-    else (0, 0)
+    tuple(int(v) for v in _rocm_str.split(".")[:2]) if _rocm_str is not None else (0, 0)
 )
 # First ROCm version where origami is not supported.
 ORIGAMI_UNSUPPORTED_ROCM_VERSION = (10, 0)
@@ -417,11 +416,6 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(64, 64, 64, 3, 8),
             GemmConfig(128, 256, 128, 3, 8),
             GemmConfig(256, 128, 128, 3, 8),
-        ]
-
-        self.mixed_mm_configs: list[BaseConfig] = [
-            GemmConfig(16, 128, 256, 3, 4),
-            GemmConfig(16, 128, 256, 5, 8),
         ]
 
         self.persistent_mm_configs: list[BaseConfig] = [
