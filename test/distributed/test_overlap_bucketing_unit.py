@@ -97,7 +97,7 @@ def build_collective_info(graph, hiding_annotations):
 
 @requires_accelerator_dist_backend()
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-class TestOverlapPreservingBucketingDevice(InductorTestCase):
+class TestOverlapPreservingBucketing(InductorTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     """
@@ -1123,12 +1123,12 @@ class TestOverlapPreservingBucketingDevice(InductorTestCase):
         )
 
 
-instantiate_device_type_tests(TestOverlapPreservingBucketingDevice, globals(), except_for="cpu")
+instantiate_device_type_tests(TestOverlapPreservingBucketing, globals(), except_for="cpu")
 
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-class TestCrossPGOverlapDevice(InductorTestCase):
+class TestCrossPGOverlap(InductorTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     """
@@ -1377,12 +1377,12 @@ class TestCrossPGOverlapDevice(InductorTestCase):
         )
 
 
-instantiate_device_type_tests(TestCrossPGOverlapDevice, globals(), except_for="cpu")
+instantiate_device_type_tests(TestCrossPGOverlap, globals(), except_for="cpu")
 
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-class TestFusibleNodeOverlapDevice(InductorTestCase):
+class TestFusibleNodeOverlap(InductorTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     """Test that fusible nodes are used for overlapping with collectives."""
@@ -1549,12 +1549,12 @@ class TestFusibleNodeOverlapDevice(InductorTestCase):
         self.assertEqual(len(scheduler.collective_info), 1)
 
 
-instantiate_device_type_tests(TestFusibleNodeOverlapDevice, globals(), except_for="cpu")
+instantiate_device_type_tests(TestFusibleNodeOverlap, globals(), except_for="cpu")
 
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-class TestOverlapSchedulingFixesDevice(InductorTestCase):
+class TestOverlapSchedulingFixes(InductorTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     """
@@ -1867,7 +1867,7 @@ class TestOverlapSchedulingFixesDevice(InductorTestCase):
             graph.run(a, b, gen)
 
 
-instantiate_device_type_tests(TestOverlapSchedulingFixesDevice, globals(), except_for="cpu")
+instantiate_device_type_tests(TestOverlapSchedulingFixes, globals(), except_for="cpu")
 
 
 @requires_accelerator_dist_backend()
@@ -2166,7 +2166,7 @@ class TestProfileGuidedEstimation(TestCase):
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-class TestCoalescedCollectiveOverlapDevice(InductorTestCase):
+class TestCoalescedCollectiveOverlap(InductorTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     """
@@ -2331,12 +2331,12 @@ class TestCoalescedCollectiveOverlapDevice(InductorTestCase):
         self.assertGreater(size, 0)
 
 
-instantiate_device_type_tests(TestCoalescedCollectiveOverlapDevice, globals(), except_for="cpu")
+instantiate_device_type_tests(TestCoalescedCollectiveOverlap, globals(), except_for="cpu")
 
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-class TestProfileGuidedEstimatorIntegrationDevice(InductorTestCase):
+class TestProfileGuidedEstimatorIntegration(InductorTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     """Integration tests: ProfileGuidedEstimator.__call__ on traced FX graphs."""
@@ -2423,12 +2423,12 @@ class TestProfileGuidedEstimatorIntegrationDevice(InductorTestCase):
             os.unlink(trace_path)
 
 
-instantiate_device_type_tests(TestProfileGuidedEstimatorIntegrationDevice, globals(), except_for="cpu")
+instantiate_device_type_tests(TestProfileGuidedEstimatorIntegration, globals(), except_for="cpu")
 
 
 @requires_accelerator_dist_backend()
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-class TestPreBucketingFsdpCollectivesDevice(InductorTestCase):
+class TestPreBucketingFsdpCollectives(InductorTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @classmethod
@@ -2559,7 +2559,7 @@ class TestPreBucketingFsdpCollectivesDevice(InductorTestCase):
         self.assertEqual(count_ag(fsdp_group), 1)
 
 
-instantiate_device_type_tests(TestPreBucketingFsdpCollectivesDevice, globals(), except_for="cpu")
+instantiate_device_type_tests(TestPreBucketingFsdpCollectives, globals(), except_for="cpu")
 
 
 class TestBitsetAncestors(TestCase):
