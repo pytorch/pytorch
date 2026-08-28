@@ -6,11 +6,15 @@ the repo small; the build extracts them into the build tree at configure time.
 
 ## Archive contents
 
-One YAML profile per library, named `lib<target>.yaml`. Each call to
-`torch_optimize_layout_if_enabled(<target>)` looks up `lib<target>.yaml`
-(e.g. target `torch_cuda` -> `libtorch_cuda.yaml`). The optimized libraries
-are: `libtorch_cuda`, `libtorch_cpu`, `libtorch_python`, `libc10`, and
-`libc10_cuda`.
+Each library has a YAML profile named `lib<target>.yaml`. Each call to
+`torch_optimize_layout_if_enabled` passes profile names in priority order and
+the first profile found is used. The optimized libraries are: `libtorch_cuda`,
+`libtorch_cpu`, `libtorch_python`, `libc10`, and `libc10_cuda`.
+
+`libtorch_python` may also have profiles for individual Python major and minor
+versions, named `libtorch_python-py<major>.<minor>.yaml` (for example,
+`libtorch_python-py3.13.yaml`). The matching version-specific profile is
+preferred when present; otherwise the build uses `libtorch_python.yaml`.
 
 ## How profiles are consumed
 

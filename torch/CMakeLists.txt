@@ -304,7 +304,10 @@ endif()
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
 torch_compile_options(torch_python)  # see cmake/public/utils.cmake
-torch_optimize_layout_if_enabled(torch_python)
+torch_optimize_layout_if_enabled(
+  torch_python
+  "libtorch_python-py${Python_VERSION_MAJOR}.${Python_VERSION_MINOR}.yaml"
+  libtorch_python.yaml)
 if(APPLE)
   target_compile_options(torch_python PRIVATE
       $<$<COMPILE_LANGUAGE:CXX>: -fvisibility=default>)
