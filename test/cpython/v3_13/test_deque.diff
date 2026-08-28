@@ -1,8 +1,8 @@
 diff --git a/test/cpython/v3_13/test_deque.py b/test/cpython/v3_13/test_deque.py
-index 4679f297fd7..57aa863406a 100644
+index 4679f297fd7f4a134c12552b96671f4a7e4f6b10..5cf7c75efe5184fc6f93916440e02372f5dcf46c 100644
 --- a/test/cpython/v3_13/test_deque.py
 +++ b/test/cpython/v3_13/test_deque.py
-@@ -1,7 +1,30 @@
+@@ -1,7 +1,31 @@
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]
 +
@@ -19,6 +19,7 @@ index 4679f297fd7..57aa863406a 100644
 +from torch._dynamo.test_case import CPythonTestCase
 +from torch.testing._internal.common_utils import (
 +    skipIfTorchDynamo,
++    TEST_WITH_TORCHDYNAMO,
 +    run_tests,
 +)
 +
@@ -34,7 +35,7 @@ index 4679f297fd7..57aa863406a 100644
  import gc
  import weakref
  import copy
-@@ -27,7 +50,7 @@ class MutateCmp:
+@@ -27,7 +51,7 @@ class MutateCmp:
          self.deque.clear()
          return self.result
  
@@ -43,7 +44,62 @@ index 4679f297fd7..57aa863406a 100644
  
      def test_basics(self):
          d = deque(range(-5125, -5000))
-@@ -541,6 +564,7 @@ class TestBasic(unittest.TestCase):
+@@ -96,6 +120,10 @@ class TestBasic(unittest.TestCase):
+             d = deque('abc')
+             d.maxlen = 10
+ 
++    @unittest.skipIf(
++        TEST_WITH_TORCHDYNAMO,
++        "__build_class__ with closed over objects not supported",
++    )
+     def test_count(self):
+         for s in ('', 'abracadabra', 'simsalabim'*500+'abc'):
+             s = list(s)
+@@ -146,6 +174,10 @@ class TestBasic(unittest.TestCase):
+                 self.assertEqual(x >  y, list(x) >  list(y), (x,y))
+                 self.assertEqual(x >= y, list(x) >= list(y), (x,y))
+ 
++    @unittest.skipIf(
++        TEST_WITH_TORCHDYNAMO,
++        "__build_class__ with closed over objects not supported",
++    )
+     def test_contains(self):
+         n = 200
+ 
+@@ -166,6 +198,10 @@ class TestBasic(unittest.TestCase):
+         with self.assertRaises(RuntimeError):
+             n in d
+ 
++    @unittest.skipIf(
++        TEST_WITH_TORCHDYNAMO,
++        "__build_class__ with closed over objects not supported",
++    )
+     def test_contains_count_index_stop_crashes(self):
+         class A:
+             def __eq__(self, other):
+@@ -249,6 +285,10 @@ class TestBasic(unittest.TestCase):
+         self.assertRaises(IndexError, d.__getitem__, 0)
+         self.assertRaises(IndexError, d.__getitem__, -1)
+ 
++    @unittest.skipIf(
++        TEST_WITH_TORCHDYNAMO,
++        "__build_class__ with closed over objects not supported",
++    )
+     def test_index(self):
+         for n in 1, 2, 30, 40, 200:
+ 
+@@ -503,6 +543,10 @@ class TestBasic(unittest.TestCase):
+         d.clear()               # clear an empty deque
+         self.assertEqual(list(d), [])
+ 
++    @unittest.skipIf(
++        TEST_WITH_TORCHDYNAMO,
++        "__build_class__ with closed over objects not supported",
++    )
+     def test_remove(self):
+         d = deque('abcdefghcij')
+         d.remove('c')
+@@ -541,6 +585,7 @@ class TestBasic(unittest.TestCase):
      def test_hash(self):
          self.assertRaises(TypeError, hash, deque('abc'))
  
@@ -51,7 +107,7 @@ index 4679f297fd7..57aa863406a 100644
      def test_long_steadystate_queue_popleft(self):
          for size in (0, 1, 2, 100, 1000):
              d = deque(range(size))
-@@ -552,6 +576,7 @@ class TestBasic(unittest.TestCase):
+@@ -552,6 +597,7 @@ class TestBasic(unittest.TestCase):
                      self.assertEqual(x, i-size)
              self.assertEqual(list(d), list(range(BIG-size, BIG)))
  
@@ -59,7 +115,7 @@ index 4679f297fd7..57aa863406a 100644
      def test_long_steadystate_queue_popright(self):
          for size in (0, 1, 2, 100, 1000):
              d = deque(reversed(range(size)))
-@@ -564,6 +589,7 @@ class TestBasic(unittest.TestCase):
+@@ -564,6 +610,7 @@ class TestBasic(unittest.TestCase):
              self.assertEqual(list(reversed(list(d))),
                               list(range(BIG-size, BIG)))
  
@@ -67,7 +123,7 @@ index 4679f297fd7..57aa863406a 100644
      def test_big_queue_popleft(self):
          pass
          d = deque()
-@@ -575,6 +601,7 @@ class TestBasic(unittest.TestCase):
+@@ -575,6 +622,7 @@ class TestBasic(unittest.TestCase):
              if x != i:
                  self.assertEqual(x, i)
  
@@ -75,7 +131,7 @@ index 4679f297fd7..57aa863406a 100644
      def test_big_queue_popright(self):
          d = deque()
          append, pop = d.appendleft, d.pop
-@@ -585,6 +612,7 @@ class TestBasic(unittest.TestCase):
+@@ -585,6 +633,7 @@ class TestBasic(unittest.TestCase):
              if x != i:
                  self.assertEqual(x, i)
  
@@ -83,7 +139,7 @@ index 4679f297fd7..57aa863406a 100644
      def test_big_stack_right(self):
          d = deque()
          append, pop = d.append, d.pop
-@@ -596,6 +624,7 @@ class TestBasic(unittest.TestCase):
+@@ -596,6 +645,7 @@ class TestBasic(unittest.TestCase):
                  self.assertEqual(x, i)
          self.assertEqual(len(d), 0)
  
@@ -91,7 +147,7 @@ index 4679f297fd7..57aa863406a 100644
      def test_big_stack_left(self):
          d = deque()
          append, pop = d.appendleft, d.popleft
-@@ -758,7 +787,7 @@ class TestBasic(unittest.TestCase):
+@@ -758,7 +808,7 @@ class TestBasic(unittest.TestCase):
          check(deque('a' * BLOCKLEN), basesize + 2 * blocksize)
          check(deque('a' * (42 * BLOCKLEN)), basesize + 43 * blocksize)
  
@@ -100,7 +156,7 @@ index 4679f297fd7..57aa863406a 100644
  
      def test_constructor(self):
          for s in ("123", "", range(1000), ('do', 1.2), range(2000,2200,5)):
-@@ -792,7 +821,7 @@ class DequeWithBadIter(deque):
+@@ -792,7 +842,7 @@ class DequeWithBadIter(deque):
      def __iter__(self):
          raise TypeError
  
@@ -109,7 +165,7 @@ index 4679f297fd7..57aa863406a 100644
  
      def test_basics(self):
          d = Deque(range(25))
-@@ -898,7 +927,7 @@ class SubclassWithKwargs(deque):
+@@ -898,7 +948,7 @@ class SubclassWithKwargs(deque):
      def __init__(self, newarg=1):
          deque.__init__(self)
  
@@ -118,7 +174,7 @@ index 4679f297fd7..57aa863406a 100644
      def test_subclass_with_kwargs(self):
          # SF bug #1486663 -- this used to erroneously raise a TypeError
          SubclassWithKwargs(newarg=1)
-@@ -1029,10 +1058,6 @@ h
+@@ -1029,10 +1079,6 @@ h
  
  __test__ = {'libreftest' : libreftest}
  
