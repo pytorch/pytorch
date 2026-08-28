@@ -652,6 +652,14 @@ class AMaxOps:
     @cute.jit
     def _maxnan(self, a, b):
         # NaN-propagating max: b if (b > a or b is NaN) else a. b != b detects NaN.
+        #
+        # Spelled out rather than `max(a, b)` because the two are not interchangeable here: a
+        # FURB136 autofix rewrote one such ternary over Int32 bounds in tile.py into the builtin
+        # and changed the emitted bits (a bitwise test caught it), so every min/max ternary in
+        # the datapath carries the noqa. AbsMaxOps below does use builtin max, and it is
+        # verified equal to vector_norm(ord=inf) including NaN rows
+        # (test_absmax_absmin_propagate_nan) -- pinned by test rather than by argument, because
+        # what the builtin lowers to over these accumulators is not evident from the source.
         return b if ((b > a) or (b != b)) else a
 
     @cute.jit
@@ -827,9 +835,9 @@ class AMinMaxOps:
 
     @cute.jit
     def _fmin(self, a, b):
-        # NaN-propagating min: if either is NaN, result is NaN. Keep the explicit
-        # ternary -- in a @cute.jit body it lowers to a cute select over SSA
-        # scalars; Python's min()/max() (RUFF FURB136) would NOT lower the same way.
+        # NaN-propagating min: if EITHER operand is NaN the result is NaN. Written as an explicit
+        # truth table because that is the property being relied on, not as an optimization
+        # choice; see the note above AMaxOps._maxnan for why these are not builtin min/max.
         return (a if a != a else (a if a < b else b)) if b == b else b  # noqa: FURB136
 
     @cute.jit
