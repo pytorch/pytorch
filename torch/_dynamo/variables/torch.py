@@ -2788,6 +2788,28 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if predicate_vt.is_python_constant():
                 if predicate_vt.as_python_constant():
                     return ConstantVariable.create(None)
+                # Exceptions from inlined calls can be caught in a parent frame.
+                current_tx: InstructionTranslatorBase | None = tx
+                while current_tx is not None and not (
+                    current_tx.current_instruction.exn_tab_entry
+                    or current_tx.block_stack
+                ):
+                    current_tx = current_tx.parent
+                if current_tx is None:
+                    # No Python handler can catch this, so keep the user error
+                    # in the compiled graph instead of graph-breaking Dynamo.
+                    proxy_args: tuple[Any, ...]
+                    if message_graph_arg is None:
+                        proxy_args = (False,)
+                    else:
+                        proxy_args = (False, message_graph_arg)
+                    tx.output.create_proxy(
+                        "call_function",
+                        torch._check,
+                        proxy_args,
+                        {},
+                    )
+                    return ConstantVariable.create(None)
                 msg = (
                     str(message_eager() if callable(message_eager) else message_eager)
                     if message_eager is not None
