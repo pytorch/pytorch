@@ -315,7 +315,7 @@ def normalize_unbind_default(match: Match, *args, **kwargs):
 
 
 @register_graph_pattern(
-    CallFunctionVarArgs([torch.cat, torch.concat], users=MULTIPLE),
+    CallFunctionVarArgs([torch.cat, torch.concat, torch.concatenate], users=MULTIPLE),
     pass_dict=construct_pattern_matcher_pass("normalization_pass"),
 )
 def normalize_cat_default(match: Match, *args, **kwargs):
