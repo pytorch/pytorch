@@ -467,7 +467,8 @@ class BaseSetVariable(VariableTracker):
         if not pyanyset_check(self_) or not pyanyset_check(other_):
             return ConstantVariable.create(NotImplemented)
 
-        return self_.call_method(tx, "intersection", [other_], {})
+        # set.__and__ uses the internal helper, bypassing a subclass override.
+        return BaseSetVariable.intersection(self_, tx, [other_], {})
 
     def nb_xor_impl(
         self,
@@ -481,7 +482,8 @@ class BaseSetVariable(VariableTracker):
         if not pyanyset_check(self_) or not pyanyset_check(other_):
             return ConstantVariable.create(NotImplemented)
 
-        return self_.call_method(tx, "symmetric_difference", [other_], {})
+        # set.__xor__ uses the internal helper, bypassing a subclass override.
+        return BaseSetVariable.symmetric_difference(self_, tx, [other_], {})
 
     def sq_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return VariableTracker.build(tx, len(self.set_items))
@@ -756,7 +758,8 @@ class SetVariable(BaseSetVariable):
         if not pyanyset_check(other):
             return ConstantVariable.create(NotImplemented)
 
-        self.call_method(tx, "intersection_update", [other], {})
+        # set.__iand__ uses the internal helper, bypassing a subclass override.
+        SetVariable.intersection_update(self, tx, [other], {})
         return self
 
     def nb_inplace_xor_impl(
@@ -766,7 +769,8 @@ class SetVariable(BaseSetVariable):
         if not pyanyset_check(other):
             return ConstantVariable.create(NotImplemented)
 
-        self.call_method(tx, "symmetric_difference_update", [other], {})
+        # set.__ixor__ uses the internal helper, bypassing a subclass override.
+        SetVariable.symmetric_difference_update(self, tx, [other], {})
         return self
 
     tp_methods = {
@@ -924,7 +928,8 @@ class OrderedSetVariable(SetVariable):
         self, tx: "InstructionTranslatorBase", other: VariableTracker
     ) -> VariableTracker:
         tx.output.side_effects.mutation(self)
-        self.call_method(tx, "difference_update", [other], {})
+        # set.__isub__ uses the internal helper, bypassing a subclass override.
+        SetVariable.difference_update(self, tx, [other], {})
         return self
 
 
