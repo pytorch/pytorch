@@ -3,7 +3,6 @@
 #include <ATen/Context.h>
 #include <c10/xpu/XPUFunctions.h>
 #include <c10/xpu/XPUStream.h>
-#include <sycl/sycl.hpp>
 
 namespace at::xpu {
 
@@ -49,10 +48,10 @@ template <class KernelClass>
 template <auto* KernelFn>
 [[nodiscard]] inline size_t getKernelMaxWorkGroupSize(
     DeviceIndex device_index = at::xpu::current_device()) {
-  namespace syclex = sycl::ext::oneapi::experimental;
   auto& context = c10::xpu::get_device_context();
   auto& device = c10::xpu::get_raw_device(device_index);
 #if SYCL_COMPILER_VERSION < 20260100
+  namespace syclex = sycl::ext::oneapi::experimental;
   auto bundle =
       syclex::get_kernel_bundle<KernelFn, sycl::bundle_state::executable>(
           context);
@@ -60,6 +59,7 @@ template <auto* KernelFn>
   return kernel.get_info<sycl::info::kernel_device_specific::work_group_size>(
       device);
 #else
+  namespace syclex = sycl::ext::oneapi::experimental;
   return syclex::get_kernel_info<
       KernelFn,
       sycl::info::kernel_device_specific::work_group_size>(context, device);
@@ -122,17 +122,24 @@ template <auto* KernelFn>
 }
 
 // Returns the number of hardware threads on the given device.
-[[nodiscard]] inline size_t getDeviceHWThreads(
+[[nodiscard]] inline uint32_t getDeviceHWThreads(
     at::DeviceIndex device = at::xpu::current_device()) {
   const auto* device_prop = at::xpu::getDeviceProperties(device);
   return device_prop->gpu_hw_threads_per_eu * device_prop->gpu_eu_count;
 }
 
 // Returns the number of EUs per Xe-Core on the given device.
-[[nodiscard]] inline size_t getDeviceEUCountPerXeCore(
+[[nodiscard]] inline uint32_t getDeviceEUCountPerXeCore(
     at::DeviceIndex device = at::xpu::current_device()) {
   const auto* device_prop = at::xpu::getDeviceProperties(device);
   return device_prop->gpu_eu_count_per_subslice;
+}
+
+// Returns the share local memory size of the given device.
+[[nodiscard]] inline size_t getDeviceLocalMemSize(
+    at::DeviceIndex device = at::xpu::current_device()) {
+  const auto* device_prop = at::xpu::getDeviceProperties(device);
+  return device_prop->local_mem_size;
 }
 
 } // namespace at::xpu
