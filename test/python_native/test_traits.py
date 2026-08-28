@@ -5,6 +5,13 @@
 # rather than failing. With this in place the kernels can be tested per fold ORDER instead of per
 # trait x order.
 #
+# SHAPE only. The protocol's LAW -- combine(leaf(a), leaf(b)) == reduce(reduce(init(), a), b),
+# whose violation is what made norm fold raw values and return a plausible wrong number -- cannot
+# be checked here: the trait methods are @cute.jit and reject host-side values ("only float is
+# supported"), so it takes two real fold shapes to compare. It is pinned in
+# test_inner_tree_order.test_tree_fold_matches_the_serial_fold_for_every_value_trait, which runs
+# the serial and tree folds over the same input for every value trait.
+#
 # The traits module imports cutlass at module scope, so every import here is inside a test body
 # and the suite is gated on the CuteDSL runtime being present -- importing at collection time
 # fails the whole file on an image without it.

@@ -381,7 +381,7 @@ def _build_geom(trait, trait_key, x, out_dtypes, nouts, M, N, block, subrow_targ
         ]
         cparts0 = [_L.cute_tensor_dynM(p, ndim=1) for p in parts0]
         outs0 = [torch.empty(M, device=device, dtype=d) for d in out_dtypes]
-        return _L.compile(
+        return _L.compile_kernel(
             fop,
             wrap_in(sub0),
             cparts0,
