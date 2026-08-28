@@ -597,7 +597,6 @@ exclude_patterns = [
     'test/cpp/**',
     'test/cpp_extensions/**',
     'torch/csrc/distributed/**',
-    'torch/csrc/inductor/**',
     'torch/csrc/jit/**',
 ]
 command = [
