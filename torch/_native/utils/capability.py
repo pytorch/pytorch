@@ -45,7 +45,13 @@ def _arch_ok(idx: int, majors: tuple[int, ...]) -> bool:
     # get_device_capability queries device properties and the answer is IMMUTABLE per device,
     # while a cond runs on every eager call -- so memoize. The accepted set is part of the key:
     # two families with different sets must not be served each other's answer.
-    major, _ = torch.cuda.get_device_capability(idx)
+    try:
+        major, _ = torch.cuda.get_device_capability(idx)
+    except RuntimeError:
+        # No usable device, e.g. tracing a CUDA model on a CPU-only box: a FAKE cuda tensor
+        # normalizes to cuda:0 without initializing CUDA, so it reaches here and the query
+        # raises. The contract at the top of this file is that a cond never raises -- decline.
+        return False
     return major in majors
 
 
@@ -59,6 +65,11 @@ def device_ok(x: torch.Tensor, majors: tuple[int, ...]) -> bool:
     ``(9, 10, 12)`` is refusing to do. The set belongs to the caller because the families
     genuinely differ; passing one here is a claim about which arches that family's kernels have
     been run on.
+
+    Granularity is the MAJOR only, so an accepted major admits every minor within it, including
+    ones that do not exist yet -- ``(9, 10, 12)`` accepts Rubin at 10.7
+    (``cpp_extension.py``'s ``('Rubin', '10.7+PTX')``). A family that needs to distinguish
+    minors has to check ``get_device_capability`` itself; this predicate cannot express it.
     """
     if x.device.type != "cuda" or torch.version.hip is not None:
         return False
@@ -72,7 +83,12 @@ def on_current_device(x: torch.Tensor) -> bool:
     # the input is not on the current device and let aten handle it.
     #
     # The non-CUDA check comes first because current_device() RAISES without CUDA, and the
-    # contract at the top of this file is that a cond never raises.
+    # contract at the top of this file is that a cond never raises. That is not sufficient on
+    # its own: a FAKE cuda tensor has device.type "cuda" in a process with no usable device
+    # (tracing a CUDA model on a CPU-only box), so the query has to be guarded too.
     if x.device.type != "cuda":
         return False
-    return x.device.index == torch.cuda.current_device()
+    try:
+        return x.device.index == torch.cuda.current_device()
+    except RuntimeError:
+        return False
