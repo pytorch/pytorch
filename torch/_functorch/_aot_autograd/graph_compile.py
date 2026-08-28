@@ -44,6 +44,7 @@ from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals, guard_or_true
 from torch.fx.graph_module import GraphModule
+from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.passes._tensorify_python_scalars import tensorify_python_scalars
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.types import py_sym_types
@@ -858,6 +859,9 @@ def run_joint_graph_passes_on_hops(
     recursive partitioning of nested regions is left to downstream passes.
     """
     from torch._higher_order_ops import invoke_subgraph
+    from torch._higher_order_ops.invoke_subgraph import (
+        get_backward_nested_region_config,
+    )
 
     def num_outputs(mod: torch.fx.GraphModule) -> int:
         return len(mod.graph.find_nodes(op="output")[0].args[0])
@@ -1234,6 +1238,25 @@ def run_joint_graph_passes_on_hops(
             # graph, it was fine because the input signature remains same.
             new_bw_node.meta.pop("eager_input_vals", None)
 
+            # When the region sets backward-specific inductor config, compile the
+            # partitioned backward under it; the forward keeps its own config.
+            fw_region_config = fw_node.meta.get("custom", {}).get(
+                "nested_region_config"
+            )
+            # get_backward_nested_region_config returns fw_config unchanged when
+            # the region has no distinct backward config, so identity tells us
+            # whether to stamp.
+            bw_region_config = get_backward_nested_region_config(fw_region_config)
+            if bw_region_config is not fw_region_config:
+                # Re-stamp on the fresh backward node's meta["custom"] (the source
+                # of truth: unlike a GraphModule's meta it survives FX transforms).
+                # Lowering picks it up via the subgraph-module mirror (_propagate_*)
+                # or the ir.py node fallback.
+                new_bw_node.meta["custom"] = {
+                    **new_bw_node.meta.get("custom", {}),
+                    "nested_region_config": bw_region_config,
+                }
+
         bw_node.replace_all_uses_with(new_bw_node)
         joint_gm.graph.erase_node(bw_node)
 
@@ -1347,6 +1370,27 @@ def prepare_hook_gm(
     fn, args = create_wrap_fn(fn, args)
     gm = _create_graph(fn, args, aot_config=aot_config)  # type: ignore[arg-type]
     return gm
+
+
+def _materialize_fx_output_containers(x: Any) -> Any:
+    # FX stores an output node's container args as immutable_list /
+    # immutable_dict. The pack hook's return value is handed to the unpack hook
+    # trace (`prepare_hook_gm(unpack_hook_gm, (pack_out_val,))`), and
+    # `create_wrap_fn` tree_maps it, which preserves those immutable types.
+    # Unpack hooks that check `type(c) is list` / `type(c) is dict` rather than
+    # isinstance would therefore see a different container than in eager, so
+    # normalize back to the plain runtime types.
+    #
+    # Note this only recovers `list` / `dict`, not other subclasses: FX's
+    # create_arg already collapses e.g. an OrderedDict pack output to
+    # immutable_dict, so that distinction is gone before we get here.
+    if type(x) in (immutable_list, list):
+        return [_materialize_fx_output_containers(v) for v in x]
+    if type(x) in (immutable_dict, dict):
+        return {k: _materialize_fx_output_containers(v) for k, v in x.items()}
+    if type(x) is tuple:
+        return tuple(_materialize_fx_output_containers(v) for v in x)
+    return x
 
 
 # Inline Autograd saved_tensors_hooks into epilogue of forward graph
@@ -1486,7 +1530,29 @@ def maybe_inline_graph_saved_tensors_hooks(
             return {"_fw_graph": fw_g, "_bw_graph": bw_g, "_node": saved}
 
         with _saved_tensor_hook_context(_get_extra_info()):
-            pack_out_val = pack_hook_gm(val)
+            pack_gm = prepare_hook_gm(aot_config, pack_hook_gm, (val,))
+            pack_g = pack_gm.graph
+            maybe_log_graph(
+                pack_gm,
+                f"saved_tensors_pack_hook {saved.name}",  # type: ignore[union-attr]
+                aot_config,
+                lambda: f"aot_saved_tensors_hooks_pack {saved.name}",  # type: ignore[union-attr]
+                structured_logs,
+            )
+
+            # Extract pack_out_val from the traced graph's output-node meta.
+            # `pack_g` is what gets inlined into the joint graph below via
+            # `node_copy`, so its output meta uses the same symbols the
+            # inlined nodes carry -- no identity mismatch, no need to re-run
+            # the hook to get an "example value".
+            pack_out_args = _materialize_fx_output_containers(
+                pack_g.output_node().args[0]
+            )
+            pack_out_val = pytree.tree_map_only(
+                torch.fx.Node,
+                lambda n: n.meta["val"],
+                pack_out_args,
+            )
 
         requires_sc_handling = any(
             is_traceable_wrapper_subclass(x) for x in pytree.tree_leaves(pack_out_val)
@@ -1497,18 +1563,6 @@ def maybe_inline_graph_saved_tensors_hooks(
                 "You can workaround it by manually returning subclass's inner tensors"
                 " in the pack hook, and reconstructing the subclass in the unpack hook"
             )
-
-        with _saved_tensor_hook_context(_get_extra_info()):
-            pack_gm = prepare_hook_gm(aot_config, pack_hook_gm, (val,))
-            pack_g = pack_gm.graph
-            maybe_log_graph(
-                pack_gm,
-                f"saved_tensors_pack_hook {saved.name}",  # type: ignore[union-attr]
-                aot_config,
-                lambda: f"aot_saved_tensors_hooks_pack {saved.name}",  # type: ignore[union-attr]
-                structured_logs,
-            )
-            pack_out_val = pack_gm(val)
 
         # Install pack hook graph as eiplogue of fw_module.
         # Saved tensor output becomes input of pack hook graph.

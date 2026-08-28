@@ -10,7 +10,7 @@ we will import V from this module::
     from .virtualized import V
 
 Various handlers are accessible as attributes on this module; for example,
-you might access ``V.graph.sizevars.optimzations_hint`` to resolve a hint
+you might access ``V.graph.sizevars.optimization_hint`` to resolve a hint
 associated with a symbolic expression.
 
 There are a few distinct usage patterns for virtualized global variables:
@@ -255,12 +255,9 @@ def _choices_default():
     We virtualize InductorChoices to allow changing inductor heuristics from out of tree.
     """
     from torch._inductor import config
-    from torch._inductor.choices import InductorChoices
+    from torch._inductor.choices import create_inductor_choices
 
-    if config.inductor_choices_class is not None:
-        rv = config.inductor_choices_class()
-    else:
-        rv = InductorChoices()
+    rv = create_inductor_choices(config.inductor_choices_class)
     setattr(threadlocal, _choices._key, rv)
     return rv
 

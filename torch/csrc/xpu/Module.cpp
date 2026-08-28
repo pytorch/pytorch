@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/xpu/Sleep.h>
 #include <ATen/xpu/XPUContext.h>
 #include <ATen/xpu/XPUGeneratorImpl.h>
 #include <ATen/xpu/XPUGraphsUtils.h>
@@ -347,9 +348,7 @@ static void registerXpuDeviceProperties(PyObject* module) {
       ._(has_subgroup_2d_block_io)
 
   THXP_FORALL_DEVICE_PROPERTIES(DEFINE_READONLY_MEMBER)
-#if SYCL_COMPILER_VERSION >= 20260000
       .def_readonly("is_integrated_gpu", &DeviceProp::is_integrated_gpu)
-#endif
       .def_readonly("total_memory", &DeviceProp::global_mem_size)
       // TODO: Expose cache size by level when available from SYCL
       .def_readonly("last_level_cache_size", &DeviceProp::global_mem_cache_size)
@@ -386,10 +385,7 @@ static void registerXpuDeviceProperties(PyObject* module) {
                    << "], has_fp16=" << prop.has_fp16
                    << ", has_fp64=" << prop.has_fp64
                    << ", has_atomic64=" << prop.has_atomic64
-#if SYCL_COMPILER_VERSION >= 20260000
-                   << ", is_integrated_gpu=" << prop.is_integrated_gpu
-#endif
-                   << ')';
+                   << ", is_integrated_gpu=" << prop.is_integrated_gpu << ")";
             return std::move(stream).str();
           });
 }
@@ -464,6 +460,7 @@ static void initXpuMethodBindings(PyObject* module) {
       [](c10::DeviceIndex device, c10::DeviceIndex peer) {
         return at::xpu::canDeviceAccessPeer(device, peer);
       });
+  m.def("_xpu_sleep", [](uint64_t cycles) { at::xpu::sleep(cycles); });
   m.def("_xpu_getMemoryFraction", [](c10::DeviceIndex device) {
     return c10::xpu::XPUCachingAllocator::getMemoryFraction(device);
   });
@@ -567,6 +564,7 @@ static void initXpuMethodBindings(PyObject* module) {
     py::str segment_unmap_s = "segment_unmap";
     py::str snapshot_s = "snapshot";
     py::str oom_s = "oom";
+    py::str annotate_s = "annotate";
     py::str device_free_s = "device_free";
 
     using c10::CachingDeviceAllocator::TraceEntry;
@@ -581,6 +579,7 @@ static void initXpuMethodBindings(PyObject* module) {
         {TraceEntry::SEGMENT_UNMAP, segment_unmap_s},
         {TraceEntry::SNAPSHOT, snapshot_s},
         {TraceEntry::OOM, oom_s},
+        {TraceEntry::ANNOTATE, annotate_s},
     };
 
     auto action_to_str = [&](TraceEntry::Action action) {
@@ -664,13 +663,10 @@ static PyObject* THXPModule_initExtension(PyObject* self, PyObject* noargs) {
   at::globalContext().lazyInitDevice(c10::DeviceType::XPU);
 
   auto m = THPObjectPtr(PyImport_ImportModule("torch.xpu"));
-  if (!m)
-    throw python_error();
+  TORCH_CHECK_PYTHON(m);
 
   auto set_module_attr = [&](const char* name, PyObject* v) {
-    if (PyObject_SetAttrString(m, name, v) < 0) {
-      throw python_error();
-    }
+    TORCH_CHECK_PYTHON(PyObject_SetAttrString(m, name, v) >= 0);
   };
 
   auto num_gpus = c10::xpu::device_count();

@@ -31,6 +31,7 @@ from _common import download, write_env_exports
 
 # Pin numpy by Python version. Matches the legacy table in setup_build.bat.
 NUMPY_PINS: list[tuple[str, str]] = [
+    ("cp315", "2.5.2"),
     ("cp314", "2.3.2"),
     ("cp313", "2.1.2"),
 ]
@@ -49,7 +50,7 @@ PIP_PACKAGES: list[str] = [
     "ninja",
     "typing_extensions",
     "setuptools==78.1.1",
-    "scikit-build-core",
+    "scikit-build-core==1.0.0",
     "spin==0.17",
 ]
 
@@ -104,13 +105,22 @@ def install_libuv(workdir: Path, python_prefix: Path) -> Path:
     return libuv_root
 
 
+def preinstall_cp315_build_deps() -> list[str]:
+    """Pin Cython < 3.3.0 for cp315 sdist builds. See pytorch/pytorch#194618."""
+    if sys.version_info[:2] != (3, 15):
+        return []
+    pip_install("-q", "cython<3.3.0", "setuptools", "wheel")
+    return ["--no-build-isolation"]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--env-out", type=Path)
     args = parser.parse_args()
 
-    pip_install("-q", f"numpy=={numpy_pin()}")
-    pip_install("-q", *PIP_PACKAGES)
+    build_flags = preinstall_cp315_build_deps()
+    pip_install("-q", *build_flags, f"numpy=={numpy_pin()}")
+    pip_install("-q", *build_flags, *PIP_PACKAGES)
 
     if not os.environ.get("SKIP_SETUP_CLEAN"):
         subprocess.run(
