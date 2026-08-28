@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import functools
+
 import torch
 import torch._subclasses.fake_tensor
 
@@ -38,23 +40,27 @@ def is_traced(t: torch.Tensor) -> bool:
     return torch._subclasses.fake_tensor.is_fake(t) or t.device.type == "meta"
 
 
-# Per-device "is this an arch we target?" cache. get_device_capability queries
-# device properties (~1.4us) and the answer is IMMUTABLE per device, but a cond runs
-# on every eager call -- so memoize by device index. Absent = HIP / not-yet-seen.
-_ARCH_OK: dict[int, bool] = {}
+@functools.cache
+def _arch_ok(idx: int, min_major: int) -> bool:
+    # get_device_capability queries device properties and the answer is IMMUTABLE per device,
+    # while a cond runs on every eager call -- so memoize. The bound is part of the key: two
+    # families with different minimums must not share an answer.
+    major, _ = torch.cuda.get_device_capability(idx)
+    return major >= min_major
 
 
-def device_ok(x: torch.Tensor) -> bool:
-    # CUDA, not HIP, and a compute capability our kernels target (Hopper/Blackwell).
+def device_ok(x: torch.Tensor, min_major: int) -> bool:
+    """CUDA (not HIP), on an arch the CALLER's kernels support.
+
+    The bound belongs to the caller because the families genuinely differ -- topk needs sm100+,
+    scatter_add and the reductions sm90+ -- so one set hardcoded here would silently change
+    which hardware some of them run on. A minimum rather than a set of majors: the one family
+    that spells its gate as a list (norm's ``(9, 10, 12)``) is excluding 11.x, which no shipping
+    part reports, so ``>=`` covers it exactly.
+    """
     if x.device.type != "cuda" or torch.version.hip is not None:
         return False
-    idx = x.device.index
-    ok = _ARCH_OK.get(idx)
-    if ok is None:
-        major, _ = torch.cuda.get_device_capability(x.device)
-        ok = major in (9, 10)  # Hopper / Blackwell -- the archs the kernels target
-        _ARCH_OK[idx] = ok
-    return ok
+    return _arch_ok(x.device.index, min_major)
 
 
 def on_current_device(x: torch.Tensor) -> bool:

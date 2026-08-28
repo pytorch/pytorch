@@ -192,9 +192,8 @@ class ReduceBlock:
 # ---------------------------------------------------------------------------
 _cute = _L.cute_tensor
 _stream = _L.stream
-_compile = (
-    _L.compile
-)  # _L.compile: cute.compile + options="--enable-tvm-ffi" (fast per-call arg passing)
+# _L.compile_kernel: cute.compile + options="--enable-tvm-ffi" (fast per-call arg passing)
+_compile = _L.compile_kernel
 _PART_TORCH = {Float32: torch.float32, Float64: torch.float64, Int32: torch.int32}
 
 _COMPILE_CACHE = {}  # structural key -> compiled kernel (one per cache_sig)
