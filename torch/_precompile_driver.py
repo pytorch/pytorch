@@ -391,6 +391,333 @@ def _inductor_forward(*args):
     return _pytree.tree_unflatten(out, _pytree.treespec_loads(OUT_SPEC))
 
 
+def _validate_dynamo_artifact_state(state):
+    from torch._dynamo.guards import GuardsState, ShapeCodeParts
+    from torch._dynamo.output_graph import OutputGraphGuardsState
+    from torch._dynamo.package import (
+        _DynamoCacheEntry,
+        load_guards_state,
+        SerializedCode,
+        SystemInfo,
+    )
+    from torch._precompile import (
+        _DynamoArtifactState,
+        _DynamoCodeState,
+        _DynamoDisabledFunction,
+        _DynamoGuardedVariant,
+        _DynamoInputContract,
+        _DynamoInputContractVariant,
+        PrecompileError,
+        PrecompileSummary,
+    )
+    from torch.utils import _pytree
+
+    def fail():
+        raise PrecompileError("python_code contains invalid serialized Dynamo state.")
+
+    def valid_str_dict(value):
+        return isinstance(value, dict) and all(isinstance(key, str) for key in value)
+
+    def valid_serialized_code(value):
+        if not isinstance(value, SerializedCode):
+            return False
+        try:
+            SerializedCode.to_code_object(value)
+        except Exception:
+            return False
+        return True
+
+    def valid_guards_state(value):
+        try:
+            guards = load_guards_state(value)
+        except Exception:
+            return False
+        return (
+            isinstance(guards, GuardsState)
+            and isinstance(guards.output_graph, OutputGraphGuardsState)
+            and (
+                guards.shape_code_parts is None
+                or isinstance(guards.shape_code_parts, ShapeCodeParts)
+            )
+        )
+
+    def valid_system_info(value):
+        return value is None or (
+            isinstance(value, SystemInfo)
+            and isinstance(value.python_version, str)
+            and isinstance(value.torch_version, str)
+            and (
+                value.toolkit_version is None or isinstance(value.toolkit_version, str)
+            )
+            and (
+                value.triton_version is None
+                or (
+                    isinstance(value.triton_version, tuple)
+                    and len(value.triton_version) == 2
+                    and all(type(part) is int for part in value.triton_version)
+                )
+            )
+            and (value.gpu_name is None or isinstance(value.gpu_name, str))
+        )
+
+    def valid_dims(value):
+        return value is None or (
+            isinstance(value, tuple)
+            and all(dim is None or type(dim) is int for dim in value)
+        )
+
+    def valid_module_signature(value):
+        if not isinstance(value, tuple) or len(value) != 4:
+            return False
+        module, qualname, training, tensors = value
+        if (
+            not isinstance(module, str)
+            or not isinstance(qualname, str)
+            or type(training) is not bool
+            or not isinstance(tensors, tuple)
+        ):
+            return False
+        for tensor in tensors:
+            if not isinstance(tensor, tuple) or len(tensor) != 8:
+                return False
+            kind, name, alias, shape, stride, dtype, device, requires_grad = tensor
+            if (
+                kind not in ("parameter", "buffer")
+                or not isinstance(name, str)
+                or type(alias) is not int
+                or alias < 0
+                or not isinstance(shape, tuple)
+                or not all(type(dim) is int for dim in shape)
+                or not isinstance(stride, tuple)
+                or len(stride) != len(shape)
+                or not all(type(dim) is int for dim in stride)
+                or not isinstance(dtype, str)
+                or not isinstance(device, str)
+                or type(requires_grad) is not bool
+            ):
+                return False
+        return True
+
+    def valid_leaf_contract(value):
+        if value is None or not isinstance(value, dict):
+            return value is None
+        if value.get("kind") == "module":
+            return (
+                set(value) == {"kind", "variants"}
+                and isinstance(value["variants"], tuple)
+                and bool(value["variants"])
+                and all(
+                    valid_module_signature(variant) for variant in value["variants"]
+                )
+            )
+        if value.get("kind") != "tensor" or set(value) != {
+            "kind",
+            "type",
+            "dtype",
+            "device",
+            "requires_grad",
+            "shape",
+            "stride",
+        }:
+            return False
+        tensor_type = value["type"]
+        shape = value["shape"]
+        stride = value["stride"]
+        return (
+            (
+                tensor_type is None
+                or (
+                    isinstance(tensor_type, tuple)
+                    and len(tensor_type) == 2
+                    and all(isinstance(part, str) for part in tensor_type)
+                )
+            )
+            and (value["dtype"] is None or isinstance(value["dtype"], str))
+            and (value["device"] is None or isinstance(value["device"], str))
+            and (value["requires_grad"] is None or type(value["requires_grad"]) is bool)
+            and valid_dims(shape)
+            and valid_dims(stride)
+            and (shape is None or stride is None or len(shape) == len(stride))
+        )
+
+    def valid_summary(value):
+        if value is None:
+            return True
+        if not isinstance(value, PrecompileSummary):
+            return False
+        if not all(
+            type(count) is int and count >= 0
+            for count in (
+                value.frames,
+                value.resume_functions,
+                value.guarded_codes,
+                value.backend_graphs,
+            )
+        ):
+            return False
+        if not all(
+            isinstance(items, tuple) and all(isinstance(item, str) for item in items)
+            for items in (
+                value.bypassed,
+                value.truncated,
+                value.uncovered_frames,
+                value.wont_generalize,
+                value.capture_errors,
+            )
+        ):
+            return False
+        if not all(
+            isinstance(items, tuple)
+            and all(
+                isinstance(item, tuple)
+                and len(item) == 2
+                and all(isinstance(part, str) for part in item)
+                for item in items
+            )
+            for items in (
+                value.dropped_guards,
+                value.kept_guards,
+                value.risky_dropped_guards,
+                value.policy_dropped_guards,
+            )
+        ):
+            return False
+        return isinstance(value.variant_examples, tuple) and all(
+            isinstance(indices, tuple)
+            and all(type(index) is int and index >= 0 for index in indices)
+            for indices in value.variant_examples
+        )
+
+    if not isinstance(state, _DynamoArtifactState):
+        fail()
+    if not isinstance(state.codes, tuple) or not state.codes:
+        fail()
+    for index, code_state in enumerate(state.codes):
+        if not isinstance(code_state, _DynamoCodeState):
+            fail()
+        if not valid_serialized_code(code_state.code):
+            fail()
+        if not isinstance(code_state.python_module, str):
+            fail()
+        if not isinstance(code_state.function_names, tuple) or not all(
+            isinstance(name, str) for name in code_state.function_names
+        ):
+            fail()
+        if type(code_state.install_to_global) is not bool:
+            fail()
+        if code_state.code_source is not None and not isinstance(
+            code_state.code_source, str
+        ):
+            fail()
+        if not valid_str_dict(code_state.global_bindings) or not all(
+            isinstance(binding, tuple)
+            and len(binding) == 2
+            and isinstance(binding[0], str)
+            and isinstance(binding[1], tuple)
+            and all(isinstance(part, str) for part in binding[1])
+            for binding in code_state.global_bindings.values()
+        ):
+            fail()
+        if not valid_str_dict(code_state.value_globals):
+            fail()
+        if not valid_str_dict(code_state.import_sources) or not all(
+            isinstance(source, str) for source in code_state.import_sources.values()
+        ):
+            fail()
+        if code_state.defaults is not None and not isinstance(
+            code_state.defaults, tuple
+        ):
+            fail()
+        if code_state.kwdefaults is not None and not valid_str_dict(
+            code_state.kwdefaults
+        ):
+            fail()
+        if not isinstance(code_state.variants, tuple) or not all(
+            isinstance(variant, _DynamoGuardedVariant)
+            and isinstance(variant.guards_state, bytes)
+            and valid_guards_state(variant.guards_state)
+            and valid_serialized_code(variant.dynamo_code)
+            for variant in code_state.variants
+        ):
+            fail()
+        if index == 0 and (code_state.install_to_global or not code_state.variants):
+            fail()
+    if not valid_str_dict(state.disabled_functions):
+        fail()
+    for name, disabled in state.disabled_functions.items():
+        if not isinstance(disabled, _DynamoDisabledFunction):
+            fail()
+        if not isinstance(name, str) or not isinstance(disabled.name, str):
+            fail()
+        if (
+            not valid_serialized_code(disabled.code)
+            or SerializedCode.to_code_object(disabled.code).co_freevars
+        ):
+            fail()
+        if disabled.defaults is not None and not isinstance(disabled.defaults, tuple):
+            fail()
+        if disabled.kwdefaults is not None and not valid_str_dict(disabled.kwdefaults):
+            fail()
+        if not valid_str_dict(disabled.module_globals) or not all(
+            isinstance(module, str) for module in disabled.module_globals.values()
+        ):
+            fail()
+        if not valid_str_dict(disabled.value_globals):
+            fail()
+    if state.input_contract is not None:
+        if not isinstance(state.input_contract, _DynamoInputContract) or not isinstance(
+            state.input_contract.variants, tuple
+        ):
+            fail()
+        for variant in state.input_contract.variants:
+            if not isinstance(variant, _DynamoInputContractVariant):
+                fail()
+            if not isinstance(variant.spec, str) or not isinstance(
+                variant.leaves, tuple
+            ):
+                fail()
+            try:
+                spec = _pytree.treespec_loads(variant.spec)
+            except Exception:
+                fail()
+                continue
+            if spec.num_leaves != len(variant.leaves) or not all(
+                valid_leaf_contract(leaf) for leaf in variant.leaves
+            ):
+                fail()
+    if state.serving_mode not in ("standalone", "installed"):
+        fail()
+    if state.serving_mode == "standalone" and state.package is not None:
+        fail()
+    if state.serving_mode == "installed" and not isinstance(
+        state.package, _DynamoCacheEntry
+    ):
+        fail()
+    if not all(
+        isinstance(value, str)
+        for value in (
+            state.entry_module,
+            state.entry_qualname,
+            state.entry_name,
+            state.device_type,
+        )
+    ):
+        fail()
+    if type(state.entry_firstlineno) is not int:
+        fail()
+    if type(state.mutates_input_grads) is not bool:
+        fail()
+    if type(state.recompile_limit) is not int or state.recompile_limit < 1:
+        fail()
+    if state.dynamic is not None and type(state.dynamic) is not bool:
+        fail()
+    if not valid_system_info(state.system_info):
+        fail()
+    if not valid_summary(state.summary):
+        fail()
+    return state
+
+
 def _build_dynamo_forward():
     """Rebuild Dynamo's guards and transformed bytecode into a standalone dispatcher.
 
@@ -444,6 +771,7 @@ def _build_dynamo_forward():
             raise TypeError(
                 f"expected _DynamoArtifactState, got {type(state).__name__}"
             )
+        state = _validate_dynamo_artifact_state(state)
     except Exception as e:
         from torch._precompile import PrecompileError
 
@@ -794,21 +1122,33 @@ def _build_dynamo_forward():
         backend_calls[backend_id] = backend_call
         namespace[backend_id] = backend_call
 
+    def rebuild_disabled_function(global_name, function_state):
+        try:
+            function_globals = dict(namespace)
+            for name, module_name in function_state.module_globals.items():
+                function_globals[name] = importlib.import_module(module_name)
+            function_globals.update(function_state.value_globals)
+            function = types.FunctionType(
+                SerializedCode.to_code_object(function_state.code),
+                function_globals,
+                function_state.name,
+                function_state.defaults,
+            )
+            if function_state.kwdefaults:
+                function.__kwdefaults__ = dict(function_state.kwdefaults)
+            function_globals[global_name] = function
+            return function
+        except Exception as error:
+            from torch._precompile import PrecompileError
+
+            if isinstance(error, PrecompileError):
+                raise
+            raise PrecompileError(
+                "python_code contains invalid serialized Dynamo state."
+            ) from error
+
     for global_name, function_state in state.disabled_functions.items():
-        function_globals = dict(namespace)
-        for name, module_name in function_state.module_globals.items():
-            function_globals[name] = importlib.import_module(module_name)
-        function_globals.update(function_state.value_globals)
-        function = types.FunctionType(
-            SerializedCode.to_code_object(function_state.code),
-            function_globals,
-            function_state.name,
-            function_state.defaults,
-        )
-        if function_state.kwdefaults:
-            function.__kwdefaults__ = dict(function_state.kwdefaults)
-        function_globals[global_name] = function
-        namespace[global_name] = function
+        namespace[global_name] = rebuild_disabled_function(global_name, function_state)
 
     if state.serving_mode == "installed":
         import threading
@@ -940,13 +1280,13 @@ def _build_dynamo_forward():
                         return
                     fn = entry_function() if self.fn is None else self.fn
                     entry = fn.forward if isinstance(fn, torch.nn.Module) else fn
-                    package = CompilePackage(
-                        entry,
-                        state.package,
-                        ignore_inlined_sources=False,
-                        serialization_guard_filter_fn=keep_serializable_guards,
-                    )
                     try:
+                        package = CompilePackage(
+                            entry,
+                            state.package,
+                            ignore_inlined_sources=False,
+                            serialization_guard_filter_fn=keep_serializable_guards,
+                        )
                         package.prepare(backends)  # type: ignore[arg-type]
                     except Exception as error:
                         from torch._precompile import PrecompileError
@@ -1136,17 +1476,26 @@ def _build_dynamo_forward():
 
         return target, bind
 
-    main_state, *resume_states = state.codes
-    for code_state in resume_states:
-        target, bind = prepare_code(code_state)
-        function = bind if target.co_freevars else bind()
-        for name in code_state.function_names:
-            namespace[name] = function
+    try:
+        main_state, *resume_states = state.codes
+        for code_state in resume_states:
+            target, bind = prepare_code(code_state)
+            function = bind if target.co_freevars else bind()
+            for name in code_state.function_names:
+                namespace[name] = function
 
-    target, bind = prepare_code(main_state)
-    if target.co_freevars:
-        raise AssertionError("main Dynamo frame must not have free variables")
-    entry = bind()
+        target, bind = prepare_code(main_state)
+        if target.co_freevars:
+            raise AssertionError("main Dynamo frame must not have free variables")
+        entry = bind()
+    except Exception as error:
+        from torch._precompile import PrecompileError
+
+        if isinstance(error, PrecompileError):
+            raise
+        raise PrecompileError(
+            "python_code contains invalid serialized Dynamo state."
+        ) from error
 
     def forward(*args, **kwargs):
         check_input_contract(args, kwargs)

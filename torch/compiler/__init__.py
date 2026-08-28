@@ -24,6 +24,7 @@ from torch.compiler._precompile_types import (
     ExampleInput as ExampleInput,
     FrameInvariants as FrameInvariants,
     GuardFact as GuardFact,
+    PrecompiledCallable as PrecompiledCallable,
     PrecompileSummary as PrecompileSummary,
 )
 
@@ -57,6 +58,7 @@ __all__ = [
     "ExampleInput",
     "GuardFact",
     "FrameInvariants",
+    "PrecompiledCallable",
     "PrecompileSummary",
     "wrap_numpy",
     "is_compiling",

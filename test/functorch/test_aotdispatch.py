@@ -1053,6 +1053,9 @@ def forward(self, primals_1):
         x = torch.arange(8, dtype=torch.float32).requires_grad_(True)
         with (
             patch.object(
+                runtime_wrappers, "_dealias_marked_returns", lambda raw, marked: None
+            ),
+            patch.object(
                 graph_compile,
                 "_retrace_backward_for_undefined_grad_outputs",
                 lambda *args: None,
@@ -1098,6 +1101,13 @@ def forward(self, primals_1):
         torch._dynamo.reset()
         x = torch.arange(8, dtype=torch.float32).requires_grad_(True)
         with ExitStack() as stack:
+            stack.enter_context(
+                patch.object(
+                    runtime_wrappers,
+                    "_dealias_marked_returns",
+                    lambda raw, marked: None,
+                )
+            )
             if fallback == "retrace":
                 stack.enter_context(
                     patch.object(
@@ -1140,6 +1150,59 @@ def forward(self, primals_1):
             torch.compile(fn, backend="inductor")(x)[3].sum().backward()
 
         self.assertEqual(x.grad, torch.full_like(x, 3))
+
+    def test_single_none_tangent_materialization(self):
+        import torch._functorch._aot_autograd.graph_compile as graph_compile
+        import torch._functorch._aot_autograd.runtime_wrappers as runtime_wrappers
+
+        def fn(x):
+            return x.sin()
+
+        torch._dynamo.reset()
+        x = torch.randn(4, requires_grad=True)
+        with (
+            patch.object(
+                graph_compile,
+                "_retrace_backward_for_undefined_grad_outputs",
+                lambda *args: None,
+            ),
+            patch.object(
+                runtime_wrappers,
+                "_specialize_bw_module_for_undefined_grad_outputs",
+                lambda *args: None,
+            ),
+        ):
+            compiled = torch.compile(fn, backend="inductor")
+            out = compiled(x)
+            prototype_objects = out.grad_fn._aot_grad_output_prototype_objects
+            self.assertTrue(prototype_objects)
+            self.assertTrue(all(obj.numel() == 0 for obj in prototype_objects))
+            other = compiled(x)
+            self.assertIs(
+                other.grad_fn._aot_grad_output_prototype_objects,
+                prototype_objects,
+            )
+            torch._C._functions.UndefinedGrad()(out).sum().backward()
+
+        self.assertIsNone(x.grad)
+
+    def test_dynamic_single_grad_output_prototype_cache(self):
+        @torch.compile(backend="aot_eager", dynamic=True)
+        def fn(x):
+            return x.sin()
+
+        torch._dynamo.reset()
+
+        def prototype_objects(size):
+            x = torch.randn(size, requires_grad=True)
+            return fn(x).grad_fn._aot_grad_output_prototype_objects
+
+        first = prototype_objects(4)
+        self.assertIs(prototype_objects(4), first)
+        resized = prototype_objects(7)
+        self.assertIsNot(resized, first)
+        self.assertIs(prototype_objects(7), resized)
+        self.assertTrue(all(obj.numel() == 0 for obj in (*first, *resized)))
 
     def test_none_tangent_error_reports_non_differentiable_dtype(self):
         # Integer outputs are normally pruned before tangent processing, so drive
@@ -2432,6 +2495,57 @@ def forward(self, primals_1):
     copy_ = torch.ops.aten.copy_.default(primals_1, view_1);  primals_1 = view_1 = copy_ = None
     return (add,)""",
         )
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    def test_input_mutation_replayed_onto_restricted_view(self, backend):
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        class Scale(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, tensor):
+                return tensor
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad * 3
+
+        def opaque_add_(weight, value):
+            weight.data.add_(value)
+
+        with torch.library._scoped_library("aotmut", "FRAGMENT") as lib:
+            lib.define("opaque_add_(Tensor(a!) weight, Tensor value) -> ()")
+            lib.impl("opaque_add_", opaque_add_, "CompositeExplicitAutograd")
+            lib.impl("opaque_add_", lambda weight, value: None, "Meta")
+
+            def body(weight, value):
+                torch.ops.aotmut.opaque_add_(weight, value)
+                return (weight * value).sum()
+
+            def run(fn, restricted):
+                torch.manual_seed(0)
+                base = torch.randn(4, requires_grad=True)
+                value = torch.randn(4, requires_grad=True)
+                weight = base * 1.0
+                if restricted:
+                    weight = Scale.apply(weight)
+                version = weight._version
+                fn(weight, value).backward()
+                result = base.grad, value.grad, weight.detach().clone()
+                return result, weight._version - version
+
+            reference = run(body, True)
+            torch._dynamo.reset()
+            self.assertEqual(run(torch.compile(body, backend=backend), True), reference)
+
+            torch._dynamo.reset()
+            counter = CompileCounterWithBackend(backend)
+            compiled = torch.compile(body, backend=counter, fullgraph=True)
+            ordinary, ordinary_version = run(compiled, False)
+            ordinary_ref, _ = run(body, False)
+            self.assertEqual(ordinary, ordinary_ref)
+            self.assertEqual(ordinary_version, 1)
+            self.assertEqual(run(compiled, True), reference)
+            self.assertEqual(counter.frame_count, 1)
 
     def test_input_mutation_requires_grad_no_grad(self):
         def f(a):
@@ -5873,6 +5987,73 @@ def forward(self, tangents_1):
         loss_list.pop().backward()
 
         self._assert_no_extra_refs(refcount_box)
+
+    def test_detach_output_aliasing_intermediate_base(self):
+        def f(x):
+            y = torch.sin(x)
+            return y[0:4], y[4:8], y.detach(), x * 3
+
+        def run(fn, x):
+            outputs = fn(x)
+            (outputs[0].sum() + outputs[1].sum() + outputs[3].sum()).backward()
+            return (
+                [output.requires_grad for output in outputs],
+                [output.grad_fn is not None for output in outputs],
+                x.grad,
+            )
+
+        x_ref = torch.arange(8, dtype=torch.float32).requires_grad_(True)
+        requires_grad_ref, grad_fn_ref, grad_ref = run(f, x_ref)
+        self.assertIsNotNone(grad_ref)
+
+        for backend in ("aot_eager", "inductor"):
+            torch._dynamo.reset()
+            x = torch.arange(8, dtype=torch.float32).requires_grad_(True)
+            requires_grad, grad_fn, grad = run(torch.compile(f, backend=backend), x)
+            self.assertEqual(
+                requires_grad,
+                requires_grad_ref,
+                f"requires_grad diverged on {backend}",
+            )
+            self.assertEqual(grad_fn, grad_fn_ref, f"grad_fn diverged on {backend}")
+            self.assertEqual(grad, grad_ref, f"gradient diverged on {backend}")
+
+        torch._dynamo.reset()
+        x = torch.arange(8, dtype=torch.float32).requires_grad_(True)
+        detached = torch.compile(f, backend="inductor")(x)[2]
+        self.assertFalse(detached.requires_grad)
+        self.assertIsNone(detached.grad_fn)
+
+    def test_detach_output_aliasing_sibling_output(self):
+        class Net(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                hidden = torch.relu(self.linear(x))
+                return hidden * 1.0, hidden.detach()
+
+        torch.manual_seed(0)
+        ref = Net()
+        x_ref = torch.randn(3, requires_grad=True)
+        outputs_ref = ref(x_ref)
+        outputs_ref[0].sum().backward()
+
+        torch._dynamo.reset()
+        torch.manual_seed(0)
+        model = Net()
+        x = torch.randn(3, requires_grad=True)
+        outputs = torch.compile(model, backend="inductor")(x)
+        self.assertEqual(
+            [(output.requires_grad, output.grad_fn is not None) for output in outputs],
+            [
+                (output.requires_grad, output.grad_fn is not None)
+                for output in outputs_ref
+            ],
+        )
+        outputs[0].sum().backward()
+        self.assertEqual(x.grad, x_ref.grad)
 
 
 def extract_graph(fx_g, _, graph_cell):
@@ -10071,6 +10252,9 @@ def forward(self, primals_1, tangents_1):
         torch._dynamo.reset()
         x = torch.arange(8, dtype=torch.float32).requires_grad_(True)
         with (
+            patch.object(
+                runtime_wrappers, "_dealias_marked_returns", lambda raw, marked: None
+            ),
             patch.object(
                 graph_compile,
                 "_retrace_backward_for_undefined_grad_outputs",

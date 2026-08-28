@@ -1174,7 +1174,7 @@ def forward(self, x_1, cfg_1):
 
         buf = io.BytesIO()
         pickler = GuardsStatePickler({id(x): x}, {}, {}, buf)
-        func, args = pickler.reducer_override(x)
+        func, args = pickler.reducer_override(x)[:2]
         obj = func(*args)
         self.assertIsInstance(obj, torch.Tensor)
 

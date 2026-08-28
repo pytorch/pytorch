@@ -2,6 +2,7 @@ import collections
 import dataclasses
 from collections.abc import Sequence
 from typing import Any
+from typing_extensions import Protocol, Self
 
 
 def _count_types(pairs: Sequence[tuple[str, str]]) -> dict[str, int]:
@@ -136,6 +137,23 @@ class PrecompileSummary:
         return result
 
 
+class PrecompiledCallable(Protocol):
+    """Callable handle returned by :meth:`torch.compiler.precompile.load`."""
+
+    def __call__(self, *args: object, **kwargs: object) -> object: ...
+
+    def __enter__(self) -> Self: ...
+
+    def __exit__(self, *exc: object) -> None: ...
+
+    def unload(self) -> None: ...
+
+    def serve_time_compiles(self) -> int: ...
+
+    @property
+    def capture_summary(self) -> PrecompileSummary | None: ...
+
+
 @dataclasses.dataclass(frozen=True)
 class _DynamoGuardedVariant:
     guards_state: bytes
@@ -200,4 +218,5 @@ class _DynamoArtifactState:
 ExampleInput.__module__ = "torch.compiler"
 GuardFact.__module__ = "torch.compiler"
 FrameInvariants.__module__ = "torch.compiler"
+PrecompiledCallable.__module__ = "torch.compiler"
 PrecompileSummary.__module__ = "torch.compiler"

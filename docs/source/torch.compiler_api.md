@@ -44,6 +44,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
      ExampleInput
      GuardFact
      FrameInvariants
+     PrecompiledCallable
      PrecompileSummary
 ```
 
@@ -96,8 +97,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       outside the supported contract. Input pytree structures must be serializable so
       these checks can be reconstructed at runtime. User-defined code must access Python
       module objects (``types.ModuleType``) through statically visible attribute paths
-      rather than pass or alias them as values. Python functions that assign or delete
-      globals are rejected.
+      rather than pass or alias them as values. Python functions that mutate globals or
+      mutable objects reachable through the Python environment are rejected. Calls and
+      implicit protocol operations on such objects are also rejected when their behavior
+      cannot be verified statically.
 
       Each retained guard is rebuilt independently from its frozen capture snapshot.
       An environment-only guard that cannot be rebuilt is omitted with its dependent
@@ -114,13 +117,16 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       and execute eagerly between compiled graph segments. Global names left in
       standalone transformed bytecode must resolve to recursive literal values or
       independently importable objects. Installed frames may resolve globals from
-      their defining modules. Disabled functions cannot assign globals or use
+      their defining modules. Python functions cannot mutate globals or mutable objects
+      reachable through the Python environment, and unverified behavior on those objects
+      is rejected conservatively. Disabled functions also cannot use
       ``globals()``, ``eval()``, or ``exec()``; their importable module globals are
       rebound at load, while recursive literal globals and defaults are captured by
       value. Top-level defaults must also be recursive literals; mutable or user-defined
       values must be passed explicitly rather than used as defaults. Tensor-valued
       defaults and tensor-valued globals referenced by user-defined code are rejected
-      because user-owned tensors must be explicit inputs.
+      because user-owned tensors must be explicit inputs. Bound methods are unsupported;
+      pass the unbound function and its receiver as an explicit input.
       Compiled graph bodies and kernels remain Python source. The eager backend
       supports higher-order graphs such as ``torch.cond``, ``torch.while_loop``,
       non-reentrant activation checkpointing, ``vmap``, autocast, and grad-mode regions.
@@ -221,14 +227,18 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        f = torch.compiler.precompile.load(python_code, cache)
        out = f(model, x)   # pass the model again at runtime
 
-   If ``fn`` itself is an ``nn.Module``, pass the runtime module first when calling the
-   loaded artifact::
+   With ``tracer="dynamo"``, if ``fn`` itself is a user-defined Python ``nn.Module``
+   whose ``forward`` method Dynamo captures as a Python frame, pass the runtime module
+   first when calling the loaded artifact::
 
        python_code, cache = torch.compiler.precompile(
            model, example_inputs=[(x,)], tracer="dynamo"
        )
        f = torch.compiler.precompile.load(python_code, cache)
        out = f(model, x)
+
+   For built-in modules such as ``Linear`` and ``Sequential``, use the wrapper form
+   above instead.
 
    Dynamo recompilation and automatic dynamic shapes::
 
@@ -275,8 +285,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
    :param python_code: The executable Python source string returned by ``precompile``.
    :param cache: The binary acceleration cache returned by ``precompile``.
-   :returns: A runnable callable with the same calling convention as the captured ``fn``.
-       The Dynamo tracer also preserves captured keyword-argument calling conventions.
+   :returns: A :class:`torch.compiler.PrecompiledCallable` with the same calling
+       convention as the captured ``fn``, except that a directly captured user-defined
+       module takes the runtime module as its first argument. The Dynamo tracer also
+       preserves captured keyword-argument calling conventions.
    :raises PrecompileError: if ``python_code`` is not a valid precompile artifact (it
        fails to parse or is missing its calling-convention metadata), if ``cache`` is
        paired with a different ``python_code`` (mismatched ``backend`` tag or
