@@ -673,7 +673,8 @@ class SetVariable(BaseSetVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if not self.sq_contains_impl(tx, args[0]).as_python_constant():
+        # Explicit unbound dispatch
+        if not BaseSetVariable.sq_contains_impl(self, tx, args[0]).as_python_constant():
             raise_observed_exception(KeyError, tx, args=[args[0]])
         self.should_reconstruct_all = True
         tx.output.side_effects.mutation(self)
@@ -689,7 +690,7 @@ class SetVariable(BaseSetVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if self.sq_contains_impl(tx, args[0]).as_python_constant():
+        if BaseSetVariable.sq_contains_impl(self, tx, args[0]).as_python_constant():
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             # sq_contains validated/normalized args[0]; a set key was coerced
