@@ -68,16 +68,17 @@ HIDDEN_NAMESPACE_END(torch, headeronly, detail)
       ##__VA_ARGS__))
 #endif // STRIP_ERROR_MESSAGES
 
-#define STD_TORCH_CHECK(cond, ...)                \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {           \
-    throw std::runtime_error(STD_TORCH_CHECK_MSG( \
-        cond,                                     \
-        "",                                       \
-        __func__,                                 \
-        ", ",                                     \
-        __FILE__,                                 \
-        ":",                                      \
-        __LINE__,                                 \
-        ", ",                                     \
-        ##__VA_ARGS__));                          \
+#define STD_TORCH_CHECK(cond, ...)                                    \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                               \
+    /* @allow-raw-throw: this macro is the headeronly check itself */ \
+    throw std::runtime_error(STD_TORCH_CHECK_MSG(                     \
+        cond,                                                         \
+        "",                                                           \
+        __func__,                                                     \
+        ", ",                                                         \
+        __FILE__,                                                     \
+        ":",                                                          \
+        __LINE__,                                                     \
+        ", ",                                                         \
+        ##__VA_ARGS__));                                              \
   }

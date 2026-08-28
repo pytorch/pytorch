@@ -20,6 +20,9 @@ import re
 import sys
 from os import path
 
+from sphinx.ext.autodoc import FunctionDocumenter
+from sphinx.util.inspect import stringify_signature
+
 # source code directory, relative to this file, for sphinx-autobuild
 # sys.path.insert(0, os.path.abspath('../..'))
 import torch
@@ -2252,6 +2255,7 @@ autodoc_default_options = {
 
 html_css_files = [
     "css/jit.css",
+    "css/foreach.css",
     "https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css",
 ]
 
@@ -2430,7 +2434,73 @@ def process_docstring(app, what_, name, obj, options, lines):
         lines.append("")
 
 
+def _foreach_annotation_name(annotation):
+    parsed_aliases = {
+        "_TensorList": "TensorList",
+        "_ScalarList[_ScalarT]": "ScalarList",
+        "_Scalar": "Scalar",
+        "Tensor": "Tensor",
+    }
+    if isinstance(annotation, str):
+        return parsed_aliases.get(annotation, annotation)
+    aliases = (
+        (torch.foreach._TensorList, "TensorList"),
+        (torch.foreach._ScalarList, "ScalarList"),
+        (torch.foreach._Scalar, "Scalar"),
+        (torch.Tensor, "Tensor"),
+    )
+    return next((name for alias, name in aliases if annotation == alias), annotation)
+
+
+class ForeachFunctionDocumenter(FunctionDocumenter):
+    def format_signature(self, **kwargs):
+        if not self.fullname.startswith("torch.foreach."):
+            return super().format_signature(**kwargs)
+
+        overloads = (
+            self.analyzer.overloads.get(".".join(self.objpath), ())
+            if self.analyzer is not None
+            else ()
+        )
+        actual = inspect.signature(self.object)
+        if overloads:
+            signatures = [
+                self.merge_default_value(actual, overload) for overload in overloads
+            ]
+        else:
+            signatures = [inspect.signature(self.object.__wrapped__, eval_str=True)]
+
+        formatted_signatures = []
+        for signature in signatures:
+            parameters = [
+                parameter.replace(
+                    annotation=_foreach_annotation_name(parameter.annotation)
+                )
+                for parameter in signature.parameters.values()
+            ]
+            returns_input_container = signature.return_annotation in (
+                "_TensorList",
+                torch.foreach._TensorList,
+            )
+            return_annotation = "tuple[Tensor, ...]"
+            if returns_input_container:
+                return_annotation += " | list[Tensor]"
+            signature = signature.replace(
+                parameters=parameters, return_annotation=return_annotation
+            )
+            if self.config.autodoc_typehints_format == "short":
+                kwargs.setdefault("unqualified_typehints", True)
+            formatted_signatures.append(stringify_signature(signature, **kwargs))
+        return "\n".join(formatted_signatures)
+
+    def add_directive_header(self, sig):
+        super().add_directive_header(sig)
+        if self.fullname.startswith("torch.foreach."):
+            self.add_line("   :single-line-parameter-list:", self.get_sourcename())
+
+
 def setup(app):
+    app.add_autodocumenter(ForeachFunctionDocumenter, override=True)
     app.connect("build-finished", coverage_post_process)
     app.connect("autodoc-process-docstring", process_docstring)
     app.connect("html-page-context", hide_edit_button_for_pages)
