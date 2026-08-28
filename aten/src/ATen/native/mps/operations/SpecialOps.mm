@@ -32,6 +32,10 @@ static void spherical_bessel_j0_kernel_mps(TensorIteratorBase& iter) {
   lib.exec_unary_kernel(iter, "spherical_bessel_j0");
 }
 
+static void ndtri_kernel_mps(TensorIteratorBase& iter) {
+  lib.exec_unary_kernel(iter, "ndtri");
+}
+
 static void entr_kernel_mps(TensorIteratorBase& iter) {
   lib.exec_unary_kernel(iter, "entr");
 }
@@ -77,6 +81,7 @@ static void bessel_y1_kernel_mps(TensorIteratorBase& iter) {
 }
 
 REGISTER_DISPATCH(i0_stub, &i0_kernel_mps)
+REGISTER_DISPATCH(special_ndtri_stub, &ndtri_kernel_mps)
 REGISTER_DISPATCH(special_i0e_stub, &i0e_kernel_mps)
 REGISTER_DISPATCH(special_i1_stub, &i1_kernel_mps)
 REGISTER_DISPATCH(special_i1e_stub, &i1e_kernel_mps)
