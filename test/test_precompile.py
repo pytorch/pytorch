@@ -44,6 +44,32 @@ _DYNAMO_CONTAINER_IDENTITY = [1]
 _DYNAMO_LITERAL_DEFAULT = (123456789,)
 _DYNAMO_LITERAL_GLOBAL = "sentinel"
 _DYNAMO_MUTATED_GLOBAL = None
+_DYNAMO_INITIAL_SCALAR_IDENTITY = int("123456789")
+_DYNAMO_INITIAL_SCALAR_VALUE = 1
+_DYNAMO_BACKEND_IDS = 7
+
+
+class _PrecompileDynamoInitialMutationHolder:
+    state = [0]
+    value = 0
+
+
+class _PrecompileDynamoInitialTensorHolder:
+    def __init__(self):
+        self.tensor = torch.randn(3)
+
+    def add(self, x):
+        return x + self.tensor
+
+
+class _PrecompileDynamoInitialPureHelper:
+    def update(self, x):
+        return x + 1
+
+
+_DYNAMO_INITIAL_TENSOR_HOLDER = _PrecompileDynamoInitialTensorHolder()
+_DYNAMO_INITIAL_MUTATED_LIST = []
+_DYNAMO_INITIAL_PURE_HELPER = _PrecompileDynamoInitialPureHelper()
 
 
 def _precompile_dynamo_dynamic(x):
@@ -85,6 +111,68 @@ def _precompile_dynamo_mutates_global(x):
     global _DYNAMO_MUTATED_GLOBAL
     _DYNAMO_MUTATED_GLOBAL = x
     return x + 1
+
+
+def _precompile_dynamo_initial_scalar_identity(x, token):
+    return x.sin() if token is _DYNAMO_INITIAL_SCALAR_IDENTITY else x.cos()
+
+
+def _precompile_dynamo_initial_scalar_value(x, scale):
+    return x * scale + _DYNAMO_INITIAL_SCALAR_VALUE
+
+
+def _precompile_dynamo_initial_mutates_global_attribute(x):
+    _PrecompileDynamoInitialMutationHolder.state[0] += 1
+    return x + _PrecompileDynamoInitialMutationHolder.state[0]
+
+
+def _precompile_dynamo_initial_stores_global_attribute(x):
+    _PrecompileDynamoInitialMutationHolder.value += 1
+    return x + _PrecompileDynamoInitialMutationHolder.value
+
+
+def _precompile_dynamo_initial_calls_global_mutator(x):
+    _DYNAMO_INITIAL_MUTATED_LIST.append(1)
+    return x + len(_DYNAMO_INITIAL_MUTATED_LIST)
+
+
+def _precompile_dynamo_initial_container_mutator(x):
+    return _DYNAMO_INITIAL_MUTATING_HELPERS[0](x)
+
+
+_DYNAMO_INITIAL_MUTATING_HELPERS = [_precompile_dynamo_initial_calls_global_mutator]
+
+
+def _precompile_dynamo_initial_calls_pure_update(x):
+    return _DYNAMO_INITIAL_PURE_HELPER.update(x)
+
+
+def _precompile_dynamo_initial_indirect_global_tensor(x):
+    return _DYNAMO_INITIAL_TENSOR_HOLDER.add(x)
+
+
+def _make_precompile_dynamo_initial_tensor_closure():
+    tensor = torch.randn(3)
+
+    def add(x):
+        return x + tensor
+
+    return add
+
+
+_DYNAMO_INITIAL_TENSOR_CLOSURE = _make_precompile_dynamo_initial_tensor_closure()
+
+
+def _precompile_dynamo_initial_closure_global_tensor(x):
+    return _DYNAMO_INITIAL_TENSOR_CLOSURE(x)
+
+
+def _precompile_dynamo_reserved_global(x):
+    return x + _DYNAMO_BACKEND_IDS
+
+
+def _precompile_dynamo_initial_ellipsis_default(x, marker=...):
+    return x + (1 if marker is Ellipsis else 2)
 
 
 def _precompile_dynamo_global_tensor(x):
@@ -2674,6 +2762,44 @@ class TestPrecompile(TestCase):
                 backend="eager",
             )
 
+    def test_tracer_dynamo_initial_rejects_scalar_input_global_identity(self):
+        with self.assertRaisesRegex(PrecompileError, "identity relation"):
+            torch.compiler.precompile(
+                _precompile_dynamo_initial_scalar_identity,
+                example_inputs=[(torch.randn(3), _DYNAMO_INITIAL_SCALAR_IDENTITY)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_initial_rejects_reverse_scalar_identity(self):
+        with self.assertRaisesRegex(PrecompileError, "identity relation"):
+            torch.compiler.precompile(
+                _precompile_dynamo_initial_scalar_identity,
+                example_inputs=[
+                    (
+                        torch.randn(3),
+                        int(str(_DYNAMO_INITIAL_SCALAR_IDENTITY)),
+                    )
+                ],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_initial_allows_equal_scalar_values(self):
+        x = torch.randn(3)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_initial_scalar_value,
+            example_inputs=[(x, _DYNAMO_INITIAL_SCALAR_VALUE)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        self.assertEqual(
+            torch.compiler.precompile.load(code, cache)(
+                x, _DYNAMO_INITIAL_SCALAR_VALUE
+            ),
+            _precompile_dynamo_initial_scalar_value(x, _DYNAMO_INITIAL_SCALAR_VALUE),
+        )
+
     def test_tracer_dynamo_rejects_global_mutation(self):
         global _DYNAMO_MUTATED_GLOBAL
         _DYNAMO_MUTATED_GLOBAL = None
@@ -2688,6 +2814,86 @@ class TestPrecompile(TestCase):
             self.assertIsNone(_DYNAMO_MUTATED_GLOBAL)
         finally:
             _DYNAMO_MUTATED_GLOBAL = None
+
+    @parametrize(
+        "fn",
+        (
+            _precompile_dynamo_initial_mutates_global_attribute,
+            _precompile_dynamo_initial_stores_global_attribute,
+            _precompile_dynamo_initial_calls_global_mutator,
+            _precompile_dynamo_initial_container_mutator,
+        ),
+        name_fn=lambda fn: fn.__name__,
+    )
+    def test_tracer_dynamo_initial_rejects_indirect_global_mutation(self, fn):
+        _PrecompileDynamoInitialMutationHolder.state[:] = [0]
+        _PrecompileDynamoInitialMutationHolder.value = 0
+        _DYNAMO_INITIAL_MUTATED_LIST.clear()
+        with self.assertRaisesRegex(PrecompileError, "mutate globals"):
+            torch.compiler.precompile(
+                fn,
+                example_inputs=[(torch.randn(3),)],
+                tracer="dynamo",
+                backend="eager",
+            )
+        self.assertEqual(_PrecompileDynamoInitialMutationHolder.state, [0])
+        self.assertEqual(_PrecompileDynamoInitialMutationHolder.value, 0)
+        self.assertEqual(_DYNAMO_INITIAL_MUTATED_LIST, [])
+
+    def test_tracer_dynamo_initial_allows_pure_update_method(self):
+        x = torch.randn(3)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_initial_calls_pure_update,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        self.assertEqual(
+            torch.compiler.precompile.load(code, cache)(x),
+            _precompile_dynamo_initial_calls_pure_update(x),
+        )
+
+    def test_tracer_dynamo_initial_rejects_indirect_global_tensor(self):
+        for fn in (
+            _precompile_dynamo_initial_indirect_global_tensor,
+            _precompile_dynamo_initial_closure_global_tensor,
+        ):
+            with (
+                self.subTest(fn=fn),
+                self.assertRaisesRegex(PrecompileError, "tensor-valued Python globals"),
+            ):
+                torch.compiler.precompile(
+                    fn,
+                    example_inputs=[(torch.randn(3),)],
+                    tracer="dynamo",
+                    backend="eager",
+                )
+
+    def test_tracer_dynamo_user_global_does_not_replace_driver_metadata(self):
+        x = torch.randn(3)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_reserved_global,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        self.assertEqual(
+            torch.compiler.precompile.load(code, cache)(x),
+            _precompile_dynamo_reserved_global(x),
+        )
+
+    def test_tracer_dynamo_accepts_ellipsis_default(self):
+        x = torch.randn(3)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_initial_ellipsis_default,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        self.assertEqual(
+            torch.compiler.precompile.load(code, cache)(x),
+            _precompile_dynamo_initial_ellipsis_default(x),
+        )
 
     def test_tracer_dynamo_preserves_key_order_guard_dependencies(self):
         forward = {"a": 2.0, "b": 3.0}
