@@ -417,7 +417,7 @@ def _build_dynamo_forward():
         raise PrecompileError(
             "precompile artifact has invalid serialized Dynamo state."
         ) from e
-    namespace = globals()
+    namespace = dict(globals())
     namespace.update(state.get("value_globals", {}))
     for alias, module_name in state["import_sources"].items():
         namespace[alias] = importlib.import_module(module_name)

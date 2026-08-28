@@ -117,8 +117,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
    :param fn: The whole computation to capture, taking the model(s) and runtime inputs
        as positional arguments.
-       Positional arguments after ``fn`` remain supported as one example call and cannot
-       be combined with ``example_inputs``.
+   :param example_args: Positional arguments after ``fn`` describe one example call and
+       cannot be combined with ``example_inputs``.
    :param example_inputs: A sequence of positional-argument tuples for ``fn``. The
        ``make_fx`` tracer requires exactly one tuple. The ``dynamo`` tracer accepts one
        or more tuples and records the guarded recompilations they exercise. With
