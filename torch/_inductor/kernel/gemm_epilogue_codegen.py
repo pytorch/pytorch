@@ -8,6 +8,7 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
     CuteDSLCSEVariable,
     CuteDSLOpOverrides,
 )
+from torch._inductor.virtualized import V
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
@@ -46,17 +47,28 @@ class GemmEpilogueCuteDSLBody:
 class GemmEpilogueCuteDSLCSE:
     def __init__(self) -> None:
         self.index = 0
+        self._cache: dict[str, CuteDSLCSEVariable] = {}
 
-    def generate(self, body, expr, *, bounds=None, dtype=None, shape=None):
+    def newvar(self, *, bounds=None, dtype=None, shape=None) -> CuteDSLCSEVariable:
         name = f"tmp{self.index}"
         self.index += 1
-        body.writeline(f"{name} = {expr}")
         return CuteDSLCSEVariable(
             name,
             ValueRanges.unknown() if bounds is None else bounds,
             dtype=dtype,
             shape=shape,
         )
+
+    def put(self, cache_key: str, value: CuteDSLCSEVariable) -> None:
+        self._cache[cache_key] = value
+
+    def try_get(self, cache_key: str) -> CuteDSLCSEVariable | None:
+        return self._cache.get(cache_key)
+
+    def generate(self, body, expr, *, bounds=None, dtype=None, shape=None):
+        result = self.newvar(bounds=bounds, dtype=dtype, shape=shape)
+        body.writeline(f"{result} = {expr}")
+        return result
 
 
 class GemmEpilogueCuteDSLKernel:
@@ -90,6 +102,33 @@ class GemmEpilogueCuteDSLOpOverrides(CuteDSLOpOverrides):
                 f"unsupported GEMM epilogue _to_copy kwargs: {unsupported_kwargs}"
             )
         return CuteDSLOpOverrides.to_dtype(x, dtype)
+
+    @staticmethod
+    def where(condition: Any, a: Any, b: Any) -> Any:
+        """Preserve all-scalar conditionals as scalar epilogue expressions."""
+        if any(
+            CuteDSLOpOverrides._is_tensor_like(value) for value in (condition, a, b)
+        ):
+            return CuteDSLOpOverrides.where(condition, a, b)
+        result_expr = (
+            f"({CuteDSLOpOverrides._as_expr(a)} if "
+            f"{CuteDSLOpOverrides._as_expr(condition)} else "
+            f"{CuteDSLOpOverrides._as_expr(b)})"
+        )
+        cse_vars = tuple(
+            CuteDSLOpOverrides._get_cse_var(value) for value in (a, b, condition)
+        )
+        if all(value is None for value in cse_vars):
+            return result_expr
+        dtype, bounds = CuteDSLOpOverrides._extract_dtype_and_bounds(a, b, condition)
+        result = V.kernel.cse.generate(
+            V.kernel.body,
+            result_expr,
+            bounds=bounds,
+            dtype=dtype if dtype is not None else torch.int32,
+        )
+        result.is_scalar_expr = True
+        return result
 
     @staticmethod
     def clamp(x: Any, min: Any = None, max: Any = None) -> Any:
