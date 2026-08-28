@@ -84,11 +84,7 @@ from torch._inductor.cpp_builder import (
     normalize_path_separator,
     run_asm_build_object,
 )
-from torch._inductor.cpu_vec_isa import (
-    get_cpu_contiguous_group_norm_fma_policy,
-    invalid_vec_isa,
-    pick_vec_isa,
-)
+from torch._inductor.cpu_vec_isa import invalid_vec_isa, pick_vec_isa
 from torch._inductor.custom_graph_pass import (
     CustomGraphModulePass,
     CustomGraphPass,
@@ -310,10 +306,6 @@ def get_device_information(device_type: str) -> dict[str, str]:
             get_interface_for_device(device_type).get_compute_capability()
         ),
     }
-    if device_type == "cpu":
-        metadata["AOTI_CPU_CONTIGUOUS_GROUP_NORM_FMA_POLICY"] = repr(
-            get_cpu_contiguous_group_norm_fma_policy()
-        )
     return metadata
 
 
@@ -1593,15 +1585,6 @@ class FxGraphHashDetails:
             torch.utils.deterministic.fill_uninitialized_memory,  # type: ignore[attr-defined]
         )
 
-        may_generate_cpu_cpp_code = self._may_generate_cpu_cpp_code(gm, example_inputs)
-
-        # Native CPU GroupNorm's FMA contraction depends on the PyTorch build.
-        # Inductor mirrors that policy, so it must participate in cache keys.
-        if may_generate_cpu_cpp_code:
-            self.cpu_contiguous_group_norm_fma_policy = (
-                get_cpu_contiguous_group_norm_fma_policy()
-            )
-
         # CPU C++ kernels specialize on torch.get_num_threads() when cpp.threads
         # is left at its runtime default and dynamic threading is disabled.
         # Include that resolved value so FX graph cache entries compiled under
@@ -1609,7 +1592,7 @@ class FxGraphHashDetails:
         if (
             config.cpp.threads < 1
             and not config.cpp.dynamic_threads
-            and may_generate_cpu_cpp_code
+            and self._may_generate_cpu_cpp_code(gm, example_inputs)
         ):
             self.cpp_runtime_thread_count = parallel_num_threads()
 

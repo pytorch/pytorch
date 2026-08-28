@@ -27,7 +27,7 @@ from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
-from torch._inductor import compile_fx, config, config_comms, metrics
+from torch._inductor import config, config_comms, metrics
 from torch._inductor.cache_key import (
     AUTOTUNE_CACHE_KEY_STRATEGY,
     CacheKeyStrategy,
@@ -45,7 +45,6 @@ from torch._inductor.codecache import (
     FxGraphCache,
     FxGraphCachePickler,
     FxGraphHashDetails,
-    get_device_information,
     PyCodeCache,
     TensorMetadata,
     TensorMetadataAndValues,
@@ -3387,74 +3386,6 @@ class TestFxGraphCacheHashing(TestCase):
                 self.assertEqual(key_1, key_2)
         finally:
             torch.set_num_threads(orig_num_threads)
-
-    def test_cpu_group_norm_fma_policy_affects_cache_key(self):
-        # Pre-AOT graphs may not expose native_group_norm yet, so conservatively
-        # key every graph that can generate CPU C++ code.
-        def fn(x):
-            return x + 1
-
-        gm = torch.fx.symbolic_trace(fn)
-        inputs = [torch.randn(4)]
-        with mock.patch(
-            "torch._inductor.codecache.get_cpu_contiguous_group_norm_fma_policy",
-            return_value=(False, False),
-        ):
-            key_unfused = self._fx_graph_cache_key(gm, inputs)
-        with mock.patch(
-            "torch._inductor.codecache.get_cpu_contiguous_group_norm_fma_policy",
-            return_value=(True, True),
-        ):
-            key_fused = self._fx_graph_cache_key(gm, inputs)
-        with mock.patch(
-            "torch._inductor.codecache.get_cpu_contiguous_group_norm_fma_policy",
-            return_value=(None, None),
-        ):
-            key_unknown = self._fx_graph_cache_key(gm, inputs)
-        self.assertNotEqual(key_unfused, key_fused)
-        self.assertNotEqual(key_unfused, key_unknown)
-        self.assertNotEqual(key_fused, key_unknown)
-
-    def test_cpu_group_norm_fma_policy_affects_aot_autograd_cache_key(self):
-        def fn(x, weight, bias):
-            return torch.nn.functional.group_norm(x, 5, weight, bias)
-
-        inputs = [torch.randn(4, 5, 6, 6), torch.ones(5), torch.zeros(5)]
-
-        def cache_key(value):
-            gm, _ = torch._dynamo.export(fn)(*inputs)
-            tracing_context = torch._guards.TracingContext(
-                FakeTensorMode(shape_env=ShapeEnv())
-            )
-            with (
-                torch._guards.tracing(tracing_context),
-                mock.patch(
-                    "torch._inductor.codecache.get_cpu_contiguous_group_norm_fma_policy",
-                    return_value=(value, value),
-                ),
-            ):
-                return compile_fx.autograd_cache_key(gm, inputs, ignore_shape_env=True)[
-                    0
-                ]
-
-        key_unfused = cache_key(False)
-        key_fused = cache_key(True)
-        key_unknown = cache_key(None)
-        self.assertNotEqual(key_unfused, key_fused)
-        self.assertNotEqual(key_unfused, key_unknown)
-        self.assertNotEqual(key_fused, key_unknown)
-
-    def test_cpu_group_norm_fma_policy_in_aoti_metadata(self):
-        policy = (True, False)
-        with mock.patch(
-            "torch._inductor.codecache.get_cpu_contiguous_group_norm_fma_policy",
-            return_value=policy,
-        ):
-            metadata = get_device_information("cpu")
-        self.assertEqual(
-            metadata["AOTI_CPU_CONTIGUOUS_GROUP_NORM_FMA_POLICY"],
-            repr(policy),
-        )
 
     def test_cpu_thread_count_affects_cache_key_for_no_input_cpu_factory(self):
         gm = self._no_input_factory_graph()

@@ -3417,7 +3417,8 @@ def _unsqueeze_multiple(x: TensorLikeType, dimensions: list[int]) -> TensorLikeT
     return x
 
 
-def _native_group_norm(
+@register_decomposition(aten.native_group_norm.default)
+def native_group_norm(
     input: Tensor,
     weight: Tensor | None,
     bias: Tensor | None,
@@ -3426,10 +3427,6 @@ def _native_group_norm(
     flattened_inner_size: int,
     num_groups: int,
     eps: float,
-    *,
-    bias_fma: Callable[[Tensor, Tensor, Tensor], Tensor] | None = None,
-    output_fma: Callable[[Tensor, Tensor, Tensor], Tensor] | None = None,
-    use_cpu_affine_formula: bool = False,
 ) -> tuple[Tensor, Tensor, Tensor]:
     torch._check(
         num_channels > 0,
@@ -3501,37 +3498,23 @@ def _native_group_norm(
         input_reshaped, dim=reduction_dims, unbiased=False, keepdim=True
     )
     rstd = torch.rsqrt(biased_var + eps)
-    if input.device.type == "cpu" and (
-        weight is not None or (use_cpu_affine_formula and bias is not None)
-    ):
-        if weight is not None:
-            weight_reshaped = torch.reshape(
-                weight, [1, num_groups, num_channels // num_groups, 1]
-            )
-            w = rstd * weight_reshaped
-        else:
-            w = rstd.expand([batch_size, num_groups, num_channels // num_groups, 1])
+    if input.device.type == "cpu" and weight is not None:
+        weight_reshaped = torch.reshape(
+            weight, [1, num_groups, num_channels // num_groups, 1]
+        )
+        w = rstd * weight_reshaped
+        b = -mean * w
         if bias is not None:
             bias_reshaped = torch.reshape(
                 bias, [1, num_groups, num_channels // num_groups, 1]
             )
-            b = (
-                -mean * w + bias_reshaped
-                if bias_fma is None
-                else bias_fma(-w, mean, bias_reshaped)
-            )
-        else:
-            b = -mean * w
+            b = b + bias_reshaped
         w = w.contiguous().as_strided([batch_size, num_channels], [num_channels, 1])
         b = b.contiguous().as_strided([batch_size, num_channels], [num_channels, 1])
         broadcast_dims = list(range(2, input.ndim))
         unsqueeze_w = _unsqueeze_multiple(w, broadcast_dims)
         unsqueeze_b = _unsqueeze_multiple(b, broadcast_dims)
-        out = (
-            input_acc * unsqueeze_w + unsqueeze_b
-            if output_fma is None
-            else output_fma(unsqueeze_w, input_acc, unsqueeze_b)
-        )
+        out = input_acc * unsqueeze_w + unsqueeze_b
     else:
         out = (input_reshaped - mean) * rstd
         out = out.view(input.shape)
@@ -3552,29 +3535,6 @@ def _native_group_norm(
     mean = torch.squeeze(mean, reduction_dims)
     rstd = torch.squeeze(rstd, reduction_dims)
     return (out, mean, rstd)
-
-
-@register_decomposition(aten.native_group_norm.default)
-def native_group_norm(
-    input: Tensor,
-    weight: Tensor | None,
-    bias: Tensor | None,
-    batch_size: int,
-    num_channels: int,
-    flattened_inner_size: int,
-    num_groups: int,
-    eps: float,
-) -> tuple[Tensor, Tensor, Tensor]:
-    return _native_group_norm(
-        input,
-        weight,
-        bias,
-        batch_size,
-        num_channels,
-        flattened_inner_size,
-        num_groups,
-        eps,
-    )
 
 
 _SCALAR_TYPE_NAME_OVERRIDES = {

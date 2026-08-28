@@ -5441,7 +5441,7 @@ class CPUReproTests(TestCase):
                 dtype if dtype else torch.float32,
             )
 
-    def test_group_norm_vec(self):
+    def test_group_norm_native_fallback(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -5463,20 +5463,50 @@ class CPUReproTests(TestCase):
                 compiled_m = torch.compile(mod, dynamic=dynamic)
                 actual, code = run_and_get_cpp_code(compiled_m, x)
                 self.assertEqual(expected, actual)
-                # 3 generated kernels (first one for var_mean, last two for result)
-                check_metrics_vec_kernel_count(3)
+                check_metrics_vec_kernel_count(0)
+                FileCheck().check("torch.ops.aten.native_group_norm.default").run(code)
 
-                # check loop split optimization
-                if fmt == torch.channels_last:
-                    # check that there are no non_contiguous loads
-                    FileCheck().check_count(
-                        "__at_align__ std::array", 0, exactly=True
-                    ).run(code)
+    def test_group_norm_native_fallback_issue_183120(self):
+        batch_norm = nn.BatchNorm2d(5).eval()
+        elu = nn.ELU()
+        group_norm = nn.GroupNorm(5, 5).eval()
+
+        def fn(x):
+            y = group_norm(elu(batch_norm(x)))
+            return torch.log(torch.clamp(y, min=1e-6))
+
+        x = torch.ones(4, 5, 6, 6)
+        expected = fn(x)
+        actual, code = run_and_get_cpp_code(torch.compile(fn, backend="inductor"), x)
+        self.assertEqual(expected, actual, rtol=0, atol=0)
+        FileCheck().check("torch.ops.aten.native_group_norm.default").run(code)
+
+    @parametrize("memory_format", (torch.contiguous_format, torch.channels_last))
+    @parametrize("affine", (True, False))
+    def test_group_norm_native_fallback_precision(self, memory_format, affine):
+        def fn(x, weight, bias):
+            y = F.group_norm(x, 5, weight, bias)
+            return y, torch.log(torch.clamp(y, min=1e-6))
+
+        one = torch.tensor(1.0)
+        lower = torch.nextafter(one, torch.tensor(-torch.inf))
+        upper = torch.nextafter(one, torch.tensor(torch.inf))
+        row = torch.cat((lower.repeat(342), one.repeat(342), upper.repeat(341)))
+        x = row.repeat(5).reshape(1, 5, 1, 1025).to(memory_format=memory_format)
+        weight = torch.ones(5) if affine else None
+        bias = torch.zeros(5) if affine else None
+
+        expected = fn(x, weight, bias)
+        torch._dynamo.reset()
+        actual, code = run_and_get_cpp_code(
+            torch.compile(fn, backend="inductor"), x, weight, bias
+        )
+        self.assertEqual(expected, actual, rtol=0, atol=0)
+        FileCheck().check("torch.ops.aten.native_group_norm.default").run(code)
 
     @requires_vectorization
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
-    def test_group_norm_sum_conv1d_tail_reduction_store(self):
-        # https://github.com/pytorch/pytorch/issues/181618
+    def test_group_norm_sum_conv1d_native_fallback(self):
         torch.manual_seed(0)
         m_norm = nn.GroupNorm(1, 9).eval()
         m_conv1 = nn.Conv1d(9, 1, 3)
@@ -5493,124 +5523,7 @@ class CPUReproTests(TestCase):
         actual, code = run_and_get_cpp_code(torch.compile(model, backend="inductor"))
 
         torch.testing.assert_close(actual, expected, atol=2e-4, rtol=1e-3)
-        self.assertIn("sum_masked_reduce", code)
-        vec_width = cpu_vec_isa.pick_vec_isa().nelements()
-        tail_width = 9 if vec_width > 9 else 9 % vec_width or vec_width
-        self.assertIn(
-            f"tmp_acc0_vec.store(tmpbuf.data(), static_cast<int64_t>({tail_width}L));",
-            code,
-        )
-
-    def test_group_norm_affine_fma_precision(self):
-        def fn(x, weight, bias):
-            y = F.group_norm(x, 5, weight, bias)
-            return torch.log(torch.clamp(y, min=1e-6))
-
-        test_cases = [
-            ("weight_and_bias", torch.ones(5), torch.zeros(5)),
-            ("weight_only", torch.ones(5), None),
-            ("bias_only", None, torch.zeros(5)),
-            ("no_affine", None, None),
-        ]
-
-        shapes = [(4, 5, 6, 6), (4, 5, 1, 17), (2, 5, 1, 1024)]
-        for shape, (name, weight, bias) in itertools.product(shapes, test_cases):
-            with self.subTest(shape=shape, name=name):
-                x = torch.full(shape, 0.9999949932098389)
-                expected = fn(x, weight, bias)
-                torch._dynamo.reset()
-                actual, code = run_and_get_cpp_code(
-                    torch.compile(fn, backend="inductor"), x, weight, bias
-                )
-
-                self.assertEqual(expected, actual, rtol=0, atol=1e-4)
-                FileCheck().check("torch.ops.aten.native_group_norm.default").run(code)
-
-        # Above the two-step variance threshold, exercise cancellation in the
-        # folded bias expression while retaining the decomposed fast path.
-        def group_norm(x, weight, bias):
-            return F.group_norm(x, 5, weight, bias)
-
-        x = torch.full((1, 5, 1, 1025), 4.375030517578125)
-        weight = torch.full((5,), -3.735017776489258)
-        bias = torch.full((5,), -1.5276412963867188)
-        fma_policy = cpu_vec_isa.get_cpu_contiguous_group_norm_fma_policy()
-        bias_uses_fma, output_uses_fma = fma_policy
-        expected = group_norm(x, weight, bias)
-        torch._dynamo.reset()
-        actual, code = run_and_get_cpp_code(
-            torch.compile(group_norm, backend="inductor"), x, weight, bias
-        )
-        self.assertEqual(expected, actual, rtol=0, atol=1e-4)
-        if bias_uses_fma is None or output_uses_fma is None:
-            FileCheck().check("torch.ops.aten.native_group_norm.default").run(code)
-        else:
-            FileCheck().check_not("torch.ops.aten.native_group_norm.default").run(code)
-            if bias_uses_fma or output_uses_fma:
-                FileCheck().check_regex(r"(fmadd|std::fma)\(").run(code)
-
-    def test_cpu_group_norm_fma_probe_ignores_default_device(self):
-        policy = cpu_vec_isa.get_cpu_contiguous_group_norm_fma_policy
-        policy.cache_clear()
-        try:
-            expected = policy()
-            policy.cache_clear()
-            with torch.device("meta"):
-                actual = policy()
-            self.assertEqual(expected, actual)
-        finally:
-            policy.cache_clear()
-
-    @config.patch("cpp.use_two_step_variance_threshold", 0)
-    def test_cpu_group_norm_unknown_fma_policy_falls_back(self):
-        def fn(x, weight, bias):
-            return F.group_norm(x, 5, weight, bias)
-
-        x = torch.full((4, 5, 6, 6), 0.9999949932098389)
-        weight = torch.ones(5)
-        bias = torch.zeros(5)
-        expected = fn(x, weight, bias)
-        with (
-            fresh_cache(),
-            patch(
-                "torch._inductor.decomposition.get_cpu_contiguous_group_norm_fma_policy",
-                return_value=(None, None),
-            ),
-        ):
-            torch._dynamo.reset()
-            actual, code = run_and_get_cpp_code(
-                torch.compile(fn, backend="inductor"), x, weight, bias
-            )
-        self.assertEqual(expected, actual, rtol=0, atol=0)
-        FileCheck().check("torch.ops.aten.native_group_norm.default").run(code)
-
-    @config.patch(
-        {
-            "cpp.enable_floating_point_contract_flag": "fast",
-            "cpp.use_two_step_variance_threshold": 0,
-        }
-    )
-    def test_cpu_group_norm_unfused_policy_with_fast_math_falls_back(self):
-        def fn(x, weight, bias):
-            return F.group_norm(x, 5, weight, bias)
-
-        x = torch.full((4, 5, 6, 6), 0.9999949932098389)
-        weight = torch.ones(5)
-        bias = torch.zeros(5)
-        expected = fn(x, weight, bias)
-        with (
-            fresh_cache(),
-            patch(
-                "torch._inductor.decomposition.get_cpu_contiguous_group_norm_fma_policy",
-                return_value=(False, False),
-            ),
-        ):
-            torch._dynamo.reset()
-            actual, code = run_and_get_cpp_code(
-                torch.compile(fn, backend="inductor"), x, weight, bias
-            )
-        self.assertEqual(expected, actual, rtol=0, atol=0)
-        FileCheck().check("torch.ops.aten.native_group_norm.default").run(code)
+        self.assertIn("torch.ops.aten.native_group_norm.default", code)
 
     @unittest.skipIf(
         os.getenv("ATEN_CPU_CAPABILITY") == "default",
@@ -5635,15 +5548,12 @@ class CPUReproTests(TestCase):
                 compiled_m = torch.compile(mod)
                 actual = compiled_m(x)
                 self.assertEqual(expected, actual)
-                # 3 generated kernels (first one for var_mean, last two for result)
-                check_metrics_vec_kernel_count(3)
-                # check that there is no outer loop fusion.
+                check_metrics_vec_kernel_count(0)
                 self.assertEqual(
                     len(metrics.cpp_outer_loop_fused_inner_counts),
                     0,
                 )
-                # check for parallel reduction.
-                self.assertEqual(metrics.parallel_reduction_count, 1)
+                self.assertEqual(metrics.parallel_reduction_count, 0)
 
     @unittest.skipIf(
         os.getenv("ATEN_CPU_CAPABILITY") == "default",

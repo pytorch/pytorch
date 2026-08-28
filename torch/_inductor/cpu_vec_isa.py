@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import dataclasses
 import functools
-import math
 import os
 import platform
 import re
@@ -17,98 +16,6 @@ from torch._inductor.utils import python_subprocess_env
 
 
 _IS_WINDOWS = sys.platform == "win32"
-
-
-def _classify_float32_fma(
-    actual: torch.Tensor,
-    a: torch.Tensor,
-    b: torch.Tensor,
-    c: torch.Tensor,
-) -> bool | None:
-    unfused = torch.add(torch.mul(a, b), c)
-    # A float32 product and near-cancelling sum are exact in float64, so one
-    # final cast models a fused float32 multiply-add for these probe values.
-    fused = torch.add(
-        torch.mul(a.to(torch.float64), b.to(torch.float64)), c.to(torch.float64)
-    ).to(torch.float32)
-    if torch.equal(fused, unfused):
-        return None
-    if torch.equal(actual, fused):
-        return True
-    if torch.equal(actual, unfused):
-        return False
-    return None
-
-
-def _probe_contiguous_group_norm_fma() -> tuple[bool | None, bool | None]:
-    shape = (4, 5, 1, 1025)
-    num_groups = 5
-    batch_size, num_channels = shape[:2]
-    flattened_inner_size = math.prod(shape[2:])
-    channels_per_group = num_channels // num_groups
-
-    def run_group_norm(
-        x: torch.Tensor, weight: torch.Tensor | None, bias: torch.Tensor | None
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        return torch.ops.aten.native_group_norm.default(
-            x,
-            weight,
-            bias,
-            batch_size,
-            num_channels,
-            flattened_inner_size,
-            num_groups,
-            1e-5,
-        )
-
-    def affine_parameters(
-        mean: torch.Tensor, rstd: torch.Tensor, weight: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        scale = torch.mul(
-            rstd.reshape(batch_size, num_groups, 1),
-            weight.reshape(1, num_groups, channels_per_group),
-        ).reshape(batch_size, num_channels)
-        expanded_mean = mean.reshape(batch_size, num_groups, 1).expand(
-            batch_size, num_groups, channels_per_group
-        )
-        return scale, expanded_mean.reshape(batch_size, num_channels)
-
-    x = torch.full(shape, 0.9999949932098389, dtype=torch.float32, device="cpu")
-    weight = torch.ones(num_channels, dtype=torch.float32, device="cpu")
-    bias = torch.zeros(num_channels, dtype=torch.float32, device="cpu")
-    output, mean, rstd = run_group_norm(x, weight, bias)
-    scale, expanded_mean = affine_parameters(mean, rstd, weight)
-    offset = torch.mul(-expanded_mean, scale)
-    broadcast_shape = (batch_size, num_channels, 1, 1)
-    output_policy = _classify_float32_fma(
-        output,
-        scale.reshape(broadcast_shape),
-        x,
-        offset.reshape(broadcast_shape),
-    )
-
-    x = torch.full(shape, 10.0, dtype=torch.float32, device="cpu")
-    x[:, :, 0, 0] = 0
-    weight = torch.full((num_channels,), 10.0, dtype=torch.float32, device="cpu")
-    _, mean, rstd = run_group_norm(x, None, None)
-    scale, expanded_mean = affine_parameters(mean, rstd, weight)
-    bias = torch.mul(scale[0], expanded_mean[0])
-    output, mean, rstd = run_group_norm(x, weight, bias)
-    scale, expanded_mean = affine_parameters(mean, rstd, weight)
-    bias_policy = _classify_float32_fma(
-        output[0, :, 0, 0],
-        -scale[0],
-        expanded_mean[0],
-        bias,
-    )
-    return bias_policy, output_policy
-
-
-@functools.cache
-def get_cpu_contiguous_group_norm_fma_policy() -> tuple[bool | None, bool | None]:
-    """Return native contiguous float32 CPU GroupNorm FMA behavior by site."""
-    with torch._C.DisableTorchFunction(), torch._C._DisableTorchDispatch():
-        return _probe_contiguous_group_norm_fma()
 
 
 def _get_isa_dry_compile_fingerprint(isa_flags: str) -> str:

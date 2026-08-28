@@ -1058,9 +1058,9 @@ struct TORCH_API IValue final {
   // ToOptional: convert a IValue to the Optional obj that accepts both T and
   // None
   template <typename T>
-  std::optional<T> toOptional();
+  std::optional<T> toOptional() &&;
   template <typename T>
-  std::optional<T> toOptional() const;
+  std::optional<T> toOptional() const&;
 
   /// @private [doxygen private]
   /// this is a shallow comparison of two IValues to test the object identity
