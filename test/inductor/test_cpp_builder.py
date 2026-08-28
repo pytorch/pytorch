@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import ntpath
 import os
 from unittest import mock
 
@@ -14,10 +15,13 @@ from torch.testing._internal.common_utils import (
 
 
 THEROCK_ROCM_HOME = "C:/site-packages/_rocm_sdk_core"
-THEROCK_CLANG_CL_NATIVE = os.path.join(
+THEROCK_CLANG_CL_CANDIDATE = os.path.join(
     THEROCK_ROCM_HOME, "lib", "llvm", "bin", "clang-cl.exe"
 )
-THEROCK_CLANG_CL = THEROCK_CLANG_CL_NATIVE.replace(os.sep, "/")
+THEROCK_CLANG_CL_WINDOWS = ntpath.join(
+    THEROCK_ROCM_HOME, "lib", "llvm", "bin", "clang-cl.exe"
+)
+THEROCK_CLANG_CL = THEROCK_CLANG_CL_WINDOWS.replace("\\", "/")
 
 
 class TestGetRocmClangClWindows(TestCase):
@@ -32,11 +36,16 @@ class TestGetRocmClangClWindows(TestCase):
     def test_uses_rocm_home_clang_cl_when_present(self):
         with (
             mock.patch("torch.utils.cpp_extension.ROCM_HOME", THEROCK_ROCM_HOME),
-            mock.patch.object(cpp_builder.os.path, "exists", return_value=True),
+            mock.patch.object(
+                cpp_builder.os.path,
+                "exists",
+                side_effect=lambda path: path == THEROCK_CLANG_CL_CANDIDATE,
+            ) as exists,
         ):
             compiler = cpp_builder._get_rocm_clang_cl_windows()
 
-        self.assertEqual(compiler, THEROCK_CLANG_CL_NATIVE)
+        self.assertEqual(compiler, THEROCK_CLANG_CL_CANDIDATE)
+        exists.assert_called_once_with(THEROCK_CLANG_CL_CANDIDATE)
 
     def test_warns_and_falls_back_when_clang_cl_is_missing(self):
         with (
@@ -47,7 +56,7 @@ class TestGetRocmClangClWindows(TestCase):
             compiler = cpp_builder._get_rocm_clang_cl_windows()
 
         self.assertEqual(compiler, "clang-cl")
-        self.assertTrue(any(THEROCK_CLANG_CL_NATIVE in line for line in logs.output))
+        self.assertTrue(any(THEROCK_CLANG_CL_CANDIDATE in line for line in logs.output))
 
     def test_warns_and_falls_back_when_rocm_home_is_unset(self):
         with (
@@ -68,6 +77,10 @@ class TestGetCppCompilerWindows(TestCase):
             subtest(
                 ("7.14.0", "cuda", None, THEROCK_CLANG_CL, True),
                 name="rocm_cuda_default",
+            ),
+            subtest(
+                ("7.14.0", "cuda:0", None, THEROCK_CLANG_CL, True),
+                name="rocm_indexed_cuda_default",
             ),
             subtest(
                 ("7.14.0", "cpu", None, "cl", False),
@@ -101,13 +114,14 @@ class TestGetCppCompilerWindows(TestCase):
 
         with (
             mock.patch.object(cpp_builder, "_IS_WINDOWS", True),
+            mock.patch.object(cpp_builder.os, "sep", "\\"),
             mock.patch.object(torch.version, "hip", hip),
             mock.patch.object(cpp_builder, "check_compiler_exist_windows"),
             mock.patch.object(cpp_builder, "check_msvc_cl_language_id") as lang_check,
             mock.patch.object(
                 cpp_builder,
                 "_get_rocm_clang_cl_windows",
-                return_value=THEROCK_CLANG_CL,
+                return_value=THEROCK_CLANG_CL_WINDOWS,
             ) as rocm_compiler,
             mock.patch.dict(os.environ, env, clear=True),
         ):
@@ -119,6 +133,15 @@ class TestGetCppCompilerWindows(TestCase):
             rocm_compiler.assert_called_once_with()
         else:
             rocm_compiler.assert_not_called()
+
+    def test_rejects_invalid_device(self):
+        with (
+            mock.patch.object(cpp_builder, "_IS_WINDOWS", True),
+            mock.patch.object(torch.version, "hip", "7.14.0"),
+            mock.patch.dict(os.environ, {}, clear=True),
+            self.assertRaises(RuntimeError),
+        ):
+            cpp_builder.get_cpp_compiler(device_type="cuda:invalid")
 
 
 class TestMsvcLanguageCheck(TestCase):
@@ -179,26 +202,53 @@ class TestCppTorchDeviceOptionsCompiler(TestCase):
         get_compiler.assert_not_called()
         self.assertEqual(init.call_args.kwargs["compiler"], "custom-clang-cl")
 
+    def test_normalizes_before_validation(self):
+        with (
+            mock.patch.object(cpp_builder, "_validate_cpp_stdlib") as validate,
+            mock.patch.object(cpp_builder, "get_cpp_compiler") as get_compiler,
+            mock.patch.object(
+                cpp_builder.CppTorchOptions,
+                "__init__",
+                side_effect=self.StopAfterSuperCall,
+            ),
+            self.assertRaises(self.StopAfterSuperCall),
+        ):
+            cpp_builder.CppTorchDeviceOptions(device_type="cpu:0")
 
+        validate.assert_called_once_with("libstdc++", "cpu", False)
+        get_compiler.assert_called_once_with(device_type="cpu")
+
+
+@instantiate_parametrized_tests
 class TestGetCppTorchDeviceOptionsWindows(TestCase):
-    def test_rocm_link_libtorch_links_amdhip64(self):
+    @parametrize("device_type", ["cuda", "cuda:0"])
+    def test_rocm_link_libtorch_links_amdhip64(self, device_type):
         with (
             mock.patch.object(cpp_builder, "_IS_WINDOWS", True),
             mock.patch.object(torch.version, "hip", "7.14.0"),
             mock.patch.object(cpp_builder.config.aot_inductor, "link_libtorch", True),
-            mock.patch("torch.utils.cpp_extension.include_paths", return_value=[]),
-            mock.patch("torch.utils.cpp_extension.library_paths", return_value=[]),
+            mock.patch(
+                "torch.utils.cpp_extension.include_paths", return_value=[]
+            ) as include_paths,
+            mock.patch(
+                "torch.utils.cpp_extension.library_paths", return_value=[]
+            ) as library_paths,
         ):
             (
-                _definitions,
+                definitions,
                 _include_dirs,
                 _cflags,
                 _ldflags,
                 _libraries_dirs,
                 libraries,
                 _passthrough_args,
-            ) = cpp_builder.get_cpp_torch_device_options("cuda")
+            ) = cpp_builder.get_cpp_torch_device_options(device_type)
 
+        include_paths.assert_called_once_with("cuda", False)
+        library_paths.assert_called_once_with(
+            "cuda", torch_include_dirs=True, cross_target_platform=None
+        )
+        self.assertIn(" USE_ROCM", definitions)
         self.assertIn("torch_hip", libraries)
         self.assertIn("amdhip64", libraries)
 

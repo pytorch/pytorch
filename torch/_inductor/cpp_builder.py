@@ -420,8 +420,8 @@ def _get_rocm_clang_cl_windows() -> str:
     Locate the clang-cl shipped with the Windows ROCm SDK.
 
     HIP host wrappers include headers with Clang-only syntax that MSVC cannot
-    parse. TheRock packages place LLVM under ``lib/llvm/bin`` on both Windows
-    and Linux, unlike traditional ROCm installations under ``llvm/bin``.
+    parse. In the packaged Windows TheRock SDK, ``ROCM_HOME`` is the
+    ``_rocm_sdk_core`` package root and LLVM is under ``lib/llvm/bin``.
     """
     from torch.utils.cpp_extension import _join_rocm_home, ROCM_HOME
 
@@ -438,6 +438,10 @@ def _get_rocm_clang_cl_windows() -> str:
     return "clang-cl"
 
 
+def _normalize_device_type(device_type: str) -> str:
+    return torch.device(device_type).type
+
+
 def get_cpp_compiler(device_type: str | None = None) -> str:
     if (
         config.aot_inductor.cross_target_platform == "windows"
@@ -452,6 +456,8 @@ def get_cpp_compiler(device_type: str | None = None) -> str:
     if _IS_WINDOWS:
         compiler = os.environ.get("CXX")
         if compiler is None:
+            if device_type is not None:
+                device_type = _normalize_device_type(device_type)
             compiler = (
                 _get_rocm_clang_cl_windows()
                 if device_type == "cuda" and torch.version.hip is not None
@@ -2195,8 +2201,8 @@ def get_cpp_torch_device_options(
     3. MISC
     4. Return the build args
     """
-    # CppTorchDeviceOptions validates too, but this is a public entry point in
-    # its own right.
+    # Validate here because callers may bypass CppTorchDeviceOptions.
+    device_type = _normalize_device_type(device_type)
     _validate_cpp_stdlib(cpp_stdlib, device_type, aot_mode)
 
     definitions: list[str] = []
@@ -2341,10 +2347,12 @@ class CppTorchDeviceOptions(CppTorchOptions):
         compiler: str = "",
         cpp_stdlib: CppStdlib = "libstdc++",
     ) -> None:
+        device_type = _normalize_device_type(device_type)
         # Validate before super().__init__, which runs the header setup that
         # would strip the default stdlib.
         _validate_cpp_stdlib(cpp_stdlib, device_type, aot_mode)
         if not compiler:
+            # Resolve here because CppOptions has no device context.
             compiler = get_cpp_compiler(device_type=device_type)
 
         super().__init__(
