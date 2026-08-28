@@ -13721,6 +13721,23 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 1)
         self.assertTrue(isinstance(compiled, torch.Tensor))
 
+    def test_deque_mul_bounded_large(self):
+        # A bounded deque repeated by a huge count must stay bounded and keep
+        # only the last maxlen items, matching CPython, instead of building the
+        # full product and raising MemoryError.
+        def fn(x):
+            d = collections.deque([1, 2, 3], maxlen=5)
+            big = collections.deque([1], maxlen=3) * (10**18)
+            return x + 1, list(d * 2), list(d * 30), list(big)
+
+        x = torch.randn(3)
+        eager = fn(x)
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)(x)
+        self.assertEqual(eager[0], compiled[0])
+        self.assertEqual(eager[1:], compiled[1:])
+        self.assertEqual(counter.frame_count, 1)
+
     def test_yield_from(self):
         def yield_from_fn(t_list, k):
             def yield_from_gen(l):
