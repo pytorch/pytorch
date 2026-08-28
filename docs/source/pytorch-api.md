@@ -47,6 +47,7 @@ torch.distributed.checkpoint <distributed.checkpoint>
 torch.distributions <distributions>
 torch.compiler <torch.compiler_api>
 torch.fft <fft>
+torch.foreach <foreach>
 torch.func <func>
 futures
 fx
@@ -88,8 +89,6 @@ torch.utils.model_zoo <model_zoo>
 torch.utils.tensorboard <tensorboard>
 torch.utils.module_tracker <module_tracker>
 type_info
-named_tensor
-name_inference
 torch.__config__ <config_mod>
 torch.__future__ <future_mod>
 logging

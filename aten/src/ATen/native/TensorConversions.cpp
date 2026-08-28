@@ -17,10 +17,6 @@
 #include <ATen/ops/_convert_indices_from_coo_to_csr_native.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo_native.h>
-#include <ATen/ops/_sparse_bsc_tensor_unsafe_native.h>
-#include <ATen/ops/_sparse_bsr_tensor_unsafe_native.h>
-#include <ATen/ops/_sparse_compressed_tensor_unsafe_native.h>
-#include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_coo_tensor_with_dims_native.h>
 #include <ATen/ops/_sparse_csc_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
@@ -752,7 +748,20 @@ Tensor sparse_compressed_to_dense(
     dense_reshaped_sizes.erase(
         dense_reshaped_sizes.begin(), dense_reshaped_sizes.begin() + 2);
   } else {
+    TORCH_CHECK(
+        values.dim() >= 4,
+        "sparse_compressed_to_dense: expected values to have at least 4 dimensions, but got ",
+        values.dim());
+
     std::array<int64_t, 2> blocksize = {values.size(2), values.size(3)};
+
+    TORCH_CHECK(
+        blocksize[0] > 0 && blocksize[1] > 0,
+        "sparse_compressed_to_dense: expected block sizes to be strictly positive, but got ",
+        blocksize[0],
+        " and ",
+        blocksize[1]);
+
     nrows = self.size(batch_ndim) / blocksize[0];
     ncols = self.size(batch_ndim + 1) / blocksize[1];
     dense_reshaped_sizes[1] = blocksize[0];

@@ -6,13 +6,20 @@ import unittest
 
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import (parametrize, run_tests, TestCase, TEST_SCIPY,
-                                                  set_default_dtype)
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    parametrize,
+    run_tests,
+    TestCase,
+    TEST_SCIPY,
+    set_default_dtype,
+)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
     dtypes,
     OpDTypes,
+    onlyAccelerator,
 )
 from torch.testing._internal.common_methods_invocations import (
     op_db,
@@ -34,8 +41,10 @@ if TEST_SCIPY:
 NVPRIM_ATEN_FALLBACK_WARNING = "fallback to aten executor"
 GET_ISOLATED_GRAPHMODULE_ERROR = "get_isolated_graphmodule failed on decomposition"
 
-class TestPrims(TestCase):
-    @onlyCUDA
+class TestPrimsDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
     @dtypes(torch.float32)
     def test_broadcast_in_dim(self, device, dtype):
         def _wrapper(a, b, broadcast_dimensions):
@@ -84,7 +93,7 @@ class TestPrims(TestCase):
             self.assertEqual(result.shape, b.shape)
             self.assertEqual(a.unsqueeze(2), result)
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.float32)
     def test_broadcast_in_dim_sum(self, device, dtype):
         def _wrapper(a):
@@ -175,7 +184,7 @@ class TestPrims(TestCase):
         )
         self.assertTrue(all_prims_namespace)
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.float32)
     @parametrize("correction", [0, 1])
     def test_var(self, device, dtype, correction):
@@ -321,6 +330,17 @@ class TestPrims(TestCase):
         self.assertEqual(ref1, res3)
         self.assertEqual(ref2, res4)
 
+    def test_functional_rng_wrapper_with_positional_device(self):
+        import torch._inductor.inductor_prims
+
+        rng_state, result = torch._prims.rng_prims.run_and_save_rng_state(
+            torch.ops.prims.inductor_seeds.default, 1, torch.device("cpu")
+        )
+
+        self.assertEqual(rng_state.device.type, "cpu")
+        self.assertEqual(result.device.type, "cpu")
+        self.assertEqual(result.shape, (1,))
+
 class TestPrimsBasic(TestCase):
     def test_torch_ops(self):
         r = make_tensor((2,), device='cpu', dtype=torch.float)
@@ -357,7 +377,9 @@ $1: f32[2] = torch._ops.prims.sin.default($0)""")
             torch._prims_common.check(True, lambda: 'message')
 
 
-instantiate_device_type_tests(TestPrims, globals())
+instantiate_device_type_tests(
+    TestPrimsDevice, globals(), only_for=("cpu", "cuda", "xpu"), allow_xpu=True
+)
 
 
 class TestRefs(TestCase):

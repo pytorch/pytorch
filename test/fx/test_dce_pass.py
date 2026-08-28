@@ -5,6 +5,7 @@ import unittest
 import torch
 import torch.fx
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_MACOS,
     raise_on_run_directly,
     TestCase,
@@ -12,6 +13,8 @@ from torch.testing._internal.common_utils import (
 
 
 class TestDCE(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _custom_is_impure_node(self, node: torch.fx.Node) -> bool:
         if node.is_impure():
             return True
@@ -388,7 +391,7 @@ class TestDCE(TestCase):
         from torch._higher_order_ops.effects import _register_effectful_op
         from torch._library.effects import EffectType
 
-        lib = torch.library.Library("dce_test", "DEF")
+        lib = torch.library.Library("dce_test", "DEF")  # noqa: SCOPED_LIBRARY
         lib.define("check_op(Tensor x) -> Tensor")
         lib.impl("check_op", lambda x: x.clone(), "CPU")
         lib.impl("check_op", lambda x: x.clone(), "Meta")
@@ -432,7 +435,7 @@ class TestDCE(TestCase):
         even when the default overload is NOT registered via _register_effectful_op."""
         from torch.fx.node import _side_effectful_functions
 
-        lib = torch.library.Library("dce_test", "DEF")
+        lib = torch.library.Library("dce_test", "DEF")  # noqa: SCOPED_LIBRARY
         lib.define("packet_only_op(Tensor x) -> Tensor")
         lib.impl("packet_only_op", lambda x: x.clone(), "CPU")
         lib.impl("packet_only_op", lambda x: x.clone(), "Meta")
