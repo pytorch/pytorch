@@ -210,6 +210,15 @@ class TestKernelRowTile(TestCase):
                 )
                 self.assertEqual(got, ref)
 
+    def _sum_trait(self):
+        # The narrow-row tests all drive a plain sum; keep the import local so the module still
+        # imports without the DSL.
+        import cutlass
+
+        from torch._native.ops._cutedsl import traits as T
+
+        return T.SumOps(acc=cutlass.Float32)
+
     def test_narrow_row_one_thread_per_row(self):
         # tpr=1: one thread owns a whole row, no lane merge at all.
         import cutlass
@@ -249,15 +258,6 @@ class TestKernelRowTile(TestCase):
             use_tma=True,
         )
         self.assertEqual(idx, x.argmax(dim=1).to(torch.int32))
-
-    def _sum_trait(self):
-        # The narrow-row tests all drive a plain sum; keep the import local so the module still
-        # imports without the DSL.
-        import cutlass
-
-        from torch._native.ops._cutedsl import traits as T
-
-        return T.SumOps(acc=cutlass.Float32)
 
     def test_narrow_row_and_tma_gates(self):
         # Both gates are pure Python needing no GPU, and the TIERING is the whole point of the
