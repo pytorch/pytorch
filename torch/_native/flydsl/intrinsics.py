@@ -1,6 +1,6 @@
 """Temporary wrappers for operations not yet exposed by FlyDSL."""
 
-from typing import Literal
+from enum import Enum
 
 import flydsl.expr as fx
 from flydsl._mlir.dialects import llvm
@@ -8,38 +8,36 @@ from flydsl.expr import arith
 from flydsl.expr.typing import Float, Integer, Numeric, Pointer
 
 
-AtomicSem = Literal["relaxed", "release", "acquire", "acq_rel"]
-AtomicScope = Literal["gpu", "cta", "sys"]
+class AtomicOrdering(Enum):
+    MONOTONIC = llvm.AtomicOrdering.monotonic
+    ACQUIRE = llvm.AtomicOrdering.acquire
+    RELEASE = llvm.AtomicOrdering.release
+    ACQ_REL = llvm.AtomicOrdering.acq_rel
 
-__all__ = ["AtomicScope", "AtomicSem", "atomic_add"]
 
-_ATOMIC_ORDERINGS = {
-    "relaxed": llvm.AtomicOrdering.monotonic,
-    "release": llvm.AtomicOrdering.release,
-    "acquire": llvm.AtomicOrdering.acquire,
-    "acq_rel": llvm.AtomicOrdering.acq_rel,
-}
-_ATOMIC_SCOPES = {
-    "gpu": fx.rocdl.SyncScope.Agent,
-    "cta": fx.rocdl.SyncScope.Workgroup,
-    "sys": fx.SyncScope.System,
-}
+class AtomicSyncScope(Enum):
+    SYSTEM = fx.SyncScope.System
+    AGENT = fx.rocdl.SyncScope.Agent
+    WORKGROUP = fx.rocdl.SyncScope.Workgroup
+
+
+__all__ = ["AtomicOrdering", "AtomicSyncScope", "atomic_add"]
 
 
 def atomic_add(
     ptr: Pointer,
     val: Numeric | int | float,
     *,
-    sem: AtomicSem = "relaxed",
-    scope: AtomicScope = "cta",
+    ordering: AtomicOrdering = AtomicOrdering.MONOTONIC,
+    syncscope: AtomicSyncScope = AtomicSyncScope.WORKGROUP,
 ) -> Numeric:
     """Atomically add a scalar value and return the previous value.
 
     Args:
         ptr: Pointer to the target memory location.
         val: Value to add.
-        sem: Memory ordering semantics.
-        scope: Threads that participate in the atomic ordering.
+        ordering: Memory ordering semantics.
+        syncscope: Threads that participate in the atomic ordering.
     """
     dtype = ptr.element_type
     if not issubclass(dtype, (Integer, Float)) or dtype.width < 8:
@@ -50,8 +48,8 @@ def atomic_add(
         op,
         fx.to_llvm_ptr(ptr),
         arith.unwrap(typed_val),
-        _ATOMIC_ORDERINGS[sem],
-        syncscope=_ATOMIC_SCOPES[scope],
-        alignment=dtype.width // 8,
+        ordering.value,
+        syncscope=syncscope.value,
+        alignment=ptr.alignment,
     ).result
     return dtype(old)
