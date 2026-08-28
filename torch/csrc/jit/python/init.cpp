@@ -884,8 +884,9 @@ void initJITBindings(PyObject* module) {
               }
             }
             auto old_strategy = getFusionStrategy();
-            auto strat =
-                fmap(old_strategy, [](std::pair<FusionBehavior, size_t> behav) {
+            auto strat = fmap(
+                std::move(old_strategy),
+                [](std::pair<FusionBehavior, size_t> behav) {
                   return std::pair<std::string, size_t>(
                       behav.first == FusionBehavior::STATIC ? "STATIC"
                                                             : "DYNAMIC",
