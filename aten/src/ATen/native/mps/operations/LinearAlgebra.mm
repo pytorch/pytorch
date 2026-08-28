@@ -22,6 +22,7 @@
 #else
 #include <ATen/ScalarOps.h>
 #include <ATen/ops/_cholesky_solve_helper_native.h>
+#include <ATen/ops/_int_mm_native.h>
 #include <ATen/ops/_linalg_check_errors.h>
 #include <ATen/ops/_linalg_eigh.h>
 #include <ATen/ops/_linalg_solve_ex_native.h>
@@ -58,8 +59,10 @@
 #include <ATen/ops/zeros.h>
 #endif
 
+#include <c10/util/TypeCast.h>
 #include <c10/util/env.h>
 #include <algorithm>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -197,13 +200,13 @@ void encode_gemv_launch(at::mps::MPSStream* stream,
                         const GemvDims& dims,
                         const Tensor& bias,
                         const std::array<float, 2>& alpha_beta) {
-  getMPSProfiler().beginProfileKernel(launch.pso, "gemm_gemv/" + launch.kernel, {mat, vec});
+  getMPSProfiler().beginProfileKernel(launch.pso, "gemm_gemv/" + launch.kernel, {mat, vec}, stream);
   auto enc = stream->commandEncoder();
   [enc setComputePipelineState:launch.pso];
   mtl_setArgs(enc, mat, vec, out, dims, bias, alpha_beta);
   [enc dispatchThreadgroups:MTLSizeMake(launch.num_groups, 1, 1)
       threadsPerThreadgroup:MTLSizeMake(launch.threads_per_tg, 1, 1)];
-  getMPSProfiler().endProfileKernel(launch.pso);
+  getMPSProfiler().endProfileKernel(launch.pso, stream);
 }
 
 // Rank-1 GEMV launch. Matrix orientation selects gemv_t vs gemv_nt; one
@@ -326,7 +329,7 @@ Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
   auto matmulPSO = lib.getPipelineStateForFunc("matmul_" + mps::scalarToMetalTypeString(output));
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      getMPSProfiler().beginProfileKernel(matmulPSO, "matmul", {self_, other_});
+      getMPSProfiler().beginProfileKernel(matmulPSO, "matmul", {self_, other_}, stream);
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:matmulPSO];
       c10::metal::vec3<uint32_t> sizes = {static_cast<uint32_t>(self_.size(0)),
@@ -342,10 +345,74 @@ Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
       MTLSize threadgroupsPerGrid = MTLSizeMake(gridSizeX, gridSizeY, 1);
       mtl_setArgs(computeEncoder, self_, other_, output, strides, sizes);
       [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
-      getMPSProfiler().endProfileKernel(matmulPSO);
+      getMPSProfiler().endProfileKernel(matmulPSO, stream);
     }
   });
   return output;
+}
+
+Tensor& int_mm_out_mps_impl(const Tensor& self, const Tensor& mat2, Tensor& result) {
+  static constexpr std::string_view func_name = "int_mm_out_mps";
+  check_mm_shapes(self, mat2, "_int_mm");
+  TORCH_CHECK(self.dtype() == at::kChar || self.dtype() == at::kByte,
+              func_name,
+              ": Expected self dtype to be int8 or uint8 but got ",
+              self.dtype());
+  TORCH_CHECK(mat2.dtype() == at::kChar, func_name, ": Expected mat2 dtype to be of type int8 but got ", mat2.dtype());
+  TORCH_CHECK(
+      result.dtype() == at::kInt, func_name, ": Expected result dtype to be of type kInt but got ", result.dtype());
+  TORCH_CHECK(result.size(0) == self.size(0),
+              func_name,
+              ": Expected result.size(0) to be ",
+              self.size(0),
+              " but got ",
+              result.size(0));
+  TORCH_CHECK(result.size(1) == mat2.size(1),
+              func_name,
+              ": Expected result.size(1) to be ",
+              mat2.size(1),
+              " but got ",
+              result.size(1));
+  TORCH_CHECK(result.dim() == 2, func_name, ": Expected result to be of dimension 2 but got ", result.dim());
+  TORCH_CHECK(result.is_contiguous(), func_name, ": Expected result to be contiguous.");
+
+  if (result.numel() == 0 || self.size(1) == 0) {
+    return result.zero_();
+  }
+
+  const auto m = c10::checked_convert<uint32_t>(self.size(0), "self.size(0)");
+  const auto k = c10::checked_convert<uint32_t>(self.size(1), "self.size(1)");
+  const auto n = c10::checked_convert<uint32_t>(mat2.size(1), "mat2.size(1)");
+  constexpr auto int_max = static_cast<uint32_t>(std::numeric_limits<int32_t>::max());
+  constexpr const char* mpp_kernel = "int_mm_mpp_64_64_4";
+  // MPP integer matmul requires operands with matching signedness, while _int_mm permits uint8 only for self.
+  const bool use_mpp = self.scalar_type() == at::kChar && self.stride(1) == 1 && mat2.stride(1) == 1 && m <= int_max &&
+      k <= int_max && n <= int_max && self.stride(0) <= int_max && mat2.stride(0) <= int_max && has_mpp() &&
+      lib.hasFunction(mpp_kernel);
+  const auto kernel_name = use_mpp ? mpp_kernel : self.scalar_type() == at::kByte ? "int_mm_uchar" : "int_mm_char";
+  auto stream = getCurrentMPSStream();
+  auto pso = lib.getPipelineStateForFunc(kernel_name);
+
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      getMPSProfiler().beginProfileKernel(pso, "int_mm", {self, mat2}, stream);
+      auto computeEncoder = stream->commandEncoder();
+      [computeEncoder setComputePipelineState:pso];
+      const c10::metal::vec3<uint32_t> sizes = {m, k, n};
+      const std::array<int64_t, 6> strides = {
+          self.stride(0), self.stride(1), mat2.stride(0), mat2.stride(1), result.stride(0), result.stride(1)};
+      const uint32_t tile_dim = use_mpp ? 64 : 16;
+      const auto grid_size_x = at::ceil_div(n, tile_dim);
+      const auto grid_size_y = at::ceil_div(m, tile_dim);
+      const auto threads_per_threadgroup = use_mpp ? MTLSizeMake(128, 1, 1) : MTLSizeMake(16, 16, 1);
+
+      mtl_setArgs(computeEncoder, self, mat2, result, strides, sizes);
+      [computeEncoder dispatchThreadgroups:MTLSizeMake(grid_size_x, grid_size_y, 1)
+                     threadsPerThreadgroup:threads_per_threadgroup];
+      getMPSProfiler().endProfileKernel(pso, stream);
+    }
+  });
+  return result;
 }
 
 Tensor& do_metal_bmm(const Tensor& batch1, const Tensor& batch2, Tensor& output) {
@@ -358,7 +425,7 @@ Tensor& do_metal_bmm(const Tensor& batch1, const Tensor& batch2, Tensor& output)
   auto matmulPSO = lib.getPipelineStateForFunc("naive_bmm_" + mps::scalarToMetalTypeString(output));
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      getMPSProfiler().beginProfileKernel(matmulPSO, "naive_batch_matmul", {batch1_, batch2_});
+      getMPSProfiler().beginProfileKernel(matmulPSO, "naive_batch_matmul", {batch1_, batch2_}, stream);
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:matmulPSO];
       std::array<uint32_t, 4> sizes = {static_cast<uint32_t>(batch1_.size(1)),
@@ -384,7 +451,7 @@ Tensor& do_metal_bmm(const Tensor& batch1, const Tensor& batch2, Tensor& output)
 
       mtl_setArgs(computeEncoder, batch1_, batch2_, output, strides, sizes);
       [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
-      getMPSProfiler().endProfileKernel(matmulPSO);
+      getMPSProfiler().endProfileKernel(matmulPSO, stream);
     }
   });
   return output;
@@ -396,8 +463,14 @@ Tensor& do_metal_addmm(const Tensor& self,
                        const Scalar& alpha,
                        const Scalar& beta,
                        const Tensor& bias) {
-  if (beta.isFloatingPoint() && alpha.isFloatingPoint() && beta.toDouble() == 0 && alpha.toDouble() == 1) {
-    return do_metal_mm(self, other, output);
+  // beta == 0 means bias is ignored, so nan/inf in it must not propagate. Lower to a plain
+  // mm (skipping the bias) and scale by alpha in place only for the uncommon alpha != 1.
+  if (beta.toComplexDouble() == 0.0) {
+    do_metal_mm(self, other, output);
+    if (alpha.toComplexDouble() != 1.0) {
+      output.mul_(alpha);
+    }
+    return output;
   }
   // Handle conjugated inputs by creating resolved copies
   auto self_ = self.is_conj() ? self.resolve_conj() : self;
@@ -409,7 +482,7 @@ Tensor& do_metal_addmm(const Tensor& self,
   auto matmulPSO = lib.getPipelineStateForFunc("addmm_" + mps::scalarToMetalTypeString(output));
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      getMPSProfiler().beginProfileKernel(matmulPSO, "addmm", {self_, other_});
+      getMPSProfiler().beginProfileKernel(matmulPSO, "addmm", {self_, other_}, stream);
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:matmulPSO];
       c10::metal::vec3<uint32_t> sizes = {static_cast<uint32_t>(self_.size(0)),
@@ -432,7 +505,7 @@ Tensor& do_metal_addmm(const Tensor& self,
       MTLSize threadgroupsPerGrid = MTLSizeMake(gridSizeX, gridSizeY, 1);
       mtl_setArgs(computeEncoder, self_, other_, output, bias_, alpha_beta.i64, strides, sizes);
       [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
-      getMPSProfiler().endProfileKernel(matmulPSO);
+      getMPSProfiler().endProfileKernel(matmulPSO, stream);
     }
   });
   return output;
@@ -445,10 +518,22 @@ Tensor& do_metal_addbmm_or_baddbmm(const Tensor& bias,
                                    const Scalar& beta,
                                    Tensor& output,
                                    bool is_baddbmm) {
-  // Handle conjugated inputs by creating resolved copies
+  // beta == 0 means bias is ignored, so nan/inf in it must not propagate. baddbmm then
+  // lowers to a plain bmm (skipping the bias) with an in-place alpha scale for alpha != 1.
+  if (is_baddbmm && beta.toComplexDouble() == 0.0) {
+    do_metal_bmm(batch1, batch2, output);
+    if (alpha.toComplexDouble() != 1.0) {
+      output.mul_(alpha);
+    }
+    return output;
+  }
+
+  // Handle conjugated inputs by creating resolved copies. addbmm still needs its batch
+  // reduction, so when beta == 0 feed the kernel a broadcast scalar zero for the bias.
   auto batch1_ = batch1.is_conj() ? batch1.resolve_conj() : batch1;
   auto batch2_ = batch2.is_conj() ? batch2.resolve_conj() : batch2;
-  auto bias_ = bias.is_conj() ? bias.resolve_conj() : bias;
+  auto bias_src = beta.toComplexDouble() == 0.0 ? at::zeros({}, bias.options()) : bias;
+  auto bias_ = bias_src.is_conj() ? bias_src.resolve_conj() : bias_src;
 
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
@@ -462,7 +547,7 @@ Tensor& do_metal_addbmm_or_baddbmm(const Tensor& bias,
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       getMPSProfiler().beginProfileKernel(
-          matmulPSO, std::string("naive_") + op_name, {batch1_, batch2_, bias_expanded});
+          matmulPSO, std::string("naive_") + op_name, {batch1_, batch2_, bias_expanded}, stream);
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:matmulPSO];
 
@@ -510,7 +595,7 @@ Tensor& do_metal_addbmm_or_baddbmm(const Tensor& bias,
       mtl_setArgs(computeEncoder, batch1_, batch2_, output, bias_expanded, alpha_beta.i64, strides, sizes);
       [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
 
-      getMPSProfiler().endProfileKernel(matmulPSO);
+      getMPSProfiler().endProfileKernel(matmulPSO, stream);
     }
   });
 
@@ -545,6 +630,12 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
   // kernels honor the output strides.
   static const bool is_macos_26_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_26_0);
   if (!output.is_contiguous() && !is_macos_26_0_or_newer) {
+    return true;
+  }
+  // Before macOS 15, an output with a storage offset is gathered into a
+  // temporary that the graph writes and nothing scatters back; the metal
+  // kernels honor the offset.
+  if (needsGather(output)) {
     return true;
   }
   // multiplicationWithPrimaryTensor: returns incorrect results if inner size exceeds 2048
@@ -1117,7 +1208,11 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
     return result;
   }
   if ((opType == ADDBMM_OP_TYPE && batch1.size(0) == 0) || batch1.size(2) == 0) {
-    at::mul_out(result, input, wrapped_scalar_tensor(beta));
+    if (beta.toComplexDouble() == 0.0) {
+      result.zero_();
+    } else {
+      at::mul_out(result, input, wrapped_scalar_tensor(beta));
+    }
     return result;
   }
 
@@ -1235,7 +1330,7 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
   // Inner dimension is 0
   // Early out as some paths in the code below do not handle this case correctly
   if (self.size(1) == 0) {
-    if (beta.toDouble() == 0.0) {
+    if (beta.toComplexDouble() == 0.0) {
       output.zero_();
     } else {
       output.copy_(*bias_);
@@ -1249,7 +1344,10 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
     return output;
   }
 
-  if (use_metal_mm(self, other, output)) {
+  // Complex addmm must use the Metal kernel (like bmm/baddbmm): the MPSGraph-based fallback
+  // for real types below encodes alpha/beta as real (double) constants via toDouble(), which
+  // throws for a complex scalar and drops its imaginary part.
+  if (use_metal_mm(self, other, output) || c10::isComplexType(self.scalar_type())) {
     return do_metal_addmm(self, other, output, alpha, beta, *bias_);
   }
 
@@ -1375,7 +1473,7 @@ static Tensor& tiled_bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2
         auto resDesc_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:resShape];
         resDesc_.preferPackedRows = true;
 
-        getMPSProfiler().beginProfileKernel(matmul, " tiled_bmm_mps", {batch1, batch2});
+        getMPSProfiler().beginProfileKernel(matmul, " tiled_bmm_mps", {batch1, batch2}, mpsStream);
 
         // Descriptors to use for last batch if it exists
         //.matrices is a readonly property so we need a separate descriptor.
@@ -1474,6 +1572,11 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
   // kernel honors the output strides.
   static const bool is_macos_26_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_26_0);
   if (!result.is_contiguous() && !is_macos_26_0_or_newer) {
+    return do_metal_bmm(batch1, batch2, result);
+  }
+  // Same pre-macOS-15 crack as use_metal_mm: an output with a storage offset
+  // is gathered into a temporary that nothing scatters back.
+  if (needsGather(result)) {
     return do_metal_bmm(batch1, batch2, result);
   }
 
@@ -1608,7 +1711,7 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
                                                                     numberOfRightHandSides:left ? bCols : bRows
                                                                                      alpha:1.0f] autorelease];
       // this function call is a no-op if MPS Profiler is not enabled
-      getMPSProfiler().beginProfileKernel(filter, " solve_triangular_mps", {A_, B_});
+      getMPSProfiler().beginProfileKernel(filter, " solve_triangular_mps", {A_, B_}, mpsStream);
 
       MPSMatrixDescriptor* sourceMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
                                                                                     columns:aCols
@@ -1642,7 +1745,7 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
                   rightHandSideMatrix:rightHandSideMatrix
                        solutionMatrix:solutionMatrix];
       }
-      getMPSProfiler().endProfileKernel(filter);
+      getMPSProfiler().endProfileKernel(filter, mpsStream);
     }
   });
   return out;
@@ -1674,11 +1777,11 @@ static void unpack_pivots_stub_impl(TensorIterator& iter, const int64_t dim_size
       id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
       auto pipeline_state = lib.getPipelineStateForFunc(
           fmt::format("unpack_pivots_{}_{}", scalarToMetalTypeString(perm), scalarToMetalTypeString(pivots)));
-      getMPSProfiler().beginProfileKernel(pipeline_state, "unpack_pivots", {pivots});
+      getMPSProfiler().beginProfileKernel(pipeline_state, "unpack_pivots", {pivots}, stream);
       [compute_encoder setComputePipelineState:pipeline_state];
       mtl_setArgs(compute_encoder, perm, pivots, params);
       mtl_dispatch1DJob(compute_encoder, pipeline_state, num_threads);
-      getMPSProfiler().endProfileKernel(pipeline_state);
+      getMPSProfiler().endProfileKernel(pipeline_state, stream);
     }
   });
 }
@@ -1840,7 +1943,7 @@ static Tensor& orgqr_stub_impl(Tensor& self, const Tensor& tau) {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
       auto pipeline_state = lib.getPipelineStateForFunc(fmt::format("orgqr_{}", scalarToMetalTypeString(self)));
-      getMPSProfiler().beginProfileKernel(pipeline_state, "orgqr", {self, tau});
+      getMPSProfiler().beginProfileKernel(pipeline_state, "orgqr", {self, tau}, stream);
       [compute_encoder setComputePipelineState:pipeline_state];
       mtl_setArgs(compute_encoder, self, tau, H, H_prod, H_prod_work, params);
       static_assert(sizeof(NSUInteger) == sizeof(uint64_t));
@@ -1849,7 +1952,7 @@ static Tensor& orgqr_stub_impl(Tensor& self, const Tensor& tau) {
       NSUInteger num_threads = threads_per_group * num_batches;
       [compute_encoder dispatchThreads:MTLSizeMake(num_threads, 1, 1)
                  threadsPerThreadgroup:MTLSizeMake(threads_per_group, 1, 1)];
-      getMPSProfiler().endProfileKernel(pipeline_state);
+      getMPSProfiler().endProfileKernel(pipeline_state, stream);
     }
   });
 
@@ -1976,7 +2079,7 @@ static void svd_kernel_mps(const Tensor& A,
     @autoreleasepool {
       id<MTLComputeCommandEncoder> enc = stream->commandEncoder();
       auto pso = lib.getPipelineStateForFunc(fmt::format("svd_jacobi_{}", scalarToMetalTypeString(A)));
-      getMPSProfiler().beginProfileKernel(pso, "svd_jacobi", {A});
+      getMPSProfiler().beginProfileKernel(pso, "svd_jacobi", {A}, stream);
       [enc setComputePipelineState:pso];
       Tensor Ubind = compute_uv ? U : U_scratch;
       Tensor Vbind = compute_uv ? Vh : Vh_scratch;
@@ -1991,7 +2094,7 @@ static void svd_kernel_mps(const Tensor& A,
       const NSUInteger wantSG = std::min<NSUInteger>(std::max<NSUInteger>(nPairs, 1), kMaxSimdGroups);
       NSUInteger tgs = std::min<NSUInteger>(maxThreads, wantSG * simd);
       [enc dispatchThreads:MTLSizeMake(tgs * batch, 1, 1) threadsPerThreadgroup:MTLSizeMake(tgs, 1, 1)];
-      getMPSProfiler().endProfileKernel(pso);
+      getMPSProfiler().endProfileKernel(pso, stream);
     }
   });
 
@@ -2086,7 +2189,7 @@ static void eigh_kernel_mps(const Tensor& eigenvalues,
     @autoreleasepool {
       id<MTLComputeCommandEncoder> enc = stream->commandEncoder();
       auto pso = lib.getPipelineStateForFunc(fmt::format("eigh_jacobi_{}", scalarToMetalTypeString(eigenvectors)));
-      getMPSProfiler().beginProfileKernel(pso, "eigh_jacobi", {eigenvectors});
+      getMPSProfiler().beginProfileKernel(pso, "eigh_jacobi", {eigenvectors}, stream);
       [enc setComputePipelineState:pso];
       // V binds to both A (in) and Q (out): safe since all reads stage into
       // threadgroup memory before any device writeback.
@@ -2100,7 +2203,7 @@ static void eigh_kernel_mps(const Tensor& eigenvalues,
       const NSUInteger wantSG = std::min<NSUInteger>(std::max<NSUInteger>(nPairs, 1), kMaxSimdGroups);
       NSUInteger tgs = std::min<NSUInteger>(maxThreads, wantSG * simd);
       [enc dispatchThreads:MTLSizeMake(tgs * batch, 1, 1) threadsPerThreadgroup:MTLSizeMake(tgs, 1, 1)];
-      getMPSProfiler().endProfileKernel(pso);
+      getMPSProfiler().endProfileKernel(pso, stream);
     }
   });
 
@@ -2175,7 +2278,7 @@ static void geqrf_kernel_mps(const Tensor& A, const Tensor& tau) {
       auto compute_encoder = stream->commandEncoder();
       auto pso = lib.getPipelineStateForFunc(fmt::format("geqrf_{}", scalarToMetalTypeString(A)));
 
-      getMPSProfiler().beginProfileKernel(pso, "geqrf", {A});
+      getMPSProfiler().beginProfileKernel(pso, "geqrf", {A}, stream);
       [compute_encoder setComputePipelineState:pso];
 
       MTLSize threadGroupSize = MTLSizeMake([pso maxTotalThreadsPerThreadgroup], 1, 1);
@@ -2184,7 +2287,7 @@ static void geqrf_kernel_mps(const Tensor& A, const Tensor& tau) {
       mtl_setArgs(compute_encoder, A, tau, params, v_work);
       [compute_encoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
 
-      getMPSProfiler().endProfileKernel(pso);
+      getMPSProfiler().endProfileKernel(pso, stream);
     }
   });
 }
@@ -2358,6 +2461,15 @@ Tensor& addr_out_mps(const Tensor& self,
 
 TORCH_IMPL_FUNC(mm_out_mps)(const Tensor& self, const Tensor& mat2, const Tensor& result) {
   mps::mm_out_mps_impl(self, mat2, const_cast<Tensor&>(result));
+}
+
+Tensor& _int_mm_out_mps(const Tensor& self, const Tensor& mat2, Tensor& result) {
+  return mps::int_mm_out_mps_impl(self, mat2, result);
+}
+
+Tensor _int_mm_mps(const Tensor& self, const Tensor& mat2) {
+  auto result = at::empty({self.size(0), mat2.size(1)}, self.options().dtype(at::kInt));
+  return _int_mm_out_mps(self, mat2, result);
 }
 
 TORCH_IMPL_FUNC(addmm_out_mps)
