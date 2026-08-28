@@ -517,9 +517,18 @@ def is_initialized():
 
 
 def _lazy_call(callable, **kwargs):
+    # Do not invoke user callbacks while holding _initialization_lock;
+    # they may call back into _lazy_call. The is_initializing check
+    # mirrors _lazy_init: while it drains _queued_calls this thread
+    # already holds the lock, so run reentrant callbacks immediately.
+    if is_initialized() or hasattr(_tls, "is_initializing"):
+        callable()
+        return
+
+    run_now = False
     with _initialization_lock:
         if is_initialized():
-            callable()
+            run_now = True
         else:
             # TODO(torch_deploy): this accesses linecache, which attempts to read the
             # file system to get traceback info. Patch linecache or do something
@@ -532,6 +541,9 @@ def _lazy_call(callable, **kwargs):
             else:
                 # Don't store the actual traceback to avoid memory cycle
                 _queued_calls.append((callable, traceback.format_stack()))
+
+    if run_now:
+        callable()
 
 
 _lazy_call(_check_capability)
