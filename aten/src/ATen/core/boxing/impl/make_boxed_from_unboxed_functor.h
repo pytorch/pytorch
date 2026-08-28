@@ -450,6 +450,7 @@ struct ivalue_to_arg<c10::SymIntArrayRef, AllowDeprecatedTypes> final {
     if (v.isIntList()) {
       std::vector<c10::SymInt> r;
       auto src = v.toIntList();
+      r.reserve(src.size());
       std::transform(
           src.begin(), src.end(), std::back_inserter(r), [](int64_t i) {
             return c10::SymInt(i);
@@ -468,6 +469,7 @@ struct ivalue_to_arg<c10::OptionalArray<c10::SymInt>, AllowDeprecatedTypes>
     if (v.isIntList()) {
       std::vector<c10::SymInt> r;
       auto src = v.toIntList();
+      r.reserve(src.size());
       std::transform(
           src.begin(), src.end(), std::back_inserter(r), [](int64_t i) {
             return c10::SymInt(i);

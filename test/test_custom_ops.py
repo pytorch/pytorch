@@ -2870,6 +2870,21 @@ TORCH_LIBRARY(test_autograd_function_backed_op, m) {
         loss.backward()
         self.assertEqual(x.grad, temp)
 
+    def test_torch_ops_warning_propagation(self):
+        x = torch.ones(2)
+        y = torch.ones(2)
+        out = torch.empty(2, 2)
+        with self.assertWarnsRegex(UserWarning, "torch.ger is deprecated"):
+            torch.ops.aten.ger.out(x, y, out=out)
+
+    def test_dispatch_call_boxed_warning_propagation(self):
+        op = torch._C._dispatch_find_schema_or_throw("aten::ger", "out")
+        x = torch.ones(2)
+        y = torch.ones(2)
+        out = torch.empty(2, 2)
+        with self.assertWarnsRegex(UserWarning, "torch.ger is deprecated"):
+            torch._C._dispatch_call_boxed(op, x, y, out=out)
+
     # Using a non-existent DSO is a quick way to trigger an OSError,
     # which can be used to not break BC.
     def test_load_library(self):
@@ -6223,7 +6238,7 @@ from torch.testing._internal.optests import opcheck
 op = torch.ops.aten.sin.default
 
 # If you rerun your test with PYTORCH_OPCHECK_PRINT_BETTER_REPRO=1
-# we will fill them in same (args, kwargs) as in your test
+# we will fill in the same (args, kwargs) as in your test
 args = ()  # args to the operator
 kwargs = {}  # kwargs to the operator
 opcheck(op, args, kwargs, test_utils="test_schema")
