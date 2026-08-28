@@ -758,7 +758,9 @@ class ConstDictVariable(VariableTracker):
         if pydict_check(self_) and pydict_check(other_):
             # dict.__or__ copies and merges via internal helpers, bypassing a
             # subclass's overridden copy/update.
-            new = cast(ConstDictVariable, ConstDictVariable.dict_copy(self_, tx, [], {}))
+            new = cast(
+                ConstDictVariable, ConstDictVariable.dict_copy(self_, tx, [], {})
+            )
             ConstDictVariable.dict_update(new, tx, [other_], {})
             return new
         return ConstantVariable.create(NotImplemented)
