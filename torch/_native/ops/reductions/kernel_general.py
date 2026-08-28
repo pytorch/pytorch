@@ -84,6 +84,49 @@ from .._cutedsl.plan_cache import cached_plan
 from .._cutedsl.traits import block_reduce, WARP, warp_reduce
 
 
+def _magic(d):
+    # Magic-number reciprocal for exact n // d over 0 <= n < 2^31 as
+    # (n * m) >> sh -- one 64-bit multiply + shift instead of a runtime 64-bit
+    # divide (which the ~%25-slower runtime-geometry decode would otherwise emit
+    # per element per pair). Same Granlund-Montgomery family as aten's IntDivider
+    # (aten/src/ATen/cuda/detail/IntegerDivider.cuh, hackersdelight.org/magic.htm);
+    # that one uses the add-indicator form for the full unsigned 2^32 domain, but
+    # K0's linear indices are Int32-positive (< 2^31), so the simpler round-up form
+    # is exact and one instruction cheaper. Proof sketch: m = floor(2^(31+l)/d)+1
+    # with l = ceil(log2 d), so m*d = 2^(31+l) + e with 0 < e <= d, and for n < 2^31
+    # the error term n*e/(d*2^(31+l)) < 2^-l * 1 < 1/d ... floor((n*m) >> (31+l))
+    # = n//d exactly. m < 2^32 (d > 2^(l-1)) so n*m < 2^63: no Int64 overflow.
+    l = (d - 1).bit_length()
+    return (1 << (31 + l)) // d + 1, 31 + l
+
+
+def _decode_offset(linear, vals, npairs):
+    # Mixed-radix decode of a linear index into a flat element offset. vals is a
+    # RUNTIME Int64 list of QUADS, fastest-varying dim first:
+    #     [m0, sh0, ext0, strd0,  m1, sh1, ext1, strd1, ...]
+    # where (m, sh) is _magic(ext). npairs is the compile-time pair COUNT (only the
+    # loop STRUCTURE is baked -- the values are launch args, so one compiled kernel
+    # serves every geometry with the same pair count). Divisions run as magic
+    # multiply+shift; the LAST pair needs neither div nor mod (a linear index in
+    # range has rem < ext_last; out-of-range lanes decode garbage that the callers'
+    # `valid` predication never reads). For a single pair this is linear*stride.
+    #
+    # INT64: the flat offset can exceed int32 (numel >= 2^31, e.g. a (300000, 8192)
+    # reduction). Cast the linear index to Int64 up front so every rem*stride product
+    # and accumulation is 64-bit; an int32 product silently wraps negative and reads
+    # out of bounds. The returned offset indexes a flat gmem tensor, which expects a
+    # 64-bit offset.
+    rem = cutlass.Int64(linear)
+    if npairs == 1:
+        return rem * vals[3]
+    off = cutlass.Int64(0)
+    for j in range(npairs - 1):
+        q = (rem * vals[4 * j]) >> vals[4 * j + 1]
+        off = off + (rem - q * vals[4 * j + 2]) * vals[4 * j + 3]
+        rem = q
+    return off + rem * vals[4 * (npairs - 1) + 3]
+
+
 class ReduceBlock:
     def __init__(
         self,
@@ -720,7 +763,6 @@ def _reduce(trait, trait_key, x, dims, out_dtypes, nouts, block=_K0_BLOCK):
         range(x.dim()) if dims is None else ([dims] if isinstance(dims, int) else dims)
     )
     red_axes = {d % x.dim() for d in red_axes}
-    has_index = getattr(trait, "has_index", False)
     out_shape = [s for i, s in enumerate(x.shape) if i not in red_axes]
 
     # Single output ELEMENT (every kept extent is 1) -> route to reduce_all (the
@@ -748,6 +790,7 @@ def _reduce(trait, trait_key, x, dims, out_dtypes, nouts, block=_K0_BLOCK):
     # and for the case a fast kernel itself declines (e.g. xcta on a prime N).
     if len(out_shape) > 0 and x.is_contiguous():
         red_pairs, kept_pairs = _ti_pairs(x, _probe(x, red_axes))
+        has_index = getattr(trait, "has_index", False)
         kind = fast_kind(red_pairs, kept_pairs, nouts, has_index)
         red_n = x.numel() // max(1, math.prod(out_shape))
         if kind == "row":
