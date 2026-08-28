@@ -169,7 +169,9 @@ class TuningProcess:
 
     @staticmethod
     def send(
-        obj: Any, write_pipe: IO[bytes], extra_env: dict[str, str | None] | None = None
+        obj: object,
+        write_pipe: IO[bytes],
+        extra_env: dict[str, str | None] | None = None,
     ) -> None:
         pickle.dump((obj, extra_env), write_pipe)
         write_pipe.flush()
@@ -233,7 +235,7 @@ class TuningProcess:
         """
         return self.running and self.process.poll() is None
 
-    def put(self, req: Any, extra_env: dict[str, str | None] | None = None) -> None:
+    def put(self, req: object, extra_env: dict[str, str | None] | None = None) -> None:
         """
         Push a work item to the child process.
         """

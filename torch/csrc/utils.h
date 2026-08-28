@@ -21,40 +21,17 @@
 #define THP_EXPECT(x, y) (x)
 #endif
 
-#define THPUtils_unpackReal_FLOAT(object)           \
-  (PyFloat_Check(object) ? PyFloat_AsDouble(object) \
-       : PyLong_Check(object)                       \
-       ? PyLong_AsLongLong(object)                  \
-       : (throw std::runtime_error("Could not parse real"), 0))
-
 #define THPUtils_checkReal_INT(object) PyLong_Check(object)
 
-#define THPUtils_unpackReal_INT(object) \
-  (PyLong_Check(object)                 \
-       ? PyLong_AsLongLong(object)      \
-       : (throw std::runtime_error("Could not parse real"), 0))
-
-#define THPUtils_unpackReal_BOOL(object) \
-  (PyBool_Check(object)                  \
-       ? object                          \
-       : (throw std::runtime_error("Could not parse real"), Py_False))
-
-#define THPUtils_unpackReal_COMPLEX(object)                                   \
-  (PyComplex_Check(object)                                                    \
-       ? (c10::complex<double>(                                               \
-             PyComplex_RealAsDouble(object), PyComplex_ImagAsDouble(object))) \
-       : PyFloat_Check(object)                                                \
-       ? (c10::complex<double>(PyFloat_AsDouble(object), 0))                  \
-       : PyLong_Check(object)                                                 \
-       ? (c10::complex<double>(PyLong_AsLongLong(object), 0))                 \
-       : (throw std::runtime_error("Could not parse real"),                   \
-          c10::complex<double>(0, 0)))
-
-#define THPBoolUtils_unpackReal(object) THPUtils_unpackReal_BOOL(object)
 #define THPBoolUtils_checkAccreal(object) THPUtils_checkReal_BOOL(object)
 #define THPByteUtils_checkReal(object) THPUtils_checkReal_INT(object)
-#define THPByteUtils_unpackReal(object) \
-  (unsigned char)THPUtils_unpackReal_INT(object)
+
+// A function, not a macro: TORCH_CHECK is a statement, and callers use this in
+// expression position.
+inline unsigned char THPByteUtils_unpackReal(PyObject* object) {
+  TORCH_CHECK(PyLong_Check(object), "Could not parse real");
+  return static_cast<unsigned char>(PyLong_AsLongLong(object));
+}
 
 /*
    From https://github.com/python/cpython/blob/v3.7.0/Modules/xxsubtype.c

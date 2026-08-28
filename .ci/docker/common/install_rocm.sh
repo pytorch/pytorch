@@ -39,15 +39,24 @@ install_rocm() {
     : "${THEROCK_INDEX_URL:?THEROCK_INDEX_URL must be set}"
     : "${ROCM_VERSION:?ROCM_VERSION must be set}"
 
+    # Major.minor pins (e.g. 7.14) accept later patches via ==7.14.*.
+    # Fully specified preview pins (e.g. 7.15.0a20260712) stay exact; PEP 440
+    # rejects ==7.15.0a20260712.*.
+    rocm_pip_version="${ROCM_VERSION}"
+    if [[ "${ROCM_VERSION}" =~ ^[0-9]+\.[0-9]+$ ]]; then
+        rocm_pip_version="${ROCM_VERSION}.*"
+    fi
+
     echo "=============================================="
     echo "ROCm Multi-Arch Wheel Installation (TheRock)"
     echo "Index URL:  ${THEROCK_INDEX_URL}"
     echo "ROCm version: ${ROCM_VERSION}"
+    echo "ROCm spec:  rocm[libraries,devel,device-all]==${rocm_pip_version}"
     echo "=============================================="
 
     # device-all pulls kernels for every supported gfx target (multi-arch wheel);
     # libraries+devel provide the runtime libs + headers/hipcc to compile against ROCm.
-    python3 -m pip install --index-url "${THEROCK_INDEX_URL}" "rocm[libraries,devel,device-all]==${ROCM_VERSION}"
+    python3 -m pip install --index-url "${THEROCK_INDEX_URL}" "rocm[libraries,devel,device-all]==${rocm_pip_version}"
 
     # Discover the real install root/bin via the rocm-sdk CLI (rocm-sdk-core wheel).
     ROCM_HOME="$(rocm-sdk path --root)"
