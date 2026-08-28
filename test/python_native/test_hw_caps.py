@@ -10,10 +10,11 @@
 import unittest
 
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfNoCuteDSL, TestCase
 
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
+@skipIfNoCuteDSL
 class TestHWCaps(TestCase):
     def _caps(self):
         from torch._native.ops._cutedsl.hw_caps import caps
