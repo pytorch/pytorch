@@ -16443,6 +16443,13 @@ class TestConsistency(TestCaseMPS):
                 atol, rtol = 5e-5, 2.5e-2
             if op.name in ("special.bessel_y0", "special.bessel_y1") and dtype == torch.float16:
                 atol, rtol = 5e-4, 2e-3
+            if op.name == "special.log_ndtr" and dtype == torch.float32:
+                # d/dx log_ndtr(x) = exp(-x*x/2 - log_ndtr(x)), so an absolute
+                # error in the forward value shows up as a relative error of
+                # the same size in the gradient. For x around -11 the forward
+                # result is about -70, where one fp32 ulp is already ~8e-6, so
+                # CPU and MPS gradients cannot agree to the default rtol.
+                atol, rtol = 1e-4, 2e-5
             if op.name == "polar" and dtype == torch.float16:
                 # `d(real)/d(abs) = cos(angle)` near pi/2 collapses to ~0 in
                 # fp16; one unlucky seeded angle can produce ~0.1 absolute

@@ -3125,5 +3125,25 @@ float erfcx(T x) {
   }
 }
 
+/*
+ * Logarithm of the Gaussian cumulative distribution function.
+ * Copy-n-paste from calc_log_ndtr in aten/src/ATen/native/Math.h, which
+ * follows SciPy's implementation. See NOTICE for the licenses.
+ */
+template <typename T>
+inline float log_ndtr(T x) {
+  /* 1 / sqrt(2) */
+  constexpr float frac_sqrt_2 = 0.707106781186547524400844362104849039;
+
+  const float xf = static_cast<float>(x);
+  const float t = xf * frac_sqrt_2;
+
+  if (xf < -1.0) {
+    return ::metal::precise::log(erfcx(-t) / 2) - t * t;
+  }
+
+  return log1p(-erfc(t) / 2);
+} // log_ndtr(T x)
+
 } // namespace metal
 } // namespace c10

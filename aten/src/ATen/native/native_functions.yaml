@@ -13618,7 +13618,7 @@
   python_module: special
   variants: function
   dispatch:
-    CPU, CUDA, XPU: special_log_ndtr_out
+    CPU, CUDA, MPS, XPU: special_log_ndtr_out
   tags: pointwise
 
 - func: special_expm1(Tensor self) -> Tensor
