@@ -7,8 +7,11 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_cdist_backward.h>
 #include <ATen/ops/linalg_vector_norm.h>
+#include <ATen/ops/ones.h>
 #include <ATen/ops/where.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 #include <ATen/native/mps/kernels/Distance.h>
@@ -107,7 +110,69 @@ static void cdist_backward_kernel_mps(Tensor& result,
   }
 }
 
+static void pdist_forward_kernel_mps(Tensor& result, const Tensor& self, const double p) {
+  const int64_t n = self.size(0);
+  const PdistParams params{
+      .N = n,
+      .D = self.size(1),
+      .p = static_cast<float>(p),
+  };
+
+  // Values must match `P_KIND` in kernels/Distance.metal.
+  const int p_kind = (p == 0.0) ? 0 : (p == 1.0) ? 1 : (p == 2.0) ? 2 : (std::isinf(p) ? 3 : 4);
+
+  auto stream = getCurrentMPSStream();
+  @autoreleasepool {
+    auto pso = lib.getPipelineStateForFunc(fmt::format("pdist_{}_p{}", scalarToMetalTypeString(self), p_kind));
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        auto compute_encoder = stream->commandEncoder();
+        [compute_encoder setComputePipelineState:pso];
+        mtl_setArgs(compute_encoder, self, result, params);
+        const auto width = std::min<NSUInteger>(pso.maxTotalThreadsPerThreadgroup, static_cast<NSUInteger>(n));
+        const MTLSize grid = MTLSizeMake(static_cast<NSUInteger>(n), static_cast<NSUInteger>(n), 1);
+        [compute_encoder dispatchThreads:grid threadsPerThreadgroup:MTLSizeMake(width, 1, 1)];
+      }
+    });
+  }
+}
+
+// pdist is the strict upper triangle of cdist(self, self), and because the
+// distance is symmetric in its two arguments, the total gradient of row i is
+// the cdist gradient with respect to x1 once the per-pair gradients and
+// distances are mirrored into full matrices. That lets the backward reuse the
+// cdist backward kernel instead of duplicating it; the zero diagonal
+// contributes nothing since that kernel skips zero coordinate differences.
+static void pdist_backward_kernel_mps(Tensor& result,
+                                      const Tensor& grad,
+                                      const Tensor& self,
+                                      const double p,
+                                      const Tensor& dist) {
+  const int64_t n = self.size(0);
+  if (result.numel() == 0) {
+    return;
+  }
+  if (p == 0.0 || n < 2 || self.size(1) == 0) {
+    result.fill_(0);
+    return;
+  }
+
+  const auto upper = at::ones({n, n}, self.options().dtype(at::kBool)).triu(1);
+
+  auto grad_full = at::zeros({n, n}, self.options());
+  grad_full.masked_scatter_(upper, grad);
+  grad_full = grad_full.add(grad_full.t());
+
+  auto dist_full = at::zeros({n, n}, self.options());
+  dist_full.masked_scatter_(upper, dist);
+  dist_full = dist_full.add(dist_full.t());
+
+  result.copy_(at::_cdist_backward(grad_full.contiguous(), self, self, p, dist_full.contiguous()));
+}
+
 REGISTER_DISPATCH(cdist_stub, &cdist_kernel_mps)
 REGISTER_DISPATCH(cdist_backward_stub, &cdist_backward_kernel_mps)
+REGISTER_DISPATCH(pdist_forward_stub, &pdist_forward_kernel_mps)
+REGISTER_DISPATCH(pdist_backward_stub, &pdist_backward_kernel_mps)
 
 } // namespace at::native

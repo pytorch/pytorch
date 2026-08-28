@@ -556,7 +556,6 @@ if torch.backends.mps.is_available():
                 torch.int8,
             ],
             "nn.functional.padreplicate_negative": [torch.bool],
-            "nn.functional.pdist": None,
             "nn.functional.rrelu": None,
             "nn.functional.silu": [
                 torch.int16,

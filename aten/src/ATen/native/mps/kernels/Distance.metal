@@ -124,3 +124,70 @@ kernel void cdist_backward(
 REGISTER_CDIST_BACKWARD_FOR_TYPE(float)
 REGISTER_CDIST_BACKWARD_FOR_TYPE(half)
 REGISTER_CDIST_BACKWARD_FOR_TYPE(bfloat)
+
+// One thread per (i, j) pair of rows; threads with j <= i drop out. `out` is
+// the row-major strict upper triangle, which is exactly pdist's layout.
+// P_KIND: 0 = p==0, 1 = p==1, 2 = p==2, 3 = p==inf, 4 = generic.
+template <typename T, int P_KIND>
+kernel void pdist(
+    constant T* x [[buffer(0)]],
+    device T* out [[buffer(1)]],
+    constant PdistParams& params [[buffer(2)]],
+    uint2 tid [[thread_position_in_grid]]) {
+  const long n = params.N;
+  const long i = static_cast<long>(tid.y);
+  const long j = static_cast<long>(tid.x);
+
+  if (i >= n || j >= n || j <= i) {
+    return;
+  }
+
+  const long d = params.D;
+  constant T* xi = x + i * d;
+  constant T* xj = x + j * d;
+
+  float acc = 0.0f;
+  for (long c = 0; c < d; ++c) {
+    const float diff = ::metal::precise::abs(
+        static_cast<float>(xi[c]) - static_cast<float>(xj[c]));
+    if IF_CONSTEXPR (P_KIND == 0) {
+      acc += (diff != 0.0f) ? 1.0f : 0.0f;
+    } else if IF_CONSTEXPR (P_KIND == 1) {
+      acc += diff;
+    } else if IF_CONSTEXPR (P_KIND == 2) {
+      acc += diff * diff;
+    } else if IF_CONSTEXPR (P_KIND == 3) {
+      acc = ::metal::max(acc, diff);
+    } else {
+      acc += ::metal::precise::pow(diff, params.p);
+    }
+  }
+
+  float result = acc;
+  if IF_CONSTEXPR (P_KIND == 2) {
+    result = ::metal::precise::sqrt(acc);
+  } else if IF_CONSTEXPR (P_KIND == 4) {
+    result = ::metal::precise::pow(acc, 1.0f / params.p);
+  }
+
+  out[i * n - (i * (i + 1)) / 2 + (j - i - 1)] = static_cast<T>(result);
+}
+
+#define REGISTER_PDIST(T, P_KIND)                              \
+  template [[host_name("pdist_" #T "_p" #P_KIND)]] kernel void \
+  pdist<T, P_KIND>(                                            \
+      constant T * x [[buffer(0)]],                            \
+      device T * out [[buffer(1)]],                            \
+      constant PdistParams & params [[buffer(2)]],             \
+      uint2 tid [[thread_position_in_grid]]);
+
+#define REGISTER_PDIST_FOR_TYPE(T) \
+  REGISTER_PDIST(T, 0)             \
+  REGISTER_PDIST(T, 1)             \
+  REGISTER_PDIST(T, 2)             \
+  REGISTER_PDIST(T, 3)             \
+  REGISTER_PDIST(T, 4)
+
+REGISTER_PDIST_FOR_TYPE(float)
+REGISTER_PDIST_FOR_TYPE(half)
+REGISTER_PDIST_FOR_TYPE(bfloat)

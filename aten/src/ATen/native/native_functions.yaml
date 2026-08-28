@@ -4537,13 +4537,13 @@
 
 - func: _pdist_forward(Tensor self, float p=2) -> Tensor
   dispatch:
-    CPU, CUDA, XPU: _pdist_forward
+    CPU, CUDA, MPS, XPU: _pdist_forward
   autogen: _pdist_forward.out
   tags: core
 
 - func: _pdist_backward(Tensor grad_output, Tensor self, float p, Tensor pdist) -> Tensor
   dispatch:
-    CPU, CUDA, XPU: _pdist_backward
+    CPU, CUDA, MPS, XPU: _pdist_backward
   autogen: _pdist_backward.out
 
 - func: cosine_similarity(Tensor x1, Tensor x2, int dim=1, float eps=1e-08) -> Tensor
