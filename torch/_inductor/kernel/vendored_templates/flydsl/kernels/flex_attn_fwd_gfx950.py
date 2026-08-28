@@ -24,6 +24,9 @@ _NEG_BIG = -1.0e30
 _FWD_COMPILE_HINTS = {
     "fast_fp_math": True,
 }
+# Four-wave CTAs reduce launch count once the 128-row prefill grid remains
+# large enough to keep gfx950 occupied.
+_FOUR_WAVE_PREFILL_MIN_CTAS = 512
 
 
 def _f32(value):
@@ -73,6 +76,8 @@ def _select_owner_waves(
         return 8
 
     base_ctas = batch_size * num_q_heads * (seq_q // 128)
+    if qk_head_dim == 128 and base_ctas >= _FOUR_WAVE_PREFILL_MIN_CTAS:
+        return 4
     if qk_head_dim == 128 and (seq_kv <= 1024 or base_ctas < 256):
         return 2
     return 4
@@ -81,11 +86,16 @@ def _select_owner_waves(
 def _select_waves_per_eu(
     *,
     owner_waves: int,
+    enough_prefill_parallelism: bool,
     seq_kv: int,
     qk_head_dim: int,
 ) -> int:
     """Select the occupancy hint independently from the owner geometry."""
-    if qk_head_dim == 128 and owner_waves in (4, 8) and seq_kv >= 2048:
+    if (
+        qk_head_dim == 128
+        and owner_waves in (4, 8)
+        and (seq_kv >= 2048 or enough_prefill_parallelism)
+    ):
         return 2
     return 1
 
@@ -143,6 +153,10 @@ def build_flex_attn_fwd_module(
     NT = NW * 64
     WAVES_PER_EU = _select_waves_per_eu(
         owner_waves=OWNER_WAVES,
+        enough_prefill_parallelism=(
+            not decode
+            and batch_size * num_q_heads * (seq_q // 128) >= _FOUR_WAVE_PREFILL_MIN_CTAS
+        ),
         seq_kv=seq_kv,
         qk_head_dim=qk_head_dim,
     )

@@ -126,6 +126,37 @@ def _run_flydsl_forward(
     output,
     stream,
 ):
+    device_index = query.device.index
+    compiled = _compiled_dispatchers.get(device_index)
+    if compiled is not None:
+        # Avoid building and unpacking an extra tuple on every cached launch.
+        compiled(
+            query,
+            key,
+            value,
+            logsumexp,
+            max_scores,
+            kv_num_blocks,
+            kv_indices,
+            full_kv_num_blocks,
+            full_kv_indices,
+{% if MASK_BUFFER_COUNT >= 1 %}
+            mask_buffer_0,
+{% endif %}
+{% if MASK_BUFFER_COUNT >= 2 %}
+            mask_buffer_1,
+{% endif %}
+{% if MASK_BUFFER_COUNT >= 3 %}
+            mask_buffer_2,
+{% endif %}
+{% if MASK_BUFFER_COUNT >= 4 %}
+            mask_buffer_3,
+{% endif %}
+            output,
+            stream,
+        )
+        return output
+
     dispatch_args = (
         query,
         key,
@@ -151,12 +182,6 @@ def _run_flydsl_forward(
         output,
         stream,
     )
-    device_index = getattr(query.device, "index", None)
-    compiled = _compiled_dispatchers.get(device_index)
-    if compiled is not None:
-        compiled(*dispatch_args)
-        return output
-
     launcher = _get_launcher()
     compile_args = tuple(
         _inductor_tensor_arg(tensor) for tensor in dispatch_args[:-1]
