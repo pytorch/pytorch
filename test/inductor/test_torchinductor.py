@@ -179,7 +179,7 @@ _T = TypeVar("_T")
 _P = ParamSpec("_P")
 
 
-HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
+HAS_AVX2 = torch.cpu._is_avx2_supported()
 
 _OPS_WITHOUT_GPU_LOWP: frozenset[str] = frozenset(
     {
