@@ -23,6 +23,7 @@ import sys
 import types
 from collections.abc import Callable, Iterator
 from typing import Any, cast, TYPE_CHECKING, Union
+from typing_extensions import TypeIs
 
 from torch.utils._pytree import MappingKey
 
@@ -86,7 +87,7 @@ if TYPE_CHECKING:
 # - Implement tp_richcompare_impl() for key equality
 
 
-def pydict_check(obj: VariableTracker) -> bool:
+def pydict_check(obj: VariableTracker) -> TypeIs["ConstDictVariable"]:
     # This is a simplified version of the CPython's PyDict_Check function:
     return issubclass(obj.python_type(), dict)
 
@@ -718,7 +719,9 @@ class ConstDictVariable(VariableTracker):
         self.install_dict_keys_match_guard()
         if self.source:
             tx.output.guard_on_key_order.add(self.source)
-        reversed_keys = [k.vt for k in reversed(list(self.items.keys()))]
+        reversed_keys: list[VariableTracker] = [
+            k.vt for k in reversed(list(self.items.keys()))
+        ]
         return variables.ListIteratorVariable(
             reversed_keys, mutation_type=ValueMutationNew()
         )
@@ -755,7 +758,7 @@ class ConstDictVariable(VariableTracker):
         if pydict_check(self_) and pydict_check(other_):
             # dict.__or__ copies and merges via internal helpers, bypassing a
             # subclass's overridden copy/update.
-            new = ConstDictVariable.dict_copy(self_, tx, [], {})
+            new = cast(ConstDictVariable, ConstDictVariable.dict_copy(self_, tx, [], {}))
             ConstDictVariable.dict_update(new, tx, [other_], {})
             return new
         return ConstantVariable.create(NotImplemented)
@@ -978,12 +981,15 @@ class OrderedDictVariable(ConstDictVariable):
         # Merge via the internal helper, bypassing a subclass's overridden
         # copy/update while preserving the OrderedDict subclass type.
         if reverse:
-            new = VariableTracker.build(tx, self.python_type()).call_function(
-                tx, [other], {}
+            new = cast(
+                ConstDictVariable,
+                VariableTracker.build(tx, self.python_type()).call_function(
+                    tx, [other], {}
+                ),
             )
             ConstDictVariable.dict_update(new, tx, [self], {})
         else:
-            new = ConstDictVariable.dict_copy(self, tx, [], {})
+            new = cast(ConstDictVariable, ConstDictVariable.dict_copy(self, tx, [], {}))
             ConstDictVariable.dict_update(new, tx, [other], {})
         return new
 
@@ -1748,12 +1754,16 @@ class DunderDictVariable(ConstDictVariable):
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        # self.items is a SideEffectsProxyDict (a MutableMapping, not a real
-        # dict); dict()'s overloads have no shape for an arbitrary Mapping.
-        # pyrefly: ignore[no-matching-overload]
+    ) -> "ConstDictVariable":
+        # self.items is a SideEffectsProxyDict keyed by HashableTracker, which
+        # is not a VariableTracker; dict()'s overloads (constrained here to
+        # ConstDictVariable.__init__'s VariableTracker key type) have no shape
+        # for a HashableTracker-keyed mapping, even though __init__ accepts it.
         return ConstDictVariable(
-            dict(self.items), mutation_type=ValueMutationNew(), source=None
+            # pyrefly: ignore[no-matching-overload]
+            dict(self.items),
+            mutation_type=ValueMutationNew(),
+            source=None,
         )
 
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/dictobject.c#L5252-L5273
