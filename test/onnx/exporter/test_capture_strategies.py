@@ -12,7 +12,7 @@ from torch.testing._internal.common_utils import HardwareClassification
 @common_utils.instantiate_parametrized_tests
 class ExportStrategiesTest(common_utils.TestCase):
     hw_classification = HardwareClassification.GENERIC
-    
+
     @common_utils.parametrize(
         "strategy_cls",
         [
