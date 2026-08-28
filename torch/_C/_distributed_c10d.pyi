@@ -144,6 +144,9 @@ class ReduceOp:
     # pyrefly: ignore  # unknown-name
     UNUSED: RedOpType = ...
 
+    # pyrefly: ignore  # unknown-name
+    op: RedOpType
+
     # mypy error being ignored:
     # Detected enum "torch._C._distributed_c10d.ReduceOp.RedOpType" in a type
     # stub with zero members. There is a chance this is due to a recent change
@@ -477,6 +480,9 @@ class ProcessGroup:
         XCCL = ...
         CUSTOM = ...
 
+    @overload
+    def __init__(self, rank: int, size: int) -> None: ...
+    @overload
     def __init__(
         self,
         store: Store,
@@ -813,8 +819,28 @@ class ProcessGroup:
     def group_desc(self) -> str: ...
 
 class FakeProcessGroup(Backend):
+    class Options(Backend.Options):
+        fake_option: int
+        error_on_collective: bool
+        simulate_uniform_ranks: bool
+
+        def __init__(self) -> None: ...
+
     @staticmethod
-    def _create_internal(rank: int, world_size: int) -> FakeProcessGroup: ...
+    def _create_internal(
+        rank: int,
+        world_size: int,
+        options: FakeProcessGroup.Options | None = ...,
+    ) -> FakeProcessGroup: ...
+    # getOptions() returns null when the group was built without options, and
+    # callers (test_device_mesh) branch on that, so this must stay optional.
+    # Backend.options is not, which makes the narrowing a real LSP violation
+    # rather than a stub inaccuracy: this property is bound to a different C++
+    # method than the base one, and widening it to match would misdescribe
+    # behavior three assertIsNone checks already pin.
+    @property
+    # pyrefly: ignore  # bad-override
+    def options(self) -> FakeProcessGroup.Options | None: ...
 
 class FakeWork(Work):
     seq_id: int
@@ -961,6 +987,7 @@ def _register_process_group(
     process_group: ProcessGroup,
 ) -> None: ...
 def _resolve_process_group(group_name: GroupName) -> ProcessGroup: ...
+def _is_process_group_registered(group_name: GroupName) -> bool: ...
 def _create_work_from_future(future: Future) -> Work: ...
 def _register_work(tensor: torch.Tensor, work: Work) -> ProcessGroup: ...
 def _get_work_registry_size() -> int: ...
@@ -972,7 +999,7 @@ def _unregister_all_process_groups() -> None: ...
 def _unregister_process_group(group_name: GroupName) -> None: ...
 
 # Initializes the device state in CUmodule so that it's able to perform NVSHMEM
-# operations.  CUmodule is a pointer to a CUDA module, carried by a int64 in
+# operations.  CUmodule is a pointer to a CUDA module, carried by an int64 in
 # Python. At C++ interface, it is converted to a uintptr_t.
 def _nvshmemx_cumodule_init(module: int) -> None: ...
 

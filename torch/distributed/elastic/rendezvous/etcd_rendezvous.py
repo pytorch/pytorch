@@ -83,7 +83,7 @@ CONST_WORKER_KEEPALIVE_TTL = 10
 # TTL for the ephemeral run_id-specific directory. All rendezvous state data
 # for a specific run_id (job instance) is contained within directory.
 # Its only role is to clean-up rendezvous data from old runs (for the case when
-# etcd server is persistent), and has no affect on correctness, but should be
+# etcd server is persistent), and has no effect on correctness, but should be
 # larger than any timeouts that a worker process is expected to survive:
 CONST_RUNID_SUBROOT_TTL = 7200  # 2 hours
 
@@ -895,7 +895,7 @@ class EtcdRendezvous:
                     break
                 except ConnectionRefusedError:
                     # This error usually occurs during test when the server already got terminated but the
-                    # python garbage collector have not yet invoked the __del__ method.
+                    # python garbage collector has not yet invoked the __del__ method.
                     break
 
                 if stop_event.wait(timeout=ttl / 2):
@@ -963,7 +963,7 @@ class EtcdRendezvous:
                 if key in extra_data_dict:
                     return extra_data_dict[key]
 
-            # The 'extra_data' node doesn't exist, or they key isn't published yet.
+            # The 'extra_data' node doesn't exist, or the key isn't published yet.
             # Wait for interesting events on the extra_data node and retry.
             try:
                 self.client.watch(node, index=root.etcd_index + 1)
@@ -1045,7 +1045,7 @@ def create_rdzv_handler(params: RendezvousParameters) -> RendezvousHandler:
         run_id - unique id for this training job instance,
         min_nodes - min number of workers expected to join the rendezvous,
         max_nodes - max number of workers allowed to join the rendezvous,
-                        defaults to min_workers is not specified.
+                        defaults to min_workers if not specified.
         timeout - total timeout within which next_rendezvous is expected to
                       succeed; a RendezvousTimeoutError is raised otherwise;
                       Defaults is 600 (10 minutes).
