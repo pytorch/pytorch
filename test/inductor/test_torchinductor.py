@@ -18856,6 +18856,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             torch.compile(foo, fullgraph=True)(torch.ones(3, 3))
             self.assertTrue(len(log2), 1)
 
+    @with_tf32_off
     def test_weight_norm_conv2d(self):
         """
         Verify fix for https://github.com/pytorch/pytorch/issues/165749
@@ -18863,10 +18864,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         from torch.nn.utils.parametrizations import weight_norm
 
         d = 65
-        x = torch.randn((2, 2, 32, 32), device=self.device)
+        # Draw on the CPU so the comparison below does not ride on the exact
+        # values the accelerator's RNG happens to produce for this seed.
+        gen = torch.Generator().manual_seed(0)
+        x = torch.randn((2, 2, 32, 32), generator=gen).to(device=self.device)
         conv = weight_norm(nn.Conv2d(2, d, 2)).to(device=self.device)
         ref = conv(x)
-        grad_out = torch.randn_like(ref)
+        grad_out = torch.randn(ref.shape, generator=gen).to(device=self.device)
         ref_grad = torch.autograd.grad(ref, list(conv.parameters()), grad_out)
 
         compiled_conv = torch.compile(conv)

@@ -502,12 +502,22 @@ inductor_override_kwargs["cuda"] = {
     ("nn.functional.linear", f16): {"atol": 3e-4, "rtol": 0.01},
     ("nn.functional.local_response_norm", f16): {"reference_in_float": True},
     ("nn.functional.normalize", f16): {"atol": 1e-3, "rtol": 0.05},
+    # Circular padding makes several output elements alias the same input, so
+    # the backward accumulates them in an order inductor does not reproduce.
+    # In fp16 that costs an ulp or two: observed 6.1e-5 absolute on gradient
+    # entries of ~1.9e-3.
+    ("nn.functional.pad.circular", f16): {"atol": 1e-4, "rtol": 1e-2},
     ("nn.functional.rms_norm", f16): {"reference_in_float": True},
     ("nn.functional.soft_margin_loss", f16): {"reference_in_float": True},
     ("nn.functional.softmin", f16): {"atol": 1e-4, "rtol": 0.01},
     ("nn.functional.softsign", f16): {"reference_in_float": True},
     ("nn.functional.tanhshrink", f16): {"atol": 3e-4, "rtol": 0.001},
     ("outer", f16): {"reference_in_float": True},
+    # The gradient wrt the exponent sums base**exp * log(base) over the
+    # broadcast dim. With a signed incoming gradient those terms are ~1e8 and
+    # cancel down to ~1e2, so how accurate the sum is depends entirely on the
+    # sample values; observed 3.2e-4 relative in fp32.
+    ("pow", f32): {"grad_atol": 1e-4, "grad_rtol": 1e-3},
     ("round.decimals_3", f16): {"reference_in_float": True},
     ("nn.functional.triplet_margin_loss", f16): {"atol": 1e-4, "rtol": 0.02},
     ("nn.functional.triplet_margin_with_distance_loss", f16): {

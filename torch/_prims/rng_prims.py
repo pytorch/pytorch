@@ -70,11 +70,7 @@ def philox_rand_offset(
     device_property = torch.cuda.get_device_properties(torch.cuda.current_device())
     blocks_per_sm = device_property.max_threads_per_multi_processor // block_size
     num = cast(int, numel)
-    # Mirrors calc_execution_policy: size the grid off
-    # ceil(numel / (block_size * unroll)) rather than ceil(numel / block_size),
-    # so this predicted counter_offset matches what the kernel actually uses.
-    elems_per_block = block_size * unroll
-    grid_size = (num + elems_per_block - 1) // elems_per_block
+    grid_size = (num + block_size - 1) // block_size
     grid_size = min(grid_size, device_property.multi_processor_count * blocks_per_sm)
     return ((num - 1) // (block_size * grid_size * unroll) + 1) * curand4_engine_calls
 
