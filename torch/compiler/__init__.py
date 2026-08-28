@@ -20,7 +20,13 @@ from torch._precompile import (
     precompile as precompile,
     PrecompileError as PrecompileError,
 )
-from torch.compiler._precompile_types import ExampleInput as ExampleInput
+from torch.compiler._precompile_types import (
+    ExampleInput as ExampleInput,
+    FrameInvariants as FrameInvariants,
+    GuardFact as GuardFact,
+    PrecompiledCallable as PrecompiledCallable,
+    PrecompileSummary as PrecompileSummary,
+)
 
 from . import config
 from ._cache import CacheInfo
@@ -50,6 +56,10 @@ __all__ = [
     "precompile",
     "PrecompileError",
     "ExampleInput",
+    "GuardFact",
+    "FrameInvariants",
+    "PrecompiledCallable",
+    "PrecompileSummary",
     "wrap_numpy",
     "is_compiling",
     "is_dynamo_compiling",

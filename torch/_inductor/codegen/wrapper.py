@@ -9,7 +9,6 @@ import dataclasses
 import dis
 import enum
 import functools
-import importlib.util
 import inspect
 import keyword
 import logging
@@ -166,12 +165,10 @@ def _constexpr_type_ref(
     path = [*module.split("."), *qualname.split(".")]
     if not all(part.isidentifier() and not keyword.iskeyword(part) for part in path):
         return None
-    try:
-        if importlib.util.find_spec(module) is None:
-            return None
-    except (ImportError, ValueError):
-        return None
     resolved = sys.modules.get(module)
+    spec = getattr(resolved, "__spec__", None)
+    if spec is None or spec.name != module:
+        return None
     try:
         for part in qualname.split("."):
             resolved = getattr(resolved, part)
@@ -4011,10 +4008,15 @@ class PythonWrapperCodegen(CodeGen):
         )
         constexpr_constants = rendered_mappings[0]
         config_dicts = rendered_mappings[1 : 1 + len(config_dicts)]
-        for entry, rendered_config in zip(
-            precomputed_grids, rendered_mappings[1 + len(config_dicts) :]
-        ):
-            entry["config"] = rendered_config
+        precomputed_grids = [
+            {**entry, "config": rendered_config}
+            for entry, rendered_config in zip(
+                precomputed_grids,
+                rendered_mappings[1 + len(config_dicts) :],
+                strict=True,
+            )
+        ]
+        inductor_meta = {**inductor_meta, "precomputed_grids": precomputed_grids}
         triton_meta = {**triton_meta, "constants": constexpr_constants}
         for import_line in constexpr_imports:
             compile_wrapper.writeline(import_line)

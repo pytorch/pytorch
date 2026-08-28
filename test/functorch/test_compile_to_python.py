@@ -286,6 +286,18 @@ class TestAOTCompileToPython(TestCase):
         torch._C._functions.UndefinedGrad()(out).sum().backward()
         self.assertIsNone(actual_x.grad)
 
+    def test_training_passthrough_backward_runs_like_eager(self):
+        def flat_fn(flat):
+            return [flat[0] + 1]
+
+        x = torch.randn(4, requires_grad=True)
+        gm = make_fx(flat_fn)([x])
+        source, cache = compile_to_python(gm, [x], grad_enabled=True)
+        actual_x = x.detach().clone().requires_grad_()
+        actual = load_from_python(source, cache)([actual_x])[0]
+        actual.sum().backward()
+        self.assertEqual(actual_x.grad, torch.ones_like(actual_x))
+
     def test_training_rng_tracker_does_not_serialize_iterator(self):
         from torch._functorch._aot_autograd import to_standalone_python
         from torch._functorch._aot_autograd.runtime_wrappers import (
@@ -310,17 +322,22 @@ class TestAOTCompileToPython(TestCase):
             source, _ = compile_to_python(gm, [x], grad_enabled=True)
         self.assertIn("_AutogradRngStateTracker(", source)
 
-    def test_training_passthrough_backward_runs_like_eager(self):
-        def flat_fn(flat):
-            return [flat[0] + 1]
+    @parametrize("value", [float("inf"), float("-inf")])
+    def test_passthrough_source_infinite_float(self, value):
+        from torch._inductor.standalone_compile import _passthrough_source
 
-        x = torch.randn(4, requires_grad=True)
-        gm = make_fx(flat_fn)([x])
-        source, cache = compile_to_python(gm, [x], grad_enabled=True)
-        actual_x = x.detach().clone().requires_grad_()
-        actual = load_from_python(source, cache)([actual_x])[0]
-        actual.sum().backward()
-        self.assertEqual(actual_x.grad, torch.ones_like(actual_x))
+        graph = fx.Graph()
+        graph.output(value)
+        source = _passthrough_source(fx.GraphModule({}, graph))
+        self.assertIsNotNone(source)
+        self.assertEqual(_exec(source)([]), value)
+
+    def test_passthrough_source_nan(self):
+        from torch._inductor.standalone_compile import _passthrough_source
+
+        graph = fx.Graph()
+        graph.output(float("nan"))
+        self.assertIsNone(_passthrough_source(fx.GraphModule({}, graph)))
 
     def test_training_serializes_observed_tangent_mask(self):
         def flat_fn(flat):
@@ -937,7 +954,6 @@ class TestAOTCompileToPython(TestCase):
             try:
                 AOTAutogradCache.clear()
                 FxGraphCache.clear()
-
                 counters.clear()
                 with (
                     mock.patch.object(
