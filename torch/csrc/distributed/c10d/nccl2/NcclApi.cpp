@@ -6,7 +6,6 @@
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NcclApi.hpp>
 #include <string_view>
-#include <tuple>
 
 namespace c10d::nccl2 {
 
@@ -294,6 +293,13 @@ ncclResult_t DefaultNcclApi::groupEnd() {
   std::lock_guard<std::mutex> lock(api_mutex_);
   return ncclGroupEnd();
 }
+
+#ifdef NCCL_SIM_INFO_INITIALIZER
+ncclResult_t DefaultNcclApi::groupSimulateEnd(ncclSimInfo_t* simInfo) {
+  std::lock_guard<std::mutex> lock(api_mutex_);
+  return ncclGroupSimulateEnd(simInfo);
+}
+#endif
 
 ncclResult_t DefaultNcclApi::commUserRank(ncclComm_t comm, int* myRank) {
   std::lock_guard<std::mutex> lock(api_mutex_);
