@@ -49,31 +49,54 @@ from .triton_addmm import AddMMConfigMixin
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator
+    from collections.abc import Callable, Generator, Sequence
 
     from triton import Config as TritonConfig
+
+    from ...ir import IRNode
+    from ...utils import _IntLike
 
 else:
     from torch._inductor.runtime.triton_compat import Config as TritonConfig
 log = logging.getLogger(__name__)
 
 
-def _origami_enabled() -> bool:
-    """Check if origami GEMM optimization is enabled."""
-    return config.rocm.origami
-
-
 USE_META_WS = meta_ws_enabled()
+
+
+def _use_template_autows() -> bool:
+    """Whether to expand the Blackwell GEMM search space with Meta Triton autoWS
+    configs: opt-in flag plus an enabled meta-WS Triton build."""
+    return config.triton.enable_template_autows and USE_META_WS
+
 
 # Check if running on ROCm
 IS_ROCM = torch.version.hip is not None
+
+_rocm_str: str | None = getattr(torch.version, "rocm", None) or torch.version.hip
+_rocm_version = (
+    tuple(int(v) for v in _rocm_str.split(".")[:2]) if _rocm_str is not None else (0, 0)
+)
+# First ROCm version where origami is not supported.
+ORIGAMI_UNSUPPORTED_ROCM_VERSION = (10, 0)
+
+
+def _origami_enabled() -> bool:
+    """Check if origami GEMM optimization is enabled."""
+    return config.rocm.origami and _rocm_version < ORIGAMI_UNSUPPORTED_ROCM_VERSION
 
 
 # rocm-origami pip pkg is only available on ROCm builds and is only used when
 # both max_autotune and config.rocm.origami are enabled (env-var driven, set once
 # at config import). Cache the import here so the hot path never pays an exception
 # and CUDA/CPU/origami-disabled processes never attempt the import.
-if IS_ROCM and config.max_autotune and config.rocm.origami:
+# origami is not supported on ROCm 10.0+.
+if (
+    IS_ROCM
+    and _rocm_version < ORIGAMI_UNSUPPORTED_ROCM_VERSION
+    and config.max_autotune
+    and config.rocm.origami
+):
     try:
         import origami  # type: ignore[import-not-found]
     except ImportError:
@@ -84,6 +107,17 @@ if IS_ROCM and config.max_autotune and config.rocm.origami:
         )
 else:
     origami = None
+    if (
+        IS_ROCM
+        and config.rocm.origami
+        and _rocm_version >= ORIGAMI_UNSUPPORTED_ROCM_VERSION
+    ):
+        log.warning(
+            "ROCm origami GEMM selection is not supported on ROCm %d.%d+ "
+            "(detected %d.%d); origami disabled.",
+            *ORIGAMI_UNSUPPORTED_ROCM_VERSION,
+            *_rocm_version,
+        )
 
 
 # TODO(rocm-origami): replace these wrappers with public accessors when the
@@ -155,6 +189,10 @@ class BlackwellGPUGemmConfig(GemmConfig):
     epilogue_subtile: int = dataclasses.field(kw_only=True, default=1)
     warp_specialize: bool = dataclasses.field(kw_only=True, default=True)
     flatten: bool = dataclasses.field(kw_only=True, default=True)
+    # Meta Triton autoWS knobs (meta-WS builds only)
+    use_meta_ws: bool = dataclasses.field(kw_only=True, default=False)
+    data_partition_factor: int = dataclasses.field(kw_only=True, default=1)
+    separate_epilogue_store: bool = dataclasses.field(kw_only=True, default=False)
 
 
 # FlexAttention Configs
@@ -378,11 +416,6 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(64, 64, 64, 3, 8),
             GemmConfig(128, 256, 128, 3, 8),
             GemmConfig(256, 128, 128, 3, 8),
-        ]
-
-        self.mixed_mm_configs: list[BaseConfig] = [
-            GemmConfig(16, 128, 256, 3, 4),
-            GemmConfig(16, 128, 256, 5, 8),
         ]
 
         self.persistent_mm_configs: list[BaseConfig] = [
@@ -872,7 +905,14 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
             # Add BlackwellGPUGemmConfig specific fields to key if present
             if isinstance(conf, BlackwellGPUGemmConfig):
-                key += (conf.epilogue_subtile, conf.warp_specialize, conf.flatten)
+                key += (
+                    conf.epilogue_subtile,
+                    conf.warp_specialize,
+                    conf.flatten,
+                    conf.use_meta_ws,
+                    conf.data_partition_factor,
+                    conf.separate_epilogue_store,
+                )
 
             extra_key, extra_kwargs = self._get_extra_config_key_and_kwargs(conf)
             key += extra_key
@@ -895,6 +935,9 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                     kwargs["EPILOGUE_SUBTILE"] = conf.epilogue_subtile
                     kwargs["WARP_SPECIALIZE"] = conf.warp_specialize
                     kwargs["FLATTEN"] = conf.flatten
+                    kwargs["USE_META_WS"] = conf.use_meta_ws
+                    kwargs["DATA_PARTITION_FACTOR"] = conf.data_partition_factor
+                    kwargs["SEPARATE_EPILOGUE_STORE"] = conf.separate_epilogue_store
 
                 kwargs.update(extra_kwargs)
 
@@ -1610,13 +1653,15 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             ROCmGemmConfig(256, 256, 64, self.default_num_stages, 8, group_m=4),
         ]
 
-        # Exhaustive search for mm configs
+        # Exhaustive search for mm configs. num_stages is deliberately not an axis
+        # here: _filter_configs forces every config to self.default_num_stages, so
+        # enumerating it would only produce duplicates that get deduped later.
         self.exhaustive_configs: list[BaseConfig] = [
             ROCmGemmConfig(
                 BLOCK_M,
                 BLOCK_N,
                 BLOCK_K,
-                num_stages,
+                self.default_num_stages,
                 num_warps,
                 group_m=group_m,
                 matrix_instr_nonkdim=matrix_instr_nonkdim,
@@ -1626,7 +1671,6 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
                 [16, 32, 64, 128, 256], repeat=3
             )
-            for num_stages in [1, self.default_num_stages]
             for num_warps in [4, 8]
             for group_m in [4, 8, 16]
             for matrix_instr_nonkdim in [0, 16]
@@ -2133,6 +2177,14 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     ]
     preprocess_mm_configs: Callable[..., Generator[TritonConfig, None, None]]
 
+    # Whether to render the K loop ascending (range(0, tl.cdiv(K, BLOCK_K)))
+    # instead of descending (range(K, 0, -BLOCK_K)). XPU's Triton->SPIR-V
+    # backend miscompiles the descending form when the loop runs more than one
+    # iteration, so the XPU heuristics set this to True. Off XPU the flag stays
+    # False and ASCENDING_K is never injected (see get_extra_kwargs), so those
+    # kernels are unaffected.
+    ascending_k: bool = False
+
     def get_extra_kwargs(
         self,
         kernel_inputs: KernelInputs,
@@ -2157,9 +2209,15 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         else:
             allow_tf32 = False
 
-        return {
+        extra_kwargs = {
             "ALLOW_TF32": allow_tf32,
         }
+        # Scoped to XPU (self.ascending_k) and to the templates that reference
+        # the key. The mm/addmm/... ops via mm_template are excluded because
+        # triton_mm.py.jinja already renders ascending unconditionally.
+        if self.ascending_k and op_name in ("bmm", "baddbmm", "mm_plus_mm"):
+            extra_kwargs["ASCENDING_K"] = True
+        return extra_kwargs
 
     def _valid(self, kernel_inputs: KernelInputs) -> bool:
         return True
@@ -2653,6 +2711,12 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
 
 # TMA mixins for Blackwell templates
 class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
+    """Config mixin for the Blackwell persistent-TMA GEMM template.
+
+    Generates the fb-triton autoWS (meta-WS) config sweep and prunes the
+    combinations the lowering cannot support before they reach codegen.
+    """
+
     def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
@@ -2668,6 +2732,11 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             op_name,
             **kwargs,
         ):
+            use_meta_ws = template_kwargs.get("USE_META_WS", False)
+            # autoWS configs come from a full sweep; drop combos the lowering
+            # does not support so no invalid config reaches codegen.
+            if use_meta_ws and not self._autows_constraints_ok(template_kwargs):
+                continue
             # Some Triton versions requires num_warps >= 4 for WS
             # to avoid compilation issues. Triton disables WS if num_warps < 4
             # or num_stages < 2. Similar issues have been seen with num_stages=1
@@ -2682,7 +2751,7 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             flatten = (
                 template_kwargs.get("FLATTEN", True)
                 and not constraints_violated
-                and not USE_META_WS
+                and not use_meta_ws
             )
             yield {
                 **template_kwargs,
@@ -2690,6 +2759,63 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                 "WARP_SPECIALIZE": ws,
                 "FLATTEN": flatten,
             }
+
+    @staticmethod
+    def _autows_constraints_ok(template_kwargs: dict[str, Any]) -> bool:
+        """autoWS lowering constraints; swept configs violating these are pruned."""
+        block_m = template_kwargs["BLOCK_M"]
+        block_n = template_kwargs["BLOCK_N"]
+        subtile = template_kwargs.get("EPILOGUE_SUBTILE", 1)
+        # each epilogue subtile is BLOCK_N // EPILOGUE_SUBTILE wide
+        if block_n // subtile < 32:
+            return False
+        # dp=2 splits the row tile into two MMA partitions; BLOCK_M=64 fails in
+        # the fb-triton WS pass pipeline, so keep the tile at 128 or 256
+        dp = template_kwargs.get("DATA_PARTITION_FACTOR", 1)
+        if dp == 2 and block_m not in (128, 256):
+            return False
+        return True
+
+    def _get_config_generator(
+        self,
+    ) -> partial[Generator[TritonConfig, None, None]]:
+        # No curated autoWS set yet: sweep the full autoWS space for both default
+        # and exhaustive search, and let _get_template_configs_impl prune it.
+        if _use_template_autows():
+            return partial(
+                self.preprocess_mm_configs, configs=self._generate_autows_configs()
+            )
+        return super()._get_config_generator()
+
+    @staticmethod
+    def _generate_autows_configs() -> list[BaseConfig]:
+        configs: list[BaseConfig] = []
+        for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
+            [32, 64, 128, 256], repeat=3
+        ):
+            for num_stages in [2, 3, 4, 5, 6]:
+                # AutoWS doesn't work with num_warps < 4
+                for num_warps in [4, 8]:
+                    for epilogue_subtile in [1, 2, 4, 8]:
+                        for data_partition_factor in [1, 2]:
+                            for separate_epilogue_store in [False, True]:
+                                configs.append(
+                                    BlackwellGPUGemmConfig(
+                                        block_m=BLOCK_M,
+                                        block_n=BLOCK_N,
+                                        block_k=BLOCK_K,
+                                        num_stages=num_stages,
+                                        num_warps=num_warps,
+                                        group_m=8,
+                                        epilogue_subtile=epilogue_subtile,
+                                        use_meta_ws=True,
+                                        data_partition_factor=data_partition_factor,
+                                        separate_epilogue_store=separate_epilogue_store,
+                                        warp_specialize=True,
+                                        flatten=False,
+                                    )
+                                )
+        return configs
 
     @staticmethod
     def _generate_exhaustive_configs() -> list[BaseConfig]:
@@ -2746,13 +2872,15 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             # Need to unsqueeze bias from [N] -> [1, N]
             bias = L[aten.unsqueeze](bias, 0)
 
-        def is_tensorwise_scale(scale: Any) -> bool:
+        def is_tensorwise_scale(scale: IRNode) -> bool:
             size = scale.get_size()
             return len(size) == 0 or all(
                 V.graph.sizevars.statically_known_equals(dim, 1) for dim in size
             )
 
-        def normalize_tensorwise_scale(scale: Any, *, allow_high_rank: bool) -> Any:
+        def normalize_tensorwise_scale(
+            scale: IRNode, *, allow_high_rank: bool
+        ) -> IRNode:
             if not is_tensorwise_scale(scale):
                 return scale
             if not allow_high_rank and len(scale.get_size()) > 2:
@@ -2801,7 +2929,9 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
         scale_b = input_nodes[3]
 
         # Scale compatibility assertion from mm_common.scaled_mm_options
-        def are_compatible_scales(size_a: Any, size_b: Any) -> bool:
+        def are_compatible_scales(
+            size_a: Sequence[_IntLike], size_b: Sequence[_IntLike]
+        ) -> bool:
             # Same sized scales are compatible
             if len(size_a) == len(size_b):
                 return True
@@ -3436,6 +3566,10 @@ class CPUMMPlusMMTemplateConfigHeuristic(
 class XPUMMTemplateConfigHeuristic(MMTemplateConfigMixin, XPUConfigHeuristic):
     """Standard MM template heuristic for XPU"""
 
+    # See MMTemplateConfigMixin.ascending_k. Applies to the bmm template
+    # (also used by baddbmm via XPUAddmmTemplateConfigHeuristic).
+    ascending_k = True
+
     def __init__(self) -> None:
         super().__init__()
 
@@ -3506,6 +3640,9 @@ class XPUMMPlusMMTemplateConfigHeuristic(
     MMPlusMMTemplateConfigMixin, XPUConfigHeuristic
 ):
     """MM Plus MM template heuristic for XPU"""
+
+    # See MMTemplateConfigMixin.ascending_k.
+    ascending_k = True
 
     def __init__(self) -> None:
         super().__init__()
