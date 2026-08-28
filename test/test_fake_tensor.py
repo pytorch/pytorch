@@ -109,8 +109,8 @@ def expectedFailurePropagateRealTensors(fn):
     return fn
 
 
-class FakeTensorTestHelpers:
-    """Assertions shared by FakeTensorTest and FakeTensorDeviceTest."""
+class _TestFakeTensorHelpers:
+    """Assertions shared by TestFakeTensor and TestFakeTensorDevice."""
 
     def checkType(self, t, device_str, size):
         self.assertTrue(is_fake_tensor(t))
@@ -121,7 +121,7 @@ class FakeTensorTestHelpers:
         prims.utils.compare_tensor_meta(t1, t2, check_strides=True)
 
 
-class FakeTensorTest(FakeTensorTestHelpers, TestCase):
+class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def fake_with_unbacked_batch(self, *tensors):
@@ -2160,7 +2160,7 @@ assert not torch.cuda.is_initialized()
                 torch.select(x, dim=1, index=-10)
 
 
-instantiate_parametrized_tests(FakeTensorTest)
+instantiate_parametrized_tests(TestFakeTensor)
 
 
 def make_propagate_real_tensors_cls(cls):
@@ -2177,11 +2177,11 @@ def make_propagate_real_tensors_cls(cls):
     globals()[cls.__name__] = cls
 
 
-make_propagate_real_tensors_cls(FakeTensorTest)
+make_propagate_real_tensors_cls(TestFakeTensor)
 
 
-class FakeTensorDeviceTest(FakeTensorTestHelpers, TestCase):
-    """FakeTensorTest cases whose behavior depends on the tensor's device.
+class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
+    """TestFakeTensor cases whose behavior depends on the tensor's device.
 
     Tests that mix ``device`` with a cpu tensor need a real second device and
     are therefore marked ``@onlyAccelerator``; the rest also run on cpu.
@@ -2591,19 +2591,19 @@ class FakeTensorDeviceTest(FakeTensorTestHelpers, TestCase):
             self.checkType(x3, "cpu", (4,))
 
 
-make_propagate_real_tensors_cls(FakeTensorDeviceTest)
+make_propagate_real_tensors_cls(TestFakeTensorDevice)
 instantiate_device_type_tests(
-    FakeTensorDeviceTest, globals(), only_for=("cpu", "cuda", "xpu"), allow_xpu=True
+    TestFakeTensorDevice, globals(), only_for=("cpu", "cuda", "xpu"), allow_xpu=True
 )
 instantiate_device_type_tests(
-    PropagateRealTensorsFakeTensorDeviceTest,  # noqa: F821
+    PropagateRealTensorsTestFakeTensorDevice,  # noqa: F821
     globals(),
     only_for=("cpu", "cuda", "xpu"),
     allow_xpu=True,
 )
 
 
-class FakeTensorConstHandling(TestCase):
+class TestFakeTensorConstHandling(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def assertConst(self, *args):
@@ -2697,7 +2697,7 @@ class FakeTensorConstHandling(TestCase):
             self.assertConst(y)
 
 
-make_propagate_real_tensors_cls(FakeTensorConstHandling)
+make_propagate_real_tensors_cls(TestFakeTensorConstHandling)
 
 
 def contains_type(type: torch.Type, maybe_contained_type: torch.Type):
@@ -2706,7 +2706,7 @@ def contains_type(type: torch.Type, maybe_contained_type: torch.Type):
     )
 
 
-class FakeTensorOpInfoTest(TestCase):
+class TestFakeTensorOpInfo(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @ops(custom_op_db, dtypes=OpDTypes.any_one)
@@ -2718,18 +2718,18 @@ class FakeTensorOpInfoTest(TestCase):
             optests.fake_check(op, args, kwargs)
 
 
-make_propagate_real_tensors_cls(FakeTensorOpInfoTest)
+make_propagate_real_tensors_cls(TestFakeTensorOpInfo)
 instantiate_device_type_tests(
-    FakeTensorOpInfoTest, globals(), only_for=("cpu", "cuda", "xpu"), allow_xpu=True
+    TestFakeTensorOpInfo, globals(), only_for=("cpu", "cuda", "xpu"), allow_xpu=True
 )
 instantiate_device_type_tests(
-    PropagateRealTensorsFakeTensorOpInfoTest,  # noqa: F821
+    PropagateRealTensorsTestFakeTensorOpInfo,  # noqa: F821
     globals(),
     only_for=("cpu",),
 )
 
 
-class FakeTensorConverterTest(TestCase):
+class TestFakeTensorConverter(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def test_memoized_conversion_to_meta(self):
@@ -3006,10 +3006,10 @@ class FakeTensorConverterTest(TestCase):
         self.assertEqual(g_eager.dtype, g_traced.dtype)
 
 
-make_propagate_real_tensors_cls(FakeTensorConverterTest)
+make_propagate_real_tensors_cls(TestFakeTensorConverter)
 
 
-class FakeTensorOperatorInvariants(TestCase):
+class TestFakeTensorOperatorInvariants(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def get_aten_op(self, schema):
@@ -3278,11 +3278,11 @@ class FakeTensorOperatorInvariants(TestCase):
         self.assertEqual(mode.count, 0)
 
 
-make_propagate_real_tensors_cls(FakeTensorOperatorInvariants)
+make_propagate_real_tensors_cls(TestFakeTensorOperatorInvariants)
 
 
-class FakeTensorOperatorInvariantsDeviceTest(TestCase):
-    """Accelerator-only FakeTensorOperatorInvariants cases (see only_for below)."""
+class TestFakeTensorOperatorInvariantsDevice(TestCase):
+    """Accelerator-only TestFakeTensorOperatorInvariants cases (see only_for below)."""
 
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -3393,22 +3393,22 @@ class FakeTensorOperatorInvariantsDeviceTest(TestCase):
             _check_device(m.state_dict(), self.device_type)
 
 
-make_propagate_real_tensors_cls(FakeTensorOperatorInvariantsDeviceTest)
+make_propagate_real_tensors_cls(TestFakeTensorOperatorInvariantsDevice)
 instantiate_device_type_tests(
-    FakeTensorOperatorInvariantsDeviceTest,
+    TestFakeTensorOperatorInvariantsDevice,
     globals(),
     only_for=("cuda", "xpu"),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
-    PropagateRealTensorsFakeTensorOperatorInvariantsDeviceTest,  # noqa: F821
+    PropagateRealTensorsTestFakeTensorOperatorInvariantsDevice,  # noqa: F821
     globals(),
     only_for=("cuda", "xpu"),
     allow_xpu=True,
 )
 
 
-class FakeTensorPropTest(TestCase):
+class TestFakeTensorProp(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def test_fake_tensor_prop_on_nn_module(self):
@@ -3578,11 +3578,11 @@ class FakeTensorPropTest(TestCase):
                 self.assertTrue(statically_known_true(sx == sy))
 
 
-make_propagate_real_tensors_cls(FakeTensorPropTest)
+make_propagate_real_tensors_cls(TestFakeTensorProp)
 
 
-class FakeTensorPropDeviceTest(TestCase):
-    """Accelerator-only FakeTensorPropTest cases (see only_for below)."""
+class TestFakeTensorPropDevice(TestCase):
+    """Accelerator-only TestFakeTensorProp cases (see only_for below)."""
 
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -3670,19 +3670,19 @@ class FakeTensorPropDeviceTest(TestCase):
                 _read_tensor_and_check(k, sd_loaded, sd, all_bytes, "cpu")
 
 
-make_propagate_real_tensors_cls(FakeTensorPropDeviceTest)
+make_propagate_real_tensors_cls(TestFakeTensorPropDevice)
 instantiate_device_type_tests(
-    FakeTensorPropDeviceTest, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+    TestFakeTensorPropDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
 )
 instantiate_device_type_tests(
-    PropagateRealTensorsFakeTensorPropDeviceTest,  # noqa: F821
+    PropagateRealTensorsTestFakeTensorPropDevice,  # noqa: F821
     globals(),
     only_for=("cuda", "xpu"),
     allow_xpu=True,
 )
 
 
-class FakeTensorSerialization(TestCase):
+class TestFakeTensorSerialization(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def test_serialization(self):
@@ -3703,8 +3703,8 @@ class FakeTensorSerialization(TestCase):
             self.assertEqual(x.device, y.device)
 
 
-class FakeTensorDispatchCacheHelpers:
-    """Cache assertions shared with FakeTensorDispatchCacheDeviceTest."""
+class _TestFakeTensorDispatchCacheHelpers:
+    """Cache assertions shared with TestFakeTensorDispatchCacheDevice."""
 
     def _test_cache_key(self, fm, x, y, z):
         """
@@ -3740,7 +3740,7 @@ class FakeTensorDispatchCacheHelpers:
             self.assertNotIn(reason, info.bypasses)
 
 
-class FakeTensorDispatchCache(FakeTensorDispatchCacheHelpers, TestCase):
+class TestFakeTensorDispatchCache(_TestFakeTensorDispatchCacheHelpers, TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def test_shape_env_settings(self):
@@ -4395,8 +4395,8 @@ def forward(self, dummy_1):
         self.assertBypasses("unrepresented symbol in output", 2)
 
 
-class FakeTensorDispatchCacheDeviceTest(FakeTensorDispatchCacheHelpers, TestCase):
-    """Accelerator-only FakeTensorDispatchCache cases (see only_for below)."""
+class TestFakeTensorDispatchCacheDevice(_TestFakeTensorDispatchCacheHelpers, TestCase):
+    """Accelerator-only TestFakeTensorDispatchCache cases (see only_for below)."""
 
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -4497,14 +4497,14 @@ class FakeTensorDispatchCacheDeviceTest(FakeTensorDispatchCacheHelpers, TestCase
 
 
 instantiate_device_type_tests(
-    FakeTensorDispatchCacheDeviceTest,
+    TestFakeTensorDispatchCacheDevice,
     globals(),
     only_for=("cuda", "xpu"),
     allow_xpu=True,
 )
 
 
-class FakeTensorPreferDeviceType(TestCase):
+class TestFakeTensorPreferDeviceType(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def test_fake_tensor_prefer_device_type_cpu_only(self):
@@ -4523,8 +4523,8 @@ class FakeTensorPreferDeviceType(TestCase):
                 self.assertTrue(is_fake_tensor(result))
 
 
-class FakeTensorPreferDeviceTypeDeviceTest(TestCase):
-    """Accelerator-only FakeTensorPreferDeviceType cases (see only_for below)."""
+class TestFakeTensorPreferDeviceTypeDevice(TestCase):
+    """Accelerator-only TestFakeTensorPreferDeviceType cases (see only_for below)."""
 
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -4594,14 +4594,14 @@ class FakeTensorPreferDeviceTypeDeviceTest(TestCase):
 
 
 instantiate_device_type_tests(
-    FakeTensorPreferDeviceTypeDeviceTest,
+    TestFakeTensorPreferDeviceTypeDevice,
     globals(),
     only_for=("cuda", "xpu"),
     allow_xpu=True,
 )
 
 
-class FakeTensorMetaDevicePropagation(TestCase):
+class TestFakeTensorMetaDevicePropagation(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_inplace_add_with_meta_rhs_keeps_destination_device(self, device):
@@ -4614,14 +4614,14 @@ class FakeTensorMetaDevicePropagation(TestCase):
 
 
 instantiate_device_type_tests(
-    FakeTensorMetaDevicePropagation,
+    TestFakeTensorMetaDevicePropagation,
     globals(),
     only_for=("cpu", "cuda", "xpu"),
     allow_xpu=True,
 )
 
 
-class FakeTensorViewCopy(TestCase):
+class TestFakeTensorViewCopy(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def test_expand_then_view_copy_matches_eager_mode(self):
