@@ -46,6 +46,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     serialTest,
+    skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
@@ -3419,6 +3420,9 @@ class TestOptimRenewed(TestCase):
             wrong = x2.sqrt().div_(0.25)
             self.assertNotEqual(correct, wrong)
 
+    @skipIfTorchDynamo(
+        "compiled_autograd does not support undefined-grad probes in gradcheck"
+    )
     def test_diff_gradcheck_adam(self, device):
         """Gradcheck on Adam differentiable path, including amsgrad max_exp_avg_sq."""
         state = {
@@ -3442,6 +3446,9 @@ class TestOptimRenewed(TestCase):
             check_batched_grad=False,
         )
 
+    @skipIfTorchDynamo(
+        "compiled_autograd does not support undefined-grad probes in gradcheck"
+    )
     def test_diff_gradcheck_nadam(self, device):
         """Gradcheck on NAdam differentiable path, including the mu_product state."""
         state = {
@@ -3465,6 +3472,9 @@ class TestOptimRenewed(TestCase):
             check_batched_grad=False,
         )
 
+    @skipIfTorchDynamo(
+        "dynamo's compiled backward computes wrong constant gradient for Rprop's differentiable path"
+    )
     def test_diff_gradcheck_rprop(self, device):
         """Gradcheck on Rprop differentiable path, covering step_size and prev states."""
         state = {
