@@ -18229,7 +18229,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         else:
             FileCheck().check("torch.ops.aten.add").run(code[0])
 
-    @requires_gpu_and_triton
+    @skip_if_no_accelerator_triton
     def test_lite_mode_triton_kernel_no_clone(self):
         # The decomposition emits "clone(s) + the mutation node" and relies on
         # reinplacing to mark the unnecessary clones; lite mode used to skip
@@ -18242,8 +18242,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             add_kernel[(n_elements,)](x, y, out, n_elements, BLOCK_SIZE=16)
             return out
 
-        x = torch.randn(64, device=GPU_TYPE)
-        y = torch.randn(64, device=GPU_TYPE)
+        x = torch.randn(64, device=self.device)
+        y = torch.randn(64, device=self.device)
 
         opt_f = torch.compile(f, mode="lite")
         result, code = run_and_get_code(opt_f, x, y)
