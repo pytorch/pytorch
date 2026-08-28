@@ -2058,17 +2058,19 @@ include_patterns = [
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
-    '--pattern=DESTINATION[[:space:]]+"[^$]',
+    '--pattern=DESTINATION[[:space:]]+"',
+    '--line-allowlist-pattern=\$\{(SKBUILD_PLATLIB_DIR|_torch_pkg|_cutedsl_dest)\}',
     '--linter-name=CMAKE_PLATLIB_DESTINATION',
     '--error-name=package data addressed through the install prefix',
     """--error-description=\
         These files install Python package data, so every destination must \
         name the wheel tree rather than rely on the install prefix: use \
         ${SKBUILD_PLATLIB_DIR}/... here, or ${_torch_pkg}/... inside \
-        PackageData.cmake. A prefix-relative destination only lands in the \
-        right place while the prefix happens to be the torch package \
-        directory, which is true under scikit-build-core and false for a \
-        standalone cmake --install. See gh-191102. \
+        PackageData.cmake (${_cutedsl_dest} is derived from the former). A \
+        prefix-relative destination only lands in the right place while the \
+        prefix happens to be the torch package directory, which is true under \
+        scikit-build-core and false for a standalone cmake --install. See \
+        gh-191102. \
     """,
     '--',
     '@{{PATHSFILE}}'

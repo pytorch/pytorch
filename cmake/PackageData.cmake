@@ -5,10 +5,6 @@
 # prefix-relative ones: the install prefix is the C++ root, which is a
 # conventional prefix for a standalone install and only happens to coincide
 # with the torch package directory under scikit-build-core.
-#
-# Must be included after FileMirroring.cmake: the valgrind headers picked up
-# by the benchmark utilities rule below are copied into the source tree by
-# that module.
 
 if(NOT DEFINED TORCH_SRC_DIR)
   set(TORCH_SRC_DIR "${PROJECT_SOURCE_DIR}/torch")
@@ -29,12 +25,11 @@ install(DIRECTORY "${TORCH_SRC_DIR}/"
 # Benchmark utilities — matches setup.py package_data patterns:
 #   utils/benchmark/utils/*.cpp
 #   utils/benchmark/utils/valgrind_wrapper/*.cpp
-#   utils/benchmark/utils/valgrind_wrapper/*.h
-# (*.h files are copied from third_party/ by FileMirroring.cmake; the pattern
-# here picks them up if already present.)
+# The valgrind headers that complete that set are installed straight from
+# third_party/ by cmake/FileMirroring.cmake; they never exist in the source tree.
 install(DIRECTORY "${TORCH_SRC_DIR}/utils/benchmark/utils/"
   DESTINATION "${_torch_pkg}/utils/benchmark/utils"
-  FILES_MATCHING PATTERN "*.cpp" PATTERN "*.h"
+  FILES_MATCHING PATTERN "*.cpp"
 )
 
 # Model dump utilities
