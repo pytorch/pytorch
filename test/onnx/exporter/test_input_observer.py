@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import HardwareClassification
 
 class TestInputObserver(common_utils.TestCase):
     hw_classification = HardwareClassification.GENERIC
-    
+
     def test_infer_dynamic_dimensions(self):
         self.assertEqual([2], _infer_dynamic_dimensions([(1, 2, 3), (1, 2, 4)]))
         self.assertEqual([0, 2], _infer_dynamic_dimensions([(1, 2, 3), (2, 2, 4)]))
