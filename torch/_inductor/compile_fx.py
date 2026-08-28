@@ -999,6 +999,8 @@ class _CompileFxKwargs(TypedDict, total=False):
     # A non-None value preserves a graph-local decision across cache loads;
     # otherwise post_compile uses the shared forward-derived BoxedBool.
     cudagraphs_post_compile_override: bool | None
+    # True when graph_partition should create partitions only for annotated regions.
+    cudagraph_partition_only_regions: bool
     static_input_idxs: Sequence[int]
     is_backward: bool
     graph_id: int | None
@@ -1814,6 +1816,12 @@ class _InProcessFxCompile(FxCompile):
                     inputs_to_check=inputs_to_check,
                     fx_wrapper=fx_wrapper,
                     get_decomp_fn=get_decomp_fn,
+                    use_cudagraph_partition=(
+                        bool(cudagraphs) and config.graph_partition
+                    ),
+                    cudagraph_partition_only_regions=graph_kwargs.get(
+                        "cudagraph_partition_only_regions", False
+                    ),
                 )
                 metrics_helper = metrics.CachedMetricsHelper()
 
@@ -2050,7 +2058,10 @@ class _InProcessFxCompile(FxCompile):
                         V.graph.disable_cudagraphs_reason = (
                             check_lowering_disable_cudagraph(
                                 # pyrefly: ignore [unbound-name]
-                                V.graph.device_node_mapping
+                                V.graph.device_node_mapping,
+                                use_cudagraph_partition=(
+                                    bool(cudagraphs) and config.graph_partition
+                                ),
                             )
                         )
 
