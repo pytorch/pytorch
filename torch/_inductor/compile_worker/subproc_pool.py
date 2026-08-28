@@ -16,6 +16,7 @@ import typing
 from collections.abc import Callable
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
+from dataclasses import dataclass
 from enum import Enum, IntEnum
 from pathlib import Path
 from typing import Any, IO, TypeVar
@@ -54,6 +55,10 @@ class MsgHeader(IntEnum):
     # Sidecar -> parent watchdog report about a still-running job (out-of-band,
     # low volume). Payload is a pickled status dict; does not affect the future.
     STATUS = 5
+    # Sidecar -> parent: the job failed, but even its failure details could not
+    # be serialized. Keeping this distinct from JOB makes an empty successful
+    # serialization unambiguous.
+    JOB_ERROR = 6
 
 
 def _current_compile_id() -> Any:
@@ -91,6 +96,12 @@ _SIDECAR_HEALTH_POLL_SECONDS = 2.0
 # whole shutdown.
 _WORKER_TERMINATE_GRACE_SECONDS = 10.0
 
+_BROKEN_POOL_MAX_SUBMIT_ATTEMPTS = 3
+
+
+def _exit_sidecar() -> Never:
+    os._exit(1)
+
 
 def _send_msg(
     write_pipe: IO[bytes], msg_header: MsgHeader, job_id: int = -1, data: bytes = b""
@@ -105,6 +116,10 @@ def _send_msg(
 def _recv_msg(read_pipe: IO[bytes]) -> tuple[MsgHeader, int, bytes]:
     msg_header, job_id, length = _unpack_msg(read_pipe.read(msg_bytes))
     data = read_pipe.read(length) if length > 0 else b""
+    if len(data) != length:
+        if msg_header in (MsgHeader.JOB, MsgHeader.JOB_ERROR):
+            return MsgHeader.JOB_ERROR, job_id, b""
+        return MsgHeader.ERROR, -1, b""
     return msg_header, job_id, data
 
 
@@ -150,6 +165,13 @@ class SubprocPickler:
 class SubprocKind(Enum):
     FORK = "fork"
     SPAWN = "spawn"
+
+
+@dataclass
+class _PendingJob:
+    future: Future[Any]
+    waitcounter: Any
+    compile_id: Any
 
 
 class SubprocPool:
@@ -243,12 +265,7 @@ class SubprocPool:
         )
 
         self.futures_lock = threading.Lock()
-        self.pending_futures: dict[int, Future[Any]] = {}
-        # Compile id captured at submit so watchdog STATUS reports (handled on the
-        # read thread) attribute to the right compile in tlparse. Keyed by job_id.
-        self._job_compile_id: dict[int, Any] = {}
-        # The pending waitcounter, is used to indicate the time when we have any specific job running.
-        self.pending_waitcounters: dict[int, Any] = {}
+        self.pending_jobs: dict[int, _PendingJob] = {}
         self.job_id_count = itertools.count()
 
         # The running waitcounter indicates the time when the SubProcPool object exists.
@@ -289,13 +306,16 @@ class SubprocPool:
         job_data = self.pickler.dumps(job_fn)
         future: Future[_T]
         with self.futures_lock:
+            if not self.running:
+                raise RuntimeError("Attempting to use a closed pool")
             job_id = next(self.job_id_count)
-            self.pending_futures[job_id] = future = Future()
-            self._job_compile_id[job_id] = _current_compile_id()
-            self.pending_waitcounters[job_id] = _WaitCounter(
-                "pytorch.wait_counter.subproc_pool.job"
-            ).guard()
-            self.pending_waitcounters[job_id].__enter__()
+            future = Future()
+            counter = _WaitCounter("pytorch.wait_counter.subproc_pool.job")
+            waitcounter = counter.guard()
+            waitcounter.__enter__()
+            self.pending_jobs[job_id] = _PendingJob(
+                future, waitcounter, _current_compile_id()
+            )
             if self.quiesce_waitcounter:
                 self.firstjob = True
                 self.quiesce_waitcounter.__exit__()
@@ -332,7 +352,7 @@ class SubprocPool:
                 self._handle_worker_status(job_id, data)
                 continue
 
-            if msg_header != MsgHeader.JOB:
+            if msg_header not in (MsgHeader.JOB, MsgHeader.JOB_ERROR):
                 # read_pipe returned None or got exception
                 if self.running:
                     log.warning("SubprocPool unclean exit")
@@ -343,37 +363,112 @@ class SubprocPool:
                 self.shutdown()
                 return
 
+            if not self._handle_job_result(
+                job_id, data, failed=msg_header == MsgHeader.JOB_ERROR
+            ):
+                return
+
+    def _handle_job_result(
+        self, job_id: int, data: bytes, *, failed: bool = False
+    ) -> bool:
+        """Resolve `job_id`'s future. Returns False once the pool has stopped."""
+        result = self._decode_job_result(job_id, data, failed=failed)
+
+        with self.futures_lock:
+            if not self.running:
+                return False
+            pending_job = self.pending_jobs.pop(job_id, None)
+            was_first_job = self.firstjob_id == job_id
+            if was_first_job:
+                self.firstjob_id = None
+        if pending_job is None:
+            log.error("Received result for unknown job %s; stopping pool", job_id)
+            self.shutdown()
+            return False
+        if self.timer:
+            self._run_job_bookkeeping(self.timer.record_call, "timer update")
+        self._run_job_bookkeeping(pending_job.waitcounter.__exit__, "waitcounter exit")
+        if was_first_job:
+            self._run_job_bookkeeping(
+                self.firstjob_waitcounter.__exit__, "first-job waitcounter exit"
+            )
+        self._resolve_future(pending_job.future, result)
+        return True
+
+    def _decode_job_result(self, job_id: int, data: bytes, *, failed: bool) -> object:
+        """Decode a result frame into a value or per-job failure; never raises."""
+        if failed:
+            return _SubprocExceptionInfo(
+                f"SubprocPool failed to deliver a result for job {job_id}. This "
+                "is an internal compile-worker error, not a failure of the code "
+                "being compiled. The sidecar could not serialize the details, "
+                "or the result pipe was truncated. If serialization failed, "
+                "re-run with TORCHINDUCTOR_WORKER_SUPPRESS_LOGGING=0 for the "
+                "sidecar traceback."
+            )
+        try:
+            return self.pickler.loads(data)
+        except BaseException as e:
             try:
-                result = self.pickler.loads(data)
-            except Exception as e:
-                # Something went wrong unpickling. We have a job_id so just
-                # notify that particular future and continue on.
                 log.exception("unpickle failure in SubprocPool._read_thread")
-                result = e
+            except BaseException:
+                pass
+            return _SubprocExceptionInfo(
+                "SubprocPool failed to deserialize the result for job "
+                f"{job_id}: the pickler raised {type(e).__name__}. This is "
+                "an internal compile-worker error, not a failure of the "
+                "code being compiled."
+            )
 
-            with self.futures_lock:
-                if not self.running:
-                    return
-                if self.timer:
-                    self.timer.record_call()
-                if isinstance(result, _SubprocExceptionInfo):
-                    # An exception occurred in the submitted job
-                    self.pending_futures[job_id].set_exception(
-                        SubprocException(result.details)
-                    )
-                elif isinstance(result, Exception):
-                    # An exception occurred in some of our subprocess machinery.
-                    self.pending_futures[job_id].set_exception(result)
-                else:
-                    self.pending_futures[job_id].set_result(result)
+    @staticmethod
+    def _resolve_future(future: Future[Any], result: object) -> None:
+        try:
+            if isinstance(result, _SubprocExceptionInfo):
+                future.set_exception(SubprocException(result.details))
+            elif isinstance(result, Exception):
+                future.set_exception(result)
+            else:
+                future.set_result(result)
+        except BaseException:
+            # Future callbacks run synchronously. A callback must not kill the
+            # sole result reader or prevent cleanup of the remaining futures.
+            try:
+                log.exception("compile-worker future callback failed")
+            except BaseException:
+                pass
 
-                self.pending_waitcounters[job_id].__exit__()
-                del self.pending_waitcounters[job_id]
-                if self.firstjob_id == job_id:
-                    self.firstjob_waitcounter.__exit__()
+    @staticmethod
+    def _run_job_bookkeeping(callback: Callable[[], object], description: str) -> None:
+        try:
+            callback()
+        except BaseException:
+            try:
+                log.exception("compile-worker %s failed", description)
+            except BaseException:
+                pass
 
-                del self.pending_futures[job_id]
-                self._job_compile_id.pop(job_id, None)
+    def _fail_pending_futures(self, exc: Exception) -> None:
+        with self.futures_lock:
+            pending_jobs = self.pending_jobs
+            firstjob_id = self.firstjob_id
+            self.pending_jobs = {}
+            self.firstjob_id = None
+        for job_id, pending_job in pending_jobs.items():
+            try:
+                if not pending_job.future.cancel():
+                    self._resolve_future(pending_job.future, exc)
+            except BaseException:
+                try:
+                    log.exception("compile-worker future callback failed")
+                except BaseException:
+                    pass
+            self._run_job_bookkeeping(
+                pending_job.waitcounter.__exit__, "waitcounter exit"
+            )
+            if firstjob_id == job_id:
+                self._run_job_bookkeeping(
+                    self.firstjob_waitcounter.__exit__, "first-job waitcounter exit"
+                )
 
     def _health_monitor(self) -> None:
         # Poll the sidecar for liveness. If it dies while we still think we are
@@ -392,35 +487,33 @@ class SubprocPool:
                 # Expected exit (shutdown) or already handled.
                 return
             self.running = False
-        # `running` is set under different locks across shutdown()/_read_thread/
-        # here, so this exit can race another for the same transition. That's
-        # safe: _WaitCounterTracker.__exit__ is idempotent (optional::reset()).
-        self.running_waitcounter.__exit__()
 
         pid = self.process.pid
-        log.error(
-            "Inductor compile worker sidecar (pid %s) exited unexpectedly with "
-            "code %s during compilation; failing pending compile jobs. Re-run "
-            "with TORCHINDUCTOR_COMPILE_THREADS=1 to compile in the main process.",
-            pid,
-            returncode,
-        )
-        self._log_sidecar_death_diagnostics(returncode)
-
         exc = RuntimeError(
             f"Inductor compile worker sidecar (pid {pid}) exited unexpectedly "
             f"with code {returncode} during compilation. Re-run with "
             "TORCHINDUCTOR_COMPILE_THREADS=1 to compile in the main process."
         )
-        with self.futures_lock:
-            for job_id, future in self.pending_futures.items():
-                if not future.cancel():
-                    future.set_exception(exc)
-                waitcounter = self.pending_waitcounters.pop(job_id, None)
-                if waitcounter is not None:
-                    waitcounter.__exit__()
-            self.pending_futures.clear()
-            self._job_compile_id.clear()
+        self._fail_pending_futures(exc)
+
+        try:
+            # `running` is set under different locks across shutdown() /
+            # `_read_thread` / here, so this exit can race another for the same
+            # transition. `_WaitCounterTracker.__exit__` is idempotent.
+            self.running_waitcounter.__exit__()
+            log.error(
+                "Inductor compile worker sidecar (pid %s) exited unexpectedly with "
+                "code %s during compilation; failing pending compile jobs. Re-run "
+                "with TORCHINDUCTOR_COMPILE_THREADS=1 to compile in the main process.",
+                pid,
+                returncode,
+            )
+            self._log_sidecar_death_diagnostics(returncode)
+        except BaseException:
+            try:
+                log.exception("failed to report compile worker sidecar death")
+            except BaseException:
+                pass
         # We intentionally do not close read_pipe here. _read_thread owns it and
         # may be mid-read; closing a buffered pipe out from under a concurrent
         # read can deadlock on the buffer lock. It is a daemon thread, so leaving
@@ -465,7 +558,9 @@ class SubprocPool:
             status = self.pickler.loads(data)
             if not isinstance(status, dict):
                 return
-            compile_id = self._job_compile_id.get(job_id)
+            with self.futures_lock:
+                pending_job = self.pending_jobs.get(job_id)
+            compile_id = pending_job.compile_id if pending_job is not None else None
             record = {**status, "compile_id": str(compile_id) if compile_id else None}
             trace_structured(
                 "artifact",
@@ -479,8 +574,11 @@ class SubprocPool:
                 suppress_context=True,
                 record_logging_overhead=False,
             )
-        except Exception:
-            log.warning("failed to report compile worker status", exc_info=True)
+        except BaseException:
+            try:
+                log.warning("failed to report compile worker status", exc_info=True)
+            except BaseException:
+                pass
 
     def quiesce(self) -> None:
         self._send(MsgHeader.QUIESCE)
@@ -523,12 +621,7 @@ class SubprocPool:
         except OSError:
             log.warning("Ignored OSError in pool shutdown", exc_info=True)
         finally:
-            with self.futures_lock:
-                for future in self.pending_futures.values():
-                    if not future.cancel():
-                        future.set_exception(RuntimeError("SubprocPool closed"))
-                self.pending_futures.clear()
-                self._job_compile_id.clear()
+            self._fail_pending_futures(RuntimeError("SubprocPool closed"))
 
 
 class SubprocMain:
@@ -613,41 +706,118 @@ class SubprocMain:
         # of the workers -- that wait is real and worth surfacing.
         with self._inflight_lock:
             self._inflight[job_id] = time.monotonic()
-        while self.running:
+        for _ in range(_BROKEN_POOL_MAX_SUBMIT_ATTEMPTS):
+            if not self.running:
+                return
             try:
                 self._submit_inner(job_id, data)
                 return
             except BrokenProcessPool:
                 # If any subprocess in the pool crashes, we get a BrokenProcessPool
-                # exception and the whole pool becomes unusable. Handle crashes by
-                # recreating the pool and resubmitting. Log it -- this was
-                # previously silent, hiding repeated worker crashes that can stall
-                # a job in this retry loop.
+                # exception and the whole pool becomes unusable. Reset it so the
+                # next attempt, or the next job after exhaustion, starts clean.
                 log.warning(
                     "Compile worker pool broke while submitting job %s; "
-                    "recreating the pool and retrying.",
+                    "resetting the pool.",
                     job_id,
                     exc_info=True,
                 )
-                self.pool = None
+                self._shutdown_pool(terminate_workers=True)
+        header, payload = self._failure_payload(
+            job_id,
+            f"worker pool broke on {_BROKEN_POOL_MAX_SUBMIT_ATTEMPTS} "
+            "consecutive submit attempts",
+        )
+        self._send_result(job_id, header, payload)
+
+    def _result_payload(self, job_id: int, fut: Future[Any]) -> tuple[MsgHeader, bytes]:
+        """
+        Bytes to send back for `job_id`. Never raises: returning without sending
+        would leave the parent's future pending forever, so each way this can go
+        wrong turns into a payload that fails just this job.
+        """
+        if fut.cancelled():
+            return self._failure_payload(job_id, "the job result was cancelled")
+
+        # exception() rather than result(): whatever the job raised is data the
+        # worker shipped back, and it need not be an Exception -- do_job only
+        # catches those, so a job calling sys.exit() lands a SystemExit here.
+        # Asking for it avoids re-raising it in this thread just to catch it.
+        if (exc := fut.exception()) is not None:
+            log.error("Error in subprocess", exc_info=exc)
+            if not isinstance(exc, Exception):
+                return self._failure_payload(
+                    job_id,
+                    f"the job raised {type(exc).__name__}, which the parent "
+                    "cannot surface as a job failure",
+                )
+            try:
+                return MsgHeader.JOB, self.pickler.dumps(exc)
+            except BaseException:
+                return self._failure_payload(
+                    job_id,
+                    f"could not pickle the {type(exc).__name__} raised by the job\n"
+                    f"{traceback.format_exc()}",
+                )
+        result = fut.result()
+        if not isinstance(result, bytes):
+            return self._failure_payload(
+                job_id, f"expected bytes result, got {type(result)}"
+            )
+        return MsgHeader.JOB, result
+
+    def _failure_payload(self, job_id: int, reason: str) -> tuple[MsgHeader, bytes]:
+        """A payload that fails `job_id` in the parent rather than hanging it."""
+        log.error("job %s: failing the job: %s", job_id, reason)
+        details = (
+            f"SubprocPool failed to deliver a result for job {job_id}: {reason}. "
+            "This is an internal compile-worker error, not a failure of the code "
+            "being compiled."
+        )
+        # Just in case a custom pickler doesn't like _SubprocExceptionInfo.
+        try:
+            return MsgHeader.JOB, self.pickler.dumps(_SubprocExceptionInfo(details))
+        except BaseException:
+            try:
+                log.exception("job %s: could not pickle the failure payload", job_id)
+            except BaseException:
+                pass
+            return MsgHeader.JOB_ERROR, b""
+
+    def _send_result(self, job_id: int, msg_header: MsgHeader, payload: bytes) -> None:
+        try:
+            with self.write_lock:
+                if not self.running:
+                    return
+                _send_msg(self.write_pipe, msg_header, job_id, payload)
+        except BaseException:
+            try:
+                log.exception(
+                    "job %s: failed to deliver a result to the parent", job_id
+                )
+            finally:
+                _exit_sidecar()
+            return
+        with self._inflight_lock:
+            self._inflight.pop(job_id, None)
 
     def _submit_inner(self, job_id: int, data: bytes) -> None:
         def callback(fut: Future[Any]) -> None:
-            with self._inflight_lock:
-                self._inflight.pop(job_id, None)
+            # concurrent.futures swallows anything raised out of a done
+            # callback (it logs to its own logger and moves on), so an escape
+            # here leaves the parent's future pending forever with nothing sent
+            # and nothing logged on the parent side.
             if not self.running:
                 return
             try:
-                result = fut.result()
-            except Exception as e:
-                log.exception("Error in subprocess")
-                result = self.pickler.dumps(e)
-            if not isinstance(result, bytes):
-                raise AssertionError(f"Expected bytes result, got {type(result)}")
-            with self.write_lock:
-                if self.running:
-                    _send_msg(self.write_pipe, MsgHeader.JOB, job_id, result)
-            return
+                msg_header, payload = self._result_payload(job_id, fut)
+            except BaseException:
+                try:
+                    log.exception("job %s: failed to construct result payload", job_id)
+                except BaseException:
+                    pass
+                msg_header, payload = MsgHeader.JOB_ERROR, b""
+            self._send_result(job_id, msg_header, payload)
 
         self._start_pool()
         if self.pool is None:
