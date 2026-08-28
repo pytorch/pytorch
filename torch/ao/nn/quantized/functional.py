@@ -96,7 +96,7 @@ def avg_pool3d(
     divisor_override=None,
 ):
     r"""
-    Applies 3D average-pooling operation in :math:`kD \ times kH \times kW` regions by step size
+    Applies 3D average-pooling operation in :math:`kD \times kH \times kW` regions by step size
     :math:`sD \times sH \times sW` steps. The number of output features is equal to the number of
     input planes.
 
