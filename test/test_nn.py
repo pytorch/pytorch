@@ -10838,7 +10838,9 @@ class TestNNDeviceType(NNTestCase):
             sum(i * s for i, s in zip(large_view.size(), large_view.stride())) >= 2 ** 31,
             msg="View must use 64-bit indexing")
         for mode, padding_mode, align_corners in itertools.product(
-                ('nearest', 'bilinear'), ('zeros', 'border', 'reflection'), (True, False)):
+                ('nearest', 'bilinear', 'bicubic'), ('zeros', 'border', 'reflection'), (True, False)):
+            if mode == 'bicubic' and torch.device(device).type == 'mps':
+                continue  # MPS has no 5-D bicubic sampler
             a = F.grid_sample(
                 small_image, coords, mode=mode,
                 padding_mode=padding_mode, align_corners=align_corners)
@@ -10859,8 +10861,6 @@ class TestNNDeviceType(NNTestCase):
     def test_grid_sample_half_precision(self):
         def helper(shape_in, shape_out, align_corners):
             for mode in ('bilinear', 'nearest', 'bicubic'):
-                if len(shape_in) != 4 and mode == 'bicubic':
-                    continue
                 data = torch.randn(shape_in, device='cuda', dtype=torch.half)
                 grid = torch.rand(shape_out, device='cuda', dtype=torch.half) * 2.0 - 1.0
 
@@ -10879,8 +10879,6 @@ class TestNNDeviceType(NNTestCase):
     def test_grid_sample_bfloat16_precision(self):
         def helper(shape_in, shape_out, align_corners):
             for mode in ('bilinear', 'nearest', 'bicubic'):
-                if len(shape_in) != 4 and mode == 'bicubic':
-                    continue
                 data = torch.randn(shape_in, device='cuda', dtype=torch.bfloat16)
                 grid = torch.rand(shape_out, device='cuda', dtype=torch.bfloat16) * 2.0 - 1.0
 
@@ -11702,6 +11700,23 @@ class TestNNDeviceType(NNTestCase):
         # stages in the scalar type, so single precision needs a tolerance
         tolerance = {} if dtype == torch.double else {"atol": 1e-4, "rtol": 1e-4}
         self.assertEqual(out_3d.squeeze(2), out_2d, **tolerance)
+
+    @parametrize_test("wrt", ["input", "grid"])
+    @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
+    @onlyNativeDeviceTypes
+    @dtypes(torch.double)
+    def test_grid_sample_3d_bicubic_one_sided_grad(self, device, dtype, wrt):
+        # The double backward builds the tap gather and the coefficient derivatives only for
+        # the outputs asked of it, and the OpInfo samples ask for both at once.
+        volume = torch.randn(1, 2, 4, 5, 5, device=device, dtype=dtype)
+        grid = torch.rand(1, 2, 3, 3, 3, device=device, dtype=dtype) * 2 - 1
+
+        def fn(t):
+            args = (t, grid) if wrt == "input" else (volume, t)
+            return F.grid_sample(*args, mode='bicubic', padding_mode='border', align_corners=False)
+
+        wrt_tensor = (volume if wrt == "input" else grid).clone().requires_grad_(True)
+        self.assertTrue(gradgradcheck(fn, (wrt_tensor,)))
 
     @parametrize_test("padding_mode", ["zeros", "border", "reflection"])
     @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
