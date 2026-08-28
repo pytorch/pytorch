@@ -13,7 +13,7 @@ from torch.distributed.tensor.parallel.style import (
     PrepareModuleOutput,
     RowwiseParallel,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
@@ -33,6 +33,8 @@ class DummyModule(torch.nn.Module):
 
 
 class TensorParallelAPITests(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         gpu_num = torch.accelerator.device_count()
