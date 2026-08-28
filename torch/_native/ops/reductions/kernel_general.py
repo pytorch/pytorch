@@ -559,7 +559,6 @@ def _reduce(trait, trait_key, x, dims, out_dtypes, nouts, block=_K0_BLOCK):
         range(x.dim()) if dims is None else ([dims] if isinstance(dims, int) else dims)
     )
     red_axes = {d % x.dim() for d in red_axes}
-    has_index = getattr(trait, "has_index", False)
     out_shape = [s for i, s in enumerate(x.shape) if i not in red_axes]
 
     # Single output ELEMENT (every kept extent is 1) -> route to reduce_all (the
@@ -574,7 +573,6 @@ def _reduce(trait, trait_key, x, dims, out_dtypes, nouts, block=_K0_BLOCK):
     if math.prod(out_shape) == 1 and nouts == 1 and x.is_contiguous():
         out = reduce_all(trait, trait_key, x, out_dtypes[0], block=block)
         return (_as_shape(out, out_shape),)
-
 
     outs = [torch.empty(out_shape, device=x.device, dtype=d) for d in out_dtypes]
     num_o = max(1, math.prod(out_shape))  # blocks (kept coordinates)
