@@ -393,7 +393,7 @@ force_fuse_int_mm_with_mul = False
 # (may improve perf at the cost of accuracy for some models).
 keep_addmm_fused_for_half_dtypes = True
 
-use_mixed_mm = Config(
+use_mixed_mm: bool = Config(
     default=True, deprecated=True, deprecation_message="does not do anything"
 )
 
