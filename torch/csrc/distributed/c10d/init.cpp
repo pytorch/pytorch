@@ -542,14 +542,10 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
   C10_LOG_API_USAGE_ONCE("c10d.python.import");
 
   auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
-  if (!c10d_module) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(c10d_module);
 
   auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
-  if (!torch_C_module) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(torch_C_module);
 
   auto torch_C_m = py::handle(torch_C_module).cast<py::module>();
   auto m =
@@ -1106,6 +1102,14 @@ Example:
       },
       py::arg("group_name"));
 
+  // Check the native registry without throwing on unknown group names
+  module.def(
+      "_is_process_group_registered",
+      [](const std::string& group_name) {
+        return ::c10d::is_process_group_registered(group_name);
+      },
+      py::arg("group_name"));
+
   module.def(
       "_register_work",
       [](const at::Tensor& tensor,
@@ -1497,8 +1501,24 @@ Example:
       // rendezvoused with -- each group owns a separate set of logical
       // endpoints over the same allocation. Requires the group's communicator
       // to have been created with `host_cft_mode` enabled.
-      .def("get_peer_cft_handle", getPeerCftHandle, py::arg("peer"))
-      .def("get_multimem_cft_handle", getMultimemCftHandle)
+      .def(
+          "get_peer_cft_handle",
+          getPeerCftHandle,
+          py::arg("peer"),
+          "Return the (le_id, le_offset) CFT logical-endpoint coordinates "
+          "addressing `peer`'s copy of this buffer, for use with the "
+          "device-side ncclCft put/get/reduce API. NCCL backend only; the "
+          "group's communicator must have been created with host_cft_mode "
+          "enabled (see ncclConfig_t.host_cft_mode), and raises RuntimeError "
+          "if the endpoints do not exist (unsupported GPU/driver/NCCL or "
+          "host_cft_mode fallback on an unsupported stack).")
+      .def(
+          "get_multimem_cft_handle",
+          getMultimemCftHandle,
+          "Return the (le_id, le_offset) multicast CFT logical-endpoint "
+          "coordinates for this buffer. Requires NVLS multicast support in "
+          "addition to the get_peer_cft_handle requirements; the first call "
+          "may be collective, so every rank of the group must reach it.")
       // Util functions that are often used together with symmetric memory but
       // not necessarily directly on symmetric memory.
       .def_static(
@@ -4018,12 +4038,19 @@ for details.
           })
 #endif
 #ifdef NCCL_HAS_HOST_CFT_MODE
-      // ncclHostCftMode_t: 1 = enable, 2 = disable, 3 = fallback (try to
-      // create the CFT logical endpoints, disable host-side CFT on error).
-      // Opt-in: NCCL leaves host-side CFT off unless this is set, since the
-      // endpoints are a limited per-device resource. Must be identical on
-      // every rank of a communicator.
-      .def_readwrite("host_cft_mode", &ncclConfig_t::hostCftMode)
+      .def_readwrite(
+          "host_cft_mode",
+          &ncclConfig_t::hostCftMode,
+          "Whether NCCL creates CFT (Compute Fabric Transport) logical "
+          "endpoints for this communicator (ncclHostCftMode_t): 1 = enable "
+          "(fail communicator init if the stack cannot support them), 2 = "
+          "disable, 3 = fallback (create them if possible, silently proceed "
+          "without otherwise). Defaults to disable: the endpoints are a "
+          "limited per-device resource, so host-side CFT is opt-in. Must be "
+          "identical on every rank and set before the communicator is "
+          "created. Requires NCCL >= 2.31.2 built with CUDA >= 13.3, a "
+          "driver reporting CUDA >= 13.3, and a GPU with logical-endpoint "
+          "support (sm_100+); NCCL_CFT_ENABLE=0 disables CFT globally.")
 #endif
       .def(
           "unsafe_get_ptr",
@@ -4654,6 +4681,9 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       .def_readwrite(
           "error_on_collective",
           &::c10d::FakeProcessGroup::Options::error_on_collective)
+      .def_readwrite(
+          "simulate_uniform_ranks",
+          &::c10d::FakeProcessGroup::Options::simulate_uniform_ranks)
       .def(
           "__copy__",
           [](const ::c10d::FakeProcessGroup::Options& self) {
@@ -4669,6 +4699,13 @@ such as `dist.all_reduce(tensor, async_op=True)`.
   fakeProcessGroup
       .def_static(
           "_create_internal",
+          [](int rank, int size) {
+            return ::c10d::FakeProcessGroup::_create_internal(rank, size);
+          },
+          py::arg("rank"),
+          py::arg("world_size"))
+      .def_static(
+          "_create_internal",
           [](int rank,
              int size,
              c10::intrusive_ptr<::c10d::FakeProcessGroup::Options> options) {
@@ -4677,8 +4714,7 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           },
           py::arg("rank"),
           py::arg("world_size"),
-          py::arg("options") =
-              c10::make_intrusive<::c10d::FakeProcessGroup::Options>())
+          py::arg("options"))
       .def_property_readonly("options", &::c10d::FakeProcessGroup::getOptions);
   auto fakeWork =
       intrusive_ptr_no_gil_destructor_class_<::c10d::FakeWork>(

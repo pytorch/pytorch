@@ -197,9 +197,7 @@ static PyObject* THPStorage_resize_with_addr_(PyObject* self, PyObject* args) {
         "but got ",
         THPUtils_typename(addr_arg));
     void* addr = PyLong_AsVoidPtr(addr_arg);
-    if (addr == nullptr && PyErr_Occurred()) {
-      throw python_error();
-    }
+    TORCH_CHECK_PYTHON(addr != nullptr || !PyErr_Occurred());
     ptrdiff_t size_bytes_i = newsize;
     TORCH_CHECK(
         !c10::overflows<size_t>(size_bytes_i, /*strict_unsigned=*/true),

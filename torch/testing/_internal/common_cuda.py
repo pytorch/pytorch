@@ -93,6 +93,24 @@ IS_SM10X = LazyVal(lambda: torch.version.hip is None and torch.cuda.is_available
 IS_SM12X = LazyVal(lambda: torch.version.hip is None and torch.cuda.is_available() and
                    torch.cuda.get_device_capability()[0] == 12)
 
+# Substrings a subprocess prints when it dies from a device-side assert, or
+# from the GPU fault ROCm reports instead when device-side asserts are not
+# enabled. Tests that trigger a device assert in a child process should check
+# its output with has_device_side_assert rather than growing a local copy.
+DEVICE_ASSERT_MARKERS = (
+    "device-side assert triggered",  # CUDA
+    "Assertion `",  # CUDA/ROCm device-side printf: Assertion `cond` failed.
+    "HSA_STATUS_ERROR_EXCEPTION",  # ROCm with TORCH_USE_HIP_DSA
+    "Device-side assertion",  # ROCm with TORCH_USE_HIP_DSA
+    "hipErrorLaunchFailure",
+    "launch failure",  # covers "unspecified launch failure"
+    "illegal memory access",
+    "Memory access fault",  # ROCm 7.14+ VM fault abort
+)
+
+def has_device_side_assert(output):
+    return any(marker in output for marker in DEVICE_ASSERT_MARKERS)
+
 @contextlib.contextmanager
 def blas_library_context(backend):
     prev_backend = torch.backends.cuda.preferred_blas_library()
@@ -245,10 +263,11 @@ def evaluate_platform_supports_fp8():
     if torch.cuda.is_available():
         if torch.version.hip:
             archs = ['gfx94']
-            if ROCM_VERSION >= (6, 3):
-                archs.extend(['gfx120'])
             if ROCM_VERSION >= (6, 5):
-                archs.append('gfx95')
+                # OCP fp8 (e4m3fn/e5m2) in scaled_mm requires ROCm 6.5+; see
+                # the ROCM_VERSION checks in aten/src/ATen/native/cuda/ScaledBlas.cpp.
+                # gfx120 and gfx95 only support OCP, so gate them on 6.5.
+                archs.extend(['gfx95', 'gfx120'])
             if ROCM_VERSION >= (7, 14):
                 archs.append('gfx1250')
             for arch in archs:
@@ -634,7 +653,7 @@ def xfailCUDAIfSM89OrLaterOnWindows(test_fn):
     return _xfail_cuda_on_windows_wrapper(test_fn) if IS_WINDOWS and SM89OrLater else test_fn
 
 
-# When using nvcc from the CUDA toolkit its versuib must be at least the one from ptxas bundled with Triton
+# When using nvcc from the CUDA toolkit its version must be at least the one from ptxas bundled with Triton
 TRITON_PTXAS_VERSION = (12, 8)
 requires_triton_ptxas_compat = unittest.skipIf(not torch.version.xpu
                                                and torch.version.hip is None

@@ -38,6 +38,7 @@ if TYPE_CHECKING:
         _collections as _collections,
         builtins as builtins,
         functools as functools,
+        heapq as heapq,
         io as io,
         itertools as itertools,
         operator as operator,
@@ -467,7 +468,7 @@ def foreach_lerp_inplace(
     self,
     end: list[torch.Tensor] | tuple[torch.Tensor, ...],
     weight: float | int | torch.Tensor,
-) -> None:
+) -> list[torch.Tensor] | tuple[torch.Tensor, ...]:
     # Decompose lerp via addcmul_ for FMA.  Uses the same dual-formula
     # approach as CUDA's native lerp to get bitwise identical results:
     #   |w| <  0.5  (low):  fma(w, diff, start)

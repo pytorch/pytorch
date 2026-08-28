@@ -157,30 +157,13 @@ class DeviceInterface:
         """
         return False
 
-    @staticmethod
-    def is_gpu() -> bool:
-        """Return True if Inductor should treat this device as a GPU-class
-        accelerator (device guards, GPU codegen/fusion, cudagraph
-        eligibility).  Defaults to False so that unknown backends are
-        conservatively treated as non-GPU until they explicitly opt in."""
-        return False
-
-    @classmethod
-    def exposes_streams(cls) -> bool:
-        """Return True if this device exposes a stream abstraction.
-        Derived from whether the ``Stream`` slot has been overridden by a
-        subclass -- backends with a real Stream implementation (CUDA, XPU,
-        MTIA) automatically get True; backends that inherit the placeholder
-        (MPS) automatically get False."""
-        return cls.Stream is not DeviceInterface.Stream
-
     @classmethod
     def get_multi_processor_count(cls, device: torch.types.Device = None) -> int:
         """Return the number of compute units, used for occupancy /
         reduction heuristics / max-autotune heuristics.  Defaults to
         reading the standard field ``multi_processor_count`` from device
-        properties; backends whose native field name differs (XPU, MTIA)
-        must override."""
+        properties; backends with a different property representation or
+        backend-specific fallback behavior must override."""
         props = cls.get_device_properties(device)
         mp_count = getattr(props, "multi_processor_count", None)
         if mp_count is None:
@@ -304,10 +287,6 @@ class CudaInterface(DeviceInterface):
         return torch.cuda.is_available()
 
     @staticmethod
-    def is_gpu() -> bool:
-        return True
-
-    @staticmethod
     def get_compute_capability(device: torch.types.Device = None) -> int | str:
         if torch.version.hip is None:
             major, min = torch.cuda.get_device_capability(device)
@@ -412,13 +391,13 @@ class MtiaInterface(DeviceInterface):
         ret = torch.mtia.is_available()
         return ret
 
-    @staticmethod
-    def is_gpu() -> bool:
-        return True
-
     @classmethod
     def get_multi_processor_count(cls, device: torch.types.Device = None) -> int:
-        return 64
+        return getattr(
+            cls.get_device_properties(device),
+            "multi_processor_count",
+            64,
+        )
 
     @staticmethod
     def get_compute_capability(device: torch.types.Device = None) -> Any:
@@ -505,13 +484,10 @@ class XpuInterface(DeviceInterface):
     def is_available() -> bool:
         return torch.xpu.is_available()
 
-    @staticmethod
-    def is_gpu() -> bool:
-        return True
-
     @classmethod
     def get_multi_processor_count(cls, device: torch.types.Device = None) -> int:
-        return cls.get_device_properties(device).gpu_subslice_count
+        props = cls.get_device_properties(device)
+        return getattr(props, "multi_processor_count", None) or props.gpu_subslice_count
 
     @staticmethod
     def get_compute_capability(device: torch.types.Device = None) -> Any:
@@ -589,17 +565,8 @@ class CpuInterface(DeviceInterface):
         pass
 
     @staticmethod
-    def is_gpu() -> bool:
-        return False
-
-    @staticmethod
     def is_triton_capable(device: torch.types.Device = None) -> bool:
-        try:
-            import triton.backends
-        except ModuleNotFoundError:
-            return False
-
-        return "cpu" in triton.backends.backends
+        return True
 
     @staticmethod
     def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
@@ -627,10 +594,6 @@ class MpsInterface(DeviceInterface):
     @staticmethod
     def is_available() -> bool:
         return torch.backends.mps.is_available()
-
-    @staticmethod
-    def is_gpu() -> bool:
-        return True
 
     @staticmethod
     def current_device() -> int:
@@ -679,10 +642,6 @@ class TpuInterface(DeviceInterface):
         return has_torch_tpu()
 
     @staticmethod
-    def is_gpu() -> bool:
-        return False
-
-    @staticmethod
     def current_device() -> int:
         return 0
 
@@ -713,6 +672,9 @@ def register_interface_for_device(
     if isinstance(device, torch.device):
         device = device.type
     device_interfaces[device] = device_interface
+    from .variables.user_defined import UserDefinedClassVariable
+
+    UserDefinedClassVariable._in_graph_classes.cache_clear()
 
 
 def get_interface_for_device(device: str | torch.device) -> type[DeviceInterface]:
