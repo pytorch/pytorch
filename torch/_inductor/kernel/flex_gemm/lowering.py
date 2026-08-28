@@ -26,7 +26,7 @@ from torch.utils._ordered_set import OrderedSet
 from ... import ir
 from ...ir import IRNode, TensorBox
 from ...lowering import empty_strided, process_subgraph_nodes, register_lowering
-from ...utils import ceildiv, has_free_symbols
+from ...utils import _IntLike, ceildiv, has_free_symbols
 from ...virtualized import V
 from .constraints import (
     FLEX_GEMM_CHUNKED_CONTIGUOUS_B_ERROR,
@@ -164,7 +164,7 @@ def infer_flex_gemm_epilogue_arg_kinds(
 def validate_flex_gemm_aux_outputs(
     gemm_op: torch._ops.OpOverload,
     aux_outputs: tuple[torch.fx.Node, ...],
-    output_size: list[Any],
+    output_size: Sequence[_IntLike],
 ) -> tuple[Any, ...]:
     """Validate QUACK aux-output support and return fake tensor metadata."""
     if not aux_outputs:
@@ -279,8 +279,8 @@ def filter_gemm_configs(
 
 def flex_gemm_config_keys(
     device,
-    m: int,
-    n: int,
+    m: _IntLike,
+    n: _IntLike,
     local_reduce_geometries: tuple[Any, ...],
     tuned: bool,
     output_contraction: FlexGemmOutputContraction | None = None,
@@ -800,11 +800,28 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     """Dispatch FlexGEMM to ordinary Inductor lowering or the QUACK template."""
     backend = kernel_options.get("backend", "TRITON")
     if backend == "NVGEMM":
+        unsupported_options = OrderedSet(kernel_options) - OrderedSet(
+            ("backend", "tuned")
+        )
+        if unsupported_options:
+            raise NotImplementedError(
+                f"Unsupported NVGEMM FlexGEMM options: {unsupported_options}"
+            )
+        tuned = kernel_options.get("tuned", False)
+        if not isinstance(tuned, bool):
+            raise NotImplementedError("NVGEMM FlexGEMM tuned must be a bool")
         decompose_nvgemm_additive_gemm(subgraph.graph_module)
-        with config.patch(
-            max_autotune=True,
-            max_autotune_gemm_backends="NVGEMM",
-        ):
+        nvgemm_config: dict[str, Any] = {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "NVGEMM",
+        }
+        if tuned:
+            nvgemm_config.update(
+                nvgemm_max_profiling_configs=None,
+                nvgemm_supplement_configs=True,
+                nvgemm_swap_ab=True,
+            )
+        with config.patch(nvgemm_config):
             return process_subgraph_nodes(subgraph.graph_module, list(args))
     if backend == "QUACK":
         return lower_quack_flex_gemm(

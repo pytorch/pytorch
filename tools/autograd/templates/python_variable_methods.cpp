@@ -86,11 +86,10 @@ static PyObject * THPVariable_apply_(PyObject* self, PyObject* arg)
     return handle_torch_function(self, "apply_", args.ptr());
   }
   auto& self_ = THPVariable_Unpack(self);
-  if (self_.requires_grad()) {
-    throw std::runtime_error(
-        "Can't call apply_() on Variable that requires grad. Use "
-        "var.detach().apply_() instead.");
-  }
+  TORCH_CHECK(
+      !self_.requires_grad(),
+      "Can't call apply_() on Variable that requires grad. Use "
+      "var.detach().apply_() instead.");
   return THPVariable_Wrap(torch::utils::apply_(self_, arg));
   END_HANDLE_TH_ERRORS
 }
@@ -143,10 +142,10 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
   // torch.Size and tuple in python
   // TODO: consider factoring this out
   THPObjectPtr tuple(PyTuple_New(static_cast<Py_ssize_t>(strides.size())));
-  if (!tuple) throw python_error();
+  TORCH_CHECK_PYTHON(tuple);
   for (size_t i = 0; i != strides.size(); i++) {
     PyObject* s = torch::toPyObject(strides[i]);
-    if (!s) throw python_error();
+    TORCH_CHECK_PYTHON(s);
     PyTuple_SET_ITEM(tuple.get(), i, s);
   }
   return tuple.release();
@@ -366,9 +365,8 @@ static PyObject * THPVariable_index_scalar(PyObject* self, PyObject* args) {
   auto& self_ = THPVariable_Unpack(self);
   // TODO: change the condition to `self_.dim() != 0` once we expose scalars
   // in PyTorch.
-  if (!isIntegralType(self_.scalar_type(), /*includeBool=*/true) || self_.sym_numel() != 1) {
-    throw TypeError("only integer tensors of a single element can be converted to an index");
-  }
+  TORCH_CHECK_TYPE(isIntegralType(self_.scalar_type(), /*includeBool=*/true) && self_.sym_numel() == 1,
+      "only integer tensors of a single element can be converted to an index");
   return wrap(dispatch_to<int64_t>(self_));
   END_HANDLE_TH_ERRORS
 }
@@ -385,9 +383,8 @@ static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
     return handle_torch_function(self, "__invert__", args);
   }
   auto& self_ = THPVariable_Unpack(self);
-  if (!isIntegralType(self_.scalar_type(), /*includeBool=*/true)) {
-    throw TypeError("~ (operator.invert) is only implemented on integer and Boolean-type tensors");
-  }
+  TORCH_CHECK_TYPE(isIntegralType(self_.scalar_type(), /*includeBool=*/true),
+      "~ (operator.invert) is only implemented on integer and Boolean-type tensors");
   return THPVariable_Wrap(dispatch_invert(self_));
   END_HANDLE_TH_ERRORS
 }
@@ -830,12 +827,11 @@ static PyObject * THPVariable_requires_grad_(PyObject* self, PyObject* args, PyO
   auto requires_grad = r.toBool(0);
   // should we throw if requires_grad is true?  var.requires_grad = True throws here
   // but it's nice to let this be a no-op.
-  if (!self_.is_leaf() && !requires_grad) {
-    throw std::runtime_error(autograd::utils::requires_grad_leaf_error(requires_grad));
-  }
-  if (requires_grad && ! isDifferentiableType(at::typeMetaToScalarType(self_.dtype()))) {
-    throw std::runtime_error("only Tensors of floating point dtype can require gradients");
-  }
+  TORCH_CHECK(
+      self_.is_leaf() || requires_grad,
+      autograd::utils::requires_grad_leaf_error(requires_grad));
+  TORCH_CHECK(!requires_grad || isDifferentiableType(at::typeMetaToScalarType(self_.dtype())),
+      "only Tensors of floating point dtype can require gradients");
   self_.set_requires_grad(requires_grad);
   return THPVariable_Wrap(self_);
   END_HANDLE_TH_ERRORS
@@ -897,11 +893,10 @@ static PyObject * THPVariable_map_(PyObject* self, PyObject* args, PyObject* kwa
   }
 
   Variable other = r.tensor(0);
-  if (self_.requires_grad() || other.requires_grad()) {
-    throw std::runtime_error(
-        "Can't call map_() on Variable that requires grad. Use "
-        "var.detach().map_() instead.");
-  }
+  TORCH_CHECK(
+      !self_.requires_grad() && !other.requires_grad(),
+      "Can't call map_() on Variable that requires grad. Use "
+      "var.detach().map_() instead.");
   TORCH_CHECK(
       !self_.unsafeGetTensorImpl()->is_python_dispatch() && !other.unsafeGetTensorImpl()->is_python_dispatch(),
       ".map_ is not supported for tensor subclasses.");
@@ -926,11 +921,10 @@ static PyObject * THPVariable_map2_(PyObject* self, PyObject* args, PyObject* kw
 
   Variable x = r.tensor(0);
   Variable y = r.tensor(1);
-  if (self_.requires_grad() || x.requires_grad() || y.requires_grad()) {
-    throw std::runtime_error(
-        "Can't call map2_() on Variable that requires grad. Use "
-        "var.detach().map2_() instead.");
-  }
+  TORCH_CHECK(
+      !self_.requires_grad() && !x.requires_grad() && !y.requires_grad(),
+      "Can't call map2_() on Variable that requires grad. Use "
+      "var.detach().map2_() instead.");
   TORCH_CHECK(
       !x.unsafeGetTensorImpl()->is_python_dispatch() && !y.unsafeGetTensorImpl()->is_python_dispatch(),
       ".map2_ is not supported for tensor subclasses.");
@@ -1058,7 +1052,7 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   } else if (THPDtype_Check(obj)) {
     is_dtype = true;
   } else {
-    throw TypeError("dtype must be a type, str, or dtype object");
+    TORCH_CHECK_TYPE(false, "dtype must be a type, str, or dtype object");
   }
   Device device = self_.device();
   if (is_dtype) {

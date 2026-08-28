@@ -34,6 +34,7 @@ from ..stream_utils import (
     get_raw_stream_name,
 )
 from ..utils import (
+    _IntLike,
     clear_on_fresh_cache,
     DeferredLineBase,
     Placeholder,
@@ -74,7 +75,7 @@ LARGE_NUMELS = 51_200_000
 BLOCK_UTILIZATION = 0.8
 
 
-def _size_hint(expr: Any) -> int:
+def _size_hint(expr: _IntLike) -> int:
     return V.graph.sizevars.optimization_hint(expr, fallback=1)
 
 

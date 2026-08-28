@@ -541,6 +541,16 @@ class _TensorPickleData:
             )
         self.metadata = dataclasses.replace(metadata, fake_mode=None)
 
+        # A view's base carries its own fake_mode, which drags in the whole
+        # FakeTensorMode -> FakeTensorConverter -> MetaConverter.storage_memo
+        # graph and dies on a meta storage's data_ptr(). unpickle() restores
+        # fake_mode on the base, so clearing it here keeps the two symmetric.
+        if self.metadata.is_view and self.metadata.base is not None:
+            self.metadata = dataclasses.replace(
+                self.metadata,
+                base=dataclasses.replace(self.metadata.base, fake_mode=None),
+            )
+
         # Some debugging/verification
         for k in MetaTensorDesc._UNSERIALIZABLE:
             if k in ("fake_mode", "view_func"):
