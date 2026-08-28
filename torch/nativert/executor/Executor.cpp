@@ -256,7 +256,7 @@ void Executor::clearStaleExecutionFrames() {
   }
 
   // Move active frames to inactive so they are cleared next time if not used
-  // Check  newActiveFramesSize > 0 to guuard against other threads adding
+  // Check  newActiveFramesSize > 0 to guard against other threads adding
   // frames to active queue during while loop
   while (executionFrames_.readIfNotEmpty(frame) && newActiveFramesSize > 0) {
     --newActiveFramesSize;

@@ -116,8 +116,8 @@ static void check_shape_forward(const Tensor& input,
       separator = " x ";
     }
 
-    TORCH_CHECK(false, "Calculated padded input size per channel: (", input_ss.str(), "). "
-                "Kernel size: (", kernel_ss.str(), "). Kernel size can't be greater than actual input size");
+    TORCH_CHECK(false, "Calculated padded input size per channel: (", std::move(input_ss).str(), "). "
+                "Kernel size: (", std::move(kernel_ss).str(), "). Kernel size can't be greater than actual input size");
   }
 }
 
@@ -348,7 +348,10 @@ Tensor mkldnn_convolution_pointwise(
       (input_t.requires_grad() || weight_t.requires_grad() ||
        (bias_opt.has_value() && bias_opt->defined() &&
         bias_opt->requires_grad()));
-  if (!maybe_backward) {
+  // With format_tag::any on dense contiguous inputs, oneDNN may choose a
+  // forward_inference primitive with an NHWC-like layout that is slower than
+  // the forward_training primitive and still has to be converted back to dense.
+  if (!maybe_backward && use_channels_last) {
     aprop_kind = ideep::prop_kind::forward_inference;
   }
   return _mkldnn_convolution(
@@ -680,6 +683,20 @@ std::vector<int64_t> _original_deconv_weight_size(
   return weight_IOHW_sizes;
 }
 
+bool _is_fake_deconv_weight_prepacked(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    int64_t groups) {
+  if (!weight_t.is_meta() || weight_t.dim() <= 2 || input_t.dim() <= 1) {
+    return false;
+  }
+
+  const auto input_channels = input_t.sizes()[1];
+  const auto regular_input_channels = weight_t.sizes()[0];
+  const auto packed_input_channels = weight_t.sizes()[1] * groups;
+  return input_channels != regular_input_channels &&
+      input_channels == packed_input_channels;
+}
 
 Tensor _mkldnn_convolution_transpose(
     const Tensor& input_t,
@@ -797,7 +814,12 @@ Tensor mkldnn_convolution_transpose_pointwise_meta(
     torch::List<std::optional<at::Scalar>> scalars,
     std::optional<std::string_view> algorithm) {
 
-  std::vector<int64_t> weight_IOHW_sizes = _original_deconv_weight_size(weight_t, groups);
+  const bool is_prepacked_weight =
+      weight_t.is_mkldnn() ||
+      _is_fake_deconv_weight_prepacked(input_t, weight_t, groups);
+  std::vector<int64_t> weight_IOHW_sizes =
+      is_prepacked_weight ? _original_deconv_weight_size(weight_t, groups)
+                          : weight_t.sizes().vec();
   int64_t dim = input_t.ndimension() - 2;
   const auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
   const auto stride_expanded = expand_param_if_needed(stride, "stride", dim);
@@ -962,7 +984,8 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_backward(
     std::tie(grad_weight, grad_bias) = mkldnn_convolution_backward_weights(
       weight.sizes(), grad_output, input, padding_expanded, stride_expanded, dilation_expanded, groups, output_mask[2], is_channels_last);
   }
-  return std::make_tuple(grad_input, grad_weight, grad_bias);
+  return std::make_tuple(
+      std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
 }
 }
 
@@ -1167,7 +1190,8 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_transpose_backward(
     std::tie(grad_weight, grad_bias) = mkldnn_convolution_transpose_backward_weights(
         weight.sizes(), grad_output, input, padding_expanded , output_padding_expanded , stride_expanded , dilation_expanded , groups, output_mask[2], is_channels_last);
   }
-  return std::make_tuple(grad_input, grad_weight, grad_bias);
+  return std::make_tuple(
+      std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
 }
 }
 

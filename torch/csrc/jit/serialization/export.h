@@ -65,7 +65,7 @@ TORCH_API std::string serialize_model_proto_to_string(
 
 TORCH_API void check_onnx_proto(const std::string& proto_string);
 
-// Serializer for both oldsyle and unified format TorchScript serialization
+// Serializer for both oldstyle and unified format TorchScript serialization
 class TORCH_API ScriptModuleSerializer {
  public:
   explicit ScriptModuleSerializer(
@@ -114,7 +114,7 @@ class TORCH_API ScriptModuleSerializer {
 
   // Uniquely identifies a SourceRange in a model.
   // SourceRanges are associated with Nodes of Graphs.
-  // However for mobile deployment we dont intend to ship
+  // However for mobile deployment we don't intend to ship
   // full JIT with capabilities of reading code and constructing
   // graphs.
   // Instead we serialize the Code generated from graph of the methods.

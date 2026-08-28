@@ -3,8 +3,6 @@
 #include <torch/csrc/autograd/anomaly_mode.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/engine.h>
-#include <torch/csrc/autograd/function.h>
-#include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/variable.h>
 
 #include <ATen/Tensor.h>
@@ -194,7 +192,7 @@ Variable SavedVariable::unpack(c10::intrusive_ptr<Node> saved_for) const {
                "that failed to compute its gradient. The variable in question "
                "was changed in there or anywhere later. Good luck!";
       }
-      TORCH_CHECK(false, message.str());
+      TORCH_CHECK(false, std::move(message).str());
     }
   }
 
@@ -252,7 +250,7 @@ void SavedVariable::set_hooks_and_pack_data(
   TORCH_CHECK(
       version == impl::version_counter(data).current_version(),
       "A saved tensor pack hook is modifying its input in place. "
-      "Tensors provided as input to pack hook can not be modified by "
+      "Tensors provided as input to pack hook cannot be modified by "
       "in-place operations as this can lead to unexpected side-effects. "
       "Please open an issue if you need to perform in-place operations on "
       "the input to a pack hook.");

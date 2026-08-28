@@ -365,7 +365,7 @@ In both cases, we also recompile on new striding behavior, device, or dtype.
 
 Behavior - fallback functions & depth:
     When an input doesn't match the format required by the specialized compiled op, it will run
-    a fallback function. Fallback functions are recursively be compiled and specialized based
+    a fallback function. Fallback functions are recursively compiled and specialized based
     on the observed tensor shapes. Since compilation can be slow, the "depth" parameter is provided to
     limit the number of specializations that can be compiled, before giving up on recompiling and
     falling back to a completely un-fused, un-specialized implementation.
@@ -656,7 +656,7 @@ struct NamedPolicy {
         }
         ss << nameFragment(cursors[i]);
       }
-      name = ss.str();
+      name = std::move(ss).str();
     }
     return value_type{std::move(name), Policy::create(cursors, std::move(v))};
   }

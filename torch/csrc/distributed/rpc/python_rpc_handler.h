@@ -42,7 +42,7 @@ class PYBIND11_EXPORT PythonRpcHandler {
   void handleException(const py::object& obj);
   // Alternative if the caller is already holding the GIL.
   void handleExceptionGILHeld(const py::object& obj);
-  // Check if obj is an RemoteException instance.
+  // Check if obj is a RemoteException instance.
   bool isRemoteException(const py::object& obj);
 
   // Explicitly clean up py::objects to avoid segment faults when
@@ -55,7 +55,7 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // PythonRpcHandler singleton cleans up py::objects and call dec_ref(), it
   // will crash.
   // The solution is to clean up py::objects earlier when Rpc agent join().
-  // Be note that py::objects can not be cleaned up when Rpc agent is destroyed
+  // Note that py::objects cannot be cleaned up when Rpc agent is destroyed
   // as well, as Rpc agent is global variable and it will have same issue as
   // PythonRpcHandler.
   void cleanup();

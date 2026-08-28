@@ -1,7 +1,5 @@
 #include <ATen/DTensorState.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/Resize.h>
-#include <c10/core/DeviceType.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/core/impl/GPUTrace.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
@@ -15,7 +13,6 @@
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/Size.h>
 #include <torch/csrc/THP.h>
-#include <torch/csrc/Types.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
@@ -34,7 +31,6 @@
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/pyobject_preservation.h>
 #include <torch/csrc/utils/python_arg_parser.h>
-#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_dispatch.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_new.h>
@@ -45,6 +41,7 @@
 #include <ATen/ATen.h>
 
 #include <structmember.h>
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <sstream>
@@ -116,10 +113,6 @@ class OperatorArgsKwargsView {
 
     bool operator==(const kwargs_iterator& rhs) const {
       return parent_ == rhs.parent_ && current_ == rhs.current_;
-    }
-
-    bool operator!=(const kwargs_iterator& rhs) {
-      return !(*this == rhs);
     }
 
    private:
@@ -1151,9 +1144,9 @@ class NativeOpSchema {
     std::ostringstream ss;
     ss << op_.operator_name().name;
     if (!op_.operator_name().overload_name.empty()) {
-      ss << "." << op_.operator_name().overload_name;
+      ss << '.' << op_.operator_name().overload_name;
     }
-    ss << "(";
+    ss << '(';
     bool first = true;
     for (const auto& item : comparison_key_) {
       if (!first)
@@ -1165,8 +1158,8 @@ class NativeOpSchema {
         ss << item.iv;
       }
     }
-    ss << ")";
-    return ss.str();
+    ss << ')';
+    return std::move(ss).str();
   }
 
  private:
@@ -1230,7 +1223,7 @@ void log_sharding_prop_cache_hit(
   if (!output_spec.is_none()) {
     ss << " -> " << py::str(output_spec).cast<std::string>();
   }
-  dtensor_dispatch_logger.attr("debug")(ss.str());
+  dtensor_dispatch_logger.attr("debug")(std::move(ss).str());
 }
 } // namespace
 
@@ -1350,14 +1343,14 @@ static bool is_random_op(const c10::OperatorHandle& op) {
       memcmp(op_name.name.data(), "aten::", aten_namespace_prefix_len) != 0) {
     return false;
   }
-  static constexpr std::array<std::string_view, 6> random_names = {{
+  static constexpr auto random_names = std::to_array<std::string_view>({
       "native_dropout",
       "normal_",
       "rand_like",
       "randn_like",
       "uniform_",
       "bernoulli",
-  }};
+  });
   std::string_view name_without_namespace(
       op_name.name.c_str() + aten_namespace_prefix_len,
       op_name.name.size() - aten_namespace_prefix_len);
@@ -1490,7 +1483,7 @@ static bool sets_intersect(
     return sets_intersect(bigger, smaller);
   }
   for (const auto& item : smaller) {
-    if (bigger.find(item) != bigger.end()) {
+    if (bigger.contains(item)) {
       return true;
     }
   }
@@ -1632,11 +1625,12 @@ py::object dispatchDTensorOp(
   // enough for now.
   const bool is_inplace_op =
       !operator_name.name.empty() && operator_name.name.back() == '_';
-  // Simple analysis of function schema to determine if this is an
-  // ou variant. It might not be entirely correct, but it's good
-  // enough for now.
+  const auto& schema_arguments = op.schema().arguments();
   const bool is_out_variant_op = !is_inplace_op &&
-      operator_name.overload_name.find("out") != std::string::npos;
+      std::any_of(
+          schema_arguments.begin(),
+          schema_arguments.end(),
+          [](const c10::Argument& argument) { return argument.is_out(); });
 
   // Fast path for default or view ops.
   const auto output_spec =
@@ -1998,7 +1992,8 @@ static PyObject* DTensor_compute_global_tensor_info_impl(
     } else if (!cpp_placement.is_replicate() && !cpp_placement.is_partial()) {
 #if IS_PYTHON_3_11_PLUS
       const auto placement_type_name =
-          py::str(py::handle(PyType_GetName(Py_TYPE(placement.ptr()))));
+          py::str(py::reinterpret_steal<py::object>(
+              PyType_GetName(Py_TYPE(placement.ptr()))));
 #else
       const auto placement_type_name =
           py::str(py::handle((PyObject*)Py_TYPE(placement.ptr()))
@@ -2084,7 +2079,6 @@ static std::pair<TensorFlavor, py::object> check_for_dtensor_or_tensor(
   // the try_replicate_spec_for_scalar_tensor stuff in our caller
   // specifically handles 1-element tensors.
 
-  torch::jit::guardAgainstNamedTensor<at::Tensor>(tensor);
   auto py_tensor = py::cast(tensor);
 
   const auto dtensor = get_dtensor_class();
@@ -2305,33 +2299,47 @@ create_native_op_schema(
 
   const auto handle_non_dtensor_arg =
       [&comparison_key, &comparison_key_hash, &native_info](
-          size_t idx, c10::IValue arg) {
-        bool is_none_or_undefined =
-            arg.isNone() || (arg.isTensor() && !arg.toTensor().defined());
-        if (idx >= native_info.static_argnum || is_none_or_undefined) {
-          if (arg.isList()) {
-            const auto& list = arg.toList();
-            if (list.empty()) {
-              arg = c10::ivalue::Tuple::create({});
-            } else {
-              // WARNING: here we rely on c10::List being represented
-              // by a contiguous array of IValue for efficiency!
-              arg = c10::ivalue::Tuple::create(c10::ArrayRef<c10::IValue>(
-                  &(*list.begin()).get(), list.size()));
-            }
-          } else if (arg.isTensor() && !arg.toTensor().defined()) {
-            // Coerce undefined Tensor to None, just as we do when
-            // converting IValues to PyObject. Otherwise comparison
-            // doesn't work. (undefined Tensors can get here because
-            // check_for_dtensor_or_tensor calls them non-Tensors, but
-            // doesn't have a way to do the coercion for us.)
-            arg = c10::IValue();
+          size_t idx, c10::IValue arg) -> bool {
+    bool is_none_or_undefined =
+        arg.isNone() || (arg.isTensor() && !arg.toTensor().defined());
+    if (idx >= native_info.static_argnum || is_none_or_undefined) {
+      if (arg.isSymInt() && arg.toSymInt().is_symbolic()) {
+        // Symbolic SymInts are scoped to a single tracing/capture context,
+        // so cached sharding results containing them cannot be reused.
+        return true;
+      }
+      if (arg.isSymIntList()) {
+        const auto symints = arg.toSymIntList();
+        for (const auto sym_idx : c10::irange(symints.size())) {
+          if (symints.get(sym_idx).is_symbolic()) {
+            return true;
           }
-          comparison_key_hash =
-              c10::hash_combine(comparison_key_hash, c10::IValue::hash(arg));
-          comparison_key.emplace_back(std::move(arg));
         }
-      };
+      }
+      if (arg.isList()) {
+        const auto& list = arg.toList();
+        if (list.empty()) {
+          arg = c10::ivalue::Tuple::create({});
+        } else {
+          // WARNING: here we rely on c10::List being represented
+          // by a contiguous array of IValue for efficiency!
+          arg = c10::ivalue::Tuple::create(
+              c10::ArrayRef<c10::IValue>(&(*list.begin()).get(), list.size()));
+        }
+      } else if (arg.isTensor() && !arg.toTensor().defined()) {
+        // Coerce undefined Tensor to None, just as we do when
+        // converting IValues to PyObject. Otherwise comparison
+        // doesn't work. (undefined Tensors can get here because
+        // check_for_dtensor_or_tensor calls them non-Tensors, but
+        // doesn't have a way to do the coercion for us.)
+        arg = c10::IValue();
+      }
+      comparison_key_hash =
+          c10::hash_combine(comparison_key_hash, c10::IValue::hash(arg));
+      comparison_key.emplace_back(std::move(arg));
+    }
+    return false;
+  };
   const auto handle_dtensor_arg = [&comparison_key,
                                    &comparison_key_hash](py::object arg) {
     comparison_key_hash = c10::hash_combine(
@@ -2340,19 +2348,33 @@ create_native_op_schema(
   };
 
   const auto handle_non_tensor_or_undefined =
-      [&comparison_key, &comparison_key_hash](c10::IValue arg) {
-        // We reach here when arg is TensorFlavor::NON_TENSOR
-        // (not a Tensor at all or undefined Tensor)
-        // We coerce undefined Tensor to None, just as we do when
-        // converting IValues to PyObject. (same behaviour as
-        // handle_non_dtensor_arg)
-        if (arg.isTensor() && !arg.toTensor().defined()) {
-          arg = c10::IValue();
+      [&comparison_key, &comparison_key_hash](c10::IValue arg) -> bool {
+    // We reach here when arg is TensorFlavor::NON_TENSOR
+    // (not a Tensor at all or undefined Tensor)
+    // We coerce undefined Tensor to None, just as we do when
+    // converting IValues to PyObject. (same behaviour as
+    // handle_non_dtensor_arg)
+    if (arg.isSymInt() && arg.toSymInt().is_symbolic()) {
+      // Symbolic SymInts are scoped to a single tracing/capture context,
+      // so cached sharding results containing them cannot be reused.
+      return true;
+    }
+    if (arg.isSymIntList()) {
+      const auto symints = arg.toSymIntList();
+      for (const auto sym_idx : c10::irange(symints.size())) {
+        if (symints.get(sym_idx).is_symbolic()) {
+          return true;
         }
-        comparison_key_hash =
-            c10::hash_combine(comparison_key_hash, c10::IValue::hash(arg));
-        comparison_key.emplace_back(std::move(arg));
-      };
+      }
+    }
+    if (arg.isTensor() && !arg.toTensor().defined()) {
+      arg = c10::IValue();
+    }
+    comparison_key_hash =
+        c10::hash_combine(comparison_key_hash, c10::IValue::hash(arg));
+    comparison_key.emplace_back(std::move(arg));
+    return false;
+  };
 
   const bool allow_implicit_replication =
       at::get_dtensor_allow_implicit_replication();
@@ -2430,13 +2452,17 @@ create_native_op_schema(
               // if the list's argument index is >= static_argnum.
               // Otherwise, step-varying scalars (like AdamW bias
               // corrections) cause unbounded cache growth.
-              handle_non_dtensor_arg(idx, item);
+              if (handle_non_dtensor_arg(idx, item)) {
+                return std::nullopt;
+              }
             }
           }
         } else {
           // non DTensor/Tensor args (i.e. int/float/bool), just add to
           // local_args
-          handle_non_dtensor_arg(idx, arg);
+          if (handle_non_dtensor_arg(idx, arg)) {
+            return std::nullopt;
+          }
         }
         break;
       }
@@ -2540,11 +2566,16 @@ create_native_op_schema(
                   item_flavor == TensorFlavor::NON_DTENSOR_TENSOR_SUBCLASS) {
                 handle_exactly_tensor(item_py_tensor);
               } else { // non-tensor
-                handle_non_tensor_or_undefined(item);
+                if (handle_non_tensor_or_undefined(item)) {
+                  return std::nullopt;
+                }
               }
             }
           } else {
-            handle_non_dtensor_arg(native_info.static_argnum, *argument_it);
+            if (handle_non_dtensor_arg(
+                    native_info.static_argnum, *argument_it)) {
+              return std::nullopt;
+            }
           }
           break;
         }
@@ -2760,6 +2791,15 @@ static int THPVariable_set_data(
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
+static std::optional<at::ScalarType> get_effective_grad_dtype(
+    const Variable& var) {
+  const auto& grad_fn = var.grad_fn();
+  if (grad_fn) {
+    return grad_fn->input_metadata(var.output_nr()).grad_dtype();
+  }
+  return var.grad_dtype();
+}
+
 static int THPVariable_set_grad(
     THPVariable* self,
     PyObject* py_grad,
@@ -2782,13 +2822,14 @@ static int THPVariable_set_grad(
       self != (THPVariable*)py_grad, "can't assign Variable as its own grad");
 
   const auto& grad = THPVariable_Unpack(py_grad);
-  if (var.grad_dtype().has_value()) {
+  const auto grad_dtype = get_effective_grad_dtype(var);
+  if (grad_dtype.has_value()) {
     TORCH_CHECK(
-        grad.dtype() == var.grad_dtype().value(),
+        grad.dtype() == grad_dtype.value(),
         "attempting to assign a gradient with dtype '",
         grad.dtype(),
         "' to a tensor with grad_dtype '",
-        var.grad_dtype().value(),
+        grad_dtype.value(),
         "'. The gradient must match the tensor's grad_dtype (defaults to the tensor's "
         "dtype). You can set the tensor's grad_dtype attribute with a specific dtype, or "
         "None to allow any dtype. Set grad_dtype with caution. Diverging the dtypes of "
@@ -2803,8 +2844,7 @@ static int THPVariable_set_grad(
       "'. Please ensure that the gradient and the tensor are on the same device");
   if (grad.layout() != kSparse) {
     auto expected_options = var.options().dtype(
-        var.grad_dtype().has_value() ? var.grad_dtype().value()
-                                     : grad.scalar_type());
+        grad_dtype.has_value() ? grad_dtype.value() : grad.scalar_type());
     TORCH_CHECK(
         grad.options().type_equal(expected_options),
         "attempting to assign a gradient to a tensor that has data of a different type");
@@ -2836,8 +2876,7 @@ static PyObject* THPVariable_get_volatile(THPVariable* self, void* unused) {
   }
   const char* msg = "volatile was removed (Variable.volatile is always False)";
   auto r = PyErr_WarnEx(PyExc_UserWarning, msg, 1);
-  if (r != 0)
-    throw python_error();
+  TORCH_CHECK_PYTHON(r == 0);
   Py_RETURN_FALSE;
   END_HANDLE_TH_ERRORS
 }
@@ -2851,8 +2890,7 @@ static int THPVariable_set_volatile(
     return handle_torch_function_setter(self, "volatile", obj);
   }
   auto r = PyErr_WarnEx(PyExc_UserWarning, VOLATILE_WARNING, 1);
-  if (r != 0)
-    throw python_error();
+  TORCH_CHECK_PYTHON(r == 0);
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
 }
@@ -2902,64 +2940,6 @@ static PyObject* THPVariable_get_ndim(THPVariable* self, void* unused) {
   }
   return THPUtils_packInt64(THPVariable_Unpack(self).dim());
   END_HANDLE_TH_ERRORS
-}
-
-static PyObject* THPVariable_get_names(PyObject* self, void* unused) {
-  HANDLE_TH_ERRORS
-  if (has_torch_function(self)) {
-    return handle_torch_function_getter((THPVariable*)self, "names");
-  }
-  // The long-term plan is to return a list of (python) torch.Dimname.
-  // However, for now, return a list of string.
-  const auto& tensor = THPVariable_Unpack(self);
-  auto size = tensor.dim();
-  THPObjectPtr tuple(PyTuple_New(size));
-  if (!tuple)
-    throw python_error();
-
-  const auto dimnames = tensor.names();
-  for (const auto i : c10::irange(size)) {
-    PyObject* str = nullptr;
-    if (dimnames[i].type() == at::NameType::WILDCARD) {
-      // PyTuple_SET_ITEM steals a reference to the object. When the tuple is
-      // deallocated, it'll decrement the refcount on Py_None, which is bad.
-      // To avoid this, we "create" a new reference to Py_None by increasing
-      // the refcount.
-      // Sources:
-      // - https://docs.python.org/3/c-api/tuple.html#c.PyTuple_SetItem
-      // -
-      // https://stackoverflow.com/questions/16400600/how-to-return-a-tuple-containing-a-none-value-from-the-c-api
-      str = Py_NewRef(Py_None);
-    } else {
-      str = THPUtils_packString(dimnames[i].symbol().toUnqualString());
-      if (!str)
-        throw python_error();
-    }
-    PyTuple_SET_ITEM(tuple.get(), i, str);
-  }
-  return tuple.release();
-  END_HANDLE_TH_ERRORS
-}
-
-static int THPVariable_set_names(
-    PyObject* self,
-    PyObject* names,
-    void* unused) {
-  HANDLE_TH_ERRORS
-  if (has_torch_function(self)) {
-    return handle_torch_function_setter((THPVariable*)self, "names", names);
-  }
-  const auto& var = THPVariable_Unpack(self);
-  if (Py_IsNone(names)) {
-    at::internal_set_names_inplace(var, std::nullopt);
-  } else {
-    TORCH_CHECK(
-        THPUtils_checkDimnameList(names),
-        "names must either be None or a tuple of dim names");
-    at::internal_set_names_inplace(var, torch::parseDimnameList(names));
-  }
-  return 0;
-  END_HANDLE_TH_ERRORS_RET(-1)
 }
 
 static int THPVariable_set_requires_grad(
@@ -3315,12 +3295,11 @@ static PyObject* THPVariable_get_grad_dtype(THPVariable* self, void* unused) {
     return handle_torch_function_getter(self, "grad_dtype");
   }
   const auto& var = THPVariable_Unpack(self);
-  TORCH_CHECK(
-      !var.grad_fn(), "grad_dtype can only be accessed on leaf tensors.");
-  if (!var.grad_dtype().has_value()) {
+  const auto grad_dtype = get_effective_grad_dtype(var);
+  if (!grad_dtype.has_value()) {
     Py_RETURN_NONE;
   } else {
-    return torch::autograd::utils::wrap(var.grad_dtype().value());
+    return torch::autograd::utils::wrap(grad_dtype.value());
   }
   END_HANDLE_TH_ERRORS
 }
@@ -3502,11 +3481,6 @@ static struct PyGetSetDef THPVariable_properties[] = {
     {"ndim", (getter)THPVariable_get_ndim, nullptr, nullptr, nullptr},
     {"nbytes", (getter)THPVariable_get_nbytes, nullptr, nullptr, nullptr},
     {"itemsize", (getter)THPVariable_get_itemsize, nullptr, nullptr, nullptr},
-    {"names",
-     (getter)THPVariable_get_names,
-     (setter)THPVariable_set_names,
-     nullptr,
-     nullptr},
     {"real",
      (getter)PropertyReal::getter,
      (setter)THPVariable_set_real,

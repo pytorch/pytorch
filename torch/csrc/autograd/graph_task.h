@@ -115,7 +115,7 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
   };
   // exec_info_ is safe to read without synchronization
   std::unordered_map<Node*, ExecInfo> exec_info_;
-  // Captures variables are grads captured that we return to the user. After
+  // Captured variables are grads captured that we return to the user. After
   // execution of the GraphTask is completed, the captured_vars_ are moved
   // out of the GraphTask and are no longer valid.
   std::vector<Variable> captured_vars_;
@@ -177,7 +177,7 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
   // invoked. So any given graph task maintains its own cpu_ready_queue_ where
   // you should send work for it to be done. We memoize the cpu_ready_queue_ per
   // GraphTask so that we know which ready queue we should push to if we are on
-  // device thread (i.e. GPU) and but next NodeTask should be run on CPU.
+  // device thread (i.e. GPU) but next NodeTask should be run on CPU.
   std::shared_ptr<ReadyQueue> cpu_ready_queue_;
 
   // Future representing the completion of the graph task. Notified when all
@@ -186,7 +186,7 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
 
   // Final callbacks installed during execution of this GraphTask
   std::vector<std::function<void()>> final_callbacks_;
-  // To protect reads and writes to final_callbacks_. Intentionally no reusing
+  // To protect reads and writes to final_callbacks_. Intentionally not reusing
   // mutex_ as the two are protecting different data structures.
   std::mutex final_callbacks_lock_;
 

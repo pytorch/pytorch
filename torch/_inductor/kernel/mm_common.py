@@ -12,6 +12,7 @@ from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 
 from .. import config
+from ..codegen.triton_utils import use_block_ptr_enabled
 from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import _IntLike, Layout, TensorBox
 from ..utils import load_template, triton_type
@@ -86,7 +87,8 @@ def mm_args(
             [*b, m, n],
         )
     else:
-        assert out_dtype is None, "out_dtype is ignored if layout is specified."
+        if out_dtype is not None:
+            raise AssertionError("out_dtype is ignored if layout is specified.")
     from ..lowering import expand
 
     others = [realize_inputs(expand(x, layout.size)) for x in others]
@@ -144,9 +146,9 @@ def use_native_matmul(mat1, mat2):
     ):
         raise AssertionError("native matmul doesn't support tma codegen yet")
 
-    # Currently only enable native matmul for default indexing
-    # TODO : support block ptr
-    if config.triton.use_block_ptr:
+    # Currently only enable native matmul for default indexing.
+    # TODO: support block ptr
+    if use_block_ptr_enabled():
         raise AssertionError("native matmul doesn't support block_ptr codegen yet")
 
     # Currently only enable native matmul for triton on GPU.
@@ -175,7 +177,7 @@ def use_native_matmul(mat1, mat2):
     # If the shape has unbacked symbols, don't do native matmul.
     # This is related to the behavior of statically_known_multiple_of on unbacked symints.
     # Since statically_known_multiple_of just returns False for unbacked symbols
-    # due to the expensive cost, codegen fails when there is a unbacked symbol.
+    # due to the expensive cost, codegen fails when there is an unbacked symbol.
     # In particular, it fails at _split_iteration_ranges in codegen/simd.py.
     # See this : https://github.com/pytorch/pytorch/pull/131649
     if any(map(has_free_unbacked_symbols, [m, k, n])):
@@ -191,6 +193,32 @@ def use_native_matmul(mat1, mat2):
         return False
 
     return True
+
+
+def _use_small_mm_pointwise(
+    m, k, n, device_type: str, statically_known_true=None
+) -> bool:
+    """Check if mm should be lowered to pointwise ops for small K and N.
+
+    For very small inner dimensions (K < 5 and N < 5) with M >= 64,
+    cuBLAS launch overhead dominates and a fused pointwise kernel is
+    faster (1.2-4.8x on H200).  M >= 64 excludes tiny matrices where
+    pointwise kernel launch overhead negates the benefit.  K,N < 5
+    avoids shapes where Triton codegen quality is unstable (K=5 regresses
+    at large M due to reduction-dimension alignment).  Disabled under
+    max_autotune to preserve template selection.
+    See https://github.com/pytorch/pytorch/issues/186348
+
+    ``statically_known_true`` lets callers that run before the inductor
+    ``GraphLowering`` is active (e.g. the pad_mm joint-graph pass, where
+    ``V.graph`` is unavailable) supply their own predicate.
+    """
+    if config.max_autotune or config.max_autotune_gemm:
+        return False
+    if device_type in ("cpu", "mps"):
+        return False
+    skt = statically_known_true or V.graph.sizevars.statically_known_true
+    return skt(m >= 64) and skt(k < 5) and skt(n < 5)
 
 
 def _is_static_problem(layout: Layout) -> tuple[bool, bool]:
@@ -254,7 +282,8 @@ def is_batch_stride_largest_or_zero(mat1, mat2, layout) -> bool:
     sizes = [mat1.get_size(), mat2.get_size(), layout.size]
     strides = [mat1.get_stride(), mat2.get_stride(), layout.stride]
     for size, stride in zip(sizes, strides):
-        assert len(size) == len(stride) == 3, "Expect 3D tensors"
+        if not (len(size) == len(stride) == 3):
+            raise AssertionError("Expect 3D tensors")
         if stride[0] != 0 and stride[0] != sympy_product(size[1:]):
             return False
 
@@ -263,6 +292,3 @@ def is_batch_stride_largest_or_zero(mat1, mat2, layout) -> bool:
 
 _KERNEL_TEMPLATE_DIR = Path(__file__).parent / "templates"
 load_kernel_template = partial(load_template, template_dir=_KERNEL_TEMPLATE_DIR)
-
-_KERNEL_TEMPLATE_FB_DIR = Path(__file__).parent.parent / "fb" / "tlx_templates"
-load_fb_kernel_template = partial(load_template, template_dir=_KERNEL_TEMPLATE_FB_DIR)

@@ -181,7 +181,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
               // Release ownership on py::objects and also restore Python
               // Error Indicator.
               e.restore();
-              // Clear the Python Error Indicator as we has recorded the
+              // Clear the Python Error Indicator as we have recorded the
               // exception in the response message.
               PyErr_Clear();
             }
@@ -207,7 +207,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
               // Release ownership on py::objects and also restore Python
               // Error Indicator.
               e.restore();
-              // Clear the Python Error Indicator as we has recorded the
+              // Clear the Python Error Indicator as we have recorded the
               // exception in the response message.
               PyErr_Clear();
             }
@@ -772,14 +772,6 @@ inline IValue createGenericDict(
   return IValue(elems);
 }
 
-template <class T>
-inline void guardAgainstNamedTensor(const T& var) {
-  TORCH_CHECK(
-      !var.has_names(),
-      "NYI: Named tensors are currently unsupported in TorchScript. As a  "
-      "workaround please drop names via `tensor = tensor.rename(None)`.");
-}
-
 // Extract custom class registered with torchbind
 template <typename T>
 c10::intrusive_ptr<T> toCustomClass(py::handle obj) {
@@ -808,7 +800,7 @@ inline std::string friendlyTypeName(py::handle obj) {
       first = false;
     }
     ss << "))";
-    return ss.str();
+    return std::move(ss).str();
   } else {
     return py::str(py::type::handle_of(obj).attr("__name__"));
   }
@@ -876,7 +868,7 @@ inline py::object getScriptedClassOrError(const c10::NamedTypePtr& classType) {
     err << "Unknown reference to ScriptClass ";
     err << classType->name()->qualifiedName();
     err << ". (Did you forget to import it?)";
-    throw std::runtime_error(err.str());
+    throw std::runtime_error(std::move(err).str());
   }
   return py_class;
 }
