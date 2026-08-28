@@ -1811,12 +1811,22 @@ class TritonOverrides(OpOverrides):
         is_pure=True,
         pack=1,
         input_dtypes=None,
+        output_dtypes=None,
+        output_index=0,
     ):
+        """Emit inline asm and share multiple outputs through kernel CSE."""
         # Use the actual dtype, not the compute type — the asm operates on
         # specific register types and Triton needs to know the real output type.
-        asm_triton_type = triton_type(dtype)
+        all_output_dtypes = output_dtypes or (dtype,)
+        asm_triton_type = (
+            f"({', '.join(triton_type(dt) for dt in all_output_dtypes)})"
+            if output_dtypes is not None
+            else triton_type(dtype)
+        )
         if constraints is None:
-            constraints = ", ".join(["=r"] + ["r" for _ in inputs])
+            constraints = ", ".join(
+                ["=r" for _ in all_output_dtypes] + ["r" for _ in inputs]
+            )
 
         # Inductor computes bf16/fp16 in fp32. For "h" (16-bit register)
         # constraints, cast back to the original dtype so the asm sees the
@@ -1852,21 +1862,40 @@ class TritonOverrides(OpOverrides):
                 f"[{args}], dtype={asm_triton_type}, is_pure={is_pure}, pack={pack})"
             )
 
-        if pack <= 1:
-            return asm_call(", ".join(cast_inputs))
+        args = ", ".join(cast_inputs)
+        if pack <= 1 and output_dtypes is None:
+            return asm_call(args)
 
         first_input = inputs[0]
         compute = V.kernel.compute
         cse = V.kernel.cse
-        result = cse.newvar(dtype=dtype, shape=first_input.shape)
-        packed_args = ", ".join(
-            f"triton_helpers.inline_asm_pack({inp}, {pack})" for inp in cast_inputs
+        if pack > 1:
+            args = ", ".join(
+                f"triton_helpers.inline_asm_pack({inp}, {pack})" for inp in cast_inputs
+            )
+        call = asm_call(args)
+        cache_key = f"inline_asm_elementwise({call})"
+        output_key = f"{cache_key}[{output_index}]"
+        if result := cse.try_get(output_key):
+            return result
+
+        result = tuple(
+            cse.newvar(dtype=dt, shape=first_input.shape) for dt in all_output_dtypes
         )
-        compute.writeline(f"{result} = {asm_call(packed_args)}")
-        compute.writeline(
-            f"{result} = triton_helpers.inline_asm_unpack({result}, {first_input}, {pack})"
-        )
-        return result
+        compute.writeline(f"{', '.join(map(str, result))} = {call}")
+        if pack > 1:
+            unpacked = tuple(
+                cse.newvar(dtype=dt, shape=first_input.shape)
+                for dt in all_output_dtypes
+            )
+            for out, packed in zip(unpacked, result):
+                compute.writeline(
+                    f"{out} = triton_helpers.inline_asm_unpack({packed}, {first_input}, {pack})"
+                )
+            result = unpacked
+        for index, output in enumerate(result):
+            cse.put(f"{cache_key}[{index}]", output)
+        return result[output_index]
 
     @staticmethod
     @maybe_upcast_float32()
