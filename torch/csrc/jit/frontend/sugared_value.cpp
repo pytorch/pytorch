@@ -290,7 +290,7 @@ std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
   };
   if (value_->type()->kind() == TypeKind::TupleType) {
     auto outputs = createTupleUnpack(value_);
-    return fmap(outputs, make_simple_value);
+    return fmap(std::move(outputs), make_simple_value);
   } else if (value_->type()->kind() == TypeKind::ListType) {
     if (!size_hint) {
       throw(
