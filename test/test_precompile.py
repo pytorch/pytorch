@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import types
 import unittest
 from unittest import mock
 
@@ -126,6 +127,22 @@ def _precompile_dynamo_mutates_global(x):
 
 def _precompile_dynamo_gather(x, idx):
     return x.sin()[idx] + x.shape[0]
+
+
+class _PrecompileDynamoTensorClassAttr:
+    tensor = torch.randn(3)
+
+
+def _precompile_dynamo_class_attr_tensor(x):
+    return x + _PrecompileDynamoTensorClassAttr.tensor
+
+
+_DYNAMO_TENSOR_MODULE = types.ModuleType("_precompile_dynamo_tensor_module")
+_DYNAMO_TENSOR_MODULE.weight = torch.randn(3)
+
+
+def _precompile_dynamo_module_attr_tensor(x):
+    return x + _DYNAMO_TENSOR_MODULE.weight
 
 
 def _precompile_dynamo_stateful_flaky(x, mode):
@@ -1276,14 +1293,21 @@ class TestPrecompile(TestCase):
 
     def test_tracer_dynamo_rejects_tensor_global(self):
         # A referenced global tensor would only exist in the caller's module, so
-        # the artifact would capture fine and then serve a raw NameError.
-        with self.assertRaisesRegex(PrecompileError, "tensor-valued Python globals"):
-            torch.compiler.precompile(
-                _precompile_dynamo_global_tensor,
-                example_inputs=[(torch.randn(3),)],
-                tracer="dynamo",
-                backend="eager",
-            )
+        # the artifact would capture fine and then serve a raw NameError. The
+        # rejection must also see tensors held as class attributes and as
+        # attributes of user (non-library) modules.
+        for fn in (
+            _precompile_dynamo_global_tensor,
+            _precompile_dynamo_class_attr_tensor,
+            _precompile_dynamo_module_attr_tensor,
+        ):
+            with self.assertRaisesRegex(PrecompileError, "contains a tensor"):
+                torch.compiler.precompile(
+                    fn,
+                    example_inputs=[(torch.randn(3),)],
+                    tracer="dynamo",
+                    backend="eager",
+                )
 
     def test_tracer_dynamo_rejects_global_mutation(self):
         # Capture runs against a copy of the fn's globals and the artifact against
@@ -1296,6 +1320,37 @@ class TestPrecompile(TestCase):
                 backend="eager",
             )
         self.assertIsNone(_DYNAMO_MUTATED_GLOBAL)
+
+    def test_tracer_dynamo_rejects_overlapping_storage_inputs(self):
+        base = torch.randn(6)
+        with self.assertRaisesRegex(PrecompileError, "share or overlap storage"):
+            torch.compiler.precompile(
+                _precompile_dynamo_aliasing,
+                example_inputs=[(base[0:4], base[2:6])],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_serve_rejects_overlapping_storage_inputs(self):
+        # The AOT StorageOverlap relation has no serialized form, so an artifact
+        # captured on non-overlapping inputs must raise on overlapping runtime
+        # views instead of silently computing the wrong thing (the fn mutates
+        # its first argument).
+        a = torch.randn(4)
+        b = torch.randn(4)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_aliasing,
+            example_inputs=[(a, b)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        a2, b2 = torch.randn(4), torch.randn(4)
+        expected = _precompile_dynamo_aliasing(a2.clone(), b2)
+        self.assertEqual(loaded(a2, b2), expected)
+        base = torch.randn(6)
+        with self.assertRaisesRegex(PrecompileError, "share or overlap storage"):
+            loaded(base[0:4], base[2:6])
 
     def test_tracer_dynamo_environment_is_specialized_at_capture(self):
         # The programming-model contract: environment guards are minimized away,
@@ -1450,10 +1505,11 @@ class TestPrecompile(TestCase):
             backend="eager",
         )
         state = _load_dynamo_state(code)
-        # Superset: additive state keys are compatible format evolution.
-        self.assertLessEqual(
-            {"code", "import_sources", "defaults", "kwdefaults", "closure", "variants"},
+        # Exact set: this pins the serialized format. Adding a key is fine but
+        # must update this test (and be consumed somewhere) deliberately.
+        self.assertEqual(
             set(state),
+            {"code", "import_sources", "defaults", "kwdefaults", "closure", "variants"},
         )
         self.assertEqual(len(state["variants"]), 1)
         make_fx_code, _ = torch.compiler.precompile(
@@ -1707,6 +1763,38 @@ class TestPrecompile(TestCase):
             # reproduces eager, including the failure mode, on bad data).
             y = torch.randn(3)
             self.assertEqual(loaded(y, ok), _precompile_dynamo_gather(y, ok))
+
+    def test_tracer_dynamo_stateful_rejects_unbindable_example(self):
+        # A wrong-arity example must raise without being recorded: recorded
+        # examples are signature.bind()'d on every rebuild, so recording it
+        # would poison every later call on the state.
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = {
+                "artifact_path": os.path.join(tmp, "u.py"),
+                "cache_path": os.path.join(tmp, "u.cache"),
+            }
+            kwargs = {"tracer": "dynamo", "backend": "eager", **paths}
+            x = torch.randn(4)
+            _, state = torch.compiler.precompile(
+                _precompile_dynamo_scalar, example_inputs=[(x, 1)], state=None, **kwargs
+            )
+            self.addCleanup(state.close)
+            with self.assertRaisesRegex(TypeError, "does not match the positional"):
+                torch.compiler.precompile(
+                    _precompile_dynamo_scalar,
+                    example_inputs=[(x, 1, 2)],
+                    state=state,
+                    **kwargs,
+                )
+            result, state = torch.compiler.precompile(
+                _precompile_dynamo_scalar,
+                example_inputs=[(x, 3)],
+                state=state,
+                **kwargs,
+            )
+            self.assertEqual(result, x + 3)
+            loaded = torch.compiler.precompile.load(**paths)
+            self.assertEqual(loaded(x, 3), x + 3)
 
     @torch._dynamo.config.patch(
         automatic_dynamic_shapes=True, assume_static_by_default=True
@@ -2135,8 +2223,11 @@ class TestPrecompile(TestCase):
                     ),
                     artifact_path,
                 ],
-                # Serving never invokes Dynamo: the artifact must work with the
-                # compiler disabled outright.
+                # The artifact must keep working with the compiler hard-disabled
+                # (a serve path that needed to compile would crash here; note a
+                # dynamo invocation that silently fell back to eager would not
+                # be caught -- the no-compile property is pinned by the load
+                # test's frame-counter assertion).
                 env={**os.environ, "TORCHDYNAMO_DISABLE": "1"},
             )
         finally:
@@ -2170,12 +2261,17 @@ class TestPrecompile(TestCase):
                         )
                         x = t.randn(4)
                         t.testing.assert_close(loaded(x), t.sin(x))
+                        # Serving must never compile: dynamo is enabled in this
+                        # child, so any compile would show up here.
+                        from torch._dynamo.utils import counters
+
+                        if counters["frames"]:
+                            raise AssertionError(dict(counters["frames"]))
                         """
                     ),
                     artifact_path,
                     cache_path,
                 ],
-                env={**os.environ, "TORCHDYNAMO_DISABLE": "1"},
             )
 
     def test_tracer_dynamo_varargs_dispatch(self):
@@ -2192,6 +2288,10 @@ class TestPrecompile(TestCase):
 
     @torch._dynamo.config.patch(recompile_limit=8)
     def test_tracer_dynamo_captures_more_than_default_recompile_limit(self):
+        # dynamic=False keeps every example a distinct static variant (automatic
+        # dynamic would fold them into one symbolic graph after two examples and
+        # never approach the limit), so 9 variants genuinely require the capture
+        # limit to be raised past the patched config default of 8.
         x = torch.randn(4)
         examples = [(x, value) for value in range(9)]
         code, cache = torch.compiler.precompile(
@@ -2199,7 +2299,9 @@ class TestPrecompile(TestCase):
             example_inputs=examples,
             tracer="dynamo",
             backend="eager",
+            dynamic=False,
         )
+        self.assertIn("VARIANT_COUNT = 9", code)
         loaded = torch.compiler.precompile.load(code, cache)
         for args in examples:
             self.assertEqual(loaded(*args), _precompile_dynamo_scalar(*args))
@@ -2351,8 +2453,11 @@ class TestPrecompile(TestCase):
                     ),
                     artifact_path,
                 ],
-                # Serving never invokes Dynamo: the artifact must work with the
-                # compiler disabled outright.
+                # The artifact must keep working with the compiler hard-disabled
+                # (a serve path that needed to compile would crash here; note a
+                # dynamo invocation that silently fell back to eager would not
+                # be caught -- the no-compile property is pinned by the load
+                # test's frame-counter assertion).
                 env={**os.environ, "TORCHDYNAMO_DISABLE": "1"},
             )
         finally:

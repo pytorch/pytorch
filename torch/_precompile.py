@@ -179,8 +179,11 @@ it.
 #    binaries instead of JIT-compiling. Both the cache priming (it unpickles) and the exec run
 #    code you supplied; treat both python_code and the cache like code you are about to
 #    run. The code_hash binds the cache to its python_code:
-#    load() rejects a (code, cache) pair from different precompile() calls (same
-#    backend) rather than silently running the cache's graph under foreign metadata.
+#    load() rejects a make_fx (code, cache) pair from different precompile() calls
+#    (same backend) rather than silently running the cache's graph under foreign
+#    metadata; for dynamo artifacts the mismatch degrades to a cold cache with a
+#    warning (python_code is fully self-contained, and a stateful rewrite
+#    interrupted between its two renames leaves exactly such a pair).
 #
 # self-contained: ``python_code`` runs on its own -- it inlines the composed graph
 # module (inductor: kernels JIT-compiled on first call, plus AOTAutograd's codegen'd
@@ -1800,11 +1803,20 @@ def _validate_dynamo_capture(
     fn: Callable[..., object],
     example_inputs: Sequence[tuple[object, ...]],
     decompositions: dict | None,
+    *,
+    check_environment: bool = True,
 ) -> Callable[..., object]:
-    """Reject unsupported dynamo-capture inputs; return the innermost target fn."""
+    """Reject unsupported dynamo-capture inputs; return the innermost target fn.
+
+    ``check_environment=False`` skips the input-independent scan of the fn's
+    referenced globals (the tensor-global rejection): stateful capture runs it
+    once when the state is created, since the programming model declares the
+    environment invariant between calls and the scan walks whole object graphs.
+    """
     import dis
     import inspect
     import pickle
+    import sys
     import types
 
     if not example_inputs:
@@ -1815,6 +1827,10 @@ def _validate_dynamo_capture(
         raise NotImplementedError(
             "precompile decompositions are not yet supported with tracer='dynamo'."
         )
+
+    def is_library_module(module_name: str | None) -> bool:
+        root = (module_name or "").partition(".")[0]
+        return root == "torch" or root in sys.stdlib_module_names
 
     def reaches(
         value: object, predicate: Callable[[object], bool], seen: set[int]
@@ -1833,11 +1849,72 @@ def _validate_dynamo_capture(
             )
         if isinstance(value, (tuple, list, set, frozenset)):
             return any(reaches(item, predicate, seen) for item in value)
-        if isinstance(
-            value, (types.FunctionType, types.ModuleType, type, torch.Tensor)
-        ) or not hasattr(value, "__dict__"):
+        if isinstance(value, types.ModuleType):
+            # User modules can carry tensors as attributes; library modules are
+            # part of the environment and are not traversed.
+            if is_library_module(value.__name__):
+                return False
+            return any(reaches(item, predicate, seen) for item in vars(value).values())
+        if isinstance(value, type):
+            if is_library_module(value.__module__):
+                return False
+            return any(
+                reaches(item, predicate, seen)
+                for cls in value.__mro__
+                if not is_library_module(cls.__module__)
+                for item in vars(cls).values()
+            )
+        if isinstance(value, (types.FunctionType, torch.Tensor)):
             return False
-        return any(reaches(item, predicate, seen) for item in vars(value).values())
+        if not hasattr(value, "__dict__"):
+            return False
+        # Instance state, plus class attributes reachable through the instance.
+        return any(
+            reaches(item, predicate, seen) for item in vars(value).values()
+        ) or reaches(type(value), predicate, seen)
+
+    def has_storage_overlap(values: object) -> bool:
+        # The same tensor object passed twice is a supported identity relation
+        # (Dynamo's serialized aliasing guards cover it); DISTINCT tensors that
+        # share or overlap storage are not: their AOT StorageOverlap relation
+        # does not survive serialization, so a mutating variant could silently
+        # serve wrong results.
+        tensors = [
+            value
+            for value in pytree.tree_leaves(values)
+            if isinstance(value, torch.Tensor)
+        ]
+        storage_ranges: dict[tuple[str, int | None], list[tuple[int, int]]] = {}
+        storage_ids: set[tuple[str, int | None, int]] = set()
+        seen_objects: set[int] = set()
+        for tensor in tensors:
+            if id(tensor) in seen_objects:
+                continue
+            seen_objects.add(id(tensor))
+            try:
+                storage = tensor.untyped_storage()
+                start = storage.data_ptr()
+                size = storage.nbytes()
+            except RuntimeError as e:
+                raise PrecompileError(
+                    "precompile tracer='dynamo' cannot verify storage overlap "
+                    "for this tensor input."
+                ) from e
+            storage_key = (tensor.device.type, tensor.device.index, storage._cdata)
+            if storage_key in storage_ids:
+                return True
+            storage_ids.add(storage_key)
+            if start != 0 and size > 0:
+                storage_ranges.setdefault(
+                    (tensor.device.type, tensor.device.index), []
+                ).append((start, start + size))
+        for ranges in storage_ranges.values():
+            furthest_end = 0
+            for start, end in sorted(ranges):
+                if start < furthest_end:
+                    return True
+                furthest_end = max(furthest_end, end)
+        return False
 
     for example in example_inputs:
         if not isinstance(example, tuple):
@@ -1850,6 +1927,12 @@ def _validate_dynamo_capture(
                 "precompile tracer='dynamo' does not yet support nn.Module arguments "
                 "(including inside containers) because Dynamo's module identity "
                 "guards are not serializable."
+            )
+        if has_storage_overlap(example):
+            raise PrecompileError(
+                "precompile tracer='dynamo' does not support distinct tensor "
+                "inputs that share or overlap storage; pass the same tensor "
+                "object, or clone the views into separate tensors."
             )
 
     from torch._dynamo.eval_frame import innermost_fn
@@ -1938,21 +2021,26 @@ def _validate_dynamo_capture(
     # A referenced tensor-valued global would be guarded by identity and read
     # through the fn's globals at serve time, where the artifact namespace has
     # no such name: capture would succeed and serving would fail with a raw
-    # NameError. Every tensor must be an explicit input.
-    tensor_globals = [
-        name
-        for name in sorted(loaded_global_names(target.__code__))
-        if name in target.__globals__
-        and reaches(
-            target.__globals__[name], lambda v: isinstance(v, torch.Tensor), set()
-        )
-    ]
-    if tensor_globals:
-        raise PrecompileError(
-            "precompile tracer='dynamo' cannot capture tensor-valued Python globals; "
-            "pass every tensor as an explicit input. Referenced global: "
-            f"{tensor_globals[0]!r}."
-        )
+    # NameError. The scan is deliberately conservative: a global is rejected
+    # when ANY tensor is reachable from it (through containers, instance state,
+    # class attributes, or non-library modules), even if the fn never reads the
+    # tensor itself.
+    if check_environment:
+        tensor_globals = [
+            name
+            for name in sorted(loaded_global_names(target.__code__))
+            if name in target.__globals__
+            and reaches(
+                target.__globals__[name], lambda v: isinstance(v, torch.Tensor), set()
+            )
+        ]
+        if tensor_globals:
+            raise PrecompileError(
+                "precompile tracer='dynamo' cannot capture a Python global whose "
+                f"object graph contains a tensor (global {tensor_globals[0]!r}); "
+                "every tensor must be an explicit input, so pass the values the "
+                "function needs as arguments instead."
+            )
     return target
 
 
@@ -2419,7 +2507,9 @@ def _precompile_dynamo_stateful(
     from torch._dynamo.package import CompilePackage
     from torch._dynamo.pgo import _new_code_state
 
-    target = _validate_dynamo_capture(fn, example_inputs, decompositions)
+    target = _validate_dynamo_capture(
+        fn, example_inputs, decompositions, check_environment=state is None
+    )
     with _DYNAMO_COMPILE_LOCK:
         fresh = state is None
         if state is None:
@@ -2495,12 +2585,27 @@ def _precompile_dynamo_stateful(
                         state.capture_limit,
                         state.dynamic,
                     )
+                import inspect
+
+                signature = inspect.signature(state.capture_target)
                 results = []
                 for example in example_inputs:
-                    # Record the example before running it: Dynamo installs a new
-                    # guarded variant at frame entry, so a step that raises after
-                    # compiling would otherwise leave a variant matching no
-                    # recorded example and every later rebuild would fail.
+                    # An unbindable example (a caller arity mistake) must never
+                    # be recorded: guard minimization signature.bind()s every
+                    # recorded example on every rebuild, so it would poison the
+                    # state. Probe the bind first, then record BEFORE running:
+                    # Dynamo installs a new guarded variant at frame entry, so a
+                    # step that raises after compiling would otherwise leave a
+                    # variant matching no recorded example and every later
+                    # rebuild would fail.
+                    try:
+                        signature.bind(*example)
+                    except TypeError as e:
+                        raise TypeError(
+                            f"precompile example does not match the positional "
+                            f"signature of {state.target.__name__!r}: {e}. The "
+                            "state is unchanged."
+                        ) from e
                     state.examples.append(example)
                     results.append(state.compiled(*example))
                 try:
@@ -2929,8 +3034,11 @@ class _PrecompileApi:
           compiling at runtime. This initial path requires one full graph (graph breaks
           are rejected), a function without closure cells, and positional tensor/scalar
           arguments or containers of those values (``nn.Module`` arguments are not
-          supported yet). Tensor-valued globals are rejected (every tensor must be an
-          explicit input), as are functions that mutate globals.
+          supported yet). A global whose object graph contains a tensor is rejected
+          conservatively (every tensor must be an explicit input), as are functions
+          that mutate globals, and distinct tensor inputs that share or overlap
+          storage (the same tensor object may repeat; the loaded artifact also
+          raises on overlapping runtime inputs).
 
         ``decompositions`` is an optional decomposition table (a dict mapping each
         ``OpOverload`` to a decomposition function) forwarded to ``make_fx`` as its
@@ -2955,7 +3063,14 @@ class _PrecompileApi:
         artifact.
 
         STATEFUL CAPTURE (``tracer="dynamo"`` only): pass ``artifact_path`` and
-        ``cache_path`` to capture incrementally from a loop the caller owns::
+        ``cache_path`` to capture incrementally from a loop the caller owns.
+        API note: this mode deliberately changes the return type to
+        ``(result, state)`` -- the caller's loop needs the step's real result,
+        and the artifact lives on disk rather than in the return value. A
+        separate entry point (e.g. ``precompile.stateful``) was considered and
+        rejected: the two modes share every capture semantic and differ only
+        in delivery, and one callable keeps the "same call, plus paths"
+        migration story::
 
             state = None
             for batch in batches:
@@ -3173,9 +3288,13 @@ class _PrecompileApi:
         Raises ``PrecompileError`` if ``python_code`` is malformed or is not a
         ``torch.compiler.precompile`` artifact (it fails to parse, or is missing the
         calling-convention metadata), if the cache's ``backend`` tag does not match
-        ``python_code``, or if the cache's ``code_hash`` does not match
-        ``sha256(python_code)`` -- i.e. the cache and python_code came from different
-        ``precompile()`` calls. A cache whose ``format``/``version`` does not match (a
+        ``python_code``, or -- for ``make_fx`` artifacts -- if the cache's
+        ``code_hash`` does not match ``sha256(python_code)``, i.e. the cache and
+        python_code came from different ``precompile()`` calls. For ``dynamo``
+        artifacts a ``code_hash`` mismatch instead degrades to a cold cache with a
+        warning: the python_code is fully self-contained, and stateful capture's
+        two-rename rewrite can legitimately leave a mismatched pair after a crash.
+        A cache whose ``format``/``version`` does not match (a
         foreign or different-build envelope) is NOT fatal: the cache is acceleration
         only, so ``load`` degrades to JIT'ing from ``python_code`` rather than crashing.
         """

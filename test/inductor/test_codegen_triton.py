@@ -1241,6 +1241,14 @@ def helper(x):
 
         self.assertIsNone(_constexpr_source(LocalSet({1})))
 
+        # Only OrderedSet exactly reconstructs: other subclasses (even of
+        # OrderedSet, even importable ones) decline rather than emit
+        # hash-order-nondeterministic or constructor-crashing source.
+        class OrderedSubSet(OrderedSet):
+            pass
+
+        self.assertIsNone(_constexpr_source(OrderedSubSet([1])))
+
     @parametrize(
         "value, expected",
         (
@@ -1387,6 +1395,40 @@ def helper(x):
         self.assertEqual(fn(x), res)
         # Verify generated code doesn't contain invalid Enum repr like <Mode.ADD: 1>
         self.assertNotIn("<Mode.", code[0])
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_plain_enum_constexpr_in_cpp_wrapper(self):
+        # The cpp_wrapper/AOTI path consumes the kernel metas returned by
+        # define_user_defined_triton_kernel; those must carry real values (no
+        # rendering placeholders) and still compile with a non-interchangeable
+        # Enum constexpr.
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def enum_kernel(
+            in_ptr, out_ptr, numel, MODE: tl.constexpr, BLOCK_SIZE: tl.constexpr
+        ):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            mask = offsets < numel
+            x = tl.load(in_ptr + offsets, mask=mask)
+            if MODE.value == 1:
+                output = x + 1
+            else:
+                output = x * 2
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def fn(x):
+            y = torch.empty_like(x)
+            enum_kernel[(1,)](x, y, x.numel(), plistlib.FMT_XML, BLOCK_SIZE=256)
+            return y
+
+        x = torch.randn(128, device=GPU_TYPE)
+        with inductor_config.patch(cpp_wrapper=True):
+            res, code = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(fn(x), res)
+        for generated in code:
+            self.assertNotIn("<PlistFormat.", generated)
 
     @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
     def test_enum_constexpr_in_autotune_config(self):
@@ -1551,7 +1593,8 @@ def helper(x):
         self.assertIs(_load_cached_autotuning(best, "h", [cfg], {}), cfg)
 
     @unittest.skipUnless(has_triton_package(), "requires Triton")
-    def test_autotune_cache_declines_non_json_enum_config_kwargs(self):
+    @parametrize("via_enum", (True, False))
+    def test_autotune_cache_declines_non_json_config_kwargs(self, via_enum):
         import json
 
         import triton
@@ -1560,19 +1603,24 @@ def helper(x):
             _config_json_cacheable,
             _json_config_value,
             _load_cached_autotuning,
+            AutotuneCache,
         )
 
         class TupleMode(Enum):
             PAIR = (1, 2)
 
-        cfg = triton.Config(
-            {"MODE": TupleMode.PAIR, "BLOCK": 64}, num_warps=4, num_stages=2
-        )
-        # save() skips such configs entirely (gated on the same predicate); if a
-        # cache entry exists anyway, the JSON round-trip turned the tuple into a
-        # list, so matching can never succeed and loading must re-autotune (None)
-        # rather than reconstruct a Config carrying the degraded JSON list.
+        value = TupleMode.PAIR if via_enum else (1, 2)
+        cfg = triton.Config({"MODE": value, "BLOCK": 64}, num_warps=4, num_stages=2)
         self.assertFalse(_config_json_cacheable(cfg))
+        # save() must skip such a config entirely. A bare instance suffices: the
+        # gate returns before any cache state is touched, so if the gate were
+        # removed this call would fail on the missing attributes.
+        cache = object.__new__(AutotuneCache)
+        self.assertIsNone(cache.save(cfg, time_taken_ns=0))
+        # If an entry exists anyway (older writer), the JSON round-trip turned
+        # the tuple into a list, so matching can never succeed and loading must
+        # re-autotune (None) rather than reconstruct a Config carrying the
+        # degraded JSON list.
         data = {key: _json_config_value(val) for key, val in cfg.kwargs.items()}
         data.update({"num_warps": 4, "num_stages": 2, "configs_hash": "h"})
         best = json.loads(json.dumps(data))

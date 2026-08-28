@@ -698,15 +698,29 @@ def _json_config_value(value: Any) -> Any:
     return value.value if isinstance(value, enum.Enum) else value
 
 
+def _json_stable_value(value: Any) -> bool:
+    if isinstance(value, enum.Enum):
+        value = value.value
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return True
+    if isinstance(value, list):
+        return all(_json_stable_value(item) for item in value)
+    if isinstance(value, dict):
+        return all(
+            isinstance(key, str) and _json_stable_value(item)
+            for key, item in value.items()
+        )
+    return False
+
+
 def _config_json_cacheable(config: Config) -> bool:
-    # An Enum kwarg whose value is not a JSON-stable scalar (e.g. a tuple, which
-    # JSON round-trips to a list) can neither be matched against a cached entry
-    # nor reconstructed from one; such configs must skip the autotune cache
-    # rather than warm-load a wrong-typed constexpr via
-    # _reconstruct_triton_config.
+    # A kwarg that does not survive a JSON round-trip (e.g. a tuple -- directly
+    # or as an Enum's value -- which comes back as a list) can neither be
+    # matched against a cached entry nor reconstructed from one; such configs
+    # must skip the autotune cache rather than warm-load a wrong-typed
+    # constexpr via _reconstruct_triton_config.
     return all(
-        not isinstance(val, enum.Enum)
-        or isinstance(val.value, (bool, int, float, str, type(None)))
+        _json_stable_value(val)
         # pyrefly: ignore [missing-attribute]
         for val in config.kwargs.values()
     )

@@ -465,7 +465,61 @@ def _build_dynamo_forward():
         target_function.__kwdefaults__ = dict(kwdefaults)
     signature = inspect.signature(target_function)
 
+    def has_storage_overlap(values):
+        # The same tensor object passed twice is covered by the serialized
+        # aliasing guards; DISTINCT tensors sharing or overlapping storage are
+        # not (their AOT StorageOverlap relation has no serialized form), and a
+        # mutating variant could silently compute the wrong thing.
+        import torch.utils._pytree as pytree
+
+        tensors = [
+            value
+            for value in pytree.tree_leaves(values)
+            if isinstance(value, torch.Tensor)
+        ]
+        storage_ranges: dict = {}
+        storage_ids: set = set()
+        seen_objects: set = set()
+        for tensor in tensors:
+            if id(tensor) in seen_objects:
+                continue
+            seen_objects.add(id(tensor))
+            try:
+                storage = tensor.untyped_storage()
+                start = storage.data_ptr()
+                size = storage.nbytes()
+            except RuntimeError as e:
+                from torch._precompile import PrecompileError
+
+                raise PrecompileError(
+                    "precompile: cannot verify storage overlap for this runtime "
+                    "tensor input."
+                ) from e
+            storage_key = (tensor.device.type, tensor.device.index, storage._cdata)
+            if storage_key in storage_ids:
+                return True
+            storage_ids.add(storage_key)
+            if start != 0 and size > 0:
+                storage_ranges.setdefault(
+                    (tensor.device.type, tensor.device.index), []
+                ).append((start, start + size))
+        for ranges in storage_ranges.values():
+            furthest_end = 0
+            for start, end in sorted(ranges):
+                if start < furthest_end:
+                    return True
+                furthest_end = max(furthest_end, end)
+        return False
+
     def forward(*args):
+        if has_storage_overlap(args):
+            from torch._precompile import PrecompileError
+
+            raise PrecompileError(
+                "precompile: distinct runtime tensor inputs must not share or "
+                "overlap storage; the artifact was not captured for aliased "
+                "inputs (invariant 2)."
+            )
         try:
             bound = signature.bind(*args)
         except TypeError as e:

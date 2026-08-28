@@ -237,11 +237,21 @@ def _constexpr_source_impl(
             return None if cls_ref is None else f"{cls_ref}._make(({body}))"
         return f"({body})"
     if isinstance(value, (set, frozenset, OrderedSet)):  # noqa: set_linter
-        # A set subclass's type and iteration order can be semantic (OrderedSet);
-        # reconstruct the exact type in iteration order, or decline, rather than
-        # silently degrade to a builtin set. Builtin sets are unordered, so their
-        # items are sorted for deterministic generated source.
+        # Exact builtin sets are unordered, so their items are sorted for
+        # deterministic generated source. OrderedSet is the one subclass with
+        # known order semantics (insertion order, deterministic) and a
+        # list-accepting constructor, so it reconstructs exactly. Any other
+        # subclass declines: emitting it as a builtin set would silently drop
+        # its type/order, and emitting `cls([...])` would be hash-order
+        # nondeterministic and assumes an iterable constructor.
         exact_builtin = type(value) in (set, frozenset)  # noqa: set_linter
+        cls_ref = None
+        if not exact_builtin:
+            if type(value) is not OrderedSet:
+                return None
+            cls_ref = _constexpr_type_ref(OrderedSet, module_aliases, imports)
+            if cls_ref is None:
+                return None
         elements = (
             sorted(
                 value,
@@ -254,11 +264,6 @@ def _constexpr_source_impl(
             if exact_builtin
             else value
         )
-        cls_ref = None
-        if not exact_builtin:
-            cls_ref = _constexpr_type_ref(type(value), module_aliases, imports)
-            if cls_ref is None:
-                return None
         items = []
         for item in elements:
             source = _constexpr_source_impl(item, module_aliases, imports)

@@ -87,10 +87,14 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       stored as opaque inline data because they have no Python-source representation.
       This initial path accepts a Python function with positional tensor/scalar arguments
       and containers of those values; closures and ``nn.Module`` arguments are not
-      supported yet because their identity guards are not serializable. Tensor-valued
-      globals are rejected because every tensor must be an explicit input, and functions
-      that mutate globals are rejected because the artifact could not reproduce the
-      side effect.
+      supported yet because their identity guards are not serializable. A global whose
+      object graph contains a tensor is rejected (conservatively, even when the fn only
+      reads a non-tensor field of it) because every tensor must be an explicit input,
+      and functions that mutate globals are rejected because the artifact could not
+      reproduce the side effect. Distinct tensor inputs must not share or overlap
+      storage -- their aliasing relation has no serialized form -- though passing the
+      same tensor object more than once is supported; capture rejects overlapping
+      inputs and the loaded artifact raises on them.
 
       Pass ``training=True`` with ``tracer="dynamo"`` and ``backend="inductor"`` to
       capture differentiable graphs. Each compiled segment contains readable Inductor
