@@ -1,12 +1,18 @@
 # mypy: allow-untyped-defs
-"""Build NVGEMM epilogue plans from scheduler Loop IR.
+r"""Build NVGEMM epilogue plans from scheduler Loop IR.
 
-The scheduler captures a candidate fusion prefix before applying backend policy.
-This module derives grouped reduction geometry from ranges and access strides,
-then describes generated CuTeDSL callbacks with backend-neutral plans.
-``reduction_type`` identifies only the associative primitive; the captured
-expressions define source, finalizer, and consumer behavior. Vendored kernels
-retain ownership of physical traversal, synchronization, and storage.
+The scheduler tests fusion incrementally by passing the GEMM and the complete
+candidate epilogue prefix to this module. The lowering captures those scheduler
+nodes as Loop IR, derives grouped-reduction geometry from ranges and access
+strides, partitions nodes into reduction regions and pointwise work, and returns
+one ``NVGemmEpilogueProgram``. Unsupported prefixes are rejected as a unit.
+
+The generated epilogue owns pointwise expressions and fragment-local reduction
+semantics. ``reduction_type`` identifies only the associative primitive; the
+captured IR defines source transforms, finalizers, consumers, and compositions
+of multiple reductions. For reductions spanning fragments or threads, the plan
+provides generated combine and finalize callbacks while the vendored kernel
+owns traversal, synchronization, and storage.
 """
 
 import dataclasses
@@ -27,6 +33,7 @@ from ...kernel.gemm_epilogue import (
 )
 from ...kernel.loop_ir_epilogue_lowering import (
     GemmEpilogueIRAnalysis,
+    GemmEpilogueIRFinalizer,
     GemmEpilogueIRStore,
     grouped_reduction_axis_ir,
 )
@@ -47,7 +54,7 @@ class NVGemmFeedPlan:
 class NVGemmReductionRegion:
     config: GemmReductionConfig
     nodes: tuple[BaseSchedulerNode, ...]
-    finalizer: "NVGemmReductionFinalizer | None" = None
+    finalizer: GemmEpilogueIRFinalizer | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -62,12 +69,6 @@ class NVGemmReductionPartition:
     def nodes(self) -> tuple[BaseSchedulerNode, ...]:
         return tuple(
             OrderedSet(node for region in self.regions for node in region.nodes)
-        )
-
-    @property
-    def finalizers(self) -> tuple["NVGemmReductionFinalizer", ...]:
-        return tuple(
-            region.finalizer for region in self.regions if region.finalizer is not None
         )
 
     def owns(self, nodes: Sequence[BaseSchedulerNode]) -> bool:
@@ -305,12 +306,6 @@ class NVGemmEpilogueCapture:
         return any(
             read.name == name for node in self.nodes for read in node.read_writes.reads
         )
-
-
-@dataclasses.dataclass(frozen=True, kw_only=True)
-class NVGemmReductionFinalizer:
-    source_name: str
-    buffer: ComputedBuffer
 
 
 class NVGemmEpilogueLowering:
@@ -763,21 +758,15 @@ class NVGemmEpilogueLowering:
                 buffer.get_name(), config.output_name
             )
             if finalizer is not None:
-                matches.append((candidate, buffer, finalizer))
+                matches.append((candidate, finalizer))
         if len(matches) != 1:
             return NVGemmReductionRegion(config=config, nodes=(source,))
-        source_name = config.output_name
-        candidate, buffer, finalizer = matches[0]
-        config = dataclasses.replace(config, output_name=buffer.get_name())
-        generated_finalizer = (
-            NVGemmReductionFinalizer(source_name=source_name, buffer=buffer)
-            if finalizer.materialize
-            else None
-        )
+        candidate, finalizer = matches[0]
+        config = dataclasses.replace(config, output_name=finalizer.output_name)
         return NVGemmReductionRegion(
             config=config,
             nodes=(source, candidate),
-            finalizer=generated_finalizer,
+            finalizer=finalizer if finalizer.materialize else None,
         )
 
     @classmethod
