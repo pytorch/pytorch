@@ -389,7 +389,6 @@ class TestStaticTritonLauncher(TestCase):
         launcher.run(1, 1, 1, stream, new_arg0, 50, 50, 50, 50)
         self.assertEqual(new_arg0, arg0)
 
-    @skipIfRocm
     def test_float_scalars(self):
         @triton.jit
         def floats(arg0, arg1: tl.float16, arg2: tl.float32, arg3: tl.float64):

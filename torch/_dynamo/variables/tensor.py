@@ -769,7 +769,17 @@ class TensorVariable(VariableTracker):
             )
         ):
             install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
-            result.source = AttrSource(self.source, name)
+            if result.is_python_constant():
+                # ConstantVariable.create(None) is a process-wide singleton, and
+                # method_attr_grad hands it back for a pending `p.grad = None`; a
+                # source written onto it leaks into every later compile. Non-constants
+                # keep the in-place write: .data's tracker is AttributeMutationNew,
+                # which __init__ rejects a source for.
+                result = result.clone(
+                    source=AttrSource(self.source, name), source_location=None
+                )
+            else:
+                result.source = AttrSource(self.source, name)
 
         # It's hard to get inplace view (metadata mutation) on graph input work properly across
         # dynamo/aot/inductor, just fall back.
@@ -1230,6 +1240,28 @@ class TensorVariable(VariableTracker):
             return VariableTracker.build(
                 tx, fake.is_contiguous(memory_format=memory_format_const)
             )
+        return None
+
+    def method_is_pinned(
+        self,
+        tx: "InstructionTranslatorBase",
+        device: VariableTracker | None = None,
+    ) -> ConstantVariable | None:
+        # ATen is_pinned() is always false for non-CPU tensors. CPU pinning can
+        # vary without changing Dynamo's tensor metadata guards, so leave it to
+        # the generic path. Tensor subclasses can override is_pinned through
+        # __torch_dispatch__, so preserve dispatch for them too.
+        no_device = device is None or (
+            isinstance(device, ConstantVariable) and device.value is None
+        )
+        example_value = self.proxy.node.meta.get("example_value")
+        if (
+            no_device
+            and self.device is not None
+            and self.device.type != "cpu"
+            and not is_traceable_wrapper_subclass(example_value)
+        ):
+            return VariableTracker.build(tx, False)
         return None
 
     def method_type(
@@ -2433,6 +2465,7 @@ class TensorVariable(VariableTracker):
         "is_floating_point": Method(method_is_floating_point),
         "is_inference": Method(method_is_inference),
         "is_complex": Method(method_is_complex),
+        "is_pinned": Method(method_is_pinned),
         "is_contiguous": Method(method_is_contiguous),
         "type": Method(method_type),
         "as_subclass": Method(method_as_subclass),

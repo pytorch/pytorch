@@ -149,7 +149,7 @@ void* getTmaDescPtr(PyObject* obj) {
   TORCH_CHECK(ret, "tma_desc_cpu_ptr() call failed");
   auto host_ptr = static_cast<uintptr_t>(THPUtils_unpackUInt64(ret));
   TORCH_CHECK(host_ptr != 0, "tma_desc_cpu_ptr() returned NULL");
-  return reinterpret_cast<void*>(host_ptr);
+  return reinterpret_cast<void*>(host_ptr); // NOLINT(performance-no-int-to-ptr)
 }
 #endif
 
