@@ -1321,9 +1321,6 @@ def repro_minify(options: ReproOptions, mod: nn.Module, load_args: Any) -> None:
     else:
         module_fails = ACCURACY_FAILS[options.accuracy]
 
-    original_failure = (
-        AccuracyError("Bad accuracy detected") if options.accuracy else None
-    )
     with config.patch(repro_after=None), _minifier_sanity_guard() as sanity:
         minifier(
             mod,
@@ -1338,7 +1335,7 @@ def repro_minify(options: ReproOptions, mod: nn.Module, load_args: Any) -> None:
             skip_sanity=options.skip_sanity,
             max_granularity=options.max_granularity,
         )
-    sanity.raise_if_failed(original_failure)
+    sanity.raise_if_failed()
 
 
 def repro_analyze(options: ReproOptions, mod: nn.Module, load_args: Any) -> None:

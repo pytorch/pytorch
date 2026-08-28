@@ -13,8 +13,11 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 class TestMinifier(TestCase):
     def test_sanity_check_failure_type(self):
+        def f(x):
+            return torch.sin(x)
+
         inputs = [torch.randn(3)]
-        graph = make_fx(torch.sin)(*inputs)
+        graph = make_fx(f)(*inputs)
 
         with self.assertRaisesRegex(
             MinifierSanityCheckFailed, "Input graph did not fail the tester"

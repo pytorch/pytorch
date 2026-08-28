@@ -31,7 +31,6 @@ from typing import Any, IO
 import torch
 from torch._dynamo.debug_utils import (
     _cuda_system_info_comment,
-    AccuracyError,
     BuckTargetWriter,
     extra_imports,
     generate_config_string,
@@ -462,9 +461,6 @@ def repro_minify(
                 return False
             return True
 
-    original_failure = (
-        AccuracyError("Bad accuracy detected") if options.accuracy else None
-    )
     with _minifier_sanity_guard() as sanity:
         minifier(
             mod,
@@ -483,7 +479,7 @@ def repro_minify(
             skip_sanity=options.skip_sanity,
             max_granularity=options.max_granularity,
         )
-    sanity.raise_if_failed(original_failure)
+    sanity.raise_if_failed()
 
 
 def run_repro(
@@ -566,7 +562,7 @@ p-value, which we leave for future work.
             default=accuracy,
             help="""\
 by default, when doing accuracy minification we will reject reductions which
-change the divergence from a floating point divergence to a integral/boolean
+change the divergence from a floating point divergence to an integral/boolean
 divergence.  This is because some operations like ReLU involve temporarily
 sharp boundaries that smooth out again afterwards; without requiring
 divergence on floating point, the minifier will often fixate on divergent

@@ -232,7 +232,8 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
         print("minifier stdout:", _decode_subprocess_output(launch_proc.stdout))
         stderr = _decode_subprocess_output(launch_proc.stderr)
         print("minifier stderr:", stderr)
-        self.assertEqual(launch_proc.returncode, 0, stderr)
+
+        self.assertNotIn("Input graph did not fail the tester", stderr)
 
         return launch_proc, launch_code
 

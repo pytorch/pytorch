@@ -2573,6 +2573,7 @@ def copy_dynamo_tensor_attributes(src: torch.Tensor, dst: torch.Tensor) -> None:
     _copy_dynamo_attr(src, dst, "_dynamo_shape_ids")
     _copy_dynamo_attr(src, dst, "_dynamo_strict_unbacked_indices")
     _copy_dynamo_attr(src, dst, "_dynamo_weak_dynamic_indices")
+    _copy_dynamo_attr(src, dst, "_dynamo_dynamic_range")
     _copy_dynamo_attr(src, dst, "_dynamo_propagated_dynamic_indices")
     _copy_dynamo_attr(src, dst, "_has_dynamo_dim_marking")
 
@@ -5050,6 +5051,9 @@ def is_compile_supported(device_type: DeviceLikeType) -> Any:
     else:
         compile_supported = False
     return compile_supported
+
+
+is_compile_supported._dynamo_marked_constant = True  # type: ignore[attr-defined]
 
 
 # The following 3.11 source code functions are adapted from

@@ -27,11 +27,12 @@ import dataclasses
 import enum
 import inspect
 import logging
+import sys
 import textwrap
 import traceback
 import weakref
 from collections.abc import Callable, Generator, MutableMapping
-from types import CellType
+from types import CellType, SimpleNamespace
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -190,6 +191,25 @@ def _manual_deque_update(deque_from: Any, deque_to: Any) -> None:
     # deque_to keeps its (read-only) maxlen, so extend re-applies eviction.
     collections.deque.clear(deque_to)
     collections.deque.extend(deque_to, deque_from)
+
+
+_MUTABLE_GETATTRIBUTES: tuple[Any, ...] = (
+    object.__getattribute__,
+    dict.__getattribute__,
+    set.__getattribute__,
+    frozenset.__getattribute__,
+    int.__getattribute__,
+    str.__getattribute__,
+    list.__getattribute__,
+    tuple.__getattribute__,
+    collections.deque.__getattribute__,
+    BaseException.__getattribute__,
+)
+if sys.version_info < (3, 13):
+    # SimpleNamespace names tp_getattro in its static struct before 3.13, so
+    # PyType_Ready publishes its own __getattribute__ wrapper even though the
+    # slot is PyObject_GenericGetAttr. BaseException above is the same case.
+    _MUTABLE_GETATTRIBUTES += (SimpleNamespace.__getattribute__,)
 
 
 class SideEffects:
@@ -682,18 +702,8 @@ class SideEffects:
 
     @staticmethod
     def cls_supports_mutation_side_effects(cls: type) -> bool:
-        return inspect.getattr_static(cls, "__getattribute__", None) in (
-            object.__getattribute__,
-            dict.__getattribute__,
-            set.__getattribute__,
-            frozenset.__getattribute__,
-            int.__getattribute__,
-            str.__getattribute__,
-            list.__getattribute__,
-            tuple.__getattribute__,
-            collections.deque.__getattribute__,
-            BaseException.__getattribute__,
-        )
+        getattribute = inspect.getattr_static(cls, "__getattribute__", None)
+        return getattribute in _MUTABLE_GETATTRIBUTES
 
     def is_attribute_mutation(self, item: VariableTracker) -> bool:
         return isinstance(item.mutation_type, AttributeMutation)
@@ -848,6 +858,8 @@ class SideEffects:
             variable_cls = variables.UserDefinedConstantVariable
         elif variables.InspectVariable.is_matching_class(user_cls):
             variable_cls = variables.InspectVariable
+        elif variables.SimpleNamespaceVariable.is_matching_cls(user_cls):
+            variable_cls = variables.SimpleNamespaceVariable
         if not issubclass(variable_cls, variables.UserDefinedObjectVariable):
             raise AssertionError(
                 f"Expected subclass of UserDefinedObjectVariable, got {variable_cls}"
