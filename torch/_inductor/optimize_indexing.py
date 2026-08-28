@@ -1,4 +1,5 @@
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -10,7 +11,85 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from .loop_body import LoopBody
-from .utils import dominated_nodes
+from .utils import dominated_nodes, flatten_index
+from .virtualized import V
+
+
+_ARG_REDUCTION_TYPES = (
+    "argmax",
+    "argmin",
+    "argmax_value",
+    "argmin_value",
+    "argmax_with_value",
+    "argmin_with_value",
+)
+
+
+def _get_argreduce_index(
+    node: torch.fx.Node,
+) -> tuple[Any, torch.fx.Node, str] | None:
+    if node.op != "call_method" or node.target != "reduction":
+        return None
+    value = node.args[-1]
+    if node.args[-2] not in _ARG_REDUCTION_TYPES or not (
+        isinstance(value, tuple) and len(value) == 2
+    ):
+        return None
+
+    reduction_value, logical_index = value
+    if not (
+        isinstance(logical_index, torch.fx.Node)
+        and logical_index.op == "call_method"
+        and logical_index.target in ("index_expr", "value_expr")
+    ):
+        return None
+
+    index_node = logical_index.args[1]
+    if not (
+        isinstance(index_node, torch.fx.Node)
+        and index_node.op == "call_module"
+        and index_node.target == "get_index"
+    ):
+        return None
+
+    index_name = index_node.args[0]
+    if not isinstance(index_name, str):
+        raise AssertionError(f"expected str index name, got {index_name!r}")
+    return reduction_value, logical_index, index_name
+
+
+def remove_redundant_argreduce_indices(
+    loop_bodies: Sequence[LoopBody],
+) -> list[tuple[torch.fx.Node, torch.fx.Node]]:
+    """Drop explicit arg-reduction indices that match the final loop order."""
+    reductions: dict[torch.fx.Node, tuple[Any, torch.fx.Node, bool]] = {}
+    for loop_body in loop_bodies:
+        if not loop_body.reduce_vars:
+            continue
+        native_index = flatten_index(loop_body.reduce_vars, loop_body.sizes[1])
+        seen_nodes: OrderedSet[torch.fx.Node] = OrderedSet()
+        blocks = [loop_body.root_block, *loop_body.subblocks.values()]
+        for node in (node for block in blocks for node in block.graph.nodes):
+            parsed = _get_argreduce_index(node)
+            if parsed is None or node in seen_nodes:
+                continue
+            seen_nodes.add(node)
+            reduction_value, logical_index, index_name = parsed
+            redundant = V.graph.sizevars.statically_known_equals(
+                loop_body.indexing_exprs[index_name], native_index
+            )
+            if node in reductions:
+                value, index, prior_redundant = reductions[node]
+                reductions[node] = value, index, prior_redundant and redundant
+            else:
+                reductions[node] = reduction_value, logical_index, redundant
+
+    undo: list[tuple[torch.fx.Node, torch.fx.Node]] = []
+    for node, (reduction_value, logical_index, redundant) in reductions.items():
+        if redundant:
+            undo.append((node, logical_index))
+            node.args = (*node.args[:-1], reduction_value)
+    return undo
 
 
 def val_expressable_in_32_bits(val: Any) -> bool:

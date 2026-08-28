@@ -4875,6 +4875,9 @@ class Scheduler:
             self.nodes = self.maybe_reorder_for_minimizing_partition(self.nodes)
             self.nodes = self.reorder_for_partition_with_simple_dependency(self.nodes)
 
+        # All fusion and loop-order transformations are complete. Finalize the
+        # LoopBodies before handing them to backend codegen.
+        self.finalize_loop_bodies(self.nodes)
         self.compute_last_usage()
 
         if torch._inductor.config.test_configs.track_memory_lifecycle:
@@ -4906,6 +4909,41 @@ class Scheduler:
         # Unlike V.graph.removed_buffers, the op recorded here is removed but
         # we still need the buffer (generated in alternative ways)
         self.removed_ops: OrderedSet[str] = OrderedSet()
+
+    @staticmethod
+    def _scheduler_nodes_with_loop_bodies(
+        nodes: Sequence[BaseSchedulerNode],
+    ) -> OrderedSet[SchedulerNode]:
+        return OrderedSet(
+            snode
+            for node in nodes
+            for snode in node.get_nodes()
+            if isinstance(snode, SchedulerNode) and isinstance(snode._body, LoopBody)
+        )
+
+    def finalize_loop_bodies(
+        self, nodes: Sequence[BaseSchedulerNode]
+    ) -> list[tuple[torch.fx.Node, torch.fx.Node]]:
+        """Apply optimizations that require the final scheduler loop order."""
+        from .optimize_indexing import remove_redundant_argreduce_indices
+
+        bodies = OrderedSet(
+            snode._body for snode in self._scheduler_nodes_with_loop_bodies(nodes)
+        )
+        return remove_redundant_argreduce_indices(list(bodies))
+
+    @contextlib.contextmanager
+    def finalized_loop_bodies(
+        self, nodes: Sequence[BaseSchedulerNode]
+    ) -> Iterator[None]:
+        """Temporarily finalize candidate LoopBodies for pre-codegen benchmarks."""
+        undo: list[tuple[torch.fx.Node, torch.fx.Node]] = []
+        try:
+            undo = self.finalize_loop_bodies(nodes)
+            yield
+        finally:
+            for node, logical_index in reversed(undo):
+                node.args = (*node.args[:-1], (node.args[-1], logical_index))
 
     def get_donated_buffers(self) -> dict[str, SchedulerDonatedBuffer]:
         name_to_donated_buf = {}
@@ -5796,10 +5834,13 @@ class Scheduler:
         device = nodes[0].get_device()
         self.current_device = device
         backend = self.get_backend(device)
-        with dynamo_timed(
-            "benchmark_fused_nodes",
-            log_pt2_compile_event=True,
-            dynamo_compile_column_us="compile_time_autotune_time_us",
+        with (
+            dynamo_timed(
+                "benchmark_fused_nodes",
+                log_pt2_compile_event=True,
+                dynamo_compile_column_us="compile_time_autotune_time_us",
+            ),
+            self.finalized_loop_bodies(nodes),
         ):
             return backend.benchmark_fused_nodes(nodes)
 
@@ -5817,7 +5858,10 @@ class Scheduler:
         device = nodes[0].get_device()
         self.current_device = device
         backend = self.get_backend(device)
-        with dynamo_timed("generate_kernel_code_from_nodes"):
+        with (
+            dynamo_timed("generate_kernel_code_from_nodes"),
+            self.finalized_loop_bodies(nodes),
+        ):
             return backend.generate_kernel_code_from_nodes(
                 nodes, benchmark_kernel, hint_override=hint_override
             )
@@ -10997,7 +11041,8 @@ class Scheduler:
         if device is None:
             raise AssertionError("expected device to be set")
         backend = self.get_backend(device)
-        return backend.benchmark_combo_kernel(node_list, node_benchmark_results)
+        with self.finalized_loop_bodies(node_list):
+            return backend.benchmark_combo_kernel(node_list, node_benchmark_results)
 
     def speedup_by_combo_kernel(self, nodes: list[BaseSchedulerNode]) -> bool:
         """

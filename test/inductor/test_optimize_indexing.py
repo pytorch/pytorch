@@ -1,17 +1,50 @@
 # Owner(s): ["module: inductor"]
 
 import operator
+from unittest import mock
 
 import sympy
 
 import torch
+from torch._inductor import config, metrics
 from torch._inductor.codegen.common import deduce_output_dtype_by_name
-from torch._inductor.optimize_indexing import convert_index_expr_to_value_expr
+from torch._inductor.codegen.cpp import CppKernelProxy
+from torch._inductor.loop_body import LoopBody
+from torch._inductor.optimize_indexing import (
+    convert_index_expr_to_value_expr,
+    remove_redundant_argreduce_indices,
+)
+from torch._inductor.scheduler import Scheduler, SchedulerNode
+from torch._inductor.virtualized import V
 from torch.fx import Graph
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
+class _FakeSizeVars:
+    @staticmethod
+    def simplify_with_ranges(expr, var_ranges):
+        return expr
+
+    @staticmethod
+    def statically_known_equals(left, right):
+        return sympy.expand(left - right) == 0
+
+
+class _FakeGraph:
+    sizevars = _FakeSizeVars()
+
+    @staticmethod
+    def get_dtype(name):
+        return torch.bfloat16
+
+
+@instantiate_parametrized_tests
 class TestOptimizeIndexing(TestCase):
     @staticmethod
     def _make_loop_body(
@@ -48,6 +81,179 @@ class TestOptimizeIndexing(TestCase):
                 return self._bounds
 
         return FakeLoopBody()
+
+    def _make_argreduce_loop_body(self, logical_index, src_dtype=torch.float32):
+        r0, r1 = sympy.symbols("r0 r1", integer=True, nonnegative=True)
+
+        def fn(index, reduction_index):
+            value = (
+                V.ops.constant(1.0, src_dtype)
+                if src_dtype == torch.float32
+                else V.ops.load("arg0", 8 * reduction_index[0] + reduction_index[1])
+            )
+            index = V.ops.index_expr(logical_index(*reduction_index), torch.int64)
+            return V.ops.reduction(torch.int64, src_dtype, "argmax", (value, index))
+
+        with (
+            config.patch(constant_and_index_propagation=False),
+            V.set_graph_handler(_FakeGraph()),
+        ):
+            loop_body = LoopBody(
+                fn,
+                ([], [r0, r1]),
+                {r0: 4, r1: 8},
+                [],
+                [r0, r1],
+            )
+        return loop_body
+
+    @staticmethod
+    def _argreduce_nodes(loop_body):
+        graph = loop_body.root_block.graph
+        reduction = graph.find_nodes(op="call_method", target="reduction")[0]
+        value, index_expr = reduction.args[-1]
+        get_index = index_expr.args[1]
+        return graph, reduction, value, index_expr, get_index
+
+    def test_remove_redundant_argreduce_index(self):
+        loop_body = self._make_argreduce_loop_body(lambda r0, r1: 8 * r0 + r1)
+        graph, reduction, value, index_expr, get_index = self._argreduce_nodes(
+            loop_body
+        )
+        with V.set_graph_handler(_FakeGraph()):
+            undo = remove_redundant_argreduce_indices([loop_body])
+
+        self.assertEqual(undo, [(reduction, index_expr)])
+        self.assertIs(reduction.args[-1], value)
+        self.assertIn(index_expr, graph.nodes)
+        self.assertIn(get_index, graph.nodes)
+
+    def test_keep_non_native_argreduce_index(self):
+        loop_body = self._make_argreduce_loop_body(lambda r0, r1: 4 * r1 + r0)
+        graph, reduction, _, index_expr, get_index = self._argreduce_nodes(loop_body)
+        with V.set_graph_handler(_FakeGraph()):
+            undo = remove_redundant_argreduce_indices([loop_body])
+
+        self.assertEqual(undo, [])
+        self.assertIs(reduction.args[-1][1], index_expr)
+        self.assertIn(index_expr, graph.nodes)
+        self.assertIn(get_index, graph.nodes)
+
+    def test_keep_shared_non_native_argreduce_index(self):
+        original = self._make_argreduce_loop_body(lambda r0, r1: 8 * r0 + r1)
+        r0, r1 = original.reduce_vars
+        with V.set_graph_handler(_FakeGraph()):
+            native = LoopBody(
+                original,
+                ([], [r0, r1]),
+                original.var_ranges,
+                [],
+                [r0, r1],
+                allow_same_symbol_in_index=True,
+            )
+            reordered = LoopBody(
+                original,
+                ([], [r0, r1]),
+                original.var_ranges,
+                [],
+                [r0, r1],
+                allow_same_symbol_in_index=True,
+            )
+            reordered.indexing_exprs["index0"] = 4 * r1 + r0
+            undo = remove_redundant_argreduce_indices([native, reordered])
+
+        self.assertIs(native.root_block.graph, reordered.root_block.graph)
+        self.assertEqual(undo, [])
+        self.assertIsInstance(self._argreduce_nodes(native)[1].args[-1], tuple)
+        self.assertIsInstance(self._argreduce_nodes(reordered)[1].args[-1], tuple)
+        self.assertEqual(reordered.indexing_exprs["index0"], 4 * r1 + r0)
+
+    @parametrize("method", ("fused", "generate", "combo"))
+    def test_argreduce_finalization_is_temporary(self, method):
+        loop_body = self._make_argreduce_loop_body(lambda r0, r1: 8 * r0 + r1)
+        scheduler = object.__new__(Scheduler)
+        snode = object.__new__(SchedulerNode)
+        snode._body = loop_body
+
+        class Backend:
+            def check_finalized(self, nodes):
+                self.assert_finalized = nodes[0]._body is loop_body
+                reduction = nodes[0]._body.root_block.graph.find_nodes(
+                    op="call_method", target="reduction"
+                )[0]
+                self.reduction_value = reduction.args[-1]
+
+            def benchmark_fused_nodes(self, nodes):
+                self.check_finalized(nodes)
+                return 1.0, ""
+
+            def generate_kernel_code_from_nodes(
+                self, nodes, benchmark_kernel, hint_override=None
+            ):
+                self.check_finalized(nodes)
+                return ""
+
+            def benchmark_combo_kernel(self, nodes, node_benchmark_results):
+                self.check_finalized(nodes)
+                return 1.0, 1.0, [""]
+
+        backend = Backend()
+        scheduler.get_backend = lambda device: backend
+        with (
+            V.set_graph_handler(_FakeGraph()),
+            mock.patch.object(
+                SchedulerNode, "get_device", return_value=torch.device("cuda")
+            ),
+        ):
+            if method == "combo":
+                scheduler.benchmark_combo_kernel([snode], {})
+            elif method == "generate":
+                scheduler.generate_kernel_code_from_nodes([snode], False)
+            elif method == "fused":
+                scheduler.benchmark_fused_nodes([snode])
+            else:
+                raise AssertionError(f"unexpected method {method}")
+
+        self.assertTrue(backend.assert_finalized)
+        self.assertNotIsInstance(backend.reduction_value, tuple)
+        self.assertIs(snode._body, loop_body)
+        self.assertIsInstance(self._argreduce_nodes(loop_body)[1].args[-1], tuple)
+
+    def test_argreduce_restores_legalized_value(self):
+        loop_body = self._make_argreduce_loop_body(
+            lambda r0, r1: 8 * r0 + r1, torch.bfloat16
+        )
+        _, reduction, original_value, logical_index, _ = self._argreduce_nodes(
+            loop_body
+        )
+        scheduler = object.__new__(Scheduler)
+        snode = object.__new__(SchedulerNode)
+        snode._body = loop_body
+
+        class Backend:
+            def generate_kernel_code_from_nodes(
+                self, nodes, benchmark_kernel, hint_override=None
+            ):
+                CppKernelProxy.legalize_lowp_fp_dtype_loopbody(self, nodes[0]._body)
+                self.legalized_value = reduction.args[-1]
+                return ""
+
+        backend = Backend()
+        scheduler.get_backend = lambda device: backend
+        with (
+            V.set_graph_handler(_FakeGraph()),
+            mock.patch.object(
+                SchedulerNode, "get_device", return_value=torch.device("cpu")
+            ),
+            mock.patch.object(metrics, "cpp_to_dtype_count", 0),
+        ):
+            scheduler.generate_kernel_code_from_nodes([snode], False)
+
+        restored_value, restored_index = reduction.args[-1]
+        self.assertIs(restored_value, backend.legalized_value)
+        self.assertIsNot(restored_value, original_value)
+        self.assertEqual(restored_value.target, "to_dtype")
+        self.assertIs(restored_index, logical_index)
 
     def test_index_expr_mixed_use_converts_in_place(self):
         # When the same index_expr is used both as an index (load) and as a
