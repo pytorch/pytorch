@@ -140,8 +140,22 @@ TORCH_API Module load_jit_module_from_stream(
     ExtraFilesMap& extra_files,
     std::optional<at::Device> device = std::nullopt);
 
+// Equivalent to ObjLoaderFuncWithVersion with an unknown archive version, i.e.
+// container type tags are always re-derived. Kept with this exact signature so
+// it continues to convert to ObjLoader.
 TORCH_API c10::intrusive_ptr<c10::ivalue::Object> ObjLoaderFunc(
     const at::StrongTypePtr& type,
     IValue input);
+
+// `archive_version` is the file-format version of the archive being read, as
+// reported by PyTorchStreamReader::version(). See [type tag serialization] in
+// unpickler.h: for version >= 3 the archive carries container type strings and
+// the unpickler applies them as each container is built, so re-deriving them
+// here is unnecessary and can cost tens of seconds on a large model. Pass 0 if
+// the version is unknown, which conservatively keeps the historical behaviour.
+TORCH_API c10::intrusive_ptr<c10::ivalue::Object> ObjLoaderFuncWithVersion(
+    const at::StrongTypePtr& type,
+    IValue input,
+    uint64_t archive_version);
 
 } // namespace torch::jit

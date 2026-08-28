@@ -35,17 +35,14 @@ static void recursive_apply(
   int64_t ndim = static_cast<int64_t>(sizes.size());
   if (dim == ndim) {
     auto args = THPObjectPtr(PyTuple_New(N));
-    if (!args)
-      throw python_error();
+    TORCH_CHECK_PYTHON(args);
     for (const auto i : c10::irange(N)) {
       PyObject* arg = load_scalar(strided_data[i].data, scalarType);
-      if (!arg)
-        throw python_error();
+      TORCH_CHECK_PYTHON(arg);
       PyTuple_SET_ITEM(args.get(), i, arg);
     }
     auto ret = THPObjectPtr(PyObject_CallObject(fn, args.get()));
-    if (!ret)
-      throw python_error();
+    TORCH_CHECK_PYTHON(ret);
     store_scalar(strided_data[0].data, scalarType, ret.get());
     return;
   }
