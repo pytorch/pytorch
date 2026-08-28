@@ -212,22 +212,7 @@ struct AtomicType<bool> {
     if (!value) {
       return;
     }
-    auto ptr = data + (offset >> 2);
-    auto old =
-        ::metal::atomic_load_explicit(ptr, ::metal::memory_order_relaxed);
-    union {
-      uint i;
-      bool t[4];
-    } val;
-    do {
-      val.i = old;
-      val.t[offset & 3] = true;
-    } while (!::metal::atomic_compare_exchange_weak_explicit(
-        ptr,
-        &old,
-        val.i,
-        ::metal::memory_order_relaxed,
-        ::metal::memory_order_relaxed));
+    atomic_add_helper<bool>(data, offset, value);
   }
   // Generic packed-CAS supports any bool op (AND for prod/amin, OR for amax).
   static inline void atomic_binary_op(
