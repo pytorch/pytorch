@@ -11,6 +11,7 @@ import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch.nn import Parameter
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class MyOptimizer(torch.optim.Optimizer):
@@ -35,6 +36,8 @@ class MyOptimizer(torch.optim.Optimizer):
 
 
 class End2EndTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # https://github.com/pytorch/torchdynamo/issues/1604
     def test_optimizing_over_tensor_with_requires_grad(self):
         class Net(torch.nn.Module):

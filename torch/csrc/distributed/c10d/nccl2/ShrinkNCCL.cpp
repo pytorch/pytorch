@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <unordered_set>
 
-#include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 
 namespace c10d::nccl2 {
@@ -44,11 +43,7 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::shrink(
       "Invalid NCCL shrink flags: ",
       shrink_flags);
 
-  if (init_state_ != InitializationState::INITIALIZED) {
-    auto device = getBoundDeviceId().value_or(
-        at::Device(at::kCUDA, at::cuda::current_device()));
-    ensureInitialized(device);
-  }
+  checkInitialized();
   checkAndAbortIfTimedOutOrError();
 
   std::unordered_set<int> seen;
@@ -82,17 +77,27 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::shrink(
 
   c10::cuda::CUDAGuard guard(device_);
   ncclComm_t childComm = nullptr;
-  NCCL_CHECK(
-      nccl_api_,
+  auto shrinkStatus = nccl_api_->commShrink(
       nccl_comm_,
-      nccl_api_->commShrink(
-          nccl_comm_,
-          excluded.data(),
-          static_cast<int>(excluded.size()),
-          &childComm,
-          &childOptions->config,
-          shrink_flags),
-      "NCCL commShrink failed");
+      excluded.data(),
+      static_cast<int>(excluded.size()),
+      &childComm,
+      &childOptions->config,
+      shrink_flags);
+  try {
+    waitForNcclChildComm(
+        *nccl_api_,
+        nccl_comm_,
+        &childComm,
+        shrinkStatus,
+        true,
+        childOptions->timeout,
+        "NCCL commShrink failed");
+  } catch (...) {
+    comm_state_ = CommState::ERROR;
+    nccl_comm_ = nullptr;
+    throw;
+  }
 
   auto excludedBeforeRank = static_cast<int>(std::ranges::count_if(
       excluded, [this](int rank) { return rank < getRank(); }));
