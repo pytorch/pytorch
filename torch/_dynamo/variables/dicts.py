@@ -554,7 +554,6 @@ class ConstDictVariable(VariableTracker):
     ) -> "ConstDictVariable":
         # items is already hashed (e.g. self.items.copy()), same as the
         # "cloning" case ConstDictVariable.__init__ documents/supports.
-        # pyrefly: ignore[bad-argument-type]
         return type(self)(items, mutation_type=ValueMutationNew())
 
     def dict_copy(
