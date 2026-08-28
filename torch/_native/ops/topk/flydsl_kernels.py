@@ -37,13 +37,13 @@ from typing import cast
 
 import flydsl.compiler as flyc
 import flydsl.expr as fx
-from flydsl._mlir.dialects import llvm
-from flydsl.expr import arith, Array, Float32, gpu, Int32, Int64, range_constexpr
+from flydsl.expr import Array, Float32, gpu, Int32, Int64, range_constexpr
 from flydsl.runtime.device import is_rdna_arch
 
 import torch
 from torch._native.flydsl.cache import CachedCompile, CacheInfo
 from torch._native.flydsl.compile_args import make_compile_arg, read_only_tensor
+from torch._native.flydsl.intrinsics import atomic_add
 from torch._native.flydsl_utils import _resolve_rocm_arch
 from torch._native.instrumentation import instrumented_flydsl_cache
 
@@ -167,18 +167,6 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
             fx.copy_atom_call(copy_atom_v, fx.slice(input_div, (None, idx)), r)
             return fx.memref_load_vec(r)
 
-        def atomic_add_i32_fetch(memref, val, offset):
-            ptr = fx.to_llvm_ptr(fx.get_iter(memref) + offset)
-            old = llvm.AtomicRMWOp(
-                llvm.AtomicBinOp.add,
-                ptr,
-                arith.unwrap(val),
-                llvm.AtomicOrdering.monotonic,
-                syncscope="workgroup",
-                alignment=4,
-            ).result
-            return fx.Int32(old)
-
         def warp_inclusive_prefix_i32(val, lane):
             for i in range_constexpr(int(math.log2(warp_size))):
                 offset = 1 << i
@@ -219,7 +207,7 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
                 byte_val = (
                     (ords >> fx.Int32(shift)) & fx.Int32(_RADIX_MASK)
                 ) ^ fx.Int32(sign_bit_xor_val)
-                atomic_add_i32_fetch(s_hist, 1, byte_val)
+                atomic_add(fx.get_iter(s_hist) + byte_val, 1)
 
         if tid == 0:
             s_prefix[0] = 0
@@ -369,13 +357,13 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
             def gather_candidate(val, idx, vals, idxs):
                 ords = _f32_to_ord(val)
                 if ords > threshold:
-                    pos = atomic_add_i32_fetch(s_write_ctr, 1, 0)
+                    pos = atomic_add(fx.get_iter(s_write_ctr), 1)
                     vals[pos] = val
                     idxs[pos] = idx
                 elif ords == threshold:
-                    eq_pos = atomic_add_i32_fetch(s_eq_ctr, 1, 0)
+                    eq_pos = atomic_add(fx.get_iter(s_eq_ctr), 1)
                     if eq_pos < remaining_k:
-                        pos = atomic_add_i32_fetch(s_write_ctr, 1, 0)
+                        pos = atomic_add(fx.get_iter(s_write_ctr), 1)
                         vals[pos] = val
                         idxs[pos] = idx
 
