@@ -17,10 +17,7 @@ from torch.distributed.elastic.multiprocessing.redirects import (
     redirect_stderr,
     redirect_stdout,
 )
-from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    TestCase,
-)
+from torch.testing._internal.common_utils import HardwareClassification, TestCase
 
 
 libc = ctypes.CDLL("libc.so.6")
