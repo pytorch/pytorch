@@ -188,9 +188,6 @@ def get_padded_length(x: int | torch.SymInt, alignment_size: int) -> int:
 
 
 def get_m_padded_length(m: int | torch.SymInt, alignment_size: int) -> int:
-    # K and N set the row strides of A, and of B and the output, so padding them to the dtype
-    # alignment makes rows 16-byte aligned. M sets no stride: padding it only changes whether
-    # the trailing M tile is masked, which is free on templates that mask or use TMA.
     if not torch._inductor.config.pad_m_dim:
         return 0
     return get_padded_length(m, alignment_size)
