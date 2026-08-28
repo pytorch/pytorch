@@ -3540,9 +3540,10 @@ struct to_ir {
         checkApplyNumInputs(apply, 1);
         auto arg = emitSugaredExpr(apply.inputs()[0], 1);
         auto inputs = arg->asTuple(apply.range(), method);
-        auto inp_values = fmap(inputs, [&](const SugaredValuePtr& sv) {
-          return sv->asValue(apply.range(), method);
-        });
+        auto inp_values =
+            fmap(std::move(inputs), [&](const SugaredValuePtr& sv) {
+              return sv->asValue(apply.range(), method);
+            });
         return std::make_shared<SimpleValue>(
             graph->insertNode(graph->createTuple(inp_values))->output());
       }
