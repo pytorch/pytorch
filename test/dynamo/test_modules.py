@@ -1511,6 +1511,58 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 1)
         self.assertTrue(torch._dynamo.testing.same(out1, out2))
 
+    def test_nn_moduledict_contains_dunder(self):
+        # CALL_METHOD obj.__contains__(key), distinct from CONTAINS_OP (`in`).
+        class M(torch.nn.Module):
+            def __init__(self, module_dict):
+                super().__init__()
+                self.module_dict = module_dict
+
+            def forward(self, x):
+                if self.module_dict.__contains__("foo"):
+                    x = torch.mul(x, 1.0)
+                x = torch.add(x, 1.0)
+                return x
+
+        m = M(torch.nn.ModuleDict({"foo": torch.nn.Linear(1, 1)}))
+        x = torch.randn(1)
+        opt_m = torch.compile(m, backend="eager", fullgraph=True)
+        self.assertEqual(m(x), opt_m(x))
+
+        torch._dynamo.reset()
+        m = M(torch.nn.ModuleDict({"bar": torch.nn.Linear(1, 1)}))
+        opt_m = torch.compile(m, backend="eager", fullgraph=True)
+        self.assertEqual(m(x), opt_m(x))
+
+    def test_nn_parameterdict_contains(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.params = torch.nn.ParameterDict(
+                    {"foo": torch.nn.Parameter(torch.ones(1))}
+                )
+
+            def forward(self, x):
+                if "foo" in self.params and self.params.__contains__("foo"):
+                    x = x + self.params["foo"]
+                if "missing" in self.params:
+                    x = x * 0
+                return x
+
+        m = M()
+        x = torch.randn(1)
+        opt_m = torch.compile(m, backend="eager", fullgraph=True)
+        self.assertEqual(m(x), opt_m(x))
+
+    def test_batchnorm_check_input_dim_elided(self):
+        m = torch.nn.BatchNorm1d(4)
+        x = torch.randn(2, 4)
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        opt_m = torch.compile(m, backend=backend, fullgraph=True)
+        self.assertEqual(m(x), opt_m(x))
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertNotIn("_check_input_dim", backend.graphs[0].print_readable(False))
+
     def test_lazy_module1(self):
         input_shape = (16, 3, 6, 7, 8)
 
@@ -2805,6 +2857,26 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         opt_f = torch.compile(f, backend="eager", fullgraph=True)
         x = torch.randn(10)
         self.assertEqual(f(x), opt_f(x))
+
+    def test_specialized_custom_tensor_method(self):
+        # Unlisted class methods with all-tensor args still go through the
+        # generic FX-proxy heuristic on NNModuleVariable.call_method.
+        class ScaledLinear(torch.nn.Linear):
+            def scale(self, x):
+                return x * 2
+
+        lin = ScaledLinear(4, 4)
+        lin.torchdynamo_force_dynamic = False
+
+        def f(x):
+            return lin.scale(x)
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        opt_f = torch.compile(f, backend=backend, fullgraph=True)
+        x = torch.randn(2, 4)
+        self.assertEqual(f(x), opt_f(x))
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertIn("scale", backend.graphs[0].print_readable(False))
 
     def test_module_dict_iter_keys(self):
         class MyModule(torch.nn.Module):
