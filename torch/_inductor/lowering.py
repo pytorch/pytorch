@@ -290,7 +290,7 @@ def decode_dtype(dtype: int | torch.dtype) -> torch.dtype:
     return dtype
 
 
-def is_integer_type(x: Any) -> TypeGuard[TensorBox | IRNode | sympy.Expr | int]:
+def is_integer_type(x: object) -> TypeGuard[TensorBox | IRNode | sympy.Expr | int]:
     if isinstance(x, (TensorBox, IRNode)):
         return is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     elif isinstance(x, sympy.Expr):
@@ -299,7 +299,7 @@ def is_integer_type(x: Any) -> TypeGuard[TensorBox | IRNode | sympy.Expr | int]:
         return isinstance(x, int)
 
 
-def is_boolean_type(x: Any) -> TypeGuard[TensorBox | IRNode | bool]:
+def is_boolean_type(x: object) -> TypeGuard[TensorBox | IRNode | bool]:
     if isinstance(x, (TensorBox, IRNode)):
         return is_boolean_dtype(x.get_dtype())
     else:
@@ -1417,7 +1417,7 @@ def trunc(x):
 
 
 @register_lowering(aten.expand, type_promotion_kind=None)
-def expand(x, sizes, *, implicit=False):
+def expand(x, sizes, *, implicit=False, graph_fanout=False):
     # `implicit` is autograd-internal metadata (see aten::expand schema); it
     # does not affect the produced tensor, so the lowering ignores it. Without
     # this kwarg the lowering rejects graphs produced by dynamo autograd where
@@ -1444,12 +1444,17 @@ def expand(x, sizes, *, implicit=False):
         if x_size_product > 0 and not free_unbacked_symbols(sizes):
             # Broadcast loop reuse is not graph fanout; keep the graph-fanout
             # read-count heuristic from materializing cheap expanded producers.
+            # graph_fanout=True is for consumers that cannot hoist the broadcast
+            # load out of their loop: a reduction over the broadcast dim can, but
+            # a pointwise or scatter loop over the expanded size folds that dim
+            # into its own index space and so reloads x at every position.
             # In deterministic modes, preserve the old materialization boundary
             # since fusing through expanded inputs can change reduction numerics.
             x.mark_reuse(
                 V.graph.sizevars.guarding_hint_or_throw(sympy_product(sizes))
                 // x_size_product,
-                graph_reuse=config.deterministic
+                graph_reuse=graph_fanout
+                or config.deterministic
                 or torch.are_deterministic_algorithms_enabled(),
             )
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
@@ -3169,7 +3174,7 @@ def inductor_random(
     ).make_indexer()
     seed_loader = seed.make_loader()
 
-    if config.align_random_eager and device.type == "cuda":
+    if config.align_random_eager and device.type == "cuda" and mode == "rand":
         threads_per_round = get_threads_per_round(device)
 
         def _vec_from_dtype(dt: torch.dtype) -> int:
@@ -4118,7 +4123,8 @@ def select_scatter(x, src, dim: int, index: int):
 
     V.graph.sizevars.check_leq(0, index)  # type: ignore[arg-type]
     V.graph.sizevars.check_lt(index, x.get_size()[dim])  # type: ignore[arg-type]
-    src = expand(unsqueeze(src, dim), x.get_size())
+    # inner_fn below loads src at every position of `dim`; see expand()
+    src = expand(unsqueeze(src, dim), x.get_size(), graph_fanout=True)
     src_loader = src.make_loader()
 
     def inner_fn(idx):
@@ -5034,7 +5040,9 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
         None,
         check=check,
     )
-    values = expand(values, expected_vals_size)
+    # the Scatter below loads values at every position of expected_vals_size;
+    # see expand()
+    values = expand(values, expected_vals_size, graph_fanout=True)
     # all guards are set above during broadcast_tensors and expand
 
     device = self.get_device()
@@ -7347,7 +7355,7 @@ def make_reduction(
     reduction_type: ReductionType,
     override_return_dtype=None,
     *,
-    strict_sum: bool = False,
+    strict_reduction: bool = False,
 ) -> Callable[..., TensorBox]:
     def inner(x, axis=None, keepdims=False, *, dtype=None) -> TensorBox:
         # For argmax/argmin on boolean tensors, cast to int32 first to ensure
@@ -7368,7 +7376,7 @@ def make_reduction(
         result = Reduction.create(
             reduction_type=reduction_type,
             input_node=x,
-            strict_sum=strict_sum,
+            strict_reduction=strict_reduction,
             **kwargs,
         )
         if isinstance(
@@ -7895,12 +7903,12 @@ def fmod(a, b):
     return make_pointwise(fn)(a, b)
 
 
-def _strict_sum_layout_eligible(axis, dtype) -> bool:
+def _strict_reduction_layout_eligible(axis, dtype) -> bool:
     current_node = V.graph.current_node
     if (
         current_node is None
         or config.numerics != "strict"
-        or current_node.target != aten.sum.dim_IntList
+        or current_node.target not in (aten.sum.dim_IntList, aten.prod.dim_int)
         or dtype is not None
         or axis is None
         or not has_triton_reduction_ordering()
@@ -7962,13 +7970,15 @@ def _strict_sum_layout_eligible(axis, dtype) -> bool:
 
 @register_lowering([aten.sum, prims.sum])
 def sum_(x, axis=None, keepdims=False, *, dtype=None):
-    strict_sum = _strict_sum_layout_eligible(axis, dtype)
+    strict_reduction = _strict_reduction_layout_eligible(axis, dtype)
     if (
         is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     ) and dtype is None:
         dtype = torch.int64
 
-    fn = make_reduction("sum", override_return_dtype=dtype, strict_sum=strict_sum)
+    fn = make_reduction(
+        "sum", override_return_dtype=dtype, strict_reduction=strict_reduction
+    )
     return fn(x, axis, keepdims, dtype=dtype)
 
 
@@ -8102,12 +8112,15 @@ def cummin(x, axis=None):
 
 @register_lowering(aten.prod)
 def prod(x, axis=None, keepdims=False, *, dtype=None):
+    strict_reduction = _strict_reduction_layout_eligible(axis, dtype)
     if (
         is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     ) and dtype is None:
         dtype = torch.int64
 
-    fn = make_reduction("prod", override_return_dtype=dtype)
+    fn = make_reduction(
+        "prod", override_return_dtype=dtype, strict_reduction=strict_reduction
+    )
     return fn(x, axis, keepdims, dtype=dtype)
 
 
@@ -9218,14 +9231,21 @@ def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list[Any]):
     - Output nodes return their result
     - Other nodes are executed via V.graph.run_node
 
+    ``args`` holds one entry per placeholder, so placeholders are counted
+    separately from nodes.  fx does not require placeholders to be a
+    contiguous prefix of the graph, and a decomposition running over the
+    subgraph can leave ops between them; indexing ``args`` by node position
+    would then read past its end.
     """
     output = _MISSING
 
-    for i, node in enumerate(graph_module.graph.nodes):
+    placeholder_idx = 0
+    for node in graph_module.graph.nodes:
         if node.op == "placeholder":
             if node in V.graph.env:
                 raise AssertionError("expected: node not in V.graph.env")
-            V.graph.env[node] = args[i]
+            V.graph.env[node] = args[placeholder_idx]
+            placeholder_idx += 1
             continue
         elif node.op == "output":
             output_args, kwargs = V.graph.fetch_args_kwargs_from_env(node)
@@ -9504,6 +9524,25 @@ def with_effects(token, op, *args, **kwargs):
                         raise AssertionError("Multiple effects NYI")
                     effect_type = next(iter(effects))
 
+    # An effectful op may retain its tensor inputs in state inductor cannot see
+    # (e.g. pushing a tensor onto a torchbind queue), so the input buffers must
+    # never have their storage recycled for another buffer. This is retention,
+    # not ordering: no dependency edge can express "the callee kept a reference",
+    # so the ordering dep below (deliberately weak) does not cover it. We pin the
+    # inputs of every ORDERED op rather than only those that can actually retain
+    # them, since there is no reliable "retains inputs" signal: retention happens
+    # inside the op implementation, so it is absent from the schema (queue_push
+    # reports alias_info=None), the EffectType enum only encodes ordering, and a
+    # ScriptObject argument merely triggers the default effect. Under-pinning
+    # silently miscompiles, so the bounded over-pinning is the intended tradeoff.
+    # never_reuse_but_free_buffers rather than never_reuse_buffers: dropping
+    # inductor's own reference is safe here, only recycling the storage is not.
+    if effect_type:
+        for arg in pytree.tree_leaves((args, kwargs)):
+            if isinstance(arg, TensorBox):
+                arg.realize()
+                V.graph.never_reuse_but_free_buffers.add(arg.get_name())
+
     # Track operations before
     operation_len = len(V.graph.operations)
 
@@ -9521,8 +9560,13 @@ def with_effects(token, op, *args, **kwargs):
             wrap_tensors, ir.FallbackKernel.create(op, *args, **kwargs)
         )
 
-    # Get all the operations created during the lowering above, and add StarDeps
-    # to the previous node with the same effect
+    # Get all the operations created during the lowering above, and order them
+    # after the previous op with the same effect. This is an ordering constraint
+    # only: an effect edge says nothing about whether this op reads the previous
+    # one's buffer, so it goes through additional_buffer_deps, which the
+    # scheduler installs as WeakDep(is_fake=True). A strong dep would be counted
+    # as a real read and would extend the previous buffer's lifetime past its
+    # last true use, defeating both reuse and deallocation.
     if len(V.graph.operations[operation_len:]) <= 0:
         raise AssertionError(
             f"No operation nodes were generated when lowering effectful operator {op}."
@@ -9533,8 +9577,12 @@ def with_effects(token, op, *args, **kwargs):
             # Patch has_side_effects to return True
             new_op.has_side_effects = lambda: True  # pyrefly: ignore[missing-attribute]
             if prev_effect_buffer:
-                op_name = new_op.get_name()  # pyrefly: ignore[missing-attribute]
-                V.graph.additional_star_deps[op_name].add(prev_effect_buffer.get_name())
+                op_name = (
+                    new_op.get_operation_name()
+                )  # pyrefly: ignore[missing-attribute]
+                V.graph.additional_buffer_deps[op_name].add(
+                    prev_effect_buffer.get_name()
+                )
         # Update the effectful ops chain to point to the latest operation
         V.graph.effectful_ops[effect_type] = (
             new_op  # pyrefly: ignore[unsupported-operation]
@@ -9662,32 +9710,41 @@ def lower_inline_asm_elementwise(
     inputs = broadcast_tensors(*inputs)
 
     input_dtypes = tuple(inp.get_dtype() for inp in inputs)
+    output_dtypes = dtype if isinstance(dtype, tuple) else (dtype,)
     loaders = [inp.make_loader() for inp in inputs]
 
-    def inner_fn(idx):
-        vals = tuple(loader(idx) for loader in loaders)
-        result = ops.inline_asm_elementwise(
-            *vals,
-            asm=asm_str,
-            constraints=constraints,
-            dtype=dtype,
-            is_pure=is_pure,
-            pack=pack,
-            input_dtypes=input_dtypes,
-        )
-        # Inductor computes in fp32 for bf16/fp16. Upcast so fused downstream
-        # ops (reductions, etc.) see fp32 values. The Pointwise's storage dtype
-        # handles the final downcast on store.
-        if dtype in (torch.float16, torch.bfloat16):
-            result = ops.to_dtype(result, torch.float32)
-        return result
+    def make_output(output_index):
+        output_dtype = output_dtypes[output_index]
 
-    return ir.Pointwise.create(
-        device=inputs[0].get_device(),
-        dtype=dtype,
-        inner_fn=inner_fn,
-        ranges=list(inputs[0].get_size()),
-    )
+        def inner_fn(idx):
+            vals = tuple(loader(idx) for loader in loaders)
+            result = ops.inline_asm_elementwise(
+                *vals,
+                asm=asm_str,
+                constraints=constraints,
+                dtype=output_dtype,
+                is_pure=is_pure,
+                pack=pack,
+                input_dtypes=input_dtypes,
+                output_dtypes=output_dtypes if len(output_dtypes) > 1 else None,
+                output_index=output_index,
+            )
+            # Inductor computes bf16/fp16 in fp32. Upcast so fused downstream
+            # ops (reductions, etc.) see fp32 values. The Pointwise's storage dtype
+            # handles the final downcast on store.
+            if output_dtype in (torch.float16, torch.bfloat16):
+                result = ops.to_dtype(result, torch.float32)
+            return result
+
+        return ir.Pointwise.create(
+            device=inputs[0].get_device(),
+            dtype=output_dtype,
+            inner_fn=inner_fn,
+            ranges=list(inputs[0].get_size()),
+        )
+
+    outputs = tuple(make_output(i) for i in range(len(output_dtypes)))
+    return outputs if isinstance(dtype, tuple) else outputs[0]
 
 
 # populate lowerings defined in kernel/*
