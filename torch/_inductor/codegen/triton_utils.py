@@ -99,6 +99,7 @@ def signature_of(
     *,
     size_dtype: str | None,
     use_fp64_for_python_float: bool = True,
+    specialize_value: bool = True,
 ) -> str:
     """Return the Triton signature type for an Inductor kernel argument."""
     if isinstance(arg, TensorArg):
@@ -125,7 +126,9 @@ def signature_of(
                 # From triton/runtime/jit.py
                 # `None` is nullptr.  Implicitly convert to *i8.
                 return "*i8"
-        elif _arg_equals_1(arg) and triton_version_uses_attrs_dict():
+        elif (
+            specialize_value and _arg_equals_1(arg) and triton_version_uses_attrs_dict()
+        ):
             # In new versions of Triton, if we have an equal-to-1 arg that's marked as a constant,
             # it should be marked as "constexpr" in the signature.
             return "constexpr"
@@ -224,6 +227,7 @@ def signature_to_meta(
     indices: list[int] | None = None,
     is_template: bool = False,
     use_fp64_for_python_float: bool = True,
+    equal_to_1_exclusions: tuple[int, ...] = (),
 ) -> dict[str, str]:
     if indices is None:
         indices = list(range(len(signature)))
@@ -255,6 +259,7 @@ def signature_to_meta(
             arg,
             size_dtype=_decide_tl_dtype(arg),
             use_fp64_for_python_float=use_fp64_for_python_float,
+            specialize_value=i not in equal_to_1_exclusions,
         )
         for i, arg in zip(indices, signature)
     }
@@ -315,11 +320,14 @@ def equal_1_arg_indices(
     args: list[KernelArgType],
     *,
     indices: list[int] | None = None,
+    exclusions: tuple[int, ...] = (),
 ) -> tuple[int, ...]:
     if indices is None:
         indices = list(range(len(args)))
 
-    equal_to_1 = tuple(i for i, arg in zip(indices, args) if _arg_equals_1(arg))
+    equal_to_1 = tuple(
+        i for i, arg in zip(indices, args) if i not in exclusions and _arg_equals_1(arg)
+    )
 
     return equal_to_1
 
@@ -355,6 +363,8 @@ def config_of(
     indices: list[int] | None = None,
     pointer_range_override: tuple[int, ...] | None = None,
     skip_cpp_wrapper_input_tensor_alignment: bool = False,
+    divisible_by_16_exclusions: tuple[int, ...] = (),
+    equal_to_1_exclusions: tuple[int, ...] = (),
 ) -> Any:
     if indices is None:
         indices = list(range(len(args)))
@@ -410,7 +420,8 @@ def config_of(
         divisible_by_16 = tuple(
             i
             for i, arg in zip(indices, args)
-            if is_aligned(
+            if i not in divisible_by_16_exclusions
+            and is_aligned(
                 arg,
                 alignment=16,
                 include_tensor=include_tensor_alignment(arg),
@@ -419,7 +430,11 @@ def config_of(
     else:
         divisible_by_16 = ()
 
-    equal_to_1 = equal_1_arg_indices(args, indices=indices)
+    equal_to_1 = equal_1_arg_indices(
+        args,
+        indices=indices,
+        exclusions=equal_to_1_exclusions,
+    )
 
     # On AMD/HIP, tag tensor args whose storage fits in 2GB so Triton
     # can use 32-bit pointer offsets and emit buffer load/store ops.

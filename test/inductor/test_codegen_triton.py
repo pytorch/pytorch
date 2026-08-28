@@ -81,6 +81,23 @@ if has_triton_package():
         values = tl.load(x + offsets, mask=mask)
         tl.store(out + offsets, values + 1, mask=mask)
 
+    @triton.jit(
+        do_not_specialize=["one"],
+        do_not_specialize_on_alignment=["multiple_of_16"],
+    )
+    def root_specialization_for_codegen(
+        x,
+        out,
+        one,
+        multiple_of_16,
+        n_elements,
+        BLOCK_SIZE: tl.constexpr,
+    ):
+        offsets = tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        values = tl.load(x + offsets, mask=mask)
+        tl.store(out + offsets, values + one + multiple_of_16, mask=mask)
+
     @triton_jit(noinline=True, debug=True)
     def aliased_jit_helper_for_codegen(x):
         return x + 1
@@ -682,6 +699,21 @@ def helper(x):
             ),
         )
 
+        _check_divisibility(
+            (0,),
+            triton_utils.config_of(
+                [SizeArg("A", sixteen), SizeArg("B", sixteen)],
+                divisible_by_16_exclusions=(1,),
+            ),
+        )
+        self.assertEqual(
+            triton_utils.equal_1_arg_indices(
+                [SizeArg("A", sympy.S.One), SizeArg("B", sympy.S.One)],
+                exclusions=(1,),
+            ),
+            (0,),
+        )
+
     def test_config_of_sizearg_with_check_constraint(self):
         from torch.utils._sympy.functions import Mod
 
@@ -1195,6 +1227,39 @@ def helper(x):
         self.assertIn("@triton.jit\ndef root_decorator_for_codegen", decorated_source)
         self.assertNotIn("noinline=True", decorated_source)
         self.assertNotIn("debug=True", decorated_source)
+
+    @unittest.skipUnless(
+        HAS_GPU_AND_TRITON or (HAS_CPU and TRITON_HAS_CPU),
+        "requires CPU or GPU Triton",
+    )
+    def test_user_defined_triton_kernel_honors_root_specialization_options(self):
+        from torch._inductor.codegen import wrapper
+
+        def fn(x):
+            out = torch.empty_like(x)
+            root_specialization_for_codegen[(1,)](
+                x,
+                out,
+                1,
+                16,
+                x.numel(),
+                BLOCK_SIZE=128,
+            )
+            return out
+
+        device = GPU_TYPE if HAS_GPU_AND_TRITON else "cpu"
+        x = torch.randn(64, device=device)
+        with patch.object(wrapper, "config_of", wraps=wrapper.config_of) as config_of:
+            result, _ = run_and_get_code(torch.compile(fn), x)
+
+        self.assertEqual(result, x + 17)
+        user_config_call = next(
+            call
+            for call in config_of.call_args_list
+            if call.kwargs.get("pointer_range_override") == ()
+        )
+        self.assertEqual(user_config_call.kwargs["equal_to_1_exclusions"], (2,))
+        self.assertEqual(user_config_call.kwargs["divisible_by_16_exclusions"], (3,))
 
     @unittest.skipUnless(
         HAS_GPU_AND_TRITON or (HAS_CPU and TRITON_HAS_CPU),

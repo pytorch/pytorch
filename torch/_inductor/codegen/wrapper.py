@@ -3746,6 +3746,12 @@ class PythonWrapperCodegen(CodeGen):
 
         arg_names = [p.name for p in kernel.params]
         constexprs = [p.num for p in kernel.params if p.is_constexpr]
+        # Root decorator text is omitted from generated source, but the original
+        # JITFunction parameters still carry Triton's specialization controls.
+        do_not_specialize = tuple(p.num for p in kernel.params if p.do_not_specialize)
+        do_not_specialize_on_alignment = tuple(
+            p.num for p in kernel.params if p.do_not_specialize_on_alignment
+        )
         for idx, key in enumerate(arg_names):
             if idx in constexprs:
                 add_arg(idx, ConstexprArg(name=key), is_constexpr=True)
@@ -3797,11 +3803,13 @@ class PythonWrapperCodegen(CodeGen):
                         ),
                     )
                 else:
-                    equals_1 = isinstance(
-                        arg, (int, sympy.Integer)
-                    ) and V.graph.sizevars.statically_known_equals(
-                        arg,
-                        1,  # type: ignore[arg-type]
+                    equals_1 = (
+                        isinstance(arg, (int, sympy.Integer))
+                        and idx not in do_not_specialize
+                        and V.graph.sizevars.statically_known_equals(
+                            arg,
+                            1,  # type: ignore[arg-type]
+                        )
                     )
                     add_arg(idx, SizeArg(key, arg), equals_1=equals_1)
 
@@ -3811,6 +3819,7 @@ class PythonWrapperCodegen(CodeGen):
             indices=arg_indices,
             argdefs=[ArgName(x) for x in kernel.arg_names],
             use_fp64_for_python_float=False,
+            equal_to_1_exclusions=do_not_specialize,
         )
         device = V.graph.get_current_device_or_throw()
         device_props = DeviceProperties.create(device)
@@ -3833,6 +3842,8 @@ class PythonWrapperCodegen(CodeGen):
                     signature,
                     indices=arg_indices,
                     pointer_range_override=(),
+                    divisible_by_16_exclusions=do_not_specialize_on_alignment,
+                    equal_to_1_exclusions=do_not_specialize,
                 )
             ],
         }
