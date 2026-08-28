@@ -16,7 +16,9 @@ from .gemm_epilogue_utils import statically_known_shape_equal
 
 
 GEMM_ACCUMULATOR_ARG_NAME = "accum"
+GEMM_LOCAL_REDUCTION_RESULT_NAME = "_local_reduce"
 GEMM_REDUCTION_FRAGMENT_WIDTH = 32
+GEMM_REDUCTION_IDENTITY_SOURCE = "def _local_reduce_source(value):\n    return value"
 
 GemmReductionType = Literal["sum", "mean", "prod", "max", "min"]
 # "default" uses one associative reduction. The other values select physical
@@ -32,6 +34,7 @@ class GemmEpiloguePlan:
     reads: tuple[str, ...] = ()
     writes: tuple[str, ...] = ()
     renames: dict[str, Any] = dataclasses.field(default_factory=dict)
+    output_scale: str | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -124,6 +127,7 @@ class GemmReductionConfig:
     reduction_algorithm: GemmReductionAlgorithm = "default"
     finalizer_fn: str | None = None
     secondary_consumer_fn: str | None = None
+    source_fn: str | None = None
 
     @property
     def geometry(self) -> GemmReductionGeometry:
@@ -153,7 +157,7 @@ class GemmReductionPlan:
     reduction_output: str | None
     group: int
     axis: int
-    reduction_type: GemmReductionType
+    reduction_type: GemmReductionType | None
     source_type: str
     primary_output: str
     reduction_algorithm: GemmReductionAlgorithm = "default"
@@ -163,10 +167,28 @@ class GemmReductionPlan:
     finalizer_fn: str | None = None
     consumer_fn: str | None = None
     secondary_consumer_fn: str | None = None
+    source_fn: str | None = None
+    combine_fn: str | None = None
+    tensor_epilogue_returns_local_reduce: bool = False
 
     @property
     def geometry(self) -> GemmReductionGeometry:
         return GemmReductionGeometry(self.group, self.axis)
+
+    @classmethod
+    def from_config(
+        cls, config: GemmReductionConfig, **plan_fields: Any
+    ) -> "GemmReductionPlan":
+        plan_fields.setdefault("finalizer_fn", config.finalizer_fn)
+        plan_fields.setdefault("secondary_consumer_fn", config.secondary_consumer_fn)
+        return cls(
+            group=config.group,
+            axis=config.axis,
+            reduction_type=config.reduction_type,
+            source_type=config.source_type,
+            source_fn=config.source_fn,
+            **plan_fields,
+        )
 
     @property
     def auxiliary_outputs(self) -> tuple[str, ...]:
