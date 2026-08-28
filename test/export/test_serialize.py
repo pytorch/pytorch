@@ -41,6 +41,7 @@ from torch._export.db.examples import all_examples
 from torch._export.serde.schema import ArgumentKind
 from torch._export.serde.serialize import (
     _dict_to_dataclass,
+    _reconstruct_fake_tensor,
     _to_json_bytes,
     canonicalize,
     deserialize,
@@ -1358,6 +1359,39 @@ class TestDeserialize(TestCase):
             _check_graph(pre_dispatch=False)
         else:
             _check_graph(pre_dispatch=False)
+
+    def test_deserialize_fake_tensor_constant_with_symbolic_size(self) -> None:
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x.data * 2
+
+        # PyTorch 2.8 allowed non-strict export to lift the FakeTensor produced
+        # by x.data into constants, including its symbolic batch dimension.
+        # Deserialization must remain compatible with those archives.
+        with self.assertWarnsRegex(
+            UserWarning,
+            "We found a fake tensor in the exported program constant's list",
+        ):
+            with torch._export.config.patch(error_on_lifted_constant_tensors=False):
+                ep = torch.export.export(
+                    Foo(),
+                    (torch.randn(2, 3),),
+                    dynamic_shapes={"x": {0: Dim("batch")}},
+                    strict=False,
+                )
+
+        self.assertEqual(len(ep.constants), 1)
+        constant_name, fake_constant = next(iter(ep.constants.items()))
+        self.assertIsInstance(fake_constant, FakeTensor)
+        self.assertFalse(is_concrete_int(fake_constant.shape[0]))
+
+        with torch.serialization.safe_globals([_reconstruct_fake_tensor]):
+            loaded_ep = deserialize(serialize(ep))
+
+        loaded_constant = loaded_ep.constants[constant_name]
+        self.assertIsInstance(loaded_constant, FakeTensor)
+        self.assertFalse(is_concrete_int(loaded_constant.shape[0]))
+        self.assertEqual(loaded_constant.shape[1], 3)
 
     def test_optional_tuple(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
