@@ -7006,7 +7006,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, XPU: heaviside_out
+    CPU, CUDA, MPS, XPU: heaviside_out
   tags: pointwise
 
 - func: heaviside(Tensor self, Tensor values) -> Tensor
