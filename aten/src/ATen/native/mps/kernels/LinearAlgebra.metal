@@ -1333,24 +1333,47 @@ INSTANTIATE_SYRK_TRAILING(L, false, 32, 128, 4)
 // The LU kernels are templated over the element type: float (sgetrf) and
 // float2/complex64 (cgetrf, host_name suffix _c64). Pivot magnitude is fabs
 // for real and cabs1 = |re| + |im| for complex (LAPACK icamax); the complex
-// elimination math routes through c10::metal::mul/div under `IF_CONSTEXPR` so
-// the float path keeps its exact fma instruction sequence. Plain LU is purely
-// algebraic, so the complex path uses NO conjugation anywhere.
-template <typename T>
-inline float luPivotMag(T v) {
-  if IF_CONSTEXPR (c10::metal::is_complex_v<T>) {
-    const float2 a = ::metal::precise::abs(v);
-    return a.x + a.y;
-  } else {
-    return fabs(v);
+// elimination math routes through c10::metal::mul/div so the float path keeps
+// its exact fma instruction sequence. Plain LU is purely algebraic, so the
+// complex path uses NO conjugation anywhere.
+//
+// Type dispatch below uses `if IF_CONSTEXPR`, which lowers to a plain runtime
+// `if` on Metal 3 (see c10/metal/common.h), so both arms are parsed and must
+// type-check for every T. Where an arm is well-formed for only one element
+// type -- the reciprocal, the pivot magnitude, and the float4 vectorized
+// stores -- it lives in an overload instead of a branch.
+inline float luPivotMag(float v) {
+  return ::metal::fabs(v);
+}
+inline float luPivotMag(float2 v) {
+  // cabs1 = |re| + |im| (LAPACK icamax)
+  const float2 a = ::metal::precise::abs(v);
+  return a.x + a.y;
+}
+inline float luRecip(float v) {
+  return 1.0f / v;
+}
+inline float2 luRecip(float2 v) {
+  return c10::metal::div(float2(1.0f, 0.0f), v);
+}
+
+// 4-wide vectorized store. The complex overloads are never selected at run
+// time (the callers' vec4/aligned guards are false for complex), but they must
+// exist so the call type-checks when T is float2.
+inline void luStore4(device float* dst, thread const float* src) {
+  *(device float4*)dst = float4(src[0], src[1], src[2], src[3]);
+}
+inline void luStore4(device float2* dst, thread const float2* src) {
+  for (short i = 0; i < 4; i++) {
+    dst[i] = src[i];
   }
 }
-template <typename T>
-inline T luRecip(T v) {
-  if IF_CONSTEXPR (c10::metal::is_complex_v<T>) {
-    return c10::metal::div(float2(1.0f, 0.0f), v);
-  } else {
-    return 1.0f / v;
+inline void luStore4(device float* dst, threadgroup const float* src) {
+  *(device float4*)dst = float4(src[0], src[1], src[2], src[3]);
+}
+inline void luStore4(device float2* dst, threadgroup const float2* src) {
+  for (short i = 0; i < 4; i++) {
+    dst[i] = src[i];
   }
 }
 
@@ -1532,18 +1555,10 @@ kernel void factorPanelLU(
     const uint lr = tid + uint(r) * G;
     if (lr < H) {
       device T* dst = Ab + ulong(d0 + lr) * N + d0;
-      if IF_CONSTEXPR (c10::metal::is_complex_v<T>) {
-#pragma unroll
-        for (short c = 0; c < W; c++) {
-          if (uint(c) < nb) {
-            dst[c] = row[r][c];
-          }
-        }
-      } else if (vec4) {
+      if (vec4) {
 #pragma unroll
         for (short c = 0; c < W; c += 4) {
-          *(device float4*)(dst + c) =
-              float4(row[r][c], row[r][c + 1], row[r][c + 2], row[r][c + 3]);
+          luStore4(dst + c, &row[r][c]);
         }
       } else {
 #pragma unroll
@@ -1923,13 +1938,8 @@ kernel void laswpGatherLU(
     const uint c = (v < W0) ? (w.x + v) : (w.z + (v - W0));
     const uint cnt = min(4u, W - v);
     device T* dp = Ab + ulong(rowIds[r]) * N + c;
-    if IF_CONSTEXPR (c10::metal::is_complex_v<T>) {
-      for (uint e = 0; e < cnt; e++) {
-        dp[e] = stage[sr][q + e];
-      }
-    } else if (cnt == 4 && aligned) {
-      *(device float4*)dp = float4(
-          stage[sr][q], stage[sr][q + 1], stage[sr][q + 2], stage[sr][q + 3]);
+    if (cnt == 4 && aligned) {
+      luStore4(dp, &stage[sr][q]);
     } else {
       for (uint e = 0; e < cnt; e++) {
         dp[e] = stage[sr][q + e];
@@ -2028,7 +2038,7 @@ kernel void trsmPanelLU(
       }
     } else {
       // batch the column loads ahead of the fma burst (in-order pipe)
-      float dcol[TS];
+      T dcol[TS];
 #pragma unroll
       for (short i = 0; i < TS; i++) {
         dcol[i] = L[i][c];
