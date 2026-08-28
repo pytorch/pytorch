@@ -36,7 +36,7 @@ from . import tile
 from .kernel_general import _launch, _PART_TORCH, ReduceBlock
 
 
-_compile = _L.compile
+_compile = _L.compile_kernel
 _stream = _L.stream
 _CACHE = {}
 

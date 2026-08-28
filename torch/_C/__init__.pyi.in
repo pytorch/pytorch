@@ -2367,9 +2367,6 @@ class _CudaDeviceProperties:
     # platform-conditional, and gcnArchName above is the mirror case (HIP-only).
     shared_memory_per_block_optin: _int
     regs_per_multiprocessor: _int
-    pci_bus_id: _int
-    pci_device_id: _int
-    pci_domain_id: _int
 
 # Functions related to SDPA
 class _SDPAParams:
