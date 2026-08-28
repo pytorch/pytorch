@@ -1874,11 +1874,7 @@ Tuple generic_to_tuple_impl(
 template <
     typename... Args,
     typename Indices = std::make_index_sequence<sizeof...(Args)>,
-    std::enable_if_t<
-        !std::disjunction_v<
-            std::is_lvalue_reference<Args>...,
-            std::negation<std::is_constructible<IValue, Args>>...>,
-        std::nullptr_t> = nullptr>
+    typename = IValue::enable_if_ivalue_compatible<Args...>::type>
 std::tuple<Args...> generic_to(const IValue& ivalue, _fake_type<std::tuple<Args...>> /*unused*/) {
   const auto& vals = ivalue.toTupleRef().elements();
   TORCH_CHECK(vals.size() == sizeof...(Args));
@@ -2138,24 +2134,12 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::Tuple> v)
     : tag(Tag::Tuple) {
   payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.release());
 }
-template <
-    typename... Args,
-    std::enable_if_t<
-        !std::disjunction_v<
-            std::is_lvalue_reference<Args>...,
-            std::negation<std::is_constructible<IValue, Args>>...>,
-        std::nullptr_t>>
+template <typename... Args, typename /* Enable */>
 inline IValue::IValue(const std::tuple<Args...>& t)
     : IValue(std::apply(c10::ivalue::Tuple::create<const Args&...>, t)) {
 }
 
-template <
-    typename... Args,
-    std::enable_if_t<
-        !std::disjunction_v<
-            std::is_lvalue_reference<Args>...,
-            std::negation<std::is_constructible<IValue, Args>>...>,
-        std::nullptr_t>>
+template <typename... Args, typename /* Enable */>
 inline IValue::IValue(std::tuple<Args...>&& t)
     : IValue(std::apply(c10::ivalue::Tuple::create<Args&&...>, std::move(t))) {
 }
