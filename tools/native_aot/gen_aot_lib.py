@@ -1162,7 +1162,11 @@ def main(argv: list[str] | None = None) -> None:
                         f"missing at compile or link time; re-export this arch "
                         f"({sc.get('arch')}) or delete {sc['_dir']}."
                     )
-                if ext in tc.link_exts:
+                # `or ()`: link_exts is Optional so that a kind which never
+                # DECLARED one is refused at import (toolchains
+                # ._assert_link_exts_are_exportable), not so that it can be None
+                # here -- by generation time every registered kind has declared one.
+                if ext in (tc.link_exts or ()):
                     entry_objects.append(art)
         src = gen_op(
             did,
