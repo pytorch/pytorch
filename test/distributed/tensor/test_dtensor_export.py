@@ -23,10 +23,10 @@ from torch.nn.attention.flex_attention import (
     create_block_mask,
     flex_attention,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
-    requires_cuda,
     run_tests,
     TestCase,
 )
@@ -175,8 +175,9 @@ register_pytree_node(
 )
 
 
-@requires_cuda
 class DTensorExportTest(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def tearDown(self):
         super().tearDown()
         dist.destroy_process_group()
@@ -188,24 +189,24 @@ class DTensorExportTest(TestCase):
         dist.init_process_group(
             backend="fake", rank=0, world_size=self.world_size, store=store
         )
-        self.device_type = "cuda"
 
-    def _run_test(self, export_fn, test_annotation=False):
+    def _run_test(self, export_fn, device, test_annotation=False):
+        device_type = torch.device(device).type
         dp_degree = 2
         tp_degree = self.world_size // dp_degree
 
         # 2-D mesh is [dp, tp]
         mesh_2d = init_device_mesh(
-            self.device_type,
+            device_type,
             mesh_shape=(dp_degree, tp_degree),
             mesh_dim_names=["dp", "tp"],
         )
 
         model = None
         if test_annotation:
-            model = SimpleModelAnnotated(self.device_type)
+            model = SimpleModelAnnotated(device)
         else:
-            model = SimpleModel(self.device_type)
+            model = SimpleModel(device)
         parallelize_plan = {
             "mlp_0.net1": ColwiseParallel(),
             "mlp_0.net2": RowwiseParallel(),
@@ -214,7 +215,7 @@ class DTensorExportTest(TestCase):
         }
         tp_model = parallelize_module(model, mesh_2d["tp"], parallelize_plan)
 
-        inp = torch.rand(20, 10, device=self.device_type)
+        inp = torch.rand(20, 10, device=device)
         inputs = (distribute_tensor(inp, mesh_2d["tp"], placements=[Replicate()]),)
 
         joint_gm = export_fn(tp_model, inputs)
@@ -354,17 +355,18 @@ class DTensorExportTest(TestCase):
     )
     def test_export_parallelize_module_with_dtensor_input(
         self,
+        device,
         export_fn,
     ):
-        self._run_test(export_fn)
+        self._run_test(export_fn, device)
 
     # aot_export_joint_with_descriptors on strict-exported exported_program.module()
     # is producing a joint graph with backward region missing
-    def test_strict_export_parallelize_module_with_dtensor_input(self):
-        self._run_test(strict_export_and_aot_export_joint_with_descriptors)
+    def test_strict_export_parallelize_module_with_dtensor_input(self, device):
+        self._run_test(strict_export_and_aot_export_joint_with_descriptors, device)
 
-    def test_annotate_aot_export_joint_with_descriptors_alone(self):
-        self._run_test(aot_export_joint_with_descriptors_alone, True)
+    def test_annotate_aot_export_joint_with_descriptors_alone(self, device):
+        self._run_test(aot_export_joint_with_descriptors_alone, device, True)
 
     @parametrize(
         "export_fn_with_answer",
@@ -375,19 +377,20 @@ class DTensorExportTest(TestCase):
             ),
         ],
     )
-    def test_dynamic_shapes(self, export_fn_with_answer):
+    def test_dynamic_shapes(self, device, export_fn_with_answer):
         export_fn, answer = export_fn_with_answer
+        device_type = torch.device(device).type
         dp_degree = 2
         tp_degree = self.world_size // dp_degree
 
         # 2-D mesh is [dp, tp]
         mesh_2d = init_device_mesh(
-            self.device_type,
+            device_type,
             mesh_shape=(dp_degree, tp_degree),
             mesh_dim_names=["dp", "tp"],
         )
 
-        model = SimpleModelDynamicShapes(self.device_type)
+        model = SimpleModelDynamicShapes(device)
         parallelize_plan = {
             "mlp_0.net1": ColwiseParallel(),
             "mlp_0.net2": RowwiseParallel(),
@@ -396,7 +399,7 @@ class DTensorExportTest(TestCase):
         }
         tp_model = parallelize_module(model, mesh_2d["tp"], parallelize_plan)
 
-        inp = torch.rand(20, 10, device=self.device_type)
+        inp = torch.rand(20, 10, device=device)
         inp_dtensor = distribute_tensor(inp, mesh_2d["tp"], placements=[Replicate()])
         torch._dynamo.mark_dynamic(inp_dtensor, 0, min=5, max=100)
         inputs = (inp_dtensor,)
@@ -420,19 +423,21 @@ class DTensorExportTest(TestCase):
             dynamo_graph_capture_for_export,
         ],
     )
-    def test_einsum_dtensor_export(self, export_fn):
+    def test_einsum_dtensor_export(self, device, export_fn):
         """Test exporting a model with einsum that has DTensor inputs/outputs with side effects"""
         world_size = 4
         # Create device mesh
-        device_mesh = init_device_mesh(self.device_type, mesh_shape=(world_size,))
+        device_mesh = init_device_mesh(
+            torch.device(device).type, mesh_shape=(world_size,)
+        )
         model = EinsumModel()
 
-        x = torch.randn(4, 8, 16)
+        x = torch.randn(4, 8, 16, device=device)
         x_dtensor = distribute_tensor(x, device_mesh, placements=[Shard(0)])
 
         # y: [16, 16] replicated
-        y = torch.randn(16, 16)
-        z = torch.randn(16, 16)
+        y = torch.randn(16, 16, device=device)
+        z = torch.randn(16, 16, device=device)
         y_dtensor = distribute_tensor(y, device_mesh, placements=[Replicate()])
         z_dtensor = DTensor.from_local(z, device_mesh, placements=[Partial()])
         inputs = (x_dtensor, y_dtensor, z_dtensor)
@@ -443,85 +448,17 @@ class DTensorExportTest(TestCase):
         output_gm = gm(*inputs)
         self.assertEqual(output, output_gm)
 
-    @parametrize(
-        "export_fn",
-        [
-            graph_capture_and_aot_export_joint_with_descriptors_v2,
-        ],
-    )
-    def test_flex_attention_dtensor_export(self, export_fn):
-        device_mesh = init_device_mesh(self.device_type, mesh_shape=(self.world_size,))
-        model = FlexAttentionModel(self.device_type)
-
-        # Parallelize the model: shard on head dimension
-        # proj_q, proj_k, proj_v are colwise parallel (output is sharded on head dimension)
-        # proj_out is rowwise parallel (input is sharded, output needs reduction)
-        parallelize_plan = {
-            "proj_q": ColwiseParallel(),
-            "proj_k": ColwiseParallel(),
-            "proj_v": ColwiseParallel(),
-            "proj_out": RowwiseParallel(),
-        }
-        tp_model = parallelize_module(model, device_mesh, parallelize_plan)
-        batch_size = 4
-        seq_len = 64
-        embed_dim = 16
-        num_heads = 8
-
-        # Input tensor replicated across all devices
-        inp = torch.randn(batch_size, seq_len, embed_dim, device=self.device_type)
-        inputs = (distribute_tensor(inp, device_mesh, placements=[Replicate()]),)
-
-        def causal_mask(b, h, q_idx, kv_idx):
-            return q_idx >= kv_idx
-
-        block_mask = create_block_mask(
-            causal_mask,
-            batch_size,
-            num_heads,
-            seq_len,
-            seq_len,
-            device=self.device_type,
+    def test_dtensor_data_dependent_index_and_slice(self, device):
+        device_mesh = init_device_mesh(
+            torch.device(device).type, mesh_shape=(self.world_size,)
         )
-
-        flex_kwargs = {"block_mask": block_mask}
-
-        joint_gm = export_fn(tp_model, inputs, flex_kwargs)
-
-        self.assertTrue(
-            _count_op(joint_gm, torch.ops.higher_order.flex_attention),
-            1,
-        )
-
-        self.assertTrue(
-            _count_op(joint_gm, torch.ops.higher_order.flex_attention_backward),
-            2,
-        )
-
-    def test_union_typed_annotation(self):
-        def fn(leaf: torch.Tensor | DTensor):
-            def nest_fn(leaf: torch.Tensor | DTensor):
-                # def nest_fn(leaf: Union[torch.Tensor, DTensor]):  # this works
-                if isinstance(leaf, DTensor):
-                    leaf = leaf.to_local()
-                return leaf
-
-            return nest_fn(leaf) + 1
-
-        z = torch.randn(16, 16)
-        gm = graph_capture_and_aot_export_joint_with_descriptors_v2(fn, (z,))
-
-        self.assertEqual(fn(z), gm(z)[0])
-
-    def test_dtensor_data_dependent_index_and_slice(self):
-        device_mesh = init_device_mesh(self.device_type, mesh_shape=(self.world_size,))
 
         class Foo(torch.nn.Module):
             def forward(self, x, y):
                 return x[y]
 
-        x = torch.randn(10)
-        y = torch.randint(1, (10,)).bool()
+        x = torch.randn(10, device=device)
+        y = torch.randint(1, (10,), device=device).bool()
         x_dt = distribute_tensor(x, device_mesh, placements=[Replicate()])
         y_dt = distribute_tensor(y, device_mesh, placements=[Replicate()])
         dynamo_graph_capture_for_export(Foo())(x_dt, y_dt)
@@ -532,7 +469,7 @@ class DTensorExportTest(TestCase):
                 torch._check(val >= 1)
                 return x[:val]
 
-        x = torch.randint(1000, (4, 64, 16))
+        x = torch.randint(1000, (4, 64, 16), device=device)
         x_dt = distribute_tensor(x, device_mesh, placements=[Replicate()])
         gm = dynamo_graph_capture_for_export(Bar())(x_dt)
         self.assertExpectedInline(
@@ -549,9 +486,9 @@ graph():
     return (getitem,)""",
         )
 
-    def test_dtensor_mark_unbacked(self):
+    def test_dtensor_mark_unbacked(self, device):
         device_mesh = init_device_mesh(
-            self.device_type, mesh_shape=(self.world_size // 2, 2)
+            torch.device(device).type, mesh_shape=(self.world_size // 2, 2)
         )
 
         class Foo(torch.nn.Module):
@@ -559,7 +496,9 @@ graph():
                 return x @ y
 
         x_dt = distribute_tensor(
-            torch.randn(64, 64), device_mesh, placements=[Replicate(), Replicate()]
+            torch.randn(64, 64, device=device),
+            device_mesh,
+            placements=[Replicate(), Replicate()],
         )
         y_dt = x_dt.clone()
         for i in range(2):
@@ -577,12 +516,87 @@ graph():
 
         # test size-0 tensor
         z_dt = distribute_tensor(
-            torch.randn(0, 0), device_mesh, placements=[Replicate(), Replicate()]
+            torch.randn(0, 0, device=device),
+            device_mesh,
+            placements=[Replicate(), Replicate()],
         )
         self.assertEqual(gm(z_dt, z_dt).shape, (0, 0))
 
+    @parametrize(
+        "export_fn",
+        [
+            graph_capture_and_aot_export_joint_with_descriptors_v2,
+        ],
+    )
+    def test_flex_attention_dtensor_export(self, device, export_fn):
+        device_mesh = init_device_mesh(
+            torch.device(device).type, mesh_shape=(self.world_size,)
+        )
+        model = FlexAttentionModel(device)
 
-instantiate_parametrized_tests(DTensorExportTest)
+        parallelize_plan = {
+            "proj_q": ColwiseParallel(),
+            "proj_k": ColwiseParallel(),
+            "proj_v": ColwiseParallel(),
+            "proj_out": RowwiseParallel(),
+        }
+        tp_model = parallelize_module(model, device_mesh, parallelize_plan)
+        batch_size = 4
+        seq_len = 64
+        embed_dim = 16
+        num_heads = 8
+
+        inp = torch.randn(batch_size, seq_len, embed_dim, device=device)
+        inputs = (distribute_tensor(inp, device_mesh, placements=[Replicate()]),)
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        block_mask = create_block_mask(
+            causal_mask,
+            batch_size,
+            num_heads,
+            seq_len,
+            seq_len,
+            device=device,
+        )
+
+        joint_gm = export_fn(tp_model, inputs, {"block_mask": block_mask})
+
+        self.assertTrue(
+            _count_op(joint_gm, torch.ops.higher_order.flex_attention),
+            1,
+        )
+        self.assertTrue(
+            _count_op(joint_gm, torch.ops.higher_order.flex_attention_backward),
+            2,
+        )
+
+
+class DTensorExportGenericTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_union_typed_annotation(self):
+        def fn(leaf: torch.Tensor | DTensor):
+            def nest_fn(leaf: torch.Tensor | DTensor):
+                if isinstance(leaf, DTensor):
+                    leaf = leaf.to_local()
+                return leaf
+
+            return nest_fn(leaf) + 1
+
+        z = torch.randn(16, 16)
+        gm = graph_capture_and_aot_export_joint_with_descriptors_v2(fn, (z,))
+
+        self.assertEqual(fn(z), gm(z)[0])
+
+
+instantiate_device_type_tests(
+    DTensorExportTest,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
