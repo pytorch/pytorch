@@ -1183,7 +1183,7 @@ class TestConvolutionNN(NNTestCase):
         F.conv1d(input, weight, bias, stride, padding, dilation, groups)
 
 
-class TestConvolutionNNDeviceType(NNTestCase):
+class TestConvolutionNNDevice(NNTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @skipMPS
@@ -4561,7 +4561,7 @@ class TestConvolutionNNCUDA(NNTestCase):
 
 
 instantiate_device_type_tests(
-    TestConvolutionNNDeviceType, globals(), allow_mps=True, allow_xpu=True
+    TestConvolutionNNDevice, globals(), allow_mps=True, allow_xpu=True
 )
 instantiate_device_type_tests(TestConvolutionNNCUDA, globals(), only_for=("cuda",))
 instantiate_parametrized_tests(TestConvolutionNN)
