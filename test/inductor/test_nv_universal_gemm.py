@@ -1666,14 +1666,14 @@ class TestNVUniversalGemmHeuristics(TestCase):
         bias = _build_bias_epilogue("bias", "out")
         self.assertEqual(bias.reads, ("bias",))
         self.assertEqual(bias.renames["D"], "out")
-        self.assertTrue(bias.is_cutedsl)
+        self.assertFalse(bias.is_evt_fallback)
 
         pointwise = GemmEpiloguePlan(
             source="def epilogue(accum, scale):\n    return accum * scale",
             reads=("scale",),
             writes=("out",),
             renames={"scale": "scale", "D": "out"},
-            is_cutedsl=True,
+            is_evt_fallback=False,
         )
         composed = _compose_bias_into_epilogue(pointwise, "bias")
         self.assertIn("biased = accum + bias", composed.source)
