@@ -255,6 +255,19 @@ def _precompile_accum_flaky_step(model, x, mode):
     return _precompile_accum_step(model, x, mode)
 
 
+class _PrecompileDeadResultModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.l = torch.nn.Linear(4, 4)
+
+
+def _precompile_dead_result(model, x):
+    # The result is unused, so the graph's output prunes to nothing -- the
+    # shape upstream short-circuits past the backend.
+    model.l(x)
+    return None
+
+
 class _PrecompileAttrCfg:
     """Discriminated by HASATTR, a slot the invariant policy CAN drop."""
 
@@ -2157,6 +2170,53 @@ class TestPrecompile(TestCase):
                 # The next good call must render and return, not inherit it.
                 self.assertIsNotNone(capture(model, x, "b"))
         self.assertEqual(_PRECOMPILE_ACCUM_RAN, ["a", "b"])
+
+    def test_precompile_records_a_backend_for_a_short_circuited_noop_graph(self):
+        # A graph that runs nothing and returns nothing never reaches the
+        # backend: output_graph substitutes noop_graph_call rather than pay a
+        # metadata pass and a joint trace for it. Ordinary torch.compile then
+        # discards the frame, but capture sets allow_empty_graphs, so it stays
+        # compiled, its id lands in backend_ids (derived by scanning co_names),
+        # and nothing was ever filed for it -- which the harvest reported as a
+        # compiled graph that lost its code, failing the whole capture.
+        #
+        # Only the inductor path: the eager one turns every cached backend into
+        # an artifact already, so it never saw this.
+        #
+        # is_noop_graph is forced rather than provoked. Whether a real frame
+        # prunes to an empty output depends on upstream pruning details that a
+        # toy model does not reproduce; what this pins is the packaging
+        # interaction, on a graph whose output IS already empty and whose one
+        # call is dead, so short-circuiting it changes nothing observable.
+        import torch._dynamo.output_graph as output_graph
+        import torch.utils._pytree as pytree
+
+        fired = []
+
+        def force_noop(gm):
+            outs = list(gm.graph.find_nodes(op="output"))
+            empty = bool(outs) and all(pytree.tree_leaves(n.args) == [] for n in outs)
+            fired.append(empty)
+            return empty
+
+        model = _PrecompileDeadResultModel()
+        x = torch.randn(2, 4)
+        with mock.patch.object(output_graph, "is_noop_graph", force_noop):
+            with torch.no_grad():
+                code, cache = torch.compiler.precompile(
+                    _precompile_dead_result,
+                    tracer="dynamo",
+                    backend="inductor",
+                    dynamic=False,
+                    example_inputs=[(model, x)],
+                    require_complete=False,
+                    require_no_risky_drops=False,
+                )
+        self.assertTrue(any(fired), "the no-op short-circuit never fired")
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertIsNone(loaded(model, x))
 
     def test_precompile_accumulate_rejects_make_fx_and_lone_paths(self):
         with self.assertRaisesRegex(ValueError, "only tracer='dynamo'"):
