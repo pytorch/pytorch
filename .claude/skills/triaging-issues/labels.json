@@ -1097,7 +1097,7 @@
     },
     {
       "name": "release triage",
-      "description": "Flagged as a possible release-branch candidate under the RELEASE.md cherry-pick criteria. For release-manager review; does not itself request a cherry-pick."
+      "description": "Affects an upcoming release: fix before the next branch cut, or cherry-pick if the branch is already cut. For release-manager review; not itself a cherry-pick request."
     },
     {
       "name": "security",
