@@ -137,10 +137,14 @@ def reduce_col_tile(trait, trait_key, x, out_dtype, nt=None, npar=None, vec=None
             [_L.cute_tensor_dynMN(x, vec, align=align, read_only=True)],
             [_L.cute_tensor_dynM(d, ndim=1) for d in dsts],
             nchunks,
-            None,
+            None,  # nwaves: the row axis's
             nrows,
             q,
             Int32(npar),
+            None,  # rvals, kvals, in_base, limit: the general axis's decode
+            None,
+            None,
+            None,
             _stream(),
         )
 
@@ -183,10 +187,14 @@ def reduce_col_tile(trait, trait_key, x, out_dtype, nt=None, npar=None, vec=None
             [_L.cute_tensor_dynM(pp, ndim=1) for pp in parts],
             [_L.cute_tensor_dynM(out, ndim=1)],
             Int32(C),
-            None,
+            None,  # nwaves
             Int32(R),
-            None,
+            None,  # q
             Int32(npar),
+            None,  # rvals, kvals, in_base, limit
+            None,
+            None,
+            None,
             _stream(),
         )
 

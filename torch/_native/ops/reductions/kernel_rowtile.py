@@ -285,6 +285,10 @@ def reduce_row_tile(
             nchunks,
             nwaves,
             Int32(N),
+            None,  # q, npar: the col axis's split
+            None,
+            None,  # rvals, kvals, in_base, limit: the general axis's decode
+            None,
             None,
             None,
             _stream(),

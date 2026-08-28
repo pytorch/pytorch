@@ -67,6 +67,56 @@ def align_bytes(N: int, itemsize: int) -> int:
     return vec_size(N, itemsize) * itemsize
 
 
+def _magic(d):
+    # Magic-number reciprocal for exact n // d over 0 <= n < 2^31 as
+    # (n * m) >> sh -- one 64-bit multiply + shift instead of a runtime 64-bit
+    # divide (which the ~%25-slower runtime-geometry decode would otherwise emit
+    # per element per pair). Same Granlund-Montgomery family as aten's IntDivider
+    # (aten/src/ATen/cuda/detail/IntegerDivider.cuh, hackersdelight.org/magic.htm);
+    # that one uses the add-indicator form for the full unsigned 2^32 domain, but
+    # K0's linear indices are Int32-positive (< 2^31), so the simpler round-up form
+    # is exact and one instruction cheaper. Proof sketch: m = floor(2^(31+l)/d)+1
+    # with l = ceil(log2 d), so m*d = 2^(31+l) + e with 0 < e <= d, and for n < 2^31
+    # the error term n*e/(d*2^(31+l)) < 2^-l * 1 < 1/d ... floor((n*m) >> (31+l))
+    # = n//d exactly. m < 2^32 (d > 2^(l-1)) so n*m < 2^63: no Int64 overflow.
+    l = (d - 1).bit_length()
+    return (1 << (31 + l)) // d + 1, 31 + l
+
+
+def _decode_offset(linear, vals, npairs):
+    # Mixed-radix decode of a linear index into a flat element offset. vals is a
+    # RUNTIME Int64 list of QUADS, fastest-varying dim first:
+    #     [m0, sh0, ext0, strd0,  m1, sh1, ext1, strd1, ...]
+    # where (m, sh) is _magic(ext). npairs is the compile-time pair COUNT (only the
+    # loop STRUCTURE is baked -- the values are launch args, so one compiled kernel
+    # serves every geometry with the same pair count). Divisions run as magic
+    # multiply+shift; the LAST pair needs neither div nor mod (a linear index in
+    # range has rem < ext_last; out-of-range lanes decode garbage that the callers'
+    # `valid` predication never reads). For a single pair this is linear*stride.
+    #
+    # INT64: the flat offset can exceed int32 (numel >= 2^31, e.g. a (300000, 8192)
+    # reduction). Cast the linear index to Int64 up front so every rem*stride product
+    # and accumulation is 64-bit; an int32 product silently wraps negative and reads
+    # out of bounds. The returned offset indexes a flat gmem tensor, which expects a
+    # 64-bit offset.
+    rem = cutlass.Int64(linear)
+    if npairs == 0:
+        # No runs at all: the operand collapsed to a single element, so every lane maps
+        # to flat offset 0. Reached via a 1-ELEMENT reduce-all (TI coalesces a (1,)
+        # input to zero pairs) -- e.g. torch.histc on a 1-element tensor, which computes
+        # aminmax internally. Without this, `vals[4 * (npairs - 1) + 3]` indexed
+        # `vals[-1]` on an empty list and raised IndexError during kernel build.
+        return cutlass.Int64(0)
+    if npairs == 1:
+        return rem * vals[3]
+    off = cutlass.Int64(0)
+    for j in range(npairs - 1):
+        q = (rem * vals[4 * j]) >> vals[4 * j + 1]
+        off = off + (rem - q * vals[4 * j + 2]) * vals[4 * j + 3]
+        rem = q
+    return off + rem * vals[4 * (npairs - 1) + 3]
+
+
 class TileMap:
     """How one row is spread over threads and loads.
 
@@ -102,17 +152,120 @@ class TileMap:
 
 
 @cute.jit
-def merge_lanes(trait, acc, tm: cutlass.Constexpr, asc: cutlass.Constexpr = False):
-    """Reduce across the `tpr` lanes covering one row. A no-op at tpr == 1.
+def fold_decoded(
+    trait,
+    mX,
+    obase,
+    rvals,
+    npairs: cutlass.Constexpr,
+    rb,
+    nt: cutlass.Constexpr,
+    tidx,
+    in_base,
+    chunk_base,
+    gidx: cutlass.Constexpr = "r",
+):
+    """Grid-stride fold of ONE output's reduced run, addressed by mixed-radix DECODE.
+
+    The arm for an arbitrary layout: `rvals` carries the reduced (extent, stride) quads, so a
+    transposed, sliced, permuted, expanded or overlapping-window input is just a different
+    decode rather than a different kernel. All `nt` threads of the block cooperate on this one
+    output and their partial accumulators are merged by the caller.
+
+    `rb` is the pre-clamped step bound (the caller applies the reduce-all tail or the ragged
+    chunk clamp), so every FULL wave is in range and its trip count can be a dynamic
+    `cutlass.range` -- a per-element `valid` would trip the IR flattener. One predicated
+    remainder pass follows, and compile depth stays O(1) in the extent.
+
+    `gidx` picks what an index trait is told the position is: "r" the linear step index,
+    "flat" the global flat input offset (reduce-all), "chunk" chunk_base + r (a split run).
+    """
+    reduce_fn, acc_dt = trait.reduce, trait.acc
+    acc = trait.init()
+    n_full = rb // nt
+    base_r = tidx
+    for _ in cutlass.range(n_full):
+        # Inline the offset: an intermediate name would be treated as loop-carried. acc and
+        # base_r are the only carried values, both initialized above.
+        if const_expr(gidx == "flat"):
+            acc = reduce_fn(
+                acc,
+                acc_dt(mX[obase + _decode_offset(base_r, rvals, npairs)]),
+                Int32(obase + _decode_offset(base_r, rvals, npairs)),
+                True,
+            )
+        elif const_expr(gidx == "chunk"):
+            acc = reduce_fn(
+                acc,
+                acc_dt(mX[obase + _decode_offset(base_r, rvals, npairs)]),
+                chunk_base + base_r,
+                True,
+            )
+        else:
+            acc = reduce_fn(
+                acc,
+                acc_dt(mX[obase + _decode_offset(base_r, rvals, npairs)]),
+                base_r,
+                True,
+            )
+        base_r = base_r + nt
+    # Invalid lanes read in_base (always in range): obase itself can be past the end for an
+    # overhanging chunk, whose rb clamps to 0.
+    valid = base_r < rb
+    off = obase + _decode_offset(base_r, rvals, npairs)
+    off_s = off if valid else in_base
+    val = acc_dt(mX[off_s])
+    if const_expr(gidx == "flat"):
+        return reduce_fn(acc, val, Int32(off_s), valid)
+    if const_expr(gidx == "chunk"):
+        return reduce_fn(acc, val, chunk_base + base_r, valid)
+    return reduce_fn(acc, val, base_r, valid)
+
+
+@cute.jit
+def fold_partials_run(trait, mIns, obase, rb, nt: cutlass.Constexpr, tidx, in_base):
+    """COMBINE one output's pre-reduced accumulator tuples: a contiguous run of `rb` per
+    field from `obase`, grid-strided by `nt`.
+
+    The stage-2 reader for every split whose partials are laid out per output (reduce-all,
+    the ragged row split, the general split, xcta). Offsetting by obase is what keeps each
+    output on its OWN partials -- without it every output reads output 0's.
+
+    Dynamic full-wave loop + constexpr remainder, as in fold_decoded: `rb` can be ~1e5 for a
+    huge-N split, and a static unroll over it scaled compile time with the partial count
+    (98125 partials was a ~384-deep unroll, ~3s to compile).
+    """
+    combine_fn = trait.combine
+    fdtypes = trait.fdtypes
+    nf = const_expr(trait.nfields)
+    acc = trait.init()
+    n_full = rb // nt
+    r = tidx
+    for _ in cutlass.range(n_full):
+        rr = obase + cutlass.Int64(r)
+        # A bare-range comprehension unrolls at trace time, leaving no `trait` attribute
+        # access inside the dynamic loop (which would trip the IR flattener).
+        acc = combine_fn(acc, tuple(fdtypes[f](mIns[f][rr]) for f in range(nf)))
+        r = r + nt
+    valid = r < rb
+    rr = (obase + cutlass.Int64(r)) if valid else in_base
+    part = tuple(fdtypes[f](mIns[f][rr]) for f in range(nf))
+    merged = combine_fn(acc, part)
+    return tuple((merged[f] if valid else acc[f]) for f in range(nf))
+
+
+@cute.jit
+def merge_lanes(trait, acc, tpr: cutlass.Constexpr, asc: cutlass.Constexpr = False):
+    """Reduce across the `tpr` lanes covering one output. A no-op at tpr == 1.
 
     `asc` selects the ASCENDING butterfly over the descending one. The folds below hand
     columns out in that direction, and an index trait's ties depend on which it is.
     """
-    if const_expr(tm.tpr == 1):
+    if const_expr(tpr == 1):
         return acc
     from .._cutedsl.traits import warp_reduce
 
-    return warp_reduce(trait, acc, tm.tpr, ascending=asc)
+    return warp_reduce(trait, acc, tpr, ascending=asc)
 
 
 _ROLL_UNROLL = 4
@@ -260,9 +413,17 @@ class TileReduce:
         and folds DOWN the rows, so there is one accumulator per output and nothing merges
         across lanes at all. The y-grid splits the reduced axis, and `combine` folds the
         partials that split leaves, in a second pass of this same body.
+    axis "general" -- ANY layout. One block per output, all `nt` threads on it, addressing by
+        TensorIterator-derived mixed-radix decode (fold_decoded), so a transposed, sliced,
+        permuted, expanded or overlapping-window input needs no reshape and no special case.
+        This is the arm that makes "never decline a geometry" possible, and it is also the
+        COMBINE engine for every split whose partials are laid out per output (`combine`).
 
-    Why one body and not two: only the FOLD is axis-specific, and every fold is a primitive
-    above. The clamp of dead threads, the projection (which has to happen OUTSIDE the store
+    Why one body and not three: only the FOLD is axis-specific, and every fold is a
+    primitive above. The general axis runs at tpr == nt (every thread of the block on one
+    output), which is exactly the row axis's tail -- merge_lanes clamps to a warp and
+    block_reduce defaults to one row per block -- so it inherits the lane merge, the warp
+    merge, the projection and the store unchanged. The clamp of dead threads, the projection (which has to happen OUTSIDE the store
     branch either way, or the DSL rejects the binding) and the store are shared -- both axes
     write nslots x nouts results and differ only in the index they write to. The col axis pins
     `lane = 0`, since its mapping already gives every output group a thread of its own; that
@@ -284,9 +445,18 @@ class TileReduce:
         use_tma=False,
         combine=False,
         pc=True,
+        npairs_red=0,
+        npairs_kept=0,
+        gidx_from="r",
+        flat_tail=False,
+        ragged_chunk=False,
     ):
-        if axis not in ("row", "col"):
-            raise ValueError(f"axis must be 'row' or 'col', got {axis!r}")
+        if axis not in ("row", "col", "general"):
+            raise ValueError(f"axis must be 'row', 'col' or 'general', got {axis!r}")
+        if axis == "general":
+            # Every thread of the block folds the one output, so the tail is the row axis's
+            # at tpr == nt.
+            tpr = nt
         if axis == "row" and tpr != 1 and (tpr % WARP or tpr > nt or nt % tpr):
             raise ValueError(
                 f"tpr must be 1 or a multiple of {WARP} dividing nt: {tpr=} {nt=}"
@@ -307,7 +477,13 @@ class TileReduce:
         self.use_tma = use_tma
         self.combine = combine
         self.pc = pc  # partial layout: (P, C) when True, else (C, P)
-        itemsize = dtype.width // 8
+        # general-axis addressing policy, all compile-time (see fold_decoded)
+        self.npairs_red = npairs_red
+        self.npairs_kept = npairs_kept
+        self.gidx_from = gidx_from
+        self.flat_tail = flat_tail
+        self.ragged_chunk = ragged_chunk
+        itemsize = dtype.width // 8 if dtype is not None else 0
         # The row folds take their tile from TileMap; loads=1 because they are ROLLED, so the
         # static per-thread count is unused and the MAX_UNROLL bound is trivially met. The TMA
         # fold is the exception -- it walks the staged row with a compile-time trip count, so
@@ -318,10 +494,15 @@ class TileReduce:
             if axis == "row"
             else None
         )
-        self.vec = self.tilemap.vec if axis == "row" else vec
+        # the general axis loads one element at a time (an arbitrary stride pattern has no
+        # width to exploit), so it has no tile and no vector
+        if axis == "row":
+            self.vec = self.tilemap.vec
+        else:
+            self.vec = 1 if axis == "general" else vec
         # one output per thread on the row axis (its lanes are merged first); `vec` adjacent
         # columns, each with its own accumulator, on the col axis
-        self.nslots = 1 if axis == "row" else self.vec
+        self.nslots = self.vec if axis == "col" else 1
         self.rows_per_block = nt // tpr
         self.warps_per_row = tpr // WARP  # 0 at tpr == 1: nothing to merge
         self.tiler = (nt, N)  # TMA box: nt whole rows
@@ -351,6 +532,11 @@ class TileReduce:
             self.pc,
             self.trait.nfields,
             self.N if self.use_tma else 0,
+            self.npairs_red,
+            self.npairs_kept,
+            self.gidx_from,
+            self.flat_tail,
+            self.ragged_chunk,
         )
 
     @cute.jit
@@ -399,6 +585,33 @@ class TileReduce:
         return acc
 
     @cute.jit
+    def _block_merge(self, acc):
+        # Merge the per-warp accumulators of one output through smem. A no-op unless the
+        # output spans more than one warp, which is every general-axis launch of >= 64
+        # threads and any row shape with tpr > WARP.
+        if const_expr(self.warps_per_row <= 1):
+            return acc
+        from .._cutedsl.traits import block_reduce
+
+        trait = self.trait
+        smem = cutlass.utils.SmemAllocator()
+        bufs = [
+            smem.allocate_tensor(
+                trait.fdtypes[f],
+                cute.make_layout(self.rows_per_block * self.warps_per_row),
+                byte_alignment=8,
+            )
+            for f in range(trait.nfields)
+        ]
+        return block_reduce(
+            trait,
+            acc,
+            bufs,
+            const_expr(self.warps_per_row),
+            const_expr(self.rows_per_block),
+        )
+
+    @cute.jit
     def _fold_partials(self, mIns, unit, nchunks, npar):
         # COMBINE pass (col axis stage 2): fold the npar partials of this thread's column,
         # which the split left as one (npar, nchunks) matrix per trait field. Bind the trait's
@@ -416,7 +629,19 @@ class TileReduce:
 
     @cute.jit
     def __call__(
-        self, mIns: list, mOuts: list, nchunks, nwaves, project_n, q, npar, stream
+        self,
+        mIns: list,
+        mOuts: list,
+        nchunks,
+        nwaves,
+        project_n,
+        q,
+        npar,
+        rvals,
+        kvals,
+        in_base,
+        limit,
+        stream,
     ):
         # The TMA atom is built here (host-compile time, inside the jit region) and baked into
         # the kernel; the input is replaced by the descriptor tensor for the load.
@@ -430,20 +655,47 @@ class TileReduce:
             mIns = [mTma]
         else:
             tma_atom = None
-        if const_expr(self.axis == "row"):
+        if const_expr(self.axis == "general"):
+            # one block per output, read live so one compile serves any output count
+            gx = mOuts[0].shape[0]
+            gy = Int32(1)
+        elif const_expr(self.axis == "row"):
             gx = cute.ceil_div(mIns[0].shape[0], const_expr(self.rows_per_block))
             gy = Int32(1)
         else:
             gx = cute.ceil_div(nchunks, const_expr(self.nt))
             # the y-grid splits the REDUCED axis in stage 1; combine has already consumed it
             gy = Int32(1) if const_expr(self.combine) else npar
-        self.kernel(mIns, mOuts, tma_atom, nchunks, nwaves, project_n, q, npar).launch(
-            grid=[gx, gy, 1], block=[const_expr(self.nt), 1, 1], stream=stream
-        )
+        self.kernel(
+            mIns,
+            mOuts,
+            tma_atom,
+            nchunks,
+            nwaves,
+            project_n,
+            q,
+            npar,
+            rvals,
+            kvals,
+            in_base,
+            limit,
+        ).launch(grid=[gx, gy, 1], block=[const_expr(self.nt), 1, 1], stream=stream)
 
     @cute.kernel
     def kernel(
-        self, mIns: list, mOuts: list, tma_atom, nchunks, nwaves, project_n, q, npar
+        self,
+        mIns: list,
+        mOuts: list,
+        tma_atom,
+        nchunks,
+        nwaves,
+        project_n,
+        q,
+        npar,
+        rvals,
+        kvals,
+        in_base,
+        limit,
     ):
         # RUNTIME args, so one compiled kernel serves every extent sharing a structure:
         #   nchunks   vec-chunks along the axis a thread walks (row: of its row; col: of the
@@ -452,6 +704,11 @@ class TileReduce:
         #   project_n the TRUE reduced extent -- mean/var's divisor, and on the col axis the
         #             row count its per-block chunk bound is measured against
         #   q, npar   col only: the reduced-axis split (rows per chunk, chunk count)
+        #   rvals     general only: the reduced (extent, stride) magic quads to decode
+        #   kvals     general only: the same for the kept dims, decoding this block's output
+        #   in_base   general only: flat input offset of output coordinate 0
+        #   limit     general only: the bound the fold clamp measures against
+        #             (nchunks doubles as the general axis's per-output step count)
         #
         # An arg a variant does not use is passed as None, NOT as a dummy value: one extra
         # unused Int32 param measured 1.27x on the column fold (8.2 -> 10.4us at (65536, 256)
@@ -459,7 +716,13 @@ class TileReduce:
         tx, _, _ = cute.arch.thread_idx()
         bx, by, _ = cute.arch.block_idx()
         trait = self.trait
-        if const_expr(self.axis == "row"):
+        chunk_base = Int32(0)  # nonzero only under ragged_chunk, for gidx_from "chunk"
+        if const_expr(self.axis == "general"):
+            # One block per output: the block index IS the output, and every thread folds it.
+            raw = Int32(bx)
+            lane = Int32(tx)
+            alive = True
+        elif const_expr(self.axis == "row"):
             raw = Int32(bx) * const_expr(self.rows_per_block) + Int32(
                 tx // const_expr(self.tpr)
             )
@@ -475,7 +738,67 @@ class TileReduce:
         unit = raw if alive else Int32(0)
 
         # THE FOLD: the one axis-specific step. Everything after it is shared.
-        if const_expr(self.combine):
+        if const_expr(self.axis == "general"):
+            # Base flat offset of this output (decode the block index against the kept dims;
+            # zero kept pairs -- a full reduction -- leaves just in_base), then the fold bound.
+            obase = in_base
+            if const_expr(self.npairs_kept > 0):
+                obase = in_base + _decode_offset(
+                    unit, kvals, const_expr(self.npairs_kept)
+                )
+            rb = nchunks
+            if const_expr(self.flat_tail):
+                # Reduce-all stage 1: the last chunk overhangs the flat input, so clamp to
+                # what is left before `limit`.
+                left = limit - obase
+                c64 = cutlass.Int64(nchunks)
+                left = left if left < c64 else c64  # noqa: FURB136 -- no DSL builtin min
+                zero = cutlass.Int64(0)
+                left = left if left > zero else zero  # noqa: FURB136 -- no builtin max
+                rb = cutlass.Int32(left)
+            elif const_expr(self.ragged_chunk):
+                # A split whose chunk need not divide the reduced run: the LAST chunk of every
+                # output is short and must fold nothing belonging to the next one. `limit`
+                # carries the reduced extent; the chunk pair is the fastest-varying kept pair,
+                # so its magic quad yields the chunk index with no runtime divide -- once per
+                # BLOCK, not per element. Counted in STEPS, so it is independent of the
+                # reduced axis's stride (a contiguous row split and a column split both use
+                # it unchanged).
+                qq = (cutlass.Int64(unit) * kvals[0]) >> kvals[1]
+                c = cutlass.Int64(unit) - qq * kvals[2]
+                cnt = cutlass.Int64(nchunks)
+                chunk_base = Int32(c * cnt)  # this chunk's first step, for gidx
+                left = limit - c * cnt
+                c64 = cutlass.Int64(nchunks)
+                left = left if left < c64 else c64  # noqa: FURB136 -- no builtin min
+                zero = cutlass.Int64(0)
+                left = left if left > zero else zero  # noqa: FURB136 -- no builtin max
+                rb = cutlass.Int32(left)
+            if const_expr(self.combine):
+                accs = (
+                    fold_partials_run(
+                        trait, mIns, obase, rb, const_expr(self.nt), lane, in_base
+                    ),
+                )
+            else:
+                accs = (
+                    fold_decoded(
+                        trait,
+                        mIns[0],
+                        obase,
+                        rvals,
+                        const_expr(self.npairs_red),
+                        rb,
+                        const_expr(self.nt),
+                        lane,
+                        in_base,
+                        chunk_base,
+                        const_expr(self.gidx_from),
+                    ),
+                )
+            accs = (merge_lanes(trait, accs[0], const_expr(self.tpr)),)
+            accs = (self._block_merge(accs[0]),)
+        elif const_expr(self.combine):
             accs = (self._fold_partials(mIns, unit, nchunks, npar),)
         elif const_expr(self.axis == "col"):
             # This block's chunk of the REDUCED axis. The last chunk is short whenever q does
@@ -519,27 +842,8 @@ class TileReduce:
                 nwaves,
                 const_expr(self.unroll),
             )
-            acc = merge_lanes(trait, acc, self.tm)
-            if const_expr(self.warps_per_row > 1):
-                from .._cutedsl.traits import block_reduce
-
-                smem = cutlass.utils.SmemAllocator()
-                bufs = [
-                    smem.allocate_tensor(
-                        trait.fdtypes[f],
-                        cute.make_layout(self.rows_per_block * self.warps_per_row),
-                        byte_alignment=8,
-                    )
-                    for f in range(trait.nfields)
-                ]
-                acc = block_reduce(
-                    trait,
-                    acc,
-                    bufs,
-                    const_expr(self.warps_per_row),
-                    const_expr(self.rows_per_block),
-                )
-            accs = (acc,)
+            acc = merge_lanes(trait, acc, const_expr(self.tpr))
+            accs = (self._block_merge(acc),)
 
         # Output indexing comes AFTER the fold: computed before it, these values stay live
         # across the loop and cost registers the fold wants.

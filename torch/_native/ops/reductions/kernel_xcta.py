@@ -162,13 +162,24 @@ class FusedTwoStage:
         # q/npar are the col axis's split args: None here, since an unused Int32 param is
         # not free (see tile.TileReduce.kernel).
         s1.kernel(
-            [mX], parts, None, s1_nchunks, s1_nwaves, project_n, None, None
+            [mX],
+            parts,
+            None,
+            s1_nchunks,
+            s1_nwaves,
+            project_n,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
         ).launch(
             grid=[cute.ceil_div(mX.shape[0], const_expr(s1.rows_per_block)), 1, 1],
             block=[const_expr(s1.nt), 1, 1],
             stream=stream,
         )
-        # --- stage 2 launch (mirrors ReduceBlock.__call__); reads `parts` ---
+        # --- stage 2 launch (the shared body's GENERAL axis); reads `parts` ---
         # Stage-2 grid = one block per output row = mOuts[0].shape[0] (read live, so this
         # fused kernel serves any M with no recompile). s2 has a single kept dim, so
         # _decode_offset ignores the extent -- correct for any M. The geometry
@@ -177,15 +188,21 @@ class FusedTwoStage:
         # limit is unused (flat_tail=False) but the kernel signature requires it;
         # in_base is always 0 here.
         s2 = self.s2
-        s2.kernel(
+        # Argument order is the shared body's; the row/col axes' args are None (an unused
+        # Int32 param is not free -- see tile.TileReduce.kernel).
+        s2.tile.kernel(
             parts,
             mOuts,
+            None,
+            count,
+            None,
+            project_n,
+            None,
+            None,
             rvals,
             kvals,
-            count,
             cutlass.Int64(0),
             cutlass.Int64(count),
-            project_n,
         ).launch(grid=[mOuts[0].shape[0], 1, 1], block=[s2.block, 1, 1], stream=stream)
 
 
