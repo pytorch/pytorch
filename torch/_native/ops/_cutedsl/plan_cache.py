@@ -14,8 +14,9 @@
 #
 # A plan of None is a valid memoized result meaning "declined -- the caller should
 # fall back" (e.g. a geometry this kernel cannot serve). It is cached like any other
-# so the (sometimes non-trivial) decline decision is not recomputed; callers use the
-# returned (hit, plan) pair to tell a cached-None from a miss.
+# so the (sometimes non-trivial) decline decision is not recomputed. Callers get the
+# plan itself back, None included; the miss-vs-cached-None distinction is internal
+# (the _MISS sentinel) and deliberately not part of the signature.
 
 from __future__ import annotations
 
