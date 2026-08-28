@@ -51,7 +51,10 @@ CUDA_ARCHES_CUDNN_VERSION = {
 # CUDA versions without a Windows installer on the ossci-windows bucket yet.
 CUDA_ARCHES_NO_WINDOWS = ["13.4"]
 
-ROCM_ARCHES = ["7.14", "10.0", "rocm-preview"]
+ROCM_ARCHES = ["7.14", "10.0", "preview"]
+ROCM_PREVIEW_VERSION = (
+    (REPO_ROOT / ".ci/docker/ci_commit_pins/rocm-preview.txt").read_text().strip()
+)
 
 XPU_ARCHES = ["xpu"]
 
@@ -95,7 +98,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "13.4": (
         "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.4.0rc1; platform_system == 'Linux' | "
         "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
-        "nvidia-cudnn-cu13==9.24.0.43; platform_system == 'Linux' | "
+        "nvidia-cudnn-cu13==9.25.0.15; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
         "nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
@@ -103,9 +106,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     # dependency on latest patch version for (major, minor)
     "7.14": ("rocm[libraries,device-all]==7.14.*"),
     "10.0": ("rocm[libraries,device-all]==10.0.*"),
-    # ROCm preview: pin the exact preview version so the runtime dep matches the
-    # wheel built against it. Keep in sync with .ci/docker/manywheel/build.sh.
-    "rocm-preview": ("rocm[libraries,device-all]==7.15.0a20260712"),
+    "preview": (f"rocm[libraries,device-all]=={ROCM_PREVIEW_VERSION}"),
     "xpu": (
         "intel-cmplr-lib-rt==2026.1.0 | "
         "intel-cmplr-lib-ur==2026.1.0 | "
@@ -155,7 +156,7 @@ CUDA_NIGHTLY_SOURCE_MATRIX = {
 
 
 def _rocm_channel(arch: str, separator: str = "") -> str:
-    return arch if arch.startswith("rocm") else f"rocm{separator}{arch}"
+    return "rocm-preview" if arch == "preview" else f"rocm{separator}{arch}"
 
 
 ROCM_NIGHTLY_SOURCE_MATRIX = {

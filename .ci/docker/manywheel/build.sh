@@ -82,12 +82,8 @@ case ${image} in
         GPU_IMAGE=amd64/almalinux:8
         ROCM_VERSION="${GPU_ARCH_VERSION}"
         if [[ "$GPU_ARCH_VERSION" == *"preview"* ]]; then
-            # ROCm preview tracks the TheRock nightly (preview) wheel index. The
-            # preview ROCm version is pinned here as the single source of truth
-            # (mirrors the rocm-preview CI image in .ci/docker/build.sh). Keep the
-            # runtime dep in generate_binary_build_matrix.py in sync with this.
             THEROCK_INDEX_URL="https://rocm.nightlies.amd.com/whl-multi-arch/"
-            ROCM_VERSION="7.15.0a20260712"
+            ROCM_VERSION=$(<"${TOPDIR}/.ci/docker/ci_commit_pins/rocm-preview.txt")
         elif [[ "${GPU_ARCH_VERSION}" == "7.14" ]]; then
             THEROCK_INDEX_URL="https://repo.amd.com/rocm/whl-multi-arch/"
         else
