@@ -119,6 +119,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     gradcheck,
+    HardwareClassification,
     load_tests,
     run_tests,
     set_default_dtype,
@@ -5098,6 +5099,7 @@ class TestRsample(DistributionsTestCase):
 
 
 class TestDistributionShapes(DistributionsTestCase):
+    hw_classification = HardwareClassification.GENERIC
     def setUp(self):
         super().setUp()
         self.scalar_sample = 1
