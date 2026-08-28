@@ -8,6 +8,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 //
 
+#include <ATen/core/functional.h>
 #include <ATen/cuda/CUDAContextLight.h>
 #include <ATen/cuda/tunable/Tunable.h>
 #include <c10/util/Exception.h>
@@ -18,7 +19,6 @@
 
 #ifndef USE_ROCM
 #include <cuda.h>
-#include <cuda_runtime_api.h>
 #include <cublasLt.h>
 #include <cublas_v2.h>
 #endif
@@ -504,10 +504,8 @@ static bool CheckKeysMatching(
     const TuningResultsValidator::GetValidateFuncs& gv_funcs,
     const std::unordered_map<std::string, std::string>& to_check) {
   auto get_keys = [](const auto& it) -> std::string { return it.first; };
-  std::vector<std::string> required_keys;
-  std::vector<std::string> provided_keys;
-  std::transform(gv_funcs.cbegin(), gv_funcs.cend(), std::back_inserter(required_keys), get_keys);
-  std::transform(to_check.cbegin(), to_check.cend(), std::back_inserter(provided_keys), get_keys);
+  std::vector<std::string> required_keys = c10::fmap(gv_funcs, get_keys);
+  std::vector<std::string> provided_keys = c10::fmap(to_check, get_keys);
   std::sort(required_keys.begin(), required_keys.end());
   std::sort(provided_keys.begin(), provided_keys.end());
 
