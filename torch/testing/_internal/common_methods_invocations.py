@@ -9030,6 +9030,10 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
     target = torch.tensor([-1, 2], device=device, dtype=torch.long)
     yield SampleInput(make_input(shape), args=(target,), kwargs={'ignore_index': -1})
 
+    # Noncontiguous target
+    target = torch.randint(num_classes, (2 * shape[0],), device=device)[::2]
+    yield SampleInput(make_input(shape), args=(target,))
+
 
 def sample_inputs_binary_cross_entropy_with_logits(
     op_info, device, dtype, requires_grad, **kwargs
@@ -22602,8 +22606,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                 "test_cow_input",
                 device_type=('cuda', 'xpu'),
             ),
-            DecorateInfo(unittest.skip("FP16 nll_loss cases have not been enabled on MPS yet"),
-                         dtypes=(torch.half,), device_type="mps"),
         ),
     ),
     OpInfo(
