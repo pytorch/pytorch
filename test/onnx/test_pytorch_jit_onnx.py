@@ -10,6 +10,7 @@ from torch.onnx._internal.torchscript_exporter.utils import (
 )
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 def _jit_graph_to_onnx_model(graph, operator_export_type, opset_version):
@@ -87,7 +88,7 @@ class _TestJITIRToONNX(_JITIRToONNXTestMixin):
     creating concrete sub-types. See MakeTestCase().
     """
 
-    hw_classification = common_utils.HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.GENERIC
 
     def test_example_ir(self):
         graph_ir = """
@@ -190,7 +191,7 @@ class _TestJITIRToONNXCuda(_JITIRToONNXTestMixin):
     creating concrete sub-types. See MakeTestCase() and instantiate_device_type_tests().
     """
 
-    hw_classification = common_utils.HardwareClassification.CUDA
+    hw_classification = HardwareClassification.CUDA
 
     def test_log_softmax_half_to_float(self, device):
         graph_ir = """
