@@ -149,11 +149,11 @@ assert_type(FLOAT**TENSOR, Tensor)
 
 # Operator @
 assert_type(TENSOR @ TENSOR, Tensor)
-assert_type(TENSOR @ BOOL, Tensor)  # Should fail type checking
+assert_type(TENSOR @ BOOL, Tensor)  # type: ignore[operator]
 assert_type(BOOL @ TENSOR, Tensor)  # type: ignore[operator]
-assert_type(TENSOR @ INT, Tensor)  # Should fail type checking
+assert_type(TENSOR @ INT, Tensor)  # type: ignore[operator]
 assert_type(INT @ TENSOR, Tensor)  # type: ignore[operator]
-assert_type(TENSOR @ FLOAT, Tensor)  # Should fail type checking
+assert_type(TENSOR @ FLOAT, Tensor)  # type: ignore[operator]
 assert_type(FLOAT @ TENSOR, Tensor)  # type: ignore[operator]
 
 #
