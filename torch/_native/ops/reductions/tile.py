@@ -245,12 +245,20 @@ class TileReduce:
         # axis needs no tile: its `vec` is a driver choice (accumulators per thread, not just
         # load width).
         self.tm = TileMap(N, itemsize, tpr, 1) if axis == "row" else None
-        self.vec = self.tm.vec if axis == "row" else vec
+        self.vec = self.tilemap.vec if axis == "row" else vec
         # one output per thread on the row axis (its lanes are merged first); `vec` adjacent
         # columns, each with its own accumulator, on the col axis
         self.nslots = 1 if axis == "row" else self.vec
         self.rows_per_block = nt // tpr
         self.warps_per_row = tpr // WARP
+
+    @property
+    def tilemap(self):
+        # Set only for a fold that takes ONE tile for the whole row. The col axis derives its
+        # `vec` from the driver rather than from a load width, so it carries no tile at all.
+        if self.tm is None:
+            raise AssertionError(f"no tile on the {self.axis} axis")
+        return self.tm
 
     @property
     def cache_sig(self):
