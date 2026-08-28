@@ -14,7 +14,7 @@ from torch.testing._internal.common_utils import HardwareClassification
 @common_utils.instantiate_parametrized_tests
 class ONNXIRPassesTest(common_utils.TestCase):
     hw_classification = HardwareClassification.GENERIC
-    
+
     @common_utils.parametrize(
         "shape_expr, expected_shape_expr",
         [
