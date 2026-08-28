@@ -1135,6 +1135,14 @@ class TestUnaryUfuncs(TestCase):
             rtol=rtol,
         )
 
+        # silu(-inf) is the limit 0, not the -inf/inf = NaN that the naive
+        # x/(1+exp(-x)) form produces (pytorch/pytorch#160876).
+        neg_inf = torch.tensor([float("-inf")], device=device, dtype=dtype)
+        self.assertEqual(
+            torch.nn.functional.silu(neg_inf),
+            torch.zeros(1, device=device, dtype=dtype),
+        )
+
     @dtypes(torch.complex64, torch.complex128)
     def test_silu_complex(self, device, dtype):
         atol = 1e-6
