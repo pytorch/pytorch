@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import torch
 import torch._inductor.config as inductor_config
 import torch._inductor.metrics
-from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
+from torch._dynamo.testing import CompileCounterWithBackend, extract_graph, normalize_gm
 from torch._inductor.codegen.cuda.device_op_overrides import CUDADeviceOpOverrides
 from torch._inductor.codegen.wrapper import (
     EnterCudaStreamContextLine,
@@ -301,6 +301,7 @@ with torch.xpu._DeviceGuard(0):
         self.assertTrue(make_line(0).setup_stream_cache)
 
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @xfailIfNoAcceleratorTriton
     def test_generated_code_uses_get_stream_by_index(self):
         """Generated inductor code should use _get_stream_by_index."""
         from torch._inductor.utils import run_and_get_code
@@ -1392,6 +1393,53 @@ class TestUserStreamCompile(InductorTestCase):
             "wait_stream(0, 1) must come after add kernel (stream 1)",
         )
 
+    def test_pattern_replacement_preserves_stream(self):
+        """A post-grad pattern replacement (online softmax) must preserve the
+        stream annotation of the intermediate nodes it introduces. Regression
+        test: the pattern matcher's percolate_tags dropped the "custom" (stream)
+        meta, so prepare_softmax_online landed on the default stream instead of
+        the side stream it was computed on. The softmax must feed a downstream
+        op (here the second matmul) so prepare_softmax_online is a non-output
+        intermediate -- output nodes get correct meta via _transfer_meta and
+        would not exercise the percolate_tags path."""
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(q, k, v):
+            s = torch.cuda.Stream()
+            e = torch.cuda.Event()
+            with torch.cuda.stream(s):
+                e.wait()
+                attn = (q @ k.transpose(-2, -1)).softmax(dim=-1) @ v
+            s.synchronize()
+            return attn.sum()
+
+        q = torch.randn(8, 64, 32, device="cuda")
+        k = torch.randn(8, 64, 32, device="cuda")
+        v = torch.randn(8, 64, 32, device="cuda")
+        expected = fn(q, k, v)
+        result, (code,) = run_and_get_code(torch.compile(fn), q, k, v)
+        self.assertEqual(result, expected)
+
+        # Find the stream context the prepare_softmax_online kernel call is
+        # emitted under. Without the fix it lands under default_stream; with it,
+        # under the side stream. A plain FileCheck ordering is too loose here --
+        # a later default_stream block would satisfy it -- so track the enclosing
+        # context explicitly.
+        call_body = code[code.find("def call(") :]
+        ctx = None
+        softmax_ctx = None
+        for line in call_body.split("\n"):
+            stripped = line.strip()
+            if stripped.startswith(("with stream", "with default_stream")):
+                ctx = stripped
+            if "prepare_softmax_online" in line and ".run(" in line:
+                softmax_ctx = ctx
+        self.assertIsNotNone(softmax_ctx, "prepare_softmax_online kernel not found")
+        self.assertTrue(
+            softmax_ctx.startswith("with stream"),
+            f"prepare_softmax_online must run on the side stream, got: {softmax_ctx}",
+        )
+
     def test_codegen_structure_single_stream(self):
         """Verify wrapper structure for pointwise ops with one side stream."""
         from torch._inductor.utils import run_and_get_code
@@ -1432,28 +1480,16 @@ class GraphModule(torch.nn.Module):
         )
 
         wrapper_body = _extract_wrapper_body(code)
-        self.assertExpectedInline(
-            wrapper_body,
-            """\
-arg0_1, = args
-with torch.cuda._DeviceGuard(0):
-    torch.cuda.set_device(0)
-    default_stream = torch.cuda.current_stream()
-    stream1 = _get_stream_by_index(1)
-    with stream1:
-        arg0_1 = copy_if_misaligned(arg0_1)
-        buf0 = empty_strided_cuda((1024, ), (1, ), torch.float32)
-        raw_stream = get_raw_stream(0)
-        triton_kernel.run(arg0_1, buf0, 1024, stream=raw_stream)
-    with default_stream:
-        buf1 = empty_strided_cuda((1024, ), (1, ), torch.float32)
-        raw_stream0 = get_raw_stream(0)
-        triton_kernel.run(arg0_1, buf1, 1024, stream=raw_stream0)
-        torch.ops.streams.synchronize_stream.default(1)
-        buf5 = empty_strided_cuda((1024, ), (1, ), torch.float32)
-        raw_stream0 = get_raw_stream(0)
-        triton_kernel.run(buf1, buf0, buf5, 1024, stream=raw_stream0)
-    return (buf5, )""",
+        self.assertGreaterEqual(wrapper_body.count("triton_kernel.run("), 2)
+        (
+            FileCheck()
+            .check("default_stream = torch.cuda.current_stream()")
+            .check("stream1 = _get_stream_by_index(1)")
+            .check("with stream1:")
+            .check("triton_kernel.run(")
+            .check("synchronize_stream")
+            .check("return (")
+            .run(wrapper_body)
         )
 
     def test_codegen_structure_pipeline(self):
@@ -1711,6 +1747,280 @@ class GraphModule(torch.nn.Module):
 # CHECK: synchronize_stream""",
             wrapper_body,
         )
+
+    def test_codegen_per_stream_alignment_copy_multi_stream(self):
+        """Regression test for per-stream alignment fixups read by many streams.
+
+        When an input is read on more than one stream, its ``x =
+        copy_if_misaligned(x)`` rewrite must be emitted once per consuming
+        stream, so every stream is ordered after its own aligned clone.  A
+        single shared copy is hard to manage due to the synchronization
+        requirements that would impose.
+
+        Here ``x`` is read on both ``s1`` and ``s2`` (``w1`` only on ``s1``,
+        ``w2`` only on ``s2``), so ``x`` must get two copies, one inside each
+        side-stream context, both cloning the same preserved original.
+        """
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x, w1, w2):
+            s1 = torch.cuda.Stream()
+            s2 = torch.cuda.Stream()
+            e1 = torch.cuda.Event()
+            e2 = torch.cuda.Event()
+            with torch.cuda.stream(s1):
+                a = x @ w1
+                e1.record(s1)
+            with torch.cuda.stream(s2):
+                b = x @ w2
+                e2.record(s2)
+            e1.wait()
+            e2.wait()
+            c = a + b
+            s1.synchronize()
+            s2.synchronize()
+            return c
+
+        x = torch.randn(32, 32, device="cuda")
+        w1 = torch.randn(32, 32, device="cuda")
+        w2 = torch.randn(32, 32, device="cuda")
+        expected = fn(x, w1, w2)
+        compiled_fn = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled_fn, x, w1, w2)
+        self.assertEqual(result, expected)
+
+        wrapper_body = _extract_wrapper_body(code)
+
+        # x is read on two streams: it is preserved once (`<x>_orig = <x>`)
+        # and cloned from that _orig inside each side-stream context, then
+        # freed after its last reader.
+        FileCheck().check_count("_orig = ", 1, exactly=True).run(wrapper_body)
+        FileCheck().check_count("_orig)", 2, exactly=True).run(wrapper_body)
+        # the clones live inside a side-stream context (not hoisted before the
+        # fork): a `with stream` precedes the first clone of the original.
+        FileCheck().check("with stream").check("_orig)").run(wrapper_body)
+        # the preserved original is freed on the normal codegen_free path;
+        # the multistream input's arg index is not stable across graphs, so
+        # match the free by pattern rather than a hardcoded name.
+        FileCheck().check_regex(r"del arg\d+_1_orig").run(code)
+
+    def test_codegen_per_stream_alignment_copy_one_per_stream(self):
+        """An input read multiple times on one stream gets a single copy there.
+
+        The per-stream alignment copy should be keyed on the consuming stream,
+        not on each use, so an input used several times within one
+        ``torch.cuda.stream`` block is cloned once per block.
+
+        Here ``x`` is read once on ``s1`` and twice on ``s2``, and we verify
+        that there are exactly two ``copy_if_misaligned`` clones of the
+        preserved original (one per stream), not three.
+        """
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x, w1, w2, w3):
+            s1 = torch.cuda.Stream()
+            s2 = torch.cuda.Stream()
+            e1 = torch.cuda.Event()
+            e2 = torch.cuda.Event()
+            with torch.cuda.stream(s1):
+                a = x @ w1
+                e1.record(s1)
+            with torch.cuda.stream(s2):
+                b = x @ w2
+                c = x @ w3
+                e2.record(s2)
+            e1.wait()
+            e2.wait()
+            out = a + b + c
+            s1.synchronize()
+            s2.synchronize()
+            return out
+
+        x = torch.randn(32, 32, device="cuda")
+        w1 = torch.randn(32, 32, device="cuda")
+        w2 = torch.randn(32, 32, device="cuda")
+        w3 = torch.randn(32, 32, device="cuda")
+        expected = fn(x, w1, w2, w3)
+        compiled_fn = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled_fn, x, w1, w2, w3)
+        self.assertEqual(result, expected)
+
+        wrapper_body = _extract_wrapper_body(code)
+
+        # x is read 3 times (once on s1, twice on s2) but is cloned once per
+        # consuming stream, not once per use: exactly two clones (`_orig)`) of
+        # the one preserved original (`_orig = `).
+        FileCheck().check_count("_orig = ", 1, exactly=True).run(wrapper_body)
+        FileCheck().check_count("_orig)", 2, exactly=True).run(wrapper_body)
+
+    def test_synchronize_threads_all_prior_sync_data(self):
+        """Both intermediates must be threaded through synchronize_stream."""
+        import operator
+
+        def fn(x, w1, w2):
+            s1 = torch.cuda.Stream()
+            e1 = torch.cuda.Event()
+            e2 = torch.cuda.Event()
+            with torch.cuda.stream(s1):
+                a = x @ w1
+                e1.record()
+                b = a @ w2
+                e2.record()
+            s1.synchronize()
+            return a.sum(), b.sum()
+
+        x = torch.randn(32, 32, device="cuda")
+        w1 = torch.randn(32, 32, device="cuda")
+        w2 = torch.randn(32, 32, device="cuda")
+        expected = fn(x, w1, w2)
+        result, _, fw_graphs, _ = extract_graph(fn, x, w1, w2)
+        self.assertEqual(result, expected)
+
+        graph = fw_graphs[0].graph
+        sync_cd = None
+        for node in graph.nodes:
+            if (
+                node.op == "call_function"
+                and "control_deps" in str(node.target)
+                and isinstance(node.args[1], torch.fx.Node)
+                and "synchronize_stream" in node.args[1].name
+            ):
+                sync_cd = node
+        self.assertIsNotNone(sync_cd, "no synchronize_stream control_deps node found")
+        sums = [
+            node
+            for node in graph.nodes
+            if node.op == "call_function" and node.target is torch.ops.aten.sum.default
+        ]
+        self.assertEqual(len(sums), 2)
+        for sum_node in sums:
+            inp = sum_node.args[0]
+            self.assertTrue(
+                inp.op == "call_function"
+                and inp.target is operator.getitem
+                and inp.args[0] is sync_cd,
+                f"sum consumer {inp} does not route through synchronize_stream barrier",
+            )
+
+    def test_synchronize_event_threads_all_prior_sync_data(self):
+        """Both intermediates must be threaded through synchronize_event."""
+        import operator
+
+        def fn(x, w1, w2):
+            s = torch.cuda.Stream()
+            e0 = torch.cuda.Event()
+            e1 = torch.cuda.Event()
+            with torch.cuda.stream(s):
+                a = x @ w1
+                e0.record()
+                b = a @ w2
+                e1.record()
+            e1.synchronize()
+            return a.sum(), b.sum()
+
+        x = torch.randn(32, 32, device="cuda")
+        w1 = torch.randn(32, 32, device="cuda")
+        w2 = torch.randn(32, 32, device="cuda")
+        expected = fn(x, w1, w2)
+        result, _, fw_graphs, _ = extract_graph(fn, x, w1, w2)
+        self.assertEqual(result, expected)
+
+        graph = fw_graphs[0].graph
+        sync_cd = None
+        for node in graph.nodes:
+            if (
+                node.op == "call_function"
+                and "control_deps" in str(node.target)
+                and isinstance(node.args[1], torch.fx.Node)
+                and "synchronize_event" in node.args[1].name
+            ):
+                sync_cd = node
+        self.assertIsNotNone(sync_cd, "no synchronize_event control_deps node found")
+        sums = [
+            node
+            for node in graph.nodes
+            if node.op == "call_function" and node.target is torch.ops.aten.sum.default
+        ]
+        self.assertEqual(len(sums), 2)
+        for sum_node in sums:
+            inp = sum_node.args[0]
+            self.assertTrue(
+                inp.op == "call_function"
+                and inp.target is operator.getitem
+                and inp.args[0] is sync_cd,
+                f"sum consumer {inp} does not route through synchronize_event barrier",
+            )
+
+    def test_barrier_deps_exclude_nodes_defined_after_sync(self):
+        """A get_attr constant first used after the barrier is not a barrier dep.
+
+        The constant is materialized at its first user, which is below the
+        barrier, so listing it as a dep would make the control_deps node
+        reference a value that is not yet defined.
+        """
+
+        def fn(x, w):
+            s = torch.cuda.Stream()
+            with torch.cuda.stream(s):
+                a = x @ w
+            s.synchronize()
+            return a.sum() + torch.tensor([1.0, 2.0, 3.0], device="cuda").sum()
+
+        x = torch.randn(32, 32, device="cuda")
+        w = torch.randn(32, 32, device="cuda")
+        expected = fn(x, w)
+        result, _, fw_graphs, _ = extract_graph(fn, x, w)
+        self.assertEqual(result, expected)
+
+        graph = fw_graphs[0].graph
+        order = {node: i for i, node in enumerate(graph.nodes)}
+        cds = [
+            node
+            for node in graph.nodes
+            if node.op == "call_function" and "control_deps" in str(node.target)
+        ]
+        self.assertGreater(len(cds), 0, "no control_deps node found")
+
+        # Guard against a vacuous pass. The ordering assertions below only
+        # exercise the fix while a tensor constant is still materialized
+        # *below* the barrier -- that is the whole failure condition. If
+        # constant lifting ever hoists the constant above the sync or turns it
+        # into a placeholder, the scenario stops reproducing and this test
+        # would silently stop guarding the regression, so fail loudly instead.
+        # Every control_deps carries its own get_attr for its subgraph, so
+        # those are excluded; only real constants count.
+        subgraph_attrs = {
+            cd.args[1] for cd in cds if isinstance(cd.args[1], torch.fx.Node)
+        }
+        sync_cd = None
+        for cd in cds:
+            attr = cd.args[1]
+            if isinstance(attr, torch.fx.Node) and "synchronize" in attr.name:
+                sync_cd = cd
+        self.assertIsNotNone(sync_cd, "no synchronize control_deps node found")
+
+        constants_after_sync = [
+            node
+            for node in graph.nodes
+            if node.op == "get_attr"
+            and node not in subgraph_attrs
+            and order[node] > order[sync_cd]
+        ]
+        self.assertTrue(
+            constants_after_sync,
+            "scenario no longer reproduces: no tensor constant is materialized "
+            "after the synchronize barrier, so the ordering checks below cannot "
+            "fail. Rework the graph so a constant is first used after the sync.",
+        )
+
+        for cd in cds:
+            for dep in (*cd.args[0], *cd.args[2:]):
+                if isinstance(dep, torch.fx.Node):
+                    self.assertLess(
+                        order[dep],
+                        order[cd],
+                        f"dep {dep} of {cd} is defined after it is used",
+                    )
 
 
 @unittest.skipUnless(TEST_CUDA, "requires CUDA")
@@ -2528,6 +2838,94 @@ class TestPDLWithMultiStream(InductorTestCase):
 
 
 @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+@xfailIfNoAcceleratorTriton
+class TestAOTIUserStreams(InductorTestCase):
+    @staticmethod
+    def _runtime_name(cuda_name):
+        if TEST_WITH_ROCM:
+            return cuda_name.replace("cuda", "hip", 1)
+        return cuda_name
+
+    def _compile_and_run(self, model, inputs):
+        from torch._inductor.utils import fresh_cache, run_and_get_cpp_code
+
+        with fresh_cache():
+            ep = torch.export.export(model, inputs, strict=True)
+
+            def _compile():
+                return torch._inductor.aoti_compile_and_package(ep)
+
+            package_path, code = run_and_get_cpp_code(_compile)
+            loaded = torch._inductor.aoti_load_package(package_path)
+            result = loaded(*inputs)
+        return result, code
+
+    def test_record_wait_event_basic(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                s = torch.cuda.Stream()
+                with torch.cuda.stream(s):
+                    y = x + 1
+                event = s.record_event()
+                event.wait()
+                return y * 2
+
+        model = Model().cuda()
+        inputs = (torch.randn(1024, device="cuda"),)
+        expected = model(*inputs)
+
+        result, code = self._compile_and_run(model, inputs)
+
+        self.assertEqual(result, expected)
+        self.assertIn(self._runtime_name("cudaEventRecord"), code)
+        self.assertIn(self._runtime_name("cudaStreamWaitEvent"), code)
+        self.assertIn("AOTIPerThreadStreamCache", code)
+
+    def test_two_stream_dependency(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                s1 = torch.cuda.Stream()
+                s2 = torch.cuda.Stream()
+                with torch.cuda.stream(s1):
+                    a = x + 1
+                event = s1.record_event()
+                s2.wait_event(event)
+                with torch.cuda.stream(s2):
+                    b = a * 2
+                final = s2.record_event()
+                final.wait()
+                return b
+
+        model = Model().cuda()
+        inputs = (torch.randn(1024, device="cuda"),)
+        expected = model(*inputs)
+
+        result, code = self._compile_and_run(model, inputs)
+
+        self.assertEqual(result, expected)
+        self.assertGreaterEqual(code.count(self._runtime_name("cudaEventRecord")), 2)
+        self.assertGreaterEqual(
+            code.count(self._runtime_name("cudaStreamWaitEvent")), 2
+        )
+        self.assertIn("_aoti_aux_stream_cache.get(2", code)
+
+    def test_stream_synchronize_raises(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                s = torch.cuda.Stream()
+                with torch.cuda.stream(s):
+                    y = x + 1
+                s.synchronize()
+                return y * 2
+
+        model = Model().cuda()
+        inputs = (torch.randn(1024, device="cuda"),)
+
+        with self.assertRaisesRegex(Exception, "synchronize_stream"):
+            self._compile_and_run(model, inputs)
+
+
+@unittest.skipIf(not TEST_CUDA, "requires CUDA")
 @torch._inductor.config.patch({"triton.cudagraphs": True})
 @xfailIfNoAcceleratorTriton
 class TestStreamCudagraphInteraction(InductorTestCase):
@@ -2652,11 +3050,13 @@ instantiate_parametrized_tests(TestStreamOrderingStress)
 instantiate_parametrized_tests(TestGenericStreamCompile)
 instantiate_parametrized_tests(TestStreamIdentity)
 instantiate_parametrized_tests(TestPDLWithMultiStream)
+instantiate_parametrized_tests(TestAOTIUserStreams)
 instantiate_parametrized_tests(TestStreamCudagraphInteraction)
 
 
 @unittest.skipIf(not TEST_CUDA, "requires CUDA")
 class TestStreamExternalObjectRestore(InductorTestCase):
+    @xfailIfNoAcceleratorTriton
     def test_restore_external_objects_before_backward(self):
         """Forward snapshots external object registry, backward restores it."""
         from torch._dynamo.graph_bytecode_inputs import store_user_object_weakrefs

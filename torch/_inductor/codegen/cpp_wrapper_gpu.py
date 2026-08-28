@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 import re
 import sys
 from itertools import count, zip_longest
-from typing import Any
+from typing import Any, cast
 from typing_extensions import Self
 
 import sympy
@@ -25,9 +26,16 @@ from ..ir import (
     TMADescriptorStable,
 )
 from ..runtime.hints import (
+    InductorMeta,
     TRITON_DEFAULT_BLOCK_SIZES,
     TRITON_DEFAULT_RSPLIT,
     TRITON_DEFAULT_RSPLIT_SIZE,
+    TritonMeta,
+)
+from ..stream_utils import (
+    AOTI_SUPPORTED_STREAM_OP_NAMES,
+    AOTI_UNSUPPORTED_STREAM_OP_REASONS,
+    get_stream_name,
 )
 from ..utils import (
     cache_on_self,
@@ -63,6 +71,16 @@ def cpp_string_literal(s: str) -> str:
         lambda match: _cpp_string_literal_escapes[match.group(0)], s
     )
     return f'"{escaped}"'
+
+
+def _launch_pdl_cpp_literal(triton_meta: TritonMeta | None) -> str:
+    """Resolve Triton's effective per-kernel PDL launch option."""
+    if triton_meta is None:
+        return "false"
+
+    backend_options = triton_meta.get("backend_options") or {}
+    launch_pdl = backend_options.get("launch_pdl", triton_meta.get("launch_pdl", False))
+    return "true" if launch_pdl else "false"
 
 
 def generate_aoti_kernel_config_header(kernel_names: list[str]) -> str:
@@ -219,7 +237,7 @@ class _LazyTritonCompileKickoffLine(DeferredLineBase):
     def __call__(self) -> str | None:
         return self.line if self.lazy_kernel_names else None
 
-    def _new_line(self, line: str) -> Self:
+    def _new_line(self, line: str) -> _LazyTritonCompileKickoffLine:
         return _LazyTritonCompileKickoffLine(self.lazy_kernel_names, line)
 
 
@@ -235,7 +253,7 @@ class DeferredTritonCallWrapper:
     kernel_name: str
     kernel_name_to_body: dict[str, str]
     arg_types: list[Any]
-    triton_meta: dict[str, Any] | None = None
+    triton_meta: TritonMeta | None = None
     inductor_meta: dict[str, Any] | None = None
     tma_tensor_args: dict[str, str] = dataclasses.field(default_factory=dict)
 
@@ -491,7 +509,9 @@ class DeferredTritonCallWrapper:
         else:
             from ..runtime.triton_heuristics import GridExpr
 
-            grid = GridExpr.from_meta_lazy(self.inductor_meta, kernel_name)
+            grid = GridExpr.from_meta_lazy(
+                cast("InductorMeta | None", self.inductor_meta), kernel_name
+            )
             for line in grid.prefix:
                 prefix.writeline(line)
 
@@ -601,11 +621,17 @@ class DeferredTritonCallWrapper:
         )
         call_args_str = self._generate_lazy_scratch(prefix, wrapper, call_args_str)
 
+        launch_pdl = (
+            _launch_pdl_cpp_literal(self.triton_meta)
+            if wrapper.device_codegen.cpp_kernel_launch_supports_pdl()
+            else None
+        )
+        launch_pdl_arg = f", {launch_pdl}" if launch_pdl is not None else ""
         common_launch_args = (
             f"grid_0, grid_1, grid_2,"
             f" {kernel_name}_result.num_warps,"
             f" {kernel_name}_result.shared_mem,"
-            f" kernel_args_, stream_"
+            f" kernel_args_, stream_{launch_pdl_arg}"
         )
         # stream_ comes from the generated wrapper signature on both JIT and
         # AOTI sides.
@@ -639,6 +665,7 @@ class DeferredTritonCallWrapper:
                     *launch_kernel_args,
                     "kernel_args_",
                     "stream_",
+                    *([launch_pdl] if launch_pdl is not None else []),
                 ],
                 num_warps=f"{kernel_name}_result.num_warps",
                 shared_mem=f"{kernel_name}_result.shared_mem",
@@ -811,7 +838,9 @@ class DeferredTritonCallWrapper:
     ):
         from ..runtime.triton_heuristics import GridExpr
 
-        grid = GridExpr.from_meta(inductor_meta, params["config"], mode="cpp")
+        grid = GridExpr.from_meta(
+            cast("InductorMeta", inductor_meta), params["config"], mode="cpp"
+        )
         for line in grid.prefix:
             prefix.writeline(line)
         prefix.splice(
@@ -907,6 +936,8 @@ class DeferredTritonCallWrapper:
             "kernel_args_",
             "stream_",
         ]
+        if wrapper.device_codegen.cpp_kernel_launch_supports_pdl():
+            launch_kernel_args.append(_launch_pdl_cpp_literal(triton_meta))
 
         enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
             "linux",
@@ -1085,14 +1116,26 @@ class CppWrapperGpu(CppWrapperCpu):
         self._triton_call_wrappers: dict[str, DeferredTritonCallWrapper] = {}
         self.autotune_input_prefix = "_REAL_AUTOTUNE_INPUT"
         self._lazy_kernel_names: list[str] = []
+        self._declared_aux_stream_slots: OrderedSet[int] = OrderedSet()
+        self._aoti_current_stream_guard_declared = False
+        self._aoti_stream_helpers_emitted = False
 
     def generate_debug_sync(self, buffer):
         if self.device == "cuda":
-            buffer.writeline(
-                maybe_hipify_code_wrapper(
-                    "AOTI_RUNTIME_CUDA_CHECK(cudaDeviceSynchronize());"
+            # The fbcode JIT cpp_wrapper CUDA build links only the CUDA driver
+            # (libcuda), not libcudart, so the runtime cudaDeviceSynchronize symbol
+            # is undefined at dlopen -> use the driver-API cuCtxSynchronize there.
+            # On ROCm the driver-context sync hipCtxSynchronize returns
+            # hipErrorNotSupported at runtime, so keep the runtime cudaDeviceSynchronize
+            # (which hipifies to hipDeviceSynchronize and IS linked in the ROCm build).
+            if torch.version.hip is not None:
+                buffer.writeline(
+                    maybe_hipify_code_wrapper(
+                        "AOTI_RUNTIME_CUDA_CHECK(cudaDeviceSynchronize());"
+                    )
                 )
-            )
+            else:
+                buffer.writeline("CUDA_DRIVER_CHECK(cuCtxSynchronize());")
             return
 
         raise NotImplementedError(
@@ -1121,9 +1164,26 @@ class CppWrapperGpu(CppWrapperCpu):
             # For a dual-wrapper-mode const graph, only the standalone JIT
             # output needs this header content. The AOTI const body is spliced
             # into the main AOTI source, which has its own kernel driver.
+            # super().write_header() early-returns for const graphs before it
+            # can call add_device_include, so emit the JIT device include here;
+            # otherwise the kernel driver's CUfunction/CUmodule/uint32_t types
+            # have no declaring header and fail to compile under -nostdinc.
+            for device in V.graph.device_types:
+                if device != "meta":
+                    self.header.splice_jit(self.get_device_include_path_jit(device))
             self.header.splice_jit(kernel_driver)
         else:
             self.header.splice(kernel_driver)
+
+    def _generate(self, is_inference):
+        # Per-Run()-function state, reset each generation. Do NOT reset
+        # _aoti_stream_helpers_emitted here: the helper structs are spliced into
+        # the file-level header once per instance, and _generate can run more
+        # than once against the same header (resetting it re-splices and yields
+        # a C++ redefinition).
+        self._declared_aux_stream_slots.clear()
+        self._aoti_current_stream_guard_declared = False
+        return super()._generate(is_inference)
 
     @cache_on_self
     def write_tma_descriptor_helpers_once(self):
@@ -1152,6 +1212,166 @@ class CppWrapperGpu(CppWrapperCpu):
             f"AOTI_TORCH_ERROR_CODE_CHECK({self.device_codegen.aoti_get_stream()}({device_idx}, (void**)&{name}));"
         )
         return name
+
+    def _ensure_aoti_stream_helpers_emitted(self) -> None:
+        if self._aoti_stream_helpers_emitted:
+            return
+        # The stream/event helpers in streams.h are CUDA-specific (cudaEvent_t,
+        # cudaStream_t, cudaEventRecord, ...). Guarding here on the device type
+        # prevents the CUDA-only symbols from being emitted into XPU generated
+        # code, where SYCL in-order queues handle event ordering implicitly.
+        if self.device == "xpu":
+            return
+        self._aoti_stream_helpers_emitted = True
+        with open(
+            os.path.join(os.path.dirname(__file__), "aoti_runtime", "streams.h")
+        ) as f:
+            self.header.splice(maybe_hipify_code_wrapper(f.read()))
+        self.header.splice(
+            """
+            namespace {
+
+            static thread_local torch::aot_inductor::AOTIPerThreadEventCache
+                _aoti_event_cache;
+            static thread_local torch::aot_inductor::AOTIPerThreadStreamCache
+                _aoti_aux_stream_cache;
+
+            }  // namespace
+            """
+        )
+
+    def codegen_stream_info_prologue(
+        self,
+        code: IndentedBuffer,
+        num_streams: int,
+        stream_idx_to_user_obj_idx: dict[int, int],
+    ) -> None:
+        if num_streams <= 1:
+            return
+        if not V.graph.aot_mode:
+            raise NotImplementedError(
+                "Multi-stream cpp_wrapper codegen is only supported for AOTI."
+            )
+        self._ensure_aoti_stream_helpers_emitted()
+        code.writeline(
+            f"_aoti_aux_stream_cache.ensure({num_streams}, this->device_idx_, stream);"
+        )
+        if not self._aoti_current_stream_guard_declared:
+            code.writeline(
+                f"std::unique_ptr<{V.graph.device_ops.cpp_aoti_stream_guard()}> "
+                "_aoti_current_stream_guard;"
+            )
+            self._aoti_current_stream_guard_declared = True
+
+        stream_type = self.device_codegen.cpp_stream_type()
+        for i in range(1, num_streams):
+            if i in self._declared_aux_stream_slots:
+                continue
+            code.writeline(
+                maybe_hipify_code_wrapper(
+                    f"{stream_type} {get_stream_name(i)} = "
+                    f"_aoti_aux_stream_cache.get({i}, this->device_idx_, stream);"
+                )
+            )
+            self._declared_aux_stream_slots.add(i)
+
+    def codegen_enter_cuda_stream_context(
+        self, code: IndentedBuffer, stream_idx: int
+    ) -> None:
+        if stream_idx == 0:
+            return
+        code.writeline(
+            "_aoti_current_stream_guard = "
+            f"std::make_unique<{V.graph.device_ops.cpp_aoti_stream_guard()}>("
+            f"{self._stream_expr_for_idx(stream_idx)}, this->device_idx_);"
+        )
+
+    def codegen_exit_cuda_stream_context(self, code: IndentedBuffer) -> None:
+        code.writeline("_aoti_current_stream_guard.reset();")
+
+    def _stream_expr_for_idx(self, stream_idx: int) -> str:
+        if stream_idx == 0:
+            return "stream"
+        return f"_aoti_aux_stream_cache.get({stream_idx}, this->device_idx_, stream)"
+
+    def _emit_stream_op_inline(self, kernel_name: str | None, args: list[str]) -> bool:
+        if kernel_name is None or not V.graph.aot_mode:
+            return False
+        if self.device == "xpu":
+            return False
+        if kernel_name in AOTI_UNSUPPORTED_STREAM_OP_REASONS:
+            raise NotImplementedError(
+                f"{kernel_name} is not supported in AOTI cpp_wrapper. "
+                f"{AOTI_UNSUPPORTED_STREAM_OP_REASONS[kernel_name]}"
+            )
+        op = AOTI_SUPPORTED_STREAM_OP_NAMES.get(kernel_name)
+        if op is None:
+            return False
+
+        def _parse_idx(arg: str) -> int:
+            return int(arg.rstrip("Ll"))
+
+        self._ensure_aoti_stream_helpers_emitted()
+        event_idx = _parse_idx(args[0])
+        if op == "record_event":
+            stream_idx = _parse_idx(args[1])
+            self.writeline(
+                maybe_hipify_code_wrapper(
+                    "AOTI_RUNTIME_CUDA_CHECK(cudaEventRecord("
+                    f"_aoti_event_cache.get({event_idx}, this->device_idx_), "
+                    f"{self._stream_expr_for_idx(stream_idx)}));"
+                )
+            )
+            return True
+        if op == "wait_event":
+            stream_idx = _parse_idx(args[1])
+            self.writeline(
+                maybe_hipify_code_wrapper(
+                    "AOTI_RUNTIME_CUDA_CHECK(cudaStreamWaitEvent("
+                    f"{self._stream_expr_for_idx(stream_idx)}, "
+                    f"_aoti_event_cache.get({event_idx}, this->device_idx_), 0));"
+                )
+            )
+            return True
+        if op == "synchronize_event":
+            self.writeline(
+                maybe_hipify_code_wrapper(
+                    "AOTI_RUNTIME_CUDA_CHECK(cudaEventSynchronize("
+                    f"_aoti_event_cache.get({event_idx}, this->device_idx_)));"
+                )
+            )
+            return True
+        return False
+
+    def _generate_extern_kernel_alloc_helper(self, extern_kernel, args):
+        kernel_name = getattr(extern_kernel, "python_kernel_name", None)
+        if self._emit_stream_op_inline(kernel_name, args):
+            if V.extern_kernel_nodes:
+                V.extern_kernel_nodes.pop()
+            return
+        super()._generate_extern_kernel_alloc_helper(extern_kernel, args)
+
+    def generate_fallback_kernel_with_runtime_lookup(
+        self,
+        buf_name,
+        python_kernel_name,
+        get_args,
+        op_overload,
+        raw_args,
+        outputs,
+    ):
+        if self._emit_stream_op_inline(python_kernel_name, list(get_args())):
+            if V.extern_kernel_nodes:
+                V.extern_kernel_nodes.pop()
+            return
+        super().generate_fallback_kernel_with_runtime_lookup(
+            buf_name,
+            python_kernel_name,
+            get_args,
+            op_overload,
+            raw_args,
+            outputs,
+        )
 
     def get_autotuning_input_name(self, idx):
         return f"{self.autotune_input_prefix}_{idx}"
@@ -1186,7 +1406,7 @@ class CppWrapperGpu(CppWrapperCpu):
                     if ((reinterpret_cast<std::uintptr_t>({input_name}.data_ptr()) & ({GPU_ALIGN_BYTES} -1)) != 0) {{
                         AOTI_TORCH_WARN("{warn_msg}");
                         AtenTensorHandle {input_name}_aligned;
-                        aoti_torch_clone_preserve_strides({input_name}, &{input_name}_aligned);
+                        AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_clone_preserve_strides({input_name}, &{input_name}_aligned));
                         {input_name} = std::move(RAIIAtenTensorHandle({input_name}_aligned));
                     }}
                     """
@@ -1505,7 +1725,7 @@ static inline void ensure_triton_kernel_compiles_started() {{
         arg_types=None,
         raw_keys=None,
         raw_args=None,
-        triton_meta=None,
+        triton_meta: TritonMeta | None = None,
         inductor_meta=None,
         graph_name="",
         original_fxnode_name=None,
@@ -1552,7 +1772,14 @@ static inline void ensure_triton_kernel_compiles_started() {{
                 original_fxnode_name=original_fxnode_name,
             )
 
-        stream = self.write_get_raw_stream(device.index, graph_name)
+        if (
+            V.graph.aot_mode
+            and current_stream_idx is not None
+            and current_stream_idx != 0
+        ):
+            stream = get_stream_name(current_stream_idx)
+        else:
+            stream = self.write_get_raw_stream(device.index, graph_name)
 
         if triton:
             call_args, arg_types = self.prepare_triton_wrapper_args(

@@ -44,7 +44,7 @@ def _reload_python_module(
 def _set_triton_ptxas_path() -> None:
     if os.environ.get("TRITON_PTXAS_PATH") is not None:
         return
-    ptxas = Path(__file__).absolute().parents[1] / "bin" / "ptxas"
+    ptxas = Path(__file__).absolute().parents[2] / "bin" / "ptxas"
     if not ptxas.exists():
         return
     if ptxas.is_file() and os.access(ptxas, os.X_OK):
@@ -124,7 +124,10 @@ def _set_triton_libdevice_path_impl() -> None:
         )
 
 
-_WORKER_CACHE_ENV_VARS = ("TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR")
+_WORKER_CACHE_ENV_VARS = (
+    "TORCHINDUCTOR_CACHE_DIR",
+    "TRITON_CACHE_DIR",
+)
 _last_applied_cache_env: dict[str, str | None] | None = None
 
 
@@ -155,7 +158,7 @@ def _worker_compile_pycodecache_kernel(
     _precompile entry point. Compiled artifacts are persisted to disk cache so
     the parent process can load them without recompilation.
 
-    Used by both CuteDSL and NV Universal GEMM backends.
+    Used by CuteDSL, FlyDSL, and NV Universal GEMM backends.
     """
     _apply_subprocess_env_and_clear_caches(extra_env)
 
@@ -212,6 +215,7 @@ def _worker_compile_triton(
         except ImportError:
             pass
     from torch._inductor import config
+    from torch._inductor.compile_worker import watchdog
     from torch._inductor.runtime import triton_helpers
 
     with config.patch(extra_config):
@@ -222,6 +226,7 @@ def _worker_compile_triton(
             # but compile workers only need to warm the compile cache.
             with triton_helpers.skip_gpu_driver_setup():
                 kernel = load_kernel()
+                watchdog.report_phase(watchdog.Phase.COMPILING)
                 kernel.precompile(warm_cache_only=True)
             elapsed_ns = time.time_ns() - start_ns
             kernel.prepare_for_pickle()

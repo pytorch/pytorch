@@ -167,6 +167,7 @@ static void basicAutogradNotImplementedFallbackImpl(
     // we don't expect many existing operators to do this because of the amount
     // of technical expertise necessary (you would need to manually register an
     // autograd kernel without using autograd.Function)
+    bool grad_fn_attached = false;
     _foreach_tensor(
         [&](size_t _, size_t idx_ret, const at::Tensor& t) {
           if (!isDifferentiableType(t.scalar_type())) {
@@ -224,11 +225,16 @@ static void basicAutogradNotImplementedFallbackImpl(
           // custom ops don't have a good in-place story.
           if (!is_mutable_output) {
             set_history(t, grad_fn);
+            grad_fn_attached = true;
           }
         },
         stack,
         stack->size() - num_returns,
         num_returns);
+    // grad_fn is shared across outputs; fire once after the loop.
+    if (grad_fn_attached) {
+      fire_node_creation_hooks(grad_fn);
+    }
   }
 }
 
@@ -468,19 +474,35 @@ static void autogradNotImplementedFallbackImpl(
 #endif
 
   if (any_requires_grad) {
+    bool grad_fn_attached = false;
     _foreach_tensor(
         [&](size_t idx_tensor, size_t idx_ret, const at::Tensor& t) {
           if (isDifferentiableType(t.scalar_type())) {
             if (is_inplace_output[idx_ret]) {
-              rebase_history(t, grad_fn);
+              auto attached_fn = rebase_history(t, grad_fn);
+              if (attached_fn == grad_fn) {
+                // Non-view in-place output: grad_fn was attached directly;
+                // it is shared across outputs, so defer to the single fire
+                // after the loop.
+                grad_fn_attached = true;
+              } else {
+                // View in-place output: attached_fn is a fresh CopySlices
+                // node created just for t; fire it here.
+                fire_node_creation_hooks(attached_fn);
+              }
             } else {
               set_history(t, grad_fn);
+              grad_fn_attached = true;
             }
           }
         },
         stack,
         stack->size() - num_returns,
         num_returns);
+    // grad_fn is shared across outputs; fire once after the loop.
+    if (grad_fn_attached) {
+      fire_node_creation_hooks(grad_fn);
+    }
   }
 }
 
@@ -498,7 +520,7 @@ struct GenericViewFunc : public ViewFunc {
         aliased_input_idx_val_(aliased_input_idx_val),
         op_(op) {
     // This should report saved Tensors and SymInts.
-    // We already have an assert that ensure there are no Tensors here
+    // We already have an assert that ensures there are no Tensors here
     // by making sure there is only one Tensor input.
     // We also verify there are no SymInt here for now.
     // Both can be lifted if the visit and clone logic get updated.

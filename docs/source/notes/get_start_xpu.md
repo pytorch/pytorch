@@ -12,8 +12,8 @@
 
 | Supported OS | Validated Hardware |
 |---|---|
-| Windows 11 & Ubuntu 24.04/25.10/26.04 | Intel® Arc A-Series Graphics (CodeName: Alchemist)<br>Intel® Arc B-Series Graphics (CodeName: Battlemage)<br>Intel® Core™ Ultra Processors with Intel® Arc™ Graphics (CodeName: Meteor Lake-H)<br>Intel® Core™ Ultra Processors (Series 2) with Intel® Arc™ Graphics (CodeName: Arrow Lake-H)<br>Intel® Core™ Ultra Mobile Processors (Series 2) with Intel® Arc™ Graphics (CodeName: Lunar Lake) |
-| Windows 11 & Ubuntu 25.10/26.04 | Intel® Core™ Ultra Mobile Processors (Series 3) with Intel® Arc™ Graphics (CodeName: Panther Lake) |
+| Windows 11 & Ubuntu 24.04/26.04 & WSL2 Ubuntu 24.04/26.04 | Intel® Arc™ A-Series Graphics (CodeName: Alchemist)<br>Intel® Arc™ B-Series Graphics (CodeName: Battlemage)<br>Intel® Core™ Ultra Processors with Intel® Arc™ Graphics (CodeName: Meteor Lake-H)<br>Intel® Core™ Ultra Processors (Series 2) with Intel® Arc™ Graphics (CodeName: Arrow Lake-H)<br>Intel® Core™ Ultra Mobile Processors (Series 2) with Intel® Arc™ Graphics (CodeName: Lunar Lake) |
+| Windows 11 & Ubuntu 26.04 & WSL2 Ubuntu 24.04/26.04 | Intel® Core™ Ultra Mobile Processors (Series 3) with Intel® Arc™ Graphics (CodeName: Panther Lake) |
 
 Intel GPUs support (Prototype) is ready from PyTorch\* 2.5 for Intel® Client GPUs and Intel® Data Center GPU Max Series on both Linux and Windows, which brings Intel GPUs and the SYCL\* software stack into the official PyTorch stack with consistent user experience to embrace more AI application scenarios.
 
@@ -47,20 +47,10 @@ pip3 install --pre torch torchvision torchaudio --index-url https://download.pyt
 
 #### Previous Versions
 
-**v2.12.0**
+For previous PyTorch releases with Intel GPU (XPU) support, refer to the [previous versions](https://pytorch.org/get-started/previous-versions/) page and use the `xpu` index URL:
 
 ```bash
-pip3 install torch==2.12.0 torchvision==0.27.0 torchaudio==2.12.0 --index-url https://download.pytorch.org/whl/xpu
-```
-
-**v2.11.0**
-
-```bash
-pip3 install torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 --index-url https://download.pytorch.org/whl/xpu
-```
-
-```{note}
-For older wheels, please refer to the [previous versions](https://pytorch.org/get-started/previous-versions/) page and ensure you use the `xpu` index URL.
+pip3 install torch==TORCH_VERSION torchvision==TORCHVISION_VERSION torchaudio==TORCHAUDIO_VERSION --index-url https://download.pytorch.org/whl/xpu
 ```
 
 ### From Source
