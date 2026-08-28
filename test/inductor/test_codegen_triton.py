@@ -1265,6 +1265,52 @@ def helper(x):
         HAS_GPU_AND_TRITON or (HAS_CPU and TRITON_HAS_CPU),
         "requires CPU or GPU Triton",
     )
+    def test_user_defined_triton_kernel_without_alignment_specialization_metadata(
+        self,
+    ):
+        from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+
+        def fn(x):
+            out = torch.empty_like(x)
+            root_decorator_for_codegen[(1,)](
+                x,
+                out,
+                x.numel(),
+                BLOCK_SIZE=128,
+            )
+            return out
+
+        define_kernel = PythonWrapperCodegen.define_user_defined_triton_kernel
+
+        def define_kernel_without_alignment_metadata(self, kernel, *args, **kwargs):
+            # Older Triton KernelParam instances predate this attribute. Remove
+            # it only during Inductor codegen so current Triton can capture the HOP.
+            alignment_options = [
+                param.do_not_specialize_on_alignment for param in kernel.params
+            ]
+            try:
+                for param in kernel.params:
+                    del param.do_not_specialize_on_alignment
+                return define_kernel(self, kernel, *args, **kwargs)
+            finally:
+                for param, alignment_option in zip(kernel.params, alignment_options):
+                    param.do_not_specialize_on_alignment = alignment_option
+
+        device = GPU_TYPE if HAS_GPU_AND_TRITON else "cpu"
+        x = torch.randn(64, device=device)
+        with patch.object(
+            PythonWrapperCodegen,
+            "define_user_defined_triton_kernel",
+            define_kernel_without_alignment_metadata,
+        ):
+            result, _ = run_and_get_code(torch.compile(fn), x)
+
+        self.assertEqual(result, x + 1)
+
+    @unittest.skipUnless(
+        HAS_GPU_AND_TRITON or (HAS_CPU and TRITON_HAS_CPU),
+        "requires CPU or GPU Triton",
+    )
     def test_user_defined_triton_kernel_preserves_jit_decorator(self):
         from torch._inductor.codegen.wrapper import (
             user_defined_triton_kernel_transitive_closure_source_code,

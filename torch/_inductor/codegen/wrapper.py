@@ -3750,7 +3750,9 @@ class PythonWrapperCodegen(CodeGen):
         # JITFunction parameters still carry Triton's specialization controls.
         do_not_specialize = tuple(p.num for p in kernel.params if p.do_not_specialize)
         do_not_specialize_on_alignment = tuple(
-            p.num for p in kernel.params if p.do_not_specialize_on_alignment
+            p.num
+            for p in kernel.params
+            if getattr(p, "do_not_specialize_on_alignment", False)
         )
         for idx, key in enumerate(arg_names):
             if idx in constexprs:
