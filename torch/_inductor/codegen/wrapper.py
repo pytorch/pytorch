@@ -570,6 +570,24 @@ def user_defined_triton_kernel_transitive_closure_source_code(
     return compile_wrapper.getvalue()
 
 
+def user_defined_triton_kernel_specialization(
+    kernel,
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """Return root specialization controls that affect Inductor codegen.
+
+    The generated closure source omits the root decorator, so cache-key callers
+    must record this metadata separately.
+    """
+    do_not_specialize = tuple(p.num for p in kernel.params if p.do_not_specialize)
+    # Older Triton KernelParam instances predate do_not_specialize_on_alignment.
+    do_not_specialize_on_alignment = tuple(
+        p.num
+        for p in kernel.params
+        if getattr(p, "do_not_specialize_on_alignment", False)
+    )
+    return do_not_specialize, do_not_specialize_on_alignment
+
+
 def _escape_triton_kernel_source_for_wrapper(src: str) -> str:
     """Escape src for a '''...''' literal, optionally nested in an r\"\"\"...\"\"\" block."""
     src = src.replace("\\", "\\\\")
@@ -3798,11 +3816,8 @@ class PythonWrapperCodegen(CodeGen):
         constexprs = [p.num for p in kernel.params if p.is_constexpr]
         # Root decorator text is omitted from generated source, but the original
         # JITFunction parameters still carry Triton's specialization controls.
-        do_not_specialize = tuple(p.num for p in kernel.params if p.do_not_specialize)
-        do_not_specialize_on_alignment = tuple(
-            p.num
-            for p in kernel.params
-            if getattr(p, "do_not_specialize_on_alignment", False)
+        do_not_specialize, do_not_specialize_on_alignment = (
+            user_defined_triton_kernel_specialization(kernel)
         )
         for idx, key in enumerate(arg_names):
             if idx in constexprs:

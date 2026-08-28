@@ -1405,6 +1405,45 @@ def helper(x):
         self.assertEqual(user_config_call.kwargs["equal_to_1_exclusions"], (2,))
         self.assertEqual(user_config_call.kwargs["divisible_by_16_exclusions"], (3,))
 
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_user_defined_triton_cache_keys_include_root_specialization(self):
+        from torch._functorch._aot_autograd.autograd_cache import (
+            AOTAutogradCacheDetails,
+        )
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            kernel_side_table,
+            triton_kernel_wrapper_mutation,
+        )
+        from torch._inductor.codecache import FxGraphHashDetails
+
+        graph = torch.fx.Graph()
+        kernel_idx = kernel_side_table.add_kernel(root_specialization_for_codegen)
+        constant_args_idx = kernel_side_table.add_constant_args({})
+        graph.call_function(
+            triton_kernel_wrapper_mutation,
+            kwargs={
+                "kernel_idx": kernel_idx,
+                "constant_args_idx": constant_args_idx,
+                "grid": [(1,)],
+                "tma_descriptor_metadata": {},
+                "kwargs": {},
+            },
+        )
+        graph.output(None)
+        gm = torch.fx.GraphModule({}, graph)
+
+        fx_details = FxGraphHashDetails(gm, [], {}, [])
+        self.assertEqual(fx_details.user_defined_triton_source[0][1:3], ((2,), (3,)))
+
+        aot_details = object.__new__(AOTAutogradCacheDetails)
+        with patch.object(
+            AOTAutogradCacheDetails,
+            "_iter_triton_kernels_from_node",
+            return_value=[root_specialization_for_codegen],
+        ):
+            aot_sources = aot_details.get_triton_source_codes_from_gm(gm)
+        self.assertEqual(aot_sources[0][1:], ((2,), (3,)))
+
     @unittest.skipUnless(
         HAS_GPU_AND_TRITON or (HAS_CPU and TRITON_HAS_CPU),
         "requires CPU or GPU Triton",
