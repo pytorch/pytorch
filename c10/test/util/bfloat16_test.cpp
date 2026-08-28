@@ -3,6 +3,7 @@
 #include <c10/util/BFloat16-math.h>
 #include <c10/util/irange.h>
 // clang-format on
+#include <c10/util/bit_cast.h>
 #include <gtest/gtest.h>
 
 namespace {
@@ -14,9 +15,7 @@ float float_from_bytes(uint32_t sign, uint32_t exponent, uint32_t fraction) {
   bytes <<= 23;
   bytes |= fraction;
 
-  float res = 0;
-  std::memcpy(&res, &bytes, sizeof(res));
-  return res;
+  return c10::bit_cast<float>(bytes);
 }
 
 TEST(BFloat16Conversion, FloatToBFloat16AndBack) {
@@ -154,9 +153,7 @@ TEST(BFloat16Math, NextAfterZero) {
 }
 
 float BinaryToFloat(uint32_t bytes) {
-  float res = 0;
-  std::memcpy(&res, &bytes, sizeof(res));
-  return res;
+  return c10::bit_cast<float>(bytes);
 }
 
 struct BFloat16TestParam {
