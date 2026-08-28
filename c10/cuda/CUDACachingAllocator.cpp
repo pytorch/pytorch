@@ -45,7 +45,6 @@
 #include <mutex>
 #include <new>
 #include <ranges>
-#include <regex>
 #include <set>
 #include <stack>
 #include <thread>
@@ -77,6 +76,16 @@ namespace cuda::CUDACachingAllocator {
 
 using namespace c10::CachingAllocator;
 using namespace c10::CachingDeviceAllocator;
+
+namespace {
+// Process-wide expandable-segment virtual-address gauges. Bumped in the
+// ExpandableSegment ctor (after a successful reservation) and dtor; read by
+// getExpandableSegmentsReservedBytes()/getExpandableSegmentsCount() for ODS and
+// out-of-VM diagnostics. Relaxed atomics: plain counters, not used for
+// synchronization.
+std::atomic<size_t> g_expandable_segments_reserved_bytes{0};
+std::atomic<size_t> g_expandable_segments_count{0};
+} // namespace
 
 #if defined(PYTORCH_C10_DRIVER_API_SUPPORTED) || defined(USE_ROCM)
 static int get_self_pid() {
@@ -421,14 +430,82 @@ struct ExpandableSegment {
     // we allocate enough address space for 1 1/8 the total memory on the GPU.
     // This allows for some cases where we have to unmap pages earlier in the
     // segment to put them at the end.
-    max_handles_ = numSegments(prop.totalGlobalMem + prop.totalGlobalMem / 8);
+    const size_t full_reserve = prop.totalGlobalMem + prop.totalGlobalMem / 8;
+    size_t reserve = full_reserve;
+    // Serving streams may be tagged with a reserve class to downsize their VA
+    // reservation (see PYTORCH_CUDA_ALLOC_CONF expandable_segments_reserve*).
+    // Untagged streams and IPC-imported segments (no stream) keep the full
+    // reserve, so this path is a byte-for-byte no-op unless reserve config is
+    // set. A single allocation cannot span segments, so the reserve is raised
+    // to the floor, and the result is capped at the historical full reserve
+    // (see clamp_reserve_bytes).
+    if (stream.has_value()) {
+      const std::string reserve_class =
+          getExpandableSegmentReserveClassForStream(*stream);
+      // Single locked snapshot so a concurrent setAllocatorSettings() re-parse
+      // cannot compose an inconsistent (reserve, class_known, floor) view.
+      const auto decision =
+          CUDAAllocatorConfig::expandable_segments_reserve_decision(
+              reserve_class, prop.totalGlobalMem);
+      if (decision.reserve_bytes.has_value() && !reserve_class.empty() &&
+          !decision.class_known) {
+        static std::mutex warn_mutex;
+        static ska::flat_hash_set<std::string> warned;
+        std::lock_guard<std::mutex> lock(warn_mutex);
+        if (warned.insert(reserve_class).second) {
+          TORCH_WARN(
+              "expandable_segments reserve class '",
+              reserve_class,
+              "' has no configured reserve in "
+              "expandable_segments_reserve_by_class; using the default reserve.");
+        }
+      }
+      reserve =
+          CUDAAllocatorConfig::clamp_reserve_bytes(decision, full_reserve);
+    }
+    max_handles_ = numSegments(reserve);
+    const size_t reserve_bytes = segment_size_ * max_handles_;
+    // Log expandable-segment VA context immediately BEFORE the (unchanged)
+    // driver check throws, so an out-of-virtual-memory crash is self-explaining
+    // in task logs. Built only on the failure branch -> perf-neutral on
+    // success.
+    auto logVaExhaustion = [&](const char* err_str) {
+      LOG(ERROR)
+          << "[ExpandableSegmentVA] Failed to reserve " << reserve_bytes
+          << " bytes (~" << (reserve_bytes >> 30)
+          << " GiB) of virtual address space for an expandable CUDA segment on device "
+          << static_cast<int>(device_) << " (driver reported: " << err_str
+          << "). This process already holds " << getExpandableSegmentsCount()
+          << " live expandable segment(s) reserving "
+          << getExpandableSegmentsReservedBytes()
+          << " bytes of virtual address space. This is virtual-address-space "
+             "(VSZ) exhaustion from expandable segments, not physical GPU OOM. "
+             "Reduce it via PYTORCH_CUDA_ALLOC_CONF expandable_segments_reserve / "
+             "expandable_segments_reserve_by_class, or by using fewer CUDA streams.";
+    };
 #ifdef USE_ROCM
-    C10_CUDA_CHECK(hipMemAddressReserve(
-        &ptr_, segment_size_ * max_handles_, 0ULL, 0, 0ULL));
+    hipError_t reserve_err =
+        hipMemAddressReserve(&ptr_, reserve_bytes, 0ULL, 0, 0ULL);
+    if (C10_UNLIKELY(reserve_err != hipSuccess)) {
+      const char* err_str = hipGetErrorString(reserve_err);
+      logVaExhaustion(err_str ? err_str : "unknown error");
+    }
+    C10_CUDA_CHECK(reserve_err);
 #else
-    C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemAddressReserve_(
-        &ptr_, segment_size_ * max_handles_, 0ULL, 0, 0ULL));
+    CUresult reserve_err = DriverAPI::get()->cuMemAddressReserve_(
+        &ptr_, reserve_bytes, 0ULL, 0, 0ULL);
+    if (C10_UNLIKELY(reserve_err != CUDA_SUCCESS)) {
+      const char* err_str = nullptr;
+      DriverAPI::get()->cuGetErrorString_(reserve_err, &err_str);
+      logVaExhaustion(err_str ? err_str : "unknown error");
+    }
+    C10_CUDA_DRIVER_CHECK(reserve_err);
 #endif
+    // Reservation succeeded (a failure would have thrown above): publish
+    // gauges.
+    g_expandable_segments_reserved_bytes.fetch_add(
+        reserve_bytes, std::memory_order_relaxed);
+    g_expandable_segments_count.fetch_add(1, std::memory_order_relaxed);
   }
   ExpandableSegment(const ExpandableSegment&) = delete;
   ExpandableSegment(ExpandableSegment&&) = delete;
@@ -822,6 +899,12 @@ struct ExpandableSegment {
     C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemAddressFree_(
         ptr_, segment_size_ * max_handles_));
 #endif
+    // Decrement only after a successful free (the checks above throw on
+    // failure), so the gauges never under-report VA that is still reserved by
+    // the driver.
+    g_expandable_segments_reserved_bytes.fetch_sub(
+        segment_size_ * max_handles_, std::memory_order_relaxed);
+    g_expandable_segments_count.fetch_sub(1, std::memory_order_relaxed);
   }
 
  private:
@@ -1924,6 +2007,37 @@ class DeviceCachingAllocator {
       // Note that at this point free_cached_blocks has already returned all
       // possible "cached" memory to the driver. The only remaining "cached"
       // memory is split from a larger block that is partially in-use.
+      //
+      // With expandable segments a single allocation cannot span segments, so a
+      // request larger than this stream's per-segment reserve fails even when
+      // the device has room -- which is otherwise baffling, since the message
+      // above will report plenty free. Only advise raising the reserve when the
+      // request would actually fit on the device; for a genuinely oversized
+      // request the reserve is not the problem.
+      std::string expandable_reserve_msg;
+      if (CUDAAllocatorConfig::expandable_segments() &&
+          alloc_size <= device_prop.totalGlobalMem) {
+        const std::string reserve_class =
+            getExpandableSegmentReserveClassForStream(stream);
+        const size_t total = device_prop.totalGlobalMem;
+        const size_t reserve = CUDAAllocatorConfig::clamp_reserve_bytes(
+            CUDAAllocatorConfig::expandable_segments_reserve_decision(
+                reserve_class, total),
+            total + total / 8);
+        if (reserve < alloc_size) {
+          expandable_reserve_msg =
+              " This allocation exceeds the expandable-segment reserve of " +
+              format_size(reserve) +
+              (reserve_class.empty()
+                   ? std::string(" for this stream")
+                   : " for stream reserve class '" + reserve_class + "'") +
+              ", and a single allocation cannot span expandable segments."
+              " Raise PYTORCH_CUDA_ALLOC_CONF expandable_segments_reserve or"
+              " expandable_segments_reserve_by_class (or unset it) so that a"
+              " segment is at least " +
+              format_size(alloc_size) + ".";
+        }
+      }
       TORCH_CHECK_WITH(
           OutOfMemoryError,
           false,
@@ -1947,11 +2061,23 @@ class DeviceCachingAllocator {
               reserved_bytes - allocated_bytes - allocated_in_private_pools),
           " is reserved by PyTorch but unallocated.",
           CUDAAllocatorConfig::expandable_segments()
-              ? ""
+              // Suppressed when the reserve-specific hint below applies: that
+              // one says to RAISE the reserve, so the generic "you may be
+              // over-reserving, reduce it" advice would contradict it.
+              ? (!expandable_reserve_msg.empty()
+                     ? ""
+                     : " expandable_segments is enabled. If instead the process"
+                       " is running out of virtual address space (VSZ),"
+                       " expandable segments may be over-reserving VA (each"
+                       " segment reserves ~9/8 of device memory, times the"
+                       " number of streams); reduce it via"
+                       " PYTORCH_CUDA_ALLOC_CONF expandable_segments_reserve /"
+                       " expandable_segments_reserve_by_class.")
               : " If reserved but unallocated memory is large try setting"
                 " PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid"
                 " fragmentation.  See documentation for Memory Management "
-                " (https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)");
+                " (https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)",
+          expandable_reserve_msg);
     }
 
     bool split_remainder = should_split(
@@ -3233,6 +3359,7 @@ class DeviceCachingAllocator {
       // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
       bool inserted = graph_pools_freeable.insert({mempool_id, pp}).second;
       TORCH_INTERNAL_ASSERT(inserted);
+      no_split_pools.erase(mempool_id);
     }
   }
 
@@ -3340,6 +3467,8 @@ class DeviceCachingAllocator {
   // returns the smallest possible address in any segment
   // where there is enough free address space to fit size
   // may be composed of free and unmapped segments
+  // returns nullptr if no segment can ever be large enough to fit size, i.e.
+  // size exceeds the per-stream expandable-segment reserve
   Block* find_expandable_block(
       c10::DeviceIndex device,
       cudaStream_t stream,
@@ -3380,6 +3509,17 @@ class DeviceCachingAllocator {
         device, stream, segment_size, devices_with_peer_access_));
 
     ExpandableSegment* es = expandable_segments_.back();
+    // A single allocation cannot span expandable segments, so if even a fresh
+    // segment is smaller than `size` no segment can ever satisfy the request.
+    // Report "no block" rather than returning a candidate that violates the
+    // contract above: the caller then fails the allocation through the normal
+    // OOM path, which notifies out-of-memory observers, counts the OOM, and
+    // retries after releasing cached blocks.
+    if (es->size() < size) {
+      expandable_segments_.pop_back();
+      delete es;
+      return nullptr;
+    }
     Block* candidate = new Block(device, stream, es->size(), pool, es->ptr());
     candidate->mapped = false;
     candidate->expandable_segment_ = es;
@@ -3471,6 +3611,11 @@ class DeviceCachingAllocator {
       size_t size,
       const std::shared_ptr<GatheredContext>& ctx) {
     Block* candidate = find_expandable_block(device, stream, pool, size);
+    if (!candidate) {
+      // No segment can ever be large enough for this allocation; fail the same
+      // way an exhausted device does so the caller runs the normal OOM path.
+      return nullptr;
+    }
     // Candidate is now a list free/unmapped blocks with at least size room:
     // unmapped -> null
     // unmapped -> free -> *
@@ -3851,11 +3996,6 @@ class DeviceCachingAllocator {
     if (isRetry) {
       stats.num_alloc_retries += 1;
     }
-#ifdef FBCODE_CAFFE2
-    bool in_fbcode = true;
-#else
-    bool in_fbcode = false;
-#endif
 
     if (allowed_memory_maximum.has_value() &&
         total_allocated_memory + size > allowed_memory_maximum.value()) {
@@ -3893,10 +4033,7 @@ class DeviceCachingAllocator {
       }
     }
 
-    if (
-        // Temporarily disable checkpointing & cudagraphs internally
-        p.is_expandable_segments_active &&
-        !(in_fbcode && p.pool->owner_PrivatePool)) {
+    if (p.is_expandable_segments_active) {
       p.block = try_allocate_expandable_block(
           p.device(), p.stream(), p.pool, p.size(), ctx);
       if (p.block) {
@@ -5396,5 +5533,51 @@ struct BackendStaticInitializer {
 
 std::atomic<CUDAAllocator*> allocator;
 static BackendStaticInitializer backend_static_initializer;
+
+namespace {
+std::mutex& expandableSegmentReserveClassMutex() {
+  static std::mutex m;
+  return m;
+}
+ska::flat_hash_map<cudaStream_t, std::string>&
+expandableSegmentReserveClassMap() {
+  static ska::flat_hash_map<cudaStream_t, std::string> m;
+  return m;
+}
+} // namespace
+
+void setExpandableSegmentReserveClassForStream(
+    cudaStream_t stream,
+    const std::string& reserve_class) {
+  std::lock_guard<std::mutex> lock(expandableSegmentReserveClassMutex());
+  if (reserve_class.empty()) {
+    expandableSegmentReserveClassMap().erase(stream);
+  } else {
+    expandableSegmentReserveClassMap()[stream] = reserve_class;
+  }
+}
+
+std::string getExpandableSegmentReserveClassForStream(cudaStream_t stream) {
+  std::lock_guard<std::mutex> lock(expandableSegmentReserveClassMutex());
+  auto& map = expandableSegmentReserveClassMap();
+  auto it = map.find(stream);
+  return it != map.end() ? it->second : std::string{};
+}
+
+void setDefaultExpandableSegmentReserveFractionForClass(
+    const std::string& reserve_class,
+    double fraction) {
+  CUDAAllocatorConfig::set_default_reserve_for_class(
+      reserve_class,
+      ExpandableSegmentReserveSpec{/*is_fraction=*/true, fraction});
+}
+
+size_t getExpandableSegmentsReservedBytes() {
+  return g_expandable_segments_reserved_bytes.load(std::memory_order_relaxed);
+}
+
+size_t getExpandableSegmentsCount() {
+  return g_expandable_segments_count.load(std::memory_order_relaxed);
+}
 } // namespace cuda::CUDACachingAllocator
 } // namespace c10

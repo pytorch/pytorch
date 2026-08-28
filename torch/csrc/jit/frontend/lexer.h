@@ -265,7 +265,7 @@ struct TORCH_API SharedParserData {
         *kind = TK_IDENT;
       }
       // check for token second, so that e.g. 'max' matches the token TK_MAX
-      // rather the
+      // rather than the
       // identifier 'max'
       if (cur) {
         const auto begin_it = cur->child_chars.begin();

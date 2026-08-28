@@ -178,6 +178,10 @@ if(USE_ROCM)
     if(USE_HIPSPARSELT)
         list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_HIPSPARSELT)
     endif()
+    if(USE_CUFILE)
+        list(APPEND TORCH_PYTHON_LINK_LIBRARIES hip::hipfile)
+        list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUFILE)
+    endif()
 endif()
 
 if(USE_XPU)
@@ -300,6 +304,7 @@ endif()
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
 torch_compile_options(torch_python)  # see cmake/public/utils.cmake
+torch_optimize_layout_if_enabled(torch_python)
 if(APPLE)
   target_compile_options(torch_python PRIVATE
       $<$<COMPILE_LANGUAGE:CXX>: -fvisibility=default>)
@@ -319,10 +324,6 @@ add_dependencies(torch_python onnx_proto)
 if(USE_NUMPY)
   target_link_libraries(torch_python PRIVATE Python::NumPy)
   target_compile_definitions(torch_python PRIVATE USE_NUMPY)
-endif()
-
-if(USE_CUFILE AND NOT USE_ROCM)
-  target_compile_definitions(torch_python PRIVATE USE_CUFILE)
 endif()
 
 if(BUILD_LAZY_TS_BACKEND)
@@ -437,7 +438,7 @@ if(BUILD_ONEDNN_GRAPH)
 endif()
 
 if(${CMAKE_BUILD_TYPE} STREQUAL "RelWithAssert")
-   # Workaround numerous decret-without-a-gil warnings from JIT
+   # Workaround numerous decref-without-a-gil warnings from JIT
    # see https://github.com/pytorch/pytorch/issues/130073
    target_compile_definitions(torch_python PRIVATE "-DPYBIND11_NO_ASSERT_GIL_HELD_INCREF_DECREF")
 endif()
