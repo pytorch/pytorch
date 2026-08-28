@@ -135,8 +135,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
    :param fn: The whole computation to capture, taking the model(s) and runtime inputs
        as positional arguments.
-       Positional arguments after ``fn`` remain supported as one example call and cannot
-       be combined with ``example_inputs``.
+   :param example_args: Positional arguments after ``fn`` describe one example call and
+       cannot be combined with ``example_inputs``.
    :param example_inputs: A sequence of positional-argument tuples or
        ``torch.compiler.ExampleInput`` values for ``fn``. ``ExampleInput`` carries an
        ``args`` tuple and ``kwargs`` dict. The
