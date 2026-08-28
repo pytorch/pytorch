@@ -1359,6 +1359,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     // We assume the devices in both vectors have the same consistent type, and
     // their indices are unique and sorted.
     std::vector<c10::Device> excessDevices;
+    excessDevices.reserve(subset.size());
     std::set_difference(
         subset.begin(),
         subset.end(),
@@ -2419,15 +2420,15 @@ inline PyObject* IValue::toPyObject() const {
 }
 
 template <typename T>
-inline std::optional<T> IValue::toOptional() {
+inline std::optional<T> IValue::toOptional() && {
   if (this->isNone()) {
     return std::nullopt;
   }
-  return this->to<T>();
+  return std::move(*this).to<T>();
 }
 
 template <typename T>
-inline std::optional<T> IValue::toOptional() const {
+inline std::optional<T> IValue::toOptional() const& {
   if (this->isNone()) {
     return std::nullopt;
   }
