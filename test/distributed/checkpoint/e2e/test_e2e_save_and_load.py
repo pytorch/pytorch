@@ -443,11 +443,11 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
 
 
 class TestNoCPU(DTensorTestBase):
-    hw_classification = HardwareClassification.ACCELERATOR
+    hw_classification = HardwareClassification.GENERIC
 
     @property
     def backend(self):
-        return dist.get_default_backend_for_device(self.device_type)
+        return "nccl"
 
     @with_comms
     def test_no_cpu(self):
