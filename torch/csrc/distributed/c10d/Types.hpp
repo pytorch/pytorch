@@ -125,11 +125,14 @@ TORCH_API bool isComplexViewAsRealAllowed(const ReduceOp& reduceOp);
 
 constexpr auto kUnsetTimeout = std::chrono::milliseconds(-1);
 
+using OptionalCollectiveConfig = std::optional<c10::IValue>;
+
 struct BroadcastOptions {
   int64_t rootRank = 0;
   int64_t rootTensor = 0;
   std::chrono::milliseconds timeout = kUnsetTimeout;
   bool asyncOp = true;
+  OptionalCollectiveConfig config = std::nullopt;
 };
 
 struct AllreduceOptions {
@@ -137,6 +140,7 @@ struct AllreduceOptions {
   std::chrono::milliseconds timeout = kUnsetTimeout;
   bool asyncOp = true;
   std::optional<at::Tensor> sparseIndices = std::nullopt;
+  OptionalCollectiveConfig config = std::nullopt;
 };
 
 struct AllreduceCoalescedOptions : AllreduceOptions {};
@@ -147,17 +151,20 @@ struct ReduceOptions {
   int64_t rootTensor = 0;
   std::chrono::milliseconds timeout = kUnsetTimeout;
   bool asyncOp = true;
+  OptionalCollectiveConfig config = std::nullopt;
 };
 
 struct AllgatherOptions {
   std::chrono::milliseconds timeout = kUnsetTimeout;
   bool asyncOp = true;
+  OptionalCollectiveConfig config = std::nullopt;
 };
 
 struct GatherOptions {
   int64_t rootRank = 0;
   std::chrono::milliseconds timeout = kUnsetTimeout;
   bool asyncOp = true;
+  OptionalCollectiveConfig config = std::nullopt;
 };
 
 struct ScatterOptions {
@@ -170,11 +177,13 @@ struct ReduceScatterOptions {
   ReduceOp reduceOp = ReduceOp::SUM;
   std::chrono::milliseconds timeout = kUnsetTimeout;
   bool asyncOp = true;
+  OptionalCollectiveConfig config = std::nullopt;
 };
 
 struct AllToAllOptions {
   std::chrono::milliseconds timeout = kUnsetTimeout;
   bool asyncOp = true;
+  OptionalCollectiveConfig config = std::nullopt;
 };
 
 struct BarrierOptions {

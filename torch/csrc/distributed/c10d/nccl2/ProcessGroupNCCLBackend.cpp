@@ -423,7 +423,8 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::broadcast(
       tensor,
       static_cast<int>(opts.rootRank),
       opts.asyncOp,
-      operationTimeout(opts.timeout));
+      operationTimeout(opts.timeout),
+      opts.config);
   work->setOutputs(tensors);
   return work;
 }
@@ -443,7 +444,11 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allreduce(
   }
   ++sequence_number_;
   auto work = all_reduce(
-      tensor, opts.reduceOp, opts.asyncOp, operationTimeout(opts.timeout));
+      tensor,
+      opts.reduceOp,
+      opts.asyncOp,
+      operationTimeout(opts.timeout),
+      opts.config);
   work->setOutputs(tensors);
   return work;
 }
@@ -457,7 +462,11 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allreduce_coalesced(
   works.reserve(tensors.size());
   for (auto& tensor : tensors) {
     works.push_back(all_reduce(
-        tensor, opts.reduceOp, opts.asyncOp, operationTimeout(opts.timeout)));
+        tensor,
+        opts.reduceOp,
+        opts.asyncOp,
+        operationTimeout(opts.timeout),
+        opts.config));
   }
   auto work = coalesceWorks(std::move(works), tensors);
   if (coalescing_batch_) {
@@ -485,7 +494,8 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reduce(
       static_cast<int>(opts.rootRank),
       opts.reduceOp,
       opts.asyncOp,
-      operationTimeout(opts.timeout));
+      operationTimeout(opts.timeout),
+      opts.config);
   work->setOutputs(tensors);
   return work;
 }
@@ -512,7 +522,8 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allgather(
   bool aliased = outputList.size() > 1 &&
       outputList[0].data_ptr() == outputList[1].data_ptr();
   if (!aliased) {
-    auto work = all_gather(outputList, input, opts.asyncOp, timeout);
+    auto work =
+        all_gather(outputList, input, opts.asyncOp, timeout, opts.config);
     work->setOutputs(outputList);
     return work;
   }
@@ -522,7 +533,8 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allgather(
   auto staging = at::empty(
       {static_cast<int64_t>(getSize()) * input.numel()},
       input.options().memory_format(at::MemoryFormat::Contiguous));
-  auto work = allGatherSingleImpl(staging, input, opts.asyncOp, timeout);
+  auto work =
+      allGatherSingleImpl(staging, input, opts.asyncOp, timeout, opts.config);
   work->setOutputs(outputList);
   auto rows = staging.view({getSize(), input.numel()});
   work->wait();
@@ -548,7 +560,8 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allgather_coalesced(
         outputTensorLists.at(i),
         inputTensors.at(i),
         opts.asyncOp,
-        operationTimeout(opts.timeout)));
+        operationTimeout(opts.timeout),
+        opts.config));
     outputs.insert(
         outputs.end(),
         outputTensorLists.at(i).begin(),
@@ -577,7 +590,8 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::
         outputs.at(i),
         inputs.at(i),
         opts.asyncOp,
-        operationTimeout(opts.timeout)));
+        operationTimeout(opts.timeout),
+        opts.config));
   }
   auto work = coalesceWorks(std::move(works), outputs);
   if (coalescing_batch_) {
@@ -592,7 +606,11 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::_allgather_base(
     const ::c10d::AllgatherOptions& opts) {
   ++sequence_number_;
   auto work = allGatherSingleImpl(
-      outputBuffer, inputBuffer, opts.asyncOp, operationTimeout(opts.timeout));
+      outputBuffer,
+      inputBuffer,
+      opts.asyncOp,
+      operationTimeout(opts.timeout),
+      opts.config);
   work->setOutputs(std::vector<at::Tensor>{outputBuffer});
   return work;
 }
@@ -601,6 +619,9 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::gather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const ::c10d::GatherOptions& opts) {
+  TORCH_CHECK(
+      !opts.config.has_value(),
+      "Per-collective NCCL configuration is only supported by gather_single");
   TORCH_CHECK(inputTensors.size() == 1, "Only single input tensor supported");
   if (getRank() == opts.rootRank) {
     TORCH_CHECK(outputTensors.size() == 1, "Only single output list on root");
@@ -615,7 +636,8 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::gather(
       inputTensors.at(0),
       static_cast<int>(opts.rootRank),
       opts.asyncOp,
-      operationTimeout(opts.timeout));
+      operationTimeout(opts.timeout),
+      opts.config);
   work->setOutputs(outputTensors.at(0));
   return work;
 }
@@ -652,7 +674,8 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::gather_single(
       inputBuffer,
       static_cast<int>(opts.rootRank),
       opts.asyncOp,
-      operationTimeout(opts.timeout));
+      operationTimeout(opts.timeout),
+      opts.config);
   work->setOutputs(std::vector<at::Tensor>{outputBuffer});
   return work;
 }
@@ -692,7 +715,8 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reduce_scatter(
       inputTensors.at(0),
       opts.reduceOp,
       opts.asyncOp,
-      operationTimeout(opts.timeout));
+      operationTimeout(opts.timeout),
+      opts.config);
   work->setOutputs(outputTensors);
   return work;
 }
@@ -714,7 +738,8 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::
         inputs.at(i),
         opts.reduceOp,
         opts.asyncOp,
-        operationTimeout(opts.timeout)));
+        operationTimeout(opts.timeout),
+        opts.config));
   }
   auto work = coalesceWorks(std::move(works), outputs);
   if (coalescing_batch_) {
@@ -733,7 +758,8 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::_reduce_scatter_base(
       inputBuffer,
       opts.reduceOp,
       opts.asyncOp,
-      operationTimeout(opts.timeout));
+      operationTimeout(opts.timeout),
+      opts.config);
   work->setOutputs(std::vector<at::Tensor>{outputBuffer});
   return work;
 }
@@ -749,11 +775,14 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::alltoall_base(
   if (outputSplitSizes.empty() && inputSplitSizes.empty()) {
     c10d::checkSplitSizes(inputSplitSizes, inputBuffer, size_);
     c10d::checkSplitSizes(outputSplitSizes, outputBuffer, size_);
-    auto work =
-        allToAllSingleImpl(outputBuffer, inputBuffer, opts.asyncOp, timeout);
+    auto work = allToAllSingleImpl(
+        outputBuffer, inputBuffer, opts.asyncOp, timeout, opts.config);
     work->setOutputs(std::vector<at::Tensor>{outputBuffer});
     return work;
   }
+  TORCH_CHECK(
+      !opts.config.has_value(),
+      "Per-collective NCCL configuration requires equal all_to_all split sizes");
   auto work = all_to_all_v_single(
       outputBuffer,
       inputBuffer,
@@ -769,6 +798,9 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::alltoall(
     std::vector<at::Tensor>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const ::c10d::AllToAllOptions& opts) {
+  TORCH_CHECK(
+      !opts.config.has_value(),
+      "Per-collective NCCL configuration is not supported for list all_to_all");
   TORCH_CHECK(!inputTensors.empty(), "alltoall requires input tensors");
   ++sequence_number_;
   auto work = all_to_all(
