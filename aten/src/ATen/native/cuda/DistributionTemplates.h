@@ -54,6 +54,14 @@ std::tuple<uint64_t, dim3, dim3> calc_execution_policy(const int64_t total_eleme
   // ceil(numel / block_size), so block*grid*unroll_factor ~= numel and every
   // vectorized draw's components map to real output elements instead of 3 of
   // every 4 being computed and discarded.
+  //
+  // Note that this changes the values produced for a given seed. The kernel
+  // below hands output element li to component (li / (block*grid)) %
+  // unroll_factor of thread li % (block*grid), so shrinking the grid moves
+  // each element onto a different draw. Anything with numel small enough that
+  // the grid does not saturate at block_size * max_grid * unroll_factor now
+  // gets a different (but equally valid) random stream than before. The philox
+  // counter offset computed below is unaffected.
   const uint64_t elems_per_block = static_cast<uint64_t>(block_size) * unroll_factor;
   dim3 grid(static_cast<uint32_t>((numel + elems_per_block - 1) / elems_per_block));
   uint32_t blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor / block_size;
