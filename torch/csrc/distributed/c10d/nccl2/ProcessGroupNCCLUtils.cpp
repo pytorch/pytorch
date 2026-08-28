@@ -241,12 +241,23 @@ ProcessGroupNCCL::RedOpRAII ProcessGroupNCCL::getNcclReduceOp(
 void ProcessGroupNCCL::checkWorkQueue() {
   WorkNCCL::WorkStatus status = workq_.garbageCollect();
 
+  // Abort hooks run where a failure is DETECTED, not only where the process is
+  // torn down, because the teardown paths run no hook at all in the
+  // configurations where the process survives the failure and a post-mortem is
+  // worth the most: abortProcess() returns early when
+  // abort_process_on_timeout_or_error_ is off or reconfigure is on. So despite
+  // the name, a hook may run here with no abort following it. That matches what
+  // the hooks are for (capture debug info about the failure, e.g.
+  // c10d::FlightRecorderHook writes its trace) and callers must tolerate being
+  // called more than once per failure, since the teardown paths still fire.
   switch (status) {
     case WorkNCCL::WorkStatus::TIMEDOUT:
       comm_state_ = CommState::TIMEOUT;
+      runAbortHooks();
       break;
     case WorkNCCL::WorkStatus::ERROR:
       comm_state_ = CommState::ERROR;
+      runAbortHooks();
       break;
     default:
       // For COMPLETED, NOT_STARTED, and INPROGRESS, no state change needed
@@ -311,6 +322,10 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
             "failed to get async error");
         if (asyncErr != ncclSuccess && asyncErr != ncclInProgress) {
           comm_state_ = CommState::ERROR;
+          // Detected here rather than through the work queue, so this needs its
+          // own notification; see checkWorkQueue() for why detection and not
+          // just teardown.
+          runAbortHooks();
           if (!options_c10d_->enable_reconfigure) {
             TC_LOG(ERROR, this) << "nccl hit async error on rank " << rank_
                                 << ": " << ncclGetErrorString(asyncErr);
@@ -336,9 +351,12 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
 }
 
 void ProcessGroupNCCL::checkInitialized() const {
-  if (init_state_ != InitializationState::INITIALIZED) {
-    throw std::runtime_error("ProcessGroupNCCL not initialized");
-  }
+  TORCH_CHECK(
+      init_state_ == InitializationState::INITIALIZED,
+      options_c10d_->enable_reconfigure
+          ? "ProcessGroupNCCL has not been initialized. Call reconfigure() "
+            "before issuing operations when enable_reconfigure=True."
+          : "ProcessGroupNCCL not initialized");
 }
 
 void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
@@ -438,10 +456,10 @@ void ProcessGroupNCCL::addEphemeralTimeout(
 }
 
 void ProcessGroupNCCL::enqueueWork(
-    c10::intrusive_ptr<WorkNCCL> work,
+    const c10::intrusive_ptr<WorkNCCL>& work,
     cudaStream_t stream) {
-  // In graph capture mode, keep a reference to the work object to prevent
-  // premature destruction until the graph gets destroyed, organized per graph
+  // In graph capture mode, keep the completion state and events alive until
+  // the graph gets destroyed, organized per graph.
   if (getGraphCaptureMode()) {
     auto capture_info = c10::cuda::captureInfoMayInitCtx(stream);
     if (capture_info.status == c10::cuda::CaptureStatus::Active) {
@@ -450,8 +468,7 @@ void ProcessGroupNCCL::enqueueWork(
       // Check if this is the first work object for this graph
       bool is_first_work = graph_capture_work_refs_[capture_info.id].empty();
 
-      // Add work reference to the per-graph container
-      graph_capture_work_refs_[capture_info.id].push_back(work);
+      graph_capture_work_refs_[capture_info.id].push_back(work->state_);
 
       // If this is the first work object for this graph, set up automatic
       // cleanup
@@ -464,7 +481,7 @@ void ProcessGroupNCCL::enqueueWork(
     }
   } else {
     // Add work to stream's queue after events have been recorded
-    workq_.enqueueWork(std::move(work), stream);
+    workq_.enqueueWork(work, stream);
   }
 }
 

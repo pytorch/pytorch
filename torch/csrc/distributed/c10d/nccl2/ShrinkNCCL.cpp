@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <unordered_set>
 
-#include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 
 namespace c10d::nccl2 {
@@ -44,11 +43,7 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::shrink(
       "Invalid NCCL shrink flags: ",
       shrink_flags);
 
-  if (init_state_ != InitializationState::INITIALIZED) {
-    auto device = getBoundDeviceId().value_or(
-        at::Device(at::kCUDA, at::cuda::current_device()));
-    ensureInitialized(device);
-  }
+  checkInitialized();
   checkAndAbortIfTimedOutOrError();
 
   std::unordered_set<int> seen;

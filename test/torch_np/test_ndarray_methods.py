@@ -676,6 +676,18 @@ class TestContains(TestCase):
 
 
 @instantiate_parametrized_tests
+class TestItem(TestCase):
+    @parametrize(
+        "value, args, expected",
+        [(0, (), 0), ([[0, 1], [2, 3]], (1,), 1), ([[0, 1], [2, 3]], (1, 0), 2)],
+    )
+    def test_item_returns_scalar(self, value, args, expected):
+        result = np.array(value).item(*args)
+        self.assertNotIsInstance(result, np.ndarray)
+        self.assertEqual(result, expected)
+
+
+@instantiate_parametrized_tests
 class TestNoExtraMethods(TestCase):
     # make sure ndarray does not carry extra methods/attributes
     # >>> set(dir(a)) - set(dir(a.tensor.numpy()))
