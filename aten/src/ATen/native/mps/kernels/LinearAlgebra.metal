@@ -1515,7 +1515,7 @@ kernel void factorPanelLU(
 #pragma unroll
           for (short c = 0; c < W; c++) {
             if (uint(c) > j) {
-              if constexpr (::metal::is_same_v<T, float2>) {
+              if IF_CONSTEXPR (::metal::is_same_v<T, float2>) {
                 row[r][c] -= c10::metal::mul(l, uc[c]);
               } else {
                 row[r][c] = fma(-l, uc[c], row[r][c]);
