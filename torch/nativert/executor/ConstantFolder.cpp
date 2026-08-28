@@ -163,8 +163,7 @@ void ConstantFolder::evaluate(Weights& weights) {
     f.kernel->compute(frame);
 
     for (auto&& [i, out] : c10::enumerate(f.node->outputs())) {
-      if (foldedOutputValueIds_.find(out->id()) !=
-          foldedOutputValueIds_.end()) {
+      if (foldedOutputValueIds_.contains(out->id())) {
         foldedValues[std::string{out->name()}] = f.kernel->output(i, frame);
       }
     }
