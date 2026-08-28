@@ -4,7 +4,6 @@
 
 import collections
 import sys
-import unittest
 
 import torch
 import torch._dynamo.test_case
@@ -30,6 +29,21 @@ class UserDefinedTuple(tuple):
 
 class UserDefinedDeque(collections.deque):
     """User-defined deque subclass."""
+
+
+class UserDefinedDequeCustomInit(collections.deque):
+    """deque subclass with a Python __init__ (side effect + super().__init__)."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.inited = True
+
+
+class UserDefinedDequeMaxlenInit(collections.deque):
+    """deque subclass whose __init__ forwards maxlen through super().__init__."""
+
+    def __init__(self, items):
+        super().__init__(items, maxlen=2)
 
 
 class UserDefinedSequence:
@@ -201,7 +215,6 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
         result = UserDefinedList([1]) + UserDefinedList([2])
         self.assertIs(type(result), list)
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_user_defined_list_inplace_concat(self):
         # in-place C sq_inplace_concat mutates and returns self: subclass
@@ -260,6 +273,22 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
     @make_dynamo_test
     def test_user_defined_deque_maxlen(self):
         d = UserDefinedDeque([1, 2, 3], maxlen=2)
+        self.assertEqual(list(d), [2, 3])
+        self.assertEqual(d.maxlen, 2)
+
+    @make_dynamo_test
+    def test_user_defined_deque_custom_init(self):
+        # A Python __init__ override is traced; its side effects apply and the
+        # inherited deque storage is still populated via super().__init__.
+        d = UserDefinedDequeCustomInit([1, 2, 3])
+        self.assertEqual(list(d), [1, 2, 3])
+        self.assertTrue(d.inited)
+
+    @make_dynamo_test
+    def test_user_defined_deque_custom_init_maxlen(self):
+        # A custom __init__ that forwards maxlen through super().__init__ must
+        # land maxlen (and its truncation) on the object itself.
+        d = UserDefinedDequeMaxlenInit([1, 2, 3])
         self.assertEqual(list(d), [2, 3])
         self.assertEqual(d.maxlen, 2)
 
