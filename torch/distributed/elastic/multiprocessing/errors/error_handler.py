@@ -111,6 +111,19 @@ class ErrorHandler:
             with open(file, "w") as fp:
                 json.dump(data, fp)
 
+    def record_success(self) -> None:
+        """
+        Record that the ``@record``-decorated entrypoint fn completed successfully.
+
+        Called by ``@record`` after the entrypoint returns without raising. The
+        base implementation only logs; subclasses may override to emit structured
+        success telemetry, mirroring ``record_exception`` as a public extension
+        point. ``self._fn_name`` carries the entrypoint fn's qualified name when
+        set.
+        """
+        if self._fn_name:
+            logger.debug("entrypoint fn completed successfully: %s", self._fn_name)
+
     def maybe_enrich_signal_failure_message(self, message: str, error_file: str) -> str:
         """Hook to enrich a signal (no-traceback) failure message.
 

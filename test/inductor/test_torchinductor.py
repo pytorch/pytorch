@@ -17833,10 +17833,28 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         _, codes = run_fw_bw_and_get_code(lambda: opt_fn(x))
         self.assertEqual(len(codes), 2)
 
-    @unittest.skipIf(
-        config.cpp_wrapper,
-        "codegen triton_kernel_wrapper_functional is not implemented for cpp wrapper",
-    )
+    def test_lite_mode_cpp_wrapper_optional_device_arg(self):
+        # Lite mode makes `aten::zeros_like` (a `Device? device=None` op with no
+        # c-shim) a StableIValue-path fallback: the shortest repro for the missing
+        # optional being emitted as the uncompilable `from(nullptr, 0)`.
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        def f(x):
+            return torch.zeros_like(x) + x
+
+        x = torch.randn(64, device=self.device)
+
+        with config.patch(cpp_wrapper=True):
+            opt_f = torch.compile(f, mode="lite")
+            result, code = run_and_get_code(opt_f, x)
+
+        self.assertEqual(result, f(x))
+        # The optional device must be passed as nullopt, not as a (pointer, index)
+        # pair spliced into a single conversion.
+        self.assertIn("aten::zeros_like", code[0])
+        self.assertNotIn("from(nullptr, 0)", code[0])
+
     def test_lite_triton_kernel_wrapper_functional(self):
         if self.device != GPU_TYPE or self.device == "mps":
             raise unittest.SkipTest("requires GPU")
@@ -18032,11 +18050,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             FileCheck().check("torch.ops.aten.add").run(code[0])
 
     @requires_gpu_and_triton
-    @unittest.skipIf(
-        config.cpp_wrapper,
-        "lite mode + user-defined Triton kernel is not supported by the cpp wrapper "
-        "(same reason as test_lite_triton_kernel_wrapper_functional above)",
-    )
     def test_lite_mode_triton_kernel_no_clone(self):
         # The decomposition emits "clone(s) + the mutation node" and relies on
         # reinplacing to mark the unnecessary clones; lite mode used to skip
@@ -18056,15 +18069,19 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         result, code = run_and_get_code(opt_f, x, y)
         self.assertEqual(result, f(x, y))
 
-        # Anchor: the kernel really made it into the generated code, so the no-clone
-        # assertion below cannot pass vacuously.
-        self.assertIn("add_kernel", code[0])
+        # Anchor so the no-clone assertion cannot pass vacuously. Under the cpp
+        # wrapper the bare name also appears in the embedded Triton source, so match
+        # the generated launch wrapper `call_<kernel>` instead.
+        self.assertIn(
+            "call_add_kernel" if config.cpp_wrapper else "add_kernel", code[0]
+        )
         # The buffer the kernel writes is allocated immediately before the call and
         # never read beforehand, so reinplacing must drop it from `tensors_to_clone`
-        # and the decomposition must emit no copy at all.
-        self.assertNotIn(
-            "aoti_torch_clone" if config.cpp_wrapper else "aten.clone", code[0]
-        )
+        # and the decomposition must emit no copy at all. Under the cpp wrapper the
+        # needle is `aten::clone` (aten.clone has no c-shim, so it goes through
+        # aoti_torch_call_dispatcher), not `aoti_torch_clone`, which is only emitted
+        # for constant buffers and so would pass even if a clone were generated.
+        self.assertNotIn("aten::clone" if config.cpp_wrapper else "aten.clone", code[0])
 
     @lowering.force_fallback(aten.sort.default)
     def test_size_asserts_for_multi_output_fallback(self):
