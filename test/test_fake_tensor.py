@@ -187,6 +187,18 @@ class FakeTensorTest(TestCase):
                 self.assertEqual(d.shape, ref.shape)
                 self.assertEqual(d.layout, torch.strided)
 
+    def test_sparse_compressed_tensor_creation_pin_memory(self):
+        with FakeTensorMode():
+            crow = torch.tensor([0, 2, 4])
+            col = torch.tensor([0, 1, 0, 1])
+            t = torch.sparse_csr_tensor(
+                crow, col, torch.randn(4), size=(2, 2), pin_memory=True
+            )
+            self.assertTrue(is_fake_tensor(t))
+            self.assertEqual(t.layout, torch.sparse_csr)
+            self.assertEqual(t.shape, (2, 2))
+            self.assertEqual(t.device, torch.device("cpu"))
+
     @unittest.skipIf(not torch.backends.cuda.is_built(), "requires CUDA build")
     def test_sparse_compressed_tensor_creation_device(self):
         if torch._functorch.config.fake_tensor_propagate_real_tensors and not RUN_CUDA:
