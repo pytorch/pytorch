@@ -384,6 +384,57 @@ class TestInnerTreeOrder(TestCase):
                 checked += 1
         self.assertEqual(checked, len(_GOLDEN) // 2)
 
+    def test_tree_fold_matches_the_serial_fold_for_every_value_trait(self):
+        # THE LAW the trait protocol has to satisfy, and the reason `leaf` exists:
+        #     combine(leaf(a), leaf(b)) == reduce(reduce(init(), a), b)
+        # The default fold walks a row SERIALLY through `reduce`; this order folds it as a TREE
+        # through `leaf` + `combine`. A trait carrying its per-element transform only in `reduce`
+        # therefore folds RAW values under the tree and returns a plausible WRONG number -- which
+        # is exactly what norm/all/any/count_nonzero did before `leaf` existed, and what a
+        # protocol test that only checks which methods exist cannot see.
+        #
+        # Run both shapes over one input and compare. Not bitwise: the two DAGs associate
+        # differently on purpose, so a tolerance is the correct comparison here.
+        import cutlass
+
+        from torch._native.ops._cutedsl import traits as T
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        x = (
+            torch.rand(64, 512, device="cuda") + 0.5
+        )  # positive: prod / norm stay finite
+        cases = [
+            ("sum", T.SumOps, {}),
+            ("prod", T.ProdOps, {}),
+            ("mean", T.MeanOps, {}),
+            ("nansum", T.NanSumOps, {}),
+            ("norm2", T.NormOps, {"p": 2.0}),
+            ("norm3", T.NormOps, {"p": 3.0}),
+            ("all", T.AllOps, {}),
+            ("any", T.AnyOps, {}),
+            ("count_nonzero", T.CountNonzeroOps, {}),
+            ("absmax", T.AbsMaxOps, {}),
+            ("absmin", T.AbsMinOps, {}),
+            ("amax", T.AMaxOps, {}),
+            ("amin", T.AMinOps, {}),
+        ]
+        for label, trait, kw in cases:
+            with self.subTest(trait=label):
+                (serial,) = rt.reduce_row_tile(
+                    trait(acc=cutlass.Float32, **kw),
+                    f"law_ser_{label}",
+                    x,
+                    [torch.float32],
+                )
+                (tree,) = rt.reduce_row_tile(
+                    trait(acc=cutlass.Float32, **kw),
+                    f"law_tree_{label}",
+                    x,
+                    [torch.float32],
+                    order="inner_tree",
+                )
+                self.assertEqual(tree, serial, atol=1e-4, rtol=1e-4)
+
 
 instantiate_parametrized_tests(TestInnerTreeOrder)
 
