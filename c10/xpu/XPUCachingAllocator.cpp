@@ -1,11 +1,8 @@
 #include <c10/core/DeviceGuard.h>
-#include <c10/util/CallOnce.h>
-#include <c10/util/env.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <c10/xpu/XPUCachingAllocator.h>
 
-#include <cerrno>
 #include <cstring>
 #include <cstdlib>
 #include <deque>
@@ -14,11 +11,16 @@
 #include <utility>
 #include <vector>
 
-#if defined(__linux__)
-#include <sys/prctl.h>
+#if defined(__has_include)
+#if __has_include(<sycl/ext/oneapi/experimental/ipc_memory.hpp>)
+#include <sycl/ext/oneapi/experimental/ipc_memory.hpp>
+#define C10_XPU_HAS_SYCL_IPC_MEMORY 1
+#endif
 #endif
 
-#include <sycl/ext/oneapi/experimental/ipc_memory.hpp>
+#if !defined(C10_XPU_HAS_SYCL_IPC_MEMORY)
+#define C10_XPU_HAS_SYCL_IPC_MEMORY 0
+#endif
 
 namespace c10::xpu::XPUCachingAllocator {
 
@@ -26,61 +28,6 @@ C10_DEFINE_REGISTRY(FreeXPUMemoryCallbacksRegistry, FreeMemoryCallback)
 
 using namespace c10::CachingAllocator;
 using namespace c10::CachingDeviceAllocator;
-
-namespace {
-
-enum class PtracerAnyState {
-  Unsupported,
-  DisabledByEnv,
-  Enabled,
-  EnableFailed,
-};
-
-struct PtracerAnyStatus {
-  PtracerAnyState state;
-  int error_code;
-};
-
-bool allowPtracerAnyForIpcImport() {
-  return c10::utils::check_env("PYTORCH_XPU_IPC_ENABLE_PTRACER_ANY") == true;
-}
-
-PtracerAnyStatus tryEnablePtracerAnyForIpcImport() {
-#if defined(__linux__) && defined(PR_SET_PTRACER_ANY)
-  const bool ptracer_opt_in = allowPtracerAnyForIpcImport();
-  if (!ptracer_opt_in) {
-    return {
-        PtracerAnyState::DisabledByEnv,
-        0,
-    };
-  }
-
-  static c10::once_flag prctl_once;
-  static bool ptracer_enabled = false;
-  static int ptracer_error = 0;
-
-  c10::call_once(prctl_once, []() {
-    if (::prctl(PR_SET_PTRACER, PR_SET_PTRACER_ANY, 0, 0, 0) == 0) {
-      ptracer_enabled = true;
-      return;
-    }
-    ptracer_error = errno;
-  });
-
-  return {
-      ptracer_enabled ? PtracerAnyState::Enabled
-                      : PtracerAnyState::EnableFailed,
-      ptracer_error,
-  };
-#else
-  return {
-      PtracerAnyState::Unsupported,
-      0,
-  };
-#endif
-}
-
-} // namespace
 
 // newly allocated memory with 512-byte alignment.
 constexpr size_t kDeviceAlignment = 512;
@@ -1910,6 +1857,8 @@ class DeviceCachingAllocator {
 
 namespace xpu_ipc {
 
+#if C10_XPU_HAS_SYCL_IPC_MEMORY
+
 using SyclIpcHandle =
     sycl::ext::oneapi::experimental::ipc_memory::handle_data_t;
 
@@ -1972,63 +1921,11 @@ class IpcMemoryCache : public std::enable_shared_from_this<IpcMemoryCache> {
 
     try {
       return open_once();
-    } catch (const std::exception& first_error) {
-      return openHandleWithPtracerRetry(open_once, first_error);
+    } catch (const std::exception& error) {
+      TORCH_CHECK(false, "XPU IPC open failed: ", error.what());
+    } catch (...) {
+      TORCH_CHECK(false, "XPU IPC open failed with unknown exception");
     }
-  }
-
-  template <typename OpenOnceFn>
-  void* openHandleWithPtracerRetry(
-      OpenOnceFn&& open_once,
-      const std::exception& first_error) {
-    const auto ptracer_status = tryEnablePtracerAnyForIpcImport();
-
-    if (ptracer_status.state == PtracerAnyState::Enabled) {
-      return retryAfterEnablingPtracer(open_once, first_error);
-    }
-
-    throwPtracerUnavailable(ptracer_status, first_error);
-  }
-
-  template <typename OpenOnceFn>
-  static void* retryAfterEnablingPtracer(
-      OpenOnceFn&& open_once,
-      const std::exception& first_error) {
-    try {
-      return open_once();
-    } catch (const std::exception& second_error) {
-      TORCH_CHECK(
-          false,
-          "XPU IPC open failed: ",
-          first_error.what(),
-          ". Retry after enabling PR_SET_PTRACER_ANY also failed: ",
-          second_error.what());
-    }
-  }
-
-  [[noreturn]] static void throwPtracerUnavailable(
-      const PtracerAnyStatus& ptracer_status,
-      const std::exception& first_error) {
-    if (ptracer_status.state == PtracerAnyState::EnableFailed) {
-      TORCH_CHECK(
-          false,
-          "XPU IPC open failed: ",
-          first_error.what(),
-          ". Failed to enable PR_SET_PTRACER_ANY (errno=",
-          ptracer_status.error_code,
-          ")");
-    }
-
-    if (ptracer_status.state == PtracerAnyState::DisabledByEnv) {
-      TORCH_CHECK(
-          false,
-          "XPU IPC open failed: ",
-          first_error.what(),
-          ". Retry with PR_SET_PTRACER_ANY is disabled by default. "
-          "To opt in, set PYTORCH_XPU_IPC_ENABLE_PTRACER_ANY=1.");
-    }
-
-    TORCH_CHECK(false, "XPU IPC open failed: ", first_error.what());
   }
 
   std::shared_ptr<void> publish(
@@ -2089,6 +1986,8 @@ class IpcMemoryCache : public std::enable_shared_from_this<IpcMemoryCache> {
 
 static std::shared_ptr<IpcMemoryCache> ipc_memory_cache =
     std::make_shared<IpcMemoryCache>();
+
+#endif // C10_XPU_HAS_SYCL_IPC_MEMORY
 
 } // namespace xpu_ipc
 
@@ -2363,6 +2262,7 @@ class NativeCachingAllocator : public XPUAllocator {
   }
 
   ShareableHandle shareIpcHandle(void* ptr) {
+#if C10_XPU_HAS_SYCL_IPC_MEMORY
     Block* block = get_allocated_block(ptr);
     TORCH_CHECK(block, "Invalid device pointer for XPU IPC: ", ptr);
 
@@ -2385,11 +2285,18 @@ class NativeCachingAllocator : public XPUAllocator {
     } catch (const std::exception& e) {
       TORCH_CHECK(false, "Failed to get XPU IPC handle: ", e.what());
     }
+#else
+    TORCH_CHECK(
+        false,
+        "XPU IPC sharing is unavailable because this build toolchain does not "
+        "provide sycl::ext::oneapi::experimental::ipc_memory.");
+#endif
   }
 
   std::shared_ptr<void> getIpcDevPtr(
       std::string handle_str,
       c10::DeviceIndex device) {
+#if C10_XPU_HAS_SYCL_IPC_MEMORY
     TORCH_CHECK(!handle_str.empty(), "Empty XPU IPC handle");
 
     xpu_ipc::SyclIpcHandle handle_data(
@@ -2398,6 +2305,14 @@ class NativeCachingAllocator : public XPUAllocator {
             handle_str.size());
 
     return xpu_ipc::ipc_memory_cache->getOrOpenHandle(handle_data, device);
+#else
+    (void)handle_str;
+    (void)device;
+    TORCH_CHECK(
+        false,
+        "XPU IPC sharing is unavailable because this build toolchain does not "
+        "provide sycl::ext::oneapi::experimental::ipc_memory.");
+#endif
   }
 };
 
