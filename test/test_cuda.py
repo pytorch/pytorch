@@ -1009,9 +1009,6 @@ print(t.is_pinned())
 
         torch._C._cuda_clearCublasWorkspaces()
 
-    @unittest.skipIf(
-        IS_WINDOWS and SM89OrLater, "preferred_blas_library not supported on Windows"
-    )
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
     @unittest.skipIf(TEST_WITH_ROCM, "eager workspaces are CUDA-only")
     @serialTest()

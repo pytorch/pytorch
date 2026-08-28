@@ -392,7 +392,7 @@ def blas_workspace_size(
 
     .. note::
 
-       When workspace caching is enabled with
+       On CUDA, when workspace caching is enabled with
        ``TORCH_CUBLAS_WORKSPACE_CACHE=1``,
        ``TORCH_CUBLASLT_UNIFIED_WORKSPACE`` controls whether the cuBLASLt
        workspace is capped at the cuBLAS workspace size and physically reuses

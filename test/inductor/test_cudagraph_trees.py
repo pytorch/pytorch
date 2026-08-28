@@ -2175,7 +2175,7 @@ if HAS_CUDA_AND_TRITON:
                         # shared allocation helper.
                         self.assertTrue(
                             "getCurrentCUDABlasHandle" in str(e)
-                            or "allocateWorkspace" in str(e)
+                            or "allocateCUDABlasWorkspace" in str(e)
                             or "CUDABlasLtWorkspace" in str(e)
                         )
 

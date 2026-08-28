@@ -83,13 +83,15 @@ TORCH_CUDA_CPP_API c10::Allocator* getCUDADeviceAllocator();
 
 /* Handles */
 TORCH_CUDA_CPP_API cusparseHandle_t getCurrentCUDASparseHandle();
-// The public handle uses cuBLAS's default workspace unless ATen workspace
-// caching is explicitly enabled.
+// On CUDA, the public handle uses cuBLAS's default workspace unless ATen
+// workspace caching is explicitly enabled. ROCm caches workspaces by default.
 TORCH_CUDA_CPP_API cublasHandle_t getCurrentCUDABlasHandle(bool setup = true);
 
-// Keeps an eager cuBLAS workspace alive while the handle is in use and restores
-// cuBLAS's default workspace before releasing it. This is an internal scoped
-// handle; external users should continue to use getCurrentCUDABlasHandle().
+// Internal scoped handle for ATen operations. When caching is disabled, it owns
+// an eager workspace and restores the default before releasing it; otherwise it
+// wraps the cache-backed handle. External users should continue to use
+// getCurrentCUDABlasHandle(). Eager scopes for the same underlying handle must
+// not overlap because restoring an inner scope replaces the outer workspace.
 class TORCH_CUDA_CPP_API CUDABlasHandleWithWorkspace {
  public:
   CUDABlasHandleWithWorkspace(
@@ -133,6 +135,8 @@ TORCH_CUDA_CPP_API WorkspaceMapWithMutex& cublaslt_handle_stream_to_workspace();
 TORCH_CUDA_CPP_API size_t getChosenWorkspaceSize();
 TORCH_CUDA_CPP_API size_t getCUDABlasLtWorkspaceSize();
 TORCH_CUDA_CPP_API bool isCUDABlasWorkspaceCachingEnabled();
+// These return cache-owned allocations even when ATen workspace caching is
+// disabled. Use allocateCUDABlasWorkspace for operation-scoped storage.
 TORCH_CUDA_CPP_API void* getCUDABlasLtWorkspace();
 TORCH_CUDA_CPP_API void* getCUDABlasLtWorkspace(size_t workspace_size);
 TORCH_CUDA_CPP_API at::DataPtr allocateCUDABlasWorkspace(size_t size);

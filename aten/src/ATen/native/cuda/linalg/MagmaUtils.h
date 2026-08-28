@@ -1,5 +1,6 @@
 #pragma once
 #include <ATen/cuda/CUDAConfig.h>
+#include <optional>
 
 #if AT_MAGMA_ENABLED()
 #include <magma_types.h>
@@ -19,9 +20,8 @@ struct MAGMAQueue {
   MAGMAQueue() = delete;
 
   // Constructor
-  explicit MAGMAQueue(int64_t device_id)
-      : handle_(at::cuda::getCurrentCUDABlasHandleWithWorkspace()) {
-    cublasHandle_t handle = handle_;
+  explicit MAGMAQueue(int64_t device_id) {
+    cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
 #if !defined(USE_ROCM)
     // Magma operations is numerically sensitive, so TF32 should be off
     // regardless of the global flag.
@@ -34,6 +34,21 @@ struct MAGMAQueue {
       handle,
       at::cuda::getCurrentCUDASparseHandle(),
       &magma_queue_);
+    try {
+      // MAGMA sets the handle stream during queue creation, which resets its
+      // workspace on CUDA. Bind the ATen workspace after queue initialization.
+      handle_.emplace(at::cuda::getCurrentCUDABlasHandleWithWorkspace());
+#if !defined(USE_ROCM)
+      TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
+#endif
+    } catch (...) {
+#if !defined(USE_ROCM)
+      (void)cublasSetMathMode(handle, original_math_mode);
+#endif
+      magma_queue_destroy(magma_queue_);
+      handle_.reset();
+      throw;
+    }
   }
 
   // Getter
@@ -51,9 +66,9 @@ struct MAGMAQueue {
   }
 
  private:
-  // MAGMA borrows the cuBLAS handle until queue destruction, so keep its eager
-  // workspace owner alive for the same lifetime.
-  at::cuda::CUDABlasHandleWithWorkspace handle_;
+  // MAGMA borrows the cuBLAS handle until queue destruction, so keep its
+  // workspace scope alive for the same lifetime.
+  std::optional<at::cuda::CUDABlasHandleWithWorkspace> handle_;
   magma_queue_t magma_queue_;
 #if !defined(USE_ROCM)
   cublasMath_t original_math_mode;

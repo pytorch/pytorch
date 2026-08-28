@@ -4,6 +4,7 @@
 
 #include <c10/cuda/CUDACachingAllocator.h>
 
+#include <algorithm>
 #include <atomic>
 #include <map>
 #include <memory>
@@ -121,10 +122,6 @@ void destroyCublasHandle(cublasHandle_t handle) {
 using CuBlasPoolType = DeviceThreadHandlePool<cublasHandle_t, createCublasHandle, destroyCublasHandle>;
 
 enum class WorkspaceMode { Cached, Explicit, Default };
-
-at::DataPtr allocateWorkspace(size_t size) {
-  return c10::cuda::CUDACachingAllocator::get()->allocate(size);
-}
 
 } // namespace
 
@@ -326,7 +323,7 @@ size_t getCUDABlasLtWorkspaceSize() {
 }
 
 at::DataPtr allocateCUDABlasWorkspace(size_t size) {
-  return allocateWorkspace(size);
+  return c10::cuda::CUDACachingAllocator::get()->allocate(size);
 }
 
 void setWorkspaceForHandle(cublasHandle_t handle, c10::cuda::CUDAStream stream) {
@@ -349,7 +346,7 @@ void setWorkspaceForHandle(cublasHandle_t handle, c10::cuda::CUDAStream stream) 
   }
 
   // Slow path: allocate workspace outside the lock
-  auto new_workspace = allocateWorkspace(workspace_size);
+  auto new_workspace = allocateCUDABlasWorkspace(workspace_size);
 
   // Insert with lock, replacing any undersized entry
   {
@@ -384,8 +381,8 @@ void* getCUDABlasLtWorkspace(size_t workspace_size) {
     }
     // First use for this handle+stream pair — allocate and insert directly.
     // No need to call cublasSetWorkspace; Lt passes workspace explicitly.
-    size_t allocation_size = getChosenWorkspaceSize();
-    auto new_workspace = allocateWorkspace(allocation_size);
+    size_t allocation_size = std::max(workspace_size, getChosenWorkspaceSize());
+    auto new_workspace = allocateCUDABlasWorkspace(allocation_size);
     {
       std::unique_lock<std::shared_mutex> lock(workspace.mutex);
       auto workspace_it = workspace.map.find(key);
@@ -416,7 +413,7 @@ void* getCUDABlasLtWorkspace(size_t workspace_size) {
   }
 
   // Slow path: allocate workspace outside the lock
-  auto new_workspace = allocateWorkspace(workspace_size);
+  auto new_workspace = allocateCUDABlasWorkspace(workspace_size);
 
   // Insert with lock, replacing any undersized entry
   {
