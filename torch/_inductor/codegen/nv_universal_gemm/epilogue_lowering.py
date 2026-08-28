@@ -508,6 +508,7 @@ class NVGemmEpilogueLowering:
                     group=group,
                     axis=axis,
                     reduction_type=reduction_type,
+                    source_type="identity",
                     source_fn=source_fn,
                 )
             strides = V.graph.sizevars.stride_vars(reads[0].index, range_vars)
@@ -530,6 +531,7 @@ class NVGemmEpilogueLowering:
             group=group,
             axis=axis,
             reduction_type=reduction_type,
+            source_type="identity",
             source_fn=source_fn,
         )
 
@@ -585,6 +587,7 @@ class NVGemmEpilogueLowering:
             group=2,
             axis=1,
             reduction_type="sum",
+            source_type="identity",
             source_fn=GEMM_REDUCTION_IDENTITY_SOURCE,
             secondary_consumer_fn=secondary_consumer_fn,
         )
@@ -688,6 +691,7 @@ class NVGemmEpilogueLowering:
                 group=geometry.group,
                 axis=geometry.axis,
                 reduction_type=cast(GemmReductionType, reduction.reduction_type),
+                source_type="identity",
                 source_fn=generated_source,
             )
         return None
@@ -922,6 +926,7 @@ class NVGemmEpilogueLowering:
             group=geometry.group,
             axis=geometry.axis,
             reduction_type=None,
+            source_type="identity",
             source_fn=None,
             combine_fn=combine_fn,
             finalizer_fn=finalizer_fn,

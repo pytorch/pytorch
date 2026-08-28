@@ -29,6 +29,7 @@ if torch.backends.mps.is_available():
             "abs",
             "add",
             "addbmm",
+            "addmm",
             "alias_copy",
             "argwhere",
             "atleast_1d",
@@ -862,8 +863,6 @@ if torch.backends.mps.is_available():
             "scalar_tensor": [torch.float16, torch.float32],
             "igamma": None,  # currently not supported for any device
             "igammac": None,  # currently not supported for any device
-            "special.i1": [torch.float16],  # "i1_backward" not implemented for 'Half'
-            "special.i1e": [torch.float16],  # "i1e_backward" not implemented for 'Half'
             # Correctness issues
             # Same issue as `argsort` and `sort` with duplicate elements (undefined behaviour).
             # Forward pass is passing since `msort` doesn't return the indices, just the values, which match the CPU.
