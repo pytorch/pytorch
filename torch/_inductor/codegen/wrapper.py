@@ -421,6 +421,7 @@ def _check_triton_jit_decorator_literals(
         )
 
 
+@functools.cache
 def _triton_jit_decorator_from_source(symbol) -> str:
     raw_src = getattr(symbol, "raw_src", None)
     if raw_src:
@@ -3701,7 +3702,6 @@ class PythonWrapperCodegen(CodeGen):
         signature: list[KernelArgType] = []
         constants: dict[str, Any] = {}
         arg_indices: list[int] = []
-        equal_to_1_args: list[str] = []
 
         def add_to_signature(idx, arg):
             signature.append(arg)
@@ -3835,10 +3835,7 @@ class PythonWrapperCodegen(CodeGen):
             # causes CUDA errors in test_aot_inductor.test_triton_kernel_with_none_input.
             # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
             # https://github.com/triton-lang/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
-            "constants": {
-                **constants,
-                **dict.fromkeys(equal_to_1_args, 1),
-            },
+            "constants": constants,
             "configs": [
                 config_of(
                     signature,

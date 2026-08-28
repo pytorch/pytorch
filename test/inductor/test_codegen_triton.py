@@ -5,7 +5,7 @@ import unittest
 from collections import namedtuple
 from enum import Enum, IntEnum
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import sympy
 
@@ -1363,9 +1363,26 @@ def helper(x):
 
         for raw_src in (None, "", "@triton.jit(\n", ["@triton.jit(\n"]):
             self.assertEqual(
-                _triton_jit_decorator_from_source(SimpleNamespace(raw_src=raw_src)),
+                _triton_jit_decorator_from_source(Mock(raw_src=raw_src)),
                 "@triton.jit",
             )
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_user_defined_triton_kernel_jit_decorator_is_memoized(self):
+        from torch._inductor.codegen.wrapper import _triton_jit_decorator_from_source
+
+        _triton_jit_decorator_from_source.cache_clear()
+        self.addCleanup(_triton_jit_decorator_from_source.cache_clear)
+        with patch(
+            "torch._inductor.codegen.wrapper.ast.parse", wraps=ast.parse
+        ) as parse:
+            first = _triton_jit_decorator_from_source(noinline_helper_for_codegen)
+            first_call_count = parse.call_count
+            second = _triton_jit_decorator_from_source(noinline_helper_for_codegen)
+
+        self.assertEqual(first, second)
+        self.assertGreater(first_call_count, 0)
+        self.assertEqual(parse.call_count, first_call_count)
 
     @unittest.skipUnless(has_triton_package(), "requires Triton")
     def test_user_defined_triton_kernel_rejects_global_jit_decorator_option(self):
@@ -1388,6 +1405,7 @@ def helper(x):
         from torch._inductor.codegen.wrapper import _triton_jit_decorator_from_source
 
         msg = "non-literal options are not supported: noinline="
+        _triton_jit_decorator_from_source.cache_clear()
         with (
             patch(
                 "torch._inductor.codegen.wrapper.ast.literal_eval",
