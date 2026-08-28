@@ -44,6 +44,17 @@ It is also possible to obtain identical results from an operation that uses
 random numbers by setting {meth}`torch.manual_seed()` to the same value between
 subsequent calls.
 
+:::{note}
+On CUDA and ROCm, the random values a seed produces also depend on the launch
+configuration of the generating kernel, which is tuned for throughput and is a
+function of the tensor size and of the device's multiprocessor count. Ops such
+as {meth}`torch.rand`, {meth}`torch.randn`, {func}`torch.Tensor.uniform_` and
+{func}`torch.Tensor.normal_` may therefore return a different set of values for
+the same seed after an upgrade, or when the same code runs on a different GPU.
+Only the distribution of the values is guaranteed, not the specific values. If
+you need a byte-identical stream, generate on the CPU and copy to the device.
+:::
+
 ### Python
 
 For custom operators, you might need to set python seed as well:
