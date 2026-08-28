@@ -808,6 +808,9 @@ def make_pointwise(
         emulate_output_cast = (
             emulate_precision_casts or truncate_saved_output
         ) and dtype in low_pr_fp
+        # Boolean pointwise ops observe stored low-precision values in eager,
+        # so fused inputs must be rounded even outside full precision emulation.
+        truncate_inputs = emulate_precision_casts or dtype == torch.bool
 
         def inner_fn(index):
             if len(index) != len(ranges):
@@ -819,7 +822,7 @@ def make_pointwise(
                 for inp_index, load in enumerate(loaders):
                     out = load(index)
                     inp_dtype = inputs[inp_index].get_dtype()
-                    if emulate_precision_casts and inp_dtype in low_pr_fp:
+                    if truncate_inputs and inp_dtype in low_pr_fp:
                         downcast = ops.to_dtype(out, inp_dtype, use_compute_types=False)
                         out = ops.to_dtype(downcast, inp_dtype)
                     inputs_loaded.append(out)
