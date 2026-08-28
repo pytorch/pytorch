@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/CanUse32BitIndexMath.h>
+#include <ATen/native/LossMulti.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/LossOps.h>
 
@@ -17,6 +18,8 @@
 #include <ATen/ops/huber_loss_native.h>
 #include <ATen/ops/mse_loss_backward_native.h>
 #include <ATen/ops/mse_loss_native.h>
+#include <ATen/ops/multilabel_margin_loss_backward_native.h>
+#include <ATen/ops/multilabel_margin_loss_forward_native.h>
 #include <ATen/ops/nll_loss2d_backward_native.h>
 #include <ATen/ops/nll_loss2d_forward_native.h>
 #include <ATen/ops/nll_loss_backward_native.h>
@@ -1646,6 +1649,137 @@ Tensor ctc_loss_backward_mps(const Tensor& grad_out,
   }
 
   return grad;
+}
+
+namespace mps {
+
+static void multilabel_margin_loss_launch(const std::string& kernel,
+                                          const std::initializer_list<Tensor>& buffers,
+                                          const MultilabelMarginParams& params) {
+  auto stream = getCurrentMPSStream();
+  @autoreleasepool {
+    auto pso = lib.getPipelineStateForFunc(kernel);
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        auto compute_encoder = stream->commandEncoder();
+        [compute_encoder setComputePipelineState:pso];
+        unsigned idx = 0;
+        for (const auto& t : buffers) {
+          mtl_setBuffer(compute_encoder, t, idx++);
+        }
+        mtl_setBytes(compute_encoder, params, idx++);
+        [compute_encoder setBuffer:stream->getErrorBuffer() offset:0 atIndex:idx];
+        mtl_dispatch1DJob(compute_encoder, pso, static_cast<uint32_t>(params.nframe));
+      }
+    });
+  }
+}
+
+} // namespace mps
+
+std::tuple<Tensor&, Tensor&> multilabel_margin_loss_forward_out_mps(const Tensor& input,
+                                                                    const Tensor& target,
+                                                                    int64_t reduction,
+                                                                    Tensor& output,
+                                                                    Tensor& is_target) {
+  int64_t nframe = 0, dim = 0;
+  multilabel_margin_loss_shape_check(nframe, dim, input.dim(), input, target);
+  TORCH_CHECK(target.scalar_type() == kLong, "expected scalar type Long but found ", target.scalar_type());
+
+  // A 1-D input produces a scalar output even under Reduction::None, as on CPU.
+  if (reduction != Reduction::None || target.dim() <= 1) {
+    output.resize_({});
+  } else {
+    output.resize_({nframe});
+  }
+  is_target.resize_as_(target);
+  TORCH_CHECK(is_target.is_contiguous(), "is_target must be contiguous");
+  is_target.zero_();
+
+  if (input.numel() == 0) {
+    return {output, is_target};
+  }
+
+  const auto input_c = input.contiguous().reshape({nframe, dim});
+  const auto target_c = target.contiguous();
+  auto per_sample = at::empty({nframe}, input.options());
+
+  const MultilabelMarginParams params{.nframe = nframe, .dim = dim, .g = 0.0f};
+  mps::multilabel_margin_loss_launch("multilabel_margin_loss_" + mps::scalarToMetalTypeString(input),
+                                     {input_c, target_c, per_sample, is_target},
+                                     params);
+
+  if (reduction == Reduction::None && target.dim() > 1) {
+    output.copy_(per_sample);
+  } else if (reduction == Reduction::Mean) {
+    output.copy_(per_sample.sum().div(nframe));
+  } else {
+    output.copy_(per_sample.sum());
+  }
+  return {output, is_target};
+}
+
+std::tuple<Tensor, Tensor> multilabel_margin_loss_forward_mps(const Tensor& input,
+                                                              const Tensor& target,
+                                                              int64_t reduction) {
+  auto output = at::empty({0}, input.options());
+  auto is_target = at::empty({0}, input.options());
+  multilabel_margin_loss_forward_out_mps(input, target, reduction, output, is_target);
+  return {std::move(output), std::move(is_target)};
+}
+
+Tensor& multilabel_margin_loss_backward_mps_out(const Tensor& grad_output,
+                                                const Tensor& input,
+                                                const Tensor& target,
+                                                int64_t reduction,
+                                                const Tensor& is_target,
+                                                Tensor& grad_input) {
+  int64_t nframe = 0, dim = 0;
+  multilabel_margin_loss_shape_check(nframe, dim, input.dim(), input, target);
+  TORCH_CHECK(target.scalar_type() == kLong, "expected scalar type Long but found ", target.scalar_type());
+  TORCH_CHECK(is_target.sizes() == target.sizes(),
+              "inconsistent is_target size: ",
+              is_target.sizes(),
+              " for target of size: ",
+              target.sizes());
+  grad_input.resize_as_(input);
+  if (grad_input.numel() == 0) {
+    return grad_input;
+  }
+
+  const auto input_c = input.contiguous().reshape({nframe, dim});
+  const auto target_c = target.contiguous();
+  const auto is_target_c = is_target.contiguous();
+  auto grad = at::empty({nframe, dim}, input.options());
+
+  const MultilabelMarginParams params{
+      .nframe = nframe,
+      .dim = dim,
+      .g = static_cast<float>(reduction == Reduction::Mean ? 1.0 / (nframe * dim) : 1.0 / dim),
+  };
+  mps::multilabel_margin_loss_launch("multilabel_margin_loss_backward_" + mps::scalarToMetalTypeString(input),
+                                     {grad, input_c, target_c, is_target_c},
+                                     params);
+
+  // Reduced losses carry a scalar grad_output; the unreduced case has one per
+  // sample and broadcasts along the class dimension.
+  if (reduction != Reduction::None || grad_output.dim() == 0) {
+    grad.mul_(grad_output.reshape({}));
+  } else {
+    grad.mul_(grad_output.reshape({nframe, 1}));
+  }
+  grad_input.copy_(grad.reshape(input.sizes()));
+  return grad_input;
+}
+
+Tensor multilabel_margin_loss_backward_mps(const Tensor& grad_output,
+                                           const Tensor& input,
+                                           const Tensor& target,
+                                           int64_t reduction,
+                                           const Tensor& is_target) {
+  auto grad_input = at::empty({0}, input.options());
+  multilabel_margin_loss_backward_mps_out(grad_output, input, target, reduction, is_target, grad_input);
+  return grad_input;
 }
 
 } // namespace at::native

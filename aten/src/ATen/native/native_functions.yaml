@@ -11850,6 +11850,7 @@
   dispatch:
     CPU: multilabel_margin_loss_forward_out_cpu
     CUDA: multilabel_margin_loss_forward_out_cuda
+    MPS: multilabel_margin_loss_forward_out_mps
     XPU: multilabel_margin_loss_forward_out_xpu
 
 - func: multilabel_margin_loss_forward(Tensor self, Tensor target, int reduction) -> (Tensor output, Tensor is_target)
@@ -11857,6 +11858,7 @@
   dispatch:
     CPU: multilabel_margin_loss_forward_cpu
     CUDA: multilabel_margin_loss_forward_cuda
+    MPS: multilabel_margin_loss_forward_mps
     XPU: multilabel_margin_loss_forward_xpu
 
 - func: multilabel_margin_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, Tensor is_target, *, Tensor(a!) grad_input) -> Tensor(a!)
@@ -11864,6 +11866,7 @@
   dispatch:
     CPU: multilabel_margin_loss_backward_cpu_out
     CUDA: multilabel_margin_loss_backward_cuda_out
+    MPS: multilabel_margin_loss_backward_mps_out
     XPU: multilabel_margin_loss_backward_xpu_out
 
 - func: multilabel_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, Tensor is_target) -> Tensor
@@ -11871,6 +11874,7 @@
   dispatch:
     CPU: multilabel_margin_loss_backward_cpu
     CUDA: multilabel_margin_loss_backward_cuda
+    MPS: multilabel_margin_loss_backward_mps
     XPU: multilabel_margin_loss_backward_xpu
 
 - func: nll_loss.out(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, SymInt ignore_index=-100, *, Tensor(a!) out) -> Tensor(a!)
