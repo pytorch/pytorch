@@ -2,6 +2,7 @@
 import contextlib
 import re
 import unittest
+from functools import partial
 from unittest.mock import patch
 
 import functorch
@@ -10,7 +11,6 @@ import torch._inductor.config as config
 import torch.autograd
 import torch.nn.functional as F
 from torch._dynamo.device_interface import get_interface_for_device
-from torch._functorch import partitioners
 from torch._inductor import metrics
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -49,8 +49,10 @@ if HAS_GPU_AND_TRITON:
 aten = torch.ops.aten
 
 
-def compile_but_use_eager(gm, example_inputs):
+def compile_but_use_eager(gm, example_inputs, graph_collector=None):
     def inner_compile(gm, *args, **kwargs):
+        if graph_collector is not None:
+            graph_collector.append(gm)
         compile_fx_inner(gm, *args, **kwargs)
         return gm
 
@@ -67,13 +69,16 @@ def count_numel(f, *args):
     return str(metrics.num_bytes_accessed // 4)
 
 
-def count_numel_train(f, *args, return_outputs=False):
+def count_numel_train(f, *args, return_outputs=False, graph_collector=None):
     """
     Assumes all inputs are fp32
     """
     metrics.reset()
 
-    f = torch.compile(f, backend=compile_but_use_eager)
+    backend = compile_but_use_eager
+    if graph_collector is not None:
+        backend = partial(compile_but_use_eager, graph_collector=graph_collector)
+    f = torch.compile(f, backend=backend)
     out = f(*args)
     res = 0
     for o in out:
@@ -851,18 +856,94 @@ class MinCutPartitioningTests(TestCase):
         inp = (T(10, grad=True), T(10, grad=True))
         self.assertExpectedInline(count_numel_train(f, *inp), """70""")
 
-    def _run_partitioning_cat_log_softmax(self) -> str:
-        def f(
-            hidden, base_weight, correction_hidden, correction_weight, targets, weights
-        ):
-            base = hidden @ base_weight
-            correction = correction_hidden @ correction_weight
-            base_3d = base.view(2, 16, 33)
+    def _assert_cat_partition(
+        self,
+        graphs,
+        num_user_outputs,
+        *,
+        recomputed,
+        expect_saved_cat=False,
+        expect_no_large_saved_intermediate=False,
+    ):
+        self.assertEqual(len(graphs), 2)
+        fw_graph, bw_graph = graphs
+        fw_cats = fw_graph.graph.find_nodes(op="call_function", target=aten.cat.default)
+        self.assertEqual(len(fw_cats), 1)
+        fw_output = next(node for node in fw_graph.graph.nodes if node.op == "output")
+        saved_values = tuple(fw_output.args[0])[num_user_outputs:]
+        bw_cats = bw_graph.graph.find_nodes(op="call_function", target=aten.cat.default)
+
+        self.assertEqual(len(bw_cats), int(recomputed))
+        if recomputed or expect_saved_cat:
+            self.assertEqual(fw_cats[0] in saved_values, not recomputed)
+        if expect_no_large_saved_intermediate:
+            cat_inputs = fw_cats[0].args[0]
+            largest_input_bytes = max(
+                node.meta["val"].numel() * node.meta["val"].element_size()
+                for node in cat_inputs
+            )
+            self.assertFalse(
+                any(
+                    node.op == "call_function"
+                    and isinstance((value := node.meta.get("val")), torch.Tensor)
+                    and value.numel() * value.element_size() >= largest_input_bytes
+                    for node in saved_values
+                )
+            )
+
+    def _run_and_assert_cat_partition(
+        self,
+        f,
+        inp,
+        *,
+        recomputed,
+        expect_saved_cat=False,
+        expect_no_large_saved_intermediate=False,
+    ):
+        torch._dynamo.reset()
+        ref_inputs = tuple(
+            arg.detach().clone().requires_grad_(arg.requires_grad) for arg in inp
+        )
+        ref = f(*ref_inputs)
+        sum(output.mean() for output in ref).backward()
+
+        graphs = []
+        count, actual_outputs = count_numel_train(
+            f,
+            *inp,
+            return_outputs=True,
+            graph_collector=graphs,
+        )
+        self.assertEqual(actual_outputs, ref)
+        for actual, expected in zip(inp, ref_inputs):
+            self.assertEqual(actual.grad, expected.grad)
+        self._assert_cat_partition(
+            graphs,
+            len(ref),
+            recomputed=recomputed,
+            expect_saved_cat=expect_saved_cat,
+            expect_no_large_saved_intermediate=expect_no_large_saved_intermediate,
+        )
+        return count
+
+    @unittest.skipUnless(GPU_TYPE == "cuda", "cat rematerialization is CUDA-only")
+    def test_partitioning_cat_log_softmax(self):
+        def f(base, correction, targets, weights):
+            base_3d = base.reshape(2, 16, 33)
             final = torch.cat(
-                (base_3d[:, :1], base_3d[:, 1:] + correction), dim=1
+                (
+                    base_3d[:, :1],
+                    base_3d[:, 1:] + correction.reshape(2, 15, 33),
+                ),
+                dim=1,
             ).reshape_as(base)
-            final_loss = F.cross_entropy(final, targets, reduction="none") * weights
-            base_loss = F.cross_entropy(base, targets, reduction="none") * weights
+            valid_token_count = weights.sum() + 1e-6
+            final_loss = (
+                F.cross_entropy(final, targets, reduction="none") * weights
+            ).sum() / valid_token_count
+            base_loss = (
+                F.cross_entropy(base, targets, reduction="none") * weights
+            ).sum() / valid_token_count
             return (
                 final_loss,
                 base_loss,
@@ -870,148 +951,84 @@ class MinCutPartitioningTests(TestCase):
                 base.argmax(-1).float(),
             )
 
-        torch._dynamo.reset()
         inp = (
-            T(32, 8, grad=True),
-            T(8, 33, grad=True),
-            T(2, 15, 8, grad=True),
-            T(8, 33, grad=True),
+            T(32, 33, dtype=torch.bfloat16, grad=True),
+            T(30, 33, dtype=torch.bfloat16, grad=True),
             torch.arange(32, device=DEVICE) % 33,
-            T(32),
+            torch.rand(32, device=DEVICE),
         )
-        ref_inputs = tuple(arg.detach().clone().requires_grad_() for arg in inp[:4])
-        ref = f(*ref_inputs, *inp[4:])
-        sum(output.mean() for output in ref).backward()
-
-        count, actual_outputs = count_numel_train(f, *inp, return_outputs=True)
-        self.assertEqual(actual_outputs, ref)
-        for actual, expected in zip(inp[:4], ref_inputs):
-            self.assertEqual(actual.grad, expected.grad)
-        return count
-
-    @unittest.skipUnless(GPU_TYPE == "cuda", "cat rematerialization is CUDA-only")
-    def test_partitioning_cat_log_softmax(self):
-        self.assertExpectedInline(self._run_partitioning_cat_log_softmax(), """20338""")
-
-    @unittest.skipUnless(GPU_TYPE == "cuda", "cat rematerialization is CUDA-only")
-    @patch.object(
-        functorch.compile.config,
-        "recompute_cat_log_softmax",
-        False,
-    )
-    def test_partitioning_cat_log_softmax_disabled(self):
-        self.assertExpectedInline(self._run_partitioning_cat_log_softmax(), """21268""")
-
-    def _assert_cat_log_softmax_not_recomputed(
-        self, f, *inp, expect_profitability_check=True
-    ):
-        tagged_cats = []
-        path_results = []
-        profitability_results = []
-        prefer_recompute = partitioners._prefer_recompute_cat_log_softmax
-        has_linear_path = partitioners._has_linear_equal_byte_cat_path
-        is_profitable = partitioners._is_profitable_cat_log_softmax_recompute
-
-        def capture_tags(gm, num_fwd_outputs):
-            prefer_recompute(gm, num_fwd_outputs)
-            tagged_cats.extend(
-                node
-                for node in gm.graph.nodes
-                if node.target == aten.cat.default and "recompute" in node.meta
-            )
-
-        def capture_path(*args, **kwargs):
-            result = has_linear_path(*args, **kwargs)
-            path_results.append(result)
-            return result
-
-        def capture_profitability(added_bytes, recomputed_bytes):
-            result = is_profitable(added_bytes, recomputed_bytes)
-            profitability_results.append(result)
-            return result
-
-        torch._dynamo.reset()
-        with (
-            patch.object(
-                partitioners, "_prefer_recompute_cat_log_softmax", capture_tags
+        self.assertExpectedInline(
+            self._run_and_assert_cat_partition(
+                f,
+                inp,
+                recomputed=True,
+                expect_no_large_saved_intermediate=True,
             ),
-            patch.object(
-                partitioners,
-                "_has_linear_equal_byte_cat_path",
-                capture_path,
-            ),
-            patch.object(
-                partitioners,
-                "_is_profitable_cat_log_softmax_recompute",
-                capture_profitability,
-            ),
-        ):
-            metrics.reset()
-            outputs = torch.compile(f, backend=compile_but_use_eager)(*inp)
-            sum(output.mean() for output in outputs).backward()
-        self.assertGreater(len(path_results), 0)
-        if expect_profitability_check:
-            self.assertTrue(all(path_results))
-            self.assertGreater(len(profitability_results), 0)
-            self.assertFalse(any(profitability_results))
-        else:
-            self.assertIn(False, path_results)
-            self.assertEqual(profitability_results, [])
-        self.assertEqual(tagged_cats, [])
-
-    @unittest.skipUnless(GPU_TYPE == "cuda", "cat rematerialization is CUDA-only")
-    def test_partitioning_cat_log_softmax_without_memory_savings(self):
-        def f(hidden, left_weight, right_weight, targets):
-            left = hidden @ left_weight
-            right = hidden @ right_weight
-            logits = torch.cat((left + 0, right + 0), dim=-1)
-            return (F.cross_entropy(logits, targets, reduction="none"),)
-
-        inp = (
-            T(16, 8, grad=True),
-            T(8, 2, grad=True),
-            T(8, 2, grad=True),
-            torch.arange(16, device=DEVICE) % 4,
+            """7344""",
         )
-        self._assert_cat_log_softmax_not_recomputed(f, *inp)
 
     @unittest.skipUnless(GPU_TYPE == "cuda", "cat rematerialization is CUDA-only")
-    def test_partitioning_cat_log_softmax_mixed_dtype_without_memory_savings(self):
+    def test_partitioning_cat_equal_mm_inputs(self):
         def f(left_hidden, left_weight, right_hidden, right_weight, targets):
-            left = (left_hidden @ left_weight).float()
-            right = (right_hidden @ right_weight).float()
-            logits = torch.cat((left, right), dim=-1).to(torch.bfloat16)
-            return (F.cross_entropy(logits, targets, reduction="none"),)
+            left = left_hidden @ left_weight
+            right = right_hidden @ right_weight
+            logits = torch.cat((left, right), dim=-1)
+            return (F.cross_entropy(logits, targets),)
 
         inp = (
             T(16, 8, dtype=torch.bfloat16, grad=True),
-            T(8, 3, dtype=torch.bfloat16, grad=True),
+            T(8, 128, dtype=torch.bfloat16, grad=True),
             T(16, 8, dtype=torch.bfloat16, grad=True),
-            T(8, 3, dtype=torch.bfloat16, grad=True),
-            torch.arange(16, device=DEVICE) % 6,
+            T(8, 128, dtype=torch.bfloat16, grad=True),
+            torch.arange(16, device=DEVICE) % 256,
         )
-        self._assert_cat_log_softmax_not_recomputed(
-            f, *inp, expect_profitability_check=False
+        self._run_and_assert_cat_partition(
+            f, inp, recomputed=False, expect_saved_cat=True
         )
 
     @unittest.skipUnless(GPU_TYPE == "cuda", "cat rematerialization is CUDA-only")
-    def test_partitioning_cat_log_softmax_mixed_spine_without_memory_savings(self):
-        def f(hidden, left_weight, right_weight, targets):
-            left = hidden @ left_weight
-            right = hidden @ right_weight
-            logits = torch.cat((left * 2, right * 2), dim=-1).to(torch.bfloat16)
-            return (
-                F.cross_entropy(logits, targets, reduction="none"),
-                F.cross_entropy(left, targets % 3, reduction="none"),
-            )
+    def test_partitioning_cat_mm_consumer(self):
+        def f(base, correction, weight):
+            joined = torch.cat((base, correction), dim=-1)
+            return (joined @ weight, base.square())
 
         inp = (
-            T(16, 8, grad=True),
-            T(8, 3, grad=True),
-            T(8, 3, grad=True),
-            torch.arange(16, device=DEVICE) % 6,
+            T(16, 6, grad=True),
+            T(16, 2, grad=True),
+            T(8, 4, grad=True),
         )
-        self._assert_cat_log_softmax_not_recomputed(f, *inp)
+        self._run_and_assert_cat_partition(f, inp, recomputed=False)
+
+    @unittest.skipUnless(GPU_TYPE == "cuda", "cat rematerialization is CUDA-only")
+    def test_partitioning_cat_forward_only(self):
+        from torch._functorch import partitioners
+        from torch._inductor.lowering import can_fuse_cat_as_producer
+
+        def f(hidden, weight):
+            projected = hidden @ weight
+            first = projected + 1
+            second = projected + 2
+            prediction = torch.cat((first, second), dim=-1).sin().detach()
+            return (projected.exp(), prediction)
+
+        inp = (
+            T(16, 8, dtype=torch.bfloat16, grad=True),
+            T(8, 16, dtype=torch.bfloat16, grad=True),
+        )
+        with patch.object(
+            partitioners,
+            "choose_saved_values_set",
+            wraps=partitioners.choose_saved_values_set,
+        ) as choose_saved:
+            self._run_and_assert_cat_partition(f, inp, recomputed=False)
+
+        self.assertEqual(choose_saved.call_count, 1)
+        (cat,) = choose_saved.call_args.args[0].find_nodes(
+            op="call_function", target=aten.cat.default
+        )
+        self.assertTrue(choose_saved.call_args.args[1].is_required_fw(cat))
+        self.assertTrue(can_fuse_cat_as_producer(cat))
+        self.assertNotIn(cat, choose_saved.call_args.kwargs["fusible_cat_nodes"])
 
     def test_partitioning_relu(self):
         def f(x):
