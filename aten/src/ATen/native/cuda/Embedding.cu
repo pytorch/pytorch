@@ -362,7 +362,7 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
   checkSameGPU("embedding_renorm", self_arg, indices_arg);
 
   auto num_indices = indices.numel();
-  if (num_indices == 0 || self.size(1) == 0) {
+  if (num_indices == 0) {
     return self;
   }
 
