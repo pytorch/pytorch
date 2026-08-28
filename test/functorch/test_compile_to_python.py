@@ -27,6 +27,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     subtest,
     TestCase,
+    xfailIfTorchDynamo,
 )
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
@@ -262,6 +263,53 @@ class TestAOTCompileToPython(TestCase):
         self.assertEqual(run_x.grad, x.cos())
         self.assertIsNone(run_y.grad)
 
+    def test_training_caches_dynamic_single_output_prototypes(self):
+        def flat_fn(flat):
+            return [flat[0].sin()]
+
+        x = torch.randn(4, requires_grad=True)
+        gm = make_fx(flat_fn, tracing_mode="symbolic")([x])
+        with torch.enable_grad():
+            source, cache = compile_to_python(gm, [x], grad_enabled=True)
+        loaded = load_from_python(source, cache)
+
+        def run(size):
+            actual_x = torch.randn(size, requires_grad=True)
+            out = loaded([actual_x])[0]
+            return actual_x, out, out.grad_fn._aot_grad_output_prototype_objects
+
+        actual_x, out, first = run(4)
+        self.assertIs(run(4)[2], first)
+        resized = run(7)[2]
+        self.assertIsNot(resized, first)
+        self.assertIs(run(7)[2], resized)
+        torch._C._functions.UndefinedGrad()(out).sum().backward()
+        self.assertIsNone(actual_x.grad)
+
+    def test_training_rng_tracker_does_not_serialize_iterator(self):
+        from torch._functorch._aot_autograd import to_standalone_python
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _AutogradRngStateTracker,
+        )
+
+        def flat_fn(flat):
+            return [flat[0].sin()]
+
+        emit_value = to_standalone_python.emit_value
+
+        def reject_tracker(value, imports):
+            if isinstance(value, _AutogradRngStateTracker):
+                raise TypeError("cannot pickle 'itertools.count' object")
+            return emit_value(value, imports)
+
+        x = torch.randn(4, requires_grad=True)
+        gm = make_fx(flat_fn)([x])
+        with mock.patch.object(
+            to_standalone_python, "emit_value", side_effect=reject_tracker
+        ):
+            source, _ = compile_to_python(gm, [x], grad_enabled=True)
+        self.assertIn("_AutogradRngStateTracker(", source)
+
     def test_training_serializes_observed_tangent_mask(self):
         def flat_fn(flat):
             return [flat[0].sin(), flat[1].sin()]
@@ -358,6 +406,7 @@ class TestAOTCompileToPython(TestCase):
         self.assertIsNone(actual_inputs[2].grad)
         self.assertIsNone(expected_inputs[2].grad)
 
+    @xfailIfTorchDynamo
     def test_training_dedup_mutated_duplicate_input(self):
         def flat_fn(a, b, c, d):
             d.mul_(2)

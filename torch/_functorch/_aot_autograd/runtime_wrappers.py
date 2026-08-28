@@ -237,6 +237,25 @@ def _identity(x: Any) -> Any:
     return x
 
 
+def _replay_input_mutation(orig: torch.Tensor, updated: torch.Tensor) -> None:
+    """Replay a functionalized input mutation onto the caller's tensor.
+
+    Opaque ops can mutate storage without participating in autograd or bumping the
+    version counter. Replaying that write with a tracked ``copy_`` rejects views
+    returned by custom autograd Functions, while changing their creation metadata
+    would alter backward semantics. Detect this unguarded property per runtime call.
+    """
+    if (
+        orig._is_view()
+        and torch._C._autograd._get_creation_meta(orig)
+        != torch._C._autograd.CreationMeta.DEFAULT
+    ):
+        with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(orig):
+            orig.copy_(updated)
+    else:
+        orig.copy_(updated)
+
+
 class AliasOfInputHandler:
     def __init__(
         self,
@@ -1080,7 +1099,11 @@ def _create_runtime_wrapper(
             args="orig_inputs, updated_inputs",
             artifact_name="mutation_epilogue",
         )
-        buf.bind(torch=torch, _unwrap_tensoralias=_unwrap_tensoralias)
+        buf.bind(
+            torch=torch,
+            _replay_input_mutation=_replay_input_mutation,
+            _unwrap_tensoralias=_unwrap_tensoralias,
+        )
         wrote_body = False
         with buf.indent():
             for i, inpt_idx in enumerate(runtime_metadata.mutated_inp_runtime_indices):
@@ -1136,7 +1159,7 @@ def _create_runtime_wrapper(
                             )
                             buf.writeline(f"raise RuntimeError({msg_name})")
                         else:
-                            buf.writeline(f"{oi}.copy_({ui})")
+                            buf.writeline(f"_replay_input_mutation({oi}, {ui})")
             if not wrote_body:
                 buf.writeline("pass")
 
@@ -2756,6 +2779,12 @@ _GradOutputPrototypeType = (
     | _GradOutputSubclassPrototype
     | _GradOutputStoredValuePrototype
 )
+_GradOutputPrototypeState = tuple[
+    tuple[_GradOutputPrototypeType | None, ...], tuple[Any, ...]
+]
+_GradOutputPrototypeCacheKey = tuple[
+    tuple[int, ...], tuple[int, ...], torch.dtype, torch.device
+]
 
 
 class KeptTangentInfo(typing.NamedTuple):
@@ -2918,9 +2947,9 @@ def _grad_output_tensor_prototype(
     )
     values = (*size, *(stride or ()))
     # Each leading zero makes the carrier storage-free regardless of the
-    # encoded value.  Compiled autograd can nevertheless proxy the second
+    # encoded value. Compiled autograd can nevertheless proxy the second
     # dimension as a runtime SymInt, so dynamic output shapes never get baked
-    # into its graph.  One carrier per value also avoids exceeding the maximum
+    # into its graph. One carrier per value also avoids exceeding the maximum
     # tensor rank for high-dimensional inputs.
     object_indices: list[int] = []
     for value in values:
@@ -3069,23 +3098,60 @@ def _set_grad_output_prototypes(
     ctx: Any,
     raw_returns: Sequence[Any],
     fw_metadata: ViewAndMutationMeta,
-) -> None:
+    cached: _GradOutputPrototypeState | None = None,
+) -> _GradOutputPrototypeState | None:
     ctx._aot_grad_output_prototypes = ()
     ctx._aot_grad_output_prototype_objects = ()
     ctx._aot_prune_unused_outputs_enabled = config.aot_autograd_prune_unused_outputs
     if not ctx._aot_prune_unused_outputs_enabled:
-        return
+        return None
 
     ctx.set_materialize_grads(False)
-    # A node with one differentiable output cannot be invoked with that sole
-    # tangent undefined, so avoid creating metadata carriers for this common
-    # case.
-    if len(_grad_output_surviving_indices(fw_metadata)) <= 1:
-        return
-
-    prototypes, runtime_objects = _grad_output_prototypes(raw_returns, fw_metadata)
+    prototypes, runtime_objects = (
+        cached
+        if cached is not None
+        else _grad_output_prototypes(raw_returns, fw_metadata)
+    )
     ctx._aot_grad_output_prototypes = prototypes
     ctx._aot_grad_output_prototype_objects = runtime_objects
+    return prototypes, runtime_objects
+
+
+def _has_static_plain_grad_output_metadata(
+    fw_metadata: ViewAndMutationMeta,
+) -> bool:
+    return all(
+        isinstance(meta, PlainTensorMeta)
+        and meta.memory_format is not None
+        and meta.memory_format.size is not None
+        for meta in fw_metadata.subclass_tangent_meta
+    )
+
+
+def _single_plain_grad_output_prototype_index(
+    fw_metadata: ViewAndMutationMeta,
+) -> int | None:
+    indices = _grad_output_surviving_indices(fw_metadata)
+    if len(indices) != 1 or len(fw_metadata.subclass_tangent_meta) != 1:
+        return None
+    if not isinstance(fw_metadata.subclass_tangent_meta[0], PlainTensorMeta):
+        return None
+    return indices[0]
+
+
+def _plain_grad_output_prototype_cache_key(
+    value: Any,
+) -> _GradOutputPrototypeCacheKey | None:
+    if isinstance(value, TensorAlias):
+        value = value.alias
+    if type(value) is not torch.Tensor or value.layout is not torch.strided:
+        return None
+
+    size = tuple(value.size())
+    stride = tuple(value.stride())
+    if not all(type(dim) is int for dim in (*size, *stride)):
+        return None
+    return size, stride, value.dtype, value.device
 
 
 def _decode_grad_output_metadata(
@@ -3954,9 +4020,77 @@ class _AutogradSavedState:
         ctx.opaque_objects = opaque_object_outs
 
 
+def _dealias_marked_returns(raw_returns: list[Any], marked: Sequence[int]) -> None:
+    """Give marked slots their own TensorImpl when an unmarked slot shares it.
+
+    ``mark_non_differentiable`` is keyed on TensorImpl, while a backend may return
+    the same object for a differentiable slot and one that is about to be marked.
+    Detaching only the marked slot preserves the differentiable slot's identity and
+    is safe because the replacement is immediately declared non-differentiable.
+    """
+    if not marked:
+        return
+
+    marked_positions: dict[int, list[int]] = {}
+    for index in marked:
+        value = raw_returns[index]
+        if isinstance(value, torch.Tensor):
+            marked_positions.setdefault(value._cdata, []).append(index)
+    if not marked_positions:
+        return
+
+    marked_set = set(marked)
+    collided: set[int] = set()
+    for index, value in enumerate(raw_returns):
+        if index in marked_set:
+            continue
+        positions = (
+            marked_positions.get(value._cdata)
+            if isinstance(value, torch.Tensor)
+            else None
+        )
+        if positions is not None:
+            collided.update(positions)
+    for index in collided:
+        raw_returns[index] = raw_returns[index].detach()
+
+
 @dataclass
 class _AutogradForwardEpilogue:
     metadata: ViewAndMutationMeta
+    cache_static_grad_output_prototypes: bool = False
+    dynamic_grad_output_prototype_index: int | None = None
+    _grad_output_prototype_cache: _GradOutputPrototypeState | None = field(
+        default=None, init=False
+    )
+    _dynamic_grad_output_prototype_cache: (
+        tuple[_GradOutputPrototypeCacheKey, _GradOutputPrototypeState] | None
+    ) = field(default=None, init=False)
+
+    def set_grad_output_prototypes(self, ctx: Any, raw_returns: Sequence[Any]) -> None:
+        cached = self._grad_output_prototype_cache
+        dynamic_key = None
+        if (
+            cached is None
+            and not self.cache_static_grad_output_prototypes
+            and self.dynamic_grad_output_prototype_index is not None
+            and config.aot_autograd_prune_unused_outputs
+        ):
+            dynamic_key = _plain_grad_output_prototype_cache_key(
+                raw_returns[self.dynamic_grad_output_prototype_index]
+            )
+            dynamic_cache = self._dynamic_grad_output_prototype_cache
+            if dynamic_cache is not None and dynamic_cache[0] == dynamic_key:
+                cached = dynamic_cache[1]
+        result = _set_grad_output_prototypes(ctx, raw_returns, self.metadata, cached)
+        if (
+            result is not None
+            and self.cache_static_grad_output_prototypes
+            and self._grad_output_prototype_cache is None
+        ):
+            self._grad_output_prototype_cache = result
+        elif result is not None and dynamic_key is not None:
+            self._dynamic_grad_output_prototype_cache = dynamic_key, result
 
     def finalize(self, ctx: Any, fw_outs: Sequence[Any]) -> tuple[Any, ...]:
         num_outputs = self.metadata.num_outputs
@@ -4018,13 +4152,14 @@ class _AutogradForwardEpilogue:
             if x.mutation_type == MutationType.MUTATED_OUT_GRAPH
         ] + self.metadata.output_info
 
-        fw_outs_not_requiring_grad = [
-            x
+        non_diff_indices = [
+            i
             for (i, x) in enumerate(raw_returns_not_including_intermediate_bases)
             if isinstance(x, torch.Tensor) and not raw_returns_meta[i].requires_grad
         ]
-        _set_grad_output_prototypes(ctx, raw_returns, self.metadata)
-        ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
+        _dealias_marked_returns(raw_returns, non_diff_indices)
+        self.set_grad_output_prototypes(ctx, raw_returns)
+        ctx.mark_non_differentiable(*(raw_returns[i] for i in non_diff_indices))
         ctx._materialize_non_diff_grads = False
         _snapshot_external_objects(ctx)
 
@@ -4807,7 +4942,15 @@ class _AOTDispatchAutogradFunctionFactory:
         self.spec.fw_metadata.compile_id_str = compile_id_str
 
         saved_state = _AutogradSavedState(self.spec.fw_metadata)
-        forward_epilogue = _AutogradForwardEpilogue(self.spec.fw_metadata)
+        forward_epilogue = _AutogradForwardEpilogue(
+            self.spec.fw_metadata,
+            cache_static_grad_output_prototypes=(
+                _has_static_plain_grad_output_metadata(self.spec.fw_metadata)
+            ),
+            dynamic_grad_output_prototype_index=(
+                _single_plain_grad_output_prototype_index(self.spec.fw_metadata)
+            ),
+        )
         rng_state = _AutogradRngStateTracker(
             num_rng=self.spec.fw_metadata.num_graphsafe_rng_states,
             graphsafe_idx=self.spec.fw_metadata.graphsafe_rng_state_index,
@@ -4881,7 +5024,12 @@ class _AOTDispatchAutogradFunctionFactory:
             args="raw_returns",
             artifact_name="compiled_fn_wrapper",
         )
-        buf.bind(TensorAlias=TensorAlias, torch=torch, Tensor=Tensor)
+        buf.bind(
+            TensorAlias=TensorAlias,
+            torch=torch,
+            Tensor=Tensor,
+            _dealias_marked_returns=_dealias_marked_returns,
+        )
 
         with buf.indent():
             for i, idx in enumerate(fw_metadata.mutated_inp_runtime_indices):
@@ -4917,6 +5065,9 @@ class _AOTDispatchAutogradFunctionFactory:
                 ):
                     _non_diff_indices.append(i)
             if _non_diff_indices:
+                buf.writeline(
+                    f"_dealias_marked_returns(raw_returns, {_non_diff_indices!r})"
+                )
                 checks = " + ".join(
                     f"([raw_returns[{i}]] if isinstance(raw_returns[{i}], Tensor) else [])"
                     for i in _non_diff_indices
@@ -4954,7 +5105,7 @@ class _AOTDispatchAutogradFunctionFactory:
                         raise AssertionError(
                             "expected no TensorAlias in intermediates_raw"
                         )
-            _set_grad_output_prototypes(ctx, raw_returns, fw_metadata)
+            forward_epilogue.set_grad_output_prototypes(ctx, raw_returns)
             ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
             ctx._materialize_non_diff_grads = False
             _snapshot_external_objects(ctx)
