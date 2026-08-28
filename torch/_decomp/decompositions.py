@@ -1777,7 +1777,22 @@ def native_group_norm_backward(
             + torch.mul(input.reshape(N, group, cpg, HxW), c2)
             + c3
         )
-        d_input = d_input.reshape(input.shape).to(input.dtype)
+        supports_memory_format = input.device.type in (
+            "cpu",
+            "cuda",
+            "meta",
+            torch._C._get_privateuse1_backend_name(),
+        )
+        memory_format = (
+            utils.suggest_memory_format(input)
+            if supports_memory_format
+            else torch.contiguous_format
+        )
+        d_input = (
+            d_input.reshape(input.shape)
+            .to(input.dtype)
+            .contiguous(memory_format=memory_format)
+        )
     if output_mask[1]:
         d_gamma = (
             (
@@ -3191,11 +3206,12 @@ def _max_unpoolnd(
             ),
         )
 
-    # The native CPU kernel preserves the input's memory format
-    # (aten/src/ATen/native/MaxUnpooling.cpp uses suggest_memory_format),
-    # while the CUDA kernel and the 3d kernels always return contiguous output.
+    # The native CPU kernel (aten/src/ATen/native/MaxUnpooling.cpp) and the XPU
+    # kernel (torch-xpu-ops MaxUnpoolingKernels.cpp) preserve the input's memory
+    # format via suggest_memory_format, while the CUDA kernel and the 3d kernels
+    # always return contiguous output.
     def _restride(t: TensorLike) -> TensorLike:
-        if dim == 2 and self.device.type == "cpu":
+        if dim == 2 and self.device.type in ("cpu", "xpu"):
             return t.contiguous(memory_format=utils.suggest_memory_format(self))
         return t
 
@@ -3347,7 +3363,7 @@ def index_add_(
 
 
 @register_decomposition(aten.index_add)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def index_add(
     x: TensorLike,
     dim: int,
@@ -3452,7 +3468,7 @@ def index_copy_(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
 
 
 @register_decomposition(aten.index_copy)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
     return _index_copy(x, dim, index, tensor, inplace=False)
 

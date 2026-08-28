@@ -230,6 +230,7 @@ class MemoryTracker:
         self.memories_reserved = stats["memories_reserved"]
         self._markers = stats["markers"]
         self._num_alloc_retries = stats["num_alloc_retries"]
+
         # Restore _op_index. Fall back to reconstructing from the trace length
         # so that stats files saved before this fix still work correctly.
         self._op_index = stats.get("op_index", len(self.memories_allocated))
