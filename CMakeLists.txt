@@ -521,10 +521,7 @@ cmake_dependent_option(BUILD_BUNDLE_PTXAS "Bundle PTX into torch/bin folder"
                        OFF "USE_CUDA" OFF)
 
 # gradual rollout of cmake-instrumentation
-set(USE_CMAKE_INSTRUMENTATION_DEFAULT OFF)
-if(NOT USE_CUDA)
-  set(USE_CMAKE_INSTRUMENTATION_DEFAULT ON)
-endif()
+set(USE_CMAKE_INSTRUMENTATION_DEFAULT ON)
 cmake_dependent_option(
   USE_CMAKE_INSTRUMENTATION
   "Use cmake-instrumentation to collect build metrics"
