@@ -46,7 +46,10 @@ CUDA_ARCHES_CUDNN_VERSION = {
     "13.4": "9",
 }
 
-ROCM_ARCHES = ["7.14", "10.0", "rocm-preview"]
+ROCM_ARCHES = ["7.14", "10.0", "preview"]
+ROCM_PREVIEW_VERSION = (
+    (REPO_ROOT / ".ci/docker/ci_commit_pins/rocm-preview.txt").read_text().strip()
+)
 
 XPU_ARCHES = ["xpu"]
 
@@ -89,9 +92,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     # dependency on latest patch version for (major, minor)
     "7.14": ("rocm[libraries,device-all]==7.14.*"),
     "10.0": ("rocm[libraries,device-all]==10.0.*"),
-    # ROCm preview: pin the exact preview version so the runtime dep matches the
-    # wheel built against it. Keep in sync with .ci/docker/manywheel/build.sh.
-    "rocm-preview": ("rocm[libraries,device-all]==7.15.0a20260712"),
+    "preview": (f"rocm[libraries,device-all]=={ROCM_PREVIEW_VERSION}"),
     "xpu": (
         "intel-cmplr-lib-rt==2026.1.2 | "
         "intel-cmplr-lib-ur==2026.1.2 | "
@@ -141,7 +142,7 @@ CUDA_NIGHTLY_SOURCE_MATRIX = {
 
 
 def _rocm_channel(arch: str, separator: str = "") -> str:
-    return arch if arch.startswith("rocm") else f"rocm{separator}{arch}"
+    return f"rocm{separator}{arch}"
 
 
 ROCM_NIGHTLY_SOURCE_MATRIX = {
@@ -315,7 +316,10 @@ WHEEL_CONTAINER_IMAGES = {
         for gpu_arch in CUDA_AARCH64_ARCHES
     },
     **{
-        gpu_arch: f"manylinux2_28-builder:{_rocm_channel(gpu_arch)}"
+        gpu_arch: (
+            "manylinux2_28-builder:"
+            f"{_rocm_channel(gpu_arch, '-' if gpu_arch == 'preview' else '')}"
+        )
         for gpu_arch in ROCM_ARCHES
     },
     "xpu": "manylinux2_28-builder:xpu",
@@ -493,6 +497,11 @@ def generate_wheels_matrix(
                 )
             else:
                 desired_cuda = translate_desired_cuda(gpu_arch_type, gpu_arch_version)
+                build_name_arch = (
+                    desired_cuda
+                    if gpu_arch_type == "rocm"
+                    else f"{gpu_arch_type}{gpu_arch_version}"
+                )
                 ret.append(
                     {
                         "python_version": python_version,
@@ -506,7 +515,7 @@ def generate_wheels_matrix(
                             arch_version
                         ].split(":")[1],
                         "package_type": package_type,
-                        "build_name": f"{package_type}-py{python_version}-{desired_cuda}".replace(
+                        "build_name": f"{package_type}-py{python_version}-{build_name_arch}".replace(
                             ".", "_"
                         ),
                         "pytorch_extra_install_requirements": (
@@ -562,7 +571,7 @@ def generate_libtorch_extraction_configs(
         # Include arch in the build name so windows x86_64 and arm64 libtorch
         # packages don't share a name and overwrite each other on upload.
         arch_tag = f"{arch}-" if os == "windows-arm64" else ""
-        # For rocm, desired_cuda already carries the channel (e.g. rocm-preview),
+        # For rocm, desired_cuda already carries the channel (e.g. rocmpreview),
         # so use it directly to avoid a doubled "rocm" prefix in the name.
         gpu_tag = (
             desired_cuda
