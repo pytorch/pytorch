@@ -19,13 +19,22 @@ def is_traced(t: torch.Tensor) -> bool:
     # reference, not our kernel. Decline so the compile router falls back. (Eager on
     # real tensors is unaffected -- that is the path our kernels target.)
     #
-    # This cond runs on EVERY eager dispatch, and is_fake() is a ~0.5us Python
-    # subclass walk. A FakeTensor / FunctionalTensor / traceable-wrapper subclass is
-    # never EXACTLY torch.Tensor, so for a plain tensor (the hot path) we skip is_fake
-    # entirely -- the only trace case left for an exact-type tensor is a meta tensor,
-    # caught by the cheap device read (~0.24us total vs ~0.80us).
+    # This cond runs on EVERY eager dispatch and is_fake() is a Python subclass walk, so an
+    # exact-type tensor (the hot path) answers from cheap reads instead. Being exact-type is
+    # NOT on its own enough to mean "not traced": a Python subclass (FakeTensor,
+    # FunctionalTensor, traceable wrapper) is never exactly torch.Tensor, but the two C++-level
+    # wrappers ARE -- C++ functionalization and a C++ fake, which is_fake reaches through its
+    # own _is_functional_tensor / _is_fake_tensor branches. A functional tensor wrapping a fake
+    # one is exact-type, is_fake() True, and was answered False here.
+    #
+    # MEASURED (200k reps, plain CPU tensor): 0.26us for the device read alone, 0.52us with both
+    # wrapper bits, 1.01us for the full is_fake walk -- so the fast path keeps half its value.
     if type(t) is torch.Tensor:
-        return t.device.type == "meta"
+        return (
+            t.device.type == "meta"
+            or torch._is_functional_tensor(t)
+            or torch._C._is_fake_tensor(t)
+        )
     return torch._subclasses.fake_tensor.is_fake(t) or t.device.type == "meta"
 
 
