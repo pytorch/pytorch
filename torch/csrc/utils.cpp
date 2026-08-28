@@ -1,4 +1,4 @@
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/variable.h>
@@ -7,8 +7,6 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/python_symnode.h>
 #include <torch/csrc/utils/python_tuples.h>
-
-#include <torch/csrc/Export.h>
 
 #include <algorithm>
 #include <cstdarg>
@@ -155,6 +153,7 @@ void THPUtils_invalidArguments(
     size_t num_options,
     ...) {
   std::vector<std::string> option_strings;
+  option_strings.reserve(num_options);
   va_list option_list;
   va_start(option_list, num_options);
   std::generate_n(
