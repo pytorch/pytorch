@@ -5,7 +5,7 @@ from collections.abc import Mapping
 import torch
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
 from torch.fx.passes.operator_support import OperatorSupport
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import HardwareClassification, TestCase
 
 
 class DummyDevOperatorSupport(OperatorSupport):
@@ -33,6 +33,8 @@ class AddModule(torch.nn.Module):
 
 
 class TestPartitionerOrder(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # partitioner test to check graph node order remains the same with the original graph after partitioning
     def test_partitioner_graph_node_order(self):
         m = AddModule()
