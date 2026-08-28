@@ -171,7 +171,7 @@ def guard_to_detect_forward_monkeypatching(
 ) -> None:
     # Users sometimes patch the forward method of a nn module instance to
     # perform optimizations like quantization. Though this is not a good
-    # software practice, but python allows this and Dynamo needs to detect
+    # software practice, python allows this and Dynamo needs to detect
     # this patching.
     #
     # One way to do this is to add an ID_MATCH guard on every function
@@ -587,7 +587,7 @@ class NNModuleVariable(VariableTracker):
                 if nnmodule_has_hooks(mod):
                     # We do not want to unroll sequential if it has hooks, since evaporating it
                     # will cause hooks to not fire!
-                    # This terminates and restart the tracing process
+                    # This terminates and restarts the tracing process
                     self.convert_to_unspecialized(tx)
 
                 # Unroll sequential
