@@ -2573,6 +2573,7 @@ def copy_dynamo_tensor_attributes(src: torch.Tensor, dst: torch.Tensor) -> None:
     _copy_dynamo_attr(src, dst, "_dynamo_shape_ids")
     _copy_dynamo_attr(src, dst, "_dynamo_strict_unbacked_indices")
     _copy_dynamo_attr(src, dst, "_dynamo_weak_dynamic_indices")
+    _copy_dynamo_attr(src, dst, "_dynamo_dynamic_range")
     _copy_dynamo_attr(src, dst, "_dynamo_propagated_dynamic_indices")
     _copy_dynamo_attr(src, dst, "_has_dynamo_dim_marking")
 
