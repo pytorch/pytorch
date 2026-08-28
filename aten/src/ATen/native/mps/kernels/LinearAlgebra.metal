@@ -1891,7 +1891,7 @@ kernel void laswpGatherLU(
     const uint c = (v < W0) ? (w.x + v) : (w.z + (v - W0));
     const uint cnt = min(4u, W - v);
     device const T* sp = Ab + ulong(rowIds[r]) * N + c;
-    if constexpr (::metal::is_same_v<T, float2>) {
+    if IF_CONSTEXPR (::metal::is_same_v<T, float2>) {
       for (uint e = 0; e < cnt; e++) {
         stage[r][q + e] = sp[e];
       }
