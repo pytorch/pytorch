@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.nn.utils.prune as prune
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     run_tests,
     TemporaryFileName,
@@ -16,6 +17,7 @@ from torch.testing._internal.common_utils import (
 
 
 class TestPruningNN(NNTestCase):
+    hw_classification = HardwareClassification.GENERIC
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
