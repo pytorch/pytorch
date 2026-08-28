@@ -6,32 +6,31 @@ import onnx_test_common
 import onnxruntime
 import parameterized
 from onnx_test_common import MAX_ONNX_OPSET_VERSION, MIN_ONNX_OPSET_VERSION
-from pytorch_test_common import (
-    skipIfUnsupportedMinOpsetVersion,
-    skipScriptTest,
-)
+from pytorch_test_common import skipIfUnsupportedMinOpsetVersion, skipScriptTest
 from test_pytorch_onnx_onnxruntime import _parameterized_class_attrs_and_values
 
 import torch
 from torch.cuda.amp import autocast
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
     Capability,
+    instantiate_device_type_tests,
     requires_capabilities,
 )
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class_params = _parameterized_class_attrs_and_values(
     MIN_ONNX_OPSET_VERSION, MAX_ONNX_OPSET_VERSION
 )
 
+
 @parameterized.parameterized_class(
     **class_params,
     class_name_func=onnx_test_common.parameterize_class_name,
 )
 class TestONNXRuntime_cuda(onnx_test_common._TestONNXRuntime):
-    hw_classification = common_utils.HardwareClassification.CUDA
+    hw_classification = HardwareClassification.CUDA
     ort_backend = "CUDAExecutionProvider"
 
     @classmethod
@@ -96,9 +95,7 @@ class TestONNXRuntime_cuda(onnx_test_common._TestONNXRuntime):
 
         N, C = 5, 4
         input = torch.randn(N, 16, dtype=torch.float16, device=device)
-        target = torch.empty(N, dtype=torch.long, device=device).random_(
-            0, C
-        )
+        target = torch.empty(N, dtype=torch.long, device=device).random_(0, C)
 
         # using test data containing default ignore_index=-100
         target[target == 1] = -100
@@ -135,9 +132,7 @@ class TestONNXRuntime_cuda(onnx_test_common._TestONNXRuntime):
                     dtype=torch.float16
                 )
 
-        x = torch.ones(
-            3, 4, requires_grad=True, dtype=torch.float16, device=device
-        )
+        x = torch.ones(3, 4, requires_grad=True, dtype=torch.float16, device=device)
         self.run_test(MyModule(), x, rtol=1e-3, atol=1e-5)
 
     def test_deduplicate_initializers_diff_devices(self, device):
