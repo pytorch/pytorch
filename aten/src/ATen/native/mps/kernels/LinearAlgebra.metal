@@ -1333,12 +1333,12 @@ INSTANTIATE_SYRK_TRAILING(L, false, 32, 128, 4)
 // The LU kernels are templated over the element type: float (sgetrf) and
 // float2/complex64 (cgetrf, host_name suffix _c64). Pivot magnitude is fabs
 // for real and cabs1 = |re| + |im| for complex (LAPACK icamax); the complex
-// elimination math routes through c10::metal::mul/div under `if constexpr` so
+// elimination math routes through c10::metal::mul/div under `IF_CONSTEXPR` so
 // the float path keeps its exact fma instruction sequence. Plain LU is purely
 // algebraic, so the complex path uses NO conjugation anywhere.
 template <typename T>
 inline float luPivotMag(T v) {
-  if IF_CONSTEXPR (::metal::is_same_v<T, float2>) {
+  if IF_CONSTEXPR (c10::metal::is_complex_v<T>) {
     const float2 a = ::metal::precise::abs(v);
     return a.x + a.y;
   } else {
@@ -1347,7 +1347,7 @@ inline float luPivotMag(T v) {
 }
 template <typename T>
 inline T luRecip(T v) {
-  if IF_CONSTEXPR (::metal::is_same_v<T, float2>) {
+  if IF_CONSTEXPR (c10::metal::is_complex_v<T>) {
     return c10::metal::div(float2(1.0f, 0.0f), v);
   } else {
     return 1.0f / v;
@@ -1390,13 +1390,13 @@ kernel void factorPanelLU(
 
   T row[R][W];
   const bool vec4 =
-      !is_complex_v<T> && ((N % 4u) == 0) && (nb == W);
+      !c10::metal::is_complex_v<T> && ((N % 4u) == 0) && (nb == W);
 #pragma unroll
   for (short r = 0; r < R; r++) {
     const uint lr = tid + uint(r) * G;
     if (lr < H) {
       device const T* src = Ab + ulong(d0 + lr) * N + d0;
-      if IF_CONSTEXPR (::metal::is_same_v<T, float2>) {
+      if IF_CONSTEXPR (c10::metal::is_complex_v<T>) {
 #pragma unroll
         for (short c = 0; c < W; c++) {
           row[r][c] = (uint(c) < nb) ? src[c] : T(0.0f);
@@ -1515,7 +1515,7 @@ kernel void factorPanelLU(
 #pragma unroll
           for (short c = 0; c < W; c++) {
             if (uint(c) > j) {
-              if IF_CONSTEXPR (::metal::is_same_v<T, float2>) {
+              if IF_CONSTEXPR (c10::metal::is_complex_v<T>) {
                 row[r][c] -= c10::metal::mul(l, uc[c]);
               } else {
                 row[r][c] = fma(-l, uc[c], row[r][c]);
@@ -1532,7 +1532,7 @@ kernel void factorPanelLU(
     const uint lr = tid + uint(r) * G;
     if (lr < H) {
       device T* dst = Ab + ulong(d0 + lr) * N + d0;
-      if IF_CONSTEXPR (::metal::is_same_v<T, float2>) {
+      if IF_CONSTEXPR (c10::metal::is_complex_v<T>) {
 #pragma unroll
         for (short c = 0; c < W; c++) {
           if (uint(c) < nb) {
@@ -1643,7 +1643,7 @@ kernel void luStreamUpdate(
       if (lane == uint(j)) {
         v = l;
       } else if (lane > j && lane < nb) {
-        if constexpr (::metal::is_same_v<T, float2>) {
+        if IF_CONSTEXPR (c10::metal::is_complex_v<T>) {
           v -= c10::metal::mul(l, uc);
         } else {
           v = fma(-l, uc, v);
@@ -1891,7 +1891,7 @@ kernel void laswpGatherLU(
     const uint c = (v < W0) ? (w.x + v) : (w.z + (v - W0));
     const uint cnt = min(4u, W - v);
     device const T* sp = Ab + ulong(rowIds[r]) * N + c;
-    if IF_CONSTEXPR (::metal::is_same_v<T, float2>) {
+    if IF_CONSTEXPR (c10::metal::is_complex_v<T>) {
       for (uint e = 0; e < cnt; e++) {
         stage[r][q + e] = sp[e];
       }
@@ -1923,7 +1923,7 @@ kernel void laswpGatherLU(
     const uint c = (v < W0) ? (w.x + v) : (w.z + (v - W0));
     const uint cnt = min(4u, W - v);
     device T* dp = Ab + ulong(rowIds[r]) * N + c;
-    if IF_CONSTEXPR (is_complex_v<T>) {
+    if IF_CONSTEXPR (c10::metal::is_complex_v<T>) {
       for (uint e = 0; e < cnt; e++) {
         dp[e] = stage[sr][q + e];
       }
@@ -1976,7 +1976,7 @@ kernel void trsmPanelLU(
   device T* Ab = A + ulong(tgid.x) * M * N;
 
   threadgroup T L[TS][TS + 1];
-  if constexpr (::metal::is_same_v<T, float2>) {
+  if IF_CONSTEXPR (c10::metal::is_complex_v<T>) {
     // zero-pad the ragged block so the unrolled solve below stays a no-op
     // past nr (scalar loads; no float4 path for complex)
     for (uint i = tid; i < TS * TS; i += G) {
@@ -2017,7 +2017,7 @@ kernel void trsmPanelLU(
 #pragma unroll
   for (short c = 0; c < TS; c++) {
     const T xc = x[c];
-    if constexpr (::metal::is_same_v<T, float2>) {
+    if IF_CONSTEXPR (c10::metal::is_complex_v<T>) {
       // no dcol register staging for complex: it would double the per-thread
       // register bytes; read L directly instead
 #pragma unroll
