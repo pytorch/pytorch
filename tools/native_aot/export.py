@@ -389,29 +389,11 @@ def _collect_jobs(ops_filter, out_root: str, archs):
                     # the string comparison below is against a spelling that parses.
                     claims = decl.archs_of(d)
                     if layout_arch not in claims:
-                        # REPORTED, not refused: the two spellings are distinct
-                        # nvcc targets for one piece of hardware, so a declaration
-                        # pinning "sm_100a" is stating that its kernels need the
-                        # arch-conditional target, and a plain-10.0 build genuinely
-                        # cannot use them. Falling back to aten is the right answer
-                        # there; what is worth saying out loud is that this build
-                        # asked for a capability the declaration covers under the
-                        # other name.
-                        #
-                        # Reported HERE, per arch, because the whole-declaration
-                        # misses collected below are suppressed once the declaration
-                        # ships for ANY arch -- which hid exactly this case: the
-                        # matched arches embed and pass the post-relink check while
-                        # every device of the missed capability falls back to aten,
-                        # with nothing in the build log.
-                        #
-                        # The asymmetry to know about: archs_from_cuda_arch_list
-                        # collapses a capability to the CONDITIONAL spelling, so a
-                        # declaration pinning only the plain one loses under a
-                        # release list naming both, even though plain-target kernels
-                        # would run on the conditional build. Matching by capability
-                        # instead would need the tree name and the declaration's
-                        # claim to disagree, which generation filters on.
+                        # REPORTED, not refused: the spellings are distinct nvcc
+                        # targets, so a declaration pinning one cannot serve a build
+                        # compiled for the other, and aten is the right answer there.
+                        # Per arch, because the whole-declaration misses below are
+                        # suppressed once anything ships -- which hid this case.
                         other = _claimed_spelling(layout_arch, claims)
                         if other:
                             print(
@@ -447,9 +429,6 @@ def _collect_jobs(ops_filter, out_root: str, archs):
     shipped = {os.path.basename(j[3]) for j in jobs}
     for did, missed in sorted(skipped.items()):
         if did not in shipped:
-            # The declaration's OWN ARCHS, not an illustration: a fixed example
-            # contradicted the case at hand (it read "an ARCHS of ('sm_100a',)" for a
-            # declaration claiming sm_100), which sends the reader the wrong way.
             print(
                 f"{did}: declares kernels but none for this build -- requested "
                 f"{' '.join(missed)}, and the declaration's ARCHS "
@@ -694,31 +673,10 @@ def archs_from_cuda_arch_list(arch_list: str) -> list[str]:
     return [a for a in out if a.endswith("a") or a not in conditional]
 
 
-# Which TORCH_CUDA_ARCH_LIST entries are ELIGIBLE for AOT kernels on the
-# automatic export path. A filter, never a build list: it cannot cause an
-# export, only permit one, and an explicit --arch bypasses it. So a list
-# with no eligible entry exports nothing and stage 2 skips, printing why.
-#
-# Distinct from a declaration's ARCHS (what the KERNELS support, sm_90+);
-# this says what the standard build SHIPS. Both spellings of a capability are
-# listed because they are distinct nvcc targets used by different builds for
-# the same hardware -- "10.0a" (arch-conditional, needed by tcgen05/wgmma) in
-# b200-native-aot.yml, plain "10.0" elsewhere and in the manywheel lists.
-# Omitting either silently exports nothing there.
-#
-# WHICH capabilities, and what admitting one costs: every entry a build's arch
-# list names is another full set of compiled kernels inside its libtorch_cuda
-# (one duplicate arch measured 54 objects / 3.5 MiB), and past this filter the
-# DSL runtimes stop being optional -- build_stage2.should_run reads this tuple to
-# decide whether stage 2 runs at all, so a box whose GPU is listed here and whose
-# wheels are missing fails the build instead of skipping. Hopper is listed
-# because every release arch list names 9.0 and the default ARCHS already covers
-# it; no CI job exercises AOT kernels there yet -- the one functional AOT job in
-# this stack runs on B200 and arrives with the first declaration -- so Hopper's
-# coverage is this suite plus that Blackwell job. sm_103
-# stays absent because no arch list we see names 10.3, and adding it would only
-# grow wheels.
-EXPORTABLE_ARCHES = ("sm_90", "sm_90a", "sm_100", "sm_100a")
+# Re-exported: build_stage2 and the tests read the shipped-arch set off the exporter.
+# DEFINED beside the set this tooling can target (torchgen.native_aot_decl), so the
+# two cannot drift; a list with no eligible entry exports nothing and stage 2 skips.
+EXPORTABLE_ARCHES = decl.EXPORTABLE_ARCHES
 
 
 def main(argv: list[str] | None = None) -> None:
