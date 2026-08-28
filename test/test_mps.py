@@ -12206,15 +12206,16 @@ class TestLinalgMPS(TestCaseMPS):
         expected = reference(a_ref, b_ref, offsets)
         if offsets is not None:
             covered = offsets[-1].item()
-            if a.dim() == 2 and b.dim() == 3:
+            if a.dim() == 2 and b.dim() == 3 and covered < actual.size(0):
                 actual = actual[:covered]
-            elif a.dim() == 3 and b.dim() == 2:
+            elif a.dim() == 3 and b.dim() == 2 and covered < actual.size(1):
                 actual = actual[:, :covered]
         tol = {torch.float32: 2e-4, torch.float16: 2e-2, torch.bfloat16: 6e-2}[a.dtype]
         self.assertEqual(actual.detach().cpu().float(), expected.detach().to(a.dtype).float(), atol=tol, rtol=tol)
         if backward:
-            actual.sum().backward()
-            expected.sum().backward()
+            grad = make_matrix(actual.shape, "n", actual.dtype)
+            actual.backward(grad)
+            expected.backward(grad.cpu().float())
             self.assertEqual(a.grad.cpu().float(), a_ref.grad.to(a.dtype).float(), atol=tol, rtol=tol)
             self.assertEqual(b.grad.cpu().float(), b_ref.grad.to(b.dtype).float(), atol=tol, rtol=tol)
 
