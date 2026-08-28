@@ -458,7 +458,7 @@ class Tensor(torch._C.TensorBase):
             and (
                 isinstance(self, torch._subclasses.functional_tensor.FunctionalTensor)
                 or (
-                    not isinstance(self, torch._subclasses.fake_tensor.FakeTensor)
+                    not torch._subclasses.fake_tensor.is_fake_tensor(self)
                     and self.data_ptr() == 0
                 )
             )
@@ -478,7 +478,7 @@ class Tensor(torch._C.TensorBase):
             type(self) is not torch.Tensor
             and type(self).__torch_dispatch__ is not torch.Tensor.__torch_dispatch__
             and (
-                isinstance(self, torch._subclasses.fake_tensor.FakeTensor)
+                torch._subclasses.fake_tensor.is_fake_tensor(self)
                 and not (skip_data and materialize_fake_tensors)
             )
         ):
@@ -512,7 +512,7 @@ class Tensor(torch._C.TensorBase):
             # don't have _subclasses
             if (
                 hasattr(torch, "_subclasses")
-                and isinstance(self, torch._subclasses.fake_tensor.FakeTensor)
+                and torch._subclasses.fake_tensor.is_fake_tensor(self)
                 and skip_data
             ):
                 storage._fake_device = self.device
@@ -918,6 +918,11 @@ class Tensor(torch._C.TensorBase):
         from torch._linalg_utils import eig
 
         return eig(self, eigenvectors=eigenvectors)
+
+    def qr(self, some=True):
+        from torch._linalg_utils import qr
+
+        return qr(self, some=some)
 
     def symeig(self, eigenvectors=False):
         from torch._linalg_utils import _symeig
@@ -1561,7 +1566,7 @@ class Tensor(torch._C.TensorBase):
             stream (integer or None): An optional Python integer representing a
                 pointer to a CUDA stream. The current stream is synchronized with
                 this stream before the capsule is created, and since the capsule
-                shares its storage with the tensor this make it safe to access from
+                shares its storage with the tensor this makes it safe to access from
                 both streams.  If -1 is passed then no synchronization is performed.
                 If 1 (on CUDA) or 0 (on ROCM) then the default stream is used for
                 synchronization. This API intentionally slightly deviates from the DLPack

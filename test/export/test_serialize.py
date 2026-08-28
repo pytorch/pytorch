@@ -41,6 +41,7 @@ from torch._export.db.examples import all_examples
 from torch._export.serde.schema import ArgumentKind
 from torch._export.serde.serialize import (
     _dict_to_dataclass,
+    _reconstruct_fake_tensor,
     _to_json_bytes,
     canonicalize,
     deserialize,
@@ -1359,6 +1360,39 @@ class TestDeserialize(TestCase):
         else:
             _check_graph(pre_dispatch=False)
 
+    def test_deserialize_fake_tensor_constant_with_symbolic_size(self) -> None:
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x.data * 2
+
+        # PyTorch 2.8 allowed non-strict export to lift the FakeTensor produced
+        # by x.data into constants, including its symbolic batch dimension.
+        # Deserialization must remain compatible with those archives.
+        with self.assertWarnsRegex(
+            UserWarning,
+            "We found a fake tensor in the exported program constant's list",
+        ):
+            with torch._export.config.patch(error_on_lifted_constant_tensors=False):
+                ep = torch.export.export(
+                    Foo(),
+                    (torch.randn(2, 3),),
+                    dynamic_shapes={"x": {0: Dim("batch")}},
+                    strict=False,
+                )
+
+        self.assertEqual(len(ep.constants), 1)
+        constant_name, fake_constant = next(iter(ep.constants.items()))
+        self.assertIsInstance(fake_constant, FakeTensor)
+        self.assertFalse(is_concrete_int(fake_constant.shape[0]))
+
+        with torch.serialization.safe_globals([_reconstruct_fake_tensor]):
+            loaded_ep = deserialize(serialize(ep))
+
+        loaded_constant = loaded_ep.constants[constant_name]
+        self.assertIsInstance(loaded_constant, FakeTensor)
+        self.assertFalse(is_concrete_int(loaded_constant.shape[0]))
+        self.assertEqual(loaded_constant.shape[1], 3)
+
     def test_optional_tuple(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
@@ -1381,6 +1415,67 @@ class TestDeserialize(TestCase):
                     return torch.ops.mylib.foo(a, b, c)
 
             self.check_graph(M(), (torch.randn(3), torch.randn(3), torch.randn(3)))
+
+    def test_list_of_int_and_float_lists_custom_op(self):
+        # Example program: a custom op that takes List[List[int]] and
+        # List[List[float]] arguments. Round-tripping it (export -> serialize ->
+        # deserialize) exercises the serde nested-list path end to end: these
+        # args must serialize as as_int_lists / as_float_lists, for both
+        # non-empty and empty lists.
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::apply_groups",
+                "(Tensor x, int[][] int_groups, float[][] float_groups) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::apply_groups", "cpu", lib=lib)
+            @torch.library.register_fake("mylib::apply_groups")
+            def apply_groups_impl(x, int_groups, float_groups):
+                bias = sum(v for group in int_groups for v in group) + sum(
+                    v for group in float_groups for v in group
+                )
+                return x + bias
+
+            class NonEmpty(torch.nn.Module):
+                def forward(self, x):
+                    return torch.ops.mylib.apply_groups(
+                        x, [[1, 2], [3, 4, 5]], [[1.5], [2.5, 3.5]]
+                    )
+
+            class Empty(torch.nn.Module):
+                def forward(self, x):
+                    return torch.ops.mylib.apply_groups(x, [], [])
+
+            # The round-trips must succeed; before nested-list support was added,
+            # serialization raised SerializeError on List[List[int/float]] args.
+            self.check_graph(NonEmpty(), (torch.randn(3),))
+            self.check_graph(Empty(), (torch.randn(3),))
+
+            # Pin down the exact serialized argument kinds and values.
+            def _serialized_op_args(mod):
+                ep = torch.export.export(mod, (torch.randn(3),), strict=True)
+                serialized = ExportedProgramSerializer().serialize(ep)
+                nodes = [
+                    n
+                    for n in serialized.exported_program.graph_module.graph.nodes
+                    if n.target and "apply_groups" in n.target
+                ]
+                self.assertEqual(len(nodes), 1)
+                return {i.name: i.arg for i in nodes[0].inputs}
+
+            args = _serialized_op_args(NonEmpty())
+            self.assertEqual(args["int_groups"].type, "as_int_lists")
+            self.assertEqual(args["int_groups"].as_int_lists, [[1, 2], [3, 4, 5]])
+            self.assertEqual(args["float_groups"].type, "as_float_lists")
+            self.assertEqual(args["float_groups"].as_float_lists, [[1.5], [2.5, 3.5]])
+
+            empty_args = _serialized_op_args(Empty())
+            self.assertEqual(empty_args["int_groups"].type, "as_int_lists")
+            self.assertEqual(empty_args["int_groups"].as_int_lists, [])
+            self.assertEqual(empty_args["float_groups"].type, "as_float_lists")
+            self.assertEqual(empty_args["float_groups"].as_float_lists, [])
 
     def test_unbacked_bindings_serialize(self):
         from torch._export.utils import _get_shape_env_from_gm

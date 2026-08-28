@@ -13,7 +13,7 @@ from .loop_body import LoopBody
 from .utils import dominated_nodes
 
 
-def val_expressable_in_32_bits(val: Any) -> bool:
+def val_expressable_in_32_bits(val: object) -> bool:
     if getattr(val, "is_Boolean", False):
         return True
 
@@ -50,7 +50,7 @@ def try_to_reduce_precision(
     replacement_vals: dict[Any, ValueRanges[sympy.Expr]],
 ) -> None:
     # if a downstream use of a node explicitly converts to int32, or float16/float32/float64,
-    # then it's precision is set for that chain of uses, and we don't need to consider those
+    # then its precision is set for that chain of uses, and we don't need to consider those
     # dominated values
     def skip_filter(node: Any) -> bool:
         return node.target == "to_dtype" and node.args[2] in (

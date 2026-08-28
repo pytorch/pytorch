@@ -45,7 +45,7 @@ class PackedSequence(PackedSequence_):
         Instances of this class should never be created manually. They are meant
         to be instantiated by functions like :func:`pack_padded_sequence`.
 
-        Batch sizes represent the number elements at each sequence step in
+        Batch sizes represent the number of elements at each sequence step in
         the batch, not the varying sequence lengths passed to
         :func:`pack_padded_sequence`.  For instance, given data ``abc`` and ``x``
         the :class:`PackedSequence` would contain data ``axbc`` with

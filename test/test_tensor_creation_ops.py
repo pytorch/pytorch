@@ -22,6 +22,7 @@ from torch.testing._internal.common_utils import (
     suppress_warnings,
     torch_to_numpy_dtype_dict,
     numpy_to_torch_dtype_dict,
+    numpy_to_torch_dtype,
     slowTest,
     set_default_dtype,
     set_default_tensor_type,
@@ -39,7 +40,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, deviceCountAtLeast, onlyNativeDeviceTypes,
     onlyCPU, largeTensorTest, precisionOverride, dtypes,
-    onlyCUDA, skipCPUIf, dtypesIfCUDA, dtypesIfCPU, skipMeta, onlyAccelerator)
+    onlyCUDA, skipCPUIf, dtypesIfCUDA, dtypesIfCPU, dtypesIfXPU, skipMeta, onlyAccelerator)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex, all_types_and_complex_and, all_types_and, floating_and_complex_types, complex_types,
     floating_types, floating_and_complex_types_and, integral_types, integral_types_and, get_all_dtypes,
@@ -417,8 +418,7 @@ class TestTensorCreation(TestCase):
 
         expected_scipy_types = [
             torch.float64,
-            # windows scipy block_diag returns int32 types
-            torch.int32 if IS_WINDOWS else torch.int64,
+            numpy_to_torch_dtype(np.array(0).dtype),
             torch.complex128,
             torch.float64
         ]
@@ -447,17 +447,19 @@ class TestTensorCreation(TestCase):
         self.assertEqual(torch.tensor([1.0 + 3.0j, 2.0 + 4.0j], dtype=complex_dtype), z)
 
     @onlyNativeDeviceTypes
-    @dtypes(torch.float32, torch.float64)
+    @dtypes(torch.half, torch.float32, torch.float64)
     def test_torch_polar(self, device, dtype):
         abs = torch.tensor([1, 2, -3, -4.5, 1, 1], device=device, dtype=dtype)
         angle = torch.tensor([math.pi / 2, 5 * math.pi / 4, 0, -11 * math.pi / 6, math.pi, -math.pi],
                              device=device, dtype=dtype)
         z = torch.polar(abs, angle)
-        complex_dtype = torch.complex64 if dtype == torch.float32 else torch.complex128
+        complex_dtype = float_to_corresponding_complex_type_map[dtype]
+        # float16 loses precision in cos/sin and the interleaved storage; relax tol.
+        atol, rtol = (1e-2, 1e-2) if dtype == torch.half else (1e-5, 1e-5)
         self.assertEqual(torch.tensor([1j, -1.41421356237 - 1.41421356237j, -3,
                                        -3.89711431703 - 2.25j, -1, -1],
                                       dtype=complex_dtype),
-                         z, atol=1e-5, rtol=1e-5)
+                         z, atol=atol, rtol=rtol)
 
     @onlyNativeDeviceTypes
     @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
@@ -468,7 +470,7 @@ class TestTensorCreation(TestCase):
             b = torch.tensor([3, 4], device=device, dtype=dtype)
             error = r"Expected both inputs to be Half, Float or Double tensors but " \
                     r"got [A-Za-z]+ and [A-Za-z]+"
-            with self.assertRaisesRegex(RuntimeError, error):
+            with self.assertRaisesRegex(NotImplementedError, error):
                 op(a, b)
 
     @onlyNativeDeviceTypes
@@ -1071,17 +1073,30 @@ class TestTensorCreation(TestCase):
     # NumPy may have the same behavior.
     @onlyNativeDeviceTypes
     @unittest.skipIf(IS_PPC, "Test is broken on PowerPC, see https://github.com/pytorch/pytorch/issues/39671")
+    # XPU float->int finite conversion differs for int32/int64; see:
+    # https://github.com/intel/torch-xpu-ops/issues/5054
+    @dtypesIfXPU(torch.bool, torch.uint8, torch.int8, torch.int16)
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_finite(self, device, dtype):
         min = torch.finfo(torch.float).min
         max = torch.finfo(torch.float).max
 
-        # Note: CUDA max float -> integer conversion is divergent on some dtypes
+        # Note: CUDA/MTIA max float -> integer conversion is divergent on some dtypes
         vals = (min, -2, -1.5, -.5, 0, .5, 1.5, 2, max)
         refs = None
-        if self.device_type == 'cuda':
+        if self.device_type in ('cuda', 'mtia'):
             if torch.version.hip:
                 # HIP min float -> int64 conversion is divergent
+                vals = (-2, -1.5, -.5, 0, .5, 1.5, 2)
+            elif dtype == torch.uint8:
+                # CUDA out-of-range float -> uint8 is divergent under clang-21:
+                # out-of-range float->int is UB and codegen differs from numpy's
+                # reference. Test only in-range values so torch and numpy agree
+                # deterministically.
+                vals = (0, .5, 1.5, 2)
+            elif dtype in (torch.int8, torch.int16):
+                # CUDA min float -> int8/int16 is divergent under clang-21
+                # (out-of-range float->int is UB). Drop the out-of-range extreme.
                 vals = (-2, -1.5, -.5, 0, .5, 1.5, 2)
             else:
                 vals = (min, -2, -1.5, -.5, 0, .5, 1.5, 2)
@@ -1091,8 +1106,11 @@ class TestTensorCreation(TestCase):
             # Note: numpy -2.0 or -1.5 -> uint8 conversion is undefined
             #       see https://github.com/pytorch/pytorch/issues/97794
             refs = (0, 254, 255, 0, 0, 0, 1, 2)
-        elif dtype == torch.int16:
-            # CPU min and max float -> int16 conversion is divergent.
+        elif dtype in (torch.int8, torch.int16):
+            # CPU min and max float -> int8/int16 conversion is divergent.
+            # (int8 also diverges under clang-21: out-of-range float->int is UB
+            # and codegen differs from numpy's reference.) Drop the out-of-range
+            # extremes.
             vals = (-2, -1.5, -.5, 0, .5, 1.5, 2)
 
         self._float_to_int_conversion_helper(vals, device, dtype, refs)
@@ -1278,6 +1296,22 @@ class TestTensorCreation(TestCase):
 
         with self.assertRaises(RuntimeError):
             torch.repeat_interleave(torch.tensor([1, 2, -1, 3, 4], device=device))
+
+        # Negative repeats must be rejected even when output_size is passed,
+        # otherwise the CPU kernel can write out of bounds: the corrupted cumsum
+        # makes a later non-negative element produce start < 0, and in a
+        # multi-threaded run that OOB write races ahead of the sibling thread's
+        # check. See https://github.com/pytorch/pytorch/issues/188938
+        # On CUDA the kernel rejects these inputs via a device-side assert,
+        # which cannot be caught cleanly and poisons the context, so this is
+        # validated on CPU only.
+        if torch.device(device).type == "cpu":
+            with self.assertRaisesRegex(RuntimeError, "repeats can not be negative"):
+                torch.repeat_interleave(
+                    torch.tensor([-1, -1, 2], device=device), output_size=0)
+            with self.assertRaisesRegex(RuntimeError, "repeats can not be negative"):
+                torch.repeat_interleave(
+                    torch.tensor([5, -2, 1], device=device), output_size=4)
 
         y = torch.tensor([[1, 2], [3, 4]], device=device)
 
@@ -3735,7 +3769,7 @@ class TestRandomTensorCreation(TestCase):
         expected_bin = shuffled_interval.shape[0] / 10
         expected_error = math.sqrt(expected_bin) / expected_bin * 3
         error = (hist - expected_bin).abs().max() / expected_bin
-        self.assertTrue(error < expected_error, f"error {error} > {expected_error}")
+        self.assertTrue(error < expected_error, lambda msg: f"{msg}\nerror {error} > {expected_error}")
 
     # Test exceptions when device and generator types are incompatible
     @onlyCUDA
@@ -4524,12 +4558,12 @@ class TestAsArray(TestCase):
         self.assertNotEqual(original.data_ptr(), tensor.data_ptr())
 
 
-instantiate_device_type_tests(TestTensorCreation, globals())
-instantiate_device_type_tests(TestRandomTensorCreation, globals())
-instantiate_device_type_tests(TestLikeTensorCreation, globals())
+instantiate_device_type_tests(TestTensorCreation, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestRandomTensorCreation, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestLikeTensorCreation, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestBufferProtocol, globals(), only_for="cpu")
 instantiate_device_type_tests(TestFromBlob, globals(), only_for="cpu")
-instantiate_device_type_tests(TestAsArray, globals())
+instantiate_device_type_tests(TestAsArray, globals(), allow_xpu=True)
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True

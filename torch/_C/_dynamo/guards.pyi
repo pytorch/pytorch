@@ -1,6 +1,6 @@
 import enum
 import traceback
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any, TypeAlias
 
 import torch
@@ -199,6 +199,7 @@ class GuardManager:
     def is_tag_safe_root(self) -> bool: ...
     def has_no_accessors(self) -> bool: ...
     def has_object_aliasing_guard(self) -> bool: ...
+    def has_unoptimized_relational_guard(self) -> bool: ...
     def get_type_of_guarded_value(self) -> type: ...
     def type_dict_manager(
         self,
@@ -496,6 +497,12 @@ def assert_size_stride(
     item: torch.Tensor,
     size: torch.types._size,
     stride: torch.types._size,
+    op_name: str | None = None,
+) -> None: ...
+def assert_size_stride_grouped(
+    items: Sequence[torch.Tensor],
+    sizes: Sequence[torch.types._size],
+    strides: Sequence[torch.types._size],
     op_name: str | None = None,
 ) -> None: ...
 def assert_alignment(

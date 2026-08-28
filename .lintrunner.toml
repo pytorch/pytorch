@@ -18,6 +18,7 @@ exclude_patterns = [
     'torch/_inductor/autoheuristic/artifacts/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
+    'torch/_inductor/kernel/vendored_templates/flydsl/kernels/**',
     'torch/_vendor/**',
     'scripts/**',
     'test/generated_type_hints_smoketest.py',
@@ -37,6 +38,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/flake8_linter.py',
     '--',
@@ -49,6 +52,7 @@ code = 'CLANGFORMAT'
 include_patterns = [
     'aten/src/ATen/*.h',
     'aten/src/ATen/cpu/vec/**/*.h',
+    'aten/src/ATen/cuda/Atomic.cuh',
     'aten/src/ATen/accelerator/**/*.h',
     'aten/src/ATen/accelerator/**/*.cpp',
     'aten/src/ATen/mps/**/*.mm',
@@ -63,11 +67,13 @@ include_patterns = [
     'aten/src/ATen/native/mps/**/*.h',
     'aten/src/ATen/native/vulkan/**/*.h',
     'aten/src/ATen/native/vulkan/**/*.cpp',
+    'aten/src/ATen/native/cuda/KernelUtils.cuh',
     'aten/src/ATen/native/cuda/MultiTensorApply.cuh',
     'aten/src/ATen/native/**/Foreach*.*',
     'aten/src/ATen/native/cuda/fused*.*',
     'aten/src/ATen/native/cuda/Fused*.cu',
-    'aten/src/ATen/native/cuda/group_norm_kernel.cu',
+    'aten/src/ATen/native/group_norm*',
+    'aten/src/ATen/native/**/group_norm*',
     'aten/src/ATen/native/cudnn/*.h',
     'aten/src/ATen/native/cudnn/*.cpp',
     'aten/src/ATen/native/mkldnn/xpu/**/*.h',
@@ -129,11 +135,14 @@ include_patterns = [
 exclude_patterns = [
     'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
+    'torch/_inductor/kernel/vendored_templates/flydsl/kernels/**',
     'torch/_vendor/**',
 ]
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/pyrefly_linter.py',
     '--config=pyrefly.toml',
@@ -160,6 +169,8 @@ include_patterns = [
     'aten/src/ATen/detail/*',
     'aten/src/ATen/functorch/*.h',
     'aten/src/ATen/functorch/*.cpp',
+    'aten/src/ATen/native/group_norm*',
+    'aten/src/ATen/native/cpu/group_norm*',
     'aten/src/ATen/native/nested/cuda/*.cpp',
     'aten/src/ATen/native/nested/cuda/*.h',
     'aten/src/ATen/native/nested/*.cpp',
@@ -200,7 +211,9 @@ exclude_patterns = [
     'c10/benchmark/intrusive_ptr_benchmark.cpp',
     'c10/cuda/CUDAAlgorithm.h',
     'c10/util/complex_math.h',
-    'c10/util/complex_utils.h',
+    'torch/headeronly/util/complex_utils.h',
+    'torch/headeronly/cuda/Atomic.h',
+    'torch/headeronly/cuda/KernelUtils.h',
     'c10/util/flat_hash_map.h',
     'c10/util/logging*.h',
     'c10/metal/*.h',
@@ -248,12 +261,9 @@ exclude_patterns = [
     'c10/mobile/CPUProfilingAllocator.cpp',
     'c10/util/accumulate.h',
     'c10/util/ApproximateClock.cpp',
-    'c10/util/BFloat16-math.h',
     'c10/util/generic_math.h',
     'c10/util/IntrusiveList.h',
-    'c10/util/irange.h',
     'c10/util/llvmMathExtras.h',
-    'c10/util/MathConstants.h',
     'c10/util/NetworkFlow.cpp',
     'c10/util/order_preserving_flat_hash_map.h',
     'c10/util/overflows.h',
@@ -265,6 +275,9 @@ exclude_patterns = [
     'torch/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cpp',
     'torch/headeronly/util/bit_cast.h',
     'torch/headeronly/util/complex.h',
+    'torch/headeronly/util/BFloat16-math.h',
+    'torch/headeronly/util/irange.h',
+    'torch/headeronly/util/MathConstants.h',
 ]
 init_command = [
     'python3',
@@ -309,11 +322,13 @@ include_patterns = [
     'torch/headeronly/macros/Export.h',
     'torch/headeronly/macros/Macros.h',
     'torch/headeronly/util/BFloat16.h',
+    'torch/headeronly/util/BFloat16-math.h',
     'torch/headeronly/util/Half.h',
     'torch/headeronly/util/TypeSafeSignMath.h',
     'torch/headeronly/util/bit_cast.h',
     'torch/headeronly/util/complex.h',
     'torch/headeronly/util/floating_point_utils.h',
+    'torch/headeronly/util/irange.h',
 ]
 exclude_patterns = [
     '**/fb/**',
@@ -408,6 +423,8 @@ include_patterns=['aten/src/ATen/native/native_functions.yaml']
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/nativefunctions_linter.py',
     '--native-functions-yml=aten/src/ATen/native/native_functions.yaml',
@@ -420,6 +437,8 @@ include_patterns=['.github/workflows/**/*.yml']
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/gha_linter.py',
     '--',
@@ -446,6 +465,7 @@ exclude_patterns=[
     '**/*.png',
     '**/*.gz',
     '**/*.patch',
+    'cmake/bolt_profiles/torch.tar.zst',
 ]
 command = [
     'python3',
@@ -498,7 +518,6 @@ exclude_patterns = [
     'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
-    '.ci/docker/common/install_rocm_drm.sh',
     '.lintrunner.toml',
     '**/*.patch',
 ]
@@ -570,54 +589,20 @@ include_patterns = [
     '**/*.h',
 ]
 exclude_patterns = [
-    # Pre-existing violations; burn down over time.
+    # Vendored upstream code - permanent, not debt.
+    'third_party/concurrentqueue/**',
+    # Pre-existing violations; burn down over time. Nothing may be added here.
     'aten/src/**',
-    'c10/core/**',
-    'c10/cuda/**',
-    'c10/test/**',
     'c10/util/**',
-    'c10/xpu/**',
     'test/cpp/**',
     'test/cpp_extensions/**',
-    'third_party/concurrentqueue/**',
-    'tools/autograd/**',
-    'torch/csrc/*.cpp',
-    'torch/csrc/*.h',
-    'torch/csrc/api/**',
-    'torch/csrc/autograd/**',
-    'torch/csrc/cuda/**',
     'torch/csrc/distributed/**',
-    'torch/csrc/dynamo/**',
-    'torch/csrc/export/**',
-    'torch/csrc/fx/**',
     'torch/csrc/inductor/**',
     'torch/csrc/jit/**',
-    'torch/csrc/lazy/**',
-    'torch/csrc/multiprocessing/**',
-    'torch/csrc/profiler/**',
-    'torch/csrc/stable/**',
-    'torch/csrc/tensor/**',
-    'torch/csrc/utils/**',
-    'torch/csrc/xpu/**',
-    'torch/headeronly/**',
-    'torch/lib/**',
-    'torch/nativert/**',
 ]
 command = [
     'python3',
-    'tools/linter/adapters/grep_linter.py',
-    '--pattern=\bthrow\b',
-    '--allowlist-pattern=@allow-raw-throw',
-    '--linter-name=RAWTHROW',
-    '--error-name=raw throw statement',
-    """--error-description=\
-        Do not use raw `throw` in C++ code. Use TORCH_CHECK, \
-        TORCH_CHECK_WITH, C10_THROW_ERROR, or other error-reporting macros \
-        instead. See c10/util/Exception.h for available macros. If this is a \
-        re-throw (throw;), restructure the code to avoid try/catch/throw or \
-        add the file to the RAWTHROW exclude list in .lintrunner.toml with \
-        justification.\
-    """,
+    'tools/linter/adapters/raw_throw_linter.py',
     '--',
     '@{{PATHSFILE}}'
 ]
@@ -712,6 +697,31 @@ command = [
         both regular and symbolic numbers, Dim for ints representing \
         dimensions, or IntWithoutSymInt/FloatWithoutSymFloat if you really \
         meant to exclude symbolic numbers.
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'ISINSTANCE_FAKE_TENSOR'
+include_patterns = ['torch/**/*.py']
+exclude_patterns = [
+    '**/fb/**',
+    'torch/testing/**',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=isinstance\([^)]*\bFakeTensor\b',
+    '--line-allowlist-pattern=noqa: ISINSTANCE_FAKE_TENSOR',
+    '--linter-name=ISINSTANCE_FAKE_TENSOR',
+    '--error-name=isinstance(x, FakeTensor)',
+    """--error-description=\
+        Do not use isinstance(x, FakeTensor) because it only matches \
+        Python FakeTensors and misses C++ FakeTensors. \
+        Use is_fake_tensor(x) for a leaf fake check. \
+        If you must match only a Python FakeTensor instance, keep isinstance \
+        and add a `# noqa: ISINSTANCE_FAKE_TENSOR` comment to the line.\
     """,
     '--',
     '@{{PATHSFILE}}'
@@ -835,6 +845,7 @@ exclude_patterns = [
     'aten/src/ATen/test/**',
     'c10/cuda/CUDAFunctions.h',
     'c10/cuda/CUDACachingAllocator.cpp',
+    'c10/cuda/CUDAMallocAsyncAllocator.cpp',
     '**/fb/**',
 ]
 command = [
@@ -955,6 +966,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/cmake_linter.py',
     '--config=.cmakelintrc',
@@ -973,6 +986,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/shellcheck_linter.py',
     '--',
@@ -1023,6 +1038,15 @@ command = [
     'tools/linter/adapters/testowners_linter.py',
     '--',
     '@{{PATHSFILE}}',
+]
+
+[[linter]]
+code = 'CODEOWNERS_TAXONOMY'
+include_patterns = ['**']
+command = [
+    'python3',
+    'scripts/codeowners/check_taxonomy.py',
+    '--lintrunner',
 ]
 
 [[linter]]
@@ -1091,6 +1115,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/test_has_main_linter.py',
     '--',
@@ -1177,6 +1203,8 @@ include_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/workflow_consistency_linter.py',
     '--',
@@ -1195,6 +1223,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/no_workflows_on_fork.py',
     '--',
@@ -1206,6 +1236,8 @@ code = 'CODESPELL'
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/codespell_linter.py',
     '--',
@@ -1227,7 +1259,10 @@ exclude_patterns = [
     'torch/_inductor/autoheuristic/artifacts/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
+    'torch/_inductor/kernel/vendored_templates/flydsl/kernels/**',
     'torch/utils/model_dump/preact.mjs',
+    # Generated: mirrors the label names on GitHub verbatim
+    'tools/linter/adapters/pytorch_labels.json',
 ]
 is_formatter = true
 
@@ -1241,6 +1276,8 @@ include_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/pyfmt_linter.py',
     '--',
@@ -1524,6 +1561,8 @@ code = 'PYPROJECT'
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/pyproject_linter.py',
     '--',
@@ -1538,6 +1577,8 @@ code = 'CMAKE_MINIMUM_REQUIRED'
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/cmake_minimum_required_linter.py',
     '--',
@@ -1602,6 +1643,7 @@ exclude_patterns = [
     'torch/_inductor/autoheuristic/artifacts/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
+    'torch/_inductor/kernel/vendored_templates/flydsl/kernels/**',
     'torch/_vendor/**',
     'test/cpython/**',
     'test/test_torchfuzz_repros.py',
@@ -1622,6 +1664,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/ruff_linter.py',
     '--config=pyproject.toml',
@@ -1814,6 +1858,7 @@ include_patterns = [
 exclude_patterns = [
     'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
+    'torch/_inductor/kernel/vendored_templates/flydsl/kernels/**',
 ]
 is_formatter = false
 
@@ -1856,6 +1901,16 @@ command = [
 ]
 include_patterns = [
     'torch/header_only_apis.txt',
+    'test/cpp/aoti_abi_check/*.cpp',
+    'test/cpp/aoti_abi_check/cuda/*.cu',
+    'tools/linter/adapters/header_only_linter.py',
+    # headers the listed APIs are filed under
+    'torch/headeronly/**',
+    'c10/util/TypeCast.h',
+    'c10/util/complex.h',
+    'c10/util/generic_math.h',
+    'aten/src/ATen/core/PhiloxRNGEngine.h',
+    'aten/src/ATen/cpu/vec/**',
 ]
 is_formatter = false
 
@@ -1872,7 +1927,10 @@ command = [
 code = 'STABLE_SHIM_VERSION'
 include_patterns = [
     'torch/csrc/stable/c/shim.h',
-    'torch/csrc/inductor/aoti_torch/c/shim.h'
+    'torch/csrc/inductor/aoti_torch/c/shim.h',
+    'torch/csrc/inductor/aoti_torch/c/shim_cpu.h',
+    'torch/csrc/inductor/aoti_torch/c/shim_mps.h',
+    'torch/csrc/inductor/aoti_torch/c/shim_xpu.h',
 ]
 command = [
     'python3',
@@ -1889,6 +1947,9 @@ include_patterns = [
     # in order to check usages of the shim. Even if the shim API is added but not used anywhere, we want
     # to update that file.
     'torch/csrc/inductor/aoti_torch/c/shim.h',
+    'torch/csrc/inductor/aoti_torch/c/shim_cpu.h',
+    'torch/csrc/inductor/aoti_torch/c/shim_mps.h',
+    'torch/csrc/inductor/aoti_torch/c/shim_xpu.h',
     'torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h',
     'torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.h',
     'torch/csrc/inductor/aoti_torch/generated/c_shim_cuda.h',
@@ -1936,4 +1997,16 @@ command = [
     'tools/linter/adapters/generated_shims_version_linter.py',
     '--',
     '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'UNSPECIFIED_BACKEND'
+include_patterns = [
+    'test/dynamo/**/*.py',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/unspecified_backend_linter.py',
+    '--',
+    '@{{PATHSFILE}}',
 ]
