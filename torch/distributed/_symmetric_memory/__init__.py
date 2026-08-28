@@ -634,7 +634,7 @@ class _ScaleMode(Enum):
 # The swizzled scale layout pads to 128 rows x 4 scale-columns per tile, and
 # `to_blocked` emits those tiles row-block-major (see torch/_higher_order_ops/
 # flex_gemm.py). Two consequences the all-gather depends on, both requiring the
-# shard's gather-dim extent to be a multiple of 128:
+# shard's flattened row count to be a multiple of 128:
 #   1. concatenating each rank's swizzled scales equals swizzling the gathered
 #      scales, so the scales can be all-gathered as opaque bytes; and
 #   2. each gathered chunk is itself a valid swizzled scale for that chunk's
@@ -685,6 +685,23 @@ def _reject_unlabelled_block_scale(
             "requested explicitly -- pass scale_recipe=[ScalingType.BlockWise1x32] "
             "and swizzle=[SwizzleType.SWIZZLE_32_4_4] -- because a swizzled scale "
             "cannot be distinguished from an unswizzled one by shape alone."
+        )
+
+
+def _check_mx_platform() -> None:
+    """This implementation is built on the NVIDIA swizzled scale layout.
+
+    ROCm's block-scaled GEMM takes an unpadded scale
+    (`ceil_div(M, 32) * K` elements, `aten/src/ATen/native/cuda/ScaledBlas.cpp`)
+    with no 128-row tiling, so neither the numel validation here nor the
+    gather-by-concatenation it licenses carries over. Fail clearly instead of
+    computing against the wrong layout.
+    """
+    if torch.version.hip is not None:
+        raise ValueError(
+            "MXFP8 async-TP is not supported on ROCm: it relies on the swizzled "
+            "32x4x4 scale layout, and ROCm's block-scaled GEMM expects an "
+            "unpadded scale layout instead."
         )
 
 
@@ -749,13 +766,21 @@ def _resolve_recipe(
     return [ScalingType.RowWise.value], [SwizzleType.NO_SWIZZLE.value]
 
 
-def _check_mx_gather_alignment(shard: torch.Tensor, gather_dim: int) -> None:
-    gathered_extent = shard.shape[gather_dim]
-    if gathered_extent % _MX_SCALE_ROW_ALIGNMENT != 0:
+def _check_mx_gather_alignment(shard: torch.Tensor) -> None:
+    """The shard's *flattened* row count must be a whole number of 128-row tiles.
+
+    The swizzled layout tiles the 2-D operand the GEMM sees, whose row count is
+    `prod(shape[:-1])` -- not `shape[0]`. Checking the leading dim alone would
+    reject every 3-D operand whose leading dim is small (a (2, 128, K) shard has
+    256 rows and gathers correctly), while admitting nothing extra, since a
+    128-aligned leading dim implies a 128-aligned product.
+    """
+    rows = math.prod(shard.shape[:-1])
+    if rows % _MX_SCALE_ROW_ALIGNMENT != 0:
         raise ValueError(
-            "MXFP8 all-gather requires the gathered dim of each shard to be a "
-            f"multiple of {_MX_SCALE_ROW_ALIGNMENT} (got {gathered_extent} for "
-            f"gather_dim={gather_dim}). The swizzled scale layout pads each "
+            "MXFP8 all-gather requires each shard's flattened row count to be a "
+            f"multiple of {_MX_SCALE_ROW_ALIGNMENT} (got {rows} for a "
+            f"{tuple(shard.shape)} shard). The swizzled scale layout pads each "
             "shard's tail to a 128-row tile, so a shorter shard cannot be "
             "gathered by concatenation."
         )
@@ -776,7 +801,7 @@ def _check_and_verify_fp8_all_gather_scale_mode(
     if scale is None:
         return _ScaleMode.UNSCALED
     elif _is_mx_scale(scale_recipe):
-        _check_mx_gather_alignment(shard, gather_dim)
+        _check_mx_gather_alignment(shard)
         expected = _mx_swizzled_scale_numel(
             math.prod(shard.shape[:-1]), shard.shape[-1]
         )
@@ -870,7 +895,7 @@ def _fused_all_gather_matmul_impl(
     )
 
     outputs = [
-        A_flat.new_empty(A_flat.shape[0], B.shape[1], dtype=out_dtype or B.dtype)
+        A_flat.new_empty(A_flat.shape[0], B.shape[1], dtype=out_dtype or A_shard.dtype)
         for B, out_dtype in zip(Bs, out_dtypes)
     ]
     output_shards = [output.chunk(group.size()) for output in outputs]
@@ -1084,7 +1109,7 @@ def _fused_all_gather_matmul_last_gather_dim_impl(
     outputs = [
         torch.empty(
             (A_shard_flat.shape[0], B.shape[1]),
-            dtype=out_dtype or B.dtype,
+            dtype=out_dtype or A_shard.dtype,
             device=A_shard.device,
         )
         for B, out_dtype in zip(Bs, out_dtypes)
@@ -1472,7 +1497,8 @@ def _fused_all_gather_scaled_matmul(
     MXFP8: pass `A_shard` as float8_e4m3fn and `A_scale` as this rank's
     float8_e8m0fnu block scales already in the swizzled 32x4x4 layout (the flat
     buffer `to_blocked` returns). The scales are gathered alongside the data, which
-    requires `A_shard.shape[gather_dim]` to be a **multiple of 128**: the swizzled
+    requires the shard's flattened row count, `prod(A_shard.shape[:-1])`, to be a
+    **multiple of 128**: the swizzled
     layout pads each shard's tail to a 128-row tile, so a shorter shard cannot be
     gathered by concatenation. A shard that is not 128-aligned raises rather than
     producing a wrong result.
@@ -1484,6 +1510,7 @@ def _fused_all_gather_scaled_matmul(
     out_dtypes = _maybe_convert_scalar_types_to_dtypes(out_dtypes)
 
     if _is_mx_scale(scale_recipe_a):
+        _check_mx_platform()
         _check_mx_leading_dim(gather_dim, "gather_dim")
         # The fp8 operand dtype is not a usable output dtype for block scaling, so
         # `out_dtype or A.dtype` would hand cuBLAS an fp8 output and fail deep in
@@ -1781,6 +1808,7 @@ def _fused_scaled_matmul_reduce_scatter(
     than producing a wrong result. `result_scale` is not supported for MXFP8.
     """
     if _is_mx_scale(scale_recipe_a):
+        _check_mx_platform()
         _check_mx_leading_dim(
             scatter_dim_after_maybe_reshape, "scatter_dim_after_maybe_reshape"
         )

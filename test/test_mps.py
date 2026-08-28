@@ -1760,11 +1760,15 @@ class TestMPS(TestCaseMPS):
 
     def test_baddbmm_beta_zero_ignores_input(self):
         # When beta == 0 the input/bias must be ignored entirely. nan/inf in it
-        # must not be propagated. Regression test for: #187521.
-        for dtype in [torch.float32, torch.float16, torch.bfloat16]:
+        # must not be propagated. Regression test for: #187521 and for #194442
+        # also probes the complex path
+        for dtype in [torch.float32, torch.float16, torch.bfloat16, torch.complex64]:
             batch1 = torch.randn(8, 77, 64, dtype=dtype, device="mps")
             batch2 = torch.randn(8, 64, 77, dtype=dtype, device="mps")
-            for bad in [float("nan"), float("inf"), float("-inf")]:
+            bad_values = [float("nan"), float("inf"), float("-inf")]
+            if dtype.is_complex:
+                bad_values = [complex(v, v) for v in bad_values]
+            for bad in bad_values:
                 inp = torch.full((8, 77, 77), bad, dtype=dtype, device="mps")
                 out = torch.baddbmm(inp, batch1, batch2, beta=0, alpha=0.125)
                 self.assertFalse(out.isnan().any() or out.isinf().any(),
@@ -1776,6 +1780,12 @@ class TestMPS(TestCaseMPS):
                 out_a = torch.addbmm(inp_a, batch1, batch2, beta=0, alpha=0.125)
                 self.assertFalse(out_a.isnan().any() or out_a.isinf().any(),
                                  lambda msg: f"{msg}\naddbmm beta=0 propagated {bad} for dtype={dtype}")
+
+                inp_m = torch.full((77, 77), bad, dtype=dtype, device="mps")
+                out_m = torch.addmm(inp_m, batch1[0], batch2[0], beta=0, alpha=0.125)
+                self.assertFalse(out_m.isnan().any() or out_m.isinf().any(),
+                                 lambda msg: f"{msg}\naddmm beta=0 propagated {bad} for dtype={dtype}")
+                self.assertEqual(out_m, torch.mm(batch1[0], batch2[0]) * 0.125)
 
     def test_local_scalar_dense_mps(self):
         x_cpu = torch.randn(1)
@@ -15304,6 +15314,30 @@ class TestAdvancedIndexing(TestCaseMPS):
         finally:
             torch.use_deterministic_algorithms(False)
 
+    @parametrize("op", ["scatter_add_", "index_add_", "index_put_"])
+    @parametrize("dtype", [torch.bool, torch.uint8])
+    @parametrize("offset", [0, 1, 2, 3])
+    def test_accumulate_misaligned_storage_offset(self, op, dtype, offset, device="mps"):
+        # 1-byte dtypes accumulate through a 4-byte atomic<uint> compare-exchange and
+        # the buffer is bound at storage_offset() * element_size(), so a view whose
+        # storage offset is not a multiple of 4 needs the kernel to realign the base
+        # pointer. A miss lands in front of the view, hence comparing the whole base
+        # tensor rather than just the view.
+        idx = torch.tensor([1, 3, 3, 6])
+        src = torch.ones(idx.numel(), dtype=dtype)
+
+        def run(dev):
+            base = torch.zeros(8 + offset, dtype=dtype, device=dev)
+            view = base.narrow(0, offset, 8)
+            index, values = idx.to(dev), src.to(dev)
+            if op == "index_put_":
+                view.index_put_((index,), values, accumulate=True)
+            else:
+                getattr(view, op)(0, index, values)
+            return base
+
+        self.assertEqual(run(device).cpu(), run("cpu"))
+
     def test_multiple_byte_mask(self, device="mps"):
         v = torch.randn(5, 7, 3, device=device)
         # note: these broadcast together and are transposed to the first dim
@@ -16283,6 +16317,9 @@ class TestConsistency(TestCaseMPS):
             mps_out, cpu_out, cpu_sample = self._run_op(op, mps_sample, opt_dtype)
 
             atol, rtol = self._compute_tolerances(op, dtype)
+            # Forward is bit-exact; backward may include inexact broadcast reductions.
+            if op.name == "nextafter":
+                atol, rtol = 0, 0
             if (op.name == "nn.functional.interpolate" and dtype == torch.uint8 and
                mps_sample.kwargs.get("mode") == "bilinear" and
                mps_sample.kwargs.get("recompute_scale_factor") is True and

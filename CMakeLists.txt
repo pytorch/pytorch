@@ -355,6 +355,9 @@ cmake_dependent_option(
 cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX OR WIN32" OFF)
 cmake_dependent_option(USE_ROCM_CK_GEMM "Use ROCm Composable Kernel for GEMMs" ON "USE_ROCM;NOT WIN32" OFF)
 cmake_dependent_option(USE_ROCM_CK_SDPA "Use ROCm Composable Kernel for SDPA" ON "USE_ROCM;NOT WIN32" OFF)
+# Off by default because enabling gfx12 adds CK SDPA code generation and compile
+# cost to ROCm builds that already target gfx1200/gfx1201.
+cmake_dependent_option(USE_ROCM_CK_SDPA_GFX12 "Also build ROCm Composable Kernel SDPA for gfx12 (RDNA4)" OFF "USE_ROCM_CK_SDPA" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(USE_CUDNN "Use cuDNN" ON "USE_CUDA" OFF)
 cmake_dependent_option(USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
@@ -886,15 +889,18 @@ elseif(LINUX AND CPU_AARCH64)
 endif()
 
 if(USE_LLVM_BOLT)
-  # BOLT requires -fno-reorder-blocks-and-partition for the compiler and
-  # --emit-relocs for the linker. Since --emit-relocs increases the binary
-  # size, we limit the use to libraries that are actually optimized by BOLT
-  # instead of applying globally (see torch_optimize_layout_if_enabled)
-  # NVIDIA internal benchmarking shows -fno-plt also provides a perf boost.
-  append_cxx_flag_if_supported("-fno-plt" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-fno-reorder-blocks-and-partition" CMAKE_CXX_FLAGS)
-  append_c_flag_if_supported("-fno-plt" CMAKE_C_FLAGS)
-  append_c_flag_if_supported("-fno-reorder-blocks-and-partition" CMAKE_C_FLAGS)
+  # In addition to the flags below, BOLT also requires --emit-relocs for the
+  # linker. Since --emit-relocs increases the binary size, we limit the use to
+  # libraries that are actually optimized by BOLT instead of applying globally
+  # (see torch_optimize_layout_if_enabled)
+  list(APPEND _bolt_flags
+    "-fno-plt" # shows a perf boost in NVIDIA internal CI
+    "-fno-reorder-blocks-and-partition" # required by BOLT when using GCC>=8
+  )
+  foreach(_flag IN LISTS _bolt_flags)
+    append_c_flag_if_supported("${_flag}" CMAKE_C_FLAGS)
+    append_cxx_flag_if_supported("${_flag}" CMAKE_CXX_FLAGS)
+  endforeach()
 
   # Extract the committed BOLT profiles for the build-time optimization
   # step (torch_optimize_layout_if_enabled in cmake/public/utils.cmake).
@@ -1060,6 +1066,22 @@ cmake_dependent_option(
   "(USE_CUDA AND NOT MSVC) OR USE_ROCM"
   OFF)
 
+# Flash Attention needs sm80+; disable it if no resolved arch reaches that.
+if(USE_FLASH_ATTENTION AND USE_CUDA AND NOT USE_ROCM)
+  string(REPLACE " " ";" _flash_attn_archs "${NVCC_FLAGS_EXTRA_readable}")
+  set(_flash_attn_has_sm80 OFF)
+  foreach(_arch IN LISTS _flash_attn_archs)
+    if(_arch MATCHES "^(sm|compute)_([0-9]+)" AND CMAKE_MATCH_2 GREATER_EQUAL 80)
+      set(_flash_attn_has_sm80 ON)
+    endif()
+  endforeach()
+  if(_flash_attn_archs AND NOT _flash_attn_has_sm80)
+    message(STATUS
+      "Disabling USE_FLASH_ATTENTION: it needs a CUDA architecture >= 8.0, "
+      "but the resolved CUDA architectures are '${_flash_attn_archs}'")
+    set(USE_FLASH_ATTENTION OFF)
+  endif()
+endif()
 
 IF(USE_ROCM AND ("gfx942" IN_LIST PYTORCH_ROCM_ARCH OR "gfx950" IN_LIST PYTORCH_ROCM_ARCH))
   message(WARNING "Setting USE_MSLK for gfx942/gfx950 to ON by default, doing ROCM build")

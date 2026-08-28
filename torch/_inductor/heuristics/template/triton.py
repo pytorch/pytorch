@@ -49,9 +49,12 @@ from .triton_addmm import AddMMConfigMixin
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator
+    from collections.abc import Callable, Generator, Sequence
 
     from triton import Config as TritonConfig
+
+    from ...ir import IRNode
+    from ...utils import _IntLike
 
 else:
     from torch._inductor.runtime.triton_compat import Config as TritonConfig
@@ -70,10 +73,9 @@ def _use_template_autows() -> bool:
 # Check if running on ROCm
 IS_ROCM = torch.version.hip is not None
 
+_rocm_str: str | None = getattr(torch.version, "rocm", None) or torch.version.hip
 _rocm_version = (
-    tuple(int(v) for v in torch.version.rocm.split(".")[:2])  # type: ignore[union-attr]
-    if torch.version.rocm is not None
-    else (0, 0)
+    tuple(int(v) for v in _rocm_str.split(".")[:2]) if _rocm_str is not None else (0, 0)
 )
 # First ROCm version where origami is not supported.
 ORIGAMI_UNSUPPORTED_ROCM_VERSION = (10, 0)
@@ -414,11 +416,6 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(64, 64, 64, 3, 8),
             GemmConfig(128, 256, 128, 3, 8),
             GemmConfig(256, 128, 128, 3, 8),
-        ]
-
-        self.mixed_mm_configs: list[BaseConfig] = [
-            GemmConfig(16, 128, 256, 3, 4),
-            GemmConfig(16, 128, 256, 5, 8),
         ]
 
         self.persistent_mm_configs: list[BaseConfig] = [
@@ -2874,13 +2871,15 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             # Need to unsqueeze bias from [N] -> [1, N]
             bias = L[aten.unsqueeze](bias, 0)
 
-        def is_tensorwise_scale(scale: Any) -> bool:
+        def is_tensorwise_scale(scale: IRNode) -> bool:
             size = scale.get_size()
             return len(size) == 0 or all(
                 V.graph.sizevars.statically_known_equals(dim, 1) for dim in size
             )
 
-        def normalize_tensorwise_scale(scale: Any, *, allow_high_rank: bool) -> Any:
+        def normalize_tensorwise_scale(
+            scale: IRNode, *, allow_high_rank: bool
+        ) -> IRNode:
             if not is_tensorwise_scale(scale):
                 return scale
             if not allow_high_rank and len(scale.get_size()) > 2:
@@ -2929,7 +2928,9 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
         scale_b = input_nodes[3]
 
         # Scale compatibility assertion from mm_common.scaled_mm_options
-        def are_compatible_scales(size_a: Any, size_b: Any) -> bool:
+        def are_compatible_scales(
+            size_a: Sequence[_IntLike], size_b: Sequence[_IntLike]
+        ) -> bool:
             # Same sized scales are compatible
             if len(size_a) == len(size_b):
                 return True

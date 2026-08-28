@@ -1366,6 +1366,69 @@ class AsyncTPTest(MultiProcContinuousTest):
     )
     @skip_if_lt_x_gpu(2)
     @skipUnless(SM100OrLater, "MXFP8 requires compute capability >= 10.0")
+    def test_fused_all_gather_scaled_matmul_mxfp8_3d(self) -> None:
+        """A 3-D operand gathers on dim 0 when its flattened row count is aligned.
+
+        The alignment requirement is on `prod(shape[:-1])`, which is what the
+        swizzled layout tiles -- not on the leading dim. A (2, 128, K) shard has
+        256 rows and is valid even though its leading dim is 2.
+        """
+        self._init_process()
+        group = dist.group.WORLD
+        rank, world = self.rank, self.world_size
+
+        b, m, K, N = 2, 128, 128, 64
+        torch.manual_seed(42)
+        A_full = torch.randn(world, b, m, K, device="cuda", dtype=torch.bfloat16)
+        B = torch.randn(N, K, device="cuda", dtype=torch.bfloat16)
+        A_shard_hp = A_full[rank].contiguous()
+
+        A_hp, A_q, A_sb = _mxfp8_quantize(A_shard_hp.flatten(0, -2))
+        A_q = A_q.view(b, m, K)
+        B_hp, B_q, B_sb = _mxfp8_quantize(B)
+
+        recipe = [ScalingType.BlockWise1x32.value]
+        swizzle = [SwizzleType.SWIZZLE_32_4_4.value]
+        args = (
+            A_q,
+            [B_q.t()],
+            A_sb,
+            [B_sb],
+            0,
+            group.group_name,
+            [None],
+            [None],
+            [torch.bfloat16],
+            [False],
+            recipe,
+            swizzle,
+            recipe,
+            swizzle,
+        )
+        outputs = []
+        for context in test_contexts:
+            with context():
+                outputs.append(torch.ops.symm_mem.fused_all_gather_scaled_matmul(*args))
+
+        self.assertEqual(outputs[0][1][0], outputs[1][1][0])
+        self.assertEqual(outputs[0][1][0].shape, torch.Size([b * world, m, N]))
+
+        A_hp_gathered = torch.empty(
+            world * b * m, K, device="cuda", dtype=torch.bfloat16
+        )
+        dist.all_gather_into_tensor(A_hp_gathered, A_hp)
+        torch.testing.assert_close(
+            outputs[0][1][0].flatten(0, -2),
+            A_hp_gathered @ B_hp.t(),
+            rtol=1e-2,
+            atol=1e-2,
+        )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skipUnless(SM100OrLater, "MXFP8 requires compute capability >= 10.0")
     def test_fused_scaled_matmul_mxfp8_rejects_non_leading_dim(self) -> None:
         """MXFP8 requires the gathered/scattered dim to be dim 0.
 
