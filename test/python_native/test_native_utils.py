@@ -168,6 +168,45 @@ class TestNativeUtils(TestCase):
         if torch.cuda.is_available():
             self.assertTrue(cap.on_current_device(torch.empty(2, device="cuda")))
 
+    @unittest.skipUnless(TEST_CUDA, "needs a CUDA tensor to compare device indices")
+    @skipIfRocm
+    def test_on_current_device_declines_another_device(self):
+        # The whole point of the predicate: a tensor on a device that is NOT the current one must
+        # be declined, because the kernel/stream caches are bound to the current device. Without
+        # this, replacing the index comparison with `return True` passes the rest of the suite --
+        # the CPU/meta cases short-circuit on device.type before ever reaching it.
+        from unittest.mock import patch
+
+        from torch._native.utils import capability as cap
+
+        x = torch.empty(2, device="cuda")
+        self.assertTrue(cap.on_current_device(x))
+        with patch.object(
+            torch.cuda, "current_device", return_value=x.device.index + 1
+        ):
+            self.assertFalse(cap.on_current_device(x))
+
+    def test_conds_never_raise_without_a_usable_device(self):
+        # Tracing a CUDA model on a CPU-only box: a fake cuda tensor normalizes to cuda:0 without
+        # initializing CUDA, so the arch query and current_device() both raise "No CUDA GPUs are
+        # available". Both conds must answer False instead -- the never-raises contract is the
+        # only thing standing between that and a dead dispatcher.
+        from unittest.mock import patch
+
+        from torch._native.utils import capability as cap
+
+        with FakeTensorMode():
+            x = torch.empty(2, device="cuda")
+        self.addCleanup(cap._arch_ok.cache_clear)
+        cap._arch_ok.cache_clear()
+        boom = RuntimeError("No CUDA GPUs are available")
+        with (
+            patch.object(torch.cuda, "get_device_capability", side_effect=boom),
+            patch.object(torch.cuda, "current_device", side_effect=boom),
+        ):
+            self.assertFalse(cap.device_ok(x, (9, 10, 12)))
+            self.assertFalse(cap.on_current_device(x))
+
 
 if __name__ == "__main__":
     run_tests()
