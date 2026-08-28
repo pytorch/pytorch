@@ -6393,10 +6393,7 @@ for dtype in (torch.int32, torch.int64):
             and p["channels_groups"] == [61, 151, 1]
             and p["stride"] == 1
             and p["nhwc"]
-            and (
-                (p["kernel"] == 1 and p["padding"] == 0)
-                or p["kernel"] == 3
-            )
+            and ((p["kernel"] == 1 and p["padding"] == 0) or p["kernel"] == 3)
         ),
     )
     @with_tf32_off
