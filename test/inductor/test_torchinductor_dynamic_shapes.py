@@ -232,7 +232,7 @@ if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
 
 
 class TestInductorDynamic(DynamicShapesTestCase):
-    compile_fn = partial(torch.compile, dynamic=True)
+    compile_fn = staticmethod(partial(torch.compile, dynamic=True))
 
     def setUp(self):
         # HAS_CUDA_AND_TRITON also checks compute capability to skip tests
