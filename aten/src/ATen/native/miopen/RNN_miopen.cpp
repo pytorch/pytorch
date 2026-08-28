@@ -1,8 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/RNN.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/Config.h>
-#include <ATen/InitialTensorOptions.h>
 #include <ATen/MatrixRef.h>
 #include <ATen/TensorUtils.h>
 
