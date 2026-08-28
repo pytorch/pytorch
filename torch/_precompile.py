@@ -5501,6 +5501,15 @@ def _precompile_dynamo(
                     )
                 if reaches_input(value, set(), receiver):
                     return True
+                if environment_contains_tensor(value, set()) or (
+                    receiver is not None
+                    and accessed_receiver_contains_tensor(value, receiver)
+                ):
+                    raise PrecompileError(
+                        "precompile tracer='dynamo' cannot capture tensor-valued "
+                        "Python globals; pass every tensor as an explicit input. "
+                        f"Referenced local import: {module_name!r}."
+                    )
         return False
 
     import_scan_active: set[int] = set()
@@ -5522,7 +5531,11 @@ def _precompile_dynamo(
     def is_library_defined_function(function: types.FunctionType) -> bool:
         code_path = os.path.realpath(function.__code__.co_filename)
         torch_root = os.path.realpath(os.path.dirname(torch.__file__))
-        if os.path.commonpath((torch_root, code_path)) == torch_root:
+        try:
+            is_torch_file = os.path.commonpath((torch_root, code_path)) == torch_root
+        except ValueError:
+            is_torch_file = False
+        if is_torch_file:
             return True
         if not is_library_module(function.__module__):
             return False
@@ -6107,76 +6120,6 @@ def _precompile_dynamo(
                     "or invoke unverified behavior on mutable environment objects."
                 )
 
-    default_ids = reachable_object_ids(defaults)
-    default_aliases = [
-        name
-        for name, value, _, _, _ in target_references
-        if reachable_object_ids([value]) & default_ids
-    ]
-    if default_aliases:
-        raise PrecompileError(
-            "precompile tracer='dynamo' cannot preserve identity between a function "
-            "default and the Python environment. Pass the value explicitly instead. "
-            f"Aliased global: {default_aliases[0]!r}."
-        )
-    aliased_globals = [
-        name
-        for name, value, receiver, aliases_input, unresolved in target_references
-        if aliases_input
-        or (
-            receiver_reaches_input(value, set())
-            if unresolved
-            else reaches_input(value, set(), receiver)
-        )
-    ]
-    if aliased_globals:
-        raise PrecompileError(
-            "precompile tracer='dynamo' cannot capture an explicit input that aliases "
-            "the Python environment; pass the value only as an input. Aliased global: "
-            f"{aliased_globals[0]!r}."
-        )
-    validate_no_environment_mutation([target])
-    input_values = [
-        value
-        for example in examples
-        for value in pytree.tree_leaves((example.args, example.kwargs))
-    ]
-    for value in input_values:
-        value_type = type(value)
-        if value_type.__module__ == "builtins" or value_type is torch.Tensor:
-            continue
-        for cls in value_type.__mro__:
-            if is_library_module(cls.__module__):
-                continue
-            for name, behavior in vars(cls).items():
-                if (
-                    name.startswith("__")
-                    and name.endswith("__")
-                    and name not in ("__del__", "__init__", "__new__")
-                    and reaches_input(behavior, set())
-                ):
-                    raise PrecompileError(
-                        "precompile tracer='dynamo' cannot preserve an input-derived "
-                        "identity relation between input behavior and the Python "
-                        "environment."
-                    )
-    if dynamic_module_access_reaches_input(target):
-        raise PrecompileError(
-            "precompile tracer='dynamo' cannot preserve an input-derived identity "
-            "relation reached through dynamic module attribute access."
-        )
-    tensor_globals = [
-        name
-        for name, value, receiver, _, _ in target_references
-        if environment_contains_tensor(value, set())
-        or (receiver is not None and accessed_receiver_contains_tensor(value, receiver))
-    ]
-    if tensor_globals:
-        raise PrecompileError(
-            "precompile tracer='dynamo' cannot capture tensor-valued Python globals; "
-            "pass every tensor as an explicit input. Referenced global: "
-            f"{tensor_globals[0]!r}."
-        )
     pending_inputs = [
         value
         for example in examples
@@ -6214,6 +6157,120 @@ def _precompile_dynamo(
             input_objects[value_id] = value
         if not isinstance(value, type):
             pending_inputs.extend(object_state_values(value))
+
+    default_ids = reachable_object_ids(defaults)
+    default_aliases = [
+        name
+        for name, value, _, _, _ in target_references
+        if reachable_object_ids([value]) & default_ids
+    ]
+    if default_aliases:
+        raise PrecompileError(
+            "precompile tracer='dynamo' cannot preserve identity between a function "
+            "default and the Python environment. Pass the value explicitly instead. "
+            f"Aliased global: {default_aliases[0]!r}."
+        )
+    aliased_globals = [
+        name
+        for name, value, receiver, aliases_input, unresolved in target_references
+        if aliases_input
+        or (
+            receiver_reaches_input(value, set())
+            if unresolved
+            else reaches_input(value, set(), receiver)
+        )
+    ]
+    if aliased_globals:
+        raise PrecompileError(
+            "precompile tracer='dynamo' cannot capture an explicit input that aliases "
+            "the Python environment; pass the value only as an input. Aliased global: "
+            f"{aliased_globals[0]!r}."
+        )
+    def is_input_behavior(value: object) -> bool:
+        if isinstance(value, (types.GetSetDescriptorType, types.MemberDescriptorType)):
+            return False
+        return (
+            callable(value)
+            or isinstance(value, (classmethod, property, staticmethod))
+            or inspect.getattr_static(type(value), "__get__", None) is not None
+        )
+
+    selected_input_behaviors = [
+        (behavior, value)
+        for value in input_objects.values()
+        for name in input_behavior_names | {"__call__"}
+        if (behavior := inspect.getattr_static(type(value), name, None)) is not None
+        and is_input_behavior(behavior)
+    ]
+    dunder_input_behaviors = [
+        (behavior, value)
+        for value in input_objects.values()
+        for cls in type(value).__mro__
+        if not is_library_module(cls.__module__)
+        for name, behavior in vars(cls).items()
+        if name.startswith("__")
+        and name.endswith("__")
+        and name not in ("__del__", "__init__", "__new__")
+        and is_input_behavior(behavior)
+    ]
+    input_constructors = [
+        constructor
+        for value in input_objects.values()
+        if isinstance(value, type)
+        for name in ("__new__", "__init__")
+        if (constructor := inspect.getattr_static(value, name, None)) is not None
+    ]
+    mutation_roots = [
+        function
+        for behavior, _ in (*selected_input_behaviors, *dunder_input_behaviors)
+        for function, _ in referenced_python_functions([behavior])
+        if not is_library_defined_function(function)
+    ]
+    mutation_roots.extend(
+        function
+        for constructor in input_constructors
+        for function, _ in referenced_python_functions([constructor])
+        if not is_library_defined_function(function)
+    )
+    validate_no_environment_mutation([target, *mutation_roots])
+    for behavior, _ in dunder_input_behaviors:
+        if reaches_input(behavior, set()):
+            raise PrecompileError(
+                "precompile tracer='dynamo' cannot preserve an input-derived identity "
+                "relation between input behavior and the Python environment."
+            )
+    if dynamic_module_access_reaches_input(target):
+        raise PrecompileError(
+            "precompile tracer='dynamo' cannot preserve an input-derived identity "
+            "relation reached through dynamic module attribute access."
+        )
+    tensor_globals = [
+        name
+        for name, value, receiver, _, _ in target_references
+        if environment_contains_tensor(value, set())
+        or (receiver is not None and accessed_receiver_contains_tensor(value, receiver))
+    ]
+    if tensor_globals:
+        raise PrecompileError(
+            "precompile tracer='dynamo' cannot capture tensor-valued Python globals; "
+            "pass every tensor as an explicit input. Referenced global: "
+            f"{tensor_globals[0]!r}."
+        )
+    for behavior, behavior_receiver in (
+        *selected_input_behaviors,
+        *dunder_input_behaviors,
+    ):
+        for function, receiver in referenced_python_functions([behavior]):
+            if is_library_defined_function(function):
+                continue
+            owner = receiver if receiver is not None else behavior_receiver
+            if environment_contains_tensor(function, set()) or (
+                owner is not None and accessed_receiver_contains_tensor(function, owner)
+            ):
+                raise PrecompileError(
+                    "precompile tracer='dynamo' cannot serialize tensor-valued input "
+                    "behavior state; pass every tensor as an explicit input."
+                )
 
     parameter_dependencies: dict[
         str, tuple[bool, bool, frozenset[tuple[str, ...]]]

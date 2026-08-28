@@ -67,9 +67,16 @@ class _PrecompileDynamoInitialPureHelper:
         return x + 1
 
 
+class _PrecompileDynamoInputMutableEnvironment:
+    def apply(self, x):
+        _DYNAMO_INPUT_MUTATED_LIST.append(1)
+        return x + 1
+
+
 _DYNAMO_INITIAL_TENSOR_HOLDER = _PrecompileDynamoInitialTensorHolder()
 _DYNAMO_INITIAL_MUTATED_LIST = []
 _DYNAMO_INITIAL_PURE_HELPER = _PrecompileDynamoInitialPureHelper()
+_DYNAMO_INPUT_MUTATED_LIST = []
 
 
 def _precompile_dynamo_dynamic(x):
@@ -78,6 +85,24 @@ def _precompile_dynamo_dynamic(x):
 
 def _precompile_dynamo_torch_sin(x):
     return torch.sin(x)
+
+
+def _precompile_dynamo_cross_drive_helper(x):
+    return x + 1
+
+
+def _precompile_dynamo_calls_cross_drive_helper(x):
+    return _precompile_dynamo_cross_drive_helper(x)
+
+
+def _precompile_dynamo_calls_input_mutable_environment(obj, x):
+    return obj.apply(x)
+
+
+def _precompile_dynamo_loaded_local_tensor(x):
+    import _precompile_loaded_tensor_module
+
+    return x + _precompile_loaded_tensor_module.TENSOR
 
 
 def _precompile_dynamo_local_import_identity(x):
@@ -1708,6 +1733,22 @@ class TestPrecompile(TestCase):
                 backend="eager",
             )
 
+    def test_tracer_dynamo_rejects_loaded_local_import_tensor(self):
+        module_name = "_precompile_loaded_tensor_module"
+        module = types.ModuleType(module_name)
+        module.TENSOR = torch.randn(3)
+        sys.modules[module_name] = module
+        try:
+            with self.assertRaisesRegex(PrecompileError, "tensor-valued"):
+                torch.compiler.precompile(
+                    _precompile_dynamo_loaded_local_tensor,
+                    example_inputs=[(torch.randn(3),)],
+                    tracer="dynamo",
+                    backend="eager",
+                )
+        finally:
+            sys.modules.pop(module_name, None)
+
     def test_tracer_dynamo_rejects_input_container_global_alias(self):
         with self.assertRaisesRegex(PrecompileError, "aliases the Python environment"):
             torch.compiler.precompile(
@@ -1939,6 +1980,33 @@ class TestPrecompile(TestCase):
         )
         loaded = torch.compiler.precompile.load(code, cache)
         self.assertEqual(loaded(x, target), _precompile_dynamo_mse_loss(x, target))
+
+    def test_tracer_dynamo_user_helper_on_other_drive(self):
+        from unittest import mock
+
+        torch_root = os.path.realpath(os.path.dirname(torch.__file__))
+        helper_path = os.path.realpath(
+            _precompile_dynamo_cross_drive_helper.__code__.co_filename
+        )
+        commonpath = os.path.commonpath
+
+        def different_drive(paths):
+            if tuple(paths) == (torch_root, helper_path):
+                raise ValueError("Paths don't have the same drive")
+            return commonpath(paths)
+
+        x = torch.randn(4)
+        with mock.patch.object(os.path, "commonpath", side_effect=different_drive):
+            code, cache = torch.compiler.precompile(
+                _precompile_dynamo_calls_cross_drive_helper,
+                example_inputs=[(x,)],
+                tracer="dynamo",
+                backend="eager",
+            )
+        self.assertEqual(
+            torch.compiler.precompile.load(code, cache)(x),
+            _precompile_dynamo_calls_cross_drive_helper(x),
+        )
 
     @torch._dynamo.config.patch(
         automatic_dynamic_shapes=True, assume_static_by_default=True
@@ -2839,6 +2907,19 @@ class TestPrecompile(TestCase):
         self.assertEqual(_PrecompileDynamoInitialMutationHolder.state, [0])
         self.assertEqual(_PrecompileDynamoInitialMutationHolder.value, 0)
         self.assertEqual(_DYNAMO_INITIAL_MUTATED_LIST, [])
+
+    def test_tracer_dynamo_rejects_input_method_environment_mutation(self):
+        _DYNAMO_INPUT_MUTATED_LIST.clear()
+        with self.assertRaisesRegex(PrecompileError, "mutable environment objects"):
+            torch.compiler.precompile(
+                _precompile_dynamo_calls_input_mutable_environment,
+                example_inputs=[
+                    (_PrecompileDynamoInputMutableEnvironment(), torch.randn(3))
+                ],
+                tracer="dynamo",
+                backend="eager",
+            )
+        self.assertEqual(_DYNAMO_INPUT_MUTATED_LIST, [])
 
     def test_tracer_dynamo_initial_allows_pure_update_method(self):
         x = torch.randn(3)
