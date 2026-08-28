@@ -63,16 +63,18 @@ struct LogSoftMaxBackwardEpilogue {
 
 template<typename T, typename AccumT, typename OutT>
 struct SoftMaxForwardEpilogue {
+  // sum is >= 1 by construction (the max element contributes exp(0) == 1), so
+  // the reciprocal can neither overflow nor go denormal.
   __device__ __forceinline__ SoftMaxForwardEpilogue(AccumT max_input, AccumT sum)
     : max_input(max_input)
-    , sum(sum) {}
+    , inv_sum(AccumT(1) / sum) {}
 
   __device__ __forceinline__ OutT operator()(T input) const {
-    return static_cast<OutT>(std::exp(input - max_input) / sum);
+    return static_cast<OutT>(std::exp(input - max_input) * inv_sum);
   }
 
   const AccumT max_input;
-  const AccumT sum;
+  const AccumT inv_sum;
 };
 
 template<typename T, typename AccumT, typename OutT>
@@ -325,16 +327,16 @@ __global__ void cunn_SpatialSoftMaxForward(
           output[data_offset + d * dim_stride] = epilogue(input[data_offset + d * dim_stride]);
       } else {
         accscalar_t max_input = std::numeric_limits<accscalar_t>::lowest();
-        for (index_t d = threadIdx.x; d < dim_size; d += blockDim.x) {
+        for (index_t d = 0; d < dim_size; ++d) {
           const accscalar_t value = static_cast<accscalar_t>(input[data_offset + d * dim_stride]);
           max_input = Max<accscalar_t>()(max_input, value);
         }
         accscalar_t sum = 0;
-        for (index_t d = threadIdx.x; d < dim_size; d += blockDim.x)
+        for (index_t d = 0; d < dim_size; ++d)
           sum += std::exp(static_cast<accscalar_t>(input[data_offset + d * dim_stride])
                  - max_input);
         Epilogue<scalar_t, accscalar_t, outscalar_t> epilogue(max_input, sum);
-        for (index_t d = threadIdx.x; d < dim_size; d += blockDim.x)
+        for (index_t d = 0; d < dim_size; ++d)
           output[data_offset + d * dim_stride] = epilogue(input[data_offset + d * dim_stride]);
       }
     }
