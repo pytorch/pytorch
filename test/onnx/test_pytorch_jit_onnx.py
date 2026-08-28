@@ -10,6 +10,7 @@ from torch.onnx._internal.torchscript_exporter.utils import (
 )
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 def _jit_graph_to_onnx_model(graph, operator_export_type, opset_version):
@@ -87,7 +88,7 @@ class _TestJITIRToONNX(_JITIRToONNXTestMixin):
     creating concrete sub-types. See MakeTestCase().
     """
 
-    hw_classification = common_utils.HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.GENERIC
 
     def test_example_ir(self):
         graph_ir = """
@@ -182,7 +183,7 @@ class _TestJITIRToONNX(_JITIRToONNXTestMixin):
         self.run_test(graph_ir, (a,))
 
 
-class _TestJITIRToONNXCuda(_JITIRToONNXTestMixin):
+class _TestJITIRToONNXCUDA(_JITIRToONNXTestMixin):
     """Abstract base class for CUDA-specific test cases.
 
     Intentionally not a sub-class of unittest.TestCase so that unittest / pytest
@@ -190,7 +191,7 @@ class _TestJITIRToONNXCuda(_JITIRToONNXTestMixin):
     creating concrete sub-types. See MakeTestCase() and instantiate_device_type_tests().
     """
 
-    hw_classification = common_utils.HardwareClassification.CUDA
+    hw_classification = HardwareClassification.CUDA
 
     def test_log_softmax_half_to_float(self, device):
         graph_ir = """
@@ -214,9 +215,11 @@ def MakeTestCase(opset_version: int, base: type) -> type:
 
 
 TestJITIRToONNX_opset14 = MakeTestCase(14, _TestJITIRToONNX)
-TestJITIRToONNXCUDA_opset14 = MakeTestCase(14, _TestJITIRToONNXCuda)
+TestJITIRToONNXCUDA_opset14 = MakeTestCase(14, _TestJITIRToONNXCUDA)
 
-instantiate_device_type_tests(TestJITIRToONNXCUDA_opset14, globals(), only_for=("cuda",))
+instantiate_device_type_tests(
+    TestJITIRToONNXCUDA_opset14, globals(), only_for=("cuda",)
+)
 
 if __name__ == "__main__":
     common_utils.run_tests()
