@@ -856,11 +856,26 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                     if reduction_plan is None:
                         raise AssertionError("expected generated reduction plan")
                     finalizer = finalizers[0]
+                    analysis = epilogue_program.capture.analysis
+                    if analysis is None:
+                        raise AssertionError("expected captured epilogue analysis")
+                    finalizer_buffer = next(
+                        (
+                            buffer
+                            for buffer in analysis.buffers
+                            if buffer.get_name() == finalizer.output_name
+                        ),
+                        None,
+                    )
+                    if finalizer_buffer is None:
+                        raise AssertionError(
+                            f"missing reduction finalizer buffer {finalizer.output_name}"
+                        )
                     reduction_plan = dataclasses.replace(
                         reduction_plan,
                         finalizer_fn=LoopIRCuteDSLCodegen.finalizer_from_buffer(
                             finalizer.source_name,
-                            finalizer.buffer,
+                            finalizer_buffer,
                             "_local_reduce_finalize",
                         ),
                     )
@@ -878,7 +893,7 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                             f"def {EPILOGUE_FN_NAME}(accum):\n"
                             "    D = accum\n    return D"
                         ),
-                        is_cutedsl=False,
+                        is_evt_fallback=True,
                     )
                 pointwise_nodes = epilogue_program.pointwise_nodes
                 fused_buffer_names: OrderedSet[str] = OrderedSet(
