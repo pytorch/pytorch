@@ -9,7 +9,8 @@
 #   tile           - the shared reduction KERNEL (one @cute.kernel, parameterized by which
 #                    axis is reduced) and the load/fold datapath it is built from.
 #   kernel_rowtile - launch policy for the ROW axis: a contiguous last dim whose row fits
-#                    one CTA tile, dynamic in BOTH M and N.
+#                    one CTA tile, dynamic in BOTH M and N. Also owns the narrow-row gates
+#                    (one thread per row, and its TMA-staged load).
 #   kernel_xcta    - fused two-stage cross-CTA row reduction for few-row / huge-N
 #                    and reduce-all.
 #   kernel_coltile - launch policy for the COLUMN (dim-0) axis: one output per thread,
