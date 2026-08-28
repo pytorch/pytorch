@@ -4,13 +4,13 @@
 import dataclasses
 import math
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
 import sympy
 
 import torch
 from torch._inductor.ir import ComputedBuffer
-from torch._inductor.kernel.gemm_epilogue import GemmReductionConfig
+from torch._inductor.kernel.gemm_epilogue import GemmReductionConfig, GemmReductionType
 from torch._inductor.ops_handler import DefaultHandler
 from torch._inductor.utils import OrderedSet
 from torch._inductor.virtualized import V
@@ -247,6 +247,7 @@ class GemmEpilogueIRAnalysis:
         if classified is None:
             return None
         reduction_type, source_type = classified
+        reduction_type = cast(GemmReductionType, reduction_type)
         return GemmReductionConfig(
             output_name, group, axis, reduction_type, source_type
         )

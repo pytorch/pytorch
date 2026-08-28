@@ -3918,6 +3918,153 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
             compiled(x, w, group_size, group_name)
 
 
+class TestCompileSyncPgCrossRanks(MultiProcessTestCase):
+    """
+    The compile time sync runs on a gloo process group over CPU, so unlike the rest of
+    TestSyncDecisionCrossRanks these need no accelerator.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_processes()
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def _init_process_group(self, timeout: datetime.timedelta | None = None) -> None:
+        store = torch.distributed.FileStore(self.file_name, self.world_size)
+        torch.distributed.init_process_group(
+            backend="gloo",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            timeout=timeout,
+        )
+
+    def test_sync_cache_decision_cross_ranks(self):
+        # A cache hit on one rank and a miss on another leaves only the missing rank
+        # inside _sync_decision_cross_ranks, which desyncs the process group. The hit
+        # must be discarded unless every rank hit.
+        from torch._dynamo.utils import counters
+        from torch._functorch._aot_autograd.autograd_cache import (
+            sync_cache_decision_cross_ranks,
+        )
+
+        self._init_process_group()
+
+        with torch._functorch.config.patch(_sync_cache_decision_cross_ranks=True):
+            self.assertTrue(sync_cache_decision_cross_ranks(True))
+            self.assertFalse(sync_cache_decision_cross_ranks(False))
+
+            counters.clear()
+            # Rank 0 hits, rank 1 misses.
+            self.assertFalse(sync_cache_decision_cross_ranks(self.rank == 0))
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_cross_rank_miss"],
+                1 if self.rank == 0 else 0,
+            )
+
+        # Disabled by default, so a lone hit survives and no collective is issued.
+        self.assertEqual(
+            sync_cache_decision_cross_ranks(self.rank == 0), self.rank == 0
+        )
+
+    @torch._functorch.config.patch(
+        enable_autograd_cache=True, _sync_cache_decision_cross_ranks=True
+    )
+    @torch._inductor.config.patch(fx_graph_cache=True, compile_threads=1)
+    def test_cross_rank_miss_recompiles_and_saves(self):
+        # End to end through aot_module_simplified, rank 0 warm and rank 1 cold: rank 1
+        # reaches the partitioner's collective alone while rank 0 sails past on its hit.
+        # Rejecting that hit is only half of it, the rejected rank also has to populate
+        # aot_config.cache_info or its recompile is never saved and the next compile
+        # diverges all over again.
+        from torch._dynamo.utils import counters
+        from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
+
+        self._init_process_group()
+        torch._C._distributed_c10d._register_process_group(
+            "default", torch.distributed.group.WORLD
+        )
+        expected = torch.full((4, 4), self.world_size + 1.0)
+
+        def fn(x):
+            return _functional_collectives.all_reduce(x, "sum", "default") + 1
+
+        def compile_and_run():
+            counters.clear()
+            torch._dynamo.reset()
+            self.assertEqual(torch.compile(fn)(torch.ones(4, 4)), expected)
+
+        # Each rank gets its own cache dir, so the clear below only cools rank 1.
+        with fresh_inductor_cache():
+            compile_and_run()
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+            if self.rank == 1:
+                AOTAutogradCache.clear()
+
+            compile_and_run()
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_cross_rank_miss"],
+                1 if self.rank == 0 else 0,
+            )
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+            # Both ranks are warm again, so the hit survives the sync and is usable.
+            compile_and_run()
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_cross_rank_miss"], 0
+            )
+
+    def test_compile_sync_pg_built_for_partitioner_sync_alone(self):
+        # _sync_decision_cross_ranks builds the pg lazily on the partitioner path, which
+        # a partial cache hit leaves to the ranks that missed. Building a group on a
+        # subset of ranks hangs and desyncs _world.group_count, so it has to happen here,
+        # where every rank is, even though the decision itself passes straight through.
+        from torch._dynamo import distributed as dynamo_distributed
+        from torch._functorch._aot_autograd.autograd_cache import (
+            sync_cache_decision_cross_ranks,
+        )
+
+        self._init_process_group()
+        self.assertIsNone(dynamo_distributed._COMPILE_SYNC_PG)
+
+        with torch._functorch.config.patch(_sync_decision_cross_ranks=True):
+            # A build without gloo has nothing to prime, and priming must not be what
+            # surfaces that: the partitioner still raises, and only for the graphs it
+            # syncs, rather than every compile that gets here.
+            with mock.patch.object(c10d, "is_gloo_available", return_value=False):
+                self.assertTrue(sync_cache_decision_cross_ranks(True))
+            self.assertIsNone(dynamo_distributed._COMPILE_SYNC_PG)
+
+            self.assertTrue(sync_cache_decision_cross_ranks(True))
+            self.assertFalse(sync_cache_decision_cross_ranks(False))
+
+        self.assertIsNotNone(dynamo_distributed._COMPILE_SYNC_PG)
+
+    def test_compile_sync_pg_without_gloo(self):
+        from torch._dynamo.distributed import get_compile_sync_pg
+
+        self._init_process_group()
+
+        with mock.patch.object(c10d, "is_gloo_available", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "requires the gloo backend"):
+                get_compile_sync_pg()
+
+    def test_compile_sync_pg_inherits_default_timeout(self):
+        from torch._dynamo.distributed import get_compile_sync_pg
+
+        timeout = datetime.timedelta(seconds=120)
+        self._init_process_group(timeout=timeout)
+
+        pg = get_compile_sync_pg()
+        device = torch.device(c10d.distributed_c10d._get_object_coll_device(pg))
+        self.assertEqual(pg._get_backend(device).options._timeout, timeout)
+
+
 class TestNodeGroupNameResolution(torch._dynamo.test_case.TestCase):
     """Unit tests for Node-typed group_name handling in bucketing.
 
