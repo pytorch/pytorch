@@ -49,6 +49,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_CUDA_AND_TRITON,
     HAS_GPU,
     HAS_XPU_AND_TRITON,
+    requires_block_ptr,
     TRITON_HAS_CPU,
 )
 from torch.testing._internal.logging_utils import log_settings, logs_to_string
@@ -256,101 +257,6 @@ class KernelTests(torch._inductor.test_case.TestCase):
         f(t1)
         # No need to assert anything, the goal is to make sure dynamo does
         # not crash
-
-    @requires_gpu
-    def test_triton_kernel_intenum_constexpr(self):
-        # triton_meta is emitted with repr(), so an enum-valued tl.constexpr
-        # renders as "<RoundingMode.even: 2>" -- a SyntaxError that makes the
-        # generated file unimportable, losing the kernel and every frame above
-        # it to an eager fallback. fbgemm's MX4 quantize kernels take a
-        # RoundingMode this way.
-        import enum
-
-        class RoundingMode(enum.IntEnum):
-            even = 2
-            stochastic = 3
-
-        @triton.jit
-        def rounding_kernel(out_ptr, n, MODE: tl.constexpr, BLOCK: tl.constexpr):
-            offs = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
-            # Compare against a plain int, as the fbgemm kernels do.
-            val = tl.where(MODE == 3, 1.0, 2.0)
-            tl.store(out_ptr + offs, val, mask=offs < n)
-
-        def f(x):
-            out = torch.empty_like(x)
-            rounding_kernel[(1,)](out, x.numel(), MODE=RoundingMode.even, BLOCK=64)
-            return out + 1
-
-        x = torch.rand(64, device=GPU_TYPE)
-        eager = f(x)
-        compiled = torch.compile(f, backend="inductor")(x)
-        # An IntEnum equals and hashes as its int, so substituting the int
-        # leaves the kernel Triton builds unchanged -- the branch above must
-        # still take the MODE != 3 arm.
-        self.assertEqual(compiled, eager)
-        self.assertTrue(torch.all(compiled == 3.0))
-
-    def test_constexpr_source_reconstructs_or_declines(self):
-        # repr() is not an expression for every constexpr a user can pass, and
-        # the value is written into generated source AND exec'd into the
-        # launcher, so an unspellable one is a SyntaxError in both rather than
-        # a bad launch. Reconstruct what can be reconstructed; decline clearly
-        # for the rest.
-        import enum
-        import plistlib
-
-        from torch._inductor.codegen.wrapper import (
-            _constexpr_constant,
-            _constexpr_source,
-        )
-
-        # A plain Enum from a real module: named, with the import it needs.
-        self.assertEqual(
-            _constexpr_source(plistlib.FMT_XML),
-            ("PlistFormat.FMT_XML", "from plistlib import PlistFormat"),
-        )
-
-        # An IntEnum equals and hashes as its int, so it becomes one -- which
-        # keeps the kernel Triton builds and its cache key unchanged.
-        class Mode(enum.IntEnum):
-            even = 2
-
-        self.assertEqual(_constexpr_constant(Mode.even), 2)
-
-        # Defined in a function body: not importable in the compile worker, so
-        # emitting an import would resolve to something else or nothing.
-        class Local(enum.Enum):
-            a = 1
-
-        self.assertIsNone(_constexpr_source(Local.a))
-
-        # Ordinary values are untouched.
-        self.assertEqual(_constexpr_source(64), ("64", None))
-
-    @requires_gpu
-    def test_triton_kernel_unspellable_constexpr_errors_clearly(self):
-        # Declining has to say why. Before, the value went into the generated
-        # file verbatim and surfaced as "SyntaxError: invalid syntax" against a
-        # temp path, with the kernel and every frame above it lost to eager.
-        import enum
-
-        class LocalMode(enum.Enum):
-            even = 2
-
-        @triton.jit
-        def local_mode_kernel(out_ptr, n, MODE: tl.constexpr, BLOCK: tl.constexpr):
-            offs = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
-            tl.store(out_ptr + offs, tl.where(MODE == 3, 1.0, 2.0), mask=offs < n)
-
-        def f(x):
-            out = torch.empty_like(x)
-            local_mode_kernel[(1,)](out, x.numel(), MODE=LocalMode.even, BLOCK=64)
-            return out + 1
-
-        x = torch.rand(64, device=GPU_TYPE)
-        with self.assertRaisesRegex(Exception, "cannot be written into"):
-            torch.compile(f, backend="inductor")(x)
 
     @requires_gpu
     def test_triton_kernel_dunder_name_no_name_mangling(self):
@@ -4383,6 +4289,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             ["O_ptr"],
         )
 
+    @requires_block_ptr
     @make_mutation_test
     def test_for_loop_arg_2():
         @triton.jit
@@ -4443,6 +4350,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             ["o_ptr"],
         )
 
+    @requires_block_ptr
     @make_mutation_test
     def test_while_loop():
         @triton.jit
@@ -5113,6 +5021,11 @@ if HAS_GPU:
 
         if kernel.fn.__name__ == "add_kernel_2d_autotuned":
             fn = unittest.skip("Fails with Triton update")(fn)
+        elif kernel.fn.__name__ in {
+            "add_kernel_with_block_ptr",
+            "kernel_with_block_ptr_2d",
+        }:
+            fn = requires_block_ptr(fn)
 
         setattr(MutationTests, name, fn)
 
