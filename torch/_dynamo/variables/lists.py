@@ -61,6 +61,7 @@ from .base import (
     getset_read,
     Member,
     Method,
+    MutationType,
     ValueMutationNew,
     VariableTracker,
 )
@@ -163,15 +164,12 @@ class BaseListVariable(VariableTracker):
     def _as_proxy(self) -> list[Any]:
         return [x.as_proxy() for x in self.items]
 
-    def modified(
-        self, items: list[VariableTracker], **kwargs: Any
+    def _new_list(
+        self,
+        items: list[VariableTracker],
+        mutation_type: MutationType | None = None,
     ) -> "BaseListVariable":
-        return type(self)(items, **kwargs)
-
-    def _new_list(self, items: list[VariableTracker]) -> "BaseListVariable":
-        return type(self)(
-            items, mutation_type=ValueMutationNew() if self.mutation_type else None
-        )
+        return type(self)(items, mutation_type=mutation_type)
 
     def debug_repr_helper(self, prefix: str, suffix: str) -> str:
         return prefix + ", ".join(i.debug_repr() for i in self.items) + suffix
@@ -209,7 +207,8 @@ class BaseListVariable(VariableTracker):
                     ValueError, tx, args=["slice step cannot be zero"]
                 )
             # Slicing a list/tuple gives a new local, not sourced from self.
-            return self._new_list(self.items[index])
+            mutation_type = ValueMutationNew() if self.mutation_type else None
+            return self._new_list(self.items[index], mutation_type=mutation_type)
         else:
             raise_type_error(
                 tx,
@@ -368,10 +367,10 @@ class BaseListVariable(VariableTracker):
         except (MemoryError, OverflowError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
         # self.items is a list, so we can't go through VariableTracker.build (which would wrap in a list variable)
-        kwargs: dict[str, Any] = {}
-        if issubclass(self.python_type(), list):
-            kwargs["mutation_type"] = ValueMutationNew()
-        return self.modified(new_items, **kwargs)
+        mutation_type = (
+            ValueMutationNew() if issubclass(self.python_type(), list) else None
+        )
+        return self._new_list(new_items, mutation_type=mutation_type)
 
     def _seq_richcompare(
         self,
@@ -612,7 +611,7 @@ class BaseListVariable(VariableTracker):
     ) -> VariableTracker:
         # List copy() doesn't have args and kwargs
         items_lst: list[VariableTracker] = list(self.items)
-        return self.modified(items_lst, mutation_type=ValueMutationNew())
+        return self._new_list(items_lst, mutation_type=ValueMutationNew())
 
     def list_reverse(
         self,
@@ -1268,7 +1267,8 @@ class ListVariable(BaseListVariable):
             i = key.nb_index_impl(tx).as_python_constant()
             if i < 0:
                 i += len(self.items)
-            return self.sq_ass_item_impl(tx, ConstantVariable(i), value)
+            # Explicit unbound dispatch
+            return ListVariable.sq_ass_item_impl(self, tx, ConstantVariable.create(i), value)
         elif pyslice_check(key):
             # CPython runs PySlice_Unpack first, which raises ValueError on
             # step==0 before the iterable check.
