@@ -266,24 +266,38 @@ struct nextafter_functor {
 
   // Metal has no bfloat nextafter overload, so open-code the musl algorithm
   // over the sign-magnitude bit pattern.
+  //
+  // Every path has to stay in the integer domain, including NaN. Metal flushes
+  // bfloat denormals whenever a value passes through a float register, and a
+  // float-valued return merged with the bit-pattern ones is enough to force
+  // that: it turns the smallest denormal, which is exactly what nextafter
+  // returns when stepping away from zero, into a signed zero.
   inline bfloat operator()(const bfloat from, const bfloat to) {
-    if (from != from || to != to) {
-      return from + to;
-    }
-    if (from == to) {
-      return to;
-    }
-    ushort ufrom = as_type<ushort>(from);
-    if (from == 0) {
-      ushort r = (as_type<ushort>(to) & (ushort(1) << 15)) | ushort(1);
-      return as_type<bfloat>(r);
-    }
-    if ((from < to) == (from > 0)) {
-      ufrom++;
+    constexpr ushort kSign = 0x8000;
+    constexpr ushort kMagnitude = 0x7fff;
+    constexpr ushort kInfinity = 0x7f80;
+    constexpr ushort kQuiet = 0x0040;
+
+    const ushort ufrom = as_type<ushort>(from);
+    const ushort uto = as_type<ushort>(to);
+    const ushort afrom = ufrom & kMagnitude;
+    const ushort ato = uto & kMagnitude;
+
+    ushort result;
+    if (afrom > kInfinity) {
+      result = ufrom | kQuiet;
+    } else if (ato > kInfinity) {
+      result = uto | kQuiet;
+    } else if (ufrom == uto || (afrom == 0 && ato == 0)) {
+      result = uto;
+    } else if (afrom == 0) {
+      result = (uto & kSign) | ushort(1);
+    } else if (afrom > ato || ((ufrom ^ uto) & kSign) != 0) {
+      result = ufrom - ushort(1);
     } else {
-      ufrom--;
+      result = ufrom + ushort(1);
     }
-    return as_type<bfloat>(ufrom);
+    return as_type<bfloat>(result);
   }
 };
 

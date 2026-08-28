@@ -15564,9 +15564,15 @@ class TestAdvancedIndexing(TestCaseMPS):
         self.assertEqual(out, torch.zeros(2, device=device), atol=0, rtol=0)
 
     def test_nextafter(self, device="mps"):
+        # Stepping away from zero lands on the smallest denormal, which is the
+        # case Metal's denormal flushing used to turn into a signed zero.
+        tiny = {torch.float16: 5.960464477539063e-08,
+                torch.bfloat16: 9.183549615799121e-41,
+                torch.float32: 1.401298464324817e-45}
         for dtype in [torch.float16, torch.bfloat16, torch.float32]:
-            x = torch.tensor([1, -1, 0, 0, 2, -2], device=device, dtype=dtype)
-            y = torch.tensor([2, -2, -1, 1, -3, 3], device=device, dtype=dtype)
+            t = tiny[dtype]
+            x = torch.tensor([1, -1, 0, 0, 2, -2, t, -t, 0, 0], device=device, dtype=dtype)
+            y = torch.tensor([2, -2, -1, 1, -3, 3, 0, 0, t, -t], device=device, dtype=dtype)
             na = torch.nextafter(x, y)
             na_cpu = torch.nextafter(x.cpu(), y.cpu())
             na_ge_x_mps = na.cpu() > x.cpu()
