@@ -6089,7 +6089,11 @@ def _precompile_dynamo(
     def is_library_defined_function(function: types.FunctionType) -> bool:
         code_path = os.path.realpath(function.__code__.co_filename)
         torch_root = os.path.realpath(os.path.dirname(torch.__file__))
-        if os.path.commonpath((torch_root, code_path)) == torch_root:
+        try:
+            is_torch_file = os.path.commonpath((torch_root, code_path)) == torch_root
+        except ValueError:
+            is_torch_file = False
+        if is_torch_file:
             return True
         if not is_library_module(function.__module__):
             return False

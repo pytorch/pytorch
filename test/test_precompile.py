@@ -66,6 +66,14 @@ def _precompile_dynamo_torch_sin(x):
     return torch.sin(x)
 
 
+def _precompile_dynamo_cross_drive_helper(x):
+    return x + 1
+
+
+def _precompile_dynamo_calls_cross_drive_helper(x):
+    return _precompile_dynamo_cross_drive_helper(x)
+
+
 def _precompile_dynamo_global_tensor(x):
     return x + _GLOBAL_TENSOR
 
@@ -97,6 +105,25 @@ class _PrecompileDynamoTensorDefaultMethod:
 
 def _precompile_dynamo_input_method_tensor_default(x, obj):
     return obj.apply(x)
+
+
+_DYNAMO_INPUT_MUTATED_LIST = []
+
+
+class _PrecompileDynamoInputMutableEnvironment:
+    def apply(self, x):
+        _DYNAMO_INPUT_MUTATED_LIST.append(1)
+        return x + 1
+
+
+def _precompile_dynamo_calls_input_mutable_environment(obj, x):
+    return obj.apply(x)
+
+
+def _precompile_dynamo_loaded_local_tensor(x):
+    import _precompile_loaded_tensor_module
+
+    return x + _precompile_loaded_tensor_module.TENSOR
 
 
 def _precompile_dynamo_imported_module_identity(x):
@@ -3668,6 +3695,33 @@ class TestPrecompile(TestCase):
         loaded = torch.compiler.precompile.load(code, cache)
         self.assertEqual(loaded(x, target), _precompile_dynamo_mse_loss(x, target))
 
+    def test_tracer_dynamo_user_helper_on_other_drive(self):
+        from unittest import mock
+
+        torch_root = os.path.realpath(os.path.dirname(torch.__file__))
+        helper_path = os.path.realpath(
+            _precompile_dynamo_cross_drive_helper.__code__.co_filename
+        )
+        commonpath = os.path.commonpath
+
+        def different_drive(paths):
+            if tuple(paths) == (torch_root, helper_path):
+                raise ValueError("Paths don't have the same drive")
+            return commonpath(paths)
+
+        x = torch.randn(4)
+        with mock.patch.object(os.path, "commonpath", side_effect=different_drive):
+            code, cache = torch.compiler.precompile(
+                _precompile_dynamo_calls_cross_drive_helper,
+                example_inputs=[(x,)],
+                tracer="dynamo",
+                backend="eager",
+            )
+        self.assertEqual(
+            torch.compiler.precompile.load(code, cache)(x),
+            _precompile_dynamo_calls_cross_drive_helper(x),
+        )
+
     def test_tracer_dynamo_rejects_non_function_callable(self):
         with self.assertRaisesRegex(NotImplementedError, "requires a Python function"):
             torch.compiler.precompile(
@@ -6246,6 +6300,19 @@ class TestPrecompile(TestCase):
             )
         self.assertIsNone(_PRECOMPILE_DYNAMO_INPUT_GLOBAL)
 
+    def test_tracer_dynamo_rejects_input_method_environment_mutation(self):
+        _DYNAMO_INPUT_MUTATED_LIST.clear()
+        with self.assertRaisesRegex(NotImplementedError, "mutable environment objects"):
+            torch.compiler.precompile(
+                _precompile_dynamo_calls_input_mutable_environment,
+                example_inputs=[
+                    (_PrecompileDynamoInputMutableEnvironment(), torch.randn(3))
+                ],
+                tracer="dynamo",
+                backend="eager",
+            )
+        self.assertEqual(_DYNAMO_INPUT_MUTATED_LIST, [])
+
     @parametrize(
         "fn,args",
         (
@@ -7309,6 +7376,22 @@ class TestPrecompile(TestCase):
                 tracer="dynamo",
                 backend="eager",
             )
+
+    def test_tracer_dynamo_rejects_loaded_local_import_tensor(self):
+        module_name = "_precompile_loaded_tensor_module"
+        module = types.ModuleType(module_name)
+        module.TENSOR = torch.randn(3)
+        sys.modules[module_name] = module
+        try:
+            with self.assertRaisesRegex(PrecompileError, "tensor-valued"):
+                torch.compiler.precompile(
+                    _precompile_dynamo_loaded_local_tensor,
+                    example_inputs=[(torch.randn(3),)],
+                    tracer="dynamo",
+                    backend="eager",
+                )
+        finally:
+            sys.modules.pop(module_name, None)
 
     @parametrize(
         "fn,args",
