@@ -282,7 +282,9 @@ std::vector<at::Tensor> AOTIModelContainerRunner::run_impl(
       proxy_executor_handle_);
   if (run_result != AOTI_RUNTIME_SUCCESS) {
     const char* err = torch::aot_inductor::get_last_error();
-    TORCH_CHECK(!err, err);
+    if (err) {
+      TORCH_CHECK(false, err);
+    }
     if (get_last_error_func_) {
       const char* aoti_err = nullptr;
       if (get_last_error_func_(&aoti_err) == AOTI_RUNTIME_SUCCESS && aoti_err &&
