@@ -34,9 +34,9 @@ This skill helps triage GitHub issues by routing issues, applying labels, and le
   - Step 3: Redirect to Secondary Oncall
   - Step 4: Label the Issue
   - Step 5: High Priority — REQUIRES HUMAN REVIEW
-  - Step 5.5: release triage — Affects an Upcoming Release
-  - Step 6: bot-triaged (automatic)
-  - Step 7: Mark Triaged
+  - Step 6: release triage — Affects an Upcoming Release
+  - Step 7: bot-triaged (automatic)
+  - Step 8: Mark Triaged
 - [V1 Constraints](#v1-constraints)
 
 **Labels reference:** See [labels.json](labels.json) for the full catalog of labels suitable for triage. **ONLY apply labels that exist in this file.** Do not invent or guess label names. This file excludes CI triggers, test configs, release notes, deprecated labels, and labels requiring human decision.
@@ -160,7 +160,7 @@ If the issue belongs in another repo (vision/text/audio/RL/ExecuTorch/etc.), tra
 
 ### 2.5) PT2 Issues — Special Handling
 
-**PT2 is NOT a redirect.** `oncall: pt2` is not like the other oncall labels in Step 3. PT2 issues continue through Steps 4–7 for full triage — add `oncall: pt2`, then proceed to label with `module:` labels, mark `triaged`, etc.
+**PT2 is NOT a redirect.** `oncall: pt2` is not like the other oncall labels in Step 3. PT2 issues continue through Steps 4–8 for full triage — add `oncall: pt2`, then proceed to label with `module:` labels, mark `triaged`, etc.
 
 **Every `oncall: pt2` issue MUST have at least one `module:` label.** The PT2 oncall queue is too broad without a module label — the team needs to know which component is affected (e.g., `module: dynamo`, `module: inductor`, `module: helion`, `module: dynamic shapes`). If you cannot determine the specific module, use `module: compile ux` as a fallback, but always try to be specific first. See [pt2-triage-rubric.md](pt2-triage-rubric.md) for detailed guidance.
 
@@ -235,22 +235,11 @@ High priority criteria:
 - Many users affected
 - Core component or popular model impact
 
-### 5.5) release triage — Affects an Upcoming Release
+### 6) release triage — Affects an Upcoming Release
 
-Add `release triage` when an issue would affect a release if it went unfixed. This is a
-continuous process, not something that only applies while a release branch is open. The
-label means "whoever owns the release needs to see this"; what happens next depends on
-where the cycle currently is:
-
-- **Between a completed release and the next branch cut** — the fix lands in main and
-  ships in the next release. Flagging early is what keeps the problem from reaching the
-  branch at all.
-- **Between branch cut and release** — the fix lands in main and is then cherry-picked to
-  the release branch, under the criteria in [RELEASE.md](../../../RELEASE.md).
-
-Either way the bot's job is the same: surface it so it can be found with
-`is:issue label:"release triage"`. It is not deciding anything — a fix may not exist yet,
-and whether to cherry-pick is never the bot's call.
+Add `release triage` when an issue would affect a release if it went unfixed. The label
+only surfaces the issue for whoever owns the release; it is not a cherry-pick request and
+does not decide anything.
 
 Add it when **any** of these hold:
 
@@ -277,11 +266,11 @@ a broken release. When unsure, add it.
 to feature requests, enhancements, or documentation-only issues, and do not add it for a
 regression against a version older than the last released minor.
 
-### 6) bot-triaged (automatic)
+### 7) bot-triaged (automatic)
 
 The `bot-triaged` label is automatically applied by a post-hook after any issue mutation. You do not need to add it manually.
 
-### 7) Mark triaged
+### 8) Mark triaged
 
 If not transferred/redirected and not flagged for review, add `triaged`.
 
@@ -300,7 +289,7 @@ If not transferred/redirected and not flagged for review, add `triaged`.
 **DO:**
 - Close clear usage questions and point to discuss.pytorch.org (per step 1)
 - Be conservative - when in doubt, add `triage review` for human attention
-- Add `release triage` whenever an issue would affect an upcoming release (step 5.5); err toward adding it
+- Add `release triage` whenever an issue would affect an upcoming release (step 6); err toward adding it
 - Apply type labels (`feature`, `enhancement`, `function request`) when confident
 - Add `triaged` label when classification is complete
 
