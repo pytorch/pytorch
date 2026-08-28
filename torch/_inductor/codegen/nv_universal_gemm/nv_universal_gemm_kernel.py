@@ -1214,7 +1214,7 @@ def _build_bias_epilogue(bias_name: str, out_name: str) -> GemmEpiloguePlan:
             f"    D = accum + {bias_name}\n"
             f"    return D"
         ),
-        is_cutedsl=True,
+        is_evt_fallback=False,
         reads=(bias_name,),
         renames={bias_name: bias_name, "D": out_name},
     )
@@ -1392,7 +1392,7 @@ class NVUniversalGemmKernel(Kernel):
                         f"{_local_reduce_source_constant(field)} = {value!r}"
                     )
         if has_epilogue:
-            if self.epilogue.is_cutedsl:
+            if not self.epilogue.is_evt_fallback:
                 code.writeline(
                     "from torch._inductor.codegen.nv_universal_gemm."
                     "nv_universal_gemm_kernel import CuTeDSLEpilogueArguments"
@@ -1474,7 +1474,7 @@ class NVUniversalGemmKernel(Kernel):
                     epi_kwargs_str += f", {epilogue_kwargs}"
                 epilogue_args_type = (
                     "CuTeDSLEpilogueArguments"
-                    if self.epilogue.is_cutedsl
+                    if not self.epilogue.is_evt_fallback
                     else "EpilogueArguments"
                 )
                 code.writeline(f"epi_args = {epilogue_args_type}({epi_kwargs_str})")

@@ -492,6 +492,7 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         codegen.finalize()
 
         return GemmEpiloguePlan(
+            is_evt_fallback=True,
             reads=tuple(codegen.get_reads()),
             writes=tuple(codegen.get_writes()),
             renames=codegen.get_renames(),
