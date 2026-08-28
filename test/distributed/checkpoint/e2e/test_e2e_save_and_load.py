@@ -363,11 +363,11 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
 
             def load_state_dict(self, state_dict):
                 tl = [
-                    torch.ones(2, dtype=torch.int64, device=device)
+                    torch.ones(2, dtype=torch.int64, device=self.device_type)
                     for _ in range(world_size)
                 ]
                 t = (
-                    torch.arange(2, dtype=torch.int64, device=device)
+                    torch.arange(2, dtype=torch.int64, device=self.device_type)
                     + 1
                     + 2 * dist.get_rank()
                 )
@@ -379,7 +379,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
 
             def load_state_dict(self, state_dict):
                 tensor = (
-                    torch.arange(2, dtype=torch.int64, device=device)
+                    torch.arange(2, dtype=torch.int64, device=self.device_type)
                     + 1
                     + 2 * dist.get_rank()
                 )
