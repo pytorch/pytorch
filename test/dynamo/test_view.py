@@ -2,10 +2,13 @@
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 @torch._dynamo.config.patch("capture_scalar_outputs", True)
 class ViewTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_view_to_2d(self):
         @torch.compile(fullgraph=True, backend="eager")
         def f(t, _u0):

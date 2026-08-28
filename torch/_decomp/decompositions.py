@@ -1777,7 +1777,22 @@ def native_group_norm_backward(
             + torch.mul(input.reshape(N, group, cpg, HxW), c2)
             + c3
         )
-        d_input = d_input.reshape(input.shape).to(input.dtype)
+        supports_memory_format = input.device.type in (
+            "cpu",
+            "cuda",
+            "meta",
+            torch._C._get_privateuse1_backend_name(),
+        )
+        memory_format = (
+            utils.suggest_memory_format(input)
+            if supports_memory_format
+            else torch.contiguous_format
+        )
+        d_input = (
+            d_input.reshape(input.shape)
+            .to(input.dtype)
+            .contiguous(memory_format=memory_format)
+        )
     if output_mask[1]:
         d_gamma = (
             (
@@ -3348,7 +3363,7 @@ def index_add_(
 
 
 @register_decomposition(aten.index_add)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def index_add(
     x: TensorLike,
     dim: int,
@@ -3453,7 +3468,7 @@ def index_copy_(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
 
 
 @register_decomposition(aten.index_copy)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
     return _index_copy(x, dim, index, tensor, inplace=False)
 
