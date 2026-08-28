@@ -871,7 +871,11 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(fn_opt(x, y3), fn(x, y3))
             self.assertEqual(cnt.frame_count, 1)
 
-    @torch._dynamo.config.patch(specialize_float=False)
+    # assume_static_by_default=False is needed for frame_count == 1 even when
+    # this test is rerun without the class-level patch (see
+    # test_nested_graph_breaks_wrapped.py); otherwise the first call compiles a
+    # static graph and the second recompiles dynamically.
+    @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=False)
     def test_unspecialized_float_clamp_tensorify(self):
         # https://github.com/pytorch/pytorch/issues/194976
         def fn(x, limit):
