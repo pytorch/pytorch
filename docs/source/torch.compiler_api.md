@@ -94,13 +94,19 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       reproduce the side effect. Distinct tensor inputs must not share or overlap
       storage -- their aliasing relation has no serialized form -- though passing the
       same tensor object more than once is supported; capture rejects overlapping
-      inputs and the loaded artifact raises on them. An explicit input must not also
-      be reachable through the Python environment (including a referenced global's
-      class or module attributes); such aliasing is rejected at capture, except for
-      process-wide singletons whose guards are value-based (dtypes, layouts, memory
-      formats, enum members). Only strided and sparse input layouts are analyzed --
-      sparse surfaces Dynamo's own rejection, and any other layout (e.g. jagged) is
-      refused at capture and at serve because its aliasing cannot be verified.
+      inputs and the loaded artifact raises on them. An explicit pytree-leaf input
+      must not also be reachable through the Python environment (including a
+      referenced global's class or module attributes); such aliasing is rejected --
+      on every one-shot capture, and once at state creation for stateful capture,
+      since the environment is declared invariant afterward (a later environment
+      change is a contract violation that can silently serve capture-time results).
+      Container inputs dissolve into their leaves, so a container's own identity is
+      not checked. Exempt from the aliasing rejection: dtypes, layouts, and memory
+      formats (process-wide, value-guarded singletons) and enum members (a used enum
+      argument fails capture loudly on its unserializable identity guard regardless).
+      Only strided and sparse input layouts are accepted -- sparse surfaces Dynamo's
+      own rejection, and any other layout (e.g. jagged) is refused at capture and at
+      serve because its aliasing cannot be verified.
 
       Pass ``training=True`` with ``tracer="dynamo"`` and ``backend="inductor"`` to
       capture differentiable graphs. Each compiled segment contains readable Inductor

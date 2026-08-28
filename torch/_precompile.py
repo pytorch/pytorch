@@ -1812,7 +1812,10 @@ def _validate_dynamo_capture(
     tensor reached). Walking those object graphs is the expensive part of
     validation and is input-independent, so stateful capture computes it once
     when the state is created and passes it back on every resume (the
-    programming model declares the environment invariant during capture); only
+    programming model declares the environment invariant during capture, so a
+    caller who mutates it after creation is outside the contract and a
+    post-creation alias will NOT be re-detected -- it can silently serve
+    capture-time results); only
     the cheap per-call id intersection against the current example inputs runs
     every time. Passing a scan also skips the tensor-global rejection, which
     was decided at scan time.
@@ -2102,12 +2105,15 @@ def _validate_dynamo_capture(
             if name in target.__globals__
         }
 
-    # torch.dtype/layout/memory_format and enum members are process-wide
-    # singletons whose guards are value-based and whose pickles return the same
-    # object, so sharing one with the environment carries no identity hazard
-    # (torch.device is NOT exempt: equal devices need not be identical). An
-    # enum input that genuinely needs an identity guard still fails later with
-    # Dynamo's accurate cannot-serialize error.
+    # torch.dtype/layout/memory_format are process-wide singletons whose
+    # guards are value-based and whose pickles return the same object, so
+    # sharing one with the environment carries no identity hazard
+    # (torch.device is NOT exempt: equal devices need not be identical). Enum
+    # members are exempt for a different reason: Dynamo puts an ID_MATCH on
+    # every realized enum argument and ID_MATCH is unserializable, so a USED
+    # enum argument always fails capture loudly with the accurate
+    # identity-guard error, while an unused pass-through enum (which this
+    # exemption newly enables) never influences dispatch.
     input_ids = {
         id(value)
         for example in example_inputs
@@ -2634,13 +2640,16 @@ def _precompile_dynamo_stateful(
     from torch._dynamo.package import CompilePackage
     from torch._dynamo.pgo import _new_code_state
 
-    # getattr: a wrong-typed `state` still gets the clean TypeError below
-    # rather than an AttributeError here.
+    if state is not None and not isinstance(state, _PrecompileDynamoState):
+        raise TypeError(
+            "precompile state must be the state returned by a previous "
+            f"stateful precompile call, got {type(state).__name__}."
+        )
     target, environment_scan = _validate_dynamo_capture(
         fn,
         example_inputs,
         decompositions,
-        environment_scan=getattr(state, "environment_scan", None),
+        environment_scan=None if state is None else state.environment_scan,
     )
     with _DYNAMO_COMPILE_LOCK:
         fresh = state is None
@@ -2665,11 +2674,6 @@ def _precompile_dynamo_stateful(
                 environment_scan=environment_scan,
             )
         else:
-            if not isinstance(state, _PrecompileDynamoState):
-                raise TypeError(
-                    "precompile state must be the state returned by a previous "
-                    f"stateful precompile call, got {type(state).__name__}."
-                )
             if state.closed:
                 raise ValueError(
                     "precompile cannot resume a closed state; start fresh with "
@@ -3171,9 +3175,12 @@ class _PrecompileApi:
           arguments or containers of those values (``nn.Module`` arguments are not
           supported yet). A global whose object graph contains a tensor is rejected
           conservatively (every tensor must be an explicit input), as are functions
-          that mutate globals, inputs also reachable through the Python environment
-          (value-guarded singletons -- dtypes, layouts, memory formats, enum
-          members -- are exempt), distinct tensor inputs that share or overlap
+          that mutate globals, pytree-leaf inputs also reachable through the Python
+          environment (checked once at state creation for stateful capture;
+          dtypes, layouts, and memory formats are exempt as value-guarded
+          singletons, and enum members because a used enum argument fails
+          loudly on its unserializable identity guard), distinct tensor inputs
+          that share or overlap
           storage (the same tensor object may repeat; the loaded artifact also
           raises on overlapping runtime inputs), and non-strided input layouts
           other than sparse (which surfaces Dynamo's own rejection).

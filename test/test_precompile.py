@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: pt2"]
 import copy
+import enum
 import io
 import os
 import pickle
@@ -188,10 +189,33 @@ class _PrecompileDynamoAliasPayload:
 
 class _PrecompileDynamoDtypeConfig:
     dtype = torch.float32
+    memory_format = torch.channels_last
+    layout = torch.strided
 
 
 def _precompile_dynamo_dtype_branch(x, dtype):
     return x * 2 if dtype is _PrecompileDynamoDtypeConfig.dtype else x * 3
+
+
+def _precompile_dynamo_format_branch(x, fmt):
+    return x * 2 if fmt is _PrecompileDynamoDtypeConfig.memory_format else x * 3
+
+
+def _precompile_dynamo_layout_branch(x, layout):
+    return x * 2 if layout is _PrecompileDynamoDtypeConfig.layout else x * 3
+
+
+class _PrecompileDynamoMode(enum.Enum):
+    A = 1
+    B = 2
+
+
+def _precompile_dynamo_enum_passthrough(x, mode):
+    return x * _PrecompileDynamoMode.A.value
+
+
+def _precompile_dynamo_enum_branch(x, mode):
+    return x * 2 if mode is _PrecompileDynamoMode.A else x * 3
 
 
 class _PrecompileDynamoAliasHolder:
@@ -1431,22 +1455,54 @@ class TestPrecompile(TestCase):
                 finally:
                     holder.payload = None
 
-    def test_tracer_dynamo_accepts_dtype_input_shared_with_environment(self):
-        # torch.dtype is a process-wide singleton with value-based guards, so a
-        # dtype passed as input while also living on a referenced config class
-        # is not an aliasing hazard; both dtype variants must capture and serve
-        # their own branch.
+    def test_tracer_dynamo_accepts_singleton_input_shared_with_environment(self):
+        # dtypes, layouts, and memory formats are process-wide singletons with
+        # value-based guards, so one passed as input while also living on a
+        # referenced config class is not an aliasing hazard; both variants of
+        # each must capture and serve their own branch.
         x = torch.randn(3)
-        examples = [(x, torch.float32), (x, torch.float64)]
+        cases = (
+            (_precompile_dynamo_dtype_branch, torch.float32, torch.float64),
+            (
+                _precompile_dynamo_format_branch,
+                torch.channels_last,
+                torch.contiguous_format,
+            ),
+            (_precompile_dynamo_layout_branch, torch.strided, torch.sparse_coo),
+        )
+        for fn, match, other in cases:
+            with self.subTest(fn=fn.__name__):
+                code, cache = torch.compiler.precompile(
+                    fn,
+                    example_inputs=[(x, match), (x, other)],
+                    tracer="dynamo",
+                    backend="eager",
+                )
+                loaded = torch.compiler.precompile.load(code, cache)
+                self.assertEqual(loaded(x, match), x * 2)
+                self.assertEqual(loaded(x, other), x * 3)
+
+    def test_tracer_dynamo_enum_exemption_semantics(self):
+        # An UNUSED enum argument may pass through even when the referenced
+        # enum class holds it (the exemption's win); a USED enum argument
+        # fails capture loudly on its unserializable identity guard -- never
+        # via the misleading aliasing error, never silently.
+        x = torch.randn(3)
         code, cache = torch.compiler.precompile(
-            _precompile_dynamo_dtype_branch,
-            example_inputs=examples,
+            _precompile_dynamo_enum_passthrough,
+            example_inputs=[(x, _PrecompileDynamoMode.A)],
             tracer="dynamo",
             backend="eager",
         )
         loaded = torch.compiler.precompile.load(code, cache)
-        self.assertEqual(loaded(x, torch.float32), x * 2)
-        self.assertEqual(loaded(x, torch.float64), x * 3)
+        self.assertEqual(loaded(x, _PrecompileDynamoMode.B), x * 1)
+        with self.assertRaisesRegex(PrecompileError, "identity guard"):
+            torch.compiler.precompile(
+                _precompile_dynamo_enum_branch,
+                example_inputs=[(x, _PrecompileDynamoMode.A)],
+                tracer="dynamo",
+                backend="eager",
+            )
 
     def test_tracer_dynamo_rejects_module_carried_in_argument_slot(self):
         # Slot values are instance state: an nn.Module carried in a slot is
@@ -2382,6 +2438,44 @@ class TestPrecompile(TestCase):
                     state=object(),
                     **paths,
                 )
+            # A duck-typed state carrying an environment_scan attribute must
+            # get the same clean TypeError, not an AttributeError from using
+            # its garbage scan.
+            with self.assertRaisesRegex(TypeError, "previous stateful precompile"):
+                torch.compiler.precompile(
+                    _precompile_dynamo_torch_sin,
+                    example_inputs=[(x,)],
+                    tracer="dynamo",
+                    backend="eager",
+                    state=types.SimpleNamespace(environment_scan="junk"),
+                    **paths,
+                )
+
+    def test_tracer_dynamo_stateful_environment_scan_is_cached(self):
+        # The wide environment walk runs once at state creation; resumed calls
+        # reuse the cached scan (the programming model declares the environment
+        # invariant during capture, so a post-creation environment change is a
+        # contract violation and is deliberately not re-detected).
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = {
+                "artifact_path": os.path.join(tmp, "c.py"),
+                "cache_path": os.path.join(tmp, "c.cache"),
+            }
+            kwargs = {"tracer": "dynamo", "backend": "eager", **paths}
+            x = torch.randn(4)
+            _, state = torch.compiler.precompile(
+                _precompile_dynamo_scalar, example_inputs=[(x, 1)], state=None, **kwargs
+            )
+            self.addCleanup(state.close)
+            scan = state.environment_scan
+            self.assertIsInstance(scan, dict)
+            _, state = torch.compiler.precompile(
+                _precompile_dynamo_scalar,
+                example_inputs=[(x, 2)],
+                state=state,
+                **kwargs,
+            )
+            self.assertIs(state.environment_scan, scan)
 
     def test_tracer_dynamo_recompile_limit_kwarg(self):
         with torch._dynamo.config.patch(automatic_dynamic_shapes=False):
