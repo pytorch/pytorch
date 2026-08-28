@@ -2218,6 +2218,10 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         from torch._inductor.kernel.flex_gemm.template import (
             FlexGemmEpilogueLocalReduceConfig,
         )
+        from torch._inductor.kernel.gemm_epilogue import (
+            GEMM_REDUCTION_IDENTITY_SOURCE,
+            GemmReductionPlan,
+        )
 
         callbacks = FlexGemmLocalReduceCallbacks(
             lambda lhs, rhs: lhs, lambda value: value
@@ -2227,7 +2231,7 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         feed_plan = FlexGemmRuntimeLocalReducePlan(
             geometry, callbacks=callbacks, feeds_main=True
         )
-        shared_plan = FlexGemmRuntimeLocalReducePlan(
+        shared_runtime_plan = FlexGemmRuntimeLocalReducePlan(
             geometry,
             out=out,
             callbacks=callbacks,
@@ -2237,19 +2241,38 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             geometry, out=out, callbacks=callbacks
         )
         self.assertTrue(feed_plan.feeds_main)
-        self.assertTrue(shared_plan.feeds_main)
+        self.assertTrue(shared_runtime_plan.feeds_main)
         self.assertFalse(store_plan.feeds_main)
-        self.assertTrue(
-            FlexGemmEpilogueLocalReduceConfig(geometry, feeds_main=True).feeds_main
+        shared_reduction_plan = GemmReductionPlan(
+            reduction_output="reduced",
+            group=8,
+            axis=0,
+            reduction_type="sum",
+            source_fn=GEMM_REDUCTION_IDENTITY_SOURCE,
+            primary_output="output",
+            feeds_main=True,
+            feed_output="output",
         )
-        self.assertTrue(
-            FlexGemmEpilogueLocalReduceConfig(
-                geometry, out_index=0, feeds_main=True
-            ).feeds_main
+        feed_template_plan = FlexGemmEpilogueLocalReduceConfig.from_plan(
+            shared_reduction_plan, None
         )
-        self.assertFalse(
-            FlexGemmEpilogueLocalReduceConfig(geometry, out_index=0).feeds_main
+        shared_template_plan = FlexGemmEpilogueLocalReduceConfig.from_plan(
+            shared_reduction_plan, 0
         )
+        store_template_plan = FlexGemmEpilogueLocalReduceConfig.from_plan(
+            dataclasses.replace(
+                shared_reduction_plan, feeds_main=False, feed_output=None
+            ),
+            0,
+        )
+        self.assertIsNotNone(feed_template_plan)
+        self.assertIsNotNone(shared_template_plan)
+        self.assertIsNotNone(store_template_plan)
+        self.assertIsNone(FlexGemmEpilogueLocalReduceConfig.from_plan(None, None))
+        self.assertIs(feed_template_plan.plan, shared_reduction_plan)
+        self.assertTrue(feed_template_plan.plan.feeds_main)
+        self.assertTrue(shared_template_plan.plan.feeds_main)
+        self.assertFalse(store_template_plan.plan.feeds_main)
 
         feed_kwargs = local_reduce_gemm_act_kwargs(
             feed_plan, None, ("combine", "finalize")
@@ -2257,7 +2280,7 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         self.assertTrue(feed_kwargs["local_reduce_feeds_main"])
         self.assertFalse(feed_kwargs["tensor_epilogue_returns_local_reduce"])
         shared_kwargs = local_reduce_gemm_act_kwargs(
-            shared_plan, out, ("combine", "finalize")
+            shared_runtime_plan, out, ("combine", "finalize")
         )
         self.assertTrue(shared_kwargs["local_reduce_feeds_main"])
         self.assertTrue(shared_kwargs["tensor_epilogue_returns_local_reduce"])
