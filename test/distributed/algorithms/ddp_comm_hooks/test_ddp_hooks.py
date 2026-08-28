@@ -18,12 +18,10 @@ from torch.distributed.algorithms.ddp_comm_hooks import (
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
     DistributedTestBase,
+    requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    requires_capabilities,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -107,7 +105,7 @@ class DistributedDataParallelCommHookTest(DistributedTestBase):
         param = next(model.parameters())
         return param.grad
 
-    @requires_capabilities("distributed.backend")
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(2)
     def test_ddp_comm_hook_allreduce_hook(self, device):
         """
@@ -123,7 +121,7 @@ class DistributedDataParallelCommHookTest(DistributedTestBase):
 
         torch.testing.assert_close(hook_grads, reference_grads, rtol=1e-5, atol=0)
 
-    @requires_capabilities("distributed.backend")
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(2)
     def test_ddp_comm_hook_fp16compress_hook(self, device):
         """
@@ -139,7 +137,7 @@ class DistributedDataParallelCommHookTest(DistributedTestBase):
 
         torch.testing.assert_close(hook_grads, reference_grads, rtol=1e-5, atol=1e-4)
 
-    @requires_capabilities("distributed.backend")
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(2)
     def test_ddp_comm_hook_quantize_per_tensor_hook(self, device):
         """
@@ -155,7 +153,7 @@ class DistributedDataParallelCommHookTest(DistributedTestBase):
 
         torch.testing.assert_close(hook_grads, reference_grads, rtol=1e-5, atol=1e-4)
 
-    @requires_capabilities("distributed.backend")
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(2)
     def test_ddp_comm_hook_quantize_per_channel_hook(self, device):
         """
@@ -173,7 +171,7 @@ class DistributedDataParallelCommHookTest(DistributedTestBase):
 
         torch.testing.assert_close(hook_grads, reference_grads, rtol=1e-5, atol=1e-4)
 
-    @requires_capabilities("distributed.backend")
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(2)
     def test_ddp_comm_hook_noop_hook(self, device):
         """
@@ -192,7 +190,7 @@ class DistributedDataParallelCommHookTest(DistributedTestBase):
 
         torch.testing.assert_close(hook_grads, reference_grads, rtol=1e-5, atol=0)
 
-    @requires_capabilities("distributed.backend")
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(2)
     def test_is_last_hook(self, device):
         process_group = self.create_pg(device)
