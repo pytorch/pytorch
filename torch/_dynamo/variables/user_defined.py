@@ -145,6 +145,7 @@ except ImportError:
 
 
 _SAFE_C_SLOTS: OrderedSet[object] | None = None
+_ORIGINAL_ENUM_META_CALL = enum.EnumMeta.__call__
 
 
 def _safe_c_slots() -> OrderedSet[object]:
@@ -469,6 +470,51 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # existing singleton members, so they can always be constant-folded.
         return isinstance(self.value, type) and issubclass(self.value, enum.Enum)
 
+    def get_custom_metaclass_call(
+        self, tx: "InstructionTranslatorBase"
+    ) -> tuple[object, Source | None] | None:
+        metaclass = type(self.value)
+        if metaclass is type:
+            return None
+
+        metaclass_call = self.lookup_metaclass_attr("__call__")
+        metaclass_call_source = (
+            self.get_source_by_walking_metaclass_mro(tx, "__call__")
+            if self.source
+            else None
+        )
+        if metaclass_call_source is not None:
+            install_guard(
+                metaclass_call_source.make_guard(GuardBuilder.CLOSURE_MATCH),
+                metaclass_call_source.make_guard(GuardBuilder.ID_MATCH),
+            )
+        if metaclass_call is type.__call__:
+            return None
+        return metaclass_call, metaclass_call_source
+
+    def call_custom_metaclass_call(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+        metaclass_call: object,
+        metaclass_call_source: Source | None,
+    ) -> VariableTracker:
+        if isinstance(metaclass_call, types.FunctionType):
+            return variables.UserFunctionVariable(
+                metaclass_call, source=metaclass_call_source
+            ).call_function(tx, [self, *args], kwargs)
+
+        unimplemented(
+            gb_type="Unsupported custom metaclass __call__",
+            context=f"type({self.value}) = {type(self.value)}",
+            explanation=(
+                "Dynamo only knows how to trace custom metaclass __call__ "
+                "descriptors that are types.FunctionType."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
     def lookup_cls_mro_attr(self, name: str) -> object:
         """Walk cls.__mro__ only (not the metaclass chain) to find *name*."""
         return mro_lookup(self.value, name)
@@ -515,6 +561,44 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 return out_source
 
         raise RuntimeError(f"Attribute {name} not found in MRO of {self.value}")
+
+    def get_source_by_walking_metaclass_mro(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> DictGetItemSource:
+        source = self.source
+        if source is None:
+            raise RuntimeError("get_source_by_walking_metaclass_mro requires source")
+
+        metacls_source = TypeSource(source)
+        metacls_mro = type(self.value).__mro__
+        for idx, klass in enumerate(metacls_mro):
+            if name in klass.__dict__:
+                for absent_idx in range(idx):
+                    absent_klass = metacls_mro[absent_idx]
+                    cache_key = (id(absent_klass), name)
+                    if cache_key in tx.output.guarded_mro_absent_keys:
+                        continue
+                    tx.output.guarded_mro_absent_keys.add(cache_key)
+                    mro_source = TypeMROSource(metacls_source)
+                    klass_source: Source = GetItemSource(mro_source, absent_idx)
+                    dict_source = TypeDictSource(klass_source)
+                    install_guard(
+                        dict_source.make_guard(
+                            functools.partial(GuardBuilder.DICT_NOT_CONTAINS, key=name)
+                        )
+                    )
+
+                if idx != 0:
+                    mro_source = TypeMROSource(metacls_source)
+                    klass_source = GetItemSource(mro_source, idx)
+                else:
+                    klass_source = metacls_source
+                dict_source = TypeDictSource(klass_source)
+                return DictGetItemSource(dict_source, name)
+
+        raise RuntimeError(
+            f"Attribute {name} not found in metaclass MRO of {self.value}"
+        )
 
     def lookup_metaclass_attr(self, name: str) -> object:
         """Walk type(cls).__mro__ (the metaclass chain) to find *name*."""
@@ -1245,6 +1329,29 @@ class UserDefinedClassVariable(UserDefinedVariable):
             var.call_method(tx, "__init__", list(args), kwargs)  # type: ignore[arg-type]
             return var
 
+        custom_metaclass_call = self.get_custom_metaclass_call(tx)
+        if custom_metaclass_call is not None:
+            metaclass_call, metaclass_call_source = custom_metaclass_call
+            # Preserve Enum's existing constant-folding path, but force its
+            # bound defaults and closure cells to install source-backed guards.
+            if (
+                metaclass_call is _ORIGINAL_ENUM_META_CALL
+                and self.can_constant_fold_through()
+                and constant_args
+            ):
+                if metaclass_call_source is not None:
+                    bound_args = variables.UserFunctionVariable(
+                        metaclass_call, source=metaclass_call_source
+                    ).bind_args(tx, [self, *args], kwargs)
+                    variables.LazyVariableTracker.realize_all(bound_args)
+            # The normal TypedDict metaclass descriptor is `dict`; its
+            # specialized construction path remains below. Replacements must
+            # instead use the generic custom-metaclass path.
+            elif not (is_typeddict(self.value) and metaclass_call is dict):
+                return self.call_custom_metaclass_call(
+                    tx, args, kwargs, metaclass_call, metaclass_call_source
+                )
+
         if self.can_constant_fold_through() and constant_args:
             # constant fold
             return VariableTracker.build(
@@ -1276,6 +1383,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             result.call_method(tx, "__init__", list(args), kwargs)
             return result
         elif is_typeddict(self.value):
+            # TypedDict construction is intentionally just dict construction:
+            # typing._TypedDictMeta.__call__ is the dict type, not a Python method.
             if self.value.__optional_keys__:  # type: ignore[attr-defined]
                 unimplemented(
                     gb_type="TypedDict with optional keys",

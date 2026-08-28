@@ -6876,6 +6876,31 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
 
         self.assertEqual(ref, res)
 
+    def test_typed_dict_metaclass_call_recompiles(self):
+        class TensorDict(TypedDict):
+            x: torch.Tensor
+
+        def fn(x):
+            return TensorDict(x=x)["x"]
+
+        metaclass = type(TensorDict)
+        original_call = metaclass.__dict__["__call__"]
+        try:
+            x = torch.tensor([1.0, 2.0])
+            cnt = torch._dynamo.testing.CompileCounter()
+            compiled_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+            self.assertEqual(compiled_fn(x), x)
+            self.assertEqual(cnt.frame_count, 1)
+
+            def custom_call(cls, *, x):
+                return {"x": x * 3}
+
+            metaclass.__call__ = custom_call
+            self.assertEqual(compiled_fn(x), x * 3)
+            self.assertEqual(cnt.frame_count, 2)
+        finally:
+            metaclass.__call__ = original_call
+
     def test_typed_dict_total(self):
         class LlavaImagePixelInputs(TypedDict):
             type: Literal["pixel_values"]

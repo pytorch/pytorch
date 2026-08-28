@@ -501,13 +501,10 @@ class EnumTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, Priority.LOW, Priority.HIGH)
         self.assertEqual(ref, res)
 
-    @unittest.expectedFailure
     def test_metaclass_custom_call(self):
         # When a class has a metaclass that overrides __call__, Python invokes
         # the metaclass's __call__ instead of the default type.__call__
-        # (which does __new__ + __init__). Dynamo currently bypasses the
-        # metaclass __call__ and uses instantiate_user_defined_class_object
-        # (which mimics type.__call__), producing wrong results.
+        # (which does __new__ + __init__).
         class ScalingMeta(type):
             def __call__(cls, val):
                 obj = cls.__new__(cls)
@@ -532,6 +529,220 @@ class EnumTests(torch._dynamo.test_case.TestCase):
         compiled_fn = torch.compile(fn, backend="eager")
         res = compiled_fn(x, 3)
         self.assertEqual(ref, res)
+
+    def test_metaclass_custom_call_source_with_instance_call(self):
+        class ScalingMeta(type):
+            def __call__(cls, scale=(10,)):
+                obj = cls.__new__(cls)
+                obj.scaled = scale[0]
+                return obj
+
+        class Scaled(metaclass=ScalingMeta):
+            def __call__(self, x):
+                return x - 1
+
+        def fn(x):
+            obj = Scaled()
+            return x * obj.scaled
+
+        x = torch.tensor([1.0, 2.0])
+        ref = fn(x)
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = compiled_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_metaclass_custom_call_source_inherited(self):
+        class BaseMeta(type):
+            def __call__(cls, scale=(7,)):
+                obj = cls.__new__(cls)
+                obj.scaled = scale[0]
+                return obj
+
+        class ScalingMeta(BaseMeta):
+            pass
+
+        class Scaled(metaclass=ScalingMeta):
+            pass
+
+        def fn(x):
+            obj = Scaled()
+            return x * obj.scaled
+
+        x = torch.tensor([1.0, 2.0])
+        ref = fn(x)
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = compiled_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_metaclass_custom_call_added_recompiles(self):
+        class BaseMeta(type):
+            pass
+
+        class ScalingMeta(BaseMeta):
+            pass
+
+        class Scaled(metaclass=ScalingMeta):
+            def __init__(self, scale):
+                self.scale = scale
+
+        def fn(x):
+            return x * Scaled(2).scale
+
+        x = torch.tensor([1.0, 2.0])
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        self.assertEqual(compiled_fn(x), x * 2)
+        self.assertEqual(cnt.frame_count, 1)
+
+        def custom_call(cls, scale):
+            obj = cls.__new__(cls)
+            obj.scale = scale * 3
+            return obj
+
+        BaseMeta.__call__ = custom_call
+        self.assertEqual(compiled_fn(x), x * 6)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_metaclass_custom_call_function_mutation_recompiles(self):
+        def make_call(scale):
+            def custom_call(cls, value=(2,)):
+                obj = cls.__new__(cls)
+                obj.value = value[0] * scale
+                return obj
+
+            return custom_call
+
+        class BaseMeta(type):
+            __call__ = make_call(3)
+
+        class ScalingMeta(BaseMeta):
+            pass
+
+        class Scaled(metaclass=ScalingMeta):
+            pass
+
+        def fn(x):
+            return x * Scaled().value
+
+        x = torch.tensor([1.0, 2.0])
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        self.assertEqual(compiled_fn(x), x * 6)
+        self.assertEqual(cnt.frame_count, 1)
+
+        BaseMeta.__call__ = make_call(3)
+        self.assertEqual(compiled_fn(x), x * 6)
+        self.assertEqual(cnt.frame_count, 2)
+
+        BaseMeta.__call__.__defaults__ = ((4,),)
+        self.assertEqual(compiled_fn(x), x * 12)
+        self.assertEqual(cnt.frame_count, 3)
+
+        BaseMeta.__call__.__closure__[0].cell_contents = 5
+        self.assertEqual(compiled_fn(x), x * 20)
+        self.assertEqual(cnt.frame_count, 4)
+
+        def replacement_call(cls, value=(2,)):
+            obj = cls.__new__(cls)
+            obj.value = value[0] + 5
+            return obj
+
+        BaseMeta.__call__ = replacement_call
+        self.assertEqual(compiled_fn(x), x * 7)
+        self.assertEqual(cnt.frame_count, 5)
+
+    def test_enum_custom_metaclass_call_recompiles(self):
+        class BaseMeta(enum.EnumMeta):
+            def __call__(cls):
+                return 6
+
+        class ScalingMeta(BaseMeta):
+            pass
+
+        class Value(enum.Enum, metaclass=ScalingMeta):
+            A = 1
+
+        def fn(x):
+            return x * Value()
+
+        x = torch.tensor([1.0, 2.0])
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        self.assertEqual(compiled_fn(x), x * 6)
+        self.assertEqual(cnt.frame_count, 1)
+
+        def replacement_call(cls):
+            return 14
+
+        BaseMeta.__call__ = replacement_call
+        self.assertEqual(compiled_fn(x), x * 14)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_enum_meta_call_default_mutation_recompiles(self):
+        class Value(enum.Enum):
+            A = 1
+
+        original_call = enum.EnumMeta.__call__
+
+        def make_call(scale):
+            def custom_call(cls, value=(2,), *args, **kwargs):
+                if cls is Value:
+                    return value[0] * scale
+                return original_call(cls, value, *args, **kwargs)
+
+            return custom_call
+
+        try:
+            enum.EnumMeta.__call__ = make_call(3)
+
+            def fn(x):
+                return x * Value()
+
+            x = torch.tensor([1.0, 2.0])
+            cnt = torch._dynamo.testing.CompileCounter()
+            compiled_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+            self.assertEqual(compiled_fn(x), x * 6)
+            self.assertEqual(cnt.frame_count, 1)
+
+            enum.EnumMeta.__call__.__defaults__ = ((4,),)
+            self.assertEqual(compiled_fn(x), x * 12)
+            self.assertEqual(cnt.frame_count, 2)
+        finally:
+            enum.EnumMeta.__call__ = original_call
+
+    def test_enum_functional_api_kwdefault_mutation_recompiles(self):
+        def fn(x):
+            value = enum.Enum("Value", "A B").A.value
+            return x * value
+
+        kwdefaults = enum.EnumMeta.__call__.__kwdefaults__
+        self.assertIsNotNone(kwdefaults)
+        original_start = kwdefaults["start"]
+        try:
+            x = torch.tensor([1.0, 2.0])
+            cnt = torch._dynamo.testing.CompileCounter()
+            compiled_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+            self.assertEqual(compiled_fn(x), x)
+            self.assertEqual(cnt.frame_count, 1)
+
+            kwdefaults["start"] = 5
+            self.assertEqual(compiled_fn(x), x * 5)
+            self.assertEqual(cnt.frame_count, 2)
+        finally:
+            kwdefaults["start"] = original_start
+
+    def test_enum_functional_api_empty_subclass(self):
+        class Base(enum.Enum):
+            pass
+
+        def fn(x):
+            value = Base("Value", "A B").A.value
+            return x * value
+
+        x = torch.tensor([1.0, 2.0])
+        ref = fn(x)
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled_fn(x), ref)
 
     def test_enum_construction_no_extra_init(self):
         # Real-world instance of the metaclass __call__ issue above.
