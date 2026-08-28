@@ -114,6 +114,7 @@ from .torch_function import (
     TensorWithTFOverrideVariable,
     TorchFunctionModeStackVariable,
 )
+from .torch_schema import detect_generator_reconstruction_tensor_mutations
 from .user_defined import UserDefinedTupleVariable
 
 
@@ -3528,7 +3529,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             if tx.fake_mode and tx.fake_mode.shape_env:
                 ctx = tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols
 
-        with ctx():
+        with ctx(), detect_generator_reconstruction_tensor_mutations(tx, args, kwargs):
             tensor_variable = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(

@@ -91,6 +91,7 @@ from .base import (
 from .constant import ConstantVariable
 from .lists import ListIteratorVariable, SizeVariable
 from .script_object import CustomClassObjectVariable
+from .torch_schema import torch_op_mutates_first_arg
 from .user_defined import UserDefinedClassVariable
 
 
@@ -133,6 +134,8 @@ supported_comparison_ops = {
     **supported_tensor_comparison_ops,
     **supported_const_comparison_ops,
 }
+
+
 supported_tensor_comparison_op_values = dict.fromkeys(
     supported_tensor_comparison_ops.values()
 )
@@ -340,6 +343,8 @@ class TensorVariable(VariableTracker):
             and version_after is not None
             and version_after > version_before
         ):
+            if tx.output.side_effects.is_reconstructing_generator():
+                tx.output.side_effects.check_allowed_side_effect(self)
             self.synchronize_attributes(tx)
             tx.output.check_input_mutation_on_current_stream(tx)
 
@@ -1023,6 +1028,12 @@ class TensorVariable(VariableTracker):
             return dispatch_torch_function(
                 tx, func_var, tuple([self] + list(args)), kwargs
             )
+
+        if (
+            tx.output.side_effects.is_reconstructing_generator()
+            and torch_op_mutates_first_arg(name)
+        ):
+            tx.output.side_effects.check_allowed_side_effect(self)
 
         # Declarative named-method dispatch (tp_methods). Mirrors CPython's
         # tp_methods table: arity (derived from CPython's ml_flags) is checked
