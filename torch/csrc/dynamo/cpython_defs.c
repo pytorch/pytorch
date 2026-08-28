@@ -17,11 +17,6 @@
 const uint8_t* THP_PyOpcode_Caches = NULL;
 int THP_PyOpcode_Caches_size = 0;
 
-void THP_PyThreadState_PopFrame(
-    PyThreadState* tstate,
-    _PyInterpreterFrame* frame) {}
-void THP_PyFrame_Clear(_PyInterpreterFrame* frame) {}
-
 void init_THPCaches() {}
 
 #else
@@ -46,7 +41,6 @@ void init_THPCaches() {}
 #define NEED_OPCODE_TABLES // To get _PyOpcode_Deopt, _PyOpcode_Caches
 
 #if IS_PYTHON_3_13_PLUS
-#include <cpython/code.h> // To get PyUnstable_Code_GetFirstFree
 #define NEED_OPCODE_METADATA
 #include <internal/pycore_opcode_metadata.h>
 #undef NEED_OPCODE_METADATA
@@ -125,6 +119,8 @@ PyFunctionObject* _PyFunction_CopyWithNewCode(
   return op;
 }
 
+#if !IS_PYTHON_3_13_PLUS
+
 // From
 // https://github.com/python/cpython/blob/e715da6db1d1d70cd779dc48e1ba8110c51cc1bf/Objects/frameobject.c#L1020
 PyFrameObject* THP_PyFrame_New_NoTrack(const PyCodeObject* code) {
@@ -139,49 +135,10 @@ PyFrameObject* THP_PyFrame_New_NoTrack(const PyCodeObject* code) {
   f->f_trace = NULL;
   f->f_trace_lines = 1;
   f->f_trace_opcodes = 0;
-#if IS_PYTHON_3_13_PLUS
-  f->f_extra_locals = NULL;
-#else
   f->f_fast_as_locals = 0;
-#endif
   f->f_lineno = 0;
-#if IS_PYTHON_3_14_PLUS
-  f->f_locals_cache = NULL;
-  f->f_overwritten_fast_locals = NULL;
-#endif
   return f;
 }
-
-#if IS_PYTHON_3_14_PLUS
-
-// From
-// https://github.com/python/cpython/blob/8b3f9ae2ca55b2cc7edc097321cc10d7c2fdbb98/Python/frame.c#L21
-PyFrameObject* THP_PyFrame_MakeAndSetFrameObject(_PyInterpreterFrame* frame) {
-  CHECK(frame->frame_obj == NULL);
-  PyObject* exc = PyErr_GetRaisedException();
-
-  PyFrameObject* f = THP_PyFrame_New_NoTrack(F_CODE(frame));
-  if (f == NULL) {
-    Py_XDECREF(exc);
-    return NULL;
-  }
-  PyErr_SetRaisedException(exc);
-
-  // GH-97002: There was a time when a frame object could be created when we
-  // are allocating the new frame object f above, so frame->frame_obj would
-  // be assigned already. That path does not exist anymore. We won't call any
-  // Python code in this function and garbage collection will not run.
-  // Notice that _PyFrame_New_NoTrack() can potentially raise a MemoryError,
-  // but it won't allocate a traceback until the frame unwinds, so we are safe
-  // here.
-  assert(frame->frame_obj == NULL);
-  assert(frame->owner != FRAME_OWNED_BY_FRAME_OBJECT);
-  f->f_frame = frame;
-  frame->frame_obj = f;
-  return f;
-}
-
-#else
 
 // From
 // https://github.com/python/cpython/blob/e715da6db1d1d70cd779dc48e1ba8110c51cc1bf/Python/frame.c#L27
@@ -223,8 +180,6 @@ PyFrameObject* THP_PyFrame_MakeAndSetFrameObject(_PyInterpreterFrame* frame) {
   return f;
 }
 
-#endif
-
 // From
 // https://github.com/python/cpython/blob/e715da6db1d1d70cd779dc48e1ba8110c51cc1bf/Include/internal/pycore_frame.h#L163
 static inline PyFrameObject* THP_PyFrame_GetFrameObject(
@@ -236,57 +191,6 @@ static inline PyFrameObject* THP_PyFrame_GetFrameObject(
   }
   return THP_PyFrame_MakeAndSetFrameObject(frame);
 }
-
-#if IS_PYTHON_3_14_PLUS
-
-static void THP_take_ownership(PyFrameObject* f, _PyInterpreterFrame* frame) {
-  Py_BEGIN_CRITICAL_SECTION(f);
-  CHECK(frame->owner < FRAME_OWNED_BY_INTERPRETER);
-  CHECK(frame->owner != FRAME_OWNED_BY_FRAME_OBJECT);
-  _PyInterpreterFrame* new_frame = (_PyInterpreterFrame*)f->_f_frame_data;
-  _PyFrame_Copy(frame, new_frame);
-  // _PyFrame_Copy takes the reference to the executable,
-  // so we need to restore it.
-  if (PyStackRef_IsNull(new_frame->f_executable)) {
-    frame->f_executable = PyStackRef_NULL;
-  } else {
-    frame->f_executable = PyStackRef_DUP(new_frame->f_executable);
-  }
-  f->f_frame = new_frame;
-  new_frame->owner = FRAME_OWNED_BY_FRAME_OBJECT;
-  if (_PyFrame_IsIncomplete(new_frame)) {
-    // This may be a newly-created generator or coroutine frame. Since it's
-    // dead anyways, just pretend that the first RESUME ran:
-    PyCodeObject* code = F_CODE(new_frame);
-    new_frame->instr_ptr =
-        _PyFrame_GetBytecode(new_frame) + code->_co_firsttraceable + 1;
-  }
-  CHECK(!_PyFrame_IsIncomplete(new_frame));
-  CHECK(f->f_back == NULL);
-  _PyInterpreterFrame* prev = _PyFrame_GetFirstComplete(frame->previous);
-  if (prev) {
-    CHECK(prev->owner < FRAME_OWNED_BY_INTERPRETER);
-    PyObject* exc = PyErr_GetRaisedException();
-    /* Link PyFrameObjects.f_back and remove link through
-     * _PyInterpreterFrame.previous */
-    PyFrameObject* back = THP_PyFrame_GetFrameObject(prev);
-    if (back == NULL) {
-      /* Memory error here. */
-      assert(PyErr_ExceptionMatches(PyExc_MemoryError));
-      /* Nothing we can do about it */
-      PyErr_Clear();
-    } else {
-      f->f_back = (PyFrameObject*)Py_NewRef(back);
-    }
-    PyErr_SetRaisedException(exc);
-  }
-  if (!_PyObject_GC_IS_TRACKED((PyObject*)f)) {
-    PyObject_GC_Track((PyObject*)f);
-  }
-  Py_END_CRITICAL_SECTION();
-}
-
-#else
 
 // From
 // https://github.com/python/cpython/blob/e715da6db1d1d70cd779dc48e1ba8110c51cc1bf/Python/frame.c#L79
@@ -332,47 +236,7 @@ static void THP_take_ownership(PyFrameObject* f, _PyInterpreterFrame* frame) {
 
 #endif
 
-#if IS_PYTHON_3_14_PLUS
-
-void THP_PyFrame_ClearLocals(_PyInterpreterFrame* frame) {
-  CHECK(frame->stackpointer != NULL);
-  _PyStackRef* sp = frame->stackpointer;
-  _PyStackRef* locals = frame->localsplus;
-  frame->stackpointer = locals;
-  while (sp > locals) {
-    sp--;
-    PyStackRef_XCLOSE(*sp);
-  }
-  Py_CLEAR(frame->f_locals);
-}
-
-// From
-// https://github.com/python/cpython/blob/8b3f9ae2ca55b2cc7edc097321cc10d7c2fdbb98/Python/frame.c#L107
-void THP_PyFrame_Clear(_PyInterpreterFrame* frame) {
-  /* It is the responsibility of the owning generator/coroutine
-   * to have cleared the enclosing generator, if any. */
-  CHECK(
-      frame->owner != FRAME_OWNED_BY_GENERATOR ||
-      _PyGen_GetGeneratorFromFrame(frame)->gi_frame_state == FRAME_CLEARED);
-  // GH-99729: Clearing this frame can expose the stack (via finalizers). It's
-  // crucial that this frame has been unlinked, and is no longer visible:
-  CHECK(_PyThreadState_GET()->current_frame != frame);
-  if (frame->frame_obj) {
-    PyFrameObject* f = frame->frame_obj;
-    frame->frame_obj = NULL;
-    if (!_PyObject_IsUniquelyReferenced((PyObject*)f)) {
-      THP_take_ownership(f, frame);
-      Py_DECREF(f);
-      return;
-    }
-    Py_DECREF(f);
-  }
-  THP_PyFrame_ClearLocals(frame);
-  PyStackRef_CLEAR(frame->f_funcobj);
-}
-
-#else
-
+#if IS_PYTHON_3_11_PLUS && !IS_PYTHON_3_13_PLUS
 // From
 // https://github.com/python/cpython/blob/e715da6db1d1d70cd779dc48e1ba8110c51cc1bf/Python/frame.c#L120
 void THP_PyFrame_Clear(_PyInterpreterFrame* frame) {
@@ -383,11 +247,7 @@ void THP_PyFrame_Clear(_PyInterpreterFrame* frame) {
       _PyFrame_GetGenerator(frame)->gi_frame_state == FRAME_CLEARED);
   // GH-99729: Clearing this frame can expose the stack (via finalizers). It's
   // crucial that this frame has been unlinked, and is no longer visible:
-#if IS_PYTHON_3_13_PLUS
-  CHECK(_PyThreadState_GET()->current_frame != frame);
-#else
   CHECK(_PyThreadState_GET()->cframe->current_frame != frame);
-#endif
   if (frame->frame_obj) {
     PyFrameObject* f = frame->frame_obj;
     frame->frame_obj = NULL;
@@ -415,18 +275,12 @@ void THP_PyFrame_Clear(_PyInterpreterFrame* frame) {
 
 #endif
 
+#if !IS_PYTHON_3_15_PLUS
 // https://github.com/python/cpython/blob/fad48ea1816be3125ea51edcdfe2f999d6ade796/Objects/obmalloc.c#L635
 void* THP_PyObject_VirtualAlloc(size_t size) {
   PyObjectArenaAllocator arena;
   PyObject_GetArenaAllocator(&arena);
   return arena.alloc(arena.ctx, size);
-}
-
-// https://github.com/python/cpython/blob/fad48ea1816be3125ea51edcdfe2f999d6ade796/Objects/obmalloc.c#L641
-void THP_PyObject_VirtualFree(void* obj, size_t size) {
-  PyObjectArenaAllocator arena;
-  PyObject_GetArenaAllocator(&arena);
-  arena.free(arena.ctx, obj, size);
 }
 
 // https://github.com/python/cpython/blob/051b8a2589ff28f0194c3701b21f729444691752/Python/pystate.c#L728
@@ -497,6 +351,15 @@ _PyInterpreterFrame* THP_PyThreadState_BumpFramePointerSlow(
   }
   return (_PyInterpreterFrame*)push_chunk(tstate, (int)size);
 }
+#endif // !IS_PYTHON_3_15_PLUS
+
+#if !IS_PYTHON_3_13_PLUS
+// https://github.com/python/cpython/blob/fad48ea1816be3125ea51edcdfe2f999d6ade796/Objects/obmalloc.c#L641
+void THP_PyObject_VirtualFree(void* obj, size_t size) {
+  PyObjectArenaAllocator arena;
+  PyObject_GetArenaAllocator(&arena);
+  arena.free(arena.ctx, obj, size);
+}
 
 // https://github.com/python/cpython/blob/051b8a2589ff28f0194c3701b21f729444691752/Python/pystate.c#L2222
 void THP_PyThreadState_PopFrame(
@@ -519,6 +382,7 @@ void THP_PyThreadState_PopFrame(
     tstate->datastack_top = base;
   }
 }
+#endif // !IS_PYTHON_3_13_PLUS
 
 #endif
 
