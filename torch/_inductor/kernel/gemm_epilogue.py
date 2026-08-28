@@ -26,7 +26,7 @@ GemmReductionType = Literal["sum", "mean", "prod", "max", "min"]
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class GemmEpiloguePlan:
     source: str | None = None
-    is_cutedsl: bool = False
+    is_evt_fallback: bool = False
     reads: tuple[str, ...] = ()
     writes: tuple[str, ...] = ()
     renames: dict[str, Any] = dataclasses.field(default_factory=dict)
@@ -103,24 +103,7 @@ class GemmReductionGeometry:
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
-class GemmReductionSpec:
-    """Semantic grouped reduction shared by analysis and codegen plans."""
-
-    group: int
-    axis: int
-    reduction_type: GemmReductionType
-    source_fn: str
-
-    def __post_init__(self) -> None:
-        _ = self.geometry
-
-    @property
-    def geometry(self) -> GemmReductionGeometry:
-        return GemmReductionGeometry(self.group, self.axis)
-
-
-@dataclasses.dataclass(frozen=True, kw_only=True)
-class GemmReductionConfig(GemmReductionSpec):
+class GemmReductionConfig:
     """Reduction recognized from frontend graph or scheduler loop IR.
 
     This is an analysis result, before output ownership and feed-main behavior
@@ -135,8 +118,19 @@ class GemmReductionConfig(GemmReductionSpec):
     """
 
     output_name: str
+    group: int
+    axis: int
+    reduction_type: GemmReductionType
+    source_fn: str
     finalizer_fn: str | None = None
     secondary_consumer_fn: str | None = None
+
+    def __post_init__(self) -> None:
+        _ = self.geometry
+
+    @property
+    def geometry(self) -> GemmReductionGeometry:
+        return GemmReductionGeometry(self.group, self.axis)
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
