@@ -282,11 +282,12 @@ def is_scaled_mm_supported(device: Device = None) -> bool:
     layout, and output combinations may have additional restrictions.
 
     Args:
-        device: Device for which to query support. Uses the current device when
-            unspecified.
+        device (torch.device or int or str, optional): Device for which to query
+            support. Uses the current device when unspecified.
     """
     if not is_available():
         return False
+    _lazy_init()
     device_index = _get_device_index(device, optional=True)
     return bool(torch._C._cuda_isScaledMMAllowed(device_index))
 

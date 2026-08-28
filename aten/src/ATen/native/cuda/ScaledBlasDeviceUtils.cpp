@@ -15,7 +15,7 @@ bool scaled_mm_arch_allowed(bool /*sm90_only*/, bool /*sm100_only*/) {
 #if ROCM_VERSION >= 60300
       "gfx1200", "gfx1201",
 #endif
-#if ROCM_VERSION >= 60500
+#if ROCM_VERSION >= 70000
       "gfx950",
 #endif
 #if ROCM_VERSION >= 71400

@@ -1217,16 +1217,23 @@ class TestFP8Matmul(TestCase):
         y = torch.rand((m, l), device=device).to(e4m3_type).t()
         scale_a = torch.tensor(1.0, device=device)
         scale_b = torch.tensor(1.0, device=device)
+        # This device cannot run _scaled_mm, so the capability query must agree.
+        self.assertFalse(torch.cuda.is_scaled_mm_supported(device))
         self.assertRaisesRegex(
             RuntimeError,
-            (
-                r"torch\.\_scaled\_mm is only supported on CUDA devices with "
-                r"compute capability \>\= 9\.0 or 8\.9, ROCm gfx942, "
-                r"ROCm 6\.3\+ gfx1200/gfx1201, ROCm 7\.0\+ gfx950, or ROCm "
-                r"7\.14\+ gfx1250"
-            ),
+            r"torch\.\_scaled\_mm is only supported on CUDA devices with compute capability \>\= 9\.0 or 8\.9, ROCm gfx942, ROCm 6\.3\+ gfx1200/gfx1201, ROCm 7\.0\+ gfx950, or ROCm 7\.14\+ gfx1250",  # noqa: B950
             lambda: scaled_mm_wrap(x, y, scale_a, scale_b, out_dtype=torch.float32),
         )
+
+    @onlyCUDA
+    def test_is_scaled_mm_supported_device_forms(self, device) -> None:
+        expected = torch.cuda.is_scaled_mm_supported()
+        self.assertIsInstance(expected, bool)
+        index = torch.cuda.current_device()
+        for form in (None, index, torch.device("cuda", index), f"cuda:{index}"):
+            self.assertEqual(torch.cuda.is_scaled_mm_supported(form), expected)
+        # Must agree with the arch gate the suite already derives independently.
+        self.assertEqual(expected, PLATFORM_SUPPORTS_FP8)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @skipCUDAIf(SM100OrLater, "fast_accum is SM90-only")
