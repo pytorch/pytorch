@@ -516,8 +516,8 @@ std::vector<Value*> getConcatInputs(Node* concat) {
 
 class ConcatCombiner {
  public:
-  explicit ConcatCombiner(std::shared_ptr<Graph> graph)
-      : graph_(std::move(graph)), aliasDb_(graph_) {}
+  ConcatCombiner(std::shared_ptr<Graph> graph, AliasDb& alias_db)
+      : graph_(std::move(graph)), aliasDb_(alias_db) {}
 
   bool run() {
     collectOptimizableConcats();
@@ -682,15 +682,20 @@ class ConcatCombiner {
   std::vector<CombinableConcat> combinable_concats_;
 
   std::shared_ptr<Graph> graph_;
-  AliasDb aliasDb_;
+  AliasDb& aliasDb_;
 };
 
 } // namespace
 
-bool CombineConcats(const std::shared_ptr<Graph>& graph) {
-  bool changed = ConcatCombiner(graph).run();
+bool CombineConcats(const std::shared_ptr<Graph>& graph, AliasDb& alias_db) {
+  bool changed = ConcatCombiner(graph, alias_db).run();
   GRAPH_DUMP("After combining concats", graph);
   return changed;
+}
+
+bool CombineConcats(const std::shared_ptr<Graph>& graph) {
+  AliasDb alias_db(graph);
+  return CombineConcats(graph, alias_db);
 }
 
 } // namespace torch::jit
