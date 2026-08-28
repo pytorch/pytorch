@@ -68,18 +68,7 @@ def set_copy(obj: VariableTracker) -> VariableTracker:
     for exact frozenset (`frozenset_copy`).  Use this for binary-op scratch
     storage so mutations don't bleed into the input.
     """
-    # For a set/frozenset subclass, clone the plain _base_vt view rather than the
-    # UserDefined* object itself, whose __dict__ carries fields (e.g.
-    # _looked_up_attrs) that VariableTracker.__init__ would reject.  Covers both
-    # UserDefinedSetVariable and its sibling UserDefinedFrozensetVariable.
-    base = obj._base_vt if isinstance(obj, variables.UserDefinedObjectVariable) else obj
-    if base is None:
-        raise AssertionError("_base_vt must not be None")
-    return base.clone(
-        items=base.items.copy(),  # type: ignore[missing-attribute]
-        mutation_type=ValueMutationNew(),
-        source=None,
-    )
+    return obj._new_set(obj.items.keys())  # type: ignore[missing-attribute]
 
 
 class BaseSetVariable(VariableTracker):
@@ -684,7 +673,8 @@ class SetVariable(BaseSetVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if not self.sq_contains_impl(tx, args[0]).as_python_constant():
+        # Explicit unbound dispatch
+        if not BaseSetVariable.sq_contains_impl(self, tx, args[0]).as_python_constant():
             raise_observed_exception(KeyError, tx, args=[args[0]])
         self.should_reconstruct_all = True
         tx.output.side_effects.mutation(self)
@@ -700,7 +690,7 @@ class SetVariable(BaseSetVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if self.sq_contains_impl(tx, args[0]).as_python_constant():
+        if BaseSetVariable.sq_contains_impl(self, tx, args[0]).as_python_constant():
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             # sq_contains validated/normalized args[0]; a set key was coerced
