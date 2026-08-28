@@ -19,7 +19,6 @@ from collections.abc import Callable
 
 import torch
 import torch.fx as fx
-from torch.fx._compatibility import compatibility
 
 
 __all__ = ["canonicalize_graph", "rename_nodes_to_canonical"]
@@ -181,7 +180,6 @@ def _is_safe_to_reorder(node: fx.Node) -> bool:
     return True
 
 
-@compatibility(is_backward_compatible=False)
 def rename_nodes_to_canonical(
     graph: fx.Graph,
     skip_ops: frozenset[str] = frozenset(),
@@ -301,7 +299,6 @@ def _group_getitem_nodes(order: list[fx.Node]) -> None:
     order[:] = new_order
 
 
-@compatibility(is_backward_compatible=False)
 def canonicalize_graph(
     graph: fx.Graph,
     canonical_key_fn: Callable[[fx.Node, dict[fx.Node, int]], object],
