@@ -2736,6 +2736,41 @@ class TestPrecompile(TestCase):
         self.assertTrue(_read_literal(ast.parse(code), "POLICY_DROPPED_GUARDS"))
 
 
+    @parametrize("api", ["session", "public"])
+    def test_guards_that_cannot_be_rebuilt_are_refused_at_capture(self, api):
+        # Fault injection, because the reachable causes are fixed: drop the
+        # carried tensor attributes back out and the guards no longer rebuild.
+        # Both entry points must refuse, and neither may hand back an artifact
+        # whose failure lands on whoever loads it.
+        from torch._dynamo.exc import PackageError
+        from torch._dynamo.guards import GuardsStatePickler
+        from torch._dynamo.precompile_package import precompile_capture
+
+        model = _PrecompileReadsAttr()
+        x = torch.randn(8)
+        x._cpu_copy = torch.randn(8)
+        # The session API raises its own PackageError; precompile() translates.
+        wanted = PrecompileError if api == "public" else PackageError
+        with (
+            mock.patch.object(
+                GuardsStatePickler, "_carried_tensor_attributes", lambda self, obj: None
+            ),
+            self.assertRaisesRegex(wanted, "cannot be rebuilt"),
+            torch.no_grad(),
+        ):
+            if api == "public":
+                torch.compiler.precompile(
+                    _precompile_call_model,
+                    backend="eager",
+                    dynamic=False,
+                    tracer="dynamo",
+                    require_no_risky_drops=False,
+                    example_inputs=[(model, x)],
+                )
+            else:
+                session = precompile_capture(_precompile_call_model, backend="eager")
+                with session as compiled:
+                    compiled(model, x)
 
     @parametrize("where", ["object", "in_a_list"])
     def test_unpicklable_guard_value_names_where_it_lives(self, where):
