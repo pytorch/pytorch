@@ -4,7 +4,6 @@
 
 #include <ATen/MapAllocator.h>
 #include <ATen/StorageUtils.h>
-#include <c10/core/DeviceGuard.h>
 #include <c10/xpu/XPUFunctions.h>
 #include <c10/xpu/XPUStream.h>
 
@@ -90,12 +89,10 @@ class XpuIPCSentData final {
   XpuIPCSentData(
       std::string handle,
       uint64_t offset,
-      int64_t* counter_ptr,
-      at::Device device)
+      int64_t* counter_ptr)
       : handle_(std::move(handle)),
         offset_(offset),
-        counter_ptr_(counter_ptr),
-        device_(device) {}
+        counter_ptr_(counter_ptr) {}
 
   ~XpuIPCSentData();
 
@@ -111,10 +108,6 @@ class XpuIPCSentData final {
     return offset_;
   }
 
-  at::Device device() const {
-    return device_;
-  }
-
   void set_original_ptr(at::DataPtr data_ptr) {
     original_ptr_ = std::move(data_ptr);
   }
@@ -128,7 +121,6 @@ class XpuIPCSentData final {
   uint64_t offset_;
   int64_t* counter_ptr_;
   at::DataPtr original_ptr_;
-  at::Device device_;
   std::shared_ptr<void> export_handle_owner_;
 };
 
@@ -265,8 +257,7 @@ at::DataPtr GetNewRefCountedXpuSentData(void* data, at::Device device) {
   auto sent_data = std::make_unique<XpuIPCSentData>(
       file_ref->handle(),
       file_ref->get_offset(),
-      file_ref->counter_ptr(),
-      device);
+      file_ref->counter_ptr());
 
   file_ref->rotate_offset();
   if (!file_ref->have_offsets()) {
@@ -345,14 +336,12 @@ c10::intrusive_ptr<at::StorageImpl> NewStorageFromXpuShared(
     std::shared_ptr<void> base_ptr;
     std::string ref_counter_handle;
     uint64_t ref_counter_offset{0};
-    c10::DeviceIndex device{-1};
   };
 
   auto ctx = std::make_unique<XpuIpcDeleterContext>();
   ctx->base_ptr = std::move(base_ptr);
   ctx->ref_counter_handle = shared.ref_counter_handle;
   ctx->ref_counter_offset = shared.ref_counter_offset;
-  ctx->device = shared.device;
 
   void* dev_ptr = ctx->base_ptr.get();
   dev_ptr = static_cast<char*>(dev_ptr) + shared.offset_bytes;
