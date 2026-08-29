@@ -3143,6 +3143,53 @@ class TestPrecompile(TestCase):
             with self.assertRaisesRegex(Exception, "source code changes detected"):
                 torch.compiler.precompile.load(code, cache)
 
+    def test_guard_drift_is_reported(self):
+        # The loud half of a lossy reconstruction is a guard that will not
+        # rebuild at all. The quiet half is one that rebuilds into a DIFFERENT
+        # check, which serializes, loads, and then never matches -- here, an
+        # attribute guard whose companion comes back as its own inverse.
+        from torch._dynamo.guards import GuardsStatePickler
+        from torch._dynamo.precompile_package import PrecompileSession
+
+        drift = []
+        real = PrecompileSession._report_guard_drift
+
+        def spy(self, code_entry, rebuilt):
+            before = set(self._drifted_guards)
+            real(self, code_entry, rebuilt)
+            drift.extend(self._drifted_guards - before)
+
+        model = _PrecompileReadsAttr()
+        x = torch.randn(8)
+        x._cpu_copy = torch.randn(8)
+        with (
+            mock.patch.object(PrecompileSession, "_report_guard_drift", spy),
+            torch.no_grad(),
+        ):
+            torch.compiler.precompile(
+                _precompile_call_model,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+                example_inputs=[(model, x)],
+            )
+            self.assertEqual(drift, [])
+            with mock.patch.object(
+                GuardsStatePickler,
+                "_carried_tensor_attributes",
+                lambda self, obj: None,
+            ):
+                torch.compiler.precompile(
+                    _precompile_call_model,
+                    backend="eager",
+                    dynamic=False,
+                    tracer="dynamo",
+                    require_no_risky_drops=False,
+                    example_inputs=[(model, x)],
+                )
+        self.assertTrue(any("_cpu_copy" in payload for _, payload in drift))
+
     def test_capture_runs_each_example_once(self):
         # Learning the guard policy from a throwaway first capture would run
         # every example twice. That is not free: the region below counts its
