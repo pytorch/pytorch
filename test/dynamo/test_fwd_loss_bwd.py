@@ -9,9 +9,12 @@ import torch._dynamo
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
     EagerAndRecordGraphs,
+    empty_line_normalizer,
     normalize_gm,
 )
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -21,6 +24,7 @@ from torch.testing._internal.common_utils import (
 
 @torch._dynamo.config.patch(trace_autograd_ops=True)
 @skipIfTorchDynamo()
+@instantiate_parametrized_tests
 class TestForwardLossBackward(TestCase):
     def _run_backward_test(self, fn, mod, x, backend=None):
         """
@@ -1399,6 +1403,133 @@ backward() with non-leaf tensor
         eager_grad = eager_vjp_fn(torch.ones(()))
         self.assertEqual(compiled_y, eager_y)
         self.assertEqual(compiled_grad, eager_grad)
+
+    @skipIfCrossRef
+    def test_autograd_grad_with_requires_grad_setattr(self):
+        mod = torch.nn.Linear(4, 4)
+
+        def fn(x):
+            y = x.detach()
+            y.requires_grad = True
+            return torch.autograd.grad(mod(y).sum(), y)[0].detach()
+
+        x = torch.randn(2, 4)
+        eager = fn(x)
+        backend = AotEagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)(x)
+        self.assertEqual(compiled, eager)
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertExpectedInline(
+            empty_line_normalizer(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False))
+            ),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[2, 4]", L_mod_parameters_weight_: "f32[4, 4]", L_mod_parameters_bias_: "f32[4]"):
+        l_x_ = L_x_
+        l_mod_parameters_weight_ = L_mod_parameters_weight_
+        l_mod_parameters_bias_ = L_mod_parameters_bias_
+        y: "f32[2, 4]" = l_x_.detach();  l_x_ = None
+        set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True);  set_inplace_requires_grad_allowed = None
+        requires_grad_ = y.requires_grad_();  requires_grad_ = None
+        set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False);  set_inplace_requires_grad_allowed_1 = None
+        linear: "f32[2, 4]" = torch._C._nn.linear(y, l_mod_parameters_weight_, l_mod_parameters_bias_);  l_mod_parameters_weight_ = l_mod_parameters_bias_ = None
+        sum_1: "f32[]" = linear.sum();  linear = None
+        grad = torch.autograd.grad(sum_1, y);  sum_1 = y = None
+        getitem: "f32[2, 4]" = grad[0];  grad = None
+        detach_1: "f32[2, 4]" = getitem.detach();  getitem = None
+        return (detach_1,)
+""",
+        )
+
+    @parametrize("via", ("setattr", "method"))
+    @parametrize("dtype", (torch.float32, torch.float64, torch.complex64))
+    def test_requires_grad_setattr_intermediate_single_graph(self, via, dtype):
+        def fn(x):
+            y = x.detach()
+            if via == "setattr":
+                y.requires_grad = True
+            else:
+                y.requires_grad_()
+            out = (y * y.conj()).real.sum()
+            return torch.autograd.grad(out, y)[0].detach()
+
+        x = torch.randn(4, dtype=dtype)
+        eager = fn(x)
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=cnt, fullgraph=True)(x)
+        self.assertEqual(compiled, eager)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_requires_grad_setattr_leaked_output_graph_breaks(self):
+        mod = torch.nn.Linear(4, 4)
+
+        def fn(x):
+            y = x.detach()
+            y.requires_grad = True
+            return mod(y).sum()
+
+        x = torch.randn(2, 4)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "returning intermediate with requires_grad_\\(\\)",
+        ):
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        torch._dynamo.reset()
+        for p in mod.parameters():
+            p.grad = None
+        eager_out = fn(x)
+        eager_out.backward()
+        eager_grads = {name: p.grad.clone() for name, p in mod.named_parameters()}
+
+        for p in mod.parameters():
+            p.grad = None
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        out = torch.compile(fn, backend=cnt)(x)
+        out.backward()
+
+        self.assertEqual(out, eager_out)
+        for name, p in mod.named_parameters():
+            self.assertEqual(eager_grads[name], p.grad)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_requires_grad_setattr_graph_input_graph_breaks(self):
+        def fn(x):
+            x.requires_grad = True
+            return x.sum()
+
+        x = torch.randn(4)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "setattr\\(\\) on Tensor.requires_grad"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+    @parametrize("value", (False, 1, None))
+    def test_requires_grad_setattr_unsupported_value_graph_breaks(self, value):
+        def fn(x):
+            y = x.detach()
+            y.requires_grad = value
+            return y.sum()
+
+        x = torch.randn(4)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "setattr\\(\\) on Tensor.requires_grad"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+    @parametrize("dtype", (torch.int64, torch.int32, torch.bool))
+    def test_requires_grad_setattr_non_differentiable_dtype_graph_breaks(self, dtype):
+        def fn(x):
+            y = x.detach()
+            y.requires_grad = True
+            return y.sum()
+
+        x = torch.ones(3, dtype=dtype)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "setattr\\(\\) on Tensor.requires_grad"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
 
 
 if __name__ == "__main__":
