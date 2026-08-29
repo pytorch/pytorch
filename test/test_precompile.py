@@ -351,6 +351,13 @@ def _precompile_attr_entry(model, x):
     return _precompile_attr_helper(model, x)
 
 
+_DRIFT_MODULE = None
+
+
+def _precompile_drift_entry(x):
+    return _DRIFT_MODULE.scaled(x).sum()
+
+
 def _precompile_reads_flag(x):
     return x * getattr(x, "my_flag", 1)
 
@@ -3065,6 +3072,55 @@ class TestPrecompile(TestCase):
                 ],
             )
         self.assertEqual(builds, 2 * managers)
+
+    def test_standalone_artifact_refuses_drifted_inlined_source(self):
+        # A standalone artifact builds no CompilePackage, so it never ran the
+        # inlined-source check the installed mode gets for free -- and an
+        # artifact whose inlined helper has since changed does not fail, it
+        # answers with the OLD number.
+        import importlib.util
+
+        def import_from_path(name, path):
+            spec = importlib.util.spec_from_file_location(name, path)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+            spec.loader.exec_module(module)
+            return module
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            original = os.path.join(tmp_dir, "orig.py")
+            modified = os.path.join(tmp_dir, "modified.py")
+            with open(original, "w") as f:
+                f.write("def scaled(x):\n    return x * 3.0\n")
+            with open(modified, "w") as f:
+                f.write("def scaled(x):\n    return x * 5.0\n")
+            global _DRIFT_MODULE
+            _DRIFT_MODULE = import_from_path("torch.test_precompile_drift", original)
+            entry = _precompile_drift_entry
+            x = torch.ones(4)
+            with torch.no_grad():
+                code, cache = torch.compiler.precompile(
+                    entry,
+                    backend="eager",
+                    dynamic=False,
+                    tracer="dynamo",
+                    require_no_risky_drops=False,
+                    example_inputs=[(x,)],
+                )
+            from torch._precompile import _parse_artifact_metadata
+
+            self.assertEqual(
+                _parse_artifact_metadata(code)["SERVING_MODE"], "standalone"
+            )
+            torch._dynamo.reset()
+            loaded = torch.compiler.precompile.load(code, cache)
+            with _maybe_scoped(loaded), torch.no_grad():
+                self.assertEqual(loaded(x), entry(x))
+
+            _DRIFT_MODULE = import_from_path("torch.test_precompile_drift", modified)
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(Exception, "source code changes detected"):
+                torch.compiler.precompile.load(code, cache)
 
     def test_capture_runs_each_example_once(self):
         # Learning the guard policy from a throwaway first capture would run
