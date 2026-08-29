@@ -16581,6 +16581,7 @@ class TestNestedCheckpoint(TestCase):
             return refs
 
         refs = scope()
+        gc.collect()
         node_names = [ref().node_name for ref in refs if ref() is not None]
         if len(node_names) > 0:
             print("Nodes still alive:", node_names)

@@ -4894,6 +4894,18 @@ class GetSetDescriptorVariable(VariableTracker):
                 f"Cannot resolve getset_descriptor '{attr_name}' "
                 f"on {type(obj).__name__}"
             )
+        # _saved_* descriptors on autograd Nodes trigger checkpoint
+        # recomputation hooks when __get__ is called.  Graph-break
+        # instead of executing the side-effecting getter during tracing.
+        if attr_name.startswith("_saved_") and isinstance(
+            obj_value, torch.autograd.graph.Node
+        ):
+            from .object_protocol import _UnhandledDescriptorError
+
+            raise _UnhandledDescriptorError(
+                f"Cannot resolve _saved_* descriptor '{attr_name}' "
+                f"on autograd Node during tracing"
+            )
         try:
             resolved = self.descriptor.__get__(obj_value, type(obj_value))
         except (AttributeError, TypeError):
