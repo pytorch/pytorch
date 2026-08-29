@@ -213,13 +213,13 @@ inline std::string_view printEnum(const {name}& e) {{
   switch (e) {{
 {chr(10).join([f"    case {name}::{x.name}: return {chr(34)}{x.name}{chr(34)};" for x in ty])}
     default:
-      throw std::runtime_error("Unknown enum value");
+      STD_TORCH_CHECK(false, "Unknown enum value");
   }}
 }}
 
 inline void parseEnum(std::string_view s, {name}& t) {{
 {chr(10).join([f"  if (s == {chr(34)}{x.name}{chr(34)}) {{ t = {name}::{x.name}; return; }}" for x in ty])}
-  throw std::runtime_error("Unknown enum value: " + std::string{{s}});
+  STD_TORCH_CHECK(false, "Unknown enum value: ", std::string{{s}});
 }}
 """
         thrift_enum_defs.append(
@@ -370,13 +370,13 @@ inline std::string_view printEnum(const {name}::Tag& e) {{
   switch (e) {{
 {chr(10).join([f"    case {name}::Tag::{x.upper()}: return {chr(34)}{x.upper()}{chr(34)};" for x in cpp_fields])}
     default:
-      throw std::runtime_error("Unknown enum value");
+      STD_TORCH_CHECK(false, "Unknown enum value");
   }}
 }}
 
 inline void parseEnum(std::string_view s, {name}::Tag& t) {{
 {chr(10).join([f"  if (s == {chr(34)}{x.upper()}{chr(34)}) {{ t = {name}::Tag::{x.upper()}; return; }}" for x in cpp_fields])}
-  throw std::runtime_error("Unknown enum value: " + std::string{{s}});
+  STD_TORCH_CHECK(false, "Unknown enum value: ", std::string{{s}});
 }}
 
 """
@@ -437,13 +437,14 @@ union {name} {{
 #pragma once
 
 #include <optional>
-#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <variant>
 #include <vector>
 
 #include <nlohmann/json.hpp>
+#include <torch/headeronly/util/Exception.h>
 
 #ifndef NLOHMANN_JSON_NAMESPACE_BEGIN
 #define NLOHMANN_JSON_NAMESPACE_BEGIN namespace nlohmann {{
