@@ -1584,9 +1584,20 @@ class CompilePackage:
             target_code = _lookup_code(entry) if entry.code_source else code
             scope = sys.modules[entry.python_module].__dict__
             for index, guarded_code in enumerate(entry.guarded_codes):
-                managers[(target_code, index)] = load_guard_manager(
-                    load_guards_state(guarded_code.guards_state), target_code, scope
-                )
+                try:
+                    managers[(target_code, index)] = load_guard_manager(
+                        load_guards_state(guarded_code.guards_state),
+                        target_code,
+                        scope,
+                    )
+                except Exception as e:
+                    # Name the frame and the variant: several frames can guard
+                    # the same source, so without them a failure here cannot be
+                    # told apart from one the capture reported dropping.
+                    raise RuntimeError(
+                        f"{entry.python_module}.{target_code.co_name} "
+                        f"variant {index}: {type(e).__name__}: {e}"
+                    ) from e
         self._prepared = _PreparedInstall(
             backends=self._deserialize_backends(backends), managers=managers
         )

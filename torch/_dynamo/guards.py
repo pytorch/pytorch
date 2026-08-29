@@ -4264,6 +4264,61 @@ def _get_unsupported_types() -> tuple[type, ...]:
 _LIVE_LEAF_GUARDS: set[tuple[str, str]] | None = None
 
 
+def _attribute_link(source: Any) -> tuple[str, str] | None:
+    """``(base, attribute)`` for a source that reads an attribute, else None."""
+    base = getattr(source, "base", None)
+    member = getattr(source, "member", None)
+    if base is None or not isinstance(member, str):
+        return None
+    # Source.name is a method on a live source and a plain string on a
+    # reconstructed one.
+    name = getattr(base, "name", None)
+    try:
+        text = name() if callable(name) else name
+    except Exception:
+        return None
+    return (text, member) if isinstance(text, str) else None
+
+
+def _companion_attribute_guards(
+    all_guards: Sequence[Guard], failures: Sequence[tuple[Guard, Exception]]
+) -> list[tuple[Guard, Exception]]:
+    """The guards that must go with one that could not be rebuilt.
+
+    A guard on ``base.attr`` does not travel alone: Dynamo also emits a HASATTR
+    on ``base`` for ``attr``, whose truth value is RECOMPUTED at rebuild by
+    reading the reconstructed object. Drop only the first and the second comes
+    back as its own inverse -- ``not hasattr(base, attr)`` -- so the artifact
+    rejects the very call it was captured on. Anything else keyed on the same
+    link goes too, for the same reason.
+    """
+    links = {
+        link
+        for guard, _ in failures
+        if (link := _attribute_link(guard.originating_source)) is not None
+    }
+    if not links:
+        return []
+    already = {id(guard) for guard, _ in failures}
+    companions: list[tuple[Guard, Exception]] = []
+    for guard in all_guards:
+        if id(guard) in already:
+            continue
+        keywords = getattr(guard.create_fn, "keywords", None) or {}
+        link = _attribute_link(guard.originating_source)
+        if link in links or (guard.name, keywords.get("attr")) in links:
+            companions.append(
+                (
+                    guard,
+                    RuntimeError(
+                        "its subject was dropped as unrebuildable, and this "
+                        "guard is recomputed from that subject at load"
+                    ),
+                )
+            )
+    return companions
+
+
 @contextlib.contextmanager
 def record_live_guard_leaves() -> Generator[set[tuple[str, str]], None, None]:
     global _LIVE_LEAF_GUARDS
@@ -5263,13 +5318,27 @@ class CheckFunctionManager:
                     output_graph,
                     False,
                 )
-                if collect_guard_failures:
-                    failed = {id(g) for g, _ in collect_guard_failures}
-                    all_guards = [g for g in all_guards if id(g) not in failed]
+                drop_failed_guards()
                 filter_entries = [
                     make_guard_filter_entry(guard, inspection_builder)
                     for guard in all_guards
                 ]
+
+            def drop_failed_guards() -> None:
+                # A guard the caller could not rebuild must leave the SERIALIZED
+                # set, not merely be reported: the pickle is what the serving
+                # machine rebuilds from, so a guard left in it fails there
+                # exactly as it failed here. Runs after every build that can
+                # collect, because which build that is depends on whether there
+                # is a runtime filter.
+                nonlocal all_guards
+                if not collect_guard_failures:
+                    return
+                collect_guard_failures.extend(
+                    _companion_attribute_guards(all_guards, collect_guard_failures)
+                )
+                failed = {id(g) for g, _ in collect_guard_failures}
+                all_guards = [g for g in all_guards if id(g) not in failed]
 
             def apply_filter(
                 filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]],
@@ -5317,6 +5386,7 @@ class CheckFunctionManager:
                 and save_guards
                 and serialization_guard_filter_fn is not None
             ):
+                drop_failed_guards()
                 filter_entries = [
                     make_guard_filter_entry(guard, builder) for guard in all_guards
                 ]
