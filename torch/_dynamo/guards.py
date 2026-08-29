@@ -5145,7 +5145,20 @@ def pickle_guards_state(
     buf = io.BytesIO()
     empty_values = {}
     missing_values = {}
-    guard_tree_values = builder.guard_tree_values
+    # A copy: the seeding below must not accrete onto the caller's builder.
+    guard_tree_values = dict(builder.guard_tree_values)
+    # A TENSOR_MATCH carries its own subject inside its create_fn partial, and
+    # normalize_create_fn has already dereferenced the weakref, so that copy is
+    # pickled. It is a DIFFERENT object from the one the source walk reaches
+    # whenever the source root round-trips by alias -- a module global comes
+    # back live while the carried tensor comes back as a fake -- and id-keyed
+    # pruning would then replace a kept guard's own subject with _Missing.
+    for guard in state.output_graph.guards:
+        create_fn = guard.create_fn
+        if isinstance(create_fn, functools.partial):
+            for carried in (*create_fn.args, *create_fn.keywords.values()):
+                if isinstance(carried, torch.Tensor):
+                    guard_tree_values.setdefault(id(carried), carried)
 
     leaves = pytree.tree_leaves(state.output_graph.local_scope)
     for leaf in leaves:
