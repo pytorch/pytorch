@@ -901,6 +901,7 @@
 #
 # [infra_ci]
 /.ci/ @pytorch/pytorch-dev-infra
+/lsan.supp @pytorch/pytorch-dev-infra
 /.ci/docker/ubuntu-rocm/ @jeffdaily
 /.ci/docker/common/install_roc*.sh @jeffdaily
 /.ci/docker/common/install_amdsmi.sh @jeffdaily
