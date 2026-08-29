@@ -1141,7 +1141,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
             ("sum", "max", "prod"),
         )
 
-    def test_reduction_consumer_materializes_builtin_finalizer(self):
+    def test_reduction_consumer_receives_finalized_value(self):
         import dataclasses
 
         from torch._inductor.kernel import gemm_epilogue_codegen
@@ -1168,6 +1168,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
                 secondary,
             ),
             "finalizer": lambda value, group: ("generated", value, group),
+            "consumer_finalizer": lambda value, group: ("consumer", value, group),
         }
         with (
             mock.patch.object(
@@ -1187,7 +1188,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
             )
             self.assertEqual(
                 compile_config.consumer("acc", "raw", "secondary"),
-                ("acc", ("builtin", "raw", 4), "secondary"),
+                ("acc", "raw", "secondary"),
             )
 
             args = dataclasses.replace(args, finalizer_fn="finalizer")
@@ -1202,6 +1203,81 @@ class TestNVUniversalGemmHeuristics(TestCase):
                 compile_config.consumer("acc", "raw", "secondary"),
                 ("acc", "raw", "secondary"),
             )
+
+            args = dataclasses.replace(args, consumer_finalizer_fn="consumer_finalizer")
+            compile_config = gemm_epilogue_codegen.GemmReductionCompileConfig.from_args(
+                args, object()
+            )
+            self.assertEqual(
+                compile_config.reduction.finalize("raw", 4),
+                ("generated", "raw", 4),
+            )
+            self.assertEqual(
+                compile_config.consumer("acc", "raw", "secondary"),
+                ("acc", ("consumer", "raw", 4), "secondary"),
+            )
+
+            args = dataclasses.replace(
+                args,
+                consumer_finalizer_fn=None,
+                secondary_consumer_fn="consumer",
+            )
+            compile_config = gemm_epilogue_codegen.GemmReductionCompileConfig.from_args(
+                args, object()
+            )
+            self.assertEqual(
+                compile_config.consumer("acc", "raw", "secondary"),
+                ("acc", "raw", "secondary"),
+            )
+            self.assertEqual(
+                compile_config.secondary_consumer("acc", "raw", "secondary"),
+                ("acc", "raw", "secondary"),
+            )
+
+    def test_feed_plan_preserves_reduction_finalizer(self):
+        import dataclasses
+
+        from torch._inductor.codegen.nv_universal_gemm.epilogue_lowering import (
+            NVGemmEpilogueCapture,
+            NVGemmEpilogueLowering,
+            NVGemmFeedPlan,
+            NVGemmReductionPartition,
+            NVGemmReductionRegion,
+        )
+        from torch._inductor.kernel.gemm_epilogue import (
+            GEMM_REDUCTION_IDENTITY_SOURCE,
+            GemmReductionConfig,
+            GemmReductionPlan,
+        )
+
+        finalizer = "def finalize(value, group):\n    return value / group"
+        config = GemmReductionConfig(
+            output_name="mean",
+            group=4,
+            axis=1,
+            reduction_type="sum",
+            source_fn=GEMM_REDUCTION_IDENTITY_SOURCE,
+            finalizer_fn=finalizer,
+        )
+        feed_plan = NVGemmFeedPlan(
+            plan=GemmReductionPlan.from_config(
+                dataclasses.replace(config, output_name="main", finalizer_fn=None),
+                reduction_output=None,
+                primary_output="out",
+                feeds_main=True,
+            )
+        )
+        gemm = mock.Mock()
+        gemm.get_name.return_value = "out"
+        plan = NVGemmEpilogueLowering._static_reduction_plan(
+            NVGemmEpilogueCapture(gemm=gemm, nodes=(), analysis=None),
+            NVGemmReductionPartition((NVGemmReductionRegion(config=config, nodes=()),)),
+            feed_plan,
+        )
+
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan.reduction_output, "mean")
+        self.assertEqual(plan.finalizer_fn, finalizer)
 
     @unittest.skipUnless(
         ensure_nv_universal_gemm_available(), "Requires cutlass.operators"
@@ -1259,7 +1335,6 @@ class TestNVUniversalGemmHeuristics(TestCase):
             axis=1,
             reduction_type=None,
             source_fn=None,
-            tensor_epilogue_returns_local_reduce=True,
         )
         generated_config = GemmReductionCompileConfig.from_args(generated_args, cute)
         self.assertEqual(generated_config.constexprs()[:4], (4, 1, False, True))
@@ -1271,7 +1346,6 @@ class TestNVUniversalGemmHeuristics(TestCase):
             axis=1,
             reduction_type=None,
             source_fn=None,
-            tensor_epilogue_returns_local_reduce=True,
         )
         self.assertTrue(
             DENSE_GEMM_REDUCTION_CAPABILITIES.supports_contract(generated_plan)
@@ -1288,7 +1362,6 @@ class TestNVUniversalGemmHeuristics(TestCase):
             source_fn=None,
             combine_fn="def combine(lhs, rhs):\n    return lhs + rhs",
             finalizer_fn="def finalize(value, group):\n    return value / group",
-            tensor_epilogue_returns_local_reduce=True,
         )
         self.assertTrue(
             DENSE_GEMM_REDUCTION_CAPABILITIES.supports_contract(physical_generated_plan)
@@ -1299,7 +1372,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
             )
         )
         with self.assertRaisesRegex(
-            RuntimeError, "cannot use physical reduction inputs"
+            RuntimeError, "specify both reduction_type and source_fn or neither"
         ):
             dataclasses.replace(generated_plan, reduction_type="sum")
 
@@ -1859,7 +1932,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertIn("VendoredDenseGemmEFCOperator", code)
         self.assertIn(f"axis={axis}", code)
         self.assertIn(f"group={group}", code)
-        self.assertIn("tensor_epilogue_returns_local_reduce=True", code)
+        self.assertIn("reduction_type=None", code)
+        self.assertIn("source_fn=None", code)
         self.assertNotIn("_LOCAL_REDUCE_SOURCE_FN_SRC", code)
         if axis == 0 or group > 32:
             self.assertIn("_LOCAL_REDUCE_COMBINE_FN_SRC", code)
@@ -1881,6 +1955,75 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertIn("_LOCAL_REDUCE_FINALIZER_FN_SRC", code)
         self.assertIn("group=64", code)
 
+    def test_bf16_grouped_n_reduce_post_op_feeds_main(self):
+        m, n, k, group = 128, 128, 64, 4
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16) * 0.1
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16) * 0.1
+
+        def fn(a, b):
+            result = a @ b
+            grouped = result.float().view(m, -1, group)
+            mean = grouped.sum(-1, keepdim=True) / group
+            return (grouped - mean).reshape(m, n)
+
+        result, code, _ = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
+        self.assertIn("feeds_main=True", code)
+        self.assertNotIn("_LOCAL_REDUCE_CONSUMER_FINALIZER_FN_SRC", code)
+
+    def test_bf16_grouped_n_reduce_raw_feed_and_finalized_output(self):
+        m, n, k, group = 128, 128, 64, 4
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16) * 0.1
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16) * 0.1
+
+        def fn(a, b):
+            result = a @ b
+            grouped = result.float().view(m, -1, group)
+            sums = grouped.sum(-1, keepdim=True)
+            means = sums / group
+            return (grouped - sums).reshape(m, n), means
+
+        result, code, _ = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
+        self.assertIn("feeds_main=True", code)
+        self.assertNotIn("_LOCAL_REDUCE_CONSUMER_FINALIZER_FN_SRC", code)
+        self.assertIn("_LOCAL_REDUCE_FINALIZER_FN_SRC", code)
+
+    def test_bf16_grouped_m_mean_feeds_main_before_output_finalizer(self):
+        m, n, k, group = 128, 64, 64, 64
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16) * 0.1
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16) * 0.1
+
+        def fn(a, b):
+            result = a @ b
+            grouped = result.float().view(-1, group, n)
+            means = grouped.square().mean(1, keepdim=True)
+            roots = means.sqrt()
+            centered = result.float() - means.expand(-1, group, -1).reshape(m, n)
+            return centered, roots
+
+        result, code, _ = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
+        self.assertIn("_LOCAL_REDUCE_CONSUMER_FINALIZER_FN_SRC", code)
+        self.assertIn("_LOCAL_REDUCE_FINALIZER_FN_SRC", code)
+
+    def test_bf16_grouped_n_mean_feeds_main_before_output_finalizer(self):
+        m, n, k, group = 128, 128, 64, 4
+        a = torch.rand(m, k, device="cuda", dtype=torch.bfloat16) * 0.1
+        b = torch.rand(k, n, device="cuda", dtype=torch.bfloat16) * 0.1
+
+        def fn(a, b):
+            result = a @ b
+            grouped = result.float().view(m, -1, group)
+            means = grouped.mean(-1, keepdim=True)
+            roots = means.sqrt()
+            return (grouped - means).reshape(m, n), roots
+
+        result, code, _ = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
+        self.assertIn("_LOCAL_REDUCE_CONSUMER_FINALIZER_FN_SRC", code)
+        self.assertIn("_LOCAL_REDUCE_FINALIZER_FN_SRC", code)
+
     def test_bf16_grouped_n_composite_reduction_fusion(self):
         m, n, k, group = 128, 64, 64, 4
         a = torch.rand(m, k, device="cuda", dtype=torch.bfloat16)
@@ -1901,7 +2044,22 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertIn("cute.ReductionOp.ADD", code)
         self.assertIn("cute.ReductionOp.MAX", code)
         self.assertIn("reduction_type=None", code)
-        self.assertIn("tensor_epilogue_returns_local_reduce=True", code)
+        self.assertIn("source_fn=None", code)
+
+    def test_bf16_grouped_n_distinct_reduction_consumers(self):
+        m, n, k, group = 128, 64, 64, 4
+        a = torch.rand(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.rand(k, n, device="cuda", dtype=torch.bfloat16)
+
+        def fn(a, b):
+            result = a @ b
+            grouped = result.float().view(m, -1, group)
+            sums = grouped.sum(-1, keepdim=True)
+            maxima = grouped.amax(-1, keepdim=True)
+            return (grouped - sums).reshape(m, n), (grouped - maxima).reshape(m, n)
+
+        result, _, _ = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
 
     def test_scaled_mm_grouped_n_composite_reduction_fusion(self):
         m, n, k, group = 128, 128, 512, 4
@@ -1929,7 +2087,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertIn("cute.ReductionOp.ADD", code)
         self.assertIn("cute.ReductionOp.MAX", code)
         self.assertIn("reduction_type=None", code)
-        self.assertIn("tensor_epilogue_returns_local_reduce=True", code)
+        self.assertIn("source_fn=None", code)
 
     def test_scaled_mm_grouped_m_reduce_finalizes_after_cross_warp_combine(self):
         m, n, k, group = 128, 128, 512, 64
@@ -2291,7 +2449,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertEqual(result[1], expected[1])
         self.assertIn("output=", code)
         self.assertNotIn("_LOCAL_REDUCE_SOURCE_FN_SRC", code)
-        self.assertIn("tensor_epilogue_returns_local_reduce=True", code)
+        self.assertIn("reduction_type=None", code)
+        self.assertIn("source_fn=None", code)
         self.assertIn(" * ", code)
 
     @config.patch(emulate_precision_casts=True)
@@ -2355,12 +2514,73 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
                 out_dtype=torch.bfloat16,
             )
             grouped = result.float().view(-1, group, n)
-            mean = grouped.mean(1, keepdim=True).expand(-1, group, -1)
+            mean = (grouped.sum(1, keepdim=True) / group).expand(-1, group, -1)
             return result.float() - mean.reshape(m, n)
 
         result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
         self.assertEqual(result, fn(a, b, scale_a, scale_b))
         self.assertIn("feeds_main=True", code)
+        self.assertNotIn("_LOCAL_REDUCE_CONSUMER_FINALIZER_FN_SRC", code)
+
+    def test_scaled_mm_grouped_reduce_raw_feed_and_finalized_output(self):
+        m, n, k, group = 128, 128, 512, 4
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
+        b = b.T
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+
+        def fn(a, b, scale_a, scale_b):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            grouped = result.float().view(-1, group, n)
+            sums = grouped.sum(1, keepdim=True)
+            means = sums / group
+            return result.float() - sums.expand(-1, group, -1).reshape(m, n), means
+
+        result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
+        self.assertEqual(result, fn(a, b, scale_a, scale_b))
+        self.assertIn("feeds_main=True", code)
+        self.assertNotIn("_LOCAL_REDUCE_CONSUMER_FINALIZER_FN_SRC", code)
+        self.assertIn("_LOCAL_REDUCE_FINALIZER_FN_SRC", code)
+
+    def test_scaled_mm_grouped_n_mean_feeds_main_before_output_finalizer(self):
+        m, n, k, group = 128, 128, 512, 4
+        a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
+
+        def fn(a, b, scale_a, scale_b):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            grouped = result.float().view(m, -1, group)
+            means = grouped.square().mean(-1, keepdim=True)
+            roots = means.sqrt()
+            centered = (grouped - means).reshape(m, n)
+            return centered, roots
+
+        result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
+        self.assertEqual(result, fn(a, b, scale_a, scale_b))
+        self.assertIn("_LOCAL_REDUCE_CONSUMER_FINALIZER_FN_SRC", code)
+        self.assertIn("_LOCAL_REDUCE_FINALIZER_FN_SRC", code)
 
     def test_matmul_add_relu_chained(self):
         """Multi-op pointwise chain (a@b + bias → relu) collapses to one
