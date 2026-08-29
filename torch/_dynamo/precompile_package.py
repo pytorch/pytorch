@@ -146,7 +146,7 @@ from .package import (
     PrecompileCacheEntry,
 )
 from .pgo import _use_code_state
-from .source import AttrSource, DictGetItemSource, GlobalSource
+from .source import AttrSource, DictGetItemSource, GlobalSource, LocalSource
 
 
 if TYPE_CHECKING:
@@ -976,6 +976,13 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
         "CONSTANT_MATCH",
         "EQUALS_MATCH",
         "DUPLICATE_INPUT",
+        # And the one that pins whether an attribute is THERE. hasattr is a
+        # branch like any other, so dropping it serves the captured side to a
+        # caller on the other one -- the same silent wrong answer as a dropped
+        # CONSTANT_MATCH. Reachable on the DEFAULT gates, because a
+        # single-variant capture makes every slot look invariant and the drop
+        # is not classed risky.
+        "HASATTR",
         # And the guard that pins an input's KIND. Dropped, a graph traced for
         # one class is served to another and returns the first one's answer,
         # silently -- there is no shape to crash on. Upstream depends on this
@@ -1168,6 +1175,53 @@ def _autograd_cache_bypasses() -> int:
     from torch._dynamo.utils import counters
 
     return counters["aot_autograd"].get("autograd_cache_bypass", 0)
+
+
+def _environment_rooted(entries: Sequence[GuardFilterEntry]) -> set[str]:
+    """The slots the precompile contract pins, by what they are ROOTED at.
+
+    The invariant policy drops a slot that held identically in every captured
+    variant, on the caller's statement that the environment is fixed and every
+    variation is in the inputs. It has no way to check which of the two a slot
+    is, so it infers it from observed variance -- and variance is evidence only
+    when there is more than one variant to compare. varying_guard_slots over a
+    single variant is empty by construction, which is the shipped default, so
+    the inference runs on no evidence and calls the inputs invariant too.
+
+    Classify by the root instead. Environment is the module structure, the
+    process globals, the global interpreter state and the shape env; a local
+    holding anything else is data the caller passes in, and the contract does
+    not license dropping guards on it. Measured on a real ranking model that is
+    roughly 60 of 7,575 slots retained, because in a real model the bulk of the
+    invariant guards genuinely are module structure.
+
+    Module-rooted is decided by VALUE, not by the name starting with "self":
+    precompile's own calling convention passes the model in as an argument, so
+    on the public API the module structure hangs off a local like ``model``.
+    """
+    modules = sorted(
+        (
+            e.name
+            for e in entries
+            if e.has_value and isinstance(e.value, torch.nn.Module) and e.name
+        ),
+        key=len,
+    )
+
+    def under_a_module(name: str) -> bool:
+        return any(
+            name == m or name.startswith(f"{m}.") or name.startswith(f"{m}[")
+            for m in modules
+        )
+
+    rooted = set()
+    for e in entries:
+        root = _source_root(e.orig_guard.originating_source)
+        # Anything not rooted at a local is environment outright: a module
+        # global, the global state guards, the shape env.
+        if not isinstance(root, LocalSource) or under_a_module(e.name):
+            rooted.add(e.name)
+    return rooted
 
 
 def _missing_backends_message(
@@ -1398,6 +1452,7 @@ def _summarize(
     uncovered: frozenset[str],
     capture_errors: Sequence[str],
     guard_sets: Mapping[tuple[str, str, int], Sequence[frozenset[_GuardFact]]],
+    dropped_code: Mapping[tuple[str, str], str],
 ) -> PrecompileSummary:
     wont_generalize = _wont_generalize(kept, guard_sets)
     return PrecompileSummary(
@@ -1410,6 +1465,11 @@ def _summarize(
         uncovered_frames=tuple(sorted(uncovered)),
         wont_generalize=wont_generalize,
         dropped_guards=tuple(sorted(dropped)),
+        dropped_guard_code=tuple(
+            (gtype, name, dropped_code[(gtype, name)])
+            for gtype, name in sorted(dropped | policy_dropped | risky)
+            if (gtype, name) in dropped_code
+        ),
         kept_guards=tuple(sorted(kept)),
         risky_dropped_guards=tuple(sorted(risky)),
         policy_dropped_guards=tuple(sorted(policy_dropped)),
@@ -1499,6 +1559,10 @@ class PrecompileSession:
         self._keep_graphs = False
         self._backend_obj: _PrecompileBackend | None = None
         self._policy_dropped_guards: set[tuple[str, str]] = set()
+        # slot -> the check it rendered as, for every slot dropped by any
+        # route. See PrecompileSummary.dropped_guard_code for why the slot
+        # tuple alone cannot be audited.
+        self._dropped_guard_code: dict[tuple[str, str], str] = {}
         self._dropped_guards: set[tuple[str, str]] = set()
         self._kept_guards: set[tuple[str, str]] = set()
         self._risky_dropped_guards: set[tuple[str, str]] = set()
@@ -2021,6 +2085,14 @@ class PrecompileSession:
                 or (guard_type, _normalize(name)) in keep_only
             )
 
+        # The facts, unlike the serialized guards above, are still filtered by
+        # observed variance alone -- a GuardFact carries no source object, so it
+        # cannot be root-classified the way _environment_rooted does it. Not a
+        # correctness gap on either path: keep_only is computed before this
+        # loop, so the pruning cannot feed itself, and this whole method never
+        # runs on the accumulating path, where close() retires the session
+        # without going through __exit__. It costs reporting fidelity in
+        # invariants(), nothing more.
         for key, variants in self._guard_sets.items():
             self._guard_sets[key] = [
                 frozenset(
@@ -2080,24 +2152,44 @@ class PrecompileSession:
         keep_only = varying_guard_slots(self._guard_sets)
         dropped: set[tuple[str, str]] = set()
 
-        def survives(guard_type: str, name: str) -> bool:
+        def survives(guard_type: str, name: str, derived: Sequence[str] = ()) -> bool:
             # An unmodelled guard never enters _guard_sets, so it was never
             # shown to be constant -- only never analyzed. This policy drops
             # what it PROVED invariant, so these stay. SHAPE_ENV is the one
             # that matters: it carries symbolic shape constraints that no
             # TENSOR_MATCH repeats.
+            #
+            # The DERIVED types decide too, the way default_guard_filter_fn
+            # reads them. One Guard can emit several checks -- a
+            # DICT_KEYS_MATCH emits the SEQUENCE_LENGTH for the same dict --
+            # and the filter removes whole Guards, so judging only the
+            # top-level type takes the length check down with its parent and
+            # the artifact answers a four-key dict with the two-key graph.
             return (
                 guard_type in _UNMODELLED_GUARD_TYPES
                 or guard_type in _SHAPE_BEARING_GUARD_TYPES
+                or any(
+                    d in _UNMODELLED_GUARD_TYPES or d in _SHAPE_BEARING_GUARD_TYPES
+                    for d in derived
+                )
                 or (guard_type, _normalize(name)) in keep_only
             )
 
         def policy(entries: Sequence[GuardFilterEntry]) -> Sequence[bool]:
+            # Only environment slots are the policy's to drop. See
+            # _environment_rooted for why observed variance cannot decide this.
+            environment = _environment_rooted(entries)
             decisions = []
             for entry in entries:
-                keep = survives(entry.guard_type, entry.name)
+                keep = entry.name not in environment or survives(
+                    entry.guard_type,
+                    entry.name,
+                    tuple(getattr(entry, "derived_guard_types", ()) or ()),
+                )
                 if not keep:
-                    dropped.add((entry.guard_type, entry.name))
+                    slot = (entry.guard_type, entry.name)
+                    dropped.add(slot)
+                    self._record_dropped_code(slot, entry)
                 decisions.append(keep)
             return decisions
 
@@ -2141,6 +2233,21 @@ class PrecompileSession:
 
         return dropped
 
+    def _record_dropped_code(
+        self, slot: tuple[str, str], entry: GuardFilterEntry
+    ) -> None:
+        """Remember what a dropped slot actually checked.
+
+        First writer wins: the same slot is dropped once per variant and per
+        re-serialization, and the renderings agree up to the ids _normalize
+        already masks.
+        """
+        if slot in self._dropped_guard_code:
+            return
+        rendered = " ; ".join(_render_code(entry.code))
+        if rendered:
+            self._dropped_guard_code[slot] = rendered
+
     def _recording_filter(
         self,
         inner: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]],
@@ -2164,6 +2271,8 @@ class PrecompileSession:
             undetermined: set[_GuardFact] = set()
             for keep, entry in zip(decisions, entries):
                 slot = (entry.guard_type, entry.name)
+                if not keep:
+                    self._record_dropped_code(slot, entry)
                 target = self._kept_guards if keep else self._dropped_guards
                 target.add(slot)
                 if not keep and (
@@ -2363,6 +2472,7 @@ class PrecompileSession:
             self._package.uncovered_frames,
             self._capture_errors,
             self._guard_sets,
+            self._dropped_guard_code,
         )
 
     def _gated_summary(
@@ -2579,6 +2689,12 @@ class PrecompileSession:
         call. See :meth:`_policy_filtered_codes` for why applying the policy to
         the session itself would quietly destroy the artifact.
         """
+        # The policy FIRST: it is what populates policy_dropped_guards, and the
+        # gates below read them. Gating first leaves require_no_risky_drops
+        # judging the previous render's numbers -- inert on the first call, and
+        # a capture that renders once therefore reports POLICY_DROPPED_GUARDS =
+        # [] while that same pass dropped every invariant slot.
+        codes = self._policy_filtered_codes()
         summary = self._gated_summary(
             require_complete=require_complete,
             require_no_risky_drops=require_no_risky_drops,
@@ -2588,9 +2704,7 @@ class PrecompileSession:
         from torch._precompile import _build_multigraph_artifact
 
         backends = self._collect_backends()
-        entry = dataclasses.replace(
-            self._package.cache_entry(), codes=self._policy_filtered_codes()
-        )
+        entry = dataclasses.replace(self._package.cache_entry(), codes=codes)
         return _build_multigraph_artifact(
             entry,
             backends,
