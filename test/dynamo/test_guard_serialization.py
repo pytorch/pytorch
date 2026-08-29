@@ -1165,6 +1165,11 @@ class TestGuardSerialization(TestGuardSerializationBase):
             cause = cm.exception.__cause__
             self.assertIsInstance(cause, torch._dynamo.exc.GuardSerializationError)
             self.assertEqual(cause.guard_type, "ID_MATCH")
+            # The stored exception must be traceback-stripped: a live
+            # __traceback__ pins the guard-build frames (GuardBuilder with the
+            # user scopes, OutputGraph) on the long-lived CheckFunctionManager,
+            # leaking them once per suppressed failure.
+            self.assertIsNone(cause.__traceback__)
         finally:
             torch._dynamo.reset()
 

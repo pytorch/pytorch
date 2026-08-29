@@ -4786,10 +4786,22 @@ class CheckFunctionManager:
             except exc.PackageError as e:
                 if torch._dynamo.config.strict_precompile or strict_error:
                     raise e
+                # Format the traceback BEFORE stripping it from the stored
+                # exception chain: a live __traceback__ pins the guard-build
+                # frames (builder, output_graph, the user scopes they hold) on
+                # this long-lived object, defeating the cleanup below (see the
+                # NB comment there).
+                formatted_traceback = traceback.format_exc().split("\n")
+                stripped: set[int] = set()
+                link: BaseException | None = e
+                while link is not None and id(link) not in stripped:
+                    stripped.add(id(link))
+                    link.__traceback__ = None
+                    link = link.__cause__ or link.__context__
                 self.guards_serialization_failure = e
                 self.output_graph.bypass_package(
                     f"Guard evaluation failed: {str(e)}",
-                    traceback=traceback.format_exc().split("\n"),
+                    traceback=formatted_traceback,
                 )
 
         # TODO: don't do the string rep, do something more structured here

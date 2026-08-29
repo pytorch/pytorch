@@ -229,19 +229,22 @@ class GuardSource(enum.Enum):
 # test/dynamo/test_sources.py enforces totality over every Source subclass so
 # a new source cannot land unclassified.
 class GuardProvenance(enum.Enum):
-    # Rooted at the traced frame's bindings (arguments, locals, cells):
-    # dispatch-relevant; serialization consumers must keep these.
+    # Rooted at the traced frame's bindings (arguments, locals, cells), or at
+    # a dynamo-installed weakref proxy for a traced runtime object
+    # (GlobalWeakRefSource): dispatch-relevant; serialization consumers must
+    # keep these.
     INPUT = 0
-    # Rooted at module globals (including imports and weak global refs):
-    # part of the Python environment.
+    # Rooted at module globals (including imports): part of the Python
+    # environment.
     GLOBAL = 1
     # Rooted at interpreter- or process-wide state (grad mode and friends,
     # the shape env, torch-function mode stack, streams, backward state):
     # part of the environment, but not reachable through any module's globals.
     AMBIENT = 2
-    # Tracing-internal values with no user-visible runtime lookup (synthetic
-    # and temp locals, ephemeral sources, materialized constants, recorded
-    # random values).
+    # Tracing-internal values with no user-visible runtime lookup IN GUARD
+    # CHECKS (synthetic and temp locals, ephemeral sources, materialized
+    # constants, recorded random values); their reconstruction bytecode may
+    # still load dynamo-installed globals.
     SYNTHETIC = 3
 
 
