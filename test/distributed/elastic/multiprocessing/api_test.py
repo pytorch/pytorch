@@ -42,7 +42,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
     skip_if_pytest,
-    skipIfRocm,
     TEST_WITH_ASAN,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_ROCM,
@@ -454,8 +453,9 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                     for i in range(pc.nprocs):
                         self.assertEqual(size, len(results.return_values[i]))
 
-        @skipIfRocm(
-            msg="Skipped on ROCm due to hang in MultiprocessContext.wait after Kineto bump (PR #177101, 1fd9c49); investigating",
+        @unittest.skipIf(
+            TEST_WITH_ROCM,
+            "Skipped on ROCm due to hang in MultiprocessContext.wait after Kineto bump (PR #177101, 1fd9c49); investigating",
         )
         def test_function_raise(self):
             """
