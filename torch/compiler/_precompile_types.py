@@ -71,8 +71,13 @@ class PrecompileSummary:
     # the remedy differ -- but reported, because a capture that silently
     # discards a precondition should not look like one that had none.
     policy_dropped_guards: tuple[tuple[str, str], ...] = ()
-    # (guard_type, source, rendered check) for every slot that was dropped, by
-    # whichever route. A slot is identified by its type and its SOURCE, which
+    # (guard_type, source, rendered check) for each dropped slot that HAS a
+    # rendered check. Some do not: EMPTY_NN_MODULE_HOOKS_DICT installs nothing
+    # under the default skip_nnmodule_hook_guards, and the global-state guards
+    # are checked in C++ against no source, so those appear in the drop lists
+    # with no entry here rather than with an empty one.
+    #
+    # A slot is identified by its type and its SOURCE, which
     # for some types is not enough to judge the drop: a dropped
     # ``('HASATTR', "counts['pixel']")`` may be the benign companion of a kept
     # TENSOR_MATCH on the same source, or the only thing standing between the

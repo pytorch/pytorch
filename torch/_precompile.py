@@ -2009,7 +2009,8 @@ def _build_multigraph_python_source(
         f"{[list(g) for g in getattr(summary, 'policy_dropped_guards', ())]!r}"
     )
     parts.append("")
-    parts.append("# What each dropped slot above actually checked. A slot is named by")
+    parts.append("# What a dropped slot above actually checked, where it renders one.")
+    parts.append("# A slot is named by")
     parts.append("# its type and SOURCE, which for some types does not say enough to")
     parts.append("# judge the drop: a dropped HASATTR on a source may be the benign")
     parts.append("# companion of a kept TENSOR_MATCH on the same source, or the only")
