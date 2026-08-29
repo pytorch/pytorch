@@ -1756,6 +1756,12 @@ class CompilePackage:
                         self._install_owner,
                     )
 
+    def code_entries(self) -> Iterable["_DynamoCodeCacheEntry"]:
+        """The per-frame entries, for a caller that edits them before they are
+        packaged. Unlike cache_entry(), this does not require a complete
+        capture."""
+        return self._codes.values()
+
     def cache_entry(self) -> _DynamoCacheEntry:
         self.validate()
         if self._innermost_fn is None:
