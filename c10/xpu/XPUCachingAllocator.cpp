@@ -19,21 +19,23 @@ namespace {
 using stream_set = ska::flat_hash_set<xpu::XPUStream>;
 
 struct Block;
-typedef bool (*Comparison)(const Block*, const Block*);
-bool BlockComparatorSize(const Block* a, const Block* b);
-bool BlockComparatorAddress(const Block* a, const Block* b);
+
+struct BlockComparatorSize {
+  bool operator()(const Block* a, const Block* b) const;
+};
+
+struct BlockComparatorAddress {
+  bool operator()(const Block* a, const Block* b) const;
+};
 
 struct PrivatePool;
 
 struct BlockPool {
   BlockPool(bool small, PrivatePool* private_pool = nullptr)
-      : blocks(BlockComparatorSize),
-        unmapped(BlockComparatorAddress),
-        is_small(small),
-        owner_PrivatePool(private_pool) {}
+      : is_small(small), owner_PrivatePool(private_pool) {}
 
-  std::set<Block*, Comparison> blocks;
-  std::set<Block*, Comparison> unmapped;
+  std::set<Block*, BlockComparatorSize> blocks;
+  std::set<Block*, BlockComparatorAddress> unmapped;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const bool is_small;
   PrivatePool* owner_PrivatePool;
@@ -101,7 +103,7 @@ struct Block {
   }
 };
 
-bool BlockComparatorSize(const Block* a, const Block* b) {
+bool BlockComparatorSize::operator()(const Block* a, const Block* b) const {
   if (a->queue != b->queue) {
     return reinterpret_cast<uintptr_t>(a->queue) <
         reinterpret_cast<uintptr_t>(b->queue);
@@ -113,7 +115,7 @@ bool BlockComparatorSize(const Block* a, const Block* b) {
       reinterpret_cast<uintptr_t>(b->ptr);
 }
 
-bool BlockComparatorAddress(const Block* a, const Block* b) {
+bool BlockComparatorAddress::operator()(const Block* a, const Block* b) const {
   if (a->queue != b->queue) {
     return reinterpret_cast<uintptr_t>(a->queue) <
         reinterpret_cast<uintptr_t>(b->queue);
@@ -2434,63 +2436,3 @@ int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
 }
 
 } // namespace c10::xpu::XPUCachingAllocator
-
-namespace c10::xpu {
-
-// uid_ is incremented when a user creates a MemPool,
-//
-// uuid_ is incremented when XPUGraph creates a MemPool
-// as a result of a user not providing a pool.
-
-std::atomic<CaptureId_t> MemPool::uid_{1};
-std::atomic<CaptureId_t> MemPool::uuid_{1};
-
-MemPool::MemPool(
-    XPUCachingAllocator::XPUAllocator* allocator,
-    bool is_user_created,
-    bool use_on_oom)
-    : allocator_(allocator), is_user_created_(is_user_created) {
-  if (is_user_created_) {
-    id_ = {0, uid_++};
-  } else {
-    id_ = {uuid_++, 0};
-  }
-  device_ = c10::xpu::current_device();
-  XPUCachingAllocator::createOrIncrefPool(device_, id_, allocator);
-  if (use_on_oom) {
-    // XPU doesn't support use_on_oom yet
-    TORCH_WARN(
-        "XPUCachingAllocator::MemPool: use_on_oom is not supported on XPU");
-  }
-}
-
-MemPool::~MemPool() {
-  TORCH_INTERNAL_ASSERT(use_count() == 1);
-  XPUCachingAllocator::releasePool(device_, id_);
-  c10::xpu::XPUCachingAllocator::emptyCache(id_); // release cached blocks
-}
-
-MempoolId_t MemPool::id() {
-  return id_;
-}
-
-XPUCachingAllocator::XPUAllocator* MemPool::allocator() {
-  return allocator_;
-}
-
-int MemPool::use_count() {
-  return XPUCachingAllocator::getPoolUseCount(device_, id_);
-}
-
-c10::DeviceIndex MemPool::device() {
-  return device_;
-}
-
-MempoolId_t MemPool::graph_pool_handle(bool is_user_created) {
-  if (is_user_created) {
-    return {0, uid_++};
-  }
-  return {uuid_++, 0};
-}
-
-} // namespace c10::xpu
