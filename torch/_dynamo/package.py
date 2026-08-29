@@ -219,6 +219,14 @@ def _backend_ids_from_code(code: types.CodeType) -> Iterator[_BackendId]:
             yield from _backend_ids_from_code(const)
 
 
+@dataclasses.dataclass
+class _PreparedInstall:
+    """What install() would have computed, computed early by prepare()."""
+
+    backends: dict[_BackendId, Any]
+    managers: dict[tuple[types.CodeType, int], Any]
+
+
 @dataclasses.dataclass(frozen=True)
 class InlinedSource:
     module: str
@@ -938,6 +946,7 @@ class CompilePackage:
         # installs, so uninstall() can remove its own and leave a neighbour
         # package's entries on a shared code object alone.
         self._install_owner = object()
+        self._prepared: _PreparedInstall | None = None
 
         self._current_entry: _DynamoCodeCacheEntry | None = None
         self._installed_globals: dict[types.ModuleType, list[_InstalledGlobal]] = {}
@@ -1001,6 +1010,7 @@ class CompilePackage:
         # field a load writes has to be reset here rather than trusted to still
         # hold its __init__ value.
         self._source_info = SourceInfo(inlined_sources=set())
+        self._prepared = None
         self._codes = {}
         self._device_types = set()
         self._system_info = None
@@ -1496,12 +1506,21 @@ class CompilePackage:
           2. Install the compiled functions to global scopes.
           3. Install the precompiled cache entries to ExtraStates on the code object.
         """
-        deserialized_backends = self._deserialize_backends(backends)
+        prepared = self._prepared
+        self._prepared = None
+        deserialized_backends = (
+            prepared.backends
+            if prepared is not None
+            else self._deserialize_backends(backends)
+        )
         with _PACKAGE_INSTALL_LOCK:
             self._uninstall()
             self._installed_precompile_region_id = isolate_recompiles_id
             try:
-                self._install_codes(deserialized_backends)
+                self._install_codes(
+                    deserialized_backends,
+                    prepared.managers if prepared is not None else {},
+                )
             except BaseException:
                 # A half-installed package is worse than an unloaded one: some
                 # frames serve precompiled code and some do not, and because
@@ -1547,7 +1566,36 @@ class CompilePackage:
                 raise AssertionError("failed install left package state installed")
             self._initialized = False
 
-    def _install_codes(self, backends: dict[_BackendId, Any]) -> None:
+    def prepare(self, backends: dict[_BackendId, Any]) -> None:
+        """Do install()'s pure half now, so its failures land here.
+
+        Deserializing the backends and building the guard trees touches nothing
+        the interpreter can see -- a guard manager reads its example values from
+        the state it was pickled with, and only STORES the runtime scope -- but
+        they are where an artifact that does not fit this host says so. Running
+        them at load costs nothing extra, because install() consumes what this
+        leaves rather than redoing it, and it moves the failure off the first
+        served call.
+        """
+        managers = {}
+        for code, entry in self._codes.items():
+            if entry.bypassed or not entry.guarded_codes:
+                continue
+            target_code = _lookup_code(entry) if entry.code_source else code
+            scope = sys.modules[entry.python_module].__dict__
+            for index, guarded_code in enumerate(entry.guarded_codes):
+                managers[(target_code, index)] = load_guard_manager(
+                    load_guards_state(guarded_code.guards_state), target_code, scope
+                )
+        self._prepared = _PreparedInstall(
+            backends=self._deserialize_backends(backends), managers=managers
+        )
+
+    def _install_codes(
+        self,
+        backends: dict[_BackendId, Any],
+        prebuilt: dict[tuple[types.CodeType, int], Any] | None = None,
+    ) -> None:
         from torch._C._dynamo.eval_frame import _load_precompile_entry
 
         from .convert_frame import input_codes
@@ -1686,7 +1734,7 @@ class CompilePackage:
                             _SKIP_INSTALLERS[target_code] = state
                         state.owners.add(self)
 
-                for guarded_code in entry.guarded_codes:
+                for _index, guarded_code in enumerate(entry.guarded_codes):
                     with dynamo_timed("precompile_load_guards"):
                         guards_state = load_guards_state(guarded_code.guards_state)
                     runtime_global_scope = sys.modules[entry.python_module].__dict__
@@ -1737,10 +1785,15 @@ class CompilePackage:
                         raise AssertionError(
                             f"Expected GuardsState, got {type(guards_state)}"
                         )
-                    with dynamo_timed("precompile_build_guards"):
-                        guard_manager = load_guard_manager(
-                            guards_state, target_code, runtime_global_scope
-                        )
+                    # Keyed by the code object install() itself resolved, so a
+                    # prepare that resolved a different one falls back to
+                    # building rather than serving a stale tree.
+                    guard_manager = (prebuilt or {}).get((target_code, _index))
+                    if guard_manager is None:
+                        with dynamo_timed("precompile_build_guards"):
+                            guard_manager = load_guard_manager(
+                                guards_state, target_code, runtime_global_scope
+                            )
                     _load_precompile_entry(
                         target_code,
                         guard_manager,
