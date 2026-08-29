@@ -264,8 +264,8 @@ it.
 # The ONE thing precompile has to correct is that Dynamo's rewrite SPECIALIZES on whether
 # p.grad is None at trace time -- a guarded choice in torch.compile, and this artifact
 # checks no guards -- so precompile always bakes the ACCUMULATING form and the driver
-# materializes a zero .grad where the runtime model has none; see Note [precompile dynamo
-# training grad accumulation]. Only params get a harvested grad, as on the make_fx path
+# materializes a zero .grad where the runtime model has none. Only params get a
+# harvested grad, as on the make_fx path
 # (invariant 5): a user input that requires grad is rejected.
 #
 # Dynamic shapes and decompositions work here too, by different mechanisms than make_fx.
