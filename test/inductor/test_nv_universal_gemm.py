@@ -1588,7 +1588,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertEqual(result[1], expected[1])
         self.assertIn("output=", code)
         self.assertNotIn("_LOCAL_REDUCE_SOURCE_FN_SRC", code)
-        self.assertIn("tensor_epilogue_returns_local_reduce=True", code)
+        self.assertIn("reduction_type=None", code)
+        self.assertIn("source_fn=None", code)
         self.assertIn(" * ", code)
 
     @config.patch(emulate_precision_casts=True)
@@ -1652,12 +1653,73 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
                 out_dtype=torch.bfloat16,
             )
             grouped = result.float().view(-1, group, n)
-            mean = grouped.mean(1, keepdim=True).expand(-1, group, -1)
+            mean = (grouped.sum(1, keepdim=True) / group).expand(-1, group, -1)
             return result.float() - mean.reshape(m, n)
 
         result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
         self.assertEqual(result, fn(a, b, scale_a, scale_b))
         self.assertIn("feeds_main=True", code)
+        self.assertNotIn("_LOCAL_REDUCE_CONSUMER_FINALIZER_FN_SRC", code)
+
+    def test_scaled_mm_grouped_reduce_raw_feed_and_finalized_output(self):
+        m, n, k, group = 128, 128, 512, 4
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
+        b = b.T
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+
+        def fn(a, b, scale_a, scale_b):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            grouped = result.float().view(-1, group, n)
+            sums = grouped.sum(1, keepdim=True)
+            means = sums / group
+            return result.float() - sums.expand(-1, group, -1).reshape(m, n), means
+
+        result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
+        self.assertEqual(result, fn(a, b, scale_a, scale_b))
+        self.assertIn("feeds_main=True", code)
+        self.assertNotIn("_LOCAL_REDUCE_CONSUMER_FINALIZER_FN_SRC", code)
+        self.assertIn("_LOCAL_REDUCE_FINALIZER_FN_SRC", code)
+
+    def test_scaled_mm_grouped_n_mean_feeds_main_before_output_finalizer(self):
+        m, n, k, group = 128, 128, 512, 4
+        a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
+
+        def fn(a, b, scale_a, scale_b):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            grouped = result.float().view(m, -1, group)
+            means = grouped.square().mean(-1, keepdim=True)
+            roots = means.sqrt()
+            centered = (grouped - means).reshape(m, n)
+            return centered, roots
+
+        result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
+        self.assertEqual(result, fn(a, b, scale_a, scale_b))
+        self.assertIn("_LOCAL_REDUCE_CONSUMER_FINALIZER_FN_SRC", code)
+        self.assertIn("_LOCAL_REDUCE_FINALIZER_FN_SRC", code)
 
     def test_matmul_add_relu_chained(self):
         """Multi-op pointwise chain (a@b + bias → relu) collapses to one
