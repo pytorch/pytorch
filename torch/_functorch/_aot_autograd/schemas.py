@@ -430,13 +430,6 @@ class SubclassCreationMeta:
                 creation_meta.make_runtime_safe()
 
     def __post_init__(self) -> None:
-        # Serialized runtime metadata has already discarded the fake tensor.
-        if self.original_subclass is None:
-            if self.original_subclass_type is None:
-                raise AssertionError(
-                    "runtime-safe subclass metadata must retain its subclass type"
-                )
-            return
         # sanity assert to make sure we don't leak memory
         if not is_fake(self.original_subclass):
             raise AssertionError(
@@ -511,10 +504,6 @@ class ViewAndMutationMeta:
     # Instead, we keep any necessary subclass metadata necessary about each traced_tangent.
     # This list is generated after calling make_runtime_safe().
     traced_tangent_metas: list[Any] | None = None
-
-    # Same length and order as traced_tangents. Retained for runtime diagnostics
-    # after the fake traced tangents themselves are discarded.
-    traced_tangent_dtypes: list[torch.dtype | None] | None = None
 
     num_symints_saved_for_bw: int | None = None
 
@@ -745,8 +734,7 @@ class ViewAndMutationMeta:
         There are various fields in ViewAndMutationMeta that aren't serializable. This function is called after all tracing
         is completed to simplify certain fields in the metadata so that they can be safely cached.
 
-        Doing so may lose information from traced_tangents while retaining the
-        runtime-safe summaries needed by the wrappers.
+        Doing so may lose information (in the case of traced_tangents), but none of the information is needed at runtime.
         """
         # TODO: This function is only a best effort: there are other fields that may not be cache safe
         # (i.e., there's no guarantee that tensor_flatten() returns a serializable result), or that
@@ -754,10 +742,6 @@ class ViewAndMutationMeta:
         if self.traced_tangent_metas is not None:
             raise AssertionError(
                 "traced_tangent_metas should be None before calling make_runtime_safe"
-            )
-        if self.traced_tangent_dtypes is not None:
-            raise AssertionError(
-                "traced_tangent_dtypes should be None before calling make_runtime_safe"
             )
 
         def extract_metadata(t: object) -> tuple[Sequence[str], object] | None:
@@ -773,10 +757,6 @@ class ViewAndMutationMeta:
                 return None
 
         self.traced_tangent_metas = [extract_metadata(t) for t in self.traced_tangents]
-        self.traced_tangent_dtypes = [
-            t.dtype if isinstance(t, torch.Tensor) else None
-            for t in self.traced_tangents
-        ]
         # Clear traced tangents at runtime
         self.traced_tangents = []
         for inp_meta in self.subclass_inp_meta:
@@ -1477,21 +1457,6 @@ class AOTGraphCapture:  # Produced by aot_stage1_graph_capture
 
     # Metadata about subclass inputs/outputs in the graph trace.
     maybe_subclass_meta: Any
-
-    # Inputs needed to retrace a backward after runtime reveals which forward
-    # output tangents are undefined. This remains compile-time-only state and is
-    # deliberately excluded from AOTAutograd cache entries.
-    autograd_trace_info: AOTAutogradTraceInfo | None = None
-
-
-@dataclass
-class AOTAutogradTraceInfo:
-    flat_fn: TraceFn
-    flat_args: list[FxValue]
-    flat_args_descs: list[AOTInput]
-    fw_metadata: ViewAndMutationMeta
-    partition_fn: Callable[..., Any] | None = None
-    original_fw_module: torch.fx.GraphModule | None = None
 
 
 FakifiedFlatArgs = NewType("FakifiedFlatArgs", list[Any])
