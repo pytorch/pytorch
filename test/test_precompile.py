@@ -1693,6 +1693,29 @@ class TestPrecompile(TestCase):
                 lambda x, y: x + y, example_inputs=[(a, b)], backend="nope"
             )
 
+    def test_unserializable_backend_says_so_rather_than_reporting_a_gap(self):
+        # A session takes any backend Dynamo resolves -- tests register their
+        # own -- so the refusal belongs at artifact(), not at construction. But
+        # the generic "recorded 0 of N compiled backend(s)" reads as a defect in
+        # the model, when the real answer is that this backend records nothing.
+        # aot_eager is the one people reach for, since it is how you isolate
+        # AOTAutograd.
+        from torch._dynamo.precompile_package import precompile_capture
+
+        session = precompile_capture(
+            _precompile_single_graph, backend="aot_eager", dynamic=False
+        )
+        with session as compiled:
+            compiled(torch.randn(2))
+        with self.assertRaisesRegex(Exception, "does not produce anything") as ctx:
+            session.artifact(require_complete=False, require_no_risky_drops=False)
+        message = str(ctx.exception)
+        self.assertIn("aot_eager", message)
+        self.assertIn("'inductor' or 'eager'", message)
+        # The grad-mode and backward advice the generic message carries would be
+        # a wrong lead here.
+        self.assertNotIn("training=True", message)
+
     def test_tracer_default_and_explicit_make_fx(self):
         # tracer defaults to "make_fx"; passing it explicitly is equivalent and works.
         m = torch.nn.Linear(4, 3).eval()
