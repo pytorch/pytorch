@@ -255,6 +255,17 @@ def _precompile_accum_flaky_step(model, x, mode):
     return _precompile_accum_step(model, x, mode)
 
 
+class _PrecompileClassAttrCfg:
+    # A CLASS attribute, so the instance __dict__ lacks it and Dynamo guards
+    # its absence with NOT_PRESENT_IN_GENERIC_DICT -- a type no never-drop
+    # list covers.
+    mode = "a"
+
+
+def _precompile_class_attr_branch(cfg, x):
+    return x * (2.0 if cfg.mode == "a" else 100.0)
+
+
 class _PrecompileHasattrCfg:
     """Branched on by hasattr, so the branch taken depends on a HASATTR guard."""
 
@@ -308,6 +319,10 @@ class _PrecompileAccumModel(torch.nn.Module):
         if mode == "b":
             return y.sum() + 1
         return y.sum() - 3
+
+
+def _precompile_accum_forward(model, x, mode):
+    return model(x, mode)
 
 
 def _precompile_accum_step(model, x, mode):
@@ -2232,6 +2247,70 @@ class TestPrecompile(TestCase):
         loaded = torch.compiler.precompile.load(code, cache)
         with _maybe_scoped(loaded), torch.no_grad():
             self.assertIsNone(loaded(model, x))
+
+    def test_precompile_keeps_input_rooted_slots_the_policy_cannot_judge(self):
+        # The policy drops what held identically in every variant, on the
+        # caller's statement that the environment is fixed and every variation
+        # is in the inputs. It cannot check which of the two a slot is, so it
+        # infers it from observed variance -- and one variant is no evidence,
+        # which is the default shape. So it dropped guards rooted in the very
+        # category its own rationale promises not to touch.
+        #
+        # Classified by root instead: module structure, globals, global state
+        # and the shape env are the environment; a local holding anything else
+        # is data the caller passes in. This asserts the general rule, on a
+        # guard type that no never-drop list covers, so it cannot pass by way
+        # of the HASATTR or derived-type fixes.
+        from torch._dynamo.precompile_package import precompile_capture
+
+        cfg = _PrecompileClassAttrCfg()
+        x = torch.ones(3)
+        session = precompile_capture(
+            _precompile_class_attr_branch,
+            backend="eager",
+            example_inputs=[(cfg, x)],
+        )
+        session._prune_invariant_guards = True
+        with session:
+            pass
+        session.artifact(require_no_risky_drops=False, require_complete=False)
+        input_rooted = [
+            (t, n) for t, n in session._policy_dropped_guards if n.startswith("cfg")
+        ]
+        self.assertEqual(input_rooted, [])
+        # And the module-structure slots are still pruned, or this would have
+        # bought correctness by keeping everything.
+        self.assertTrue(session._policy_dropped_guards)
+
+    def test_precompile_still_prunes_module_structure(self):
+        # The pruning win is the point of the policy: on a real model the bulk
+        # of the invariant guards genuinely are module structure, and those
+        # must still go.
+        from torch._dynamo.precompile_package import precompile_capture
+
+        model = _PrecompileAccumModel()
+        x = torch.randn(3, 8)
+        session = precompile_capture(
+            _precompile_accum_forward,
+            backend="eager",
+            example_inputs=[(model, x, "a")],
+        )
+        session._prune_invariant_guards = True
+        with session:
+            pass
+        session.artifact(require_no_risky_drops=False, require_complete=False)
+        dropped = session._policy_dropped_guards
+        self.assertTrue(dropped)
+        # Every one of them is environment: rooted at the module, or a
+        # global-state guard with no source at all.
+        # "self" as well as "model": an inner frame is the module's own
+        # forward, so the module arrives as self there. Both are the module by
+        # VALUE, which is what the rule keys on.
+        for _, name in dropped:
+            self.assertTrue(
+                name == "" or name.startswith(("model", "self", "G[")),
+                f"dropped a slot that is not environment-rooted: {name!r}",
+            )
 
     def test_precompile_keeps_a_hasattr_guard_under_default_gates(self):
         # hasattr is a branch. A single-variant capture makes every slot look

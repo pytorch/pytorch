@@ -146,7 +146,7 @@ from .package import (
     PrecompileCacheEntry,
 )
 from .pgo import _use_code_state
-from .source import AttrSource, DictGetItemSource, GlobalSource
+from .source import AttrSource, DictGetItemSource, GlobalSource, LocalSource
 
 
 if TYPE_CHECKING:
@@ -1177,6 +1177,53 @@ def _autograd_cache_bypasses() -> int:
     return counters["aot_autograd"].get("autograd_cache_bypass", 0)
 
 
+def _environment_rooted(entries: Sequence[GuardFilterEntry]) -> set[str]:
+    """The slots the precompile contract pins, by what they are ROOTED at.
+
+    The invariant policy drops a slot that held identically in every captured
+    variant, on the caller's statement that the environment is fixed and every
+    variation is in the inputs. It has no way to check which of the two a slot
+    is, so it infers it from observed variance -- and variance is evidence only
+    when there is more than one variant to compare. varying_guard_slots over a
+    single variant is empty by construction, which is the shipped default, so
+    the inference runs on no evidence and calls the inputs invariant too.
+
+    Classify by the root instead. Environment is the module structure, the
+    process globals, the global interpreter state and the shape env; a local
+    holding anything else is data the caller passes in, and the contract does
+    not license dropping guards on it. Measured on a real ranking model that is
+    roughly 60 of 7,575 slots retained, because in a real model the bulk of the
+    invariant guards genuinely are module structure.
+
+    Module-rooted is decided by VALUE, not by the name starting with "self":
+    precompile's own calling convention passes the model in as an argument, so
+    on the public API the module structure hangs off a local like ``model``.
+    """
+    modules = sorted(
+        (
+            e.name
+            for e in entries
+            if e.has_value and isinstance(e.value, torch.nn.Module) and e.name
+        ),
+        key=len,
+    )
+
+    def under_a_module(name: str) -> bool:
+        return any(
+            name == m or name.startswith(f"{m}.") or name.startswith(f"{m}[")
+            for m in modules
+        )
+
+    rooted = set()
+    for e in entries:
+        root = _source_root(e.orig_guard.originating_source)
+        # Anything not rooted at a local is environment outright: a module
+        # global, the global state guards, the shape env.
+        if not isinstance(root, LocalSource) or under_a_module(e.name):
+            rooted.add(e.name)
+    return rooted
+
+
 def _missing_backends_message(
     total: int, missing: Sequence[object], backend: str = "inductor"
 ) -> str:
@@ -2111,9 +2158,12 @@ class PrecompileSession:
             )
 
         def policy(entries: Sequence[GuardFilterEntry]) -> Sequence[bool]:
+            # Only environment slots are the policy's to drop. See
+            # _environment_rooted for why observed variance cannot decide this.
+            environment = _environment_rooted(entries)
             decisions = []
             for entry in entries:
-                keep = survives(
+                keep = entry.name not in environment or survives(
                     entry.guard_type,
                     entry.name,
                     tuple(getattr(entry, "derived_guard_types", ()) or ()),
