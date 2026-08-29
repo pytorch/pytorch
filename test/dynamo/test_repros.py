@@ -13,7 +13,6 @@ import gc
 import importlib
 import inspect
 import itertools
-import logging
 import os
 import random
 import sys
@@ -77,6 +76,7 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     serialTest,
@@ -87,7 +87,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     xfailIfS390X,
 )
-from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
+from torch.testing._internal.logging_utils import LoggingTestCase
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -981,12 +981,10 @@ class IncByTwo:
 
 
 class LRUCacheWarningTests(LoggingTestCase):
-    @unittest.skipUnless(torch.accelerator.is_available(), "requires accelerator")
-    @make_logging_test(dynamo=logging.DEBUG)
-    def test_lru_cache_warning_issued_during_tracing(self, records):
-        prev_default = torch._C._get_default_device()
-        try:
-            torch.set_default_device(torch.accelerator.current_accelerator())
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_lru_cache_warning_issued_during_tracing(self, device):
+        with self.assertNoLogs(level="WARNING"):
 
             @torch.compile(backend="eager")
             def f(x):
@@ -994,20 +992,13 @@ class LRUCacheWarningTests(LoggingTestCase):
                 x = x.cos().sin()
                 return x
 
-            result = f(torch.randn(1024))
+            result = f(torch.randn(1024, device=device))
             self.assertIsInstance(result, torch.Tensor)
-        finally:
-            if prev_default == "cpu":
-                torch.set_default_device(None)
-            else:
-                torch.set_default_device(prev_default)
-
-        for record in records:
-            if "call to a lru_cache wrapped function at:" in record.getMessage():
-                self.fail("lru_cache warning was incorrectly logged")
 
 
 class ReproTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self) -> None:
         super().setUp()
         try:
@@ -4796,49 +4787,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(x1, x2)
         self.assertEqual(x1.data, x2.data)
         self.assertEqual(y1, y2)
-
-    @requires_cuda
-    def test_tensor_set_data_cross_device(self):
-        def func(x):
-            x.data = x.data.to("cuda")
-            return x + 1
-
-        x_eager = torch.randn(4, device="cpu")
-        x_compiled = x_eager.clone()
-
-        out_eager = func(x_eager)
-        out_compiled = torch.compile(func, backend="eager", fullgraph=True)(x_compiled)
-
-        self.assertEqual(out_eager, out_compiled)
-        self.assertEqual(x_eager.device, x_compiled.device)
-
-    @requires_cuda
-    def test_tensor_set_data_cross_device_shape_mismatch_graphbreaks(self):
-        def func(x):
-            x.data = torch.randn(8, device="cuda")
-            return x + 1
-
-        x = torch.randn(4, device="cpu")
-        with self.assertRaises(torch._dynamo.exc.Unsupported):
-            torch.compile(func, backend="eager", fullgraph=True)(x)
-
-    @requires_cuda
-    def test_tensor_set_data_cross_device_placeholder_metadata(self):
-        backend = torch._dynamo.testing.EagerAndRecordGraphs()
-
-        def func(x):
-            x.data = x.data.to("cuda")
-            return x + 1
-
-        x = torch.randn(4, device="cpu")
-        torch.compile(func, backend=backend, fullgraph=True)(x)
-
-        gm = backend.graphs[0]
-        for node in gm.graph.nodes:
-            if node.op == "placeholder":
-                ev = node.meta.get("example_value")
-                if isinstance(ev, torch.Tensor):
-                    self.assertEqual(ev.device.type, "cpu")
 
     def test_user_ctor_ctx_manager(self):
         class UserCtxManager:
@@ -8879,8 +8827,184 @@ SavedForBackwardsAOTOutput(idx=5)""",
         self.assertEqual(opt_fn(inp2, grid2), fn(inp2, grid2))
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_getattr_return(self):
+        _WrapperDescriptor = type(type.__call__)
+        _MethodWrapper = type(all.__call__)
+        _ClassMethodWrapper = type(int.__dict__["from_bytes"])
+
+        _NonUserDefinedCallables = (
+            _WrapperDescriptor,
+            _MethodWrapper,
+            _ClassMethodWrapper,
+            types.BuiltinFunctionType,
+        )
+
+        def _signature_get_user_defined_method(cls, method_name):
+            try:
+                meth = getattr(cls, method_name)
+            except AttributeError:
+                return
+            else:
+                if not isinstance(meth, _NonUserDefinedCallables):
+                    # Once '__signature__' will be added to 'C'-level
+                    # callables, this check won't be necessary
+                    return meth
+
+        def fn(x):
+            s = _signature_get_user_defined_method(type(torch.nn.Linear), "__call__")
+            if s is None:
+                return torch.cos(x)
+
+            return torch.sin(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_data_dependent_error_log_no_print(self):
+        # This is a regression test case for
+        # https://github.com/pytorch/pytorch/pull/149831
+        from io import StringIO
+
+        capturedOutput = StringIO()
+        sys.stderr = capturedOutput
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def func(a):
+            if a.sum() > 0:
+                return a + 1
+            return a + 2
+
+        a = torch.rand(10, 10)
+        try:
+            func(a)
+        except Exception:
+            pass
+        sys.stderr = sys.__stderr__
+
+        # Make sure we don't _print_ out the graph module.
+        output = capturedOutput.getvalue()
+        self.assertNotIn("class GraphModule", output)
+
+    def test_deepcopy_constant_tensor_in_aot_bwd(self):
+        class Fn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x + 1
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                return grad_out * torch.tensor(2) * grad_out.shape[0]
+
+        def f(x):
+            return Fn.apply(x)
+
+        x = torch.randn(8, requires_grad=True)
+        out = f(x)  # should not raise
+        c_out = torch.compile(f, backend="aot_eager", dynamic=True)(x)
+        expected = torch.autograd.grad(out.sum(), inputs=(x,))
+        actual = torch.autograd.grad(c_out.sum(), inputs=(x,))
+        self.assertEqual(expected, actual)
+
+    def test_module_attribute_error(self):
+        @torch.compile(backend="eager")
+        def f1(x):
+            return torch._bar(x)
+
+        @torch.compile(backend="eager")
+        def f2(x):
+            try:
+                return torch._bar(x)
+            except AttributeError:
+                return x + 1
+
+        with self.assertRaises(AttributeError):
+            f1(torch.ones(3))
+
+        self.assertEqual(f2(torch.ones(3)), torch.ones(3) + 1)
+
+    def test_named_tuple_vt_clone(self):
+        # https://github.com/pytorch/pytorch/issues/157945
+        class SVDCompressor(nn.Module):
+            def __init__(self, k=10):
+                super().__init__()
+                self.k = k
+
+            def forward(self, x):
+                U, S = torch.linalg.svd(x)[:2]
+                reduced = U[:, :, : self.k] @ torch.diag_embed(S[:, : self.k])
+                return reduced
+
+        input = torch.randn(4, 8, 6)
+        model = SVDCompressor(k=5)
+
+        out1 = model(input.clone())
+        out2 = torch.compile(model, backend="eager")(input.clone())
+        self.assertEqual(out1, out2)
+
+    def test_filter_warnings(self):
+        x = torch.ones(2, 2, requires_grad=True)
+
+        def call_foobar(x):
+            warnings.warn("foobar")
+
+        @torch.compile(backend="eager")
+        def f(x):
+            call_foobar(x)
+            call_foobar(x)
+            call_foobar(x)
+            call_foobar(x)
+            return call_foobar(x)
+
+        with warnings.catch_warnings(record=True) as w:
+            f(x)
+            self.assertEqual(len(w), 1)
+            self.assertEqual(str(w[0].message), "foobar")
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_tensor_set_data_cross_device(self, device):
+        def func(x):
+            x.data = x.data.to(device)
+            return x + 1
+
+        x_eager = torch.randn(4, device="cpu")
+        x_compiled = x_eager.clone()
+
+        out_eager = func(x_eager)
+        out_compiled = torch.compile(func, backend="eager", fullgraph=True)(x_compiled)
+
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(x_eager.device, x_compiled.device)
+
+    def test_tensor_set_data_cross_device_shape_mismatch_graphbreaks(self, device):
+        def func(x):
+            x.data = torch.randn(8, device=device)
+            return x + 1
+
+        x = torch.randn(4, device="cpu")
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(func, backend="eager", fullgraph=True)(x)
+
+    def test_tensor_set_data_cross_device_placeholder_metadata(self, device):
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        def func(x):
+            x.data = x.data.to(device)
+            return x + 1
+
+        x = torch.randn(4, device="cpu")
+        torch.compile(func, backend=backend, fullgraph=True)(x)
+
+        gm = backend.graphs[0]
+        for node in gm.graph.nodes:
+            if node.op == "placeholder":
+                ev = node.meta.get("example_value")
+                if isinstance(ev, torch.Tensor):
+                    self.assertEqual(ev.device.type, "cpu")
+
     @serialTest()
     @onlyAccelerator
     def test_mem_leak_guards(self, device):
@@ -9434,121 +9558,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         # (aka if you set torch._functorch.config.treat_parameters_as_free_to_save = False)
         self.assertEqual(mode.ops_counter[torch.ops.aten._to_copy.default], 5)
 
-    def test_getattr_return(self):
-        _WrapperDescriptor = type(type.__call__)
-        _MethodWrapper = type(all.__call__)
-        _ClassMethodWrapper = type(int.__dict__["from_bytes"])
-
-        _NonUserDefinedCallables = (
-            _WrapperDescriptor,
-            _MethodWrapper,
-            _ClassMethodWrapper,
-            types.BuiltinFunctionType,
-        )
-
-        def _signature_get_user_defined_method(cls, method_name):
-            try:
-                meth = getattr(cls, method_name)
-            except AttributeError:
-                return
-            else:
-                if not isinstance(meth, _NonUserDefinedCallables):
-                    # Once '__signature__' will be added to 'C'-level
-                    # callables, this check won't be necessary
-                    return meth
-
-        def fn(x):
-            s = _signature_get_user_defined_method(type(torch.nn.Linear), "__call__")
-            if s is None:
-                return torch.cos(x)
-
-            return torch.sin(x)
-
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        x = torch.randn(4)
-        self.assertEqual(fn(x), opt_fn(x))
-
-    def test_data_dependent_error_log_no_print(self):
-        # This is a regression test case for
-        # https://github.com/pytorch/pytorch/pull/149831
-        from io import StringIO
-
-        capturedOutput = StringIO()
-        sys.stderr = capturedOutput
-
-        @torch.compile(fullgraph=True, backend="eager")
-        def func(a):
-            if a.sum() > 0:
-                return a + 1
-            return a + 2
-
-        a = torch.rand(10, 10)
-        try:
-            func(a)
-        except Exception:
-            pass
-        sys.stderr = sys.__stderr__
-
-        # Make sure we don't _print_ out the graph module.
-        output = capturedOutput.getvalue()
-        self.assertNotIn("class GraphModule", output)
-
-    def test_deepcopy_constant_tensor_in_aot_bwd(self):
-        class Fn(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x):
-                return x + 1
-
-            @staticmethod
-            def backward(ctx, grad_out):
-                return grad_out * torch.tensor(2) * grad_out.shape[0]
-
-        def f(x):
-            return Fn.apply(x)
-
-        x = torch.randn(8, requires_grad=True)
-        out = f(x)  # should not raise
-        c_out = torch.compile(f, backend="aot_eager", dynamic=True)(x)
-        expected = torch.autograd.grad(out.sum(), inputs=(x,))
-        actual = torch.autograd.grad(c_out.sum(), inputs=(x,))
-        self.assertEqual(expected, actual)
-
-    def test_module_attribute_error(self):
-        @torch.compile(backend="eager")
-        def f1(x):
-            return torch._bar(x)
-
-        @torch.compile(backend="eager")
-        def f2(x):
-            try:
-                return torch._bar(x)
-            except AttributeError:
-                return x + 1
-
-        with self.assertRaises(AttributeError):
-            f1(torch.ones(3))
-
-        self.assertEqual(f2(torch.ones(3)), torch.ones(3) + 1)
-
-    def test_named_tuple_vt_clone(self):
-        # https://github.com/pytorch/pytorch/issues/157945
-        class SVDCompressor(nn.Module):
-            def __init__(self, k=10):
-                super().__init__()
-                self.k = k
-
-            def forward(self, x):
-                U, S = torch.linalg.svd(x)[:2]
-                reduced = U[:, :, : self.k] @ torch.diag_embed(S[:, : self.k])
-                return reduced
-
-        input = torch.randn(4, 8, 6)
-        model = SVDCompressor(k=5)
-
-        out1 = model(input.clone())
-        out2 = torch.compile(model, backend="eager")(input.clone())
-        self.assertEqual(out1, out2)
-
     @onlyAccelerator
     def test_zero_dim_param_mixed_device_grad(self, device):
         # cpu 0-dim params with cuda grads
@@ -9573,25 +9582,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertIsNotNone(model.b.grad)
         self.assertEqual(model.a.grad.device, torch.device("cpu"))
         self.assertEqual(model.b.grad.device, torch.device("cpu"))
-
-    def test_filter_warnings(self):
-        x = torch.ones(2, 2, requires_grad=True)
-
-        def call_foobar(x):
-            warnings.warn("foobar")
-
-        @torch.compile(backend="eager")
-        def f(x):
-            call_foobar(x)
-            call_foobar(x)
-            call_foobar(x)
-            call_foobar(x)
-            return call_foobar(x)
-
-        with warnings.catch_warnings(record=True) as w:
-            f(x)
-            self.assertEqual(len(w), 1)
-            self.assertEqual(str(w[0].message), "foobar")
 
     def test_filter_safe_grad_warning(self):
         x = torch.ones(2, 2, requires_grad=True)
@@ -10408,10 +10398,14 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
 
 
 instantiate_parametrized_tests(ReproTests)
-
-devices = ["cuda", "hpu", "xpu"]
 instantiate_device_type_tests(
-    ReproTestsDevice, globals(), only_for=devices, allow_xpu=True
+    LRUCacheWarningTests, globals(), except_for="cpu", allow_xpu=True, allow_mps=True
+)
+instantiate_device_type_tests(
+    ReproTestsDevice,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
 )
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
