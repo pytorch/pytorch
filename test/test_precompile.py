@@ -3073,6 +3073,27 @@ class TestPrecompile(TestCase):
             )
         self.assertEqual(builds, 2 * managers)
 
+    def test_standalone_artifact_refuses_a_foreign_torch(self):
+        # A dynamo artifact carries Dynamo internals in its opaque blobs, so it
+        # is locked to the build that made it. TORCH_VERSION was emitted and
+        # read by nothing, leaving the mismatch to surface as whatever import
+        # or attribute error came first.
+        x = torch.randn(4)
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _precompile_single_graph,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                example_inputs=[(x,)],
+            )
+        torch._dynamo.reset()
+        with (
+            mock.patch.object(torch, "__version__", "0.0.0+notreal"),
+            self.assertRaisesRegex(Exception, "produced by torch"),
+        ):
+            torch.compiler.precompile.load(code, cache)
+
     def test_standalone_artifact_refuses_drifted_inlined_source(self):
         # A standalone artifact builds no CompilePackage, so it never ran the
         # inlined-source check the installed mode gets for free -- and an
