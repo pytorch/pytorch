@@ -391,11 +391,6 @@ def _build_dynamo_forward():
     import types
 
     import torch
-    from torch._dynamo.package import (
-        load_guard_manager,
-        load_guards_state,
-        SerializedCode,
-    )
 
     if tuple(_DYNAMO_PYTHON_VERSION) != sys.version_info[:2]:
         from torch._precompile import PrecompileError
@@ -408,6 +403,9 @@ def _build_dynamo_forward():
     # _DYNAMO_STATE pickles Dynamo internals (guard trees, code objects), which
     # have no cross-version compatibility story; check up front so a foreign
     # build fails with this message instead of an arbitrary unpickling error.
+    # The torch._dynamo.package import stays BELOW both checks for the same
+    # reason: on a foreign build a moved/renamed loader symbol must surface as
+    # this message, not as a raw ImportError.
     if _DYNAMO_TORCH_VERSION != torch.__version__:
         from torch._precompile import PrecompileError
 
@@ -415,6 +413,12 @@ def _build_dynamo_forward():
             f"precompile artifact was produced by torch {_DYNAMO_TORCH_VERSION}, "
             f"but is being loaded by torch {torch.__version__}."
         )
+
+    from torch._dynamo.package import (
+        load_guard_manager,
+        load_guards_state,
+        SerializedCode,
+    )
 
     state = pickle.loads(base64.b64decode(_DYNAMO_STATE))
     namespace = globals()
@@ -442,9 +446,22 @@ def _build_dynamo_forward():
     kwdefaults = state["kwdefaults"]
 
     # Capture rejects fns with closure cells, so rebuilt functions never carry one.
+    # state["variants"] is newest-first (see _build_dynamo_artifact): the
+    # dispatch loop below serves the first passing guard set, matching live
+    # Dynamo's LRU-front-first recompilation checks.
     variants = []
     for guarded in state["variants"]:
         guards_state = load_guards_state(guarded["guards_state"])
+        # Check-time G[...] accessors resolve against this namespace, and the
+        # builtins dict only exists under its per-compile key in the capture
+        # frame's globals; install it like the mainline CompilePackage loader
+        # so a retained builtins-routed guard can evaluate at all instead of
+        # silently failing every call it should accept.
+        builtins_key = guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
+        if builtins_key and builtins_key not in namespace:
+            from torch._dynamo.output_graph import get_builtins_dict
+
+            namespace[builtins_key] = get_builtins_dict(namespace)
         manager = load_guard_manager(guards_state, target, namespace)
         code = SerializedCode.to_code_object(guarded["dynamo_code"])
         function = types.FunctionType(code, namespace, target.co_name, defaults, None)

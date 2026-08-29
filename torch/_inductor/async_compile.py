@@ -94,20 +94,27 @@ _constexpr_module_import_re = re.compile(
 _worker_missing_module_re = re.compile(r"No module named '([^']+)'")
 
 
-def _constexpr_module_missing_in_worker(source_code: str, details: str) -> str | None:
+def _constexpr_module_missing_in_worker(
+    source_code: str, error: str | ModuleNotFoundError
+) -> str | None:
     """Return the constexpr-referenced module a compile worker failed to import.
 
     Codegen validates these imports in the parent process, but workers snapshot
     sys.path/PYTHONPATH when the pool spawns, so a module made importable
     afterwards (e.g. via sys.path.append) can raise ModuleNotFoundError only in
-    the worker. Returns None if the failure is anything else.
+    the worker. Takes either the subprocess pool's formatted traceback string or
+    the ModuleNotFoundError a spawn/fork pool re-raises directly. Returns None
+    if the failure is anything else.
     """
-    if "ModuleNotFoundError" not in details:
+    if isinstance(error, ModuleNotFoundError):
+        name = error.name
+    else:
+        if "ModuleNotFoundError" not in error:
+            return None
+        missing = _worker_missing_module_re.search(error)
+        name = missing.group(1) if missing else None
+    if name is None:
         return None
-    missing = _worker_missing_module_re.search(details)
-    if missing is None:
-        return None
-    name = missing.group(1)
     for module in _constexpr_module_import_re.findall(source_code):
         if module == name or module.startswith(name + "."):
             return module
@@ -571,7 +578,7 @@ class AsyncCompile:
             )
 
             # LambdaFuture.result() does not memoize, and task.result()
-            # re-raises the same SubprocException on every call; cache the
+            # re-raises the same worker exception on every call; cache the
             # fallback kernel so re-entry neither recompiles nor re-warns.
             fallback_kernel: CachingAutotuner | None = None
 
@@ -581,10 +588,16 @@ class AsyncCompile:
                     return fallback_kernel
                 try:
                     kernel, elapsed_us = task.result()
-                except SubprocException as e:
-                    module = _constexpr_module_missing_in_worker(source_code, e.details)
+                except (SubprocException, ModuleNotFoundError) as e:
+                    # The subprocess pool wraps worker failures in
+                    # SubprocException; spawn/fork pools re-raise the worker's
+                    # ModuleNotFoundError directly.
+                    error = e.details if isinstance(e, SubprocException) else e
+                    module = _constexpr_module_missing_in_worker(source_code, error)
                     if module is None:
-                        raise e.with_name(kernel_name) from e
+                        if isinstance(e, SubprocException):
+                            raise e.with_name(kernel_name) from e
+                        raise
                     # The parent validated this import at codegen time, so only
                     # the worker's stale module search path is at fault; compile
                     # in-process instead of failing the whole compile.

@@ -46,7 +46,8 @@ dynamic graphs. It retains guards derived from explicit inputs and treats the Py
 environment as an unchecked invariant between capture and runtime; changing that
 environment can silently run a specialization captured for the old state. Initial
 support is for Python functions with positional tensor/scalar arguments and containers
-of those values; graph breaks, closures, and `nn.Module` arguments are not supported yet.
+of those values; graph breaks, closures, `nn.Module`, and `numpy.ndarray` arguments are
+not supported yet.
 Globals whose object graph contains a tensor and functions that mutate globals are
 rejected, as are distinct tensor inputs sharing or overlapping storage (the same
 tensor object may be passed more than once).

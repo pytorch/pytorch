@@ -331,13 +331,15 @@ class AutotuneCache:
         triton_cache_hash: str | None = None,
     ) -> None:
         if not _config_json_cacheable(config):
-            # Skipped configs are also absent from the bundled/mega caches, so
-            # this kernel re-autotunes on every cold process; name the cache
-            # entry so the recurring cost is attributable.
+            # Only genuinely unserializable kwargs (sets, NaN, arbitrary
+            # objects) land here; see _config_json_cacheable. Skipped configs
+            # are also absent from the bundled/mega caches, so this kernel
+            # re-autotunes on every cold process; name the cache entry so the
+            # recurring cost is attributable.
             cache_id = (self.local_cache or self.remote_cache or (None, "<unknown>"))[1]
             log.warning(
-                "Skipping autotune cache save for %s: a config kwarg does not "
-                "survive a JSON round-trip",
+                "Skipping autotune cache save for %s: a config kwarg is not "
+                "JSON-serializable",
                 cache_id,
             )
             return
@@ -701,12 +703,14 @@ def _json_config_value(value: Any) -> Any:
     # Enum config kwargs stay real Enum members at runtime (the kernel may consume
     # e.g. MODE.value), but the JSON caches store the underlying value -- the same
     # form the generated source used to bake in before Enums round-tripped.
-    # Recurses over the same structure _json_stable_value accepts (lists and
-    # str-keyed dicts; tuples are rejected there) so that anything
-    # _config_json_cacheable admits both serializes and ==-matches on load.
+    # Tuples are stored as lists, the form json.loads hands back, so candidate
+    # matching in _load_cached_autotuning compares the cached entry against the
+    # same shape. Recurses over the structure _json_stable_value accepts (lists,
+    # tuples and str-keyed dicts) so that anything _config_json_cacheable admits
+    # both serializes and ==-matches on load.
     if isinstance(value, enum.Enum):
         value = value.value
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         return [_json_config_value(item) for item in value]
     if isinstance(value, dict):
         return {key: _json_config_value(item) for key, item in value.items()}
@@ -722,7 +726,7 @@ def _json_stable_value(value: Any) -> bool:
         return math.isfinite(value)
     if value is None or isinstance(value, (bool, int, str)):
         return True
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         return all(_json_stable_value(item) for item in value)
     if isinstance(value, dict):
         return all(
@@ -733,11 +737,11 @@ def _json_stable_value(value: Any) -> bool:
 
 
 def _config_json_cacheable(config: Config) -> bool:
-    # A kwarg that does not survive a JSON round-trip (e.g. a tuple -- directly
-    # or as an Enum's value -- which comes back as a list) can neither be
-    # matched against a cached entry nor reconstructed from one; such configs
-    # must skip the autotune cache rather than warm-load a wrong-typed
-    # constexpr via _reconstruct_triton_config.
+    # Every kwarg must serialize to strict JSON via _json_config_value (Enums
+    # unwrap, tuples become lists) and ==-match its serialized form back to a
+    # candidate config on load; anything else (sets, NaN, arbitrary objects)
+    # must skip the autotune cache rather than fail json.dumps in save or
+    # warm-load a wrong-typed constexpr via _reconstruct_triton_config.
     return all(
         _json_stable_value(val)
         # pyrefly: ignore [missing-attribute]
@@ -803,10 +807,18 @@ def _load_cached_autotuning(
             # Value-identical multi-matches (duplicate configs, subset kwargs)
             # fall through to reconstruction below, as before the Enum guard.
             return None
-        if not all(_config_json_cacheable(cfg) for cfg in configs):
-            # A no-match here may be a JSON round-trip artifact (see
-            # _config_json_cacheable), and reconstruction below would bake the
+        if any(
+            _json_config_value(val) != val
+            for cfg in configs
+            # pyrefly: ignore [missing-attribute]
+            for val in cfg.kwargs.values()
+        ):
+            # Some candidate kwarg degrades under the JSON round-trip (tuple ->
+            # list, plain Enum -> raw value), so a no-match here may be a
+            # serialization artifact and reconstruction below would bake the
             # degraded JSON value into the kernel; re-autotune instead.
+            # IntEnum/str-mixin members ==-match their unwrapped values, so
+            # they are not degraded and fall through to reconstruction.
             return None
 
     # Reconstruct Config from cached data. This handles both coordesc

@@ -357,8 +357,10 @@ def _constexpr_source(value: Any) -> tuple[str, list[str]] | None:
 
 
 class _SourceLiteral:
-    # Rendered constexpr mappings holding these are cached (user_defined_kernel_cache)
-    # and may be compared by config-matching code, so equality must be by source.
+    # These exist only to be repr'd into generated source (the cached metas in
+    # user_defined_kernel_cache keep the real values, not these placeholders),
+    # but defensively define equality by source in case an instance reaches
+    # ==-based config matching (e.g. autotune candidate matching).
     def __init__(self, source: str) -> None:
         self.source = source
 

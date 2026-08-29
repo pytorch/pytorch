@@ -1331,6 +1331,11 @@ def helper(x):
                 ),
                 name="torch_dtype",
             ),
+            subtest((torch.Size((128,)), ("(128,)", [])), name="torch_size"),
+            subtest(
+                ((torch.Size((2, 3)), 1), ("((2, 3), 1)", [])),
+                name="nested_torch_size",
+            ),
             subtest((slice(1, 5, 2), ("slice(1, 5, 2)", [])), name="slice"),
             subtest((range(3), ("range(0, 3)", [])), name="range"),
             subtest(
@@ -1345,6 +1350,25 @@ def helper(x):
         from torch._inductor.codegen.wrapper import _constexpr_source
 
         self.assertEqual(_constexpr_source(value), expected)
+
+    def test_constexpr_bytearray_source(self):
+        from torch._inductor.codegen.wrapper import _constexpr_source
+
+        value = bytearray(b"a\x00'\"b")
+        source, imports = _constexpr_source(value)
+        self.assertEqual(imports, [])
+        rebuilt = eval(source)
+        self.assertIs(type(rebuilt), bytearray)
+        self.assertEqual(rebuilt, value)
+
+    def test_source_literal_eq_hash(self):
+        from torch._inductor.codegen.wrapper import _SourceLiteral
+
+        left, right = _SourceLiteral("mod.X"), _SourceLiteral("mod.X")
+        self.assertEqual(left, right)
+        self.assertEqual(hash(left), hash(right))
+        self.assertNotEqual(left, _SourceLiteral("mod.Y"))
+        self.assertNotEqual(left, "mod.X")
 
     @unittest.skipUnless(has_triton_package(), "requires Triton")
     def test_constexpr_triton_dtype_source(self):
@@ -1584,6 +1608,10 @@ def helper(x):
         # cache entries must not claim found_by_coordesc: a warm load would skip
         # candidate matching and reconstruct a Config whose Enum kwargs degrade to
         # the raw JSON values.
+        if inductor_config.force_disable_caches:
+            self.skipTest("requires autotune caching enabled")
+        if not inductor_config.autotune_local_cache:
+            self.skipTest("requires the local autotune cache")
         import triton
         import triton.language as tl
 
@@ -1659,21 +1687,17 @@ def helper(x):
     @unittest.skipUnless(has_triton_package(), "requires Triton")
     @parametrize("via_enum", (True, False))
     def test_autotune_cache_declines_non_json_config_kwargs(self, via_enum):
-        import json
-
         import triton
 
         from torch._inductor.runtime.autotune_cache import (
             _config_json_cacheable,
-            _json_config_value,
-            _load_cached_autotuning,
             AutotuneCache,
         )
 
-        class TupleMode(Enum):
-            PAIR = (1, 2)
+        class SetMode(Enum):
+            PAIR = frozenset({1, 2})
 
-        value = TupleMode.PAIR if via_enum else (1, 2)
+        value = SetMode.PAIR if via_enum else {1, 2}
         cfg = triton.Config({"MODE": value, "BLOCK": 64}, num_warps=4, num_stages=2)
         self.assertFalse(_config_json_cacheable(cfg))
         # save() must skip such a config entirely. A bare instance suffices: the
@@ -1681,14 +1705,82 @@ def helper(x):
         # removed this call would fail on the missing attributes.
         cache = object.__new__(AutotuneCache)
         self.assertIsNone(cache.save(cfg, time_taken_ns=0))
-        # If an entry exists anyway (older writer), the JSON round-trip turned
-        # the tuple into a list, so matching can never succeed and loading must
-        # re-autotune (None) rather than reconstruct a Config carrying the
-        # degraded JSON list.
-        data = {key: _json_config_value(val) for key, val in cfg.kwargs.items()}
-        data.update({"num_warps": 4, "num_stages": 2, "configs_hash": "h"})
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_autotune_cache_matches_tuple_config_kwargs(self):
+        # Tuple kwargs (directly or as an Enum's value) serialize as JSON
+        # lists; warm load must match the stored list back to the tuple-kwarg
+        # candidate and return that exact Config object so the kernel sees a
+        # real tuple, not the degraded list.
+        import os
+        import tempfile
+
+        import triton
+
+        from torch._inductor.remote_cache import LocalAutotuneCache
+        from torch._inductor.runtime.autotune_cache import (
+            _config_json_cacheable,
+            _load_cached_autotuning,
+            AutotuneCache,
+        )
+
+        class TupleMode(Enum):
+            PAIR = (1, 2)
+
+        kw = {"MODE": TupleMode.PAIR, "SHAPE": (2, 3), "NEST": [(1,)], "BLOCK": 64}
+        cfg = triton.Config(dict(kw), num_warps=4, num_stages=2)
+        self.assertTrue(_config_json_cacheable(cfg))
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            key = os.path.join(tmpdir, "kernel.best_config")
+            local_cache = LocalAutotuneCache("local-autotune")
+            cache = AutotuneCache(configs_hash="h", local_cache=(local_cache, key))
+            cache.save(cfg, time_taken_ns=0)
+            best = local_cache.get(key)
+        self.assertIsNotNone(best)
+        self.assertEqual(best["SHAPE"], [2, 3])
+        loaded = _load_cached_autotuning(best, "h", [cfg], {})
+        self.assertIs(loaded, cfg)
+        self.assertEqual(loaded.kwargs, kw)
+        self.assertIs(loaded.kwargs["MODE"], TupleMode.PAIR)
+        self.assertIs(type(loaded.kwargs["SHAPE"]), tuple)
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_autotune_cache_degraded_no_match_reautotunes(self):
+        # A stored winner matching no candidate normally reconstructs (it may
+        # be a dynamically added config), but when some candidate kwarg
+        # degrades under the JSON round-trip (tuple -> list) the miss may be a
+        # serialization artifact and reconstruction would bake the degraded
+        # value into the kernel; warm load must re-autotune instead.
+        import json
+
+        import triton
+
+        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+
+        cfg = triton.Config({"SHAPE": (2, 3), "BLOCK": 64}, num_warps=4, num_stages=2)
+        data = {"SHAPE": [4, 5], "BLOCK": 32, "num_warps": 4, "num_stages": 2}
+        data["configs_hash"] = "h"
         best = json.loads(json.dumps(data))
         self.assertIsNone(_load_cached_autotuning(best, "h", [cfg], {}))
+
+        # A plain Enum kwarg (identity __eq__) is degraded too; IntEnum and
+        # str-mixin members ==-match their unwrapped values and are not.
+        class Mode(Enum):
+            A = 1
+
+        cfg_enum = triton.Config({"MODE": Mode.A}, num_warps=4, num_stages=2)
+        data = {"MODE": 3, "num_warps": 4, "num_stages": 2, "configs_hash": "h"}
+        best = json.loads(json.dumps(data))
+        self.assertIsNone(_load_cached_autotuning(best, "h", [cfg_enum], {}))
+
+        # Without degraded candidate kwargs the same miss still reconstructs.
+        plain = triton.Config({"BLOCK": 64}, num_warps=4, num_stages=2)
+        data = {"BLOCK": 32, "num_warps": 4, "num_stages": 2, "configs_hash": "h"}
+        best = json.loads(json.dumps(data))
+        loaded = _load_cached_autotuning(best, "h", [plain], {})
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded.kwargs, {"BLOCK": 32})
 
     @unittest.skipUnless(has_triton_package(), "requires Triton")
     def test_autotune_cache_saves_container_enum_config_kwargs(self):
@@ -2039,6 +2131,57 @@ def helper(x):
                 self.assertIs(future.result(), sentinel_kernel)
             self.assertEqual(compile_in_process.call_count, 1)
         self.assertEqual(task.result.call_count, 1)
+
+    def test_constexpr_module_missing_in_worker_accepts_exception(self):
+        # Spawn/fork worker pools re-raise the worker's ModuleNotFoundError
+        # directly instead of wrapping it in SubprocException; the helper must
+        # match on the exception's .name.
+        from torch._inductor.async_compile import _constexpr_module_missing_in_worker
+
+        src = "import foo.bar as __inductor_constexpr_module_0\n"
+        err = ModuleNotFoundError("No module named 'foo'", name="foo")
+        self.assertEqual(_constexpr_module_missing_in_worker(src, err), "foo.bar")
+        other = ModuleNotFoundError("No module named 'baz'", name="baz")
+        self.assertIsNone(_constexpr_module_missing_in_worker(src, other))
+        nameless = ModuleNotFoundError("No module named 'foo'")
+        self.assertIsNone(_constexpr_module_missing_in_worker(src, nameless))
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_constexpr_fallback_catches_raw_module_not_found(self):
+        # With TORCHINDUCTOR_WORKER_START=spawn/fork the worker's
+        # ModuleNotFoundError propagates raw from future.result(); the fallback
+        # must fire for constexpr imports and re-raise anything else unchanged.
+        import os
+        from unittest.mock import Mock
+
+        from torch._inductor.async_compile import AsyncCompile
+
+        module_name = f"inductor_spawn_probe_{os.getpid()}"
+        source_code = f"import {module_name} as __inductor_constexpr_module_0\n"
+        task = Mock()
+        task.result.side_effect = ModuleNotFoundError(
+            f"No module named '{module_name}'", name=module_name
+        )
+        pool = Mock()
+        pool.submit.return_value = task
+        sentinel_kernel = object()
+        with (
+            patch.object(AsyncCompile, "use_process_pool", return_value=True),
+            patch.object(AsyncCompile, "process_pool", return_value=pool),
+            patch.object(
+                AsyncCompile, "_compile_triton_in_process", return_value=sentinel_kernel
+            ),
+        ):
+            future = AsyncCompile().triton("probe_kernel", source_code)
+            logger_name = "torch._inductor.async_compile"
+            with self.assertLogs(logger_name, level="WARNING") as logs:
+                self.assertIs(future.result(), sentinel_kernel)
+            self.assertTrue(any("in-process compilation" in msg for msg in logs.output))
+            # An unrelated missing module must propagate unchanged.
+            unrelated = f"import {module_name}x as __inductor_constexpr_module_0\n"
+            future = AsyncCompile().triton("probe_kernel", unrelated)
+            with self.assertRaises(ModuleNotFoundError):
+                future.result()
 
     @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
     def test_unspellable_enum_constexpr_errors_clearly(self):

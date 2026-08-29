@@ -1162,7 +1162,16 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         if not isinstance(target, ast.Name):
             continue
         if target.id in wanted:
-            found[target.id] = ast.literal_eval(node.value)
+            try:
+                found[target.id] = ast.literal_eval(node.value)
+            except (ValueError, TypeError, SyntaxError, RecursionError) as e:
+                # A truncated or hand-edited artifact can leave a metadata name
+                # assigned a non-literal; surface the documented error type
+                # instead of ast's raw "malformed node" ValueError.
+                raise PrecompileError(
+                    f"python_code assigns non-literal metadata to {target.id!r}; "
+                    "it does not look like a torch.compiler.precompile artifact."
+                ) from e
         else:
             # Not a metadata name we consume (the driver section emits only
             # function defs today, but a future artifact revision could add a
@@ -1539,7 +1548,8 @@ def _filter_dynamo_guards(
     from torch._dynamo.guards import CheckFunctionManager, GuardBuilder
     from torch._dynamo.output_graph import OutputGraphCommon
     from torch._dynamo.package import load_guard_manager, load_guards_state
-    from torch._guards import GuardsSet
+    from torch._dynamo.source import LocalSource
+    from torch._guards import ChainedSource, GuardsSet
     from torch.utils._ordered_set import OrderedSet
 
     signature = inspect.signature(target)
@@ -1548,13 +1558,21 @@ def _filter_dynamo_guards(
         bound = signature.bind(*example)
         bound.apply_defaults()
         example_scopes.append(dict(bound.arguments))
-    input_roots = {f"L[{name!r}]" for scope in example_scopes for name in scope}
+    input_names = {name for scope in example_scopes for name in scope}
 
-    def is_input_source(source: str) -> bool:
-        return any(
-            source == root or source.startswith((f"{root}.", f"{root}["))
-            for root in input_roots
-        )
+    def is_input_guard(guard: Any) -> bool:
+        # Classify by the originating source's root, not by a string prefix on
+        # the rendered name: many input-rooted sources render as call
+        # expressions (___tuple_iterator_getitem(L['it'], 0),
+        # ___from_numpy(L['x']), type(L['x']), list(dict.keys(L['d']))[0], ...)
+        # that an "L['name']"-prefix test misclassifies as environment guards;
+        # dropping one always succeeds (a variant's guards pass on the examples
+        # that produced it) and the artifact then silently serves the
+        # capture-time specialization for calls whose values differ.
+        source = guard.originating_source
+        while isinstance(source, ChainedSource):
+            source = source.base
+        return isinstance(source, LocalSource) and source.local_name in input_names
 
     def fresh_guard(guard: Any, *, final: bool = False) -> Any:
         create_fn = guard.create_fn
@@ -1625,7 +1643,7 @@ def _filter_dynamo_guards(
         # required, so only kept_guards is a minimization candidate.
         def try_drop(index: int) -> bool:
             guard = kept_guards[index]
-            if not guard.name or is_input_source(guard.name):
+            if not guard.name or is_input_guard(guard):
                 return False
             candidate = kept_guards[:index] + kept_guards[index + 1 :]
             try:
@@ -2053,6 +2071,11 @@ def _validate_dynamo_capture(
                 furthest_end = max(furthest_end, end)
         return False
 
+    try:
+        import numpy
+    except ImportError:
+        numpy = None  # type: ignore[assignment]
+
     for example in example_inputs:
         if not isinstance(example, tuple):
             raise TypeError(
@@ -2064,6 +2087,17 @@ def _validate_dynamo_capture(
                 "precompile tracer='dynamo' does not yet support nn.Module arguments "
                 "(including inside containers) because Dynamo's module identity "
                 "guards are not serializable."
+            )
+        if numpy is not None and reaches(
+            example, lambda v: isinstance(v, numpy.ndarray)
+        ):
+            # Dynamo traces ndarrays via ___from_numpy sources whose TENSOR_MATCH
+            # guard construction fails under the package/save-guards path, so
+            # capture would die with an internal error; reject up front.
+            raise NotImplementedError(
+                "precompile tracer='dynamo' does not yet support numpy.ndarray "
+                "arguments (including inside containers); convert them to tensors "
+                "with torch.from_numpy and pass those instead."
             )
         if has_storage_overlap(example):
             raise PrecompileError(
@@ -2268,6 +2302,13 @@ def _dynamo_capture_context(
                     torch._dynamo.config.accumulated_recompile_limit, capture_limit
                 ),
                 fail_on_recompile_limit_hit=True,
+                # suppress_errors would silently fall back to eager (an
+                # artifact must never be built from an uncaptured run), and
+                # eval_frame asserts it is off whenever
+                # fail_on_recompile_limit_hit is on -- a process-level
+                # TORCHDYNAMO_SUPPRESS_ERRORS=1 would otherwise fail every
+                # capture with that raw assertion.
+                suppress_errors=False,
                 # Otherwise every capture compile records the private package
                 # into the process-global PrecompileContext (DynamoCache).
                 caching_precompile=False,
@@ -2441,13 +2482,19 @@ def _build_dynamo_artifact(
         "import_sources": dict(code.import_sources),
         "defaults": capture_target.__defaults__,
         "kwdefaults": capture_target.__kwdefaults__,
+        # Newest-first: the driver serves the first variant whose guards pass,
+        # and live Dynamo checks recompilations LRU-front-first -- an input
+        # matching both an early static variant and a later dynamic one (the
+        # automatic-dynamic revisit pattern) must serve the later one, whose
+        # backend is the one that observed any training tangent masks.
+        # guarded_codes is chronological (CompilePackage appends).
         "variants": [
             {
                 "guards_state": guards_state,
                 "dynamo_code": guarded.dynamo_code,
             }
             for guarded, guards_state in zip(code.guarded_codes, filtered_guard_states)
-        ],
+        ][::-1],
     }
     backend_ids = [str(backend_id) for backend_id in code.backend_ids]
     python_code = _build_dynamo_python_source(
@@ -2500,23 +2547,40 @@ def _teardown_dynamo_capture(
                 cached_backends.pop(id(backend_fn), None)
 
 
+def _freeze_tensor_metadata(tensor: torch.Tensor) -> torch.Tensor:
+    # A metadata-frozen alias: shares storage (no data copy; guards check
+    # metadata, not data) but owns its sizes/strides/requires_grad, so a later
+    # in-place METADATA mutation of the input (resize_, transpose_,
+    # requires_grad_) cannot invalidate the recorded example. Built under
+    # no_grad so the alias is a leaf that keeps no autograd graph alive.
+    with torch.no_grad():
+        frozen = tensor.as_strided(
+            tensor.size(), tensor.stride(), tensor.storage_offset()
+        )
+    frozen.requires_grad = tensor.requires_grad
+    return frozen
+
+
 def _snapshot_example(example: tuple[object, ...]) -> tuple[object, ...]:
     # Guard minimization re-checks every recorded example AFTER it has run
     # (and stateful rebuilds re-check them again on every later call), so a fn
-    # that mutates a container input would otherwise fail the re-check -- or
+    # or caller that mutates an input would otherwise fail the re-check -- or
     # permanently poison a stateful state -- for a computation plain
-    # torch.compile supports. Record a pre-execution copy instead. Tensors are
-    # kept by reference (guards check metadata, not data, and copying would
-    # double example memory; the shared memo also preserves aliasing
-    # relations); an example deepcopy cannot handle is recorded live, which
-    # only matters if the fn then mutates it.
+    # torch.compile supports. Record a pre-execution copy instead. Tensor
+    # leaves become metadata-frozen storage aliases (copying data would double
+    # example memory; the shared memo preserves identity and aliasing
+    # relations); a tensor that cannot be re-aliased, or an example deepcopy
+    # cannot handle, is recorded live, which only matters if it is then
+    # mutated.
     import copy
 
-    memo: dict[int, object] = {
-        id(leaf): leaf
-        for leaf in pytree.tree_leaves(example)
-        if isinstance(leaf, torch.Tensor)
-    }
+    memo: dict[int, object] = {}
+    for leaf in pytree.tree_leaves(example):
+        if isinstance(leaf, torch.Tensor) and id(leaf) not in memo:
+            try:
+                memo[id(leaf)] = _freeze_tensor_metadata(leaf)
+            except Exception:
+                memo[id(leaf)] = leaf
     try:
         return copy.deepcopy(example, memo)
     except Exception:
@@ -2680,7 +2744,10 @@ def _write_dynamo_artifact_files(
     # Two-phase: write and fsync both temp files first, then rename back to
     # back, so the window in which a crash leaves a mismatched
     # (code_hash-rejected) pair on disk is two renames, not a full cache write.
-    # A failed write cleans its temp files up and leaves the previous pair.
+    # A failure before the first rename cleans its temp files up and leaves the
+    # previous pair; a failure between the renames leaves the NEW artifact with
+    # the OLD cache, which load() degrades on (code_hash mismatch -> cold cache
+    # with a warning) and the next successful rewrite repairs.
     import os
 
     renames = []
@@ -3146,16 +3213,12 @@ def _make_inlined_forward(python_code: str) -> Callable[..., object]:
     ``python_code`` needs no cache -- the kernels (inductor) or graph (eager) are
     inlined, so we just exec it and hand back its ``forward``. The returned
     ``forward`` takes the same args the traced fn took (model(s) plus runtime
-    inputs)."""
-    # python_code is untrusted EXECUTABLE input -- exec'ing it runs whatever it contains
-    # (JIT-compiling inlined kernels or running the inlined graph). Warn per load (not
-    # warning_once) before the exec so the inlined fallback is never silent about it.
-    log.warning(
-        "torch.compiler.precompile.load is about to EXEC python_code, which is untrusted "
-        "executable input (it runs inlined kernels / graph code). Only exec python_code "
-        "you produced or otherwise trust (Note [precompile programming model], "
-        "invariant 7)."
-    )
+    inputs).
+
+    The untrusted-input warning is emitted by ``load`` BEFORE any cache
+    processing, not here: the cache is unpickled (``load_cache_artifacts``)
+    before this exec runs, and a warning after that unpickle would fire only
+    once the risk had already been taken."""
     module_ns: dict[str, object] = {"__name__": "_precompiled_artifact"}
     exec(compile(python_code, "<precompile>", "exec"), module_ns)
     return cast("Callable[..., object]", module_ns["forward"])
@@ -3481,9 +3544,10 @@ class _PrecompileApi:
         everything captured so far. A call whose guards all hit adds nothing;
         guard minimization is re-run over every example seen so far on each
         rebuild, so the state keeps a pre-execution snapshot of every example
-        tuple alive (tensors by reference; a step may freely mutate its
-        container inputs, except an exotic input ``deepcopy`` cannot copy,
-        which is recorded live), and later calls see earlier variants because the
+        tuple alive (tensor data by reference, tensor metadata frozen; a step
+        may freely mutate its container inputs and its tensor inputs in place,
+        except an exotic input ``deepcopy`` cannot copy, which is recorded
+        live), and later calls see earlier variants because the
         state carries one isolate-recompiles bucket and one PGO record across
         calls (a dimension that varies between calls recompiles into a
         symbolic graph exactly as it would within one call).
@@ -3631,6 +3695,18 @@ class _PrecompileApi:
         meta = _parse_artifact_metadata(python_code)
         backend = cast(str, meta["BACKEND"])
         tracer = cast(str, meta.get("TRACER", "make_fx"))
+
+        # Both halves are untrusted EXECUTABLE input: priming below unpickles the
+        # cache's inductor bundle, and the exec of python_code runs whatever it
+        # contains (JIT-compiling inlined kernels or running the inlined graph).
+        # Warn per load (not warning_once), BEFORE either risk is taken.
+        log.warning(
+            "torch.compiler.precompile.load is about to unpickle the cache and EXEC "
+            "python_code, which are untrusted executable inputs (they run inlined "
+            "kernels / graph code). Only load a (python_code, cache) pair you "
+            "produced or otherwise trust (Note [precompile programming model], "
+            "invariant 7)."
+        )
 
         # weights_only=True is safe (plain str/int/bytes dict). The inner artifact bytes
         # are the inductor save_cache_artifacts bundle, used below to prime the kernel

@@ -89,7 +89,9 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       stored as opaque inline data because they have no Python-source representation.
       This initial path accepts a Python function with positional tensor/scalar arguments
       and containers of those values; closures and ``nn.Module`` arguments are not
-      supported yet because their identity guards are not serializable. A global whose
+      supported yet because their identity guards are not serializable, and
+      ``numpy.ndarray`` arguments are not supported yet (convert them with
+      ``torch.from_numpy``). A global whose
       object graph contains a tensor is rejected (conservatively, even when the fn only
       reads a non-tensor field of it) because every tensor must be an explicit input,
       and functions that mutate globals are rejected because the artifact could not
@@ -227,8 +229,9 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    delivery differs. A call whose guards all hit adds nothing; guard
    minimization is re-run over every example seen so far on each rewrite, so
    the state keeps a pre-execution snapshot of every example tuple alive
-   (tensors by reference; a step may freely mutate its container inputs --
-   except an exotic input ``deepcopy`` cannot copy, which is recorded live).
+   (tensor data by reference, tensor metadata frozen; a step may freely mutate
+   its container inputs and its tensor inputs in place -- except an exotic
+   input ``deepcopy`` cannot copy, which is recorded live).
    Rewriting is proportional to everything captured so far, not to the call.
 
    :param fn: The computation to capture; same requirements as

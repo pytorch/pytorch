@@ -28,6 +28,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfTorchDynamo,
+    TEST_NUMPY,
     TestCase,
 )
 
@@ -128,6 +129,19 @@ def _precompile_dynamo_mutates_global(x):
 
 def _precompile_dynamo_gather(x, idx):
     return x.sin()[idx] + x.shape[0]
+
+
+def _precompile_dynamo_iter_sum(it, t):
+    return t + next(it) + next(it)
+
+
+def _precompile_dynamo_affine(x):
+    return x * 2 + 1
+
+
+def _precompile_dynamo_inplace_step(x):
+    x.add_(1)
+    return x * 2
 
 
 class _PrecompileDynamoTensorClassAttr:
@@ -540,9 +554,7 @@ class TestPrecompile(TestCase):
         exec(compile(code, "<artifact>", "exec"), ns)
         self.assertEqual(ns["forward"](m, x), m(x))
 
-    @unittest.skipUnless(
-        torch.cuda.is_available(), "needs CUDA + Triton for the kernel cache"
-    )
+    @unittest.skipUnless(TEST_CUDA, "needs CUDA + Triton for the kernel cache")
     @torch._inductor.config.patch({"compile_threads": 1})
     def test_cache_reload_without_eager_static_launcher_rehydration(self):
         # A cold load should use JIT instead of eagerly rehydrating the static launcher.
@@ -576,7 +588,7 @@ class TestPrecompile(TestCase):
                 counters["inductor"]["triton_bundler_load_static_autotuner"], 0
             )
 
-    @unittest.skipUnless(torch.cuda.is_available(), "needs CUDA for Triton autotuning")
+    @unittest.skipUnless(TEST_CUDA, "needs CUDA for Triton autotuning")
     def test_cache_bundles_autotune_artifacts(self):
         from torch._inductor.utils import fresh_cache
 
@@ -607,51 +619,45 @@ class TestPrecompile(TestCase):
         from torch.distributed.tensor import DeviceMesh, distribute_tensor, Replicate
         from torch.testing._internal.common_utils import find_free_port
 
-        # Use a free port (a hardcoded one flakes on shared CI) and restore the
-        # env afterwards so we do not leak MASTER_ADDR/MASTER_PORT to later tests.
-        saved_env = {k: os.environ.get(k) for k in ("MASTER_ADDR", "MASTER_PORT")}
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = str(find_free_port())
-        dist.init_process_group("gloo", rank=0, world_size=1)
-        try:
-            mesh = DeviceMesh("cpu", list(range(1)))
-            m = torch.nn.Linear(4, 3).eval()
-            for name, p in list(m.named_parameters()):
-                setattr(
-                    m,
-                    name,
-                    torch.nn.Parameter(
-                        distribute_tensor(p.detach(), mesh, [Replicate()])
-                    ),
+        # Use a free port (a hardcoded one flakes on shared CI); patch.dict
+        # restores the env so we do not leak MASTER_ADDR/MASTER_PORT to later tests.
+        env = {"MASTER_ADDR": "localhost", "MASTER_PORT": str(find_free_port())}
+        with mock.patch.dict(os.environ, env):
+            dist.init_process_group("gloo", rank=0, world_size=1)
+            try:
+                mesh = DeviceMesh("cpu", list(range(1)))
+                m = torch.nn.Linear(4, 3).eval()
+                for name, p in list(m.named_parameters()):
+                    setattr(
+                        m,
+                        name,
+                        torch.nn.Parameter(
+                            distribute_tensor(p.detach(), mesh, [Replicate()])
+                        ),
+                    )
+                x = distribute_tensor(torch.randn(5, 4), mesh, [Replicate()])
+                ref = m(x)
+
+                code, cache = torch.compiler.precompile(
+                    lambda model, x: model(x), example_inputs=[(m, x)]
                 )
-            x = distribute_tensor(torch.randn(5, 4), mesh, [Replicate()])
-            ref = m(x)
+                # Subclass handling is via our own protocol-based driver, not embedded
+                # AOTAutograd wrapper source.
+                self.assertIn("__tensor_unflatten__", code)
+                self.assertNotIn("subclass_wrapper", code)
 
-            code, cache = torch.compiler.precompile(
-                lambda model, x: model(x), example_inputs=[(m, x)]
-            )
-            # Subclass handling is via our own protocol-based driver, not embedded
-            # AOTAutograd wrapper source.
-            self.assertIn("__tensor_unflatten__", code)
-            self.assertNotIn("subclass_wrapper", code)
+                # load() takes the bundled-artifact path (real AOTAutograd runtime).
+                f_c = torch.compiler.precompile.load(code, cache)
+                self.assertEqual(f_c(m, x).to_local(), ref.to_local())
 
-            # load() takes the bundled-artifact path (real AOTAutograd runtime).
-            f_c = torch.compiler.precompile.load(code, cache)
-            self.assertEqual(f_c(m, x).to_local(), ref.to_local())
-
-            # Also exercise the standalone driver (the generated python, no cache):
-            # subclass inputs/outputs handled by the inlined recipes via
-            # __tensor_flatten__/__tensor_unflatten__.
-            ns = {"__name__": "_dt"}
-            exec(compile(code, "<dt>", "exec"), ns)
-            self.assertEqual(ns["forward"](m, x).to_local(), ref.to_local())
-        finally:
-            dist.destroy_process_group()
-            for k, v in saved_env.items():
-                if v is None:
-                    os.environ.pop(k, None)
-                else:
-                    os.environ[k] = v
+                # Also exercise the standalone driver (the generated python, no cache):
+                # subclass inputs/outputs handled by the inlined recipes via
+                # __tensor_flatten__/__tensor_unflatten__.
+                ns = {"__name__": "_dt"}
+                exec(compile(code, "<dt>", "exec"), ns)
+                self.assertEqual(ns["forward"](m, x).to_local(), ref.to_local())
+            finally:
+                dist.destroy_process_group()
 
     def test_cache_holds_only_artifact(self):
         # The cache is purely an acceleration: the only COMPILED blob it carries is the
@@ -823,22 +829,22 @@ class TestPrecompile(TestCase):
                 lambda x: Out(x + 1, x + 2), example_inputs=[(torch.randn(4),)]
             )
 
-    def test_input_leaf_count_mismatch_rejected_when_spec_unserializable(self):
+    @parametrize("backend", ("inductor", "eager"))
+    def test_input_leaf_count_mismatch_rejected_when_spec_unserializable(self, backend):
         # When IN_SPEC degrades to None the structural in_spec check is skipped; a runtime
         # input flattening to a DIFFERENT leaf count must still raise a clean
         # PrecompileError (not a raw zip/unpack error) on the live and eager-inlined paths.
         m = torch.nn.Linear(4, 3).eval()
         inp = _UnserializableCtxInput(torch.randn(5, 4), torch.randn(5, 4))
-        for backend in ("inductor", "eager"):
-            code, cache = torch.compiler.precompile(
-                lambda model, h: model(h.a + h.b),
-                example_inputs=[(m, inp)],
-                backend=backend,
-            )
-            self.assertIn("IN_SPEC = None", code)
-            f = torch.compiler.precompile.load(code, cache)
-            with self.assertRaisesRegex(PrecompileError, "flattened to"):
-                f(m, torch.randn(5, 4))  # one leaf vs the traced two
+        code, cache = torch.compiler.precompile(
+            lambda model, h: model(h.a + h.b),
+            example_inputs=[(m, inp)],
+            backend=backend,
+        )
+        self.assertIn("IN_SPEC = None", code)
+        f = torch.compiler.precompile.load(code, cache)
+        with self.assertRaisesRegex(PrecompileError, "flattened to"):
+            f(m, torch.randn(5, 4))  # one leaf vs the traced two
 
     def test_user_input_error_precedes_structural_error(self):
         # All three load paths run the user-input checks BEFORE the structural model-name
@@ -871,7 +877,8 @@ class TestPrecompile(TestCase):
                     B(), x.double()
                 )  # wrong model AND wrong dtype -> dtype reported first
 
-    def test_unserializable_out_spec_rejected(self):
+    @parametrize("backend", ("inductor", "eager"))
+    def test_unserializable_out_spec_rejected(self, backend):
         # OUT_SPEC is load-bearing (the driver rebuilds fn's output via tree_unflatten),
         # so unlike IN_SPEC it cannot degrade to None: a fn returning an unregistered
         # namedtuple must fail with a clear PrecompileError, not a raw pytree error, on
@@ -881,13 +888,12 @@ class TestPrecompile(TestCase):
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)
         NT = collections.namedtuple("NT", ["p", "q"])
-        for backend in ("inductor", "eager"):
-            with self.assertRaisesRegex(PrecompileError, "output structure"):
-                torch.compiler.precompile(
-                    lambda model, xx: NT(model(xx), model(xx) + 1),
-                    example_inputs=[(m, x)],
-                    backend=backend,
-                )
+        with self.assertRaisesRegex(PrecompileError, "output structure"):
+            torch.compiler.precompile(
+                lambda model, xx: NT(model(xx), model(xx) + 1),
+                example_inputs=[(m, x)],
+                backend=backend,
+            )
         # A registered namedtuple output serializes and round-trips on both backends.
         # Registration mutates the process-global pytree registry, so deregister it on
         # cleanup rather than leaking the node into later tests.
@@ -895,14 +901,13 @@ class TestPrecompile(TestCase):
         _pytree._register_namedtuple(RNT, serialized_type_name="test_precompile.RNT")
         self.addCleanup(_pytree._deregister_pytree_node, RNT)
         ref = (m(x), m(x) + 1)
-        for backend in ("inductor", "eager"):
-            code, cache = torch.compiler.precompile(
-                lambda model, xx: RNT(model(xx), model(xx) + 1),
-                example_inputs=[(m, x)],
-                backend=backend,
-            )
-            out = torch.compiler.precompile.load(code, cache)(m, x)
-            self.assertEqual((out.p, out.q), ref)
+        code, cache = torch.compiler.precompile(
+            lambda model, xx: RNT(model(xx), model(xx) + 1),
+            example_inputs=[(m, x)],
+            backend=backend,
+        )
+        out = torch.compiler.precompile.load(code, cache)(m, x)
+        self.assertEqual((out.p, out.q), ref)
 
     def test_cached_and_inlined_paths_agree(self):
         # Both load paths exec the SAME inlined driver in python_code; the only difference
@@ -1149,9 +1154,15 @@ class TestPrecompile(TestCase):
         # PrecompileError rather than a raw "found 0 runnable modules" RuntimeError. The
         # eager backend handles these (the contract is otherwise identical).
         x = torch.randn(4)
-        for fn in (lambda xx: 7, lambda xx: xx, lambda xx: xx.detach()):
-            with self.assertRaisesRegex(PrecompileError, "no compute"):
-                torch.compiler.precompile(fn, example_inputs=[(x,)])
+        cases = {
+            "constant": lambda xx: 7,
+            "passthrough": lambda xx: xx,
+            "detach_alias": lambda xx: xx.detach(),
+        }
+        for label, fn in cases.items():
+            with self.subTest(case=label):
+                with self.assertRaisesRegex(PrecompileError, "no compute"):
+                    torch.compiler.precompile(fn, example_inputs=[(x,)])
         # The eager backend handles a passthrough and a constant fn.
         code, cache = torch.compiler.precompile(
             lambda xx: xx, example_inputs=[(x,)], backend="eager"
@@ -1319,6 +1330,16 @@ class TestPrecompile(TestCase):
                 example_inputs=[(x,)],
                 backend="eager",
             )
+
+    def test_positional_example_inputs_with_tracer_dynamo(self):
+        # The BC positional-example form composes with tracer='dynamo' (the
+        # positional examples become the single example tuple).
+        x = torch.randn(3)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_torch_sin, x, tracer="dynamo", backend="eager"
+        )
+        self.assertIn('TRACER = "dynamo"', code)
+        self.assertEqual(torch.compiler.precompile.load(code, cache)(x), torch.sin(x))
 
     def test_zero_argument_call_remains_supported(self):
         code, cache = torch.compiler.precompile(lambda: 3, backend="eager")
@@ -1793,6 +1814,27 @@ class TestPrecompile(TestCase):
             torch.compiler.precompile(
                 lambda pair: pair[0](pair[1]),
                 example_inputs=[((torch.nn.Linear(2, 2), torch.randn(1, 2)),)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    @unittest.skipUnless(TEST_NUMPY, "requires numpy")
+    def test_tracer_dynamo_rejects_numpy_example_inputs(self):
+        # Dynamo traces ndarrays via ___from_numpy sources whose TENSOR_MATCH
+        # guard construction fails under the save-guards path, so capture
+        # would die with an internal error; reject up front (bare and nested)
+        # with actionable advice.
+        import numpy as np
+
+        arr = np.ones(3, dtype=np.float32)
+        with self.assertRaisesRegex(NotImplementedError, "torch.from_numpy"):
+            torch.compiler.precompile(
+                lambda a: a, example_inputs=[(arr,)], tracer="dynamo", backend="eager"
+            )
+        with self.assertRaisesRegex(NotImplementedError, "torch.from_numpy"):
+            torch.compiler.precompile(
+                lambda t, box: t,
+                example_inputs=[(torch.randn(3), [arr])],
                 tracer="dynamo",
                 backend="eager",
             )
@@ -2294,6 +2336,33 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(TypeError, "requires python_code and cache"):
             torch.compiler.precompile.load()
 
+    def test_load_from_paths_make_fx_artifact(self):
+        # The (artifact_path, cache_path) form of load() is exercised elsewhere
+        # only on dynamo artifacts; a make_fx pair written to disk must load
+        # via paths too, and a MISSING artifact file raises the normal open()
+        # FileNotFoundError (only a missing CACHE file degrades -- see
+        # test_tracer_dynamo_load_degrades_on_missing_cache_file).
+        x = torch.randn(4)
+        code, cache = torch.compiler.precompile(
+            lambda t: t + 1, example_inputs=[(x,)], backend="eager"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_path = os.path.join(tmp, "f.py")
+            cache_path = os.path.join(tmp, "f.cache")
+            with open(artifact_path, "w") as f:
+                f.write(code)
+            with open(cache_path, "wb") as f:
+                f.write(cache)
+            loaded = torch.compiler.precompile.load(
+                artifact_path=artifact_path, cache_path=cache_path
+            )
+            self.assertEqual(loaded(x), x + 1)
+            with self.assertRaises(FileNotFoundError):
+                torch.compiler.precompile.load(
+                    artifact_path=os.path.join(tmp, "missing.py"),
+                    cache_path=cache_path,
+                )
+
     def test_tracer_dynamo_stateful_partial_backward_keeps_default_mask(self):
         # A partial backward between calls records a nonzero tangent mask; the
         # next rewrite must still cover the ordinary all-defined backward
@@ -2448,6 +2517,33 @@ class TestPrecompile(TestCase):
                     backend="eager",
                 )
 
+    @torch._dynamo.config.patch(suppress_errors=True)
+    def test_tracer_dynamo_capture_with_suppress_errors_enabled(self):
+        # An ambient suppress_errors=True (e.g. TORCHDYNAMO_SUPPRESS_ERRORS=1)
+        # must not break capture: eval_frame asserts suppress_errors is off
+        # whenever fail_on_recompile_limit_hit is on, so the capture context
+        # patches it False (an artifact must never be built from a silently
+        # uncaptured eager fallback anyway). Both entry points must work.
+        x = torch.randn(3)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_torch_sin,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        self.assertEqual(torch.compiler.precompile.load(code, cache)(x), torch.sin(x))
+        with tempfile.TemporaryDirectory() as tmp:
+            [result], state = torch.compiler.precompile.stateful(
+                _precompile_dynamo_torch_sin,
+                example_inputs=[(x,)],
+                state=None,
+                backend="eager",
+                artifact_path=os.path.join(tmp, "artifact.py"),
+                cache_path=os.path.join(tmp, "artifact.cache"),
+            )
+            self.addCleanup(state.close)
+            self.assertEqual(result, torch.sin(x))
+
     def test_tracer_dynamo_stateful_validation(self):
         x = torch.randn(3)
         # Both paths are mandatory keyword-only arguments of stateful().
@@ -2526,6 +2622,35 @@ class TestPrecompile(TestCase):
                     state=types.SimpleNamespace(environment_scan="junk"),
                     **paths,
                 )
+
+    def test_tracer_dynamo_stateful_example_inputs_validation(self):
+        # stateful() runs the same example_inputs checks as the one-shot entry
+        # point (which test_example_inputs_require_tuples and
+        # test_make_fx_requires_one_example_input cover): an empty batch and a
+        # non-tuple example are rejected before anything is captured or
+        # written.
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = {
+                "artifact_path": os.path.join(tmp, "v.py"),
+                "cache_path": os.path.join(tmp, "v.cache"),
+            }
+            with self.assertRaisesRegex(ValueError, "at least one"):
+                torch.compiler.precompile.stateful(
+                    _precompile_dynamo_torch_sin,
+                    example_inputs=[],
+                    state=None,
+                    backend="eager",
+                    **paths,
+                )
+            with self.assertRaisesRegex(TypeError, "positional-argument tuples"):
+                torch.compiler.precompile.stateful(
+                    _precompile_dynamo_torch_sin,
+                    example_inputs=[[torch.randn(3)]],
+                    state=None,
+                    backend="eager",
+                    **paths,
+                )
+            self.assertEqual(os.listdir(tmp), [])  # nothing was written
 
     def test_tracer_dynamo_stateful_environment_scan_is_cached(self):
         # The wide environment walk runs once at state creation; resumed calls
@@ -2623,6 +2748,7 @@ class TestPrecompile(TestCase):
                 # be caught -- the no-compile property is pinned by the load
                 # test's frame-counter assertion).
                 env={**os.environ, "TORCHDYNAMO_DISABLE": "1"},
+                timeout=300,
             )
         finally:
             os.unlink(artifact_path)
@@ -2677,6 +2803,7 @@ class TestPrecompile(TestCase):
                     for key, value in os.environ.items()
                     if key != "TORCHDYNAMO_DISABLE"
                 },
+                timeout=300,
             )
 
     def test_tracer_dynamo_varargs_dispatch(self):
@@ -2799,6 +2926,24 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "produced by torch"):
             torch.compiler.precompile.load(incompatible, cache)
 
+    def test_tracer_dynamo_version_checks_precede_package_import(self):
+        # On a foreign build a moved/renamed loader symbol must surface as the
+        # version-mismatch message, not a raw ImportError, so the emitted
+        # driver runs its version checks BEFORE importing torch._dynamo.package.
+        # The driver must also install the per-compile builtins dict so a
+        # retained builtins-routed guard can evaluate.
+        code, _cache = torch.compiler.precompile(
+            _precompile_dynamo_torch_sin,
+            example_inputs=[(torch.randn(3),)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        self.assertLess(
+            code.index("_DYNAMO_TORCH_VERSION != torch.__version__"),
+            code.index("from torch._dynamo.package import"),
+        )
+        self.assertIn("get_builtins_dict", code)
+
     @torch._dynamo.config.patch(
         automatic_dynamic_shapes=True, assume_static_by_default=True
     )
@@ -2864,6 +3009,7 @@ class TestPrecompile(TestCase):
                 # be caught -- the no-compile property is pinned by the load
                 # test's frame-counter assertion).
                 env={**os.environ, "TORCHDYNAMO_DISABLE": "1"},
+                timeout=300,
             )
         finally:
             os.unlink(artifact_path)
@@ -2933,6 +3079,92 @@ class TestPrecompile(TestCase):
         x = torch.randn(4)
         self.assertEqual(loaded(x, 2), _precompile_dynamo_scalar(x, 2))
         self.assertEqual(loaded(x, 4), _precompile_dynamo_scalar(x, 4))
+
+    def test_tracer_dynamo_retains_call_wrapped_input_guards(self):
+        # Guard minimization classifies input guards by their originating
+        # source's root, not by an "L['name']" string prefix: a tuple-iterator
+        # input's guards render as ___tuple_iterator_getitem(L['it'], i), which
+        # the prefix test misclassified as environment and dropped -- the
+        # artifact then silently served the capture-time values for any
+        # iterator.
+        from torch._precompile import _parse_artifact_metadata
+
+        t = torch.randn(3)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_iter_sum,
+            example_inputs=[(iter((2.0, 3.0)), t)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        dropped = _parse_artifact_metadata(code)["_DROPPED_GUARDS"]
+        self.assertFalse(
+            any("tuple_iterator" in source for _, source in dropped), dropped
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(loaded(iter((2.0, 3.0)), t), t + 5.0)
+        # Different iterator values must MISS dispatch, not serve stale 5.0.
+        with self.assertRaisesRegex(PrecompileError, "no captured Dynamo variant"):
+            loaded(iter((5.0, 9.0)), t)
+
+    @torch._dynamo.config.patch(
+        automatic_dynamic_shapes=True, assume_static_by_default=True
+    )
+    def test_tracer_dynamo_dispatch_serves_newest_variant_first(self):
+        # state["variants"] is newest-first and the driver serves the first
+        # passing guard set, matching live Dynamo's LRU-front-first checks: an
+        # input matching both the early static variant and the later dynamic
+        # one (the automatic-dynamic revisit pattern) must serve the dynamic
+        # one. Rebuild the per-variant guard managers exactly like the emitted
+        # driver does and check which examples each accepts.
+        import builtins
+        import importlib
+
+        from torch._dynamo.package import (
+            load_guard_manager,
+            load_guards_state,
+            SerializedCode,
+        )
+
+        examples = [(torch.randn(size),) for size in (2, 4, 2)]
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_affine,
+            example_inputs=examples,
+            tracer="dynamo",
+            backend="eager",
+        )
+        self.assertIn("VARIANT_COUNT = 2", code)
+        state = _load_dynamo_state(code)
+        target_code = SerializedCode.to_code_object(state["code"])
+        namespace: dict = {"__builtins__": builtins.__dict__}
+        for alias, module_name in state["import_sources"].items():
+            namespace[alias] = importlib.import_module(module_name)
+        managers = []
+        for variant in state["variants"]:
+            guards_state = load_guards_state(variant["guards_state"])
+            key = guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
+            if key and key not in namespace:
+                from torch._dynamo.output_graph import get_builtins_dict
+
+                namespace[key] = get_builtins_dict(namespace)
+            managers.append(load_guard_manager(guards_state, target_code, namespace))
+        self.assertEqual(len(managers), 2)
+        scopes = [{"x": torch.randn(2)}, {"x": torch.randn(4)}]
+        # The driver dispatches under set_grad_enabled(TRAINING), and capture
+        # ran with grad off (TRAINING = False); match it or the global-state
+        # guard fails every check.
+        with torch.no_grad():
+            # variants[0] (served first) is the DYNAMIC variant: both sizes pass.
+            self.assertEqual(
+                [managers[0].check(scope) for scope in scopes], [True, True]
+            )
+            # The older static size-2 variant sits behind it.
+            self.assertEqual(
+                [managers[1].check(scope) for scope in scopes], [True, False]
+            )
+        loaded = torch.compiler.precompile.load(code, cache)
+        for size in (2, 4, 5):  # 5 only matches the dynamic variant
+            x = torch.randn(size)
+            self.assertEqual(loaded(x), _precompile_dynamo_affine(x))
 
     def test_tracer_dynamo_preserves_relational_guards(self):
         shared = torch.ones(4)
@@ -3018,34 +3250,30 @@ class TestPrecompile(TestCase):
             f_c = torch.compiler.precompile.load(code, cache)
             self.assertEqual(f_c(m, x), m(x))
 
-    def test_inductor_caches_disabled(self):
+    @parametrize("cache_config", ("force_disable_caches", "fx_graph_cache"))
+    def test_inductor_caches_disabled(self, cache_config):
         # Source is captured off codegen (GraphLowering.save_output_code), not the cache
         # bundle, so precompile must work even when caching is disabled -- producing a
         # runnable python_code with an empty cache, not a misleading "non-cacheable HOP"
-        # error. Covers force_disable_caches and fx_graph_cache=False.
+        # error. Covers force_disable_caches=True and fx_graph_cache=False (the
+        # disabling value differs per knob).
         import torch._inductor.config as ind_config
 
         m = torch.nn.Sequential(torch.nn.Linear(4, 3)).eval()
         x = torch.randn(5, 4)
-        for patch in (
-            {"force_disable_caches": True},
-            {"fx_graph_cache": False},
-        ):
-            with ind_config.patch(**patch):
-                code, cache = torch.compiler.precompile(
-                    lambda model, xx: model(xx), example_inputs=[(m, x)]
-                )
-                # No saveable artifact when caches are off; the cache is empty.
-                blob = torch.load(io.BytesIO(cache), weights_only=True)
-                self.assertIsNone(blob["artifact"], patch)
-                # python_code still runs standalone (JITs from inlined source).
-                ns = {"__name__": "_a"}
-                exec(compile(code, "<a>", "exec"), ns)
-                self.assertEqual(ns["forward"](m, x), m(x), patch)
-                # ...and load() falls back to the inlined path.
-                self.assertEqual(
-                    torch.compiler.precompile.load(code, cache)(m, x), m(x), patch
-                )
+        with ind_config.patch(**{cache_config: cache_config == "force_disable_caches"}):
+            code, cache = torch.compiler.precompile(
+                lambda model, xx: model(xx), example_inputs=[(m, x)]
+            )
+            # No saveable artifact when caches are off; the cache is empty.
+            blob = torch.load(io.BytesIO(cache), weights_only=True)
+            self.assertIsNone(blob["artifact"])
+            # python_code still runs standalone (JITs from inlined source).
+            ns = {"__name__": "_a"}
+            exec(compile(code, "<a>", "exec"), ns)
+            self.assertEqual(ns["forward"](m, x), m(x))
+            # ...and load() falls back to the inlined path.
+            self.assertEqual(torch.compiler.precompile.load(code, cache)(m, x), m(x))
 
     def test_inductor_cpp_wrapper_pinned_off(self):
         # cpp_wrapper would make Inductor emit a C++ ``call`` (no python module); a
@@ -3178,17 +3406,19 @@ class TestPrecompile(TestCase):
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(2, 4)
         for bad in (3.14, 2 + 3j, "hi"):
-            with self.assertRaisesRegex(PrecompileError, "non-tensor Python value"):
-                torch.compiler.precompile(
-                    lambda model, t, b=bad: (model(t), b), example_inputs=[(m, x)]
-                )
+            with self.subTest(bad=bad):
+                with self.assertRaisesRegex(PrecompileError, "non-tensor Python value"):
+                    torch.compiler.precompile(
+                        lambda model, t, b=bad: (model(t), b), example_inputs=[(m, x)]
+                    )
         for extra in (7, None):
-            code, cache = torch.compiler.precompile(
-                lambda model, t, e=extra: (model(t), e), example_inputs=[(m, x)]
-            )
-            self.assertEqual(
-                torch.compiler.precompile.load(code, cache)(m, x)[1], extra
-            )
+            with self.subTest(extra=extra):
+                code, cache = torch.compiler.precompile(
+                    lambda model, t, e=extra: (model(t), e), example_inputs=[(m, x)]
+                )
+                self.assertEqual(
+                    torch.compiler.precompile.load(code, cache)(m, x)[1], extra
+                )
         ecode, ecache = torch.compiler.precompile(
             lambda model, t: (model(t), 3.14), example_inputs=[(m, x)], backend="eager"
         )
@@ -3443,24 +3673,20 @@ class TestPrecompile(TestCase):
         from torch.distributed.tensor import DeviceMesh, distribute_tensor, Replicate
         from torch.testing._internal.common_utils import find_free_port
 
-        saved_env = {k: os.environ.get(k) for k in ("MASTER_ADDR", "MASTER_PORT")}
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = str(find_free_port())
-        dist.init_process_group("gloo", rank=0, world_size=1)
-        try:
-            mesh = DeviceMesh("cpu", list(range(1)))
-            m = torch.nn.Linear(4, 3).eval()
-            x = distribute_tensor(torch.randn(8, 4), mesh, [Replicate()])
-            mark_unbacked(x, 0)
-            with self.assertRaisesRegex(PrecompileError, "tensor subclass"):
-                torch.compiler.precompile(lambda mm, t: mm(t), example_inputs=[(m, x)])
-        finally:
-            dist.destroy_process_group()
-            for k, v in saved_env.items():
-                if v is None:
-                    os.environ.pop(k, None)
-                else:
-                    os.environ[k] = v
+        env = {"MASTER_ADDR": "localhost", "MASTER_PORT": str(find_free_port())}
+        with mock.patch.dict(os.environ, env):
+            dist.init_process_group("gloo", rank=0, world_size=1)
+            try:
+                mesh = DeviceMesh("cpu", list(range(1)))
+                m = torch.nn.Linear(4, 3).eval()
+                x = distribute_tensor(torch.randn(8, 4), mesh, [Replicate()])
+                mark_unbacked(x, 0)
+                with self.assertRaisesRegex(PrecompileError, "tensor subclass"):
+                    torch.compiler.precompile(
+                        lambda mm, t: mm(t), example_inputs=[(m, x)]
+                    )
+            finally:
+                dist.destroy_process_group()
 
     @parametrize("path", ("cached", "inlined"))
     def test_shape_id_mismatched_sizes_rejected(self, path):
@@ -3633,6 +3859,18 @@ class TestPrecompile(TestCase):
             PrecompileError, "missing calling-convention metadata"
         ):
             torch.compiler.precompile.load("x = 1\n", buf.getvalue())
+
+    def test_load_non_literal_metadata_rejected(self):
+        # A truncated / hand-edited artifact can leave a metadata name assigned
+        # a non-literal expression; _parse_artifact_metadata must surface the
+        # documented PrecompileError naming the metadata (not ast's raw
+        # "malformed node" ValueError).
+        with self.assertRaisesRegex(
+            PrecompileError, "non-literal metadata to 'BACKEND'"
+        ):
+            torch.compiler.precompile.load(
+                "BACKEND = str(1)\nTRACER = 'make_fx'\n", b""
+            )
 
     def test_singleton_pickle_deepcopy_roundtrip(self):
         # torch.compiler.precompile is a process-wide singleton; pickle and deepcopy
@@ -4369,6 +4607,90 @@ class TestPrecompile(TestCase):
             loaded = torch.compiler.precompile.load(**paths)
             self.assertEqual(loaded([1, 2], t), t * 3)
 
+    def test_tracer_dynamo_stateful_survives_input_metadata_mutation(self):
+        # The recorded example snapshot freezes tensor METADATA (a storage
+        # alias owning its sizes/strides), so a caller that resize_()s an
+        # input between calls cannot poison the state: rebuilds re-check every
+        # recorded example, and a live-recorded tensor would re-check at the
+        # mutated shape and fail every later call.
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = dict(
+                artifact_path=os.path.join(tmp, "artifact.py"),
+                cache_path=os.path.join(tmp, "artifact.cache"),
+            )
+            buf = torch.randn(4)
+            [r1], state = torch.compiler.precompile.stateful(
+                _precompile_dynamo_torch_sin,
+                example_inputs=[(buf,)],
+                state=None,
+                backend="eager",
+                **paths,
+            )
+            self.addCleanup(state.close)
+            self.assertEqual(r1, torch.sin(buf))
+            buf.resize_(8)  # caller-side metadata mutation of call 1's example
+            buf.fill_(0.5)
+            [r2], state = torch.compiler.precompile.stateful(
+                _precompile_dynamo_torch_sin,
+                example_inputs=[(buf,)],
+                state=state,
+                backend="eager",
+                **paths,
+            )
+            self.assertEqual(r2, torch.sin(buf))
+            x3 = torch.randn(4)
+            [r3], state = torch.compiler.precompile.stateful(
+                _precompile_dynamo_torch_sin,
+                example_inputs=[(x3,)],
+                state=state,
+                backend="eager",
+                **paths,
+            )
+            self.assertEqual(r3, torch.sin(x3))
+            summary = state.summary()
+            self.assertEqual((summary.calls, summary.examples), (3, 3))
+            loaded = torch.compiler.precompile.load(**paths)
+            y = torch.randn(4)
+            self.assertEqual(loaded(y), torch.sin(y))
+
+    def test_tracer_dynamo_stateful_survives_transpose_between_calls(self):
+        # The in-place-mutating-fn flavor of the metadata-freeze regression:
+        # the step mutates its input DATA (add_) and the caller transpose_()s
+        # the same tensor between calls (a metadata mutation). Both calls must
+        # capture and rewrite; the frozen snapshot keeps call 1's example at
+        # its original metadata.
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = dict(
+                artifact_path=os.path.join(tmp, "artifact.py"),
+                cache_path=os.path.join(tmp, "artifact.cache"),
+            )
+            x = torch.randn(2, 3)
+            expected = (x.clone() + 1) * 2
+            [r1], state = torch.compiler.precompile.stateful(
+                _precompile_dynamo_inplace_step,
+                example_inputs=[(x,)],
+                state=None,
+                backend="eager",
+                **paths,
+            )
+            self.addCleanup(state.close)
+            self.assertEqual(r1, expected)
+            x.transpose_(0, 1)  # caller-side metadata mutation between calls
+            expected = (x.clone() + 1) * 2
+            [r2], state = torch.compiler.precompile.stateful(
+                _precompile_dynamo_inplace_step,
+                example_inputs=[(x,)],
+                state=state,
+                backend="eager",
+                **paths,
+            )
+            self.assertEqual(r2, expected)
+            self.assertEqual(state.summary().calls, 2)
+            loaded = torch.compiler.precompile.load(**paths)
+            z = torch.randn(2, 3)
+            expected = (z.clone() + 1) * 2
+            self.assertEqual(loaded(z), expected)
+
     def test_tracer_dynamo_stateful_returns_list_per_example(self):
         # Always a list, one entry per example tuple of the call -- never
         # unwrapped, so a fn that itself returns a list stays unambiguous.
@@ -4608,6 +4930,28 @@ class TestPrecompile(TestCase):
             with self.assertLogs("torch._precompile", level="WARNING") as logs:
                 loaded = torch.compiler.precompile.load(code, buf.getvalue())
         self.assertTrue(any("could not prime the cache" in m for m in logs.output))
+        self.assertEqual(loaded(x), _precompile_dynamo_torch_sin(x))
+
+    def test_load_untrusted_warning_precedes_cache_processing(self):
+        # Both halves of a load are untrusted executable input, so the trust
+        # warning must fire BEFORE any cache processing: with a corrupt cache
+        # envelope, the untrusted-input record comes before the envelope
+        # degrade record, and the load still serves (the cache is acceleration
+        # only).
+        x = torch.randn(3)
+        code, _cache = torch.compiler.precompile(
+            _precompile_dynamo_torch_sin,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        with self.assertLogs("torch._precompile", level="WARNING") as cm:
+            loaded = torch.compiler.precompile.load(code, b"corrupt-envelope")
+        untrusted = [i for i, m in enumerate(cm.output) if "untrusted" in m.lower()]
+        envelope = [i for i, m in enumerate(cm.output) if "envelope" in m]
+        self.assertTrue(untrusted, cm.output)
+        self.assertTrue(envelope, cm.output)
+        self.assertLess(untrusted[0], envelope[0])
         self.assertEqual(loaded(x), _precompile_dynamo_torch_sin(x))
 
     def test_tracer_dynamo_accepts_interpreter_singleton_inputs(self):
