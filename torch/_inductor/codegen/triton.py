@@ -1811,12 +1811,22 @@ class TritonOverrides(OpOverrides):
         is_pure=True,
         pack=1,
         input_dtypes=None,
+        output_dtypes=None,
+        output_index=0,
     ):
+        """Emit inline asm and share multiple outputs through kernel CSE."""
         # Use the actual dtype, not the compute type — the asm operates on
         # specific register types and Triton needs to know the real output type.
-        asm_triton_type = triton_type(dtype)
+        all_output_dtypes = output_dtypes or (dtype,)
+        asm_triton_type = (
+            f"({', '.join(triton_type(dt) for dt in all_output_dtypes)})"
+            if output_dtypes is not None
+            else triton_type(dtype)
+        )
         if constraints is None:
-            constraints = ", ".join(["=r"] + ["r" for _ in inputs])
+            constraints = ", ".join(
+                ["=r" for _ in all_output_dtypes] + ["r" for _ in inputs]
+            )
 
         # Inductor computes bf16/fp16 in fp32. For "h" (16-bit register)
         # constraints, cast back to the original dtype so the asm sees the
@@ -1852,21 +1862,40 @@ class TritonOverrides(OpOverrides):
                 f"[{args}], dtype={asm_triton_type}, is_pure={is_pure}, pack={pack})"
             )
 
-        if pack <= 1:
-            return asm_call(", ".join(cast_inputs))
+        args = ", ".join(cast_inputs)
+        if pack <= 1 and output_dtypes is None:
+            return asm_call(args)
 
         first_input = inputs[0]
         compute = V.kernel.compute
         cse = V.kernel.cse
-        result = cse.newvar(dtype=dtype, shape=first_input.shape)
-        packed_args = ", ".join(
-            f"triton_helpers.inline_asm_pack({inp}, {pack})" for inp in cast_inputs
+        if pack > 1:
+            args = ", ".join(
+                f"triton_helpers.inline_asm_pack({inp}, {pack})" for inp in cast_inputs
+            )
+        call = asm_call(args)
+        cache_key = f"inline_asm_elementwise({call})"
+        output_key = f"{cache_key}[{output_index}]"
+        if result := cse.try_get(output_key):
+            return result
+
+        result = tuple(
+            cse.newvar(dtype=dt, shape=first_input.shape) for dt in all_output_dtypes
         )
-        compute.writeline(f"{result} = {asm_call(packed_args)}")
-        compute.writeline(
-            f"{result} = triton_helpers.inline_asm_unpack({result}, {first_input}, {pack})"
-        )
-        return result
+        compute.writeline(f"{', '.join(map(str, result))} = {call}")
+        if pack > 1:
+            unpacked = tuple(
+                cse.newvar(dtype=dt, shape=first_input.shape)
+                for dt in all_output_dtypes
+            )
+            for out, packed in zip(unpacked, result):
+                compute.writeline(
+                    f"{out} = triton_helpers.inline_asm_unpack({packed}, {first_input}, {pack})"
+                )
+            result = unpacked
+        for index, output in enumerate(result):
+            cse.put(f"{cache_key}[{index}]", output)
+        return result[output_index]
 
     @staticmethod
     @maybe_upcast_float32()
@@ -6356,38 +6385,58 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             value_expr = f"{value_expr}.to(tl.uint8, bitcast=True)"
         return self._reshape_expr(value, shape, value_expr=value_expr)
 
+    def _emit_recursive_split(
+        self,
+        expr: str,
+        names: Sequence[str],
+        shape: Sequence[sympy.Expr | int | str],
+        dtype: torch.dtype,
+    ) -> None:
+        """Split a trailing axis into a power-of-two number of lanes."""
+        factor = len(names)
+        if factor <= 1 or factor & (factor - 1) != 0:
+            raise AssertionError(f"split factor must be a power of two: {factor}")
+        is_float8 = dtype in TRITON_FLOAT8_DTYPES
+        if factor == 2:
+            if not is_float8:
+                self.compute.writeline(f"{', '.join(names)} = tl.split({expr})")
+                return
+            raw_parts = tuple(
+                self.cse.newvar(dtype=torch.uint8, shape=shape[:-1]) for _ in names
+            )
+            self.compute.writeline(
+                f"{', '.join(map(str, raw_parts))} = tl.split({expr})"
+            )
+            for raw_part, name in zip(raw_parts, names):
+                self.compute.writeline(
+                    f"{name} = {raw_part}.to({triton_type(dtype)}, bitcast=True)"
+                )
+            return
+        half = factor // 2
+        split_shape = (*shape[:-1], half, 2)
+        part_shape = (*shape[:-1], half)
+        split_dtype = torch.uint8 if is_float8 else dtype
+        even = self.cse.newvar(dtype=split_dtype, shape=part_shape)
+        odd = self.cse.newvar(dtype=split_dtype, shape=part_shape)
+        self.compute.writeline(
+            f"{even}, {odd} = tl.split("
+            f"tl.reshape({expr}, {triton_shape_str(split_shape)}))"
+        )
+        self._emit_recursive_split(str(even), names[0::2], part_shape, dtype)
+        self._emit_recursive_split(str(odd), names[1::2], part_shape, dtype)
+
     def emit_split_via_reshape(
         self,
         value: CSEVariable,
         reshape_shape: Sequence[sympy.Expr | int | str],
         part_names: Sequence[str],
     ) -> None:
-        """Reshape ``value`` to expose the lane axis, then split it.
-
-        ``tl.split`` can only divide the trailing axis in two, so the caller
-        reshapes ``[..., n]`` to ``[..., n // factor, factor]`` first; the lane
-        axis has to be trailing before the split can see it.
-
-        float8 goes through uint8 because Triton's ``tl.split`` does not accept
-        fp8 operands.
-        """
+        """Reshape ``value`` to expose the trailing lane axis, then split it."""
         dtype = value.dtype
         if dtype is None:
             raise AssertionError("split value must have a known dtype")
-        is_float8 = dtype in TRITON_FLOAT8_DTYPES
-        value_expr = str(value)
-        if is_float8:
-            value_expr = f"{value_expr}.to(tl.uint8, bitcast=True)"
-        reshaped = self._reshape_expr(value, reshape_shape, value_expr=value_expr)
-        if not is_float8:
-            self.compute.writeline(f"{', '.join(part_names)} = tl.split({reshaped})")
-            return
-        raw_part_names = [f"{name}_uint8" for name in part_names]
-        self.compute.writeline(f"{', '.join(raw_part_names)} = tl.split({reshaped})")
-        for raw_name, part_name in zip(raw_part_names, part_names):
-            self.compute.writeline(
-                f"{part_name} = {raw_name}.to({triton_type(dtype)}, bitcast=True)"
-            )
+        expr = self._bitcast_reshape_expr(value, reshape_shape, dtype)
+        self._emit_recursive_split(expr, part_names, reshape_shape, dtype)
 
     def emit_broadcast_via_reshape(
         self,

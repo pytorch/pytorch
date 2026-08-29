@@ -376,10 +376,12 @@ def record(
         def wrapper(*args: _P.args, **kwargs: _P.kwargs):
             if error_handler is None:
                 raise AssertionError  # assertion for mypy type checker
-            error_handler.set_entrypoint_fn_name(f.__qualname__)
+            # f may be a functools.partial (or other callable) without a
+            # __qualname__; attribute the error to the fn name when available.
+            error_handler.set_entrypoint_fn_name(getattr(f, "__qualname__", None))
             error_handler.initialize()
             try:
-                return f(*args, **kwargs)
+                result = f(*args, **kwargs)
             except SystemExit as se:
                 # For run_path based entrypoints, SystemExit with code = 0 will never exit.
                 # Handling it here by returning a value:
@@ -404,6 +406,11 @@ def record(
             except Exception as e:
                 error_handler.record_exception(e)
                 raise
+            # Reached only when f() returned without raising. Kept outside the
+            # try so a subclass record_success() that raises is NOT caught by the
+            # handlers above (which would misreport success as a failure).
+            error_handler.record_success()
+            return result
 
         return wrapper
 

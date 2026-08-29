@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import collections
 import contextlib
+import copy
 import dataclasses
 import enum
 import functools
@@ -26,10 +27,12 @@ from collections.abc import (
     Callable,
     Collection,
     Generator,
+    Iterable,
     Iterator,
     Mapping,
     MutableMapping,
     MutableSet,
+    Set as AbstractSet,
 )
 from datetime import datetime
 from functools import lru_cache
@@ -39,6 +42,7 @@ from typing import (
     Concatenate,
     Generic,
     Literal,
+    NamedTuple,
     Protocol,
     TYPE_CHECKING,
     TypeAlias,
@@ -86,7 +90,7 @@ from torch.fx.experimental.symbolic_shapes import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence, ValuesView
+    from collections.abc import Sequence, ValuesView
     from pathlib import Path
 
     from torch import SymBool, SymFloat, SymInt
@@ -153,6 +157,239 @@ _DO_BENCH_PROFILE_EVENT_NAME = "inductor_do_bench_using_profiling"
 _T = TypeVar("_T")
 VarRanges = dict[sympy.Expr, sympy.Expr]
 InputType = torch.Tensor | int | torch.SymInt | None
+
+
+class ImportableConstexprType(NamedTuple):
+    module: str
+    qualname: str
+    root_name: str
+
+
+# Keep this aligned with names that generated Triton kernel modules bind before
+# evaluating constexpr reprs. Launcher-specific bindings are checked at its call site.
+_TRITON_CONSTEXPR_RESERVED_NAMES = frozenset(
+    (
+        "AttrsDescriptor",
+        "AutotuneHint",
+        "DeviceProperties",
+        "ReductionHint",
+        "TileHint",
+        "libdevice",
+        "math",
+        "pl",
+        "proton",
+        "tl",
+        "tl_math",
+        "tlx",
+        "torch",
+        "triton",
+        "triton_helpers",
+        "triton_heuristics",
+    )
+)
+
+
+class ConstexprReprChildren(NamedTuple):
+    values: tuple[object, ...]
+    rebuild: Callable[[tuple[object, ...]], object]
+
+
+def get_constexpr_repr_children(value: object) -> ConstexprReprChildren | None:
+    """Describe the immediate values included in an object's repr."""
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        fields = tuple(field for field in dataclasses.fields(value) if field.repr)
+
+        def rebuild_dataclass(children: tuple[object, ...]) -> object:
+            # Avoid constructors that could coerce sanitized values back to Enum.
+            result = copy.copy(value)
+            for field, child in zip(fields, children):
+                object.__setattr__(result, field.name, child)
+            return result
+
+        return ConstexprReprChildren(
+            tuple(getattr(value, field.name) for field in fields),
+            rebuild_dataclass,
+        )
+
+    attrs_fields = getattr(type(value), "__attrs_attrs__", None)
+    if attrs_fields is not None:
+        # attrs permits callable repr formatters, so only False hides a field.
+        fields = tuple(
+            field for field in attrs_fields if getattr(field, "repr", True) is not False
+        )
+
+        def rebuild_attrs(children: tuple[object, ...]) -> object:
+            result = copy.copy(value)
+            for field, child in zip(fields, children):
+                object.__setattr__(result, field.name, child)
+            return result
+
+        return ConstexprReprChildren(
+            tuple(getattr(value, field.name) for field in fields),
+            rebuild_attrs,
+        )
+
+    repr_args = getattr(value, "__repr_args__", None)
+    if callable(repr_args):
+        items = tuple(cast(Callable[[], Iterable[tuple[object, object]]], repr_args)())
+
+        def rebuild_repr_args(children: tuple[object, ...]) -> object:
+            result = copy.copy(value)
+            for (name, _), child in zip(items, children):
+                if not isinstance(name, str):
+                    raise TypeError(
+                        "Cannot sanitize an unnamed value returned by __repr_args__"
+                    )
+                object.__setattr__(result, name, child)
+            return result
+
+        return ConstexprReprChildren(
+            tuple(item for _, item in items),
+            rebuild_repr_args,
+        )
+
+    if isinstance(value, Mapping):
+        items = tuple(value.items())
+        mapping_constructor = cast(
+            Callable[[Mapping[object, object]], object], type(value)
+        )
+
+        def rebuild_mapping(children: tuple[object, ...]) -> object:
+            # children is the flattened key, value, key, value stream.
+            child_iter = iter(children)
+            sanitized = dict(zip(child_iter, child_iter))
+            if isinstance(value, collections.defaultdict):
+                return type(value)(value.default_factory, sanitized)
+            return mapping_constructor(sanitized)
+
+        return ConstexprReprChildren(
+            tuple(item for pair in items for item in pair),
+            rebuild_mapping,
+        )
+
+    if isinstance(value, list):
+        return ConstexprReprChildren(
+            tuple(value), lambda children: type(value)(children)
+        )
+
+    if isinstance(value, tuple) and hasattr(value, "_fields"):
+        return ConstexprReprChildren(
+            tuple(value),
+            lambda children: getattr(type(value), "_make")(children),  # noqa: B009
+        )
+
+    if isinstance(value, tuple):
+        return ConstexprReprChildren(tuple(value), tuple)
+
+    if isinstance(value, AbstractSet):
+        set_constructor = cast(Callable[[Iterable[object]], object], type(value))
+        return ConstexprReprChildren(tuple(value), set_constructor)
+
+    return None
+
+
+def _constexpr_type_repr_prefix(value: object) -> str | None:
+    value_type = type(value)
+    type_name = getattr(value_type, "__name__", None)
+    type_qualname = getattr(value_type, "__qualname__", None)
+    if type_name is None or type_qualname is None:
+        return None
+    value_repr = repr(value)
+    for prefix in (f"{type_qualname}(", f"{type_name}("):
+        if value_repr.startswith(prefix):
+            return prefix
+    return None
+
+
+def _collect_importable_constexpr_types(
+    value: object,
+    result: dict[str, ImportableConstexprType],
+    seen: OrderedSet[int],
+) -> None:
+    if id(value) in seen:
+        return
+    seen.add(id(value))
+
+    value_type = type(value)
+    type_module = getattr(value_type, "__module__", None)
+    type_qualname = getattr(value_type, "__qualname__", None)
+    repr_prefix = (
+        _constexpr_type_repr_prefix(value) if type_module != "builtins" else None
+    )
+    if (
+        type_module is not None
+        and type_qualname is not None
+        and type_module != "builtins"
+        and repr_prefix is not None
+    ):
+        if type_module == "__main__" or "<locals>" in type_qualname:
+            raise ImportError(
+                "Triton constexpr value type "
+                f"{type_module}.{type_qualname} is not importable. "
+                "Define constexpr config classes at module scope in an importable module."
+            )
+        repr_qualname = repr_prefix.removesuffix("(")
+        if repr_qualname != type_qualname:
+            raise ImportError(
+                "Triton constexpr nested value type "
+                f"{type_module}.{type_qualname} uses the bare name "
+                f"{repr_qualname} in its repr, which generated code cannot import. "
+                "Use the type's qualified name in its repr."
+            )
+        if dataclasses.is_dataclass(value) and not isinstance(value, type):
+            for field in dataclasses.fields(value):
+                if field.repr and not field.init:
+                    raise ImportError(
+                        "Triton constexpr dataclass value type "
+                        f"{type_module}.{type_qualname} has repr-visible field "
+                        f"{field.name} with init=False, so its repr cannot be "
+                        "evaluated as a constructor call. Set repr=False or init=True."
+                    )
+        root_name = type_qualname.split(".", 1)[0]
+        if root_name in _TRITON_CONSTEXPR_RESERVED_NAMES:
+            raise ImportError(
+                "Triton constexpr value type "
+                f"{type_module}.{type_qualname} requires import name {root_name}, "
+                "which would shadow a name reserved by generated Triton code. "
+                "Rename the root type."
+            )
+        existing = result.get(root_name)
+        # Generated imports bind the root, so sibling nested types from the
+        # same module intentionally share one entry.
+        if existing is not None and (existing.module, existing.root_name) != (
+            type_module,
+            root_name,
+        ):
+            raise ImportError(
+                "Triton constexpr values require conflicting imports for "
+                f"{root_name}: {existing.module}.{existing.qualname} and "
+                f"{type_module}.{type_qualname}"
+            )
+        result[root_name] = ImportableConstexprType(
+            module=type_module,
+            qualname=type_qualname,
+            root_name=root_name,
+        )
+
+    repr_children = get_constexpr_repr_children(value)
+    if repr_children is not None:
+        for child in repr_children.values:
+            _collect_importable_constexpr_types(child, result, seen)
+
+
+def get_importable_constexpr_types(
+    values: Iterable[object],
+) -> list[ImportableConstexprType]:
+    """Collect imports for constructor-style constexpr reprs that use the type's
+    ``__qualname__`` and can be evaluated in the generated module."""
+    result: dict[str, ImportableConstexprType] = {}
+    seen: OrderedSet[int] = OrderedSet()
+    for value in values:
+        _collect_importable_constexpr_types(value, result, seen)
+    # Import lines are part of the generated kernel source and its cache key, so
+    # their order must not depend on set iteration or PYTHONHASHSEED.
+    return sorted(result.values(), key=lambda spec: (spec.module, spec.root_name))
+
 
 XPU_KERNEL_FORMAT = (
     "spv" if _IS_WINDOWS else os.getenv("TORCHINDUCTOR_XPU_KERNEL_FORMAT", "zebin")
@@ -1931,18 +2168,22 @@ def use_triton_template(
         layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
     if enable_float8:
         layout_dtypes.extend([torch.float8_e4m3fn, torch.float8_e5m2])
+    # _use_template_for_gpu logs an SM-count warning.
+    # Keep it last so the warning only fires when a Triton template is
+    # actually in play, not on default-mode compiles or on devices without
+    # Triton template support (e.g. mps).
     return (
-        (
+        # some callers handle max-autotune checking externally
+        (config.max_autotune or config.max_autotune_gemm or not check_max_autotune)
+        and _use_autotune_backend("TRITON")
+        and has_backend_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
+        and (
             (
                 is_gpu(layout.device.type)
                 and _use_template_for_gpu(layout, layout_dtypes)
             )
             or (layout.device.type == "cpu" and layout.dtype in layout_dtypes)
         )
-        # some callers handle max-autotune checking externally
-        and (config.max_autotune or config.max_autotune_gemm or not check_max_autotune)
-        and _use_autotune_backend("TRITON")
-        and has_backend_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
     )
 
 
@@ -2350,10 +2591,12 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     # output dtype
     # FP32 not supported: https://github.com/pytorch/pytorch/issues/145952
     layout_dtypes = [torch.float16, torch.bfloat16, torch.int32]
+    # Keep _use_template_for_gpu last: it calls is_big_gpu, whose SM-count
+    # warning should only fire when the CUTLASS backend is actually enabled.
     res = (
-        _use_template_for_gpu(layout, layout_dtypes)
-        and (config.max_autotune or config.max_autotune_gemm)
+        (config.max_autotune or config.max_autotune_gemm)
         and _use_autotune_backend("CUTLASS")
+        and _use_template_for_gpu(layout, layout_dtypes)
     )
 
     if res:
