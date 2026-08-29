@@ -328,14 +328,20 @@ def check_headeronly_symbols(install_root: Path) -> None:
     platform_specific_keywords = [
         "cpu/vec",
         "win32-headers.h",
+        "headeronly/cuda",
     ]
+
+    # Headers that #error on direct inclusion and are reached via a parent header
+    non_self_contained_keywords = [
+        "util/complex_utils.h",
+    ]
+
+    skip_keywords = platform_specific_keywords + non_self_contained_keywords
 
     filtered_headers = []
     for header in headeronly_headers:
         rel_path = header.relative_to(include_dir).as_posix()
-        if not any(
-            keyword in rel_path.lower() for keyword in platform_specific_keywords
-        ):
+        if not any(keyword in rel_path.lower() for keyword in skip_keywords):
             filtered_headers.append(header)
 
     includes = []

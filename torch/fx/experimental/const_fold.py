@@ -1,4 +1,5 @@
 import re
+import types
 from collections.abc import Callable
 from typing import Any
 
@@ -282,9 +283,21 @@ def split_const_subgraphs(
 
         # If the node itself is constant, or all of its inputs are constant,
         # then tag it as constant.
-        if node.op != "get_attr" and not set(node.all_input_nodes).issubset(
-            const_nodes
-        ):
+        if node.op == "get_attr":
+            # Only fold get_attr nodes that resolve to tensors (parameters,
+            # buffers). Module references and unresolvable paths must be
+            # excluded -- split_module handles get_attr nodes outside the
+            # normal partition callback, so tagging alone is not enough.
+            try:
+                parts = node.target.split(".")
+                obj = mod_traced
+                for part in parts:
+                    obj = getattr(obj, part)
+            except AttributeError:
+                continue
+            if isinstance(obj, (torch.nn.Module, types.ModuleType)):
+                continue
+        elif not set(node.all_input_nodes).issubset(const_nodes):
             continue
 
         # If provided skip folding function says to skip, then skip. Also skip a
