@@ -2089,15 +2089,16 @@ def _validate_dynamo_capture(
                 "guards are not serializable."
             )
         if numpy is not None and reaches(
-            example, lambda v: isinstance(v, numpy.ndarray)
+            example, lambda v: isinstance(v, (numpy.ndarray, numpy.generic))
         ):
-            # Dynamo traces ndarrays via ___from_numpy sources whose TENSOR_MATCH
-            # guard construction fails under the package/save-guards path, so
-            # capture would die with an internal error; reject up front.
+            # Dynamo traces ndarrays AND numpy scalars (numpy.generic) via
+            # ___from_numpy sources whose TENSOR_MATCH guard construction fails
+            # under the package/save-guards path, so capture would die with an
+            # internal error; reject up front.
             raise NotImplementedError(
-                "precompile tracer='dynamo' does not yet support numpy.ndarray "
-                "arguments (including inside containers); convert them to tensors "
-                "with torch.from_numpy and pass those instead."
+                "precompile tracer='dynamo' does not yet support numpy array or "
+                "numpy scalar arguments (including inside containers); convert "
+                "them with torch.from_numpy / float(...) and pass those instead."
             )
         if has_storage_overlap(example):
             raise PrecompileError(
@@ -2557,7 +2558,16 @@ def _freeze_tensor_metadata(tensor: torch.Tensor) -> torch.Tensor:
         frozen = tensor.as_strided(
             tensor.size(), tensor.stride(), tensor.storage_offset()
         )
+    if type(frozen) is not type(tensor):
+        # A _disabled_torch_function_impl subclass (nn.Parameter) view-decays
+        # to plain Tensor, which would fail TENSOR_MATCH's exact-type check.
+        frozen = frozen.as_subclass(type(tensor))
     frozen.requires_grad = tensor.requires_grad
+    if (tensor.is_leaf or tensor.retains_grad) and tensor.grad is not None:
+        # Guards rooted at L['x'].grad check the recorded scope's .grad; the
+        # fresh leaf alias starts with none, so carry it by reference (the
+        # leaf-or-retains gate avoids the non-leaf .grad access warning).
+        frozen.grad = tensor.grad
     return frozen
 
 

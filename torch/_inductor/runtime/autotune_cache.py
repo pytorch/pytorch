@@ -807,19 +807,22 @@ def _load_cached_autotuning(
             # Value-identical multi-matches (duplicate configs, subset kwargs)
             # fall through to reconstruction below, as before the Enum guard.
             return None
-        if any(
-            _json_config_value(val) != val
-            for cfg in configs
-            # pyrefly: ignore [missing-attribute]
-            for val in cfg.kwargs.values()
-        ):
-            # Some candidate kwarg degrades under the JSON round-trip (tuple ->
-            # list, plain Enum -> raw value), so a no-match here may be a
-            # serialization artifact and reconstruction below would bake the
-            # degraded JSON value into the kernel; re-autotune instead.
-            # IntEnum/str-mixin members ==-match their unwrapped values, so
-            # they are not degraded and fall through to reconstruction.
-            return None
+    if any(
+        _json_config_value(val) != val
+        for cfg in configs
+        # pyrefly: ignore [missing-attribute]
+        for val in cfg.kwargs.values()
+    ):
+        # Some candidate kwarg degrades under the JSON round-trip (tuple ->
+        # list, plain Enum -> raw value), so a no-match here may be a
+        # serialization artifact and reconstruction below would bake the
+        # degraded JSON value into the kernel; re-autotune instead.
+        # IntEnum/str-mixin members ==-match their unwrapped values, so
+        # they are not degraded and fall through to reconstruction. Applies
+        # to the coordesc branch too: coordesc-eligible kernels have int-only
+        # kwargs today, but if one ever grows a degradable kwarg its stamped
+        # entry must not reconstruct a wrong-typed constexpr either.
+        return None
 
     # Reconstruct Config from cached data. This handles both coordesc
     # configs and dynamically added configs (e.g. _dynamic_scale_rblock)

@@ -2154,8 +2154,12 @@ def helper(x):
         import os
         from unittest.mock import Mock
 
-        from torch._inductor.async_compile import AsyncCompile
+        from torch._inductor.async_compile import AsyncCompile, CompiledTritonKernels
 
+        # The raw-raise path never calls remove_future, so without this a
+        # Mock-holding LambdaFuture would sit in the process-global kernel
+        # cache until the next compile_fx clears it.
+        self.addCleanup(CompiledTritonKernels.cache_clear)
         module_name = f"inductor_spawn_probe_{os.getpid()}"
         source_code = f"import {module_name} as __inductor_constexpr_module_0\n"
         task = Mock()

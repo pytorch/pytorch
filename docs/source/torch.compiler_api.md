@@ -90,8 +90,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       This initial path accepts a Python function with positional tensor/scalar arguments
       and containers of those values; closures and ``nn.Module`` arguments are not
       supported yet because their identity guards are not serializable, and
-      ``numpy.ndarray`` arguments are not supported yet (convert them with
-      ``torch.from_numpy``). A global whose
+      numpy array/scalar arguments are not supported yet (convert them with
+      ``torch.from_numpy`` / ``float(...)``). A global whose
       object graph contains a tensor is rejected (conservatively, even when the fn only
       reads a non-tensor field of it) because every tensor must be an explicit input,
       and functions that mutate globals are rejected because the artifact could not

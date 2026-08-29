@@ -144,6 +144,16 @@ def _precompile_dynamo_inplace_step(x):
     return x * 2
 
 
+def _precompile_dynamo_param_scale(p, x):
+    return (p * x).sum()
+
+
+def _precompile_dynamo_grad_step(x):
+    if x.grad is not None:
+        return x - 0.1 * x.grad
+    return x.clone()
+
+
 class _PrecompileDynamoTensorClassAttr:
     tensor = torch.randn(3)
 
@@ -1113,10 +1123,10 @@ class TestPrecompile(TestCase):
 
     def test_untrusted_input_warning_fires_per_load(self):
         # The trust warning is emitted PER load (not warning_once) via log.warning on the
-        # torch._precompile logger: load() always execs python_code (through
-        # _make_inlined_forward), which warns before the exec, whether or not the cache
-        # primed the kernels first. Calling load() TWICE must fire the untrusted-input
-        # warning on BOTH calls, locking in per-load behavior rather than once-per-process.
+        # torch._precompile logger: load() warns before any cache processing and then
+        # always execs python_code, whether or not the cache primed the kernels first.
+        # Calling load() TWICE must fire the untrusted-input warning on BOTH calls,
+        # locking in per-load behavior rather than once-per-process.
         m = torch.nn.Sequential(torch.nn.Linear(4, 3)).eval()
         x = torch.randn(5, 4)
         # Cached path (inductor): the exec of python_code warns about untrusted input.
@@ -1130,8 +1140,8 @@ class TestPrecompile(TestCase):
                 any("untrusted" in line.lower() for line in cm.output),
                 f"cached load did not warn about untrusted input: {cm.output}",
             )
-        # Eager backend (empty cache, nothing to prime): load() still EXECs python_code
-        # via _make_inlined_forward, which warns about exec'ing untrusted code every load.
+        # Eager backend (empty cache, nothing to prime): load() still warns about the
+        # untrusted input up front and EXECs python_code, every load.
         ecode, ecache = torch.compiler.precompile(
             lambda model, t: model(t), example_inputs=[(m, x)], backend="eager"
         )
@@ -1835,6 +1845,16 @@ class TestPrecompile(TestCase):
             torch.compiler.precompile(
                 lambda t, box: t,
                 example_inputs=[(torch.randn(3), [arr])],
+                tracer="dynamo",
+                backend="eager",
+            )
+        # numpy scalars (numpy.generic) route through the same ___from_numpy
+        # guard path and died with a raw internal TypeError when only ndarray
+        # was rejected.
+        with self.assertRaisesRegex(NotImplementedError, "torch.from_numpy"):
+            torch.compiler.precompile(
+                lambda s, t: t * s,
+                example_inputs=[(np.float64(2.0), torch.randn(3))],
                 tracer="dynamo",
                 backend="eager",
             )
@@ -2942,6 +2962,10 @@ class TestPrecompile(TestCase):
             code.index("_DYNAMO_TORCH_VERSION != torch.__version__"),
             code.index("from torch._dynamo.package import"),
         )
+        # Presence-only pin: the builtins-dict install is defense in depth (no
+        # public capture today retains a guard routed through the builtins
+        # dict), so there is no behavioral load path to assert against; this
+        # only pins that the install block ships in the emitted driver.
         self.assertIn("get_builtins_dict", code)
 
     @torch._dynamo.config.patch(
@@ -4341,8 +4365,8 @@ class TestPrecompile(TestCase):
     def test_single_trust_warning_on_inlined_load(self):
         # On the inlined load path (an eager artifact has an empty cache, so there is
         # nothing to prime and load() just EXECs python_code) the untrusted-input / EXEC
-        # warning must fire EXACTLY ONCE -- only _make_inlined_forward warns. Asserting
-        # "exactly once" guards against the EXEC warning being duplicated on this load.
+        # warning must fire EXACTLY ONCE -- load() warns once, before cache processing.
+        # Asserting "exactly once" guards against the warning being duplicated.
         m = torch.nn.Sequential(torch.nn.Linear(4, 3)).eval()
         x = torch.randn(5, 4)
         code, cache = torch.compiler.precompile(
@@ -4690,6 +4714,57 @@ class TestPrecompile(TestCase):
             z = torch.randn(2, 3)
             expected = (z.clone() + 1) * 2
             self.assertEqual(loaded(z), expected)
+
+    def test_tracer_dynamo_parameter_example_input(self):
+        # The frozen snapshot must preserve the input's exact Python type:
+        # nn.Parameter disables __torch_function__, so a bare as_strided view
+        # decays to plain Tensor and TENSOR_MATCH's pytype check then fails
+        # every guard re-check ("does not match any example input").
+        p = torch.nn.Parameter(torch.randn(3))
+        x = torch.randn(3)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_param_scale,
+            example_inputs=[(p, x)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        q = torch.nn.Parameter(torch.randn(3))
+        y = torch.randn(3)
+        self.assertEqual(loaded(q, y), (q * y).sum())
+
+    def test_tracer_dynamo_grad_reading_step(self):
+        # The frozen snapshot must carry the input's .grad by reference: the
+        # alias is a fresh leaf whose .grad starts None, so a fn reading a
+        # non-None x.grad (an optimizer-style step) would fail its
+        # GradSource-rooted guard on every re-check.
+        def make_input():
+            x = torch.randn(3, requires_grad=True)
+            x.sum().backward()
+            return x
+
+        x = make_input()
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_grad_step,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        y = make_input()
+        self.assertEqual(loaded(y), y - 0.1 * y.grad)
+        with tempfile.TemporaryDirectory() as tmp:
+            z = make_input()
+            [r], state = torch.compiler.precompile.stateful(
+                _precompile_dynamo_grad_step,
+                example_inputs=[(z,)],
+                state=None,
+                backend="eager",
+                artifact_path=os.path.join(tmp, "artifact.py"),
+                cache_path=os.path.join(tmp, "artifact.cache"),
+            )
+            self.addCleanup(state.close)
+            self.assertEqual(r, z - 0.1 * z.grad)
 
     def test_tracer_dynamo_stateful_returns_list_per_example(self):
         # Always a list, one entry per example tuple of the call -- never
