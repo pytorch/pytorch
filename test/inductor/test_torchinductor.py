@@ -179,7 +179,7 @@ _T = TypeVar("_T")
 _P = ParamSpec("_P")
 
 
-HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
+HAS_AVX2 = torch.cpu._is_avx2_supported()
 
 _OPS_WITHOUT_GPU_LOWP: frozenset[str] = frozenset(
     {
@@ -1449,6 +1449,20 @@ def target_assert_size_stride_str(
     if name is not None:
         return f"assert_size_stride({name}, {size_str}, {stride_str}"
     return f"{size_str}, {stride_str}"
+
+
+def target_assert_alignment_regex(
+    cpp_wrapper: bool, op_name: str | None = None, alignment: int = 16
+):
+    if op_name is None:
+        op_name_literal = r'"[^"]+"' if cpp_wrapper else r"'[^']+'"
+    else:
+        quote = '"' if cpp_wrapper else "'"
+        op_name_literal = re.escape(f"{quote}{op_name}{quote}")
+    return (
+        rf"assert_alignment\s*\(\s*[^,]+,\s*{alignment},\s*"
+        rf"{op_name_literal}\s*\)"
+    )
 
 
 @instantiate_parametrized_tests
@@ -16248,7 +16262,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             if code and len(code) > 0 and "assert_alignment(" in code[0]:
                 try:
                     FileCheck().check_regex(
-                        r"assert_alignment\s*\(\s*[^,]+,\s*[^,]+,\s*'[^']+'\s*\)"
+                        target_assert_alignment_regex(config.cpp_wrapper)
                     ).run(code[0])
                 except Exception as e:
                     print(f"Failed regex match for assert_alignment: {e}")

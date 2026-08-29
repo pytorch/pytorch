@@ -9030,6 +9030,10 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
     target = torch.tensor([-1, 2], device=device, dtype=torch.long)
     yield SampleInput(make_input(shape), args=(target,), kwargs={'ignore_index': -1})
 
+    # Noncontiguous target
+    target = torch.randint(num_classes, (2 * shape[0],), device=device)[::2]
+    yield SampleInput(make_input(shape), args=(target,))
+
 
 def sample_inputs_binary_cross_entropy_with_logits(
     op_info, device, dtype, requires_grad, **kwargs
@@ -12365,9 +12369,6 @@ op_db: list[OpInfo] = [
                    dtypes=(torch.complex64, torch.complex128)),
                DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-3, rtol=2e-3)}),
                             "TestConsistency", "test_output_grad_match", device_type="mps"),
-               # RuntimeError: value cannot be converted to type double without overflow
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
            )),
     OpInfo('addmm',
            # When alpha=beta=1 as compile-time constants, JIT will decompose addmm into mm and add.
@@ -22605,8 +22606,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                 "test_cow_input",
                 device_type=('cuda', 'xpu'),
             ),
-            DecorateInfo(unittest.skip("FP16 nll_loss cases have not been enabled on MPS yet"),
-                         dtypes=(torch.half,), device_type="mps"),
         ),
     ),
     OpInfo(
