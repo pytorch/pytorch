@@ -443,6 +443,10 @@ def _precompile_mixed_keyability(model, x):
     return _precompile_unkeyable(y).cos()
 
 
+class _PrecompileLockHolder:
+    """Local classes cannot be packaged, so the lock fixture lives here."""
+
+
 def _precompile_reads_flag(x):
     return x * getattr(x, "my_flag", 1)
 
@@ -4155,6 +4159,42 @@ class TestPrecompile(TestCase):
             "global_scope['CFG'].cfg.lock",
             _offending_value_path(state, holder.cfg.lock, roots),
         )
+
+    def test_a_served_handle_does_not_lose_the_frame(self):
+        # The pruning walks the top-level leaves of local_scope; the pickler
+        # walks everything under them. An artifact a previous load installed on
+        # a guarded object is therefore never pruned, and walking into it hits
+        # the session's condition variable -- "cannot pickle '_thread.RLock'",
+        # frame lost to eager. Seen on a real capture, where the path was
+        # local_scope['pipeline']._precompiled_fwd_loss_bwd._compiled._inner
+        # ._state._lock: precompile's own, and nothing the caller could change.
+        import io
+        import pickle as _pickle
+
+        from torch._dynamo.guards import (
+            _is_precompile_handle,
+            _Missing,
+            GuardsStatePickler,
+        )
+        from torch._precompile import PrecompiledCallable
+
+        handle = PrecompiledCallable.__new__(PrecompiledCallable)
+        handle._state = threading.Condition()
+        self.assertTrue(_is_precompile_handle(handle))
+        # Narrow on purpose: a lock in the CALLER's model still fails loudly
+        # with its path named, which the two tests above depend on.
+        self.assertFalse(_is_precompile_handle(threading.RLock()))
+
+        holder = _PrecompileLockHolder()
+        holder.installed = handle
+        holder.scale = 2.0
+
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump(holder)
+        back = _pickle.loads(buf.getvalue())
+        self.assertIsInstance(back.installed, _Missing)
+        # Everything around it survives, which is the point: the frame is kept.
+        self.assertEqual(back.scale, 2.0)
 
     def test_unpicklable_value_outside_both_scopes_is_named(self):
         # What gets pickled is `state`; the two scopes are a handful of objects

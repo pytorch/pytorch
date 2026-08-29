@@ -4182,6 +4182,36 @@ class GuardsState:
     local_state: Any | None = None
 
 
+def _is_precompile_handle(obj: Any) -> bool:
+    """Whether ``obj`` is one of precompile's own served-artifact handles.
+
+    Deliberately narrow. A lock in the CALLER's model still fails the frame
+    with its path named, because that is something they can act on; these are
+    ours, installed by a previous load, and carry a session's condition
+    variable a few attributes down.
+    """
+    from torch._dynamo.precompile_package import (
+        PrecompiledCallable as _InnerCallable,
+        PrecompileSession,
+    )
+    from torch._precompile import (
+        _InstalledArtifact,
+        PrecompiledCallable,
+        PrecompiledModule,
+    )
+
+    return isinstance(
+        obj,
+        (
+            PrecompiledCallable,
+            PrecompiledModule,
+            _InstalledArtifact,
+            _InnerCallable,
+            PrecompileSession,
+        ),
+    )
+
+
 class _Missing:
     def __init__(self, reason: str | None = None) -> None:
         self._reason = reason
@@ -4747,6 +4777,16 @@ class GuardsStatePickler(pickle.Pickler):
         import sympy
 
         self.last_reduced = obj
+
+        if _is_precompile_handle(obj):
+            # A loaded artifact installed onto a live object, reached because
+            # that object is guarded. Walking into it serializes precompile's
+            # own machinery -- a PrecompileSession carries a condition variable,
+            # so the frame dies on "cannot pickle '_thread.RLock'" and runs
+            # eager. Nothing can guard on a served handle, and unlike a lock in
+            # the user's own model there is nothing they could change, so drop
+            # it the way a pruned value is dropped.
+            return _Missing, ("precompile handle",)
 
         if id(obj) in self.empty_values:
             return type(obj).__new__, (type(obj),)
