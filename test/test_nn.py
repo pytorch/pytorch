@@ -8303,8 +8303,10 @@ class TestNNDeviceType(NNTestCase):
 
         grads = []
         for dev in (device, "cpu"):
-            w = weight.to(dev).requires_grad_(True) if weight is not None else None
-            b = bias.to(dev).requires_grad_(True) if bias is not None else None
+            # detach() so the "cpu" iteration copies instead of flipping
+            # requires_grad on the shared source tensors in place.
+            w = weight.detach().to(dev).requires_grad_(True) if weight is not None else None
+            b = bias.detach().to(dev).requires_grad_(True) if bias is not None else None
             if op == "layer_norm":
                 out = torch.nn.functional.layer_norm(x.to(dev), normalized_shape, w, b, eps)
             else:
