@@ -2,6 +2,12 @@
 
 #include <Python.h>
 
+#ifdef __cplusplus
+#include <cstdint>
+#else
+#include <stdint.h>
+#endif
+
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 
 #ifdef __cplusplus
@@ -9,6 +15,7 @@
 #include <torch/csrc/dynamo/utils.h>
 #include <torch/csrc/utils/pybind.h>
 #include <list>
+#include <mutex>
 #include <unordered_map>
 
 namespace py = pybind11;
@@ -52,8 +59,19 @@ typedef struct VISIBILITY_HIDDEN PrecompileEntry {
   py::object guard_manager;
   py::object code;
   void* root_mgr;
+  int64_t isolate_recompiles_id;
+  // Opaque token identifying who installed this entry. Several packages may
+  // legitimately hold entries for one code object in one region -- a library
+  // frame two loaded models both reach -- so teardown has to remove what THIS
+  // installer put here and nothing else. Compared by identity; py::none() for
+  // callers that do not track ownership.
+  py::object owner;
 
-  PrecompileEntry(py::object gm, py::object c);
+  PrecompileEntry(
+      py::object gm,
+      py::object c,
+      int64_t region_id,
+      py::object owner_token);
 } PrecompileEntry;
 
 typedef struct VISIBILITY_HIDDEN ExtraState {
@@ -68,10 +86,23 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // Total cache entries across all compile scopes (for O(1)
   // has_any_cache_entries)
   size_t total_cache_entry_count{0};
-  // Frame state to detect dynamic shape dims
+  mutable std::recursive_mutex cache_mutex;
+  // Frame state to detect dynamic shape dims in the default compile scope.
   py::dict frame_state;
-  // Actions to apply to all frames with this code object (non-isolated)
+  // Isolated compile scopes must not teach the default scope which dimensions
+  // to generalize.
+  std::unordered_map<int64_t, py::dict> region_frame_state_map;
+  std::mutex region_frame_state_mutex;
+  // Actions to apply to all frames with this code object (non-isolated).
+  // Read on every intercepted frame, so the mutex guarding it is per-ExtraState
+  // rather than process-wide: two threads running different functions must not
+  // serialize against each other here.
   FrameExecStrategy strategy{DEFAULT, DEFAULT};
+  std::mutex strategy_mutex;
+  // Monotonic token for the last global strategy write. Tokens come from a
+  // process-wide counter, so resetting a code object's ExtraState cannot make
+  // a stale owner appear current again.
+  uint64_t strategy_generation{0};
   // Per-region strategies for isolated compiles. When an isolated region
   // hits its recompile limit, only that region goes RUN_ONLY.
   std::unordered_map<int64_t, FrameExecStrategy> region_strategy_map;
@@ -79,9 +110,16 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   ExtraState(PyCodeObject* orig_code_arg);
   std::list<CacheEntry>& cache_entry_list(int64_t isolate_recompiles_id);
   bool has_any_cache_entries() const;
+  bool has_relevant_entries(int64_t isolate_recompiles_id) const;
   void move_to_front(CacheEntry* cache_entry, std::list<CacheEntry>& entries);
   void move_to_back(CacheEntry* cache_entry);
-  void invalidate(CacheEntry* cache_entry, py::object deleted_guard_manager);
+  // live_guard_manager is the wrapper that OWNS cache_entry (CacheEntry's own
+  // guard_manager). It is what establishes, under the lock, that the raw
+  // cache_entry read before the lock is still the entry it was.
+  void invalidate(
+      CacheEntry* cache_entry,
+      py::object deleted_guard_manager,
+      py::object live_guard_manager);
 } ExtraState;
 
 #else
@@ -102,19 +140,37 @@ CacheEntry* extract_cache_entry(
     ExtraState* extra_state,
     int64_t isolate_recompiles_id);
 
-// Returns either the previously stored frame state or an empty dict.
+// Returns either the previously stored frame state for this compile scope or an
+// empty dict.
 // Ownership contract
 // args
 //  - extra_state: Borrowed
+//  - isolate_recompiles_id: Compile scope (-1 = default)
 // return
-//  - extra_state->frame_state: Borrowed.
-FrameState* extract_frame_state(ExtraState* extra_state);
+//  - frame state: New reference.
+FrameState* extract_frame_state(
+    ExtraState* extra_state,
+    int64_t isolate_recompiles_id);
 
 // Returns the FrameExecStrategy stored in extra_state.
 // Ownership contract
 // args
 //  - extra_state: Borrowed
 FrameExecStrategy extra_state_get_exec_strategy(ExtraState* extra_state);
+
+uint64_t extra_state_get_exec_strategy_token(
+    ExtraState* extra_state,
+    FrameExecStrategy* strategy);
+
+uint64_t extra_state_set_exec_strategy_with_token(
+    ExtraState* extra_state,
+    FrameExecStrategy strategy,
+    FrameExecStrategy* prior_strategy);
+
+bool extra_state_compare_and_set_exec_strategy(
+    ExtraState* extra_state,
+    uint64_t expected_generation,
+    FrameExecStrategy strategy);
 
 // Set the FrameExecStrategy to be done to all frames with code object
 // corresponding to this extra_state. Ownership contract
@@ -226,6 +282,9 @@ CacheEntry* create_cache_entry(
 
 // Extracts the backend fn from the callback.
 PyObject* get_backend(PyObject* callback);
+// Turn on the cache-key lookup inside get_backend. Called once, when the first
+// backend carrying one is constructed; see cache_entry.cpp.
+void enable_precompile_cache_keys();
 
 #ifdef __cplusplus
 
@@ -239,13 +298,28 @@ py::list _debug_get_cache_entry_list(const py::handle& code_obj);
 py::list _get_cache_entries_for_region(
     const py::handle& code_obj,
     int64_t isolate_recompiles_id);
+void _clear_cache_entries_for_region(
+    const py::handle& code_obj,
+    int64_t isolate_recompiles_id);
 size_t _get_total_cache_entry_count(const py::handle& code_obj);
 void _reset_precompile_entries(const py::handle& code_obj);
+void _reset_precompile_entries_for_owner(
+    const py::handle& code_obj,
+    int64_t isolate_recompiles_id,
+    const py::handle& owner);
+void _reset_precompile_entries_for_region(
+    const py::handle& code_obj,
+    int64_t isolate_recompiles_id);
 void _load_precompile_entry(
     const py::handle& code_obj,
     py::object guard_manager,
-    py::object dynamo_code);
+    py::object dynamo_code,
+    int64_t isolate_recompiles_id,
+    py::object owner);
 py::list _debug_get_precompile_entries(const py::handle& code_obj);
-void _set_lru_cache(py::object boolean);
+bool _has_precompile_entries(
+    const py::handle& code_obj,
+    int64_t isolate_recompiles_id);
+void _set_lru_cache(const py::object& boolean);
 
 #endif
