@@ -959,20 +959,19 @@ PyInterpreterHolder self_interpreter;
 
 py::handle getTorchApiFunction(const c10::OperatorHandle& op) {
   return op.getPythonOp([&]() -> PyObject* {
-    // Parse the name into namespace and name (no overload_name)
-    // TODO: put this into the library
     const auto& schema = op.schema();
-    const auto& qualified_name = op.operator_name().name;
+    const auto& operator_name = op.operator_name();
     const auto& overload_name = schema.overload_name();
-    auto pos = qualified_name.find("::");
-    TORCH_INTERNAL_ASSERT(pos != std::string::npos, qualified_name);
+    auto ns = operator_name.getNamespace();
+    TORCH_INTERNAL_ASSERT(ns.has_value(), operator_name.name);
     // Make me some null terminated strings
-    std::string ns_str = qualified_name.substr(0, pos);
-    const char* ns = ns_str.c_str();
-    const char* func_name = qualified_name.c_str() + pos + strlen("::");
+    std::string ns_str(*ns);
+    std::string func_name(operator_name.getBaseName());
 
-    py::handle torch_api_function =
-        py::module::import("torch").attr("ops").attr(ns).attr(func_name);
+    py::handle torch_api_function = py::module::import("torch")
+                                        .attr("ops")
+                                        .attr(ns_str.c_str())
+                                        .attr(func_name.c_str());
     if (overload_name.empty()) {
       return torch_api_function.attr("default").ptr();
     } else {

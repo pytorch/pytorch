@@ -12,25 +12,33 @@
 
 namespace c10 {
 
-// TODO: consider storing namespace separately too
 struct OperatorName final {
   std::string name;
   std::string overload_name;
   OperatorName(std::string name, std::string overload_name)
-      : name(std::move(name)), overload_name(std::move(overload_name)) {}
-
-  // TODO: These two functions below are slow!  Fix internal data structures so
-  // I don't have to manually reconstruct the namespaces!
+      : name(std::move(name)),
+        overload_name(std::move(overload_name)),
+        namespace_sep_(this->name.find("::")) {}
 
   // Return the namespace of this OperatorName, if it exists.  The
   // returned string_view is only live as long as the OperatorName
   // exists and name is not mutated
   std::optional<std::string_view> getNamespace() const {
-    auto pos = name.find("::");
-    if (pos == std::string::npos) {
+    if (namespace_sep_ == std::string::npos) {
       return std::nullopt;
     } else {
-      return std::string_view(name.data(), pos);
+      return std::string_view(name.data(), namespace_sep_);
+    }
+  }
+
+  // Return the part of name after the namespace prefix, if any (e.g. "add"
+  // for "aten::add"), otherwise the whole name. The returned string_view is
+  // only live as long as the OperatorName exists and name is not mutated.
+  std::string_view getBaseName() const {
+    if (namespace_sep_ == std::string::npos) {
+      return name;
+    } else {
+      return std::string_view(name).substr(namespace_sep_ + 2);
     }
   }
 
@@ -47,11 +55,19 @@ struct OperatorName final {
       std::char_traits<char>::copy(name_data, ns, ns_len);
       name[ns_len] = ':';
       name[ns_len + 1] = ':';
+      namespace_sep_ = ns_len;
       return true;
     } else {
       return false;
     }
   }
+
+ private:
+  // Byte offset of the "::" namespace separator in `name`, or
+  // std::string::npos if `name` has no namespace. Computed once at
+  // construction (and updated by setNamespaceIfNotSet) instead of doing a
+  // linear scan on every getNamespace()/getBaseName() call.
+  std::string::size_type namespace_sep_;
 };
 
 // Non-owning view of an OperatorName.  Unlike OperatorName, most of
