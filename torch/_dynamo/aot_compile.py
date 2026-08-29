@@ -437,7 +437,14 @@ def aot_compile_fullgraph(
             )
 
         if check_fn.guards_state is None:
-            raise AssertionError("guards_state must not be None")
+            # Practically unreachable (build_guards above runs strict, so a
+            # serialization failure raises directly), but keep the surface
+            # typed and cause-chained like convert_frame's.
+            from torch._dynamo import exc
+
+            raise exc.PackageError(
+                "guards_state must not be None"
+            ) from check_fn.guards_serialization_failure
 
         source_info = SourceInfo(inlined_sources=set())
         for traced_code in graph_capture_output.traced_code:
