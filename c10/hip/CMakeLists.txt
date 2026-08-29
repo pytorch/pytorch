@@ -39,7 +39,7 @@ if(NOT BUILD_LIBTORCHLESS)
 
   # If building shared library, set dllimport/dllexport proper.
   target_compile_options(c10_hip PRIVATE "-DC10_CUDA_BUILD_MAIN_LIB")
-  # Enable hidden visibility if compiler supports it.
+  # No HIP_VISIBILITY_PRESET in CMake, so this still needs the raw flag.
   if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
     target_compile_options(c10_hip PRIVATE "-fvisibility=hidden")
   endif()
