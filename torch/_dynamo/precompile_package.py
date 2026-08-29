@@ -1537,12 +1537,38 @@ class PrecompileSession:
         self._finished = False
 
     def _take_backend_artifacts(self) -> None:
-        from torch._dynamo.precompile_context import PrecompileContext
+        from torch._dynamo.output_graph import noop_graph_call
+        from torch._dynamo.precompile_context import (
+            EagerCacheArtifact,
+            PrecompileContext,
+        )
 
         for backend_id in self._package.cache_entry().backend_ids:
             artifact = PrecompileContext.take_artifact(backend_id)
             if artifact is not None:
                 self._backend_artifacts[backend_id] = artifact
+            elif self._package.cached_backends.get(backend_id) is noop_graph_call:
+                # A graph that runs nothing and returns nothing never reaches
+                # the backend: output_graph short-circuits it to noop_graph_call
+                # rather than pay a metadata pass and a joint trace for a
+                # function with nothing in it. The id still exists -- the
+                # transformed bytecode names it, and backend_ids is derived by
+                # scanning co_names -- so nothing was ever filed for it and the
+                # harvest reads it as a compiled graph that lost its code.
+                #
+                # Only reachable under capture: allow_empty_graphs is what keeps
+                # such a frame compiled at all, and ordinary torch.compile
+                # discards it rather than packaging anything. Recorded rather
+                # than excused, so the served artifact dispatches the frame to
+                # the same no-op instead of skipping it at install and silently
+                # running eager.
+                #
+                # Here rather than in _collect_backends because teardown clears
+                # cached_backends for a non-eager backend, and _collect_backends
+                # runs after it.
+                self._backend_artifacts[backend_id] = EagerCacheArtifact(
+                    key=backend_id, content=noop_graph_call
+                )
 
     def _record_capture_error(self, error: BaseException) -> None:
         message = str(error)
