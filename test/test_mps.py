@@ -11975,24 +11975,24 @@ class TestPad(TestCaseMPS):
         gi_ref = torch.ops.aten.replication_pad1d_backward(go.cpu(), x.cpu(), (1, 1))
         self.assertEqual(gi.cpu(), gi_ref)
 
-    def test_pad_5d_large_inner_dims(self):
+    @parametrize("mode", ["constant", "replicate", "reflect"])
+    @parametrize("shape,padding", [((1, 2, 3, 256, 256), (0, 0, 0, 0, 2, 1)),
+                                   ((1, 1, 2, 2, 65536), (2, 1)),
+                                   ((1, 1, 2, 2, 65536), (0, 0, 2, 1))])
+    def test_pad_5d_large_inner_dims(self, mode, shape, padding):
         # MPSGraph pads rank > 4 operands incorrectly once the output inner extent is large.
         # See https://github.com/pytorch/pytorch/issues/194922
-        def helper(shape, padding, mode):
-            cpu_x = torch.randn(shape, requires_grad=True)
-            mps_x = cpu_x.detach().clone().to("mps").requires_grad_()
-            cpu_out = F.pad(cpu_x, padding, mode=mode)
-            mps_out = F.pad(mps_x, padding, mode=mode)
-            self.assertEqual(cpu_out, mps_out)
-            grad = torch.randn_like(cpu_out)
-            cpu_out.backward(gradient=grad)
-            mps_out.backward(gradient=grad.to("mps"))
-            self.assertEqual(cpu_x.grad, mps_x.grad)
-
-        for mode in ["constant", "replicate", "reflect"]:
-            helper((1, 2, 3, 256, 256), (0, 0, 0, 0, 2, 1), mode)
-        helper((1, 1, 2, 2, 65536), (2, 1), "constant")
-        helper((1, 1, 2, 2, 65536), (0, 0, 2, 1), "constant")
+        if mode != "constant" and len(padding) != 6:
+            self.skipTest("replicate and reflect need a 6-element pad for a 5D input")
+        cpu_x = torch.randn(shape, requires_grad=True)
+        mps_x = cpu_x.detach().clone().to("mps").requires_grad_()
+        cpu_out = F.pad(cpu_x, padding, mode=mode)
+        mps_out = F.pad(mps_x, padding, mode=mode)
+        self.assertEqual(cpu_out, mps_out)
+        grad = torch.randn_like(cpu_out)
+        cpu_out.backward(gradient=grad)
+        mps_out.backward(gradient=grad.to("mps"))
+        self.assertEqual(cpu_x.grad, mps_x.grad)
 
 class TestConv3dChannelsLast3dMPS(NNTestCase):
     def _run_conv3d_cl3d(self, *, input_shape, Cin, Cout, k, pad, with_bias, dtype, groups=1):
@@ -17451,6 +17451,7 @@ instantiate_parametrized_tests(TestMPS)
 instantiate_parametrized_tests(TestSDPA)
 instantiate_parametrized_tests(TestSmoothL1Loss)
 instantiate_parametrized_tests(TestMetalLibrary)
+instantiate_parametrized_tests(TestPad)
 instantiate_parametrized_tests(TestConv3dChannelsLast3dMPS)
 instantiate_parametrized_tests(TestConvolutionMPS)
 instantiate_parametrized_tests(TestLargeTensors)
