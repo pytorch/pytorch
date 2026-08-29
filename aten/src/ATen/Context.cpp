@@ -24,10 +24,10 @@ namespace at {
 /*
   These const variables defined the fp32 precisions for different backend
   We have "generic", "cuda", "mkldnn" backend now and we can choose fp32
-  prevision from "ieee", "tf32", "bf16" and "none". The "ieee" precision means
-  IEEE standard floating point format, "tf32" and "bf16" means we are allowed to
-  use "tf32" or "bf16" as internal computation data types for fp32 computations.
-  And "none" means it is override-able by parent's node
+  precision from "ieee", "tf32", "bf16", "bf16x9", and "none". The "ieee"
+  precision means IEEE standard floating point format. "tf32", "bf16", and
+  "bf16x9" allow reduced-precision arithmetic internally for fp32 computations.
+  "none" means it is override-able by its parent node.
 
   generic->mkldnn->matmul
                 ->conv
@@ -68,6 +68,8 @@ Float32Precision str2precision(const std::string& name) {
     return Float32Precision::TF32;
   else if (name == "bf16")
     return Float32Precision::BF16;
+  else if (name == "bf16x9")
+    return Float32Precision::BF16X9;
   TORCH_CHECK(false, "Unknown precision: ", name);
 }
 
@@ -84,6 +86,8 @@ std::string precision2str(Float32Precision prec) {
     case Float32Precision::DEFAULT:
       // DEFAULT is an internal sentinel and should be resolved before reaching here
       TORCH_CHECK(false, "DEFAULT precision should not be visible externally");
+    case Float32Precision::BF16X9:
+      return "bf16x9";
   }
   TORCH_CHECK(false, "Invalid enum Float32Precision(", static_cast<int>(prec), ")");
 }
@@ -395,6 +399,9 @@ Float32MatmulPrecision Context::float32MatmulPrecision() const {
   invalid = invalid ||
       (float32Precision(Float32Backend::MKLDNN, Float32Op::MATMUL) == Float32Precision::TF32 &&
        float32_matmul_precision != at::Float32MatmulPrecision::HIGH);
+  invalid = invalid ||
+      (float32Precision(Float32Backend::CUDA, Float32Op::MATMUL) == Float32Precision::BF16X9 &&
+       float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST);
   TORCH_CHECK(
       !invalid,
       "PyTorch is checking the matmul precision without a specific backend name,",
@@ -483,6 +490,10 @@ void Context::setFloat32Precision(Float32Backend backend, Float32Op op, Float32P
   TORCH_CHECK(
       !(backend == Float32Backend::CUDA && p == Float32Precision::BF16),
       "backend 'cuda' does not support precision 'bf16'");
+  TORCH_CHECK(
+      p != Float32Precision::BF16X9 ||
+          (backend == Float32Backend::CUDA && op == Float32Op::MATMUL),
+      "precision 'bf16x9' is only supported for backend 'cuda' and op 'matmul'");
   TORCH_CHECK(
       p != Float32Precision::DEFAULT,
       "DEFAULT precision is internal and cannot be set explicitly");

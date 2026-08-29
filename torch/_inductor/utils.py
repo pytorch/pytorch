@@ -3011,6 +3011,15 @@ def use_cpp_gemm_template(
     )
 
 
+def is_bf16x9_matmul(device_type: str, dtype: torch.dtype) -> bool:
+    """Return whether a matmul must preserve cuBLAS BF16x9 emulation."""
+    return (
+        device_type == "cuda"
+        and dtype == torch.float32
+        and torch.backends.cuda.matmul.fp32_precision == "bf16x9"
+    )
+
+
 def use_aten_gemm_kernels() -> bool:
     return not (
         config.max_autotune or config.max_autotune_gemm

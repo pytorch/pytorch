@@ -330,8 +330,8 @@ struct GemmParams : OpParams {
 
   std::string Signature() const override {
     return fmt::sprintf(
-        "%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld",
-        transa, transb, m, n, k, lda, ldb, ldc);
+        "%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld%s",
+        transa, transb, m, n, k, lda, ldb, ldc, ComputeTypeSignature<T>());
   }
 
   std::string DynamicSignature() const override {
@@ -339,14 +339,15 @@ struct GemmParams : OpParams {
     const bool dynamic_n = this->IsDynamicN();
     const bool dynamic_k = this->IsDynamicK();
     return fmt::sprintf(
-        "%c%c_%s_%s_%s_ld_%s_%s_%s",
+        "%c%c_%s_%s_%s_ld_%s_%s_%s%s",
         transa, transb,
         MaybeWildcardInt(m, dynamic_m),
         MaybeWildcardInt(n, dynamic_n),
         MaybeWildcardInt(k, dynamic_k),
         MaybeWildcardInt(lda, ShouldWildcardLda(transa, dynamic_m, dynamic_k, lda, m, k)),
         MaybeWildcardInt(ldb, ShouldWildcardLdb(transb, dynamic_n, dynamic_k, ldb, n, k)),
-        MaybeWildcardInt(ldc, ShouldWildcardLdc(dynamic_m, ldc, m)));
+        MaybeWildcardInt(ldc, ShouldWildcardLdc(dynamic_m, ldc, m)),
+        ComputeTypeSignature<T>());
   }
 
   size_t GetSizeA() const {
@@ -449,8 +450,8 @@ struct GemmAndBiasParams : OpParams {
 
   std::string Signature() const override {
     return fmt::sprintf(
-        "%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld",
-        transa, transb, m, n, k, lda, ldb, ldc);
+        "%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld%s",
+        transa, transb, m, n, k, lda, ldb, ldc, ComputeTypeSignature<T>());
   }
 
   std::string DynamicSignature() const override {
@@ -458,14 +459,15 @@ struct GemmAndBiasParams : OpParams {
     const bool dynamic_n = this->IsDynamicN();
     const bool dynamic_k = this->IsDynamicK();
     return fmt::sprintf(
-        "%c%c_%s_%s_%s_ld_%s_%s_%s",
+        "%c%c_%s_%s_%s_ld_%s_%s_%s%s",
         transa, transb,
         MaybeWildcardInt(m, dynamic_m),
         MaybeWildcardInt(n, dynamic_n),
         MaybeWildcardInt(k, dynamic_k),
         MaybeWildcardInt(lda, ShouldWildcardLda(transa, dynamic_m, dynamic_k, lda, m, k)),
         MaybeWildcardInt(ldb, ShouldWildcardLdb(transb, dynamic_n, dynamic_k, ldb, n, k)),
-        MaybeWildcardInt(ldc, ShouldWildcardLdc(dynamic_m, ldc, m)));
+        MaybeWildcardInt(ldc, ShouldWildcardLdc(dynamic_m, ldc, m)),
+        ComputeTypeSignature<T>());
   }
 
   size_t GetSizeA() const {
@@ -569,8 +571,8 @@ struct GemmStridedBatchedParams : OpParams {
 
   std::string Signature() const override {
     return fmt::sprintf(
-        "%c%c_%ld_%ld_%ld_B_%ld_ld_%ld_%ld_%ld",
-        transa, transb, m, n, k, batch, lda, ldb, ldc);
+        "%c%c_%ld_%ld_%ld_B_%ld_ld_%ld_%ld_%ld%s",
+        transa, transb, m, n, k, batch, lda, ldb, ldc, ComputeTypeSignature<T>());
   }
 
   std::string DynamicSignature() const override {
@@ -579,7 +581,7 @@ struct GemmStridedBatchedParams : OpParams {
     const bool dynamic_k = this->IsDynamicK();
     const bool dynamic_batch = this->IsDynamicBatch();
     return fmt::sprintf(
-        "%c%c_%s_%s_%s_B_%s_ld_%s_%s_%s",
+        "%c%c_%s_%s_%s_B_%s_ld_%s_%s_%s%s",
         transa, transb,
         MaybeWildcardInt(m, dynamic_m),
         MaybeWildcardInt(n, dynamic_n),
@@ -587,7 +589,8 @@ struct GemmStridedBatchedParams : OpParams {
         MaybeWildcardInt(batch, dynamic_batch),
         MaybeWildcardInt(lda, ShouldWildcardLda(transa, dynamic_m, dynamic_k, lda, m, k)),
         MaybeWildcardInt(ldb, ShouldWildcardLdb(transb, dynamic_n, dynamic_k, ldb, n, k)),
-        MaybeWildcardInt(ldc, ShouldWildcardLdc(dynamic_m, ldc, m)));
+        MaybeWildcardInt(ldc, ShouldWildcardLdc(dynamic_m, ldc, m)),
+        ComputeTypeSignature<T>());
   }
 
   size_t GetSizeA() const {

@@ -52,6 +52,16 @@ These backends include:
 ```
 
 ```{eval-rst}
+.. attribute::  fp32_precision
+
+    A :class:`str` that controls the internal computation precision of CUDA
+    matrix multiplications with FP32 inputs and outputs. Supported values are
+    ``"ieee"``, ``"tf32"``, and ``"bf16x9"``. BF16x9 requires CUDA 13.0 or
+    newer and an NVIDIA GPU with compute capability 10.0 or newer. See
+    :ref:`tf32_on_ampere`.
+```
+
+```{eval-rst}
 .. attribute::  allow_tf32
 
     A :class:`bool` that controls whether TensorFloat-32 tensor cores may be used in matrix

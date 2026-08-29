@@ -50,7 +50,14 @@ enum class TORCH_API Float32Op { ALL, CONV, RNN, MATMUL };
 // DEFAULT is an internal-only sentinel meaning "use legacy backend default
 // unless a parent setting overrides it". NONE means "explicitly set to
 // inherit/no-op".
-enum class TORCH_API Float32Precision { NONE, IEEE, TF32, BF16, DEFAULT };
+enum class TORCH_API Float32Precision {
+  NONE,
+  IEEE,
+  TF32,
+  BF16,
+  DEFAULT,
+  BF16X9
+};
 
 enum class TORCH_API CuDNNDepthwiseKernel { AUTO, CUDNN, NATIVE };
 

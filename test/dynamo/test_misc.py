@@ -12121,6 +12121,28 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         finally:
             write_state(initial_state)
 
+    @recover_orig_fp32_precision
+    def test_recompile_on_bf16x9_precision_change(self):
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(10)
+        torch.set_float32_matmul_precision("highest")
+        fn(x)
+        self.assertEqual(counter.frame_count, 1)
+
+        torch.backends.cuda.matmul.fp32_precision = "bf16x9"
+        fn(x)
+        fn(x)
+        self.assertEqual(counter.frame_count, 2)
+
+        torch.backends.cuda.matmul.fp32_precision = "ieee"
+        fn(x)
+        self.assertEqual(counter.frame_count, 2)
+
     def test_grad_state_mutated(self):
         prior = torch.is_grad_enabled()
         value = None

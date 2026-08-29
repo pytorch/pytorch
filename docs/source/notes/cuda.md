@@ -79,9 +79,25 @@ torch.backends.cudnn.conv.fp32_precision = "tf32"
 torch.backends.cudnn.rnn.fp32_precision = "tf32"
 ```
 
-The fp32_precision can be set to `ieee` or `tf32` for `cuda/cudnn`.
-`ieee` fp32_precision indicate that we will use `FP32` as internal computation precision.
-`tf32` fp32_precision indicate that we will allow to use `TF32` as internal computation precision.
+The `fp32_precision` setting can be set to `ieee` or `tf32` for CUDA matmuls
+and cuDNN. `ieee` uses FP32 for internal computation, while `tf32` allows TF32
+for internal computation.
+
+On NVIDIA GPUs, CUDA matmuls also support `bf16x9`:
+
+```python
+torch.backends.cuda.matmul.fp32_precision = "bf16x9"
+```
+
+This mode keeps the inputs and output in FP32 while cuBLAS decomposes each input
+into three BF16 values and evaluates the resulting nine BF16 products with FP32
+accumulation. It generally provides more accuracy than TF32, but relative
+accuracy is workload-dependent and is not guaranteed to match IEEE FP32.
+`bf16x9` requires a CUDA 13.0 or newer build and a GPU with compute capability
+10.0 or newer. It is valid only for `torch.backends.cuda.matmul.fp32_precision`;
+using it for a generic, cuDNN, or MKLDNN precision setting raises an error.
+Unsupported CUDA builds, CUDA devices, and ROCm executions also raise an error
+instead of using another computation mode.
 
 We can override a generic setting for a specific operator if the fp32_precision is set to `ieee`.
 

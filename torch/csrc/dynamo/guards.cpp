@@ -686,9 +686,8 @@ struct GlobalStateGuard {
     _torch_function_all_disabled = at::impl::torch_function_all_disabled();
     _deterministic_algorithms = ctx.deterministicAlgorithms();
     _deterministic_algorithms_warn_only = ctx.deterministicAlgorithmsWarnOnly();
-    _allow_tf32 =
-        ctx.float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL) ==
-        at::Float32Precision::TF32;
+    _cuda_matmul_precision =
+        ctx.float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL);
     _allow_fp16_reduce = ctx.allowFP16ReductionCuBLAS();
     _allow_bf16_reduce = ctx.allowBF16ReductionCuBLAS();
     _num_threads = at::get_num_threads();
@@ -705,10 +704,9 @@ struct GlobalStateGuard {
             _deterministic_algorithms == ctx.deterministicAlgorithms() &&
             _deterministic_algorithms_warn_only ==
                 ctx.deterministicAlgorithmsWarnOnly() &&
-            _allow_tf32 ==
-                (ctx.float32Precision(
-                     at::Float32Backend::CUDA, at::Float32Op::MATMUL) ==
-                 at::Float32Precision::TF32) &&
+            _cuda_matmul_precision ==
+                ctx.float32Precision(
+                    at::Float32Backend::CUDA, at::Float32Op::MATMUL) &&
             _allow_fp16_reduce == ctx.allowFP16ReductionCuBLAS() &&
             _allow_bf16_reduce == ctx.allowBF16ReductionCuBLAS() &&
             _num_threads == at::get_num_threads()) &&
@@ -730,11 +728,9 @@ struct GlobalStateGuard {
     if (_deterministic_algorithms_warn_only !=
         ctx.deterministicAlgorithmsWarnOnly())
       os << "deterministic_algorithms_warn_only ";
-    if (_allow_tf32 !=
-        (ctx.float32Precision(
-             at::Float32Backend::CUDA, at::Float32Op::MATMUL) ==
-         at::Float32Precision::TF32))
-      os << "allow_tf32 ";
+    if (_cuda_matmul_precision !=
+        ctx.float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL))
+      os << "cuda_matmul_precision ";
     if (_allow_fp16_reduce != ctx.allowFP16ReductionCuBLAS())
       os << "allow_fp16_reduce ";
     if (_allow_bf16_reduce != ctx.allowBF16ReductionCuBLAS())
@@ -755,7 +751,8 @@ struct GlobalStateGuard {
     json_j["deterministic_algorithms"] = json_t._deterministic_algorithms;
     json_j["deterministic_algorithms_warn_only"] =
         json_t._deterministic_algorithms_warn_only;
-    json_j["allow_tf32"] = json_t._allow_tf32;
+    json_j["cuda_matmul_precision"] =
+        static_cast<int64_t>(json_t._cuda_matmul_precision);
     json_j["allow_fp16_reduce"] =
         static_cast<int64_t>(json_t._allow_fp16_reduce);
     json_j["allow_bf16_reduce"] =
@@ -774,7 +771,8 @@ struct GlobalStateGuard {
     json_t._deterministic_algorithms = json_j.at("deterministic_algorithms");
     json_t._deterministic_algorithms_warn_only =
         json_j.at("deterministic_algorithms_warn_only");
-    json_t._allow_tf32 = json_j.at("allow_tf32");
+    json_t._cuda_matmul_precision = static_cast<at::Float32Precision>(
+        static_cast<int64_t>(json_j.at("cuda_matmul_precision")));
     json_t._allow_fp16_reduce = static_cast<at::CuBLASReductionOption>(
         static_cast<int64_t>(json_j.at("allow_fp16_reduce")));
     json_t._allow_bf16_reduce = static_cast<at::CuBLASReductionOption>(
@@ -790,7 +788,7 @@ struct GlobalStateGuard {
   bool _torch_function_all_disabled;
   bool _deterministic_algorithms;
   bool _deterministic_algorithms_warn_only;
-  bool _allow_tf32;
+  at::Float32Precision _cuda_matmul_precision;
   at::CuBLASReductionOption _allow_fp16_reduce;
   at::CuBLASReductionOption _allow_bf16_reduce;
   int _num_threads;

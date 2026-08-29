@@ -80,7 +80,8 @@ TensorFloat-32(TF32) on ROCm
 TF32 is supported on AMD Instinct MI300 (gfx942, CDNA3) via hipBLASLt. The
 same ``torch.backends.cuda.matmul.fp32_precision`` and
 ``torch.backends.cuda.matmul.allow_tf32`` controls used on NVIDIA hardware
-also apply on ROCm. The TF32 path on MI300 has hardware-level numerical
+also apply on ROCm, except that the ``"bf16x9"`` precision mode is NVIDIA-only.
+The TF32 path on MI300 has hardware-level numerical
 differences from the NVIDIA implementation; see :ref:`tf32_on_mi300` for
 details.
 

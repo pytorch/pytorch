@@ -1329,6 +1329,46 @@ print(t.is_pinned())
 
     @recover_orig_fp32_precision
     @serialTest()
+    def test_bf16x9_fp32_precision_get_set(self):
+        torch.set_float32_matmul_precision("highest")
+        torch.backends.cuda.matmul.fp32_precision = "bf16x9"
+        self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "bf16x9")
+        self.assertFalse(torch.backends.cuda.matmul.allow_tf32)
+        self.assertEqual(torch.get_float32_matmul_precision(), "highest")
+
+        with torch.backends.flags(fp32_precision="tf32"):
+            self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "bf16x9")
+            torch.backends.cuda.matmul.fp32_precision = "none"
+            self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "tf32")
+        torch.backends.cuda.matmul.fp32_precision = "bf16x9"
+
+        for backend, op in (
+            ("generic", "all"),
+            ("cuda", "all"),
+            ("cuda", "conv"),
+            ("cuda", "rnn"),
+            ("mkldnn", "all"),
+            ("mkldnn", "matmul"),
+        ):
+            with self.subTest(backend=backend, op=op):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "precision 'bf16x9' is only supported for backend 'cuda' and op 'matmul'",
+                ):
+                    torch._C._set_fp32_precision_setter(backend, op, "bf16x9")
+
+        with self.assertRaisesRegex(RuntimeError, "Unknown precision"):
+            torch.backends.cuda.matmul.fp32_precision = "bf16x8"
+
+        torch.set_float32_matmul_precision("high")
+        torch.backends.cuda.matmul.fp32_precision = "bf16x9"
+        with self.assertRaisesRegex(RuntimeError, "mix of the legacy and new APIs"):
+            torch.get_float32_matmul_precision()
+        with self.assertRaisesRegex(RuntimeError, "mix of the legacy and new APIs"):
+            _ = torch.backends.cuda.matmul.allow_tf32
+
+    @recover_orig_fp32_precision
+    @serialTest()
     def test_invalid_status_for_legacy_api(self):
         torch.backends.cudnn.conv.fp32_precision = "none"
         torch.backends.cudnn.rnn.fp32_precision = "tf32"

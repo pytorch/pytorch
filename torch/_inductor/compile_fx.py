@@ -469,7 +469,7 @@ def _step_logger() -> Callable[..., None]:
 def _warn_tf32_disabled() -> None:
     if (
         torch.cuda.is_available()
-        and torch.backends.cuda.matmul.fp32_precision != "tf32"
+        and torch.backends.cuda.matmul.fp32_precision not in ("tf32", "bf16x9")
         and torch.cuda.get_device_capability() >= (8, 0)
     ):
         perf_hint_log.info(

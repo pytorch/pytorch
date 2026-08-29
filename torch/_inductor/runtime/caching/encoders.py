@@ -22,7 +22,7 @@ class ShouldPadEncodedParams(TypedDict):
     input: EncodedTensor | None
     mat1_exclude_padding_time: bool
     mat2_exclude_padding_time: bool
-    tf32: bool
+    fp32_precision: str
 
 
 def should_pad_params_encoder(
@@ -52,6 +52,14 @@ def should_pad_params_encoder(
     # Import here to avoid circular dependency
     from torch._inductor.fx_passes.pad_mm import should_exclude_padding_time
 
+    fp32_precision = "not_float32"
+    if mat1.dtype == torch.float32:
+        fp32_precision = (
+            torch.backends.cuda.matmul.fp32_precision
+            if mat1.device.type == "cuda"
+            else torch.backends.mkldnn.fp32_precision
+        )
+
     return ShouldPadEncodedParams(
         mat1=_encode_tensor(mat1),
         mat2=_encode_tensor(mat2),
@@ -59,10 +67,5 @@ def should_pad_params_encoder(
         input=_encode_tensor(input) if input is not None else None,
         mat1_exclude_padding_time=should_exclude_padding_time(match, "mat1"),
         mat2_exclude_padding_time=should_exclude_padding_time(match, "mat2"),
-        tf32=False
-        if mat1.dtype != torch.float32
-        else bool(
-            torch.backends.cuda.matmul.fp32_precision == "tf32"
-            or torch.backends.mkldnn.fp32_precision == "tf32"
-        ),
+        fp32_precision=fp32_precision,
     )

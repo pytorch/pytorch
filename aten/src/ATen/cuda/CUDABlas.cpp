@@ -250,6 +250,31 @@ using detail::CuBlasLtGroupedMatrixLayout;
     CUDABLAS_NONNEGINT_CHECK(bgemm<Dtype>, num_batches);  \
   } while (0)
 
+namespace {
+
+bool useBF16x9() {
+  return !at::NoTF32Guard::should_disable_tf32() &&
+      at::globalContext().float32Precision(
+          at::Float32Backend::CUDA, at::Float32Op::MATMUL) ==
+      at::Float32Precision::BF16X9;
+}
+
+void checkBF16x9Support() {
+#ifdef USE_ROCM
+  TORCH_CHECK(false, "bf16x9 precision is only supported on NVIDIA CUDA");
+#elif defined(CUDA_VERSION) && CUDA_VERSION >= 13000
+  TORCH_CHECK(
+      at::cuda::getCurrentDeviceProperties()->major >= 10,
+      "bf16x9 precision requires a CUDA device with compute capability 10.0 or later");
+#else
+  TORCH_CHECK(
+      false,
+      "bf16x9 precision requires PyTorch to be built with CUDA 13.0 or later");
+#endif
+}
+
+} // namespace
+
 template <typename Dtype, typename C_Dtype = Dtype>
 static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
 #if defined(USE_ROCM) && ROCM_VERSION == 60400
@@ -502,6 +527,36 @@ void bgemm_internal_cublas<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
   detail::cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   BGEMM_CHECK_ARGVALUES(float);
+  if (useBF16x9()) {
+    checkBF16x9Support();
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13000
+    TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedEx(
+        handle,
+        opa,
+        opb,
+        m,
+        n,
+        k,
+        &alpha,
+        a,
+        CUDA_R_32F,
+        lda,
+        stridea,
+        b,
+        CUDA_R_32F,
+        ldb,
+        strideb,
+        &beta,
+        c,
+        CUDA_R_32F,
+        ldc,
+        stridec,
+        num_batches,
+        CUBLAS_COMPUTE_32F_EMULATED_16BFX9,
+        CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+    return;
+#endif
+  }
   TORCH_CUDABLAS_CHECK(cublasSgemmStridedBatched(
       handle, opa, opb, m, n, k, &alpha, a, lda, stridea, b, ldb, strideb, &beta, c, ldc, stridec, num_batches));
 }
@@ -974,6 +1029,32 @@ void gemm_internal_cublas<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
   detail::cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(float);
+  if (useBF16x9()) {
+    checkBF16x9Support();
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13000
+    TORCH_CUDABLAS_CHECK(cublasGemmEx(
+        handle,
+        opa,
+        opb,
+        m,
+        n,
+        k,
+        &alpha,
+        a,
+        CUDA_R_32F,
+        lda,
+        b,
+        CUDA_R_32F,
+        ldb,
+        &beta,
+        c,
+        CUDA_R_32F,
+        ldc,
+        CUBLAS_COMPUTE_32F_EMULATED_16BFX9,
+        CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+    return;
+#endif
+  }
   TORCH_CUDABLAS_CHECK(cublasSgemm(
       handle, opa, opb, m, n, k, &alpha, a, lda, b, ldb, &beta, c, ldc));
 }

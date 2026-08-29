@@ -308,10 +308,25 @@ CublasLtTypeInfo<T, C_Dtype> getCublasLtTypeInfo() {
     info.compute_type = CUBLAS_COMPUTE_64F;
     info.scale_type = CUDA_R_64F;
   } else if constexpr (std::is_same_v<T, float>) {
-    if (at::globalContext().float32Precision(
-            at::Float32Backend::CUDA,
-            at::Float32Op::MATMUL) == at::Float32Precision::TF32) {
+    const auto fp32_precision = at::globalContext().float32Precision(
+        at::Float32Backend::CUDA, at::Float32Op::MATMUL);
+    if (fp32_precision == at::Float32Precision::TF32) {
       info.compute_type = CUBLAS_COMPUTE_32F_FAST_TF32;
+    } else if (
+        !at::NoTF32Guard::should_disable_tf32() &&
+        fp32_precision == at::Float32Precision::BF16X9) {
+#ifdef USE_ROCM
+      TORCH_CHECK(false, "bf16x9 precision is only supported on NVIDIA CUDA");
+#elif defined(CUDA_VERSION) && CUDA_VERSION >= 13000
+      TORCH_CHECK(
+          at::cuda::getCurrentDeviceProperties()->major >= 10,
+          "bf16x9 precision requires a CUDA device with compute capability 10.0 or later");
+      info.compute_type = CUBLAS_COMPUTE_32F_EMULATED_16BFX9;
+#else
+      TORCH_CHECK(
+          false,
+          "bf16x9 precision requires PyTorch to be built with CUDA 13.0 or later");
+#endif
     }
   } else if constexpr (std::is_same_v<T, c10::complex<double>>) {
     info.ab_type = CUDA_C_64F;
