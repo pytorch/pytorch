@@ -511,7 +511,7 @@ struct ExitTransformer {
   //   while i < 3:
   //     continue
   //   break
-  // when we transform the for loop block, target_block_ will be set the for
+  // when we transform the for loop block, target_block_ will be set to the for
   // block. then, when we enter the while loop, target_block_ will be the while
   // loop block. when we are done transforming the while it will be set back to
   // the for block.
