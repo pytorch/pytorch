@@ -1,16 +1,11 @@
 #pragma once
 
-#ifdef __HIPCC__
-#include <hip/hip_runtime.h>
-#endif
+#include <torch/headeronly/util/NumericUtils.h>
 
-#include <c10/macros/Macros.h>
-#include <c10/util/BFloat16.h>
-#include <c10/util/Float8_e4m3fn.h>
-#include <c10/util/Float8_e4m3fnuz.h>
-#include <c10/util/Float8_e5m2.h>
-#include <c10/util/Float8_e5m2fnuz.h>
-#include <c10/util/Half.h>
+// complex_math.h declares ::exp/log/log1p/tan for c10::complex at global
+// scope. The templates below call ::exp(x) etc., which as a qualified name is
+// bound at definition, so those overloads must be visible here for
+// at::exp(c10::complex<T>) to work.
 #include <c10/util/complex.h>
 
 #include <cmath>
@@ -18,114 +13,8 @@
 
 namespace at {
 
-// std::isnan isn't performant to use on integral types; it will
-// (uselessly) convert to floating point and then do the test.
-// This function is.
-
-template <typename T, std::enable_if_t<std::is_integral_v<T>, int> = 0>
-inline C10_HOST_DEVICE bool _isnan(T /*val*/) {
-  return false;
-}
-
-template <typename T, std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
-inline C10_HOST_DEVICE bool _isnan(T val) {
-#if defined(__CUDACC__) || defined(__HIPCC__)
-  return ::isnan(val);
-#else
-  return std::isnan(val);
-#endif
-}
-
-template <typename T, std::enable_if_t<c10::is_complex<T>::value, int> = 0>
-inline C10_HOST_DEVICE bool _isnan(T val) {
-  return std::isnan(val.real()) || std::isnan(val.imag());
-}
-
-template <typename T, std::enable_if_t<std::is_same_v<T, at::Half>, int> = 0>
-inline C10_HOST_DEVICE bool _isnan(T val) {
-  return at::_isnan(static_cast<float>(val));
-}
-
-template <
-    typename T,
-    std::enable_if_t<std::is_same_v<T, at::BFloat16>, int> = 0>
-inline C10_HOST_DEVICE bool _isnan(at::BFloat16 val) {
-  return at::_isnan(static_cast<float>(val));
-}
-
-inline C10_HOST_DEVICE bool _isnan(at::BFloat16 val) {
-  return at::_isnan(static_cast<float>(val));
-}
-
-template <
-    typename T,
-    std::enable_if_t<std::is_same_v<T, at::Float8_e5m2>, int> = 0>
-inline C10_HOST_DEVICE bool _isnan(T val) {
-  return val.isnan();
-}
-
-template <
-    typename T,
-    std::enable_if_t<std::is_same_v<T, at::Float8_e4m3fn>, int> = 0>
-inline C10_HOST_DEVICE bool _isnan(T val) {
-  return val.isnan();
-}
-
-template <
-    typename T,
-    std::enable_if_t<std::is_same_v<T, at::Float8_e5m2fnuz>, int> = 0>
-inline C10_HOST_DEVICE bool _isnan(T val) {
-  return val.isnan();
-}
-
-template <
-    typename T,
-    std::enable_if_t<std::is_same_v<T, at::Float8_e4m3fnuz>, int> = 0>
-inline C10_HOST_DEVICE bool _isnan(T val) {
-  return val.isnan();
-}
-
-// std::isinf isn't performant to use on integral types; it will
-// (uselessly) convert to floating point and then do the test.
-// This function is.
-
-template <typename T, std::enable_if_t<std::is_integral_v<T>, int> = 0>
-inline C10_HOST_DEVICE bool _isinf(T /*val*/) {
-  return false;
-}
-
-template <typename T, std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
-inline C10_HOST_DEVICE bool _isinf(T val) {
-#if defined(__CUDACC__) || defined(__HIPCC__)
-  return ::isinf(val);
-#else
-  return std::isinf(val);
-#endif
-}
-
-inline C10_HOST_DEVICE bool _isinf(at::Half val) {
-  return at::_isinf(static_cast<float>(val));
-}
-
-inline C10_HOST_DEVICE bool _isinf(at::BFloat16 val) {
-  return at::_isinf(static_cast<float>(val));
-}
-
-inline C10_HOST_DEVICE bool _isinf(at::Float8_e5m2 val) {
-  return val.isinf();
-}
-
-inline C10_HOST_DEVICE bool _isinf(at::Float8_e4m3fn val [[maybe_unused]]) {
-  return false;
-}
-
-inline C10_HOST_DEVICE bool _isinf(at::Float8_e5m2fnuz val [[maybe_unused]]) {
-  return false;
-}
-
-inline C10_HOST_DEVICE bool _isinf(at::Float8_e4m3fnuz val [[maybe_unused]]) {
-  return false;
-}
+using torch::headeronly::_isinf;
+using torch::headeronly::_isnan;
 
 template <typename T>
 C10_HOST_DEVICE inline T exp(T x) {
