@@ -2565,10 +2565,10 @@ def _warn_unclosed_dynamo_state(fn_name: str) -> None:
 
 
 class _PrecompileDynamoState:
-    """Opaque accumulated capture state for stateful ``torch.compiler.precompile``.
+    """Opaque accumulated capture state for ``torch.compiler.precompile.stateful``.
 
-    Returned by (and passed back to) precompile calls that give
-    ``artifact_path``/``cache_path``. It owns the live Dynamo capture session:
+    Returned by (and passed back to) ``precompile.stateful`` calls. It owns
+    the live Dynamo capture session:
     the cloned capture function with its installed code caches, the
     CompilePackage new variants accumulate into, the optimize wrapper (whose
     isolate-recompiles bucket keeps earlier variants visible to later calls),
@@ -3175,12 +3175,9 @@ class _PrecompileApi:
         tracer: str = "make_fx",
         decompositions: dict | None = None,
         training: bool = False,
-        state: _PrecompileDynamoState | None = None,
-        artifact_path: str | None = None,
-        cache_path: str | None = None,
         recompile_limit: int | None = None,
         dynamic: bool | None = None,
-    ) -> tuple[str, bytes] | tuple[list[object], _PrecompileDynamoState]:
+    ) -> tuple[str, bytes]:
         """Ahead-of-time precompile ``fn`` against ``example_inputs``.
 
         .. note::
@@ -3279,68 +3276,12 @@ class _PrecompileApi:
         The symbolic graphs and their input-derived dispatch guards are retained in the
         artifact.
 
-        STATEFUL CAPTURE (``tracer="dynamo"`` only): pass ``artifact_path`` and
-        ``cache_path`` to capture incrementally from a loop the caller owns.
-        API note: this mode deliberately changes the return type to
-        ``(results, state)`` -- the caller's loop needs the step's real
-        results, and the artifact lives on disk rather than in the return
-        value. ``results`` is always a list with one entry per example tuple
-        of THIS call (never unwrapped, so a fn that itself returns a list is
-        unambiguous). A separate entry point (e.g. ``precompile.stateful``)
-        was considered and rejected: the two modes share every capture
-        semantic and differ only in delivery, and one callable keeps the
-        "same call, plus paths" migration story::
-
-            state = None
-            try:
-                for batch in batches:
-                    [result], state = torch.compiler.precompile(
-                        step,
-                        example_inputs=[(batch,)],
-                        state=state,
-                        artifact_path="step.py",
-                        cache_path="step.cache",
-                        tracer="dynamo",
-                    )
-            finally:
-                if state is not None:
-                    state.close()
-
-        Every call runs its example tuples for real, records whatever guarded
-        variants they newly exercise into the returned opaque ``state``
-        (``state=None`` starts fresh; passing a returned state resumes -- with
-        the same fn, ``backend``, ``training``, and ``recompile_limit``, else
-        the call raises rather than produce a mixed artifact), REWRITES the
-        artifact and cache files atomically, and returns this call's example
-        results (a list, one entry per example tuple) instead of
-        ``(python_code, cache)``. The files on disk are always a
-        loadable artifact for everything captured so far. A call whose guards
-        all hit adds nothing; guard minimization is re-run over every example
-        seen so far on each rebuild, so the state keeps a pre-execution
-        snapshot of every example tuple alive (tensors by reference; a step
-        may freely mutate its container inputs), and later calls see earlier
-        variants because the state carries
-        one isolate-recompiles bucket and one PGO record across calls (a
-        dimension that varies between calls recompiles into a symbolic graph
-        exactly as it would within one call). ``recompile_limit`` caps the
-        variants per capture; the stateful default is
-        ``max(torch._dynamo.config.recompile_limit, 256)`` because accumulating
-        captures outgrow the config default (the one-shot default is
-        ``max(torch._dynamo.config.recompile_limit, len(example_inputs) + 1)``).
-        ``dynamic`` is forwarded to Dynamo (``None`` keeps the
-        automatic policy) and, like the other capture settings, must not change
-        across resumed calls. After each rewrite, ``state.summary()`` reports
-        what the artifact carries -- calls, examples, variants, graphs, dynamic
-        graphs, and the environment guards minimization dropped from at least
-        one variant (also embedded in the artifact as ``_DROPPED_GUARDS``). Load the on-disk pair directly
-        with ``precompile.load(artifact_path=..., cache_path=...)``. Rewriting
-        is proportional to everything captured so far, not to the call, so a
-        long loop over a large capture pays it every time; feed precompile the
-        calls that add variants rather than all of them. The state is
-        process-local and not serializable; call ``state.close()`` when done
-        capturing to release the session, and do not call
-        ``torch._dynamo.reset()`` between calls that share a state (later calls
-        may raise or duplicate variants).
+        To capture incrementally from a loop the caller owns (one example per
+        call, an always-loadable artifact rewritten on disk), use the sibling
+        entry point :meth:`precompile.stateful`; ``recompile_limit`` there
+        defaults to ``max(torch._dynamo.config.recompile_limit, 256)``, while
+        the one-shot default here is
+        ``max(torch._dynamo.config.recompile_limit, len(example_inputs) + 1)``.
 
         With ``tracer="make_fx"``, dynamic shapes are opt-in via
         ``torch._dynamo.decorators.mark_unbacked``
@@ -3438,33 +3379,11 @@ class _PrecompileApi:
                 "precompile training=True currently requires tracer='dynamo' and "
                 "backend='inductor'."
             )
-        stateful = (
-            state is not None or artifact_path is not None or cache_path is not None
-        )
-        dynamo_only = stateful or recompile_limit is not None or dynamic is not None
-        if dynamo_only and tracer != "dynamo":
+        if (recompile_limit is not None or dynamic is not None) and tracer != "dynamo":
             raise ValueError(
-                "precompile state, artifact_path, cache_path, recompile_limit, "
-                "and dynamic require tracer='dynamo'."
-            )
-        if stateful and (artifact_path is None or cache_path is None):
-            raise ValueError(
-                "precompile stateful mode requires both artifact_path and cache_path."
+                "precompile recompile_limit and dynamic require tracer='dynamo'."
             )
         if tracer == "dynamo":
-            if stateful:
-                return _precompile_dynamo_stateful(
-                    fn,
-                    example_inputs,
-                    backend=backend,
-                    decompositions=decompositions,
-                    training=training,
-                    recompile_limit=recompile_limit,
-                    dynamic=dynamic,
-                    state=state,
-                    artifact_path=cast(str, artifact_path),
-                    cache_path=cast(str, cache_path),
-                )
             return _precompile_dynamo(
                 fn,
                 example_inputs,
@@ -3483,6 +3402,114 @@ class _PrecompileApi:
         # sha256 over exactly the bytes returned to the caller (a matched pair loads).
         python_code = compiled.to_python_code()
         return python_code, compiled.to_cache_bytes(python_code)
+
+    def stateful(
+        self,
+        fn: Callable[..., object],
+        *,
+        example_inputs: Sequence[tuple[object, ...]],
+        artifact_path: str,
+        cache_path: str,
+        state: _PrecompileDynamoState | None = None,
+        backend: str = "inductor",
+        training: bool = False,
+        recompile_limit: int | None = None,
+        dynamic: bool | None = None,
+    ) -> tuple[list[object], _PrecompileDynamoState]:
+        """Capture ``fn`` incrementally from a loop the caller owns (Dynamo tracer).
+
+        Some capture regions can only be exercised from the caller's own loop
+        (e.g. a pipelined train step whose batch deque only advances between
+        iterations), so ``precompile`` cannot drive the examples itself. Each
+        ``stateful`` call runs its example tuples for real, records whatever
+        guarded variants they newly exercise into the returned opaque
+        ``state``, REWRITES the artifact and cache files at
+        ``artifact_path``/``cache_path`` atomically, and returns
+        ``(results, state)``: ``results`` is always a list with one entry per
+        example tuple of THIS call (never unwrapped, so a fn that itself
+        returns a list is unambiguous). The capture semantics -- tracer,
+        rejections, guard minimization, the programming-model contract -- are
+        exactly ``precompile(..., tracer="dynamo")``'s; only the delivery
+        differs. API note: this began as a mode of ``precompile`` itself
+        (keyed on passing the paths), and was split into this sibling entry
+        point after review -- both modes returned 2-tuples, so calling the
+        wrong mode failed silently at unpack time and the return annotation
+        was an unhelpful union::
+
+            state = None
+            try:
+                for batch in batches:
+                    [result], state = torch.compiler.precompile.stateful(
+                        step,
+                        example_inputs=[(batch,)],
+                        state=state,
+                        artifact_path="step.py",
+                        cache_path="step.cache",
+                    )
+            finally:
+                if state is not None:
+                    state.close()
+
+        ``state=None`` starts fresh; passing a returned state resumes -- with
+        the same ``fn``, ``backend``, ``training``, ``recompile_limit``, and
+        ``dynamic``, else the call raises rather than produce a mixed
+        artifact. The files on disk are always a loadable artifact for
+        everything captured so far. A call whose guards all hit adds nothing;
+        guard minimization is re-run over every example seen so far on each
+        rebuild, so the state keeps a pre-execution snapshot of every example
+        tuple alive (tensors by reference; a step may freely mutate its
+        container inputs), and later calls see earlier variants because the
+        state carries one isolate-recompiles bucket and one PGO record across
+        calls (a dimension that varies between calls recompiles into a
+        symbolic graph exactly as it would within one call).
+        ``recompile_limit`` caps the variants per capture and defaults to
+        ``max(torch._dynamo.config.recompile_limit, 256)`` because
+        accumulating captures outgrow the config default. ``dynamic`` is
+        forwarded to Dynamo (``None`` keeps the automatic policy). After each
+        rewrite, ``state.summary()`` reports what the artifact carries --
+        calls, examples, variants, graphs, dynamic graphs, and the environment
+        guards minimization dropped from at least one variant (also embedded
+        in the artifact as ``_DROPPED_GUARDS``). Load the on-disk pair
+        directly with ``precompile.load(artifact_path=..., cache_path=...)``.
+        Rewriting is proportional to everything captured so far, not to the
+        call, so a long loop over a large capture pays it every time; feed
+        stateful the calls that add variants rather than all of them. The
+        state is process-local and not serializable; call ``state.close()``
+        when done capturing to release the session, and do not call
+        ``torch._dynamo.reset()`` between calls that share a state (later
+        calls may raise or duplicate variants).
+        """
+        torch._C._log_api_usage_once("torch.compiler.precompile.stateful")
+        if len(example_inputs) == 0:
+            raise ValueError(
+                "precompile.stateful requires at least one example input tuple."
+            )
+        for example in example_inputs:
+            if not isinstance(example, tuple):
+                raise TypeError(
+                    "precompile.stateful example_inputs must be a sequence of "
+                    f"positional-argument tuples, got {type(example).__name__}."
+                )
+        if backend not in ("inductor", "eager"):
+            raise ValueError(
+                f"precompile backend must be 'inductor' or 'eager', got {backend!r}."
+            )
+        if training and backend != "inductor":
+            raise NotImplementedError(
+                "precompile training=True currently requires backend='inductor'."
+            )
+        return _precompile_dynamo_stateful(
+            fn,
+            example_inputs,
+            backend=backend,
+            decompositions=None,
+            training=training,
+            recompile_limit=recompile_limit,
+            dynamic=dynamic,
+            state=state,
+            artifact_path=artifact_path,
+            cache_path=cache_path,
+        )
 
     def load(
         self,
@@ -3696,3 +3723,5 @@ PrecompileError.__module__ = "torch.compiler"
 PrecompileError.__qualname__ = "precompile.PrecompileError"
 _PrecompileApi.load.__module__ = "torch.compiler"
 _PrecompileApi.load.__qualname__ = "precompile.load"
+_PrecompileApi.stateful.__module__ = "torch.compiler"
+_PrecompileApi.stateful.__qualname__ = "precompile.stateful"

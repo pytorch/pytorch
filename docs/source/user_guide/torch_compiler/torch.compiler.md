@@ -54,8 +54,8 @@ With `training=True` and the Inductor backend, Dynamo graphs
 include readable compiled forward and backward code, so served outputs retain a
 `grad_fn` and can be passed to `backward()`. This training mode works across captured
 recompilations and rejects output-tangent patterns not observed during capture (the
-ordinary all-tangents-defined pattern is always covered). Passing
-`artifact_path`/`cache_path` switches `precompile` into stateful capture: each call runs
+ordinary all-tangents-defined pattern is always covered). The sibling entry point
+`torch.compiler.precompile.stateful` captures incrementally: each call runs
 its example tuples for real inside a loop the caller owns, returns a list of that call's
 per-example results plus an opaque `state` to pass back in, and rewrites an
 always-loadable artifact on disk; call `state.close()` when done capturing. See

@@ -1168,9 +1168,8 @@ def helper(x):
             self.assertIn("\nfrom torch._dynamo.testing import rand_strided\n", imports)
             self.assertIn("\nimport torch\n", imports)
 
-    def test_constexpr_source_reconstructs_or_declines(self):
+    def test_constexpr_source_module_enum_rendering(self):
         from torch._inductor.codegen.wrapper import (
-            _constexpr_constant,
             _constexpr_source,
             _render_constexpr_constants,
         )
@@ -1189,18 +1188,34 @@ def helper(x):
         )
         self.assertEqual(imports, ["import plistlib as __inductor_constexpr_module_0"])
 
+    def test_constexpr_constant_enum_interchange(self):
+        from torch._inductor.codegen.wrapper import _constexpr_constant
+
         class Mode(IntEnum):
             EVEN = 2
 
-        self.assertEqual(_constexpr_constant(Mode.EVEN), 2)
-        self.assertEqual(_constexpr_constant(IntFlag("Flags", {"A": 1}).A), 1)
-        text_mode = Enum("TextMode", {"A": "a"}, type=str)
-        self.assertEqual(_constexpr_constant(text_mode.A), "a")
-        float_mode = Enum("FloatMode", {"A": 1.5}, type=float)
-        self.assertEqual(_constexpr_constant(float_mode.A), 1.5)
+        cases = (
+            ("int_enum", Mode.EVEN, 2),
+            ("int_flag", IntFlag("Flags", {"A": 1}).A, 1),
+            ("str_enum", Enum("TextMode", {"A": "a"}, type=str).A, "a"),
+            ("float_enum", Enum("FloatMode", {"A": 1.5}, type=float).A, 1.5),
+        )
+        for name, value, expected in cases:
+            with self.subTest(case=name):
+                self.assertEqual(_constexpr_constant(value), expected)
+
+    def test_constexpr_constant_namedtuple_recursion(self):
+        from torch._inductor.codegen.wrapper import _constexpr_constant
+
+        class Mode(IntEnum):
+            EVEN = 2
+
         Pair = namedtuple("Pair", ("left", "right"))
         nested = {Mode.EVEN: [Mode.EVEN, (Mode.EVEN,), Pair(Mode.EVEN, 3)]}
         self.assertEqual(_constexpr_constant(nested), {2: [2, (2,), Pair(2, 3)]})
+
+    def test_constexpr_constant_namedtuple_with_shifting_new(self):
+        from torch._inductor.codegen.wrapper import _constexpr_constant
 
         class Shifted(namedtuple("ShiftedBase", ("value",))):
             __slots__ = ()
@@ -1211,6 +1226,12 @@ def helper(x):
         shifted = Shifted(1)
         self.assertEqual(_constexpr_constant(shifted).value, 2)
 
+    def test_constexpr_source_declines_local_enum(self):
+        from torch._inductor.codegen.wrapper import (
+            _constexpr_source,
+            _render_constexpr_constants,
+        )
+
         class Local(Enum):
             VALUE = 1
 
@@ -1218,12 +1239,17 @@ def helper(x):
         with self.assertRaisesRegex(RuntimeError, "cannot be written into"):
             _render_constexpr_constants({"MODE": Local.VALUE})
 
+    def test_constexpr_source_declines_main_module_enum(self):
+        from torch._inductor.codegen.wrapper import _constexpr_source
+
         # An enum living in __main__ (an enum defined at the top of a user
         # script) is not importable from the generated module; decline rather
         # than emit a dangling import.
         with patch.object(plistlib.PlistFormat, "__module__", "__main__"):
             self.assertIsNone(_constexpr_source(plistlib.FMT_XML))
 
+    def test_constexpr_source_ordered_set_round_trip(self):
+        from torch._inductor.codegen.wrapper import _constexpr_source
         from torch.utils._ordered_set import OrderedSet
 
         # A set subclass's type and iteration order are semantic: the source
@@ -1235,6 +1261,10 @@ def helper(x):
         reconstructed = eval(source, scope)
         self.assertIs(type(reconstructed), OrderedSet)
         self.assertEqual(list(reconstructed), [2, 1])
+
+    def test_constexpr_source_declines_set_subclasses(self):
+        from torch._inductor.codegen.wrapper import _constexpr_source
+        from torch.utils._ordered_set import OrderedSet
 
         class LocalSet(set):
             pass
@@ -1252,11 +1282,10 @@ def helper(x):
 
         OrderedSubSet.__module__ = "torch.utils._ordered_set"
         OrderedSubSet.__qualname__ = "OrderedSubSet"
-        ordered_set_module.OrderedSubSet = OrderedSubSet
-        try:
+        with patch.object(
+            ordered_set_module, "OrderedSubSet", OrderedSubSet, create=True
+        ):
             self.assertIsNone(_constexpr_source(OrderedSubSet([1])))
-        finally:
-            del ordered_set_module.OrderedSubSet
 
     def test_constexpr_container_subclass_declines(self):
         # Consistent with the set-subclass policy: emitting a container display
@@ -1793,6 +1822,125 @@ def helper(x):
         # x + 1, not x * 2: the "a\nb" constexpr survived both parses intact.
         self.assertEqual(fn(x), res)
         compile(code[0], "<test-generated-wrapper>", "exec")
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_module_enum_constexpr_compiles_in_subprocess_worker(self):
+        # The generated "import plistlib as __inductor_constexpr_module_N" must
+        # execute inside a real compile-worker subprocess, not just the parent.
+        import triton
+        import triton.language as tl
+
+        from torch._inductor.async_compile import AsyncCompile, shutdown_compile_workers
+        from torch._inductor.utils import fresh_cache
+
+        @triton.jit
+        def enum_kernel(
+            in_ptr, out_ptr, numel, MODE: tl.constexpr, BLOCK_SIZE: tl.constexpr
+        ):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            mask = offsets < numel
+            x = tl.load(in_ptr + offsets, mask=mask)
+            if MODE.value == 1:
+                output = x + 1
+            else:
+                output = x * 2
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def fn(x):
+            y = torch.empty_like(x)
+            enum_kernel[(1,)](x, y, x.numel(), plistlib.FMT_XML, BLOCK_SIZE=256)
+            return y
+
+        x = torch.randn(128, device=GPU_TYPE)
+        patched = {"compile_threads": 2, "worker_start_method": "subprocess"}
+        with inductor_config.patch(patched):
+            shutdown_compile_workers()
+            try:
+                AsyncCompile.warm_pool()
+                AsyncCompile.wakeup()
+                AsyncCompile.wait_pool_ready()
+                self.assertTrue(AsyncCompile.use_process_pool())
+                logger_name = "torch._inductor.async_compile"
+                with (
+                    fresh_cache(),
+                    self.assertNoLogs(logger_name, level="WARNING"),
+                ):
+                    res, code = run_and_get_code(torch.compile(fn), x)
+            finally:
+                shutdown_compile_workers()
+        self.assertEqual(fn(x), res)
+        self.assertIn("PlistFormat['FMT_XML']", code[0])
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_constexpr_module_missing_in_worker_falls_back_in_process(self):
+        # Compile workers snapshot PYTHONPATH when the pool spawns, so a module
+        # added to sys.path afterwards imports fine in the parent (where codegen
+        # validates it) but raises ModuleNotFoundError in the worker. The
+        # compile must fall back to in-process compilation instead of failing.
+        import importlib
+        import os
+        import sys
+        import tempfile
+
+        import triton
+        import triton.language as tl
+
+        from torch._inductor.async_compile import AsyncCompile, shutdown_compile_workers
+        from torch._inductor.utils import fresh_cache
+
+        @triton.jit
+        def probe_kernel(
+            in_ptr, out_ptr, numel, MODE: tl.constexpr, BLOCK_SIZE: tl.constexpr
+        ):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            mask = offsets < numel
+            x = tl.load(in_ptr + offsets, mask=mask)
+            if MODE.value == 1:
+                output = x + 1
+            else:
+                output = x * 2
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        module_name = f"inductor_constexpr_probe_{os.getpid()}"
+        module_src = "import enum\n\nclass Mode(enum.Enum):\n    ADD = 1\n    MUL = 2\n"
+        x = torch.randn(128, device=GPU_TYPE)
+        patched = {"compile_threads": 2, "worker_start_method": "subprocess"}
+        with tempfile.TemporaryDirectory() as tmpdir, inductor_config.patch(patched):
+            with open(os.path.join(tmpdir, f"{module_name}.py"), "w") as f:
+                f.write(module_src)
+            shutdown_compile_workers()
+            try:
+                # Spawn the worker pool before the module becomes importable so
+                # the workers' PYTHONPATH snapshot cannot contain tmpdir.
+                AsyncCompile.warm_pool()
+                AsyncCompile.wakeup()
+                AsyncCompile.wait_pool_ready()
+                self.assertTrue(AsyncCompile.use_process_pool())
+                sys.path.insert(0, tmpdir)
+                importlib.invalidate_caches()
+                mod = importlib.import_module(module_name)
+
+                def fn(x):
+                    y = torch.empty_like(x)
+                    probe_kernel[(1,)](x, y, x.numel(), mod.Mode.ADD, BLOCK_SIZE=256)
+                    return y
+
+                logger_name = "torch._inductor.async_compile"
+                with (
+                    fresh_cache(),
+                    self.assertLogs(logger_name, level="WARNING") as logs,
+                ):
+                    res, code = run_and_get_code(torch.compile(fn), x)
+                self.assertTrue(
+                    any("in-process compilation" in msg for msg in logs.output)
+                )
+                self.assertEqual(fn(x), res)
+                self.assertIn(module_name, code[0])
+            finally:
+                if tmpdir in sys.path:
+                    sys.path.remove(tmpdir)
+                sys.modules.pop(module_name, None)
+                shutdown_compile_workers()
 
     @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
     def test_unspellable_enum_constexpr_errors_clearly(self):

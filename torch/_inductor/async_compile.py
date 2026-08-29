@@ -85,6 +85,34 @@ size_hints_regex = re.compile(
     r"size_hints=(\{.*?\})",
 )
 
+# Matches the module imports that user-defined-Triton constexpr rendering
+# (torch/_inductor/codegen/wrapper.py, _constexpr_module_ref) emits into
+# generated kernel source.
+_constexpr_module_import_re = re.compile(
+    r"^import ([\w.]+) as __inductor_constexpr_module_\d+$", re.MULTILINE
+)
+_worker_missing_module_re = re.compile(r"No module named '([^']+)'")
+
+
+def _constexpr_module_missing_in_worker(source_code: str, details: str) -> str | None:
+    """Return the constexpr-referenced module a compile worker failed to import.
+
+    Codegen validates these imports in the parent process, but workers snapshot
+    sys.path/PYTHONPATH when the pool spawns, so a module made importable
+    afterwards (e.g. via sys.path.append) can raise ModuleNotFoundError only in
+    the worker. Returns None if the failure is anything else.
+    """
+    if "ModuleNotFoundError" not in details:
+        return None
+    missing = _worker_missing_module_re.search(details)
+    if missing is None:
+        return None
+    name = missing.group(1)
+    for module in _constexpr_module_import_re.findall(source_code):
+        if module == name or module.startswith(name + "."):
+            return module
+    return None
+
 
 def _pycodecache_kernel_compile_env() -> dict[str, str | None]:
     env_vars = [
@@ -546,7 +574,26 @@ class AsyncCompile:
                 try:
                     kernel, elapsed_us = task.result()
                 except SubprocException as e:
-                    raise e.with_name(kernel_name) from e
+                    module = _constexpr_module_missing_in_worker(source_code, e.details)
+                    if module is None:
+                        raise e.with_name(kernel_name) from e
+                    # The parent validated this import at codegen time, so only
+                    # the worker's stale module search path is at fault; compile
+                    # in-process instead of failing the whole compile.
+                    log.warning(
+                        "Compile worker could not import module %r referenced by "
+                        "a constexpr of Triton kernel %s; workers snapshot "
+                        "PYTHONPATH when the pool spawns. Falling back to "
+                        "in-process compilation. Make the module importable at "
+                        "worker startup (installed or on PYTHONPATH before "
+                        "compile) to keep parallel compile.",
+                        module,
+                        kernel_name,
+                    )
+                    CompiledTritonKernels.remove_future(source_code)
+                    return self._compile_triton_in_process(
+                        kernel_name, source_code, load_kernel, compile_id, is_backward
+                    )
 
                 # Now that we've compiled, we should clear the future
                 # so it can't be used again
@@ -567,32 +614,44 @@ class AsyncCompile:
             CompiledTritonKernels.save(source_code, future)
             return future
         else:
-            with dynamo_timed(
-                "async_compile.precompile",
-                log_pt2_compile_event=True,
-                dynamo_compile_column_us="triton_compile_time_us",
-                log_waitcounter=True,
-                waitcounter_name_override="compile_triton",
-            ):
-                fail = None
-                try:
-                    start_ns = time_ns()
-                    _set_triton_ptxas_path()
-                    _set_triton_libdevice_path()
-                    kernel = load_kernel()
-                    kernel.set_compile_info(compile_id, is_backward)
-                    kernel.precompile(
-                        warm_cache_only=False,
-                        static_triton_bundle_key=CompiledTritonKernels.key(source_code),
-                    )
-                    elapsed_us = (time_ns() - start_ns) // 1000
-                    _emit_triton_kernel_compile_metric(kernel, kernel_name, elapsed_us)
-                    return kernel
-                except Exception as e:
-                    fail = str(e)
-                    raise
-                finally:
-                    log_triton_builds(fail=fail)
+            return self._compile_triton_in_process(
+                kernel_name, source_code, load_kernel, compile_id, is_backward
+            )
+
+    @staticmethod
+    def _compile_triton_in_process(
+        kernel_name: str,
+        source_code: str,
+        load_kernel: Callable[[], CachingAutotuner],
+        compile_id,
+        is_backward: bool,
+    ) -> CachingAutotuner:
+        with dynamo_timed(
+            "async_compile.precompile",
+            log_pt2_compile_event=True,
+            dynamo_compile_column_us="triton_compile_time_us",
+            log_waitcounter=True,
+            waitcounter_name_override="compile_triton",
+        ):
+            fail = None
+            try:
+                start_ns = time_ns()
+                _set_triton_ptxas_path()
+                _set_triton_libdevice_path()
+                kernel = load_kernel()
+                kernel.set_compile_info(compile_id, is_backward)
+                kernel.precompile(
+                    warm_cache_only=False,
+                    static_triton_bundle_key=CompiledTritonKernels.key(source_code),
+                )
+                elapsed_us = (time_ns() - start_ns) // 1000
+                _emit_triton_kernel_compile_metric(kernel, kernel_name, elapsed_us)
+                return kernel
+            except Exception as e:
+                fail = str(e)
+                raise
+            finally:
+                log_triton_builds(fail=fail)
 
     def multi_kernel(self, *args, **kwargs) -> Any:
         from torch._inductor.codegen.multi_kernel import MultiKernelCall

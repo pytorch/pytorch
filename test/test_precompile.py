@@ -1946,13 +1946,12 @@ class TestPrecompile(TestCase):
             state = None
             for shape, expected_variants in (((2, 4), 1), ((3, 4), 2), ((2, 4), 2)):
                 x = torch.randn(*shape)
-                [result], state = torch.compiler.precompile(
+                [result], state = torch.compiler.precompile.stateful(
                     _precompile_dynamo_dynamic,
                     example_inputs=[(x,)],
                     state=state,
                     artifact_path=artifact_path,
                     cache_path=cache_path,
-                    tracer="dynamo",
                     backend="eager",
                 )
                 self.assertEqual(result, _precompile_dynamo_dynamic(x))
@@ -1987,13 +1986,12 @@ class TestPrecompile(TestCase):
             state = None
             for shape in ((2, 3), (4, 5)):
                 x = torch.randn(*shape, requires_grad=True)
-                [out], state = torch.compiler.precompile(
+                [out], state = torch.compiler.precompile.stateful(
                     _precompile_dynamo_dynamic,
                     example_inputs=[(x,)],
                     state=state,
                     artifact_path=artifact_path,
                     cache_path=cache_path,
-                    tracer="dynamo",
                     training=True,
                 )
                 # Each call is a real training step: its backward runs before
@@ -2021,22 +2019,22 @@ class TestPrecompile(TestCase):
                 "artifact_path": os.path.join(tmp, "f.py"),
                 "cache_path": os.path.join(tmp, "f.cache"),
             }
-            kwargs = {"tracer": "dynamo", "backend": "eager", **paths}
+            kwargs = {"backend": "eager", **paths}
             x = torch.randn(4)
-            _, state = torch.compiler.precompile(
+            _, state = torch.compiler.precompile.stateful(
                 _precompile_dynamo_stateful_flaky,
                 example_inputs=[(x, 1)],
                 state=None,
                 **kwargs,
             )
             with self.assertRaisesRegex(PrecompileError, "graph breaks"):
-                torch.compiler.precompile(
+                torch.compiler.precompile.stateful(
                     _precompile_dynamo_stateful_flaky,
                     example_inputs=[(x, 3)],
                     state=state,
                     **kwargs,
                 )
-            [result], state = torch.compiler.precompile(
+            [result], state = torch.compiler.precompile.stateful(
                 _precompile_dynamo_stateful_flaky,
                 example_inputs=[(x, 2)],
                 state=state,
@@ -2060,9 +2058,9 @@ class TestPrecompile(TestCase):
                 "artifact_path": os.path.join(tmp, "g.py"),
                 "cache_path": os.path.join(tmp, "g.cache"),
             }
-            kwargs = {"tracer": "dynamo", "backend": "eager", "dynamic": False, **paths}
+            kwargs = {"backend": "eager", "dynamic": False, **paths}
             ok = torch.tensor([0])
-            _, state = torch.compiler.precompile(
+            _, state = torch.compiler.precompile.stateful(
                 _precompile_dynamo_gather,
                 example_inputs=[(torch.randn(2), ok)],
                 state=None,
@@ -2071,14 +2069,14 @@ class TestPrecompile(TestCase):
             self.addCleanup(state.close)
             with self.assertRaisesRegex(IndexError, "out of bounds"):
                 # New shape -> new static variant compiles, then the step fails.
-                torch.compiler.precompile(
+                torch.compiler.precompile.stateful(
                     _precompile_dynamo_gather,
                     example_inputs=[(torch.randn(3), torch.tensor([99]))],
                     state=state,
                     **kwargs,
                 )
             x = torch.randn(4)
-            [result], state = torch.compiler.precompile(
+            [result], state = torch.compiler.precompile.stateful(
                 _precompile_dynamo_gather,
                 example_inputs=[(x, ok)],
                 state=state,
@@ -2101,14 +2099,14 @@ class TestPrecompile(TestCase):
                 "artifact_path": os.path.join(tmp, "u.py"),
                 "cache_path": os.path.join(tmp, "u.cache"),
             }
-            kwargs = {"tracer": "dynamo", "backend": "eager", **paths}
+            kwargs = {"backend": "eager", **paths}
             x = torch.randn(4)
-            _, state = torch.compiler.precompile(
+            _, state = torch.compiler.precompile.stateful(
                 _precompile_dynamo_scalar, example_inputs=[(x, 1)], state=None, **kwargs
             )
             self.addCleanup(state.close)
             with self.assertRaisesRegex(TypeError, "does not match the positional"):
-                torch.compiler.precompile(
+                torch.compiler.precompile.stateful(
                     _precompile_dynamo_scalar,
                     example_inputs=[(x, 1, 2)],
                     state=state,
@@ -2117,13 +2115,13 @@ class TestPrecompile(TestCase):
             # A batch with a bad example records NOTHING, including the good
             # examples before it -- the message says so.
             with self.assertRaisesRegex(TypeError, "No example from this call"):
-                torch.compiler.precompile(
+                torch.compiler.precompile.stateful(
                     _precompile_dynamo_scalar,
                     example_inputs=[(x, 2), (x, 1, 2)],
                     state=state,
                     **kwargs,
                 )
-            [result], state = torch.compiler.precompile(
+            [result], state = torch.compiler.precompile.stateful(
                 _precompile_dynamo_scalar,
                 example_inputs=[(x, 3)],
                 state=state,
@@ -2147,11 +2145,10 @@ class TestPrecompile(TestCase):
             }
             state = None
             for size in (3, 4):  # the second call recompiles a dynamic variant
-                _, state = torch.compiler.precompile(
+                _, state = torch.compiler.precompile.stateful(
                     _precompile_dynamo_env_scale,
                     example_inputs=[(torch.randn(size),)],
                     state=state,
-                    tracer="dynamo",
                     backend="eager",
                     **paths,
                 )
@@ -2204,22 +2201,20 @@ class TestPrecompile(TestCase):
                 "artifact_path": os.path.join(tmp, "d.py"),
                 "cache_path": os.path.join(tmp, "d.cache"),
             }
-            _, state = torch.compiler.precompile(
+            _, state = torch.compiler.precompile.stateful(
                 _precompile_dynamo_dynamic,
                 example_inputs=[(x,)],
                 state=None,
-                tracer="dynamo",
                 backend="eager",
                 dynamic=False,
                 **paths,
             )
             self.addCleanup(state.close)
             with self.assertRaisesRegex(ValueError, "dynamic=True"):
-                torch.compiler.precompile(
+                torch.compiler.precompile.stateful(
                     _precompile_dynamo_dynamic,
                     example_inputs=[(x,)],
                     state=state,
-                    tracer="dynamo",
                     backend="eager",
                     dynamic=True,
                     **paths,
@@ -2285,21 +2280,19 @@ class TestPrecompile(TestCase):
                 "cache_path": os.path.join(tmp, "m.cache"),
             }
             x, y = clones()
-            [(out_a, _out_b)], state = torch.compiler.precompile(
+            [(out_a, _out_b)], state = torch.compiler.precompile.stateful(
                 _precompile_dynamo_independent_outputs,
                 example_inputs=[(x, y)],
                 state=None,
-                tracer="dynamo",
                 training=True,
                 **paths,
             )
             self.addCleanup(state.close)
             out_a.sum().backward()  # partial: only output 0 gets a tangent
-            _, state = torch.compiler.precompile(
+            _, state = torch.compiler.precompile.stateful(
                 _precompile_dynamo_independent_outputs,
                 example_inputs=[clones()],
                 state=state,
-                tracer="dynamo",
                 training=True,
                 **paths,
             )
@@ -2331,11 +2324,10 @@ class TestPrecompile(TestCase):
                 automatic_dynamic_shapes=True, assume_static_by_default=True
             ):
                 for size in (2, 3):  # the recompile logs a guard failure
-                    _, state = torch.compiler.precompile(
+                    _, state = torch.compiler.precompile.stateful(
                         _precompile_dynamo_dynamic,
                         example_inputs=[(torch.randn(size, 4),)],
                         state=state,
-                        tracer="dynamo",
                         backend="eager",
                         **paths,
                     )
@@ -2346,11 +2338,10 @@ class TestPrecompile(TestCase):
             self.assertNotIn(code, guard_failures)
             self.assertIn("closed", repr(state))
             with self.assertRaisesRegex(ValueError, "closed state"):
-                torch.compiler.precompile(
+                torch.compiler.precompile.stateful(
                     _precompile_dynamo_dynamic,
                     example_inputs=[(torch.randn(2, 4),)],
                     state=state,
-                    tracer="dynamo",
                     backend="eager",
                     **paths,
                 )
@@ -2378,11 +2369,10 @@ class TestPrecompile(TestCase):
             }
             x = torch.randn(4, requires_grad=True)
             y = torch.randn(4, requires_grad=True)
-            [(out_a, _)], state = torch.compiler.precompile(
+            [(out_a, _)], state = torch.compiler.precompile.stateful(
                 _precompile_dynamo_independent_outputs,
                 example_inputs=[(x, y)],
                 state=None,
-                tracer="dynamo",
                 training=True,
                 **paths,
             )
@@ -2400,11 +2390,10 @@ class TestPrecompile(TestCase):
                 with self.assertRaisesRegex(Exception, "injected mask-compile"):
                     out_a.sum().backward()
                 with self.assertLogs("torch._precompile", level="WARNING") as logs:
-                    _, state = torch.compiler.precompile(
+                    _, state = torch.compiler.precompile.stateful(
                         _precompile_dynamo_independent_outputs,
                         example_inputs=[(x.detach().clone().requires_grad_(), y)],
                         state=state,
-                        tracer="dynamo",
                         training=True,
                         **paths,
                     )
@@ -2432,15 +2421,16 @@ class TestPrecompile(TestCase):
 
     def test_tracer_dynamo_stateful_validation(self):
         x = torch.randn(3)
-        with self.assertRaisesRegex(ValueError, "both artifact_path and cache_path"):
-            torch.compiler.precompile(
+        # Both paths are mandatory keyword-only arguments of stateful().
+        with self.assertRaisesRegex(TypeError, "cache_path"):
+            torch.compiler.precompile.stateful(
                 _precompile_dynamo_torch_sin,
                 example_inputs=[(x,)],
-                tracer="dynamo",
                 backend="eager",
                 artifact_path="only-one.py",
             )
-        with self.assertRaisesRegex(ValueError, "require tracer='dynamo'"):
+        # The one-shot entry point no longer takes the stateful kwargs at all.
+        with self.assertRaisesRegex(TypeError, "artifact_path"):
             torch.compiler.precompile(
                 lambda t: t + 1,
                 example_inputs=[(x,)],
@@ -2456,25 +2446,24 @@ class TestPrecompile(TestCase):
                 "artifact_path": os.path.join(tmp, "a.py"),
                 "cache_path": os.path.join(tmp, "a.cache"),
             }
-            _, state = torch.compiler.precompile(
+            _, state = torch.compiler.precompile.stateful(
                 _precompile_dynamo_torch_sin,
                 example_inputs=[(x,)],
-                tracer="dynamo",
                 backend="eager",
                 **paths,
             )
             self.addCleanup(state.close)
-            resume = {"example_inputs": [(x,)], "tracer": "dynamo", "state": state}
+            resume = {"example_inputs": [(x,)], "state": state}
             with self.assertRaisesRegex(ValueError, "mixed artifact"):
-                torch.compiler.precompile(
+                torch.compiler.precompile.stateful(
                     _precompile_dynamo_torch_sin, backend="inductor", **resume, **paths
                 )
             with self.assertRaisesRegex(ValueError, "resumes only the function"):
-                torch.compiler.precompile(
+                torch.compiler.precompile.stateful(
                     _precompile_dynamo_dynamic, backend="eager", **resume, **paths
                 )
             with self.assertRaisesRegex(ValueError, "recompile_limit"):
-                torch.compiler.precompile(
+                torch.compiler.precompile.stateful(
                     _precompile_dynamo_torch_sin,
                     backend="eager",
                     recompile_limit=99,
@@ -2482,7 +2471,7 @@ class TestPrecompile(TestCase):
                     **paths,
                 )
             with self.assertRaisesRegex(ValueError, "training=True"):
-                torch.compiler.precompile(
+                torch.compiler.precompile.stateful(
                     _precompile_dynamo_torch_sin,
                     backend="inductor",
                     training=True,
@@ -2490,10 +2479,9 @@ class TestPrecompile(TestCase):
                     **paths,
                 )
             with self.assertRaisesRegex(TypeError, "previous stateful precompile"):
-                torch.compiler.precompile(
+                torch.compiler.precompile.stateful(
                     _precompile_dynamo_torch_sin,
                     example_inputs=[(x,)],
-                    tracer="dynamo",
                     backend="eager",
                     state=object(),
                     **paths,
@@ -2502,10 +2490,9 @@ class TestPrecompile(TestCase):
             # get the same clean TypeError, not an AttributeError from using
             # its garbage scan.
             with self.assertRaisesRegex(TypeError, "previous stateful precompile"):
-                torch.compiler.precompile(
+                torch.compiler.precompile.stateful(
                     _precompile_dynamo_torch_sin,
                     example_inputs=[(x,)],
-                    tracer="dynamo",
                     backend="eager",
                     state=types.SimpleNamespace(environment_scan="junk"),
                     **paths,
@@ -2521,15 +2508,15 @@ class TestPrecompile(TestCase):
                 "artifact_path": os.path.join(tmp, "c.py"),
                 "cache_path": os.path.join(tmp, "c.cache"),
             }
-            kwargs = {"tracer": "dynamo", "backend": "eager", **paths}
+            kwargs = {"backend": "eager", **paths}
             x = torch.randn(4)
-            _, state = torch.compiler.precompile(
+            _, state = torch.compiler.precompile.stateful(
                 _precompile_dynamo_scalar, example_inputs=[(x, 1)], state=None, **kwargs
             )
             self.addCleanup(state.close)
             scan = state.environment_scan
             self.assertIsInstance(scan, dict)
-            _, state = torch.compiler.precompile(
+            _, state = torch.compiler.precompile.stateful(
                 _precompile_dynamo_scalar,
                 example_inputs=[(x, 2)],
                 state=state,
@@ -4329,11 +4316,10 @@ class TestPrecompile(TestCase):
                 cache_path=os.path.join(tmp, "artifact.cache"),
             )
             t = torch.randn(2)
-            results, state = torch.compiler.precompile(
+            results, state = torch.compiler.precompile.stateful(
                 _precompile_dynamo_mutating_step,
                 example_inputs=[([1, 2], t)],
                 state=None,
-                tracer="dynamo",
                 backend="eager",
                 **paths,
             )
@@ -4342,11 +4328,10 @@ class TestPrecompile(TestCase):
             self.assertEqual(results, [t * 3])
             # A later call still records and rewrites: the recorded snapshot,
             # not the mutated live list, is re-checked on rebuild.
-            [result], state = torch.compiler.precompile(
+            [result], state = torch.compiler.precompile.stateful(
                 _precompile_dynamo_mutating_step,
                 example_inputs=[([5, 6, 7], t)],
                 state=state,
-                tracer="dynamo",
                 backend="eager",
                 **paths,
             )
@@ -4360,11 +4345,10 @@ class TestPrecompile(TestCase):
         # unwrapped, so a fn that itself returns a list stays unambiguous.
         with tempfile.TemporaryDirectory() as tmp:
             xs = [torch.randn(2, 4), torch.randn(3, 4)]
-            results, state = torch.compiler.precompile(
+            results, state = torch.compiler.precompile.stateful(
                 _precompile_dynamo_dynamic,
                 example_inputs=[(xs[0],), (xs[1],)],
                 state=None,
-                tracer="dynamo",
                 backend="eager",
                 artifact_path=os.path.join(tmp, "artifact.py"),
                 cache_path=os.path.join(tmp, "artifact.cache"),
@@ -4411,11 +4395,10 @@ class TestPrecompile(TestCase):
                 cache_path=os.path.join(tmp, "artifact.cache"),
             )
             x = torch.randn(3)
-            _, state = torch.compiler.precompile(
+            _, state = torch.compiler.precompile.stateful(
                 _precompile_dynamo_torch_sin,
                 example_inputs=[(x,)],
                 state=None,
-                tracer="dynamo",
                 backend="eager",
                 **paths,
             )
@@ -4462,23 +4445,21 @@ class TestPrecompile(TestCase):
                 cache_path=os.path.join(tmp, "artifact.cache"),
             )
             x = torch.randn(4)
-            _, state = torch.compiler.precompile(
+            _, state = torch.compiler.precompile.stateful(
                 _precompile_dynamo_scalar,
                 example_inputs=[(x, 2)],
                 state=None,
                 recompile_limit=1,
-                tracer="dynamo",
                 backend="eager",
                 **paths,
             )
             self.addCleanup(state.close)
             with self.assertRaisesRegex(PrecompileError, r"close\(\) this state"):
-                torch.compiler.precompile(
+                torch.compiler.precompile.stateful(
                     _precompile_dynamo_scalar,
                     example_inputs=[(x, 3)],
                     state=state,
                     recompile_limit=1,
-                    tracer="dynamo",
                     backend="eager",
                     **paths,
                 )
@@ -4490,11 +4471,10 @@ class TestPrecompile(TestCase):
                 cache_path=os.path.join(tmp, "artifact.cache"),
             )
             x = torch.randn(2, 4)
-            _, state = torch.compiler.precompile(
+            _, state = torch.compiler.precompile.stateful(
                 _precompile_dynamo_dynamic,
                 example_inputs=[(x,)],
                 state=None,
-                tracer="dynamo",
                 backend="eager",
                 **paths,
             )
@@ -4506,11 +4486,10 @@ class TestPrecompile(TestCase):
                 with self.assertRaisesRegex(
                     PrecompileError, "can no longer be rendered"
                 ):
-                    torch.compiler.precompile(
+                    torch.compiler.precompile.stateful(
                         _precompile_dynamo_dynamic,
                         example_inputs=[(torch.randn(3, 4),)],
                         state=state,
-                        tracer="dynamo",
                         backend="eager",
                         **paths,
                     )
@@ -4524,11 +4503,10 @@ class TestPrecompile(TestCase):
         from torch._precompile import _teardown_dynamo_capture
 
         with tempfile.TemporaryDirectory() as tmp:
-            _, state = torch.compiler.precompile(
+            _, state = torch.compiler.precompile.stateful(
                 _precompile_dynamo_torch_sin,
                 example_inputs=[(torch.randn(3),)],
                 state=None,
-                tracer="dynamo",
                 backend="eager",
                 artifact_path=os.path.join(tmp, "artifact.py"),
                 cache_path=os.path.join(tmp, "artifact.cache"),

@@ -155,10 +155,12 @@ def _constexpr_module_ref(
     if module not in module_aliases:
         alias = f"__inductor_constexpr_module_{len(module_aliases)}"
         module_aliases[module] = alias
-        # Known limitation: async-compile subprocess workers snapshot
-        # PYTHONPATH when the pool is spawned, so a module importable in the
-        # parent process may fail to import when the worker executes this
-        # generated import.
+        # Async-compile subprocess workers snapshot PYTHONPATH when the pool
+        # is spawned, so a module importable in the parent process may fail to
+        # import when the worker executes this generated import. AsyncCompile
+        # detects that ModuleNotFoundError (matching this exact import shape;
+        # see _constexpr_module_missing_in_worker in async_compile.py) and
+        # falls back to in-process compilation for the kernel.
         imports.append(f"import {module} as {alias}")
     return module_aliases[module]
 
