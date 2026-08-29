@@ -4,7 +4,6 @@ import contextlib
 import copy
 import functools
 import itertools
-import unittest
 from collections import defaultdict
 from collections.abc import Iterable
 
@@ -57,11 +56,6 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 
 c10d_ops = torch.ops.c10d
 funcol = torch.ops.c10d_functional
-
-from torch.testing._internal.common_fsdp import get_devtype
-
-
-device_type = torch.device(get_devtype())
 
 
 class TestReplicateForwardInputs(FSDPTestMultiThread):
