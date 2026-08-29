@@ -10,9 +10,10 @@ namespace torch::jit {
 struct PeepholeOptimizeAliasSensitiveImpl {
   PeepholeOptimizeAliasSensitiveImpl(
       std::shared_ptr<Graph> graph,
-      bool shape_peepholes)
+      bool shape_peepholes,
+      AliasDb& alias_db)
       : graph_(std::move(graph)),
-        aliasDb_(std::make_unique<AliasDb>(graph_)),
+        aliasDb_(alias_db),
         shape_peepholes_(shape_peepholes) {}
 
   bool run() {
@@ -53,14 +54,14 @@ struct PeepholeOptimizeAliasSensitiveImpl {
         // This is to handle potential resize_ calls, however unlikely.
         // If we add more checks related to resize_ in the graph,
         // factor this out like collectResizeSet in shape_analysis.
-        if (!aliasDb_->hasWriters(node->output())) {
+        if (!aliasDb_.hasWriters(node->output())) {
           for (const Use& dim_use : dim_uses) {
             replaceWithIValue(dim_use.user->output(), output_size);
           }
           changed = true;
         } else {
           for (const Use& dim_use : dim_uses) {
-            if (aliasDb_->moveAfterTopologicallyValid(node, dim_use.user)) {
+            if (aliasDb_.moveAfterTopologicallyValid(node, dim_use.user)) {
               replaceWithIValue(dim_use.user->output(), output_size);
               changed = true;
             }
@@ -129,7 +130,7 @@ struct PeepholeOptimizeAliasSensitiveImpl {
   }
 
   bool tryToReplaceOutputWithInput(Value* input, Value* output) {
-    if (!aliasDb_->safeToChangeAliasingRelationship(input, output)) {
+    if (!aliasDb_.safeToChangeAliasingRelationship(input, output)) {
       return false;
     }
     // whenever we replace an output with an input, all of the aliasing
@@ -141,7 +142,7 @@ struct PeepholeOptimizeAliasSensitiveImpl {
     // invalidating all of the memory dag caches, we just keep a set of values
     // which are "stale" (aliasing properties not up to date), and avoid doing
     // further optimizations on values which alias them
-    if (aliasDb_->mayAlias({input, output}, stale_alias_values_)) {
+    if (aliasDb_.mayAlias({input, output}, stale_alias_values_)) {
       return false;
     }
     output->replaceAllUsesWith(input);
@@ -152,15 +153,23 @@ struct PeepholeOptimizeAliasSensitiveImpl {
 
   ValueSet stale_alias_values_;
   std::shared_ptr<Graph> graph_;
-  std::unique_ptr<AliasDb> aliasDb_;
+  AliasDb& aliasDb_;
   bool shape_peepholes_;
 };
 
 bool PeepholeOptimizeAliasSensitive(
     const std::shared_ptr<Graph>& graph,
-    bool shape_peepholes) {
-  PeepholeOptimizeAliasSensitiveImpl opt(graph, shape_peepholes);
+    bool shape_peepholes,
+    AliasDb& alias_db) {
+  PeepholeOptimizeAliasSensitiveImpl opt(graph, shape_peepholes, alias_db);
   return opt.run();
+}
+
+bool PeepholeOptimizeAliasSensitive(
+    const std::shared_ptr<Graph>& graph,
+    bool shape_peepholes) {
+  AliasDb alias_db(graph);
+  return PeepholeOptimizeAliasSensitive(graph, shape_peepholes, alias_db);
 }
 
 } // namespace torch::jit
