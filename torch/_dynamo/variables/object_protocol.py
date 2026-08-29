@@ -2211,7 +2211,6 @@ def object_generic_getattr(
     tx: "InstructionTranslatorBase",
     obj: VariableTracker,
     name: str,
-    skip_getattr_fallback: bool = False,
 ) -> VariableTracker:
     """Dynamo's PyObject_GenericGetAttr.
 
@@ -2227,8 +2226,11 @@ def object_generic_getattr(
       3. obj.lookup_instance_dict — instance __dict__
       4-5. obj.resolve_type_attr — non-data descriptor / plain class var
       5b. obj.dynamic_getattr_fallback — attrs with non-standard storage
-      6. obj.call_getattr_fallback — __getattr__
       7. AttributeError
+
+    There is deliberately no step 6 (__getattr__): CPython chains to
+    __getattr__ in _Py_slot_tp_getattr_hook, one level above GenericGetAttr,
+    which is VariableTracker.tp_getattro_impl here.
     """
     from .user_defined import is_data_descriptor
 
@@ -2260,12 +2262,6 @@ def object_generic_getattr(
     dynamic_result = obj.dynamic_getattr_fallback(tx, name)
     if dynamic_result is not None:
         return dynamic_result
-
-    # Step 6: __getattr__ fallback.
-    if not skip_getattr_fallback:
-        getattr_result = obj.call_getattr_fallback(tx, name)
-        if getattr_result is not None:
-            return getattr_result
 
     # Step 7: Attribute not found.
     try:
