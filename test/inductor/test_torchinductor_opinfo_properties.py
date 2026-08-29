@@ -57,6 +57,8 @@ from torch.testing._internal.common_utils import (
     getRocmVersion,
     IS_FBCODE,
     IS_WINDOWS,
+    isRocmArchAnyOf,
+    MI200_ARCH,
     parametrize,
     skipIfTorchDynamo,
     TEST_WITH_ASAN,
@@ -709,6 +711,17 @@ def is_expected_failure(device_type, op_name, backend, test_type, dtype=None):
             FBCODE_XFAIL_DICTS.get(test_type, {}).get(backend, {}).get(op_name, set())
         )
         xfails = xfails | fbcode_xfails
+    if (
+        test_type == "batch_invariance"
+        and backend == "inductor_default"
+        and op_name == "log1p"
+        and isRocmArchAnyOf(MI200_ARCH)
+    ):
+        # log1p fp32 batch invariance holds on MI200 (gfx90a) but not on
+        # MI300/MI350, which stay xfailed (#191552). Checked at runtime, not
+        # in ROCM_BATCH_INVARIANCE_XFAILS, because the arch query would force
+        # import-time HIP init that this module otherwise avoids.
+        xfails.discard(fp32)
     return dtype in xfails or ALL in xfails
 
 

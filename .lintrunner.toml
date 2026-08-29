@@ -18,6 +18,7 @@ exclude_patterns = [
     'torch/_inductor/autoheuristic/artifacts/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
+    'torch/_inductor/kernel/vendored_templates/flydsl/kernels/**',
     'torch/_vendor/**',
     'scripts/**',
     'test/generated_type_hints_smoketest.py',
@@ -134,6 +135,7 @@ include_patterns = [
 exclude_patterns = [
     'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
+    'torch/_inductor/kernel/vendored_templates/flydsl/kernels/**',
     'torch/_vendor/**',
 ]
 command = [
@@ -259,12 +261,9 @@ exclude_patterns = [
     'c10/mobile/CPUProfilingAllocator.cpp',
     'c10/util/accumulate.h',
     'c10/util/ApproximateClock.cpp',
-    'c10/util/BFloat16-math.h',
     'c10/util/generic_math.h',
     'c10/util/IntrusiveList.h',
-    'c10/util/irange.h',
     'c10/util/llvmMathExtras.h',
-    'c10/util/MathConstants.h',
     'c10/util/NetworkFlow.cpp',
     'c10/util/order_preserving_flat_hash_map.h',
     'c10/util/overflows.h',
@@ -276,6 +275,9 @@ exclude_patterns = [
     'torch/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cpp',
     'torch/headeronly/util/bit_cast.h',
     'torch/headeronly/util/complex.h',
+    'torch/headeronly/util/BFloat16-math.h',
+    'torch/headeronly/util/irange.h',
+    'torch/headeronly/util/MathConstants.h',
 ]
 init_command = [
     'python3',
@@ -320,11 +322,13 @@ include_patterns = [
     'torch/headeronly/macros/Export.h',
     'torch/headeronly/macros/Macros.h',
     'torch/headeronly/util/BFloat16.h',
+    'torch/headeronly/util/BFloat16-math.h',
     'torch/headeronly/util/Half.h',
     'torch/headeronly/util/TypeSafeSignMath.h',
     'torch/headeronly/util/bit_cast.h',
     'torch/headeronly/util/complex.h',
     'torch/headeronly/util/floating_point_utils.h',
+    'torch/headeronly/util/irange.h',
 ]
 exclude_patterns = [
     '**/fb/**',
@@ -461,6 +465,7 @@ exclude_patterns=[
     '**/*.png',
     '**/*.gz',
     '**/*.patch',
+    'cmake/bolt_profiles/torch.tar.zst',
 ]
 command = [
     'python3',
@@ -513,7 +518,6 @@ exclude_patterns = [
     'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
-    '.ci/docker/common/install_rocm_drm.sh',
     '.lintrunner.toml',
     '**/*.patch',
 ]
@@ -589,29 +593,12 @@ exclude_patterns = [
     'third_party/concurrentqueue/**',
     # Pre-existing violations; burn down over time. Nothing may be added here.
     'aten/src/**',
-    'c10/core/**',
-    'c10/test/**',
     'c10/util/**',
     'test/cpp/**',
     'test/cpp_extensions/**',
-    'tools/autograd/**',
-    'torch/csrc/*.cpp',
-    'torch/csrc/*.h',
-    'torch/csrc/autograd/**',
-    'torch/csrc/cuda/**',
     'torch/csrc/distributed/**',
-    'torch/csrc/dynamo/**',
-    'torch/csrc/export/**',
     'torch/csrc/inductor/**',
     'torch/csrc/jit/**',
-    'torch/csrc/multiprocessing/**',
-    'torch/csrc/profiler/**',
-    'torch/csrc/stable/**',
-    'torch/csrc/tensor/**',
-    'torch/csrc/utils/**',
-    'torch/csrc/xpu/**',
-    'torch/headeronly/**',
-    'torch/lib/**',
 ]
 command = [
     'python3',
@@ -1272,6 +1259,7 @@ exclude_patterns = [
     'torch/_inductor/autoheuristic/artifacts/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
+    'torch/_inductor/kernel/vendored_templates/flydsl/kernels/**',
     'torch/utils/model_dump/preact.mjs',
     # Generated: mirrors the label names on GitHub verbatim
     'tools/linter/adapters/pytorch_labels.json',
@@ -1655,6 +1643,7 @@ exclude_patterns = [
     'torch/_inductor/autoheuristic/artifacts/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
+    'torch/_inductor/kernel/vendored_templates/flydsl/kernels/**',
     'torch/_vendor/**',
     'test/cpython/**',
     'test/test_torchfuzz_repros.py',
@@ -1869,6 +1858,7 @@ include_patterns = [
 exclude_patterns = [
     'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
+    'torch/_inductor/kernel/vendored_templates/flydsl/kernels/**',
 ]
 is_formatter = false
 
@@ -1911,6 +1901,16 @@ command = [
 ]
 include_patterns = [
     'torch/header_only_apis.txt',
+    'test/cpp/aoti_abi_check/*.cpp',
+    'test/cpp/aoti_abi_check/cuda/*.cu',
+    'tools/linter/adapters/header_only_linter.py',
+    # headers the listed APIs are filed under
+    'torch/headeronly/**',
+    'c10/util/TypeCast.h',
+    'c10/util/complex.h',
+    'c10/util/generic_math.h',
+    'aten/src/ATen/core/PhiloxRNGEngine.h',
+    'aten/src/ATen/cpu/vec/**',
 ]
 is_formatter = false
 
@@ -2009,4 +2009,69 @@ command = [
     'tools/linter/adapters/unspecified_backend_linter.py',
     '--',
     '@{{PATHSFILE}}',
+]
+
+[[linter]]
+code = 'CMAKE_INSTALL_PREFIX_ROOT'
+include_patterns = [
+    "**/*.cmake",
+    "**/*.cmake.in",
+    "**/CMakeLists.txt",
+]
+exclude_patterns = [
+    'cmake/Modules/**',
+    'cmake/Modules_CUDA_fix/**',
+    'cmake/Caffe2Config.cmake.in',
+    'aten/src/ATen/ATenConfig.cmake.in',
+    'cmake/TorchConfig.cmake.in',
+    'cmake/TorchConfigVersion.cmake.in',
+    'cmake/cmake_uninstall.cmake.i',
+    'third_party/**',
+    'fb/**',
+    '**/fb/**',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=DESTINATION[[:space:]]+"\."',
+    '--linter-name=CMAKE_INSTALL_PREFIX_ROOT',
+    '--error-name=install destination at the install prefix root',
+    """--error-description=\
+        Nothing is installed at the root of the install prefix. C++ artifacts \
+        belong under the CMAKE_INSTALL_*DIR directories (bin, include, lib, \
+        share); Python package data belongs in the wheel tree, addressed as \
+        ${SKBUILD_PLATLIB_DIR}/torch and guarded on SKBUILD so that a build \
+        scikit-build-core does not drive installs the C++ distribution alone. \
+        A destination of "." lands package data next to bin/ and lib/ in any \
+        standalone cmake --install. See gh-191102. \
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'CMAKE_PLATLIB_DESTINATION'
+include_patterns = [
+    'cmake/PackageData.cmake',
+    'cmake/FileMirroring.cmake',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=DESTINATION[[:space:]]+"',
+    '--line-allowlist-pattern=\$\{(SKBUILD_PLATLIB_DIR|_torch_pkg|_cutedsl_dest)\}',
+    '--linter-name=CMAKE_PLATLIB_DESTINATION',
+    '--error-name=package data addressed through the install prefix',
+    """--error-description=\
+        These files install Python package data, so every destination must \
+        name the wheel tree rather than rely on the install prefix: use \
+        ${SKBUILD_PLATLIB_DIR}/... here, or ${_torch_pkg}/... inside \
+        PackageData.cmake (${_cutedsl_dest} is derived from the former). A \
+        prefix-relative destination only lands in the right place while the \
+        prefix happens to be the torch package directory, which is true under \
+        scikit-build-core and false for a standalone cmake --install. See \
+        gh-191102. \
+    """,
+    '--',
+    '@{{PATHSFILE}}'
 ]

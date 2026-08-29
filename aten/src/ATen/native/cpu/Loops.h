@@ -38,16 +38,6 @@
 #include <tuple>
 #include <utility>
 
-// gcc < 12 ICEs ("unrecognizable insn" during RTL pass vregs) when it auto-vectorizes a loop
-// that bit-casts between integer and float vectors; the BFloat16/Half -> float widening used by
-// many kernels is exactly such a bit-cast. The contiguous fast path in execute_op is what makes
-// those loops vectorizable, so disable it there and keep the runtime-stride loop.
-#if defined(__GNUC__) && !defined(__clang__) && !defined(__INTEL_COMPILER) && __GNUC__ < 12
-#define AT_CONTIGUOUS_BASIC_LOOP_FASTPATH 0
-#else
-#define AT_CONTIGUOUS_BASIC_LOOP_FASTPATH 1
-#endif
-
 namespace at::native { inline namespace CPU_CAPABILITY {
 
 using namespace vec;
@@ -66,23 +56,6 @@ typename traits::ArgsTuple
 dereference(char* C10_RESTRICT data[], const int64_t* strides, int64_t i) {
   using Indices = std::make_index_sequence<traits::arity>;
   return dereference_impl<traits>(data, strides, i, Indices{});
-}
-
-template <typename traits, std::size_t... INDEX>
-typename traits::ArgsTuple
-dereference_contiguous_impl(char* C10_RESTRICT data[], int64_t i,
-                            std::index_sequence<INDEX...> /*unused*/) {
-  return std::make_tuple(
-      c10::load<typename traits::template arg<INDEX>::type>(
-          data[INDEX] +
-          i * sizeof(typename traits::template arg<INDEX>::type))...);
-}
-
-template <typename traits>
-typename traits::ArgsTuple
-dereference_contiguous(char* C10_RESTRICT data[], int64_t i) {
-  using Indices = std::make_index_sequence<traits::arity>;
-  return dereference_contiguous_impl<traits>(data, i, Indices{});
 }
 
 template <typename traits, std::size_t... INDEX>
@@ -113,15 +86,6 @@ inline void
 execute_op(char* C10_RESTRICT data[], const int64_t* strides, int64_t i, int64_t n, func_t&& op) {
   using traits = function_traits<func_t>;
   using result_type = typename traits::result_type;
-#if AT_CONTIGUOUS_BASIC_LOOP_FASTPATH
-  if (is_contiguous<traits>(strides)) {
-    for (; i < n; i++) {
-      result_type* out_ptr = (result_type*)(data[0] + i * sizeof(result_type));
-      *out_ptr = std::apply(op, dereference_contiguous<traits>(&data[1], i));
-    }
-    return;
-  }
-#endif
   for (; i < n; i++) {
     result_type* out_ptr = (result_type*)(data[0] + i * strides[0]);
     *out_ptr = std::apply(op, dereference<traits>(
