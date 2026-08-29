@@ -212,6 +212,59 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 ```
 
 ```{eval-rst}
+.. py:method:: precompile.accumulate(fn, *, artifact_path, cache_path, backend="inductor", tracer="dynamo", guard_filter_fn=None, recompile_limit=256, dynamic=None, invariants=None, require_complete=True, require_no_risky_drops=True, require_no_dropped_guards=False, training=False)
+
+   Capture ``fn`` across calls that YOUR loop makes, rewriting the artifact each time.
+
+   :func:`torch.compiler.precompile` makes its example calls itself, back to back, which is
+   wrong whenever the calls are not independent -- a training step whose inputs come off a
+   queue that the enclosing loop advances cannot be called twice in a row, because the second
+   call finds the state the first one consumed. ``accumulate`` inverts that: the caller keeps
+   their loop and precompile stops and resumes around each call.
+
+   Each call runs ``fn`` for real, folds whatever graphs and variants it newly exercised into
+   the capture, rewrites both files, and returns what ``fn`` returned. A call that exercises
+   nothing new adds nothing. There is no finalize step: the two files are a complete, loadable
+   artifact for everything captured so far from the first call onwards, so a job that dies
+   partway through leaves a working artifact for the batches it did reach.
+
+   Gradients pass straight through -- precompile makes no call of its own here, so there is
+   nothing to snapshot and ``keep_example_grads`` does not apply.
+
+   The returned object holds a LIVE compiled region, because that is the only way a later call
+   can reuse an earlier one's variants: they are filed under an id that nothing can hand back
+   to ``torch._dynamo.optimize``. Use it as a context manager, or call ``close()``, to release
+   it; a capture left open keeps precompile's compiler configuration installed.
+
+   :param fn: The whole computation to capture, taking the model(s) and runtime inputs
+       positionally, exactly as :func:`torch.compiler.precompile` does.
+   :param artifact_path: File to write ``python_code`` to, rewritten on every call. Required.
+   :param cache_path: File to write the acceleration cache to. Required.
+   :param tracer: ``"dynamo"``, and nothing else -- a make_fx trace is a single graph of a
+       single call and has nothing to accumulate.
+   :returns: A ``precompile.AccumulatingCapture``. Call it like ``fn``; it also exposes
+       ``summary()``, ``invariants()``, ``calls()`` and ``close()``.
+   :raises PrecompileError: as :func:`torch.compiler.precompile` does, on the call that
+       violates the contract.
+
+   Example::
+
+       with torch.compiler.precompile.accumulate(
+           train_step, artifact_path="m.py", cache_path="m.cache",
+           training=True, require_no_risky_drops=False,
+       ) as capture:
+           for batch in loader:
+               losses = capture(model, batch)   # runs for real, returns its result
+               optimizer.step()
+
+   .. note::
+
+      Rewriting is proportional to everything captured so far, not to the call, so a long loop
+      over a large model pays it every time. Capture the batches that add variants rather than
+      all of them.
+```
+
+```{eval-rst}
 .. py:method:: precompile.load(python_code=None, cache=None, *, artifact_path=None, cache_path=None, fn=None)
 
    Reconstruct a runnable from the ``(python_code, cache)`` pair produced by
