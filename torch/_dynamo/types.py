@@ -46,8 +46,8 @@ class GuardFilterEntry:
     guard_type: str
     derived_guard_types: tuple[str, ...]
     # True iff the guard's source is rooted at exactly a GlobalSource
-    # (narrower than provenance GLOBAL, which also covers imports and weak
-    # global refs); kept for backward compatibility with existing filters.
+    # (narrower than provenance GLOBAL, which also covers imports); kept for
+    # backward compatibility with existing filters.
     is_global: bool
     # Where the guard's source chain is rooted; see Note [Guard provenance]
     # in torch/_guards.py. INPUT guards are dispatch-relevant; GLOBAL and
