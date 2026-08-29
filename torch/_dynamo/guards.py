@@ -4508,6 +4508,7 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
         guard_type=guard.create_fn_name(),
         derived_guard_types=(tuple(guard.guard_types) if guard.guard_types else ()),
         is_global=is_global,
+        provenance=guard.provenance,
         orig_guard=guard,
     )
 
@@ -4746,6 +4747,10 @@ class CheckFunctionManager:
             CompileEventLogger.increment_toplevel("guard_latency_us", int(latency))
 
         self.guards_state: bytes | None = None
+        # Typed record of why guards_state is None: the swallowed PackageError
+        # (a GuardSerializationError names the exact guard). Consumers must
+        # chain or inspect this instead of matching message text.
+        self.guards_serialization_failure: exc.PackageError | None = None
         if save_guards:
             from torch._dynamo.output_graph import OutputGraphCommon
 
@@ -4760,6 +4765,7 @@ class CheckFunctionManager:
             except exc.PackageError as e:
                 if torch._dynamo.config.strict_precompile or strict_error:
                     raise e
+                self.guards_serialization_failure = e
                 self.output_graph.bypass_package(
                     f"Guard evaluation failed: {str(e)}",
                     traceback=traceback.format_exc().split("\n"),
@@ -4812,8 +4818,8 @@ class CheckFunctionManager:
             elif (
                 guard_type in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
             ):
-                raise torch._dynamo.exc.PackageError(
-                    f"{guard_type} guard cannot be serialized."
+                raise torch._dynamo.exc.GuardSerializationError(
+                    guard_type, guard.name or ""
                 )
             elif failed := next(
                 (
@@ -4824,8 +4830,8 @@ class CheckFunctionManager:
                 None,
             ):
                 # Just raise the first failed guard name
-                raise torch._dynamo.exc.PackageError(
-                    f"{failed} guard cannot be serialized."
+                raise torch._dynamo.exc.GuardSerializationError(
+                    failed, guard.name or ""
                 )
 
         builtins_dict_name = output_graph.name_of_builtins_dict_key_in_fglobals or ""

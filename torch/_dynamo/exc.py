@@ -428,6 +428,22 @@ class PackageError(TorchDynamoException):
     pass
 
 
+class GuardSerializationError(PackageError):
+    """A specific guard could not be serialized into a compile package.
+
+    Carries the failing guard's type and source name so consumers
+    (caching precompile, aot_compile, torch.compiler.precompile) can report
+    WHICH guard blocked serialization instead of re-deriving it from message
+    text.
+    """
+
+    def __init__(self, guard_type: str, guard_name: str) -> None:
+        self.guard_type = guard_type
+        self.guard_name = guard_name
+        detail = f" (guard on {guard_name})" if guard_name else ""
+        super().__init__(f"{guard_type} guard cannot be serialized.{detail}")
+
+
 class ObservedException(TorchDynamoException):
     # An exception observed during the tracing. This exception is used by Dynamo to handle exceptions.
     def __init__(
