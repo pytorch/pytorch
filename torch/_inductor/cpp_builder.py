@@ -886,6 +886,10 @@ class BuildOptionsBase:
         return self._preprocessing
 
     def save_flags_to_json(self, file: str) -> None:
+        # use_relative_path describes the environment doing a build, not a
+        # property of this one, so a loader always re-supplies it and it must
+        # not round-trip here (else BuildOptionsBase(**loaded, use_relative_path=x)
+        # collides on the key).
         attrs = {
             "compiler": self.get_compiler(),
             "definitions": self.get_definitions(),
@@ -896,7 +900,6 @@ class BuildOptionsBase:
             "libraries": self.get_libraries(),
             "passthrough_args": self.get_passthrough_args(),
             "aot_mode": self.get_aot_mode(),
-            "use_relative_path": self.get_use_relative_path(),
             "compile_only": self.get_compile_only(),
         }
 
