@@ -262,6 +262,35 @@ class TestAOTCompileToPython(TestCase):
         self.assertEqual(run_x.grad, x.cos())
         self.assertIsNone(run_y.grad)
 
+    def test_training_passthrough_backward_runs_like_eager(self):
+        def flat_fn(flat):
+            return [flat[0] + 1]
+
+        x = torch.randn(4, requires_grad=True)
+        gm = make_fx(flat_fn)([x])
+        source, cache = compile_to_python(gm, [x], grad_enabled=True)
+        actual_x = x.detach().clone().requires_grad_()
+        actual = load_from_python(source, cache)([actual_x])[0]
+        actual.sum().backward()
+        self.assertEqual(actual_x.grad, torch.ones_like(actual_x))
+
+    def test_passthrough_source_renders_nonfinite_floats(self):
+        # repr(float("inf")) is "inf", which is not valid Python source; the
+        # passthrough renderer must spell nonfinite floats as float(...) calls.
+        import math
+
+        from torch._inductor.standalone_compile import _passthrough_source
+
+        gm = torch.fx.symbolic_trace(lambda x: (x, float("inf"), float("nan")))
+        source = _passthrough_source(gm)
+        namespace = {}
+        exec(source, namespace)
+        x = torch.randn(2)
+        out = namespace["call"]([x])
+        self.assertIs(out[0], x)
+        self.assertEqual(out[1], float("inf"))
+        self.assertTrue(math.isnan(out[2]))
+
     def test_training_serializes_observed_tangent_mask(self):
         def flat_fn(flat):
             return [flat[0].sin(), flat[1].sin()]
@@ -901,6 +930,21 @@ class TestAOTCompileToPython(TestCase):
             finally:
                 AOTAutogradCache.clear()
                 FxGraphCache.clear()
+
+    def test_inline_backward_graph_is_not_lowered_as_inference(self):
+        def loss(x, weight):
+            return torch.nn.functional.conv2d(x, weight).sum()
+
+        x = torch.randn(1, 2, 5, 5)
+        weight = torch.randn(3, 2, 3, 3)
+        gm = make_fx(torch.func.grad(loss, argnums=(0, 1)))(x, weight)
+        with mock.patch.object(
+            torch._inductor,
+            "compile_to_python",
+            wraps=torch._inductor.compile_to_python,
+        ) as lower:
+            compile_to_python(gm, [x, weight])
+        self.assertFalse(lower.call_args_list[0].kwargs["is_inference"])
 
     def test_concurrent_compile_to_python_smoke(self):
         # End-to-end concurrency smoke test: _COMPILE_LOCK serializes the entry point (the

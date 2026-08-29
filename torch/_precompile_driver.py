@@ -53,6 +53,12 @@ if TYPE_CHECKING:
     USER_INPUT_DTYPES: list[str | None] = []
     USER_INPUT_DEVICES: list[str | None] = []
     USER_INPUT_BOUNDS: list[dict[int, tuple[int | None, int | None]] | None] = []
+    _DYNAMO_BACKEND_IDS: tuple[str, ...] = ()
+    _DYNAMO_BACKEND_SOURCES: tuple[str, ...] = ()
+    _DYNAMO_PYTHON_VERSION: tuple[int, int] = (0, 0)
+    _DYNAMO_TORCH_VERSION: str = ""
+    _DYNAMO_STATE: str = ""
+    TRAINING: bool = False
 
     # The compiled/captured graph's entry point, emitted before the driver.
     def call(flat_inputs: list[object]) -> list[object]: ...
@@ -366,3 +372,249 @@ def _inductor_forward(*args):
             else:
                 p.grad.add_(g)
     return _pytree.tree_unflatten(out, _pytree.treespec_loads(OUT_SPEC))
+
+
+def _build_dynamo_forward():
+    """Rebuild Dynamo's guards and transformed bytecode into a standalone dispatcher.
+
+    The compiled graph sources stay ordinary Python in the artifact. Only the minimized
+    Dynamo dispatch guards and transformed code objects are opaque, because neither has
+    a source form. There is no compiler behind this dispatcher: a miss against every
+    retained guard set raises instead of compiling another specialization.
+    """
+    import base64
+    import enum
+    import importlib
+    import inspect
+    import pickle
+    import sys
+    import types
+
+    import torch
+
+    if tuple(_DYNAMO_PYTHON_VERSION) != sys.version_info[:2]:
+        from torch._precompile import PrecompileError
+
+        raise PrecompileError(
+            "precompile artifact was produced on Python "
+            f"{_DYNAMO_PYTHON_VERSION[0]}.{_DYNAMO_PYTHON_VERSION[1]}, but is "
+            f"being loaded on Python {sys.version_info[0]}.{sys.version_info[1]}."
+        )
+    # _DYNAMO_STATE pickles Dynamo internals (guard trees, code objects), which
+    # have no cross-version compatibility story; check up front so a foreign
+    # build fails with this message instead of an arbitrary unpickling error.
+    # The torch._dynamo.package import stays BELOW both checks for the same
+    # reason: on a foreign build a moved/renamed loader symbol must surface as
+    # this message, not as a raw ImportError.
+    if _DYNAMO_TORCH_VERSION != torch.__version__:
+        from torch._precompile import PrecompileError
+
+        raise PrecompileError(
+            f"precompile artifact was produced by torch {_DYNAMO_TORCH_VERSION}, "
+            f"but is being loaded by torch {torch.__version__}."
+        )
+
+    from torch._dynamo.package import (
+        load_guard_manager,
+        load_guards_state,
+        SerializedCode,
+    )
+
+    state = pickle.loads(base64.b64decode(_DYNAMO_STATE))
+    namespace = globals()
+    for alias, module_name in state["import_sources"].items():
+        namespace[alias] = importlib.import_module(module_name)
+
+    def make_backend(call):
+        def run(*args):
+            return call(list(args))
+
+        return torch._dynamo.disable(run)
+
+    for index, (backend_id, source) in enumerate(
+        zip(_DYNAMO_BACKEND_IDS, _DYNAMO_BACKEND_SOURCES)
+    ):
+        backend_namespace = {"__name__": f"_precompiled_backend_{index}"}
+        exec(
+            compile(source, f"<precompile-backend-{index}>", "exec"),
+            backend_namespace,
+        )
+        namespace[backend_id] = make_backend(backend_namespace["call"])
+
+    target = SerializedCode.to_code_object(state["code"])
+    defaults = state["defaults"]
+    kwdefaults = state["kwdefaults"]
+
+    # Capture rejects fns with closure cells, so rebuilt functions never carry one.
+    # state["variants"] is newest-first (see _build_dynamo_artifact): the
+    # dispatch loop below serves the first passing guard set, matching live
+    # Dynamo's LRU-front-first recompilation checks.
+    variants = []
+    for guarded in state["variants"]:
+        guards_state = load_guards_state(guarded["guards_state"])
+        # Check-time G[...] accessors resolve against this namespace, and the
+        # builtins dict only exists under its per-compile key in the capture
+        # frame's globals; install it like the mainline CompilePackage loader
+        # so a retained builtins-routed guard can evaluate at all instead of
+        # silently failing every call it should accept.
+        builtins_key = guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
+        if builtins_key and builtins_key not in namespace:
+            from torch._dynamo.output_graph import get_builtins_dict
+
+            namespace[builtins_key] = get_builtins_dict(namespace)
+        manager = load_guard_manager(guards_state, target, namespace)
+        code = SerializedCode.to_code_object(guarded["dynamo_code"])
+        function = types.FunctionType(code, namespace, target.co_name, defaults, None)
+        if kwdefaults:
+            function.__kwdefaults__ = dict(kwdefaults)
+        variants.append((manager, function))
+
+    target_function = types.FunctionType(
+        target, namespace, target.co_name, defaults, None
+    )
+    if kwdefaults:
+        target_function.__kwdefaults__ = dict(kwdefaults)
+    signature = inspect.signature(target_function)
+
+    def instance_values(root):
+        # Deep per-argument walk: containers, __dict__ contents, and slot
+        # values; functions, modules, types, and tensors are yielded but not
+        # descended. Must stay in sync with the capture-side walk in
+        # torch/_precompile.py (test_precompile pins the overlap parity).
+        seen = set()
+        stack = [root]
+        while stack:
+            value = stack.pop()
+            if value is None or type(value) in (bool, int, float, complex, str, bytes):
+                continue
+            if id(value) in seen:
+                continue
+            seen.add(id(value))
+            yield value
+            if isinstance(
+                value, (enum.Enum, torch.dtype, torch.layout, torch.memory_format)
+            ):
+                # Value-guarded singleton leaves, matching the capture-side walk.
+                continue
+            if isinstance(value, dict):
+                stack.extend(value.keys())
+                stack.extend(value.values())
+                continue
+            if isinstance(value, (tuple, list, set, frozenset)):
+                stack.extend(value)
+                continue
+            if isinstance(
+                value, (types.FunctionType, types.ModuleType, type, torch.Tensor)
+            ):
+                continue
+            if hasattr(value, "__dict__"):
+                stack.extend(vars(value).values())
+            for cls in type(value).__mro__:
+                for descriptor in vars(cls).values():
+                    if isinstance(descriptor, types.MemberDescriptorType):
+                        try:
+                            stack.append(descriptor.__get__(value, type(value)))
+                        except AttributeError:
+                            pass
+
+    def has_storage_overlap(values):
+        # The same tensor object passed twice is covered by the serialized
+        # aliasing guards; DISTINCT tensors sharing or overlapping storage are
+        # not (their AOT StorageOverlap relation has no serialized form), and a
+        # mutating variant could silently compute the wrong thing. Deliberately
+        # STORAGE-granular: AOTAutograd's synthetic-base mutation handling keys
+        # on shared storage, not element overlap. Sparse layouts are left for
+        # the guard checks to reject; any other non-strided layout (e.g.
+        # jagged) is rejected outright since its aliasing cannot be verified.
+        # Enumeration is DEEP via instance_values, matching the capture-side
+        # scan: a tensor inside a custom argument must not bypass the check.
+        sparse_layouts = (
+            torch.sparse_coo,
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+        )
+        tensors = []
+        for value in instance_values(values):
+            if not isinstance(value, torch.Tensor) or value.layout in sparse_layouts:
+                continue
+            if value.layout is not torch.strided:
+                from torch._precompile import PrecompileError
+
+                raise PrecompileError(
+                    "precompile: cannot verify storage overlap for a "
+                    f"{value.layout} layout runtime tensor input."
+                )
+            tensors.append(value)
+        if len(tensors) < 2:
+            return False
+        storage_ranges: dict = {}
+        storage_ids: set = set()
+        seen_objects: set = set()
+        for tensor in tensors:
+            if id(tensor) in seen_objects:
+                continue
+            seen_objects.add(id(tensor))
+            try:
+                storage = tensor.untyped_storage()
+                start = storage.data_ptr()
+                size = storage.nbytes()
+            except RuntimeError as e:
+                from torch._precompile import PrecompileError
+
+                raise PrecompileError(
+                    "precompile: cannot verify storage overlap for this runtime "
+                    "tensor input."
+                ) from e
+            storage_key = (tensor.device.type, tensor.device.index, storage._cdata)
+            if storage_key in storage_ids:
+                return True
+            storage_ids.add(storage_key)
+            # data_ptr() == 0 (meta/fake or unallocated storages) is excluded
+            # from the range check; identity via _cdata above still applies.
+            if start != 0 and size > 0:
+                storage_ranges.setdefault(
+                    (tensor.device.type, tensor.device.index), []
+                ).append((start, start + size))
+        for ranges in storage_ranges.values():
+            furthest_end = 0
+            for start, end in sorted(ranges):
+                if start < furthest_end:
+                    return True
+                furthest_end = max(furthest_end, end)
+        return False
+
+    def forward(*args):
+        if has_storage_overlap(args):
+            from torch._precompile import PrecompileError
+
+            raise PrecompileError(
+                "precompile: distinct runtime tensor inputs must not share or "
+                "overlap storage; the artifact was not captured for aliased "
+                "inputs (invariant 2)."
+            )
+        try:
+            bound = signature.bind(*args)
+        except TypeError as e:
+            from torch._precompile import PrecompileError
+
+            raise PrecompileError(
+                f"precompile: {e}; the artifact takes the same positional arguments "
+                "as the traced fn (invariant 2)."
+            ) from e
+        bound.apply_defaults()
+        local_scope = dict(bound.arguments)
+        with torch.set_grad_enabled(TRAINING):
+            for manager, function in variants:
+                if manager.check(local_scope):
+                    return function(*args)
+        from torch._precompile import PrecompileError
+
+        raise PrecompileError(
+            f"precompile: no captured Dynamo variant of {target.co_name!r} matches "
+            f"this call. Add an example covering it and precompile again; the artifact "
+            f"contains {len(variants)} guarded variant(s)."
+        )
+
+    return forward

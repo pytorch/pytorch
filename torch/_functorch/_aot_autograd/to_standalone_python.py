@@ -963,8 +963,13 @@ class _CompileToPythonState:
     ``install_capture`` connects the generated module's private compiler hook to
     ``compile_mask``. Bit ``i`` is set when grad output ``i`` is undefined. The first
     real backward with a new mask compiles and runs that specialization immediately,
-    then records its source and cache. ``finalize`` emits only those recorded variants
-    and removes the live compiler hook.
+    then records its source and cache. After running its examples, the CALLER reads
+    the observed masks out of ``call.__globals__["_AOT_OBSERVED_UNDEFINED_TANGENT_MASKS"]``
+    and passes them to ``finalize``, which emits only those recorded variants.
+    ``finalize`` does not touch the module globals: the caller is responsible for
+    setting ``_AOT_BACKWARD_VARIANT_COMPILER`` back to ``None`` and clearing
+    ``_AOT_BACKWARD_VARIANTS`` in that globals dict (see
+    ``torch._precompile._DynamoPythonBackend.finalize_training``).
     """
 
     forward_python: str

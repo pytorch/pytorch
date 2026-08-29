@@ -1,20 +1,25 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import ast
 import collections
 import contextlib
 import dataclasses
 import dis
+import enum
 import functools
+import importlib.util
 import inspect
+import keyword
 import logging
+import math
 import operator
 import os
 import re
 import secrets
+import sys
 import tempfile
 from collections.abc import Callable
-from enum import Enum
 from itertools import chain, count
 from typing import Any, Literal, Protocol, TYPE_CHECKING
 
@@ -116,22 +121,296 @@ def _rewrite_symbol_solution_for_int_codegen(expr: sympy.Expr) -> sympy.Expr:
     return CleanDiv(numerator, denominator)
 
 
-def _sanitize_for_repr(obj: Any) -> Any:
-    """Convert Enum values to their underlying value for valid Python repr in code generation."""
-    if isinstance(obj, dict):
-        return {_sanitize_for_repr(k): _sanitize_for_repr(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_sanitize_for_repr(v) for v in obj]
-    # For namedtuples (have _fields), reconstruct to preserve the type
-    if isinstance(obj, tuple) and hasattr(obj, "_fields"):
-        return getattr(type(obj), "_make")(  # noqa: B009
-            _sanitize_for_repr(getattr(obj, field)) for field in obj._fields
+def _constexpr_constant(value: Any) -> Any:
+    # Only exact builtin containers are rebuilt (subclasses would be silently
+    # coerced to plain builtins); subclasses pass through unchanged and
+    # _constexpr_source_impl declines them, matching the set-subclass policy.
+    if type(value) is dict:
+        return {
+            _constexpr_constant(key): _constexpr_constant(item)
+            for key, item in value.items()
+        }
+    if type(value) is list:
+        return [_constexpr_constant(item) for item in value]
+    if isinstance(value, tuple) and hasattr(value, "_fields"):
+        make = getattr(type(value), "_make")  # noqa: B009
+        return make(_constexpr_constant(item) for item in value)
+    if type(value) is torch.Size:
+        # torch.Size is a value-transparent torch container (no _fields;
+        # iteration/__eq__ inherited from tuple), so a plain tuple is exact.
+        return tuple(_constexpr_constant(item) for item in value)
+    if type(value) is tuple:
+        return tuple(_constexpr_constant(item) for item in value)
+    if isinstance(value, enum.Enum) and isinstance(
+        value.value, (bytes, float, int, str)
+    ):
+        try:
+            interchangeable = value == value.value and hash(value) == hash(value.value)
+        except TypeError:
+            interchangeable = False
+        if interchangeable:
+            return _constexpr_constant(value.value)
+    return value
+
+
+def _constexpr_module_ref(
+    module: str, module_aliases: dict[str, str], imports: list[str]
+) -> str:
+    if module not in module_aliases:
+        alias = f"__inductor_constexpr_module_{len(module_aliases)}"
+        module_aliases[module] = alias
+        # Async-compile subprocess workers snapshot PYTHONPATH when the pool
+        # is spawned, so a module importable in the parent process may fail to
+        # import when the worker executes this generated import. AsyncCompile
+        # detects that ModuleNotFoundError (matching this exact import shape;
+        # see _constexpr_module_missing_in_worker in async_compile.py) and
+        # falls back to in-process compilation for the kernel.
+        imports.append(f"import {module} as {alias}")
+    return module_aliases[module]
+
+
+def _constexpr_type_ref(
+    cls: type[Any], module_aliases: dict[str, str], imports: list[str]
+) -> str | None:
+    module, qualname = cls.__module__, cls.__qualname__
+    if not module or module == "__main__":
+        return None
+    path = [*module.split("."), *qualname.split(".")]
+    if not all(part.isidentifier() and not keyword.iskeyword(part) for part in path):
+        return None
+    try:
+        if importlib.util.find_spec(module) is None:
+            return None
+    except (ImportError, ValueError):
+        return None
+    resolved = sys.modules.get(module)
+    try:
+        for part in qualname.split("."):
+            resolved = getattr(resolved, part)
+    except AttributeError:
+        return None
+    if resolved is not cls:
+        return None
+    module_ref = _constexpr_module_ref(module, module_aliases, imports)
+    return f"{module_ref}.{qualname}"
+
+
+def _constexpr_source_impl(
+    value: Any, module_aliases: dict[str, str], imports: list[str]
+) -> str | None:
+    if isinstance(value, enum.Enum):
+        normalized = _constexpr_constant(value)
+        if normalized is not value:
+            return _constexpr_source_impl(normalized, module_aliases, imports)
+        cls = type(value)
+        cls_ref = _constexpr_type_ref(cls, module_aliases, imports)
+        if (
+            cls_ref is not None
+            and value.name is not None
+            and cls.__members__.get(value.name) is value
+        ):
+            return f"{cls_ref}[{value.name!r}]"
+        return None
+    if isinstance(value, torch_dtype):
+        source = repr(value)
+        name = source.removeprefix("torch.")
+        if source.startswith("torch.") and getattr(torch, name, None) is value:
+            module_ref = _constexpr_module_ref("torch", module_aliases, imports)
+            return f"{module_ref}.{name}"
+        return None
+    if isinstance(value, dict):
+        # Like the set path below: a `{...}` display would silently drop a
+        # subclass's type, so only exact builtin dicts render.
+        if type(value) is not dict:
+            return None
+        items = []
+        for key, item in value.items():
+            key_source = _constexpr_source_impl(key, module_aliases, imports)
+            item_source = _constexpr_source_impl(item, module_aliases, imports)
+            if key_source is None or item_source is None:
+                return None
+            items.append(f"{key_source}: {item_source}")
+        return "{" + ", ".join(items) + "}"
+    if isinstance(value, list):
+        if type(value) is not list:
+            return None
+        items = []
+        for item in value:
+            source = _constexpr_source_impl(item, module_aliases, imports)
+            if source is None:
+                return None
+            items.append(source)
+        return "[" + ", ".join(items) + "]"
+    if isinstance(value, tuple):
+        # Namedtuples reconstruct exactly via _make; torch.Size coerces to an
+        # exact plain tuple (see _constexpr_constant); any other tuple
+        # subclass declines rather than degrade to a plain tuple.
+        if type(value) is torch.Size:
+            normalized = _constexpr_constant(value)
+            return _constexpr_source_impl(normalized, module_aliases, imports)
+        if not hasattr(value, "_fields") and type(value) is not tuple:
+            return None
+        items = []
+        for item in value:
+            source = _constexpr_source_impl(item, module_aliases, imports)
+            if source is None:
+                return None
+            items.append(source)
+        body = ", ".join(items)
+        if len(items) == 1:
+            body += ","
+        if hasattr(value, "_fields"):
+            cls_ref = _constexpr_type_ref(type(value), module_aliases, imports)
+            return None if cls_ref is None else f"{cls_ref}._make(({body}))"
+        return f"({body})"
+    if isinstance(value, (set, frozenset, OrderedSet)):  # noqa: set_linter
+        # Exact builtin sets are unordered, so their items are sorted for
+        # deterministic generated source. OrderedSet is the one subclass with
+        # known order semantics (insertion order, deterministic) and a
+        # list-accepting constructor, so it reconstructs exactly. Any other
+        # subclass declines: emitting it as a builtin set would silently drop
+        # its type/order, and emitting `cls([...])` would be hash-order
+        # nondeterministic and assumes an iterable constructor.
+        exact_builtin = type(value) in (set, frozenset)  # noqa: set_linter
+        cls_ref = None
+        if not exact_builtin:
+            if type(value) is not OrderedSet:
+                return None
+            cls_ref = _constexpr_type_ref(OrderedSet, module_aliases, imports)
+            if cls_ref is None:
+                return None
+        elements = (
+            sorted(
+                value,
+                key=lambda item: (
+                    type(item).__module__,
+                    type(item).__qualname__,
+                    repr(item),
+                ),
+            )
+            if exact_builtin
+            else value
         )
-    if isinstance(obj, tuple):
-        return tuple(_sanitize_for_repr(v) for v in obj)
-    if isinstance(obj, Enum):
-        return _sanitize_for_repr(obj.value)
-    return obj
+        items = []
+        for item in elements:
+            source = _constexpr_source_impl(item, module_aliases, imports)
+            if source is None:
+                return None
+            items.append(source)
+        if cls_ref is not None:
+            return f"{cls_ref}([{', '.join(items)}])"
+        if isinstance(value, frozenset):
+            if not items:
+                return "frozenset()"
+            return "frozenset((" + ", ".join(items) + ",))"
+        return "set()" if not items else "{" + ", ".join(items) + "}"
+    if isinstance(value, slice):
+        items = []
+        for item in (value.start, value.stop, value.step):
+            source = _constexpr_source_impl(item, module_aliases, imports)
+            if source is None:
+                return None
+            items.append(source)
+        return "slice(" + ", ".join(items) + ")"
+    if isinstance(value, range):
+        return repr(value)
+    if isinstance(value, bytearray):
+        return f"bytearray({bytes(value)!r})"
+    if type(value) is float and math.isnan(value):
+        # NaN != NaN would break the ==-based config matching that consumes
+        # these constants (autotune-cache lookup, precomputed-grid selection).
+        return None
+    if type(value) is float and math.isinf(value):
+        return f"float({str(value)!r})"
+    source = repr(value)
+    try:
+        reconstructed = ast.literal_eval(source)
+        matches = type(reconstructed) is type(value) and reconstructed == value
+    except (SyntaxError, ValueError):
+        pass
+    else:
+        if matches is True:
+            return source
+    try:
+        import triton.language as tl
+    except ImportError:
+        return None
+    if isinstance(value, tl.dtype):
+        name = source.removeprefix("triton.language.")
+        if (
+            source.startswith("triton.language.")
+            and name.isidentifier()
+            and getattr(tl, name, None) is value
+        ):
+            module_ref = _constexpr_module_ref(
+                "triton.language", module_aliases, imports
+            )
+            return f"{module_ref}.{name}"
+        return None
+    return None
+
+
+def _constexpr_source(value: Any) -> tuple[str, list[str]] | None:
+    imports: list[str] = []
+    source = _constexpr_source_impl(value, {}, imports)
+    return None if source is None else (source, imports)
+
+
+class _SourceLiteral:
+    # These exist only to be repr'd into generated source (the cached metas in
+    # user_defined_kernel_cache keep the real values, not these placeholders),
+    # but defensively define equality by source in case an instance reaches
+    # ==-based config matching (e.g. autotune candidate matching).
+    def __init__(self, source: str) -> None:
+        self.source = source
+
+    def __repr__(self) -> str:
+        return self.source
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, _SourceLiteral):
+            return NotImplemented
+        return self.source == other.source
+
+    def __hash__(self) -> int:
+        return hash(self.source)
+
+
+def _render_constexpr_constants(
+    constants: dict[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
+    (rendered,), imports = _render_constexpr_mappings([constants])
+    return rendered, imports
+
+
+def _render_constexpr_mappings(
+    mappings: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    rendered_mappings: list[dict[str, Any]] = []
+    imports: list[str] = []
+    module_aliases: dict[str, str] = {}
+    for constants in mappings:
+        rendered: dict[str, Any] = {}
+        for name, value in constants.items():
+            expression = _constexpr_source_impl(value, module_aliases, imports)
+            if expression is None:
+                detail = (
+                    " NaN constexprs are rejected because autotune config matching "
+                    "compares constants by equality."
+                    if isinstance(value, float) and math.isnan(value)
+                    else ""
+                )
+                raise RuntimeError(
+                    f"Triton kernel constexpr argument {name!r} has value {value!r} "
+                    f"of type {type(value).__name__}, which cannot be written into "
+                    "the generated kernel. Pass an int, an IntEnum, or a value "
+                    f"whose type is defined in an importable module.{detail}"
+                )
+            rendered[name] = (
+                _SourceLiteral(expression) if expression != repr(value) else value
+            )
+        rendered_mappings.append(rendered)
+    return rendered_mappings, imports
 
 
 ReuseKey = tuple[torch.device, torch.dtype, str, bool, int, tuple[int, int] | None]
@@ -3529,7 +3808,7 @@ class PythonWrapperCodegen(CodeGen):
                 if arg.name in kwargs:
                     # the arg may not appear in kwargs if it is an autotuned arg.
                     # in this case, it will be added in triton_heuristics after autotuning.
-                    constants[arg.name] = kwargs[arg.name]
+                    constants[arg.name] = _constexpr_constant(kwargs[arg.name])
 
             else:
                 # the only case where arg name isn't in kwargs, should be
@@ -3715,7 +3994,7 @@ class PythonWrapperCodegen(CodeGen):
             ):
                 precomputed_grids.append(
                     {
-                        "config": config_to_dict(cfg),
+                        "config": _constexpr_constant(config_to_dict(cfg)),
                         "python": [*map(pexpr, grid)],
                         "cpp": [*map(cexpr, grid)],
                         "python_slow": [*map(pexpr, grid)],
@@ -3776,23 +4055,54 @@ class PythonWrapperCodegen(CodeGen):
         inductor_meta.update(triton_info_kernel_cls.inductor_meta_common())
 
         compile_wrapper.splice(triton_info_kernel_cls.gen_common_triton_imports())
+        config_dicts = [_constexpr_constant(config_to_dict(cfg)) for cfg in configs]
+        precomputed_grids = inductor_meta.get("precomputed_grids", [])
+        rendered_mappings, constexpr_imports = _render_constexpr_mappings(
+            [
+                triton_meta.get("constants", {}),
+                *config_dicts,
+                *(entry["config"] for entry in precomputed_grids),
+            ]
+        )
+        # The rendered mappings hold _SourceLiteral placeholders and exist only to
+        # be repr'd into the generated source below; the returned/cached metas keep
+        # real values so downstream consumers (KernelCallLine, AOTI) never compare
+        # against placeholders.
+        rendered_config_dicts = rendered_mappings[1 : 1 + len(config_dicts)]
+        rendered_grids = [
+            {**entry, "config": rendered_config}
+            for entry, rendered_config in zip(
+                precomputed_grids, rendered_mappings[1 + len(config_dicts) :]
+            )
+        ]
+        source_triton_meta = {**triton_meta, "constants": rendered_mappings[0]}
+        source_inductor_meta = (
+            {**inductor_meta, "precomputed_grids": rendered_grids}
+            if precomputed_grids
+            else inductor_meta
+        )
+        for import_line in constexpr_imports:
+            compile_wrapper.writeline(import_line)
         if config.triton.proton_profiling:
             compile_wrapper.writeline('pl.enable_semantic("triton")')
 
-        # Sanitize triton_meta to convert Enum values for valid Python repr
-        sanitized_triton_meta = _sanitize_for_repr(triton_meta)
-        compile_wrapper.splice(
+        # Like kernel_src below, this text is spliced into the '''...''' literal
+        # passed to async_compile.triton and therefore parsed twice; escape it so
+        # rendered constants whose reprs carry backslashes or quotes (e.g. "a\nb",
+        # bytes) survive the outer parse intact.
+        decorator_src = _escape_triton_kernel_source_for_wrapper(
             f"""
             @triton_heuristics.user_autotune(
-                configs={[*map(config_to_dict, configs)]!r},
-                inductor_meta={inductor_meta!r},
-                triton_meta={sanitized_triton_meta!r},
+                configs={rendered_config_dicts!r},
+                inductor_meta={source_inductor_meta!r},
+                triton_meta={source_triton_meta!r},
                 filename=__file__,
                 custom_kernel=True,
             )
             @triton.jit
             """
         )
+        compile_wrapper.splice(decorator_src)
         kernel_src = user_defined_triton_kernel_transitive_closure_source_code(
             kernel, epilogue_fusion
         )

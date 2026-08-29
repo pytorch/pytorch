@@ -302,8 +302,8 @@ def aot_stage1_graph_capture(
             for wrapper in wrappers
         )
         and not aot_state.fw_metadata.tokens
-        and not requires_subclass_dispatch(  # type: ignore[arg-type]
-            aot_state.flat_args,
+        and not requires_subclass_dispatch(
+            aot_state.flat_args,  # pyrefly: ignore[bad-argument-type]
             aot_state.fw_metadata,
         )
         and not has_dynamo_autograd_function
