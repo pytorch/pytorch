@@ -323,6 +323,16 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   fi
   pip_install_whl "$(echo dist/*.whl)"
 
+  # Regression test for gh-189388: a cross build must ship a SOABI-tagged _C.
+  # This job builds a wheel and never imports it -- the smoke test below is gated
+  # on *full-debug* -- so a wrongly named extension module otherwise passes
+  # silently. The check reads the wheel's own tags rather than this interpreter's
+  # sysconfig, so it does not depend on which python is active here. Pass the
+  # glob unquoted: dist/ may hold more than one wheel.
+  if [[ "$BUILD_ENVIRONMENT" == *riscv64*cross* ]]; then
+    python .ci/pytorch/check_wheel_soabi.py dist/*.whl
+  fi
+
   # Smoke-test tools/build_with_debinfo.py against the real build tree: it must
   # still emit a debug-rebuild plan with a -g compile and the libtorch_python
   # relink. This guards against build-system changes (e.g. a new
