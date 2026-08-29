@@ -85,7 +85,6 @@ from .ir import (
     validate_ir,
     View,
 )
-from .ops_handler import register_pointwise_op
 from .utils import (
     ceildiv,
     convert_symint_to_expr,
@@ -982,9 +981,6 @@ def to_dtype(
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
 
-register_pointwise_op("to_dtype")
-
-
 _FLOAT8_E8M0FNU_TO_FLOAT_DTYPES = (
     torch.float32,
     torch.float64,
@@ -1153,7 +1149,6 @@ def register_pointwise(
 ):
     """A pointwise function that maps ops.{name} to inputs"""
     name = name or aten_fn.__name__
-    register_pointwise_op(name)
     fn = ops_wrapper(name)
 
     register_op_dtype_propagation_rules(
@@ -7820,9 +7815,6 @@ def mul(a, b):
         return make_pointwise(fn)(a, b)
 
 
-register_pointwise_op("mul")
-
-
 def get_constant_value(x: ir.IRNode) -> ir.Constant | None:
     """Try convert an arbitrary IR node into an ir.Constant value"""
 
@@ -7880,9 +7872,6 @@ def div_prim(a, b):
         return ops.truediv(*args)
 
     return make_pointwise(fn)(a, b)
-
-
-register_pointwise_op("truediv")
 
 
 @register_lowering(
