@@ -2369,87 +2369,12 @@ class PrecompileSession:
         created, and ``precompile_load`` takes it straight back. Same contract
         as ``invariants``.
         """
-        if self._stack is not None:
-            raise RuntimeError("save() must be called after the capture block exits")
-        if not self._prune_invariant_guards:
-            self._drop_unrebuildable_guards()
-        summary = self.summary()
-        if require_complete and summary.capture_errors:
-            raise PackageError(
-                "Precompilation is incomplete because capture raised: "
-                f"{list(summary.capture_errors)}. Re-run every example successfully, "
-                "or pass require_complete=False to save the partial artifact."
-            )
-        if require_no_dropped_guards and summary.dropped_guards:
-            raise PackageError(
-                f"Precompilation dropped {len(summary.dropped_guards)} guard(s) that "
-                f"were not serialized: {list(summary.dropped_guards)}. Rebinding any "
-                f"of those sources between capture and load can silently serve a graph "
-                f"traced against the old value. Pass require_no_dropped_guards=False "
-                f"only to select the relaxed risky-drop policy."
-            )
-        if summary.risky_dropped_guards and require_no_risky_drops:
-            raise PackageError(
-                f"Precompilation dropped guard(s) that can affect dispatch on "
-                f"{[n for _, n in summary.risky_dropped_guards]}. Each of those names "
-                f"either a configuration-dependent identity slot or a guard discarded "
-                f"by a custom filter. Nothing checks it at load time, so a different "
-                f"value can silently select the wrong graph instead of recompiling. "
-                f"Make the value reachable through a serializable guard, pin both "
-                f"machines to the same value, or pass "
-                f"require_no_risky_drops=False to accept the risk explicitly."
-            )
-        elif summary.risky_dropped_guards:
-            # The caller explicitly accepted the risk.
-            _warn_risky_drops(summary.risky_dropped_guards)
-        if require_complete:
-            if summary.guarded_codes == 0:
-                raise PackageError(
-                    "Precompilation captured no compiled code. Capture happens by "
-                    "execution, so the callable must actually be run inside the "
-                    "capture block. A call Dynamo could not turn into guarded code "
-                    "is reported separately as an uncovered frame."
-                )
-            if summary.truncated:
-                raise PackageError(
-                    f"Precompilation is incomplete: at least "
-                    f"{len(summary.truncated)} frame(s) exceeded recompile_limit "
-                    f"(currently {self._recompile_limit}) and are missing variants: "
-                    f"{list(summary.truncated)}. That list is a lower bound -- hitting "
-                    f"the limit also puts every frame called beneath the named one "
-                    f"into run-only mode, so those stop capturing too and never "
-                    f"re-enter Dynamo to report it. A frame needs one slot per "
-                    f"variant, and frames shared across module instances accumulate "
-                    f"them. Raise recompile_limit, or pass require_complete=False to "
-                    f"accept an artifact that is more incomplete than this list shows."
-                )
-            if summary.uncovered_frames:
-                raise PackageError(
-                    f"Precompilation exercised frame(s) that produced NO guarded code "
-                    f"at all: {list(summary.uncovered_frames)}. Those paths are absent "
-                    f"from the artifact, and such a frame is skipped at install and runs "
-                    f"eager, so serving() cannot report that gap. This is expected for a "
-                    f"frame that only dispatches to covered submodules; it also looks "
-                    f"exactly like a frame Dynamo gave up on (check "
-                    f"TORCH_LOGS=graph_breaks for gb0124). A frame that hit the recompile "
-                    f"limit has working variants and is reported as truncated instead. "
-                    f"Pass require_complete=False once you have confirmed which."
-                )
-            if summary.bypassed:
-                raise PackageError(
-                    f"Precompilation is incomplete: {len(summary.bypassed)} frame(s) "
-                    f"were bypassed and will serve nothing: {list(summary.bypassed)}. "
-                    f"This usually means their guards could not be serialized. Pass "
-                    f"require_complete=False to accept a partial artifact."
-                )
-        if summary.wont_generalize:
-            log.warning(
-                "precompile: %d value(s) are pinned to what capture saw (%s). A call "
-                "supplying anything else misses every graph, so exercise each value "
-                "you need to serve inside the capture block.",
-                len(summary.wont_generalize),
-                list(summary.wont_generalize),
-            )
+        summary = self._gated_summary(
+            require_complete=require_complete,
+            require_no_risky_drops=require_no_risky_drops,
+            require_no_dropped_guards=require_no_dropped_guards,
+            caller="save()",
+        )
         self._take_backend_artifacts()
         store = _SingleFileStore(self._backend_artifacts)
         if self._backend == "eager":
@@ -2713,6 +2638,19 @@ def precompile_load(
     )
 
 
+def _dynamo_entry_for_serve(cache_entry: PrecompileCacheEntry) -> _DynamoCacheEntry:
+    """A private copy of the artifact's dynamo state, for one serve.
+
+    CompilePackage keeps the entry's per-code records and APPENDS to them, so a
+    serve-time recompile writes its new backend id back into the artifact. The
+    next install then resolves that id against cache_entry.backends, which never
+    had it, and fails -- an artifact served twice breaks on the install after
+    the first recompile. Copying is cheap: deepcopy treats bytes as atomic, so
+    this duplicates the record structure and not the serialized payloads.
+    """
+    return copy.deepcopy(cache_entry.dynamo)
+
+
 def prepare_cache_entry(
     fn: Callable[..., object], cache_entry: PrecompileCacheEntry
 ) -> CompilePackage:
@@ -2728,7 +2666,7 @@ def prepare_cache_entry(
     """
     package = CompilePackage(
         _entry_fn_of(fn),
-        cache_entry.dynamo,
+        _dynamo_entry_for_serve(cache_entry),
         serialization_guard_filter_fn=default_guard_filter_fn,
     )
     try:
@@ -2766,7 +2704,7 @@ def serve_cache_entry(
     # at load; install() below consumes them instead of rebuilding.
     package = prepared or CompilePackage(
         entry_fn,
-        cache_entry.dynamo,
+        _dynamo_entry_for_serve(cache_entry),
         serialization_guard_filter_fn=(
             default_guard_filter_fn if guard_filter_fn is None else guard_filter_fn
         ),
@@ -2885,6 +2823,12 @@ class PrecompiledCallable:
             # and costs a set/restore pair.
             revert = _ALLOW_EMPTY_GRAPHS()
             try:
+                # Scoped to the whole served call, so an unrelated compilation
+                # triggered from inside it -- a nested torch.compile, a hook --
+                # also reads this artifact's private profile instead of the
+                # process one. Narrowing that needs the override keyed by code
+                # object, which pgo does not model; put_code_state never
+                # persists this state either way, so nothing escapes the call.
                 with _use_code_state(self._pgo_state):
                     return compiled(*args, **kwargs)
             finally:
