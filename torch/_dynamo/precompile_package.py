@@ -976,6 +976,13 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
         "CONSTANT_MATCH",
         "EQUALS_MATCH",
         "DUPLICATE_INPUT",
+        # And the one that pins whether an attribute is THERE. hasattr is a
+        # branch like any other, so dropping it serves the captured side to a
+        # caller on the other one -- the same silent wrong answer as a dropped
+        # CONSTANT_MATCH. Reachable on the DEFAULT gates, because a
+        # single-variant capture makes every slot look invariant and the drop
+        # is not classed risky.
+        "HASATTR",
         # And the guard that pins an input's KIND. Dropped, a graph traced for
         # one class is served to another and returns the first one's answer,
         # silently -- there is no shape to crash on. Upstream depends on this
@@ -2080,22 +2087,37 @@ class PrecompileSession:
         keep_only = varying_guard_slots(self._guard_sets)
         dropped: set[tuple[str, str]] = set()
 
-        def survives(guard_type: str, name: str) -> bool:
+        def survives(guard_type: str, name: str, derived: Sequence[str] = ()) -> bool:
             # An unmodelled guard never enters _guard_sets, so it was never
             # shown to be constant -- only never analyzed. This policy drops
             # what it PROVED invariant, so these stay. SHAPE_ENV is the one
             # that matters: it carries symbolic shape constraints that no
             # TENSOR_MATCH repeats.
+            #
+            # The DERIVED types decide too, the way default_guard_filter_fn
+            # reads them. One Guard can emit several checks -- a
+            # DICT_KEYS_MATCH emits the SEQUENCE_LENGTH for the same dict --
+            # and the filter removes whole Guards, so judging only the
+            # top-level type takes the length check down with its parent and
+            # the artifact answers a four-key dict with the two-key graph.
             return (
                 guard_type in _UNMODELLED_GUARD_TYPES
                 or guard_type in _SHAPE_BEARING_GUARD_TYPES
+                or any(
+                    d in _UNMODELLED_GUARD_TYPES or d in _SHAPE_BEARING_GUARD_TYPES
+                    for d in derived
+                )
                 or (guard_type, _normalize(name)) in keep_only
             )
 
         def policy(entries: Sequence[GuardFilterEntry]) -> Sequence[bool]:
             decisions = []
             for entry in entries:
-                keep = survives(entry.guard_type, entry.name)
+                keep = survives(
+                    entry.guard_type,
+                    entry.name,
+                    tuple(getattr(entry, "derived_guard_types", ()) or ()),
+                )
                 if not keep:
                     dropped.add((entry.guard_type, entry.name))
                 decisions.append(keep)
@@ -2579,6 +2601,12 @@ class PrecompileSession:
         call. See :meth:`_policy_filtered_codes` for why applying the policy to
         the session itself would quietly destroy the artifact.
         """
+        # The policy FIRST: it is what populates policy_dropped_guards, and the
+        # gates below read them. Gating first leaves require_no_risky_drops
+        # judging the previous render's numbers -- inert on the first call, and
+        # a capture that renders once therefore reports POLICY_DROPPED_GUARDS =
+        # [] while that same pass dropped every invariant slot.
+        codes = self._policy_filtered_codes()
         summary = self._gated_summary(
             require_complete=require_complete,
             require_no_risky_drops=require_no_risky_drops,
@@ -2588,9 +2616,7 @@ class PrecompileSession:
         from torch._precompile import _build_multigraph_artifact
 
         backends = self._collect_backends()
-        entry = dataclasses.replace(
-            self._package.cache_entry(), codes=self._policy_filtered_codes()
-        )
+        entry = dataclasses.replace(self._package.cache_entry(), codes=codes)
         return _build_multigraph_artifact(
             entry,
             backends,

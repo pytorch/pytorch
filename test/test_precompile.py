@@ -255,6 +255,21 @@ def _precompile_accum_flaky_step(model, x, mode):
     return _precompile_accum_step(model, x, mode)
 
 
+class _PrecompileHasattrCfg:
+    """Branched on by hasattr, so the branch taken depends on a HASATTR guard."""
+
+
+def _precompile_hasattr_branch(cfg, x):
+    if hasattr(cfg, "fast"):
+        return x * 2.0
+    return x * 100.0
+
+
+def _precompile_dict_len(d, x):
+    # len(d) rides on the same Guard as the key check, as a DERIVED type.
+    return d["a"] * len(d)
+
+
 class _PrecompileDeadResultModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -2217,6 +2232,93 @@ class TestPrecompile(TestCase):
         loaded = torch.compiler.precompile.load(code, cache)
         with _maybe_scoped(loaded), torch.no_grad():
             self.assertIsNone(loaded(model, x))
+
+    def test_precompile_keeps_a_hasattr_guard_under_default_gates(self):
+        # hasattr is a branch. A single-variant capture makes every slot look
+        # invariant -- varying_guard_slots over one variant is empty by
+        # construction -- so the policy dropped the HASATTR and the artifact
+        # answered a caller on the OTHER branch with the captured one: 2.0
+        # where eager says 100.0, on fully default gates, with
+        # RISKY_DROPPED_GUARDS = [] and no error.
+        with_attr = _PrecompileHasattrCfg()
+        with_attr.fast = True
+        without = _PrecompileHasattrCfg()
+        x = torch.ones(3)
+        self.assertNotEqual(
+            _precompile_hasattr_branch(with_attr, x)[0].item(),
+            _precompile_hasattr_branch(without, x)[0].item(),
+        )
+        with torch.no_grad():
+            # Deliberately every gate at its default.
+            code, cache = torch.compiler.precompile(
+                _precompile_hasattr_branch,
+                tracer="dynamo",
+                backend="eager",
+                dynamic=False,
+                example_inputs=[(with_attr, x)],
+            )
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertEqual(
+                loaded(with_attr, x), _precompile_hasattr_branch(with_attr, x)
+            )
+            # Refused, rather than served the captured branch's answer.
+            with self.assertRaisesRegex(RuntimeError, "no captured variant"):
+                loaded(without, x)
+
+    def test_precompile_keeps_a_guard_whose_derived_type_must_survive(self):
+        # One Guard can emit several checks: a DICT_KEYS_MATCH emits the
+        # SEQUENCE_LENGTH for the same dict, as a DERIVED type. The filter
+        # removes whole Guards, so judging only the top-level type took the
+        # length check down with its parent and a four-key dict was answered
+        # with the two-key graph.
+        two = {"a": torch.ones(3), "b": torch.ones(3)}
+        four = {k: torch.ones(3) for k in ("a", "b", "c", "e")}
+        x = torch.ones(3)
+        self.assertNotEqual(
+            _precompile_dict_len(two, x)[0].item(),
+            _precompile_dict_len(four, x)[0].item(),
+        )
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _precompile_dict_len,
+                tracer="dynamo",
+                backend="eager",
+                dynamic=False,
+                example_inputs=[(two, x)],
+            )
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertEqual(loaded(two, x), _precompile_dict_len(two, x))
+            with self.assertRaisesRegex(RuntimeError, "no captured variant"):
+                loaded(four, x)
+
+    def test_precompile_accumulate_reports_the_pass_that_just_ran(self):
+        # The gates read policy_dropped_guards, and the policy is what fills
+        # them, so gating first judged the PREVIOUS render's numbers -- inert
+        # on the first call. A capture that renders once therefore wrote
+        # POLICY_DROPPED_GUARDS = [] while that same pass had dropped every
+        # invariant slot.
+        model = _PrecompileAccumModel()
+        x = torch.randn(3, 8)
+        with tempfile.TemporaryDirectory() as d:
+            artifact_path = os.path.join(d, "m.py")
+            with torch.compiler.precompile.accumulate(
+                _precompile_accum_step,
+                artifact_path=artifact_path,
+                cache_path=os.path.join(d, "m.cache"),
+                backend="eager",
+                dynamic=False,
+                training=True,
+                require_complete=False,
+                require_no_risky_drops=False,
+            ) as capture:
+                capture(model, x, "a")  # exactly ONE render
+            with open(artifact_path) as f:
+                rendered = f.read()
+        self.assertNotIn("POLICY_DROPPED_GUARDS = []", rendered)
 
     def test_precompile_accumulate_rejects_make_fx_and_lone_paths(self):
         with self.assertRaisesRegex(ValueError, "only tracer='dynamo'"):
