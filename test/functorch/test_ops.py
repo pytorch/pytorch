@@ -1696,8 +1696,10 @@ class TestOperators(TestCase):
                 ),  # NYI: forward-AD for _embedding_bag
                 xfail(
                     "nn.functional.grid_sample", ""
-                ),  # NYI: forward AD for grid_sampler_2d
-                xfail("grid_sampler_2d", ""),  # NYI: forward AD for grid_sampler_2d
+                ),  # NYI: forward AD for grid_sampler_2d_backward
+                xfail(
+                    "grid_sampler_2d", ""
+                ),  # NYI: forward AD for grid_sampler_2d_backward
                 xfail(
                     "nn.functional.hardsigmoid", ""
                 ),  # NYI: forward AD for hardsigmoid_backward
@@ -1919,10 +1921,10 @@ class TestOperators(TestCase):
                 xfail("nn.functional.gaussian_nll_loss"),  # data depenedant flow
                 xfail(
                     "nn.functional.grid_sample"
-                ),  # Forward AD not implemented and no decomposition
+                ),  # NYI: forward AD for grid_sampler_2d_backward
                 xfail(
                     "grid_sampler_2d"
-                ),  # Forward AD not implemented and no decomposition
+                ),  # NYI: forward AD for grid_sampler_2d_backward
                 xfail(
                     "nn.functional.hardsigmoid"
                 ),  # Forward AD not implemented and no decomposition
