@@ -225,12 +225,9 @@ class InlinedSource:
     firstlineno: int
     lastlineno: int
     checksum: str
-    content: str
-
-
-@functools.cache
-def _get_module_content(module: types.ModuleType) -> str:
-    return inspect.getsource(module)
+    # The whole module's source, kept for a reader that never arrived. Retained
+    # as a field so an old pickle still loads; never populated.
+    content: str = ""
 
 
 def _defining_module_name(code: types.CodeType) -> str | None:
@@ -317,7 +314,6 @@ class SourceInfo:
                 firstlineno=firstlineno,
                 lastlineno=lastlineno,
                 checksum=_hash_source(source),
-                content=_get_module_content(module),
             )
         )
 
