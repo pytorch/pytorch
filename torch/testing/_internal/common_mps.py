@@ -135,6 +135,7 @@ if torch.backends.mps.is_available():
             "meshgridvariadic_tensors",
             "movedim",
             "mul",
+            "nan_to_num",
             "narrow",
             "narrow_copy",
             "neg",
