@@ -654,7 +654,7 @@ static PyObject* THPStorage_shareXpu(PyObject* self, PyObject* noargs) {
 
   try {
     auto shared = torch::ShareXpuStorage(storage);
-    THPObjectPtr tuple(PyTuple_New(7));
+    THPObjectPtr tuple(PyTuple_New(6));
     THPObjectPtr device(THPUtils_packInt32(shared.device));
     THPObjectPtr handle(
         shared.handle.empty()
@@ -662,8 +662,6 @@ static PyObject* THPStorage_shareXpu(PyObject* self, PyObject* noargs) {
             : PyBytes_FromStringAndSize(
                   shared.handle.c_str(),
                   static_cast<Py_ssize_t>(shared.handle.size())));
-    THPObjectPtr event(PyBytes_FromStringAndSize(
-        shared.event.c_str(), static_cast<Py_ssize_t>(shared.event.size())));
     THPObjectPtr ref_counter(
         shared.ref_counter_handle.empty()
             ? Py_NewRef(Py_None)
@@ -675,18 +673,17 @@ static PyObject* THPStorage_shareXpu(PyObject* self, PyObject* noargs) {
     THPObjectPtr size_bytes(THPUtils_packUInt64(shared.size_bytes));
     THPObjectPtr offset_bytes(THPUtils_packInt64(shared.offset_bytes));
 
-    if (!tuple || !device || !handle || !event || !ref_counter ||
+    if (!tuple || !device || !handle || !ref_counter ||
         !ref_counter_offset || !size_bytes || !offset_bytes) {
       return nullptr;
     }
 
     PyTuple_SET_ITEM(tuple.get(), 0, device.release());
     PyTuple_SET_ITEM(tuple.get(), 1, handle.release());
-    PyTuple_SET_ITEM(tuple.get(), 2, event.release());
-    PyTuple_SET_ITEM(tuple.get(), 3, ref_counter.release());
-    PyTuple_SET_ITEM(tuple.get(), 4, ref_counter_offset.release());
-    PyTuple_SET_ITEM(tuple.get(), 5, size_bytes.release());
-    PyTuple_SET_ITEM(tuple.get(), 6, offset_bytes.release());
+    PyTuple_SET_ITEM(tuple.get(), 2, ref_counter.release());
+    PyTuple_SET_ITEM(tuple.get(), 3, ref_counter_offset.release());
+    PyTuple_SET_ITEM(tuple.get(), 4, size_bytes.release());
+    PyTuple_SET_ITEM(tuple.get(), 5, offset_bytes.release());
     return tuple.release();
   } catch (const std::exception& e) {
     TORCH_CHECK(false, "Failed to get XPU IPC handle: ", e.what());
@@ -720,17 +717,16 @@ static PyObject* THPStorage_releaseIPCCounterXpu(
 
 static PyObject* THPStorage_newSharedXpu(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(PyTuple_GET_SIZE(args) == 7, "tuple of 7 items expected");
+  TORCH_CHECK(PyTuple_GET_SIZE(args) == 6, "tuple of 6 items expected");
   PyObject* device = PyTuple_GET_ITEM(args, 0);
   PyObject* handle = PyTuple_GET_ITEM(args, 1);
-  PyObject* event = PyTuple_GET_ITEM(args, 2);
-  PyObject* ref_counter = PyTuple_GET_ITEM(args, 3);
-  PyObject* ref_counter_offset = PyTuple_GET_ITEM(args, 4);
-  PyObject* size_bytes = PyTuple_GET_ITEM(args, 5);
-  PyObject* offset_bytes = PyTuple_GET_ITEM(args, 6);
+  PyObject* ref_counter = PyTuple_GET_ITEM(args, 2);
+  PyObject* ref_counter_offset = PyTuple_GET_ITEM(args, 3);
+  PyObject* size_bytes = PyTuple_GET_ITEM(args, 4);
+  PyObject* offset_bytes = PyTuple_GET_ITEM(args, 5);
 
   if (!(THPUtils_checkLong(device) && PyBytes_Check(handle) &&
-        PyBytes_Check(event) && PyBytes_Check(ref_counter) &&
+        PyBytes_Check(ref_counter) &&
         THPUtils_checkLong(ref_counter_offset) && THPUtils_checkLong(size_bytes) &&
         THPUtils_checkLong(offset_bytes))) {
     THPUtils_invalidArguments(
@@ -738,7 +734,7 @@ static PyObject* THPStorage_newSharedXpu(PyObject* _unused, PyObject* args) {
         nullptr,
         "_new_shared in XPU mode",
         1,
-        "(int device, bytes handle, bytes event, bytes ref_counter, int ref_counter_offset, int storage_size_bytes, int storage_offset_bytes)");
+        "(int device, bytes handle, bytes ref_counter, int ref_counter_offset, int storage_size_bytes, int storage_offset_bytes)");
     return nullptr;
   }
 
@@ -746,12 +742,6 @@ static PyObject* THPStorage_newSharedXpu(PyObject* _unused, PyObject* args) {
   Py_ssize_t handle_size = 0;
   if (PyBytes_AsStringAndSize(handle, &handle_data, &handle_size) == -1) {
     TORCH_CHECK(false, "Failed to extract IPC handle bytes");
-  }
-
-  char* event_data = nullptr;
-  Py_ssize_t event_size = 0;
-  if (PyBytes_AsStringAndSize(event, &event_data, &event_size) == -1) {
-    TORCH_CHECK(false, "Failed to extract IPC event bytes");
   }
 
   char* ref_counter_data = nullptr;
@@ -765,7 +755,6 @@ static PyObject* THPStorage_newSharedXpu(PyObject* _unused, PyObject* args) {
   shared.device = c10::checked_convert<c10::DeviceIndex>(
       THPUtils_unpackLong(device), "c10::DeviceIndex");
   shared.handle = std::string(handle_data, handle_size);
-  shared.event = std::string(event_data, event_size);
   shared.ref_counter_handle = std::string(ref_counter_data, ref_counter_size);
   shared.ref_counter_offset = THPUtils_unpackUInt64(ref_counter_offset);
   shared.size_bytes = THPUtils_unpackUInt64(size_bytes);

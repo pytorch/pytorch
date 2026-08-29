@@ -4,21 +4,15 @@
 
 #include <ATen/MapAllocator.h>
 #include <ATen/StorageUtils.h>
-#include <ATen/detail/XPUHooksInterface.h>
-
-#include <ATen/xpu/level_zero_stub/ATenLevelZero.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/xpu/XPUFunctions.h>
 #include <c10/xpu/XPUStream.h>
 
-#include <sycl/ext/oneapi/backend/level_zero.hpp>
 #include <sycl/sycl.hpp>
 
 #include <atomic>
-#include <cstring>
 #include <memory>
 #include <mutex>
-#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -30,8 +24,6 @@ namespace {
 
 inline constexpr int64_t XPU_IPC_REF_COUNTER_FILE_SIZE = 10000;
 inline constexpr int64_t XPU_IPC_WARN_AFTER_X_BLOCKS_IN_LIMBO = 1000;
-
-class XpuIpcEvent;
 
 struct XpuIPCRefCountersFile final {
   XpuIPCRefCountersFile(std::string handle, uint64_t size, at::DataPtr data_ptr)
@@ -115,10 +107,6 @@ class XpuIPCSentData final {
     original_ptr_ = std::move(data_ptr);
   }
 
-  void set_ipc_event(std::shared_ptr<XpuIpcEvent> ipc_event) {
-    ipc_event_ = std::move(ipc_event);
-  }
-
   void set_export_handle_owner(std::shared_ptr<void> handle_owner) {
     export_handle_owner_ = std::move(handle_owner);
   }
@@ -129,7 +117,6 @@ class XpuIPCSentData final {
   int64_t* counter_ptr_;
   at::DataPtr original_ptr_;
   at::Device device_;
-  std::shared_ptr<XpuIpcEvent> ipc_event_;
   std::shared_ptr<void> export_handle_owner_;
 };
 
@@ -276,177 +263,6 @@ at::DataPtr GetNewRefCountedXpuSentData(void* data, at::Device device) {
   return at::DataPtr(data, sent_data.release(), XpuIPCSentDataDelete, device);
 }
 
-class XpuIpcEvent {
- public:
-  static XpuIpcEvent create(c10::DeviceIndex device) {
-    return XpuIpcEvent(device, false, std::nullopt);
-  }
-
-  static XpuIpcEvent open(
-      c10::DeviceIndex device,
-      const std::string& ipc_pool_handle) {
-    return XpuIpcEvent(device, true, ipc_pool_handle);
-  }
-
-  XpuIpcEvent(const XpuIpcEvent&) = delete;
-  XpuIpcEvent& operator=(const XpuIpcEvent&) = delete;
-
-  XpuIpcEvent(XpuIpcEvent&& other) noexcept
-      : pool_(other.pool_),
-        event_(other.event_),
-        opened_ipc_pool_(other.opened_ipc_pool_) {
-    other.release();
-  }
-
-  XpuIpcEvent& operator=(XpuIpcEvent&& other) noexcept {
-    if (this != &other) {
-      cleanup();
-      pool_ = other.pool_;
-      event_ = other.event_;
-      opened_ipc_pool_ = other.opened_ipc_pool_;
-      other.release();
-    }
-    return *this;
-  }
-
-  ~XpuIpcEvent() {
-    cleanup();
-  }
-
-  std::string export_handle() const {
-#ifndef _WIN32
-    ze_ipc_event_pool_handle_t ipc_handle{};
-    const auto& ze = at::detail::getXPUHooks().level_zero();
-    TORCH_CHECK(pool_, "XPU IPC event pool is not initialized before export");
-    TORCH_CHECK(
-        ze.zeEventPoolGetIpcHandle(pool_, &ipc_handle) == ZE_RESULT_SUCCESS,
-        "Failed to export XPU IPC event pool handle");
-    return std::string(
-        reinterpret_cast<const char*>(&ipc_handle), sizeof(ipc_handle));
-#else
-    return {};
-#endif
-  }
-
-  void signal() const {
-#ifndef _WIN32
-    const auto& ze = at::detail::getXPUHooks().level_zero();
-    TORCH_CHECK(event_, "XPU IPC event is not initialized");
-    TORCH_CHECK(
-        ze.zeEventHostSignal(event_) == ZE_RESULT_SUCCESS,
-        "Failed to signal XPU IPC event");
-#endif
-  }
-
-  void wait() const {
-#ifndef _WIN32
-    const auto& ze = at::detail::getXPUHooks().level_zero();
-    TORCH_CHECK(event_, "XPU IPC event is not initialized");
-    TORCH_CHECK(
-        ze.zeEventHostSynchronize(event_, UINT64_MAX) == ZE_RESULT_SUCCESS,
-        "Failed to wait on XPU IPC event");
-#endif
-  }
-
- private:
-  void cleanup() {
-#ifndef _WIN32
-    if (!XpuIPCGlobalEntities::alive) {
-      release();
-      return;
-    }
-
-    const auto& ze = at::detail::getXPUHooks().level_zero();
-    if (event_) {
-      ze.zeEventDestroy(event_);
-    }
-    if (pool_) {
-      if (opened_ipc_pool_) {
-        ze.zeEventPoolCloseIpcHandle(pool_);
-      } else {
-        ze.zeEventPoolDestroy(pool_);
-      }
-    }
-#endif
-  }
-
-  void release() noexcept {
-    pool_ = nullptr;
-    event_ = nullptr;
-    opened_ipc_pool_ = false;
-  }
-
-  XpuIpcEvent(
-      c10::DeviceIndex device,
-      bool open_from_ipc,
-      std::optional<std::string> ipc_pool_handle) {
-#ifndef _WIN32
-    const auto& ze = at::detail::getXPUHooks().level_zero();
-    auto& sycl_device = c10::xpu::get_raw_device(device);
-    auto& sycl_context = c10::xpu::get_device_context();
-    auto l0_device =
-        sycl::get_native<sycl::backend::ext_oneapi_level_zero>(sycl_device);
-    auto l0_context =
-        sycl::get_native<sycl::backend::ext_oneapi_level_zero>(sycl_context);
-
-    try {
-      if (open_from_ipc) {
-        TORCH_CHECK(ipc_pool_handle.has_value(), "Missing XPU IPC pool handle");
-        TORCH_CHECK(
-            ipc_pool_handle->size() == sizeof(ze_ipc_event_pool_handle_t),
-            "Invalid XPU IPC event pool handle size");
-        ze_ipc_event_pool_handle_t ipc_handle{};
-        std::memcpy(
-            &ipc_handle,
-            ipc_pool_handle->data(),
-            sizeof(ze_ipc_event_pool_handle_t));
-        TORCH_CHECK(
-            ze.zeEventPoolOpenIpcHandle(l0_context, ipc_handle, &pool_) ==
-                ZE_RESULT_SUCCESS,
-            "Failed to open XPU IPC event pool handle");
-        opened_ipc_pool_ = true;
-      } else {
-        ze_event_pool_desc_t pool_desc{};
-        pool_desc.stype = ZE_STRUCTURE_TYPE_EVENT_POOL_DESC;
-        pool_desc.flags = ZE_EVENT_POOL_FLAG_HOST_VISIBLE | ZE_EVENT_POOL_FLAG_IPC;
-        pool_desc.count = 1;
-        TORCH_CHECK(
-            ze.zeEventPoolCreate(l0_context, &pool_desc, 1, &l0_device, &pool_) ==
-                ZE_RESULT_SUCCESS,
-            "Failed to create XPU IPC event pool");
-      }
-
-      ze_event_desc_t event_desc{};
-      event_desc.stype = ZE_STRUCTURE_TYPE_EVENT_DESC;
-      event_desc.index = 0;
-      event_desc.signal = ZE_EVENT_SCOPE_FLAG_HOST;
-      event_desc.wait = ZE_EVENT_SCOPE_FLAG_HOST;
-      TORCH_CHECK(
-          ze.zeEventCreate(pool_, &event_desc, &event_) == ZE_RESULT_SUCCESS,
-          "Failed to create XPU IPC event");
-    } catch (...) {
-      if (pool_) {
-        if (opened_ipc_pool_) {
-          ze.zeEventPoolCloseIpcHandle(pool_);
-        } else {
-          ze.zeEventPoolDestroy(pool_);
-        }
-        pool_ = nullptr;
-      }
-      throw;
-    }
-#else
-    (void)device;
-    (void)open_from_ipc;
-    (void)ipc_pool_handle;
-#endif
-  }
-
-  ze_event_pool_handle_t pool_{nullptr};
-  ze_event_handle_t event_{nullptr};
-  bool opened_ipc_pool_{false};
-};
-
 } // namespace
 
 bool IsImportedXpuStorage(const c10::StorageImpl& storage) {
@@ -464,22 +280,15 @@ XpuSharedStorage ShareXpuStorage(const at::Storage& storage) {
 
   auto shandle =
       c10::xpu::XPUCachingAllocator::shareIpcHandle(storage.mutable_data());
-  auto ipc_event =
-      std::make_shared<XpuIpcEvent>(XpuIpcEvent::create(storage.device().index()));
 
   shared.handle = shandle.handle;
   shared.offset_bytes = shandle.offset;
-  shared.event = ipc_event->export_handle();
-
-  c10::xpu::getCurrentXPUStream(storage.device().index()).synchronize();
-  ipc_event->signal();
 
   at::DataPtr sent_data_ptr =
       GetNewRefCountedXpuSentData(storage.mutable_data(), storage.device());
   auto old_data_ptr = storage.set_data_ptr(std::move(sent_data_ptr));
   auto sent_data = static_cast<XpuIPCSentData*>(storage.data_ptr().get_context());
   sent_data->set_original_ptr(std::move(old_data_ptr));
-  sent_data->set_ipc_event(std::move(ipc_event));
   sent_data->set_export_handle_owner(std::move(shandle.handle_owner));
 
   shared.ref_counter_handle = sent_data->handle();
@@ -516,11 +325,6 @@ void ReleaseXpuIPCRefCounter(const std::string& handle, uint64_t offset) {
 
 c10::intrusive_ptr<at::StorageImpl> NewStorageFromXpuShared(
     const XpuSharedStorage& shared) {
-  if (!shared.event.empty()) {
-    XpuIpcEvent event = XpuIpcEvent::open(shared.device, shared.event);
-    event.wait();
-  }
-
   auto base_ptr =
       c10::xpu::XPUCachingAllocator::getIpcDevPtr(shared.handle, shared.device);
 

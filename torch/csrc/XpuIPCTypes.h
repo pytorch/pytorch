@@ -15,7 +15,6 @@ namespace torch {
 struct XpuSharedStorage final {
   c10::DeviceIndex device{-1};
   std::string handle;
-  std::string event;
   std::string ref_counter_handle;
   uint64_t ref_counter_offset{0};
   size_t size_bytes{0};

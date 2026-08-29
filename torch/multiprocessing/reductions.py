@@ -569,7 +569,6 @@ def rebuild_storage_xpu(
     cls,
     device,
     handle,
-    event,
     ref_counter_handle,
     ref_counter_offset,
     size_bytes,
@@ -590,7 +589,6 @@ def rebuild_storage_xpu(
     storage = cls._new_shared_xpu(
         device,
         handle,
-        event,
         ref_counter_handle,
         ref_counter_offset,
         size_bytes,
@@ -641,7 +639,6 @@ def reduce_storage(storage):
         (
             device,
             handle,
-            event,
             ref_counter_handle,
             ref_counter_offset,
             size_bytes,
@@ -651,7 +648,6 @@ def reduce_storage(storage):
         metadata = (
             device,
             handle,
-            event,
             ref_counter_handle,
             ref_counter_offset,
             size_bytes,
