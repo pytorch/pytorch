@@ -39,13 +39,11 @@ class GemmEpilogueIRExpression:
 class GemmEpilogueIRReduction:
     reduction_type: str
     source: GemmEpilogueIRExpression
-    result: int | None = None
     synthetic_element: GemmEpilogueIRExpression | None = None
 
 
 @dataclasses.dataclass(frozen=True)
 class GemmEpilogueIRRegion:
-    output_name: str
     reductions: tuple[GemmEpilogueIRReduction, ...]
     expression: GemmEpilogueIRExpression
 
@@ -142,7 +140,7 @@ class _GemmEpilogueIRHandler(DefaultHandler):
                     loads=value.loads,
                     reductions=(
                         *value.reductions,
-                        GemmEpilogueIRReduction(reduction_type, value, index),
+                        GemmEpilogueIRReduction(reduction_type, value),
                     ),
                 )
                 for index in range(count)
@@ -297,7 +295,7 @@ class GemmEpilogueIRAnalysis:
             for reduction in reductions
         ):
             return None
-        return GemmEpilogueIRRegion(output_name, reductions, store.value)
+        return GemmEpilogueIRRegion(reductions, store.value)
 
     def reduction_finalizer(
         self,
