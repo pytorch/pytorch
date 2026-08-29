@@ -760,6 +760,54 @@ class DistTensorRandomOpTest(DTensorTestBase):
         self.assertEqual(out.device.type, self.device_type)
         self.assertEqual(offset_after, offset_before + 4)
 
+    @skip_unless_torch_gpu
+    def test_register_run_dtensor_rng_dispatch(self):
+        """register_run_dtensor_rng_dispatch registers a py_impl idempotently."""
+        from torch._C import DispatchKey
+        from torch._prims.rng_prims import register_run_dtensor_rng_dispatch
+
+        register_run_dtensor_rng_dispatch(DispatchKey.PrivateUse1)
+        # registering the same key twice is a no-op
+        register_run_dtensor_rng_dispatch(DispatchKey.PrivateUse1)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_registered_tracker_falls_back_from_hop(self):
+        """A tracker registered via register_rng_tracker that does not implement
+        the counter-based offset contract runs random ops under _distribute_region
+        instead of the run_dtensor_rng_op HOP path (previously this raised an
+        AssertionError at the isinstance gate)."""
+        import contextlib
+
+        class FakeTracker(random._RNGStateTracker):
+            def __init__(self, device_mesh, run_state_sync):
+                self.device_mesh = device_mesh
+                self._use_distribute_region = True
+
+            @contextlib.contextmanager
+            def _distribute_region(self, spec, generator=None):
+                yield
+
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        random.register_rng_tracker(self.device_type, FakeTracker)
+        saved_tracker = random._rng_tracker
+        try:
+            # manual_seed is the creation point that consults the registry
+            random.manual_seed(0, device_mesh)
+            self.assertIsInstance(random._rng_tracker, FakeTracker)
+            dt = distribute_tensor(
+                torch.empty([self.world_size], device=self.device_type),
+                device_mesh,
+                [Shard(0)],
+            )
+            # before the capability-probe change this raised
+            # AssertionError: tracker is not OffsetBasedRNGTracker
+            dt.uniform_(0, 1)
+            self.assertIsInstance(random._rng_tracker, FakeTracker)
+        finally:
+            random._rng_tracker = saved_tracker
+            random._RNG_TRACKER_REGISTRY.pop(self.device_type, None)
+
 
 class DistTensorRandomOpCompileTest(DTensorTestBase):
     def _run_with_seed(self, fn, create_input, num_runs):
