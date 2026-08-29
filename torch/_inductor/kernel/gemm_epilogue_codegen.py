@@ -15,6 +15,7 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
 from torch._inductor.kernel.gemm_epilogue import (
     GEMM_ACCUMULATOR_ARG_NAME,
     GemmReductionArguments,
+    GemmReductionType,
 )
 from torch._inductor.ops_handler import ReductionType
 from torch._inductor.virtualized import V
@@ -122,12 +123,11 @@ def canonical_tensorssa_reduction_type(reduction_type: str) -> ReductionType:
 
 
 def materialize_tensorssa_reduction(
-    reduction_type: ReductionType,
+    reduction_type: GemmReductionType,
     cute: Any,
-    plan_type: str | None = None,
 ) -> MaterializedTensorSSAReduction:
     """Materialize the shared TensorSSA descriptor as CuTeDSL operands."""
-    reduction = tensorssa_reduction(reduction_type)
+    reduction = tensorssa_reduction(canonical_tensorssa_reduction_type(reduction_type))
     reduce_op = getattr(cute.ReductionOp, reduction.cute_op.rpartition(".")[2])
     combine = materialize_epilogue_function(
         f"def combine(lhs, rhs):\n    return {reduction.combine_expr}", cute
@@ -135,11 +135,7 @@ def materialize_tensorssa_reduction(
     init_val = materialize_epilogue_function(
         f"def init():\n    return {reduction.init_val}", cute
     )()
-    finalize = (
-        _mean_finalize
-        if plan_type is not None and plan_type.startswith("mean")
-        else _identity_finalize
-    )
+    finalize = _mean_finalize if reduction_type == "mean" else _identity_finalize
     return MaterializedTensorSSAReduction(reduce_op, init_val, combine, None, finalize)
 
 
@@ -170,11 +166,12 @@ class GemmReductionCompileConfig:
                 )
             ):
                 raise RuntimeError(
-                    "generated epilogue reductions cannot use physical reduction inputs"
+                    "generated tensor reductions cannot also specify reduction_type or source_fn"
                 )
             if args.geometry.needs_physical_callbacks != (args.combine_fn is not None):
                 raise RuntimeError(
-                    "generated epilogue reductions require callbacks only for physical geometry"
+                    "combine_fn must be present exactly when a generated reduction "
+                    "crosses TensorSSA fragments"
                 )
             reduction = MaterializedTensorSSAReduction(
                 None,
@@ -186,12 +183,11 @@ class GemmReductionCompileConfig:
         else:
             if args.reduction_type is None or args.source_fn is None:
                 raise RuntimeError(
-                    "physical GEMM reductions require a primitive and source callback"
+                    "kernel-driven GEMM reductions require reduction_type and source_fn"
                 )
             reduction = materialize_tensorssa_reduction(
-                canonical_tensorssa_reduction_type(args.reduction_type),
-                cute,
                 args.reduction_type,
+                cute,
             )
             reduction = dataclasses.replace(
                 reduction, source=materialize(args.source_fn)
@@ -200,20 +196,17 @@ class GemmReductionCompileConfig:
             if finalizer is not None:
                 reduction = dataclasses.replace(reduction, finalize=finalizer)
 
+        consumer_finalizer = materialize(args.consumer_finalizer_fn)
+
         def materialize_consumer(source: str | None) -> Any:
             consumer = materialize(source)
-            if consumer is None or args.finalizer_fn is not None:
+            if consumer is None or consumer_finalizer is None:
                 return consumer
-            reduction_finalize = reduction.finalize
-            if reduction_finalize is None:
-                raise RuntimeError(
-                    "generated epilogue reductions cannot use reduction consumers"
-                )
 
             def consume(accumulator, primary_reduction, secondary_reduction):
                 return consumer(
                     accumulator,
-                    reduction_finalize(primary_reduction, args.group),
+                    consumer_finalizer(primary_reduction, args.group),
                     secondary_reduction,
                 )
 
