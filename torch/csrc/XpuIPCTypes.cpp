@@ -25,6 +25,18 @@ namespace {
 inline constexpr int64_t XPU_IPC_REF_COUNTER_FILE_SIZE = 10000;
 inline constexpr int64_t XPU_IPC_WARN_AFTER_X_BLOCKS_IN_LIMBO = 1000;
 
+inline int64_t AtomicLoadCounter(const int64_t* counter_ptr) {
+  return __atomic_load_n(counter_ptr, __ATOMIC_ACQUIRE);
+}
+
+inline void AtomicStoreCounter(int64_t* counter_ptr, int64_t value) {
+  __atomic_store_n(counter_ptr, value, __ATOMIC_RELEASE);
+}
+
+inline int64_t AtomicDecrementCounter(int64_t* counter_ptr) {
+  return __atomic_fetch_sub(counter_ptr, static_cast<int64_t>(1), __ATOMIC_ACQ_REL);
+}
+
 struct XpuIPCRefCountersFile final {
   XpuIPCRefCountersFile(std::string handle, uint64_t size, at::DataPtr data_ptr)
       : size_(size),
@@ -36,7 +48,7 @@ struct XpuIPCRefCountersFile final {
   }
 
   void set_counter(int64_t value) {
-    *counter_ptr() = value;
+    AtomicStoreCounter(counter_ptr(), value);
   }
 
   bool have_offsets() const {
@@ -88,7 +100,7 @@ class XpuIPCSentData final {
   ~XpuIPCSentData();
 
   int64_t counter_value() const {
-    return *counter_ptr_;
+    return AtomicLoadCounter(counter_ptr_);
   }
 
   const std::string& handle() const {
@@ -318,7 +330,8 @@ void ReleaseXpuIPCRefCounter(const std::string& handle, uint64_t offset) {
         flags,
         sizeof(int64_t) * XPU_IPC_REF_COUNTER_FILE_SIZE,
         nullptr);
-    *(static_cast<int64_t*>(sptr.get()) + offset) -= 1;
+    auto* counter_ptr = static_cast<int64_t*>(sptr.get()) + offset;
+    AtomicDecrementCounter(counter_ptr);
   } catch (c10::Error&) {
   }
 }
