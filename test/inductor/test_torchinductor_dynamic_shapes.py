@@ -38,10 +38,7 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_ASAN,
 )
-from torch.testing._internal.inductor_utils import (
-    HAS_CPU,
-    patch_inductor_backend,
-)
+from torch.testing._internal.inductor_utils import HAS_CPU, patch_inductor_backend
 from torch.utils._triton import has_triton
 
 
@@ -216,36 +213,32 @@ class DynamicShapesGPUTests(
 
 if hasattr(DynamicShapesGPUTests, "test_conv_with_as_strided_dynamic_shapes"):
     # gfx950 shows a deterministic numerical mismatch for this generated test.
-    DynamicShapesGPUTests.test_conv_with_as_strided_dynamic_shapes = (
-        skipIfRocmArch(MI350_ARCH)(
-            DynamicShapesGPUTests.test_conv_with_as_strided_dynamic_shapes
-        )
-    )
+    DynamicShapesGPUTests.test_conv_with_as_strided_dynamic_shapes = skipIfRocmArch(
+        MI350_ARCH
+    )(DynamicShapesGPUTests.test_conv_with_as_strided_dynamic_shapes)
 
-if hasattr(
-    DynamicShapesGPUTests, "test_randint_distribution_dynamic_shapes"
-):
+if hasattr(DynamicShapesGPUTests, "test_randint_distribution_dynamic_shapes"):
     # gfx950 shows a deterministic randint64 distribution mismatch for high bounds.
-    DynamicShapesGPUTests.test_randint_distribution_dynamic_shapes = (
-        skipIfRocmArch(MI350_ARCH)(
-            DynamicShapesGPUTests.test_randint_distribution_dynamic_shapes
-        )
-    )
+    DynamicShapesGPUTests.test_randint_distribution_dynamic_shapes = skipIfRocmArch(
+        MI350_ARCH
+    )(DynamicShapesGPUTests.test_randint_distribution_dynamic_shapes)
 
-if hasattr(
-    DynamicShapesGPUTests, "test_AllenaiLongformerBase_repro_dynamic_shapes"
-):
+if hasattr(DynamicShapesGPUTests, "test_AllenaiLongformerBase_repro_dynamic_shapes"):
     # With tensorify enabled, SymInt div no longer graph-breaks; the full
     # model compiles but Inductor hangs on the complex dynamic-shape graph.
     DynamicShapesGPUTests.test_AllenaiLongformerBase_repro_dynamic_shapes = (
-        unittest.skip(
-            "Skipped! SymInt div no longer graph-breaks"
-        )(DynamicShapesGPUTests.test_AllenaiLongformerBase_repro_dynamic_shapes)
+        unittest.skip("Skipped! SymInt div no longer graph-breaks")(
+            DynamicShapesGPUTests.test_AllenaiLongformerBase_repro_dynamic_shapes
+        )
     )
 
 if not TEST_WITH_ASAN:
     instantiate_device_type_tests(
-        DynamicShapesGPUTests, globals(), allow_xpu=True, allow_mps=True, except_for="cpu"
+        DynamicShapesGPUTests,
+        globals(),
+        allow_xpu=True,
+        allow_mps=True,
+        except_for="cpu",
     )
 
 
