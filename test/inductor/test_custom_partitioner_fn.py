@@ -1,6 +1,4 @@
 # Owner(s): ["module: pt2-dispatcher"]
-import unittest
-
 import torch
 from functorch.compile import min_cut_rematerialization_partition
 from torch._C import FileCheck
@@ -9,7 +7,6 @@ from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_fw_bw_and_get_code
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification
-from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
 class MyCustomPartitionerFn(CustomPartitionerFn):
@@ -33,7 +30,6 @@ class MyCustomPartitionerFn(CustomPartitionerFn):
 class TestCustomPartitionerFn(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_custom_partitioner_fn(self, device):
         """
         For function f(a, b), with the  partitioner in the compile_fx stack,
