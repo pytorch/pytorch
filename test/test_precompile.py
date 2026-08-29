@@ -394,6 +394,18 @@ def _precompile_calls_unkeyable(model, x):
     return model(_precompile_unkeyable(y)).sum()
 
 
+def _precompile_mixed_keyability(model, x):
+    # Only SOME graphs are unkeyable, which is the shape that used to leave a
+    # capture with most of its backends recorded and the rest missing.
+    y = model(x).relu()
+    torch._dynamo.graph_break()
+    y = _precompile_unkeyable(y)
+    torch._dynamo.graph_break()
+    y = y.sin()
+    torch._dynamo.graph_break()
+    return _precompile_unkeyable(y).cos()
+
+
 def _precompile_reads_flag(x):
     return x * getattr(x, "my_flag", 1)
 
@@ -3413,6 +3425,53 @@ class TestPrecompile(TestCase):
         loaded = torch.compiler.precompile.load(code, cache)
         with _maybe_scoped(loaded), torch.no_grad():
             self.assertEqual(loaded(model, x), want)
+
+    def test_partly_unkeyable_capture_records_every_backend(self):
+        # Backend recording is all-or-nothing: one missing id fails the whole
+        # artifact, so a capture that keys most of its graphs and not the rest
+        # is the worst case. Since capture pins bypass_autograd_cache_key there
+        # is no such state -- every graph is recorded whether or not the cache
+        # could have addressed it.
+        from torch._dynamo.precompile_package import precompile_capture
+        from torch._dynamo.utils import counters
+
+        model, x = torch.nn.Linear(8, 8).eval(), torch.randn(4, 8)
+        counters["aot_autograd"].clear()
+        with torch.no_grad():
+            session = precompile_capture(
+                _precompile_mixed_keyability, backend="inductor", dynamic=False
+            )
+            with session as compiled:
+                compiled(model, x)
+            entry = session._package.cache_entry()
+            collected = session._collect_backends()
+
+        self.assertEqual(len(entry.backend_ids), 4)
+        self.assertEqual(
+            {str(b) for b in entry.backend_ids}, set(collected), "partial recording"
+        )
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+
+    def test_missing_backend_error_reports_the_recorded_split(self):
+        # One missing id is fatal, so the message has to say how many of the
+        # capture actually landed. Reading "their compiled backends were never
+        # recorded" off a capture that recorded 41 of 56 sends the reader after
+        # a total failure that did not happen.
+        from torch._dynamo.precompile_package import _missing_backends_message
+
+        message = _missing_backends_message(56, [f"b{i}" for i in range(15)])
+        self.assertIn("recorded 41 of 56", message)
+        self.assertIn("15 graph(s)", message)
+        self.assertNotIn("never recorded", message)
+        # Long lists get truncated rather than pasting 15 opaque ids.
+        self.assertIn("... (7 more)", message)
+        self.assertNotIn("b8", message)
+        # The cache no longer gates recording, so it must not be the headline.
+        self.assertIn("training=True", message)
+
+        one = _missing_backends_message(2, ["b0"])
+        self.assertIn("recorded 1 of 2", one)
+        self.assertNotIn("more)", one)
 
     def test_unkeyable_graphs_in_one_capture_do_not_collide(self):
         # The fallback key has to be unique per CALL. The keyed lookup still
