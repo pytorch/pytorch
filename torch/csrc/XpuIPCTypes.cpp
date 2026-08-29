@@ -3,7 +3,6 @@
 #ifdef USE_XPU
 
 #include <ATen/MapAllocator.h>
-#include <ATen/StorageUtils.h>
 #include <c10/xpu/XPUFunctions.h>
 #include <c10/xpu/XPUStream.h>
 
@@ -55,7 +54,7 @@ struct XpuIPCRefCountersFile final {
   }
 
   bool offsets_in_use() const {
-    return used_slots_;
+    return used_slots_ > 0;
   }
 
   uint64_t get_offset() const {
@@ -67,8 +66,7 @@ struct XpuIPCRefCountersFile final {
     used_slots_++;
   }
 
-  void return_offset(uint64_t offset) {
-    (void)offset;
+  void return_offset() {
     used_slots_--;
   }
 
@@ -208,7 +206,7 @@ void ReturnXpuRefCounter(const std::string& handle, uint64_t offset) {
   auto& map = xpu_ipc_global_entities.ref_counters_files_;
   auto it = map.find(handle);
   if (it != map.end()) {
-    it->second->return_offset(offset);
+    it->second->return_offset();
     if (it->second->offsets_in_use() == 0 && !it->second->have_offsets()) {
       map.erase(handle);
     }
