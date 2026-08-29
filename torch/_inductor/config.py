@@ -1098,8 +1098,19 @@ combo_kernels_autotune = 1
 combo_kernel_allow_mixed_sizes = 1
 # Enable dynamic shapes for foreach kernels
 combo_kernel_foreach_dynamic_shapes = True
-# Maximum number of arguments (read/write buffers) allowed in a combo kernel
-combo_kernel_max_num_args = 250
+# Maximum number of arguments (read/write buffers) allowed in a combo kernel.
+#
+# NOTE: this cap partitions a combo group by sum(reads+writes) in
+# ComboKernel._update_partition, which runs BEFORE the dispatch strategy is
+# chosen. Uniform dispatch passes pointer tables instead of N*args, so its real
+# argument count is independent of group size -- but the partitioning cannot know
+# that yet. A group whose per-node read/write count exceeds
+# combo_kernel_max_num_args / combo_kernel_uniform_dispatch_min_kernels can
+# therefore never form a partition large enough to reach the uniform gate.
+# Env-overridable to sweep this interaction on the perf dashboard.
+combo_kernel_max_num_args: int = int(
+    os.environ.get("TORCHINDUCTOR_COMBO_KERNEL_MAX_NUM_ARGS", "250")
+)
 # Maximum number of sub-kernels allowed in a single combo kernel
 combo_kernel_max_num_nodes = 8
 # When True, each combo sub-kernel gets its own block sizes (XBLOCK_0, YBLOCK_0, etc.)

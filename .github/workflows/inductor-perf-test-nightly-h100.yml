@@ -82,6 +82,11 @@ on:
         required: false
         type: string
         default: "128"
+      combo_kernel_max_num_args:
+        description: "Codegen arg cap: partitions a combo group by sum(reads+writes) BEFORE dispatch is chosen, so a low value blocks uniform dispatch (sweep, e.g. 250/512/1024)"
+        required: false
+        type: string
+        default: "250"
       benchmark_configs:
         description: The list of configs used the benchmark
         required: false
@@ -219,7 +224,7 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' }}
     with:
       build-environment: ${{ needs.build.outputs.build-environment }}
-      dashboard-tag: training-${{ inputs.training || 'true' }}-inference-${{ inputs.inference || 'true' }}-default-${{ inputs.default || 'true' }}-dynamic-${{ inputs.dynamic || 'true' }}-cudagraphs-${{ inputs.cudagraphs || 'true' }}-cppwrapper-${{ inputs.cppwrapper || 'false' }}-aotinductor-${{ inputs.aotinductor || 'false' }}-maxautotune-${{ inputs.maxautotune || 'false' }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs || 'false' }}-deterministic_perf-${{ inputs.deterministic_perf || 'false' }}-batch_invariant_accuracy-${{ inputs.batch_invariant_accuracy || 'false' }}-combo_kernels-${{ inputs.combo_kernels || 'false' }}-combo_kernel_uniform_dispatch-${{ inputs.combo_kernel_uniform_dispatch || 'false' }}-uniformmink-${{ inputs.combo_kernel_uniform_dispatch_min_kernels || '32' }}-uniformmaxnodes-${{ inputs.combo_kernel_uniform_dispatch_max_num_nodes || '128' }}
+      dashboard-tag: training-${{ inputs.training || 'true' }}-inference-${{ inputs.inference || 'true' }}-default-${{ inputs.default || 'true' }}-dynamic-${{ inputs.dynamic || 'true' }}-cudagraphs-${{ inputs.cudagraphs || 'true' }}-cppwrapper-${{ inputs.cppwrapper || 'false' }}-aotinductor-${{ inputs.aotinductor || 'false' }}-maxautotune-${{ inputs.maxautotune || 'false' }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs || 'false' }}-deterministic_perf-${{ inputs.deterministic_perf || 'false' }}-batch_invariant_accuracy-${{ inputs.batch_invariant_accuracy || 'false' }}-combo_kernels-${{ inputs.combo_kernels || 'false' }}-combo_kernel_uniform_dispatch-${{ inputs.combo_kernel_uniform_dispatch || 'false' }}-uniformmink-${{ inputs.combo_kernel_uniform_dispatch_min_kernels || '32' }}-uniformmaxnodes-${{ inputs.combo_kernel_uniform_dispatch_max_num_nodes || '128' }}-maxnumargs-${{ inputs.combo_kernel_max_num_args || '250' }}
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
       timeout-minutes: 720

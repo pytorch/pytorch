@@ -893,6 +893,16 @@ test_perf_for_dashboard() {
     export TORCHINDUCTOR_COMBO_KERNEL_UNIFORM_DISPATCH_MAX_NUM_NODES="${BASH_REMATCH[1]}"
   fi
 
+  # Codegen argument cap. This partitions a combo group by sum(reads+writes)
+  # BEFORE the dispatch strategy is chosen, so a value low relative to a node's
+  # read/write count holds every partition below the uniform min_kernels gate and
+  # blocks uniform dispatch entirely -- independently of the scheduler's grouping.
+  # Extracted from DASHBOARD_TAG so the interaction can be swept from the workflow
+  # trigger; when absent the inductor config default (250) applies.
+  if [[ "$DASHBOARD_TAG" =~ maxnumargs-([0-9]+) ]]; then
+    export TORCHINDUCTOR_COMBO_KERNEL_MAX_NUM_ARGS="${BASH_REMATCH[1]}"
+  fi
+
   # TODO: All the accuracy tests can be skipped once the CI accuracy checking is stable enough
   local targets=(accuracy performance)
 
