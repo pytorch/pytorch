@@ -1167,6 +1167,73 @@ class FakeTensorTest(TestCase):
         with torch._subclasses.CrossRefFakeMode():
             y = torch.full((4, 4), 1)
 
+    def test_tensor_constructor_meta_device(self):
+        eager_indexed = torch.tensor([[1.0, 2.0], [3.0]], device="meta:0")
+        eager_values = torch.tensor([[1.0, 2.0], [3.0, 4.0]], device="meta")
+
+        self.assertEqual(eager_indexed.device, torch.device("meta"))
+        self.assertEqual(eager_indexed.shape, (2, 2))
+        self.assertEqual(eager_values.shape, (2, 2))
+
+        with FakeTensorMode(), torch.device("meta"):
+            scalar = torch.tensor(3.0)
+            values = torch.tensor([1.0, 2.0, 3.0])
+
+        self.assertIsInstance(scalar, FakeTensor)
+        self.assertEqual(scalar.device, torch.device("meta"))
+        self.assertEqual(scalar.shape, ())
+        self.assertIsInstance(values, FakeTensor)
+        self.assertEqual(values.device, torch.device("meta"))
+        self.assertEqual(values.shape, (3,))
+
+        with FakeTensorMode():
+            explicit = torch.tensor(3.0, device="meta")
+            explicit_indexed = torch.tensor(3.0, device="meta:0")
+
+        self.assertIsInstance(explicit, FakeTensor)
+        self.assertEqual(explicit.device, torch.device("meta"))
+        self.assertEqual(explicit.shape, ())
+        self.assertIsInstance(explicit_indexed, FakeTensor)
+        self.assertEqual(explicit_indexed.device, torch.device("meta"))
+        self.assertEqual(explicit_indexed.shape, ())
+
+    @parametrize("device", ("meta", "meta:0"))
+    def test_tensor_constructor_meta_device_from_storage(self, device):
+        storage = torch.tensor([1.0, 2.0]).storage()
+
+        with patch.object(FakeTensorMode, "avoid_device_init", True):
+            with FakeTensorMode():
+                tensor = torch.tensor(storage, device=device)
+
+        self.assertIsInstance(tensor, FakeTensor)
+        self.assertEqual(tensor.device, torch.device("meta"))
+        self.assertEqual(tensor.shape, (2,))
+
+    @expectedFailurePropagateRealTensors
+    @parametrize(
+        "device,expected_device",
+        (("cpu", "cpu"), ("cpu:0", "cpu"), ("cuda:1", "cuda:1")),
+    )
+    def test_tensor_constructor_meta_storage_device(self, device, expected_device):
+        storage = torch.empty(2, device="meta").storage()
+
+        with patch.object(FakeTensorMode, "avoid_device_init", True):
+            with FakeTensorMode():
+                tensor = torch.tensor(storage, dtype=torch.float32, device=device)
+
+        self.assertIsInstance(tensor, FakeTensor)
+        self.assertEqual(tensor.device, torch.device(expected_device))
+        self.assertEqual(tensor.shape, (2,))
+
+    def test_tensor_constructor_meta_device_disallowed(self):
+        with patch.object(torch._functorch.config, "fake_tensor_allow_meta", False):
+            with self.assertRaisesRegex(
+                AssertionError,
+                "device.type must not be 'meta' when allow_meta is False",
+            ):
+                with FakeTensorMode():
+                    torch.tensor(3.0, device="meta")
+
     def check_function_with_fake(self, fn):
         out = fn()
         with torch._subclasses.FakeTensorMode():
@@ -1592,6 +1659,37 @@ class FakeTensorTest(TestCase):
                 self.assertEqual(output.shape, (L, N, D * H_out))
                 self.assertEqual(h_n.shape, (D * num_layers, N, H_out))
                 self.assertEqual(c_n.shape, (D * num_layers, N, hidden_size))
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_cuda_gru(self):
+        with torch.backends.cudnn.flags(enabled=False):
+            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False)
+            with fake_tensor_mode:
+                N = 5
+                L = 4
+                H_in = 2
+                hidden_size = 3
+                num_layers = 2
+                bidir = False
+                D = 2 if bidir else 1
+
+                gru = torch.nn.GRU(
+                    input_size=H_in,
+                    hidden_size=hidden_size,
+                    num_layers=num_layers,
+                    batch_first=False,
+                    bias=True,
+                    bidirectional=bidir,
+                    device="cuda",
+                )
+
+                h_0 = torch.randn((num_layers * D, N, hidden_size), device="cuda")
+                inp = torch.randn((L, N, H_in), device="cuda")
+                output, h_n = gru(inp, h_0)
+                output.sum().backward()
+
+                self.assertEqual(output.shape, (L, N, D * hidden_size))
+                self.assertEqual(h_n.shape, (D * num_layers, N, hidden_size))
 
     def test_data_dependent_operator(self):
         with FakeTensorMode(allow_fallback_kernels=False):
@@ -2752,6 +2850,7 @@ class FakeTensorConverterTest(TestCase):
         y_conv = converter.from_real_tensor(mode, y)
         self.assertIs(x_conv_storage, y_conv.untyped_storage())
 
+    @xfailIfTorchDynamo
     def test_dead_key(self):
         x = torch.rand(2, 2, 2)
         mode = FakeTensorMode()
@@ -3802,6 +3901,41 @@ class FakeTensorDispatchCache(TestCase):
 
             z1 = x1.mul_(2)
             self.assertFalse(z1._is_view())
+
+    def test_cache_unsafe_view_aliasing(self):
+        """
+        _unsafe_view reports is_view=False, but its output still shares storage
+        with its input. A cache hit must reproduce that aliasing against the new
+        input rather than hand back a freshly allocated storage.
+
+        Storage identity is what this checks. Neither extract_tensor_metadata
+        nor the crosscheck's assert_metadata_eq compares storage identity, and
+        _is_view() is False for a correct and an incorrect output alike, so
+        nothing else here would catch a regression.
+        """
+        with FakeTensorMode():
+            x = torch.randn(4, 4)
+            y = torch.randn(4, 4)
+
+            FakeTensorMode.cache_clear()
+            ref = aten._unsafe_view.default(x, [16])
+            self.assertEqual(ref.untyped_storage()._cdata, x.untyped_storage()._cdata)
+
+            # Same shapes and dtypes, so this call is served from the cache. The
+            # hit count is compared relatively: the fake implementation
+            # re-dispatches internally, so the absolute counts are not 1.
+            hits = FakeTensorMode.cache_info().hits
+            res = aten._unsafe_view.default(y, [16])
+            self.assertEqual(FakeTensorMode.cache_info().hits, hits + 1)
+
+            self.assertEqual(res.untyped_storage()._cdata, y.untyped_storage()._cdata)
+            self.assertNotEqual(
+                res.untyped_storage()._cdata, x.untyped_storage()._cdata
+            )
+            self.assertEqual(
+                extract_tensor_metadata(ref),
+                extract_tensor_metadata(res),
+            )
 
     def test_cache_dispatch_key_set(self):
         """

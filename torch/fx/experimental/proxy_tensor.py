@@ -10,6 +10,7 @@ import contextvars
 import functools
 import inspect
 import logging
+import math
 import operator
 import threading
 import typing
@@ -555,7 +556,7 @@ def _nary_sym_min(*args: Any) -> Any:
 def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
     """
     Returns a dict mapping sympy types to Python callables
-    (e.g. ``sympy.Mul`` -> ``operator.mul``, ``sympy.Add`` -> ``torch.sym_sum``).
+    (e.g. ``sympy.Mul`` -> a fold over ``operator.mul``).
     """
     import sympy
 
@@ -676,7 +677,7 @@ def _build_proxy_for_sym_expr(
     if expr.is_Float:
         return float(expr)
 
-    args = []
+    args: list[Any] = []
     for arg in expr.args:
         if (arg_value := _build_proxy_for_sym_expr(tracer, arg)) is None:
             return None
@@ -686,9 +687,18 @@ def _build_proxy_for_sym_expr(
     if not func:
         return None
 
+    # sympy Mul and Add are n-ary, but the handlers they map to (operator.mul,
+    # operator.add) take exactly two arguments, so an expression like s0*s1*s2
+    # has to be folded into a chain of binary ops. Fold rather than passing a
+    # variadic wrapper: the handler becomes the fx node's target, and that has
+    # to stay a real operator for downstream consumers.
     if out is None:
+        if len(args) > 2:
+            return functools.reduce(func, args)
         out = func(*args)
     else:
+        if len(args) > 2:
+            args = [functools.reduce(func, args[:-1]), args[-1]]
         _sym_register(tracer, func, tuple(args), out)
     return out
 
@@ -1184,7 +1194,11 @@ def _coor_enabled() -> bool:
 def _coor_current_accelerator() -> torch.device | None:
     """The current accelerator as an indexed device (e.g. cuda:0), or None if there is no
     accelerator. Used to classify device operands under compile-on-one-rank."""
-    acc = torch.accelerator.current_accelerator()
+    # check_available matters: current_accelerator() reports the accelerator the build
+    # supports, so on a CUDA-enabled build with no visible GPUs it returns cuda and the
+    # index lookup below then raises "No CUDA GPUs are available". Such a machine has no
+    # accelerator for our purposes, and a cpu-only graph must still compile there.
+    acc = torch.accelerator.current_accelerator(check_available=True)
     if acc is None:
         return None
     return torch.device(acc.type, torch.accelerator.current_device_index())
@@ -1595,8 +1609,8 @@ class PythonKeyTracer(Tracer):
     torch_fn_counts: dict[OpOverload, int]
     enable_thunkify: bool = False
 
-    def __init__(self) -> None:
-        super().__init__(autowrap_modules=())  # type: ignore[arg-type]
+    def __init__(self, *, autowrap_modules: tuple[types.ModuleType, ...] = ()) -> None:
+        super().__init__(autowrap_modules=autowrap_modules)  # type: ignore[arg-type]
         _init_proxy_trackers(self)
 
     # In general, we don't want to make modules leaves. In principle, users of
@@ -2544,8 +2558,17 @@ class _ModuleStackTracer(PythonKeyTracer):
     See Note [Preserving the nn module stack metadata during export non-strict mode]  # noqa: W605
     """
 
-    def __init__(self, scope_root: GraphModule) -> None:
-        super().__init__()
+    @classmethod
+    def _graph_module_deserialization_tracer(cls, root: Module) -> Tracer:
+        return _ModuleStackTracerForGraphModuleDeserialization(root)
+
+    def __init__(
+        self,
+        scope_root: Module,
+        *,
+        autowrap_modules: tuple[types.ModuleType, ...] = (),
+    ) -> None:
+        super().__init__(autowrap_modules=autowrap_modules)
         self.record_stack_traces = not fx.config.do_not_emit_stack_traces
         self._record_forward_stack_traces_only = True
         self.scope_root = scope_root
@@ -2829,6 +2852,43 @@ class _ModuleStackTracer(PythonKeyTracer):
             )
 
         return node
+
+
+class _ModuleStackTracerForGraphModuleDeserialization(_ModuleStackTracer):
+    """Replay GraphModule code without running export-only tracer behavior."""
+
+    def __init__(self, scope_root: Module) -> None:
+        super().__init__(scope_root, autowrap_modules=(math,))
+        self.record_stack_traces = False
+
+    def trace(
+        self,
+        root: Module | Callable[..., Any],
+        concrete_args: dict[str, object] | None = None,
+    ) -> fx.Graph:
+        return Tracer.trace(self, root, concrete_args)
+
+    def call_module(
+        self,
+        m: Module,
+        forward: Callable[..., Any],
+        args: tuple[object, ...],
+        kwargs: dict[str, object],
+    ) -> Any:
+        return Tracer.call_module(self, m, forward, args, kwargs)
+
+    def getattr(
+        self, attr: str, attr_val: object, parameter_proxy_cache: dict[str, Proxy]
+    ) -> object:
+        if isinstance(attr_val, Module) and self.enable_attr_proxy:
+            return self.proxy_type(attr_val, attr)
+        return Tracer.getattr(self, attr, attr_val, parameter_proxy_cache)
+
+    def is_leaf_module(self, m: Module, module_qualified_name: str) -> bool:
+        return True
+
+    def create_node(self, *args: object, **kwargs: object) -> fx.node.Node:
+        return Tracer.create_node(self, *args, **kwargs)  # type: ignore[arg-type]
 
 
 class _MakefxTracer:

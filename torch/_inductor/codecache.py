@@ -207,7 +207,7 @@ log = logging.getLogger(__name__)
 AOTAUTOGRAD_CACHE_PREFIX = "a"
 
 
-def _device_constructor_sort_key(target: Any) -> str:
+def _device_constructor_sort_key(target: object) -> str:
     return ".".join(
         x
         for x in (
@@ -733,7 +733,7 @@ class FxGraphCachePickler(pickle.Pickler):
         self.fast = True
 
     # pyrefly: ignore [bad-override]
-    def reducer_override(self, obj: Any) -> Any:
+    def reducer_override(self, obj: object) -> Any:
         """Fallback reducer for objects not registered in dispatch_table.
 
         This handles extension types (e.g. pybind11 enums) that don't support
@@ -769,7 +769,9 @@ class FxGraphCachePickler(pickle.Pickler):
         return result
 
     @staticmethod
-    def _reduce_unpicklable(obj: Any) -> Any:
+    def _reduce_unpicklable(
+        obj: object,
+    ) -> tuple[Callable[[str], NoReturn], tuple[str]]:
         key = _get_stable_obj_key(obj)
         if key is None:
             raise BypassFxGraphCache(
@@ -846,7 +848,7 @@ class FxGraphCachePickler(pickle.Pickler):
         # hashing.  Guards ensure correctness on cache reload.
         return (_ident, (str(s),))
 
-    def _reduce_unsupported(self, s: Any) -> NoReturn:
+    def _reduce_unsupported(self, s: object) -> NoReturn:
         """
         Custom reducer to handle any objects that we don't support and therefore
         raise to bypass caching.
@@ -893,7 +895,7 @@ class FxGraphCachePickler(pickle.Pickler):
                 self.fast = False
         return (_ident, (t.wrapped_obj, t.script_class_name, t.real_obj))
 
-    def dumps(self, obj: Any) -> bytes:
+    def dumps(self, obj: object) -> bytes:
         """
         Pickle an object and return a byte string.
         """
@@ -913,14 +915,14 @@ class FxGraphCachePickler(pickle.Pickler):
             self._stream.seek(0)
             self._stream.truncate(0)
 
-    def get_hash(self, obj: Any) -> str:
+    def get_hash(self, obj: object) -> str:
         """
         Serialize an object and return a hash of the bytes.
         """
         serialized_data = self.dumps(obj)
         return COMPACT_CACHE_KEY_STRATEGY.key(serialized_data)
 
-    def get_key(self, obj: Any) -> str:
+    def get_key(self, obj: object) -> str:
         """
         Serialize an object and return an FX graph cache key.
         """
@@ -934,7 +936,7 @@ class FxGraphCachePickler(pickle.Pickler):
         to a different value than another.
         """
 
-        def get_str(obj: Any) -> str:
+        def get_str(obj: object) -> str:
             if isinstance(obj, torch.Tensor):
                 return str(extract_tensor_metadata_for_cache_key(obj))
             elif isinstance(obj, bytes):
@@ -1199,7 +1201,7 @@ class CacheabilityValidator:
 
     def _check_cache_key_object(
         self,
-        obj: Any,
+        obj: object,
         seen: set[int] | None = None,  # noqa: set_linter
     ) -> None:
         if seen is None:
@@ -1227,11 +1229,11 @@ class CacheabilityValidator:
 _warned_pre_grad_pass_missing_uuid: OrderedSet[str] = OrderedSet()
 
 
-def _custom_pass_has_uuid(custom_pass: Any) -> bool:
+def _custom_pass_has_uuid(custom_pass: object) -> bool:
     return isinstance(custom_pass, CustomGraphPass) and custom_pass.uuid() is not None
 
 
-def _custom_pass_name(custom_pass: Any) -> str:
+def _custom_pass_name(custom_pass: object) -> str:
     return getattr(custom_pass, "__qualname__", None) or type(custom_pass).__qualname__
 
 
@@ -1372,7 +1374,7 @@ class FxGraphHashDetails:
     )
 
     @classmethod
-    def _contains_tensor(cls, value: Any) -> bool:
+    def _contains_tensor(cls, value: object) -> bool:
         if isinstance(value, torch.Tensor):
             return True
         if isinstance(value, (list, tuple, OrderedSet, frozenset)):
@@ -1385,7 +1387,7 @@ class FxGraphHashDetails:
         return False
 
     @classmethod
-    def _contains_cpu_tensor(cls, value: Any) -> bool:
+    def _contains_cpu_tensor(cls, value: object) -> bool:
         if isinstance(value, torch.Tensor):
             return value.device.type == "cpu"
         if isinstance(value, (list, tuple, OrderedSet, frozenset)):
@@ -1398,7 +1400,7 @@ class FxGraphHashDetails:
         return False
 
     @staticmethod
-    def _device_type(value: Any) -> str | None:
+    def _device_type(value: object) -> str | None:
         if isinstance(value, torch.device):
             return value.type
         if isinstance(value, str):
@@ -1410,7 +1412,7 @@ class FxGraphHashDetails:
 
     @classmethod
     def _is_factory_target(
-        cls, target: Any, targets: tuple[Any, ...], packets: tuple[Any, ...]
+        cls, target: object, targets: tuple[object, ...], packets: tuple[object, ...]
     ) -> bool:
         if target in targets or target in packets:
             return True
@@ -1991,7 +1993,6 @@ class InductorCacheArtifact(CacheArtifact):
     @override
     def populate_cache(self) -> None:
         FxGraphCache._write_to_local_cache(self.key, self.content)
-        FxGraphCache._emit_triton_bundle(self.content)
 
     @override
     @staticmethod
@@ -2254,7 +2255,8 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         # Now re-evaluate with the symints to add any guards to the current env.
         if graph.guards_expr:
             check = bool(evaluate_guards(graph.guards_expr, symints))
-            assert check is True  # noqa: S101
+            if check is not True:
+                raise AssertionError(f"expected check to be True, got {check}")
             log.debug(
                 "fx graph cache key %s post-load guards: %s", key, shape_env.guards
             )
@@ -2272,15 +2274,6 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         # iterating over all entries in the parent subdir.
         path = os.path.join(subdir, sha256_hash(content))
         write_atomic(path, content, make_dirs=True)
-
-    @staticmethod
-    def _emit_triton_bundle(content: bytes) -> None:
-        if not TritonBundler.is_enabled():
-            return
-
-        graph = pickle.loads(content)
-        if bundle := graph._triton_bundle:
-            TritonBundler.read_and_emit(bundle)
 
     @staticmethod
     def _save_graph(
@@ -4072,24 +4065,24 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         // We manually link it below to workaround issues with fbcode build.
         static void* (*_torchinductor_pyobject_tensor_data_ptr)(PyObject* obj);
 
-        template <typename T> static inline T parse_arg(PyObject* args, size_t n) {{
+        template <typename T> static inline T parse_arg(PyObject* const* args, size_t n) {{
             static_assert(std::is_pointer_v<T>, "arg type must be pointer or long");
-            return static_cast<T>(_torchinductor_pyobject_tensor_data_ptr(PyTuple_GET_ITEM(args, n)));
+            return static_cast<T>(_torchinductor_pyobject_tensor_data_ptr(args[n]));
         }}
-        template <> inline int64_t parse_arg<int64_t>(PyObject* args, size_t n) {{
-            auto result = PyLong_AsSsize_t(PyTuple_GET_ITEM(args, n));
+        template <> inline int64_t parse_arg<int64_t>(PyObject* const* args, size_t n) {{
+            auto result = PyLong_AsSsize_t(args[n]);
             if(result == -1 && PyErr_Occurred()) [[unlikely]]
                 throw std::runtime_error("expected int arg");
             return result;
         }}
-        template <> inline uintptr_t parse_arg<uintptr_t>(PyObject* args, size_t n) {{
-            auto result = PyLong_AsVoidPtr(PyTuple_GET_ITEM(args, n));
+        template <> inline uintptr_t parse_arg<uintptr_t>(PyObject* const* args, size_t n) {{
+            auto result = PyLong_AsVoidPtr(args[n]);
             if(result == reinterpret_cast<void*>(-1) && PyErr_Occurred()) [[unlikely]]
                 throw std::runtime_error("expected int arg");
             return reinterpret_cast<uintptr_t>(result);
         }}
-        template <> inline float parse_arg<float>(PyObject* args, size_t n) {{
-            auto result = PyFloat_AsDouble(PyTuple_GET_ITEM(args, n));
+        template <> inline float parse_arg<float>(PyObject* const* args, size_t n) {{
+            auto result = PyFloat_AsDouble(args[n]);
             if(result == -1.0 && PyErr_Occurred()) [[unlikely]]
                 throw std::runtime_error("expected float arg");
             return static_cast<float>(result);
@@ -4097,11 +4090,9 @@ class CppPythonBindingsCodeCache(CppCodeCache):
 
         {extra_parse_arg}
 
-        static PyObject* {entry_func}_py(PyObject* self, PyObject* args) {{
+        static PyObject* {entry_func}_py(PyObject* self, PyObject* const* args, Py_ssize_t nargs) {{
             try {{
-                if(!PyTuple_CheckExact(args)) [[unlikely]]
-                    throw std::runtime_error("tuple args required");
-                if(PyTuple_GET_SIZE(args) != {arg_len}) [[unlikely]]
+                if(nargs != {arg_len}) [[unlikely]]
                     throw std::runtime_error("requires {arg_len} args");
                 {call_entry_func}
             }} catch(std::exception const& e) {{
@@ -4114,7 +4105,12 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         }}
 
         static PyMethodDef py_methods[] = {{
-            {{"{entry_func}", {entry_func}_py, METH_VARARGS, ""}},
+            {{
+                "{entry_func}",
+                reinterpret_cast<PyCFunction>(reinterpret_cast<void (*)()>({entry_func}_py)),
+                METH_FASTCALL,
+                ""
+            }},
             {{NULL, NULL, 0, NULL}}}};
 
         static struct PyModuleDef py_module =
@@ -4310,8 +4306,9 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
             return result;
         }}
 
-        template <> inline std::vector<AtenTensorHandle> parse_arg<std::vector<AtenTensorHandle>>(PyObject* args, size_t n) {{
-            return unpack_tensor_handle_list(PyTuple_GET_ITEM(args, n));
+        template <>
+        inline std::vector<AtenTensorHandle> parse_arg<std::vector<AtenTensorHandle>>(PyObject* const* args, size_t n) {{
+            return unpack_tensor_handle_list(args[n]);
         }}
 
         PyObject* inductor_entry_cpp(std::vector<AtenTensorHandle>&& input_handles) {{
