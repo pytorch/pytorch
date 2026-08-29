@@ -318,13 +318,15 @@ def _check_rng_sync_internal(
     generator: torch.Generator, group: dist.ProcessGroup
 ) -> tuple[dict[Any, set], str]:
     if generator.device.type in {"cuda", "xpu"}:
+        # Counter-based RNGs (Philox) whose 16-byte state can be interpreted
+        # as a (seed, offset) pair.
         return _check_philox_rng_sync(generator, group)
-    elif generator.device.type == "cpu":
-        return _check_cpu_rng_sync(generator, group)
     else:
-        raise NotImplementedError(
-            f"Unsupported generator device: {generator.device.type}"
-        )
+        # Any other device (cpu, npu, ...) falls back to comparing the full
+        # generator state tensors, which works for generators whose
+        # ``get_state()`` returns a tensor. This keeps the check usable by
+        # third-party backends without raising NotImplementedError.
+        return _check_cpu_rng_sync(generator, group)
 
 
 def _desync_table_str(tag: str, value_ranks: dict[Any, set[int]]) -> str:
