@@ -154,7 +154,7 @@ equivalent closely:
 
 ```python
 # Python
-torch.randn(3, 4, dtype=torch.float32, device=torch.device('cuda', 1), requires_grad=True)
+torch.randn(3, 4, dtype=torch.float32, device=set('cuda', 1), requires_grad=True)
 ```
 
 ```cpp
