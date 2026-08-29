@@ -4804,6 +4804,48 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
     )
 
 
+def _offending_value_path(state: Any, error: Exception) -> str:
+    """Best-effort attribute path to the value that could not be pickled.
+
+    The type in the error names WHAT failed and never WHERE it lives, which in a
+    large model means bisecting by hand across multi-minute captures. Walk the
+    scopes the guard state carries and report the first path whose value has the
+    failing type. Best-effort by construction: it is a diagnostic appended to an
+    error that is already being raised, so any failure here must stay silent
+    rather than mask the real one.
+    """
+    try:
+        wanted = re.search(r"cannot pickle '([^']+)' object", str(error))
+        if wanted is None:
+            return ""
+        target = wanted.group(1)
+        graph = state.output_graph
+        roots = [
+            (f"local_scope[{k!r}]", v)
+            for k, v in (getattr(graph, "local_scope", None) or {}).items()
+        ] + [
+            (f"global_scope[{k!r}]", v)
+            for k, v in (getattr(graph, "global_scope", None) or {}).items()
+        ]
+        seen: set[int] = set()
+        queue = collections.deque(roots)
+        while queue:
+            path, value = queue.popleft()
+            if id(value) in seen or len(seen) > 20000:
+                continue
+            seen.add(id(value))
+            if type(value).__name__ == target:
+                return f"\n  reached via: {path}"
+            for name, child in (
+                list(vars(value).items()) if hasattr(value, "__dict__") else []
+            ):
+                if not name.startswith("__"):
+                    queue.append((f"{path}.{name}", child))
+    except Exception:
+        return ""
+    return ""
+
+
 def pickle_guards_state(
     state: GuardsState,
     builder: GuardBuilder,
@@ -4855,8 +4897,12 @@ def pickle_guards_state(
         # program that has nothing wrong with it.
         # The caller turns PackageError into a package bypass, or re-raises it
         # under strict_precompile. Name the original type so the reason stays
-        # diagnosable in the bypass message.
-        raise torch._dynamo.exc.PackageError(f"{type(e).__name__}: {e}") from e
+        # diagnosable in the bypass message -- and the PATH to the offending
+        # value, because a type alone ("cannot pickle 'generator' object") is
+        # not actionable in a model with a thousand-frame guard tree.
+        raise torch._dynamo.exc.PackageError(
+            f"{type(e).__name__}: {e}{_offending_value_path(state, e)}"
+        ) from e
     return buf.getvalue()
 
 
