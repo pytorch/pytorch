@@ -4146,6 +4146,11 @@ def _get_unsupported_types() -> tuple[type, ...]:
     )
     try:
         ret += (torch._C._distributed_c10d.ProcessGroup,)
+        # A concrete backend -- ProcessGroupNCCL, FakeProcessGroup -- is bound as
+        # a subclass of Backend, NOT of ProcessGroup, so the line above misses it
+        # and the whole frame dies with "cannot pickle FakeProcessGroup". The
+        # identity-guard rationale above applies to backends verbatim.
+        ret += (torch._C._distributed_c10d.Backend,)
     except AttributeError:
         pass
     return ret
@@ -4572,19 +4577,7 @@ class GuardsStatePickler(pickle.Pickler):
             if id(obj) not in self.guard_tree_values:
                 return _Missing, ("module guard tree",)
 
-            for attr in obj.__dict__.values():
-                if isinstance(attr, (torch.Tensor, torch.nn.Module)):
-                    continue
-                if id(attr) in self.guard_tree_values:
-                    continue
-                if callable(attr):
-                    continue
-                if _is_interned_singleton(attr):
-                    # Pruning is keyed by id(), so an unguarded attribute
-                    # holding an interned value would poison every OTHER
-                    # reference to that same object -- see the helper.
-                    continue
-                self.missing_values[id(attr)] = attr
+            self._prune_unguarded_attributes(obj)
 
             # DDP module is a special case because it tries to restore unneeded
             # data in custom __setstate__. We cannot skip ddp module because it
@@ -4693,6 +4686,32 @@ class GuardsStatePickler(pickle.Pickler):
                 contents = _Missing("empty function closure")
             return type(self)._unpickle_cell, (contents,)
 
+        if (
+            id(obj) in self.guard_tree_values
+            and hasattr(obj, "__dict__")
+            and not inspect.isclass(obj)
+            and not inspect.ismodule(obj)
+            and not isinstance(obj, (torch.nn.Module, torch.Tensor))
+            and not type(obj).__module__.startswith("torch.")
+        ):
+            # Any object the guard tree reached, not just an nn.Module. A guarded
+            # object that is NOT a module -- a train pipeline, a wrapper holding a
+            # dataloader -- was pickled whole, so one unguarded attribute several
+            # levels down (a live generator, a process group) took the entire
+            # frame with it. Only the attributes something guards need to survive.
+            # Deliberately LAST: every specific reducer above -- functions,
+            # methods, cells, ops -- gets first refusal, because they need their
+            # own reconstruction rather than attribute pruning.
+            #
+            # And deliberately USER objects only. Pruning is safe when nothing
+            # reads the pruned attribute on the way back, which holds for an
+            # nn.Module and for a user's own object, but NOT for torch's
+            # structural types: a DTensorSpec's fields are needed to rebuild the
+            # spec even though no guard names each one, and pruning them leaves a
+            # tensor no guard can match. Tensors are excluded for the same reason
+            # -- a subclass carries its spec in __dict__.
+            self._prune_unguarded_attributes(obj)
+
         if hasattr(torch.distributed, "distributed_c10d") and isinstance(
             obj, torch.distributed.distributed_c10d.Work
         ):
@@ -4730,6 +4749,29 @@ class GuardsStatePickler(pickle.Pickler):
                 return type(self)._unpickle_fsdp_module_type, (original_type,)
 
         return NotImplemented
+
+    def _prune_unguarded_attributes(self, obj: Any) -> None:
+        """Mark every ``__dict__`` value nothing guards as prunable.
+
+        Reaching an object through the guard tree does not mean its whole state
+        is needed -- only the attributes a guard actually reads. The rest is
+        replaced by the _Missing sentinel, which is what keeps an unpicklable
+        bystander (a generator, a live iterator, a C handle) from taking the
+        frame down with it.
+        """
+        for attr in vars(obj).values():
+            if isinstance(attr, (torch.Tensor, torch.nn.Module)):
+                continue
+            if id(attr) in self.guard_tree_values:
+                continue
+            if callable(attr):
+                continue
+            if _is_interned_singleton(attr):
+                # Pruning is keyed by id(), so an unguarded attribute holding an
+                # interned value would poison every OTHER reference to that same
+                # object -- see the helper.
+                continue
+            self.missing_values[id(attr)] = attr
 
 
 def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterEntry:
