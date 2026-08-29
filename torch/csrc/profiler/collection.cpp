@@ -102,8 +102,8 @@ OpArgData parseArgData(
                 shape.emplace_back(t.sizes_);
                 stride.emplace_back(t.strides_);
               }
-              shapes[i] = shape;
-              strides[i] = stride;
+              shapes[i] = std::move(shape);
+              strides[i] = std::move(stride);
               dtypes[i] = "TensorList";
             },
             [&](const c10::IValue&) { dtypes[i] = "Scalar"; },
@@ -134,11 +134,11 @@ OpArgData parseArgData(
 
   return OpArgData{
       .hasData = true,
-      .shapes = shapes,
-      .dtypes = dtypes,
-      .concreteInputs = concrete_inputs_list,
-      .shapesForKinetoEvent = shapesForKinetoEvent,
-      .strides = strides};
+      .shapes = std::move(shapes),
+      .dtypes = std::move(dtypes),
+      .concreteInputs = std::move(concrete_inputs_list),
+      .shapesForKinetoEvent = std::move(shapesForKinetoEvent),
+      .strides = std::move(strides)};
 }
 
 // ============================================================================

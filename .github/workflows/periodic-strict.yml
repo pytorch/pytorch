@@ -2,6 +2,9 @@
 name: periodic-strict
 
 on:
+  pull_request:
+    paths:
+      - .github/workflows/periodic-strict.yml
   schedule:
     - cron: 45 */4 * * *
   push:
@@ -12,7 +15,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id }}-${{ github.event_name == 'schedule' }}-${{ github.event.schedule }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id }}-${{ github.event_name == 'schedule' }}
   cancel-in-progress: true
 
 permissions:
@@ -31,3 +34,48 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
       check_experiments: lf
+
+  linux-jammy-cuda13_0-py3_10-gcc11-build:
+    name: linux-jammy-cuda13.0-py3.10-gcc11
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-jammy-cuda13.0-py3.10-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      cuda-arch-list: '7.5 8.6 8.9'
+      test-matrix: |
+        { include: [
+          { config: "periodic", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "periodic", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+        ]}
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: "13.0"
+    secrets: inherit
+
+  linux-jammy-cuda13_0-py3_10-gcc11-test:
+    name: linux-jammy-cuda13.0-py3.10-gcc11
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-jammy-cuda13_0-py3_10-gcc11-build
+      - get-label-type
+    with:
+      build-environment: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-build.outputs.test-matrix }}
+      # These custom run_test.py targets cannot be filtered cleanly by -m periodic:
+      # doctests and autoload bypass pytest; AOT builds extensions before pytest;
+      # CI sanity expects its unmarked test to fail.
+      tests-to-exclude: >-
+        doctests
+        test_cpp_extensions_aot_ninja
+        test_cpp_extensions_aot_no_ninja
+        test_autoload_enable
+        test_autoload_disable
+        test_ci_sanity_check_fail
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: "13.0"
+    secrets: inherit

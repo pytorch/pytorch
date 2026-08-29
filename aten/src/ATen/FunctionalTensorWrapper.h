@@ -121,7 +121,12 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // Pass - Inplace View Ops]
   // Single-output replay may change autograd view metadata, so callers that
   // expose value() must use the default exact replay.
-  void regenerate_from_base(bool single_output_replay = false);
+  // The exact replay: rebuild value_ by replaying the recorded view ops as the
+  // user wrote them. Use this whenever the result can reach autograd.
+  void regenerate_from_base();
+  // The cheap replay. See ViewMeta::forward_cheap - only for values that stay
+  // inside functionalization.
+  void regenerate_from_base_cheap();
   // Performs step (2) of the sync. This is its own public API because it's
   // needed by functorch. functorch wants to make sure that all input tensors to
   // a functionalized program have been properly synced so it can properly
@@ -220,15 +225,17 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
     return is_multi_output_view_;
   }
 
-  // True when value_ was last rebuilt by the cheap single-output replay, so a
-  // caller that needs the exact one has to regenerate even if we are otherwise
-  // up to date. See _unwrap_functional_tensor.
-  bool regenerated_single_output() const {
-    return regenerated_single_output_;
+  // True when value_ was last rebuilt by the cheap replay, so a caller that
+  // needs the exact one has to regenerate even if we are otherwise up to date.
+  // See _unwrap_functional_tensor.
+  bool regenerated_cheaply() const {
+    return regenerated_cheaply_;
   }
 
   // See Note[resize_() in functionalization pass]
   void maybe_replace_storage(const Tensor& other);
+
+  void regenerate_from_base_impl(bool cheap_replay);
 
   // Replaces the storage with a new functional storage,
   // and clears the view_metas_ stack.
@@ -296,8 +303,8 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // the copy_() from autograd as well.
   bool has_metadata_mutation_ = false;
   bool is_multi_output_view_ = false;
-  // See regenerated_single_output().
-  bool regenerated_single_output_ = false;
+  // See regenerated_cheaply().
+  bool regenerated_cheaply_ = false;
   // Did the tensor experience a set_() call.
   bool was_storage_changed_ = false;
   // Did the tensor experience a shallow_copy_data_() call.
@@ -413,7 +420,7 @@ void mutate_view_meta(
 TORCH_API Tensor apply_view_meta_sequence(
     const Tensor& base,
     const std::vector<std::shared_ptr<functionalization::ViewMeta>>& sequence,
-    bool single_output_replay = false);
+    bool cheap_replay = false);
 
 void set_sizes_strides_offset(const Tensor& out, const Tensor& meta_out);
 void set_sizes_strides_offset(

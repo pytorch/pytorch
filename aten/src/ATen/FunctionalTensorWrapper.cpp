@@ -218,8 +218,8 @@ void FunctionalTensorWrapper::replace_(const Tensor& other, bool from_lazy_regen
   // TODO: going to need to change this if we want nested functionalize() transforms.
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(other));
   if (!from_lazy_regenerate) {
-    // A value that did not come from regenerate_from_base cannot be a cheap replay.
-    regenerated_single_output_ = false;
+    // A value that did not come from a replay cannot be a cheap one.
+    regenerated_cheaply_ = false;
   }
   value_ = other;
   TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
@@ -371,25 +371,33 @@ void FunctionalTensorWrapper::sync_() {
     return;
   }
   apply_updates();
-  regenerate_from_base(/*single_output_replay=*/true);
+  regenerate_from_base_cheap();
 }
 
 const std::vector<std::shared_ptr<functionalization::ViewMeta>>& FunctionalTensorWrapper::view_metas() const {
   return view_metas_;
 }
 
-void FunctionalTensorWrapper::regenerate_from_base(bool single_output_replay) {
+void FunctionalTensorWrapper::regenerate_from_base() {
+  regenerate_from_base_impl(/*cheap_replay=*/false);
+}
+
+void FunctionalTensorWrapper::regenerate_from_base_cheap() {
+  regenerate_from_base_impl(/*cheap_replay=*/true);
+}
+
+void FunctionalTensorWrapper::regenerate_from_base_impl(bool cheap_replay) {
   at::AutoDispatchSkipFunctionalize guard;
   auto storage_impl = functional_storage_impl();
   auto t = storage_impl->base();
 
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t));
   t = at::functionalization::impl::apply_view_meta_sequence(
-      t, view_metas_, single_output_replay);
+      t, view_metas_, cheap_replay);
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t));
 
   replace_(t, /*from_lazy_regenerate=*/true);
-  regenerated_single_output_ = single_output_replay;
+  regenerated_cheaply_ = cheap_replay;
   generation_ = storage_impl->generation();
 }
 
@@ -803,10 +811,10 @@ void mutate_view_meta(const at::Tensor& self, const std::shared_ptr<functionaliz
 Tensor apply_view_meta_sequence(
     const Tensor& base,
     const std::vector<std::shared_ptr<functionalization::ViewMeta>>& sequence,
-    bool single_output_replay) {
+    bool cheap_replay) {
   Tensor r = base;
   for (auto& vm : sequence) {
-    r = single_output_replay ? vm->forward_single_output(r) : vm->forward(r);
+    r = cheap_replay ? vm->forward_cheap(r) : vm->forward(r);
   }
   return r;
 }

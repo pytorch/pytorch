@@ -107,17 +107,18 @@ struct ViewMeta {
   virtual Tensor forward(const Tensor& base) = 0;
   virtual Tensor reverse(const Tensor& base, const Tensor& mutated_view) = 0;
 
-  // Same result as `forward`, but a multi-output view may regenerate just this
-  // output instead of replaying the whole operation and discarding the sibling
-  // views (e.g. one output of `unbind` is a `select` of the base). Replaying is
-  // O(number of outputs), so regenerating every view of one base is quadratic.
+  // The cheap replay. Same tensor as `forward`, the exact replay, but a
+  // multi-output view rebuilds just this output rather than replaying the whole
+  // operation and discarding the sibling views (one output of `unbind` is a
+  // `select` of the base). The exact replay is O(number of outputs), so
+  // rebuilding every view of one base with it is quadratic.
   //
-  // Only valid where the result is not visible to autograd. The cheap form
-  // loses the multi-output-view bookkeeping that replaying the real op sets up:
-  // an `unbind` output regenerated as a `select` gets SelectBackward rather
-  // than UnbindBackward, and so does not inherit the restrictions autograd
-  // places on mutating a multi-output view.
-  virtual Tensor forward_single_output(const Tensor& base) {
+  // Only valid where the result is not visible to autograd. The cheap replay
+  // loses the multi-output-view bookkeeping the exact one sets up: an `unbind`
+  // output rebuilt as a `select` gets SelectBackward rather than
+  // UnbindBackward, and so does not inherit the restrictions autograd places on
+  // mutating a multi-output view.
+  virtual Tensor forward_cheap(const Tensor& base) {
     return forward(base);
   }
 

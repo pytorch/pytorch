@@ -18,7 +18,6 @@
 #include <ATen/functorch/DynamicLayer.h>
 #include <ATen/functorch/Interpreter.h>
 #include <ATen/functorch/LegacyVmapTransforms.h>
-#include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/functorch/TensorWrapper.h>
 #include <c10/core/AutogradState.h>
 #include <c10/core/InferenceMode.h>
@@ -200,8 +199,12 @@ static Tensor _unwrap_functional_tensor(
   // is a cheap one. Replaying unconditionally would put the O(N^2) this change
   // removes straight back at the unwrap boundary.
   if (!functional->is_up_to_date() ||
-      (exact && functional->regenerated_single_output())) {
-    functional->regenerate_from_base(/*single_output_replay=*/!exact);
+      (exact && functional->regenerated_cheaply())) {
+    if (exact) {
+      functional->regenerate_from_base();
+    } else {
+      functional->regenerate_from_base_cheap();
+    }
   }
   return functional->value();
 }

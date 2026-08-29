@@ -797,7 +797,7 @@ def gen_functionalization_view_inverse_declaration(
 #
 # Keyed by operator name; the body is formatted with the view op to call, which
 # differs between the view and the view_copy variant.
-SINGLE_OUTPUT_VIEW_REPLAY: dict[str, str] = {
+CHEAP_VIEW_REPLAY: dict[str, str] = {
     "split.Tensor": """\
   // split() chunk `i` is base[i * split_size : (i + 1) * split_size] along dim,
   // and slice clamps the end, which gives the short final chunk for free.
@@ -902,13 +902,11 @@ class ViewMetaSpecialization:
         # List of field declarations.
         attr_declarations = "\n".join(f"  {binding.decl()};" for binding in attributes)
 
-        # Override `forward_single_output` if one output of this multi-output view
+        # Override `forward_cheap` if one output of this multi-output view
         # can be regenerated without replaying the whole operation.
-        single_output_decl = ""
-        if self.single_output_replay_body is not None:
-            single_output_decl = (
-                "  Tensor forward_single_output(const Tensor& base) override;\n"
-            )
+        cheap_replay_decl = ""
+        if self.cheap_replay_body is not None:
+            cheap_replay_decl = "  Tensor forward_cheap(const Tensor& base) override;\n"
 
         # Override `to_out_index` if this operation returns more than 1 value.
         to_out_index_decl = ""
@@ -932,7 +930,7 @@ struct TORCH_API {self.classname} : public ViewMeta {{
 
   Tensor forward(const Tensor& base) override;
   Tensor reverse(const Tensor& base, const Tensor& mutated_view) override;
-{single_output_decl}{to_out_index_decl}
+{cheap_replay_decl}{to_out_index_decl}
 
   SerializableTuple to_serializable_tuple() {{
     return std::make_tuple({tuple_arguments});
@@ -980,19 +978,17 @@ struct TORCH_API {self.classname} : public ViewMeta {{
         return f"{opname}({arguments}){maybe_index}"
 
     @property
-    def single_output_replay_body(self) -> str | None:
+    def cheap_replay_body(self) -> str | None:
         # A new multi-output view op would otherwise silently inherit the base
-        # forward_single_output and stay quadratic, with no golden to flag it.
+        # forward_cheap and stay quadratic, with no golden to flag it.
         name = str(self.f.func.name)
-        if self.is_multi_output and name not in SINGLE_OUTPUT_VIEW_REPLAY:
-            raise AssertionError(
-                f"multi-output view {name} has no single-output replay"
-            )
-        return SINGLE_OUTPUT_VIEW_REPLAY.get(name)
+        if self.is_multi_output and name not in CHEAP_VIEW_REPLAY:
+            raise AssertionError(f"multi-output view {name} has no cheap replay")
+        return CHEAP_VIEW_REPLAY.get(name)
 
-    # Body of `forward_single_output`, or None if this operation does not override it.
-    def single_output_impl(self) -> str | None:
-        body = self.single_output_replay_body
+    # Body of `forward_cheap`, or None if this operation does not override it.
+    def cheap_replay_impl(self) -> str | None:
+        body = self.cheap_replay_body
         if body is None:
             return None
 
@@ -1001,7 +997,7 @@ struct TORCH_API {self.classname} : public ViewMeta {{
             return "\n".join("  " + line for line in filled.splitlines())
 
         return f"""
-at::Tensor {self.classname}::forward_single_output(const at::Tensor& base) {{
+at::Tensor {self.classname}::forward_cheap(const at::Tensor& base) {{
   if (reapply_views) {{
 {arm("at::_ops::slice_Tensor::call", "at::_ops::select_int::call")}
   }} else {{
@@ -1025,7 +1021,7 @@ at::Tensor {self.classname}::reverse(const at::Tensor& base, const Tensor& mutat
 }}""",
         ]
 
-        single_output = self.single_output_impl()
+        single_output = self.cheap_replay_impl()
         if single_output is not None:
             functions.append(single_output)
 
