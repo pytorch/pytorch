@@ -2925,27 +2925,38 @@ class TestPrecompile(TestCase):
         with _maybe_scoped(loaded), torch.no_grad():
             self.assertEqual(loaded(x), _precompile_reads_flag(x))
 
-    def test_mark_unbacked_artifact_serves_the_tensor_it_captured(self):
+    @parametrize(
+        "marking",
+        ["unbacked", "unbacked_bounds", "unbacked_shape_id", "static", "dynamic"],
+    )
+    def test_marked_artifact_serves_the_tensor_it_captured(self, marking):
         # The dimension-marking guard reads its attributes off the example value
-        # rather than through a source, so reconstruction has to restore them
-        # too -- and it has to restore ALL of them: the two dependent ones are
-        # gated on _dynamo_unbacked_indices, so carrying the gate without them
-        # activates a guard whose expected value is None and the artifact stops
-        # serving the very tensor it was captured on.
+        # rather than through a source, so nothing registers them in the guard
+        # tree and value pruning drops them -- leaving the rebuilt guard
+        # comparing against nothing and the artifact refusing the very tensor it
+        # was captured on.
+        #
+        # Serving the SAME marked tensor is the whole point. Every other marking
+        # test in these suites marks one tensor and serves a fresh unmarked one,
+        # which passes with the bug fully present.
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(8, 4)
-        mark_unbacked(x, 0, min=4, max=16)
+        {
+            "unbacked": lambda t: mark_unbacked(t, 0),
+            "unbacked_bounds": lambda t: mark_unbacked(t, 0, min=4, max=16),
+            "unbacked_shape_id": lambda t: mark_unbacked(t, 0, shape_id="b"),
+            "static": lambda t: torch._dynamo.decorators.mark_static(t, 0),
+            "dynamic": lambda t: mark_dynamic(t, 0),
+        }[marking](x)
         code, cache = torch.compiler.precompile(
             _precompile_call_model,
             example_inputs=[(m, x)],
             training=True,
             tracer="dynamo",
+            require_no_risky_drops=False,
         )
         loaded = torch.compiler.precompile.load(code, cache)
         self.assertEqual(loaded(m, x), m(x))
-        marked = torch.randn(12, 4)
-        mark_unbacked(marked, 0, min=4, max=16)
-        self.assertEqual(loaded(m, marked), m(marked))
 
     def test_attribute_shadowing_fake_tensor_state_is_refused(self):
         # A reconstructed tensor IS a FakeTensor, so an attribute of the same

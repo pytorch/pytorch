@@ -3882,11 +3882,21 @@ class GuardBuilder(GuardBuilderBase):
                 "_dynamo_static_indices",
             )
 
+            def read_marking(attr_name: str) -> Any:
+                # These are read off the EXAMPLE rather than through a Source,
+                # so nothing else registers them in the guard tree -- and a
+                # value the tree does not reach is pruned out of the serialized
+                # state, leaving the rebuilt guard comparing against nothing.
+                marking = getattr(value, attr_name, None)
+                if marking is not None:
+                    self.guard_tree_values[id(marking)] = marking
+                return marking
+
             expected_attrs: dict[str, set[int]] = {}
             absent_attrs: list[str] = []
             for attr_name in dim_marking_attrs:
                 if hasattr(value, attr_name):
-                    expected_attrs[attr_name] = getattr(value, attr_name)
+                    expected_attrs[attr_name] = read_marking(attr_name)
                     code_part = f"((getattr({tensor_name}, '{attr_name}', set()).issubset({getattr(value, attr_name)!r})) if hasattr({tensor_name}, '{attr_name}') else True)"
                     code.append(code_part)
                 else:
@@ -3908,7 +3918,7 @@ class GuardBuilder(GuardBuilderBase):
                 if not hasattr(value, gate_attr):
                     continue
                 for attr_name in dep_attr_names:
-                    attr_value = getattr(value, attr_name, None)
+                    attr_value = read_marking(attr_name)
                     dependent_attrs[attr_name] = (attr_value, gate_attr)
                     code_part = f"((getattr({tensor_name}, '{attr_name}', None) == {attr_value!r}) if hasattr({tensor_name}, '{gate_attr}') else True)"
                     code.append(code_part)
@@ -4139,22 +4149,6 @@ class _Missing:
         return _Missing()
 
 
-# Attributes a TENSOR_MATCH guard bakes into its code by READING them off the
-# example value instead of by walking a source, so nothing registers them in the
-# guard tree and identity pruning cannot see them. See [Note: Dimension Marking
-# Guards].
-_TENSOR_ATTRIBUTES_TENSOR_MATCH_READS = frozenset(
-    {
-        "_dynamo_dynamic_indices",
-        "_dynamo_weak_dynamic_indices",
-        "_dynamo_unbacked_indices",
-        "_dynamo_strict_unbacked_indices",
-        "_dynamo_static_indices",
-        "_dynamo_shape_ids",
-        "_dynamo_unbacked_bounds",
-    }
-)
-
 # A reconstructed FakeTensor keeps its own bookkeeping in __dict__ alongside
 # anything the user hung there. Re-serializing one must not carry these across:
 # the reconstructor sets them itself, and carrying them would accrete a fresh
@@ -4300,7 +4294,7 @@ class GuardsStatePickler(pickle.Pickler):
         for name, value in state.items():
             if is_fake and name in _FAKE_TENSOR_OWNED_ATTRIBUTES:
                 continue
-            if not (name in _TENSOR_ATTRIBUTES_TENSOR_MATCH_READS or self._keep(value)):
+            if not self._keep(value):
                 continue
             if name in _FAKE_TENSOR_RESERVED_ATTRIBUTES:
                 raise torch._dynamo.exc.PackageError(
