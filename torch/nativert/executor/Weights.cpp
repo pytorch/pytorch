@@ -441,13 +441,14 @@ void Weights::setValue(
     const std::string& name,
     const at::Tensor& newValue,
     bool skipDeviceCheck) {
-  if (allValues_.contains(name)) {
+  auto it = allValues_.find(name);
+  if (it != allValues_.end()) {
     validateValue(name, newValue, skipDeviceCheck);
+    it->second = newValue;
   } else {
     LOG(WARNING) << name << " is not found in the registered weights";
+    allValues_.emplace(name, newValue);
   }
-
-  allValues_[name] = newValue;
 }
 
 void Weights::updateValue(const std::string& name, const at::Tensor& newValue) {

@@ -250,9 +250,11 @@ c10::SymbolicShape extractListShape(
   }
   Node* list_construct = list->node();
   std::vector<std::optional<int64_t>> output_shape;
+  output_shape.reserve(list_construct->inputs().size());
   for (Value* input : list_construct->inputs()) {
-    if (symbolic_shape_values.contains(input)) {
-      output_shape.emplace_back(symbolic_shape_values[input]);
+    if (auto it = symbolic_shape_values.find(input);
+        it != symbolic_shape_values.end()) {
+      output_shape.emplace_back(it->second);
     } else {
       output_shape.push_back(constant_as<int64_t>(input));
     }

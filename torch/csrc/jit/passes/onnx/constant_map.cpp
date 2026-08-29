@@ -25,10 +25,12 @@ bool ConstantValueMap::HasRank(const std::string& tensorName) {
 }
 
 std::optional<size_t> ConstantValueMap::GetRank(const std::string& tensorName) {
-  if (!HasRank(tensorName)) {
+  const auto& rank_map = ConstantValueMap::getInstance().rankMap;
+  auto it = rank_map.find(tensorName);
+  if (it == rank_map.end()) {
     return std::nullopt;
   }
-  return ConstantValueMap::getInstance().rankMap[tensorName];
+  return it->second;
 }
 
 void ConstantValueMap::SetAllGraphInputsStatic(bool all_static) {
