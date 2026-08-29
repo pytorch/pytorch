@@ -30,7 +30,6 @@ import itertools
 import logging
 import math
 import pickle
-import re
 import sys
 import textwrap
 import traceback
