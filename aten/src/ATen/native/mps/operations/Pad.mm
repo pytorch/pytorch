@@ -2,12 +2,19 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <c10/metal/common.h>
+
+#include <algorithm>
+#include <limits>
+#include <numeric>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/constant_pad_nd_native.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty_strided.h>
 #include <ATen/ops/reflection_pad1d_backward_native.h>
 #include <ATen/ops/reflection_pad1d_native.h>
 #include <ATen/ops/reflection_pad2d_backward_native.h>
@@ -330,10 +337,7 @@ static Tensor& pad_out_template(Tensor& output,
   return output;
 }
 
-static MTLSize replication_pad1d_threadgroup(id<MTLComputePipelineState> pso,
-                                             NSUInteger gx,
-                                             NSUInteger gy,
-                                             NSUInteger gz) {
+static MTLSize pad_threadgroup(id<MTLComputePipelineState> pso, NSUInteger gx, NSUInteger gy, NSUInteger gz) {
   const auto maxTPG = [pso maxTotalThreadsPerThreadgroup];
   const auto tg_x = std::min<NSUInteger>(maxTPG, gx);
   const auto tg_y = std::min<NSUInteger>(maxTPG / tg_x, gy);
@@ -373,7 +377,7 @@ static void replication_pad1d_kernel_mps(const Tensor& input_, IntArrayRef paddi
       [encoder setComputePipelineState:pso];
       mtl_setArgs(encoder, input, output_c, sizes_pad);
       [encoder dispatchThreads:MTLSizeMake(output_W, nplane, nbatch)
-          threadsPerThreadgroup:replication_pad1d_threadgroup(pso, output_W, nplane, nbatch)];
+          threadsPerThreadgroup:pad_threadgroup(pso, output_W, nplane, nbatch)];
       getMPSProfiler().endProfileKernel(pso, stream);
     }
   });
@@ -417,13 +421,51 @@ static void replication_pad1d_backward_kernel_mps(const Tensor& grad_output_,
       [encoder setComputePipelineState:pso];
       mtl_setArgs(encoder, grad_output, grad_input_c, sizes_pad);
       [encoder dispatchThreads:MTLSizeMake(input_W, nplane, nbatch)
-          threadsPerThreadgroup:replication_pad1d_threadgroup(pso, input_W, nplane, nbatch)];
+          threadsPerThreadgroup:pad_threadgroup(pso, input_W, nplane, nbatch)];
       getMPSProfiler().endProfileKernel(pso, stream);
     }
   });
   if (grad_input_needs_copy) {
     grad_input.copy_(grad_input_buf);
   }
+}
+
+template <typename index_t>
+static void constant_pad_nd_strided_kernel_mps(const Tensor& input,
+                                               const Tensor& output,
+                                               const Scalar& value,
+                                               const std::vector<index_t>& output_sizes,
+                                               const std::vector<index_t>& input_sizes,
+                                               const std::vector<index_t>& input_strides,
+                                               const std::vector<index_t>& output_strides,
+                                               const std::vector<index_t>& left_pad,
+                                               NSUInteger grid_x,
+                                               NSUInteger grid_y) {
+  const auto metal_ndim = static_cast<uint32_t>(output.dim());
+  const auto index_type = sizeof(index_t) == sizeof(uint32_t) ? "u32" : "u64";
+  auto pso = lib.getPipelineStateForFunc("constant_pad_nd_strided_" + std::string(index_type) + "_" +
+                                         scalarToMetalTypeString(input));
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      getMPSProfiler().beginProfileKernel(pso, "constant_pad_nd", {input, output}, stream);
+      auto encoder = stream->commandEncoder();
+      auto fill_value = getMPSScalar(value, input.scalar_type());
+      [encoder setComputePipelineState:pso];
+      mtl_setArgs(encoder,
+                  input,
+                  output,
+                  output_sizes,
+                  input_sizes,
+                  input_strides,
+                  output_strides,
+                  left_pad,
+                  metal_ndim,
+                  fill_value);
+      mtl_dispatch2DJob(encoder, pso, grid_x, grid_y);
+      getMPSProfiler().endProfileKernel(pso, stream);
+    }
+  });
 }
 
 } // namespace mps
@@ -559,17 +601,189 @@ Tensor replication_pad3d_backward_mps(const Tensor& grad_output, const Tensor& i
 
 // backward pass is explicitly handled in autograd by negating the "pad" argument
 Tensor constant_pad_nd_mps(const Tensor& self, IntArrayRef pad, const Scalar& value) {
-  if (pad.empty()) {
-    return self.clone();
+  TORCH_CHECK(pad.size() % 2 == 0, "Length of pad must be even but instead it equals ", pad.size());
+
+  const auto ndim = self.dim();
+  const auto padding_dim = static_cast<int64_t>(pad.size() / 2);
+  TORCH_CHECK(ndim >= padding_dim,
+              "Length of pad should be no more than twice the number of dimensions of the input. Pad length is ",
+              pad.size(),
+              " while the input has ",
+              ndim,
+              " dimensions.");
+
+  bool all_pads_non_positive = true;
+  auto cropped = self;
+  for (const auto dim : c10::irange(ndim - padding_dim, ndim)) {
+    const auto pad_idx = 2 * (ndim - dim - 1);
+    if (pad[pad_idx] < 0) {
+      cropped = cropped.narrow(dim, -pad[pad_idx], cropped.size(dim) + pad[pad_idx]);
+    } else if (pad[pad_idx] != 0) {
+      all_pads_non_positive = false;
+    }
+    if (pad[pad_idx + 1] < 0) {
+      cropped = cropped.narrow(dim, 0, cropped.size(dim) + pad[pad_idx + 1]);
+    } else if (pad[pad_idx + 1] != 0) {
+      all_pads_non_positive = false;
+    }
   }
-  if (pad.size() > 6) {
-    TORCH_WARN_ONCE("MPS: The constant padding of more than 3 dimensions is not currently supported natively. ",
-                    "It uses View Ops default implementation to run. This may have performance implications.");
+
+  if (all_pads_non_positive && cropped.is_contiguous()) {
+    return cropped.clone();
+  }
+
+  if (self.is_quantized() || self.is_conj() || self.is_neg() || ndim > c10::metal::max_ndim) {
     return at::native::constant_pad_nd(self, pad, value);
   }
-  Tensor output = at::empty({0}, self.options());
-  return mps::pad_out_template(
-      output, self, pad, std::nullopt, MPSGraphPaddingModeConstant, value.toDouble(), __func__);
+
+  std::vector<int64_t> output_sizes;
+  if (all_pads_non_positive) {
+    output_sizes = cropped.sizes().vec();
+  } else {
+    output_sizes = self.sizes().vec();
+    for (const auto dim : c10::irange(ndim - padding_dim, ndim)) {
+      const auto pad_idx = 2 * (ndim - dim - 1);
+      const auto output_size = self.size(dim) + pad[pad_idx] + pad[pad_idx + 1];
+      TORCH_CHECK(output_size >= 0,
+                  "The input size ",
+                  self.size(dim),
+                  ", plus negative padding ",
+                  pad[pad_idx],
+                  " and ",
+                  pad[pad_idx + 1],
+                  " resulted in a negative output size, which is invalid. Check dimension ",
+                  dim,
+                  " of your input.");
+      output_sizes[dim] = output_size;
+    }
+  }
+
+  Tensor output;
+  if (all_pads_non_positive && cropped.is_non_overlapping_and_dense()) {
+    output = at::empty_strided(cropped.sizes(), cropped.strides(), cropped.options());
+  } else if (all_pads_non_positive) {
+    output = at::empty_like(cropped);
+  } else {
+    output = at::empty(output_sizes, self.options().memory_format(self.suggest_memory_format()));
+  }
+  if (output.numel() == 0) {
+    return output;
+  }
+
+  const Scalar kernel_value = all_pads_non_positive ? Scalar(0) : value;
+  constexpr auto uint_max = std::numeric_limits<uint32_t>::max();
+  const auto type = mps::scalarToMetalTypeString(self);
+  const auto stream = getCurrentMPSStream();
+  const bool use_dense = padding_dim <= 3 && cropped.is_contiguous() && output.is_contiguous();
+
+  if (use_dense) {
+    const auto in_w = cropped.size(-1);
+    const auto in_h = padding_dim >= 2 ? cropped.size(-2) : 1;
+    const auto in_d = padding_dim >= 3 ? cropped.size(-3) : 1;
+    const auto out_w = output.size(-1);
+    const auto out_h = padding_dim >= 2 ? output.size(-2) : 1;
+    const auto out_d = padding_dim >= 3 ? output.size(-3) : 1;
+    const auto grid_x = c10::metal::ceil_div(out_w, static_cast<int64_t>(c10::metal::ILP_PER_THREAD));
+    const auto grid_z = output.numel() / (out_w * out_h);
+    const auto left_w = padding_dim >= 1 ? std::max<int64_t>(pad[0], 0) : 0;
+    const auto left_h = padding_dim >= 2 ? std::max<int64_t>(pad[2], 0) : 0;
+    const auto left_d = padding_dim >= 3 ? std::max<int64_t>(pad[4], 0) : 0;
+    const std::array<int64_t, 9> params64 = {in_w, in_h, in_d, out_w, out_h, out_d, left_w, left_h, left_d};
+    const bool params_fit_uint = std::all_of(
+        params64.begin(), params64.end(), [](int64_t param) { return param <= std::numeric_limits<uint32_t>::max(); });
+
+    if (params_fit_uint && grid_x <= uint_max && out_h <= uint_max && grid_z <= uint_max) {
+      std::array<uint32_t, 9> params;
+      std::transform(
+          params64.begin(), params64.end(), params.begin(), [](int64_t param) { return static_cast<uint32_t>(param); });
+      auto pso = mps::lib.getPipelineStateForFunc("constant_pad_nd_dense_" + type);
+      dispatch_sync_with_rethrow(stream->queue(), ^() {
+        @autoreleasepool {
+          getMPSProfiler().beginProfileKernel(pso, "constant_pad_nd", {cropped, output}, stream);
+          auto encoder = stream->commandEncoder();
+          auto fill_value = mps::getMPSScalar(kernel_value, self.scalar_type());
+          [encoder setComputePipelineState:pso];
+          mps::mtl_setArgs(encoder, cropped, output, params, fill_value);
+          [encoder dispatchThreads:MTLSizeMake(grid_x, out_h, grid_z)
+              threadsPerThreadgroup:mps::pad_threadgroup(pso, grid_x, out_h, grid_z)];
+          getMPSProfiler().endProfileKernel(pso, stream);
+        }
+      });
+      return output;
+    }
+  }
+
+  std::vector<int64_t> dim_order(ndim);
+  std::iota(dim_order.begin(), dim_order.end(), 0);
+  std::stable_sort(dim_order.begin(), dim_order.end(), [&](int64_t lhs, int64_t rhs) {
+    return output.stride(lhs) < output.stride(rhs);
+  });
+
+  std::vector<int64_t> ordered_output_sizes(ndim);
+  std::vector<int64_t> ordered_input_sizes(ndim);
+  std::vector<int64_t> ordered_output_strides(ndim);
+  std::vector<int64_t> ordered_input_strides(ndim);
+  std::vector<int64_t> ordered_left_pad(ndim);
+  for (const auto ordered_dim : c10::irange(ndim)) {
+    const auto dim = dim_order[ordered_dim];
+    ordered_output_sizes[ordered_dim] = output.size(dim);
+    ordered_input_sizes[ordered_dim] = cropped.size(dim);
+    ordered_output_strides[ordered_dim] = output.stride(dim);
+    ordered_input_strides[ordered_dim] = cropped.stride(dim);
+    if (dim >= ndim - padding_dim) {
+      const auto pad_idx = 2 * (ndim - dim - 1);
+      ordered_left_pad[ordered_dim] = std::max<int64_t>(pad[pad_idx], 0);
+    }
+  }
+
+  const auto inner = ordered_output_sizes[0];
+  const auto grid_x = c10::metal::ceil_div(inner, static_cast<int64_t>(c10::metal::ILP_PER_THREAD));
+  const auto grid_y = output.numel() / inner;
+  if (grid_x > uint_max || grid_y > uint_max) {
+    return at::native::constant_pad_nd(self, pad, value);
+  }
+
+  const auto values_fit_uint = [](const std::vector<int64_t>& values) {
+    return std::all_of(
+        values.begin(), values.end(), [](int64_t value) { return value <= std::numeric_limits<uint32_t>::max(); });
+  };
+  const bool use_32bit_index = mps::offsetsFitIn<uint32_t>(cropped, output) && values_fit_uint(ordered_output_sizes) &&
+      values_fit_uint(ordered_input_sizes) && values_fit_uint(ordered_output_strides) &&
+      values_fit_uint(ordered_input_strides) && values_fit_uint(ordered_left_pad);
+
+  if (use_32bit_index) {
+    const auto to_uint = [](const std::vector<int64_t>& values) {
+      std::vector<uint32_t> result(values.size());
+      std::transform(
+          values.begin(), values.end(), result.begin(), [](int64_t value) { return static_cast<uint32_t>(value); });
+      return result;
+    };
+    mps::constant_pad_nd_strided_kernel_mps(cropped,
+                                            output,
+                                            kernel_value,
+                                            to_uint(ordered_output_sizes),
+                                            to_uint(ordered_input_sizes),
+                                            to_uint(ordered_input_strides),
+                                            to_uint(ordered_output_strides),
+                                            to_uint(ordered_left_pad),
+                                            grid_x,
+                                            grid_y);
+  } else {
+    const auto to_uint64 = [](const std::vector<int64_t>& values) {
+      return std::vector<uint64_t>(values.begin(), values.end());
+    };
+    mps::constant_pad_nd_strided_kernel_mps(cropped,
+                                            output,
+                                            kernel_value,
+                                            to_uint64(ordered_output_sizes),
+                                            to_uint64(ordered_input_sizes),
+                                            to_uint64(ordered_input_strides),
+                                            to_uint64(ordered_output_strides),
+                                            to_uint64(ordered_left_pad),
+                                            grid_x,
+                                            grid_y);
+  }
+  return output;
 }
 
 } // namespace at::native

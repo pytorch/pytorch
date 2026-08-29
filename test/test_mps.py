@@ -11854,6 +11854,41 @@ class TestNNMPS(NNTestCase):
 
 
 class TestPad(TestCaseMPS):
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16, torch.int32, torch.bool])
+    def test_constant_pad_nd_5d(self, dtype):
+        pad = (1, 1, 1, 1, 2, 0)
+        value = True if dtype == torch.bool else 1.25
+        input_cpu = make_tensor((1, 3, 1, 4, 4), device="cpu", dtype=dtype, low=-2, high=2)
+        expected = F.pad(input_cpu, pad, value=value)
+        actual = F.pad(input_cpu.to("mps"), pad, value=value)
+        self.assertEqual(actual.cpu(), expected)
+
+    @parametrize("layout", ["contiguous", "transposed", "sliced", "channels_last_3d"])
+    @parametrize("pad", [
+        (1, 2, -1, 2, 1, -1),
+        (1, 0, 0, 1, -1, 1, 1, 0),
+        (0, 0, 0, 0, 0, 0),
+        (-1, 0, 0, -1),
+    ])
+    def test_constant_pad_nd_layouts(self, layout, pad):
+        input_cpu = torch.randn((2, 3, 4, 5, 6))
+        input_mps = input_cpu.to("mps")
+        if layout == "transposed":
+            input_cpu = input_cpu.transpose(-1, -2)
+            input_mps = input_mps.transpose(-1, -2)
+        elif layout == "sliced":
+            input_cpu = input_cpu[..., ::2]
+            input_mps = input_mps[..., ::2]
+        elif layout == "channels_last_3d":
+            input_cpu = input_cpu.contiguous(memory_format=torch.channels_last_3d)
+            input_mps = input_mps.contiguous(memory_format=torch.channels_last_3d)
+
+        expected = F.pad(input_cpu, pad, value=2.25)
+        actual = F.pad(input_mps, pad, value=2.25)
+        self.assertEqual(actual.cpu(), expected)
+        if all(value <= 0 for value in pad):
+            self.assertEqual(actual.stride(), expected.stride())
+
     def test_constant_pad(self):
         m = torch.nn.ConstantPad2d((-2, -2, -2, -2), 3.5)
         input_cpu = torch.randn(1, 16, 16, 16)
@@ -11887,7 +11922,7 @@ class TestPad(TestCaseMPS):
 
         self.assertEqual(y_cpu, y_mps.cpu())
 
-    def test_constant_pad_4d_warning(self):
+    def test_constant_pad_4d(self):
         inputCPU = torch.rand((1, 2, 2, 2, 1, 1))
         inputMPS = inputCPU.detach().clone().to('mps')
         outputCPU = F.pad(inputCPU, [0, 0, 0, 0, 0, 0, 1, 0])
@@ -11959,7 +11994,7 @@ class TestPad(TestCaseMPS):
         helper((1, 2, 2, 2, 2), (0, 1), nn.ConstantPad3d)
 
     def test_constant_pad_nd_preserves_memory_format(self):
-        nchw_tensor = torch.rand((1, 2, 5, 3))
+        nchw_tensor = torch.rand((1, 2, 5, 3), device="mps")
         nchw_padded = torch.constant_pad_nd(nchw_tensor, [1, 2], 0.5)
         self.assertTrue(nchw_padded.is_contiguous(memory_format=torch.contiguous_format))
 
@@ -11973,6 +12008,7 @@ class TestPad(TestCaseMPS):
         input_mps = torch.randn((2, 3, 4), device="mps")
         output_mps = torch.constant_pad_nd(input_mps, [])
         self.assertEqual(output_mps, input_mps)
+        self.assertNotEqual(output_mps.data_ptr(), input_mps.data_ptr())
 
     def test_replication_pad1d_non_contig_out(self):
         x = torch.randn(2, 3, 5, device="mps")
@@ -17462,6 +17498,7 @@ instantiate_parametrized_tests(TestAutocastMPS)
 instantiate_parametrized_tests(MatmulTest)
 instantiate_parametrized_tests(TestBinaryIteratorConformance)
 instantiate_parametrized_tests(TestLogical)
+instantiate_parametrized_tests(TestPad)
 instantiate_parametrized_tests(TestMPS)
 instantiate_parametrized_tests(TestSDPA)
 instantiate_parametrized_tests(TestSmoothL1Loss)
