@@ -2004,6 +2004,16 @@
       ]
     }
   ],
+  "GB8739": [
+    {
+      "Gb_type": "repr() on unresolved bound method",
+      "Context": "tp_repr_impl {self}",
+      "Explanation": "Dynamo cannot compute repr() of bound method '{self.method_name}' because the receiver is not known at compile time and the eager repr embeds its memory address.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0132": [
     {
       "Gb_type": "Unsupported `func` in itertools.accumulate",
@@ -2593,6 +2603,16 @@
       ]
     }
   ],
+  "GB8816": [
+    {
+      "Gb_type": "Unresolved attribute access",
+      "Context": "generic_getattr: {type(obj).__name__}.{name}",
+      "Explanation": "Dynamo cannot resolve attribute '{name}' on {type(obj).__name__}.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB5904": [
     {
       "Gb_type": "unsupported __getitem__ (sq_item)",
@@ -3096,6 +3116,16 @@
       "Hints": [
         "Supported args are Tensors, and functions/nn.Modules/user-defined objects ",
         "from outside the compiled region.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB8042": [
+    {
+      "Gb_type": "Attribute access on torch.profiler object",
+      "Context": "getattr({self}, {name})",
+      "Explanation": "Dynamo ignores torch.profiler side effects, so runtime attributes like `{name}` on a profiler object cannot be traced.",
+      "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
@@ -5572,6 +5602,24 @@
       "Explanation": "wrap_with_set_grad_enabled expects grad_enabled argument to be a constant.",
       "Hints": [
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB1431": [
+    {
+      "Gb_type": "autograd.Function with custom vmap staticmethod",
+      "Context": "{self.fn_cls.__name__}.vmap",
+      "Explanation": "Dynamo cannot trace an autograd.Function that defines its own vmap staticmethod under vmap; eager applies and validates that rule.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "autograd.Function with custom vmap staticmethod",
+      "Context": "{self.fn_cls.__name__}.vmap",
+      "Explanation": "Dynamo cannot trace an autograd.Function that defines its own vmap staticmethod; eager applies and validates that rule.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
