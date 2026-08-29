@@ -7,7 +7,6 @@ import os
 import shutil
 import signal
 import tempfile
-import unittest
 from unittest import mock
 
 from torch.distributed.elastic.multiprocessing.errors import (
