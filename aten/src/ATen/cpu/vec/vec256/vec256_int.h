@@ -6,13 +6,14 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/irange.h>
+
+#ifdef CPU_CAPABILITY_AVX512
+#include <array>
+#endif
 
 namespace at::vec::inline CPU_CAPABILITY {
 
 #ifdef CPU_CAPABILITY_AVX2
-
-#include <array>
 
 struct Vectorizedi {
  protected:
@@ -61,7 +62,7 @@ class Vectorized<int64_t> : public Vectorizedi {
   static Vectorized<int64_t> blend(
       Vectorized<int64_t> a,
       Vectorized<int64_t> b) {
-    __at_align__ std::array<int64_t, size()> tmp_values{};
+    __at_align__ std::array<int64_t, size()> tmp_values;
     a.store(tmp_values.data());
     if (mask & 0x01)
       tmp_values[0] = _mm256_extract_epi64(b.values, 0);
@@ -107,7 +108,8 @@ class Vectorized<int64_t> : public Vectorizedi {
     return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
   }
   static Vectorized<int64_t> loadu(const void* ptr, int64_t count) {
-    __at_align__ std::array<int64_t, size()> tmp_values{};
+    __at_align__ std::array<int64_t, size()> tmp_values;
+    // Fill tail with 1.
     tmp_values.fill(1);
     std::memcpy(
         tmp_values.data(),
@@ -121,7 +123,7 @@ class Vectorized<int64_t> : public Vectorizedi {
       // https://software.intel.com/content/www/us/en/develop/documentation/cpp-compiler-developer-guide-and-reference/top/compiler-reference/intrinsics/intrinsics-for-intel-advanced-vector-extensions/intrinsics-for-load-and-store-operations-1/mm256-storeu-si256.html
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
     } else if (count > 0) {
-      __at_align__ std::array<int64_t, size()> tmp_values{};
+      __at_align__ std::array<int64_t, size()> tmp_values;
       _mm256_storeu_si256(
           reinterpret_cast<__m256i*>(tmp_values.data()), values);
       std::memcpy(
@@ -189,10 +191,7 @@ class Vectorized<int32_t> : public Vectorizedi {
     return 8;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized() = default;
-  Vectorized(int32_t v) {
-    values = _mm256_set1_epi32(v);
-  }
+  Vectorized(int32_t v) : Vectorizedi{_mm256_set1_epi32(v)} {}
   Vectorized(
       int32_t val1,
       int32_t val2,
@@ -201,9 +200,16 @@ class Vectorized<int32_t> : public Vectorizedi {
       int32_t val5,
       int32_t val6,
       int32_t val7,
-      int32_t val8) {
-    values = _mm256_setr_epi32(val1, val2, val3, val4, val5, val6, val7, val8);
-  }
+      int32_t val8)
+      : Vectorizedi{_mm256_setr_epi32(
+            val1,
+            val2,
+            val3,
+            val4,
+            val5,
+            val6,
+            val7,
+            val8)} {}
   template <int64_t mask>
   static Vectorized<int32_t> blend(
       Vectorized<int32_t> a,
@@ -259,7 +265,8 @@ class Vectorized<int32_t> : public Vectorizedi {
     return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
   }
   static Vectorized<int32_t> loadu(const void* ptr, int32_t count) {
-    __at_align__ std::array<int32_t, size()> tmp_values{};
+    __at_align__ std::array<int32_t, size()> tmp_values;
+    // Fill tail with 1.
     tmp_values.fill(1);
     std::memcpy(
         tmp_values.data(),
@@ -273,7 +280,7 @@ class Vectorized<int32_t> : public Vectorizedi {
       // https://software.intel.com/content/www/us/en/develop/documentation/cpp-compiler-developer-guide-and-reference/top/compiler-reference/intrinsics/intrinsics-for-intel-advanced-vector-extensions/intrinsics-for-load-and-store-operations-1/mm256-storeu-si256.html
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
     } else if (count > 0) {
-      __at_align__ std::array<int32_t, size()> tmp_values{};
+      __at_align__ std::array<int32_t, size()> tmp_values;
       _mm256_storeu_si256(
           reinterpret_cast<__m256i*>(tmp_values.data()), values);
       std::memcpy(
@@ -409,10 +416,7 @@ class Vectorized<int16_t> : public Vectorizedi {
     return 16;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized() = default;
-  Vectorized(int16_t v) {
-    values = _mm256_set1_epi16(v);
-  }
+  Vectorized(int16_t v) : Vectorizedi{_mm256_set1_epi16(v)} {}
   Vectorized(
       int16_t val1,
       int16_t val2,
@@ -429,30 +433,29 @@ class Vectorized<int16_t> : public Vectorizedi {
       int16_t val13,
       int16_t val14,
       int16_t val15,
-      int16_t val16) {
-    values = _mm256_setr_epi16(
-        val1,
-        val2,
-        val3,
-        val4,
-        val5,
-        val6,
-        val7,
-        val8,
-        val9,
-        val10,
-        val11,
-        val12,
-        val13,
-        val14,
-        val15,
-        val16);
-  }
+      int16_t val16)
+      : Vectorizedi{_mm256_setr_epi16(
+            val1,
+            val2,
+            val3,
+            val4,
+            val5,
+            val6,
+            val7,
+            val8,
+            val9,
+            val10,
+            val11,
+            val12,
+            val13,
+            val14,
+            val15,
+            val16)} {}
   template <int64_t mask>
   static Vectorized<int16_t> blend(
       Vectorized<int16_t> a,
       Vectorized<int16_t> b) {
-    __at_align__ std::array<int16_t, size()> tmp_values{};
+    __at_align__ std::array<int16_t, size()> tmp_values;
     a.store(tmp_values.data());
     if (mask & 0x01)
       tmp_values[0] = _mm256_extract_epi16(b.values, 0);
@@ -561,7 +564,8 @@ class Vectorized<int16_t> : public Vectorizedi {
     return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
   }
   static Vectorized<int16_t> loadu(const void* ptr, int16_t count) {
-    __at_align__ std::array<int16_t, size()> tmp_values{};
+    __at_align__ std::array<int16_t, size()> tmp_values;
+    // Fill tail with 1.
     tmp_values.fill(1);
     std::memcpy(
         tmp_values.data(),
@@ -575,7 +579,7 @@ class Vectorized<int16_t> : public Vectorizedi {
       // https://software.intel.com/content/www/us/en/develop/documentation/cpp-compiler-developer-guide-and-reference/top/compiler-reference/intrinsics/intrinsics-for-intel-advanced-vector-extensions/intrinsics-for-load-and-store-operations-1/mm256-storeu-si256.html
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
     } else if (count > 0) {
-      __at_align__ std::array<int16_t, size()> tmp_values{};
+      __at_align__ std::array<int16_t, size()> tmp_values;
       _mm256_storeu_si256(
           reinterpret_cast<__m256i*>(tmp_values.data()), values);
       std::memcpy(
@@ -641,10 +645,7 @@ class Vectorized8 : public Vectorizedi {
     return 32;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized8() = default;
-  Vectorized8(T v) {
-    values = _mm256_set1_epi8(v);
-  }
+  Vectorized8(T v) : Vectorizedi{_mm256_set1_epi8(v)} {}
   Vectorized8(
       T val1,
       T val2,
@@ -677,44 +678,43 @@ class Vectorized8 : public Vectorizedi {
       T val29,
       T val30,
       T val31,
-      T val32) {
-    values = _mm256_setr_epi8(
-        val1,
-        val2,
-        val3,
-        val4,
-        val5,
-        val6,
-        val7,
-        val8,
-        val9,
-        val10,
-        val11,
-        val12,
-        val13,
-        val14,
-        val15,
-        val16,
-        val17,
-        val18,
-        val19,
-        val20,
-        val21,
-        val22,
-        val23,
-        val24,
-        val25,
-        val26,
-        val27,
-        val28,
-        val29,
-        val30,
-        val31,
-        val32);
-  }
+      T val32)
+      : Vectorizedi{_mm256_setr_epi8(
+            val1,
+            val2,
+            val3,
+            val4,
+            val5,
+            val6,
+            val7,
+            val8,
+            val9,
+            val10,
+            val11,
+            val12,
+            val13,
+            val14,
+            val15,
+            val16,
+            val17,
+            val18,
+            val19,
+            val20,
+            val21,
+            val22,
+            val23,
+            val24,
+            val25,
+            val26,
+            val27,
+            val28,
+            val29,
+            val30,
+            val31,
+            val32)} {}
   template <int64_t mask>
   static Vectorized<T> blend(Vectorized<T> a, Vectorized<T> b) {
-    __at_align__ std::array<T, size()> tmp_values{};
+    __at_align__ std::array<T, size()> tmp_values;
     a.store(tmp_values.data());
     if (mask & 0x01)
       tmp_values[0] = _mm256_extract_epi8(b.values, 0);
@@ -911,7 +911,8 @@ class Vectorized8 : public Vectorizedi {
     return _mm256_castsi128_si256(input_128);
   }
   static Vectorized<T> loadu(const void* ptr, T count) {
-    __at_align__ std::array<T, size()> tmp_values{};
+    __at_align__ std::array<T, size()> tmp_values;
+    // Fill tail with 1.
     tmp_values.fill(1);
     std::memcpy(
         tmp_values.data(), ptr, std::min<int64_t>(count, size()) * sizeof(T));
@@ -928,7 +929,7 @@ class Vectorized8 : public Vectorizedi {
         _mm_storel_epi64(
             reinterpret_cast<__m128i*>(ptr), _mm256_castsi256_si128(values));
       } else {
-        __at_align__ std::array<T, size()> tmp_values{};
+        __at_align__ std::array<T, size()> tmp_values;
         _mm256_storeu_si256(
             reinterpret_cast<__m256i*>(tmp_values.data()), values);
         std::memcpy(
@@ -1215,8 +1216,8 @@ Vectorized<T> inline int_elementwise_binary_256(
     const Vectorized<T>& a,
     const Vectorized<T>& b,
     Op op) {
-  std::array<T, Vectorized<T>::size()> values_a{};
-  std::array<T, Vectorized<T>::size()> values_b{};
+  std::array<T, Vectorized<T>::size()> values_a;
+  std::array<T, Vectorized<T>::size()> values_b;
   a.store(values_a.data());
   b.store(values_b.data());
   for (int i = 0; i != Vectorized<T>::size(); i++) {
@@ -1469,7 +1470,7 @@ std::
     return _mm256_cvtepu8_epi32(
         _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ptr)));
   } else {
-    auto a = Vectorized<uint8_t>::loadu(ptr, count);
+    auto a = Vectorized<uint8_t>::loadu(ptr, static_cast<uint8_t>(count));
     return _mm256_cvtepu8_epi32(_mm256_castsi256_si128(a));
   }
 }

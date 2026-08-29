@@ -225,6 +225,7 @@ class Vectorized<float> {
     if (count == size()) {
       vst1q_f32(reinterpret_cast<float*>(ptr), values);
     } else {
+      // Zero tail past `count`.
       __at_align__ std::array<float, size()> tmp_values{};
       vst1q_f32(reinterpret_cast<float*>(tmp_values.data()), values);
       std::memcpy(
@@ -238,12 +239,12 @@ class Vectorized<float> {
   // Once we specialize that implementation for ARM
   // this should be removed. TODO (kimishpatel)
   float operator[](int idx) const {
-    __at_align__ std::array<float, size()> tmp{};
+    __at_align__ std::array<float, size()> tmp;
     store(tmp.data());
     return tmp[idx];
   }
   float operator[](int idx) {
-    __at_align__ std::array<float, size()> tmp{};
+    __at_align__ std::array<float, size()> tmp;
     store(tmp.data());
     return tmp[idx];
   }
@@ -260,7 +261,7 @@ class Vectorized<float> {
     return vreinterpretq_f32_u32(vmvnq_u32(vceqq_f32(values, values)));
   }
   bool has_inf_nan() const {
-    __at_align__ std::array<float, size()> tmp{};
+    __at_align__ std::array<float, size()> tmp;
     store(tmp.data());
     for (const auto i : c10::irange(size())) {
       if (_isnan(tmp[i]) || _isinf(tmp[i])) {
@@ -270,7 +271,7 @@ class Vectorized<float> {
     return false;
   }
   Vectorized<float> map(float (*const f)(float)) const {
-    __at_align__ std::array<float, size()> tmp{};
+    __at_align__ std::array<float, size()> tmp;
     store(tmp.data());
     for (const auto i : c10::irange(size())) {
       tmp[i] = f(tmp[i]);
@@ -280,8 +281,8 @@ class Vectorized<float> {
   Vectorized<float> map2(
       const Vectorized<float>& second,
       float (*const f)(float, float)) const {
-    __at_align__ std::array<float, size()> tmp{};
-    __at_align__ std::array<float, size()> tmp_second{};
+    __at_align__ std::array<float, size()> tmp;
+    __at_align__ std::array<float, size()> tmp_second;
     store(tmp.data());
     second.store(tmp_second.data());
     for (const auto i : c10::irange(size())) {
