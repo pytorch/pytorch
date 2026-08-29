@@ -5405,6 +5405,16 @@
       ]
     }
   ],
+  "GB2694": [
+    {
+      "Gb_type": "construct object with custom __del__",
+      "Context": "class={self.value.__name__}",
+      "Explanation": "Dynamo cannot preserve __del__-once semantics for an object whose class defines __del__; example-object materialization and cross-graph-break reconstruction would fire __del__ multiple times.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0321": [
     {
       "Gb_type": "torch.scan: improper init",
