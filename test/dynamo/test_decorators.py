@@ -2333,6 +2333,76 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         with self.assertRaises(Unsupported):
             f9(inp)
 
+    def test_load_attr_break_graph_if_unsupported_with_skip_frame(self):
+        # Regression test: break_graph_if_unsupported on LOAD_ATTR must not
+        # skip the speculation checkpoint when should_compile_partial_graph()
+        # is False, otherwise skip_frame() exceptions don't propagate
+        # correctly and produce fewer compiled frames than expected.
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.error_on_graph_break(False)
+        def inner2(x):
+            x = x + 2
+            torch._dynamo.graph_break()
+            return x + 4
+
+        def inner1(x):
+            with torch._dynamo.error_on_graph_break(False):
+                torch._dynamo.skip_frame()
+            return inner2(x)
+
+        @torch._dynamo.error_on_graph_break(True)
+        @torch.compile(backend=cnts)
+        def fn(x):
+            x = x + 1
+            return inner1(x)
+
+        inp = torch.ones(3)
+        self.assertEqual(fn(inp), inp + 7)
+        self.assertEqual(cnts.frame_count, 3)
+
+    def test_saved_tensor_descriptor_graph_break(self):
+        # Regression test: _saved_* getset descriptors on autograd Nodes
+        # must graph-break rather than calling __get__ during tracing,
+        # which would trigger checkpoint recomputation hooks as a
+        # tracing-time side effect.
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(gf):
+            return gf._saved_result.sum()
+
+        x = torch.randn(3, requires_grad=True)
+        y = x.exp()
+        result = fn(y.grad_fn)
+        self.assertEqual(result, y.sum())
+        # The graph break at _saved_result produces one compiled frame
+        # (the .sum() in the resume function) on some Python versions,
+        # and a full frame skip on others.
+        self.assertLessEqual(cnt.frame_count, 1)
+
+    def test_grad_fn_none_recompiles_for_non_leaf(self):
+        # grad_fn constant-folds to None for a leaf tensor.  TENSOR_MATCH does
+        # not guard grad_fn presence and requires_grad does not distinguish a
+        # leaf from a non-leaf, so without a NONE_MATCH guard on grad_fn the
+        # leaf-specialized branch is silently reused for a non-leaf input.
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(x):
+            if x.grad_fn is None:
+                return x + 1
+            return x * 100
+
+        leaf = torch.randn(3, requires_grad=True)
+        non_leaf = torch.randn(3, requires_grad=True) * 2
+
+        self.assertEqual(fn(leaf), leaf + 1)
+        frames_after_leaf = cnt.frame_count
+        self.assertEqual(fn(non_leaf), non_leaf * 100)
+        # The non-leaf input must not reuse the leaf-specialized code.
+        self.assertGreater(cnt.frame_count, frames_after_leaf)
+
         # test export with error_on_graph_break(False) still errors
 
     def test_error_on_graph_break_export(self):

@@ -90,6 +90,7 @@ from .base import (
 )
 from .constant import ConstantVariable
 from .lists import ListIteratorVariable, SizeVariable
+from .misc import CallMethodVariable
 from .script_object import CustomClassObjectVariable
 from .user_defined import UserDefinedClassVariable
 
@@ -457,9 +458,7 @@ class TensorVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         fake_val = self.proxy.node.meta["example_value"]
-        # For getattrs on tensors without sources,
-        # we can do better than the default (creating a GetAttrVariable)
-        # if:
+        # For getattrs on tensors without sources, resolve directly if:
         # (1) the tensor is a traceable tensor subclass
         # (2) We are getattr'ing an inner tensor from that subclass
         if not self.source and is_traceable_wrapper_subclass(fake_val):
@@ -538,10 +537,9 @@ class TensorVariable(VariableTracker):
         # but unfortunately id(real_value.__self__) is not id(<original value>)
         if is_bound_tensor_method(real_value):
             # No need to install the guard because its a bound tensor method
-            from .misc import GetAttrVariable
 
-            return GetAttrVariable(
-                self, name, source=attr_source, py_type=type(real_value)
+            return CallMethodVariable(
+                self, name, py_type=type(real_value), source=attr_source
             )
 
         install_guard(
@@ -683,6 +681,24 @@ class TensorVariable(VariableTracker):
                 hints=[],
             )
         else:
+            # Constant-folding grad_fn to None is only valid while the tensor
+            # stays a leaf. requires_grad alone does not distinguish a leaf
+            # (grad_fn is None) from a non-leaf with the same metadata, so
+            # guard on grad_fn being None to force a recompile otherwise.
+            # Only needed when requires_grad is True: TENSOR_MATCH already
+            # guards requires_grad=False, which implies grad_fn is None.
+            # subguards_allowed() excludes sources that are not evaluable in
+            # the guard scope (e.g. SYNTHETIC_LOCAL from synthetic_graph_input).
+            if (
+                self.source is not None
+                and self.source.subguards_allowed()
+                and self.requires_grad
+            ):
+                install_guard(
+                    AttrSource(self.source, "grad_fn").make_guard(
+                        GuardBuilder.NONE_MATCH
+                    )
+                )
             return variables.ConstantVariable.create(None)
 
     def method_attr__version(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -695,23 +711,17 @@ class TensorVariable(VariableTracker):
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
-        from . import GetAttrVariable
-
-        # TODO - This is not a good solution but solves an accuracy issue.
-        # Today, tp_getattro_impl returns GetAttrVariable for both non-existent
-        # attributes and existing attributes. This is a bug and requires more
-        # deep dive.
+        # Fast path: all_tensor_attrs covers standard tensor attributes.
+        # This also ensures tp_getattro_impl exceptions we don't catch here
+        # (e.g. UnknownPropertiesDuringBackwardTrace for strict-mode banned
+        # ops) are unreachable, since those ops are all in all_tensor_attrs.
         if name in all_tensor_attrs:
             return ConstantVariable.create(True)
 
         try:
-            var = VariableTracker.build(tx, getattr).call_function(
-                tx, [self, VariableTracker.build(tx, name)], {}
-            )
-            # in the event that TensorVariable returns NotImplemented
-            # GetAttrBuiltinVariable.call_function returns GetAttrVariable
-            ret_val = not isinstance(var, GetAttrVariable)
-        except (AttributeError, ObservedAttributeError):
+            self.tp_getattro_impl(tx, name)
+            ret_val = True
+        except (NotImplementedError, AttributeError, ObservedAttributeError):
             ret_val = False
 
         if self.source:
@@ -847,9 +857,25 @@ class TensorVariable(VariableTracker):
             result = try_generic_attr_handling()
 
         if result is None:
-            result = self.dynamic_getattr(tx, name)
+            try:
+                result = self.dynamic_getattr(tx, name)
+            except NotImplementedError:
+                pass
 
         if result is None:
+            static_attr = all_tensor_attrs.get(name, None)
+            if static_attr is None:
+                # all_tensor_attrs is computed at import time; check the
+                # actual type for dynamically-added methods (e.g. distributed
+                # wait) and subclass methods.
+                static_attr = getattr(self.class_type, name, None)
+            # `wait` is a synthetic method that call_method traces (functional
+            # collectives wait_tensor); it is not a real torch.Tensor attribute
+            # but must still resolve to a method call to match eager.
+            if (static_attr is not None and callable(static_attr)) or name == "wait":
+                return CallMethodVariable(
+                    self, name, source=self.source and AttrSource(self.source, name)
+                )
             raise NotImplementedError
         return result
 
@@ -1458,7 +1484,6 @@ class TensorVariable(VariableTracker):
                 # Non-leaf tensors (has_grad_fn=True) must be skipped because:
                 # 1. Semantically: they're intermediates, not the leaves we want gradients for
                 # 2. Implementation: the backward rewrite can't handle .grad on non-leafs
-                #    (Dynamo creates GetAttrVariable instead of TensorVariable)
                 #
                 # In-graph created tensors without proper source also can't be handled
                 # when user explicitly passes them as inputs, because
@@ -1517,9 +1542,8 @@ class TensorVariable(VariableTracker):
           This matches eager where only leaves get .grad.
         - User-provided (inputs=[...]): Errors if any non-leaf tensor is found.
           While eager backward(inputs=[non_leaf]) works, Dynamo cannot trace it
-          because the backward rewrite accesses .grad, and Dynamo creates
-          a generic GetAttrVariable for .grad on non-leaf tensors (instead of a
-          TensorVariable), which cannot be used in tensor operations.
+          because the backward rewrite accesses .grad on non-leaf tensors,
+          which cannot be resolved to a TensorVariable.
 
         TODO: Support non-leaf tensors by fixing .grad access on non-leaf in Dynamo.
         """
@@ -3350,7 +3374,7 @@ class NumpyNdarrayVariable(TensorVariable):
         #
         # NB: only ALWAYS specialized attributes can go here; notably,
         # size/shape not allowed!
-        if name in ("shape", "stride"):
+        if name in ("shape", "stride", "strides"):
             if not has_free_symbols(r := getattr(example_ndarray, name)):
                 return VariableTracker.build(tx, tuple(int(r) for r in r))
             return insert_into_graph()
@@ -3372,6 +3396,14 @@ class NumpyNdarrayVariable(TensorVariable):
                 explanation=f"Dynamo currently does not support tracing `ndarray.{name}`.",
                 hints=[],
             )
+        # Callable ndarray methods dispatch through call_method; GetAttrVariable
+        # used to defer these, so resolve them to a bound-method VT instead.
+        if np is not None:
+            attr = getattr(np.ndarray, name, None)
+            if attr is not None and callable(attr):
+                return CallMethodVariable(
+                    self, name, source=self.source and AttrSource(self.source, name)
+                )
         raise NotImplementedError
 
     @staticmethod

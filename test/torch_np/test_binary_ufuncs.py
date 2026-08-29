@@ -199,6 +199,25 @@ class TestBinaryUfuncBasic(TestCase):
             np.subtract(0.5, 0.6), subtract(0.5, 0.6), atol=1e-7, check_dtype=False
         )
 
+    def test_subtract_weak_scalar_promotes_bool_array(self):
+        # NEP 50: a weak scalar of a higher category promotes a bool array
+        # (numpy: `1 - array([True, False])` -> int64).  torch refuses bool
+        # operands for subtraction outright, so leaving the array as bool
+        # raised instead of returning the promoted result.
+        import torch._numpy as tnp
+
+        for scalar, expected_dtype in ((1, "int64"), (1.5, "float64")):
+            expected = np.subtract(scalar, np.asarray([True, False]))
+            got = subtract(scalar, tnp.asarray([True, False]))
+            assert_allclose(expected, got, atol=1e-7, check_dtype=False)
+            self.assertEqual(got.dtype.name, expected_dtype)
+            self.assertEqual(got.dtype.name, expected.dtype.name)
+
+        # numpy rejects bool - bool; the promotion must not mask that.
+        barr = tnp.asarray([True, False])
+        with self.assertRaises((TypeError, RuntimeError)):
+            subtract(barr, barr)
+
 
 if __name__ == "__main__":
     run_tests()

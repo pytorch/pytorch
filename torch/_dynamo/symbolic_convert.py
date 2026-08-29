@@ -3373,6 +3373,10 @@ class InstructionTranslatorBase(
             )
         self.push(result)
 
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when attempting to trace LOAD_ATTR: loading an object's attribute, e.g. x.attr",
+    )
     def LOAD_ATTR(self, inst: Instruction) -> None:
         if sys.version_info >= (3, 12):
             if inst.arg is None or inst.arg % 2 != 0:
@@ -5060,6 +5064,7 @@ class InstructionTranslatorBase(
 
             # maybe use Format.VALUE_WITH_FAKE_GLOBALS instead?
             # https://docs.python.org/3/library/annotationlib.html#annotationlib.Format.VALUE_WITH_FAKE_GLOBALS
+            fn.annotate = attr
             attr = attr.call_function(self, [VariableTracker.build(self, 1)], {})
             fn.annotations = attr
         elif flags & 0x08:
