@@ -642,7 +642,7 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
       int32_t zero_point,
       float inverse_scale) {
     auto* rhs_data = (float*)rhs.data();
-    std::array<int8_t, 32> quantized_values{};
+    std::array<int8_t, 32> quantized_values;
     QuantizeAvx2<value_type>(
         rhs_data, quantized_values.data(), 32, inverse_scale, zero_point);
     return Vectorized<c10::qint8>::loadu(quantized_values.data());
@@ -832,7 +832,7 @@ struct Vectorized<c10::quint8> : public Vectorizedqi {
       int32_t zero_point,
       float inverse_scale) {
     auto* rhs_data = (float*)rhs.data();
-    std::array<uint8_t, 32> quantized_values{};
+    std::array<uint8_t, 32> quantized_values;
     QuantizeAvx2<value_type>(
         rhs_data, quantized_values.data(), 32, inverse_scale, zero_point);
     return Vectorized<c10::quint8>::loadu(quantized_values.data());
@@ -966,7 +966,7 @@ struct VectorizedQuantizedConverter {
       Vectorized<float> /*scale_zp_premul*/) const {
     float_vec_return_type rv;
     for (const auto i : c10::irange(float_num_vecs())) {
-      std::array<float, Vectorized<float>::size()> tmp_vals{};
+      std::array<float, Vectorized<float>::size()> tmp_vals;
       for (const auto j : c10::irange(Vectorized<float>::size())) {
         tmp_vals[j] = at::native::dequantize_val<T>(
             scale[j],
@@ -1016,11 +1016,11 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
       float scale,
       int32_t zero_point,
       float /*inverse_scale*/) {
-    std::array<value_type, size()> qvals{};
+    std::array<value_type, size()> qvals;
     std::array<
         float,
         static_cast<size_t>(float_num_vecs()) * Vectorized<float>::size()>
-        float_vals{};
+        float_vals;
 
     for (const size_t i : c10::irange(float_num_vecs())) {
       rhs[i].store(&float_vals[i * Vectorized<float>::size()]);
@@ -1148,11 +1148,11 @@ struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
       float scale,
       int32_t zero_point,
       float /*inverse_scale*/) {
-    std::array<value_type, size()> qvals{};
+    std::array<value_type, size()> qvals;
     std::array<
         float,
         static_cast<size_t>(float_num_vecs()) * Vectorized<float>::size()>
-        float_vals{};
+        float_vals;
 
     for (const size_t i : c10::irange(float_num_vecs())) {
       rhs[i].store(&float_vals[i * Vectorized<float>::size()]);
@@ -1270,11 +1270,11 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
       float scale,
       int32_t zero_point,
       float /*inverse_scale*/) {
-    std::array<value_type, size()> qvals{};
+    std::array<value_type, size()> qvals;
     std::array<
         float,
         static_cast<size_t>(float_num_vecs()) * Vectorized<float>::size()>
-        float_vals{};
+        float_vals;
 
     for (const size_t i : c10::irange(float_num_vecs())) {
       rhs[i].store(&float_vals[i * Vectorized<float>::size()]);

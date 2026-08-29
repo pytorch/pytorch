@@ -1,13 +1,10 @@
 #include <torch/csrc/autograd/variable.h>
 
-#include <torch/csrc/autograd/InferenceMode.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/edge.h>
-#include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/functions/tensor.h>
-#include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/generated/Functions.h>
 #include <torch/csrc/autograd/generated/ViewFuncs.h>
 #include <torch/csrc/autograd/utils/error_messages.h>
@@ -19,7 +16,6 @@
 
 #include <memory>
 #include <mutex>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -293,10 +289,9 @@ c10::intrusive_ptr<Node> grad_accumulator(const Variable& self) {
   if (!autograd_meta) {
     return nullptr;
   }
-  if (autograd_meta->grad_fn_) {
-    throw std::logic_error(
-        "grad_accumulator() should be only called on leaf Variables");
-  }
+  TORCH_CHECK(
+      !autograd_meta->grad_fn_,
+      "grad_accumulator() should be only called on leaf Variables");
   if (!autograd_meta->requires_grad_) {
     return nullptr;
   }
