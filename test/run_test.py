@@ -1836,6 +1836,7 @@ def get_selected_tests(options) -> list[str]:
             "test_mps",
             "test_metal",
             "test_modules",
+            "test_linalg",
             "nn/test_convolution",
             "nn/test_dropout",
             "nn/test_pooling",
