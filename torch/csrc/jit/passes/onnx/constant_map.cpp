@@ -277,9 +277,9 @@ void ConstantValueMap::PrintMaps() {
   std::cout << "Rank/Shape Map:" << '\n';
   for (const auto& x : ConstantValueMap::getInstance().rankMap) {
     std::stringstream ss;
-    if (ConstantValueMap::getInstance().shapeMap.contains(x.first)) {
-      auto shape_symbols =
-          ConstantValueMap::getInstance().shapeMap[x.first].sizes();
+    auto& shape_map = ConstantValueMap::getInstance().shapeMap;
+    if (auto it = shape_map.find(x.first); it != shape_map.end()) {
+      auto shape_symbols = it->second.sizes();
       if (shape_symbols.has_value()) {
         for (const auto& shape_symbol : shape_symbols.value()) {
           if (shape_symbol.is_static()) {

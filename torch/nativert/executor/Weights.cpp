@@ -104,8 +104,8 @@ Weights::Weights(
     // /extra/xl_weights/<model_name>_model_param_config.json
     // Currently, we only use the metadata from model definition.
     std::optional<TensorMeta> tensorMeta;
-    if (weightsMeta_.contains(tensorName)) {
-      tensorMeta = weightsMeta_.at(tensorName);
+    if (auto it = weightsMeta_.find(tensorName); it != weightsMeta_.end()) {
+      tensorMeta = it->second;
     } else {
       TORCH_CHECK(
           false,
@@ -115,11 +115,12 @@ Weights::Weights(
     }
     std::optional<TensorMeta> newTensorMeta;
     if (maybeNewWeightsMeta) {
-      if (!stateDictPaths.contains(tensorName)) {
+      auto it = stateDictPaths.find(tensorName);
+      if (it == stateDictPaths.end()) {
         TORCH_CHECK(false, "Tensor name not found in state dict paths");
       }
 
-      std::string paramName = stateDictPaths.at(tensorName);
+      std::string paramName = it->second;
       if (maybeNewWeightsMeta->contains(paramName)) {
         newTensorMeta = *maybeNewWeightsMeta->at(paramName);
       } else {
