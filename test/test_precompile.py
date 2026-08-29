@@ -254,6 +254,18 @@ class _PrecompileUnguardedAttr(torch.nn.Module):
         return self.l(x).relu().sum()
 
 
+class _PrecompilePipeline:
+    """A guarded object that is NOT an nn.Module and holds unpicklable state."""
+
+    def __init__(self, model) -> None:
+        self.model = model
+        self.it = (n for n in range(3))
+
+
+def _precompile_via_pipeline(pipeline, x):
+    return pipeline.model(x).relu().sum()
+
+
 def _precompile_scale_sum(x):
     return torch.relu(x * 2.0).sum()
 
@@ -2794,27 +2806,105 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "not valid Python"):
             torch.compiler.precompile.load("not an artifact {", b"")
 
-    def test_multi_graph_keep_all_filter_reports_unserializable_guard(self):
-        with self.assertRaisesRegex(PrecompileError, "guard cannot be serialized"):
-            torch.compiler.precompile(
-                _precompile_multi_graph,
+    def test_guarded_user_object_prunes_its_unguarded_attributes(self):
+        # Pruning used to apply only to nn.Module, so a guarded object that is
+        # NOT a module -- a train pipeline holding a dataloader -- was pickled
+        # whole and one unguarded attribute several levels down took the frame
+        # with it ("cannot pickle 'generator' object"), which surfaced only as
+        # "the entry frame produced no guarded code".
+        x = torch.randn(4, 8)
+        pipeline = _PrecompilePipeline(torch.nn.Linear(8, 8))
+        with torch.no_grad():
+            expected = _precompile_via_pipeline(pipeline, x)
+            code, cache = torch.compiler.precompile(
+                _precompile_via_pipeline,
                 backend="eager",
                 dynamic=False,
                 tracer="dynamo",
-                example_inputs=[(torch.randn(2, 8),)],
-                guard_filter_fn=lambda entries: [True] * len(entries),
+                example_inputs=[(pipeline, x)],
             )
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertEqual(loaded(pipeline, x), expected)
 
-    def test_multi_graph_manual_keep_all_filter_uses_public_error(self):
+    def test_unpicklable_value_error_names_the_attribute_path(self):
+        # A type alone ("cannot pickle 'generator' object") is not actionable in
+        # a model with a thousand-frame guard tree; the path is.
+        from torch._dynamo.guards import _offending_value_path
+
+        class _Scope:
+            pass
+
+        holder = _Scope()
+        holder.deep = _Scope()
+        holder.deep.it = (n for n in range(3))
+        state = _Scope()
+        state.output_graph = _Scope()
+        state.output_graph.local_scope = {"p": holder}
+        state.output_graph.global_scope = {}
+        path = _offending_value_path(
+            state, TypeError("cannot pickle 'generator' object")
+        )
+        self.assertIn("local_scope['p'].deep.it", path)
+
+    def test_offending_value_path_never_masks_the_real_error(self):
+        # It is a diagnostic appended to an error already being raised, so any
+        # failure inside it must stay silent.
+        from torch._dynamo.guards import _offending_value_path
+
+        class _Exploding:
+            @property
+            def output_graph(self):
+                raise RuntimeError("boom")
+
+        self.assertEqual(
+            _offending_value_path(_Exploding(), TypeError("cannot pickle 'x' object")),
+            "",
+        )
+
+    def test_keep_all_filter_cannot_readmit_unserializable_guards(self):
+        # A custom filter COMPOSES with the default rather than replacing it, so
+        # asking to keep everything cannot re-admit the identity guards that are
+        # unserializable in the first place. Replacing used to make every frame
+        # fail with "ID_MATCH guard cannot be serialized", in frames that had
+        # nothing to do with the caller's filter.
+        code, cache = torch.compiler.precompile(
+            _precompile_multi_graph,
+            backend="eager",
+            dynamic=False,
+            tracer="dynamo",
+            example_inputs=[(torch.randn(2, 8),)],
+            guard_filter_fn=lambda entries: [True] * len(entries),
+            # a custom filter is present, so the ordinary identity drops are
+            # reported as risky; the point here is that they are DROPS and not
+            # a hard "cannot be serialized" failure
+            require_no_risky_drops=False,
+        )
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        x = torch.randn(2, 8)
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertEqual(loaded(x), _precompile_multi_graph(x))
+
+    def test_custom_filter_only_narrows_what_the_default_kept(self):
+        # The composed filter is an AND: a caller can drop more, never fewer.
+        dropped = {"n": 0}
+
+        def drop_everything(entries):
+            dropped["n"] += len(entries)
+            return [False] * len(entries)
+
         session = _precompile_capture(
             _precompile_multi_graph,
             backend="eager",
             dynamic=False,
-            guard_filter_fn=lambda entries: [True] * len(entries),
+            guard_filter_fn=drop_everything,
         )
-        with self.assertRaisesRegex(PrecompileError, "guard cannot be serialized"):
-            with session as compiled:
-                compiled(torch.randn(2, 8))
+        with session as compiled:
+            compiled(torch.randn(2, 8))
+        self.assertGreater(dropped["n"], 0)
+        self.assertEqual(session.summary().kept_guards, ())
 
     def test_multi_graph_capture_exit_wait_interrupt_is_retryable(self):
         session = _precompile_capture(
