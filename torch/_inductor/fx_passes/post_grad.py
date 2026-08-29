@@ -2135,6 +2135,8 @@ def _can_fold_scaled_mm_output_scale(match: Match) -> bool:
         return False
 
     output_scale = match.kwargs["output_scale"]
+    if not isinstance(output_scale, torch.fx.Node):
+        return False
     scale_val = output_scale.meta.get("val")
     if not (
         isinstance(scale_val, torch.Tensor)
