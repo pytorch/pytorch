@@ -276,7 +276,13 @@ class GlobalSource(Source):
 
 @dataclass_with_cached_hash(frozen=True)
 class GlobalWeakRefSource(Source):
-    _provenance: ClassVar[GuardProvenance] = GuardProvenance.GLOBAL
+    # INPUT, not GLOBAL: these are Dynamo-INSTALLED weakref proxies standing in
+    # for the identity/liveness of traced runtime objects (e.g. an optimizer
+    # passed as an argument and its params, via store_global_weakref_by_id).
+    # Their WEAKREF_ALIVE / identity guards are dispatch-relevant, so an
+    # environment-drop policy must never see them as droppable, even though
+    # the lookup goes through the globals dict.
+    _provenance: ClassVar[GuardProvenance] = GuardProvenance.INPUT
 
     global_name: str
 
@@ -1170,6 +1176,10 @@ class TorchFunctionModeStackSource(Source):
 
 @dataclass_with_cached_hash(frozen=True)
 class ConstantSource(Source):
+    # Classification is about GUARD semantics and ConstantSource cannot be
+    # guarded on (make_guard raises below); its reconstruct does emit a
+    # LOAD_GLOBAL of a dynamo-installed binding, which non-guard consumers
+    # reasoning about reconstruction portability should not infer from this.
     _provenance: ClassVar[GuardProvenance] = GuardProvenance.SYNTHETIC
 
     source_name: str
