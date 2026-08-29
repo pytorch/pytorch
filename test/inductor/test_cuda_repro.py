@@ -1713,9 +1713,7 @@ class CudaReproTests(TestCase):
             return (maximum == scaled).sum(dim=-1, keepdim=True)
 
         expected = fn(maximum, values)
-        actual = torch.compile(fn, backend="inductor", fullgraph=True)(
-            maximum, values
-        )
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(maximum, values)
 
         self.assertEqual(actual, expected)
         self.assertTrue((actual > 0).all())
