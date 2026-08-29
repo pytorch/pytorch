@@ -1463,6 +1463,12 @@ class PrecompileSession:
         # variant of every frame. Off by default: the capture session API
         # serializes everything serializable, and precompile() turns it on.
         self._prune_invariant_guards = False
+        # Retain what each example call returned, for precompile()'s on-disk
+        # form to hand back. Off by default: a capture() session outlives the
+        # calls, and holding every result would pin the caller's output tensors
+        # for the life of the session.
+        self._collect_results = False
+        self._example_results: list[object] = []
         # The leaves every live guard build produced, to compare a rebuild
         # against; see _report_guard_drift.
         self._live_guard_leaves: set[tuple[str, str]] = set()
@@ -1656,10 +1662,12 @@ class PrecompileSession:
                     # AOTAutograd builds its CompiledFunction and the joint
                     # graph, which it only does when the outputs require grad.
                     with torch.inference_mode(False), torch.enable_grad():
-                        self._call(*args, **kwargs)
+                        result = self._call(*args, **kwargs)
                 else:
                     with torch.inference_mode(False), torch.no_grad():
-                        self._call(*args, **kwargs)
+                        result = self._call(*args, **kwargs)
+                if self._collect_results:
+                    self._example_results.append(result)
         except BaseException as e:
             self._record_capture_error(e)
             # A __enter__ that raises never gets its __exit__, so without this
@@ -2075,6 +2083,16 @@ class PrecompileSession:
             return decisions
 
         return filter_fn
+
+    def example_results(self) -> list[object]:
+        """
+        What each ``example_inputs`` call returned, in order.
+
+        Only populated when ``_collect_results`` was set before ``__enter__``;
+        otherwise empty, because a session that outlives its calls must not pin
+        the caller's output tensors.
+        """
+        return list(self._example_results)
 
     def invariants(self) -> tuple[FrameInvariants, ...]:
         """

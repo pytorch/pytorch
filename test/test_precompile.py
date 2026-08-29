@@ -1663,14 +1663,117 @@ class TestPrecompile(TestCase):
             .default
         )
 
+    def test_precompile_writes_the_pair_and_returns_the_call_results(self):
+        # The on-disk form is the one a real capture uses: the artifact runs to
+        # hundreds of megabytes of source, and precompile makes the example
+        # calls itself, so their results are only reachable if it hands them
+        # back.
+        m = torch.nn.Linear(4, 3)
+        xs = [torch.randn(2, 4), torch.randn(2, 4)]
+        with tempfile.TemporaryDirectory() as d:
+            # A subdirectory that does not exist yet: the paths name files, and
+            # their parents are created.
+            artifact_path = os.path.join(d, "nested", "artifact.py")
+            cache_path = os.path.join(d, "nested", "artifact.cache")
+            results = torch.compiler.precompile(
+                lambda model, t: model(t),
+                tracer="dynamo",
+                backend="eager",
+                example_inputs=[(m, x) for x in xs],
+                artifact_path=artifact_path,
+                cache_path=cache_path,
+            )
+            self.assertIsInstance(results, list)
+            self.assertEqual(len(results), len(xs))
+            with torch.no_grad():
+                for got, x in zip(results, xs):
+                    self.assertEqual(got, m(x))
+            loaded = torch.compiler.precompile.load(
+                artifact_path=artifact_path, cache_path=cache_path
+            )
+            with _maybe_scoped(loaded), torch.no_grad():
+                self.assertEqual(loaded(m, xs[0]), m(xs[0]))
+
+    def test_precompile_make_fx_on_disk_has_no_call_results(self):
+        # make_fx traces fn under proxy/fake tensors, so what it returned during
+        # the trace is a proxy rather than a value. Both files are still
+        # written; there is simply nothing to hand back.
+        m = torch.nn.Linear(4, 3)
+        x = torch.randn(2, 4)
+        with tempfile.TemporaryDirectory() as d:
+            artifact_path = os.path.join(d, "artifact.py")
+            cache_path = os.path.join(d, "artifact.cache")
+            results = torch.compiler.precompile(
+                lambda model, t: model(t),
+                backend="eager",
+                example_inputs=[(m, x)],
+                artifact_path=artifact_path,
+                cache_path=cache_path,
+            )
+            self.assertEqual(results, [])
+            self.assertGreater(os.path.getsize(artifact_path), 0)
+            self.assertGreater(os.path.getsize(cache_path), 0)
+            loaded = torch.compiler.precompile.load(
+                artifact_path=artifact_path, cache_path=cache_path
+            )
+            self.assertEqual(loaded(m, x), m(x))
+
+    def test_precompile_paths_come_in_pairs(self):
+        # Half an artifact can never be loaded: the cache carries a sha256 of
+        # exactly the python_code it was emitted with.
+        m = torch.nn.Linear(4, 3)
+        x = torch.randn(2, 4)
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "artifact.py")
+            with self.assertRaisesRegex(ValueError, "artifact_path without cache_path"):
+                torch.compiler.precompile(
+                    lambda model, t: model(t),
+                    example_inputs=[(m, x)],
+                    artifact_path=path,
+                )
+            with self.assertRaisesRegex(ValueError, "cache_path without artifact_path"):
+                torch.compiler.precompile(
+                    lambda model, t: model(t),
+                    example_inputs=[(m, x)],
+                    cache_path=path,
+                )
+        with self.assertRaisesRegex(ValueError, "cache_path without artifact_path"):
+            torch.compiler.precompile.load(cache_path="x")
+        with self.assertRaisesRegex(ValueError, "needs the artifact"):
+            torch.compiler.precompile.load()
+
+    def test_precompile_load_takes_the_pair_in_memory_or_from_disk_not_both(self):
+        m = torch.nn.Linear(4, 3)
+        x = torch.randn(2, 4)
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                lambda model, t: model(t),
+                tracer="dynamo",
+                backend="eager",
+                example_inputs=[(m, x)],
+            )
+        with tempfile.TemporaryDirectory() as d:
+            artifact_path = os.path.join(d, "artifact.py")
+            cache_path = os.path.join(d, "artifact.cache")
+            with open(artifact_path, "w") as f:
+                f.write(code)
+            with open(cache_path, "wb") as f:
+                f.write(cache)
+            with self.assertRaisesRegex(ValueError, "not both"):
+                torch.compiler.precompile.load(
+                    code, cache, artifact_path=artifact_path, cache_path=cache_path
+                )
+
     def test_precompile_public_result_types(self):
         # The public surface is the pair and the loader; the session types it
         # is built from are internal.
         from torch._precompile import PrecompileSession
 
+        # Two forms: the in-memory pair, and the on-disk form that writes both
+        # files and hands back what the example calls returned.
         self.assertEqual(
             typing.get_type_hints(torch.compiler.precompile.__call__)["return"],
-            tuple[str, bytes],
+            tuple[str, bytes] | list[object],
         )
         self.assertEqual(
             typing.get_type_hints(PrecompileSession.artifact)["return"],
