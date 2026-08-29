@@ -135,6 +135,10 @@ def _constexpr_constant(value: Any) -> Any:
     if isinstance(value, tuple) and hasattr(value, "_fields"):
         make = getattr(type(value), "_make")  # noqa: B009
         return make(_constexpr_constant(item) for item in value)
+    if type(value) is torch.Size:
+        # torch.Size is a value-transparent torch container (no _fields;
+        # iteration/__eq__ inherited from tuple), so a plain tuple is exact.
+        return tuple(_constexpr_constant(item) for item in value)
     if type(value) is tuple:
         return tuple(_constexpr_constant(item) for item in value)
     if isinstance(value, enum.Enum) and isinstance(
@@ -238,8 +242,12 @@ def _constexpr_source_impl(
             items.append(source)
         return "[" + ", ".join(items) + "]"
     if isinstance(value, tuple):
-        # Namedtuples reconstruct exactly via _make; any other tuple subclass
-        # declines rather than degrade to a plain tuple.
+        # Namedtuples reconstruct exactly via _make; torch.Size coerces to an
+        # exact plain tuple (see _constexpr_constant); any other tuple
+        # subclass declines rather than degrade to a plain tuple.
+        if type(value) is torch.Size:
+            normalized = _constexpr_constant(value)
+            return _constexpr_source_impl(normalized, module_aliases, imports)
         if not hasattr(value, "_fields") and type(value) is not tuple:
             return None
         items = []

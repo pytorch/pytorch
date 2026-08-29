@@ -337,6 +337,35 @@ def _precompile_dynamo_mutating_step(xs, t):
     return t * len(xs)
 
 
+def _precompile_dynamo_helper_empty_default(x, dims=()):
+    return x * (len(dims) + 1)
+
+
+def _precompile_dynamo_calls_empty_default(a, dims):
+    return _precompile_dynamo_helper_empty_default(a) + len(dims)
+
+
+def _precompile_dynamo_helper_ellipsis_default(x, key=...):
+    return x + (0 if key is ... else 1)
+
+
+def _precompile_dynamo_calls_ellipsis_default(a, key):
+    return _precompile_dynamo_helper_ellipsis_default(a)
+
+
+def _precompile_dynamo_act(x):
+    return torch.relu(x)
+
+
+class _PrecompileDynamoActBox:
+    def __init__(self, act):
+        self.act = act
+
+
+def _precompile_dynamo_calls_act(a, box):
+    return _precompile_dynamo_act(a) * 2
+
+
 # A custom pytree node whose context (a set) is not JSON-dumpable and which has no
 # to_dumpable_context serializer, so treespec_dumps raises TypeError (distinct from the
 # unregistered-namedtuple NotImplementedError path). Registered once at module load and
@@ -4511,7 +4540,11 @@ class TestPrecompile(TestCase):
                 artifact_path=os.path.join(tmp, "artifact.py"),
                 cache_path=os.path.join(tmp, "artifact.cache"),
             )
-            session = (
+            # The state is about to be dropped without close(), so release the
+            # session by hand even if the assertions below fail -- otherwise a
+            # failure leaks the pinned session into the rest of the suite.
+            self.addCleanup(
+                _teardown_dynamo_capture,
                 state.package,
                 state.capture_target,
                 state.pgo_state,
@@ -4521,8 +4554,6 @@ class TestPrecompile(TestCase):
                 del state
                 gc.collect()
             self.assertTrue(any("without close()" in m for m in logs.output))
-            # The state is gone, so release the session it warned about by hand.
-            _teardown_dynamo_capture(*session)
 
     def test_load_rejects_tampered_or_garbage_python_code(self):
         code, cache = torch.compiler.precompile(
@@ -4578,6 +4609,69 @@ class TestPrecompile(TestCase):
                 loaded = torch.compiler.precompile.load(code, buf.getvalue())
         self.assertTrue(any("could not prime the cache" in m for m in logs.output))
         self.assertEqual(loaded(x), _precompile_dynamo_torch_sin(x))
+
+    def test_tracer_dynamo_accepts_interpreter_singleton_inputs(self):
+        # (), Ellipsis, and NotImplemented are process-wide singletons that
+        # Dynamo value-guards; a helper default holding one must not read as
+        # an environment alias of the caller's input.
+        x = torch.randn(3)
+        for fn, extra in (
+            (_precompile_dynamo_calls_empty_default, ()),
+            (_precompile_dynamo_calls_ellipsis_default, ...),
+        ):
+            with self.subTest(extra=extra):
+                code, cache = torch.compiler.precompile(
+                    fn, example_inputs=[(x, extra)], tracer="dynamo", backend="eager"
+                )
+                loaded = torch.compiler.precompile.load(code, cache)
+                self.assertEqual(loaded(x, extra), fn(x, extra))
+
+    def test_tracer_dynamo_accepts_unused_function_reference_in_input(self):
+        # An argument merely carrying a reference to a function the fn loads
+        # as a global is not an alias hazard: a USED reference gets an
+        # unserializable identity guard and fails loudly; an unused one never
+        # influences dispatch.
+        x = torch.randn(3)
+        box = _PrecompileDynamoActBox(_precompile_dynamo_act)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_calls_act,
+            example_inputs=[(x, box)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(loaded(x, box), _precompile_dynamo_calls_act(x, box))
+
+    def test_load_warns_on_empty_in_memory_cache(self):
+        x = torch.randn(3)
+        code, _ = torch.compiler.precompile(
+            _precompile_dynamo_torch_sin,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        with self.assertLogs("torch._precompile", level="WARNING") as logs:
+            loaded = torch.compiler.precompile.load(code, b"")
+        self.assertTrue(any("got an empty cache" in m for m in logs.output))
+        self.assertEqual(loaded(x), _precompile_dynamo_torch_sin(x))
+
+    def test_tracer_dynamo_fresh_stateful_recompile_limit_advice(self):
+        # A fresh call that hits the limit self-closes and never returns its
+        # state, so it must get the plain advice, not "close() this state".
+        with tempfile.TemporaryDirectory() as tmp:
+            x = torch.randn(4)
+            with self.assertRaisesRegex(
+                PrecompileError, r"pass a larger recompile_limit"
+            ):
+                torch.compiler.precompile.stateful(
+                    _precompile_dynamo_scalar,
+                    example_inputs=[(x, 2), (x, 3)],
+                    state=None,
+                    recompile_limit=1,
+                    backend="eager",
+                    artifact_path=os.path.join(tmp, "artifact.py"),
+                    cache_path=os.path.join(tmp, "artifact.cache"),
+                )
 
     def test_tracer_dynamo_capture_leaves_global_pgo_state_untouched(self):
         from torch._dynamo import pgo

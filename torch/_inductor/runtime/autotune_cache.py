@@ -788,11 +788,20 @@ def _load_cached_autotuning(
             # pyrefly: ignore [missing-attribute]
             matched_config.extra_options = extra_options
             return matched_config
-        if len(matching_configs) > 1:
+        if len(matching_configs) > 1 and any(
+            _json_config_value(val) != val
+            for cfg in matching_configs
+            # pyrefly: ignore [missing-attribute]
+            for val in cfg.kwargs.values()
+        ):
             # Enum unwrapping can make distinct candidates (e.g. MODE=Mode.A vs
             # MODE=1) serialize identically; reconstruction below would
             # arbitrarily bake the raw JSON value even when the winner was the
-            # Enum member. Re-autotune instead.
+            # Enum member. Re-autotune, but only when unwrapping actually
+            # changed some matching kwarg (plain Enums; IntEnum/str-mixin
+            # members ==-match their unwrapped values, so they are safe).
+            # Value-identical multi-matches (duplicate configs, subset kwargs)
+            # fall through to reconstruction below, as before the Enum guard.
             return None
         if not all(_config_json_cacheable(cfg) for cfg in configs):
             # A no-match here may be a JSON round-trip artifact (see

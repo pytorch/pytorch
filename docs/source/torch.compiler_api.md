@@ -227,7 +227,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    delivery differs. A call whose guards all hit adds nothing; guard
    minimization is re-run over every example seen so far on each rewrite, so
    the state keeps a pre-execution snapshot of every example tuple alive
-   (tensors by reference; a step may freely mutate its container inputs).
+   (tensors by reference; a step may freely mutate its container inputs --
+   except an exotic input ``deepcopy`` cannot copy, which is recorded live).
    Rewriting is proportional to everything captured so far, not to the call.
 
    :param fn: The computation to capture; same requirements as
@@ -297,9 +298,11 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        ``backend`` tag or ``code_hash``), if a Dynamo artifact is loaded under a
        different Python minor version or torch version than produced it, or if a
        runtime call violates the precompile contract. A Dynamo artifact's mismatched
-       (or missing, on the path form) cache instead degrades to a cold cache with a
+       cache instead degrades to a cold cache with a
        warning: the python_code is fully self-contained, and stateful capture's
        two-rename rewrite can legitimately leave a mismatched pair after a crash. A
+       missing cache file on the path form degrades with a warning for BOTH tracers
+       (an absent cache is no cache, not a wrong pairing), and a
        cache whose ``format``/``version`` tag does not match (a foreign or
        different-build envelope) also degrades to JIT'ing from ``python_code``.
 

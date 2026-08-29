@@ -2157,13 +2157,32 @@ def _validate_dynamo_capture(
     # containers, __dict__, slot values): a tensor inside a custom object that
     # aliases the environment has the same dropped-guard hazard as a bare
     # aliased leaf. instance_values already skips primitive leaves.
+    # Interpreter-wide singletons ((), Ellipsis, NotImplemented) are exempt
+    # like the torch singletons above: Dynamo value-guards them, and their
+    # process-wide identity would otherwise read any helper default or class
+    # attribute holding one as an alias of the caller's input. Functions,
+    # classes, and modules an argument merely carries are exempt for the enum
+    # rationale: a USED one gets an unserializable identity guard and fails
+    # capture loudly; an unused reference never influences dispatch.
+    singleton_ids = {id(()), id(Ellipsis), id(NotImplemented)}
     input_ids = {
         id(value)
         for example in example_inputs
         for value in instance_values(example)
         if not isinstance(
-            value, (enum.Enum, torch.dtype, torch.layout, torch.memory_format)
+            value,
+            (
+                enum.Enum,
+                torch.dtype,
+                torch.layout,
+                torch.memory_format,
+                types.FunctionType,
+                types.MethodType,
+                types.ModuleType,
+                type,
+            ),
         )
+        and id(value) not in singleton_ids
     }
     # An input aliased through the environment (including a global's class or
     # module attributes) would have its identity guard classified as
@@ -2778,7 +2797,12 @@ def _precompile_dynamo_stateful(
         try:
             with (
                 _dynamo_capture_context(state.pgo_state, training, state.capture_limit),
-                _translate_dynamo_capture_errors(state.capture_limit, stateful=True),
+                # A FRESH call that hits the limit self-closes and never
+                # returns its state, so the close()-and-recapture advice only
+                # fits resumed calls.
+                _translate_dynamo_capture_errors(
+                    state.capture_limit, stateful=not fresh
+                ),
             ):
                 if state.compiled is None:
                     state.compiled, state.backend_fn = _make_dynamo_capture_optimizer(
@@ -3458,7 +3482,8 @@ class _PrecompileApi:
         guard minimization is re-run over every example seen so far on each
         rebuild, so the state keeps a pre-execution snapshot of every example
         tuple alive (tensors by reference; a step may freely mutate its
-        container inputs), and later calls see earlier variants because the
+        container inputs, except an exotic input ``deepcopy`` cannot copy,
+        which is recorded live), and later calls see earlier variants because the
         state carries one isolate-recompiles bucket and one PGO record across
         calls (a dimension that varies between calls recompiles into a
         symbolic graph exactly as it would within one call).
@@ -3543,11 +3568,13 @@ class _PrecompileApi:
         calling-convention metadata), or -- for ``make_fx`` artifacts -- if the
         cache's ``backend`` tag or ``code_hash`` does not match ``python_code``,
         i.e. the cache and python_code came from different ``precompile()`` calls.
-        For ``dynamo`` artifacts a ``backend``/``code_hash`` mismatch -- or a
-        missing cache file on the path form -- instead degrades to a cold cache
-        with a warning: the python_code is fully self-contained, and stateful
-        capture's two-rename rewrite can legitimately leave a mismatched pair (or,
-        on its first rewrite, an artifact without its cache) after a crash.
+        For ``dynamo`` artifacts a ``backend``/``code_hash`` mismatch instead
+        degrades to a cold cache with a warning: the python_code is fully
+        self-contained, and stateful capture's two-rename rewrite can
+        legitimately leave a mismatched pair after a crash. A MISSING cache
+        file on the path form (the first-rewrite crash window) degrades with a
+        warning for BOTH tracers -- it is checked before the artifact's tracer
+        is known, and an absent cache is no cache, not a wrong pairing.
         A cache whose ``format``/``version`` does not match (a
         foreign or different-build envelope) is NOT fatal: the cache is acceleration
         only, so ``load`` degrades to JIT'ing from ``python_code`` rather than crashing.
@@ -3578,6 +3605,14 @@ class _PrecompileApi:
                     cache_path,
                 )
                 cache = b""
+        elif not cache and cache is not None:
+            # The in-memory form must not degrade silently: an empty cache is
+            # a truncated or misread file, and the pre-envelope-check code
+            # warned here too (torch.load raised into the fallback warning).
+            log.warning(
+                "torch.compiler.precompile.load got an empty cache; falling "
+                "back to JIT from python_code."
+            )
         if python_code is None or cache is None:
             raise TypeError(
                 "precompile.load requires python_code and cache (or artifact_path "
@@ -3715,7 +3750,7 @@ precompile.__name__ = "precompile"  # type: ignore[attr-defined]
 precompile.__qualname__ = "precompile"  # type: ignore[attr-defined]
 precompile.__doc__ = _PrecompileApi.__call__.__doc__
 
-# Both are public under torch.compiler.precompile, so report their module/qualname there
+# These are public under torch.compiler.precompile, so report their module/qualname there
 # (mirroring the singleton fixup above) -- otherwise Sphinx autoexception/autofunction
 # would anchor them under this private module. load is a bound method; patch the
 # underlying function so introspection on precompile.load reports torch.compiler too.

@@ -387,7 +387,17 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
                 any(g.guard_type == t or t in g.derived_guard_types for t in wanted)
                 for g in guards
             ]
-            self.assertTrue(any(ret))
+            # Each requested type must match at least one guard: a test that
+            # names two types relies on both being emitted (e.g. the grad
+            # ordering tests need the dict's TYPE_MATCH to put it in the
+            # serialized scope), and any(ret) alone would let one silently
+            # disappear.
+            for t in wanted:
+                matched = any(
+                    g.guard_type == t or t in g.derived_guard_types for g in guards
+                )
+                if not matched:
+                    raise AssertionError(f"no guard matched requested type {t!r}")
             return ret
 
         ref_gm = None

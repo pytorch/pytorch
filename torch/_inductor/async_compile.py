@@ -570,7 +570,15 @@ class AsyncCompile:
                 extra_config,
             )
 
+            # LambdaFuture.result() does not memoize, and task.result()
+            # re-raises the same SubprocException on every call; cache the
+            # fallback kernel so re-entry neither recompiles nor re-warns.
+            fallback_kernel: CachingAutotuner | None = None
+
             def get_result() -> CachingAutotuner:
+                nonlocal fallback_kernel
+                if fallback_kernel is not None:
+                    return fallback_kernel
                 try:
                     kernel, elapsed_us = task.result()
                 except SubprocException as e:
@@ -591,9 +599,10 @@ class AsyncCompile:
                         kernel_name,
                     )
                     CompiledTritonKernels.remove_future(source_code)
-                    return self._compile_triton_in_process(
+                    fallback_kernel = self._compile_triton_in_process(
                         kernel_name, source_code, load_kernel, compile_id, is_backward
                     )
+                    return fallback_kernel
 
                 # Now that we've compiled, we should clear the future
                 # so it can't be used again

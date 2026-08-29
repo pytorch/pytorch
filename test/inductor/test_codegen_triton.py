@@ -1757,6 +1757,35 @@ def helper(x):
         best = json.loads(json.dumps(data))
         self.assertIsNone(_load_cached_autotuning(best, "h", [cfg_enum, cfg_raw], {}))
 
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_autotune_cache_multi_match_without_enums_reconstructs(self):
+        # Multiple value-identical matches carry no Enum-vs-raw ambiguity
+        # (duplicate identical configs, or a config whose kwargs are a subset
+        # of the saved best); warm load must fall through to reconstruction
+        # rather than silently re-autotuning on every run.
+        import json
+
+        import triton
+
+        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+
+        dup = [triton.Config({"BLOCK": 64}, num_warps=4, num_stages=2) for _ in "ab"]
+        data = {"BLOCK": 64, "num_warps": 4, "num_stages": 2, "configs_hash": "h"}
+        loaded = _load_cached_autotuning(json.loads(json.dumps(data)), "h", dup, {})
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded.kwargs, {"BLOCK": 64})
+        self.assertEqual(loaded.num_warps, 4)
+        self.assertEqual(loaded.num_stages, 2)
+
+        subset = [
+            triton.Config({"BLOCK": 64}, num_warps=4, num_stages=2),
+            triton.Config({"BLOCK": 64, "SPLIT": 2}, num_warps=4, num_stages=2),
+        ]
+        data["SPLIT"] = 2
+        loaded = _load_cached_autotuning(json.loads(json.dumps(data)), "h", subset, {})
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded.kwargs, {"BLOCK": 64, "SPLIT": 2})
+
     @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
     def test_plain_enum_constexpr_in_user_defined_triton_kernel(self):
         import triton
@@ -1784,6 +1813,34 @@ def helper(x):
         actual, code = run_and_get_code(torch.compile(fn), x)
         self.assertEqual(actual, fn(x))
         self.assertIn("PlistFormat['FMT_XML']", code[0])
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_torch_size_constexpr_in_user_defined_triton_kernel(self):
+        # torch.Size is a tuple subclass with no semantics of its own, so it
+        # must render as a plain tuple rather than hit the generic
+        # tuple-subclass decline ("cannot be written into the generated
+        # kernel"), which would regress from eager.
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def size_kernel(
+            in_ptr, out_ptr, numel, SHAPE: tl.constexpr, BLOCK_SIZE: tl.constexpr
+        ):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            mask = offsets < numel
+            x = tl.load(in_ptr + offsets, mask=mask)
+            tl.store(out_ptr + offsets, x + SHAPE[0], mask=mask)
+
+        def fn(x):
+            output = torch.empty_like(x)
+            size_kernel[(1,)](x, output, x.numel(), x.shape, BLOCK_SIZE=256)
+            return output
+
+        x = torch.randn(128, device=GPU_TYPE)
+        actual, code = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(actual, fn(x))
+        self.assertIn("(128,)", code[0])
 
     @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
     def test_escape_bearing_constexpr_in_user_defined_triton_kernel(self):
@@ -1941,6 +1998,47 @@ def helper(x):
                     sys.path.remove(tmpdir)
                 sys.modules.pop(module_name, None)
                 shutdown_compile_workers()
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_constexpr_fallback_result_is_memoized(self):
+        # LambdaFuture.result() re-runs its result_fn on every call and the
+        # worker task re-raises the same SubprocException, so without
+        # memoization every re-entry of the fallback path would warn again and
+        # recompile the kernel in-process again.
+        import os
+        from unittest.mock import Mock
+
+        from torch._inductor.async_compile import AsyncCompile
+        from torch._inductor.compile_worker.subproc_pool import SubprocException
+
+        module_name = f"inductor_fallback_probe_{os.getpid()}"
+        source_code = f"import {module_name} as __inductor_constexpr_module_0\n"
+        task = Mock()
+        task.result.side_effect = SubprocException(
+            f"ModuleNotFoundError: No module named '{module_name}'"
+        )
+        pool = Mock()
+        pool.submit.return_value = task
+        sentinel_kernel = object()
+        with (
+            patch.object(AsyncCompile, "use_process_pool", return_value=True),
+            patch.object(AsyncCompile, "process_pool", return_value=pool),
+            patch.object(
+                AsyncCompile, "_compile_triton_in_process", return_value=sentinel_kernel
+            ) as compile_in_process,
+        ):
+            future = AsyncCompile().triton("probe_kernel", source_code)
+            logger_name = "torch._inductor.async_compile"
+            with self.assertLogs(logger_name, level="WARNING") as logs:
+                self.assertIs(future.result(), sentinel_kernel)
+            fallback_warnings = [
+                msg for msg in logs.output if "in-process compilation" in msg
+            ]
+            self.assertEqual(len(fallback_warnings), 1)
+            with self.assertNoLogs(logger_name, level="WARNING"):
+                self.assertIs(future.result(), sentinel_kernel)
+            self.assertEqual(compile_in_process.call_count, 1)
+        self.assertEqual(task.result.call_count, 1)
 
     @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
     def test_unspellable_enum_constexpr_errors_clearly(self):
