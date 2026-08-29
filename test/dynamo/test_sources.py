@@ -95,6 +95,12 @@ class GuardProvenanceTests(torch._dynamo.test_case.TestCase):
         walk(Source)
         self.assertGreater(len(roots), 10)  # sanity: the walk found the roots
         for cls in roots:
+            if not cls.__module__.startswith("torch"):
+                # Test fixtures (e.g. the fail-closed test below) linger in
+                # __subclasses__ until cyclic GC runs, so a same-process test
+                # ordering must not flip this walk's verdict; only torch's own
+                # sources are enforced.
+                continue
             self.assertIsInstance(
                 cls._provenance,
                 GuardProvenance,
@@ -105,6 +111,7 @@ class GuardProvenanceTests(torch._dynamo.test_case.TestCase):
     def test_provenance_classifies_by_root(self):
         from torch._dynamo.source import (
             GlobalStateSource,
+            GlobalWeakRefSource,
             NumpyTensorSource,
             ShapeEnvSource,
             TupleIteratorGetItemSource,
@@ -127,6 +134,11 @@ class GuardProvenanceTests(torch._dynamo.test_case.TestCase):
         )
         self.assertEqual(GlobalStateSource().provenance, GuardProvenance.AMBIENT)
         self.assertEqual(ShapeEnvSource().provenance, GuardProvenance.AMBIENT)
+        # Dynamo-installed weakref proxies stand in for traced-value identity;
+        # an environment-drop policy must never see them as droppable GLOBAL.
+        self.assertEqual(
+            GlobalWeakRefSource("__optimizer_1").provenance, GuardProvenance.INPUT
+        )
 
     def test_unclassified_root_fails_closed(self):
         from torch._guards import Source
@@ -162,6 +174,34 @@ class GuardProvenanceTests(torch._dynamo.test_case.TestCase):
         ambient = [e for e in seen if e.guard_type == "GRAD_MODE"]
         self.assertTrue(ambient)
         self.assertEqual(ambient[0].provenance, GuardProvenance.AMBIENT)
+
+    def test_optimizer_weakref_guards_classify_as_input(self):
+        # Compiling an optimizer step installs weakref proxies for the
+        # optimizer object and its params (G['__optimizer_...']) and guards
+        # their liveness with WEAKREF_ALIVE; those guards distinguish
+        # optimizer instances, so they must classify INPUT, not as droppable
+        # environment guards.
+        from torch._guards import GuardProvenance
+
+        seen = []
+
+        def filter_fn(entries):
+            seen.extend(entries)
+            return [True] * len(entries)
+
+        p = torch.nn.Parameter(torch.randn(4))
+        opt = torch.optim.Adam([p])
+        p.grad = torch.randn(4)
+
+        @torch.compile(backend="eager", options={"guard_filter_fn": filter_fn})
+        def step(o):
+            o.step()
+
+        step(opt)
+        weakref_entries = [e for e in seen if e.guard_type == "WEAKREF_ALIVE"]
+        self.assertTrue(weakref_entries)
+        for entry in weakref_entries:
+            self.assertEqual(entry.provenance, GuardProvenance.INPUT)
 
 
 if __name__ == "__main__":
