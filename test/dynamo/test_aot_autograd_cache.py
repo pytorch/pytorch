@@ -33,6 +33,7 @@ from torch._functorch._aot_autograd.autograd_cache import (
     autograd_cache_key,
     BypassAOTAutogradCache,
     check_cacheable,
+    check_node_safe,
     sanitize_gm_for_cache,
 )
 from torch._functorch._aot_autograd.schemas import AOTConfig, CacheableAOTConfig
@@ -61,7 +62,6 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     parametrize,
     skipIfWindows,
-    skipIfXpu,
     subtest,
     TEST_CUDA,
     TEST_WITH_ASAN,
@@ -3854,6 +3854,43 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         ):
             check_cacheable(gm)
 
+    def test_call_method_bypass_names_the_method_and_the_receiver(self):
+        graph = torch.fx.Graph()
+        xs = graph.placeholder("xs")
+        value = graph.call_function(torch.sym_int, (xs,))
+        graph.output(graph.call_method("size", (value,)))
+        gm = torch.fx.GraphModule({}, graph)
+
+        with self.assertRaises(BypassAOTAutogradCache) as ctx:
+            check_cacheable(gm)
+        message = str(ctx.exception)
+        self.assertIn("'size'", message)
+        self.assertIn("target=torch.sym_int", message)
+        self.assertIn("example_value", message)
+
+    def test_call_method_bypass_formats_bound_builtin_receiver(self):
+        graph = torch.fx.Graph()
+        xs = graph.placeholder("xs")
+        receiver = graph.call_function([].append, (xs,))
+        method = graph.call_method("size", (receiver,))
+
+        with self.assertRaises(BypassAOTAutogradCache) as ctx:
+            check_node_safe(method)
+        self.assertIn("%append : call_function", str(ctx.exception))
+
+    def test_call_method_bypass_names_unsupported_method(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        x.meta["example_value"] = torch.empty(0)
+        method = graph.call_method("size", (x,))
+        method.target = operator.getitem
+
+        with self.assertRaisesRegex(
+            BypassAOTAutogradCache,
+            r"Unsupported call_method method <built-in function getitem>$",
+        ):
+            check_node_safe(method)
+
     def test_numpy_wrapper_cache_key_does_not_cache_unknown_callable_ids(self):
         torch._dynamo.utils._torch_numpy_callable_cache_key_by_id.cache_clear()
 
@@ -3870,45 +3907,6 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             cache_info.currsize,
             0,
         )
-
-    def test_with_effects_linalg_check_errors_cacheable(self):
-        graph = torch.fx.Graph()
-        token = graph.placeholder("token")
-        info = graph.placeholder("info")
-        out = graph.call_function(
-            torch.ops.higher_order.with_effects,
-            (
-                token,
-                torch.ops.aten._linalg_check_errors.default,
-                info,
-                "cholesky",
-            ),
-            {"is_matrix": False},
-        )
-        graph.output(out)
-        gm = torch.fx.GraphModule({}, graph)
-
-        check_cacheable(gm)
-
-    def test_with_effects_other_effectful_op_bypassed(self):
-        graph = torch.fx.Graph()
-        token = graph.placeholder("token")
-        msg = graph.placeholder("msg")
-        out = graph.call_function(
-            torch.ops.higher_order.with_effects,
-            (
-                token,
-                torch.ops.aten._print.default,
-                msg,
-            ),
-        )
-        graph.output(out)
-        gm = torch.fx.GraphModule({}, graph)
-
-        with self.assertRaisesRegex(
-            BypassAOTAutogradCache, "Unsupported call_function target"
-        ):
-            check_cacheable(gm)
 
     def test_numpy_wrapper_accepts_torch_numpy_alias_target(self):
         import torch._numpy as tnp
@@ -4135,7 +4133,6 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         ):
             AOTAutogradCache._pickle_entry(entry, remote=False)
 
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/4091")
     @requires_gpu_and_triton
     def test_prepare_for_pickle_clears_benchmark_failure_reasons(self):
         """prepare_for_pickle clears benchmark_failure_reasons which can hold
@@ -4184,7 +4181,9 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         xnumel = 256
         inp = torch.randn(xnumel, device=GPU_TYPE)
         out = torch.empty_like(inp)
-        autotuner.run(inp, out, xnumel, stream=torch.cuda.current_stream().cuda_stream)
+        autotuner.run(
+            inp, out, xnumel, stream=torch.accelerator.current_stream().native_handle
+        )
         self.assertEqual(out, inp + 1.0)
 
         # Inject a launcher key into benchmark_failure_reasons — this is how
@@ -4375,6 +4374,46 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(data_a, data_b)
         # Different value -> different hash
         self.assertNotEqual(data_a, data_c)
+
+    def test_with_effects_linalg_check_errors_cacheable(self):
+        graph = torch.fx.Graph()
+        token = graph.placeholder("token")
+        info = graph.placeholder("info")
+        out = graph.call_function(
+            torch.ops.higher_order.with_effects,
+            (
+                token,
+                torch.ops.aten._linalg_check_errors.default,
+                info,
+                "cholesky",
+            ),
+            {"is_matrix": False},
+        )
+        graph.output(out)
+        gm = torch.fx.GraphModule({}, graph)
+
+        check_cacheable(gm)
+
+    def test_with_effects_other_effectful_op_bypassed(self):
+        graph = torch.fx.Graph()
+        token = graph.placeholder("token")
+        msg = graph.placeholder("msg")
+        out = graph.call_function(
+            torch.ops.higher_order.with_effects,
+            (
+                token,
+                torch.ops.aten._print.default,
+                msg,
+            ),
+        )
+        graph.output(out)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with self.assertRaisesRegex(
+            BypassAOTAutogradCache, "Unsupported call_function target"
+        ):
+            check_cacheable(gm)
+
 
 
 def _subprocess_gen_dtensor_cache_key(queue):
