@@ -71,6 +71,16 @@ class PrecompileSummary:
     # the remedy differ -- but reported, because a capture that silently
     # discards a precondition should not look like one that had none.
     policy_dropped_guards: tuple[tuple[str, str], ...] = ()
+    # (guard_type, source, rendered check) for every slot that was dropped, by
+    # whichever route. A slot is identified by its type and its SOURCE, which
+    # for some types is not enough to judge the drop: a dropped
+    # ``('HASATTR', "counts['pixel']")`` may be the benign companion of a kept
+    # TENSOR_MATCH on the same source, or the only thing standing between the
+    # artifact and an optional attribute going missing, and those want very
+    # different reactions. The rendered check names the attribute and so tells
+    # them apart. Reported alongside the three lists rather than folded into
+    # them, so the slot tuples stay the identity the policy compares on.
+    dropped_guard_code: tuple[tuple[str, str, str], ...] = ()
     capture_errors: tuple[str, ...] = ()
 
     @property

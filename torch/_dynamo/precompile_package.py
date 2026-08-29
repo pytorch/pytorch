@@ -1452,6 +1452,7 @@ def _summarize(
     uncovered: frozenset[str],
     capture_errors: Sequence[str],
     guard_sets: Mapping[tuple[str, str, int], Sequence[frozenset[_GuardFact]]],
+    dropped_code: Mapping[tuple[str, str], str],
 ) -> PrecompileSummary:
     wont_generalize = _wont_generalize(kept, guard_sets)
     return PrecompileSummary(
@@ -1464,6 +1465,11 @@ def _summarize(
         uncovered_frames=tuple(sorted(uncovered)),
         wont_generalize=wont_generalize,
         dropped_guards=tuple(sorted(dropped)),
+        dropped_guard_code=tuple(
+            (gtype, name, dropped_code[(gtype, name)])
+            for gtype, name in sorted(dropped | policy_dropped | risky)
+            if (gtype, name) in dropped_code
+        ),
         kept_guards=tuple(sorted(kept)),
         risky_dropped_guards=tuple(sorted(risky)),
         policy_dropped_guards=tuple(sorted(policy_dropped)),
@@ -1553,6 +1559,10 @@ class PrecompileSession:
         self._keep_graphs = False
         self._backend_obj: _PrecompileBackend | None = None
         self._policy_dropped_guards: set[tuple[str, str]] = set()
+        # slot -> the check it rendered as, for every slot dropped by any
+        # route. See PrecompileSummary.dropped_guard_code for why the slot
+        # tuple alone cannot be audited.
+        self._dropped_guard_code: dict[tuple[str, str], str] = {}
         self._dropped_guards: set[tuple[str, str]] = set()
         self._kept_guards: set[tuple[str, str]] = set()
         self._risky_dropped_guards: set[tuple[str, str]] = set()
@@ -2075,6 +2085,14 @@ class PrecompileSession:
                 or (guard_type, _normalize(name)) in keep_only
             )
 
+        # The facts, unlike the serialized guards above, are still filtered by
+        # observed variance alone -- a GuardFact carries no source object, so it
+        # cannot be root-classified the way _environment_rooted does it. Not a
+        # correctness gap on either path: keep_only is computed before this
+        # loop, so the pruning cannot feed itself, and this whole method never
+        # runs on the accumulating path, where close() retires the session
+        # without going through __exit__. It costs reporting fidelity in
+        # invariants(), nothing more.
         for key, variants in self._guard_sets.items():
             self._guard_sets[key] = [
                 frozenset(
@@ -2169,7 +2187,9 @@ class PrecompileSession:
                     tuple(getattr(entry, "derived_guard_types", ()) or ()),
                 )
                 if not keep:
-                    dropped.add((entry.guard_type, entry.name))
+                    slot = (entry.guard_type, entry.name)
+                    dropped.add(slot)
+                    self._record_dropped_code(slot, entry)
                 decisions.append(keep)
             return decisions
 
@@ -2213,6 +2233,21 @@ class PrecompileSession:
 
         return dropped
 
+    def _record_dropped_code(
+        self, slot: tuple[str, str], entry: GuardFilterEntry
+    ) -> None:
+        """Remember what a dropped slot actually checked.
+
+        First writer wins: the same slot is dropped once per variant and per
+        re-serialization, and the renderings agree up to the ids _normalize
+        already masks.
+        """
+        if slot in self._dropped_guard_code:
+            return
+        rendered = " ; ".join(_render_code(entry.code))
+        if rendered:
+            self._dropped_guard_code[slot] = rendered
+
     def _recording_filter(
         self,
         inner: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]],
@@ -2236,6 +2271,8 @@ class PrecompileSession:
             undetermined: set[_GuardFact] = set()
             for keep, entry in zip(decisions, entries):
                 slot = (entry.guard_type, entry.name)
+                if not keep:
+                    self._record_dropped_code(slot, entry)
                 target = self._kept_guards if keep else self._dropped_guards
                 target.add(slot)
                 if not keep and (
@@ -2435,6 +2472,7 @@ class PrecompileSession:
             self._package.uncovered_frames,
             self._capture_errors,
             self._guard_sets,
+            self._dropped_guard_code,
         )
 
     def _gated_summary(
