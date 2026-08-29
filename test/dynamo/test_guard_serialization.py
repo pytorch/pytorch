@@ -896,6 +896,30 @@ class TestGuardSerialization(TestGuardSerializationBase):
         )
         self._test_check_fn(ref, loaded, {"x": None}, False)
 
+
+    def test_tensor_match_through_a_python_attribute(self):
+        # A tensor is reconstructed from its metadata, which does not include a
+        # plain Python attribute someone assigned onto it -- so a guard whose
+        # SOURCE traverses one could not be rebuilt at all, and the whole state
+        # failed to load with AttributeError.
+        def f(x: torch.Tensor):
+            return x + x.companion
+
+        x = torch.ones(2)
+        x.companion = torch.ones(2)
+        ref, loaded = self._test_serialization("TENSOR_MATCH", f, x)
+
+        def with_companion(companion):
+            t = torch.randn(2)
+            t.companion = companion
+            return {"x": t}
+
+        self._test_check_fn(ref, loaded, with_companion(torch.randn(2)), True)
+        self._test_check_fn(ref, loaded, with_companion(torch.randn(3)), False)
+        self._test_check_fn(
+            ref, loaded, with_companion(torch.randn(2, dtype=torch.float64)), False
+        )
+
     def test_not_present_in_generic_dict(self):
         class Module(torch.nn.Module):
             def forward(self, x: torch.Tensor):

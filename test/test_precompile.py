@@ -328,6 +328,33 @@ class _PrecompileTrainMod(torch.nn.Module):
         return torch.relu(self.b(torch.relu(self.a(x))))
 
 
+# A tensor carrying side metadata as a plain Python attribute -- APS hangs a CPU
+# twin on a GPU tensor this way, and torch itself hangs _dynamo_dynamic_indices.
+# Reconstruction rebuilds a tensor from its metadata alone, so a guard whose
+# source traverses the attribute has to carry it or it cannot be rebuilt.
+class _PrecompileReadsAttr(torch.nn.Module):
+    def forward(self, x):
+        companion = getattr(x, "_cpu_copy", None)
+        if companion is not None:
+            return x * 2 + companion.to(x.device)
+        return x * 2
+
+
+def _precompile_attr_helper(model, x):
+    # x itself must cross the break: rebinding it to an intermediate would drop
+    # the attribute and the guard under test would never be built.
+    torch._dynamo.graph_break()
+    return model(x).sum()
+
+
+def _precompile_attr_entry(model, x):
+    return _precompile_attr_helper(model, x)
+
+
+def _precompile_reads_flag(x):
+    return x * getattr(x, "my_flag", 1)
+
+
 class _PrecompileUnpicklableHolder:
     def __init__(self, bad):
         self.bad = bad
@@ -2736,10 +2763,113 @@ class TestPrecompile(TestCase):
                 example_inputs=[args],
             )
 
+    @parametrize("broken", [False, True])
+    def test_guard_through_a_tensor_attribute_round_trips(self, broken):
+        # The whole point: a guard rooted at x._cpu_copy. Both serving modes,
+        # because the standalone one raised at load() while the installed one
+        # deferred the same AttributeError into the first served call.
+        model = _PrecompileReadsAttr()
+        x = torch.randn(8)
+        x._cpu_copy = torch.randn(8)
+        entry = _precompile_attr_entry if broken else _precompile_call_model
+        args = (model, x)
+        with torch.no_grad():
+            expected = entry(*args)
+            code, cache = torch.compiler.precompile(
+                entry,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+                example_inputs=[args],
+            )
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertEqual(loaded(*args), expected)
 
+    def test_tensor_attribute_is_carried_by_value_not_baked(self):
+        # The attribute is carried so the guard can be REBUILT, not so its value
+        # can be reused: rebinding it between capture and serve must change the
+        # answer, and a large one must not land in the artifact.
+        model = _PrecompileReadsAttr()
+        x = torch.randn(8)
+        x._cpu_copy = torch.zeros(2048, 8)[0]
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _precompile_call_model,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+                example_inputs=[(model, x)],
+            )
+        self.assertLess(len(code), 200_000)
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            for _ in range(2):
+                x._cpu_copy = torch.randn(8)
+                self.assertEqual(loaded(model, x), model(x))
 
+    def test_self_referential_tensor_attribute_round_trips(self):
+        # Carried in the reduce STATE slot rather than as a constructor
+        # argument, so pickle memoizes the tensor before it saves the state and
+        # an attribute pointing back at its own tensor terminates.
+        x = torch.randn(4)
+        x.my_flag = x
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _precompile_reads_flag,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+                example_inputs=[(x,)],
+            )
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertEqual(loaded(x), _precompile_reads_flag(x))
 
+    def test_mark_unbacked_artifact_serves_the_tensor_it_captured(self):
+        # The dimension-marking guard reads its attributes off the example value
+        # rather than through a source, so reconstruction has to restore them
+        # too -- and it has to restore ALL of them: the two dependent ones are
+        # gated on _dynamo_unbacked_indices, so carrying the gate without them
+        # activates a guard whose expected value is None and the artifact stops
+        # serving the very tensor it was captured on.
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(8, 4)
+        mark_unbacked(x, 0, min=4, max=16)
+        code, cache = torch.compiler.precompile(
+            _precompile_call_model,
+            example_inputs=[(m, x)],
+            training=True,
+            tracer="dynamo",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(loaded(m, x), m(x))
+        marked = torch.randn(12, 4)
+        mark_unbacked(marked, 0, min=4, max=16)
+        self.assertEqual(loaded(m, marked), m(marked))
 
+    def test_attribute_shadowing_fake_tensor_state_is_refused(self):
+        # A reconstructed tensor IS a FakeTensor, so an attribute of the same
+        # name as one a FakeTensor keeps its own state in cannot be carried.
+        # Refuse by name rather than fail somewhere inside the rebuild.
+        for name, fn in _precompile_reads_shadowed.items():
+            x = torch.randn(4)
+            x.__dict__[name] = 3
+            with self.assertRaisesRegex(PrecompileError, f"a guard reads '{name}'"):
+                torch.compiler.precompile(
+                    fn,
+                    backend="eager",
+                    dynamic=False,
+                    tracer="dynamo",
+                    require_no_risky_drops=False,
+                    example_inputs=[(x,)],
+                )
 
     def test_serialized_guards_drop_export_bookkeeping(self):
         # Guard.code_list and .guard_types are rebuilt by create_fn at load, and
