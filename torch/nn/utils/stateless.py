@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
+from collections.abc import Iterator
 from typing import Any
 from typing_extensions import deprecated
 
@@ -164,7 +165,7 @@ def _reparametrize_module(
 )
 def functional_call(
     module: "torch.nn.Module",
-    parameters_and_buffers: dict[str, Tensor],
+    parameters_and_buffers: dict[str, Tensor] | Iterator[tuple[str, Tensor]],
     args: Any | tuple | None = None,
     kwargs: dict[str, Any] | None = None,
     *,
@@ -215,8 +216,8 @@ def functional_call(
 
     Args:
         module (torch.nn.Module): the module to call
-        parameters_and_buffers (dict of str and Tensor): the parameters that will be used in
-            the module call.
+        parameters_and_buffers (dict of str and Tensor or iterator of (str, Tensor)): the parameters that will be used
+            in the module call. An iterator can be used directly with APIs such as ``module.named_parameters()``.
         args (Any or tuple): arguments to be passed to the module call. If not a tuple, considered a single argument.
         kwargs (dict): keyword arguments to be passed to the module call
         tie_weights (bool, optional): If True, then parameters and buffers tied in the original model will be treated as
@@ -242,7 +243,7 @@ def functional_call(
 
 def _functional_call(
     module: "torch.nn.Module",
-    parameters_and_buffers: dict[str, Tensor],
+    parameters_and_buffers: dict[str, Tensor] | Iterator[tuple[str, Tensor]],
     args: Any | tuple | None = None,
     kwargs: dict[str, Any] | None = None,
     *,
@@ -250,6 +251,8 @@ def _functional_call(
     strict: bool = False,
 ):
     # TODO allow kwargs such as unsafe and others for parametrization
+    if isinstance(parameters_and_buffers, Iterator):
+        parameters_and_buffers = dict(parameters_and_buffers)
     if (
         torch.jit.is_tracing()
         or torch.jit.is_scripting()
