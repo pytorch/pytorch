@@ -4,6 +4,7 @@
 #include <ATen/core/Tensor.h>
 #include <torch/library.h>
 #include <ATen/native/mkldnn/Linear.h>
+#include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -507,11 +508,7 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
           std::optional<c10::ScalarType> out_dtype,
           bool use_fast_accum,
           Tensor& out) {
-  TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix");
-  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
-  TORCH_CHECK(
-      mat1.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
-      mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
+  check_mm_shapes(mat1, mat2, "_scaled_mm");
 
   TORCH_INTERNAL_ASSERT((scale_a.numel() == 1 && scale_b.numel() == 1), "Now _scaled_mm only supports per-tensor scaling for CPU backend.");
   TORCH_CHECK(
