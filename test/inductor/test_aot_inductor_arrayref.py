@@ -208,6 +208,12 @@ CPU_TEST_FAILURES = {
     "test_duplicate_constant_folding": fail_stack_allocation(is_skip=True),
     "test_aot_inductor_consts_cpp_build": fail_stack_allocation(is_skip=True),
     "test_stride_with_unbacked_expr": fail_minimal_arrayref_interface(is_skip=True),
+    # TODO: error: no member named 'get' in 'ArrayRefTensor<T>' -- a TensorList
+    # fallback renders its elements as `<elem>.get()`, which graph inputs do not
+    # provide under the minimal arrayref interface.
+    "test_aoti_profiler_tensor_list_input_shapes": fail_minimal_arrayref_interface(
+        is_skip=True
+    ),
     # TODO: use of deleted function RAIIAtenTensorHandle
     "test_dup_unbacked_sym_decl": fail_minimal_arrayref_interface(is_skip=True),
     # TODO: use of deleted function RAIIAtenTensorHandle
@@ -303,6 +309,8 @@ CPU_TEST_FAILURES = {
     "test_cond_unbacked_symint_closure_dynamic_False": fail_stack_allocation(
         is_skip=True
     ),
+    # TODO: no match for operator= between RAIIAtenTensorHandle and ArrayRefTensor
+    "test_cond_unbacked_symint_predicate": fail_stack_allocation(),
     "test_empty_cat_dtype_promotion": fail_stack_allocation(is_skip=True),
     "test_pad_fallback": fail_stack_allocation(is_skip=True),
     "test_simple_embed_kernel_binary_False_max_autotune_True": fail_stack_allocation(
