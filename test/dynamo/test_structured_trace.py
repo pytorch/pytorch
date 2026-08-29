@@ -14,16 +14,15 @@ from contextlib import contextmanager
 from unittest import skipIf
 
 import torch
-import torch._dynamo.test_case
-import torch._dynamo.testing
 import torch._logging.structured
 import torch.distributed as dist
 import torch.fx as fx
 from torch._inductor.test_case import TestCase
 from torch._logging._internal import TorchLogsFormatter
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.testing._internal.common_utils import find_free_port
-from torch.testing._internal.inductor_utils import HAS_XPU_AND_TRITON
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import find_free_port, HardwareClassification
+from torch.testing._internal.inductor_utils import HAS_TRITON, HAS_XPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
 
 
@@ -221,7 +220,9 @@ def show_chrome_events(fn):
     return wrapper
 
 
-class StructuredTraceTest(TestCase):
+class _StructuredTraceTestBase(TestCase):
+    # Common base class for structured trace tests with shared setup/teardown and assertions.
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
@@ -306,6 +307,26 @@ class StructuredTraceTest(TestCase):
             )
         finally:
             shutil.rmtree(out, ignore_errors=True)
+
+    @contextmanager
+    def _setup_runtime_estimates_capture(self):
+        """Helper to turn on and capture the combined 'inductor_runtime_and_tensor_meta' structured trace."""
+        payload_buffer = io.StringIO()
+        payload_handler = logging.StreamHandler(payload_buffer)
+        payload_handler.setLevel(logging.DEBUG)
+        payload_handler.setFormatter(StructuredTracePayloadFormatter())
+        payload_handler.addFilter(
+            StructuredTraceTestingFilter("inductor_runtime_and_tensor_meta")
+        )
+        trace_log.addHandler(payload_handler)
+        try:
+            yield payload_buffer
+        finally:
+            trace_log.removeHandler(payload_handler)
+
+
+class StructuredTraceTest(_StructuredTraceTestBase):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_compile_id_serialization_deserialization(self):
         cid = torch._guards.CompileId(
@@ -1311,186 +1332,6 @@ def forward(self, x_1: "f32[2][1]cpu"):
         finally:
             dist.destroy_process_group()
 
-    @contextmanager
-    def _setup_runtime_estimates_capture(self):
-        """Helper to turn on and capture the combined 'inductor_runtime_and_tensor_meta' structured trace."""
-        payload_buffer = io.StringIO()
-        payload_handler = logging.StreamHandler(payload_buffer)
-        payload_handler.setLevel(logging.DEBUG)
-        payload_handler.setFormatter(StructuredTracePayloadFormatter())
-        payload_handler.addFilter(
-            StructuredTraceTestingFilter("inductor_runtime_and_tensor_meta")
-        )
-        trace_log.addHandler(payload_handler)
-        try:
-            yield payload_buffer
-        finally:
-            trace_log.removeHandler(payload_handler)
-
-    @requires_tlparse
-    @requires_distributed()
-    @requires_gpu_and_triton
-    @torch._inductor.config.patch("fx_graph_cache", False)
-    @torch._inductor.config.patch("log_tlparse", True)
-    def test_runtime_estimates_simple(self):
-        """Test runtime estimates logging with simple compute and collective ops."""
-        import torch.distributed as dist
-
-        store = FakeStore()
-        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
-
-        class SimpleModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(4, 4)
-
-            def forward(self, x):
-                h = self.linear(x)
-                h = torch.relu(h)
-
-                h = torch.ops._c10d_functional.all_reduce.default(h, "sum", "0")
-                h = torch.ops._c10d_functional.wait_tensor.default(h)
-                return h
-
-        try:
-            with self._setup_runtime_estimates_capture() as payload_buffer:
-                torch._dynamo.reset()
-
-                mod = SimpleModule().to(device_type)
-                compiled = torch.compile(mod, backend="inductor")
-                compiled(torch.randn(4, 4, device=device_type))
-
-                # Verify runtime + tensor meta artifact was logged
-                self.assertIn(
-                    '"inductor_runtime_and_tensor_meta"', self.buffer.getvalue()
-                )
-
-                payload_content = payload_buffer.getvalue().strip()
-                if payload_content:
-                    data = json.loads(payload_content)
-                    self.assertIn("ops", data)
-                    ops = data["ops"]
-
-                    # Verify runtime estimates
-                    compute_ops = [op for op in ops if op["type"] == "compute"]
-                    collective_ops = [op for op in ops if op["type"] == "collective"]
-
-                    self.assertTrue(len(compute_ops) > 0 or len(collective_ops) > 0)
-
-                    # Just check each op has an estimated runtime value (any value, including 0)
-                    for op in ops:
-                        self.assertIn("estimated_runtime_ns", op)
-                        self.assertIsNotNone(op["estimated_runtime_ns"])
-
-                self.assertParses()
-        finally:
-            dist.destroy_process_group()
-
-    @requires_tlparse
-    @requires_distributed()
-    @requires_gpu_and_triton
-    @torch._inductor.config.patch("fx_graph_cache", False)
-    @torch._inductor.config.patch("log_tlparse", True)
-    def test_runtime_estimates_mixed(self):
-        """Test runtime estimates logging with mixed compute and collective sequence."""
-        import torch.distributed as dist
-
-        store = FakeStore()
-        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
-
-        class MixedModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.norm = torch.nn.LayerNorm(4)
-
-            def forward(self, x):
-                h = self.norm(x)
-                h = torch.nn.functional.gelu(h)
-
-                h = torch.ops._c10d_functional.all_reduce.default(h, "sum", "0")
-                h = torch.ops._c10d_functional.wait_tensor.default(h)
-
-                h = h * 0.5
-
-                gathered = torch.ops._c10d_functional.all_gather_into_tensor.default(
-                    h, 2, "0"
-                )
-                gathered = torch.ops._c10d_functional.wait_tensor.default(gathered)
-
-                return gathered.sum(dim=0)
-
-        try:
-            with self._setup_runtime_estimates_capture() as payload_buffer:
-                torch._dynamo.reset()
-
-                mod = MixedModule().to(device_type)
-                compiled = torch.compile(mod, backend="inductor")
-                compiled(torch.randn(4, 4, device=device_type))
-
-                # Verify artifact was logged
-                self.assertIn(
-                    '"inductor_runtime_and_tensor_meta"', self.buffer.getvalue()
-                )
-
-                payload_content = payload_buffer.getvalue().strip()
-                if payload_content:
-                    data = json.loads(payload_content)
-                    self.assertIn("ops", data)
-                    ops = data["ops"]
-
-                    # Should have both compute and collective ops
-                    op_types = {op["type"] for op in ops}
-                    self.assertIn("compute", op_types)
-                    self.assertIn("collective", op_types)
-
-                    # Just check each op has an estimated runtime value (any value, including 0)
-                    for op in ops:
-                        self.assertIn("estimated_runtime_ns", op)
-                        self.assertIsNotNone(op["estimated_runtime_ns"])
-
-                self.assertParses()
-        finally:
-            dist.destroy_process_group()
-
-    @requires_tlparse
-    @requires_distributed()
-    @requires_gpu_and_triton
-    @torch._inductor.config.patch("fx_graph_cache", False)
-    @torch._inductor.config.patch("log_tlparse", True)
-    def test_tensor_metadata_logging_multiple_ops(self):
-        import torch.distributed as dist
-
-        store = FakeStore()
-        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
-
-        class Mixed(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(4, 4)
-
-            def forward(self, x):
-                y = torch.relu(self.linear(x))
-                y = torch.ops._c10d_functional.all_reduce.default(y, "sum", "0")
-                y = torch.ops._c10d_functional.wait_tensor.default(y)
-                return y + 1
-
-        try:
-            with self._setup_runtime_estimates_capture() as payload_buffer:
-                torch._dynamo.reset()
-                mod = Mixed().to(device_type)
-                compiled = torch.compile(mod, backend="inductor")
-                compiled(torch.randn(4, 4, device=device_type))
-                payload = payload_buffer.getvalue().strip()
-                if payload:
-                    data = json.loads(payload)
-                    types = sorted({op.get("type") for op in data.get("ops", [])})
-                    self.assertExpectedInline(
-                        str(types), """['collective', 'compute']"""
-                    )
-                self.assertParses()
-        finally:
-            dist.destroy_process_group()
-
     @requires_tlparse
     @torch._inductor.config.patch("log_tlparse", True)
     def test_tensor_metadata_logging(self):
@@ -1632,6 +1473,182 @@ def forward(self, x_1: "f32[2][1]cpu"):
                 """{"graph_execution_order": [{"compile_id": "0/0"}, {"compile_id": "1/0"}]}""",
             )
             self.assertParses()
+
+
+class StructuredTraceTestDevice(_StructuredTraceTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @requires_tlparse
+    @requires_distributed()
+    @skipIf(not HAS_TRITON, "requires triton")
+    @torch._inductor.config.patch("fx_graph_cache", False)
+    @torch._inductor.config.patch("log_tlparse", True)
+    def test_runtime_estimates_simple(self, device):
+        """Test runtime estimates logging with simple compute and collective ops."""
+        import torch.distributed as dist
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        class SimpleModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                h = self.linear(x)
+                h = torch.relu(h)
+
+                h = torch.ops._c10d_functional.all_reduce.default(h, "sum", "0")
+                h = torch.ops._c10d_functional.wait_tensor.default(h)
+                return h
+
+        try:
+            with self._setup_runtime_estimates_capture() as payload_buffer:
+                torch._dynamo.reset()
+
+                mod = SimpleModule().to(device)
+                compiled = torch.compile(mod, backend="inductor")
+                compiled(torch.randn(4, 4, device=device))
+
+                # Verify runtime + tensor meta artifact was logged
+                self.assertIn(
+                    '"inductor_runtime_and_tensor_meta"', self.buffer.getvalue()
+                )
+
+                payload_content = payload_buffer.getvalue().strip()
+                if payload_content:
+                    data = json.loads(payload_content)
+                    self.assertIn("ops", data)
+                    ops = data["ops"]
+
+                    # Verify runtime estimates
+                    compute_ops = [op for op in ops if op["type"] == "compute"]
+                    collective_ops = [op for op in ops if op["type"] == "collective"]
+
+                    self.assertTrue(len(compute_ops) > 0 or len(collective_ops) > 0)
+
+                    # Just check each op has an estimated runtime value (any value, including 0)
+                    for op in ops:
+                        self.assertIn("estimated_runtime_ns", op)
+                        self.assertIsNotNone(op["estimated_runtime_ns"])
+
+                self.assertParses()
+        finally:
+            dist.destroy_process_group()
+
+    @requires_tlparse
+    @requires_distributed()
+    @skipIf(not HAS_TRITON, "requires triton")
+    @torch._inductor.config.patch("fx_graph_cache", False)
+    @torch._inductor.config.patch("log_tlparse", True)
+    def test_runtime_estimates_mixed(self, device):
+        """Test runtime estimates logging with mixed compute and collective sequence."""
+        import torch.distributed as dist
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        class MixedModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.norm = torch.nn.LayerNorm(4)
+
+            def forward(self, x):
+                h = self.norm(x)
+                h = torch.nn.functional.gelu(h)
+
+                h = torch.ops._c10d_functional.all_reduce.default(h, "sum", "0")
+                h = torch.ops._c10d_functional.wait_tensor.default(h)
+
+                h = h * 0.5
+
+                gathered = torch.ops._c10d_functional.all_gather_into_tensor.default(
+                    h, 2, "0"
+                )
+                gathered = torch.ops._c10d_functional.wait_tensor.default(gathered)
+
+                return gathered.sum(dim=0)
+
+        try:
+            with self._setup_runtime_estimates_capture() as payload_buffer:
+                torch._dynamo.reset()
+
+                mod = MixedModule().to(device)
+                compiled = torch.compile(mod, backend="inductor")
+                compiled(torch.randn(4, 4, device=device))
+
+                # Verify artifact was logged
+                self.assertIn(
+                    '"inductor_runtime_and_tensor_meta"', self.buffer.getvalue()
+                )
+
+                payload_content = payload_buffer.getvalue().strip()
+                if payload_content:
+                    data = json.loads(payload_content)
+                    self.assertIn("ops", data)
+                    ops = data["ops"]
+
+                    # Should have both compute and collective ops
+                    op_types = {op["type"] for op in ops}
+                    self.assertIn("compute", op_types)
+                    self.assertIn("collective", op_types)
+
+                    # Just check each op has an estimated runtime value (any value, including 0)
+                    for op in ops:
+                        self.assertIn("estimated_runtime_ns", op)
+                        self.assertIsNotNone(op["estimated_runtime_ns"])
+
+                self.assertParses()
+        finally:
+            dist.destroy_process_group()
+
+    @requires_tlparse
+    @requires_distributed()
+    @skipIf(not HAS_TRITON, "requires triton")
+    @torch._inductor.config.patch("fx_graph_cache", False)
+    @torch._inductor.config.patch("log_tlparse", True)
+    def test_tensor_metadata_logging_multiple_ops(self, device):
+        import torch.distributed as dist
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        class Mixed(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                y = torch.relu(self.linear(x))
+                y = torch.ops._c10d_functional.all_reduce.default(y, "sum", "0")
+                y = torch.ops._c10d_functional.wait_tensor.default(y)
+                return y + 1
+
+        try:
+            with self._setup_runtime_estimates_capture() as payload_buffer:
+                torch._dynamo.reset()
+                mod = Mixed().to(device)
+                compiled = torch.compile(mod, backend="inductor")
+                compiled(torch.randn(4, 4, device=device))
+                payload = payload_buffer.getvalue().strip()
+                if payload:
+                    data = json.loads(payload)
+                    types = sorted({op.get("type") for op in data.get("ops", [])})
+                    self.assertExpectedInline(
+                        str(types), """['collective', 'compute']"""
+                    )
+                self.assertParses()
+        finally:
+            dist.destroy_process_group()
+
+
+instantiate_device_type_tests(
+    StructuredTraceTestDevice,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
