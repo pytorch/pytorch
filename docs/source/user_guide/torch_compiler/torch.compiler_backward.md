@@ -21,26 +21,6 @@ in a context manager that may change its behavior.
 This page documents how ``torch.compile``'s autograd semantics differ from
 eager-mode PyTorch and how to work around it.
 
-Unused output gradients
------------------------
-
-``torch.compile`` now matches eager autograd when a differentiable output of a
-compiled region is not used by the loss. Independent inputs that only affect
-that output receive ``.grad = None`` instead of a zero tensor, and
-``torch.autograd.grad(..., allow_unused=False)`` can therefore raise the same
-error as it does in eager mode. This is a backward-compatibility change from
-older AOTAutograd behavior, which materialized every missing output gradient
-as zeros and ran the corresponding backward computation.
-
-To temporarily restore the previous behavior, disable pruning before running
-the compiled forward:
-
-```py
-with torch._functorch.config.patch(aot_autograd_prune_unused_outputs=False):
-    output = compiled_fn(*inputs)
-    loss_fn(output).backward()
-```
-
 ``Autocast`` behavior
 ---------------------
 
