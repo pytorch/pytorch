@@ -355,6 +355,12 @@ def _precompile_reads_flag(x):
     return x * getattr(x, "my_flag", 1)
 
 
+def _read_risky(code):
+    from torch._precompile import _read_literal
+
+    return _read_literal(ast.parse(code), "RISKY_DROPPED_GUARDS")
+
+
 class _PrecompileUnpicklableHolder:
     def __init__(self, bad):
         self.bad = bad
@@ -2753,7 +2759,7 @@ class TestPrecompile(TestCase):
         with (
             drop,
             mock.patch.object(
-                PrecompileSession, "_check_guards_are_rebuildable", lambda self: None
+                PrecompileSession, "_drop_unrebuildable_guards", lambda self: None
             ),
             mock.patch.object(
                 PrecompileSession, "_apply_guard_policy", lambda self: None
@@ -2776,11 +2782,13 @@ class TestPrecompile(TestCase):
             torch.compiler.precompile.load(code, cache)
 
     @parametrize("api", ["session", "public"])
-    def test_guards_that_cannot_be_rebuilt_are_refused_at_capture(self, api):
-        # Fault injection, because the reachable causes are fixed: drop the
-        # carried tensor attributes back out and the guards no longer rebuild.
-        # Both entry points must refuse, and neither may hand back an artifact
-        # whose failure lands on whoever loads it.
+    def test_guards_that_cannot_be_rebuilt_are_dropped_not_refused(self, api):
+        # A guard that cannot be rebuilt is dropped and recorded, not grounds
+        # for refusing the other frames. Whether it is worth keeping is a
+        # separate question with an answer the caller already controls, so the
+        # drop is RISKY: the default rail still refuses, and only a caller who
+        # said it accepts unchecked slots gets an artifact.
+        # Fault-injected, because the reachable causes are fixed.
         from torch._dynamo.exc import PackageError
         from torch._dynamo.guards import GuardsStatePickler
         from torch._dynamo.precompile_package import precompile_capture
@@ -2788,17 +2796,20 @@ class TestPrecompile(TestCase):
         model = _PrecompileReadsAttr()
         x = torch.randn(8)
         x._cpu_copy = torch.randn(8)
-        # The session API raises its own PackageError; precompile() translates.
-        wanted = PrecompileError if api == "public" else PackageError
-        with (
-            mock.patch.object(
-                GuardsStatePickler, "_carried_tensor_attributes", lambda self, obj: None
-            ),
-            self.assertRaisesRegex(wanted, "cannot be rebuilt"),
-            torch.no_grad(),
-        ):
-            if api == "public":
-                torch.compiler.precompile(
+        drop = mock.patch.object(
+            GuardsStatePickler, "_carried_tensor_attributes", lambda self, obj: None
+        )
+        if api == "public":
+            with drop, torch.no_grad():
+                with self.assertRaisesRegex(PrecompileError, "can affect dispatch"):
+                    torch.compiler.precompile(
+                        _precompile_call_model,
+                        backend="eager",
+                        dynamic=False,
+                        tracer="dynamo",
+                        example_inputs=[(model, x)],
+                    )
+                code, cache = torch.compiler.precompile(
                     _precompile_call_model,
                     backend="eager",
                     dynamic=False,
@@ -2806,10 +2817,18 @@ class TestPrecompile(TestCase):
                     require_no_risky_drops=False,
                     example_inputs=[(model, x)],
                 )
-            else:
-                session = precompile_capture(_precompile_call_model, backend="eager")
-                with session as compiled:
-                    compiled(model, x)
+            self.assertIn("_cpu_copy", str(_read_risky(code)))
+            return
+        with drop, torch.no_grad():
+            session = precompile_capture(_precompile_call_model, backend="eager")
+            with session as compiled:
+                compiled(model, x)
+            with self.assertRaisesRegex(PackageError, "can affect dispatch"):
+                session.artifact(require_complete=False)
+            summary = session.summary()
+        self.assertTrue(
+            any("_cpu_copy" in name for _, name in summary.risky_dropped_guards)
+        )
 
     @parametrize("where", ["object", "in_a_list"])
     def test_unpicklable_guard_value_names_where_it_lives(self, where):
