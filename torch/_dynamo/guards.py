@@ -4835,7 +4835,10 @@ def _offending_value_path(state: Any, error: Exception) -> str:
         wanted = re.search(r"cannot pickle '([^']+)' object", str(error))
         if wanted is None:
             return ""
-        target = wanted.group(1)
+        # CPython qualifies the name for anything outside builtins -- a lock is
+        # '_thread.lock' against a __name__ of 'lock' -- so compare on the last
+        # component or the archetypal offenders never match.
+        target = wanted.group(1).rsplit(".", 1)[-1]
         graph = state.output_graph
         roots = [
             (f"local_scope[{k!r}]", v)
@@ -4853,6 +4856,14 @@ def _offending_value_path(state: Any, error: Exception) -> str:
             seen.add(id(value))
             if type(value).__name__ == target:
                 return f"\n  reached via: {path}"
+            if isinstance(value, (list, tuple)):
+                queue.extend((f"{path}[{i}]", v) for i, v in enumerate(value))
+            elif isinstance(value, dict):
+                queue.extend(
+                    (f"{path}[{k!r}]", v)
+                    for k, v in value.items()
+                    if isinstance(k, (str, int))
+                )
             for name, child in (
                 list(vars(value).items()) if hasattr(value, "__dict__") else []
             ):
