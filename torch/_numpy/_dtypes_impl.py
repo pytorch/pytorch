@@ -226,6 +226,14 @@ def nep50_to_tensors(
     if weak_dtype.is_complex and not_weak.dtype == torch.float32:
         dt = torch.complex64
 
+    # NEP 50: a weak scalar from a higher category promotes a bool array into
+    # that category (numpy: `1 - array([True, False])` -> int64 `[0, 1]`).
+    # Leaving the array as bool also trips torch's outright refusal of bool
+    # operands for some ops, e.g. subtraction.  bool <op> bool is untouched, so
+    # it still raises, matching numpy.
+    if dt is None and cat_weak > cat_not_weak and not_weak.dtype == torch.bool:
+        not_weak = not_weak.to(get_default_dtype_for(weak_dtype))
+
     # detect overflows: in PyTorch, uint8(-1) wraps around to 255,
     # while NEP50 mandates an exception.
     #
