@@ -115,6 +115,7 @@ class GemmReductionConfig:
         axis: GEMM output axis grouped by the reduction, either M (0) or N (1).
         reduction_type: Associative primitive computed by the kernel.
         source_fn: Generated source transformation applied before reduction.
+        finalizer_fn: Optional source for post-reduction scalar finalization.
     """
 
     output_name: str
@@ -141,18 +142,18 @@ class GemmReductionPlan:
         reduction_output: Optional compressed reduction output buffer.
         group: Number of adjacent GEMM output elements in each reduction group.
         axis: GEMM output axis grouped by the reduction, either M (0) or N (1).
-        reduction_type: Associative primitive computed by a physical reduction.
+        reduction_type: Associative primitive used by a kernel-driven reduction.
         source_fn: Generated source transformation applied before reduction.
-        combine_fn: Generated callback that combines physical reduction partials.
+        combine_fn: Generated callback that combines cross-fragment partial results.
         primary_output: Buffer receiving the primary GEMM result.
         feeds_main: Whether the reduction participates in the primary output.
         feed_output: Optional full-shape output consuming the reduction.
         secondary_feed_output: Optional second full-shape reduction consumer.
         finalizer_fn: Optional source for post-reduction scalar finalization.
         consumer_fn: Optional source for the primary full-shape consumer.
+        consumer_finalizer_fn: Optional source that converts the raw reduction
+            to the value consumed by full-shape outputs.
         secondary_consumer_fn: Optional source for the secondary consumer.
-        tensor_epilogue_returns_local_reduce: Whether the generated tensor epilogue
-            returns its fragment-local reduction value as its final result.
     """
 
     group: int
@@ -167,37 +168,34 @@ class GemmReductionPlan:
     secondary_feed_output: str | None = None
     finalizer_fn: str | None = None
     consumer_fn: str | None = None
+    consumer_finalizer_fn: str | None = None
     secondary_consumer_fn: str | None = None
-    tensor_epilogue_returns_local_reduce: bool = False
 
     def __post_init__(self) -> None:
         _ = self.geometry
-        physical_reduction = (self.reduction_type, self.source_fn)
-        if not self.tensor_epilogue_returns_local_reduce and any(
-            value is None for value in physical_reduction
+        kernel_reduction_inputs = (self.reduction_type, self.source_fn)
+        if any(value is None for value in kernel_reduction_inputs) and not all(
+            value is None for value in kernel_reduction_inputs
         ):
             raise RuntimeError(
-                "physical GEMM reductions require a primitive and source callback"
-            )
-        if self.tensor_epilogue_returns_local_reduce and any(
-            value is not None for value in physical_reduction
-        ):
-            raise RuntimeError(
-                "generated epilogue reductions cannot use physical reduction inputs"
+                "GEMM reductions must specify both reduction_type and source_fn or neither"
             )
         if self.tensor_epilogue_returns_local_reduce:
             if self.geometry.needs_physical_callbacks != (self.combine_fn is not None):
                 raise RuntimeError(
-                    "generated epilogue reductions require callbacks only for physical geometry"
+                    "combine_fn must be present exactly when a generated reduction "
+                    "crosses TensorSSA fragments"
                 )
         elif self.combine_fn is not None:
-            raise RuntimeError(
-                "kernel-lowered reductions cannot use a generated combine callback"
-            )
+            raise RuntimeError("kernel-driven reductions cannot specify combine_fn")
 
     @property
     def geometry(self) -> GemmReductionGeometry:
         return GemmReductionGeometry(self.group, self.axis)
+
+    @property
+    def tensor_epilogue_returns_local_reduce(self) -> bool:
+        return self.reduction_type is None and self.source_fn is None
 
     @classmethod
     def from_config(
@@ -238,12 +236,14 @@ class GemmReductionArguments:
         secondary_feed_output: Optional second full-shape reduction consumer.
         group: Number of adjacent GEMM output elements in each reduction group.
         axis: GEMM output axis grouped by the reduction, either M (0) or N (1).
-        reduction_type: Associative primitive computed by a physical reduction.
+        reduction_type: Associative primitive used by a kernel-driven reduction.
         source_fn: Generated source transformation applied before reduction.
-        combine_fn: Generated callback that combines physical reduction partials.
+        combine_fn: Generated callback that combines cross-fragment partial results.
         feeds_main: Whether the reduction also produces the primary GEMM output.
-        tensor_epilogue_returns_local_reduce: Whether the generated tensor epilogue
-            returns its fragment-local reduction value as its final result.
+        consumer_fn: Optional primary reduction consumer.
+        consumer_finalizer_fn: Optional callback that converts the raw reduction
+            to the value consumed by full-shape outputs.
+        secondary_consumer_fn: Optional secondary reduction consumer.
     """
 
     output: Any | None = None
@@ -257,8 +257,8 @@ class GemmReductionArguments:
     feeds_main: bool = False
     finalizer_fn: str | None = None
     consumer_fn: str | None = None
+    consumer_finalizer_fn: str | None = None
     secondary_consumer_fn: str | None = None
-    tensor_epilogue_returns_local_reduce: bool = False
 
     TENSOR_FIELDS: ClassVar[tuple[str, ...]] = (
         "output",
@@ -274,8 +274,8 @@ class GemmReductionArguments:
         "feeds_main",
         "finalizer_fn",
         "consumer_fn",
+        "consumer_finalizer_fn",
         "secondary_consumer_fn",
-        "tensor_epilogue_returns_local_reduce",
     )
 
     @classmethod
@@ -296,6 +296,10 @@ class GemmReductionArguments:
     @property
     def geometry(self) -> GemmReductionGeometry:
         return GemmReductionGeometry(self.group, self.axis)
+
+    @property
+    def tensor_epilogue_returns_local_reduce(self) -> bool:
+        return self.reduction_type is None and self.source_fn is None
 
     @property
     def primary_enabled(self) -> bool:
