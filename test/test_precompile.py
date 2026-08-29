@@ -242,6 +242,18 @@ def _maybe_scoped(loaded):
     return loaded if hasattr(loaded, "__enter__") else contextlib.nullcontext()
 
 
+class _PrecompileUnguardedAttr(torch.nn.Module):
+    """Holds an interned value no guard reads -- the pruning-collision shape."""
+
+    def __init__(self, junk) -> None:
+        super().__init__()
+        self.l = torch.nn.Linear(8, 8)
+        self.junk = junk
+
+    def forward(self, x):
+        return self.l(x).relu().sum()
+
+
 def _precompile_scale_sum(x):
     return torch.relu(x * 2.0).sum()
 
@@ -2559,6 +2571,36 @@ class TestPrecompile(TestCase):
             self.assertEqual(loaded(x, 2), x * 2)
             # k never varied, so nothing checks it: the captured graph serves.
             self.assertEqual(loaded(x, 5), x * 2)
+
+    @parametrize("junk", ["dtype", "int", "str", "device"])
+    def test_unguarded_interned_attribute_does_not_poison_the_artifact(self, junk):
+        # Value pruning is keyed by id(), which asks "same OBJECT" when it means
+        # "same REFERENCE". For an interned value those come apart: an unguarded
+        # module attribute holding torch.float32 registers that id as missing,
+        # and every OTHER reference to that dtype -- including ones the artifact
+        # needs -- then resolves to the sentinel, so it fails to load with
+        # "empty_strided(): argument 'dtype' must be torch.dtype, not _Missing".
+        value = {
+            "dtype": torch.float32,
+            "int": 8,
+            "str": "cuda",
+            "device": torch.device("cpu"),
+        }[junk]
+        model = _PrecompileUnguardedAttr(value)
+        x = torch.randn(4, 8)
+        with torch.no_grad():
+            expected = model(x)
+            code, cache = torch.compiler.precompile(
+                _brk_call,
+                backend="inductor",
+                dynamic=False,
+                tracer="dynamo",
+                example_inputs=[(model, x)],
+            )
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertEqual(loaded(model, x), expected)
 
     def test_shape_guards_survive_a_single_example(self):
         # Invariant-guard dropping is licensed by "it discriminated nothing",
