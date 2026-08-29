@@ -496,6 +496,65 @@ _pytree.register_pytree_node(
 )
 
 
+# An eager-backend graph is carried as a pickled GraphModule, and GraphModule's
+# reduction re-derives the Graph by symbolically re-tracing the generated source.
+# cond, while_loop and vmap do not survive that (their operands reject Proxies), and
+# autocast is worse: its enter/exit take no Proxy at all, so the retrace EXECUTES
+# them and leaves no node behind. checkpoint DOES survive it, and is here for the
+# other half of the fix -- its body is run through fx.Interpreter, so it is the case
+# that proves a nested body must keep a real Graph. Each is also placed behind an
+# un-inlinable helper, because the installed serving mode re-records its backends and
+# only that path copies them.
+def _eager_rt_cond(x):
+    return torch.cond(x.sum() > 0, lambda t: t.sin(), lambda t: t.cos(), (x,))
+
+
+def _eager_rt_while_loop(x):
+    return torch._higher_order_ops.while_loop(
+        lambda i, t: i < 3, lambda i, t: (i + 1, t + 1.0), (torch.tensor(0), x)
+    )[1]
+
+
+def _eager_rt_checkpoint(x):
+    return torch.utils.checkpoint.checkpoint(
+        lambda t: t.sin().cos(), x, use_reentrant=False
+    )
+
+
+def _eager_rt_vmap(x):
+    return torch.vmap(lambda t: t * 2.0)(x)
+
+
+def _eager_rt_autocast(x):
+    with torch.autocast("cpu", dtype=torch.bfloat16):
+        return x @ x
+
+
+def _eager_rt_no_grad_region(x):
+    y = x * 2.0
+    with torch.no_grad():
+        return y.sin()
+
+
+_EAGER_ROUND_TRIP = {
+    "cond": _eager_rt_cond,
+    "while_loop": _eager_rt_while_loop,
+    "checkpoint": _eager_rt_checkpoint,
+    "vmap": _eager_rt_vmap,
+    "autocast": _eager_rt_autocast,
+}
+
+
+def _eager_rt_helper(key, x):
+    y = x * 2.0
+    torch._dynamo.graph_break()
+    return _EAGER_ROUND_TRIP[key](y)
+
+
+def _eager_rt_broken(key, x):
+    return _eager_rt_helper(key, x)
+
+
 def _strip_artifact(cache: bytes) -> bytes:
     """Return the cache envelope with its compiled artifact removed, forcing load()
     onto the inlined (no-cache) path that JIT-compiles from python_code. Many tests
@@ -2586,6 +2645,13 @@ class TestPrecompile(TestCase):
             with self.assertRaisesRegex(RuntimeError, "no captured variant"):
                 loaded(x, 5)
 
+
+
+
+
+
+
+
     @parametrize("junk", ["dtype", "int", "str", "device"])
     def test_unguarded_interned_attribute_does_not_poison_the_artifact(self, junk):
         # Value pruning is keyed by id(), which asks "same OBJECT" when it means
@@ -2712,6 +2778,80 @@ class TestPrecompile(TestCase):
             for x in xs:
                 # entry frame is forward, so the receiver is passed explicitly
                 self.assertEqual(loaded(model, x), model(x))
+
+    @parametrize("construct", sorted(_EAGER_ROUND_TRIP))
+    @parametrize("broken", [False, True])
+    def test_eager_backend_graph_survives_serialization(self, construct, broken):
+        # An eager subgraph ships as a pickled GraphModule, whose reduction keeps
+        # only the generated source and re-derives the Graph by re-tracing it. A HOP
+        # explodes on the Proxy; autocast's enter/exit take no Proxy at all, so the
+        # retrace RUNS them and drops the nodes -- served output was fp32.
+        from torch._precompile import _parse_artifact_metadata
+
+        entry, args = (
+            (_eager_rt_broken, (construct,))
+            if broken
+            else (_EAGER_ROUND_TRIP[construct], ())
+        )
+        x = torch.randn(4, 4)
+        with torch.no_grad():
+            expected = torch.compile(entry, backend="eager")(*args, x)
+        torch._dynamo.reset()
+        code, cache = torch.compiler.precompile(
+            entry,
+            backend="eager",
+            dynamic=False,
+            tracer="dynamo",
+            require_no_risky_drops=False,
+            example_inputs=[(*args, x)],
+        )
+        self.assertEqual(
+            _parse_artifact_metadata(code)["SERVING_MODE"],
+            "installed" if broken else "standalone",
+        )
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertEqual(loaded(*args, x), expected)
+
+    def test_eager_backend_keeps_an_in_graph_no_grad_region(self):
+        # The retrace executes _set_grad_enabled instead of recording it, so the
+        # region's ops land OUTSIDE it: the served output carried a grad_fn.
+        x = torch.randn(4, requires_grad=True)
+        with torch.enable_grad():
+            expected = torch.compile(_eager_rt_no_grad_region, backend="eager")(x)
+            code, cache = torch.compiler.precompile(
+                _eager_rt_no_grad_region,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                training=True,
+                example_inputs=[(x,)],
+            )
+        self.assertFalse(expected.requires_grad)
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.enable_grad():
+            served = loaded(x)
+        self.assertFalse(served.requires_grad)
+        self.assertEqual(served, expected)
+
+    def test_eager_backend_load_does_not_leak_grad_mode(self):
+        # Same executed-instead-of-recorded node, seen from the other side: the
+        # retrace ran _set_grad_enabled(True) against the LOADER's global state.
+        x = torch.randn(4)
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _eager_rt_no_grad_region,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                example_inputs=[(x,)],
+            )
+        torch._dynamo.reset()
+        with torch.no_grad():
+            torch.compiler.precompile.load(code, cache)
+            self.assertFalse(torch.is_grad_enabled())
 
     def test_rendered_subgraphs_do_not_share_top_level_names(self):
         # Two variants of one frame are the same computation at different
