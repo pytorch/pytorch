@@ -105,10 +105,7 @@ class TestFsdpTpCheckpointConversion(DTensorTestBase):
 
 
 instantiate_device_type_tests(
-    TestFsdpTpCheckpointConversion,
-    globals(),
-    except_for="cpu",
-    allow_xpu=True
+    TestFsdpTpCheckpointConversion, globals(), except_for="cpu", allow_xpu=True
 )
 
 if __name__ == "__main__":
