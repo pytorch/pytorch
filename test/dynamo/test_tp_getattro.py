@@ -977,6 +977,77 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
         self.assertEqual(result, "caught")
 
+    def test_custom_getattribute_resolves_property(self):
+        """super().__getattribute__() inside a custom __getattribute__
+        must correctly resolve properties (data descriptors).  This
+        exercises the recursion guard: descriptor resolution internally
+        looks up __class__ via tp_getattro_impl, which must not re-enter
+        the custom __getattribute__."""
+
+        class MyObj:
+            def __getattribute__(self, name):
+                return super().__getattribute__(name)
+
+            @property
+            def value(self):
+                return 42
+
+        def fn(obj):
+            return obj.value
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertEqual(result, 42)
+
+    def test_custom_getattribute_resolves_staticmethod(self):
+        """super().__getattribute__() inside a custom __getattribute__
+        must correctly resolve staticmethods (non-data descriptors)."""
+
+        class MyObj:
+            def __getattribute__(self, name):
+                return super().__getattribute__(name)
+
+            @staticmethod
+            def compute():
+                return 99
+
+        def fn(obj):
+            return obj.compute()
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertEqual(result, 99)
+
+    def test_custom_getattribute_resolves_instance_attr(self):
+        """super().__getattribute__() inside a custom __getattribute__
+        must find instance dict attributes."""
+
+        class MyObj:
+            def __init__(self):
+                self.x = 10
+
+            def __getattribute__(self, name):
+                return super().__getattribute__(name)
+
+        def fn(obj):
+            return obj.x
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertEqual(result, 10)
+
+    def test_custom_getattribute_resolves_dunder_class(self):
+        """Direct obj.__class__ access with a custom __getattribute__
+        must return the correct type (the __class__ shortcut in
+        tp_getattro_impl fires before __getattribute__ dispatch)."""
+
+        class MyObj:
+            def __getattribute__(self, name):
+                return super().__getattribute__(name)
+
+        def fn(obj):
+            return obj.__class__
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertIs(result, MyObj)
+
     # --- BoundBuiltinMethodVariable slots ---
 
     def test_bound_builtin_method_hash(self):
@@ -2103,6 +2174,52 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
 
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3))
         self.assertFalse(result)
+
+    def test_dunder_getattribute_dict_is_mutation_tracked(self):
+        """__dict__ via explicit/super __getattribute__ must be the tracked dict.
+
+        The generic getset-descriptor path yields an untracked copy, silently
+        dropping stores made through it.
+        """
+
+        class S:
+            def __init__(self):
+                self.y = 7
+
+        def explicit(o):
+            d = o.__getattribute__("__dict__")
+            d["z"] = 3
+            return sorted(o.__dict__.items())
+
+        def via_super(o):
+            d = super(S, o).__getattribute__("__dict__")
+            d["z"] = 3
+            return sorted(o.__dict__.items())
+
+        def identity(o):
+            return super(S, o).__getattribute__("__dict__") is o.__dict__
+
+        for fn in (explicit, via_super, identity):
+            torch._dynamo.reset()
+            expected = fn(S())
+            actual = torch.compile(fn, backend="eager", fullgraph=True)(S())
+            self.assertEqual(actual, expected)
+
+    def test_udov_attribute_error_carries_name_and_obj(self):
+        """AttributeError from a UDOV miss must set .name/.obj like CPython."""
+
+        class Foo:
+            bar = 1
+
+        def fn(t):
+            obj = Foo()
+            try:
+                obj.missing
+            except AttributeError as e:
+                return t.sin(), e.name
+
+        _, name = torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(2))
+        self.assertEqual(name, "missing")
 
 
 if __name__ == "__main__":

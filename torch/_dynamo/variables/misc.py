@@ -90,7 +90,7 @@ from .base import (
 )
 from .constant import ConstantVariable
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
-from .object_protocol import generic_str
+from .object_protocol import generic_str, object_generic_getattr
 from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
 
 
@@ -399,8 +399,8 @@ class SuperVariable(VariableTracker):
             # descriptors, etc. are all handled consistently.
             # https://github.com/python/cpython/blob/e76aa128fe/Objects/object.c#L1611-L1683
             if isinstance(self.objvar, UserDefinedObjectVariable):
-                return self.objvar.generic_getattr(
-                    tx, attr_name, skip_getattr_fallback=True
+                return object_generic_getattr(
+                    tx, self.objvar, attr_name, skip_getattr_fallback=True
                 )
 
             attr_value = None
