@@ -4267,6 +4267,9 @@ class GuardsStatePickler(pickle.Pickler):
         self.guard_tree_values = guard_tree_values
         self.empty_values = empty_values
         self.missing_values = missing_values
+        # The object reducer_override was last handed, so a failure inside a
+        # __reduce__ can be attributed to a value rather than only to a type.
+        self.last_reduced: Any = None
 
     @classmethod
     def _restore_tensor_attributes(
@@ -4623,6 +4626,8 @@ class GuardsStatePickler(pickle.Pickler):
     ) -> tuple[Callable[..., Any], tuple[Any, ...]] | Any:
         import sympy
 
+        self.last_reduced = obj
+
         if id(obj) in self.empty_values:
             return type(obj).__new__, (type(obj),)
 
@@ -4962,24 +4967,22 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
     )
 
 
-def _offending_value_path(state: Any, error: Exception) -> str:
+def _offending_value_path(state: Any, target: Any) -> str:
     """Best-effort attribute path to the value that could not be pickled.
 
-    The type in the error names WHAT failed and never WHERE it lives, which in a
-    large model means bisecting by hand across multi-minute captures. Walk the
-    scopes the guard state carries and report the first path whose value has the
-    failing type. Best-effort by construction: it is a diagnostic appended to an
-    error that is already being raised, so any failure here must stay silent
-    rather than mask the real one.
+    The error names WHAT failed and never WHERE it lives, which in a large model
+    means bisecting by hand across multi-minute captures. The pickler records
+    the object it was reducing, so this walks the scopes the guard state carries
+    and reports the first path holding THAT object -- by identity, not by type,
+    which used to report a same-typed bystander instead.
+
+    Best-effort by construction: it is a diagnostic appended to an error that is
+    already being raised, so any failure here must stay silent rather than mask
+    the real one.
     """
     try:
-        wanted = re.search(r"cannot pickle '([^']+)' object", str(error))
-        if wanted is None:
+        if target is None:
             return ""
-        # CPython qualifies the name for anything outside builtins -- a lock is
-        # '_thread.lock' against a __name__ of 'lock' -- so compare on the last
-        # component or the archetypal offenders never match.
-        target = wanted.group(1).rsplit(".", 1)[-1]
         graph = state.output_graph
         roots = [
             (f"local_scope[{k!r}]", v)
@@ -4995,7 +4998,7 @@ def _offending_value_path(state: Any, error: Exception) -> str:
             if id(value) in seen or len(seen) > 20000:
                 continue
             seen.add(id(value))
-            if type(value).__name__ == target:
+            if value is target:
                 return f"\n  reached via: {path}"
             if isinstance(value, (list, tuple)):
                 queue.extend((f"{path}[{i}]", v) for i, v in enumerate(value))
@@ -5070,7 +5073,8 @@ def pickle_guards_state(
         # value, because a type alone ("cannot pickle 'generator' object") is
         # not actionable in a model with a thousand-frame guard tree.
         raise torch._dynamo.exc.PackageError(
-            f"{type(e).__name__}: {e}{_offending_value_path(state, e)}"
+            f"{type(e).__name__}: {e}"
+            f"{_offending_value_path(state, pickler.last_reduced)}"
         ) from e
     return buf.getvalue()
 
@@ -5983,7 +5987,6 @@ def strip_local_scope(s: str) -> str:
 
     This is to generate user friendly recompilation messages.
     """
-    import re
 
     pattern = r"L\[\s*['\"](.*?)['\"]\s*\]"
     return re.sub(pattern, r"\1", s)
