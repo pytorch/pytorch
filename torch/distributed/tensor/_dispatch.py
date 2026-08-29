@@ -374,7 +374,9 @@ class OpDispatcher:
             local_tensor_args = cast(tuple[object, ...], local_tensor_args)
             if op_call in self._random_ops:
                 if not random._rng_tracker and is_rng_supported_mesh(mesh):
-                    # Default to `OffsetBasedRNGTracker` if the parallelism API did not already construct one
+                    # Default to `OffsetBasedRNGTracker` (or the device's
+                    # registered tracker) if the parallelism API did not
+                    # already construct one
                     # Skip RNG state sync during tracing to avoid lazily initializing real RNG state under fake mode.
                     run_state_sync = not _are_we_tracing()
                     if not run_state_sync:
@@ -385,9 +387,7 @@ class OpDispatcher:
                             "the same seed on all ranks before compiling DTensor random ops.",
                             stacklevel=2,
                         )
-                    random._rng_tracker = random.OffsetBasedRNGTracker(
-                        mesh, run_state_sync
-                    )
+                    random.get_or_create_rng_tracker(mesh, run_state_sync)
 
                 first_arg, first_local_arg = (
                     cast(dtensor.DTensor, args[0]),
@@ -410,6 +410,20 @@ class OpDispatcher:
                     and random._rng_tracker.distribute_region_enabled
                 ):
                     accelerator = torch.accelerator.current_accelerator()
+
+                    def _run_op_under_distribute_region():
+                        # shared execution block for the generic
+                        # (non-counter-based) RNG path
+                        with random._rng_tracker._distribute_region(
+                            first_arg._spec, generator=maybe_user_generator
+                        ):
+                            with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
+                                output_sharding.output_spec
+                            ):
+                                return op_call(
+                                    *local_tensor_args, **op_info.local_kwargs
+                                )
+
                     if (
                         maybe_user_generator is not None
                         or accelerator is None
@@ -419,34 +433,32 @@ class OpDispatcher:
                             and type(first_local_arg) is not torch.Tensor
                         )
                     ):
-                        with random._rng_tracker._distribute_region(
-                            first_arg._spec, generator=maybe_user_generator
-                        ):
+                        local_results = _run_op_under_distribute_region()
+                    else:
+                        # Accelerator device without user generator: use the
+                        # traceable HOP when the tracker implements the
+                        # counter-based offset contract; otherwise (e.g. a
+                        # custom tracker registered via ``register_rng_tracker``)
+                        # fall back to the generic distribute-region path.
+                        try:
+                            start_offset_incr, end_offset_incr = (
+                                random._rng_tracker._compute_rng_offsets(
+                                    first_arg._spec
+                                )
+                            )
+                        except NotImplementedError:
+                            local_results = _run_op_under_distribute_region()
+                        else:
                             with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
                                 output_sharding.output_spec
                             ):
-                                local_results = op_call(
-                                    *local_tensor_args, **op_info.local_kwargs
+                                local_results = run_dtensor_rng_op(
+                                    start_offset_incr,
+                                    end_offset_incr,
+                                    op_call,
+                                    *local_tensor_args,
+                                    **op_info.local_kwargs,
                                 )
-                    else:
-                        # Accelerator device without user generator, use HOP for traceability
-                        if not isinstance(
-                            random._rng_tracker, random.OffsetBasedRNGTracker
-                        ):
-                            raise AssertionError
-                        start_offset_incr, end_offset_incr = (
-                            random._rng_tracker._compute_rng_offsets(first_arg._spec)
-                        )
-                        with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
-                            output_sharding.output_spec
-                        ):
-                            local_results = run_dtensor_rng_op(
-                                start_offset_incr,
-                                end_offset_incr,
-                                op_call,
-                                *local_tensor_args,
-                                **op_info.local_kwargs,
-                            )
                 else:
                     # No rng_tracker, meta tensor, or distribute_region disabled
                     with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(

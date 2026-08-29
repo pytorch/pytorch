@@ -1492,7 +1492,8 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
         spec = DTensorSpec(device_mesh, tuple(placements), tensor_meta=tensor_meta)
 
         if random.is_rng_supported_mesh(device_mesh) and not random._rng_tracker:
-            random._rng_tracker = random.OffsetBasedRNGTracker(device_mesh)
+            # create the default (or device-registered) RNG tracker
+            random.get_or_create_rng_tracker(device_mesh, run_state_sync=True)
 
         if random._rng_tracker is None:
             raise AssertionError

@@ -299,7 +299,9 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
     should be shared and synchronized among all ranks to respect the semantics of DTensor
     random operators.
 
-    note: _RNGStateTracker only supports cuda/cuda-like device.
+    note: the default policy assumes a cuda/cuda-like philox RNG. Devices whose
+    RNG does not follow those semantics should register their own tracker via
+    :func:`register_rng_tracker`.
     """
 
     def __init__(
@@ -310,11 +312,13 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         super().__init__(_resolve_device(device_mesh=device_mesh))
         if self._device_handle is None:
             raise AssertionError
-        # DTensor RNG tracker so far only supports CUDA/CUDA-like devices
+        # the default tracker assumes a non-cpu device module with
+        # philox-style RNG state APIs
         if self._device.type == "cpu":
             raise RuntimeError(
-                f"{self.__class__.__name__} instantiation requires the presence of "
-                f"CUDA/CUDA-like/XPU device. Got {self._device.type} instead."
+                f"{self.__class__.__name__} instantiation requires a non-cpu "
+                f"device with device-module RNG state APIs. Got "
+                f"{self._device.type} instead."
             )
 
         if run_state_sync:
