@@ -28,11 +28,6 @@ from torch.testing._internal.distributed._shard.sharded_tensor._test_ops_common 
 )
 
 
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
-backend = torch.distributed.get_default_backend_for_device(device_type)
-
 if TEST_WITH_DEV_DBG_ASAN:
     print(
         "Skip dev-asan as torch + multiprocessing spawn have known issues",
@@ -172,14 +167,14 @@ class TestShardedEmbeddingBag(ShardedTensorTestBase):
 
         self.assertEqual(local_output, sharded_output)
 
-    @with_comms(init_rpc=False, backend=backend)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_capabilities(Capability.distributed.backend)
     def test_sharded_embedding_bag_colwise(self, device):
         for spec in generate_chunk_sharding_specs_for_test(1):
             self._test_sharded_embedding_bag_with_test_cases(spec, 1)
 
-    @with_comms(init_rpc=False, backend=backend)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_capabilities(Capability.distributed.backend)
     def test_sharded_embedding_bag_rowwise(self, device):
@@ -290,7 +285,9 @@ class TestShardedEmbeddingBag(ShardedTensorTestBase):
         )
 
 
-instantiate_device_type_tests(TestShardedEmbeddingBag, globals(), except_for=["cpu"])
+instantiate_device_type_tests(
+    TestShardedEmbeddingBag, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
