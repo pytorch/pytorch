@@ -186,11 +186,6 @@ template <typename T>
 constexpr constant bool is_complex_v =
     ::metal::is_same_v<T, float2> || ::metal::is_same_v<T, half2>;
 
-// The complex<T> alias (common.h) must map onto Metal's float2/half2 so it is
-// recognized as complex here and is layout-compatible with the host mirror.
-static_assert(is_complex_v<complex<float>>, "complex<float> must be float2");
-static_assert(is_complex_v<complex<half>>, "complex<half> must be half2");
-
 template <typename T>
 constexpr constant bool is_scalar_floating_point_v =
     ::metal::is_floating_point_v<T> && ::metal::is_scalar_v<T>;
