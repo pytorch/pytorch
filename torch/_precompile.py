@@ -1994,6 +1994,23 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
     if not entry_frames:
         return
     if not any(f["variants"] for f in entry_frames):
+        # The entry frame having no variants has two very different causes, and
+        # guessing the wrong one sends the caller restructuring code that was
+        # never the problem. If Dynamo BYPASSED the frame, it recorded why --
+        # say that, because the thin-wrapper advice below is then simply wrong.
+        bypassed = [
+            code
+            for code in entry.codes
+            if code.bypassed and getattr(code, "bypass_reason", None)
+        ]
+        if bypassed:
+            reasons = ", ".join(sorted({str(c.bypass_reason) for c in bypassed}))
+            raise PrecompileError(
+                f"precompile captured no dispatchable graph for {entry.fn_name!r}: "
+                f"{len(bypassed)} frame(s) were BYPASSED during capture, so their "
+                f"guards were never written. Reason: {reasons}. Fix that rather "
+                f"than restructuring the captured callable."
+            )
         # Handing precompile a bare nn.Module compiles Dynamo's own wrapper
         # frame (external_utils.wrap_inline's `inner`) rather than the module:
         # every graph lands there, closing over the module, and the entry frame
