@@ -11959,7 +11959,7 @@ class TestPad(TestCaseMPS):
         helper((1, 2, 2, 2, 2), (0, 1), nn.ConstantPad3d)
 
     def test_constant_pad_nd_preserves_memory_format(self):
-        nchw_tensor = torch.rand((1, 2, 5, 3))
+        nchw_tensor = torch.rand((1, 2, 5, 3), device="mps")
         nchw_padded = torch.constant_pad_nd(nchw_tensor, [1, 2], 0.5)
         self.assertTrue(nchw_padded.is_contiguous(memory_format=torch.contiguous_format))
 
