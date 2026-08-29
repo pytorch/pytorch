@@ -7593,7 +7593,7 @@ Done""",
         check(fast_mode=False)
 
     def test_gradcheck_fast_mode_forward_ad_error_indexing(self):
-        from torch.autograd.gradcheck import GradcheckError
+        from torch.autograd.gradcheck import FAST_FAIL_SLOW_OK_MSG, GradcheckError
 
         class BadMul(Function):
             @staticmethod
@@ -7638,8 +7638,10 @@ Done""",
                     "Jacobian computed with forward mode mismatch for output "
                     f"{output_idx} with respect to input 0"
                 )
-                with self.assertRaisesRegex(GradcheckError, err_msg):
+                with self.assertRaisesRegex(GradcheckError, err_msg) as cm:
                     gradcheck(fn, inputs, **kwargs)
+                if name == "integer output":
+                    self.assertNotIn(FAST_FAIL_SLOW_OK_MSG, str(cm.exception))
                 self.assertFalse(gradcheck(fn, inputs, raise_exception=False, **kwargs))
 
     def test_gradcheck_forward_ad(self):
