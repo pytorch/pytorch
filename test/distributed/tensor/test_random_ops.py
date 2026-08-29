@@ -1062,6 +1062,120 @@ class DistTensorRandomOpsTest3D(DTensorTestBase):
         compute_rankwise_if_local_tensor(weight_local, self.rank)
 
 
+class RNGTrackerRegistryTest(DTensorTestBase):
+    """Tests for the RNG tracker registration API (``register_rng_tracker``,
+    ``set_rng_tracker``, ``get_or_create_rng_tracker``).
+
+    These tests are CPU-runnable: they use a cpu device mesh and fake tracker
+    classes, so no accelerator is required.
+    """
+
+    def setUp(self):
+        super().setUp()
+        # isolate the global tracker/registry state between tests
+        self._saved_tracker = random._rng_tracker
+        self._saved_registry = dict(random._RNG_TRACKER_REGISTRY)
+
+    def tearDown(self):
+        random._rng_tracker = self._saved_tracker
+        random._RNG_TRACKER_REGISTRY.clear()
+        random._RNG_TRACKER_REGISTRY.update(self._saved_registry)
+        super().tearDown()
+
+    @with_comms
+    def test_register_rng_tracker_type_check(self):
+        class FakeTracker(random._RNGStateTracker):
+            def __init__(self, device_mesh, run_state_sync):
+                self.device_mesh = device_mesh
+
+        with self.assertRaises(TypeError):
+            random.register_rng_tracker("cpu", object)  # type: ignore[arg-type]
+        with self.assertRaises(TypeError):
+            random.register_rng_tracker("cpu", FakeTracker(None, False))  # type: ignore[arg-type]
+        random.register_rng_tracker("cpu", FakeTracker)
+        self.assertIs(random._RNG_TRACKER_REGISTRY["cpu"], FakeTracker)
+
+        # registering again overrides the previous entry
+        random.register_rng_tracker("cpu", FakeTracker)
+        self.assertIs(random._RNG_TRACKER_REGISTRY["cpu"], FakeTracker)
+
+    @with_comms
+    def test_set_rng_tracker(self):
+        class FakeTracker(random._RNGStateTracker):
+            def __init__(self, device_mesh, run_state_sync):
+                self.device_mesh = device_mesh
+
+        fake = FakeTracker(None, False)
+        with self.assertRaises(TypeError):
+            random.set_rng_tracker(object())  # type: ignore[arg-type]
+        random.set_rng_tracker(fake)
+        self.assertIs(random._rng_tracker, fake)
+
+    @with_comms
+    def test_registered_tracker_created_at_manual_seed(self):
+        created = []
+
+        class FakeTracker(random._RNGStateTracker):
+            def __init__(self, device_mesh, run_state_sync):
+                created.append((device_mesh, run_state_sync))
+                self.device_mesh = device_mesh
+
+            def _distribute_region(self, spec, generator=None):
+                yield
+
+        device_mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+        # torch.cpu has no ``set_rng_state``, so without a registration the cpu
+        # mesh is reported unsupported; a registered tracker makes it supported
+        self.assertFalse(is_rng_supported_mesh(device_mesh))
+        random.register_rng_tracker("cpu", FakeTracker)
+        self.assertTrue(is_rng_supported_mesh(device_mesh))
+
+        # the creation point in manual_seed instantiates the registered class
+        # instead of the default OffsetBasedRNGTracker
+        manual_seed(42, device_mesh)
+        self.assertEqual(len(created), 1)
+        self.assertIs(created[0][0], device_mesh)
+        self.assertFalse(created[0][1])  # manual_seed uses run_state_sync=False
+        self.assertIsInstance(random._rng_tracker, FakeTracker)
+
+    @with_comms
+    def test_get_or_create_rng_tracker_returns_existing(self):
+        # get_or_create returns the already-created instance instead of
+        # re-creating, and passes run_state_sync through to the constructor
+        device_mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+
+        class FakeTracker(random._RNGStateTracker):
+            def __init__(self, device_mesh, run_state_sync):
+                self.device_mesh = device_mesh
+                self.run_state_sync = run_state_sync
+
+        random.register_rng_tracker("cpu", FakeTracker)
+        tracker = random.get_or_create_rng_tracker(device_mesh, True)
+        self.assertIsInstance(tracker, FakeTracker)
+        self.assertTrue(tracker.run_state_sync)
+        # second call returns the same instance instead of re-creating
+        self.assertIs(random.get_or_create_rng_tracker(device_mesh, True), tracker)
+
+    @with_comms
+    def test_unregistered_behavior_unchanged(self):
+        device_mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+        with self.assertWarns(UserWarning):
+            self.assertFalse(is_rng_supported_mesh(device_mesh))
+        self.assertIsNone(random._rng_tracker)
+
+    def test_compute_rng_offsets_contract(self):
+        # trackers that do not implement the counter-based offset contract
+        # must raise NotImplementedError (consumed by the capability probe in
+        # torch/distributed/tensor/_dispatch.py)
+        class FakeTracker(random._RNGStateTracker):
+            def __init__(self, device_mesh, run_state_sync):
+                self.device_mesh = device_mesh
+
+        fake = FakeTracker(None, False)
+        with self.assertRaises(NotImplementedError):
+            fake._compute_rng_offsets(None)  # type: ignore[arg-type]
+
+
 DistTensorRandomInitTestWithLocalTensor = create_local_tensor_test_class(
     DistTensorRandomInitTest,
 )
