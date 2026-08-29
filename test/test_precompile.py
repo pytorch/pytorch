@@ -256,6 +256,16 @@ def _precompile_defaulted_entry(model, x, scale=3.0):
     return _precompile_defaulted_helper(model, x, scale)
 
 
+# Collides with a name the artifact module binds for its own metadata, which is
+# how a rendered-source global shadows a user global the guards were written
+# against.
+BACKEND = 5.0
+
+
+def _precompile_shadowed_global_entry(t):
+    return t * BACKEND
+
+
 class _PrecompileUnguardedAttr(torch.nn.Module):
     """Holds an interned value no guard reads -- the pruning-collision shape."""
 
@@ -1801,6 +1811,25 @@ class TestPrecompile(TestCase):
             # Called WITHOUT scale, so the served frame only has it if the
             # artifact carried the default.
             self.assertEqual(loaded(model, x), _precompile_defaulted_entry(model, x))
+
+    def test_precompile_user_global_wins_over_the_artifacts_own(self):
+        # The rendered backend source is exec'd into the artifact module and
+        # brings its own names with it. Binding the frames to that live dict let
+        # those shadow a user global of the same name -- which their guards were
+        # written against -- so every variant missed.
+        x = torch.randn(4)
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _precompile_shadowed_global_entry,
+                tracer="dynamo",
+                backend="eager",
+                require_no_risky_drops=False,
+                example_inputs=[(x,)],
+            )
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertEqual(loaded(x), _precompile_shadowed_global_entry(x))
 
     def test_precompile_public_result_types(self):
         # The public surface is the pair and the loader; the session types it
