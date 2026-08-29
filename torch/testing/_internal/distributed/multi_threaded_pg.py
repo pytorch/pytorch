@@ -46,6 +46,39 @@ def ret_work(ret):
     return _create_work_from_future(fut)
 
 
+# Note [Threaded PG cross-stream synchronization]
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# A real process group is stream-ordered w.r.t. the stream that issued the
+# collective. Threaded PG instead performs the data movement for *all* ranks on
+# rank 0's thread, hence on rank 0's current stream. The current stream is
+# thread-local, so whenever a rank issues a collective from a side stream (FSDP2
+# does this for all-gather/reduce-scatter), rank 0's copies are unordered w.r.t.
+# that rank's producing and consuming kernels. Events restore the ordering that
+# a real backend would provide.
+def _record_current_stream_events(data):
+    """Record an event on the current stream of every accelerator device in ``data``."""
+    accelerator = torch.accelerator.current_accelerator()
+    if accelerator is None:
+        return ()
+    devices = {
+        t.device
+        for t in flatten_list(data)
+        if isinstance(t, torch.Tensor) and t.device.type == accelerator.type
+    }
+    events = []
+    for device in devices:
+        event = torch.Event(device.type)
+        event.record(torch.accelerator.current_stream(device.index))
+        events.append((device, event))
+    return events
+
+
+def _wait_current_stream_events(events):
+    """Make the calling thread's current stream wait on ``events``."""
+    for device, event in events:
+        event.wait(torch.accelerator.current_stream(device.index))
+
+
 def binop_reduce(tensors, op):
     res = op(torch.stack(tensors), dim=0)
     if isinstance(res, torch.Tensor):
@@ -332,11 +365,17 @@ class Collective:
         self._count = 0
         self._done = False
 
+        # See Note [Threaded PG cross-stream synchronization]
+        self._input_events = [()] * world_size
+        self._work_events = ()
+
         self._pg = pg
 
     def join(self, rank, data):
         with self._start_cond:
             self._data[rank] = data
+            if rank > 0:
+                self._input_events[rank] = _record_current_stream_events(data)
             self._count += 1
 
             # notify rank 0
@@ -363,9 +402,13 @@ class Collective:
                 )
                 if self._pg._terminate.is_set():
                     sys.exit("Test termination event occurs.")
+                _wait_current_stream_events(self._work_events)
             else:
                 # copy data around
+                for events in self._input_events:
+                    _wait_current_stream_events(events)
                 self._collective.work(self._data)
+                self._work_events = _record_current_stream_events(self._data)
                 self._done = True
                 self._done_cond.notify_all()
         return ret_work(data)

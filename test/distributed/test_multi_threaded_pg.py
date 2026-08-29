@@ -22,7 +22,13 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     spawn_threads_and_init_comms,
 )
-from torch.testing._internal.common_utils import IS_SANDCASTLE, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    device_sleep,
+    get_cycles_per_ms,
+    IS_SANDCASTLE,
+    run_tests,
+    TestCase,
+)
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
@@ -300,6 +306,40 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
         res_num = ((0 + self.world_size - 1) * self.world_size) / 2
         self.assertEqual(t0, torch.ones(3, 3) * res_num)
         self.assertEqual(t1, torch.ones(3, 3) * (res_num * 2))
+
+    @skip_if_lt_x_gpu(1)
+    def test_collectives_issued_from_side_stream(self):
+        # Threaded PG performs every rank's data movement on rank 0's stream, so
+        # it must synchronize with the stream each rank issued the collective
+        # from. FSDP2 relies on this: it all-gathers/reduce-scatters on private
+        # side streams.
+        device = torch.device(device_type, 0)
+        device_module = torch.get_device_module(device_type)
+        delay_cycles = int(200 * get_cycles_per_ms(device_type))
+        side_stream = device_module.Stream(device=device)
+        side_stream.wait_stream(device_module.current_stream(device))
+        with device_module.stream(side_stream):
+            if self.rank != 0:
+                # Rank 0 reads stale input unless it waits on this stream
+                device_sleep(device_type, delay_cycles)
+            inp = torch.full((8,), float(self.rank + 1), device=device)
+            all_gather_out = torch.empty((8 * self.world_size,), device=device)
+            dist.all_gather_into_tensor(all_gather_out, inp)
+            reduce_scatter_out = torch.empty((8,), device=device)
+            dist.reduce_scatter_tensor(reduce_scatter_out, all_gather_out)
+        device_module.current_stream(device).wait_stream(side_stream)
+
+        expected_all_gather = torch.cat(
+            [
+                torch.full((8,), float(rank + 1), device=device)
+                for rank in range(self.world_size)
+            ]
+        )
+        self.assertEqual(all_gather_out, expected_all_gather)
+        self.assertEqual(
+            reduce_scatter_out,
+            torch.full((8,), float(self.world_size * (self.rank + 1)), device=device),
+        )
 
     @skip_if_lt_x_gpu(1)
     def test_bwd_sees_fwd_pg(self):
