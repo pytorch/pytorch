@@ -6,13 +6,14 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/irange.h>
+
+#ifdef CPU_CAPABILITY_AVX512
+#include <array>
+#endif
 
 namespace at::vec::inline CPU_CAPABILITY {
 
 #ifdef CPU_CAPABILITY_AVX512
-
-#include <array>
 
 struct Vectorizedi {
  protected:
@@ -213,10 +214,7 @@ class Vectorized<int32_t> : public Vectorizedi {
     return 16;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized() = default;
-  Vectorized(int32_t v) {
-    values = _mm512_set1_epi32(v);
-  }
+  Vectorized(int32_t v) : Vectorizedi{_mm512_set1_epi32(v)} {}
   Vectorized(
       int32_t val1,
       int32_t val2,
@@ -233,25 +231,24 @@ class Vectorized<int32_t> : public Vectorizedi {
       int32_t val13,
       int32_t val14,
       int32_t val15,
-      int32_t val16) {
-    values = _mm512_setr_epi32(
-        val1,
-        val2,
-        val3,
-        val4,
-        val5,
-        val6,
-        val7,
-        val8,
-        val9,
-        val10,
-        val11,
-        val12,
-        val13,
-        val14,
-        val15,
-        val16);
-  }
+      int32_t val16)
+      : Vectorizedi{_mm512_setr_epi32(
+            val1,
+            val2,
+            val3,
+            val4,
+            val5,
+            val6,
+            val7,
+            val8,
+            val9,
+            val10,
+            val11,
+            val12,
+            val13,
+            val14,
+            val15,
+            val16)} {}
   template <int64_t mask>
   static Vectorized<int32_t> blend(
       Vectorized<int32_t> a,
@@ -463,10 +460,7 @@ class Vectorized<int16_t> : public Vectorizedi {
     return 32;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized() = default;
-  Vectorized(int16_t v) {
-    values = _mm512_set1_epi16(v);
-  }
+  Vectorized(int16_t v) : Vectorizedi{_mm512_set1_epi16(v)} {}
   Vectorized(
       int16_t val1,
       int16_t val2,
@@ -499,41 +493,40 @@ class Vectorized<int16_t> : public Vectorizedi {
       int16_t val29,
       int16_t val30,
       int16_t val31,
-      int16_t val32) {
-    values = _mm512_set_epi16(
-        val32,
-        val31,
-        val30,
-        val29,
-        val28,
-        val27,
-        val26,
-        val25,
-        val24,
-        val23,
-        val22,
-        val21,
-        val20,
-        val19,
-        val18,
-        val17,
-        val16,
-        val15,
-        val14,
-        val13,
-        val12,
-        val11,
-        val10,
-        val9,
-        val8,
-        val7,
-        val6,
-        val5,
-        val4,
-        val3,
-        val2,
-        val1);
-  }
+      int16_t val32)
+      : Vectorizedi{_mm512_set_epi16(
+            val32,
+            val31,
+            val30,
+            val29,
+            val28,
+            val27,
+            val26,
+            val25,
+            val24,
+            val23,
+            val22,
+            val21,
+            val20,
+            val19,
+            val18,
+            val17,
+            val16,
+            val15,
+            val14,
+            val13,
+            val12,
+            val11,
+            val10,
+            val9,
+            val8,
+            val7,
+            val6,
+            val5,
+            val4,
+            val3,
+            val2,
+            val1)} {}
   template <int64_t mask>
   static Vectorized<int16_t> blend(
       Vectorized<int16_t> a,
@@ -745,10 +738,7 @@ class Vectorized8 : public Vectorizedi {
     return 64;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized8() = default;
-  Vectorized8(T v) {
-    values = _mm512_set1_epi8(v);
-  }
+  Vectorized8(T v) : Vectorizedi{_mm512_set1_epi8(v)} {}
   Vectorized8(
       T val1,
       T val2,
@@ -813,73 +803,72 @@ class Vectorized8 : public Vectorizedi {
       T val61,
       T val62,
       T val63,
-      T val64) {
-    values = _mm512_set_epi8(
-        val64,
-        val63,
-        val62,
-        val61,
-        val60,
-        val59,
-        val58,
-        val57,
-        val56,
-        val55,
-        val54,
-        val53,
-        val52,
-        val51,
-        val50,
-        val49,
-        val48,
-        val47,
-        val46,
-        val45,
-        val44,
-        val43,
-        val42,
-        val41,
-        val40,
-        val39,
-        val38,
-        val37,
-        val36,
-        val35,
-        val34,
-        val33,
-        val32,
-        val31,
-        val30,
-        val29,
-        val28,
-        val27,
-        val26,
-        val25,
-        val24,
-        val23,
-        val22,
-        val21,
-        val20,
-        val19,
-        val18,
-        val17,
-        val16,
-        val15,
-        val14,
-        val13,
-        val12,
-        val11,
-        val10,
-        val9,
-        val8,
-        val7,
-        val6,
-        val5,
-        val4,
-        val3,
-        val2,
-        val1);
-  }
+      T val64)
+      : Vectorizedi{_mm512_set_epi8(
+            val64,
+            val63,
+            val62,
+            val61,
+            val60,
+            val59,
+            val58,
+            val57,
+            val56,
+            val55,
+            val54,
+            val53,
+            val52,
+            val51,
+            val50,
+            val49,
+            val48,
+            val47,
+            val46,
+            val45,
+            val44,
+            val43,
+            val42,
+            val41,
+            val40,
+            val39,
+            val38,
+            val37,
+            val36,
+            val35,
+            val34,
+            val33,
+            val32,
+            val31,
+            val30,
+            val29,
+            val28,
+            val27,
+            val26,
+            val25,
+            val24,
+            val23,
+            val22,
+            val21,
+            val20,
+            val19,
+            val18,
+            val17,
+            val16,
+            val15,
+            val14,
+            val13,
+            val12,
+            val11,
+            val10,
+            val9,
+            val8,
+            val7,
+            val6,
+            val5,
+            val4,
+            val3,
+            val2,
+            val1)} {}
   template <int64_t mask>
   static Vectorized<T> blend(Vectorized<T> a, Vectorized<T> b) {
     return _mm512_mask_blend_epi8(mask, a.values, b.values);
@@ -1367,8 +1356,8 @@ Vectorized<T> inline int_elementwise_binary_512(
     const Vectorized<T>& a,
     const Vectorized<T>& b,
     Op op) {
-  std::array<T, Vectorized<T>::size()> values_a{};
-  std::array<T, Vectorized<T>::size()> values_b{};
+  std::array<T, Vectorized<T>::size()> values_a;
+  std::array<T, Vectorized<T>::size()> values_b;
   a.store(values_a.data());
   b.store(values_b.data());
   for (int i = 0; i != Vectorized<T>::size(); i++) {
