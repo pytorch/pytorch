@@ -473,6 +473,22 @@ class _InstalledArtifact:
             )
         self._fn = fn
 
+    def _validate(self, package_blob: str) -> None:
+        """Check the artifact against this host at load, not at first call."""
+        import base64
+
+        from torch._dynamo.precompile_package import validate_cache_entry
+
+        # Exactly the resolution _ensure performs, or this checks a different
+        # entry frame than the install will.
+        fn = self._entry_factory() if self._fn is None else self._fn
+        try:
+            validate_cache_entry(fn, pickle.loads(base64.b64decode(package_blob)))
+        except PrecompileError:
+            raise
+        except Exception as e:
+            raise PrecompileError(str(e)) from e
+
     def _ensure(self) -> Any:
         if self._inner is None:
             fn = self._entry_factory() if self._fn is None else self._fn
@@ -3060,6 +3076,7 @@ class _PrecompileApi:
                 )
             if fn is not None:
                 forward._rebind(fn)
+            forward._validate(cast(str, meta["_PACKAGE"]))
             return PrecompiledCallable(forward)
         if fn is not None:
             raise PrecompileError(

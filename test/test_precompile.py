@@ -2735,6 +2735,45 @@ class TestPrecompile(TestCase):
         )
         self.assertTrue(_read_literal(ast.parse(code), "POLICY_DROPPED_GUARDS"))
 
+    def test_installed_artifact_validates_at_load_not_at_first_call(self):
+        # An installed artifact defers its mutation to the first call, which is
+        # the right default -- but it used to defer every way the artifact can
+        # be wrong for this host along with it, so a guard that would not
+        # rebuild surfaced as a bare AttributeError in the middle of a training
+        # step. Injected here, because capture now refuses this at the source.
+        from torch._dynamo.guards import GuardsStatePickler
+        from torch._dynamo.precompile_package import PrecompileSession
+
+        model = _PrecompileReadsAttr()
+        x = torch.randn(8)
+        x._cpu_copy = torch.randn(8)
+        drop = mock.patch.object(
+            GuardsStatePickler, "_carried_tensor_attributes", lambda self, obj: None
+        )
+        with (
+            drop,
+            mock.patch.object(
+                PrecompileSession, "_check_guards_are_rebuildable", lambda self: None
+            ),
+            mock.patch.object(
+                PrecompileSession, "_apply_guard_policy", lambda self: None
+            ),
+            torch.no_grad(),
+        ):
+            code, cache = torch.compiler.precompile(
+                _precompile_attr_entry,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+                example_inputs=[(model, x)],
+            )
+        from torch._precompile import _parse_artifact_metadata
+
+        self.assertEqual(_parse_artifact_metadata(code)["SERVING_MODE"], "installed")
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(PrecompileError, "cannot rebuild its guards"):
+            torch.compiler.precompile.load(code, cache)
 
     @parametrize("api", ["session", "public"])
     def test_guards_that_cannot_be_rebuilt_are_refused_at_capture(self, api):
