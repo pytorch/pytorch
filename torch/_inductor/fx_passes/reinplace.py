@@ -219,6 +219,43 @@ def scatter_always_uses_mutation(node: torch.fx.Node) -> bool:
     )
 
 
+# Indexed updates allowed between generalized_scatter and copy_ back to a graph
+# input when deciding scatter reinplace profitability (see #195285).
+_SCATTER_COPY_BACK_THROUGH_OPS = OrderedSet(
+    [
+        aten.index_put.default,
+        aten._unsafe_index_put.default,
+        aten.index_copy.default,
+    ]
+)
+
+
+def _is_copied_back_to_input(node: torch.fx.Node, inp: torch.fx.Node) -> bool:
+    return any(
+        user.target is aten.copy_.default and user.args[0] is inp for user in node.users
+    )
+
+
+def _scatter_copied_back_through_indexed_updates(
+    node: torch.fx.Node, inp: torch.fx.Node
+) -> bool:
+    """True if node reaches copy_(inp, ...) directly or via a single-user chain."""
+    current = node
+    seen: OrderedSet[torch.fx.Node] = OrderedSet()
+    while current not in seen:
+        seen.add(current)
+        if _is_copied_back_to_input(current, inp):
+            return True
+        if len(current.users) != 1:
+            return False
+        user = next(iter(current.users))
+        through = user.target in _SCATTER_COPY_BACK_THROUGH_OPS
+        if not through or user.args[0] is not current:
+            return False
+        current = user
+    return False
+
+
 def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     """Choose between mutating and functional scatter decompositions
 
@@ -236,10 +273,11 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     if is_node_realized(inp) and is_node_realized(node):  # type: ignore[arg-type]
         return True
 
-    # If the output is copied back into the input, this forces both to be
-    # realized as the output is a user of the input
-    if inp.op in ("placeholder", "get_attr") and any(  # type: ignore[union-attr]
-        user.target is aten.copy_.default and user.args[0] is inp for user in node.users
+    # If the output is copied back into the input (directly, or through a
+    # single-user chain of known inplaceable indexed updates), this forces both
+    # to be realized as the output is a user of the input.
+    if inp.op in ("placeholder", "get_attr") and (  # type: ignore[union-attr]
+        _scatter_copied_back_through_indexed_updates(node, inp)  # type: ignore[arg-type]
     ):
         return True
 
