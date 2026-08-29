@@ -12,7 +12,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from .. import config
 from ..codecache import code_hash, CodeCacheFuture, get_path, write_atomic
-from ..runtime.benchmarking import benchmarker
+from ..runtime.benchmarking import benchmarker, gpu_benchmark_lock
 from ..utils import cache_on_self, IndentedBuffer
 from ..virtualized import V
 from .common import TensorArg, WorkspaceArg
@@ -391,6 +391,7 @@ class MultiKernelCall:
 
         return self._kernels
 
+    @gpu_benchmark_lock
     def benchmark_sub_kernels(self, *args, **kwargs):
         """
         Benchmark all the sub kernels and return the execution time

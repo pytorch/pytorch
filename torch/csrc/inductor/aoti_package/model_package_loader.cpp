@@ -2,7 +2,6 @@
 
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/FileSystem.h>
-#include <c10/util/error.h>
 #include <c10/util/string_view.h>
 #include <c10/util/tempfile.h>
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>

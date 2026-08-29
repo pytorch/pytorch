@@ -95,6 +95,42 @@ project(${SKBUILD_PROJECT_NAME}
 # For standalone cmake invocations, find it via find_package.
 find_package(Python COMPONENTS Interpreter REQUIRED)
 
+# ---[ Where the Python packages go.
+# scikit-build-core exports each wheel tree to CMake as SKBUILD_<TREE>_DIR, and
+# wheel.install-dir picks which one becomes CMAKE_INSTALL_PREFIX. We set it to
+# "torch" so the C++ distribution lands at torch/lib and torch/include, as the
+# install rpath and torch/__init__.py both require; the prefix therefore sits
+# one level below platlib, and the Python-side install rules address
+# SKBUILD_PLATLIB_DIR directly instead of reaching it through the prefix.
+#
+# Those rules are guarded on SKBUILD, so a build scikit-build-core does not
+# drive (libtorch, tools/build_libtorch.py, downstream cmake --install) installs
+# the C++ distribution alone and keeps package data out of a conventional prefix
+# (see gh-191102). SKBUILD is set for every scikit-build-core configure,
+# editable installs included, where platlib is a per-build staging directory.
+#
+# The extension modules resolve the C++ tree through an $ORIGIN/lib install
+# rpath and torch/__init__.py resolves bin/ and lib/ off its own __file__, so
+# the prefix has to be the torch package directory. Enforce it rather than let
+# a mismatch produce an install that only fails at import time.
+if(SKBUILD)
+  get_filename_component(_torch_pkg_dir "${SKBUILD_PLATLIB_DIR}/torch" ABSOLUTE)
+  get_filename_component(_torch_prefix "${CMAKE_INSTALL_PREFIX}" ABSOLUTE)
+  if(NOT _torch_pkg_dir STREQUAL _torch_prefix)
+    message(FATAL_ERROR
+      "CMAKE_INSTALL_PREFIX must be the torch package directory: the "
+      "extension modules load the C++ libraries through an $ORIGIN/lib rpath "
+      "relative to themselves.\n"
+      "  SKBUILD_PLATLIB_DIR  : ${SKBUILD_PLATLIB_DIR}\n"
+      "  expected prefix      : ${_torch_pkg_dir}\n"
+      "  CMAKE_INSTALL_PREFIX : ${_torch_prefix}\n"
+      "Keep wheel.install-dir = \"torch\" in pyproject.toml, which is what "
+      "makes the two agree.")
+  endif()
+  unset(_torch_pkg_dir)
+  unset(_torch_prefix)
+endif()
+
 # Forward environment variables to CMake variables, replicating the behavior
 # previously handled by setup.py / tools/setup_helpers/cmake.py.
 # When built via setup.py, these are already set as -D flags; the module
@@ -355,6 +391,9 @@ cmake_dependent_option(
 cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX OR WIN32" OFF)
 cmake_dependent_option(USE_ROCM_CK_GEMM "Use ROCm Composable Kernel for GEMMs" ON "USE_ROCM;NOT WIN32" OFF)
 cmake_dependent_option(USE_ROCM_CK_SDPA "Use ROCm Composable Kernel for SDPA" ON "USE_ROCM;NOT WIN32" OFF)
+# Off by default because enabling gfx12 adds CK SDPA code generation and compile
+# cost to ROCm builds that already target gfx1200/gfx1201.
+cmake_dependent_option(USE_ROCM_CK_SDPA_GFX12 "Also build ROCm Composable Kernel SDPA for gfx12 (RDNA4)" OFF "USE_ROCM_CK_SDPA" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(USE_CUDNN "Use cuDNN" ON "USE_CUDA" OFF)
 cmake_dependent_option(USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
@@ -483,6 +522,22 @@ cmake_dependent_option(
 cmake_dependent_option(BUILD_FUNCTORCH "Build Functorch" ON "BUILD_PYTHON" OFF)
 cmake_dependent_option(BUILD_BUNDLE_PTXAS "Bundle PTX into torch/bin folder"
                        OFF "USE_CUDA" OFF)
+cmake_dependent_option(
+  USE_CMAKE_INSTRUMENTATION
+  "Use cmake-instrumentation to collect build metrics"
+  OFF # disabled by default because it causes CI timeouts
+  "CMAKE_VERSION VERSION_GREATER_EQUAL 4.3"
+  OFF
+)
+if(USE_CMAKE_INSTRUMENTATION)
+  cmake_instrumentation(
+    API_VERSION 1
+    DATA_VERSION 1.0
+    HOOKS postCMakeBuild
+    OPTIONS trace
+    CALLBACK "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/build_trace_summary.py" --root "${CMAKE_CURRENT_SOURCE_DIR}" --index
+  )
+endif()
 cmake_dependent_option(USE_KLEIDIAI "Use KleidiAI for the ARM CPU & AARCH64 architecture." ON
                         "CPU_AARCH64" OFF)
 # prioritized text linker, ON by default for AArch64+Linux, option visible to all AArch64, x86 and ppc64le.
@@ -1107,23 +1162,6 @@ cmake_dependent_option(
   Will be disabled if not supported by the platform" ON
   "USE_CUDA OR USE_ROCM" OFF)
 
-cmake_dependent_option(
-  USE_CMAKE_INSTRUMENTATION
-  "Use cmake-instrumentation to collect build metrics"
-  OFF # disabled by default because it causes CI timeouts
-  "CMAKE_VERSION VERSION_GREATER_EQUAL 4.3"
-  OFF
-)
-if(USE_CMAKE_INSTRUMENTATION)
-  cmake_instrumentation(
-    API_VERSION 1
-    DATA_VERSION 1.0
-    HOOKS postCMakeBuild
-    OPTIONS trace
-    CALLBACK "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/build_trace_summary.py" --root "${CMAKE_CURRENT_SOURCE_DIR}" --index
-  )
-endif()
-
 #
 # Cannot be put into Dependencies.cmake due circular dependency:
 # USE_FLASH_ATTENTION -> USE_ROCM -> Dependencies.cmake -> aotriton.cmake
@@ -1596,17 +1634,17 @@ if(BUILD_BUNDLE_PTXAS AND USE_CUDA)
           DESTINATION "${CMAKE_INSTALL_BINDIR}")
 endif()
 
-# File mirroring: copy source files into torchgen/packaged/, vendored
-# inductor templates, and symlink-replacement copies.  Previously handled
-# by setup.py; now consolidated here for both scikit-build-core and
-# setuptools builds.
-include(cmake/FileMirroring.cmake)
+if(SKBUILD)
+  # File mirroring: copy source files into torchgen/packaged/, vendored
+  # inductor templates, and symlink-replacement copies.  Previously handled
+  # by setup.py.
+  include(cmake/FileMirroring.cmake)
 
-# Package data: install non-Python data files (type stubs, templates,
-# headers, etc.) into the torch package.  Previously declared via
-# setup.py package_data; now consolidated here for both scikit-build-core
-# and setuptools builds.
-include(cmake/PackageData.cmake)
+  # Package data: install non-Python data files (type stubs, templates,
+  # headers, etc.) into the torch package.  Previously declared via
+  # setup.py package_data.
+  include(cmake/PackageData.cmake)
+endif()
 
 include(cmake/PostBuildSteps.cmake)
 
