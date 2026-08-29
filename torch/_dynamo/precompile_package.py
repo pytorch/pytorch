@@ -1434,6 +1434,7 @@ class PrecompileSession:
         example_inputs: Sequence[ExampleInput | tuple[object, ...]] | None = None,
         invariants: str | None = None,
         training: bool = False,
+        keep_example_grads: bool = False,
     ) -> None:
         # Not `example_inputs or ()`: truth-testing the caller's object turns the
         # likeliest mistake -- passing the tensors themselves instead of a
@@ -1477,6 +1478,11 @@ class PrecompileSession:
         # eagerly, so the artifact carries AOTAutograd's CompiledFunction and
         # calling .backward() on a served output runs precompiled code.
         self._training = training
+        # Leave .grad exactly as the example calls left it, for a caller whose
+        # example IS their live training step. Off by default: the documented
+        # flow is a warmup step and then a capture, where restoring is what
+        # keeps the capture from doubling the gradients it finds.
+        self._keep_example_grads = keep_example_grads
         # Set by the caller for the real capture; the guard probe leaves it off
         # so it does not pay for a lowering whose source is thrown away.
         self._keep_graphs = False
@@ -1634,9 +1640,16 @@ class PrecompileSession:
             # changed, and on the documented warmup-step-then-capture flow it
             # would otherwise double them. make_fx does the same; see the
             # rationale at torch._precompile._capture.
-            grads = _grad_snapshot(self._fn, self._example_inputs)
-            for tensor in grads:
-                tensor.grad = None
+            #
+            # Unless the caller says the example call IS their training step, in
+            # which case its gradients are the point and restoring discards the
+            # backward they just paid for -- silently, since the artifact is
+            # produced either way. Then precompile touches .grad not at all, and
+            # a pre-existing grad accumulates exactly as it would in eager.
+            if not self._keep_example_grads:
+                grads = _grad_snapshot(self._fn, self._example_inputs)
+                for tensor in grads:
+                    tensor.grad = None
             # Automatic examples are the ordinary no_grad inference path.
             # inference_mode is a distinct guarded state and is disabled here
             # even when the caller entered it before starting capture.
@@ -2737,6 +2750,7 @@ def precompile_capture(
     example_inputs: Sequence[ExampleInput | tuple[object, ...]] | None = None,
     invariants: str | None = None,
     training: bool = False,
+    keep_example_grads: bool = False,
 ) -> PrecompileSession:
     r"""Begin capturing ``fn`` into a multi-graph artifact.
 
@@ -2769,6 +2783,7 @@ def precompile_capture(
         example_inputs=example_inputs,
         invariants=invariants,
         training=training,
+        keep_example_grads=keep_example_grads,
     )
 
 
