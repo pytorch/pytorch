@@ -1493,7 +1493,9 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertIn(
             "factory_kernel",
             kernel_names,
-            lambda msg: f"{msg}\nfactory_kernel should be detected, got: {kernel_names}",
+            lambda msg: (
+                f"{msg}\nfactory_kernel should be detected, got: {kernel_names}"
+            ),
         )
 
         a = torch.randn(5, device=GPU_TYPE)
@@ -4413,7 +4415,6 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             BypassAOTAutogradCache, "Unsupported call_function target"
         ):
             check_cacheable(gm)
-
 
 
 def _subprocess_gen_dtensor_cache_key(queue):
