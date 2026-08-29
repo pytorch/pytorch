@@ -2,7 +2,7 @@ add_loop_eager,compile_time_instruction_count,3862000000,0.1
 
 
 
-add_loop_eager_dynamic,compile_time_instruction_count,5468000000,0.1
+add_loop_eager_dynamic,compile_time_instruction_count,4919000000,0.1
 
 
 
