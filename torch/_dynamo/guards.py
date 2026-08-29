@@ -4991,7 +4991,21 @@ class GuardsStatePickler(pickle.Pickler):
         elif inspect.ismethod(obj):
             func = obj.__func__
             method_self = obj.__self__
-            inner_func = getattr(method_self, func.__name__)
+            # Decide from the receiver's FATE, not by reading it. This branch
+            # emits a bound method, so its own output comes back through here
+            # whenever the state is serialized twice -- which the guard policy
+            # does, rebuilding each frame from the pickle capture already made.
+            # By then the receiver is the sentinel, and the getattr below used
+            # to raise "'_Missing' object has no attribute <name>". Carrying the
+            # binding unconditionally makes the branch a FIXED POINT: it reduces
+            # its own output to itself, so the second pass is stable, and the
+            # reduction never depends on the receiver resolving the name at load
+            # either. The method stays a real method -- degrading it to the
+            # sentinel instead would re-pin a TYPE_MATCH on it to _Missing, and
+            # the artifact would capture and then never match a live receiver.
+            if self._reduces_to_missing(method_self):
+                return type(self)._unpickle_bound_method, (func, method_self)
+            inner_func = getattr(method_self, func.__name__, None)
             if inspect.ismethod(inner_func):
                 inner_func = inner_func.__func__
             if func is not inner_func:
@@ -5072,6 +5086,22 @@ class GuardsStatePickler(pickle.Pickler):
                 return type(self)._unpickle_fsdp_module_type, (original_type,)
 
         return NotImplemented
+
+    def _reduces_to_missing(self, obj: Any) -> bool:
+        """Whether this value is already, or is about to become, the sentinel.
+
+        Mirrors the three rules above that substitute _Missing for a value the
+        guard tree never reached. A reducer that has to know its own output will
+        round-trip asks here rather than reading the value, because reading is
+        exactly what the substitution breaks.
+        """
+        if type(obj) is _Missing or id(obj) in self.missing_values:
+            return True
+        if isinstance(obj, torch.nn.Module):
+            return id(obj) not in self.guard_tree_values
+        if isinstance(obj, torch.Tensor) and obj.device.type != "meta":
+            return id(obj) not in self.guard_tree_values
+        return False
 
     def _prune_unguarded_attributes(self, obj: Any) -> None:
         """Mark every ``__dict__`` value nothing guards as prunable.
