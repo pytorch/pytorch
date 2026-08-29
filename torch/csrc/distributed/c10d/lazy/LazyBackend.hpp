@@ -75,6 +75,10 @@ class LazyBackend : public Backend {
   c10::intrusive_ptr<Backend::Options> getBackendOptions() override {
     return primary_->getBackendOptions();
   }
+  void setGroupUid(const std::string& pg_uid) override {
+    Backend::setGroupUid(pg_uid);
+    primary_->setGroupUid(pg_uid);
+  }
 
   // ---- P2P: dispatched to per-peer 2-rank pair comms ----
   c10::intrusive_ptr<Work> send(
@@ -107,6 +111,16 @@ class LazyBackend : public Backend {
   c10::intrusive_ptr<Work> endCoalescing() override {
     coalescing_active_ = false;
     return primary_->endCoalescing();
+  }
+
+  bool supportsTimeEstimation() const override {
+    return primary_->supportsTimeEstimation();
+  }
+  void startTimeEstimate() override {
+    primary_->startTimeEstimate();
+  }
+  float endTimeEstimate() override {
+    return primary_->endTimeEstimate();
   }
 
   // ---- Collectives: forwarded to the primary comm ----
@@ -159,6 +173,12 @@ class LazyBackend : public Backend {
       std::vector<at::Tensor>& inputTensors,
       const GatherOptions& opts) override {
     return primary_->gather(outputTensors, inputTensors, opts);
+  }
+  c10::intrusive_ptr<Work> gather_single(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const GatherOptions& opts) override {
+    return primary_->gather_single(outputBuffer, inputBuffer, opts);
   }
   c10::intrusive_ptr<Work> scatter(
       std::vector<at::Tensor>& outputTensors,
@@ -214,10 +234,20 @@ class LazyBackend : public Backend {
   std::shared_ptr<c10::Allocator> getMemAllocator() override {
     return primary_->getMemAllocator();
   }
+  at::Tensor allocateTensor(long size, at::TensorOptions options) override {
+    return primary_->allocateTensor(size, options);
+  }
+  bool supportsTensorAlloc(c10::DeviceIndex deviceIdx) override {
+    return primary_->supportsTensorAlloc(deviceIdx);
+  }
 
   // ---- Lifecycle / fault tolerance: fan out to every comm we own ----
   void eagerConnectSingleDevice(at::Device device) override {
     primary_->eagerConnectSingleDevice(device);
+  }
+  void setBoundDeviceId(std::optional<at::Device> device) override {
+    primary_->setBoundDeviceId(device);
+    Backend::setBoundDeviceId(primary_->getBoundDeviceId());
   }
   void setTimeout(std::chrono::milliseconds timeout) override {
     primary_->setTimeout(timeout);
@@ -249,16 +279,38 @@ class LazyBackend : public Backend {
     }
   }
   ErrorType getError() override {
-    return primary_->getError();
+    auto error = primary_->getError();
+    if (error != ErrorType::SUCCESS) {
+      return error;
+    }
+    for (const auto& channel : snapshotPairComms()) {
+      error = channel->getError();
+      if (error != ErrorType::SUCCESS) {
+        return error;
+      }
+    }
+    return ErrorType::SUCCESS;
   }
   void suspend() override {
     primary_->suspend();
+    for (const auto& channel : snapshotPairComms()) {
+      channel->suspend();
+    }
   }
   void resume() override {
     primary_->resume();
+    for (const auto& channel : snapshotPairComms()) {
+      channel->resume();
+    }
   }
   std::unordered_map<std::string, uint64_t> getMemoryStats() override {
-    return primary_->getMemoryStats();
+    auto stats = primary_->getMemoryStats();
+    for (const auto& channel : snapshotPairComms()) {
+      for (const auto& [name, value] : channel->getMemoryStats()) {
+        stats[name] += value;
+      }
+    }
+    return stats;
   }
   void registerAbortHook(int64_t hook_id, AbortHook hook) override {
     abort_hooks_.emplace(hook_id, hook);
@@ -274,6 +326,25 @@ class LazyBackend : public Backend {
     std::lock_guard<std::mutex> lk(pair_mu_);
     for (auto& [_, channel] : pair_comms_) {
       channel->unregisterAbortHook(hook_id);
+    }
+  }
+  bool supportsCompletionHooks() const override {
+    return primary_->supportsCompletionHooks();
+  }
+  void registerCompletionHook(int64_t hook_id, CompletionHook hook) override {
+    completion_hooks_.emplace(hook_id, hook);
+    primary_->registerCompletionHook(hook_id, hook);
+    std::lock_guard<std::mutex> lk(pair_mu_);
+    for (auto& [_, channel] : pair_comms_) {
+      channel->registerCompletionHook(hook_id, hook);
+    }
+  }
+  void unregisterCompletionHook(int64_t hook_id) override {
+    completion_hooks_.erase(hook_id);
+    primary_->unregisterCompletionHook(hook_id);
+    std::lock_guard<std::mutex> lk(pair_mu_);
+    for (auto& [_, channel] : pair_comms_) {
+      channel->unregisterCompletionHook(hook_id);
     }
   }
 
@@ -363,10 +434,13 @@ class LazyBackend : public Backend {
       sub->setBoundDeviceId(getBoundDeviceId());
     }
 
-    // Fan registered hooks out to the new channel so user-registered abort
-    // hooks observe events from every comm we own.
+    // Fan registered hooks out to the new channel so user-registered abort and
+    // completion hooks observe events from every comm we own.
     for (const auto& [hook_id, hook] : abort_hooks_) {
       sub->registerAbortHook(hook_id, hook);
+    }
+    for (const auto& [hook_id, hook] : completion_hooks_) {
+      sub->registerCompletionHook(hook_id, hook);
     }
 
     std::lock_guard<std::mutex> lk(pair_mu_);
@@ -392,6 +466,16 @@ class LazyBackend : public Backend {
   }
 
  private:
+  std::vector<c10::intrusive_ptr<T>> snapshotPairComms() const {
+    std::lock_guard<std::mutex> lk(pair_mu_);
+    std::vector<c10::intrusive_ptr<T>> channels;
+    channels.reserve(pair_comms_.size());
+    for (const auto& [_, channel] : pair_comms_) {
+      channels.push_back(channel);
+    }
+    return channels;
+  }
+
   // Per-pair monotonically increasing counter so successive pair-comm
   // allocations for the same {lo,hi} produce distinct names (and therefore
   // distinct store-bootstrap key namespaces). Both ranks of a pair increment
@@ -414,6 +498,7 @@ class LazyBackend : public Backend {
 
   bool coalescing_active_{false};
   std::unordered_map<int64_t, AbortHook> abort_hooks_;
+  std::unordered_map<int64_t, CompletionHook> completion_hooks_;
 };
 
 } // namespace c10d

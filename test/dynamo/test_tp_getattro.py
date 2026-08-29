@@ -1,12 +1,23 @@
 # Owner(s): ["module: dynamo"]
-"""Tests for getattro_impl: unified attribute access protocol in Dynamo."""
+"""Tests for tp_getattro_impl: unified attribute access protocol in Dynamo."""
+
+import functools
+import inspect
+import math
+import sys
+import types
+import unittest
 
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch.testing._internal.common_utils import HardwareClassification
+from torch.utils._triton import has_triton_package
 
 
 class TpGetattroTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # --- getattr() builtin ---
 
     def test_getattr_constant(self):
@@ -420,7 +431,7 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(result, torch.sin(x))
 
-    # --- Descriptor protocol (tp_descr_get through getattro_impl) ---
+    # --- Descriptor protocol (tp_descr_get through tp_getattro_impl) ---
 
     def test_data_descriptor_priority_over_instance_dict(self):
         """Data descriptors (property) take precedence over instance __dict__."""
@@ -564,6 +575,28 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
 
         result = torch.compile(fn, backend="eager", fullgraph=True)()
         self.assertEqual(sorted(result), ["a", "b"])
+
+    def test_nonstandard_c_method_descriptor_graph_break_binding(self):
+        if not has_triton_package():
+            self.skipTest("requires Triton package")
+
+        from triton._C.libtriton import ir
+
+        context = ir.context()
+        ir.load_dialects(context)
+        builder = ir.builder(context)
+        descriptor = inspect.getattr_static(type(builder), "get_loc")
+        if not inspect.ismethoddescriptor(descriptor) or isinstance(
+            descriptor, types.MethodDescriptorType
+        ):
+            self.skipTest("requires a nonstandard C method descriptor")
+        bound_method_type = type(builder.get_loc)
+
+        def fn():
+            builder.get_loc()
+            return isinstance(builder.get_loc, bound_method_type)
+
+        self.assertTrue(torch.compile(fn, backend="eager")())
 
     def test_classmethod_descriptor_dict_fromkeys(self):
         """dict.fromkeys is a classmethod_descriptor."""
@@ -731,7 +764,7 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
             torch.compile(fn, backend="eager")()
 
     def test_range_start_stop_step(self):
-        """RangeVariable.getattro_impl fast path for start/stop/step."""
+        """RangeVariable.tp_getattro_impl fast path for start/stop/step."""
 
         def fn():
             r = range(2, 10, 3)
@@ -948,7 +981,7 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         """super().__getattribute__() inside a custom __getattribute__
         must correctly resolve properties (data descriptors).  This
         exercises the recursion guard: descriptor resolution internally
-        looks up __class__ via getattro_impl, which must not re-enter
+        looks up __class__ via tp_getattro_impl, which must not re-enter
         the custom __getattribute__."""
 
         class MyObj:
@@ -1003,7 +1036,7 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
     def test_custom_getattribute_resolves_dunder_class(self):
         """Direct obj.__class__ access with a custom __getattribute__
         must return the correct type (the __class__ shortcut in
-        getattro_impl fires before __getattribute__ dispatch)."""
+        tp_getattro_impl fires before __getattribute__ dispatch)."""
 
         class MyObj:
             def __getattribute__(self, name):
@@ -1039,6 +1072,110 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
 
         result = torch.compile(fn, backend="eager")()
         self.assertTrue(result)
+
+    def test_bound_builtin_method_meth_getsets(self):
+        """meth_getsets/meth_members on a non-constant receiver."""
+
+        class L(list):
+            pass
+
+        def fn(x):
+            m = x.append
+            return (
+                m.__name__,
+                m.__qualname__,
+                m.__self__ is x,
+                m.__doc__,
+                m.__text_signature__,
+                m.__module__,
+            )
+
+        x = L([torch.ones(2)])
+        expected = fn(x)
+        # __qualname__ names the receiver's type, not the descriptor's owner
+        # (list.append), so a subclass receiver reports the subclass.
+        self.assertEqual(expected[1], f"{L.__qualname__}.append")
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, expected)
+
+    def test_bound_builtin_method_classmethod_descr(self):
+        """A classmethod descriptor binds to the type, so __self__ is the class."""
+
+        class D(dict):
+            pass
+
+        def fn(x):
+            m = x.fromkeys
+            return (
+                m.__name__,
+                m.__qualname__,
+                m.__self__ is D,
+                m.__doc__,
+                m.__text_signature__,
+                m.__module__,
+            )
+
+        x = D(a=torch.ones(2))
+        expected = fn(x)
+        self.assertEqual(expected[1], f"{D.__qualname__}.fromkeys")
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, expected)
+
+    def test_bound_builtin_method_builtin_function_descr(self):
+        """A builtin function taken straight out of a type dict (tuple.__new__)."""
+
+        new = tuple.__new__
+
+        def fn(x):
+            return (
+                new.__name__,
+                new.__qualname__,
+                new.__self__ is tuple,
+                new.__doc__,
+                new.__text_signature__,
+                new.__module__,
+                x.sum(),
+            )
+
+        x = torch.ones(2)
+        expected = fn(x)
+        self.assertEqual(expected[1], "tuple.__new__")
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, expected)
+
+    def test_bound_builtin_method_module_receiver(self):
+        """meth_get__qualname__ returns the bare name when __self__ is a module."""
+
+        def fn(x):
+            m = types.ModuleType.__dir__.__get__(math)
+            return m.__qualname__, m.__name__, m.__module__, m.__self__ is math, x.sum()
+
+        x = torch.ones(2)
+        expected = fn(x)
+        self.assertEqual(expected[0], "__dir__")
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, expected)
+
+    def test_bound_builtin_method_const_instance_receiver(self):
+        """A python-constant, non-type receiver: __qualname__ names type(self)."""
+
+        def fn(fs, x):
+            m = fs.__contains__
+            return (
+                m.__qualname__,
+                m.__name__,
+                m.__self__ is fs,
+                m.__doc__,
+                m.__module__,
+                x.sum(),
+            )
+
+        fs = frozenset({1, 2})
+        x = torch.ones(2)
+        expected = fn(fs, x)
+        self.assertEqual(expected[0], "frozenset.__contains__")
+        result = torch.compile(fn, backend="eager", fullgraph=True)(fs, x)
+        self.assertEqual(result, expected)
 
     def test_bmv_load_then_call(self):
         """Load a method into a variable, then call it through CMV."""
@@ -1733,7 +1870,7 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, x)
 
     def test_float_fromhex_inline(self):
-        """float.fromhex accessed inline routes through BuiltinVariable.getattro_impl."""
+        """float.fromhex accessed inline routes through BuiltinVariable.tp_getattro_impl."""
 
         def fn():
             return float.fromhex("0x1.0p10")
@@ -1771,7 +1908,7 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
 
     def test_specialized_builtin_non_callable_attr(self):
         """Non-callable attr on a specialized builtin (DictBuiltinVariable) via
-        BaseBuiltinVariable.getattro_impl."""
+        BaseBuiltinVariable.tp_getattro_impl."""
 
         def fn():
             return dict.__name__
@@ -1875,6 +2012,101 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)()
         self.assertEqual(result, "default")
 
+    # --- CallMethodVariable fidelity (python_type / __name__ / repr) ---
+
+    def test_bound_tensor_method_python_type(self):
+        """A bound tensor method is builtin_function_or_method, not MethodType."""
+
+        def fn(x):
+            return (
+                isinstance(x.add, types.MethodType),
+                isinstance(x.add, types.BuiltinMethodType),
+            )
+
+        x = torch.randn(3)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x), (False, True)
+        )
+
+    def test_bound_tensor_method_repr_graph_breaks(self):
+        """repr() of a bound method embeds an address, so it cannot be modeled."""
+
+        def fn(x):
+            return x + 1, repr(x.add)
+
+        x = torch.randn(3)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+    def test_builtin_class_attr_name(self):
+        """len.__class__ is a type, so __name__ is the type's, not '__class__'."""
+
+        def fn():
+            return len.__class__.__name__
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, "builtin_function_or_method")
+
+    def test_metaclass_builtin_callable_attr_name(self):
+        """A builtin aliased onto a metaclass keeps its own __name__."""
+
+        class Meta(type):
+            action = len
+
+        class MyClass(metaclass=Meta):
+            pass
+
+        def fn():
+            return MyClass.action.__name__
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, "len")
+
+    # --- function slots that have no real backing function object ---
+
+    def test_functools_wraps_over_nested_function(self):
+        """functools.wraps copies every WRAPPER_ASSIGNMENTS slot off the
+        wrapped function; on 3.14 that includes the __annotate__ getset."""
+
+        def fn(x):
+            # inner closes over a tensor, so it has no materializable backing
+            # function object and every slot must come off the VT itself.
+            def inner():
+                return x + 1
+
+            @functools.wraps(inner)
+            def wrapper():
+                return inner()
+
+            return wrapper(), wrapper.__name__
+
+        x = torch.ones(1)
+        result, name = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, x + 1)
+        self.assertEqual(name, "inner")
+
+    @unittest.skipIf(
+        sys.version_info < (3, 14), "__annotate__ was added in Python 3.14"
+    )
+    def test_nested_function_annotate(self):
+        def fn(x):
+            def unannotated(a):
+                return a + 1
+
+            def annotated(a: int) -> int:
+                return a + 1
+
+            return unannotated.__annotate__, annotated.__annotate__ is None
+
+        x = torch.ones(1)
+        unannotated, annotated_is_none = torch.compile(
+            fn, backend="eager", fullgraph=True
+        )(x)
+        self.assertIsNone(unannotated)
+        self.assertFalse(annotated_is_none)
+
     # --- UDCV C-level method descriptor (via CallMethodVariable) ---
 
     def test_inherited_dunder_get_descriptor(self):
@@ -1891,7 +2123,7 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         self.assertIs(result, property.__get__)
 
     def test_unresolved_attr_graph_breaks(self):
-        """Accessing an attribute that getattro_impl cannot resolve graph-breaks
+        """Accessing an attribute that tp_getattro_impl cannot resolve graph-breaks
         instead of silently deferring via GetAttrVariable."""
 
         def fn():
@@ -1902,7 +2134,7 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
             torch.compile(fn, backend="eager", fullgraph=True)()
 
     def test_autograd_function_apply_call(self):
-        """AutogradFunctionVariable.apply resolves via getattro_impl BMV."""
+        """AutogradFunctionVariable.apply resolves via tp_getattro_impl BMV."""
 
         class MyFunc(torch.autograd.Function):
             @staticmethod
