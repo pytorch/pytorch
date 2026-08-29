@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from typing import Any
 
 import torch
@@ -12,7 +12,11 @@ from torch._functorch.utils import exposed_in
 @exposed_in("torch.func")
 def functional_call(
     module: torch.nn.Module,
-    parameter_and_buffer_dicts: dict[str, Tensor] | Sequence[dict[str, Tensor]],
+    parameter_and_buffer_dicts: (
+        dict[str, Tensor]
+        | Sequence[dict[str, Tensor]]
+        | Iterator[tuple[str, Tensor]]
+    ),
     args: Any = None,
     kwargs: dict[str, Any] | None = None,
     *,
@@ -109,9 +113,10 @@ def functional_call(
 
     Args:
         module (torch.nn.Module): the module to call
-        parameters_and_buffer_dicts (Dict[str, Tensor] or tuple of Dict[str, Tensor]): the parameters that will be used in
-            the module call. If given a tuple of dictionaries, they must have distinct keys so that all dictionaries can
-            be used together
+        parameters_and_buffer_dicts (Dict[str, Tensor], tuple of Dict[str, Tensor], or iterator of (str, Tensor)):
+            the parameters that will be used in the module call. If given a tuple of dictionaries, they must have
+            distinct keys so that all dictionaries can be used together. An iterator can be used directly with APIs
+            such as ``module.named_parameters()``.
         args (Any or tuple): arguments to be passed to the module call. If not a tuple, considered a single argument.
         kwargs (dict): keyword arguments to be passed to the module call
         tie_weights (bool, optional): If True, then parameters and buffers tied in the original model will be treated as
@@ -145,10 +150,12 @@ def functional_call(
         parameters_and_buffers = {
             k: v for d in parameter_and_buffer_dicts for k, v in d.items()
         }
+    elif isinstance(parameter_and_buffer_dicts, Iterator):
+        parameters_and_buffers = dict(parameter_and_buffer_dicts)
     else:
         raise ValueError(
-            f"Expected parameter_and_buffer_dicts to be a dict, or a list/tuple of dicts, "
-            f"but got {type(parameter_and_buffer_dicts)}"
+            "Expected parameter_and_buffer_dicts to be a dict, a list/tuple of dicts, "
+            f"or an iterator of (name, Tensor) pairs, but got {type(parameter_and_buffer_dicts)}"
         )
 
     return nn.utils.stateless._functional_call(
