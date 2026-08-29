@@ -5223,11 +5223,11 @@ class CheckFunctionManager:
             # inspection build that runs AFTER the runtime one hands the filter
             # -- and therefore _GuardFact.code and the committed invariants
             # report -- each guard's code parts two or three times over. Build
-            # the entries first whenever anything is going to want them, which
-            # for a serialization-only filter is not otherwise until later.
-            if guard_filter_fn is not None or (
-                save_guards and serialization_guard_filter_fn is not None
-            ):
+            # the entries first whenever the RUNTIME build is going to need
+            # them. A serialization-only filter does not: with no runtime
+            # filter the runtime build sees every guard, so it IS the
+            # inspection build and its builder answers the same questions.
+            if guard_filter_fn is not None:
                 build_filter_entries()
 
             runtime_guards = (
@@ -5242,6 +5242,14 @@ class CheckFunctionManager:
                 runtime_save_guards,
                 guard_filter_fn=guard_filter_fn,
             )
+            if (
+                filter_entries is None
+                and save_guards
+                and serialization_guard_filter_fn is not None
+            ):
+                filter_entries = [
+                    make_guard_filter_entry(guard, builder) for guard in all_guards
+                ]
 
             serialized_guards = runtime_guards
             serialization_builder = builder
