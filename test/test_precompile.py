@@ -2560,6 +2560,35 @@ class TestPrecompile(TestCase):
             # k never varied, so nothing checks it: the captured graph serves.
             self.assertEqual(loaded(x, 5), x * 2)
 
+    def test_shape_guards_survive_a_single_example(self):
+        # Invariant-guard dropping is licensed by "it discriminated nothing",
+        # but with ONE example nothing can discriminate, so the rule would drop
+        # every input guard -- including the one that checks the runtime tensor
+        # looks like the captured one at all. Shape-bearing guards are therefore
+        # never policy-dropped, and an out-of-domain call is refused rather than
+        # reaching a kernel specialized for a different shape.
+        x = torch.randn(2, 8)
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _precompile_scale_sum,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                example_inputs=[(x,)],
+            )
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertEqual(loaded(x), _precompile_scale_sum(x))
+            for bad in (
+                torch.randn(3, 8),
+                torch.randn(2, 9),
+                torch.randn(16),
+                torch.randn(2, 8, dtype=torch.float64),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "no captured variant"):
+                    loaded(bad)
+
     def test_discriminating_guards_are_kept(self):
         # The other half: a value that DID vary is what selects between the
         # variants, so its guard survives and both variants serve correctly.
