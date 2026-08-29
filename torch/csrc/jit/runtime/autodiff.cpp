@@ -319,7 +319,7 @@ static std::vector<Value*> linearGradientForNode(
   auto block = linear->addBlock();
   WithInsertPoint guard(block);
   auto results = GradientHelper(node).gradient(grad_values);
-  return fmap(results, [block, linear](Value* grad) -> Value* {
+  return fmap(std::move(results), [block, linear](Value* grad) -> Value* {
     if (!grad || grad->mustBeNone())
       return nullptr;
     block->registerOutput(grad);
