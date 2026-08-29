@@ -365,12 +365,12 @@ std::vector<uint8_t> FileStore::compareSet(
     file.write(regKey);
     file.write(desiredValue);
     return desiredValue;
-  } else if (!cache_.contains(regKey)) {
+  } else if (it == cache_.end()) {
     // if the key does not exist
     return expectedValue;
   }
   // key exists but current value is not expected
-  return cache_[regKey];
+  return it->second;
 }
 
 std::vector<uint8_t> FileStore::get(const std::string& key) {

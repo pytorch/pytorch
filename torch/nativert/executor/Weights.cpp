@@ -121,8 +121,9 @@ Weights::Weights(
       }
 
       std::string paramName = it->second;
-      if (maybeNewWeightsMeta->contains(paramName)) {
-        newTensorMeta = *maybeNewWeightsMeta->at(paramName);
+      if (auto metaIt = maybeNewWeightsMeta->find(paramName);
+          metaIt != maybeNewWeightsMeta->end()) {
+        newTensorMeta = *metaIt->second;
       } else {
         TORCH_CHECK(
             false,

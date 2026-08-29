@@ -258,7 +258,7 @@ struct MakeDefsDominateUses {
       Value* inp_remapped = inp;
       if (auto it = remap.find(inp_remapped); it != remap.end()) {
         n->replaceInput(i, it->second);
-        inp_remapped = remap[inp_remapped];
+        inp_remapped = it->second;
       }
 
       // This conditional isn't strictly necessary, but saves a lot of
