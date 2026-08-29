@@ -3247,9 +3247,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return DictBuiltinVariable.call_custom_dict_fromkeys(
-            tx, dict, *args, **kwargs
-        )
+        return DictBuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
 
     tp_methods = {
         "fromkeys": Method(fromkeys),
