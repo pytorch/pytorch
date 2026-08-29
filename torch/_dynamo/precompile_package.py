@@ -919,7 +919,7 @@ def _object_identity(value: object) -> str:
     return f"is a {type(value).__module__}.{type(value).__qualname__}"[:160]
 
 
-# Guards that pin an input's SHAPE, and are therefore never policy-dropped even
+# Guards that pin an input's SHAPE or VALUE, and are never policy-dropped even
 # when they held identically across every captured variant. Dropping a guard is
 # licensed by "it discriminated nothing", but with a single example nothing CAN
 # discriminate, and what silently disappears is the check that the runtime tensor
@@ -932,6 +932,16 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
         "TENSOR_MATCH",
         "SEQUENCE_LENGTH",
         "SYMBOL_MATCH",
+        # Value-equality guards belong here for the same reason and are the
+        # half that bites hardest: they pin a Python value the graph
+        # specialized on -- an int or bool argument, `module.training`, an
+        # `.item()` result, `mask=None`. Dropped, the artifact serves the
+        # captured branch for every other value, with correct-looking numerics
+        # and nothing in the header to say so. Shapes at least crash inside a
+        # kernel; these do not.
+        "CONSTANT_MATCH",
+        "EQUALS_MATCH",
+        "DUPLICATE_INPUT",
     }
 )
 
@@ -1135,6 +1145,7 @@ def _summarize(
     entry: _DynamoCacheEntry,
     dropped: set[tuple[str, str]],
     kept: set[tuple[str, str]],
+    policy_dropped: set[tuple[str, str]],
     risky: set[tuple[str, str]],
     truncated: frozenset[str],
     uncovered: frozenset[str],
@@ -1154,6 +1165,7 @@ def _summarize(
         dropped_guards=tuple(sorted(dropped)),
         kept_guards=tuple(sorted(kept)),
         risky_dropped_guards=tuple(sorted(risky)),
+        policy_dropped_guards=tuple(sorted(policy_dropped)),
         capture_errors=tuple(capture_errors),
     )
 
@@ -1697,6 +1709,7 @@ class PrecompileSession:
             self._package.cache_entry(),
             self._dropped_guards,
             self._kept_guards,
+            self._policy_dropped_guards,
             risky,
             self._package.truncated_frames,
             self._package.uncovered_frames,

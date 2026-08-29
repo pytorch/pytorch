@@ -2517,14 +2517,15 @@ class TestPrecompile(TestCase):
         with _maybe_scoped(loaded), torch.no_grad():
             self.assertIsNotNone(loaded(model, x, True))
             counters.clear()
-            # flag varied across nothing here -- one example -- so its guard is
-            # not serialized and the captured graph answers. That is the trade
-            # invariant-guard dropping makes, and it is why the artifact's
-            # domain is the calls you gave it.
-            self.assertIsNotNone(loaded(model, x, False))
+            # flag pins a VALUE, so its guard survives even though it never
+            # varied. A standalone artifact has no compiler and refuses; an
+            # installed one is on the frame evaluator and recompiles, which is
+            # torch.compile parity. Either way the answer is never wrong.
             if installed:
-                self.assertEqual(counters["stats"]["unique_graphs"], 0)
-        del reference, installed
+                self.assertEqual(loaded(model, x, False), reference)
+            else:
+                with self.assertRaisesRegex(RuntimeError, "no captured variant"):
+                    loaded(model, x, False)
 
     def test_dynamo_tracer_training_across_a_graph_break_matches_torch_compile(self):
         # Gradients, through a break, against torch.compile as the reference.
@@ -2560,10 +2561,10 @@ class TestPrecompile(TestCase):
             self.assertEqual(want, param.grad)
 
     def test_invariant_guards_are_not_serialized(self):
-        # The default, and a load-bearing one: a guard whose value never varied
-        # across the capture discriminates nothing, so it is not serialized.
-        # The trade is explicit -- an uncovered value is then served by a
-        # captured graph rather than refused.
+        # A guard whose value never varied discriminates nothing, so it is not
+        # serialized -- EXCEPT the ones that pin a shape or a value, which are
+        # kept regardless. Here k pins a value, so it survives and an uncovered
+        # k is refused rather than answered from the captured graph.
         from torch._precompile import _parse_artifact_metadata
 
         xs = [torch.randn(3), torch.randn(5)]
@@ -2581,8 +2582,9 @@ class TestPrecompile(TestCase):
         x = torch.randn(3)
         with torch.no_grad():
             self.assertEqual(loaded(x, 2), x * 2)
-            # k never varied, so nothing checks it: the captured graph serves.
-            self.assertEqual(loaded(x, 5), x * 2)
+            # k pins a value, so it is checked even though it never varied.
+            with self.assertRaisesRegex(RuntimeError, "no captured variant"):
+                loaded(x, 5)
 
     @parametrize("junk", ["dtype", "int", "str", "device"])
     def test_unguarded_interned_attribute_does_not_poison_the_artifact(self, junk):
