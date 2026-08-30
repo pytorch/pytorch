@@ -21720,7 +21720,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         "nn.functional.dropout",
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.dropout, input, *args, **kwargs),
-        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16, torch.complex64),
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
@@ -21771,7 +21771,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         "nn.functional.dropout2d",
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.dropout2d, input, *args, **kwargs),
-        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16, torch.complex64),
         skips=(
             # lambda impl
@@ -21790,7 +21790,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         "nn.functional.dropout3d",
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.dropout3d, input, *args, **kwargs),
-        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16, torch.complex64),
         skips=(
             # lambda impl
@@ -21809,7 +21809,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         "nn.functional.alpha_dropout",
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.alpha_dropout, input, *args, **kwargs),
-        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16, torch.complex64),
         gradcheck_wrapper=wrapper_set_seed,
         supports_forward_ad=True,
@@ -21826,14 +21826,14 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
             # Fails in cuda11.7 and xpu
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu', device_type=('cuda', 'xpu')),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),),),
-    # In training mode, feature_alpha_dropout currently doesn't support inputs of complex dtype
-    # unlike when `train=False`, it supports complex inputs, hence 2 OpInfos to cover all cases
+    # feature_alpha_dropout has two OpInfos to cover train=True and train=False,
+    # whose sample inputs differ; both support complex inputs.
     OpInfo(
         "nn.functional.feature_alpha_dropout",
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.feature_alpha_dropout, input, *args, **kwargs),
         variant_test_name="with_train",
-        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16, torch.complex64),
         skips=(
             # lambda impl
@@ -24568,10 +24568,17 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Expected: dropout is not comparable"),
                          'TestCommon',
                          'test_python_ref_executor', device_type=('cuda', 'xpu')),
-            # AssertionError: Tensor-likes are not close!
+            # AssertionError: Tensor-likes are not close! (dropout draws a fresh
+            # mask per call, so conj/neg-view invariance does not hold)
             DecorateInfo(unittest.skip("Expected: dropout is not comparable"),
                          'TestMathBits',
                          'test_neg_view'),
+            DecorateInfo(unittest.skip("Expected: dropout is not comparable"),
+                         'TestMathBits',
+                         'test_conj_view'),
+            DecorateInfo(unittest.skip("Expected: dropout is not comparable"),
+                         'TestMathBits',
+                         'test_neg_conj_view'),
             # AssertionError: Tensor-likes are not close!
             DecorateInfo(unittest.skip("Expected: dropout is not comparable"),
                          'TestCommon',
@@ -24631,7 +24638,11 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Expected: dropout is not comparable"),
                          'TestMathBits',
                          'test_neg_view'),
-            # dropout is not comparable
+            # dropout is not comparable. For complex the executor mismatch is
+            # dtype-dependent (complex64 happens to match), so skip rather than
+            # xfail to avoid a flaky unexpected-success.
+            DecorateInfo(unittest.skip("dropout is not comparable"), 'TestCommon',
+                         'test_python_ref_executor', dtypes=(torch.complex64, torch.complex128)),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
             DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
         )
