@@ -1598,21 +1598,13 @@ INSTANTIATE_FACTOR_PANEL_LU(float2, 4, 8)
 // factorPanelLU no longer fits. luStreamUpdate applies column j's rank-1 update
 // over all rows and writes each threadgroup's local argmax partial to scratch;
 // luStreamPivot then reduces those partials to the global pivot for column j.
-// Streaming scratch layout per batch (in floats): kLUStreamNT argmax value
-// partials, kLUStreamNT index partials, then the 32-element U row in the
-// kernel's element type (32 floats for float, 64 floats for float2).
-template <typename T>
-inline uint luStreamScratchStride() {
-  return 2 * kLUStreamNT + 32 * (sizeof(T) / sizeof(float));
-}
-
 template <typename T>
 [[max_total_threads_per_threadgroup(kLUStreamNT)]]
 kernel void luStreamUpdate(
     device T* A [[buffer(0)]],
     constant uint2& dims [[buffer(3)]],
     constant uint4& params [[buffer(4)]], // d0, j, RPT, searchOnly
-    device float* scratch [[buffer(6)]],
+    device LUStreamScratch<T>* scratch [[buffer(6)]],
     uint3 tgid [[threadgroup_position_in_grid]],
     uint warp_id [[simdgroup_index_in_threadgroup]],
     uint lane [[thread_index_in_simdgroup]]) {
@@ -1626,8 +1618,7 @@ kernel void luStreamUpdate(
   const uint nb = min(32u, minMN - d0);
   const uint H = M - d0;
   device T* Ab = A + ulong(tgid.y) * M * N;
-  device float* scr = scratch + ulong(tgid.y) * luStreamScratchStride<T>();
-  device T* uRow = (device T*)(scr + 2 * kLUStreamNT);
+  device auto& scr = scratch[tgid.y];
 
   const uint rowStart = searchOnly ? j : j + 1;
   const uint sc = searchOnly ? j : j + 1; // column searched for next pivot
@@ -1637,10 +1628,10 @@ kernel void luStreamUpdate(
   T rp = T(0.0f);
   bool doUpdate = false;
   if (!searchOnly) {
-    const T upiv = uRow[j];
+    const T upiv = scr.uRow[j];
     doUpdate = luPivotMag(upiv) != 0.0f;
     rp = doUpdate ? luRecip(upiv) : T(0.0f);
-    uc = (lane < nb) ? uRow[lane] : T(0.0f);
+    uc = (lane < nb) ? scr.uRow[lane] : T(0.0f);
   }
 
   float bv = -1.0f;
@@ -1691,21 +1682,21 @@ kernel void luStreamUpdate(
     const float m2 = simd_max(v2);
     const uint p2 = simd_min((v2 == m2) ? i2 : 0xffffffffu);
     if (lane == 0) {
-      scr[tgid.x] = m2;
-      ((device uint*)(scr + kLUStreamNT))[tgid.x] = p2;
+      scr.vpart[tgid.x] = m2;
+      scr.ipart[tgid.x] = p2;
     }
   }
 }
 
-#define INSTANTIATE_LU_STREAM_UPDATE(T)                \
-  template [[host_name("luStreamUpdate_" #T)]]         \
-  kernel void luStreamUpdate<T>(                       \
-      device T * A [[buffer(0)]],                      \
-      constant uint2 & dims [[buffer(3)]],             \
-      constant uint4 & params [[buffer(4)]],           \
-      device float* scratch [[buffer(6)]],             \
-      uint3 tgid [[threadgroup_position_in_grid]],     \
-      uint warp_id [[simdgroup_index_in_threadgroup]], \
+#define INSTANTIATE_LU_STREAM_UPDATE(T)                  \
+  template [[host_name("luStreamUpdate_" #T)]]           \
+  kernel void luStreamUpdate<T>(                         \
+      device T * A [[buffer(0)]],                        \
+      constant uint2 & dims [[buffer(3)]],               \
+      constant uint4 & params [[buffer(4)]],             \
+      device LUStreamScratch<T> * scratch [[buffer(6)]], \
+      uint3 tgid [[threadgroup_position_in_grid]],       \
+      uint warp_id [[simdgroup_index_in_threadgroup]],   \
       uint lane [[thread_index_in_simdgroup]]);
 
 INSTANTIATE_LU_STREAM_UPDATE(float)
@@ -1722,7 +1713,7 @@ kernel void luStreamPivot(
     device int* info [[buffer(2)]],
     constant uint2& dims [[buffer(3)]],
     constant uint4& params [[buffer(4)]], // d0, j, npart
-    device float* scratch [[buffer(6)]],
+    device LUStreamScratch<T>* scratch [[buffer(6)]],
     uint3 tid3 [[thread_position_in_threadgroup]],
     uint3 tgid [[threadgroup_position_in_grid]],
     uint warp_id [[simdgroup_index_in_threadgroup]],
@@ -1737,9 +1728,7 @@ kernel void luStreamPivot(
   const uint tid = tid3.x; // threadgroup of kLUStreamNT threads
   device T* Ab = A + ulong(tgid.x) * M * N;
   device int* pv = pivots + ulong(tgid.x) * minMN;
-  device float* scr = scratch + ulong(tgid.x) * luStreamScratchStride<T>();
-  device const uint* sidx = (device const uint*)(scr + kLUStreamNT);
-  device T* uRow = (device T*)(scr + 2 * kLUStreamNT);
+  device auto& scr = scratch[tgid.x];
 
   if (d0 == 0 && j == 0 && tid == 0) {
     info[tgid.x] = 0;
@@ -1752,8 +1741,8 @@ kernel void luStreamPivot(
   float bv = -1.0f;
   uint bi = 0xffffffffu;
   for (uint i = tid; i < npart; i += kLUStreamNT) {
-    const float v = scr[i];
-    const uint ix = sidx[i];
+    const float v = scr.vpart[i];
+    const uint ix = scr.ipart[i];
     if (v > bv || (v == bv && ix < bi)) {
       bv = v;
       bi = ix;
@@ -1793,23 +1782,23 @@ kernel void luStreamPivot(
         *rp2 = vj;
         vj = vp;
       }
-      uRow[lane] = vj;
+      scr.uRow[lane] = vj;
     }
   }
 }
 
-#define INSTANTIATE_LU_STREAM_PIVOT(T)                 \
-  template [[host_name("luStreamPivot_" #T)]]          \
-  kernel void luStreamPivot<T>(                        \
-      device T * A [[buffer(0)]],                      \
-      device int* pivots [[buffer(1)]],                \
-      device int* info [[buffer(2)]],                  \
-      constant uint2& dims [[buffer(3)]],              \
-      constant uint4& params [[buffer(4)]],            \
-      device float* scratch [[buffer(6)]],             \
-      uint3 tid3 [[thread_position_in_threadgroup]],   \
-      uint3 tgid [[threadgroup_position_in_grid]],     \
-      uint warp_id [[simdgroup_index_in_threadgroup]], \
+#define INSTANTIATE_LU_STREAM_PIVOT(T)                  \
+  template [[host_name("luStreamPivot_" #T)]]           \
+  kernel void luStreamPivot<T>(                         \
+      device T * A [[buffer(0)]],                       \
+      device int* pivots [[buffer(1)]],                 \
+      device int* info [[buffer(2)]],                   \
+      constant uint2& dims [[buffer(3)]],               \
+      constant uint4& params [[buffer(4)]],             \
+      device LUStreamScratch<T>* scratch [[buffer(6)]], \
+      uint3 tid3 [[thread_position_in_threadgroup]],    \
+      uint3 tgid [[threadgroup_position_in_grid]],      \
+      uint warp_id [[simdgroup_index_in_threadgroup]],  \
       uint lane [[thread_index_in_simdgroup]]);
 
 INSTANTIATE_LU_STREAM_PIVOT(float)

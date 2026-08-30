@@ -720,15 +720,13 @@ static void lu_factor_panel_encode(const Tensor& LU,
   const auto uB = static_cast<uint32_t>(B);
   const uint32_t mn = std::min(uM, uN);
   const uint32_t NBo = mn <= 1024 ? 32 : mn <= 2048 ? 64 : 128;
-  // panels taller than this use the streaming kernels (kLUStreamNT argmax
-  // partials and the 32-element U row per batch in scratch; the partials are
-  // always floats, the U row is in the element type: 32 floats for float,
-  // 64 for complex64)
+  // panels taller than this use the streaming kernels; scratch is one
+  // LUStreamScratch<T> slice per batch, bound untyped as a raw byte buffer.
   const uint32_t kStreamMinRows = 4 * maxG;
   Tensor scratch;
   if (uM > kStreamMinRows) {
-    const int64_t scratchStride = 2 * kLUStreamNT + (isComplex ? 64 : 32);
-    scratch = at::empty({B, scratchStride}, LU.options().dtype(kFloat));
+    const int64_t perBatch = isComplex ? sizeof(LUStreamScratch<c10::complex<float>>) : sizeof(LUStreamScratch<float>);
+    scratch = at::empty({B * perBatch}, LU.options().dtype(kByte));
   }
 
   @autoreleasepool {
