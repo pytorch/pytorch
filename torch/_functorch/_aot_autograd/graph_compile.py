@@ -321,6 +321,7 @@ def aot_stage1_graph_capture(
             flat_args=_clone_traced_inputs_for_autograd(aot_state.flat_args),
             flat_args_descs=list(aot_state.flat_args_descs),
             fw_metadata=_clone_fw_metadata_for_retrace(aot_state.fw_metadata),
+            autocast_state=_autocast_fingerprint(aot_state.flat_args),
         )
 
     with maybe_skip_decompose(aot_config) as graph_capture_aot_config:
@@ -2428,6 +2429,29 @@ def _backward_placeholder_key(node: torch.fx.Node) -> tuple[str, str]:
     return "name", str(node.target)
 
 
+def _autocast_fingerprint(flat_args: Sequence[Any]) -> tuple[Any, ...]:
+    device_types = {"cpu", "cuda"}
+    for arg in flat_args:
+        if isinstance(arg, torch.Tensor):
+            device_types.add(arg.device.type)
+    per_device = tuple(
+        (dev, torch.is_autocast_enabled(dev), torch.get_autocast_dtype(dev))
+        for dev in sorted(device_types)
+        if torch._C._is_autocast_available(dev)
+    )
+    return (torch.is_autocast_cache_enabled(), per_device)
+
+
+@contextmanager
+def _set_autocast_cache_enabled(enabled: bool) -> Generator[None, None, None]:
+    prior = torch.is_autocast_cache_enabled()
+    torch.set_autocast_cache_enabled(enabled)
+    try:
+        yield
+    finally:
+        torch.set_autocast_cache_enabled(prior)
+
+
 def _retrace_backward_for_undefined_grad_outputs(
     trace_info: AOTAutogradTraceInfo,
     aot_config: AOTConfig,
@@ -2441,6 +2465,17 @@ def _retrace_backward_for_undefined_grad_outputs(
     forward did not save, or when a tensor subclass needs the structural fallback.
     """
     if trace_info.partition_fn is None or trace_info.original_fw_module is None:
+        return None
+    # The joint trace was autocast-dispatched under the compile-time autocast
+    # state; retracing under a diverged ambient state produces graphs whose
+    # dtypes silently differ, which the name-only ABI check below cannot see.
+    # The cache-enabled bit is recreated instead of compared: dynamo disables
+    # the autocast cache while tracing (e.g. compiled autograd backward), and
+    # the bit cannot change the retraced graph's dtypes.
+    if trace_info.autocast_state is None:
+        return None
+    autocast_cache_enabled, per_device_autocast_state = trace_info.autocast_state
+    if per_device_autocast_state != _autocast_fingerprint(trace_info.flat_args)[1]:
         return None
 
     metadata = _clone_fw_metadata_for_retrace(trace_info.fw_metadata)
@@ -2464,6 +2499,7 @@ def _retrace_backward_for_undefined_grad_outputs(
         torch.enable_grad(),
         torch.autograd.set_multithreading_enabled(False),
         preserve_rng_state(),
+        _set_autocast_cache_enabled(autocast_cache_enabled),
         fake_mode if fake_mode is not None else nullcontext(),
         PhiloxStateTracker(),
         torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing(),
@@ -2488,14 +2524,20 @@ def _retrace_backward_for_undefined_grad_outputs(
             trace_joint_graph=True,
         )
 
-    fw_module, bw_module, _, _, _, _ = _aot_stage2a_partition(
-        graph,
-        joint_inputs,
-        maybe_subclass_meta,
-        metadata,
-        retrace_config,
-        trace_info.partition_fn,
-    )
+    # compile_fx runs the partition under V.set_fake_mode; inductor's
+    # joint-graph passes (e.g. replace_random) read V.fake_mode, so recreate
+    # that context here where nothing inductor-side is ambient.
+    from torch._inductor.virtualized import V
+
+    with V.set_fake_mode(fake_mode) if fake_mode is not None else nullcontext():
+        fw_module, bw_module, _, _, _, _ = _aot_stage2a_partition(
+            graph,
+            joint_inputs,
+            maybe_subclass_meta,
+            metadata,
+            retrace_config,
+            trace_info.partition_fn,
+        )
 
     original_fw_outputs = next(
         reversed(trace_info.original_fw_module.graph.find_nodes(op="output"))

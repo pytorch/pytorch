@@ -1,6 +1,7 @@
 import dataclasses
 from enum import IntEnum
 from types import SimpleNamespace
+from typing import NamedTuple
 
 
 class UserDefinedTritonKernelConfigMode(IntEnum):
@@ -28,6 +29,9 @@ class UserDefinedTritonKernelConfigNamespace:
         def __repr__(self):
             return f"{type(self).__name__}(offset={self.offset!r})"
 
+    class Point(NamedTuple):
+        offset: int
+
 
 @dataclasses.dataclass(frozen=True)
 class UserDefinedTritonKernelNestedConfig:
@@ -50,6 +54,11 @@ class UserDefinedTritonKernelNonInitConfig:
 tl = dataclasses.make_dataclass("tl", [("offset", int)], frozen=True)
 
 
+# This root name collides with a binding in the generated launcher's exec scope.
+class runner(NamedTuple):
+    offset: int
+
+
 class UserDefinedAttrsLikeConfig:
     # attrs publishes this metadata for the fields used by its generated repr.
     __attrs_attrs__ = (
@@ -57,7 +66,7 @@ class UserDefinedAttrsLikeConfig:
         SimpleNamespace(name="hidden", repr=False),
     )
 
-    def __init__(self, nested, hidden):
+    def __init__(self, nested, hidden=None):
         self.nested = nested
         self.hidden = hidden
 
@@ -66,7 +75,7 @@ class UserDefinedAttrsLikeConfig:
 
 
 class UserDefinedPydanticLikeConfig:
-    def __init__(self, nested, hidden):
+    def __init__(self, nested, hidden=None):
         self.nested = nested
         self.hidden = hidden
 

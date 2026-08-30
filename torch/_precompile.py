@@ -2317,6 +2317,13 @@ def _dynamo_capture_context(
                 bundled_autograd_cache=True,
                 bypass_autograd_cache_key=True,
                 force_non_lazy_backward_lowering=training,
+                # The undefined-tangent specialization machinery is default-off
+                # for ordinary torch.compile; precompile's training artifacts
+                # are built on it, so enable it for capture. The autograd.Function
+                # contexts created under this patch snapshot the flag at forward
+                # time, so backwards the caller runs between stateful calls keep
+                # observing tangent masks after the patch unwinds.
+                aot_autograd_prune_unused_outputs=training,
             )
         )
         stack.enter_context(_use_code_state(pgo_state))

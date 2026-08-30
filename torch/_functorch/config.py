@@ -42,8 +42,12 @@ fake_tensor_allow_meta = os.environ.get("FAKE_ALLOW_META", "1") != "0"
 debug_assert = False
 
 # Preserve undefined user grad outputs and specialize AOTAutograd backward graphs
-# around them. Disable this to restore the previous zero-materialization behavior.
-aot_autograd_prune_unused_outputs = True
+# around them (retracing or structurally pruning the backward per observed
+# undefined-tangent pattern). Default OFF: the machinery trades per-call
+# overhead and backward-time compiles for specialized backwards, and is
+# consumed by torch.compiler.precompile (which enables it during capture);
+# ordinary torch.compile keeps the zero-materialization behavior.
+aot_autograd_prune_unused_outputs = False
 
 debug_partitioner = os.environ.get("AOT_PARTITIONER_DEBUG", "0") != "0"
 

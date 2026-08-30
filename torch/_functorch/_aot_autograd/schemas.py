@@ -1492,6 +1492,9 @@ class AOTAutogradTraceInfo:
     fw_metadata: ViewAndMutationMeta
     partition_fn: Callable[..., Any] | None = None
     original_fw_module: torch.fx.GraphModule | None = None
+    # Ambient autocast state at joint-trace time; the backward-time retrace
+    # bails when the caller's autocast state diverges from it.
+    autocast_state: tuple[Any, ...] | None = None
 
 
 FakifiedFlatArgs = NewType("FakifiedFlatArgs", list[Any])

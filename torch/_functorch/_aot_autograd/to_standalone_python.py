@@ -1411,11 +1411,24 @@ def _compose_training_module(
         "from torch._functorch._aot_autograd.runtime_wrappers import "
         "_AutogradSavedState, _mask_pruned_backward_outputs, "
         "_pruned_backward_output_indices_from_dependencies, "
-        "_set_grad_output_prototypes, _snapshot_external_objects, "
-        "index_to_external_object_weakref",
+        "_snapshot_external_objects, index_to_external_object_weakref",
         "from torch._functorch._aot_autograd.standalone_runtime import "
         "normalize_as_list",
     }
+
+    # The artifact bakes aot_autograd_prune_unused_outputs=True at emission
+    # time instead of calling _set_grad_output_prototypes, which would re-read
+    # the ambient config wherever the artifact happens to be loaded. Like the
+    # runtime helper, a node with a single differentiable output cannot see
+    # that sole tangent undefined, so skip building prototype carriers for it.
+    if len(_rw._grad_output_surviving_indices(spec.fw_metadata)) > 1:
+        prototypes_expr = "_grad_output_prototypes(raw_returns, _fw_metadata)"
+        imports.add(
+            "from torch._functorch._aot_autograd.runtime_wrappers import "
+            "_grad_output_prototypes"
+        )
+    else:
+        prototypes_expr = "((), ())"
 
     glue = f"""
 _fw_metadata = {fw_metadata_src}
@@ -1435,7 +1448,12 @@ _DISABLE_AMP = {spec.disable_amp!r}
 
 def _finalize(ctx, fw_outs):
     raw_returns = list(fw_outs[:_NUM_FORWARD_RETURNS])
-    _set_grad_output_prototypes(ctx, raw_returns, _fw_metadata)
+    # Prune-unused-outputs behavior is baked in at emission time; the ambient
+    # aot_autograd_prune_unused_outputs config must not change the artifact.
+    ctx._aot_prune_unused_outputs_enabled = True
+    ctx.set_materialize_grads(False)
+    protos = {prototypes_expr}
+    ctx._aot_grad_output_prototypes, ctx._aot_grad_output_prototype_objects = protos
     ctx.mark_non_differentiable(*_transform_raw_returns(raw_returns))
     ctx._materialize_non_diff_grads = False
     _snapshot_external_objects(ctx)
@@ -1497,11 +1515,7 @@ class _CompiledFunction(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, *flat_args):
-        if (
-            ctx._aot_prune_unused_outputs_enabled
-            and len(flat_args) == 1
-            and isinstance(flat_args[0], list)
-        ):
+        if len(flat_args) == 1 and isinstance(flat_args[0], list):
             ctx._undefined_grad_out_indices = tuple(
                 index for index, grad in enumerate(flat_args[0]) if grad is None
             )

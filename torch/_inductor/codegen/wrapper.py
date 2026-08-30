@@ -19,9 +19,9 @@ import re
 import secrets
 import sys
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from itertools import chain, count
-from typing import Any, Literal, Protocol, TYPE_CHECKING
+from typing import Any, cast, Literal, Protocol, TYPE_CHECKING
 
 import sympy
 from sympy import Expr
@@ -98,7 +98,7 @@ from .triton_utils import config_of, should_unwrap_unspec_arg, signature_to_meta
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator, Sequence
+    from collections.abc import Iterator, Sequence
 
     import triton
 
@@ -193,6 +193,35 @@ def _constexpr_type_ref(
         return None
     module_ref = _constexpr_module_ref(module, module_aliases, imports)
     return f"{module_ref}.{qualname}"
+
+
+def _constexpr_constructor_items(value: Any) -> list[tuple[str | None, Any]] | None:
+    # The constructor-repr kinds from get_constexpr_repr_children (utils.py):
+    # dataclasses, attrs-like classes, and __repr_args__ (pydantic-like)
+    # objects rebuild as TypeRef(field=child, ...) over their repr-visible
+    # fields. Containers never get here: _constexpr_source_impl handles or
+    # declines them first.
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        fields = dataclasses.fields(value)
+        return [(f.name, getattr(value, f.name)) for f in fields if f.repr]
+    attrs_fields = getattr(type(value), "__attrs_attrs__", None)
+    if attrs_fields is not None:
+        # attrs permits callable repr formatters, so only False hides a field.
+        return [
+            (field.name, getattr(value, field.name))
+            for field in attrs_fields
+            if getattr(field, "repr", True) is not False
+        ]
+    repr_args = getattr(value, "__repr_args__", None)
+    if callable(repr_args):
+        pairs = cast(Callable[[], Iterable[tuple[object, object]]], repr_args)()
+        items: list[tuple[str | None, Any]] = []
+        for name, item in pairs:
+            if name is not None and not isinstance(name, str):
+                return None
+            items.append((name, item))
+        return items
+    return None
 
 
 def _constexpr_source_impl(
@@ -322,6 +351,31 @@ def _constexpr_source_impl(
         return None
     if type(value) is float and math.isinf(value):
         return f"float({str(value)!r})"
+    constructor_items = _constexpr_constructor_items(value)
+    if constructor_items is not None:
+        cls_ref = _constexpr_type_ref(type(value), module_aliases, imports)
+        if cls_ref is None:
+            return None
+        parts = []
+        for name, item in constructor_items:
+            item_source = _constexpr_source_impl(item, module_aliases, imports)
+            if item_source is None:
+                return None
+            parts.append(item_source if name is None else f"{name}={item_source}")
+        source = f"{cls_ref}({', '.join(parts)})"
+        # The repr contract only promises constructor syntax over repr-visible
+        # fields; verify the call actually rebuilds an instance (a field may be
+        # init=False, a hidden init parameter may be required, an init argument
+        # may be renamed, ...) so unrenderable values decline loudly at codegen
+        # instead of crashing the generated module.
+        namespace = {
+            alias: sys.modules.get(module) for module, alias in module_aliases.items()
+        }
+        try:
+            reconstructed = eval(source, namespace)
+        except Exception:
+            return None
+        return source if type(reconstructed) is type(value) else None
     source = repr(value)
     try:
         reconstructed = ast.literal_eval(source)

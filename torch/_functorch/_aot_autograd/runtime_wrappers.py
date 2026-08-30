@@ -11,6 +11,7 @@ import contextlib
 import copy
 import functools
 import itertools
+import logging
 import operator
 import pprint
 import threading
@@ -128,6 +129,7 @@ def _unwrap_tensor_subclasses_no_symints(
 
 zip = strict_zip
 
+log = logging.getLogger(__name__)
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
 
@@ -3535,59 +3537,63 @@ def _all_backward_grad_args_are_pruned_zeros(
     )
 
 
-def _simplify_with_pruned_zeros(
-    graph: torch.fx.Graph,
-    target: Any,
-    args: Any,
-    kwargs: dict[str, Any],
-) -> Any:
+def _pruned_fold_preserves_meta(candidate: Any, node: torch.fx.Node) -> bool:
+    """Whether folding ``node`` down to ``candidate`` keeps the node's shape/dtype.
+
+    ``add(pruned_zero, rhs)`` may broadcast or take a scalar rhs, in which case
+    the rhs is not a valid stand-in for the add's result.
+    """
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+    if not isinstance(candidate, torch.fx.Node):
+        return False
+    candidate_val = candidate.meta.get("val")
+    node_val = node.meta.get("val")
+    if not isinstance(candidate_val, torch.Tensor) or not isinstance(
+        node_val, torch.Tensor
+    ):
+        return False
+    return (
+        candidate_val.dtype == node_val.dtype
+        and candidate_val.device == node_val.device
+        and len(candidate_val.shape) == len(node_val.shape)
+        and all(
+            statically_known_true(s1 == s2)
+            for s1, s2 in zip(candidate_val.shape, node_val.shape)
+        )
+    )
+
+
+def _prunes_to_zero(target: Any, args: Any, kwargs: dict[str, Any]) -> bool:
+    """Whether the call's result is provably zero given its pruned-zero args."""
     aten = torch.ops.aten
 
     if target in (aten.mul.Tensor, aten.mul.Scalar):
-        if any(_is_pruned_zero(arg) for arg in args[:2]):
-            return _PRUNED_ZERO
+        return any(_is_pruned_zero(arg) for arg in args[:2])
 
     if target in (aten.mm.default, aten.bmm.default, aten.matmul.default):
-        if any(_is_pruned_zero(arg) for arg in args[:2]):
-            return _PRUNED_ZERO
+        return any(_is_pruned_zero(arg) for arg in args[:2])
 
     if target in (aten.div.Tensor, aten.div.Scalar):
-        if args and _is_pruned_zero(args[0]):
-            return _PRUNED_ZERO
+        return bool(args) and _is_pruned_zero(args[0])
 
     if target is aten.neg.default:
-        if args and _is_pruned_zero(args[0]):
-            return _PRUNED_ZERO
+        return bool(args) and _is_pruned_zero(args[0])
 
     if target is aten.where.self:
         true_value, false_value = args[1:3]
-        if (
+        return (
             _is_pruned_or_literal_zero(true_value)
             and _is_pruned_or_literal_zero(false_value)
             and any(_is_pruned_zero(arg) for arg in args[1:3])
-        ):
-            return _PRUNED_ZERO
+        )
 
     if _all_backward_grad_args_are_pruned_zeros(target, args, kwargs):
-        return _PRUNED_ZERO
+        return True
 
-    if target is aten.add.Tensor:
+    if target in (aten.add.Tensor, aten.sub.Tensor):
         lhs, rhs = args[:2]
-        if _is_pruned_zero(lhs) and _is_pruned_zero(rhs):
-            return _PRUNED_ZERO
-        if _is_pruned_zero(rhs):
-            return lhs
-        if _is_pruned_zero(lhs) and _kwargs_alpha_is_one(kwargs):
-            return rhs
-
-    if target is aten.sub.Tensor:
-        lhs, rhs = args[:2]
-        if _is_pruned_zero(lhs) and _is_pruned_zero(rhs):
-            return _PRUNED_ZERO
-        if _is_pruned_zero(rhs):
-            return lhs
-        if _is_pruned_zero(lhs) and _kwargs_alpha_is_one(kwargs):
-            return graph.call_function(aten.neg.default, (rhs,))
+        return _is_pruned_zero(lhs) and _is_pruned_zero(rhs)
 
     zero_preserving_unary = {
         aten.alias.default,
@@ -3606,11 +3612,48 @@ def _simplify_with_pruned_zeros(
         aten.unsqueeze.default,
         aten.view.default,
     }
-    if target in zero_preserving_unary and args and _is_pruned_zero(args[0]):
+    if target in zero_preserving_unary:
+        return bool(args) and _is_pruned_zero(args[0])
+
+    if target is operator.getitem:
+        return bool(args) and _is_pruned_zero(args[0])
+
+    return False
+
+
+def _simplify_with_pruned_zeros(
+    graph: torch.fx.Graph,
+    node: torch.fx.Node,
+    args: Any,
+    kwargs: dict[str, Any],
+) -> Any:
+    aten = torch.ops.aten
+    target = node.target
+
+    if _prunes_to_zero(target, args, kwargs):
         return _PRUNED_ZERO
 
-    if target is operator.getitem and args and _is_pruned_zero(args[0]):
-        return _PRUNED_ZERO
+    if target is aten.add.Tensor:
+        lhs, rhs = args[:2]
+        if _is_pruned_zero(rhs) and _pruned_fold_preserves_meta(lhs, node):
+            return lhs
+        if (
+            _is_pruned_zero(lhs)
+            and _kwargs_alpha_is_one(kwargs)
+            and _pruned_fold_preserves_meta(rhs, node)
+        ):
+            return rhs
+
+    if target is aten.sub.Tensor:
+        lhs, rhs = args[:2]
+        if _is_pruned_zero(rhs) and _pruned_fold_preserves_meta(lhs, node):
+            return lhs
+        if (
+            _is_pruned_zero(lhs)
+            and _kwargs_alpha_is_one(kwargs)
+            and _pruned_fold_preserves_meta(rhs, node)
+        ):
+            return graph.call_function(aten.neg.default, (rhs,))
 
     return _UNHANDLED_ZERO_SIMPLIFICATION
 
@@ -3684,13 +3727,13 @@ def _specialize_bw_module_for_undefined_grad_outputs(
         args = torch.fx.map_arg(node.args, load_arg)
         kwargs = torch.fx.map_arg(node.kwargs, load_arg)
         if _contains_pruned_zero((args, kwargs)):
-            replacement = _simplify_with_pruned_zeros(
-                new_graph, node.target, args, kwargs
-            )
+            replacement = _simplify_with_pruned_zeros(new_graph, node, args, kwargs)
             if replacement is _UNHANDLED_ZERO_SIMPLIFICATION:
                 return None
             env[node] = replacement
-            if isinstance(replacement, torch.fx.Node):
+            # Give freshly created replacement nodes (e.g. the neg in the sub
+            # fold) the folded node's meta; leave surviving nodes' meta alone.
+            if isinstance(replacement, torch.fx.Node) and "val" not in replacement.meta:
                 replacement.meta.update(copy.copy(node.meta))
             continue
 
@@ -3721,6 +3764,42 @@ def _union_tangent_dependencies(x: Any) -> _TangentDependency:
 class _TangentDependencySet:
     visible_outputs: frozenset[int]
     has_other_tangent: bool
+
+
+def _provably_zero_backward_output_indices(
+    bw_module: torch.fx.GraphModule,
+    placeholders_to_prune: set[torch.fx.Node],
+) -> frozenset[int]:
+    """Indices of backward outputs that are provably zero with the given
+    tangent placeholders replaced by zeros. Purely analytical; the graph is
+    not modified."""
+    env: dict[torch.fx.Node, Any] = {}
+
+    def load_arg(n: torch.fx.Node) -> Any:
+        return env[n]
+
+    for node in bw_module.graph.nodes:
+        if node.op == "placeholder":
+            env[node] = _PRUNED_ZERO if node in placeholders_to_prune else node
+            continue
+
+        if node.op == "output":
+            output_arg = torch.fx.map_arg(node.args[0], load_arg)
+            flat_outputs, _ = tree_flatten(output_arg)
+            return frozenset(
+                i for i, output in enumerate(flat_outputs) if _is_pruned_zero(output)
+            )
+
+        args = torch.fx.map_arg(node.args, load_arg)
+        kwargs = torch.fx.map_arg(node.kwargs, load_arg)
+        if _contains_pruned_zero((args, kwargs)) and _prunes_to_zero(
+            node.target, args, kwargs
+        ):
+            env[node] = _PRUNED_ZERO
+        else:
+            env[node] = node
+
+    return frozenset()
 
 
 def _pruned_backward_output_indices_for_undefined_grad_outputs(
@@ -3762,12 +3841,20 @@ def _pruned_backward_output_indices_for_undefined_grad_outputs(
         if node.op == "output":
             output_arg = torch.fx.map_arg(node.args[0], load_arg)
             flat_outputs, _ = tree_flatten(output_arg)
+            # Depending only on pruned tangents is not enough: an affine
+            # backward (e.g. a custom Function returning g1 + 1) produces a
+            # nonzero gradient from a zero tangent, and eager materializes
+            # zeros for it. Only mask outputs that are provably zero.
+            provably_zero = _provably_zero_backward_output_indices(
+                bw_module, placeholders_to_prune
+            )
             return tuple(
                 i
                 for i, output in enumerate(flat_outputs)
                 if isinstance(output, _TangentDependency)
                 and output.depends_pruned
                 and not output.depends_live
+                and i in provably_zero
             )
 
         args = torch.fx.map_arg(node.args, load_arg)
@@ -4300,25 +4387,41 @@ class _AutogradBackwardCompiler:
             if trace_info is not None:
                 from .graph_compile import _retrace_backward_for_undefined_grad_outputs
 
-                with (
-                    tracing(saved_context),
-                    compile_context(saved_compile_context),
-                ):
-                    specialized = _retrace_backward_for_undefined_grad_outputs(
-                        trace_info,
-                        self.aot_config,
+                try:
+                    with (
+                        tracing(saved_context),
+                        compile_context(saved_compile_context),
+                    ):
+                        specialized = _retrace_backward_for_undefined_grad_outputs(
+                            trace_info,
+                            self.aot_config,
+                            specialization_indices,
+                            bw_module,
+                            placeholder_list,
+                        )
+                except Exception as e:
+                    from torch._precompile import PrecompileError
+
+                    if isinstance(e, PrecompileError):
+                        raise
+                    log.warning(
+                        "Backward retrace for undefined grad outputs %s failed; "
+                        "falling back to structural specialization",
                         specialization_indices,
-                        bw_module,
-                        placeholder_list,
+                        exc_info=True,
                     )
+                    specialized = None
                 if (
                     specialized is None
                     and self.aot_config.precompile_backend_id is not None
                 ):
                     raise RuntimeError(
-                        "AOTAutograd could not compile the observed undefined-output "
-                        "tangent pattern without changing the compiled forward's saved "
-                        "activation ABI."
+                        "AOTAutograd could not compile the backward for undefined "
+                        f"grad output indices {specialization_indices} (mask "
+                        f"{specialization_key:#b}) without changing the compiled "
+                        "forward's saved activation ABI. Cover this backward "
+                        "pattern during capture, or run a full backward through "
+                        "every forward output."
                     )
             if specialized is None:
                 specialized = _specialize_bw_module_for_undefined_grad_outputs(
@@ -4331,8 +4434,11 @@ class _AutogradBackwardCompiler:
             if specialized is None:
                 if self.aot_config.precompile_backend_id is not None:
                     raise RuntimeError(
-                        "AOTAutograd could not compile the observed undefined-output "
-                        "tangent pattern."
+                        "AOTAutograd could not compile the backward for undefined "
+                        f"grad output indices {specialization_indices} (mask "
+                        f"{specialization_key:#b}). Cover this backward pattern "
+                        "during capture, or run a full backward through every "
+                        "forward output."
                     )
                 _materialize_missing_tangent_args(
                     all_args,
@@ -4387,6 +4493,12 @@ class _AutogradBackwardCompiler:
             self.specialized_compiled_bws[specialization_key] = (
                 compiled_bw,
                 kept_arg_indices,
+            )
+            log.info(
+                "Compiled specialized backward for undefined grad output mask %s "
+                "(%d specialized variant(s) total)",
+                f"{specialization_key:#b}",
+                len(self.specialized_compiled_bws),
             )
             _prune_runtime_args_in_place(all_args, kept_arg_indices)
             return compiled_bw, all_args, ()
@@ -4452,6 +4564,13 @@ class _AutogradBackwardCompiler:
             self.lazy_backward_context_prepared = True
 
         if not saved_tensors_use_once:
+            if self.fw_metadata.bw_donated_idxs:
+                # Backwards compiled so far assumed donated buffers. Clearing
+                # bw_donated_idxs would let them slip past the retain_graph
+                # guard in _backward_impl, so drop them and recompile without
+                # donation instead.
+                self.specialized_compiled_bws.clear()
+                self.compiled_bw = None
             self.fw_metadata.bw_donated_idxs = []
             # Update bw_donated_idxs if using lazy_backward_info from `aot_dispatch_autograd`
             if (
