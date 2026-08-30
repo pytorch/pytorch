@@ -782,10 +782,13 @@ class DistributedDataParallel(Module, Joinable):
         batched_grad_copy (bool): When set to ``True``, individual per-parameter
                     gradient-to-bucket copy and division operations are deferred
                     and flushed as a single ``_foreach_copy_`` plus one flat
-                    ``div_`` when a bucket becomes ready. This reduces per-parameter
-                    kernel launches down to 2 kernels per bucket, which can improve
-                    throughput for models with many small parameters. The
-                    optimization is most effective with
+                    ``div_`` when a bucket becomes ready. The symmetric copy of
+                    the reduced bucket back into each parameter's ``.grad`` (used
+                    when ``gradient_as_bucket_view=False``) is likewise batched
+                    into a single ``_foreach_copy_`` per bucket. This reduces
+                    per-parameter kernel launches to a small constant per bucket,
+                    which can improve throughput for models with many small
+                    parameters. The optimization is most effective with
                     ``optimizer.zero_grad(set_to_none=True)`` (the default), where
                     ``gradient_as_bucket_view`` alone cannot avoid copies because
                     the bucket view alias is destroyed every iteration.

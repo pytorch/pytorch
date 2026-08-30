@@ -1630,6 +1630,19 @@ std::vector<size_t> Reducer::getUnmarkedParamIndicesForIteration() {
 
 // A bucket with one or more dense tensors needs to be unflattened.
 void Reducer::finalize_bucket_dense(Bucket& bucket) {
+  // When batched_grad_copy_ is enabled, the per-parameter copies from the
+  // reduced bucket back into each .grad are deferred and flushed as a single
+  // _foreach_copy_ below. Only safe when grads are the parameters' own .grad
+  // tensors, i.e. not under distributed autograd (which manages grads through
+  // an rpc context and writes them back per callback).
+  const bool batch_copy_out = batched_grad_copy_ && !gradient_as_bucket_view_ &&
+      !optim_in_backward_ && rpc_context_.context_ptr.load() == nullptr;
+  std::vector<at::Tensor> batched_grad_dsts;
+  std::vector<at::Tensor> batched_grad_srcs;
+  if (batch_copy_out) {
+    batched_grad_dsts.reserve(bucket.variables.size());
+    batched_grad_srcs.reserve(bucket.variables.size());
+  }
   for (const auto intra_bucket_index : c10::irange(bucket.variables.size())) {
     auto& variable = bucket.variables[intra_bucket_index];
 
@@ -1674,6 +1687,25 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
       if (optim_in_backward_) {
         // Return early if optimizer has already run.
         runGradCallbackForVariable(variable, [&](auto& grad) { return true; });
+      } else if (batch_copy_out) {
+        const auto& bucket_view = bucket.bucket_views_out[intra_bucket_index];
+        runGradCallbackForVariable(variable, [&](auto& grad) {
+          if (global_unused) {
+            // Keep a globally unused parameter's grad untouched.
+            return false;
+          }
+          if (!grad.defined()) {
+            // Creates grad according to the "Gradient Layout Contract".
+            grad = torch::autograd::utils::clone_obey_contract(
+                bucket_view, variable);
+          } else if (grad.requires_grad()) {
+            grad.copy_(bucket_view);
+          } else {
+            batched_grad_dsts.push_back(grad);
+            batched_grad_srcs.push_back(bucket_view);
+          }
+          return true;
+        });
       } else {
         RECORD_FUNCTION(
             "torch.distributed.ddp.reducer::copy_bucket_to_grad",
@@ -1720,6 +1752,13 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
         return false;
       });
     }
+  }
+
+  if (!batched_grad_dsts.empty()) {
+    RECORD_FUNCTION(
+        "torch.distributed.ddp.reducer::copy_bucket_to_grad_batched",
+        std::vector<c10::IValue>());
+    at::_foreach_copy_(batched_grad_dsts, batched_grad_srcs);
   }
 }
 
