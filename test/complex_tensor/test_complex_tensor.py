@@ -167,6 +167,27 @@ class TestComplexTensorGeneric(TestCase):
         self.assertEqual(c.imag, torch.tensor([7, 8], dtype=torch.float32))
         self.assertEqual(c, torch.tensor([5 + 7j, 6 + 8j], dtype=torch.complex64))
 
+    def test_promote_tensors_python_complex_scalar(self):
+        from torch._subclasses.complex_tensor._ops.common import promote_tensors
+
+        cases = (
+            (torch.float32, torch.complex64),
+            (torch.float64, torch.complex128),
+            (torch.complex64, torch.complex64),
+            (torch.complex128, torch.complex128),
+        )
+
+        for input_dtype, expected_dtype in cases:
+            with self.subTest(input_dtype=input_dtype):
+                tensor = torch.ones(2, dtype=input_dtype)
+                output_dtype, promoted = promote_tensors(tensor, 1j)
+
+                self.assertEqual(output_dtype, expected_dtype)
+                self.assertEqual(
+                    [value.dtype for value in promoted],
+                    [expected_dtype, expected_dtype],
+                )
+
     def test_mul_inplace_complex(self):
         from torch._subclasses.complex_tensor import ComplexTensor
 
