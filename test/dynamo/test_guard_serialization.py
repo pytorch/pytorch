@@ -870,6 +870,28 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ref, loaded, {"self": mod, "x": torch.randn(3), "func": inner}, True
         )
 
+    def test_snapshot_globals_function_preserves_module(self):
+        # The globals snapshot arrives as pickle STATE, so FunctionType is
+        # constructed with empty globals and reads __module__ = None from
+        # them; a guard rooted at fn.__module__ would rebuild against None.
+        from torch._dynamo.guards import GuardsStatePickler
+
+        def outer():
+            def inner():
+                return FQN_MISMATCH_GLOBAL
+
+            return inner
+
+        fn = outer()
+        self.assertIsNotNone(fn.__module__)
+        buf = io.BytesIO()
+        g = fn.__globals__
+        gtv = {id(fn): fn, id(g): g}
+        pickler = GuardsStatePickler(gtv, {}, {}, buf)
+        pickler.dump(fn)
+        out = pickle.loads(buf.getvalue())
+        self.assertEqual(out.__module__, fn.__module__)
+
     def test_fqn_mismatched_function_prunes_unguarded_defaults(self):
         mod = DecoratedUnpicklableDefaultForwardModule()
         ref, loaded = self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
