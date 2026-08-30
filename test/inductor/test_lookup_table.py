@@ -1115,6 +1115,12 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
             self.run_model("mm", tensors)
 
 
+class TestGpuCoverageProbe(TestCase):
+    @unittest.skipIf(not has_triton_tma_device(), "needs device-side TMA")
+    def test_gpu_coverage_probe(self):
+        self.assertTrue(True)
+
+
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
 
