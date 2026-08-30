@@ -13,6 +13,8 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  # Required by repository policy. PR updates do not cancel this run because
+  # `synchronize` is not a trigger for this workflow.
   cancel-in-progress: true
 
 permissions:
