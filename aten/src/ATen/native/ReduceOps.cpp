@@ -377,9 +377,8 @@ TORCH_META_FUNC(aminmax)
   if (min.defined() && max.defined()) {
     // The two outputs are written independently, so overlapping storage makes
     // whichever write lands last clobber the other, silently.
-    const auto overlap = at::get_overlap_status(min, max);
     TORCH_CHECK(
-        overlap == at::MemOverlapStatus::No,
+        at::get_overlap_status(min, max) == at::MemOverlapStatus::No,
         "aminmax(): the `min` and `max` out= tensors must not overlap.");
   }
 

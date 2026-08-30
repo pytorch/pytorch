@@ -1223,7 +1223,7 @@ class TestReductions(TestCase):
         # `min` and `max` are written independently, so sharing storage makes
         # whichever write lands last clobber the other, silently.
         out = torch.empty(3, device=device, dtype=dtype)
-        with self.assertRaisesRegex(RuntimeError, "must not share overlap"):
+        with self.assertRaisesRegex(RuntimeError, "must not overlap"):
             torch.aminmax(x, dim=1, out=(out, out))
 
         buf = torch.empty(5, device=device, dtype=dtype)
