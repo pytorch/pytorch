@@ -332,7 +332,8 @@ static void upsample_bicubic2d_backward_out_cuda_template(
   int input_height = input_size[2];
   int input_width = input_size[3];
 
-  Tensor grad_output = grad_output_.contiguous();
+  // Strided accessors handle any memory format; no contiguous copy needed.
+  const Tensor& grad_output = grad_output_;
 
   grad_input.zero_();
 
