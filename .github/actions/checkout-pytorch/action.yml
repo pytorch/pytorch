@@ -51,6 +51,7 @@ runs:
         git config --global fetch.parallel 0
         git config --global submodule.fetchJobs 0
 
+
         # Retry throttled fetches instead of failing hard. Native in git >= 2.54
         # (retries HTTP 429, honoring Retry-After); maxRetries defaults to 0 so
         # it must be set explicitly. Inert no-op on older git, so set uncondi-
@@ -94,6 +95,7 @@ runs:
       env:
         NO_SUDO: ${{ inputs.no-sudo }}
       run: |
+        git config --global --add safe.directory "${GITHUB_WORKSPACE}"
         cd "${GITHUB_WORKSPACE}"
         # Clean stale submodule dirs
         if [ -z "${NO_SUDO}" ]; then

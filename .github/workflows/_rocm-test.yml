@@ -83,15 +83,64 @@ jobs:
       matrix: ${{ fromJSON(inputs.test-matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
+    container:
+      image: "ghcr.io/pytorch/ci-image:pytorch-linux-jammy-rocm-n-py3-5e310b5c515ec85a74bbd294b4244dcfb885f5e4"  # zizmor: ignore[unpinned-images]
+
     timeout-minutes: ${{ inputs.timeout-minutes }}
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: $/.github/actions/checkout-pytorch
+        # uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: true
 
-      - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
+      # - name: Setup ROCm
+      #   uses: $/.github/actions/setup-rocm
+
+
+      - name: Setup useful environment variables
+        shell: bash
+        run: |
+          RUNNER_ARTIFACT_DIR="${RUNNER_TEMP}/artifacts"
+          rm -rf "${RUNNER_ARTIFACT_DIR}"
+          mkdir -p "${RUNNER_ARTIFACT_DIR}"
+          echo "RUNNER_ARTIFACT_DIR=${RUNNER_ARTIFACT_DIR}" >> "${GITHUB_ENV}"
+
+          RUNNER_TEST_RESULTS_DIR="${RUNNER_TEMP}/test-results"
+          rm -rf "${RUNNER_TEST_RESULTS_DIR}"
+          mkdir -p "${RUNNER_TEST_RESULTS_DIR}"
+          echo "RUNNER_TEST_RESULTS_DIR=${RUNNER_TEST_RESULTS_DIR}" >> "${GITHUB_ENV}"
+
+          RUNNER_DOCS_DIR="${RUNNER_TEMP}/docs"
+          rm -rf "${RUNNER_DOCS_DIR}"
+          mkdir -p "${RUNNER_DOCS_DIR}"
+          echo "RUNNER_DOCS_DIR=${RUNNER_DOCS_DIR}" >> "${GITHUB_ENV}"
+
+      - name: Preserve github env variables for use in docker
+        shell: bash
+        run: |
+          env | grep '^GITHUB' >> "${RUNNER_TEMP}/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' >> "${RUNNER_TEMP}/github_env_${GITHUB_RUN_ID}"
+
+      # - name: Login to ECR
+      #   uses: pytorch/pytorch/.github/actions/ecr-login@main
+
+      - name: Preserve github env variables for use in docker
+        shell: bash
+        run: |
+          env | grep '^GITHUB' >> "${RUNNER_TEMP}/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' >> "${RUNNER_TEMP}/github_env_${GITHUB_RUN_ID}"
+          env | grep '^RUNNER' >> "${RUNNER_TEMP}/github_env_${GITHUB_RUN_ID}"
+
+      - name: Configure AWS credentials
+        id: aws-creds
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/arc
+          aws-region: us-east-1
+          # The max duration enforced by the server side
+          role-duration-seconds: 18000
 
       - name: Runner check GPU count (distributed jobs)
         if: ${{ contains(matrix.config, 'distributed') }}
@@ -103,20 +152,20 @@ jobs:
             exit 1
           fi
 
-      - name: Calculate docker image
-        id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
-        with:
-          docker-image-name: ${{ inputs.docker-image }}
+      # - name: Calculate docker image
+      #   id: calculate-docker-image
+      #   uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+      #   with:
+      #     docker-image-name: ${{ inputs.docker-image }}
 
-      - name: Pull docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-        with:
-          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+      # - name: Pull docker image
+      #   uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+      #   with:
+      #     docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
       - name: Get workflow job id
         id: get-job-id
-        uses: ./.github/actions/get-workflow-job-id
+        uses: $/.github/actions/get-workflow-job-id
         if: always()
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -139,13 +188,13 @@ jobs:
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Download build artifacts
-        uses: ./.github/actions/download-build-artifacts
+        uses: $/.github/actions/download-build-artifacts
         with:
           name: ${{ inputs.build-environment }}
 
       - name: Download TD artifacts
         continue-on-error: true
-        uses: ./.github/actions/download-td-artifacts
+        uses: $/.github/actions/download-td-artifacts
 
       - name: Parse ref
         id: parse-ref
@@ -156,7 +205,7 @@ jobs:
         # checks for labels and re-enabled test issues.  It does not actually do
         # any filtering.  All filtering is done in the build step.
         id: keep-going
-        uses: ./.github/actions/filter-test-configs
+        uses: $/.github/actions/filter-test-configs
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           test-matrix: ${{ inputs.test-matrix }}
@@ -221,89 +270,27 @@ jobs:
         run: |
           set -x
 
-          if [[ $TEST_CONFIG == 'multigpu' ]]; then
-            TEST_COMMAND=.ci/pytorch/multigpu-test.sh
-          elif [[ $BUILD_ENVIRONMENT == *onnx* ]]; then
-            TEST_COMMAND=.ci/caffe2/test.sh
-          else
-            TEST_COMMAND=.ci/pytorch/test.sh
-          fi
+          # if [[ $TEST_CONFIG == 'multigpu' ]]; then
+          #   TEST_COMMAND=.ci/pytorch/multigpu-test.sh
+          # elif [[ $BUILD_ENVIRONMENT == *onnx* ]]; then
+          #   TEST_COMMAND=.ci/caffe2/test.sh
+          # else
+          #   TEST_COMMAND=.ci/pytorch/test.sh
+          # fi
+          # PREFLIGHT=""
+          # if [[ "${TEST_CONFIG}" == *distributed* ]]; then
+          #   PREFLIGHT="timeout 180 python .ci/pytorch/rocm_preflight.py && "
+          # fi
+          pwd  
+          TEST_COMMAND=.ci/pytorch/test.sh
+          pip install dist/*.whl && .ci/pytorch/test.sh
 
-          # detached container should get cleaned up by teardown_ec2_linux
-          # TODO: Stop building test binaries as part of the build phase
-          # Used for GPU_FLAG since that doesn't play nice
-          # shellcheck disable=SC2086,SC2090
-          container_name=$(docker run \
-            ${GPU_FLAG:-} \
-            -e BUILD_ENVIRONMENT \
-            -e PR_NUMBER \
-            -e GITHUB_ACTIONS \
-            -e GITHUB_REPOSITORY \
-            -e GITHUB_WORKFLOW \
-            -e GITHUB_JOB \
-            -e GITHUB_RUN_ID \
-            -e GITHUB_RUN_NUMBER \
-            -e GITHUB_RUN_ATTEMPT \
-            -e JOB_ID \
-            -e JOB_NAME \
-            -e BASE_SHA \
-            -e BRANCH \
-            -e SHA1 \
-            -e AWS_DEFAULT_REGION \
-            -e AWS_ACCESS_KEY_ID \
-            -e AWS_SECRET_ACCESS_KEY \
-            -e AWS_SESSION_TOKEN \
-            -e IN_WHEEL_TEST \
-            -e SHARD_NUMBER \
-            -e TEST_CONFIG \
-            -e NUM_TEST_SHARDS \
-            -e REENABLED_ISSUES \
-            -e CONTINUE_THROUGH_ERROR \
-            -e VERBOSE_TEST_LOGS \
-            -e TEST_SHOWLOCALS \
-            -e NO_TEST_TIMEOUT \
-            -e NO_TD \
-            -e MAX_JOBS="$(nproc --ignore=2)" \
-            -e PYTORCH_TEST_RERUN_DISABLED_TESTS \
-            -e TESTS_TO_INCLUDE \
-            -e HUGGING_FACE_HUB_TOKEN \
-            -e DASHBOARD_TAG \
-            --env-file="${RUNNER_TEMP}/github_env_${GITHUB_RUN_ID}" \
-            --ulimit stack=10485760:83886080 \
-            --ulimit core=0 \
-            --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
-            --security-opt seccomp=unconfined \
-            --cap-add=SYS_PTRACE \
-            --shm-size="8g" \
-            --tty \
-            --detach \
-            --name="${container_name}" \
-            --user jenkins \
-            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
-            -w /var/lib/jenkins/workspace \
-            "${DOCKER_IMAGE}"
-          )
-          # save container name for later step
-          echo "CONTAINER_NAME=${container_name}" >> "$GITHUB_ENV"
-          WORKSPACE_ORIGINAL_OWNER_ID=$(docker exec -t "${container_name}" stat -c '%u' /var/lib/jenkins/workspace | tr -d '\r')
-          echo "WORKSPACE_ORIGINAL_OWNER_ID=${WORKSPACE_ORIGINAL_OWNER_ID}" >> "$GITHUB_ENV"
-          # ROCm/RCCL pre-flight for distributed shards: some gfx950 pods come up
-          # with a container that can't read the KFD topology ("Could not read
-          # node #N"), so every collective init fails and a later test hangs the
-          # whole shard until the 270-min job timeout. Host-side rocminfo still
-          # passes on these pods, so the GPU-count check misses it. Fail fast.
-          PREFLIGHT=""
-          if [[ "${TEST_CONFIG}" == *distributed* ]]; then
-            PREFLIGHT="timeout 180 python .ci/pytorch/rocm_preflight.py && "
-          fi
-          docker exec -t "${container_name}" sh -c "pip install dist/*.whl && ${PREFLIGHT}${TEST_COMMAND}"
-
-      - name: Restore workspace owner
-        if: always()
-        shell: bash
-        run: |
-          docker exec -t "${CONTAINER_NAME}" sh -c \
-            'sudo chown -R '"${WORKSPACE_ORIGINAL_OWNER_ID}"' /var/lib/jenkins/workspace'
+      # - name: Restore workspace owner
+      #   if: always()
+      #   shell: bash
+      #   run: |
+      #     docker exec -t "${CONTAINER_NAME}" sh -c \
+      #       'sudo chown -R '"${WORKSPACE_ORIGINAL_OWNER_ID}"' /var/lib/jenkins/workspace'
 
       - name: Print remaining test logs
         shell: bash
@@ -321,7 +308,7 @@ jobs:
           kill "$MONITOR_SCRIPT_PID"
 
       - name: Upload test artifacts
-        uses: ./.github/actions/upload-test-artifacts
+        uses: $/.github/actions/upload-test-artifacts
         if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
         with:
           # ROCm runners are not on EC2 and have no IAM instance profile, so the
@@ -335,7 +322,8 @@ jobs:
         if: always()
         run: |
           # shellcheck disable=SC2156
-          find . -iname "core.[1-9]*" -exec docker exec "${CONTAINER_NAME}" sh -c "gdb python {} -ex 'bt' -ex 'q'" \;
+          # find . -iname "core.[1-9]*" -exec docker exec "${CONTAINER_NAME}" sh -c "gdb python {} -ex 'bt' -ex 'q'" \;
+          find . -iname "core.[1-9]*" -exec gdb python {} -ex 'bt' -ex 'q' \;
 
       - name: Store Core dumps on GitHub
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -365,7 +353,7 @@ jobs:
       - name: Upload utilization stats
         if: ${{ always() && steps.test.conclusion && steps.test.conclusion != 'skipped' && !inputs.disable-monitor }}
         continue-on-error: true
-        uses: ./.github/actions/upload-utilization-stats
+        uses: $/.github/actions/upload-utilization-stats
         with:
           job_id: ${{ steps.get-job-id.outputs.job-id }}
           job_name: ${{ steps.get-job-id.outputs.job-name }}
@@ -373,5 +361,5 @@ jobs:
           workflow_run_id: ${{github.run_id}}
           workflow_attempt: ${{github.run_attempt}}
 
-      - name: Teardown ROCm
-        uses: ./.github/actions/teardown-rocm
+      # - name: Teardown ROCm
+      #   uses: $/.github/actions/teardown-rocm
