@@ -7261,6 +7261,49 @@ def sample_inputs_linear_cross_entropy_chunked_none(op_info, device, dtype, requ
     yield from sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, chunked=True, chunked_none=True, **kw)
 
 
+def _cutedsl_linear_cross_entropy_eligible(sample):
+    """Whether ``F.linear_cross_entropy`` routes this sample to one of the
+    chunked ops, i.e. whether a native override can see it at all.
+
+    Delegates to the functional's own predicate, so the gate has exactly one
+    definition and this cannot drift from it. ``warn=False`` because this is a
+    question about the sample, not a dispatch whose options are being ignored.
+    """
+    from torch.nn.functional import _linear_cross_entropy_chunked_applies
+
+    kwargs = sample.kwargs
+    return _linear_cross_entropy_chunked_applies(
+        sample.input,
+        sample.args[0],
+        sample.args[1],
+        kwargs.get("linear_bias"),
+        kwargs.get("reduction", "mean"),
+        kwargs.get("label_smoothing", 0.0),
+        kwargs.get("options"),
+        warn=False,
+    )
+
+
+def sample_inputs_cutedsl_linear_cross_entropy(op_info, device, dtype, requires_grad, **kwargs_unused):
+    # Reuse the chunked generator's whole sample space and keep what the
+    # override actually sees, so this variant tracks that generator instead of
+    # restating a hand-picked subset. ``requires_grad`` passes through: the
+    # override handles the gradient path too.
+    for sample in sample_inputs_linear_cross_entropy(
+        op_info, device, dtype, requires_grad=requires_grad, chunked=True
+    ):
+        if _cutedsl_linear_cross_entropy_eligible(sample):
+            yield sample
+
+
+def sample_inputs_cutedsl_linear_cross_entropy_none(op_info, device, dtype, requires_grad, **kwargs_unused):
+    for sample in sample_inputs_linear_cross_entropy(
+        op_info, device, dtype, requires_grad=requires_grad, chunked=True, chunked_none=True
+    ):
+        if _cutedsl_linear_cross_entropy_eligible(sample):
+            yield sample
+
+
 def error_inputs_linear_cross_entropy(op_info, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float)
 
@@ -23088,6 +23131,90 @@ if "cutedsl" in dsl_ops_by_dsl:
             variant_test_name="cutedsl_optimized_deterministic",
             method_variant=_topk_method_deterministic,
             **_cutedsl_topk_kwargs,
+        ),
+    ])
+    # CuTeDSL linear_cross_entropy overrides, one per chunked op. Both delegate
+    # to the op's own accumulator, so what differs from the "chunked" /
+    # "chunked_none" variants is only what the override itself imposes: CUDA
+    # only, CuTeDSL required, and samples filtered to those the ops receive.
+    _cutedsl_lce_skips = (
+        DecorateInfo(skipCUDAIf(not torch.cuda.is_available(), "CUDA not available")),
+        DecorateInfo(skipIfNoCuteDSL),
+        # Same unspecified launch failure the eager chunked variants hit.
+        DecorateInfo(unittest.skip("unspecified launch failure"),
+                     "TestCompositeCompliance", "test_cow_input",
+                     device_type="cuda",
+                     active_if=TEST_WITH_ROCM or IS_LINUX or TEST_WITH_TORCHINDUCTOR),
+        # LinearCrossEntropyOptions is a Python dataclass JIT cannot infer, and
+        # every sample here carries options=...
+        DecorateInfo(unittest.skip("LinearCrossEntropyOptions not JIT-scriptable"),
+                     "TestJit", "test_variant_consistency_jit"),
+        # MissingOperatorWithoutDecomp: the chunked custom ops have no Inductor
+        # lowering.
+        DecorateInfo(unittest.skip("no Inductor lowering for the chunked ops"),
+                     "TestInductorOpInfo", "test_comprehensive"),
+        # Inherited autograd limits: no forward-mode AD, no jvp, no vmap over
+        # the backward, no double backward.
+        DecorateInfo(unittest.expectedFailure, "TestFwdGradients", "test_forward_mode_AD"),
+        DecorateInfo(unittest.expectedFailure, "TestFwdGradients", "test_fn_fwgrad_bwgrad"),
+        DecorateInfo(unittest.expectedFailure, "TestOperators", "test_grad"),
+        DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vjp"),
+        DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vjpvjp"),
+        DecorateInfo(unittest.expectedFailure, "TestOperators", "test_jvpvjp"),
+        DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vjpvmap"),
+        DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapvjp"),
+        DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapvjpvjp"),
+        DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapjvpvjp"),
+        DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapvjp_has_batch_rule"),
+    )
+    _cutedsl_lce_kwargs = dict(
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        # The chunked accumulation the impls delegate to is nondeterministic
+        # (index_add_ / cross-chunk accumulation).
+        gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+        supports_forward_ad=False,
+        supports_fwgrad_bwgrad=False,
+        supports_out=False,
+        # ``target`` (arg 2) is materialized exactly as on the eager chunked
+        # path, since that is what the impls call.
+        allow_cow_input_materialize_forward=[2],
+        allow_cow_input_materialize_backward=[2, 'output grad 0'],
+        decorators=[DecorateInfo(onlyCUDA)],
+    )
+    dsl_ops_by_dsl.setdefault('cutedsl', []).extend([
+        OpInfo(
+            "nn.functional.linear_cross_entropy",
+            variant_test_name="cutedsl",
+            sample_inputs_func=sample_inputs_cutedsl_linear_cross_entropy,
+            skips=_cutedsl_lce_skips + (
+                # nll_loss2d decomposition mismatch on total_weight, as on the
+                # "chunked" variant.
+                DecorateInfo(
+                    unittest.skip("nll_loss2d_forward decomposition mismatch on total_weight"),
+                    "TestDecomp", "test_comprehensive", device_type="cuda"),
+            ),
+            **_cutedsl_lce_kwargs,
+        ),
+        OpInfo(
+            "nn.functional.linear_cross_entropy",
+            variant_test_name="cutedsl_none",
+            sample_inputs_func=sample_inputs_cutedsl_linear_cross_entropy_none,
+            # reduction='none' recomputes grads in backward, so the per-sample
+            # upstream grad makes it non-batched-grad compatible -- as on the
+            # "chunked_none" variant.
+            check_batched_grad=False,
+            check_batched_gradgrad=False,
+            skips=_cutedsl_lce_skips + (
+                DecorateInfo(
+                    unittest.skip("nll_loss2d_forward decomposition mismatch on total_weight"),
+                    "TestDecomp", "test_comprehensive"),
+                # Recompute-in-backward is not vmap-over-grad compatible, as on
+                # the "chunked_none" variant.
+                DecorateInfo(unittest.expectedFailure, "TestOperators",
+                             "test_vmap_autograd_grad"),
+            ),
+            **_cutedsl_lce_kwargs,
         ),
     ])
 
