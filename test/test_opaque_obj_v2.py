@@ -1181,7 +1181,10 @@ def forward(self, x_1, cfg_1):
 
         buf = io.BytesIO()
         pickler = GuardsStatePickler({id(x): x}, {}, {}, buf)
-        func, args = pickler.reducer_override(x)
+        # reducer_override returns a full pickle reduce tuple, and a tensor's
+        # is six long: guarded attributes assigned onto it ride in the STATE
+        # slot with a setter. Only the callable and its args matter here.
+        func, args = pickler.reducer_override(x)[:2]
         obj = func(*args)
         self.assertIsInstance(obj, torch.Tensor)
 
