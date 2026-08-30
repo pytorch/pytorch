@@ -926,9 +926,9 @@ def all_reduce_coalesced_backward(ctx, grad_outputs: list[torch.Tensor]):
     group_name = ctx.group_name
     reduce_op = ctx.reduce_op
 
-    if reduce_op != "sum":
+    if reduce_op not in ("sum", "avg"):
         raise RuntimeError(
-            f"all_reduce_coalesced backward only supports 'sum' reduction, got '{reduce_op}'"
+            f"all_reduce_coalesced backward only supports 'sum' and 'avg' reductions, got '{reduce_op}'"
         )
 
     # Backward does all_reduce on list of gradients
