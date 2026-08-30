@@ -6,6 +6,7 @@ from collections.abc import Callable
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
+from torch._functorch.vmap import restore_vmap, unwrap_batched, wrap_batched
 from torch._higher_order_ops.auto_functionalize import (
     can_auto_functionalize,
     do_auto_functionalize_v2,
@@ -20,6 +21,7 @@ from torch._higher_order_ops.utils import (
     get_graph_output_example_values,
     HopInstance,
     materialize_as_graph,
+    move_bdim_to_front,
     reenter_make_fx,
     validate_subgraph_args_types,
 )
@@ -40,7 +42,7 @@ class WhileLoopOp(HigherOrderOperator):
         self,
         cond_fn: Callable,
         body_fn: Callable,
-        carried_inputs: tuple[torch.Tensor | int | float | bool],
+        carried_inputs: tuple[torch.Tensor | int | float | bool, ...],
         additional_inputs: tuple[torch.Tensor | torch.SymInt | int, ...],
         /,
         *,
@@ -201,6 +203,10 @@ def while_loop(cond_fn, body_fn, carried_inputs):
 
         - During inference, body_fn and cond_fn can in-place mutate tensors that are not
           carried_inputs, such as module buffers and captured tensors from the enclosing scope.
+
+        - Under torch.vmap, all carried_inputs must be tensors: batch elements may run a
+          different number of iterations, which requires masking the carries of the ones
+          that already exited.
 
     """
 
@@ -662,6 +668,92 @@ def while_loop_func(
             **op_kwargs,
         )
         return ctx.wrap_tensors(ret)
+
+
+# NOTE: [vmap of while_loop]
+# while_loop runs a single loop for the whole batch, but under vmap each batch element's
+# cond_fn can turn False at a different iteration. So we keep looping until *every* element
+# is done, i.e. the batched predicate is reduced with .any(), and freeze the carries of the
+# elements that already exited by selecting between the new and the old carry with
+# torch.where. This is the same trick cond's batching rule uses for a batched predicate,
+# except that cond_fn has to be re-evaluated inside body_fn to get the mask.
+#
+# Freezing requires every carry to hold a per-element value, so unbatched carries are
+# broadcast to the batch size up front. That also keeps the carry metadata stable across
+# iterations for the case where body_fn turns an unbatched carry into a batched output.
+@while_loop_op.py_impl(torch._C._functorch.TransformType.Vmap)
+def while_loop_batch_rule(
+    interpreter,
+    cond_fn,
+    body_fn,
+    carried_inputs,
+    additional_inputs,
+    mutated_arg_indices="",
+):
+    if mutated_arg_indices:
+        raise RuntimeError(
+            "torch.while_loop doesn't support vmap when cond_fn or body_fn mutates its inputs, got {mutated_arg_indices}."
+        )
+    if not all(isinstance(carry, torch.Tensor) for carry in carried_inputs):
+        raise RuntimeError(
+            "torch.while_loop only supports tensor carries under vmap, but got {carried_inputs}."
+        )
+
+    batch_size = interpreter.batch_size()
+    randomness = interpreter.randomness()
+    (unbatched_carries, unbatched_additional), (carry_bdims, additional_bdims) = (
+        unwrap_batched((carried_inputs, additional_inputs), interpreter.level())
+    )
+
+    # Prepare the batched carry.
+    init_carries = tuple(
+        move_bdim_to_front(carry, bdim, batch_size)
+        for carry, bdim in zip(unbatched_carries, carry_bdims)
+    )
+    # Unbatched additional inputs stay unbatched, but the backward of while_loop carries
+    # the gradients of the additional inputs, which start out as zeros with the same
+    # layout, so the batched ones need the same normalization as the carries.
+    additional = tuple(
+        move_bdim_to_front(t, bdim, batch_size) if bdim is not None else t
+        for t, bdim in zip(unbatched_additional, additional_bdims)
+    )
+    # cond_fn and body_fn take the carries followed by the additional inputs
+    in_dims = (0,) * len(init_carries) + tuple(
+        0 if bdim is not None else None for bdim in additional_bdims
+    )
+
+    def batched_pred(flat_args):
+        pred, pred_bdim = restore_vmap(cond_fn, in_dims, batch_size, randomness)(
+            *flat_args
+        )
+        if pred_bdim is None:
+            return pred, None
+        return pred.movedim(pred_bdim, 0), 0
+
+    def batched_cond_fn(*flat_args):
+        pred, pred_bdim = batched_pred(flat_args)
+        return pred.any() if pred_bdim is not None else pred
+
+    def batched_body_fn(*flat_args):
+        pred, pred_bdim = batched_pred(flat_args)
+        outs, out_bdims = restore_vmap(body_fn, in_dims, batch_size, randomness)(
+            *flat_args
+        )
+        outs = tuple(
+            move_bdim_to_front(out, bdim, batch_size)
+            for out, bdim in zip(outs, out_bdims)
+        )
+        if pred_bdim is None:
+            return outs
+        masked_outs = []
+        for out, carry in zip(outs, flat_args[: len(init_carries)]):
+            mask = pred.reshape((batch_size,) + (1,) * (out.dim() - 1))
+            masked_outs.append(torch.where(mask, out, carry))
+        return tuple(masked_outs)
+
+    with interpreter.lower():
+        out = while_loop_op(batched_cond_fn, batched_body_fn, init_carries, additional)
+    return wrap_batched(out, (0,) * len(out), interpreter.level())
 
 
 class WhileLoopStackOutputOp(HigherOrderOperator):

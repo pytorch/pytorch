@@ -972,6 +972,18 @@ def first_slice_copy(t: torch.Tensor, dim: int = 0) -> torch.Tensor:
     return torch.select_copy(t, dim, 0)
 
 
+# Gives `t` a leading batch dim of size `batch_size`.
+def move_bdim_to_front(
+    t: torch.Tensor, bdim: int | None, batch_size: int
+) -> torch.Tensor:
+    # Materialize with contiguous_format to match torch.stack behavior. .contiguous()
+    # is not enough: broadcasting or moving a size 1 dim leaves a view that reports as
+    # contiguous while keeping the strides of the source, and the HOPs compare the
+    # strides of their carries exactly.
+    t = t.expand(batch_size, *t.shape) if bdim is None else t.movedim(bdim, 0)
+    return t.clone(memory_format=torch.contiguous_format)
+
+
 # Returns a mask whether a list element is a tensor or not
 def get_tensor_mask(tensor_list: Iterable[Any]) -> list[bool]:
     return [bool(isinstance(v, torch.Tensor)) for v in tensor_list]
