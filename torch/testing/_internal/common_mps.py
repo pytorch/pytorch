@@ -77,6 +77,11 @@ if torch.backends.mps.is_available():
         # Those ops are not expected to work
         UNIMPLEMENTED_XFAILLIST: dict[str, list | None] = {
             # Failures due to lack of op implementation on MPS backend
+            # No 5-D bicubic sampler on MPS: the 5-D bicubic samples are yielded on every
+            # backend and GridSampler.mm refuses the mode, so the whole op xfails until MPS
+            # implements it. The f16/bf16 SKIPLIST entry below still intercepts those dtypes.
+            # TODO: drop this when MPS has 5-D bicubic.
+            "nn.functional.grid_sample": None,
             "linalg.eig": None,
             "linalg.eigvals": None,
             "frexp": None,

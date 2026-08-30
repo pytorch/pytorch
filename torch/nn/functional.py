@@ -5575,7 +5575,7 @@ def grid_sample(
             used internally will actually be trilinear. However, when the input is 4-D,
             the interpolation mode will legitimately be bilinear. Likewise
             ``mode='bicubic'`` is tricubic on a 5-D input, the separable cubic kernel
-            extended over the third axis.
+            extended over the third axis; CPU and CUDA implement the 5-D case.
         padding_mode (str): padding mode for outside grid values
             ``'zeros'`` | ``'border'`` | ``'reflection'``. Default: ``'zeros'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
