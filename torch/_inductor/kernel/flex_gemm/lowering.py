@@ -807,7 +807,7 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     if backend in ("NVGEMM", "QUACK") and gemm_op in FLEX_GEMM_OP_SPECS:
         mat1 = args[FLEX_GEMM_OP_SPECS[gemm_op].mat1_index]
         if isinstance(mat1, TensorBox) and is_bf16x9_matmul(
-            mat1.get_device().type, mat1.get_dtype()
+            mat1.get_device_or_error().type, mat1.get_dtype()
         ):
             # See Note [16x9 precision] in torch/_inductor/utils.py.
             warning_once(
