@@ -27,7 +27,10 @@
 #include <sys/types.h>
 #include <unistd.h>
 #else
+#include <c10/util/win32-headers.h>
+#include <fmt/os.h>
 #include <process.h>
+#include <bit>
 #endif
 #endif
 
@@ -96,6 +99,33 @@ static int get_self_pid() {
   return getpid();
 #endif // _WIN32
 }
+
+#ifdef _WIN32
+// Process creation time, used to tell a reused PID apart. 0 on failure.
+static uint64_t win32_process_create_time(HANDLE proc) {
+  FILETIME create{}, exit{}, kernel{}, user{};
+  if (!GetProcessTimes(proc, &create, &exit, &kernel, &user)) {
+    return 0;
+  }
+  return std::bit_cast<uint64_t>(create);
+}
+#endif // _WIN32
+
+// Serializable OS form of a memory handle: Win32 NT HANDLE (void*) or POSIX
+// fd (int). Serialized width is sizeof(OsIpcHandle).
+#ifdef _WIN32
+using OsIpcHandle = void*;
+#else
+using OsIpcHandle = int;
+#endif
+#ifndef USE_ROCM
+#ifdef _WIN32
+constexpr CUmemAllocationHandleType kOsIpcHandleType = CU_MEM_HANDLE_TYPE_WIN32;
+#else
+constexpr CUmemAllocationHandleType kOsIpcHandleType =
+    CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+#endif
+#endif
 #endif // defined(PYTORCH_C10_DRIVER_API_SUPPORTED) || defined(USE_ROCM)
 
 namespace Native {
@@ -527,9 +557,10 @@ struct ExpandableSegment {
     }
 
 #ifdef _WIN32
-    // No Win32 IPC handle type implemented; share() still errors clearly
-    // for cross-process use.
-    constexpr bool enable_ipc_handles = false;
+    // Win32 NT-handle IPC: opt-in, off by default while it is validated.
+    static const bool enable_ipc_handles =
+        c10::utils::check_env("TORCH_CUDA_EXPANDABLE_SEGMENTS_IPC")
+            .value_or(false);
 #else
     // In fbcode, IPC handle types for expandable segments are disabled by
     // default because some jobs were failing (see
@@ -575,7 +606,7 @@ struct ExpandableSegment {
 #ifdef USE_ROCM
           prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
 #else
-          prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+          prop.requestedHandleTypes = kOsIpcHandleType;
 #endif
         }
       }
@@ -679,6 +710,17 @@ struct ExpandableSegment {
     // ipcMemHandle_to_devptr.
     ShareHeader header{};
     header.pid = get_self_pid();
+#ifdef _WIN32
+    // Cache the first nonzero read; retry on a transient GetProcessTimes
+    // failure (0) so it doesn't pin producer_create_time to 0 forever.
+    static std::atomic<uint64_t> self_create_time{0};
+    uint64_t create_time = self_create_time.load(std::memory_order_relaxed);
+    if (create_time == 0) {
+      create_time = win32_process_create_time(GetCurrentProcess());
+      self_create_time.store(create_time, std::memory_order_relaxed);
+    }
+    header.producer_create_time = create_time;
+#endif
     header.segment_size = segment_size_;
     header.num_handles = end - begin;
     header.handle_type = handle_type_;
@@ -690,23 +732,25 @@ struct ExpandableSegment {
       auto& handle = *maybe_handle;
       if (handle_type_ != Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
         if (!handle.shareable_handle) {
-          int fd = 0;
 #ifdef USE_ROCM
+          int fd = 0;
           C10_CUDA_CHECK(hipMemExportToShareableHandle(
               &fd, handle.handle, hipMemHandleTypePosixFileDescriptor, 0));
-#else
-          C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemExportToShareableHandle_(
-              &fd, handle.handle, CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR, 0));
-#endif
           handle.shareable_handle = fd;
-          LOG(INFO) << "use posix fd to share expandable segments.";
+#else
+          OsIpcHandle sh{};
+          C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemExportToShareableHandle_(
+              &sh, handle.handle, kOsIpcHandleType, 0));
+          handle.shareable_handle = sh;
+#endif
+          LOG(INFO) << "use os ipc handle to share expandable segments.";
         }
         TORCH_CHECK(
             handle.shareable_handle != std::nullopt,
             "shareable_handle is null");
+        OsIpcHandle os_handle = std::get<OsIpcHandle>(*handle.shareable_handle);
         buf.write(
-            reinterpret_cast<const char*>(&*handle.shareable_handle),
-            sizeof(int));
+            reinterpret_cast<const char*>(&os_handle), sizeof(OsIpcHandle));
       } else {
 #ifdef USE_ROCM
         TORCH_INTERNAL_ASSERT(
@@ -722,8 +766,10 @@ struct ExpandableSegment {
         TORCH_CHECK(
             handle.shareable_handle != std::nullopt,
             "shareable_handle is null");
+        CUmemFabricHandle fabric_handle =
+            std::get<CUmemFabricHandle>(*handle.shareable_handle);
         buf.write(
-            reinterpret_cast<const char*>(&*handle.shareable_handle),
+            reinterpret_cast<const char*>(&fabric_handle),
             sizeof(CUmemFabricHandle));
 #endif
       }
@@ -739,11 +785,18 @@ struct ExpandableSegment {
     buf.read(reinterpret_cast<char*>(&header), sizeof(ShareHeader));
     // Sanitize the handle_type from the wire header: guard against corrupted
     // or future-version payloads that somehow slipped past the version gate.
-    TORCH_CHECK(
+    // Accept only handle types the current platform's import path can decode:
+    // a POSIX fd stream and a Win32 NT-handle stream have different widths.
+    const bool valid_handle_type =
+        header.handle_type == Expandable_Segments_Handle_Type::FABRIC_HANDLE ||
+#ifdef _WIN32
+        header.handle_type == Expandable_Segments_Handle_Type::WIN32_HANDLE;
+#else
         header.handle_type == Expandable_Segments_Handle_Type::UNSPECIFIED ||
-            header.handle_type == Expandable_Segments_Handle_Type::POSIX_FD ||
-            header.handle_type ==
-                Expandable_Segments_Handle_Type::FABRIC_HANDLE,
+        header.handle_type == Expandable_Segments_Handle_Type::POSIX_FD;
+#endif
+    TORCH_CHECK(
+        valid_handle_type,
         "Unknown Expandable_Segments_Handle_Type in IPC share header: ",
         static_cast<int>(header.handle_type));
 #ifndef USE_ROCM
@@ -780,8 +833,74 @@ struct ExpandableSegment {
 #endif // !_WIN32
     if (header.handle_type != Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
 #ifdef _WIN32
+      // Verify the producer's creation time before trusting header.pid (Windows
+      // reuses PIDs), then DuplicateHandle each exported NT handle in.
+      // SYNCHRONIZE is required for the WaitForSingleObject liveness check
+      // below.
+      HANDLE producer = OpenProcess(
+          PROCESS_DUP_HANDLE | PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
+          FALSE,
+          static_cast<DWORD>(header.pid));
       TORCH_CHECK(
-          false, "IPC expandable segments are not supported on Windows");
+          producer != nullptr,
+          fmt::windows_error(
+              static_cast<int>(GetLastError()),
+              "expandable_segments Win32 IPC: OpenProcess({}) failed",
+              header.pid)
+              .what());
+      auto close_producer =
+          c10::make_scope_exit([producer]() { CloseHandle(producer); });
+      // 0 = GetProcessTimes failed; reject so two 0s can't compare equal.
+      const uint64_t producer_time = win32_process_create_time(producer);
+      TORCH_CHECK(
+          producer_time != 0 && producer_time == header.producer_create_time,
+          "expandable_segments Win32 IPC: could not verify producer PID ",
+          header.pid,
+          " (process creation time mismatched or unavailable); aborting ",
+          "import.");
+      // The producer must be live: DuplicateHandle reads its handle table, and
+      // its process handle signals (WAIT_OBJECT_0) once it exits.
+      const DWORD producer_wait = WaitForSingleObject(producer, 0);
+      TORCH_CHECK(
+          producer_wait != WAIT_OBJECT_0,
+          "expandable_segments Win32 IPC: producer PID ",
+          header.pid,
+          " has already exited; aborting import.");
+      TORCH_CHECK(
+          producer_wait == WAIT_TIMEOUT,
+          fmt::windows_error(
+              static_cast<int>(GetLastError()),
+              "expandable_segments Win32 IPC: WaitForSingleObject on producer "
+              "PID {} failed",
+              header.pid)
+              .what());
+      for ([[maybe_unused]] auto i : c10::irange(header.num_handles)) {
+        OsIpcHandle producer_handle{};
+        buf.read(
+            reinterpret_cast<char*>(&producer_handle), sizeof(OsIpcHandle));
+        HANDLE my_handle = nullptr;
+        if (!DuplicateHandle(
+                producer,
+                static_cast<HANDLE>(producer_handle),
+                GetCurrentProcess(),
+                &my_handle,
+                0,
+                FALSE,
+                DUPLICATE_SAME_ACCESS)) {
+          auto err = GetLastError();
+          TORCH_CHECK(
+              false,
+              fmt::windows_error(
+                  static_cast<int>(err), "DuplicateHandle failed")
+                  .what());
+        }
+        auto close_my_handle =
+            c10::make_scope_exit([my_handle]() { CloseHandle(my_handle); });
+        CUmemGenericAllocationHandle handle = 0;
+        C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemImportFromShareableHandle_(
+            &handle, my_handle, kOsIpcHandleType));
+        segment->handles_.emplace_back(handle);
+      }
 #else
       auto pidfd = syscall(SYS_pidfd_open, header.pid, 0);
       TORCH_CHECK(
@@ -838,7 +957,8 @@ struct ExpandableSegment {
           false, "expandable segment with fabric handle not supported");
 #elif defined(_WIN32)
       TORCH_CHECK(
-          false, "IPC expandable segments are not supported on Windows");
+          false,
+          "fabric handle expandable segments are not supported on Windows");
 #else
       for (auto i : c10::irange(header.num_handles)) {
         (void)i;
@@ -915,7 +1035,17 @@ struct ExpandableSegment {
   // are not supported and any FABRIC config is rejected with a clear error.
   static Expandable_Segments_Handle_Type detectHandleType(
       c10::DeviceIndex device) {
-#ifndef USE_ROCM
+#ifdef _WIN32
+    (void)device;
+    const auto configured =
+        CUDAAllocatorConfig::expandable_segments_handle_type();
+    TORCH_CHECK(
+        configured == Expandable_Segments_Handle_Type::UNSPECIFIED ||
+            configured == Expandable_Segments_Handle_Type::WIN32_HANDLE,
+        "expandable_segments: only the WIN32 handle type is supported on ",
+        "Windows; unset PYTORCH_CUDA_ALLOC_CONF=expandable_segments_handle_type.");
+    return Expandable_Segments_Handle_Type::WIN32_HANDLE;
+#elif !defined(USE_ROCM)
     switch (CUDAAllocatorConfig::expandable_segments_handle_type()) {
       case Expandable_Segments_Handle_Type::POSIX_FD:
         return Expandable_Segments_Handle_Type::POSIX_FD;
@@ -932,6 +1062,11 @@ struct ExpandableSegment {
         return cuda::get_fabric_access(device)
             ? Expandable_Segments_Handle_Type::FABRIC_HANDLE
             : Expandable_Segments_Handle_Type::POSIX_FD;
+      case Expandable_Segments_Handle_Type::WIN32_HANDLE:
+        TORCH_CHECK(
+            false,
+            "expandable_segments: the WIN32 handle type is only supported on ",
+            "Windows.");
     }
     TORCH_INTERNAL_ASSERT(false, "unhandled Expandable_Segments_Handle_Type");
 #else
@@ -1031,7 +1166,11 @@ struct ExpandableSegment {
 #endif
       }
       if (h.shareable_handle) {
-#ifndef _WIN32
+#ifdef _WIN32
+        if (auto* nt = std::get_if<void*>(&*h.shareable_handle)) {
+          CloseHandle(*nt);
+        }
+#else
         // shareable_handle also holds CUmemFabricHandle for fabric segments;
         // std::get_if skips those (no fd to close) instead of throwing.
         if (auto* fd = std::get_if<int>(&*h.shareable_handle)) {
@@ -1087,7 +1226,8 @@ struct ExpandableSegment {
   size_t max_handles_;
   struct Handle {
     CUmemGenericAllocationHandle handle;
-    std::optional<std::variant<int, CUmemFabricHandle>> shareable_handle;
+    // int: POSIX fd; CUmemFabricHandle: fabric; void*: Win32 NT HANDLE.
+    std::optional<std::variant<int, CUmemFabricHandle, void*>> shareable_handle;
     // False for handles imported via fromShared but not yet cuMemMap'd, so
     // unmapHandles can skip cuMemUnmap on ranges that were never mapped.
     bool mapped = false;
@@ -1098,6 +1238,8 @@ struct ExpandableSegment {
     // indeterminate bytes over IPC.
 #ifdef _WIN32
     int pid = 0;
+    // Producer creation time, checked on import to detect PID reuse.
+    uint64_t producer_create_time = 0;
 #else
     pid_t pid = 0;
 #endif

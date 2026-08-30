@@ -20,6 +20,7 @@ enum class Expandable_Segments_Handle_Type : int {
   UNSPECIFIED = 0,
   POSIX_FD = 1,
   FABRIC_HANDLE = 2,
+  WIN32_HANDLE = 3,
 };
 
 // A per-segment virtual-address reserve size, expressed either as a fraction of
