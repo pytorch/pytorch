@@ -19,6 +19,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/add.h>
 #include <ATen/ops/all_native.h>
 #include <ATen/ops/amax.h>
 #include <ATen/ops/amax_native.h>
@@ -28,11 +29,13 @@
 #include <ATen/ops/argmax_native.h>
 #include <ATen/ops/argmin_native.h>
 #include <ATen/ops/count_nonzero_native.h>
+#include <ATen/ops/imag.h>
 #include <ATen/ops/max_native.h>
 #include <ATen/ops/mean_native.h>
 #include <ATen/ops/min_native.h>
 #include <ATen/ops/nansum_native.h>
 #include <ATen/ops/prod_native.h>
+#include <ATen/ops/real.h>
 #include <ATen/ops/std_mean_native.h>
 #include <ATen/ops/std_native.h>
 #include <ATen/ops/sum.h>
@@ -364,6 +367,20 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
                                       StdVarType stdVarType) {
   TORCH_CHECK_TYPE(input_t.is_floating_point() || input_t.is_complex(),
                    "std and var only support floating point and complex dtypes");
+
+  if (input_t.is_complex()) {
+    // Variance of a complex tensor is real: var(z) = var(Re z) + var(Im z).
+    // MPSGraph's varianceOfTensor computes E[(z - mu)^2] (no conjugation) on
+    // complex input, so decompose into real components like the CPU path does.
+    // TODO: This is correct but slow: at::real/at::imag materialize strided
+    // views that force gathers, and it runs two separate reduction graphs plus
+    // an add. Refactor to a single graph (or a dedicated Metal kernel) that
+    // reduces |z - mu|^2 directly.
+    auto var = at::add(std_var_common_impl_mps(at::real(input_t), dim, correction, keepdim, STANDARD_VARIANCE),
+                       std_var_common_impl_mps(at::imag(input_t), dim, correction, keepdim, STANDARD_VARIANCE));
+    return (stdVarType == STANDARD_DEVIATION) ? var.sqrt() : var;
+  }
+
   using CachedGraph = MPSUnaryCachedGraph;
 
   IntArrayRef input_shape = input_t.sizes();
