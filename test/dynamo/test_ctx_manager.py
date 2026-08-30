@@ -360,6 +360,33 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled(x).dtype, torch.float32)
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_autocast_object_mutated_in_place_recompiles(self):
+        # The live-mutation direction of the value guards: mutating the held
+        # object leaves id() unchanged, so an ID_MATCH on it keeps serving the
+        # stale bf16 graph. This must be the FIRST divergence after compile --
+        # any rebind in between would give the id() guard a different object
+        # and let a recompile mask the staleness.
+        class MyModule(torch.nn.Module):
+            def __init__(self, ctx):
+                super().__init__()
+                self.ctx = ctx
+                self.l = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                with self.ctx:
+                    return self.l(x)
+
+        module = MyModule(torch.amp.autocast("cpu", dtype=torch.bfloat16))
+        cnts = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(module, backend=cnts)
+        x = torch.randn(4, 4)
+        self.assertEqual(compiled(x).dtype, torch.bfloat16)
+        self.assertEqual(cnts.frame_count, 1)
+
+        module.ctx._enabled = False
+        self.assertEqual(compiled(x).dtype, torch.float32)
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_autocast_cpu(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):

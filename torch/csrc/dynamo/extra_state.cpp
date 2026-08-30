@@ -99,10 +99,60 @@ void ExtraState::move_to_back(CacheEntry* cache_entry) {
   list.splice(list.end(), list, cache_entry->_owner_loc);
 }
 
+void ExtraState::invalidate_locked(
+    const py::object& deleted_guard_manager,
+    const py::object& live_guard_manager) {
+  // Locate the entry by the IDENTITY of the guard manager that owns it, never
+  // by an address handed in: a std::list node is recycled, so a fresh entry
+  // allocated at the same address would pass an address check and then be
+  // wrongly invalidated, killing a valid compilation. Only live nodes are
+  // dereferenced here, so an already-destroyed entry is never touched.
+  CacheEntry* live_entry = nullptr;
+  for (auto& [id, entries] : this->cache_entry_map) {
+    (void)id;
+    for (CacheEntry& live : entries) {
+      if (live.guard_manager.ptr() == live_guard_manager.ptr()) {
+        live_entry = &live;
+        break;
+      }
+    }
+    if (live_entry != nullptr) {
+      break;
+    }
+  }
+  if (live_entry != nullptr) {
+    CHECK(live_entry->_owner == this);
+    CHECK(live_entry == &*live_entry->_owner_loc);
+    live_entry->invalidate(py::object(deleted_guard_manager));
+    // Move the cache entry to the end of the list because these will always
+    // return False.
+    this->move_to_back(live_entry);
+  }
+}
+
+void ExtraState::drain_pending_invalidations() {
+  // Swap out under the pending mutex: applying an invalidation can run
+  // arbitrary Python (dropping a guard manager reference), which must not
+  // happen while that mutex is held.
+  std::vector<std::pair<py::object, py::object>> pending;
+  {
+    std::lock_guard<std::mutex> lock(this->pending_invalidation_mutex);
+    pending.swap(this->pending_invalidations);
+  }
+  for (auto& [deleted_gm, live_gm] : pending) {
+    this->invalidate_locked(deleted_gm, live_gm);
+  }
+}
+
 void ExtraState::invalidate(
     CacheEntry* cache_entry,
     py::object deleted_guard_manager,
     py::object live_guard_manager) {
+  // cache_entry arrives as a non-owning raw pointer, read off the guard
+  // manager before any lock was taken (CheckFunctionManager.invalidate);
+  // another thread can destroy it at any point, so it is never dereferenced
+  // -- the live entry is re-located by guard manager identity instead.
+  (void)cache_entry;
   // Sometimes setting the cache_entry->code to None causes the orig_code to be
   // freed. This calls destroy_extra_state, which deletes the extra_state and
   // all the cache_entries. This causes the `this` pointer to be a dangling
@@ -111,45 +161,64 @@ void ExtraState::invalidate(
   // function is running.
   Py_INCREF(this->orig_code);
   {
-    CacheLock lock(this->cache_mutex);
-    // cache_entry arrives as a non-owning raw pointer, read off the guard
-    // manager before the lock was taken (CheckFunctionManager.invalidate). The
-    // wait above can release the GIL, so another thread holding both the GIL
-    // and this lock -- _clear_cache_entries_for_region, reached from
-    // PrecompiledCallable.unload() -- can destroy the entry while we block.
-    //
-    // Locate the entry by the IDENTITY of the guard manager that owns it, never
-    // by the address we were handed: a std::list node is recycled, so a fresh
-    // entry allocated at the same address would pass an address check and then
-    // be wrongly invalidated, killing a valid compilation. Only live nodes are
-    // dereferenced here, so a freed cache_entry is never touched.
-    CacheEntry* live_entry = nullptr;
-    for (auto& [id, entries] : this->cache_entry_map) {
-      (void)id;
-      for (CacheEntry& live : entries) {
-        if (live.guard_manager.ptr() == live_guard_manager.ptr()) {
-          live_entry = &live;
-          break;
-        }
-      }
-      if (live_entry != nullptr) {
-        break;
-      }
-    }
-    if (live_entry != nullptr) {
-      CHECK(live_entry == cache_entry);
-      CHECK(cache_entry->_owner == this);
-      CHECK(cache_entry == &*cache_entry->_owner_loc);
-      cache_entry->invalidate(std::move(deleted_guard_manager));
-      // Move the cache entry to the end of the list because these will always
-      // return False.
-      cache_entry->_owner->move_to_back(cache_entry);
+    std::unique_lock<std::recursive_mutex> lock(
+        this->cache_mutex, std::try_to_lock);
+    if (!lock.owns_lock()) {
+      // NEVER block on cache_mutex here: invalidate is reached from
+      // weakref.finalize, which GC can fire during guard evaluation while
+      // ANOTHER ExtraState's cache_mutex is held. Two threads doing that
+      // against each other's states would deadlock -- CacheLock releases only
+      // the GIL, not the peer's lock. Park the request instead; the next
+      // holder of cache_mutex (lookup, or a later invalidate) applies it.
+      std::lock_guard<std::mutex> pending_lock(
+          this->pending_invalidation_mutex);
+      this->pending_invalidations.emplace_back(
+          std::move(deleted_guard_manager), std::move(live_guard_manager));
+    } else {
+      this->drain_pending_invalidations();
+      this->invalidate_locked(deleted_guard_manager, live_guard_manager);
     }
   }
   // The lock must be released BEFORE the decref: if this drops the last
   // reference, destroy_extra_state deletes `this` along with cache_mutex, and
   // unlocking a destroyed mutex is undefined behaviour.
   Py_DECREF(this->orig_code);
+}
+
+void ExtraState::clear_in_place() {
+  // Destructors of the evicted containers run AFTER the locks release: a
+  // CacheEntry / PrecompileEntry destructor drops py::objects, and any Python
+  // that runs from those decrefs must not re-enter this state's containers
+  // mid-mutation or block behind a mutex this thread still holds.
+  std::list<PrecompileEntry> dead_precompile_entries;
+  std::unordered_map<int64_t, std::list<CacheEntry>> dead_cache_entries;
+  std::vector<std::pair<py::object, py::object>> dead_pending;
+  py::dict dead_frame_state;
+  std::unordered_map<int64_t, py::dict> dead_region_frame_state;
+  {
+    CacheLock lock(this->cache_mutex);
+    dead_precompile_entries.swap(this->precompile_entries);
+    dead_cache_entries.swap(this->cache_entry_map);
+    this->total_cache_entry_count = 0;
+  }
+  {
+    std::lock_guard<std::mutex> lock(this->pending_invalidation_mutex);
+    dead_pending.swap(this->pending_invalidations);
+  }
+  // frame_state itself is only touched under the GIL (see
+  // extract_frame_state), which the caller holds.
+  dead_frame_state = std::move(this->frame_state);
+  this->frame_state = py::dict();
+  {
+    std::lock_guard<std::mutex> lock(this->region_frame_state_mutex);
+    dead_region_frame_state.swap(this->region_frame_state_map);
+  }
+  {
+    std::lock_guard<std::mutex> lock(this->strategy_mutex);
+    this->strategy = FrameExecStrategy{DEFAULT, DEFAULT};
+    this->strategy_generation = 0;
+    this->region_strategy_map.clear();
+  }
 }
 
 CacheEntry* extract_cache_entry(
@@ -307,6 +376,13 @@ void destroy_extra_state(void* obj) {
   delete extra;
 }
 
+void reset_extra_state(PyCodeObject* code) {
+  ExtraState* extra = get_extra_state(code);
+  if (extra != nullptr) {
+    extra->clear_in_place();
+  }
+}
+
 void set_extra_state(PyCodeObject* code, ExtraState* extra_state) {
   ExtraState* old_extra_state = get_extra_state(code);
   CHECK(extra_state == nullptr || old_extra_state != extra_state);
@@ -432,6 +508,7 @@ void lookup(
     const char** trace_annotation,
     bool is_skip_guard_eval_unsafe) {
   CacheLock lock(extra_state->cache_mutex);
+  extra_state->drain_pending_invalidations();
   CacheEntry* found = nullptr;
   bool guard_error = false;
 
@@ -639,12 +716,20 @@ void _clear_cache_entries_for_region(
     return;
   }
   {
-    CacheLock lock(extra->cache_mutex);
-    auto it = extra->cache_entry_map.find(isolate_recompiles_id);
-    if (it != extra->cache_entry_map.end()) {
-      TORCH_CHECK(extra->total_cache_entry_count >= it->second.size());
-      extra->total_cache_entry_count -= it->second.size();
-      extra->cache_entry_map.erase(it);
+    // Evicted entries die AFTER the lock releases: a CacheEntry destructor
+    // drops py::objects whose __del__ can re-enter this state -- e.g. unload
+    // another artifact on the same code object -- and under cache_mutex that
+    // re-entry would mutate the container mid-erase.
+    std::list<CacheEntry> evicted;
+    {
+      CacheLock lock(extra->cache_mutex);
+      auto it = extra->cache_entry_map.find(isolate_recompiles_id);
+      if (it != extra->cache_entry_map.end()) {
+        TORCH_CHECK(extra->total_cache_entry_count >= it->second.size());
+        extra->total_cache_entry_count -= it->second.size();
+        evicted = std::move(it->second);
+        extra->cache_entry_map.erase(it);
+      }
     }
   }
   {
@@ -702,8 +787,12 @@ void _reset_precompile_entries(const py::handle& code_obj) {
   PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
   ExtraState* extra = get_extra_state(code);
   if (extra != nullptr) {
-    CacheLock lock(extra->cache_mutex);
-    extra->precompile_entries.clear();
+    // Destroyed after the lock releases; see _clear_cache_entries_for_region.
+    std::list<PrecompileEntry> evicted;
+    {
+      CacheLock lock(extra->cache_mutex);
+      evicted.swap(extra->precompile_entries);
+    }
   }
 }
 
@@ -716,11 +805,20 @@ void _reset_precompile_entries_for_region(
   PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
   ExtraState* extra = get_extra_state(code);
   if (extra != nullptr) {
-    CacheLock lock(extra->cache_mutex);
-    extra->precompile_entries.remove_if(
-        [isolate_recompiles_id](const PrecompileEntry& entry) {
-          return entry.isolate_recompiles_id == isolate_recompiles_id;
-        });
+    // Matching nodes are spliced out under the lock and destroyed after it
+    // releases; see _clear_cache_entries_for_region.
+    std::list<PrecompileEntry> evicted;
+    {
+      CacheLock lock(extra->cache_mutex);
+      auto& entries = extra->precompile_entries;
+      for (auto it = entries.begin(); it != entries.end();) {
+        auto next = std::next(it);
+        if (it->isolate_recompiles_id == isolate_recompiles_id) {
+          evicted.splice(evicted.end(), entries, it);
+        }
+        it = next;
+      }
+    }
   }
 }
 
@@ -734,13 +832,22 @@ void _reset_precompile_entries_for_owner(
   PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
   ExtraState* extra = get_extra_state(code);
   if (extra != nullptr) {
-    CacheLock lock(extra->cache_mutex);
-    PyObject* owner_ptr = owner.ptr();
-    extra->precompile_entries.remove_if(
-        [isolate_recompiles_id, owner_ptr](const PrecompileEntry& entry) {
-          return entry.isolate_recompiles_id == isolate_recompiles_id &&
-              entry.owner.ptr() == owner_ptr;
-        });
+    // Matching nodes are spliced out under the lock and destroyed after it
+    // releases; see _clear_cache_entries_for_region.
+    std::list<PrecompileEntry> evicted;
+    {
+      CacheLock lock(extra->cache_mutex);
+      PyObject* owner_ptr = owner.ptr();
+      auto& entries = extra->precompile_entries;
+      for (auto it = entries.begin(); it != entries.end();) {
+        auto next = std::next(it);
+        if (it->isolate_recompiles_id == isolate_recompiles_id &&
+            it->owner.ptr() == owner_ptr) {
+          evicted.splice(evicted.end(), entries, it);
+        }
+        it = next;
+      }
+    }
   }
 }
 
