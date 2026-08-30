@@ -51,6 +51,7 @@ DTYPE_TO_CPP = {
     torch.float8_e4m3fnuz: "at::Float8_e4m3fnuz",
     torch.float8_e5m2fnuz: "at::Float8_e5m2fnuz",
     torch.float8_e8m0fnu: "at::Float8_e8m0fnu",
+    torch.float4_e2m1fn_x2: "at::Float4_e2m1fn_x2",
 }
 
 DTYPE_TO_ATEN = {
@@ -78,6 +79,7 @@ DTYPE_TO_ATEN = {
     torch.float8_e4m3fnuz: "at::kFloat8_e4m3fnuz",
     torch.float8_e5m2fnuz: "at::kFloat8_e5m2fnuz",
     torch.float8_e8m0fnu: "at::kFloat8_e8m0fnu",
+    torch.float4_e2m1fn_x2: "at::kFloat4_e2m1fn_x2",
 }
 
 DEVICE_TO_ATEN = {

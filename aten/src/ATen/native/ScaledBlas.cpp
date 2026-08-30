@@ -8,6 +8,7 @@
 #include <ATen/native/GroupedMMUtils.h>
 #include <ATen/BlasBackend.h>
 #include <ATen/native/ScaledBlasUtils.h>
+#include <ATen/native/cpu/mxfp_mm_kernel.h>
 #if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
 #endif
@@ -67,6 +68,26 @@ TORCH_META_FUNC(_scaled_mm_v2)(
   TORCH_CHECK_VALUE(self.dim() == 2, "mat_a must be a matrix");
   TORCH_CHECK_VALUE(mat2.dim() == 2, "mat_b must be a matrix");
 
+  std::vector<Tensor> scale_a_vec(scale_a.begin(), scale_a.end());
+  std::vector<Tensor> scale_b_vec(scale_b.begin(), scale_b.end());
+  auto recipe_a_enum =
+      scaled_blas::convert_int_to_enum<at::blas::ScalingType>(recipe_a);
+  auto recipe_b_enum =
+      scaled_blas::convert_int_to_enum<at::blas::ScalingType>(recipe_b);
+  auto swizzle_a_enum =
+      scaled_blas::convert_int_to_enum<at::blas::SwizzleType>(swizzle_a);
+  auto swizzle_b_enum =
+      scaled_blas::convert_int_to_enum<at::blas::SwizzleType>(swizzle_b);
+  const bool is_cpu_mxfp = scaled_blas::validate_cpu_mxfp_v2_inputs(
+      self,
+      scale_a_vec,
+      recipe_a_enum,
+      swizzle_a_enum,
+      scale_b_vec,
+      recipe_b_enum,
+      swizzle_b_enum,
+      contraction_dim);
+
   if (!contraction_dim.empty()) {
     TORCH_CHECK_VALUE(contraction_dim.size() == 2, "contraction_dim must have exactly 2 elements");
     auto mat_a_dim = contraction_dim[0];
@@ -85,18 +106,17 @@ TORCH_META_FUNC(_scaled_mm_v2)(
       !bias.has_value() || bias->sym_numel() == mat2.sym_size(1),
       "Bias must be size ", mat2.sym_size(1), " but got ", bias->sym_numel());
 
-  // Layout / per-recipe scale-shape validation. Materialize the lists so the
-  // helper sees ArrayRef<Tensor> rather than ITensorListRef.
-  std::vector<Tensor> scale_a_vec(scale_a.begin(), scale_a.end());
-  std::vector<Tensor> scale_b_vec(scale_b.begin(), scale_b.end());
-  auto recipe_a_enum = scaled_blas::convert_int_to_enum<at::blas::ScalingType>(recipe_a);
-  auto recipe_b_enum = scaled_blas::convert_int_to_enum<at::blas::ScalingType>(recipe_b);
-  auto swizzle_a_enum = scaled_blas::convert_int_to_enum<at::blas::SwizzleType>(swizzle_a);
-  auto swizzle_b_enum = scaled_blas::convert_int_to_enum<at::blas::SwizzleType>(swizzle_b);
-  scaled_blas::validate_scaled_mm_v2_inputs(
-      self, mat2,
-      scale_a_vec, recipe_a_enum, swizzle_a_enum,
-      scale_b_vec, recipe_b_enum, swizzle_b_enum);
+  if (!is_cpu_mxfp) {
+    scaled_blas::validate_scaled_mm_v2_inputs(
+        self,
+        mat2,
+        scale_a_vec,
+        recipe_a_enum,
+        swizzle_a_enum,
+        scale_b_vec,
+        recipe_b_enum,
+        swizzle_b_enum);
+  }
 
   const auto out_dtype_ = out_dtype.value_or(self.scalar_type());
   set_output_raw_strided(
@@ -146,6 +166,8 @@ namespace at::native {
 
 using at::blas::ScalingType;
 using at::blas::SwizzleType;
+
+DEFINE_DISPATCH(mxfp_mm_stub);
 
 namespace {
 
@@ -229,6 +251,106 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
   }
   invalid_scaling_config(mat_a, mat_b, scale_a, scale_b);
   return {};
+}
+
+bool is_mxfp_scale(const Tensor& scale) {
+  return scale.scalar_type() == ScalarType::Float8_e8m0fnu;
+}
+
+void validate_mxfp_cpu(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const Tensor& scale_a,
+    const Tensor& scale_b,
+    const std::optional<Tensor>& bias,
+    const Tensor& out) {
+  TORCH_CHECK_VALUE(
+      mat_a.dim() == 2 && mat_b.dim() == 2, "MXFP operands must be matrices");
+  TORCH_CHECK_VALUE(
+      is_mxfp_scale(scale_a) && is_mxfp_scale(scale_b),
+      "MXFP scales must both have dtype Float8_e8m0fnu");
+
+  const auto input_dtype = mat_a.scalar_type();
+  const bool is_mxfp4 = input_dtype == ScalarType::Float4_e2m1fn_x2;
+  TORCH_CHECK_VALUE(
+      mat_b.scalar_type() == input_dtype &&
+          (is_mxfp4 || input_dtype == ScalarType::Float8_e4m3fn),
+      "MXFP operands must both have dtype Float8_e4m3fn or Float4_e2m1fn_x2");
+
+  const int64_t packing = is_mxfp4 ? 2 : 1;
+  const int64_t logical_k = packing * mat_a.size(1);
+  TORCH_CHECK_VALUE(
+      mat_a.size(1) == mat_b.size(0),
+      "MXFP operand shapes cannot be multiplied: ",
+      mat_a.sizes(),
+      " and ",
+      mat_b.sizes());
+  const int64_t k_blocks = (logical_k + 31) / 32;
+  TORCH_CHECK_VALUE(
+      scale_a.dim() == 2 && scale_a.size(0) == mat_a.size(0) &&
+          scale_a.size(1) == k_blocks,
+      "MXFP scale_a must have shape (", mat_a.size(0), ", ", k_blocks,
+      "), got ", scale_a.sizes());
+  TORCH_CHECK_VALUE(
+      scale_b.dim() == 2 && scale_b.size(0) == mat_b.size(1) &&
+          scale_b.size(1) == k_blocks,
+      "MXFP scale_b must have shape (", mat_b.size(1), ", ", k_blocks,
+      "), got ", scale_b.sizes());
+  TORCH_CHECK_VALUE(
+      scale_a.is_contiguous(), "MXFP scale_a must be contiguous");
+  TORCH_CHECK_VALUE(
+      scale_b.is_contiguous(), "MXFP scale_b must be contiguous");
+  TORCH_CHECK_VALUE(mat_a.is_contiguous(), "MXFP mat_a must be row-major");
+  TORCH_CHECK_VALUE(
+      mat_b.numel() == 0 ||
+          (mat_b.size(0) == 1 && mat_b.stride(1) == 1) ||
+          (mat_b.size(1) == 1 && mat_b.stride(0) == 1) ||
+          (mat_b.stride(0) == 1 && mat_b.stride(1) == mat_b.size(0)),
+      "MXFP mat_b must be column-major");
+  TORCH_CHECK_VALUE(
+      out.scalar_type() == ScalarType::BFloat16 ||
+          out.scalar_type() == ScalarType::Float,
+      "CPU MXFP output must have dtype BFloat16 or Float32, got ",
+      out.scalar_type());
+  TORCH_CHECK_VALUE(out.is_contiguous(), "CPU MXFP output must be contiguous");
+  TORCH_CHECK_VALUE(
+      !bias.has_value() || bias->numel() == mat_b.size(1),
+      "Bias must be size ",
+      mat_b.size(1),
+      " but got ",
+      bias.has_value() ? bias->numel() : 0);
+  TORCH_CHECK_VALUE(
+      !bias.has_value() || bias->scalar_type() == ScalarType::Half ||
+          bias->scalar_type() == ScalarType::BFloat16 ||
+          bias->scalar_type() == ScalarType::Float,
+      "CPU MXFP bias must have dtype Float16, BFloat16, or Float32, got ",
+      bias.has_value() ? bias->scalar_type() : ScalarType::Undefined);
+}
+
+Tensor& _scaled_mm_mxfp_out_cpu(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const Tensor& scale_a,
+    const Tensor& scale_b,
+    const std::optional<Tensor>& bias,
+    Tensor& out) {
+  validate_mxfp_cpu(mat_a, mat_b, scale_a, scale_b, bias, out);
+  at::native::resize_output(out, {mat_a.size(0), mat_b.size(1)});
+  if (out.numel() == 0) {
+    return out;
+  }
+  const Tensor bias_data = bias.has_value()
+      ? bias->contiguous().view({-1})
+      : Tensor{};
+  if (mat_a.size(1) == 0) {
+    out.zero_();
+    if (bias_data.defined()) {
+      out.add_(bias_data);
+    }
+    return out;
+  }
+  mxfp_mm_stub(kCPU, mat_a, mat_b, scale_a, scale_b, bias_data, out);
+  return out;
 }
 
 } // namespace
@@ -364,6 +486,20 @@ _scaled_mm_out_cpu(const Tensor& mat1, const Tensor& mat2,
           std::optional<c10::ScalarType> out_dtype,
           bool use_fast_accum,
           Tensor& out) {
+  if (is_mxfp_scale(scale_a) || is_mxfp_scale(scale_b)) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        !scale_result.has_value(), "CPU MXFP does not support scale_result");
+    TORCH_CHECK_VALUE(
+        !out_dtype || *out_dtype == out.scalar_type(),
+        "out_dtype must match output matrix type");
+    return _scaled_mm_mxfp_out_cpu(
+        mat1,
+        mat2,
+        scale_a,
+        scale_b,
+        bias,
+        out);
+  }
 #if AT_MKLDNN_ENABLED() && !defined(__powerpc__)
   if (at::globalContext().userEnabledMkldnn() && scale_a.numel() == 1 && scale_b.numel() == 1) {
     bool mixed_dtype = mat1.scalar_type() != mat2.scalar_type();
@@ -458,6 +594,34 @@ TORCH_IMPL_FUNC(_scaled_mm_cpu_v2_out)(
   ArrayRef<Tensor> scale_a_ref(scale_a);
   ArrayRef<Tensor> scale_b_ref(scale_b);
 
+  // Conversion of implicitly-defined enums to explicit
+  auto scale_recipe_a_enum = convert_int_to_enum<ScalingType>(scale_recipe_a);
+  auto swizzle_a_enum = convert_int_to_enum<SwizzleType>(swizzle_a);
+  auto scale_recipe_b_enum = convert_int_to_enum<ScalingType>(scale_recipe_b);
+  auto swizzle_b_enum = convert_int_to_enum<SwizzleType>(swizzle_b);
+  std::optional<Tensor> bias_opt = bias.has_value()
+      ? std::optional<Tensor>{*bias}
+      : std::optional<Tensor>{std::nullopt};
+
+  if (scaled_blas::validate_cpu_mxfp_v2_inputs(
+          mat_a,
+          scale_a_ref,
+          scale_recipe_a_enum,
+          swizzle_a_enum,
+          scale_b_ref,
+          scale_recipe_b_enum,
+          swizzle_b_enum,
+          contraction_dim)) {
+    _scaled_mm_mxfp_out_cpu(
+        mat_a,
+        mat_b,
+        scale_a[0],
+        scale_b[0],
+        bias_opt,
+        const_cast<Tensor&>(out));
+    return;
+  }
+
   // If any of M, K, N is 0 - return early (the tensorwise/rowwise float8 gemm kernels
   // do not support this case). The output has already been sized by the
   // structured-op meta function; we only need to zero-fill when K=0.
@@ -476,12 +640,6 @@ TORCH_IMPL_FUNC(_scaled_mm_cpu_v2_out)(
         "Bias must be Float32 or BFloat16 or Half, but got ",
         bias->scalar_type());
   }
-
-  // Conversion of implicitly-defined enums to explicit
-  auto scale_recipe_a_enum = convert_int_to_enum<ScalingType>(scale_recipe_a);
-  auto swizzle_a_enum = convert_int_to_enum<SwizzleType>(swizzle_a);
-  auto scale_recipe_b_enum = convert_int_to_enum<ScalingType>(scale_recipe_b);
-  auto swizzle_b_enum = convert_int_to_enum<SwizzleType>(swizzle_b);
 
   if (!swizzle_a_enum.empty() && !swizzle_b_enum.empty()) {
     TORCH_CHECK_VALUE(
@@ -510,10 +668,6 @@ TORCH_IMPL_FUNC(_scaled_mm_cpu_v2_out)(
 
     invalid_scaling_config(mat_a, mat_b, scale_a_opt, scale_b_opt);
   }
-
-  std::optional<Tensor> bias_opt = bias.has_value()
-      ? std::optional<Tensor>{*bias}
-      : std::optional<Tensor>{std::nullopt};
 
   if (gemm_impl == ScaledGemmImplementation::TENSORWISE_TENSORWISE ||
       gemm_impl == ScaledGemmImplementation::ROWWISE_ROWWISE) {

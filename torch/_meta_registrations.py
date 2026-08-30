@@ -7206,6 +7206,99 @@ def meta__efficient_attention_backward(
     return grad_query, grad_key, grad_value, grad_bias
 
 
+def _is_cpu_mxfp(self: torch.Tensor, *scales: torch.Tensor) -> bool:
+    return device_hint(self) == "cpu" and any(
+        scale.dtype == torch.float8_e8m0fnu for scale in scales
+    )
+
+
+def _check_cpu_mxfp(
+    self: torch.Tensor,
+    mat2: torch.Tensor,
+    scale_a: torch.Tensor,
+    scale_b: torch.Tensor,
+    bias: torch.Tensor | None,
+    out_dtype: torch.dtype | None,
+    scale_result: torch.Tensor | None = None,
+) -> torch.Tensor:
+    torch._check_value(
+        self.dim() == 2 and mat2.dim() == 2,
+        lambda: "MXFP operands must be matrices",
+    )
+    is_mxfp8 = self.dtype == mat2.dtype == torch.float8_e4m3fn
+    is_mxfp4 = self.dtype == mat2.dtype == torch.float4_e2m1fn_x2
+    torch._check_value(
+        is_mxfp8 or is_mxfp4,
+        lambda: "MXFP operands must both have dtype Float8_e4m3fn or Float4_e2m1fn_x2",
+    )
+    torch._check_value(
+        scale_a.dtype == scale_b.dtype == torch.float8_e8m0fnu,
+        lambda: "MXFP scales must both have dtype Float8_e8m0fnu",
+    )
+
+    packing = 2 if is_mxfp4 else 1
+    logical_k = packing * self.size(1)
+    torch._check_value(
+        self.size(1) == mat2.size(0),
+        lambda: f"MXFP operand shapes cannot be multiplied: {self.shape} and {mat2.shape}",
+    )
+    k_blocks = ceil_div(logical_k, 32)
+    torch._check_value(
+        scale_a.dim() == 2,
+        lambda: f"MXFP scale_a must have shape ({self.size(0)}, {k_blocks}), got {scale_a.shape}",
+    )
+    torch._check_value(
+        (scale_a.size(0) == self.size(0)) & (scale_a.size(1) == k_blocks),
+        lambda: f"MXFP scale_a must have shape ({self.size(0)}, {k_blocks}), got {scale_a.shape}",
+    )
+    scale_b_shape = (mat2.size(1), k_blocks)
+    torch._check_value(
+        scale_b.dim() == 2,
+        lambda: f"MXFP scale_b must have shape {scale_b_shape}, got {scale_b.shape}",
+    )
+    torch._check_value(
+        (scale_b.size(0) == scale_b_shape[0]) & (scale_b.size(1) == scale_b_shape[1]),
+        lambda: f"MXFP scale_b must have shape {scale_b_shape}, got {scale_b.shape}",
+    )
+    torch._check_value(
+        scale_a.is_contiguous(), lambda: "MXFP scale_a must be contiguous"
+    )
+    torch._check_value(
+        scale_b.is_contiguous(), lambda: "MXFP scale_b must be contiguous"
+    )
+    torch._check_value(self.is_contiguous(), lambda: "MXFP mat_a must be row-major")
+    torch._check_value(
+        (mat2.numel() == 0)
+        | ((mat2.size(0) == 1) & (mat2.stride(1) == 1))
+        | ((mat2.size(1) == 1) & (mat2.stride(0) == 1))
+        | ((mat2.stride(0) == 1) & (mat2.stride(1) == mat2.size(0))),
+        lambda: "MXFP mat_b must be column-major",
+    )
+    torch._check_not_implemented(
+        scale_result is None,
+        lambda: "CPU MXFP does not support scale_result",
+    )
+    resolved_out_dtype = out_dtype if out_dtype is not None else self.dtype
+    torch._check_value(
+        resolved_out_dtype in (torch.bfloat16, torch.float32),
+        lambda: f"CPU MXFP output must have dtype BFloat16 or Float32, got {resolved_out_dtype}",
+    )
+    if bias is not None:
+        torch._check_value(
+            bias.numel() == mat2.size(1),
+            lambda: f"Bias must be size {mat2.size(1)} but got {bias.numel()}",
+        )
+        torch._check_value(
+            bias.dtype in (torch.float16, torch.bfloat16, torch.float32),
+            lambda: (
+                f"CPU MXFP bias must have dtype Float16, BFloat16, or Float32, got {bias.dtype}"
+            ),
+        )
+    return torch.empty(
+        self.size(0), mat2.size(1), dtype=resolved_out_dtype, device=self.device
+    )
+
+
 def _check_scaled_mm_sizes(
     self: torch.Tensor,
     mat2: torch.Tensor,
@@ -7233,6 +7326,11 @@ def _check_scaled_mm_sizes(
         is_fp8_or_fp4_type(self.dtype) and is_fp8_or_fp4_type(mat2.dtype),
         lambda: f"Expected both inputs to be fp8 or fp4 types but got self.dtype={self.dtype} and mat2.dtype={mat2.dtype}",
     )
+
+    if _is_cpu_mxfp(self, scale_a, scale_b):
+        return _check_cpu_mxfp(
+            self, mat2, scale_a, scale_b, bias, out_dtype, scale_result
+        )
 
     if (
         device_hint(self) == "cuda"
@@ -7450,6 +7548,33 @@ def meta_scaled_mm_v2(
     contraction_dim: list[int] | None = None,
     use_fast_accum: bool = False,
 ):
+    if _is_cpu_mxfp(self, *scale_a, *scale_b):
+        scaling_type = torch._C._ScalingType  # pyrefly: ignore [missing-attribute]
+        swizzle_type = torch._C._SwizzleType  # pyrefly: ignore [missing-attribute]
+        blockwise_1x32 = scaling_type.BlockWise1x32.value
+        no_swizzle = swizzle_type.NO_SWIZZLE.value
+        torch._check_value(
+            len(scale_a) == len(scale_b) == 1
+            and scale_recipe_a == scale_recipe_b == [blockwise_1x32],
+            lambda: "CPU MXFP requires one BlockWise1x32 scale per operand",
+        )
+        torch._check_not_implemented(
+            swizzle_a in ([], [no_swizzle]) and swizzle_b in ([], [no_swizzle]),
+            lambda: "CPU MXFP only supports NO_SWIZZLE",
+        )
+        torch._check_not_implemented(
+            not contraction_dim or contraction_dim == [1, 0],
+            lambda: "CPU scaled_mm_v2 only supports contraction_dim=[] or [1, 0]",
+        )
+        return _check_cpu_mxfp(
+            self,
+            mat2,
+            scale_a[0],
+            scale_b[0],
+            bias,
+            out_dtype,
+        )
+
     # Shape inference only; per-recipe scale validation lives in the C++
     # TORCH_META_FUNC (validate_scaled_mm_v2_inputs) and runs in eager. This
     # Python meta exists because the structured C++ meta sizes its output via
