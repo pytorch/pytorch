@@ -34,7 +34,13 @@ The tables below list the hooks accelerator vendors should implement when integr
 | `setCurrentDevice(DeviceIndex)`    | Sets the active device for the current thread                                | Switch the current thread's context to a specific accelerator device |
 | `getCurrentDevice()`               | Returns the currently active device index                                    | Query which accelerator device is active in the current thread       |
 | `exchangeDevice(DeviceIndex)`      | Atomically exchanges the current device and returns the previous one         | Temporarily switch devices and restore the previous device afterward |
-| `maybeExchangeDevice(DeviceIndex)` | Conditionally exchanges device only if the index is valid                    | Safely attempt device switching with validation                      |
+| `maybeExchangeDevice(DeviceIndex)` | Conditionally exchanges device only if the index is valid                     | Safely attempt device switching with validation                               |
+| `supportsIpc()`                    | Returns whether this device supports IPC memory sharing                       | Guard IPC code paths; unimplemented devices are silently unaffected           |
+| `requiresEventSync()`              | Returns whether consumers must wait on an event before reading shared memory  | Enable or skip event-based synchronization in the consumer IPC path           |
+| `getIpcMemHandle(void*)`           | Returns a serialized handle and byte offset for a device allocation           | Serialize device memory for transfer to another process                       |
+| `getIpcEventHandle()`              | Returns serialized event handle bytes for the current stream event            | Serialize synchronization state for transfer to the consumer process          |
+| `openIpcMemHandle(handle)`         | Opens a shared IPC handle; returned DataPtr's deleter unmaps the memory       | Reconstruct device memory pointer in the consumer process                     |
+| `waitIpcEvent(event_bytes, stream)`| Waits on an IPC event on the given stream                                     | Synchronize the consumer stream before reading shared memory                  |
 
 ## Implementation
 
@@ -164,4 +170,4 @@ This function maintains a static vector of generators (one per device), initiali
 
 [random.py]: https://github.com/pytorch/pytorch/tree/main/test/cpp_extensions/open_registration_extension/torch_openreg/torch_openreg/openreg/random.py#L48-L53 "random.py"
 [Context.h]: https://github.com/pytorch/pytorch/tree/main/aten/src/ATen/Context.h#L61-L102 "Context.h"
-[PrivateUse1HooksInterface.h]: https://github.com/pytorch/pytorch/tree/main/aten/src/ATen/detail/PrivateUse1HooksInterface.h#L15-L72 "PrivateUse1HooksInterface.h"
+[PrivateUse1HooksInterface.h]: https://github.com/pytorch/pytorch/tree/main/aten/src/ATen/detail/PrivateUse1HooksInterface.h "PrivateUse1HooksInterface.h"
