@@ -778,6 +778,5 @@ def cond_batch_rule(interpreter, pred, true_fn, false_fn, inputs):
         with interpreter.lower():
             result = torch.vmap(fn, in_dims=(0,) + in_dims)(pred_, *tensors)
 
-    if not isinstance(result, tuple):
-        result = (result,)
+    result = tuple(pytree.tree_leaves(result))
     return wrap_batched(result, (0,) * len(result), lvl)

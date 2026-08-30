@@ -204,9 +204,10 @@ def while_loop(cond_fn, body_fn, carried_inputs):
         - During inference, body_fn and cond_fn can in-place mutate tensors that are not
           carried_inputs, such as module buffers and captured tensors from the enclosing scope.
 
-        - Under torch.vmap, all carried_inputs must be tensors: batch elements may run a
-          different number of iterations, which requires masking the carries of the ones
-          that already exited.
+        - Under torch.vmap, all leaf carried_inputs must be torch.Tensors (not Python
+          int/float/bool): batch elements may run a different number of iterations, which
+          requires masking the carries of the ones that already exited via torch.where.
+          Pytree containers (dict, list, tuple) of tensors are supported.
 
     """
 
@@ -692,11 +693,11 @@ def while_loop_batch_rule(
 ):
     if mutated_arg_indices:
         raise RuntimeError(
-            "torch.while_loop doesn't support vmap when cond_fn or body_fn mutates its inputs, got {mutated_arg_indices}."
+            f"torch.while_loop doesn't support vmap when cond_fn or body_fn mutates its inputs, got {mutated_arg_indices}."
         )
     if not all(isinstance(carry, torch.Tensor) for carry in carried_inputs):
         raise RuntimeError(
-            "torch.while_loop only supports tensor carries under vmap, but got {carried_inputs}."
+            f"torch.while_loop only supports tensor carries under vmap, but got {carried_inputs}."
         )
 
     batch_size = interpreter.batch_size()
