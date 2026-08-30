@@ -10340,6 +10340,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         res = torch.vmap(fn)(index)
         self.assertEqual(res, _fake_vmap_switch(index, branches, ()))
 
+    @skipIfTorchDynamo("counting branch calls mutates a list from outside the HOP")
     def test_switch_vmap_branches_run(self):
         # switch_op is called directly, so that the branches are only run by the
         # batch rule and not by dynamo tracing them as well.
