@@ -4711,10 +4711,17 @@ class SIMDScheduling(BaseScheduling):
                     # pyrefly: ignore [bad-argument-type]
                     kernel_code_list.append((src_code, kernel, node_group))
             else:
+                # Compile-time subkernel autotuning is not vetted for deterministic mode.
+                deterministic_compile_time_fallback = (
+                    per_subkernel_blocks
+                    and config.combo_kernel_compile_time_autotune
+                    and config.deterministic
+                )
                 if (
                     enable_autotune
                     and per_subkernel_blocks
                     and config.combo_kernel_compile_time_autotune
+                    and not deterministic_compile_time_fallback
                     and not only_gen_src_code
                 ):
                     group = list(node_group)
@@ -4759,7 +4766,11 @@ class SIMDScheduling(BaseScheduling):
                         # pyrefly: ignore [bad-argument-type]
                         kernel_code_list.append((co_src, co_kernel, [pn]))
                     continue
-                no_bench_mode = per_subkernel_blocks and not enable_autotune
+                # Use heuristic block sizes when autotuning is disabled or when
+                # deterministic mode prevents compile-time subkernel benchmarking.
+                no_bench_mode = per_subkernel_blocks and (
+                    not enable_autotune or deterministic_compile_time_fallback
+                )
                 fusion_pns: list[Any] = []
                 fusion_configs: list[Any] = []
                 carve_out_pns: list[Any] = []
@@ -4793,7 +4804,8 @@ class SIMDScheduling(BaseScheduling):
                     kernel = self._build_combo_kernel(
                         fusion_pns,
                         node_schedule_map,
-                        enable_autotune=enable_autotune,
+                        enable_autotune=enable_autotune
+                        and not deterministic_compile_time_fallback,
                         mixed_sizes=mixed_sizes,
                         per_subkernel_blocks=per_subkernel_blocks,
                         only_gen_src_code=only_gen_src_code,
