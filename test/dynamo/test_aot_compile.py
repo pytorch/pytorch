@@ -803,6 +803,59 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         with self.assertRaisesRegex(RuntimeError, "0.0.0-fake"):
             artifacts.check_compatibility()
 
+    def test_inductor_cpu_capture_records_cpu_codegen_target(self):
+        # Pins the recording side: a regression that records None silently
+        # disarms check_compatibility via its predates-the-field skip.
+        from torch._dynamo.package import SystemInfo
+
+        if SystemInfo.current().cpu_codegen_target is None:
+            self.skipTest("no CPU codegen target on this host")
+
+        def fn(x):
+            return x + 1
+
+        compiled = torch.compile(fn, fullgraph=True, backend="inductor").aot_compile(
+            ((torch.randn(3, 3),), {})
+        )
+        artifacts = compiled._artifacts
+        self.assertEqual(artifacts.device_types, frozenset(("cpu",)))
+        self.assertIsNotNone(artifacts.system_info.cpu_codegen_target)
+
+        stale = ("mips", "DEFAULT", None, "INVALID", None, None)
+        artifacts.system_info = dataclasses.replace(
+            artifacts.system_info, cpu_codegen_target=stale
+        )
+        with self.assertRaisesRegex(RuntimeError, "CPU codegen target"):
+            artifacts.check_compatibility()
+
+    @unittest.skipIf(not HAS_GPU, "requires gpu")
+    def test_mixed_device_graph_arms_cpu_codegen_target(self):
+        # A mixed cpu+accelerator graph collapses device_type to the
+        # accelerator, but inductor still emits native CPU kernels for the cpu
+        # half, so the codegen target must be recorded and compared anyway.
+        from torch._dynamo.package import SystemInfo
+
+        if SystemInfo.current().cpu_codegen_target is None:
+            self.skipTest("no CPU codegen target on this host")
+
+        def fn(x, y):
+            return x + 1, y + 1
+
+        compiled = torch.compile(fn, fullgraph=True, backend="inductor").aot_compile(
+            ((torch.randn(4), torch.randn(4, device=GPU_TYPE)), {})
+        )
+        artifacts = compiled._artifacts
+        self.assertEqual(artifacts.device_type, GPU_TYPE)
+        self.assertIn("cpu", artifacts.device_types)
+        self.assertIsNotNone(artifacts.system_info.cpu_codegen_target)
+
+        stale = ("mips", "DEFAULT", None, "INVALID", None, None)
+        artifacts.system_info = dataclasses.replace(
+            artifacts.system_info, cpu_codegen_target=stale
+        )
+        with self.assertRaisesRegex(RuntimeError, "CPU codegen target"):
+            artifacts.check_compatibility()
+
     def path(self):
         path = os.path.join(cache_dir(), f"package_{self.id()}")
         os.makedirs(path, exist_ok=True)
