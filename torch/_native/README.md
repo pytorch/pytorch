@@ -252,7 +252,7 @@ register_op_override(
 ```
 Register a given implementation to a library.
 
-* `lib_symbol`: namespace you're overriding -- `"aten"` for most cases.
+* `lib_symbol`: namespace you're overriding -- `"aten"` for most cases. Namespace support is opt-in: the value must be listed in the registry's `_ALLOWED_LIB_SYMBOLS`, so adding a namespace is a deliberate change that comes with its own tests. The op must also already be defined in the dispatcher when overrides are installed, so a namespace defined by a lazily-imported module has to be imported from your `register_to_dispatch()` first.
 * `op_symbol`: the op to override, either a bare name (`"bmm"`, resolving to `aten.bmm.default`) or overload-qualified (`"add_.Tensor"` → `aten.add_.Tensor`).
 * `dispatch_key`: typically `"CPU"` or `"CUDA"` (or any other backend key).
 * `cond`: predicate choosing when `impl` applies. May be `None` if `unconditional_override=True`, in which case a trivially-true predicate is substituted.
