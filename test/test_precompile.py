@@ -2777,6 +2777,10 @@ class TestPrecompile(TestCase):
         finally:
             os.unlink(artifact_path)
 
+    # Crossref installs a torch-function mode during capture; the fresh
+    # plain subprocess does not have it, so the artifact correctly rejects
+    # the changed environment (the contract's declared invariant).
+    @skipIfCrossRef
     def test_tracer_dynamo_load_runs_in_fresh_process(self):
         # The public load() path (cache-primed), cold: a fresh subprocess has no
         # warm in-process Dynamo/Inductor state to mask a broken artifact.
@@ -2997,6 +3001,10 @@ class TestPrecompile(TestCase):
         x = torch.randn(8, 9, requires_grad=True)
         self.assertTrue(loaded(x).requires_grad)
 
+    # Crossref installs a torch-function mode during capture; the fresh
+    # plain subprocess does not have it, so the artifact correctly rejects
+    # the changed environment (the contract's declared invariant).
+    @skipIfCrossRef
     def test_tracer_dynamo_training_source_runs_in_fresh_process(self):
         x = torch.randn(4, requires_grad=True)
         code, _cache = torch.compiler.precompile(
