@@ -1214,6 +1214,28 @@ class TestReductions(TestCase):
         with self.assertRaisesRegex(TypeError, 'not implemented'):
             torch.aminmax(torch.tensor(1., dtype=dtype, device=device), dim=0)
 
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float32)
+    def test_aminmax_out_overlap(self, device, dtype):
+        x = torch.randn(3, 4, device=device, dtype=dtype)
+        expected = torch.aminmax(x, dim=1)
+
+        # `min` and `max` are written independently, so sharing storage makes
+        # whichever write lands last clobber the other, silently.
+        out = torch.empty(3, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "must not share memory"):
+            torch.aminmax(x, dim=1, out=(out, out))
+
+        buf = torch.empty(5, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "must not share memory"):
+            torch.aminmax(x, dim=1, out=(buf[0:3], buf[2:5]))
+
+        # Disjoint views of one storage do not overlap and stay allowed.
+        buf = torch.empty(6, device=device, dtype=dtype)
+        result = torch.aminmax(x, dim=1, out=(buf[0:3], buf[3:6]))
+        self.assertEqual(result.min, expected.min)
+        self.assertEqual(result.max, expected.max)
+
     # TODO: bincount isn't a classic reduction -- maybe this test suite is
     #   reductions and summary ops?
     @skipIfMPS
