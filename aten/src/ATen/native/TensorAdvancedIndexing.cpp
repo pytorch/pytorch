@@ -972,9 +972,7 @@ Tensor& _index_put_impl_(
       " (got ",
       indices.size(),
       ")");
-  if (!indices.empty()) {
-    checkAtLeastOneIndexTensor(indices);
-  }
+  checkAtLeastOneIndexTensor(indices);
   if (at::has_internal_overlap(self) == MemOverlap::Yes) {
     TORCH_WARN(
         "Use of index_put_ on expanded tensors is deprecated. "

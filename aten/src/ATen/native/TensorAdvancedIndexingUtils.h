@@ -72,6 +72,9 @@ inline std::tuple<bool, Tensor> canDispatchToMaskedFill(
 }
 
 inline void checkAtLeastOneIndexTensor(IOptTensorListRef indices) {
+  if (indices.empty()) {
+    return;
+  }
   TORCH_CHECK_INDEX(
       std::any_of(
           indices.begin(),
