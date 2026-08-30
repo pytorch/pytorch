@@ -9,17 +9,6 @@ set -ex -o pipefail
 # Suppress ANSI color escape sequences
 export TERM=vt100
 
-# Retry-policy A/B experiment (see unstable.yml). The test config name is the only
-# per-job channel available without changing the shared _linux-test.yml, so the
-# suffix is stripped back to the real config here: everything downstream then sees
-# the same TEST_CONFIG as the trunk arm we are comparing against, and the only
-# difference is the retry policy.
-if [[ "${TEST_CONFIG}" == *_retry_experiment ]]; then
-  export TEST_CONFIG="${TEST_CONFIG%_retry_experiment}"
-  export PYTORCH_NUM_PYTEST_RERUNS=0
-  export PYTORCH_NUM_PROCESS_RETRIES=1
-fi
-
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # shellcheck source=./common-build.sh
@@ -242,6 +231,13 @@ if [[ "$TEST_CONFIG" == 'slow' ]]; then
   export PYTORCH_TEST_SKIP_FAST=1
 fi
 
+if [[ "$TEST_CONFIG" == 'periodic' ]]; then
+  export PYTORCH_TEST_WITH_PERIODIC=1
+  # Allows @periodic tests that are also marked slow (@slowTest or
+  # slow-tests.json) to run.
+  export PYTORCH_TEST_WITH_SLOW=1
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *slow-gradcheck* ]]; then
   export PYTORCH_TEST_WITH_SLOW_GRADCHECK=1
   # TODO: slow gradcheck tests run out of memory a lot recently, so setting this
@@ -447,6 +443,21 @@ test_python() {
   assert_git_not_dirty
 }
 
+test_cpuset_num_threads() {
+  # Regression test for https://github.com/pytorch/pytorch/issues/193859
+  # When the process is restricted to a single CPU via a cpuset/affinity mask,
+  # the default intraop thread count must respect that limit rather than the
+  # host's physical core count. Clear the *_NUM_THREADS env vars so the count
+  # is derived from the affinity mask instead of an explicit override.
+  if ! command -v taskset >/dev/null; then
+    echo "taskset not available, skipping cpuset num_threads test"
+    return
+  fi
+  env -u OMP_NUM_THREADS -u MKL_NUM_THREADS taskset -c 0 python -c \
+    'import torch; n = torch.get_num_threads(); print("num_threads =", n); assert n == 1, n'
+  assert_git_not_dirty
+}
+
 test_python_smoke() {
   # Smoke tests for H100/B200
   install_nvmath
@@ -538,7 +549,7 @@ _run_fabric_handle_tests() {
   time python test/run_test.py --include distributed/test_symmetric_memory.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_nvshmem.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_shmem_triton.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
-  time python test/run_test.py --include distributed/test_nccl.py -k NCCLSymmetricMemoryTest $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include distributed/test_nccl.py -k "NCCLSymmetricMemoryTest or NCCLSymmMemWatchdogTest" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include inductor/test_symm_mem_registry.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include inductor/test_low_contention_collectives.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
@@ -1184,6 +1195,41 @@ test_inductor_halide() {
 
 test_inductor_pallas() {
   python test/run_test.py --include inductor/test_pallas.py --verbose
+  assert_git_not_dirty
+}
+
+test_inductor_flydsl() {
+  install_flydsl
+  (
+    cd test
+    python3 - <<'PY'
+import importlib
+import importlib.metadata
+
+import torch
+from torch._inductor.codegen.flydsl import flydsl_utils
+from torch._inductor.codegen.flydsl.flydsl_scheduling import (
+    _get_flydsl_device_arch,
+)
+
+importlib.import_module("flydsl")
+if torch.version.hip is None or not torch.cuda.is_available():
+    raise RuntimeError("FlyDSL CI requires a ROCm-enabled PyTorch build")
+device_index = torch.cuda.current_device()
+arch = _get_flydsl_device_arch(device_index)
+if arch != "gfx950":
+    raise RuntimeError(f"FlyDSL CI requires gfx950, got {arch}")
+if not flydsl_utils.runtime_available():
+    reason = (
+        flydsl_utils._flydsl_runtime_unavailable_reason()
+        or "ROCm runtime support is unavailable"
+    )
+    raise RuntimeError(f"FlyDSL runtime is unavailable: {reason}")
+version = importlib.metadata.version("flydsl")
+print(f"FlyDSL {version} runtime available on {arch}")
+PY
+  )
+  python test/run_test.py --include inductor/test_flydsl_template.py --verbose
   assert_git_not_dirty
 }
 
@@ -2189,6 +2235,9 @@ test_executorch() {
 test_torchtitan() {
   install_torchao
   install_torchcomms
+  # muse_glimmer and kimi_k2_7 import torchvision at model-build time. Build it
+  # from the pinned commit rather than PyPI so it links the CI-built torch.
+  install_torchvision
 
   local torchtitan_commit
   torchtitan_commit=$(get_pinned_commit torchtitan)
@@ -2433,6 +2482,8 @@ elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   collect_tlparse_output
 elif [[ "${TEST_CONFIG}" == *inductor-halide* ]]; then
   test_inductor_halide
+elif [[ "${TEST_CONFIG}" == *inductor-flydsl* ]]; then
+  test_inductor_flydsl
 elif [[ "${TEST_CONFIG}" == *inductor-pallas* ]]; then
   test_inductor_pallas
 elif [[ "${TEST_CONFIG}" == *inductor-triton-cpu* ]]; then
@@ -2522,6 +2573,10 @@ elif [[ "${TEST_CONFIG}" == *dynamo_wrapped* ]]; then
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_aten
   fi
+elif [[ "${TEST_CONFIG}" == periodic ]]; then
+  # Sweeps the default test files; run_test.py selects the @periodic tests.
+  install_torchvision
+  test_python_shard "$SHARD_NUMBER"
 elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
   install_torchvision
   test_python_shard "$SHARD_NUMBER"
@@ -2593,6 +2648,7 @@ elif [[ "${TEST_CONFIG}" == "tsan" ]]; then
 else
   install_torchvision
   install_monkeytype
+  test_cpuset_num_threads
   test_python
   test_aten
   test_vec256
