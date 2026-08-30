@@ -18,7 +18,7 @@ from torch.nativert.backends._lower_utils import (
     package_nativert_with_aoti_delegate,
 )
 from torch.testing._internal.common_utils import IS_WINDOWS
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
 from torch.utils import _pytree as pytree
 
 
@@ -262,8 +262,8 @@ class TestNativeRT(TestCase):
         return M()
 
     parameters = []
-    for device in ["cpu", "cuda"]:
-        if device == "cuda" and not HAS_CUDA_AND_TRITON:
+    for device in ["cpu", GPU_TYPE]:
+        if device == GPU_TYPE and not HAS_GPU_AND_TRITON:
             continue
         for module, sample_inputs in [
             (get_module.__func__().to(device), (torch.randn(4, 4).to(device),)),
