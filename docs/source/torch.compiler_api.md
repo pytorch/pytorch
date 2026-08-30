@@ -50,7 +50,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 % intentionally omitted from the autosummary block above.
 
 ```{eval-rst}
-.. py:function:: precompile(fn, *, backend="inductor", tracer="make_fx", decompositions=None, example_inputs, artifact_path=None, cache_path=None, guard_filter_fn=None, recompile_limit=256, dynamic=None, invariants=None, require_complete=True, require_no_risky_drops=True, require_no_dropped_guards=False, training=False)
+.. py:function:: precompile(fn, *, backend="inductor", tracer="make_fx", decompositions=None, example_inputs, artifact_path=None, cache_path=None, guard_filter_fn=None, recompile_limit=256, dynamic=None, invariants=None, require_complete=True, require_no_risky_drops=True, require_no_dropped_guards=False, training=False, keep_example_grads=False)
 
    Ahead-of-time precompile ``fn`` against ``example_inputs``, a sequence of calls each
    given as a tuple of positional arguments. precompile makes those calls itself and
@@ -158,12 +158,21 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        precompile cannot serialize. Applies only to ``tracer="dynamo"``.
    :param training: Run the example calls with grad enabled, for a capture whose ``fn``
        performs a backward.
+   :param keep_example_grads: Leave ``.grad`` exactly as the example calls left it.
+       By default precompile snapshots and clears the example model's gradients before
+       the calls and restores them afterwards, so capturing cannot double the gradients
+       of the documented warmup-step-then-capture flow. Pass ``True`` when the example
+       call IS your live training step and its gradients are the point -- otherwise the
+       backward you just paid for is discarded, and the artifact is produced either way
+       so nothing tells you a batch went missing. With it set, a gradient already present
+       accumulates exactly as it would in eager. Applies only to ``tracer="dynamo"``.
    :returns: ``(python_code, cache)`` -- a self-contained Python source string and a
        binary acceleration cache. If ``artifact_path`` and ``cache_path`` are given, the
        pair is written to those files and precompile returns instead what each
        ``example_inputs`` call RETURNED, in order, so a capture over real batches can hand
        their results on without a second forward. Only ``tracer="dynamo"`` runs the calls
-       for real; ``tracer="make_fx"`` traces under proxy tensors and returns ``[]``.
+       for real, so naming the paths with ``tracer="make_fx"`` is rejected before ``fn``
+       runs rather than returning nothing after it.
    :raises PrecompileError: if capture, lowering, or a runtime call violates the
        contract (see the exception below).
 
@@ -200,6 +209,59 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
            artifact_path="model.py",
            cache_path="model.cache",
        )
+```
+
+```{eval-rst}
+.. py:method:: precompile.accumulate(fn, *, artifact_path, cache_path, backend="inductor", tracer="dynamo", guard_filter_fn=None, recompile_limit=256, dynamic=None, invariants=None, require_complete=True, require_no_risky_drops=True, require_no_dropped_guards=False, training=False)
+
+   Capture ``fn`` across calls that YOUR loop makes, rewriting the artifact each time.
+
+   :func:`torch.compiler.precompile` makes its example calls itself, back to back, which is
+   wrong whenever the calls are not independent -- a training step whose inputs come off a
+   queue that the enclosing loop advances cannot be called twice in a row, because the second
+   call finds the state the first one consumed. ``accumulate`` inverts that: the caller keeps
+   their loop and precompile stops and resumes around each call.
+
+   Each call runs ``fn`` for real, folds whatever graphs and variants it newly exercised into
+   the capture, rewrites both files, and returns what ``fn`` returned. A call that exercises
+   nothing new adds nothing. There is no finalize step: the two files are a complete, loadable
+   artifact for everything captured so far from the first call onwards, so a job that dies
+   partway through leaves a working artifact for the batches it did reach.
+
+   Gradients pass straight through -- precompile makes no call of its own here, so there is
+   nothing to snapshot and ``keep_example_grads`` does not apply.
+
+   The returned object holds a LIVE compiled region, because that is the only way a later call
+   can reuse an earlier one's variants: they are filed under an id that nothing can hand back
+   to ``torch._dynamo.optimize``. Use it as a context manager, or call ``close()``, to release
+   it; a capture left open keeps precompile's compiler configuration installed.
+
+   :param fn: The whole computation to capture, taking the model(s) and runtime inputs
+       positionally, exactly as :func:`torch.compiler.precompile` does.
+   :param artifact_path: File to write ``python_code`` to, rewritten on every call. Required.
+   :param cache_path: File to write the acceleration cache to. Required.
+   :param tracer: ``"dynamo"``, and nothing else -- a make_fx trace is a single graph of a
+       single call and has nothing to accumulate.
+   :returns: A ``precompile.AccumulatingCapture``. Call it like ``fn``; it also exposes
+       ``summary()``, ``invariants()``, ``calls()`` and ``close()``.
+   :raises PrecompileError: as :func:`torch.compiler.precompile` does, on the call that
+       violates the contract.
+
+   Example::
+
+       with torch.compiler.precompile.accumulate(
+           train_step, artifact_path="m.py", cache_path="m.cache",
+           training=True, require_no_risky_drops=False,
+       ) as capture:
+           for batch in loader:
+               losses = capture(model, batch)   # runs for real, returns its result
+               optimizer.step()
+
+   .. note::
+
+      Rewriting is proportional to everything captured so far, not to the call, so a long loop
+      over a large model pays it every time. Capture the batches that add variants rather than
+      all of them.
 ```
 
 ```{eval-rst}
