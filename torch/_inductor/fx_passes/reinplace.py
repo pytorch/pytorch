@@ -221,11 +221,12 @@ def scatter_always_uses_mutation(node: torch.fx.Node) -> bool:
 
 # Indexed updates allowed between generalized_scatter and copy_ back to a graph
 # input when deciding scatter reinplace profitability (see #195285).
+# index_copy is omitted: it is not in inplaceable_ops and is normally decomposed
+# to index_put before this pass.
 _SCATTER_COPY_BACK_THROUGH_OPS = OrderedSet(
     [
         aten.index_put.default,
         aten._unsafe_index_put.default,
-        aten.index_copy.default,
     ]
 )
 
@@ -239,20 +240,21 @@ def _is_copied_back_to_input(node: torch.fx.Node, inp: torch.fx.Node) -> bool:
 def _scatter_copied_back_through_indexed_updates(
     node: torch.fx.Node, inp: torch.fx.Node
 ) -> bool:
-    """True if node reaches copy_(inp, ...) directly or via a single-user chain."""
-    current = node
+    """True if node reaches copy_(inp, ...) through indexed-update base edges."""
+    pending = [node]
     seen: OrderedSet[torch.fx.Node] = OrderedSet()
-    while current not in seen:
+    while pending:
+        current = pending.pop()
+        if current in seen:
+            continue
         seen.add(current)
         if _is_copied_back_to_input(current, inp):
             return True
-        if len(current.users) != 1:
-            return False
-        user = next(iter(current.users))
-        through = user.target in _SCATTER_COPY_BACK_THROUGH_OPS
-        if not through or user.args[0] is not current:
-            return False
-        current = user
+        pending.extend(
+            user
+            for user in current.users
+            if user.target in _SCATTER_COPY_BACK_THROUGH_OPS and user.args[0] is current
+        )
     return False
 
 
@@ -274,8 +276,10 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
         return True
 
     # If the output is copied back into the input (directly, or through a
-    # single-user chain of known inplaceable indexed updates), this forces both
-    # to be realized as the output is a user of the input.
+    # chain of known inplaceable indexed updates), this forces both to be
+    # realized as the output is a user of the input. Other output users do not
+    # change that profitability decision; alias and liveness checks remain the
+    # safety gate for reinplacing.
     if inp.op in ("placeholder", "get_attr") and (  # type: ignore[union-attr]
         _scatter_copied_back_through_indexed_updates(node, inp)  # type: ignore[arg-type]
     ):
