@@ -787,8 +787,8 @@ class _PrecompileBackend:
             inner, "backend_ctx_ctor", contextlib.nullcontext
         )
         # Rendering a subgraph as source needs the graph, which only exists
-        # here. Kept for the REAL capture only: the guard probe throws its
-        # graphs away, and rendering is a second full lowering.
+        # here. Kept only where something will render it (see the caller):
+        # retaining deepcopies every compiled graph for the session.
         self._keep_graphs = keep_graphs
         self.graphs: dict[str, tuple[torch.fx.GraphModule, list[Any]]] = {}
 
@@ -942,6 +942,21 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
         "CONSTANT_MATCH",
         "EQUALS_MATCH",
         "DUPLICATE_INPUT",
+        # And the one that pins whether an attribute is THERE. hasattr is a
+        # branch like any other, so dropping it serves the captured side to a
+        # caller on the other one -- the same silent wrong answer as a dropped
+        # CONSTANT_MATCH. Reachable on the DEFAULT gates, because a
+        # single-variant capture makes every slot look invariant and the drop
+        # is not classed risky.
+        "HASATTR",
+        # And the guard that pins an input's KIND. Dropped, a graph traced for
+        # one class is served to another and returns the first one's answer,
+        # silently -- there is no shape to crash on. Upstream depends on this
+        # specifically: an AsyncCollectiveTensor's tensor-class guards are
+        # deliberately removed so an ACT-traced graph can be reused for the
+        # resolved tensor, and the observation sites reinstall exactly this
+        # guard to keep that sound.
+        "TYPE_MATCH",
     }
 )
 
@@ -1221,8 +1236,8 @@ class PrecompileSession:
         # eagerly, so the artifact carries AOTAutograd's CompiledFunction and
         # calling .backward() on a served output runs precompiled code.
         self._training = training
-        # Set by the caller for the real capture; the guard probe leaves it off
-        # so it does not pay for a lowering whose source is thrown away.
+        # Set by the caller only where the graphs will actually be rendered,
+        # so a capture does not pay to retain a lowering nothing reads.
         self._keep_graphs = False
         self._backend_obj: _PrecompileBackend | None = None
         self._policy_dropped_guards: set[tuple[str, str]] = set()
@@ -1517,8 +1532,12 @@ class PrecompileSession:
             for guarded in code_entry.guarded_codes:
                 if f_code is None:
                     f_code = SerializedCode.to_code_object(code_entry.python_code)
-                loaded = load_guards_state(guarded.guards_state)
                 try:
+                    # Inside the try: unpickling the capture's own guard state
+                    # can fail too, and that must surface as the same
+                    # PackageError as a re-serialization failure, not escape
+                    # raw out of artifact()/__exit__.
+                    loaded = load_guards_state(guarded.guards_state)
                     pruned = CheckFunctionManager(
                         f_code,
                         OutputGraphCommon(loaded.output_graph),
@@ -2016,6 +2035,7 @@ class PrecompileSession:
             # own, so they have to be handed to the store explicitly.
             for backend_id, backend in self._package.cached_backends.items():
                 store.record_eager_backend(backend_id, backend)
+        self._package.refuse_unserializable()
         try:
             # save_cache_entry, not save_package: the latter also files the
             # package into the process-global PrecompileContext, which is for
@@ -2139,6 +2159,7 @@ class PrecompileSession:
         )
         from torch._precompile import _build_multigraph_artifact
 
+        self._package.refuse_unserializable()
         entry = self._package.cache_entry()
         backends = self._collect_backends()
         return _build_multigraph_artifact(
