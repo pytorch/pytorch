@@ -12777,6 +12777,8 @@ op_db: list[OpInfo] = [
                     supports_fwgrad_bwgrad=True,
                     promotes_int_to_float=True,
                     supports_rhs_python_scalar=False,
+                    # IEEE 754-2008 §9.2.1 specifies signed-zero results for boundary inputs.
+                    check_sign_sensitive_special_values=True,
                     skips=(
                         # Incorrectly attempts to use a scalar for the second argument
                         DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping'),
@@ -13264,7 +13266,9 @@ op_db: list[OpInfo] = [
                     # https://github.com/pytorch/pytorch/issues/80411
                     gradcheck_fast_mode=True,
                     supports_forward_ad=True,
-                    supports_fwgrad_bwgrad=True),
+                    supports_fwgrad_bwgrad=True,
+                    # The sign bit is the entire output of copysign.
+                    check_sign_sensitive_special_values=True),
     OpInfo('corrcoef',
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_corrcoef,
@@ -18950,6 +18954,8 @@ op_db: list[OpInfo] = [
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    promotes_int_to_float=True,
+                   # Sign of zero propagates to the sign of the resulting infinity.
+                   check_sign_sensitive_special_values=True,
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/issues/45690
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',

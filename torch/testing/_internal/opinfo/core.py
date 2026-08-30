@@ -953,6 +953,11 @@ class OpInfo:
 
     skip_correctness_check_compile_vs_eager: bool = False
 
+    # Whether test_sign_sensitive_special_values (test_ops.py) checks isnan/isinf
+    # mask parity and signed-zero signbit parity between eager and torch.compile.
+    # torch.allclose treats +0.0 == -0.0, so it can't catch that divergence.
+    check_sign_sensitive_special_values: bool = False
+
     # True if the op produces nondeterministic output (e.g. uninitialized
     # memory) that cannot be meaningfully compared across calls.
     has_nondeterministic_output: bool = False
