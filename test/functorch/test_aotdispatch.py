@@ -5337,6 +5337,105 @@ def forward(self, tangents_1):
         outs[0].sum().backward()
         self.assertEqual(x.grad, x_ref.grad)
 
+    def test_none_tangent_in_kept_slot_names_the_forward_output(self):
+        # A None in a kept tangent slot otherwise surfaces several frames below
+        # AOTAutograd as inductor's "expected Tensor() for op: input", naming
+        # only a codegen'd variable like tangents_3 -- which is not positional
+        # and cannot be mapped back to a user output by hand. Disabling the
+        # marking dedup puts a None back in the intermediate-base slot.
+        import torch._functorch._aot_autograd.runtime_wrappers as rw
+
+        def f(x):
+            y = torch.sin(x)
+            return y[0:4], y[4:8], y.detach(), x * 3
+
+        torch._dynamo.reset()
+        x = torch.arange(8, dtype=torch.float32).requires_grad_(True)
+        with patch.object(rw, "_dealias_marked_returns", lambda raw, marked: None):
+            outs = torch.compile(f, backend="inductor")(x)
+            with self.assertRaises(RuntimeError) as cm:
+                outs[3].sum().backward()
+
+        msg = str(cm.exception)
+        self.assertIn("handed a non-Tensor for a tangent it requires", msg)
+        self.assertIn("tangent index         : 1", msg)
+        self.assertIn("received              : None (type NoneType", msg)
+        self.assertIn("IntermediateBaseAOTOutput(base_of=PlainAOTOutput(idx=0))", msg)
+        self.assertIn("that slot holds       : intermediate base 0", msg)
+        self.assertIn("user output index     : 0", msg)
+        self.assertIn("OutputType.alias_of_intermediate_save_as_output", msg)
+        self.assertIn("its requires_grad     : True", msg)
+        self.assertIn("its dtype             : torch.float32", msg)
+        self.assertIn("This slot is case (2) or (3)", msg)
+
+    def test_none_tangent_error_reports_non_differentiable_dtype(self):
+        # An integer output never gets a kept tangent slot from metadata, so the
+        # dtype arm of the explanation is only reachable when the recorded
+        # metadata and the runtime output disagree. Drive it directly.
+        from torch._functorch._aot_autograd.descriptors import (
+            PlainAOTOutput,
+            TangentAOTInput,
+        )
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            AOTDispatchAutograd,
+            KeptTangentInfo,
+        )
+
+        info = KeptTangentInfo(
+            grad_out_idx=(0, 2),
+            dtype=(torch.float32, torch.int64),
+            num_mutated_inputs=0,
+            num_outputs=3,
+            num_intermediate_bases=0,
+            output_type=("non_alias",) * 3,
+            output_requires_grad=(True, False, True),
+            output_requires_grad_for_backward=(True, False, True),
+        )
+        msg = str(
+            AOTDispatchAutograd._non_tensor_tangent_error(
+                None, 1, TangentAOTInput(PlainAOTOutput(idx=2)), "1/0", "here\n", info
+            )
+        )
+        self.assertIn("user output index     : 2", msg)
+        self.assertIn("its dtype             : torch.int64", msg)
+        self.assertIn("torch.int64 is not a differentiable dtype", msg)
+        self.assertIn("This error occurred in compiled graph [1/0].", msg)
+        self.assertIn("The forward output was created here:\nhere", msg)
+
+    def test_none_tangent_for_a_dropped_slot_still_passes_through(self):
+        # Autograd legitimately hands back None for every returned slot it
+        # treats as non-differentiable: integer and bool outputs, a detached
+        # output, and the TensorAlias-wrapped outputs that alias an input or an
+        # intermediate. Six of the eight slots here arrive None; the prologue
+        # drops all six before any tangent processing, so the check must not
+        # see them. Only x * 3 and the intermediate base behind y[0:4] / y[4:8]
+        # are kept.
+        def f(x, lengths):
+            y = torch.sin(x)
+            return (
+                y[0:4],
+                y[4:8],
+                lengths * 2,
+                lengths > 1,
+                (x * 2).detach(),
+                x[0:2],
+                x * 3,
+            )
+
+        def run(fn, x, lengths):
+            outs = fn(x, lengths)
+            (outs[0].sum() + outs[1].sum() + outs[6].sum()).backward()
+            return x.grad
+
+        torch._dynamo.reset()
+        lengths = torch.arange(4)
+        x_ref = torch.randn(8, requires_grad=True)
+        grad_ref = run(f, x_ref, lengths)
+
+        x = x_ref.detach().clone().requires_grad_(True)
+        grad = run(torch.compile(f, backend="inductor"), x, lengths)
+        self.assertEqual(grad, grad_ref)
+
 
 def extract_graph(fx_g, _, graph_cell):
     graph_cell[0] = fx_g
