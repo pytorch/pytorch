@@ -10143,9 +10143,10 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         else:
             self.assertEqual(res, (a + 1, a - 1))
 
+    @parametrize("compile_mode", ["none", "compile"])
     @parametrize("nOutputs", [1, 2])
     @parametrize("bdim", [0, 1])
-    def test_cond_vmap_batched_pred(self, nOutputs, bdim):
+    def test_cond_vmap_batched_pred(self, compile_mode, nOutputs, bdim):
         def fn(pred, x):
             return torch.cond(
                 pred=pred,
@@ -10155,14 +10156,24 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             )
 
         pred = torch.tensor([True, False, True, False])
-        x = torch.rand(4, 3)
+        x = torch.rand(4, 3, requires_grad=True)
         if bdim == 1:
             pred, x = pred.unsqueeze(0), x.movedim(0, 1)
         expected = [fn(pred.select(bdim, i), x.select(bdim, i)) for i in range(4)]
-        out = torch.vmap(fn, in_dims=(bdim, bdim))(pred, x)
+
+        vmapped = torch.vmap(fn, in_dims=(bdim, bdim))
+        out = compile_mode_helper(vmapped, compile_mode)(pred, x)
         self.assertEqual(len(out), nOutputs)
         for i in range(nOutputs):
             self.assertEqual(out[i], torch.stack([e[i] for e in expected]))
+
+        # Verify gradients flow correctly through torch.where selection for all outputs.
+        # Use a single grad call to avoid retain_graph bookkeeping across outputs.
+        all_out = [o.sum() for o in out]
+        all_expected = [torch.stack([e[i] for e in expected]).sum() for i in range(nOutputs)]
+        grads = torch.autograd.grad(all_out, [x], grad_outputs=[torch.ones(1)] * nOutputs)
+        expected_grads = torch.autograd.grad(all_expected, [x], grad_outputs=[torch.ones(1)] * nOutputs)
+        self.assertEqual(grads, expected_grads, atol=1e-5, rtol=1e-5)
 
     @parametrize("boolcond", [True, False])
     def test_vmap_vmap(self, boolcond):
@@ -10799,6 +10810,51 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
             RuntimeError, "only supports tensor carries under vmap"
         ):
             torch.vmap(fn, in_dims=(None, 0))(0, torch.rand(4, 3))
+
+    @skipIfTorchDynamo("a vmap test, not a dynamo test")
+    def test_while_loop_vmap_mutated_inputs_error(self):
+        def fn(x):
+            return torch.ops.higher_order.while_loop(
+                lambda c: c.sum() < 10.0,
+                lambda c: (c + 1,),
+                (x,),
+                (),
+                mutated_arg_indices="0",
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError, "doesn't support vmap when cond_fn or body_fn mutates"
+        ):
+            torch.vmap(fn)(torch.rand(4, 3))
+
+    @skipIfTorchDynamo("a vmap test, not a dynamo test")
+    def test_while_loop_vmap_per_sample_grads(self):
+        def fn(x):
+            return while_loop(lambda c: c.sum() < 10.0, lambda c: (c * 2,), (x,))[0]
+
+        x = torch.rand(4, 3, requires_grad=True)
+        per_sample_grads = torch.vmap(torch.func.grad(fn))(x)
+        # Reference: grad for each sample independently.
+        expected = torch.stack(
+            [torch.func.grad(fn)(x[i].detach().requires_grad_(True)) for i in range(4)]
+        )
+        self.assertEqual(per_sample_grads, expected, atol=1e-5, rtol=1e-5)
+
+    @skipIfTorchDynamo("a vmap test, not a dynamo test")
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_while_loop_vmap_cuda(self):
+        def cond_fn(c):
+            return c.sum() < 10.0
+
+        def body_fn(c):
+            return (c + 1,)
+
+        x = torch.arange(12.0, device="cuda").reshape(4, 3)
+        out = torch.vmap(lambda c: while_loop(cond_fn, body_fn, (c,)))(x)[0]
+        expected = torch.stack(
+            [_fake_while_loop(cond_fn, body_fn, (x[i],))[0] for i in range(4)]
+        ).to("cuda")
+        self.assertEqual(out, expected)
 
     @skipIfTorchDynamo("Skip because we're testing export")
     @parametrize("strict", [True, False])
