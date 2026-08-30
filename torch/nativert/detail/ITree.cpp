@@ -326,8 +326,9 @@ class PytreeNodeRegistry {
     return it->second;
   }
   void registerNode(std::string_view typeName, NodeDef nodeDef) {
-    TORCH_CHECK(!hasNodeDef(typeName));
-    registry_.emplace(typeName, nodeDef);
+    auto [_, inserted] =
+        registry_.try_emplace(std::string(typeName), std::move(nodeDef));
+    TORCH_CHECK(inserted);
   }
 
   void registerOrReplaceNode(std::string_view typeName, NodeDef nodeDef) {
