@@ -587,7 +587,10 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         def resetter():
             try:
                 for _ in range(30):
-                    torch._dynamo.eval_frame.reset_code(f.__code__)
+                    # The public reset path: it holds compile_lock, so it
+                    # races the LOOKUPS here (which take no compile lock) but
+                    # not an in-flight compile's cache-entry snapshot.
+                    torch._dynamo.eval_frame.remove_from_cache(f.__code__)
             except BaseException as e:
                 errors.put(e)
             finally:

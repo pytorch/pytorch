@@ -232,6 +232,10 @@ def _identity(x: Any) -> Any:
     return x
 
 
+# Once per process; see the comment at the warning site.
+_replay_input_mutation_warned = False
+
+
 def _replay_input_mutation(orig: torch.Tensor, updated: torch.Tensor) -> None:
     """Write a functionalized input mutation back onto the caller's tensor.
 
@@ -262,13 +266,25 @@ def _replay_input_mutation(orig: torch.Tensor, updated: torch.Tensor) -> None:
         and torch._C._autograd._get_creation_meta(orig)
         == torch._C._autograd.CreationMeta.IN_CUSTOM_FUNCTION
     ):
-        if torch.is_grad_enabled() and orig.requires_grad:
+        global _replay_input_mutation_warned
+        if (
+            not _replay_input_mutation_warned
+            and torch.is_grad_enabled()
+            and orig.requires_grad
+        ):
             # An autograd-VISIBLE mutation of this view is exactly what eager
             # rejects ("Output ... is a view and is being modified inplace");
             # replaying it invisibly instead drops the mutation's contribution
             # to autograd. Whether the op that really did the write was
             # visible is unknowable here -- the graph does not guard on the
-            # view's provenance -- so say so once rather than guess.
+            # view's provenance -- so say so ONCE PER PROCESS rather than
+            # guess. The flag, not warnings' own registry: the caller is a
+            # codegen'd epilogue with a fresh fabricated frame per compiled
+            # function, so the registry would re-warn per compilation. The
+            # module-level flag is also how the legitimate invisible-write
+            # case (an op that writes through raw pointers in eager, the
+            # reason this replay exists) avoids a warning on every call.
+            _replay_input_mutation_warned = True
             warnings.warn(
                 "torch.compile is replaying a mutation of an input that is a "
                 "view created inside a custom autograd.Function, without "
