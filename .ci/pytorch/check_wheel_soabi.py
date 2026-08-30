@@ -25,13 +25,23 @@ Checks, in order:
 """
 
 import argparse
+import itertools
 import posixpath
 import re
 import sys
 import zipfile
 
 
-EXTENSION_SUFFIXES = (".so", ".pyd", ".dylib")
+# The suffixes CPython's import system recognises for extension modules, per
+# importlib.machinery.EXTENSION_SUFFIXES (.so on POSIX including macOS, .pyd on
+# Windows). Notably not .dylib: macOS uses that for shared libraries -- torch
+# ships several -- but never for an importable module.
+EXTENSION_SUFFIXES = (".so", ".pyd")
+
+# torch/_C.<abi>.<ext> or the untagged torch/_C.<ext>. Deliberately not a plain
+# prefix match: torch/_C/ is a directory of .pyi stubs, and a sibling module such
+# as torch/_C_foo.so would not be this one.
+MEMBER_RE = re.compile(r"torch/_C\.[^/]+")
 
 
 class CheckFailed(Exception):
@@ -71,7 +81,7 @@ def extension_members(archive: zipfile.ZipFile) -> list[str]:
     return sorted(
         n
         for n in archive.namelist()
-        if n.startswith("torch/_C") and n.endswith(EXTENSION_SUFFIXES)
+        if MEMBER_RE.fullmatch(n) and n.endswith(EXTENSION_SUFFIXES)
     )
 
 
@@ -97,7 +107,15 @@ def check_wheel(wheel: str) -> bool:
         return False
 
     joined = f"{python_tag}-{abi_tag}-{platform_tag}"
-    if joined not in declared:
+    # A filename may compress a tag set ("py2.py3-none-any"); WHEEL lists each
+    # expansion on its own Tag: line. Compare the expansions, not the strings.
+    expanded = {
+        "-".join(combo)
+        for combo in itertools.product(
+            python_tag.split("."), abi_tag.split("."), platform_tag.split(".")
+        )
+    }
+    if not expanded <= declared:
         raise CheckFailed(
             f"{wheel}: filename says {joined}, .dist-info/WHEEL says "
             f"{', '.join(sorted(declared)) or '(nothing)'}"
@@ -116,11 +134,11 @@ def check_wheel(wheel: str) -> bool:
         )
 
     # cp312 -> cpython-312, cp313t -> cpython-313t; abi3 is left alone.
-    expected = re.sub(r"^cp(?=\d)", "cpython-", abi_tag)
-    if not abi.startswith(expected):
+    accepted = [re.sub(r"^cp(?=\d)", "cpython-", a) for a in abi_tag.split(".")]
+    if not any(abi.startswith(a) for a in accepted):
         raise CheckFailed(
             f"{wheel}: {member} carries ABI tag '{abi}', but the wheel declares "
-            f"'{abi_tag}', so '{expected}...' was expected."
+            f"'{abi_tag}', so one of {accepted} was expected."
         )
 
     print(f"OK: {wheel} declares {joined} and ships {member}", flush=True)
