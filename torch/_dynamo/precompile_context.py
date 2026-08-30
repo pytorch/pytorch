@@ -141,6 +141,11 @@ class PrecompileContext:
         """
         return cls._backend_artifacts_by_key.get(_BackendId(key), None)
 
+    @classmethod
+    def take_artifact(cls, key: str) -> BackendCacheArtifact[Any] | None:
+        """Remove and return one artifact from the process-global staging area."""
+        return cls._backend_artifacts_by_key.pop(_BackendId(key), None)
+
     @staticmethod
     def dump_debug_info(
         dynamo_entries: dict[str, _DynamoCacheEntry],
@@ -206,7 +211,7 @@ class PrecompileContext:
         for key, cache_entry in dynamo_entries.items():
             try:
                 result = PrecompileCacheEntry.from_cache_entry(
-                    cache_entry, backend_artifacts
+                    copy.deepcopy(cache_entry), backend_artifacts
                 )
                 if result is not None:
                     precompile_cache_entries[key] = result
