@@ -5337,6 +5337,50 @@ def forward(self, tangents_1):
         outs[0].sum().backward()
         self.assertEqual(x.grad, x_ref.grad)
 
+    def test_replay_input_mutation_warns_once_on_grad_visible_target(self):
+        # The invisible replay of a mutation that LOOKS autograd-visible (grad
+        # enabled, target requires grad) may drop real gradient information;
+        # that inherent ambiguity is reported once per process -- a module
+        # flag, since the codegen'd epilogue callers each get a fresh frame
+        # and would re-warn per compiled function through warnings' registry.
+        from torch._functorch._aot_autograd import runtime_wrappers as rw
+
+        class Passthrough(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, g):
+                return g
+
+        base = torch.randn(4, requires_grad=True)
+        view = Passthrough.apply(base)
+        self.assertTrue(view._is_view())
+
+        prior = rw._replay_input_mutation_warned
+        try:
+            rw._replay_input_mutation_warned = False
+            updated = torch.randn(4)
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                rw._replay_input_mutation(view, updated)
+                rw._replay_input_mutation(view, updated)
+            hits = [w for w in caught if "replaying a mutation" in str(w.message)]
+            self.assertEqual(len(hits), 1)
+            self.assertEqual(view.detach(), updated)
+
+            # The unambiguous serving configuration stays silent.
+            rw._replay_input_mutation_warned = False
+            with warnings.catch_warnings(record=True) as caught, torch.no_grad():
+                warnings.simplefilter("always")
+                rw._replay_input_mutation(view, torch.randn(4))
+            self.assertEqual(
+                [w for w in caught if "replaying a mutation" in str(w.message)], []
+            )
+        finally:
+            rw._replay_input_mutation_warned = prior
+
     def test_input_mutation_replayed_onto_restricted_view(self):
         # Functionalization lifts an input mutation out of the graph and replays
         # it as a tracked copy_, which is stricter than the write it stands in

@@ -14,6 +14,7 @@
 
 #include <torch/csrc/dynamo/utils.h>
 #include <torch/csrc/utils/pybind.h>
+#include <atomic>
 #include <list>
 #include <mutex>
 #include <unordered_map>
@@ -116,6 +117,9 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // Parked requests are applied by the next holder of cache_mutex.
   std::mutex pending_invalidation_mutex;
   std::vector<std::pair<py::object, py::object>> pending_invalidations;
+  // Cheap early-out for drain_pending_invalidations, so the hot lookup paths
+  // do not take pending_invalidation_mutex when nothing is parked.
+  std::atomic<bool> has_pending_invalidations{false};
 
   ExtraState(PyCodeObject* orig_code_arg);
   std::list<CacheEntry>& cache_entry_list(int64_t isolate_recompiles_id);
@@ -239,7 +243,10 @@ void destroy_extra_state(void* obj);
 // concurrently -- deletes the mutex under the waiter. The husk stays attached
 // to the still-alive code object and behaves like a fresh state; the real
 // destroy happens only from the code object's dealloc, when no frame of that
-// code can be mid-lookup.
+// code can be mid-lookup. Callers racing an in-flight COMPILE (which holds a
+// Python-side snapshot of this code's cache entries) must additionally hold
+// convert_frame.compile_lock, as torch._dynamo.reset() and remove_from_cache
+// do; this function only makes the reset safe against concurrent lookups.
 // Ownership contract
 // args
 //  - code: Borrowed
