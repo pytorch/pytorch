@@ -34,7 +34,9 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
     onlyCUDA,
+    onlyOn,
     skipCUDAIfNotRocm,
+    skipXPU,
     tol as xtol,
     toleranceOverride,
 )
@@ -55,6 +57,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocmArch,
     TEST_CUDA,
     TEST_WITH_ROCM,
+    TEST_XPU,
     TestCase,
     TemporaryFileName,
     decorateIf,
@@ -567,13 +570,13 @@ class TestMatmulCuda(InductorTestCase):
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig_bf16
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_fp16
 
-    @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @onlyOn(["cuda", "xpu"])
+    @unittest.skipIf(TEST_CUDA and not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
-    def test_grouped_gemm_2d_2d(self, strided, a_row_major, b_row_major, dtype):
-        device = "cuda"
+    def test_grouped_gemm_2d_2d(self, device, strided, a_row_major, b_row_major, dtype):
         m, n, k, n_groups = 16, 32, 64, 4
         if a_row_major:
             a = torch.randn(m, k * n_groups + k * int(strided), device=device, dtype=dtype)[:, :k * n_groups]
@@ -604,13 +607,13 @@ class TestMatmulCuda(InductorTestCase):
             start = offs_cpu[i]
         self.grouped_mm_helper(alist, blist, gO, agradlist, bgradlist, out)
 
-    @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @onlyOn(["cuda", "xpu"])
+    @unittest.skipIf(TEST_CUDA and not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
-    def test_grouped_gemm_2d_3d(self, strided, a_row_major, b_row_major, dtype):
-        device = "cuda"
+    def test_grouped_gemm_2d_3d(self, device, strided, a_row_major, b_row_major, dtype):
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 64, 4
         if a_row_major:
@@ -658,14 +661,13 @@ class TestMatmulCuda(InductorTestCase):
                 start = offs_cpu[i]
             self.grouped_mm_helper(alist, b, gOlist, agradlist, bgradlist, outlist)
 
-
-    @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @onlyOn(["cuda", "xpu"])
+    @unittest.skipIf(TEST_CUDA and not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
-    def test_grouped_gemm_3d_3d(self, strided, a_row_major, b_row_major, dtype):
-        device = "cuda"
+    def test_grouped_gemm_3d_3d(self, device, strided, a_row_major, b_row_major, dtype):
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 64, 4
         if a_row_major:
@@ -692,13 +694,13 @@ class TestMatmulCuda(InductorTestCase):
         out.backward(gO)
         self.grouped_mm_helper(a, b, gO, a.grad, b.grad, out)
 
-    @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @onlyOn(["cuda", "xpu"])
+    @unittest.skipIf(TEST_CUDA and not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
-    def test_grouped_gemm_3d_2d(self, strided, a_row_major, b_row_major, dtype):
-        device = "cuda"
+    def test_grouped_gemm_3d_2d(self, device, strided, a_row_major, b_row_major, dtype):
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 64, 4
         if a_row_major:
@@ -744,13 +746,13 @@ class TestMatmulCuda(InductorTestCase):
             self.grouped_mm_helper(a, blist, gOlist, agradlist, bgradlist, outlist)
 
     # TODO(future PR): enable compile for torch.nn.functional.grouped_mm fallback path
-    @unittest.skipIf(not SM90OrLater, "Grouped gemm with compile supported on SM90")
+    @onlyOn(["cuda", "xpu"])
+    @unittest.skipIf(TEST_CUDA and not SM90OrLater, "Grouped gemm with compile supported on SM90")
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
     @parametrize("max_autotune", [False, True])
-    def test_grouped_gemm_compiled(self, op, a_row_major, b_row_major, max_autotune):
-        device = "cuda"
+    def test_grouped_gemm_compiled(self, device, op, a_row_major, b_row_major, max_autotune):
         dtype_AB = torch.bfloat16
         dtype_offset = torch.int32
 
@@ -766,6 +768,8 @@ class TestMatmulCuda(InductorTestCase):
                     "max_autotune_gemm_backends": "TRITON",
                 }
             )
+            if TEST_XPU:
+                options["max_autotune_gemm_backends"] = "ATEN"
         f = torch.compile(
             f_ref,
             options=options,
@@ -1062,10 +1066,9 @@ class TestMatmulCuda(InductorTestCase):
             C = f(A, B, offs)
         self.assertEqual(C, C_ref)
 
-    def test_grouped_gemm_doubly_non_contiguous(self):
+    def test_grouped_gemm_doubly_non_contiguous(self, device):
         # Verify that doubly-non-contiguous inputs (neither stride is 1)
         # are rejected by _grouped_mm_validate_inputs.
-        device = "cuda"
         dtype = torch.bfloat16
         k = 32
         ngroups = 5
@@ -1145,6 +1148,7 @@ class TestMatmulCuda(InductorTestCase):
         self.assertEqual(C, C_ref)
 
     @skipCUDAIfNotRocm
+    @skipXPU
     # Fails with triton 3.7
     def test_grouped_gemm_rocm_ck_flag(self):
         CK_EQUAL_K_HINT = "kernel_grouped_gemm_xdl_splitk"
@@ -1443,7 +1447,6 @@ class TestMatmulCuda(InductorTestCase):
                 else:
                     op(a, mismatch_batch_dim_b, out_dtype=torch.float32)
 
-
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
 @unittest.skipIf(IS_WINDOWS, "Windows doesn't support CUTLASS extensions")
 @unittest.skipIf(not _IS_SM8X, "mixed dtypes linear only supported on SM 8.x")
@@ -1560,7 +1563,7 @@ class TestMixedDtypesLinearCuda(TestCase):
                 atol,
             )
 
-instantiate_device_type_tests(TestMatmulCuda, globals(), except_for="cpu")
+instantiate_device_type_tests(TestMatmulCuda, globals(), except_for="cpu", allow_xpu=True)
 instantiate_device_type_tests(TestMixedDtypesLinearCuda, globals(), except_for="cpu")
 
 if __name__ == '__main__':
