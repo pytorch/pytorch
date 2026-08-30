@@ -3711,7 +3711,6 @@ class FakeTensorDispatchCache(TestCase):
     def _symbolic_cache_input(self, *, dtype=torch.float32, requires_grad=False):
         shape_env = ShapeEnv()
         fake_mode = FakeTensorMode(shape_env=shape_env)
-        fake_mode.cache_crosscheck_enabled = False
         x = fake_mode.from_tensor(
             torch.randn(4, 8, dtype=dtype, requires_grad=requires_grad),
             source=LocalSource("x", is_input=True),
@@ -3733,6 +3732,7 @@ class FakeTensorDispatchCache(TestCase):
 
     def test_cache_symbolic_contiguous_output_avoids_empty_strided(self):
         fake_mode, x = self._symbolic_cache_input()
+        fake_mode.cache_crosscheck_enabled = False
 
         with fake_mode:
             FakeTensorMode.cache_clear()
@@ -3782,6 +3782,7 @@ class FakeTensorDispatchCache(TestCase):
 
     def test_cache_symbolic_noncontiguous_output_preserves_strides(self):
         fake_mode, x = self._symbolic_cache_input()
+        fake_mode.cache_crosscheck_enabled = False
 
         with fake_mode:
             x = aten.transpose.int(x, 0, 1)
@@ -3799,6 +3800,7 @@ class FakeTensorDispatchCache(TestCase):
 
     def test_cache_symbolic_view_output_preserves_strides_and_storage_offset(self):
         fake_mode, x = self._symbolic_cache_input()
+        fake_mode.cache_crosscheck_enabled = False
 
         with fake_mode:
             x = aten.transpose.int(x, 0, 1)
@@ -3900,6 +3902,7 @@ class FakeTensorDispatchCache(TestCase):
 
     def test_cache_symbolic_dtype_changing_view_preserves_dtype(self):
         fake_mode, x = self._symbolic_cache_input(dtype=torch.complex64)
+        fake_mode.cache_crosscheck_enabled = False
 
         with fake_mode:
             x = aten.slice.Tensor(x, 0, 1, 4)
