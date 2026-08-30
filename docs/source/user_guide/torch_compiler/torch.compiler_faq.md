@@ -244,22 +244,9 @@ torch.compile(toy_example, fullgraph=True, backend=<compiler>)(a, b)
 
 ### Why didn’t my code recompile when I changed it?
 
-If you enabled dynamic shapes by setting
-`env TORCHDYNAMO_DYNAMIC_SHAPES=1 python model.py` then your code
-won’t recompile on shape changes. We’ve added support for dynamic shapes
-which avoids recompilations in the case when shapes vary by less than a
-factor of 2. This is especially useful in scenarios like varying image
-sizes in CV or variable sequence length in NLP. In inference scenarios
-it’s often not possible to know what a batch size will be beforehand
-because you take what you can get from different client apps.
+If dynamic shapes are enabled (for instance, via automatic dynamic shapes or `torch.compile(..., dynamic=True)`), then your code won’t recompile on shape changes. We’ve added support for dynamic shapes which avoids recompilations in the case when shapes vary. This is especially useful in scenarios like varying image sizes in CV or variable sequence length in NLP. In inference scenarios it’s often not possible to know what a batch size will be beforehand because you take what you can get from different client apps.
 
-In general, TorchDynamo tries very hard not to recompile things
-unnecessarily so if for example TorchDynamo finds 3 graphs and your
-change only modified one graph then only that graph will recompile. So
-another tip to avoid potentially slow compilation times is to warmup a
-model by compiling it once after which subsequent compilations will be
-much faster. Cold start compile times is still a metric we track
-visibly.
+In general, TorchDynamo tries very hard not to recompile things unnecessarily so if for example TorchDynamo finds 3 graphs and your change only modified one graph then only that graph will recompile. So another tip to avoid potentially slow compilation times is to warmup a model by compiling it once after which subsequent compilations will be much faster. Cold start compile times is still a metric we track visibly.
 
 ## Why am I getting incorrect results?
 
@@ -278,13 +265,9 @@ and triton then you can enable `torch._inductor.config.fallback_random = True`
 
 ## Why am I getting OOMs?
 
-Dynamo is still an alpha product so there’s a few sources of OOMs and if
-you’re seeing an OOM try disabling the following configurations in this
-order and then open an issue on GitHub so we can solve the root problem
-1\. If you’re using dynamic shapes try disabling them, we’ve disabled
-them by default: `env TORCHDYNAMO_DYNAMIC_SHAPES=0 python model.py` 2.
-CUDA graphs with Triton are enabled by default in inductor but removing
-them may alleviate some OOM issues: `torch._inductor.config.triton.cudagraphs = False`.
+Dynamo is continuously improving; if you’re seeing an OOM try disabling the following configurations in this order and then open an issue on GitHub so we can solve the root problem:
+1. If you’re using dynamic shapes try disabling them: `torch.compile(..., dynamic=False)`.
+2. CUDA graphs with Triton are enabled by default in inductor but removing them may alleviate some OOM issues: `torch._inductor.config.triton.cudagraphs = False`.
 
 ## Does `torch.func` work with `torch.compile` (for `grad` and `vmap` transforms)?
 
