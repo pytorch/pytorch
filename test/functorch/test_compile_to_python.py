@@ -283,6 +283,81 @@ class TestAOTCompileToPython(TestCase):
         ]
         self.assertEqual(len(names), len(set(names)), f"duplicate top-level: {names}")
 
+    def test_training_compose_refuses_unmodeled_wrappers(self):
+        # Aliased + mutated inputs drive AOTSyntheticBaseWrapper, which the
+        # training compose does not splice. It must REFUSE: silently dropping
+        # the wrapper composes a module whose inner forward was compiled for
+        # the merged synthetic-base calling convention, so it only fails (or
+        # miscomputes) at serve time -- replacing the caller's working
+        # pickled-bundle fallback with a broken artifact.
+        def f(a, b, w):
+            a.mul_(2)
+            return ((a + b) * w).sum()
+
+        def make():
+            base = torch.arange(4, dtype=torch.float32) + 1
+            return base[:], base  # a aliases b
+
+        w = torch.randn(4, requires_grad=True)
+        with torch.enable_grad():
+            gm = make_fx(f)(*make(), w)
+        a0, b0 = make()
+        with (
+            torch.enable_grad(),
+            self.assertRaisesRegex(NotImplementedError, "cannot yet model"),
+        ):
+            compile_to_python(gm, [a0, b0, w], grad_enabled=True)
+
+    def test_restride_refuses_symbolic_forward_strides(self):
+        # CompiledFxGraph.output_strides entries are PRINTED stride
+        # expressions (strings); under dynamic shapes they are symbolic and
+        # cannot be applied to a static fake. int() on one used to escape as
+        # a raw ValueError; refusing keeps the pickled-bundle fallback.
+        import types as types_mod
+
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            _restride_backward_placeholders,
+        )
+
+        gm = make_fx(lambda x: x * 2)(torch.randn(2, 3))
+        spec = types_mod.SimpleNamespace(
+            fw_metadata=types_mod.SimpleNamespace(
+                tensors_saved_for_backwards_slice=slice(0, 1)
+            ),
+            num_symints_saved_for_bw=0,
+        )
+        # A concrete printed stride still applies.
+        _restride_backward_placeholders(gm, [("3", "1")], spec)
+        with self.assertRaisesRegex(
+            NotImplementedError, "symbolic forward output strides"
+        ):
+            _restride_backward_placeholders(gm, [("3*s0", "1")], spec)
+
+    @requires_cuda_and_triton
+    def test_training_conv_restride_matches_eager(self):
+        # Conv nets are what the backward restride exists for: inductor's
+        # layout optimization can hand back channels-last saved activations,
+        # and a backward lowered against the joint trace's eager strides
+        # raises a size assert -- or, with size asserts off, silently computes
+        # wrong gradients.
+        m = torch.nn.Conv2d(16, 32, 3).to("cuda")
+        x = torch.randn(2, 16, 16, 16, device="cuda")
+        for p in m.parameters():
+            p.grad = None
+        m(x).sum().backward()
+        expected = {n: p.grad.detach().clone() for n, p in m.named_parameters()}
+
+        gm = _capture(m, x)
+        with torch.enable_grad():
+            src, _cache = compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
+        out = _exec(src)(_flat_inputs(m, x))
+        out = out[0] if isinstance(out, (list, tuple)) else out
+        for p in m.parameters():
+            p.grad = None
+        out.sum().backward()
+        for name, param in m.named_parameters():
+            self.assertEqual(param.grad, expected[name], atol=1e-4, rtol=1e-4)
+
     def test_linear_addmm_runs_like_eager(self):
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)

@@ -849,8 +849,14 @@ class ConvertFrameAssert:
         ):
             from .package import DynamoCache
 
-            # Record that the dynamo package has changed
-            DynamoCache.record_package(self._package)
+            # Record that the dynamo package has changed. A package that
+            # cannot be serialized (e.g. its CPU codegen target drifted
+            # mid-capture) must not fail the user's compile; it just is not
+            # persisted.
+            try:
+                DynamoCache.record_package(self._package)
+            except PackageError as e:
+                log.warning("Not recording compile package: %s", e)
         return result
 
 

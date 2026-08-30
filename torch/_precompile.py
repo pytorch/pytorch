@@ -328,6 +328,7 @@ import io
 import logging
 import pickle
 import sys
+import threading
 import types
 from collections.abc import Callable, Mapping, Sequence
 from types import MappingProxyType
@@ -464,20 +465,30 @@ class _InstalledArtifact:
         self._entry_factory = entry_factory
         self._fn: Callable[..., object] | None = None
         self._inner: Any = None
+        # Serving is documented as multi-thread safe, and installing is a
+        # process-global mutation of live code objects: two first calls racing
+        # through an unlocked check-then-act would both install, and the
+        # loser's installed state leaks with nothing left holding it.
+        self._install_lock = threading.Lock()
 
     def _rebind(self, fn: Callable[..., object]) -> None:
-        if self._inner is not None:
-            raise PrecompileError(
-                "precompile: this artifact is already installed; pass fn= to load() "
-                "before the first call."
-            )
-        self._fn = fn
+        with self._install_lock:
+            if self._inner is not None:
+                raise PrecompileError(
+                    "precompile: this artifact is already installed; pass fn= to load() "
+                    "before the first call."
+                )
+            self._fn = fn
 
     def _ensure(self) -> Any:
-        if self._inner is None:
-            fn = self._entry_factory() if self._fn is None else self._fn
-            self._inner = self._serve(fn)
-        return self._inner
+        inner = self._inner
+        if inner is None:
+            with self._install_lock:
+                if self._inner is None:
+                    fn = self._entry_factory() if self._fn is None else self._fn
+                    self._inner = self._serve(fn)
+                inner = self._inner
+        return inner
 
     def __call__(self, *args: object, **kwargs: object) -> object:
         return self._ensure()(*args, **kwargs)
@@ -490,7 +501,8 @@ class _InstalledArtifact:
         self.unload()
 
     def unload(self) -> None:
-        inner, self._inner = self._inner, None
+        with self._install_lock:
+            inner, self._inner = self._inner, None
         if inner is not None:
             inner.unload()
 
@@ -1801,6 +1813,15 @@ def _build_multigraph_python_source(
         f"RISKY_DROPPED_GUARDS = {[list(g) for g in summary.risky_dropped_guards]!r}"
     )
     parts.append("")
+    parts.append("# Guards that COULD be serialized and were not, because they held")
+    parts.append("# identically in every captured variant so they discriminated")
+    parts.append("# nothing. Not checked at serve time either: a call outside the")
+    parts.append("# captured domain along one of these is served, not refused.")
+    parts.append(
+        f"POLICY_DROPPED_GUARDS = "
+        f"{[list(g) for g in getattr(summary, 'policy_dropped_guards', ())]!r}"
+    )
+    parts.append("")
     parts.append("# Values pinned to exactly what capture saw; any other value misses.")
     parts.append(f"WONT_GENERALIZE = {tuple(summary.wont_generalize)!r}")
     parts.append("")
@@ -1994,6 +2015,23 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
     if not entry_frames:
         return
     if not any(f["variants"] for f in entry_frames):
+        # The entry frame having no variants has two very different causes, and
+        # guessing the wrong one sends the caller restructuring code that was
+        # never the problem. If Dynamo BYPASSED the frame, it recorded why --
+        # say that, because the thin-wrapper advice below is then simply wrong.
+        bypassed = [
+            code
+            for code in entry.codes
+            if code.bypassed and getattr(code, "bypass_reason", None)
+        ]
+        if bypassed:
+            reasons = ", ".join(sorted({str(c.bypass_reason) for c in bypassed}))
+            raise PrecompileError(
+                f"precompile captured no dispatchable graph for {entry.fn_name!r}: "
+                f"{len(bypassed)} frame(s) were BYPASSED during capture, so their "
+                f"guards were never written. Reason: {reasons}. Fix that rather "
+                f"than restructuring the captured callable."
+            )
         # Handing precompile a bare nn.Module compiles Dynamo's own wrapper
         # frame (external_utils.wrap_inline's `inner`) rather than the module:
         # every graph lands there, closing over the module, and the entry frame
@@ -2851,35 +2889,14 @@ class _PrecompileApi:
         # caught it.
         #
         # Which guards discriminate is only knowable once every variant
-        # exists, and guards are serialized per compilation as each one is
-        # produced. So learn it from a throwaway capture first, then capture
-        # again keeping only those. The examples fully determine the
-        # capture, and PrecompileSession gives each session a fresh PGO
-        # state, so the second pass reproduces the first: measured identical
-        # on that model (53 frames, 121 variants, no frame differing).
-        from torch._dynamo.precompile_package import varying_guard_slots
-
-        probe = _capture_session(
-            fn,
-            backend=backend,
-            guard_filter_fn=guard_filter_fn,
-            recompile_limit=recompile_limit,
-            dynamic=dynamic,
-            example_inputs=example_inputs,
-            training=bool(training),
-        )
-        # The probe runs the same calls, so it raises the same things the
-        # real capture would -- and it raises them FIRST. Translate here too,
-        # or a package error surfaces raw from a pass the caller cannot see.
-        from torch._dynamo.exc import PackageError as _PackageError
-
-        try:
-            with probe:
-                pass
-        except _PackageError as e:
-            raise PrecompileError(str(e)) from e
-        keep_only = varying_guard_slots(probe._guard_sets)
-        torch._dynamo.reset()
+        # exists, but guards are serialized per compilation, as each one is
+        # produced. So capture once and apply the policy on the way out, by
+        # re-serializing each frame's guards from the pickle the capture
+        # already made -- see PrecompileSession._apply_guard_policy. Running
+        # the examples a second time to learn the policy first would be
+        # simpler, but a capture is not free of side effects: it would double
+        # a training step's gradients, and a region that mutates state would
+        # be guarded on values the second pass had already advanced past.
         session = PrecompileSession(
             _capture_session(
                 fn,
@@ -2889,20 +2906,19 @@ class _PrecompileApi:
                 dynamic=dynamic,
                 example_inputs=example_inputs,
                 invariants=invariants,
-                keep_only=keep_only,
                 training=bool(training),
             )
         )
-        # Retain graphs only where they will actually be rendered: the probe
-        # above threw its lowering away, and an eager "backend" is an fx graph
-        # with no source to emit. Retaining otherwise would deepcopy every
-        # compiled graph and hold it for the session to produce nothing.
+        session._session._prune_invariant_guards = True
+        # Retain graphs only where they will actually be rendered: an eager
+        # "backend" is an fx graph with no source to emit. Retaining otherwise
+        # would deepcopy every compiled graph and hold it for the session to
+        # produce nothing.
         session._session._keep_graphs = backend != "eager"
         with session:
             pass
         # The capture is finished, so hand back the artifact rather than a
-        # session the caller has to know to save. capture() remains for a
-        # capture whose calls the caller has to make.
+        # session the caller has to know to save.
         return session.artifact(
             require_complete=require_complete,
             require_no_risky_drops=require_no_risky_drops,
@@ -2930,6 +2946,17 @@ class _PrecompileApi:
         2 of Note [precompile programming model], the runtime model must match the
         example model's parameter/buffer structure; precompile re-derives the
         param/buffer list from it (same interning/order as capture).
+
+        The returned object comes in two shapes, decided by the CAPTURE, not by a
+        load-time choice. A dynamo artifact whose capture graph-broke or recompiled
+        serves by INSTALLING onto the captured code objects: the returned callable
+        mutates process state on first call (or on ``__enter__``) and supports
+        ``with`` / ``unload()`` to take that back out. A single-whole-graph artifact
+        is standalone: a plain callable with neither. ``fn=`` applies to the
+        installing shape only -- pass the function object to install onto when it is
+        not importable from where it was captured (defined in ``__main__``, a
+        notebook, or a REPL); it must be passed before the first call, and a
+        standalone artifact rejects it with ``PrecompileError``.
 
         Raises ``PrecompileError`` if ``python_code`` is malformed or is not a
         ``torch.compiler.precompile`` artifact (it fails to parse, or is missing the
