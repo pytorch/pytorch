@@ -6,6 +6,7 @@
 
 #include <ATen/core/ivalue.h>
 #include <c10/util/Synchronized.h>
+#include <c10/util/string_view.h>
 #include <nlohmann/json.hpp>
 
 namespace torch::nativert::detail {
@@ -316,10 +317,13 @@ class PytreeNodeRegistry {
             }});
   }
   bool hasNodeDef(std::string_view typeName) const {
-    return registry_.contains(std::string{typeName});
+    return registry_.contains(typeName);
   }
   const NodeDef& getNodeDef(std::string_view typeName) const {
-    return registry_.at(std::string{typeName});
+    auto it = registry_.find(typeName);
+    TORCH_CHECK_INDEX(
+        it != registry_.end(), "Unknown pytree node type: ", typeName);
+    return it->second;
   }
   void registerNode(std::string_view typeName, NodeDef nodeDef) {
     TORCH_CHECK(!hasNodeDef(typeName));
@@ -327,7 +331,7 @@ class PytreeNodeRegistry {
   }
 
   void registerOrReplaceNode(std::string_view typeName, NodeDef nodeDef) {
-    auto it = registry_.find(std::string{typeName});
+    auto it = registry_.find(typeName);
     if (it != registry_.end()) {
       it->second = nodeDef;
     } else {
@@ -336,7 +340,12 @@ class PytreeNodeRegistry {
   }
 
  private:
-  std::unordered_map<std::string, NodeDef> registry_;
+  std::unordered_map<
+      std::string,
+      NodeDef,
+      c10::TransparentStringHash,
+      std::equal_to<>>
+      registry_;
 };
 
 c10::Synchronized<PytreeNodeRegistry>& getPytreeNodeRegistry() {
