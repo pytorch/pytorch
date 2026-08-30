@@ -571,7 +571,7 @@ Tensor& linalg_pinv_out(
   checkSameDevice("linalg.pinv", result, input);
   checkLinalgCompatibleDtype("linalg.pinv", result, input);
   Tensor result_tmp = at::linalg_pinv(input, atol, rtol, hermitian);
-  at::native::resize_output(result, result_tmp.sizes());
+  at::native::resize_output_symint(result, result_tmp.sym_sizes());
   result.copy_(result_tmp);
   return result;
 }
@@ -585,7 +585,7 @@ Tensor& linalg_pinv_out(
   checkSameDevice("linalg.pinv", result, input);
   checkLinalgCompatibleDtype("linalg.pinv", result, input);
   Tensor result_tmp = at::linalg_pinv(input, atol, rtol, hermitian);
-  at::native::resize_output(result, result_tmp.sizes());
+  at::native::resize_output_symint(result, result_tmp.sym_sizes());
   result.copy_(result_tmp);
   return result;
 }
@@ -595,7 +595,7 @@ Tensor& linalg_pinv_out(const Tensor& input, const Tensor& rcond, bool hermitian
   checkLinalgCompatibleDtype("linalg.pinv", result, input);
 
   Tensor result_tmp = at::linalg_pinv(input, rcond, hermitian);
-  at::native::resize_output(result, result_tmp.sizes());
+  at::native::resize_output_symint(result, result_tmp.sym_sizes());
   result.copy_(result_tmp);
   return result;
 }
@@ -3079,7 +3079,7 @@ Tensor& linalg_matrix_norm_out(
   TORCH_CHECK(out.scalar_type() == result.scalar_type(),
               "linalg.matrix_norm expected out tensor dtype ", out.scalar_type(),
               " but got: ", result.scalar_type());
-  at::native::resize_output(result, out.sizes());
+  at::native::resize_output_symint(result, out.sym_sizes());
   result.copy_(out);
   return result;
 }
@@ -3126,7 +3126,7 @@ Tensor& linalg_matrix_norm_out(
   TORCH_CHECK(out.scalar_type() == result.scalar_type(),
               "linalg.matrix_norm expected out tensor dtype ", out.scalar_type(),
               " but got: ", result.scalar_type());
-  at::native::resize_output(result, out.sizes());
+  at::native::resize_output_symint(result, out.sym_sizes());
   result.copy_(out);
   return result;
 }
@@ -3163,7 +3163,7 @@ Tensor& linalg_norm_out(const Tensor& X, const std::optional<Scalar>& opt_ord, O
   TORCH_CHECK(out.scalar_type() == result.scalar_type(),
               "linalg.norm expected out tensor dtype ", out.scalar_type(),
               " but got: ", result.scalar_type());
-  at::native::resize_output(result, out.sizes());
+  at::native::resize_output_symint(result, out.sym_sizes());
   result.copy_(out);
   return result;
 }
@@ -3188,7 +3188,7 @@ Tensor& linalg_norm_out(const Tensor& X, std::string_view ord, OptionalIntArrayR
   TORCH_CHECK(out.scalar_type() == result.scalar_type(),
               "linalg.norm expected out tensor dtype ", out.scalar_type(),
               " but got: ", result.scalar_type());
-  at::native::resize_output(result, out.sizes());
+  at::native::resize_output_symint(result, out.sym_sizes());
   result.copy_(out);
   return result;
 }
@@ -3369,7 +3369,7 @@ Tensor& linalg_cond_out(const Tensor& self, const std::optional<Scalar>& opt_ord
   checkLinalgCompatibleDtype("linalg.cond", result.scalar_type(), real_dtype);
 
   Tensor result_tmp = at::linalg_cond(self, opt_ord);
-  at::native::resize_output(result, result_tmp.sizes());
+  at::native::resize_output_symint(result, result_tmp.sym_sizes());
   result.copy_(result_tmp);
   return result;
 }
@@ -3403,7 +3403,7 @@ Tensor& linalg_cond_out(const Tensor& self, std::string_view ord, Tensor& result
   checkLinalgCompatibleDtype("linalg.cond", result.scalar_type(), real_dtype);
 
   Tensor result_tmp = at::linalg_cond(self, ord);
-  at::native::resize_output(result, result_tmp.sizes());
+  at::native::resize_output_symint(result, result_tmp.sym_sizes());
   result.copy_(result_tmp);
   return result;
 }
@@ -3451,7 +3451,7 @@ Tensor& linalg_tensorinv_out(const Tensor& self, int64_t ind, Tensor& result) {
   checkLinalgCompatibleDtype("tensorinv", result, self);
 
   Tensor result_tmp = at::linalg_tensorinv(self, ind);
-  at::native::resize_output(result, result_tmp.sizes());
+  at::native::resize_output_symint(result, result_tmp.sym_sizes());
   result.copy_(result_tmp);
   return result;
 }
@@ -3499,7 +3499,7 @@ Tensor& linalg_tensorsolve_out(const Tensor& self, const Tensor& other, Optional
   checkLinalgCompatibleDtype("tensorsolve", result, self);
 
   Tensor result_tmp = at::linalg_tensorsolve(self, other, dims);
-  at::native::resize_output(result, result_tmp.sizes());
+  at::native::resize_output_symint(result, result_tmp.sym_sizes());
   result.copy_(result_tmp);
   return result;
 }
