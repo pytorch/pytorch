@@ -33,6 +33,7 @@ import gc
 import importlib
 import inspect
 import itertools
+import json
 import logging
 import os
 import pstats
@@ -104,6 +105,7 @@ from .cache_size import (
 from .code_context import code_context
 from .eval_frame import (
     _get_cache_entries_for_region,
+    _get_explicit_compile_regions,
     _get_total_cache_entry_count,
     add_skip_reason,
     always_optimize_code_objects,
@@ -152,7 +154,13 @@ from .symbolic_convert import (
     SpeculationLog,
 )
 from .trace_rules import is_numpy
-from .types import ConvertFrameReturn, FrameAction, FrameExecStrategy, wrap_guarded_code
+from .types import (
+    ConvertFrameReturn,
+    FrameAction,
+    FrameExecStrategy,
+    GuardFilterEntry,
+    wrap_guarded_code,
+)
 from .utils import (
     _get_error_on_graph_break,
     chromium_event_timed,
@@ -588,8 +596,16 @@ def get_compile_id(
     if not isinstance(frame_id, int):
         raise AssertionError(f"frame_id must be an int, got {type(frame_id)}")
 
-    frame_compile_id = FRAME_COMPILE_COUNTER[frame_id]
-    FRAME_COMPILE_COUNTER[frame_id] += 1
+    if get_eval_frame_isolate_recompiles_id() >= 0:
+        frame_compile_id = frame_state.get("_compile_id", 0)
+        if not isinstance(frame_compile_id, int):
+            raise AssertionError(
+                f"frame compile id must be an int, got {type(frame_compile_id)}"
+            )
+        frame_state["_compile_id"] = frame_compile_id + 1
+    else:
+        frame_compile_id = FRAME_COMPILE_COUNTER[frame_id]
+        FRAME_COMPILE_COUNTER[frame_id] += 1
 
     compiled_autograd_id = None
     if prior := CompileContext.current_compile_id():
@@ -654,7 +670,18 @@ class ConvertFrameAssert:
             )
         else:
             cache_entries_for_reasons = cache_entries
-        total_count = _get_total_cache_entry_count(code)
+        package = self._package
+        explicit_package = (
+            package is not None and package.serialization_guard_filter_fn is not None
+        )
+        if explicit_package:
+            if package is None:
+                raise AssertionError("explicit package must not be None")
+            total_count = package.guarded_code_count(code)
+        else:
+            total_count = _get_total_cache_entry_count(code)
+            for region_id in _get_explicit_compile_regions():
+                total_count -= len(_get_cache_entries_for_region(code, region_id))
         cache_size = compute_cache_size(frame, cache_entries, total_count)
         input_codes.add(code)
         if code in output_codes:
@@ -770,9 +797,21 @@ class ConvertFrameAssert:
         try:
             compile_ctx = compile_context(CompileContext(compile_id))
             # When recompile_limit is set, temporarily override the global
-            # config so the existing exceeds_recompile_limit check uses it.
+            # config so the existing exceeds_recompile_limit check uses it. An
+            # explicit package also raises a lower accumulated cap; ordinary
+            # torch.compile keeps the ambient global safety limit.
             recompile_ctx = (
-                config.patch(recompile_limit=self._recompile_limit)
+                config.patch(
+                    recompile_limit=self._recompile_limit,
+                    accumulated_recompile_limit=(
+                        max(
+                            config.accumulated_recompile_limit,
+                            self._recompile_limit,
+                        )
+                        if explicit_package
+                        else config.accumulated_recompile_limit
+                    ),
+                )
                 if self._recompile_limit is not None
                 else contextlib.nullcontext()
             )
@@ -803,11 +842,21 @@ class ConvertFrameAssert:
             # Restore the previous initial_global_state for nested compilation handling
             initial_global_state = prev_initial_global_state
 
-        if config.caching_precompile and self._package is not None:
+        if (
+            config.caching_precompile
+            and self._package is not None
+            and self._package.serialization_guard_filter_fn is None
+        ):
             from .package import DynamoCache
 
-            # Record that the dynamo package has changed
-            DynamoCache.record_package(self._package)
+            # Record that the dynamo package has changed. A package that
+            # cannot be serialized (e.g. its CPU codegen target drifted
+            # mid-capture) must not fail the user's compile; it just is not
+            # persisted.
+            try:
+                DynamoCache.record_package(self._package)
+            except PackageError as e:
+                log.warning("Not recording compile package: %s", e)
         return result
 
 
@@ -1008,6 +1057,11 @@ class DynamoOutput:
         save: bool = False,
         cache_entries: list[CacheEntry] | None = None,
         strict_error: bool = False,
+        serialization_guard_filter_fn: collections.abc.Callable[
+            [collections.abc.Sequence[GuardFilterEntry]],
+            collections.abc.Sequence[bool],
+        ]
+        | None = None,
     ) -> CheckFunctionManager:
         output_graph = self.tracer_output.output_graph
         if output_graph is None:
@@ -1028,14 +1082,26 @@ class DynamoOutput:
 
         if not fx_experimental_config.translation_validation:
             return self._build_guards(
-                code, output_graph, cache_entries, hooks, save, strict_error
+                code,
+                output_graph,
+                cache_entries,
+                hooks,
+                save,
+                strict_error,
+                serialization_guard_filter_fn,
             )
 
         from torch.fx.experimental.validator import bisect, ValidationException
 
         try:
             return self._build_guards(
-                code, output_graph, cache_entries, hooks, save, strict_error
+                code,
+                output_graph,
+                cache_entries,
+                hooks,
+                save,
+                strict_error,
+                serialization_guard_filter_fn,
             )
         except ValidationException:
             bisect(output_graph.shape_env)
@@ -1049,6 +1115,11 @@ class DynamoOutput:
         hooks: Hooks | None,
         save: bool,
         strict_error: bool,
+        serialization_guard_filter_fn: collections.abc.Callable[
+            [collections.abc.Sequence[GuardFilterEntry]],
+            collections.abc.Sequence[bool],
+        ]
+        | None = None,
     ) -> CheckFunctionManager:
         return CheckFunctionManager(
             code,
@@ -1056,6 +1127,7 @@ class DynamoOutput:
             cache_entries,
             hooks.guard_fail_fn if hooks else None,
             hooks.guard_filter_fn if hooks else None,
+            serialization_guard_filter_fn=serialization_guard_filter_fn,
             save_guards=save,
             strict_error=strict_error,
         )
@@ -1959,6 +2031,15 @@ def _compile(
                 hooks=hooks,
                 save=package is not None,
                 cache_entries=cache_entries,
+                serialization_guard_filter_fn=(
+                    package.serialization_guard_filter_fn
+                    if package is not None
+                    else None
+                ),
+                strict_error=(
+                    package is not None
+                    and package.serialization_guard_filter_fn is not None
+                ),
             )
 
         if package is not None:
@@ -2057,6 +2138,31 @@ def _compile(
                 recompile_reason,
                 troubleshooting_url,
             )
+
+            if package is not None and package.has_current_entry():
+                # This frame will stop compiling new variants, so the ones
+                # past the limit will never be captured. Record that so a caller
+                # building an artifact can detect the gap. Deliberately not a
+                # bypass: the variants captured so far are still valid and must
+                # stay installable, and for a cache a miss just recompiles.
+                # Only this frame is named even though the RUN_ONLY strategy set
+                # below is recursive: frames called beneath it go short too, and
+                # never re-enter here, so the record is a lower bound.
+                package.mark_current_entry_truncated()
+                torch._logging.trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "dynamo_cache_truncated",
+                        "encoding": "json",
+                    },
+                    payload_fn=lambda: json.dumps(
+                        {
+                            "reason": f"hit {limit_type}",
+                            "function": format_func_info(code),
+                        }
+                    ),
+                    expect_trace_id=False,
+                )
 
             def raise_unimplemented_cache_limit_exceeded() -> NoReturn:
                 unimplemented(
