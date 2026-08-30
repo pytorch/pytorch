@@ -3166,11 +3166,14 @@ class <lambda>(torch.nn.Module):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
+    @parametrize("parallel_backward", [False, True])
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
-    def test_scan_non_pointwise(self, reverse, compile_mode, device, autograd):
+    def test_scan_non_pointwise(
+        self, reverse, compile_mode, device, autograd, parallel_backward
+    ):
         scan_fct = compile_mode_helper(scan, compile_mode)
 
         x = torch.randn(3, 10, 2, device=device, requires_grad=autograd)
@@ -3189,6 +3192,7 @@ class <lambda>(torch.nn.Module):
             x,
             dim=0,
             reverse=reverse,
+            parallel_backward=parallel_backward,
         )
         self.assertEqual(result, expected_result)
 
@@ -3878,9 +3882,10 @@ class GraphModule(torch.nn.Module):
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
+    @parametrize("parallel_backward", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("autograd", [False, True])
-    def test_scan_closure_RNN(self, compile_mode, autograd):
+    def test_scan_closure_RNN(self, compile_mode, autograd, parallel_backward):
         dim = 1
         device = torch.device("cpu")
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -3915,6 +3920,7 @@ class GraphModule(torch.nn.Module):
             x,
             dim=dim,
             reverse=False,
+            parallel_backward=parallel_backward,
         )
         self.assertEqual(result[0], expected_result_state)
         self.assertEqual(result[1], expected_result_out)
@@ -3952,6 +3958,7 @@ class GraphModule(torch.nn.Module):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
+    @parametrize("parallel_backward", [False, True])
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize(
@@ -3959,7 +3966,7 @@ class GraphModule(torch.nn.Module):
     )
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_scan_closure_RNN_partial_autograd(
-        self, reverse, compile_mode, partial_grad, device
+        self, reverse, compile_mode, partial_grad, device, parallel_backward
     ):
         dim = 1
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -4025,7 +4032,14 @@ class GraphModule(torch.nn.Module):
                 return (c_new_0, c_new_1), h_new
 
             inits = (h, h_1)
-            result = scan_fct(RNN, inits, (x, x1), dim=dim, reverse=reverse)
+            result = scan_fct(
+                RNN,
+                inits,
+                (x, x1),
+                dim=dim,
+                reverse=reverse,
+                parallel_backward=parallel_backward,
+            )
             result_exp = _fake_scan(RNN, (h, h_1), (x, x1), dim=dim, reverse=reverse)
             self.assertEqual(result, result_exp)
 
@@ -4295,12 +4309,13 @@ class GraphModule(torch.nn.Module):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
+    @parametrize("parallel_backward", [False, True])
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     def test_scan_closure_combine_fn_with_no_grad_init_carries_unequal_grad(
-        self, reverse, compile_mode, device, autograd
+        self, reverse, compile_mode, device, autograd, parallel_backward
     ):
         dim = 1
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -4314,6 +4329,7 @@ class GraphModule(torch.nn.Module):
             x,
             dim=dim,
             reverse=reverse,
+            parallel_backward=parallel_backward,
         )
         result_exp = _fake_scan(
             get_scan_combine_fn("fct_c1_no_grad", True),
@@ -4335,12 +4351,13 @@ class GraphModule(torch.nn.Module):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
+    @parametrize("parallel_backward", [False, True])
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     def test_scan_closure_combine_fn_with_no_grad_init_carries_equal_grad(
-        self, reverse, compile_mode, device, autograd
+        self, reverse, compile_mode, device, autograd, parallel_backward
     ):
         dim = 1
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -4354,6 +4371,7 @@ class GraphModule(torch.nn.Module):
             x,
             dim=dim,
             reverse=reverse,
+            parallel_backward=parallel_backward,
         )
         result_exp = _fake_scan(
             get_scan_combine_fn("fct_c1_no_grad", True),
@@ -4375,12 +4393,13 @@ class GraphModule(torch.nn.Module):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
+    @parametrize("parallel_backward", [False, True])
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     def test_scan_closure_combine_fn_with_no_grad_for_out(
-        self, reverse, compile_mode, device, autograd
+        self, reverse, compile_mode, device, autograd, parallel_backward
     ):
         dim = 1
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -4395,7 +4414,14 @@ class GraphModule(torch.nn.Module):
                 h_new = torch.tanh(x[0] + x[1] + y)
             return (c1, c2), h_new
 
-        result = scan_fct(fct_ys_no_grad, (h1, h2), x, dim=dim, reverse=reverse)
+        result = scan_fct(
+            fct_ys_no_grad,
+            (h1, h2),
+            x,
+            dim=dim,
+            reverse=reverse,
+            parallel_backward=parallel_backward,
+        )
         result_exp = _fake_scan(fct_ys_no_grad, (h1, h2), x, dim=dim, reverse=reverse)
         self.assertEqual(result, result_exp)
 
@@ -4404,12 +4430,13 @@ class GraphModule(torch.nn.Module):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
+    @parametrize("parallel_backward", [False, True])
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     def test_scan_closure_combine_fn_with_no_grad_additional_inputs_partial(
-        self, reverse, compile_mode, device, autograd
+        self, reverse, compile_mode, device, autograd, parallel_backward
     ):
         dim = 1
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -4430,7 +4457,14 @@ class GraphModule(torch.nn.Module):
 
             return c_new, h_new2
 
-        result = scan_fct(fct_no_grad_bhh_Whh, h, x, dim=dim, reverse=reverse)
+        result = scan_fct(
+            fct_no_grad_bhh_Whh,
+            h,
+            x,
+            dim=dim,
+            reverse=reverse,
+            parallel_backward=parallel_backward,
+        )
         result_exp = _fake_scan(fct_no_grad_bhh_Whh, h, x, dim=dim, reverse=reverse)
         self.assertEqual(result, result_exp)
 
@@ -4439,12 +4473,13 @@ class GraphModule(torch.nn.Module):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
+    @parametrize("parallel_backward", [False, True])
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     def test_scan_closure_combine_fn_with_no_grad_additional_inputs_all(
-        self, reverse, compile_mode, device, autograd
+        self, reverse, compile_mode, device, autograd, parallel_backward
     ):
         dim = 1
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -4465,7 +4500,14 @@ class GraphModule(torch.nn.Module):
             h_new2 = h_new + h_new_no_grad
             return c_new2, h_new2
 
-        result = scan_fct(fct_no_grad_bih_Wih_bhh_Whh, h, x, dim=dim, reverse=reverse)
+        result = scan_fct(
+            fct_no_grad_bih_Wih_bhh_Whh,
+            h,
+            x,
+            dim=dim,
+            reverse=reverse,
+            parallel_backward=parallel_backward,
+        )
         result_exp = _fake_scan(
             fct_no_grad_bih_Wih_bhh_Whh, h, x, dim=dim, reverse=reverse
         )
@@ -4476,12 +4518,13 @@ class GraphModule(torch.nn.Module):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
+    @parametrize("parallel_backward", [False, True])
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     def test_scan_closure_combine_fn_carries_ys_same_grad(
-        self, reverse, compile_mode, device, autograd
+        self, reverse, compile_mode, device, autograd, parallel_backward
     ):
         dim = 1
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -4502,7 +4545,14 @@ class GraphModule(torch.nn.Module):
             h_new2 = h_new + h_new_no_grad
             return c_new2, h_new2
 
-        result = scan_fct(fct_no_grad_bih_Wih_bhh_Whh, h, x, dim=dim, reverse=reverse)
+        result = scan_fct(
+            fct_no_grad_bih_Wih_bhh_Whh,
+            h,
+            x,
+            dim=dim,
+            reverse=reverse,
+            parallel_backward=parallel_backward,
+        )
         result_exp = _fake_scan(
             fct_no_grad_bih_Wih_bhh_Whh, h, x, dim=dim, reverse=reverse
         )
@@ -4513,11 +4563,14 @@ class GraphModule(torch.nn.Module):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
+    @parametrize("parallel_backward", [False, True])
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
-    def test_scan_closure_nested(self, reverse, compile_mode, device, autograd):
+    def test_scan_closure_nested(
+        self, reverse, compile_mode, device, autograd, parallel_backward
+    ):
         scan_fct = compile_mode_helper(scan, compile_mode)
 
         # Simple non-nested case
@@ -4531,7 +4584,9 @@ class GraphModule(torch.nn.Module):
             h_new = torch.tanh(c_new + x)
             return c_new, h_new
 
-        result = scan_fct(f1, h, x, dim=1, reverse=reverse)
+        result = scan_fct(
+            f1, h, x, dim=1, reverse=reverse, parallel_backward=parallel_backward
+        )
         result_exp = _fake_scan(f1, h, x, dim=1, reverse=reverse)
         self.assertEqual(result, result_exp)
 
@@ -4574,7 +4629,14 @@ class GraphModule(torch.nn.Module):
             h_new = torch.tanh(c_new + x)
             return c_new, h_new
 
-        result1 = chain_fct(scan_fct, f1, f2, x1, h1, h2)
+        result1 = chain_fct(
+            functools.partial(scan_fct, parallel_backward=parallel_backward),
+            f1,
+            f2,
+            x1,
+            h1,
+            h2,
+        )
         expected_result = chain_fct(_fake_scan, f1, f2, x1, h1, h2)
         self.assertEqual(result1, expected_result)
 
@@ -4600,7 +4662,14 @@ class GraphModule(torch.nn.Module):
             h_new = torch.tanh(c_new + x)
             return c_new, h_new
 
-        result1 = chain_fct(scan_fct, f1, f2, x1, h1, h2)
+        result1 = chain_fct(
+            functools.partial(scan_fct, parallel_backward=parallel_backward),
+            f1,
+            f2,
+            x1,
+            h1,
+            h2,
+        )
         expected_result = chain_fct(_fake_scan, f1, f2, x1, h1, h2)
         self.assertEqual(result1, expected_result)
 
@@ -8497,15 +8566,19 @@ def forward(self, x_1):
                 torch._enable_functionalization(reapply_views=False)
                 try:
                     func_args = pytree.tree_map(
-                        lambda x: torch._to_functional_tensor(x)
-                        if isinstance(x, torch.Tensor)
-                        else x,
+                        lambda x: (
+                            torch._to_functional_tensor(x)
+                            if isinstance(x, torch.Tensor)
+                            else x
+                        ),
                         args,
                     )
                     func_kwargs = pytree.tree_map(
-                        lambda x: torch._to_functional_tensor(x)
-                        if isinstance(x, torch.Tensor)
-                        else x,
+                        lambda x: (
+                            torch._to_functional_tensor(x)
+                            if isinstance(x, torch.Tensor)
+                            else x
+                        ),
                         kwargs,
                     )
                     return func(*func_args, **func_kwargs)
