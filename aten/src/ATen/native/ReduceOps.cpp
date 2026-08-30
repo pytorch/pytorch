@@ -379,10 +379,8 @@ TORCH_META_FUNC(aminmax)
     // whichever write lands last clobber the other, silently.
     const auto overlap = at::get_overlap_status(min, max);
     TORCH_CHECK(
-        overlap != at::MemOverlapStatus::Partial &&
-            overlap != at::MemOverlapStatus::Full,
-        "aminmax(): the `min` and `max` out= tensors must not share memory, "
-        "but they overlap. Pass two distinct tensors.");
+        overlap == at::MemOverlapStatus::No,
+        "aminmax(): the `min` and `max` out= tensors must not overlap.");
   }
 
   DimVector shape;
