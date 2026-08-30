@@ -165,6 +165,9 @@ TEST_F(ParallelTest, ParallelApplyRethrowsException_MultiCUDA) {
   struct M : torch::nn::Cloneable<M> {
     void reset() override {}
     torch::Tensor forward(torch::Tensor input) {
+      // ParallelApplyRethrowsException is about a user exception propagating
+      // out of forward(), so this should stay a plain std:: exception.
+      // @allow-raw-throw: intentionally a plain std:: exception
       throw std::runtime_error("Badness!");
     }
   };
