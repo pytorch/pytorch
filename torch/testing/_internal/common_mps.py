@@ -352,6 +352,12 @@ if torch.backends.mps.is_available():
             "short",
             "square",
             "stack",
+            # var(z) = var(real(z)) + var(imag(z)), see
+            # https://github.com/pytorch/pytorch/issues/135210
+            "std",
+            "stdunbiased",
+            "std_mean",
+            "std_meanunbiased",
             "stft",
             "sum",
             "sum_to_size",
@@ -359,6 +365,10 @@ if torch.backends.mps.is_available():
             "trace",
             "trapz",
             "trapezoid",
+            "var",
+            "varunbiased",
+            "var_mean",
+            "var_meanunbiased",
             "vdot",
             "vstack",
             "where",
