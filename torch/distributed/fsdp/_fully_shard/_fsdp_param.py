@@ -685,7 +685,7 @@ class FSDPParam:
                 if isinstance(self.mesh_info, HSDPMeshInfo):
                     spec_placements.append(Replicate())
                 # Reuse the placement already computed for this DP shard dim
-                # so that we don't loss _StridedShard.
+                # so that we don't lose _StridedShard.
                 spec_placements.append(spmd_placements[i])
                 skip = len(dp_dim_names.shard_names) - 1
             elif name in replicate_names_set and isinstance(
@@ -1059,15 +1059,21 @@ class FSDPParam:
 
     def to_accumulated_grad_if_needed(self) -> None:
         # Access `_unsharded_param` to bypass the sharded state check since we
-        # prefer to reshard before upcasting the gradient to save memory
+        # prefer to reshard before upcasting the gradient to save memory.
+        # It is created by `init_unsharded_param` and dropped by
+        # `free_unsharded_param`, so a parameter that has not been all-gathered
+        # does not have it. Such a parameter has no unsharded gradient to upcast,
+        # which is the case this method already returns early for.
+        unsharded_param = getattr(self, "_unsharded_param", None)
         if (
             self.reduce_dtype is None
-            or self._unsharded_param.grad is None
-            or self._unsharded_param.grad.dtype == self.reduce_dtype
+            or unsharded_param is None
+            or unsharded_param.grad is None
+            or unsharded_param.grad.dtype == self.reduce_dtype
         ):
             return
-        unsharded_grad = self._unsharded_param.grad
-        self._unsharded_param.grad = None
+        unsharded_grad = unsharded_param.grad
+        unsharded_param.grad = None
         self.unsharded_accumulated_grad = unsharded_grad.to(self.reduce_dtype)
 
     def accumulate_unsharded_grad_if_needed(self) -> None:
