@@ -7,6 +7,7 @@ import unittest
 
 import torch
 import torch._dynamo.test_case
+import torch._dynamo.testing
 from torch.testing._internal.common_utils import IS_FBCODE
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._triton import (
@@ -521,9 +522,11 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             return tensor + 1, tma
 
         x = torch.randn(128, 128, device=GPU_TYPE)
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
 
         ref = create_tma(x)
-        res = torch.compile(create_tma, backend="eager")(x)
+        res = torch.compile(create_tma, backend=backend)(x)
+        self.assertEqual(len(backend.graphs), 1)
         self.assertEqual(ref[1].desc, res[1].desc)
 
     @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
@@ -542,9 +545,11 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             return tensor + 1, tma
 
         x = torch.randn(128, 128, device=GPU_TYPE)
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
 
         ref = create_tma(x)
-        res = torch.compile(create_tma, backend="eager")(x)
+        res = torch.compile(create_tma, backend=backend)(x)
+        self.assertEqual(len(backend.graphs), 1)
         self.assertEqual(ref, res)
 
     def test_self_referential_sourceful(self):
@@ -662,10 +667,10 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         """TSOV.as_python_constant must succeed for reference-type opaque
         objects. Without this, __eq__ between two opaque objects graph breaks.
         """
+        import torch._custom_class_base
         import torch._library.opaque_object
-        import torch._opaque_base
 
-        class Config(torch._opaque_base.OpaqueBase):
+        class Config(torch._custom_class_base.CustomClassBase):
             def __init__(self, v):
                 self.v = v
 
@@ -678,7 +683,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             def __hash__(self):
                 return hash(self.v)
 
-        torch._library.opaque_object.register_opaque_type(Config, typ="reference")
+        torch._library.opaque_object.register_custom_class(Config, typ="symbolic")
 
         cfg = Config(42)
 

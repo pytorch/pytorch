@@ -20,6 +20,32 @@ Observed Exceptions:
     - Special handling for StopIteration, LookupError, etc.
     - Exception state management during compilation
 
+    When an exception is raised inside a ``torch.compile`` region,
+    TorchDynamo does **not** immediately propagate it to the caller.
+    Instead, Dynamo symbolically traces the exception so that
+    ``try``/``except`` blocks inside the compiled function can be
+    captured in the FX graph and reasoned about statically.
+
+    Common Python exception types are wrapped in ``ObservedException``
+    subclasses (e.g. ``StopIteration`` → ``ObservedUserStopIteration``,
+    ``KeyError`` → ``ObservedKeyError``).  The full mapping is defined in
+    ``observed_exception_map``.  For exception types not present in that
+    map, :func:`get_dynamo_observed_exception` creates a new
+    ``ObservedException`` subclass dynamically at tracing time.
+
+    If an observed exception is **not caught** inside the compiled region
+    it propagates out and is re-raised as the original exception type in
+    eager mode, preserving the original traceback for the user.
+
+    .. note::
+        This behaviour means that exception-based control flow (e.g.
+        ``StopIteration`` from a custom iterator, ``KeyError`` from a
+        dict access) is generally supported inside ``torch.compile``
+        regions.  However, raising or catching exceptions that depend on
+        *data-dependent* conditions may still cause a graph break because
+        Dynamo cannot statically determine which branch will be taken at
+        compile time.
+
 Error Formatting:
     - Stack trace filtering and formatting
     - Error message augmentation
@@ -213,10 +239,15 @@ class TorchRuntimeError(TorchDynamoException):
 
 
 class InvalidBackend(TorchDynamoException):
-    def __init__(self, name: str) -> None:
-        super().__init__(
-            f"Invalid backend: {name!r}, see `torch._dynamo.list_backends()` for available backends."
+    def __init__(self, name: str, suggestions: list[str] | None = None) -> None:
+        msg = f"Invalid backend: {name!r}"
+        msg += (
+            f", did you mean: {', '.join(map(repr, suggestions))}?"
+            if suggestions
+            else "."
         )
+        msg += " See `torch._dynamo.list_backends()` for available backends."
+        super().__init__(msg)
 
 
 class ResetRequired(TorchDynamoException):
@@ -464,6 +495,10 @@ class ObservedTypeError(ObservedException):
     pass
 
 
+class FakeTensorObservedException(ObservedException):
+    pass
+
+
 observed_exception_map = {
     StopIteration: ObservedUserStopIteration,
     LookupError: ObservedLookupError,
@@ -475,6 +510,28 @@ observed_exception_map = {
     NotImplementedError: ObservedNotImplementedError,
     TypeError: ObservedTypeError,
 }
+
+
+class UnhandledDescriptorError(NotImplementedError):
+    """Raised by object_generic_getattr when a descriptor type is not
+    recognized by _resolve_descriptor_get.  Subclasses NotImplementedError
+    so callers that catch NotImplementedError (e.g., generic_getattr's
+    graph-break fallback) still work, but callers that want to
+    distinguish unhandled descriptors from other NotImplementedErrors can
+    catch this specifically.
+    """
+
+
+class TritonUnavailableError(RuntimeError):
+    """
+    Raised by DeviceInterface.raise_if_triton_unavailable to signal that a
+    device cannot run Triton (e.g. no Triton backend was built for it).
+
+    Subclasses RuntimeError so existing callers that catch RuntimeError keep
+    working, while callers that only want to react to Triton unavailability -
+    such as has_triton() - can catch this specific type instead of swallowing
+    every RuntimeError, which would hide unrelated bugs.
+    """
 
 
 def get_dynamo_observed_exception(exc_type: type[Exception]) -> type[ObservedException]:
@@ -494,7 +551,6 @@ def raise_observed_exception(
     args: list[VariableTracker] | list[str] | None = None,
     kwargs: dict[str, VariableTracker] | None = None,
 ) -> NoReturn:
-    from .symbolic_convert import ExceptionVals
     from .variables.builder import SourcelessBuilder
 
     if args:
@@ -510,15 +566,7 @@ def raise_observed_exception(
     exception_vt = SourcelessBuilder.create(tx, exc_type).call_function(
         tx, args_, kwargs or {}
     )
-    if not isinstance(exception_vt, ExceptionVals):
-        raise AssertionError(f"expected ExceptionVals, got {type(exception_vt)}")
-    tx._attach_traceback_to_exception(exception_vt)
-    tx.exn_vt_stack.set_current_exception(exception_vt)  # type: ignore[arg-type]
-    raised_exc = get_dynamo_observed_exception(exc_type)
-    # Store the original exception arguments for better error messages
-    if args:
-        raise raised_exc(*args_)
-    raise raised_exc
+    tx.do_raise(exception_vt, None)
 
 
 def raise_type_error(tx: InstructionTranslatorBase, msg: str) -> NoReturn:
@@ -577,6 +625,7 @@ def unimplemented_with_warning(
     context: str,
     explanation: str,
     hints: list[str],
+    log_warning: bool = True,
 ) -> NoReturn:
     # This function calls unimplemented internally and eventually graph breaks
     # or falls to eager. unimplemented itself does not print any user warnings,
@@ -584,7 +633,8 @@ def unimplemented_with_warning(
     # encountered in the torch.compile stack which is worth showing as warning
     # to the user. For example, if AOT Autograd backend fails with a fake tensor
     # exception, its ok to fallback to eager but not silently. Here, we can use
-    # this function to log the message and the stack trace.
+    # this function to log the message and the stack trace. Callers can disable
+    # the user warning while keeping structured/debug graph-break logging.
     graph_break_msg = format_error_msg_verbose(e, code)
     torch._logging.trace_structured(
         "artifact",
@@ -603,7 +653,7 @@ def unimplemented_with_warning(
         explanation=explanation,
         hints=hints,
         from_exc=e,
-        log_warning=True,
+        log_warning=log_warning,
     )
 
 
@@ -768,9 +818,15 @@ def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -
  torch._dynamo.replay('{exc.record_filename}').\n"
         )
 
-    if not config.verbose and hasattr(exc, "real_stack"):
+    show_verbose_hint = real_stack is not None or isinstance(exc, ShortenTraceback)
+    if not config.verbose and show_verbose_hint:
+        stack_trace = (
+            "the full Dynamo stack trace"
+            if isinstance(exc, ShortenTraceback)
+            else "the internal stack trace"
+        )
         msg += (
-            "\nSet TORCHDYNAMO_VERBOSE=1 for the internal stack trace "
+            f"\nSet TORCHDYNAMO_VERBOSE=1 for {stack_trace} "
             "(please do this especially if you're reporting a bug to PyTorch). "
             'For even more developer context, set TORCH_LOGS="+dynamo"\n'
         )
