@@ -1,0 +1,133 @@
+{{def_kernel("A", "B")}}
+    M = {{size("A", 0)}}
+    N = {{size("B", 1)}}
+    K = {{size("A", 1)}}
+    if M * N == 0:
+        # early exit due to zero-size input(s)
+        return
+    start_pid = tl.program_id(0)
+    grid_m = tl.cdiv(M, BLOCK_M)
+    grid_n = tl.cdiv(N, BLOCK_N)
+    k_tiles = tl.cdiv(K, BLOCK_K)
+    num_tiles = grid_m * grid_n
+
+    stride_am = {{stride("A", 0)}}
+    stride_ak = {{stride("A", 1)}}
+    stride_bk = {{stride("B", 0)}}
+    stride_bn = {{stride("B", 1)}}
+
+    # tile_id_c is used in the epilogue to break the dependency between
+    # the prologue and the epilogue
+    tile_id_c = start_pid - NUM_SMS
+    num_pid_in_group = GROUP_M * grid_n
+
+    for tile_id in tl.range(
+        start_pid, num_tiles, NUM_SMS, flatten=FLATTEN, warp_specialize=WARP_SPECIALIZE
+    ):
+        pid_m, pid_n = _compute_pid(
+            tile_id, num_pid_in_group, grid_m, GROUP_M, NUM_SMS
+        )
+
+        rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+        rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+        if (M >= BLOCK_M and K > 1):
+            offs_a_m = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
+        else:
+            offs_a_m = rm % M
+        if (N >= BLOCK_N and K > 1):
+            offs_b_n = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
+        else:
+            offs_b_n = rn % N
+        offs_k = tl.arange(0, BLOCK_K)
+
+        accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
+        for ki in range(k_tiles):
+            {% if not EVEN_K %}
+            a_mask = offs_k[None, :] < (K - ki * BLOCK_K)
+            b_mask = offs_k[:, None] < (K - ki * BLOCK_K)
+            {% endif %}
+            a_k_idx_vals = offs_k[None, :] + (ki * BLOCK_K)
+            b_k_idx_vals = offs_k[:, None] + (ki * BLOCK_K)
+
+            idx_m = offs_a_m[:, None]
+            idx_n = a_k_idx_vals
+            {{load_input("A", "a", ("idx_m", "idx_n"), mask=None if EVEN_K else "a_mask",
+                         indent_width=12, index_shape=("BLOCK_M", "BLOCK_K"))}}
+
+            idx_m = b_k_idx_vals
+            idx_n = offs_b_n[None, :]
+            {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask",
+                         indent_width=12, index_shape=("BLOCK_K", "BLOCK_N"))}}
+
+            {% if USE_FAST_ACCUM %}
+            accumulator = tl.dot(a, b, accumulator, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
+            {% else %}
+            accumulator += tl.dot(a, b, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
+            {% endif %}
+
+        tile_id_c += NUM_SMS
+        pid_m, pid_n = _compute_pid(
+            tile_id_c, num_pid_in_group, grid_m, GROUP_M, NUM_SMS
+        )
+        offs_cm = pid_m * BLOCK_M
+        offs_cn = pid_n * BLOCK_N
+        subtiles = _subtile_accumulator(accumulator, BLOCK_M, BLOCK_N, EPILOGUE_SUBTILE)
+        for i in tl.static_range(EPILOGUE_SUBTILE):
+            subtile = subtiles[i]
+            offs_cn_i = offs_cn + i * (BLOCK_N // EPILOGUE_SUBTILE)
+            {{store_output(
+                ("offs_cm", "offs_cn_i"),
+                "subtile",
+                indent_width=12,
+                val_shape=("BLOCK_M", "BLOCK_N // EPILOGUE_SUBTILE"),
+                block_indexing=True
+            )}}
+
+@triton.jit
+def _compute_pid(tile_id, num_pid_in_group, grid_m, GROUP_M: tl.constexpr, NUM_SMS: tl.constexpr):
+    group_id = tile_id // num_pid_in_group
+    first_pid_m = group_id * GROUP_M
+    group_size_m = min(grid_m - first_pid_m, GROUP_M)
+    pid_m = first_pid_m + (tile_id % group_size_m)
+    pid_n = (tile_id % num_pid_in_group) // group_size_m
+    return pid_m, pid_n
+
+
+@triton.jit
+def _subtile_accumulator(
+    acc,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    SUBTILE_FACTOR: tl.constexpr,
+):
+    """
+    Recursively split an accumulator into SUBTILE_FACTOR pieces using
+    reshape + permute + split operations.
+
+    Args:
+        acc: The accumulator tensor of shape (BLOCK_M, BLOCK_N)
+        BLOCK_M: The M dimension size (constexpr)
+        BLOCK_N: The N dimension size (constexpr)
+        SUBTILE_FACTOR: Must be a power of 2. The number of pieces to split into (constexpr)
+
+    Returns:
+        A tuple of SUBTILE_FACTOR tensors, each of shape (BLOCK_M, BLOCK_N // SUBTILE_FACTOR)
+    """
+    # SUBTILE_FACTOR must be a power of 2
+    tl.static_assert(SUBTILE_FACTOR > 0, "SUBTILE_FACTOR must be positive")
+    tl.static_assert((SUBTILE_FACTOR & (SUBTILE_FACTOR - 1)) == 0, "SUBTILE_FACTOR must be a power of 2")
+
+    if SUBTILE_FACTOR == 1:
+        # Base case: no subtiling needed, return the input as a single-element tuple
+        return (acc,)
+    else:
+        # Recursive case: split into 2 halves, then recursively split each half
+        tl.static_assert(BLOCK_N % 2 == 0)
+        acc = tl.reshape(acc, (BLOCK_M, 2, BLOCK_N // 2))
+        acc = tl.permute(acc, (0, 2, 1))
+        left, right = tl.split(acc)
+        # Recursively split each half
+        left_subtiles = _subtile_accumulator(left, BLOCK_M, BLOCK_N // 2, SUBTILE_FACTOR // 2)
+        right_subtiles = _subtile_accumulator(right, BLOCK_M, BLOCK_N // 2, SUBTILE_FACTOR // 2)
+        # Concatenate the tuples
+        return left_subtiles + right_subtiles
