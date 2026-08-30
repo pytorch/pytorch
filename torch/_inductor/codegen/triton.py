@@ -7120,8 +7120,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     @lru_cache(None)
     def gen_common_triton_imports(cls) -> str:
         imports = IndentedBuffer()
+        # torch import is required: user-defined triton kernels may carry torch.Tensor
+        # param annotations that are evaluated when the generated module is executed.
         imports.splice(
             """
+            import torch
             import triton
             import triton.language as tl
             """
