@@ -443,9 +443,34 @@ class TestTransformers(NNTestCase):
             out, _ = mha(X, X, X, attn_mask=attn_mask, key_padding_mask=key_padding_mask, need_weights=False)
             mha.eval()  # enable fast path
             out_fp, _ = mha(X, X, X, attn_mask=attn_mask, key_padding_mask=key_padding_mask, need_weights=False)
-            # The FP kernel will return NaNs while the sdpa kernel which is ran when the fast path is turned off returns 0 instead
-            # of NaNs for fully masked rows
-            self.assertEqual(out, out_fp.nan_to_num())
+            self.assertEqual(out, out_fp)
+
+    def test_transformerencoder_fastpath_fully_masked_rows_match_sdpa(self, device):
+        # A bool banded mask + key padding deeper than the band leaves rows with
+        # every key masked: the fast path yielded NaN there while SDPA zero-fills.
+        previous_fastpath = torch.backends.mha.get_fastpath_enabled()
+        try:
+            torch.manual_seed(0)
+            seqlen, window, pad = 16, 4, 12
+            encoder = nn.TransformerEncoder(
+                nn.TransformerEncoderLayer(
+                    32, 4, 64, batch_first=True, norm_first=True, device=device),
+                1, enable_nested_tensor=False).eval()
+            x = torch.randn(1, seqlen, 32, device=device)
+            i = torch.arange(seqlen, device=device)[:, None]
+            j = torch.arange(seqlen, device=device)[None, :]
+            mask = ~((i - j >= 0) & (i - j < window))
+            key_padding_mask = torch.zeros(1, seqlen, dtype=torch.bool, device=device)
+            key_padding_mask[:, -pad:] = True
+            with torch.no_grad():
+                torch.backends.mha.set_fastpath_enabled(True)
+                fast = encoder(x, mask=mask, src_key_padding_mask=key_padding_mask)
+                torch.backends.mha.set_fastpath_enabled(False)
+                ref = encoder(x, mask=mask, src_key_padding_mask=key_padding_mask)
+            self.assertTrue(torch.isfinite(fast).all())
+            self.assertEqual(fast, ref)
+        finally:
+            torch.backends.mha.set_fastpath_enabled(previous_fastpath)
 
     @onlyCUDA
     def test_multiheadattention_fastpath_fp16_head_dim_alignment(self, device):
