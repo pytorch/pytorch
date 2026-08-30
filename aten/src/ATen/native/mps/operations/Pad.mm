@@ -2,6 +2,12 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/kernels/Pad.h>
+#include <c10/metal/common.h>
+
+#include <algorithm>
+#include <limits>
+#include <numeric>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -330,10 +336,7 @@ static Tensor& pad_out_template(Tensor& output,
   return output;
 }
 
-static MTLSize replication_pad1d_threadgroup(id<MTLComputePipelineState> pso,
-                                             NSUInteger gx,
-                                             NSUInteger gy,
-                                             NSUInteger gz) {
+static MTLSize pad_threadgroup(id<MTLComputePipelineState> pso, NSUInteger gx, NSUInteger gy, NSUInteger gz) {
   const auto maxTPG = [pso maxTotalThreadsPerThreadgroup];
   const auto tg_x = std::min<NSUInteger>(maxTPG, gx);
   const auto tg_y = std::min<NSUInteger>(maxTPG / tg_x, gy);
@@ -373,7 +376,7 @@ static void replication_pad1d_kernel_mps(const Tensor& input_, IntArrayRef paddi
       [encoder setComputePipelineState:pso];
       mtl_setArgs(encoder, input, output_c, sizes_pad);
       [encoder dispatchThreads:MTLSizeMake(output_W, nplane, nbatch)
-          threadsPerThreadgroup:replication_pad1d_threadgroup(pso, output_W, nplane, nbatch)];
+          threadsPerThreadgroup:pad_threadgroup(pso, output_W, nplane, nbatch)];
       getMPSProfiler().endProfileKernel(pso, stream);
     }
   });
@@ -417,13 +420,149 @@ static void replication_pad1d_backward_kernel_mps(const Tensor& grad_output_,
       [encoder setComputePipelineState:pso];
       mtl_setArgs(encoder, grad_output, grad_input_c, sizes_pad);
       [encoder dispatchThreads:MTLSizeMake(input_W, nplane, nbatch)
-          threadsPerThreadgroup:replication_pad1d_threadgroup(pso, input_W, nplane, nbatch)];
+          threadsPerThreadgroup:pad_threadgroup(pso, input_W, nplane, nbatch)];
       getMPSProfiler().endProfileKernel(pso, stream);
     }
   });
   if (grad_input_needs_copy) {
     grad_input.copy_(grad_input_buf);
   }
+}
+
+static Tensor crop_negative_pads(const Tensor& self, IntArrayRef pad, int64_t padding_dim) {
+  const auto ndim = self.dim();
+  auto cropped = self;
+  for (const auto dim : c10::irange(ndim - padding_dim, ndim)) {
+    const auto pad_idx = 2 * (ndim - dim - 1);
+    if (pad[pad_idx] < 0) {
+      cropped = cropped.narrow(dim, -pad[pad_idx], cropped.size(dim) + pad[pad_idx]);
+    }
+    if (pad[pad_idx + 1] < 0) {
+      cropped = cropped.narrow(dim, 0, cropped.size(dim) + pad[pad_idx + 1]);
+    }
+  }
+  return cropped;
+}
+
+static Tensor allocate_pad_output(const Tensor& self,
+                                  const Tensor& cropped,
+                                  IntArrayRef pad,
+                                  int64_t padding_dim,
+                                  bool all_pads_non_positive) {
+  if (all_pads_non_positive) {
+    return at::empty_like(cropped);
+  }
+  const auto ndim = self.dim();
+  auto output_sizes = self.sizes().vec();
+  for (const auto dim : c10::irange(ndim - padding_dim, ndim)) {
+    const auto pad_idx = 2 * (ndim - dim - 1);
+    const auto output_size = self.size(dim) + pad[pad_idx] + pad[pad_idx + 1];
+    TORCH_CHECK(output_size >= 0,
+                "The input size ",
+                self.size(dim),
+                ", plus negative padding ",
+                pad[pad_idx],
+                " and ",
+                pad[pad_idx + 1],
+                " resulted in a negative output size, which is invalid. Check dimension ",
+                dim,
+                " of your input.");
+    output_sizes[dim] = output_size;
+  }
+  return at::empty(output_sizes, self.options().memory_format(self.suggest_memory_format()));
+}
+
+static bool constant_pad_dense_eligible(const Tensor& input, const Tensor& output, int64_t padding_dim) {
+  if (padding_dim > 3 || !input.is_contiguous() || !output.is_contiguous()) {
+    return false;
+  }
+  constexpr auto uint_max = std::numeric_limits<uint32_t>::max();
+  const auto out_w = output.size(-1);
+  const auto out_h = padding_dim >= 2 ? output.size(-2) : 1;
+  const auto out_d = padding_dim >= 3 ? output.size(-3) : 1;
+  const bool sizes_fit = out_w <= uint_max && out_h <= uint_max && out_d <= uint_max;
+  return sizes_fit && output.numel() / (out_w * out_h) <= uint_max;
+}
+
+static void constant_pad_dense_kernel_mps(const Tensor& input,
+                                          const Tensor& output,
+                                          IntArrayRef pad,
+                                          int64_t padding_dim,
+                                          const Scalar& fill) {
+  const auto in_w = input.size(-1);
+  const auto in_h = padding_dim >= 2 ? input.size(-2) : 1;
+  const auto in_d = padding_dim >= 3 ? input.size(-3) : 1;
+  const auto out_w = output.size(-1);
+  const auto out_h = padding_dim >= 2 ? output.size(-2) : 1;
+  const auto out_d = padding_dim >= 3 ? output.size(-3) : 1;
+  const auto left_w = padding_dim >= 1 ? std::max<int64_t>(pad[0], 0) : 0;
+  const auto left_h = padding_dim >= 2 ? std::max<int64_t>(pad[2], 0) : 0;
+  const auto left_d = padding_dim >= 3 ? std::max<int64_t>(pad[4], 0) : 0;
+  const auto grid_x = c10::metal::ceil_div(out_w, static_cast<int64_t>(c10::metal::ILP_PER_THREAD));
+  const auto grid_z = output.numel() / (out_w * out_h);
+  const ConstantPadDenseParams params = {
+      {static_cast<uint32_t>(in_w), static_cast<uint32_t>(in_h), static_cast<uint32_t>(in_d)},
+      {static_cast<uint32_t>(out_w), static_cast<uint32_t>(out_h), static_cast<uint32_t>(out_d)},
+      {static_cast<uint32_t>(left_w), static_cast<uint32_t>(left_h), static_cast<uint32_t>(left_d)}};
+  auto pso = lib.getPipelineStateForFunc("constant_pad_nd_dense_" + scalarToMetalTypeString(input));
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      getMPSProfiler().beginProfileKernel(pso, "constant_pad_nd", {input, output}, stream);
+      auto encoder = stream->commandEncoder();
+      auto fill_value = getMPSScalar(fill, input.scalar_type());
+      [encoder setComputePipelineState:pso];
+      mtl_setArgs(encoder, input, output, params, fill_value);
+      [encoder dispatchThreads:MTLSizeMake(grid_x, out_h, grid_z)
+          threadsPerThreadgroup:pad_threadgroup(pso, grid_x, out_h, grid_z)];
+      getMPSProfiler().endProfileKernel(pso, stream);
+    }
+  });
+}
+
+static void constant_pad_strided_kernel_mps(const Tensor& input,
+                                            const Tensor& output,
+                                            IntArrayRef pad,
+                                            int64_t padding_dim,
+                                            const Scalar& fill) {
+  const auto ndim = output.dim();
+  DimVector dim_order(ndim);
+  std::iota(dim_order.begin(), dim_order.end(), 0);
+  std::stable_sort(dim_order.begin(), dim_order.end(), [&](int64_t lhs, int64_t rhs) {
+    return output.stride(lhs) < output.stride(rhs);
+  });
+  const auto inner = output.size(dim_order[0]);
+  const auto grid_x = c10::metal::ceil_div(inner, static_cast<int64_t>(c10::metal::ILP_PER_THREAD));
+  const auto grid_y = output.numel() / inner;
+  const bool use_u32 = offsetsFitIn<uint32_t>(input, output);
+  auto pso = lib.getPipelineStateForFunc(
+      fmt::format("constant_pad_nd_{}{}", scalarToMetalTypeString(input), mtlIdxSuffix(use_u32)));
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      getMPSProfiler().beginProfileKernel(pso, "constant_pad_nd", {input, output}, stream);
+      auto encoder = stream->commandEncoder();
+      auto fill_value = getMPSScalar(fill, input.scalar_type());
+      [encoder setComputePipelineState:pso];
+      mtlDispatchByIndexWidth<uint32_t, uint64_t>(use_u32, [&](auto idx_tag) {
+        using idx_t = typename decltype(idx_tag)::type;
+        ConstantPadNdParams<idx_t> params{};
+        params.ndim = static_cast<uint32_t>(ndim);
+        for (const auto i : c10::irange(ndim)) {
+          const auto dim = dim_order[i];
+          const auto pad_idx = 2 * (ndim - dim - 1);
+          params.output_sizes[i] = static_cast<idx_t>(output.size(dim));
+          params.input_sizes[i] = static_cast<idx_t>(input.size(dim));
+          params.input_strides[i] = static_cast<idx_t>(input.stride(dim));
+          params.output_strides[i] = static_cast<idx_t>(output.stride(dim));
+          params.left_pad[i] = static_cast<idx_t>(dim >= ndim - padding_dim ? std::max<int64_t>(pad[pad_idx], 0) : 0);
+        }
+        mtl_setArgs(encoder, input, output, params, fill_value);
+      });
+      mtl_dispatch2DJob(encoder, pso, grid_x, grid_y);
+      getMPSProfiler().endProfileKernel(pso, stream);
+    }
+  });
 }
 
 } // namespace mps
@@ -559,17 +698,41 @@ Tensor replication_pad3d_backward_mps(const Tensor& grad_output, const Tensor& i
 
 // backward pass is explicitly handled in autograd by negating the "pad" argument
 Tensor constant_pad_nd_mps(const Tensor& self, IntArrayRef pad, const Scalar& value) {
-  if (pad.empty()) {
-    return self.clone();
+  TORCH_CHECK(pad.size() % 2 == 0, "Length of pad must be even but instead it equals ", pad.size());
+
+  const auto ndim = self.dim();
+  const auto padding_dim = static_cast<int64_t>(pad.size() / 2);
+  TORCH_CHECK(ndim >= padding_dim,
+              "Length of pad should be no more than twice the number of dimensions of the input. Pad length is ",
+              pad.size(),
+              " while the input has ",
+              ndim,
+              " dimensions.");
+
+  // Negative pads mean we crop the input
+  const bool all_pads_non_positive = std::ranges::all_of(pad, [](int64_t p) { return p <= 0; });
+  const auto cropped = mps::crop_negative_pads(self, pad, padding_dim);
+  if (all_pads_non_positive && cropped.is_contiguous()) {
+    return cropped.clone();
   }
-  if (pad.size() > 6) {
-    TORCH_WARN_ONCE("MPS: The constant padding of more than 3 dimensions is not currently supported natively. ",
-                    "It uses View Ops default implementation to run. This may have performance implications.");
+
+  auto output = mps::allocate_pad_output(self, cropped, pad, padding_dim, all_pads_non_positive);
+  if (output.numel() == 0) {
+    return output;
+  }
+  if (cropped.numel() == 0) {
+    return output.fill_(value);
+  }
+
+  const Scalar fill = all_pads_non_positive ? Scalar(0) : value;
+  if (mps::constant_pad_dense_eligible(cropped, output, padding_dim)) {
+    mps::constant_pad_dense_kernel_mps(cropped, output, pad, padding_dim, fill);
+  } else if (output.numel() > std::numeric_limits<uint32_t>::max()) {
     return at::native::constant_pad_nd(self, pad, value);
+  } else {
+    mps::constant_pad_strided_kernel_mps(cropped, output, pad, padding_dim, fill);
   }
-  Tensor output = at::empty({0}, self.options());
-  return mps::pad_out_template(
-      output, self, pad, std::nullopt, MPSGraphPaddingModeConstant, value.toDouble(), __func__);
+  return output;
 }
 
 } // namespace at::native
