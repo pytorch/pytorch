@@ -684,6 +684,13 @@ def run_test(
     )
     print_to_stderr(f"Executing {command} ... [{datetime.now()}]")
 
+    # BPF-TD: record the owning process pid + monotonic time window so the
+    # post-processor can attribute this test file's syscall-traced pid subtree.
+    # The test subprocess is forked from this (pool worker) process, so its
+    # whole descendant tree is captured by pid-tree join in build_mapping.py.
+    bpf_td_dir = os.environ.get("PYTORCH_BPF_TD_TRACE_DIR")
+    bpf_td_start = time.clock_gettime(time.CLOCK_MONOTONIC) if bpf_td_dir else None
+
     with ExitStack() as stack:
         output = None
         if options.pipe_logs:
@@ -722,6 +729,24 @@ def run_test(
             # this writing have been excluded and new ones should be added to
             # the list of exclusions in tools/testing/discover_tests.py
             ret_code = 0 if ret_code == 5 else ret_code
+
+    if bpf_td_dir:
+        record = {
+            "test_file": test_file,
+            "pid": os.getpid(),
+            "start_ns": int(bpf_td_start * 1e9),
+            "end_ns": int(time.clock_gettime(time.CLOCK_MONOTONIC) * 1e9),
+        }
+        line = json.dumps(record) + "\n"
+        fd = os.open(
+            os.path.join(bpf_td_dir, "test_pids.jsonl"),
+            os.O_WRONLY | os.O_CREAT | os.O_APPEND,
+            0o644,
+        )
+        try:
+            os.write(fd, line.encode())
+        finally:
+            os.close(fd)
 
     if options.pipe_logs and print_log:
         handle_log_file(
