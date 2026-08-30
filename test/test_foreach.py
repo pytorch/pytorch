@@ -1180,6 +1180,56 @@ class TestForeach(TestCase):
             ),
         )
 
+    @onlyCUDA
+    @dtypes(torch.float32, torch.float64)
+    def test_foreach_norm_ragged_chunks(self, device, dtype):
+        # Heavily ragged list stresses the compact per-tensor partial offsets:
+        # tensors span very different chunk counts (kChunkSize == 65536) and
+        # empty tensors are interspersed among the non-empty ones.
+        import math
+
+        chunk = 65536
+        sizes = [chunk * 3 + 7, 1, chunk + 1, 5, chunk * 2, 3, chunk - 1]
+        for out_dtype in (None, torch.float64):
+            for ord in (0, 1, 2, math.inf):
+                tensors = []
+                for i, n in enumerate(sizes):
+                    tensors.append(
+                        make_tensor((n,), dtype=dtype, device=device, low=-1, high=1)
+                    )
+                    if i in (1, 4):
+                        tensors.append(torch.empty(0, dtype=dtype, device=device))
+                if ord == math.inf:
+                    # inf norm has no identity for empty tensors
+                    tensors = [t for t in tensors if t.numel() != 0]
+                kwargs = {"ord": ord}
+                if out_dtype is not None:
+                    kwargs["dtype"] = out_dtype
+                actual = torch._foreach_norm(tensors, **kwargs)
+                expect = [
+                    torch.linalg.vector_norm(
+                        t if out_dtype is None else t.to(out_dtype), ord
+                    )
+                    if t.numel() != 0
+                    else torch.zeros((), dtype=out_dtype or dtype, device=device)
+                    for t in tensors
+                ]
+                self.assertEqual(expect, actual)
+
+    @onlyCUDA
+    @dtypes(torch.float32, torch.float64, torch.half, torch.bfloat16)
+    def test_foreach_max_ragged_chunks(self, device, dtype):
+        # Heavily ragged list stresses the compact per-tensor partial offsets
+        # for _foreach_max (all tensors must be non-empty for max).
+        chunk = 65536
+        sizes = [chunk * 3 + 7, 1, chunk + 1, 5, chunk * 2, 3, chunk - 1]
+        tensors = [
+            make_tensor((n,), dtype=dtype, device=device, low=-1, high=1) for n in sizes
+        ]
+        actual = torch._foreach_max(tensors)
+        expect = [t.max() for t in tensors]
+        self.assertEqual(expect, actual)
+
     @ops(
         [o for o in foreach_reduce_op_db if o.name == "_foreach_norm"],
     )
