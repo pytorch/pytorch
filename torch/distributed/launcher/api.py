@@ -403,4 +403,9 @@ def launch_agent(
         raise
     finally:
         if shutdown_rdzv:
-            spec.rdzv_handler.shutdown()
+            try:
+                spec.rdzv_handler.shutdown()
+            except Exception:
+                logger.error(
+                    "Error shutting down rendezvous handler", exc_info=True
+                )
