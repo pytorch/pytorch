@@ -195,8 +195,8 @@ jobs:
       # Apply the filter logic to the build step too if the test-config label is already there
       - name: Select all requested test configurations (if the test matrix is available)
         id: filter
-        # TEST-ONLY: exercise the action from this stack before it lands.
-        uses: ./.github/actions/filter-test-configs
+        # TEST-ONLY: exercise the action from #195366 before it lands.
+        uses: pytorch/pytorch/.github/actions/filter-test-configs@2ef30e2fe713d6c68b77eb99bcc8aa4d2fc83335
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           test-matrix: ${{ inputs.test-matrix }}

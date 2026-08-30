@@ -5,11 +5,11 @@
 name: td-holdout-unstable
 
 on:
-  # Capture the initial PR snapshot; synchronize events do not rerun it.
+  # TEST-ONLY: allow this already-open PR to retry the workflow.
   pull_request:
     branches-ignore:
       - nightly
-    types: [opened]
+    types: [opened, synchronize]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
