@@ -174,8 +174,37 @@ class CUDAGraphAPIOnlyTests(TestCase):
         torch.compiler.cudagraph_mark_warmup_incomplete()
         self.assertEqual(tuple(containers), existing_devices)
 
-
 class GraphTreeBackendTests(TestCase):
+    def test_cudagraph_accelerator_mismatch_fallback(self):
+        from torch._inductor.cudagraph_utils import (
+            check_current_accelerator_for_cudagraphs,
+        )
+
+        with unittest.mock.patch.object(
+            torch.accelerator,
+            "current_accelerator",
+            return_value=torch.device("xpu"),
+        ):
+            reason = check_current_accelerator_for_cudagraphs("cuda")
+
+        self.assertIsNotNone(reason)
+        self.assertIn("does not match graph device", reason)
+
+    def test_cudagraph_missing_rng_fallback(self):
+        from torch._inductor.cudagraph_utils import check_rng_state_for_cudagraphs
+
+        device_module = unittest.mock.Mock(
+            get_rng_state=lambda: None,
+            set_rng_state=None,
+        )
+        with unittest.mock.patch.object(
+            torch, "get_device_module", return_value=device_module
+        ):
+            reason = check_rng_state_for_cudagraphs("privateuseone")
+
+        self.assertIsNotNone(reason)
+        self.assertIn("missing set_rng_state", reason)
+
     def test_graph_tree_backend_registration(self):
         with fresh_graph_tree_backend() as backend:
             graph_interface = backend.CUDAGraphTreeGraphInterface()
@@ -210,6 +239,7 @@ class GraphTreeBackendTests(TestCase):
                         graph_interface,
                         allocator_interface,
                     )
+
 
 if HAS_CUDA_AND_TRITON:
 
@@ -2528,14 +2558,14 @@ if HAS_CUDA_AND_TRITON:
         @blas_library_context("cublas")
         @unittest.mock.patch.dict(os.environ, {"TORCH_DISABLE_ADDR2LINE": "0"})
         def test_workspace_allocation_error(self):
+            from torch._inductor import graph_tree_backend
+
             torch._C._cuda_clearCublasWorkspaces()
 
-            prev = torch._inductor.cudagraph_trees.clear_cublas_manager
+            prev = graph_tree_backend.clear_cublas_manager
 
             try:
-                torch._inductor.cudagraph_trees.clear_cublas_manager = (
-                    contextlib.nullcontext
-                )
+                graph_tree_backend.clear_cublas_manager = contextlib.nullcontext
 
                 @torch.compile()
                 def foo(x, y):
@@ -2569,7 +2599,7 @@ if HAS_CUDA_AND_TRITON:
 
             finally:
                 torch._C._cuda_clearCublasWorkspaces()
-                torch._inductor.cudagraph_trees.clear_cublas_manager = prev
+                graph_tree_backend.clear_cublas_manager = prev
                 torch._inductor.cudagraph_trees.get_container(
                     self.device_idx
                 ).tree_manager = None

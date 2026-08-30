@@ -422,17 +422,13 @@ def check_lowering_disable_cudagraph(
     device_node_mapping: dict[torch.device, torch.fx.Node],
     device_type: str = "cuda",
 ) -> str | None:
-    if reason := (
-        check_caching_allocator_for_cudagraphs() if device_type == "cuda" else None
-    ):
-        return reason
+    if device_type == "cuda":
+        if reason := check_caching_allocator_for_cudagraphs():
+            return reason
 
-    if reason := check_multiple_devices_or_any_cpu_nodes(
+    return check_multiple_devices_or_any_cpu_nodes(
         device_node_mapping, expected_device_type=device_type
-    ):
-        return reason
-
-    return None
+    )
 
 
 def log_cudagraph_skip_and_bump_counter(msg: str) -> None:
@@ -682,8 +678,8 @@ def get_partition_cudagraph_metadata(
     )
 
 
-def collect_cuda_data_ptrs(obj: object) -> OrderedSet[int]:
-    """Debug helper that collects the data pointers of all CUDA tensors in the object."""
+def collect_device_data_ptrs(obj: object, device_type: str) -> OrderedSet[int]:
+    """Collect data pointers for tensors on the given device type."""
     if not isinstance(obj, torch.Tensor):
         return OrderedSet()
 
@@ -691,7 +687,7 @@ def collect_cuda_data_ptrs(obj: object) -> OrderedSet[int]:
     for base in get_plain_tensors(obj, out=[]):
         if type(base) is not torch.Tensor:
             continue
-        if is_fake(base) or base.is_meta or base.device.type != "cuda":
+        if is_fake(base) or base.is_meta or base.device.type != device_type:
             continue
         try:
             ptrs.add(base.data_ptr())

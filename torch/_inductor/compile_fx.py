@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from inspect import currentframe
 from itertools import count
 from operator import attrgetter
-from typing import Any, Generic, TYPE_CHECKING, TypeVar
+from typing import Any, cast, Generic, TYPE_CHECKING, TypeVar
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
@@ -2354,12 +2354,16 @@ def cudagraphify_impl(
     if accelerator.type == "cuda":
         graph = torch.cuda.CUDAGraph()
         graph_context = torch.cuda.graph(
-            graph, stream=stream, capture_error_mode="thread_local"
+            graph,
+            stream=cast(torch.cuda.Stream, stream),
+            capture_error_mode="thread_local",
         )
+        stream_context = contextlib.nullcontext()
     else:
         graph = torch.accelerator.Graph(capture_error_mode="thread_local")
         graph_context = graph
-    with stream, graph_context:
+        stream_context = stream
+    with stream_context, graph_context:
         static_outputs = model(list(static_inputs))
     if not isinstance(static_outputs, (list, tuple)):
         static_outputs = (static_outputs,)

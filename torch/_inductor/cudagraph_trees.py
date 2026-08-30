@@ -77,6 +77,7 @@ from torch._inductor.compile_fx import (
 from torch._inductor.cudagraph_utils import (
     check_for_mutation,
     CheckInvariantStatus,
+    collect_device_data_ptrs,
     FunctionID,
     log_cudagraph_skip_and_bump_counter,
     log_data_ptr_mismatch,
@@ -87,7 +88,6 @@ from torch._inductor.cudagraph_utils import (
     WrappedFunction,
 )
 from torch._library.opaque_object import is_custom_class_obj
-from torch._subclasses.fake_tensor import get_plain_tensors, is_fake
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.storage import UntypedStorage
 from torch.utils import _pytree as pytree
@@ -105,30 +105,6 @@ StorageWeakRefPointer = int
 StorageDataPtr = int
 NBytes = int
 S = TypeVar("S", bound="StorageWeakRefWrapper")
-
-
-def _collect_graph_tree_data_ptrs(
-    obj: object,
-) -> OrderedSet[tree_backend.DataPtr]:
-    """Collect data pointers for tensors owned by the registered Tree backend."""
-    if not isinstance(obj, torch.Tensor):
-        return OrderedSet()
-
-    device_type = tree_backend.get_device_type()
-    ptrs: OrderedSet[tree_backend.DataPtr] = OrderedSet()
-    for base in get_plain_tensors(obj, out=[]):
-        if type(base) is not torch.Tensor:
-            continue
-        if is_fake(base) or base.is_meta or base.device.type != device_type:
-            continue
-        try:
-            ptrs.add(tree_backend.DataPtr(base.data_ptr()))
-        except RuntimeError:
-            pass
-    return ptrs
-
-
-AllocatorState = Any
 
 
 log = torch._logging.getArtifactLogger(__name__, "cudagraphs")
@@ -167,42 +143,6 @@ class GraphID:
     "Unique counter of a cuda graph recording"
 
     id: int
-
-
-def clear_cublass_cache() -> None:
-    """
-    Cublas keeps a persistent workspace allocation for running matmuls. This poses a problem for
-    doing warmup within a CUDAGraph private pool because we do not want persistent allocations from
-    one one run to the next. When we begin a new run of a cudagraphs path (generation), all tensors
-    from the previous generation are freed. This frees them the memory pool, but not elsewhere.
-    A tensor in the cublas workspace would continue to be in use the workspace but would also get allocated
-    in the next run. The memory would be in use in two places.
-
-    To solve this, we clear cublas caches before and after warming up or recording. If a workspace is required
-    it will be allocated to the cudagraph private pool and accounted for in the allocator for the duration of the
-    program. There is no overhead to this on replay since cudagraphs removes allocation overhead.
-    """
-    torch._C._cuda_clearCublasWorkspaces()
-
-
-@contextlib.contextmanager
-def clear_cublas_manager() -> Generator[None, None, None]:
-    "Context manager around clearing cublas caches that will clear on enter and exit"
-    clear_cublass_cache()
-    try:
-        yield
-    finally:
-        clear_cublass_cache()
-
-
-@contextlib.contextmanager
-def disable_conv_cache_emptying() -> Generator[None, None, None]:
-    prev = torch._C._cuda_get_conv_benchmark_empty_cache()
-    torch._C._cudnn_set_conv_benchmark_empty_cache(False)
-    try:
-        yield
-    finally:
-        torch._C._cudnn_set_conv_benchmark_empty_cache(prev)
 
 
 @contextlib.contextmanager
@@ -422,10 +362,11 @@ def get_manager(
 ) -> CUDAGraphTreeManager | None:
     if device_index is None:
         accelerator = torch.accelerator.current_accelerator()
-        if accelerator is None:
+        if accelerator is None or not tree_backend.is_graph_tree_backend_available():
             return None
         device_module = torch.get_device_module(accelerator)
-        if not device_module.is_initialized():
+        is_initialized = getattr(device_module, "is_initialized", None)
+        if is_initialized is not None and not is_initialized():
             return None
         device_index = torch.accelerator.current_device_index()
 
@@ -682,7 +623,7 @@ def _use_cuda_memory_pool_manager(
     torch.accelerator.synchronize()
     stream.wait_stream(torch.accelerator.current_stream())
 
-    with stream, torch.accelerator.device_index(device):
+    with stream, torch.device(device):
         # Begin allocate to mem pool for all memory allocation on the current thread.
         # This is thread safe since a thread can only warmup or record 1 cudagraph
         # at the same time.
@@ -1173,7 +1114,7 @@ class CUDAGraphNode:
 
         # initialized below in _record
 
-        self.checkpointed_caching_state: AllocatorState | None = None
+        self.checkpointed_caching_state: tree_backend.AllocatorState | None = None
 
         # Output Storage Alias information, can be:
         # - A new, unaliased storage, or the output is None
@@ -2310,9 +2251,14 @@ def check_memory_pool(
             generated_files: list[str] = []
 
             tensors = objgraph.by_type("torch.Tensor")
+            device_type = tree_backend.get_device_type()
             for index, bad_dp in enumerate(allocated_not_in_live_storages):
                 bad_tensor = next(
-                    (t for t in tensors if bad_dp in _collect_graph_tree_data_ptrs(t)),
+                    (
+                        t
+                        for t in tensors
+                        if bad_dp in collect_device_data_ptrs(t, device_type)
+                    ),
                     None,
                 )
                 if bad_tensor is None:

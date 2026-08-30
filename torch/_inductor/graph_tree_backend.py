@@ -6,10 +6,6 @@ import threading
 from typing import Any, cast, NewType, Protocol, runtime_checkable, TYPE_CHECKING
 
 import torch
-from torch._higher_order_ops.cudagraph_conditional_nodes import (
-    ControlFlowOpWarmupDispatchMode,
-    CUDAGraphCaptureControlFlowOpDispatchMode,
-)
 
 
 if TYPE_CHECKING:
@@ -22,6 +18,8 @@ if TYPE_CHECKING:
 DataPtr = NewType("DataPtr", int)
 # Non-owning address of a StorageImpl. It must never be treated as a DataPtr.
 StorageImplHandle = NewType("StorageImplHandle", int)
+# Opaque allocator state returned by get_checkpoint_state.
+AllocatorState = NewType("AllocatorState", object)
 
 
 class GraphTreeCaptureMode(enum.Enum):
@@ -32,14 +30,6 @@ class GraphTreeCaptureMode(enum.Enum):
 @runtime_checkable
 class GraphTreeGraph(Protocol):
     def replay(self) -> None: ...
-
-    def reset(self) -> None:
-        """Release captured graph resources.
-
-        Graph Trees currently relies on graph object destruction during tree
-        shutdown rather than invoking this method directly.
-        """
-        ...
 
 
 @runtime_checkable
@@ -80,12 +70,14 @@ class GraphTreeAllocatorInterface(Protocol):
 
     def release_pool(self, device: int, pool: tuple[int, int]) -> None: ...
 
-    def get_checkpoint_state(self, device: int, pool: tuple[int, int]) -> Any: ...
+    def get_checkpoint_state(
+        self, device: int, pool: tuple[int, int]
+    ) -> AllocatorState: ...
 
     def set_checkpoint_pool_state(
         self,
         device: int,
-        state: Any,
+        state: AllocatorState,
         stale_storages: list[StorageImplHandle],
         storages_to_add_deleters: list[StorageImplHandle],
     ) -> None:
@@ -126,7 +118,10 @@ class GraphTreeAllocatorInterface(Protocol):
         ...
 
     def check_pool_live_allocations(
-        self, device: int, pool: tuple[int, int], allocations: set[DataPtr]
+        self,
+        device: int,
+        pool: tuple[int, int],
+        allocations: set[DataPtr],  # noqa: set_linter
     ) -> bool:
         """Check that live allocations exactly match the supplied addresses."""
         ...
@@ -144,6 +139,30 @@ class GraphTreeAllocatorInterface(Protocol):
     def is_history_enabled(self) -> bool: ...
 
     def record_memory_history(self, enabled: bool) -> None: ...
+
+
+# Keep CUDA-only dependencies below lazy or call-time for third-party backends.
+def clear_cublas_cache() -> None:
+    torch._C._cuda_clearCublasWorkspaces()
+
+
+@contextlib.contextmanager
+def clear_cublas_manager() -> Generator[None, None, None]:
+    clear_cublas_cache()
+    try:
+        yield
+    finally:
+        clear_cublas_cache()
+
+
+@contextlib.contextmanager
+def disable_conv_cache_emptying() -> Generator[None, None, None]:
+    prev = torch._C._cuda_get_conv_benchmark_empty_cache()
+    torch._C._cudnn_set_conv_benchmark_empty_cache(False)
+    try:
+        yield
+    finally:
+        torch._C._cudnn_set_conv_benchmark_empty_cache(prev)
 
 
 class CUDAGraphTreeGraphInterface:
@@ -172,25 +191,27 @@ class CUDAGraphTreeGraphInterface:
 
     @contextlib.contextmanager
     def warmup_setup_context(self, *, kernel_free: bool) -> Generator[None, None, None]:
-        # Resolve these through cudagraph_trees at use time to preserve the
-        # existing monkey-patching/debugging surface of that module.
-        from torch._inductor import cudagraph_trees
-
         with contextlib.ExitStack() as stack:
             if not kernel_free:
-                stack.enter_context(cudagraph_trees.disable_conv_cache_emptying())
-            stack.enter_context(cudagraph_trees.clear_cublas_manager())
+                stack.enter_context(disable_conv_cache_emptying())
+            stack.enter_context(clear_cublas_manager())
             yield
 
     def warmup_execution_context(self) -> contextlib.AbstractContextManager[None]:
+        from torch._higher_order_ops.cudagraph_conditional_nodes import (
+            ControlFlowOpWarmupDispatchMode,
+        )
+
         return ControlFlowOpWarmupDispatchMode()
 
     def capture_setup_context(self) -> contextlib.AbstractContextManager[None]:
-        from torch._inductor import cudagraph_trees
-
-        return cudagraph_trees.clear_cublas_manager()
+        return clear_cublas_manager()
 
     def capture_execution_context(self) -> contextlib.AbstractContextManager[None]:
+        from torch._higher_order_ops.cudagraph_conditional_nodes import (
+            CUDAGraphCaptureControlFlowOpDispatchMode,
+        )
+
         return CUDAGraphCaptureControlFlowOpDispatchMode()
 
 
@@ -204,18 +225,23 @@ class CUDAGraphTreeAllocatorInterface:
     def release_pool(self, device: int, pool: tuple[int, int]) -> None:
         torch._C._cuda_releasePool(device, pool)
 
-    def get_checkpoint_state(self, device: int, pool: tuple[int, int]) -> Any:
-        return torch._C._cuda_getCheckpointState(device, pool)
+    def get_checkpoint_state(
+        self, device: int, pool: tuple[int, int]
+    ) -> AllocatorState:
+        return cast(AllocatorState, torch._C._cuda_getCheckpointState(device, pool))
 
     def set_checkpoint_pool_state(
         self,
         device: int,
-        state: Any,
+        state: AllocatorState,
         stale_storages: list[StorageImplHandle],
         storages_to_add_deleters: list[StorageImplHandle],
     ) -> None:
         torch._C._cuda_setCheckpointPoolState(
-            device, state, stale_storages, storages_to_add_deleters
+            device,
+            state,
+            cast(list[int], stale_storages),
+            cast(list[int], storages_to_add_deleters),
         )
 
     def raw_delete(self, ptr: DataPtr) -> None:
@@ -235,7 +261,10 @@ class CUDAGraphTreeAllocatorInterface:
         torch._C._free_And_Remove_DeleterFn(storage)
 
     def check_pool_live_allocations(
-        self, device: int, pool: tuple[int, int], allocations: set[DataPtr]
+        self,
+        device: int,
+        pool: tuple[int, int],
+        allocations: set[DataPtr],  # noqa: set_linter
     ) -> bool:
         return torch._C._cuda_checkPoolLiveAllocations(device, pool, allocations)
 
@@ -360,6 +389,7 @@ def get_device_type() -> str:
 
 
 __all__ = [
+    "AllocatorState",
     "DataPtr",
     "GraphTreeAllocatorInterface",
     "GraphTreeCaptureMode",
