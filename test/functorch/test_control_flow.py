@@ -10550,11 +10550,10 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
         self.assertEqual(out, exp)
         self.assertEqual(compile_out, exp)
 
-    @skipIfTorchDynamo("not a dynamo test")
-    def test_scan_in_vmap_unbatched_init_error(self):
-        # Test with various operations requiring shape reasoning
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_scan_in_vmap_unbatched_init(self):
         x = torch.randn(4, 5, 3, 2)
-        init = torch.randn(4, 3, 2)
+        init = torch.randn(3, 2)
         weight = torch.randn(3, 3)
 
         def combine_fn(carry, xs):
@@ -10566,17 +10565,18 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
             output = torch.sin(carry).sum() + torch.cos(xs).mean()
             return new_carry, output
 
-        def vmap_fn(x, init):
-            def fn(x, init):
-                return scan(combine_fn, init, x)
+        def fn(scan_op, x, init):
+            def inner_fn(x, init):
+                return scan_op(combine_fn, init, x)
 
-            return torch.vmap(fn, in_dims=(0, None))(x, init)
+            return torch.vmap(inner_fn, in_dims=(0, None))(x, init)
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            """The size of tensor a \\(4\\) must match the size of tensor b \\(2\\) at non-singleton dimension 4""",
-        ):
-            vmap_fn(x, init)
+        out = fn(scan, x, init)
+        compile_out = torch.compile(fn)(scan, x, init)
+        exp = fn(_fake_scan, x, init)
+
+        self.assertEqual(out, exp)
+        self.assertEqual(compile_out, exp)
 
     @skipIfTorchDynamo("a vmap test, not a dynamo test")
     def test_vmap_closure_weight_error(self):
@@ -10719,14 +10719,6 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
         self.assertEqual(out, exp)
         self.assertEqual(compile_out, exp)
 
-    # TODO: A scan in the body of a while_loop triggers a stride mismatch in scan.
-    # The same scan under vmap works on its own, so this is
-    # a limitation of the two batching rules combined rather than of either one.
-    @decorateIf(
-        unittest.expectedFailure,
-        lambda params: params["autograd"]
-        and params["while_loop_test"] == "scan_in_body",
-    )
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @parametrize("while_loop_test", list(WHILE_LOOP_VMAP_TESTS.keys()))
     @parametrize("compile_mode", ["none", "compile"])
@@ -11390,10 +11382,13 @@ class GraphModule(torch.nn.Module):
             mul_2: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select);  arg1_1 = select = None
             add_2: "f32[3, 3]" = torch.ops.aten.add.Tensor(mm, mul_2);  mm = mul_2 = None
             add_3: "f32[3, 3]" = torch.ops.aten.add.Tensor(add_2, mul_1);  add_2 = mul_1 = None
-            add_4: "i64[]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
-            add_5: "f32[3]" = torch.ops.aten.add.Tensor(view, arg2_1);  view = arg2_1 = None
-            add_6: "f32[3, 3]" = torch.ops.aten.add.Tensor(t_4, arg3_1);  t_4 = arg3_1 = None
-            return (add_4, add_3, add_5, add_6)
+            add_4: "f32[3]" = torch.ops.aten.add.Tensor(view, arg2_1);  view = arg2_1 = None
+            add_5: "f32[3, 3]" = torch.ops.aten.add.Tensor(t_4, arg3_1);  t_4 = arg3_1 = None
+            add_6: "i64[]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+            clone: "f32[3, 3]" = torch.ops.aten.clone.default(add_3, memory_format = torch.contiguous_format);  add_3 = None
+            clone_1: "f32[3]" = torch.ops.aten.clone.default(add_4, memory_format = torch.contiguous_format);  add_4 = None
+            clone_2: "f32[3, 3]" = torch.ops.aten.clone.default(add_5, memory_format = torch.contiguous_format);  add_5 = None
+            return (add_6, clone, clone_1, clone_2)
 """,
             )
 

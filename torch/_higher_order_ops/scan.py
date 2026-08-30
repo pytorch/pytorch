@@ -32,6 +32,7 @@ from torch._higher_order_ops.utils import (
     HopInstance,
     mask_list,
     materialize_as_graph,
+    move_bdim_to_front,
     reenter_make_fx,
     split_into_chunks,
     unique_graph_id,
@@ -1148,19 +1149,31 @@ def scan_functionalize(
 def scan_batch_rule(
     interpreter, combine_fn, init, xs, additional_inputs, mutated_arg_indices=""
 ):
-    unbatched_args, in_dims = unwrap_batched(
-        (init, xs, additional_inputs), interpreter.level()
+    batch_size = interpreter.batch_size()
+    (unbatched_init, unbatched_xs, unbatched_additional_inputs), in_dims = (
+        unwrap_batched((init, xs, additional_inputs), interpreter.level())
+    )
+    init_dims, xs_dims, additional_dims = in_dims
+
+    # Prepare the batched carry.
+    unbatched_init = tuple(
+        move_bdim_to_front(t, bdim, batch_size)
+        for t, bdim in zip(unbatched_init, init_dims)
     )
     # move to last dim to not interfere with scan's batching
-    unbatched_init, unbatched_xs, unbatched_additional_inputs = pytree.tree_map(
-        lambda x, bdim: x.movedim(bdim, -1) if bdim is not None else x,
-        unbatched_args,
-        in_dims,
+    unbatched_xs = tuple(
+        t.movedim(bdim, -1) if bdim is not None else t
+        for t, bdim in zip(unbatched_xs, xs_dims)
     )
+    unbatched_additional_inputs = tuple(
+        t.movedim(bdim, -1) if bdim is not None else t
+        for t, bdim in zip(unbatched_additional_inputs, additional_dims)
+    )
+    num_carries = len(unbatched_init)
     after_move_dims = tuple(
-        pytree.tree_flatten(
-            pytree.tree_map(lambda x: -1 if x is not None else None, in_dims)
-        )[0]
+        [0] * len(init_dims)
+        + [-1 if bdim is not None else None for bdim in xs_dims]
+        + [-1 if bdim is not None else None for bdim in additional_dims]
     )
 
     with interpreter.lower():
@@ -1171,27 +1184,28 @@ def scan_batch_rule(
             outputs, per_slice_out_dims = restore_vmap(
                 combine_fn,
                 after_move_dims,
-                interpreter.batch_size(),
+                batch_size,
                 interpreter.randomness(),
             )(*args)
-            # Note: outputs are not batched, we just move the batch dim to the end
-            # this is to avoid it interfering with scan's batching
-            outputs = tuple(
-                pytree.tree_map(
-                    lambda out, out_bdim: out.movedim(out_bdim, -1)
-                    if out_bdim is not None
-                    else out,
-                    outputs,
-                    per_slice_out_dims,
-                )
+            # Note: outputs are not batched, we just place the batch dim where scan's
+            # batching does not interfere with it: at the front for the carries and at the end for the ys.
+            carries, ys = _extract_carry_and_out(list(outputs), num_carries)
+            carry_dims, y_dims = _extract_carry_and_out(
+                list(per_slice_out_dims), num_carries
             )
+            carries = [
+                move_bdim_to_front(out, bdim, batch_size)
+                for out, bdim in zip(carries, carry_dims)
+            ]
+            ys = [
+                out.movedim(bdim, -1) if bdim is not None else out
+                for out, bdim in zip(ys, y_dims)
+            ]
             out_dims = tuple(
-                pytree.tree_map(
-                    lambda out_bdim: -1 if out_bdim is not None else None,
-                    per_slice_out_dims,
-                )
+                [0] * len(carry_dims)
+                + [-1 if bdim is not None else None for bdim in y_dims]
             )
-            return outputs
+            return tuple(carries + ys)
 
         op_kwargs = {}
         if mutated_arg_indices:
