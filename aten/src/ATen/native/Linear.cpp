@@ -102,13 +102,14 @@ Tensor linear(const Tensor& input, const Tensor& weight, const std::optional<Ten
     return xnnpack::linear(input, weight, *bias);
   }
 #endif
-  if (input_dim == 2 && bias->defined()) {
+  if (input_dim == 2 && weight_dim == 2 && bias->defined()) {
     // Fused op is marginally faster.
     return at::addmm(*bias, input, weight.t());
   }
 
   const auto is_bias_likely_fusable = (
       bias->defined() &&
+      weight_dim == 2 &&
       // cuBLASLt: will fuse in the epilogue without copies
       // when input/weight/bias are all strided.
       // When weight is not strided, bias will not be fused,
@@ -148,7 +149,8 @@ Tensor& linear_out(const Tensor& input, const Tensor& weight, const std::optiona
               ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
               : c10::MaybeOwned<Tensor>::owned(std::in_place);
 
-  if (input.dim() == 2 && bias->defined()) {
+  const auto weight_dim = weight.dim();
+  if (input.dim() == 2 && weight_dim == 2 && bias->defined()) {
     // Fused op is marginally faster.
     return at::addmm_out(output, *bias, input, weight.t());
   }

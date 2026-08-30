@@ -5620,6 +5620,16 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(RuntimeError, ".*both arguments.*1D.*"):
             m(inp)
 
+    def test_linear_1d_weight_bias(self):
+        # Verifies that F.linear with a 2D input, 1D weight, and 1D bias works
+        # and correctly bypasses the addmm fast-path (which expects a 2D weight)
+        input = torch.randn(2, 3)
+        weight = torch.randn(3)
+        bias = torch.randn(1)
+        res = torch.nn.functional.linear(input, weight, bias)
+        expected = torch.matmul(input, weight) + bias
+        self.assertEqual(res, expected)
+
     @tf32_on_and_off(0.005)
     @parametrize_test('device', ['cpu'] + (['cuda'] if TEST_CUDA else []))
     @parametrize_test('bias', [
