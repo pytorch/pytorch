@@ -576,6 +576,11 @@ class _DynamoCacheEntry:
     source_info: SourceInfo
     device_type: str
     system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
+    # Every device the capture targeted. device_type keeps the single
+    # collapsed value (an accelerator wins) for BC, but a mixed
+    # cpu+accelerator capture still holds native CPU code, so compatibility
+    # must see the full set. None on artifacts predating the field.
+    device_types: frozenset[str] | None = None
     requires_native_backend_compatibility: bool = True
     fn_name: str | None = None
     fn_first_lineno: str | None = None
@@ -586,21 +591,31 @@ class _DynamoCacheEntry:
 
     def check_versions(self) -> None:
         """Check if the current system is compatible with the system used to create this cache entry."""
+        # getattr: an artifact pickled before device_types existed lacks it.
+        device_types = getattr(self, "device_types", None) or frozenset(
+            (self.device_type,)
+        )
+        check_codegen = getattr(self, "requires_native_backend_compatibility", True)
         # Determining the codegen target runs the C++ toolchain -- seconds on a
         # cold inductor cache, and a re-raised InvalidCxxCompiler on a host with
         # no compiler at all -- so only pay for it when this artifact actually
         # records one to compare against.
-        check_codegen = self.requires_native_backend_compatibility
         current_system_info = SystemInfo.current(
             cpu_codegen=(
                 check_codegen
-                and self.device_type == "cpu"
+                and "cpu" in device_types
                 and self.system_info.cpu_codegen_target is not None
             )
         )
-        self.system_info.check_compatibility(
-            current_system_info, self.device_type, check_codegen=check_codegen
-        )
+        # Sorted so "cpu" is checked first: the codegen-target mismatch is the
+        # more specific refusal and must not be masked by a GPU-availability
+        # error from a later device in set order.
+        for device_type in sorted(device_types):
+            self.system_info.check_compatibility(
+                current_system_info,
+                device_type,
+                check_codegen=check_codegen,
+            )
 
     def debug_info(self) -> dict[str, Any]:
         if len(self.codes) == 0:
@@ -754,8 +769,9 @@ class CompilePackage:
 
         self._current_entry: _DynamoCodeCacheEntry | None = None
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
-        # device_type that model compiled with.
-        self._device_type = "cpu"
+        # Every device type the compiled graphs target. Empty means nothing
+        # named a device, which cache_entry records as plain cpu.
+        self._device_types: set[str] = set()
         # Whether this package's backend generates native code. An eager one
         # bakes no vector width, so it must neither pay the C++ toolchain probe
         # at save nor be rejected on ISA skew at load.
@@ -809,6 +825,11 @@ class CompilePackage:
             self._codes = {self._innermost_fn.__code__: main}
             for code in codes:
                 self._codes[SerializedCode.to_code_object(code.python_code)] = code
+            # Restore the artifact's device coverage, so a re-save of the
+            # loaded package keeps checking what the capture targeted.
+            self._device_types = set(
+                getattr(dynamo, "device_types", None) or (dynamo.device_type,)
+            )
         else:
             self._add_function(
                 self._innermost_fn.__code__, self._innermost_fn.__module__
@@ -930,7 +951,7 @@ class CompilePackage:
         device_types = _graph_device_types(graph)
         if not device_types:
             return
-        self._device_type = next((d for d in sorted(device_types) if d != "cpu"), "cpu")
+        self._device_types.update(device_types)
 
     def bypass_current_entry(self) -> None:
         if self._current_entry is None:
@@ -1132,17 +1153,24 @@ class CompilePackage:
         self.validate()
         if self._innermost_fn is None:
             raise AssertionError("_innermost_fn is not set in cache_entry")
+        device_types = frozenset(self._device_types or ("cpu",))
+        device_type = next(
+            (device for device in sorted(device_types) if device != "cpu"),
+            "cpu",
+        )
         return _DynamoCacheEntry(
             codes=list(self._codes.values()),
             source_info=self._source_info,
-            device_type=self._device_type,
+            device_type=device_type,
+            device_types=device_types,
             # The field's default_factory would run the C++ toolchain probe on
             # every save; only an artifact that can hold CPU native code has a
-            # baked vector width to record.
+            # baked vector width to record. Keyed off the device SET: a mixed
+            # cpu+accelerator capture still holds native CPU code.
             system_info=SystemInfo.current(
                 cpu_codegen=(
                     self._requires_native_backend_compatibility
-                    and self._device_type == "cpu"
+                    and "cpu" in device_types
                 )
             ),
             requires_native_backend_compatibility=(
