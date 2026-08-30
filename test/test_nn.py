@@ -6690,13 +6690,35 @@ class TestAddRelu(TestCase):
 
         self.assertEqual(broadcasted_res, res)
 
-
+dynamo_wrapper_expected_failures = {}
+dynamo_wrapper_expected_failures["xpu"] = {
+    # intel/torch-xpu-ops/issues/5401
+    'test_Hardshrink_no_batch_dim_xpu',
+    'test_Softshrink_no_batch_dim_xpu',
+    'test_Conv1d_zero_batch_xpu_fp32',
+    'test_Conv2d_zero_batch_xpu_fp32',
+    'test_Conv3d_zero_batch_xpu_fp32',
+    'test_Conv1d_zero_batch_xpu_tf32',
+    'test_Conv2d_zero_batch_xpu_tf32',
+    'test_Conv3d_zero_batch_xpu_tf32',
+    'test_Embedding_sparse_xpu',
+    'test_EmbeddingBag_sparse_xpu',
+}
 def add_test(test, decorator=None, tf32_decorator=None):
     def add(test_name, fn):
         if hasattr(TestNN, test_name):
             raise RuntimeError('Found two tests with the same name: ' + test_name)
         if decorator is not None:
             fn = decorator(fn)
+        if os.environ.get("PYTORCH_TEST_WITH_DYNAMO", "0") == "1":
+            device_type = (
+                acc.type
+                if (acc := torch.accelerator.current_accelerator())
+                else "cpu"
+            )
+            if dynamo_wrapper_expected_failures.get(device_type) is not None \
+            and test_name in dynamo_wrapper_expected_failures[device_type]:
+                return
         setattr(TestNN, test_name, fn)
 
     test_name = test.get_name()
@@ -6709,49 +6731,49 @@ def add_test(test, decorator=None, tf32_decorator=None):
         if device_type in ('cuda', 'xpu'):
             # Always suffix with device_type so this never collides with the plain
             # CPU test name registered above, even when no accelerator is available
-            # (in which case test_device() itself SkipTest's at runtime).
+            # (in which case test_accelerator() itself SkipTest's at runtime).
             device_test_name = test_name + f"_{device_type}"
             # With dtype enable, it's good enough to test against three floating types
             kwargs = {}
-            if 'extra_args' in get_function_arglist(test.test_device):
+            if 'extra_args' in get_function_arglist(test.test_accelerator):
                 kwargs['extra_args'] = test.extra_args
 
-            if 'dtype' in get_function_arglist(test.test_device):
+            if 'dtype' in get_function_arglist(test.test_accelerator):
                 if (torch.cuda.is_tf32_supported() or torch.xpu.is_tf32_supported()) and test.with_tf32:
 
                     def with_tf32_off(self, test=test, kwargs=kwargs):
                         with tf32_off():
-                            test.test_device(self, dtype=torch.float, **kwargs)
+                            test.test_accelerator(self, dtype=torch.float, **kwargs)
 
                     add(device_test_name + '_fp32', with_tf32_off)
-                    
+
                     def with_tf32_on(self, test=test, kwargs=kwargs):
                         with tf32_on(self, test.tf32_precision):
-                            test.test_device(self, dtype=torch.float, **kwargs)
+                            test.test_accelerator(self, dtype=torch.float, **kwargs)
                     if tf32_decorator is not None:
                         with_tf32_on = tf32_decorator(with_tf32_on)
                     add(device_test_name + '_tf32', with_tf32_on)
                 else:
                     add(device_test_name + '_float', lambda self,
-                        test=test, kwargs=kwargs: test.test_device(self, dtype=torch.float, **kwargs))
+                        test=test, kwargs=kwargs: test.test_accelerator(self, dtype=torch.float, **kwargs))
                 add(device_test_name + '_double', lambda self,
-                    test=test, kwargs=kwargs: test.test_device(self, dtype=torch.double, **kwargs))
+                    test=test, kwargs=kwargs: test.test_accelerator(self, dtype=torch.double, **kwargs))
 
                 def test_half(self, test=test, kwargs=kwargs):
-                    test.test_device(self, dtype=torch.half, **kwargs)
+                    test.test_accelerator(self, dtype=torch.half, **kwargs)
                 if getattr(test, 'check_half', True):
                     add(device_test_name + '_half', test_half)
 
                 def test_bfloat16(self, test=test, kwargs=kwargs):
-                    test.test_device(self, dtype=torch.bfloat16, **kwargs)
+                    test.test_accelerator(self, dtype=torch.bfloat16, **kwargs)
                 if getattr(test, 'check_bfloat16', True):
                     add(device_test_name + '_bfloat16', test_bfloat16)
 
                 def test_cfloat(self, test=test, kwargs=kwargs):
-                    test.test_device(self, dtype=torch.cfloat, **kwargs)
+                    test.test_accelerator(self, dtype=torch.cfloat, **kwargs)
 
                 def test_cdouble(self, test=test, kwargs=kwargs):
-                    test.test_device(self, dtype=torch.cdouble, **kwargs)
+                    test.test_accelerator(self, dtype=torch.cdouble, **kwargs)
                 if getattr(test, 'check_complex', False):
                     add(device_test_name + '_cfloat', test_cfloat)
                     add(device_test_name + '_cdouble', test_cdouble)
@@ -6759,14 +6781,17 @@ def add_test(test, decorator=None, tf32_decorator=None):
             else:
                 def with_tf32_off(self, test=test, kwargs=kwargs):
                     with tf32_off():
-                        test.test_device(self, **kwargs)
+                        test.test_accelerator(self, **kwargs)
 
                 if (torch.cuda.is_tf32_supported() or torch.xpu.is_tf32_supported()) and test.with_tf32:
                     add(device_test_name + '_fp32', with_tf32_off)
 
+                    def with_tf32_on(self, test=test, kwargs=kwargs):
+                        with tf32_on(self, test.tf32_precision):
+                            test.test_accelerator(self, **kwargs)
+
                     if tf32_decorator is not None:
                         with_tf32_on = tf32_decorator(with_tf32_on)
-
                     add(device_test_name + '_tf32', with_tf32_on)
                 else:
                     add(device_test_name, with_tf32_off)
@@ -6844,7 +6869,7 @@ for test_params in module_tests + get_new_module_tests():
         test_params['reference_fn'] = reference_fn
         test_params['check_forward_only'] = True
         # Currently we don't support conv2d/conv3d for LongTensor in CUDA
-        test_params['test_device'] = False
+        test_params['test_accelerator'] = False
         test = NewModuleTest(**test_params)
 
         add_test(test, decorator)

@@ -16,14 +16,9 @@ import torch.nn.functional as F
 from torch.nn import _reduction as _Reduction
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import TestCase, to_gpu, freeze_rng_state, is_iterable, \
-<<<<<<< HEAD
-    gradcheck, gradgradcheck, MI300_ARCH, set_default_dtype, skipIfRocmArch, skipIfTorchDynamo, TEST_WITH_ROCM
-from torch.testing._internal.common_cuda import TEST_CUDA, SM90OrLater
-=======
-    gradcheck, gradgradcheck, set_default_dtype, skipIfTorchDynamo, TEST_WITH_ROCM, \
+    gradcheck, gradgradcheck, MI300_ARCH, set_default_dtype, skipIfRocmArch, skipIfTorchDynamo, TEST_WITH_ROCM, \
     TEST_ACCELERATOR, TEST_MPS
 from torch.testing._internal.common_cuda import SM90OrLater
->>>>>>> 792c39acb32 (Make common_nn.module_tests and common_nn.get_new_module_tests() device agnostic)
 from torch.autograd.gradcheck import _get_numerical_jacobian, _iter_tensors
 from torch.autograd import Variable
 from torch.types import _TensorOrTensors
@@ -137,7 +132,7 @@ module_tests = [
     dict(
         module_name='RReLU',
         input_size=(1, 2, 2),
-        test_device=False,
+        test_accelerator=False,
         default_dtype=torch.double,
     ),
     dict(
@@ -146,7 +141,7 @@ module_tests = [
         cpp_constructor_args='torch::nn::RReLUOptions().lower(0.1).upper(0.9)',
         input_size=(4, 4, 5),
         desc='with_up_down',
-        test_device=False,
+        test_accelerator=False,
         default_dtype=torch.double,
     ),
     dict(
@@ -2325,7 +2320,7 @@ def get_new_module_tests():
             input_size=(2, 128),
             fullname='softmax_lastdim_dtype',
             pickle=False,
-            test_device=False,
+            test_accelerator=False,
             default_dtype=torch.double,
         ),
         dict(
@@ -2350,7 +2345,7 @@ def get_new_module_tests():
             input_size=(2, 2, 4, 4),  # regular spatial algorithm
             fullname='softmax_spatial_dtype',
             pickle=False,
-            test_device=False,
+            test_accelerator=False,
             default_dtype=torch.double,
         ),
         dict(
@@ -2358,7 +2353,7 @@ def get_new_module_tests():
             cpp_options_args='F::SoftmaxFuncOptions(0)',
             input_size=(2, 3, 4, 5),
             fullname='softmax_functional_dim0',
-            test_device=False,
+            test_accelerator=False,
             pickle=False,
             default_dtype=torch.double,
         ),
@@ -2367,7 +2362,7 @@ def get_new_module_tests():
             cpp_options_args='F::SoftmaxFuncOptions(3)',
             input_size=(2, 3, 4, 5),
             fullname='softmax_functional_dim3',
-            test_device=False,
+            test_accelerator=False,
             pickle=False,
             default_dtype=torch.double,
         ),
@@ -2376,7 +2371,7 @@ def get_new_module_tests():
             cpp_options_args='F::SoftmaxFuncOptions(-1)',
             input_size=(),
             fullname='softmax_functional_scalar',
-            test_device=False,
+            test_accelerator=False,
             pickle=False,
         ),
         dict(
@@ -2432,7 +2427,7 @@ def get_new_module_tests():
             cpp_constructor_args='torch::nn::UnfoldOptions({2, 2}).dilation({1, 1}).padding({0, 0}).stride({1, 1})',
             input_size=(2, 4, 3, 3),
             check_gradgrad=False,
-            test_device=True,
+            test_accelerator=True,
             default_dtype=torch.double,
         ),
         dict(
@@ -2441,7 +2436,7 @@ def get_new_module_tests():
             cpp_constructor_args='torch::nn::FoldOptions({3, 3}, {2, 2}).dilation({1, 1}).padding({0, 0}).stride({1, 1})',
             input_size=(2, 16, 4),
             check_gradgrad=False,
-            test_device=True,
+            test_accelerator=True,
             default_dtype=torch.double,
         ),
         dict(
@@ -2451,7 +2446,7 @@ def get_new_module_tests():
             input_size=(16, 4),
             check_gradgrad=False,
             ref=single_batch_reference_fn,
-            test_device=True,
+            test_accelerator=True,
             default_dtype=torch.double,
         ),
         dict(
@@ -2460,7 +2455,7 @@ def get_new_module_tests():
             cpp_constructor_args='torch::nn::UnfoldOptions(2).dilation(1).padding(0).stride(1)',
             input_size=(2, 4, 3, 3),
             check_gradgrad=False,
-            test_device=True,
+            test_accelerator=True,
             default_dtype=torch.double,
         ),
         dict(
@@ -2469,7 +2464,7 @@ def get_new_module_tests():
             cpp_constructor_args='torch::nn::FoldOptions(3, 2).dilation(1).padding(0).stride(1)',
             input_size=(2, 16, 4),
             check_gradgrad=False,
-            test_device=True,
+            test_accelerator=True,
             default_dtype=torch.double,
         ),
         dict(
@@ -2479,7 +2474,7 @@ def get_new_module_tests():
             input_size=(16, 4),
             ref=single_batch_reference_fn,
             check_gradgrad=False,
-            test_device=True,
+            test_accelerator=True,
             default_dtype=torch.double,
         ),
         dict(
@@ -2488,7 +2483,7 @@ def get_new_module_tests():
             cpp_constructor_args='torch::nn::RReLUOptions().lower(0.1).upper(0.9)',
             input_size=(),
             desc='with_up_down_scalar',
-            test_device=False,
+            test_accelerator=False,
             default_dtype=torch.double,
         ),
         dict(
@@ -2698,7 +2693,7 @@ def get_new_module_tests():
         'Hardswish': {'check_gradgrad': False, 'check_jit': False, 'default_dtype': torch.double},
         # For RRelu, test that compare CPU and GPU results fail because RNG
         # is different between CPU and GPU
-        'RReLU': {'test_device': False, 'default_dtype': torch.double},
+        'RReLU': {'test_accelerator': False, 'default_dtype': torch.double},
         'ELU': {'default_dtype': torch.double},
         'GELU': {'default_dtype': torch.double},
         'GLU': {'default_dtype': torch.double},
@@ -3469,7 +3464,7 @@ class ModuleTest(TestBase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.jacobian_input = kwargs.get('jacobian_input', True)
-        self.should_test_device = kwargs.get('test_device', True)
+        self.should_test_accelerator = kwargs.get('test_accelerator', True) if not TEST_MPS else False
         self.should_test_pickle = kwargs.get('pickle', True)
         self.check_gradgrad = kwargs.get('check_gradgrad', True)
         self.FIXME_no_cuda_gradgrad_comparison = \
@@ -3572,10 +3567,10 @@ class ModuleTest(TestBase):
                 # #172454); use the same bound as the grad-input compare above.
                 test_case.assertEqual(test_case._get_parameters(module)[1], d_param, atol=1e-4, rtol=0)
 
-    def test_device(self, test_case):
+    def test_accelerator(self, test_case):
         self._arg_cache.clear()
-        if not TEST_ACCELERATOR or not self.should_test_device:
-            raise unittest.SkipTest('Excluded from Device tests')
+        if not TEST_ACCELERATOR or not self.should_test_accelerator:
+            raise unittest.SkipTest('Excluded from Accelerator tests')
 
         with set_default_dtype(self.default_dtype):
             cpu_input = self._get_input()
@@ -3831,7 +3826,8 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
             module(*input_tuple)
             assert_module_parameters_are(torch.DoubleTensor)
 
-            if TEST_ACCELERATOR and self.should_test_device:
+            # Skip MPS due to MPS limitations in BF16 or FP16 and some ops
+            if TEST_ACCELERATOR and self.should_test_accelerator:
                 # check that to(device) moves module parameters to correct GPU device,
                 # and that float() casts parameters correctly
 
@@ -3864,10 +3860,11 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
                     # to GPU1
                     input_tuple = tuple(t.to(1) for t in input_tuple)
                     module.to(1)
-                    module(*input_tuple).to(1)
+                    with torch.accelerator.device_index(1):
+                        module(*input_tuple)
                     assert_module_parameters_are(torch.FloatTensor, 1)  # type: ignore[attr-defined]
 
-                if not self.skip_double and not TEST_MPS:
+                if not self.skip_double:
                     # test double()
                     input_tuple = tuple(to_double(t).to(self.device) for t in input_tuple)
                     module.double().to(self.device)
@@ -3897,7 +3894,7 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.should_test_device = kwargs.get('test_device', True)
+        self.should_test_accelerator = kwargs.get('test_accelerator', True)
         self.check_forward_only = kwargs.get('check_forward_only', False)
         self.check_gradgrad = kwargs.get('check_gradgrad', True)
         self.check_half = kwargs.get('check_half', True)
@@ -3950,7 +3947,7 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
             if self.check_gradgrad:
                 gradgradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad)
 
-    def test_device(self, test_case, dtype, extra_args=None):
+    def test_accelerator(self, test_case, dtype, extra_args=None):
         self._arg_cache.clear()
 
         def convert_dtype(obj, dtype, requires_grad=False):
@@ -3961,7 +3958,7 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
             else:
                 return obj
 
-        if not TEST_ACCELERATOR or not self.should_test_device:
+        if not TEST_ACCELERATOR or not self.should_test_accelerator:
             raise unittest.SkipTest('Excluded from Device tests')
 
         with set_default_dtype(self.default_dtype):
