@@ -15,7 +15,7 @@ from typing import Any, Optional, TYPE_CHECKING
 import torch
 import torch.fx
 from torch._dynamo.convert_frame import GraphRuntimeEnv
-from torch._dynamo.graph_utils import _graph_device_type
+from torch._dynamo.graph_utils import _graph_device_types
 from torch._dynamo.package import emits_native_code, SystemInfo
 
 from . import convert_frame
@@ -55,6 +55,10 @@ class CompileArtifacts:
     device_type: str
     backend_name: str
     system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
+    # Every device the graph targets. device_type keeps the single collapsed
+    # value (an accelerator wins) for BC, but a mixed cpu+accelerator graph
+    # still emits native CPU code, so compatibility must see the full set.
+    device_types: frozenset[str] = frozenset()
 
     @property
     def emits_native_code(self) -> bool:
@@ -68,17 +72,23 @@ class CompileArtifacts:
         # mismatch message labels self "cached" and the argument "current".
         # Determining the codegen target runs the C++ toolchain, so only pay for
         # it when this artifact actually records one to compare against.
+        # getattr: an artifact pickled before device_types existed lacks the
+        # attribute entirely.
+        device_types = getattr(self, "device_types", None) or frozenset(
+            (self.device_type,)
+        )
         check_codegen = self.emits_native_code
         current = SystemInfo.current(
             cpu_codegen=(
                 check_codegen
-                and self.device_type == "cpu"
+                and "cpu" in device_types
                 and self.system_info.cpu_codegen_target is not None
             )
         )
-        self.system_info.check_compatibility(
-            current, self.device_type, check_codegen=check_codegen
-        )
+        for device_type in sorted(device_types):
+            self.system_info.check_compatibility(
+                current, device_type, check_codegen=check_codegen
+            )
 
 
 class AOTCompilePickler(pickle.Pickler):
@@ -431,7 +441,13 @@ def aot_compile_fullgraph(
         if backend_input is None:
             raise AssertionError("backend_input must not be None")
         backend_input.graph_module._backend_id = backend_input.backend_id  # type: ignore[assignment]
-        device_type = _graph_device_type(backend_input.graph_module.graph)
+        # An empty scan means the graph names no device; it lowers to CPU code.
+        # device_type keeps the collapsed accelerator-wins value; the full set
+        # is what decides whether native CPU code ships in a mixed graph.
+        device_types = _graph_device_types(
+            backend_input.graph_module.graph
+        ) or frozenset(("cpu",))
+        device_type = next((d for d in sorted(device_types) if d != "cpu"), "cpu")
         if (
             backend_input.fake_mode.shape_env
             is not graph_capture_output.output_graph.shape_env
@@ -517,10 +533,12 @@ def aot_compile_fullgraph(
             backend_name=backend_name,
             # The field's default_factory would run the C++ toolchain probe on
             # every capture; only an artifact that can hold CPU native code has
-            # a baked vector width to record.
+            # a baked vector width to record. Keyed off the device SET: a mixed
+            # cpu+accelerator graph still bakes a CPU vector ISA.
             system_info=SystemInfo.current(
-                cpu_codegen=(emits_native_code(backend_name) and device_type == "cpu")
+                cpu_codegen=(emits_native_code(backend_name) and "cpu" in device_types)
             ),
+            device_types=frozenset(device_types),
         )
         aot_compiled_fn = AOTCompiledFunction(
             _artifacts=artifacts, _extra_globals=fn.__globals__

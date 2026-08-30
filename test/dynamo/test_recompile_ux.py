@@ -555,6 +555,63 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             raised.append(errors.get_nowait())
         self.assertEqual(raised, [])
 
+    def test_reset_code_racing_lookup_does_not_destroy_the_cache_state(self):
+        """reset_code can run while other threads are parked on the same
+        ExtraState's cache lock -- the lock releases the GIL while it waits --
+        so destroying the state there deletes the very mutex the waiter is
+        blocked on. reset_code must empty the state in place instead. This
+        drives resets against concurrent lookups and the recompiles they
+        force; every call must either serve the cache or recompile cleanly,
+        and the emptied state must serve fresh compiles like a new one.
+        """
+
+        def f(x):
+            return x.sin() + x.cos()
+
+        opt = torch.compile(f, backend="eager", dynamic=False)
+        args = [torch.randn(n) for n in (3, 4)]
+        for arg in args:
+            opt(arg)
+
+        errors = queue.SimpleQueue()
+        stop = threading.Event()
+
+        def caller():
+            try:
+                while not stop.is_set():
+                    for arg in args:
+                        opt(arg)
+            except BaseException as e:
+                errors.put(e)
+
+        def resetter():
+            try:
+                for _ in range(30):
+                    torch._dynamo.eval_frame.reset_code(f.__code__)
+            except BaseException as e:
+                errors.put(e)
+            finally:
+                stop.set()
+
+        threads = [threading.Thread(target=caller, daemon=True) for _ in range(4)]
+        threads.append(threading.Thread(target=resetter, daemon=True))
+        prior_interval = sys.getswitchinterval()
+        sys.setswitchinterval(1e-6)
+        faulthandler.dump_traceback_later(300, exit=True, file=sys.__stderr__)
+        try:
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+        finally:
+            faulthandler.cancel_dump_traceback_later()
+            sys.setswitchinterval(prior_interval)
+        raised = []
+        while not errors.empty():
+            raised.append(errors.get_nowait())
+        self.assertEqual(raised, [])
+        self.assertEqual(opt(args[0]), f(args[0]))
+
     @torch._dynamo.config.patch(
         recompile_limit=1,
         fail_on_recompile_limit_hit=True,
