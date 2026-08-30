@@ -4182,6 +4182,36 @@ class GuardsState:
     local_state: Any | None = None
 
 
+def _is_precompile_handle(obj: Any) -> bool:
+    """Whether ``obj`` is one of precompile's own served-artifact handles.
+
+    Deliberately narrow. A lock in the CALLER's model still fails the frame
+    with its path named, because that is something they can act on; these are
+    ours, installed by a previous load, and carry a session's condition
+    variable a few attributes down.
+    """
+    from torch._dynamo.precompile_package import (
+        PrecompiledCallable as _InnerCallable,
+        PrecompileSession,
+    )
+    from torch._precompile import (
+        _InstalledArtifact,
+        PrecompiledCallable,
+        PrecompiledModule,
+    )
+
+    return isinstance(
+        obj,
+        (
+            PrecompiledCallable,
+            PrecompiledModule,
+            _InstalledArtifact,
+            _InnerCallable,
+            PrecompileSession,
+        ),
+    )
+
+
 class _Missing:
     def __init__(self, reason: str | None = None) -> None:
         self._reason = reason
@@ -4748,6 +4778,16 @@ class GuardsStatePickler(pickle.Pickler):
 
         self.last_reduced = obj
 
+        if _is_precompile_handle(obj):
+            # A loaded artifact installed onto a live object, reached because
+            # that object is guarded. Walking into it serializes precompile's
+            # own machinery -- a PrecompileSession carries a condition variable,
+            # so the frame dies on "cannot pickle '_thread.RLock'" and runs
+            # eager. Nothing can guard on a served handle, and unlike a lock in
+            # the user's own model there is nothing they could change, so drop
+            # it the way a pruned value is dropped.
+            return _Missing, ("precompile handle",)
+
         if id(obj) in self.empty_values:
             return type(obj).__new__, (type(obj),)
 
@@ -5087,14 +5127,35 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
     )
 
 
-def _offending_value_path(state: Any, target: Any) -> str:
+def _scope_roots(graph: Any) -> list[tuple[str, Any]]:
+    """The named values a guard state can reach, for the diagnostic walk."""
+    return [
+        (f"local_scope[{k!r}]", v)
+        for k, v in (getattr(graph, "local_scope", None) or {}).items()
+    ] + [
+        (f"global_scope[{k!r}]", v)
+        for k, v in (getattr(graph, "global_scope", None) or {}).items()
+    ]
+
+
+def _offending_value_path(
+    state: Any, target: Any, roots: list[tuple[str, Any]] | None = None
+) -> str:
     """Best-effort attribute path to the value that could not be pickled.
 
     The error names WHAT failed and never WHERE it lives, which in a large model
     means bisecting by hand across multi-minute captures. The pickler records
-    the object it was reducing, so this walks the scopes the guard state carries
-    and reports the first path holding THAT object -- by identity, not by type,
-    which used to report a same-typed bystander instead.
+    the object it was reducing, so this walks the guard state and reports the
+    first path holding THAT object -- by identity, not by type, which used to
+    report a same-typed bystander instead.
+
+    Searched from ``state``, because that is what gets pickled. Rooting only at
+    the two scopes searched five objects on a real capture while the pickler
+    walked the whole output graph, its guards and its guard-tree values, so a
+    value living anywhere else -- a lock on a compiler internal, say -- was
+    unreachable however well the scopes were preserved. The scopes stay as
+    SEEDS, ahead of ``state`` in the queue, so the common case still reports the
+    short readable path rather than a long one through the graph.
 
     Best-effort by construction: it is a diagnostic appended to an error that is
     already being raised, so any failure here must stay silent rather than mask
@@ -5103,19 +5164,16 @@ def _offending_value_path(state: Any, target: Any) -> str:
     try:
         if target is None:
             return ""
-        graph = state.output_graph
-        roots = [
-            (f"local_scope[{k!r}]", v)
-            for k, v in (getattr(graph, "local_scope", None) or {}).items()
-        ] + [
-            (f"global_scope[{k!r}]", v)
-            for k, v in (getattr(graph, "global_scope", None) or {}).items()
-        ]
+        if roots is None:
+            roots = _scope_roots(state.output_graph)
         seen: set[int] = set()
-        queue = collections.deque(roots)
+        queue = collections.deque([*roots, ("state", state)])
+        # Higher than the scope-only walk needed: the whole guard state is
+        # orders of magnitude larger, and this runs once, on a path that is
+        # already raising.
         while queue:
             path, value = queue.popleft()
-            if id(value) in seen or len(seen) > 20000:
+            if id(value) in seen or len(seen) > 200000:
                 continue
             seen.add(id(value))
             if value is target:
@@ -5176,6 +5234,12 @@ def pickle_guards_state(
             missing_values[id(leaf)] = leaf
     pickler = GuardsStatePickler(guard_tree_values, empty_values, missing_values, buf)
 
+    # Snapshot the search roots before the pruning below empties global_scope.
+    # The diagnostic that names the unpicklable value walks these, so pruning
+    # first leaves anything reachable only through a global unnameable -- which
+    # is how "cannot pickle '_thread.RLock' object" arrived with no path at all.
+    scope_roots = _scope_roots(state.output_graph)
+
     if all(
         torch.compiler.keep_portable_guards_unsafe(
             [
@@ -5207,7 +5271,7 @@ def pickle_guards_state(
         # not actionable in a model with a thousand-frame guard tree.
         raise torch._dynamo.exc.PackageError(
             f"{type(e).__name__}: {e}"
-            f"{_offending_value_path(state, pickler.last_reduced)}"
+            f"{_offending_value_path(state, pickler.last_reduced, scope_roots)}"
         ) from e
     return buf.getvalue()
 
