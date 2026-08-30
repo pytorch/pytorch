@@ -744,6 +744,10 @@ class _DynamoCacheEntry:
     source_info: SourceInfo
     device_type: str
     system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
+    # Every device the capture targeted. device_type keeps the single
+    # collapsed value (an accelerator wins) for BC, but a mixed
+    # cpu+accelerator capture still holds native CPU code, so compatibility
+    # must see the full set. None on artifacts predating the field.
     device_types: frozenset[str] | None = None
     requires_native_backend_compatibility: bool = True
     fn_name: str | None = None
@@ -755,12 +759,15 @@ class _DynamoCacheEntry:
 
     def check_versions(self) -> None:
         """Check if the current system is compatible with the system used to create this cache entry."""
+        # getattr: an artifact pickled before device_types existed lacks it.
         device_types = getattr(self, "device_types", None) or frozenset(
             (self.device_type,)
         )
         check_codegen = getattr(self, "requires_native_backend_compatibility", True)
-        # Determining the codegen target runs the C++ toolchain, so only pay for
-        # it when this artifact actually records one to compare against.
+        # Determining the codegen target runs the C++ toolchain -- seconds on a
+        # cold inductor cache, and a re-raised InvalidCxxCompiler on a host with
+        # no compiler at all -- so only pay for it when this artifact actually
+        # records one to compare against.
         current_system_info = SystemInfo.current(
             cpu_codegen=(
                 check_codegen
@@ -768,7 +775,10 @@ class _DynamoCacheEntry:
                 and self.system_info.cpu_codegen_target is not None
             )
         )
-        for device_type in device_types:
+        # Sorted so "cpu" is checked first: the codegen-target mismatch is the
+        # more specific refusal and must not be masked by a GPU-availability
+        # error from a later device in set order.
+        for device_type in sorted(device_types):
             self.system_info.check_compatibility(
                 current_system_info,
                 device_type,
@@ -1212,8 +1222,10 @@ class CompilePackage:
                 # Never fail the COMPILE over this: the ambient
                 # caching_precompile path runs through here on every user
                 # torch.compile. The mixed-target package is unserviceable, so
-                # cache_entry() refuses it instead, and the ambient recorder
-                # downgrades that to a skipped save.
+                # refuse_unserializable() refuses it at serialization
+                # boundaries -- and only there: introspection and teardown
+                # still work -- with the ambient recorder downgrading that
+                # refusal to a skipped save.
                 if self._cpu_codegen_target_drift is None:
                     self._cpu_codegen_target_drift = (
                         "CPU codegen target changed during capture: "
@@ -1768,13 +1780,21 @@ class CompilePackage:
                         self._install_owner,
                     )
 
-    def cache_entry(self) -> _DynamoCacheEntry:
-        self.validate()
+    def refuse_unserializable(self) -> None:
+        """Raise PackageError if this package can never be serialized -- its
+        CPU codegen target drifted mid-capture, so it mixes native code for
+        two targets. Called at serialization boundaries only: introspection
+        (summary(), backend-id enumeration, teardown) still builds a
+        cache_entry() from such a package without raising.
+        """
         if self._cpu_codegen_target_drift is not None:
             raise PackageError(
                 f"{self._cpu_codegen_target_drift}; the package mixes native "
                 "code for two targets and cannot be serialized."
             )
+
+    def cache_entry(self) -> _DynamoCacheEntry:
+        self.validate()
         if self._innermost_fn is None:
             raise AssertionError("_innermost_fn is not set in cache_entry")
         device_types = frozenset(self._device_types or ("cpu",))
@@ -1825,6 +1845,7 @@ class DynamoStore(abc.ABC):
         """
         from torch._dynamo.precompile_context import PrecompileContext
 
+        package.refuse_unserializable()
         cache_entry = package.cache_entry()
         PrecompileContext.record_dynamo_cache_entry(
             cache_entry=cache_entry, key=package.source_id
