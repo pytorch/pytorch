@@ -485,8 +485,7 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
     }
   }
 
-  Tensor output_t = at::empty(
-      IntArrayRef(output_shape.data(), num_output_dims), out_dtype, std::nullopt, kMPS, std::nullopt, std::nullopt);
+  Tensor output_t = at::empty(IntArrayRef(output_shape.data(), num_output_dims), input_t.options().dtype(out_dtype));
 
   if (output_t.numel() == 0 || input_t.numel() == 0) {
     output_t.fill_(std::numeric_limits<float>::quiet_NaN());
