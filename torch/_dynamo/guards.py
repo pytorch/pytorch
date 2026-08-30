@@ -30,6 +30,7 @@ import itertools
 import logging
 import math
 import pickle
+import re
 import sys
 import textwrap
 import traceback
@@ -112,6 +113,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.utils import _pytree as pytree
 from torch.utils._indented_buffer import IndentedBuffer
+from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef
@@ -4146,9 +4148,47 @@ def _get_unsupported_types() -> tuple[type, ...]:
     )
     try:
         ret += (torch._C._distributed_c10d.ProcessGroup,)
+        # A concrete backend -- ProcessGroupNCCL, FakeProcessGroup -- is bound as
+        # a subclass of Backend, NOT of ProcessGroup, so the line above misses it
+        # and the whole frame dies with "cannot pickle FakeProcessGroup". The
+        # identity-guard rationale above applies to backends verbatim.
+        ret += (torch._C._distributed_c10d.Backend,)
     except AttributeError:
         pass
     return ret
+
+
+def _is_interned_singleton(value: Any) -> bool:
+    """Whether pruning ``value`` would poison unrelated references to it.
+
+    Pruning is keyed by ``id()``, which asks "is this the same OBJECT" when the
+    question it means is "is this the same REFERENCE". For an interned value the
+    two come apart: ``torch.float32`` is one object, so an unguarded attribute
+    holding it registers that id as missing and EVERY other reference to that
+    dtype -- including ones the artifact genuinely needs -- then resolves to the
+    sentinel, and the artifact fails to load with "empty_strided(): argument
+    'dtype' must be torch.dtype, not _Missing".
+
+    These are also exactly the values pruning gains nothing from: they are
+    immutable, trivially picklable, and a handful of bytes. So skip them rather
+    than make identity carry a distinction it cannot.
+    """
+    return isinstance(
+        value,
+        (
+            torch.dtype,
+            torch.device,
+            torch.layout,
+            torch.memory_format,
+            type(None),
+            bool,
+            int,
+            float,
+            complex,
+            str,
+            bytes,
+        ),
+    )
 
 
 class GuardsStatePickler(pickle.Pickler):
@@ -4520,16 +4560,32 @@ class GuardsStatePickler(pickle.Pickler):
             # torch.Tensor. This is important for cross-compilation where
             # we compile with fake tensors but run with real tensors.
             pytype = type(obj)
+            dispatch_keys = torch._C._dispatch_keys(obj)
             if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 obj, torch._subclasses.FakeTensor
             ):
                 pytype = obj.pytype if obj.pytype is not None else torch.Tensor
+                # Both of these read the FAKE rather than the tensor it stands for.
+                # _dispatch_keys() on a fake reports Python/PythonTLSSnapshot that
+                # the real tensor never had (masked at check time, so latent), and
+                # empty_like under the live FakeTensorMode returns another FakeTensor,
+                # dragging the mode and its converters into the pickle.
+                if obj.dispatch_keys is not None:
+                    dispatch_keys = obj.dispatch_keys
+                with no_dispatch():
+                    meta = torch.empty_like(
+                        obj, device="meta", requires_grad=obj.requires_grad
+                    )
+            else:
+                meta = torch.empty_like(
+                    obj, device="meta", requires_grad=obj.requires_grad
+                )
 
             return type(self)._unpickle_tensor, (
-                torch.empty_like(obj, device="meta", requires_grad=obj.requires_grad),
+                meta,
                 obj.device,
                 pytype,
-                torch._C._dispatch_keys(obj).raw_repr(),
+                dispatch_keys.raw_repr(),
                 # Reading .grad off a non-leaf warns and is always None anyway;
                 # a training capture hits plenty of non-leaf tensors.
                 obj.grad if obj.is_leaf else None,
@@ -4539,14 +4595,7 @@ class GuardsStatePickler(pickle.Pickler):
             if id(obj) not in self.guard_tree_values:
                 return _Missing, ("module guard tree",)
 
-            for attr in obj.__dict__.values():
-                if isinstance(attr, (torch.Tensor, torch.nn.Module)):
-                    continue
-                if id(attr) in self.guard_tree_values:
-                    continue
-                if callable(attr):
-                    continue
-                self.missing_values[id(attr)] = attr
+            self._prune_unguarded_attributes(obj)
 
             # DDP module is a special case because it tries to restore unneeded
             # data in custom __setstate__. We cannot skip ddp module because it
@@ -4655,6 +4704,32 @@ class GuardsStatePickler(pickle.Pickler):
                 contents = _Missing("empty function closure")
             return type(self)._unpickle_cell, (contents,)
 
+        if (
+            id(obj) in self.guard_tree_values
+            and hasattr(obj, "__dict__")
+            and not inspect.isclass(obj)
+            and not inspect.ismodule(obj)
+            and not isinstance(obj, (torch.nn.Module, torch.Tensor))
+            and not type(obj).__module__.startswith("torch.")
+        ):
+            # Any object the guard tree reached, not just an nn.Module. A guarded
+            # object that is NOT a module -- a train pipeline, a wrapper holding a
+            # dataloader -- was pickled whole, so one unguarded attribute several
+            # levels down (a live generator, a process group) took the entire
+            # frame with it. Only the attributes something guards need to survive.
+            # Deliberately LAST: every specific reducer above -- functions,
+            # methods, cells, ops -- gets first refusal, because they need their
+            # own reconstruction rather than attribute pruning.
+            #
+            # And deliberately USER objects only. Pruning is safe when nothing
+            # reads the pruned attribute on the way back, which holds for an
+            # nn.Module and for a user's own object, but NOT for torch's
+            # structural types: a DTensorSpec's fields are needed to rebuild the
+            # spec even though no guard names each one, and pruning them leaves a
+            # tensor no guard can match. Tensors are excluded for the same reason
+            # -- a subclass carries its spec in __dict__.
+            self._prune_unguarded_attributes(obj)
+
         if hasattr(torch.distributed, "distributed_c10d") and isinstance(
             obj, torch.distributed.distributed_c10d.Work
         ):
@@ -4693,6 +4768,29 @@ class GuardsStatePickler(pickle.Pickler):
 
         return NotImplemented
 
+    def _prune_unguarded_attributes(self, obj: Any) -> None:
+        """Mark every ``__dict__`` value nothing guards as prunable.
+
+        Reaching an object through the guard tree does not mean its whole state
+        is needed -- only the attributes a guard actually reads. The rest is
+        replaced by the _Missing sentinel, which is what keeps an unpicklable
+        bystander (a generator, a live iterator, a C handle) from taking the
+        frame down with it.
+        """
+        for attr in vars(obj).values():
+            if isinstance(attr, (torch.Tensor, torch.nn.Module)):
+                continue
+            if id(attr) in self.guard_tree_values:
+                continue
+            if callable(attr):
+                continue
+            if _is_interned_singleton(attr):
+                # Pruning is keyed by id(), so an unguarded attribute holding an
+                # interned value would poison every OTHER reference to that same
+                # object -- see the helper.
+                continue
+            self.missing_values[id(attr)] = attr
+
 
 def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterEntry:
     MISSING = object()
@@ -4724,6 +4822,59 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
     )
 
 
+def _offending_value_path(state: Any, error: Exception) -> str:
+    """Best-effort attribute path to the value that could not be pickled.
+
+    The type in the error names WHAT failed and never WHERE it lives, which in a
+    large model means bisecting by hand across multi-minute captures. Walk the
+    scopes the guard state carries and report the first path whose value has the
+    failing type. Best-effort by construction: it is a diagnostic appended to an
+    error that is already being raised, so any failure here must stay silent
+    rather than mask the real one.
+    """
+    try:
+        wanted = re.search(r"cannot pickle '([^']+)' object", str(error))
+        if wanted is None:
+            return ""
+        # CPython qualifies the name for anything outside builtins -- a lock is
+        # '_thread.lock' against a __name__ of 'lock' -- so compare on the last
+        # component or the archetypal offenders never match.
+        target = wanted.group(1).rsplit(".", 1)[-1]
+        graph = state.output_graph
+        roots = [
+            (f"local_scope[{k!r}]", v)
+            for k, v in (getattr(graph, "local_scope", None) or {}).items()
+        ] + [
+            (f"global_scope[{k!r}]", v)
+            for k, v in (getattr(graph, "global_scope", None) or {}).items()
+        ]
+        seen: set[int] = set()
+        queue = collections.deque(roots)
+        while queue:
+            path, value = queue.popleft()
+            if id(value) in seen or len(seen) > 20000:
+                continue
+            seen.add(id(value))
+            if type(value).__name__ == target:
+                return f"\n  reached via: {path}"
+            if isinstance(value, (list, tuple)):
+                queue.extend((f"{path}[{i}]", v) for i, v in enumerate(value))
+            elif isinstance(value, dict):
+                queue.extend(
+                    (f"{path}[{k!r}]", v)
+                    for k, v in value.items()
+                    if isinstance(k, (str, int))
+                )
+            for name, child in (
+                list(vars(value).items()) if hasattr(value, "__dict__") else []
+            ):
+                if not name.startswith("__"):
+                    queue.append((f"{path}.{name}", child))
+    except Exception:
+        return ""
+    return ""
+
+
 def pickle_guards_state(
     state: GuardsState,
     builder: GuardBuilder,
@@ -4743,7 +4894,7 @@ def pickle_guards_state(
                     empty_values[id(base)] = base
                 except:  # noqa: E722
                     pass
-        elif id(leaf) not in guard_tree_values:
+        elif id(leaf) not in guard_tree_values and not _is_interned_singleton(leaf):
             # TODO See if we have lift this branch as the first one.
             # Prune more objects in pytree hierarchy.
             missing_values[id(leaf)] = leaf
@@ -4775,8 +4926,12 @@ def pickle_guards_state(
         # program that has nothing wrong with it.
         # The caller turns PackageError into a package bypass, or re-raises it
         # under strict_precompile. Name the original type so the reason stays
-        # diagnosable in the bypass message.
-        raise torch._dynamo.exc.PackageError(f"{type(e).__name__}: {e}") from e
+        # diagnosable in the bypass message -- and the PATH to the offending
+        # value, because a type alone ("cannot pickle 'generator' object") is
+        # not actionable in a model with a thousand-frame guard tree.
+        raise torch._dynamo.exc.PackageError(
+            f"{type(e).__name__}: {e}{_offending_value_path(state, e)}"
+        ) from e
     return buf.getvalue()
 
 
@@ -5165,14 +5320,16 @@ class CheckFunctionManager:
             for k, v in output_graph_guards_state.global_scope.items()
             if k in used_global_vars or k in self.additional_used_global_vars
         }
-        global_scope_state[builtins_dict_name] = {
-            k: v
-            # pyrefly: ignore [missing-attribute]
-            for k, v in output_graph_guards_state.global_scope[
-                builtins_dict_name
-            ].items()  # type: ignore[attr-defined]
-            if k in self.used_builtin_vars
-        }
+        # Absent when this state was itself loaded from a pickle whose guards
+        # were all portable: pickle_guards_state drops global_scope in that
+        # case but keeps the name, and re-serializing must not fail on it.
+        builtins_dict = output_graph_guards_state.global_scope.get(builtins_dict_name)
+        if builtins_dict is not None:
+            global_scope_state[builtins_dict_name] = {
+                k: v
+                for k, v in builtins_dict.items()  # type: ignore[attr-defined]
+                if k in self.used_builtin_vars
+            }
         output_graph_guards_state = dataclasses.replace(
             output_graph_guards_state,
             local_scope={
@@ -5188,6 +5345,12 @@ class CheckFunctionManager:
                         obj_weakref=None,
                         guarded_class_weakref=None,
                         create_fn=normalize_create_fn(guard.create_fn),
+                        # Export bookkeeping, repopulated by create_fn at load.
+                        # set_export_info EXTENDS these on every guard build and
+                        # CheckFunctionManager builds up to three times, so the
+                        # artifact otherwise ships each code part several times over.
+                        guard_types=None,
+                        code_list=None,
                     )
                     for guard in sorted_guards
                 )
