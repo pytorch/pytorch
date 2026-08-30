@@ -9,13 +9,8 @@ from typing import Any
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._C._functorch import (
-    _add_batch_dim,
-    get_unwrapped,
-    is_batchedtensor,
-    maybe_get_bdim,
-)
 from torch._functorch.utils import exposed_in
+from torch._functorch.vmap import unwrap_batched, wrap_batched
 from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     check_input_alias_and_mutation_return_outputs,
@@ -755,42 +750,34 @@ def cond_batch_rule(interpreter, pred, true_fn, false_fn, inputs):
             f"Cond inputs must be a list of tensors, got {[type(i) for i in inputs]}"
         )
 
-    pred_is_batched = isinstance(pred, torch.Tensor) and is_batchedtensor(pred)
-
+    lvl = interpreter.level()
     # unbatched tensors are not vmapped
-    tensors, in_dims = zip(
-        *[
-            (get_unwrapped(t), maybe_get_bdim(t)) if is_batchedtensor(t) else (t, None)
-            for t in inputs
-        ]
+    (unbatched_pred, tensors), (pred_bdim, in_dims) = unwrap_batched(
+        (pred, tuple(inputs)), lvl
     )
 
-    if pred_is_batched:
-        # prepend "pred" and vmap everything
-        pred_ = move_bdim_to_front(
-            get_unwrapped(pred), maybe_get_bdim(pred), interpreter.batch_size()
-        )
-        tensors = (pred_,) + tensors
-        in_dims = (0,) + in_dims
-
-        def fn(p, *args):
-            t = true_fn(*args)
-            f = false_fn(*args)
-            return torch.where(p, t[0], f[0])
-
-        with interpreter.lower():
-            result = torch.vmap(fn, in_dims=in_dims)(*tensors)
-
-    else:
+    if pred_bdim is None:
         # predicate is known at this stage and it is a boolean expression or a
         # tensor with one element.
         true_fn = torch.vmap(true_fn, in_dims=in_dims)
         false_fn = torch.vmap(false_fn, in_dims=in_dims)
 
         with interpreter.lower():
-            result = cond_op(pred, true_fn, false_fn, tensors)
+            result = cond_op(unbatched_pred, true_fn, false_fn, tensors)
+
+    else:
+        # Each batch element takes its own branch, so run both branches for the whole
+        # batch and select every output per element.
+        pred_ = move_bdim_to_front(unbatched_pred, pred_bdim, interpreter.batch_size())
+
+        def fn(p, *args):
+            return pytree.tree_map(
+                lambda t, f: torch.where(p, t, f), true_fn(*args), false_fn(*args)
+            )
+
+        with interpreter.lower():
+            result = torch.vmap(fn, in_dims=(0,) + in_dims)(pred_, *tensors)
 
     if not isinstance(result, tuple):
         result = (result,)
-    lvl = interpreter.level()
-    return tuple(_add_batch_dim(r, 0, lvl) for r in result)
+    return wrap_batched(result, (0,) * len(result), lvl)
