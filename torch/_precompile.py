@@ -21,14 +21,15 @@ silently run code specialized for its capture-time state. The artifact never com
 after loading; a call that fails every retained guard set raises. Compiled graphs and kernels remain Python source, while
 guard trees and transformed bytecode are stored as opaque inline data.
 
-With ``tracer="dynamo"`` and the inductor backend, differentiability is inferred per
-captured graph exactly as ``torch.compile`` infers it (inputs that require grad under
-grad mode produce a joint forward+backward). Each differentiable graph
-contains AOTAutograd's forward and backward as readable Inductor source. The served
-output retains its ``grad_fn`` and a later ``backward()`` executes those captured
-backward kernels across captured recompilations. Backward variants are specialized to
-output-tangent patterns observed while running the examples, and an unseen pattern fails
-instead of compiling at runtime.
+With ``tracer="dynamo"``, differentiability is inferred per captured graph exactly
+as ``torch.compile`` infers it (inputs that require grad under grad mode). On the
+inductor backend each differentiable graph contains AOTAutograd's forward and
+backward as readable Inductor source; the served output retains its ``grad_fn`` and
+a later ``backward()`` executes those captured backward kernels across captured
+recompilations, with backward variants specialized to output-tangent patterns
+observed while running the examples (an unseen pattern fails instead of compiling
+at runtime). On the eager backend the backward is live eager autograd through the
+emitted forward ops -- not captured, like the eager forward's kernels.
 
 ``precompile`` returns a self-contained, executable ``python_code`` string plus a
 companion integrity-tagged ``cache``. With ``backend="inductor"`` (the default) the
@@ -2619,10 +2620,12 @@ def _precompile_dynamo(
         fn, example_inputs, decompositions
     )
     # Differentiability mirrors torch.compile: capture runs grad-enabled and
-    # AOTAutograd infers per graph from requires_grad inputs. The eager
-    # backend keeps no-grad capture (it has no backward composition), so its
-    # artifacts stay inference regardless of input requires_grad.
-    grad_enabled = backend == "inductor"
+    # each graph infers it from requires_grad inputs. Inductor precompiles the
+    # joint forward+backward; the eager backend serves its forward graph under
+    # live autograd, so its backward is eager autograd through the emitted
+    # ops -- neither captured nor specialized, exactly like
+    # torch.compile(backend="eager").
+    grad_enabled = True
 
     capture_target = _make_dynamo_capture_target(target)
     capture_limit = (
@@ -2821,10 +2824,8 @@ def _precompile_dynamo_stateful(
         decompositions,
         environment_scan=None if state is None else state.environment_scan,
     )
-    # Differentiability mirrors torch.compile (see _precompile_dynamo); the
-    # backend is checked for consistency on resume, so grad semantics cannot
-    # change across the state's life.
-    grad_enabled = backend == "inductor"
+    # Differentiability mirrors torch.compile (see _precompile_dynamo).
+    grad_enabled = True
     with _DYNAMO_COMPILE_LOCK:
         fresh = state is None
         if state is None:
@@ -3364,20 +3365,24 @@ class _PrecompileApi:
         broken down in the captured graph. Defaults to ``None`` (make_fx's default) and
         is not yet supported with ``tracer="dynamo"``.
 
-        With ``tracer="dynamo"`` and ``backend="inductor"``, differentiability is
-        inferred per captured graph exactly as ``torch.compile`` infers it: capture
-        runs with grad enabled, and a graph whose inputs require grad is compiled as
-        a joint forward+backward -- readable AOTAutograd source bridged by an emitted
-        ``torch.autograd.Function``. Its served outputs retain ``grad_fn``; calling
-        ``backward()`` executes the precompiled backward kernels. Graphs whose inputs
-        do not require grad stay inference graphs, and ``backend="eager"`` always
-        captures inference (it has no backward composition), matching its behavior
-        before differentiable capture existed. The input tensors that require
-        gradients must do so in every example and at runtime (requires_grad is
-        guarded, so a flipped input fails dispatch loudly).
-        Each example's actual backward records its output-tangent presence pattern; an
-        unseen pattern raises instead of compiling during serving. If the examples only
-        run forwards, only the all-tangents-present backward is covered.
+        With ``tracer="dynamo"``, differentiability is inferred per captured graph
+        exactly as ``torch.compile`` infers it: capture runs with grad enabled, and a
+        graph whose inputs require grad is differentiable; no-grad inputs stay
+        inference graphs. The input tensors that require gradients must do so in
+        every example and at runtime (requires_grad is guarded, so a flipped input
+        fails dispatch loudly). How the backward is realized depends on the backend,
+        mirroring ``torch.compile``: with ``backend="inductor"`` a differentiable
+        graph is compiled as a joint forward+backward -- readable AOTAutograd source
+        bridged by an emitted ``torch.autograd.Function`` -- so served outputs retain
+        ``grad_fn`` and ``backward()`` executes the precompiled backward kernels;
+        each example's actual backward records its output-tangent presence pattern,
+        an unseen pattern raises instead of compiling during serving, and if the
+        examples only run forwards, only the all-tangents-present backward is
+        covered. With ``backend="eager"`` the artifact's forward runs under live
+        autograd, so ``backward()`` is ordinary eager autograd through the emitted
+        ops -- neither captured nor specialized (any tangent pattern and higher-order
+        grad work), and, like the eager forward itself, resolved against the loaded
+        torch rather than frozen in the artifact.
 
         With ``tracer="dynamo"``, shape variation across ``example_inputs`` uses
         Dynamo's ordinary automatic dynamic-shape policy: for example, a static first

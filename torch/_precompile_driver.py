@@ -605,8 +605,7 @@ def _build_dynamo_forward():
             ) from e
         bound.apply_defaults()
         local_scope = dict(bound.arguments)
-        # Pin grad mode to the capture-time state (enabled for inductor
-        # artifacts, disabled for eager ones): inference graphs stay
+        # Pin grad mode to the capture-time state: inference graphs stay
         # inference either way, and requires_grad is guarded per input.
         with torch.set_grad_enabled(_DYNAMO_GRAD_ENABLED):
             for manager, function in variants:

@@ -1492,12 +1492,13 @@ class TestPrecompile(TestCase):
             self.assertEqual(global_guards, [])
         self.assertEqual(torch.compiler.precompile.load(code, cache)(x), torch.sin(x))
 
-    def test_tracer_dynamo_backend_controls_grad_mode(self):
-        # The eager backend always captures under no_grad (it has no backward
-        # composition), so a requires_grad example still yields an inference
-        # artifact; the inductor backend captures grad-enabled and the driver
-        # pins the capture-time grad mode, so the served output stays
-        # differentiable even under an ambient no_grad.
+    def test_tracer_dynamo_eager_backward_is_live_autograd(self):
+        # Both backends capture grad-enabled and infer differentiability from
+        # requires_grad inputs; the driver pins the capture-time grad mode, so
+        # served outputs stay differentiable even under an ambient no_grad.
+        # The eager backend's backward is LIVE autograd through the emitted
+        # ops (not captured), like torch.compile(backend="eager") -- so it
+        # matches eager gradients with no tangent-pattern specialization.
         x = torch.randn(4, requires_grad=True)
         code, cache = torch.compiler.precompile(
             _precompile_dynamo_torch_sin,
@@ -1505,12 +1506,16 @@ class TestPrecompile(TestCase):
             tracer="dynamo",
             backend="eager",
         )
-        self.assertIn("_DYNAMO_GRAD_ENABLED = False", code)
-        with torch.enable_grad():
+        self.assertIn("_DYNAMO_GRAD_ENABLED = True", code)
+        with torch.no_grad():
             out = torch.compiler.precompile.load(code, cache)(x)
-        self.assertIsNone(out.grad_fn)
-        self.assertFalse(out.requires_grad)
+        self.assertTrue(out.requires_grad)
+        out.sum().backward()
+        x_ref = x.detach().clone().requires_grad_()
+        _precompile_dynamo_torch_sin(x_ref).sum().backward()
+        self.assertEqual(x.grad, x_ref.grad)
 
+        x.grad = None
         code, cache = torch.compiler.precompile(
             _precompile_dynamo_torch_sin,
             example_inputs=[(x,)],
@@ -3209,9 +3214,9 @@ class TestPrecompile(TestCase):
         self.assertEqual(len(managers), 2)
         scopes = [{"x": torch.randn(2)}, {"x": torch.randn(4)}]
         # The driver dispatches under set_grad_enabled(_DYNAMO_GRAD_ENABLED),
-        # and this eager-backend capture ran with grad off; match it or the
+        # and capture runs grad-enabled on every backend; match it or the
         # global-state guard fails every check.
-        with torch.no_grad():
+        with torch.enable_grad():
             # variants[0] (served first) is the DYNAMIC variant: both sizes pass.
             self.assertEqual(
                 [managers[0].check(scope) for scope in scopes], [True, True]

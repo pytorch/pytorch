@@ -125,8 +125,11 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       at runtime; the ordinary all-tangents-defined pattern is always covered, even
       when capture runs no backward. ``requires_grad`` is part of each input's guards,
       so an input whose ``requires_grad`` flipped since capture fails dispatch loudly
-      rather than silently changing behavior. ``backend="eager"`` always captures
-      inference graphs (no backward composition). Only first-order backward is
+      rather than silently changing behavior. With ``backend="eager"`` the backward is
+      live eager autograd through the emitted forward ops -- neither captured nor
+      specialized (any tangent pattern and higher-order grad work), and, like the
+      eager forward's kernels, resolved against the loaded torch rather than frozen
+      in the artifact. On the inductor backend only first-order backward is
       supported; tensor-subclass and ``BackwardState`` training graphs are rejected.
 
    With ``tracer="make_fx"``, if ``fn`` runs a backward, the artifact re-runs the whole
