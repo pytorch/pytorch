@@ -1899,6 +1899,7 @@ class PrecompileSession:
             # own, so they have to be handed to the store explicitly.
             for backend_id, backend in self._package.cached_backends.items():
                 store.record_eager_backend(backend_id, backend)
+        self._package.refuse_unserializable()
         try:
             # save_cache_entry, not save_package: the latter also files the
             # package into the process-global PrecompileContext, which is for
@@ -2022,6 +2023,7 @@ class PrecompileSession:
         )
         from torch._precompile import _build_multigraph_artifact
 
+        self._package.refuse_unserializable()
         entry = self._package.cache_entry()
         backends = self._collect_backends()
         return _build_multigraph_artifact(

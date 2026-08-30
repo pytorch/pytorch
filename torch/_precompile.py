@@ -2943,11 +2943,14 @@ class _PrecompileApi:
         param/buffer list from it (same interning/order as capture).
 
         The returned object comes in two shapes, decided by the CAPTURE, not by a
-        load-time choice. A dynamo artifact whose capture graph-broke or recompiled
-        serves by INSTALLING onto the captured code objects: the returned callable
+        load-time choice. A dynamo artifact with captured frames the entry bytecode
+        cannot reach on its own -- e.g. a graph break inside a child module's frame
+        -- serves by INSTALLING onto the captured code objects: the returned callable
         mutates process state on first call (or on ``__enter__``) and supports
-        ``with`` / ``unload()`` to take that back out. A single-whole-graph artifact
-        is standalone: a plain callable with neither. ``fn=`` applies to the
+        ``with`` / ``unload()`` to take that back out. An artifact whose frames are
+        all reachable from the entry -- including one that graph-broke or recompiled
+        only within the entry frame -- is standalone: a plain callable with neither.
+        ``fn=`` applies to the
         installing shape only -- pass the function object to install onto when it is
         not importable from where it was captured (defined in ``__main__``, a
         notebook, or a REPL); it must be passed before the first call, and a
