@@ -20,6 +20,7 @@ from torch._inductor.select_algorithm import (
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache, get_num_sms, TMA_DESCRIPTOR_SIZE
 from torch._inductor.virtualized import V
+from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1113,6 +1114,17 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
         # Ensure hash checking is enabled
         with patch.object(inductor_config.lookup_table, "check_src_hash", True):
             self.run_model("mm", tensors)
+
+
+class TestClassLevelSkipProbe(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        if not SM90OrLater:
+            raise unittest.SkipTest("needs sm90")
+
+    def test_gated_by_class_setup(self):
+        self.assertTrue(True)
 
 
 if __name__ == "__main__":
