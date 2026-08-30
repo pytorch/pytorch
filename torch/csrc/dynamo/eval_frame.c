@@ -708,8 +708,11 @@ static PyObject* reset_code(PyObject* dummy, PyObject* code) {
     return NULL;
   }
 
-  // set_extra_state destroys the existing object on extra scratch space.
-  set_extra_state((PyCodeObject*)code, NULL);
+  // Emptied in place, NOT destroyed: another thread can be blocked on this
+  // state's cache_mutex (CacheLock releases the GIL while it waits), and
+  // set_extra_state(code, NULL) would delete the mutex under the waiter. The
+  // state is truly destroyed only when the code object itself deallocates.
+  reset_extra_state((PyCodeObject*)code);
   Py_RETURN_NONE;
 }
 
