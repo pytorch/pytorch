@@ -41,7 +41,6 @@ void init_THPCaches() {}
 #define NEED_OPCODE_TABLES // To get _PyOpcode_Deopt, _PyOpcode_Caches
 
 #if IS_PYTHON_3_13_PLUS
-#include <cpython/code.h> // To get PyUnstable_Code_GetFirstFree
 #define NEED_OPCODE_METADATA
 #include <internal/pycore_opcode_metadata.h>
 #undef NEED_OPCODE_METADATA
@@ -136,16 +135,8 @@ PyFrameObject* THP_PyFrame_New_NoTrack(const PyCodeObject* code) {
   f->f_trace = NULL;
   f->f_trace_lines = 1;
   f->f_trace_opcodes = 0;
-#if IS_PYTHON_3_13_PLUS
-  f->f_extra_locals = NULL;
-#else
   f->f_fast_as_locals = 0;
-#endif
   f->f_lineno = 0;
-#if IS_PYTHON_3_14_PLUS
-  f->f_locals_cache = NULL;
-  f->f_overwritten_fast_locals = NULL;
-#endif
   return f;
 }
 
