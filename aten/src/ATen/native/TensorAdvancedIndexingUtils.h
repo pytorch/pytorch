@@ -3,6 +3,8 @@
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/TensorIterator.h>
 
+#include <algorithm>
+
 namespace at::native {
 namespace {
 #ifndef STRIP_ERROR_MESSAGES
@@ -67,6 +69,17 @@ inline std::tuple<bool, Tensor> canDispatchToMaskedFill(
     mask = mask.unsqueeze(-1);
   }
   return std::make_tuple(true, std::move(mask));
+}
+
+inline void checkAtLeastOneIndexTensor(IOptTensorListRef indices) {
+  TORCH_CHECK_INDEX(
+      std::any_of(
+          indices.begin(),
+          indices.end(),
+          [](const OptionalTensorRef& index) {
+            return index.has_value() && index->defined();
+          }),
+      "at least one index tensor must be provided");
 }
 
 inline AdvancedIndex make_info(Tensor self, IOptTensorListRef orig) {
