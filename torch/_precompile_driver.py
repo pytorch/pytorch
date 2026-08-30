@@ -58,7 +58,7 @@ if TYPE_CHECKING:
     _DYNAMO_PYTHON_VERSION: tuple[int, int] = (0, 0)
     _DYNAMO_TORCH_VERSION: str = ""
     _DYNAMO_STATE: str = ""
-    TRAINING: bool = False
+    _DYNAMO_GRAD_ENABLED: bool = False
 
     # The compiled/captured graph's entry point, emitted before the driver.
     def call(flat_inputs: list[object]) -> list[object]: ...
@@ -605,7 +605,10 @@ def _build_dynamo_forward():
             ) from e
         bound.apply_defaults()
         local_scope = dict(bound.arguments)
-        with torch.set_grad_enabled(TRAINING):
+        # Pin grad mode to the capture-time state (enabled for inductor
+        # artifacts, disabled for eager ones): inference graphs stay
+        # inference either way, and requires_grad is guarded per input.
+        with torch.set_grad_enabled(_DYNAMO_GRAD_ENABLED):
             for manager, function in variants:
                 if manager.check(local_scope):
                     return function(*args)

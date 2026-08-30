@@ -21,7 +21,9 @@ silently run code specialized for its capture-time state. The artifact never com
 after loading; a call that fails every retained guard set raises. Compiled graphs and kernels remain Python source, while
 guard trees and transformed bytecode are stored as opaque inline data.
 
-With ``tracer="dynamo", training=True`` (inductor backend only), every compiled graph
+With ``tracer="dynamo"`` and the inductor backend, differentiability is inferred per
+captured graph exactly as ``torch.compile`` infers it (inputs that require grad under
+grad mode produce a joint forward+backward). Each differentiable graph
 contains AOTAutograd's forward and backward as readable Inductor source. The served
 output retains its ``grad_fn`` and a later ``backward()`` executes those captured
 backward kernels across captured recompilations. Backward variants are specialized to
@@ -1140,7 +1142,7 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     # _DYNAMO_BACKEND_SOURCES is intentionally absent: its value is not a plain
     # literal (each entry is a subscripted string), so ast.literal_eval rejects it.
     dynamo_metadata = {
-        "TRAINING",
+        "_DYNAMO_GRAD_ENABLED",
         "_DYNAMO_PYTHON_VERSION",
         "_DYNAMO_TORCH_VERSION",
         "_DYNAMO_BACKEND_IDS",
@@ -1490,7 +1492,7 @@ def _build_dynamo_eager_graph_source(gm: torch.fx.GraphModule) -> str:
 
 
 def _dynamo_backend_compiler(
-    backend: str, training: bool
+    backend: str
 ) -> Callable[..., _DynamoPythonBackend]:
     def compile_graph(
         gm: torch.fx.GraphModule, example_inputs: list[object]
@@ -1521,7 +1523,7 @@ def _dynamo_backend_compiler(
                 gm,
                 graph_inputs,
                 options={"size_asserts": True},
-                grad_enabled=training,
+                grad_enabled=True,
             )
             call = aot_autograd.load_from_python(python_code, cache)
         return _DynamoPythonBackend(python_code, cache, is_dynamic, call, compile_state)
@@ -1720,7 +1722,7 @@ def _dynamo_backend_source_literal(source: str) -> str:
 def _build_dynamo_python_source(
     *,
     backend: str,
-    training: bool,
+    grad_enabled: bool,
     state: dict[str, Any],
     backend_ids: list[str],
     compiled_backends: list[_DynamoPythonBackend],
@@ -1754,7 +1756,7 @@ def _build_dynamo_python_source(
         "# " + "=" * 70,
         f"BACKEND = {backend!r}",
         'TRACER = "dynamo"',
-        f"TRAINING = {training!r}",
+        f"_DYNAMO_GRAD_ENABLED = {grad_enabled!r}",
         f"VARIANT_COUNT = {len(state['variants'])}",
         f"GRAPH_COUNT = {len(compiled_backends)}",
         f"DYNAMIC_GRAPH_COUNT = {dynamic_count}",
@@ -2288,7 +2290,7 @@ def _keep_serializable_capture_guards(guards: Sequence[Any]) -> list[bool]:
 
 @contextlib.contextmanager
 def _dynamo_capture_context(
-    pgo_state: Any, training: bool, capture_limit: int
+    pgo_state: Any, grad_enabled: bool, capture_limit: int
 ) -> Iterator[None]:
     import torch._functorch.config as functorch_config
     from torch._dynamo.pgo import _use_code_state
@@ -2316,19 +2318,19 @@ def _dynamo_capture_context(
             functorch_config.patch(
                 bundled_autograd_cache=True,
                 bypass_autograd_cache_key=True,
-                force_non_lazy_backward_lowering=training,
+                force_non_lazy_backward_lowering=grad_enabled,
                 # The undefined-tangent specialization machinery is default-off
                 # for ordinary torch.compile; precompile's training artifacts
                 # are built on it, so enable it for capture. The autograd.Function
                 # contexts created under this patch snapshot the flag at forward
                 # time, so backwards the caller runs between stateful calls keep
                 # observing tangent masks after the patch unwinds.
-                aot_autograd_prune_unused_outputs=training,
+                aot_autograd_prune_unused_outputs=grad_enabled,
             )
         )
         stack.enter_context(_use_code_state(pgo_state))
         stack.enter_context(torch.inference_mode(False))
-        stack.enter_context(torch.set_grad_enabled(training))
+        stack.enter_context(torch.set_grad_enabled(grad_enabled))
         yield
 
 
@@ -2395,11 +2397,10 @@ def _make_dynamo_capture_optimizer(
     capture_target: Callable[..., object],
     package: Any,
     backend: str,
-    training: bool,
     capture_limit: int,
     dynamic: bool | None,
 ) -> tuple[Callable[..., object], Callable[..., object]]:
-    compile_graph = _dynamo_backend_compiler(backend, training)
+    compile_graph = _dynamo_backend_compiler(backend)
     compiled = torch._dynamo.optimize(
         backend=compile_graph,
         nopython=True,
@@ -2444,7 +2445,7 @@ def _build_dynamo_artifact(
     example_inputs: Sequence[tuple[object, ...]],
     *,
     backend: str,
-    training: bool,
+    grad_enabled: bool,
     keep_capture: bool = False,
 ) -> tuple[str, bytes, PrecompileStateSummary]:
     """Render the package's accumulated capture as (python_code, cache) bytes.
@@ -2505,7 +2506,7 @@ def _build_dynamo_artifact(
     backend_ids = [str(backend_id) for backend_id in code.backend_ids]
     python_code = _build_dynamo_python_source(
         backend=backend,
-        training=training,
+        grad_enabled=grad_enabled,
         state=dynamo_state,
         backend_ids=backend_ids,
         compiled_backends=compiled_backends,
@@ -2608,7 +2609,6 @@ def _precompile_dynamo(
     *,
     backend: str,
     decompositions: dict | None,
-    training: bool,
     recompile_limit: int | None = None,
     dynamic: bool | None = None,
 ) -> tuple[str, bytes]:
@@ -2618,6 +2618,12 @@ def _precompile_dynamo(
     target, _environment_scan = _validate_dynamo_capture(
         fn, example_inputs, decompositions
     )
+    # Differentiability mirrors torch.compile: capture runs grad-enabled and
+    # AOTAutograd infers per graph from requires_grad inputs. The eager
+    # backend keeps no-grad capture (it has no backward composition), so its
+    # artifacts stay inference regardless of input requires_grad.
+    grad_enabled = backend == "inductor"
+
     capture_target = _make_dynamo_capture_target(target)
     capture_limit = (
         recompile_limit
@@ -2630,12 +2636,12 @@ def _precompile_dynamo(
         pgo_state = _new_code_state()
         try:
             with (
-                _dynamo_capture_context(pgo_state, training, capture_limit),
+                _dynamo_capture_context(pgo_state, grad_enabled, capture_limit),
                 _translate_dynamo_capture_errors(capture_limit),
             ):
                 package = CompilePackage(capture_target)
                 compiled, backend_fn = _make_dynamo_capture_optimizer(
-                    capture_target, package, backend, training, capture_limit, dynamic
+                    capture_target, package, backend, capture_limit, dynamic
                 )
                 recorded = []
                 for example in example_inputs:
@@ -2646,7 +2652,7 @@ def _precompile_dynamo(
                     capture_target,
                     recorded,
                     backend=backend,
-                    training=training,
+                    grad_enabled=grad_enabled,
                 )
                 return python_code, cache
         finally:
@@ -2689,7 +2695,6 @@ class _PrecompileDynamoState:
         package: Any,
         pgo_state: Any,
         backend: str,
-        training: bool,
         capture_limit: int,
         dynamic: bool | None,
         environment_scan: dict[str, tuple[frozenset[int], bool]],
@@ -2699,7 +2704,6 @@ class _PrecompileDynamoState:
         self.package = package
         self.pgo_state = pgo_state
         self.backend = backend
-        self.training = training
         self.capture_limit = capture_limit
         self.dynamic = dynamic
         # Cached wide walk of the fn's referenced globals (see
@@ -2748,8 +2752,7 @@ class _PrecompileDynamoState:
         status = ", closed" if self.closed else ""
         return (
             f"<torch.compiler.precompile dynamo state: {len(self.examples)} "
-            f"example call(s), backend={self.backend!r}, "
-            f"training={self.training}{status}>"
+            f"example call(s), backend={self.backend!r}{status}>"
         )
 
 
@@ -2798,7 +2801,6 @@ def _precompile_dynamo_stateful(
     *,
     backend: str,
     decompositions: dict | None,
-    training: bool,
     recompile_limit: int | None,
     dynamic: bool | None,
     state: _PrecompileDynamoState | None,
@@ -2819,6 +2821,10 @@ def _precompile_dynamo_stateful(
         decompositions,
         environment_scan=None if state is None else state.environment_scan,
     )
+    # Differentiability mirrors torch.compile (see _precompile_dynamo); the
+    # backend is checked for consistency on resume, so grad semantics cannot
+    # change across the state's life.
+    grad_enabled = backend == "inductor"
     with _DYNAMO_COMPILE_LOCK:
         fresh = state is None
         if state is None:
@@ -2836,7 +2842,6 @@ def _precompile_dynamo_stateful(
                 package=CompilePackage(capture_target),
                 pgo_state=_new_code_state(),
                 backend=backend,
-                training=training,
                 capture_limit=capture_limit,
                 dynamic=dynamic,
                 environment_scan=environment_scan,
@@ -2851,7 +2856,6 @@ def _precompile_dynamo_stateful(
                 f"{name}={got!r} (the state was created with {want!r})"
                 for name, got, want in (
                     ("backend", backend, state.backend),
-                    ("training", training, state.training),
                 )
                 if got != want
             ]
@@ -2878,7 +2882,7 @@ def _precompile_dynamo_stateful(
                 )
         try:
             with (
-                _dynamo_capture_context(state.pgo_state, training, state.capture_limit),
+                _dynamo_capture_context(state.pgo_state, grad_enabled, state.capture_limit),
                 # A FRESH call that hits the limit self-closes and never
                 # returns its state, so the close()-and-recapture advice only
                 # fits resumed calls.
@@ -2891,7 +2895,6 @@ def _precompile_dynamo_stateful(
                         state.capture_target,
                         state.package,
                         backend,
-                        training,
                         state.capture_limit,
                         state.dynamic,
                     )
@@ -2928,7 +2931,7 @@ def _precompile_dynamo_stateful(
                         state.capture_target,
                         state.examples,
                         backend=backend,
-                        training=training,
+                        grad_enabled=grad_enabled,
                         keep_capture=True,
                     )
                 except PrecompileError as e:
@@ -3276,7 +3279,6 @@ class _PrecompileApi:
         backend: str = "inductor",
         tracer: str = "make_fx",
         decompositions: dict | None = None,
-        training: bool = False,
         recompile_limit: int | None = None,
         dynamic: bool | None = None,
     ) -> tuple[str, bytes]:
@@ -3362,12 +3364,17 @@ class _PrecompileApi:
         broken down in the captured graph. Defaults to ``None`` (make_fx's default) and
         is not yet supported with ``tracer="dynamo"``.
 
-        ``training=True`` is supported with ``tracer="dynamo"`` and
-        ``backend="inductor"``. Capture runs with grad enabled, and each compiled graph
-        carries a readable AOTAutograd forward and backward bridged by an emitted
-        ``torch.autograd.Function``. A served output therefore retains its ``grad_fn``;
-        calling ``backward()`` executes the precompiled backward kernels. The input
-        tensors that require gradients must do so in every example and at runtime.
+        With ``tracer="dynamo"`` and ``backend="inductor"``, differentiability is
+        inferred per captured graph exactly as ``torch.compile`` infers it: capture
+        runs with grad enabled, and a graph whose inputs require grad is compiled as
+        a joint forward+backward -- readable AOTAutograd source bridged by an emitted
+        ``torch.autograd.Function``. Its served outputs retain ``grad_fn``; calling
+        ``backward()`` executes the precompiled backward kernels. Graphs whose inputs
+        do not require grad stay inference graphs, and ``backend="eager"`` always
+        captures inference (it has no backward composition), matching its behavior
+        before differentiable capture existed. The input tensors that require
+        gradients must do so in every example and at runtime (requires_grad is
+        guarded, so a flipped input fails dispatch loudly).
         Each example's actual backward records its output-tangent presence pattern; an
         unseen pattern raises instead of compiling during serving. If the examples only
         run forwards, only the all-tangents-present backward is covered.
@@ -3476,11 +3483,6 @@ class _PrecompileApi:
             raise ValueError(
                 f"precompile tracer must be 'make_fx' or 'dynamo', got {tracer!r}."
             )
-        if training and (tracer != "dynamo" or backend != "inductor"):
-            raise NotImplementedError(
-                "precompile training=True currently requires tracer='dynamo' and "
-                "backend='inductor'."
-            )
         if (recompile_limit is not None or dynamic is not None) and tracer != "dynamo":
             raise ValueError(
                 "precompile recompile_limit and dynamic require tracer='dynamo'."
@@ -3491,7 +3493,6 @@ class _PrecompileApi:
                 example_inputs,
                 backend=backend,
                 decompositions=decompositions,
-                training=training,
                 recompile_limit=recompile_limit,
                 dynamic=dynamic,
             )
@@ -3514,7 +3515,6 @@ class _PrecompileApi:
         cache_path: str,
         state: _PrecompileDynamoState | None = None,
         backend: str = "inductor",
-        training: bool = False,
         recompile_limit: int | None = None,
         dynamic: bool | None = None,
     ) -> tuple[list[object], _PrecompileDynamoState]:
@@ -3553,7 +3553,7 @@ class _PrecompileApi:
                     state.close()
 
         ``state=None`` starts fresh; passing a returned state resumes -- with
-        the same ``fn``, ``backend``, ``training``, ``recompile_limit``, and
+        the same ``fn``, ``backend``, ``recompile_limit``, and
         ``dynamic``, else the call raises rather than produce a mixed
         artifact. The files on disk are always a loadable artifact for
         everything captured so far. A call whose guards all hit adds nothing;
@@ -3598,16 +3598,11 @@ class _PrecompileApi:
             raise ValueError(
                 f"precompile backend must be 'inductor' or 'eager', got {backend!r}."
             )
-        if training and backend != "inductor":
-            raise NotImplementedError(
-                "precompile training=True currently requires backend='inductor'."
-            )
         return _precompile_dynamo_stateful(
             fn,
             example_inputs,
             backend=backend,
             decompositions=None,
-            training=training,
             recompile_limit=recompile_limit,
             dynamic=dynamic,
             state=state,

@@ -51,11 +51,12 @@ are not supported yet.
 Globals whose object graph contains a tensor and functions that mutate globals are
 rejected, as are distinct tensor inputs sharing or overlapping storage (the same
 tensor object may be passed more than once).
-With `training=True` and the Inductor backend, Dynamo graphs
-include readable compiled forward and backward code, so served outputs retain a
-`grad_fn` and can be passed to `backward()`. This training mode works across captured
-recompilations and rejects output-tangent patterns not observed during capture (the
-ordinary all-tangents-defined pattern is always covered). The sibling entry point
+With the Inductor backend, each captured Dynamo graph's differentiability is inferred
+from its inputs, mirroring `torch.compile`: `requires_grad` inputs yield graphs with
+readable compiled forward and backward code, so served outputs retain a `grad_fn` and
+can be passed to `backward()`; no-grad inputs yield inference graphs. This works across
+captured recompilations and rejects output-tangent patterns not observed during capture
+(the ordinary all-tangents-defined pattern is always covered). The sibling entry point
 `torch.compiler.precompile.stateful` captures incrementally: each call runs
 its example tuples for real inside a loop the caller owns, returns a list of that call's
 per-example results plus an opaque `state` to pass back in, and rewrites an

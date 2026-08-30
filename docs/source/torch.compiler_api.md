@@ -50,7 +50,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 % intentionally omitted from the autosummary block above.
 
 ```{eval-rst}
-.. py:function:: precompile(fn, *example_args, example_inputs=None, backend="inductor", tracer="make_fx", decompositions=None, training=False, recompile_limit=None, dynamic=None)
+.. py:function:: precompile(fn, *example_args, example_inputs=None, backend="inductor", tracer="make_fx", decompositions=None, recompile_limit=None, dynamic=None)
 
    Ahead-of-time precompile ``fn`` against example inputs, returning a self-contained,
    runnable Python source string plus an acceleration cache as ``(python_code, cache)``.
@@ -112,16 +112,22 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       own rejection, and any other layout (e.g. jagged) is refused at capture and at
       serve because its aliasing cannot be verified.
 
-      Pass ``training=True`` with ``tracer="dynamo"`` and ``backend="inductor"`` to
-      capture differentiable graphs. Each compiled segment contains readable Inductor
-      source for both its AOTAutograd forward and backward, bridged by an emitted
-      ``torch.autograd.Function``. Outputs retain their ``grad_fn``, so a later
-      ``backward()`` executes the captured backward kernels. Training works across
-      captured recompilations. Backward variants are specialized to output-tangent
+      With ``tracer="dynamo"`` and ``backend="inductor"``, capture runs with
+      gradients enabled and each captured graph's differentiability is inferred from
+      its inputs, mirroring ``torch.compile``: inputs with ``requires_grad`` yield a
+      joint forward+backward whose compiled segments contain readable Inductor source
+      for both the AOTAutograd forward and backward, bridged by an emitted
+      ``torch.autograd.Function``; inputs without ``requires_grad`` yield inference
+      graphs. Differentiable outputs retain their ``grad_fn``, so a later
+      ``backward()`` executes the captured backward kernels, across captured
+      recompilations. Backward variants are specialized to output-tangent
       patterns observed during capture, and an unseen pattern fails instead of compiling
       at runtime; the ordinary all-tangents-defined pattern is always covered, even
-      when capture runs no backward. Only first-order backward is supported; tensor-subclass and
-      ``BackwardState`` training graphs are rejected.
+      when capture runs no backward. ``requires_grad`` is part of each input's guards,
+      so an input whose ``requires_grad`` flipped since capture fails dispatch loudly
+      rather than silently changing behavior. ``backend="eager"`` always captures
+      inference graphs (no backward composition). Only first-order backward is
+      supported; tensor-subclass and ``BackwardState`` training graphs are rejected.
 
    With ``tracer="make_fx"``, if ``fn`` runs a backward, the artifact re-runs the whole
    forward and backward and scatters the resulting parameter gradients onto the runtime
@@ -150,9 +156,6 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    :param decompositions: Optional decomposition table (``dict`` of ``OpOverload`` to a
        decomposition function) forwarded to ``make_fx``; defaults to ``None`` and is not
        yet supported with ``tracer="dynamo"``.
-   :param training: If ``True``, capture a differentiable Dynamo/Inductor artifact whose
-       outputs can be passed to ``backward()``. Defaults to ``False`` and currently
-       requires ``tracer="dynamo"`` and ``backend="inductor"``.
    :param recompile_limit: Cap on captured variants per Dynamo capture
        (``tracer="dynamo"`` only). The default is
        ``torch._dynamo.config.recompile_limit`` or the example count plus one,
@@ -188,11 +191,11 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        f = torch.compiler.precompile.load(python_code, cache)
        out = f(torch.randn(7, 4))  # served by the captured dynamic variant
 
-   Dynamo training::
+   Dynamo training (inferred from ``requires_grad``)::
 
        examples = [(torch.randn(n, 4, requires_grad=True),) for n in (2, 3)]
        python_code, cache = torch.compiler.precompile(
-           fn, example_inputs=examples, tracer="dynamo", training=True
+           fn, example_inputs=examples, tracer="dynamo"
        )
        f = torch.compiler.precompile.load(python_code, cache)
        x = torch.randn(7, 4, requires_grad=True)
@@ -201,7 +204,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 ```
 
 ```{eval-rst}
-.. py:method:: precompile.stateful(fn, *, example_inputs, artifact_path, cache_path, state=None, backend="inductor", training=False, recompile_limit=None, dynamic=None)
+.. py:method:: precompile.stateful(fn, *, example_inputs, artifact_path, cache_path, state=None, backend="inductor", recompile_limit=None, dynamic=None)
 
    Capture ``fn`` incrementally from a loop the caller owns (Dynamo tracer,
    implied). Every call runs its example tuples for real, records whatever
@@ -217,7 +220,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
                [result], state = torch.compiler.precompile.stateful(
                    step, example_inputs=[(batch,)], state=state,
                    artifact_path="step.py", cache_path="step.cache",
-                   training=True, recompile_limit=256,
+                   recompile_limit=256,
                )
                # result is this call's real step output; run the training loop on it.
        finally:
@@ -244,7 +247,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        rewritten on every call.
    :param state: ``None`` starts fresh; passing the state returned by a
        previous call resumes it. A resumed call must use the same ``fn``,
-       ``backend``, ``training``, ``recompile_limit``, and ``dynamic`` as the
+       ``backend``, ``recompile_limit``, and ``dynamic`` as the
        state, else it raises rather than produce a mixed artifact. After each
        rewrite ``state.summary()`` reports what the artifact carries (calls,
        examples, variants, graphs, dynamic graphs, and the environment guards
@@ -252,7 +255,6 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        artifact as ``_DROPPED_GUARDS``). The state is process-local and not
        serializable; call ``state.close()`` when done capturing.
    :param backend: As on ``precompile``.
-   :param training: As on ``precompile`` (requires ``backend="inductor"``).
    :param recompile_limit: Cap on captured variants; defaults to
        ``max(torch._dynamo.config.recompile_limit, 256)`` because accumulating
        captures outgrow the config default. Fixed when the state is created.

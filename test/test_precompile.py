@@ -1492,25 +1492,29 @@ class TestPrecompile(TestCase):
             self.assertEqual(global_guards, [])
         self.assertEqual(torch.compiler.precompile.load(code, cache)(x), torch.sin(x))
 
-    def test_tracer_dynamo_training_flag_controls_grad_mode(self):
+    def test_tracer_dynamo_backend_controls_grad_mode(self):
+        # The eager backend always captures under no_grad (it has no backward
+        # composition), so a requires_grad example still yields an inference
+        # artifact; the inductor backend captures grad-enabled and the driver
+        # pins the capture-time grad mode, so the served output stays
+        # differentiable even under an ambient no_grad.
         x = torch.randn(4, requires_grad=True)
         code, cache = torch.compiler.precompile(
             _precompile_dynamo_torch_sin,
             example_inputs=[(x,)],
             tracer="dynamo",
             backend="eager",
-            training=False,
         )
+        self.assertIn("_DYNAMO_GRAD_ENABLED = False", code)
         with torch.enable_grad():
-            self.assertFalse(
-                torch.compiler.precompile.load(code, cache)(x).requires_grad
-            )
+            out = torch.compiler.precompile.load(code, cache)(x)
+        self.assertIsNone(out.grad_fn)
+        self.assertFalse(out.requires_grad)
 
         code, cache = torch.compiler.precompile(
             _precompile_dynamo_torch_sin,
             example_inputs=[(x,)],
             tracer="dynamo",
-            training=True,
         )
         with torch.no_grad():
             out = torch.compiler.precompile.load(code, cache)(x)
@@ -2088,7 +2092,6 @@ class TestPrecompile(TestCase):
                     state=state,
                     artifact_path=artifact_path,
                     cache_path=cache_path,
-                    training=True,
                 )
                 # Each call is a real training step: its backward runs before
                 # the next call, exactly like a caller-owned loop would.
@@ -2099,7 +2102,7 @@ class TestPrecompile(TestCase):
                 code = f.read()
             with open(cache_path, "rb") as f:
                 cache = f.read()
-            self.assertIn("TRAINING = True", code)
+            self.assertIn("_DYNAMO_GRAD_ENABLED = True", code)
             self.assertIn("DYNAMIC_GRAPH_COUNT = 1", code)
             loaded = torch.compiler.precompile.load(code, cache)
             y = torch.randn(7, 4, requires_grad=True)
@@ -2407,7 +2410,6 @@ class TestPrecompile(TestCase):
                 _precompile_dynamo_independent_outputs,
                 example_inputs=[(x, y)],
                 state=None,
-                training=True,
                 **paths,
             )
             self.addCleanup(state.close)
@@ -2416,7 +2418,6 @@ class TestPrecompile(TestCase):
                 _precompile_dynamo_independent_outputs,
                 example_inputs=[clones()],
                 state=state,
-                training=True,
                 **paths,
             )
             with open(paths["artifact_path"]) as f:
@@ -2496,7 +2497,6 @@ class TestPrecompile(TestCase):
                 _precompile_dynamo_independent_outputs,
                 example_inputs=[(x, y)],
                 state=None,
-                training=True,
                 **paths,
             )
             self.addCleanup(state.close)
@@ -2517,7 +2517,6 @@ class TestPrecompile(TestCase):
                         _precompile_dynamo_independent_outputs,
                         example_inputs=[(x.detach().clone().requires_grad_(), y)],
                         state=state,
-                        training=True,
                         **paths,
                     )
             self.assertTrue(any("could not compile" in line for line in logs.output))
@@ -2617,14 +2616,6 @@ class TestPrecompile(TestCase):
                     _precompile_dynamo_torch_sin,
                     backend="eager",
                     recompile_limit=99,
-                    **resume,
-                    **paths,
-                )
-            with self.assertRaisesRegex(ValueError, "training=True"):
-                torch.compiler.precompile.stateful(
-                    _precompile_dynamo_torch_sin,
-                    backend="inductor",
-                    training=True,
                     **resume,
                     **paths,
                 )
@@ -2735,7 +2726,6 @@ class TestPrecompile(TestCase):
             _precompile_dynamo_torch_sin,
             example_inputs=[(x,)],
             tracer="dynamo",
-            training=True,
         )
         loaded = torch.compiler.precompile.load(code, cache)
         y = torch.randn(3, requires_grad=True)
@@ -2989,10 +2979,9 @@ class TestPrecompile(TestCase):
             _precompile_dynamo_dynamic,
             example_inputs=examples,
             tracer="dynamo",
-            training=True,
         )
 
-        self.assertIn("TRAINING = True", code)
+        self.assertIn("_DYNAMO_GRAD_ENABLED = True", code)
         self.assertIn("DYNAMIC_GRAPH_COUNT = 1", code)
         self.assertIn("class _CompiledFunction(torch.autograd.Function):", code)
         self.assertIn("_inner_call_fw", code)
@@ -3009,7 +2998,6 @@ class TestPrecompile(TestCase):
             _precompile_dynamo_dynamic,
             example_inputs=[(x,)],
             tracer="dynamo",
-            training=True,
         )
         with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as artifact:
             artifact.write(code)
@@ -3054,21 +3042,59 @@ class TestPrecompile(TestCase):
             _precompile_dynamo_independent_outputs,
             example_inputs=[(x, y)],
             tracer="dynamo",
-            training=True,
         )
         loaded = torch.compiler.precompile.load(code, cache)
         with self.assertRaisesRegex(PrecompileError, "undefined-output-tangent"):
             loaded(x, y)[0].sum().backward()
 
-    def test_training_requires_dynamo_inductor(self):
+    def test_tracer_dynamo_differentiability_inferred_per_graph(self):
+        # Differentiability mirrors torch.compile on the inductor backend: a
+        # captured graph whose inputs require grad compiles as a joint
+        # forward+backward (the served output carries grad_fn and backward
+        # matches eager); a graph whose inputs do not require grad stays an
+        # inference graph. requires_grad is guarded per input, so a serve call
+        # with it flipped misses dispatch loudly.
         x = torch.randn(4, requires_grad=True)
-        for kwargs in ({}, {"tracer": "dynamo", "backend": "eager"}):
-            with self.assertRaisesRegex(NotImplementedError, "dynamo.*inductor"):
-                torch.compiler.precompile(
-                    _precompile_dynamo_dynamic,
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_torch_sin, example_inputs=[(x,)], tracer="dynamo"
+        )
+        self.assertIn("_DYNAMO_GRAD_ENABLED = True", code)
+        loaded = torch.compiler.precompile.load(code, cache)
+        y = torch.randn(4, requires_grad=True)
+        out = loaded(y)
+        self.assertIsNotNone(out.grad_fn)
+        out.sum().backward()
+        self.assertEqual(y.grad, y.detach().cos())
+        with self.assertRaisesRegex(PrecompileError, "no captured Dynamo variant"):
+            loaded(torch.randn(4))  # requires_grad flipped off
+
+        plain = torch.randn(4)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_torch_sin, example_inputs=[(plain,)], tracer="dynamo"
+        )
+        self.assertIn("_DYNAMO_GRAD_ENABLED = True", code)
+        self.assertIsNone(torch.compiler.precompile.load(code, cache)(plain).grad_fn)
+
+    def test_training_kwarg_removed(self):
+        # Differentiability is inferred from each captured graph's inputs;
+        # the old training= kwarg is gone from both entry points.
+        x = torch.randn(4, requires_grad=True)
+        with self.assertRaisesRegex(TypeError, "training"):
+            torch.compiler.precompile(
+                _precompile_dynamo_torch_sin,
+                example_inputs=[(x,)],
+                tracer="dynamo",
+                training=True,
+            )
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(TypeError, "training"):
+                torch.compiler.precompile.stateful(
+                    _precompile_dynamo_torch_sin,
                     example_inputs=[(x,)],
+                    state=None,
                     training=True,
-                    **kwargs,
+                    artifact_path=os.path.join(tmp, "a.py"),
+                    cache_path=os.path.join(tmp, "a.cache"),
                 )
 
     def test_dynamo_backend_source_literal_roundtrip(self):
@@ -3182,9 +3208,9 @@ class TestPrecompile(TestCase):
             managers.append(load_guard_manager(guards_state, target_code, namespace))
         self.assertEqual(len(managers), 2)
         scopes = [{"x": torch.randn(2)}, {"x": torch.randn(4)}]
-        # The driver dispatches under set_grad_enabled(TRAINING), and capture
-        # ran with grad off (TRAINING = False); match it or the global-state
-        # guard fails every check.
+        # The driver dispatches under set_grad_enabled(_DYNAMO_GRAD_ENABLED),
+        # and this eager-backend capture ran with grad off; match it or the
+        # global-state guard fails every check.
         with torch.no_grad():
             # variants[0] (served first) is the DYNAMIC variant: both sizes pass.
             self.assertEqual(
@@ -5164,7 +5190,6 @@ class TestPrecompileNumerics(TestCase):
                 _precompile_dynamo_dynamic,
                 example_inputs=examples,
                 tracer="dynamo",
-                training=True,
             )
 
         self.assertIn("DYNAMIC_GRAPH_COUNT = 1", code)
