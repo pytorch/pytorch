@@ -499,8 +499,7 @@ void initDynamoBindings(PyObject* torch) {
       .def_readwrite("recursive_action", &FrameExecStrategy::recursive_action);
 
   m.def("get_code_exec_strategy", [](py::handle code) {
-    TORCH_CHECK_TYPE(
-        PyCode_Check(code.ptr()), "expected a code object");
+    TORCH_CHECK_TYPE(PyCode_Check(code.ptr()), "expected a code object");
     ExtraState* extra =
         get_extra_state(reinterpret_cast<PyCodeObject*>(code.ptr()));
     return extra == nullptr
@@ -511,8 +510,7 @@ void initDynamoBindings(PyObject* torch) {
   m.def(
       "get_code_region_exec_strategy",
       [](py::handle code, int64_t isolate_recompiles_id) {
-        TORCH_CHECK_TYPE(
-            PyCode_Check(code.ptr()), "expected a code object");
+        TORCH_CHECK_TYPE(PyCode_Check(code.ptr()), "expected a code object");
         ExtraState* extra =
             get_extra_state(reinterpret_cast<PyCodeObject*>(code.ptr()));
         return extra == nullptr
@@ -526,8 +524,7 @@ void initDynamoBindings(PyObject* torch) {
       [](py::handle code,
          int64_t isolate_recompiles_id,
          FrameExecStrategy strategy) {
-        TORCH_CHECK_TYPE(
-            PyCode_Check(code.ptr()), "expected a code object");
+        TORCH_CHECK_TYPE(PyCode_Check(code.ptr()), "expected a code object");
         PyCodeObject* code_obj = reinterpret_cast<PyCodeObject*>(code.ptr());
         ExtraState* extra = get_extra_state(code_obj);
         if (extra == nullptr) {
@@ -538,8 +535,7 @@ void initDynamoBindings(PyObject* torch) {
       });
 
   m.def("get_code_exec_strategy_token", [](py::handle code) -> py::tuple {
-    TORCH_CHECK_TYPE(
-        PyCode_Check(code.ptr()), "expected a code object");
+    TORCH_CHECK_TYPE(PyCode_Check(code.ptr()), "expected a code object");
     ExtraState* extra =
         get_extra_state(reinterpret_cast<PyCodeObject*>(code.ptr()));
     if (extra == nullptr) {
@@ -555,8 +551,7 @@ void initDynamoBindings(PyObject* torch) {
   m.def(
       "set_code_exec_strategy_with_token",
       [](py::handle code, FrameExecStrategy strategy) -> py::tuple {
-        TORCH_CHECK_TYPE(
-            PyCode_Check(code.ptr()), "expected a code object");
+        TORCH_CHECK_TYPE(PyCode_Check(code.ptr()), "expected a code object");
         PyCodeObject* code_obj = reinterpret_cast<PyCodeObject*>(code.ptr());
         ExtraState* extra = get_extra_state(code_obj);
         if (extra == nullptr) {
@@ -573,8 +568,7 @@ void initDynamoBindings(PyObject* torch) {
       [](py::handle code,
          uint64_t expected_generation,
          FrameExecStrategy strategy) {
-        TORCH_CHECK_TYPE(
-            PyCode_Check(code.ptr()), "expected a code object");
+        TORCH_CHECK_TYPE(PyCode_Check(code.ptr()), "expected a code object");
         ExtraState* extra =
             get_extra_state(reinterpret_cast<PyCodeObject*>(code.ptr()));
         return extra != nullptr &&
