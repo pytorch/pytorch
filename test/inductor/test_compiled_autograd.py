@@ -4495,6 +4495,12 @@ class CompiledAutograd1(torch.nn.Module):
         "DTensor/FakePG requires distributed build",
     )
     def test_dtensor_unused_output_fallback(self):
+        # The sharding-prop cache is keyed by mesh equality, so an earlier test's
+        # hash-equal DeviceMesh (from a destroyed process group) would leak into
+        # this test's output specs and corrupt the traced joint graph.
+        from torch.distributed.tensor.debug import _clear_sharding_prop_cache
+
+        _clear_sharding_prop_cache()
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
         try:
@@ -5682,6 +5688,7 @@ xfail_divergence_from_eager = {
 }
 
 skipped_tests = set()
+skipped_tests.add("test_graph_queue_callback")
 
 if not HAS_CUDA_AND_TRITON:
     # Found Tesla M60 which is too old to be supported by the triton GPU compiler

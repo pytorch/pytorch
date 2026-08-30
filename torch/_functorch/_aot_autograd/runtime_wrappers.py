@@ -46,7 +46,6 @@ from torch._ops import OpOverload
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.fx.experimental._backward_state import BackwardState
-from torch.fx.experimental.proxy_tensor import HANDLED_TYPES
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
@@ -475,7 +474,15 @@ class _AnalyzeCustomOpInputOutputMode(TorchDispatchMode):
             underlying_tensor = tensor
             if isinstance(tensor, torch.nn.Parameter):
                 underlying_tensor = tensor.data
-            if type(underlying_tensor) not in HANDLED_TYPES:
+            # A subclass with no __torch_dispatch__ has no handler to defer to, so
+            # returning NotImplemented for it makes the dispatch fail outright.
+            # `types` cannot replace the check because HigherOrderOperator.dispatch
+            # passes it empty and this mode accepts HOPs.
+            if (
+                not is_fake_tensor(underlying_tensor)
+                and type(underlying_tensor).__torch_dispatch__
+                is not torch._C._disabled_torch_dispatch_impl
+            ):
                 return NotImplemented
 
         res = func(*args, **kwargs)
@@ -2758,6 +2765,45 @@ _GradOutputPrototypeType = (
 )
 
 
+def _dealias_marked_returns(raw_returns: list[Any], marked: Sequence[int]) -> None:
+    """Give each slot about to be marked non-differentiable its own TensorImpl.
+
+    mark_non_differentiable is keyed on TensorImpl, so marking one slot marks
+    EVERY returned slot holding that same object, and with
+    ctx._materialize_non_diff_grads = False a slot marked this way is handed a
+    None instead of zeros. Backends are free to return one object in two slots
+    -- inductor lowers aten.detach to a no-op, and h*1 / h+0 fold away -- so
+    `return h * 1, h.detach()` marks the differentiable output too and drops
+    the gradient, and `return y[:2], y[2:], y.detach()` marks y's intermediate
+    base, which the backward requires a tangent for.
+
+    Substituting an alias is only correct because the slot is one we are about
+    to declare non-differentiable anyway; slots that stay differentiable keep
+    their identity.
+    """
+    if not marked:
+        return
+    # This runs on every forward of every compiled autograd function and almost
+    # never fires, so index the marked slots -- usually one or two -- and probe
+    # the rest against them, rather than indexing all of raw_returns.
+    marked_positions: dict[int, list[int]] = {}
+    for i in marked:
+        x = raw_returns[i]
+        if isinstance(x, torch.Tensor):
+            marked_positions.setdefault(id(x), []).append(i)
+    if not marked_positions:
+        return
+    marked_set = set(marked)
+    collide: set[int] = set()
+    for j, o in enumerate(raw_returns):
+        if j not in marked_set:
+            hits = marked_positions.get(id(o))
+            if hits is not None:
+                collide.update(hits)
+    for i in collide:
+        raw_returns[i] = raw_returns[i].detach()
+
+
 class KeptTangentInfo(typing.NamedTuple):
     """Runtime-safe metadata for tangent slots retained by the backward prologue."""
 
@@ -4018,13 +4064,14 @@ class _AutogradForwardEpilogue:
             if x.mutation_type == MutationType.MUTATED_OUT_GRAPH
         ] + self.metadata.output_info
 
-        fw_outs_not_requiring_grad = [
-            x
+        non_diff_indices = [
+            i
             for (i, x) in enumerate(raw_returns_not_including_intermediate_bases)
             if isinstance(x, torch.Tensor) and not raw_returns_meta[i].requires_grad
         ]
+        _dealias_marked_returns(raw_returns, non_diff_indices)
         _set_grad_output_prototypes(ctx, raw_returns, self.metadata)
-        ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
+        ctx.mark_non_differentiable(*(raw_returns[i] for i in non_diff_indices))
         ctx._materialize_non_diff_grads = False
         _snapshot_external_objects(ctx)
 
@@ -4881,7 +4928,12 @@ class _AOTDispatchAutogradFunctionFactory:
             args="raw_returns",
             artifact_name="compiled_fn_wrapper",
         )
-        buf.bind(TensorAlias=TensorAlias, torch=torch, Tensor=Tensor)
+        buf.bind(
+            TensorAlias=TensorAlias,
+            torch=torch,
+            Tensor=Tensor,
+            _dealias_marked_returns=_dealias_marked_returns,
+        )
 
         with buf.indent():
             for i, idx in enumerate(fw_metadata.mutated_inp_runtime_indices):
@@ -4917,6 +4969,12 @@ class _AOTDispatchAutogradFunctionFactory:
                 ):
                     _non_diff_indices.append(i)
             if _non_diff_indices:
+                # See _dealias_marked_returns: marking is keyed on TensorImpl,
+                # so a slot sharing an object with another returned slot marks
+                # that one too.
+                buf.writeline(
+                    f"_dealias_marked_returns(raw_returns, {_non_diff_indices!r})"
+                )
                 checks = " + ".join(
                     f"([raw_returns[{i}]] if isinstance(raw_returns[{i}], Tensor) else [])"
                     for i in _non_diff_indices
