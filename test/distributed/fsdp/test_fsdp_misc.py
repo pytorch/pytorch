@@ -21,7 +21,10 @@ from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     ShardingStrategy,
 )
-from torch.distributed.fsdp._common_utils import clean_tensor_name
+from torch.distributed.fsdp._common_utils import (
+    clean_tensor_name,
+    _override_module_mixed_precision,
+)
 from torch.distributed.fsdp._flat_param import _FSDP_USE_UNSAFE_SETATTR
 from torch.distributed.fsdp._runtime_utils import HOMOGENEOUS_ATTR_NAMES
 from torch.distributed.fsdp.wrap import (
@@ -1221,6 +1224,13 @@ class TestFSDPMiscWorldSize1(FSDPTestMultiThread):
         called_setattr_override = False
         fsdp_module(inp)
         self.assertTrue(called_setattr_override)
+
+    def test_override_module_mixed_precision_default_dict(self):
+        """Tests that _override_module_mixed_precision properly overrides wrap dictionary without mutable default side-effects."""
+        m = nn.Sequential(nn.Linear(5, 5))
+        _override_module_mixed_precision(m, [nn.Linear])
+        self.assertEqual(m[0]._wrap_overrides, {"mixed_precision": None})
+
 
 
 instantiate_parametrized_tests(TestFSDPMiscMultiThread)
