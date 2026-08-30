@@ -262,6 +262,21 @@ def _replay_input_mutation(orig: torch.Tensor, updated: torch.Tensor) -> None:
         and torch._C._autograd._get_creation_meta(orig)
         == torch._C._autograd.CreationMeta.IN_CUSTOM_FUNCTION
     ):
+        if torch.is_grad_enabled() and orig.requires_grad:
+            # An autograd-VISIBLE mutation of this view is exactly what eager
+            # rejects ("Output ... is a view and is being modified inplace");
+            # replaying it invisibly instead drops the mutation's contribution
+            # to autograd. Whether the op that really did the write was
+            # visible is unknowable here -- the graph does not guard on the
+            # view's provenance -- so say so once rather than guess.
+            warnings.warn(
+                "torch.compile is replaying a mutation of an input that is a "
+                "view created inside a custom autograd.Function, without "
+                "autograd tracking. If the mutating op is autograd-visible in "
+                "eager (where it raises an error on such a view), gradients "
+                "flowing through this input may be silently wrong.",
+                stacklevel=2,
+            )
         with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(orig):
             orig.copy_(updated)
     else:

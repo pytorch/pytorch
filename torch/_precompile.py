@@ -328,6 +328,7 @@ import io
 import logging
 import pickle
 import sys
+import threading
 import types
 from collections.abc import Callable, Mapping, Sequence
 from types import MappingProxyType
@@ -464,20 +465,30 @@ class _InstalledArtifact:
         self._entry_factory = entry_factory
         self._fn: Callable[..., object] | None = None
         self._inner: Any = None
+        # Serving is documented as multi-thread safe, and installing is a
+        # process-global mutation of live code objects: two first calls racing
+        # through an unlocked check-then-act would both install, and the
+        # loser's installed state leaks with nothing left holding it.
+        self._install_lock = threading.Lock()
 
     def _rebind(self, fn: Callable[..., object]) -> None:
-        if self._inner is not None:
-            raise PrecompileError(
-                "precompile: this artifact is already installed; pass fn= to load() "
-                "before the first call."
-            )
-        self._fn = fn
+        with self._install_lock:
+            if self._inner is not None:
+                raise PrecompileError(
+                    "precompile: this artifact is already installed; pass fn= to load() "
+                    "before the first call."
+                )
+            self._fn = fn
 
     def _ensure(self) -> Any:
-        if self._inner is None:
-            fn = self._entry_factory() if self._fn is None else self._fn
-            self._inner = self._serve(fn)
-        return self._inner
+        inner = self._inner
+        if inner is None:
+            with self._install_lock:
+                if self._inner is None:
+                    fn = self._entry_factory() if self._fn is None else self._fn
+                    self._inner = self._serve(fn)
+                inner = self._inner
+        return inner
 
     def __call__(self, *args: object, **kwargs: object) -> object:
         return self._ensure()(*args, **kwargs)
@@ -490,7 +501,8 @@ class _InstalledArtifact:
         self.unload()
 
     def unload(self) -> None:
-        inner, self._inner = self._inner, None
+        with self._install_lock:
+            inner, self._inner = self._inner, None
         if inner is not None:
             inner.unload()
 
@@ -2901,8 +2913,7 @@ class _PrecompileApi:
         with session:
             pass
         # The capture is finished, so hand back the artifact rather than a
-        # session the caller has to know to save. capture() remains for a
-        # capture whose calls the caller has to make.
+        # session the caller has to know to save.
         return session.artifact(
             require_complete=require_complete,
             require_no_risky_drops=require_no_risky_drops,
@@ -2930,6 +2941,17 @@ class _PrecompileApi:
         2 of Note [precompile programming model], the runtime model must match the
         example model's parameter/buffer structure; precompile re-derives the
         param/buffer list from it (same interning/order as capture).
+
+        The returned object comes in two shapes, decided by the CAPTURE, not by a
+        load-time choice. A dynamo artifact whose capture graph-broke or recompiled
+        serves by INSTALLING onto the captured code objects: the returned callable
+        mutates process state on first call (or on ``__enter__``) and supports
+        ``with`` / ``unload()`` to take that back out. A single-whole-graph artifact
+        is standalone: a plain callable with neither. ``fn=`` applies to the
+        installing shape only -- pass the function object to install onto when it is
+        not importable from where it was captured (defined in ``__main__``, a
+        notebook, or a REPL); it must be passed before the first call, and a
+        standalone artifact rejects it with ``PrecompileError``.
 
         Raises ``PrecompileError`` if ``python_code`` is malformed or is not a
         ``torch.compiler.precompile`` artifact (it fails to parse, or is missing the

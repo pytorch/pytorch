@@ -699,7 +699,9 @@ def compile_to_python(
     *,
     options: dict[str, Any] | None = None,
     is_inference: bool = True,
-    output_strides: list[tuple[int, ...] | None] | None = None,
+    # The entries are CompiledFxGraph.output_strides: PRINTED stride
+    # expressions (strings), symbolic under dynamic shapes -- not ints.
+    output_strides: list[tuple[str, ...] | None] | None = None,
 ) -> tuple[str, bytes | None]:
     """Compile ``gm`` and return ``(inner_python, cache)`` -- the INNER half of the
     backend contract behind ``torch.compiler.precompile``.
