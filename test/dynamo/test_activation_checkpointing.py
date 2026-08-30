@@ -6,6 +6,7 @@ import math
 import re
 import unittest
 from importlib import import_module
+from types import SimpleNamespace
 
 import torch
 import torch._dynamo.config
@@ -21,17 +22,31 @@ from functorch.compile import (
     nop,
 )
 from torch._dynamo.backends.common import aot_autograd
+from torch._dynamo.source import ConstantSource
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
     CompileCounterWithBackend,
     normalize_gm,
 )
+from torch._functorch.partitioners import has_recomputable_rng_ops, is_rng_op
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
+from torch.fx.experimental.sym_node import SymNode
+from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_CUDNN_ATTENTION,
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import IS_WINDOWS, parametrize, skipIfHpu
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    parametrize,
+    skipIfHpu,
+    skipIfXpu,
+    TEST_CUDA,
+)
+from torch.testing._internal.inductor_utils import HAS_GPU_AND_TRITON
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils.checkpoint import (
     checkpoint,
@@ -40,7 +55,10 @@ from torch.utils.checkpoint import (
 )
 
 
-if HAS_CUDA_AND_TRITON:
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
+
+if HAS_GPU_AND_TRITON:
     import triton
     from triton import language as tl
 
@@ -327,7 +345,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         self._validate(fn, backend, x, y)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize(
         "partition_fn",
         [
@@ -357,7 +375,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         self._validate(fn, backend, x, y)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize(
         "partition_fn",
         [
@@ -388,7 +406,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         self._validate(fn, backend, x, y)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_checkpoint_shows_tags_in_tlparse(self, device):
         def gn(x, y):
             return torch.sigmoid(torch.matmul(x, y))
@@ -406,7 +424,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             # Check for the pattern with any graph ID (the ID depends on test order)
             self.assertTrue(
                 re.search(r"# ac_graph_id: \d+ - PREFER_RECOMPUTE", gm_str),
-                f"Expected ac_graph_id pattern not found in:\n{gm_str}",
+                lambda msg: f"{msg}\nExpected ac_graph_id pattern not found in:\n{gm_str}",
             )
             return min_cut_rematerialization_partition(joint_gm, *args, **kwargs)
 
@@ -415,7 +433,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         _ = torch.compile(fn, backend=backend)(x, y)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_ac_tags_through_custom_autograd_function(self, device):
         class MyMM(torch.autograd.Function):
             @staticmethod
@@ -463,7 +481,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         out = torch.compile(fn, backend=backend)(x, w)
         out.sum().backward()
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_sac_tags_through_custom_autograd_function(self, device):
         class MyMM(torch.autograd.Function):
             @staticmethod
@@ -521,7 +539,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         out = torch.compile(fn, backend=backend)(x, w)
         out.sum().backward()
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_tangent_placeholders_have_is_backward_tag(self, device):
         """Test that tangent placeholders in the joint graph are tagged with is_backward."""
 
@@ -555,7 +573,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         _ = torch.compile(fn, backend=backend)(x, y)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize(
         "partition_fn",
         [
@@ -591,7 +609,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         self._validate(fn, backend, x)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize(
         "partition_fn",
         [
@@ -624,7 +642,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         self._validate(fn, backend, x, y)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize(
         "partition_fn",
         [
@@ -663,7 +681,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         self._validate(fn, backend, x)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize(
         "partition_fn",
         [
@@ -706,7 +724,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         self._validate(fn, backend, x)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @torch._inductor.config.patch(fallback_random=True)
     def test_tags_recomputed_rand(self, device):
         def gn(x, y):
@@ -730,7 +748,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         backend = "inductor"
         self._validate(fn, backend, x, y)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @torch._inductor.config.patch(fallback_random=True)
     def test_tags_rand(self, device):
         def gn(x, y):
@@ -757,7 +775,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         backend = "inductor"
         self._validate(fn, backend, x, y)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @torch._inductor.config.patch(fallback_random=True)
     def test_tags_dropout(self, device):
         # Figure out a way to test the number of inductor_random calls
@@ -859,13 +877,13 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(
             additional_saved_tensors,
             expected_additional_saved_tensors,
-            f"""
+            lambda msg: f"""{msg}\n
 Expected additional saved tensors: {expected_additional_saved_tensors} but got: {additional_saved_tensors}.
 Non-primal fwd outputs from model w/ backward hook: {mod_with_hook_fwd_outputs_no_primal}.
 Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no_primal}.""",
         )
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_fallback(self, device):
         def gn(x, y):
             torch._dynamo.graph_break()
@@ -893,7 +911,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self.assertEqual(cnt.op_count, 2)
         self.assertEqual(len(cnt.graphs), 2)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_kwargs(self, device):
         def gn(x, y, z=None):
             a = torch.matmul(x, y)
@@ -927,7 +945,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         body_function = getattr(cnt.graphs[0], wrap_node.args[0].name)
         self.assertEqual(op_count(body_function), 2)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_symints_location(self, device):
         def gn(x, y):
             return torch.matmul(x, torch.nn.functional.dropout(y, 0.5))
@@ -957,7 +975,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         wrap_node = find_first_node(cnt.graphs[0], tag_activation_checkpoint)
         self.assertEqual(len(wrap_node.args), 3)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1065,7 +1083,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         result = opt_fn(a, b)
         self.assertEqual(result, expected)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1121,7 +1139,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1177,7 +1195,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1251,7 +1269,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1308,7 +1326,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1380,7 +1398,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1433,7 +1451,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1485,7 +1503,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1540,7 +1558,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         "In-place op support in selective checkpointing + torch.compile "
         "requires TorchDispatchMode + torch.compile work to complete"
     )
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize(
         "partition_fn",
         [
@@ -1593,7 +1611,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @torch._inductor.config.patch(fallback_random=True)
     @parametrize(
@@ -1660,7 +1678,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             self._validate(fn, backend, x, skip_check=not preserve_rng_state)
             self._compare_orig_and_checkpointed_fns(gn, fn, x)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1705,7 +1723,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         ):
             self._validate(fn, backend, x, y)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize(
         "partition_fn",
         [
@@ -1806,7 +1824,8 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self.assertEqual(out, out_compiled)
         self.assertEqual(input.grad, input_compiled.grad)
 
-    @requires_cuda_and_triton
+    @skipIfXpu(msg="XPU has some known limitations on flash attention.")
+    @requires_gpu_and_triton
     def test_autocast_flash_attention(self, device):
         def fn(primals_1, primals_2, primals_3):
             return torch.ops.aten._scaled_dot_product_efficient_attention.default(
@@ -1830,7 +1849,8 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             res = opt_gn(*args)
             self.assertEqual(ref, res)
 
-    @requires_cuda_and_triton
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/4911")
+    @requires_gpu_and_triton
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
         "This platform doesn't support efficient attention",
@@ -1841,7 +1861,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
                 x, x, x, None, True, dropout_p=0.0
             )[0]
 
-        @torch.compile(mode="reduce-overhead")
+        @torch.compile(mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
         def attn(x):
             return eager_attn(x)
 
@@ -1869,7 +1889,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self.assertEqual(ref, y)
         self.assertEqual(x_ref.grad, x.grad)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_error_msg(self, device):
         class MockModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -1893,7 +1913,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         ):
             opt_fn(x)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_list_inputs(self, device):
         class MockModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -1918,7 +1938,8 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         res = opt_fn(x, [y, z])
         self.assertEqual(ref, res)
 
-    @requires_cuda_and_triton
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3393")
+    @requires_gpu_and_triton
     def test_pattern_matcher(self, device):
         # Check that the sdpa op is recomputed in the backward graph
         # tests percolate_tags
@@ -1964,14 +1985,12 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         fwd_graph = aot_graphs[0]
         # Determine which fused attention backend is expected based on the
         # prioritization logic in sdp_utils.cpp:check_prefer_cudnn_attention.
-        dprops = torch.cuda.get_device_properties(device)
+        dprops = torch.get_device_module(device_type).get_device_properties(device)
         cudnn_version = (
             torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else 0
         )
-        prefer_cudnn = (
-            cudnn_version > 91500 and dprops.major in (9, 10) and dprops.minor in (0, 3)
-        )
-        if prefer_cudnn and torch.version.cuda:
+        prefer_cudnn = cudnn_version > 91500 and dprops.major in (9, 10)
+        if prefer_cudnn and torch.version.cuda and TEST_CUDA:
             sdpa_op = torch.ops.aten._scaled_dot_product_cudnn_attention.default
         else:
             sdpa_op = torch.ops.aten._scaled_dot_product_flash_attention.default
@@ -1983,7 +2002,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self.assertTrue(count_ops(bwd_graph, [], freq=1, op=sdpa_op))
 
     @requires_distributed()
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_distributed_utils_checkpoint_wrapper(self):
         from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
             checkpoint_wrapper as dist_checkpoint_wrapper,
@@ -2011,7 +2030,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self.assertEqual(ref, res)
 
     @requires_distributed()
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_dynamo_does_not_trace_getattr_as_top_frame(self):
         from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
             CheckpointWrapper,
@@ -2159,12 +2178,13 @@ class GraphModule(torch.nn.Module):
 
         wrap_body_0 = self.wrap_body_0
         tag_activation_checkpoint = torch.ops.higher_order.tag_activation_checkpoint(wrap_body_0, l_x_, use_reentrant = False);  wrap_body_0 = l_x_ = None
-        getitem_6: "f32[4, 4]" = tag_activation_checkpoint[0]
-        getitem_7: "f32[4, 4]" = tag_activation_checkpoint[1]
-        getitem_8: "f32[4, 4]" = tag_activation_checkpoint[2];  tag_activation_checkpoint = None
+        getitem_3: "f32[4, 4]" = tag_activation_checkpoint[0]
+        getitem_4: "f32[4, 4]" = tag_activation_checkpoint[1]
 
-        add: "f32[4, 4]" = getitem_6 + getitem_7;  getitem_6 = getitem_7 = None
-        return (add, getitem_8)
+        add: "f32[4, 4]" = getitem_3 + getitem_4;  getitem_3 = getitem_4 = None
+
+        getitem_5: "f32[4, 4]" = tag_activation_checkpoint[2];  tag_activation_checkpoint = None
+        return (add, getitem_5)
 
     class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_: "f32[4, 4]"):
@@ -2665,6 +2685,62 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
             cfn(x).backward()
 
 
+class ActivationCheckpointingSharedModuleTests(torch._dynamo.test_case.TestCase):
+    """Checkpointing the same module at two sibling call sites. See
+    https://github.com/pytorch/pytorch/issues/193194."""
+
+    def test_dynamic_shape_checkpoint_shared_module_two_call_sites(self):
+        # An unspecialized plain-float module attribute (self.eps), read
+        # inside a torch.utils.checkpoint region that's entered from two
+        # sibling call sites under dynamic shapes, used to hard crash with
+        # AssertionError: lift_tracked_freevar_to_input should not be called
+        # on root SubgraphTracer.
+        class Block(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.eps = 1e-6
+
+            def forward(self, x, extra):
+                out = x * self.eps
+                if extra:
+                    out = out + x
+                return out
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.block = Block()
+
+            def forward(self, x):
+                out1 = torch.utils.checkpoint.checkpoint(
+                    self.block, x, False, use_reentrant=False
+                )
+                out2 = torch.utils.checkpoint.checkpoint(
+                    self.block, x, True, use_reentrant=False
+                )
+                return out1 + out2
+
+        model = Model()
+        cnt = CompileCounterWithBackend("aot_eager")
+        # dynamic=True is what unspecializes self.eps (via wrap_symfloat)
+        # rather than specializing it to a constant; it also happens to
+        # cover the two different sequence lengths below with one compile.
+        compiled_model = torch.compile(model, backend=cnt, dynamic=True, fullgraph=True)
+
+        for seq_len in (8, 16):
+            x = torch.randn(2, seq_len, requires_grad=True)
+            expected = model(x)
+            result = compiled_model(x)
+            self.assertEqual(result, expected)
+            # Exercise the AC joint-graph/recompute boundary, where this
+            # issue was originally reported.
+            result.sum().backward()
+
+        # Confirms dynamic shapes were actually exercised: one compile
+        # covering both sequence lengths, not a silent recompile.
+        self.assertEqual(cnt.frame_count, 1)
+
+
 class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
     """Tests for AC reordering optimization in full graph (forward+backward in one graph)."""
 
@@ -2696,7 +2772,7 @@ class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
 
         return result, captured_gm
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(not HAS_GPU_AND_TRITON, "GPU not available")
     def test_ac_rematerialize_simple_forward_backward(self):
         x = torch.randn(4, 4, requires_grad=True)
         y = torch.randn(4, 4, requires_grad=True)
@@ -2773,6 +2849,190 @@ def forward(self, arg0_1, arg1_1):
         ):
             self._compile_and_capture(fwd_bwd_with_rng, True, (x,))
 
+    def test_ac_rematerialize_sdpa_rng_classification(self):
+        sdpa_ops = [
+            torch.ops.aten.scaled_dot_product_attention.default,
+            torch.ops.aten._scaled_dot_product_attention_math_for_mps.default,
+            torch.ops.aten._scaled_dot_product_cudnn_attention.default,
+            torch.ops.aten._scaled_dot_product_cudnn_attention_backward.default,
+            torch.ops.aten._scaled_dot_product_flash_attention.default,
+            torch.ops.aten._scaled_dot_product_flash_attention.quantized,
+            torch.ops.aten._scaled_dot_product_efficient_attention.default,
+            torch.ops.aten._scaled_dot_product_efficient_attention_backward.default,
+            torch.ops.aten._scaled_dot_product_fused_attention_overrideable.default,
+            torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default,
+            torch.ops.aten._flash_attention_forward.default,
+            torch.ops.aten._flash_attention_forward.quantized,
+            torch.ops.aten._flash_attention_forward_no_dropout_inplace.default,
+            torch.ops.aten._efficient_attention_forward.default,
+            torch.ops.aten._cudnn_attention_forward.default,
+        ]
+        shape_env = ShapeEnv()
+        zero_symbol = shape_env.create_symbol(
+            0.0,
+            source=ConstantSource("dropout_zero"),
+            dynamic_dim=DimDynamic.DUCK,
+            constraint_dim=None,
+        )
+        nonzero_symbol = shape_env.create_symbol(
+            0.1,
+            source=ConstantSource("dropout_nonzero"),
+            dynamic_dim=DimDynamic.DUCK,
+            constraint_dim=None,
+        )
+        symfloat_zero = torch.SymFloat(SymNode(zero_symbol, shape_env, float, hint=0.0))
+        symfloat_nonzero = torch.SymFloat(
+            SymNode(nonzero_symbol, shape_env, float, hint=0.1)
+        )
+        dropout_cases = [
+            (0, False),
+            (0.0, False),
+            (-0.0, False),
+            (1e-12, True),
+            (0.1, True),
+            (float("nan"), True),
+        ]
+
+        for op in sdpa_ops:
+            dropout_arg_idx = next(
+                idx
+                for idx, arg in enumerate(op._schema.arguments)
+                if arg.name == "dropout_p"
+            )
+            for dropout_p, expected in dropout_cases:
+                with self.subTest(op=op, dropout_p=dropout_p):
+                    graph = torch.fx.Graph()
+                    q = graph.placeholder("q")
+                    args = [q] * (dropout_arg_idx + 1)
+                    args[dropout_arg_idx] = dropout_p
+                    node = graph.call_function(op, tuple(args), {})
+                    node.meta["recompute"] = (
+                        torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE
+                    )
+                    graph.output(node)
+                    gm = torch.fx.GraphModule({}, graph)
+
+                    self.assertEqual(has_recomputable_rng_ops(gm), expected)
+
+            with self.subTest(op=op, dropout_p="dynamic"):
+                graph = torch.fx.Graph()
+                q = graph.placeholder("q")
+                dropout_p = graph.placeholder("dropout_p")
+                args = [q] * (dropout_arg_idx + 1)
+                args[dropout_arg_idx] = dropout_p
+                node = graph.call_function(op, tuple(args), {})
+                node.meta["recompute"] = (
+                    torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE
+                )
+                graph.output(node)
+                gm = torch.fx.GraphModule({}, graph)
+
+                self.assertTrue(has_recomputable_rng_ops(gm))
+
+            for dropout_p, expected in dropout_cases:
+                with self.subTest(op=op, kwarg_dropout_p=dropout_p):
+                    graph = torch.fx.Graph()
+                    q = graph.placeholder("q")
+                    node = graph.call_function(
+                        op, tuple([q] * dropout_arg_idx), {"dropout_p": dropout_p}
+                    )
+                    node.meta["recompute"] = (
+                        torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE
+                    )
+                    graph.output(node)
+                    gm = torch.fx.GraphModule({}, graph)
+
+                    self.assertEqual(has_recomputable_rng_ops(gm), expected)
+
+            for dropout_p, expected in [
+                (symfloat_zero, False),
+                (symfloat_nonzero, True),
+            ]:
+                with self.subTest(op=op, symfloat_dropout_p=dropout_p):
+                    args = [None] * (dropout_arg_idx + 1)
+                    args[dropout_arg_idx] = dropout_p
+                    node = SimpleNamespace(target=op, args=tuple(args), kwargs={})
+
+                    self.assertEqual(is_rng_op(node), expected)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    def test_ac_rematerialize_with_sdpa_dropout_zero(self):
+        from torch.nn.attention import sdpa_kernel, SDPBackend
+
+        cases = []
+        if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION:
+            cases.append((SDPBackend.EFFICIENT_ATTENTION, torch.float32))
+        if PLATFORM_SUPPORTS_FLASH_ATTENTION:
+            cases.append((SDPBackend.FLASH_ATTENTION, torch.float16))
+        if PLATFORM_SUPPORTS_CUDNN_ATTENTION:
+            cases.append((SDPBackend.CUDNN_ATTENTION, torch.float16))
+        if not cases:
+            self.skipTest("No fused SDPA backends available")
+        sdpa_ops = {
+            torch.ops.aten.scaled_dot_product_attention.default,
+            torch.ops.aten._scaled_dot_product_cudnn_attention.default,
+            torch.ops.aten._scaled_dot_product_flash_attention.default,
+            torch.ops.aten._scaled_dot_product_efficient_attention.default,
+            torch.ops.aten._scaled_dot_product_fused_attention_overrideable.default,
+        }
+
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op in sdpa_ops:
+                return torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE
+            return torch.utils.checkpoint.CheckpointPolicy.PREFER_SAVE
+
+        context_fn = functools.partial(
+            torch.utils.checkpoint.create_selective_checkpoint_contexts, policy_fn
+        )
+
+        for backend, dtype in cases:
+            with self.subTest(backend=backend, dtype=dtype):
+                torch._dynamo.reset()
+                q = torch.randn(
+                    2, 4, 128, 64, device="cuda", dtype=dtype, requires_grad=True
+                )
+                k = torch.randn(
+                    2, 4, 128, 64, device="cuda", dtype=dtype, requires_grad=True
+                )
+                v = torch.randn(
+                    2, 4, 128, 64, device="cuda", dtype=dtype, requires_grad=True
+                )
+
+                def fwd_bwd_with_sdpa(q, k, v):
+                    with sdpa_kernel(backend):
+                        z = torch.utils.checkpoint.checkpoint(
+                            lambda q, k, v: F.scaled_dot_product_attention(
+                                q, k, v, dropout_p=0.0
+                            ),
+                            q,
+                            k,
+                            v,
+                            use_reentrant=False,
+                            context_fn=context_fn,
+                        )
+                        loss = z.sum()
+                        dq, dk, dv = _grad(loss, (q, k, v))
+
+                    return z.detach(), dq, dk, dv
+
+                result_with, gm_with = self._compile_and_capture(
+                    fwd_bwd_with_sdpa, True, (q, k, v)
+                )
+                torch._dynamo.reset()
+                result_without, _ = self._compile_and_capture(
+                    fwd_bwd_with_sdpa, False, (q, k, v)
+                )
+                eager_inputs = tuple(
+                    t.detach().clone().requires_grad_(True) for t in (q, k, v)
+                )
+                result_eager = fwd_bwd_with_sdpa(*eager_inputs)
+
+                for actual, expected in zip(result_with, result_without):
+                    self.assertEqual(actual, expected)
+                for actual, expected in zip(result_with, result_eager):
+                    self.assertEqual(actual, expected)
+                self.assertEqual(sum(self.count_op(gm_with, op) for op in sdpa_ops), 2)
+
     def test_ac_rematerialize_with_no_annotations(self):
         x = torch.randn(4, 4, requires_grad=True)
 
@@ -2848,7 +3108,7 @@ def forward(self, arg0_1, arg1_1):
 
         self.assertTrue(
             any("relu" in name for name in recomputed_nodes),
-            f"Expected relu_recomputed but got: {recomputed_nodes}",
+            lambda msg: f"{msg}\nExpected relu_recomputed but got: {recomputed_nodes}",
         )
 
     def _compile_with_joint_graph_pass_and_capture(self, fn, inputs):
@@ -3076,27 +3336,27 @@ def forward(self, arg0_1):
             gm_with.code.strip(),
             """\
 def forward(self, arg0_1, arg1_1, arg2_1):
-    mm = torch.ops.aten.mm.default(arg0_1, arg1_1)
+    mm = torch.ops.aten.mm.default(arg2_1, arg0_1)
     sin = torch.ops.aten.sin.default(mm);  mm = None
-    mm_1 = torch.ops.aten.mm.default(arg0_1, arg2_1)
-    sigmoid = torch.ops.aten.sigmoid.default(mm_1);  mm_1 = None
-    detach_4 = torch.ops.aten.detach.default(sigmoid)
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
-    sum_2 = torch.ops.aten.sum.default(sigmoid);  sigmoid = None
     ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
     expand = torch.ops.aten.expand.default(ones_like, [4, 4]);  ones_like = None
-    mm_recomputed = torch.ops.aten.mm.default(arg0_1, arg1_1);  arg0_1 = None
+    mm_recomputed = torch.ops.aten.mm.default(arg2_1, arg0_1)
     cos = torch.ops.aten.cos.default(mm_recomputed);  mm_recomputed = None
     mul = torch.ops.aten.mul.Tensor(expand, cos);  expand = cos = None
-    t = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
-    mm_3 = torch.ops.aten.mm.default(mul, t);  mul = t = None
+    t = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
+    mm_2 = torch.ops.aten.mm.default(mul, t);  mul = t = None
+    mm_3 = torch.ops.aten.mm.default(arg2_1, arg1_1);  arg2_1 = None
+    sigmoid = torch.ops.aten.sigmoid.default(mm_3);  mm_3 = None
+    detach_4 = torch.ops.aten.detach.default(sigmoid)
+    sum_2 = torch.ops.aten.sum.default(sigmoid);  sigmoid = None
     ones_like_1 = torch.ops.aten.ones_like.default(sum_2, pin_memory = False, memory_format = torch.preserve_format);  sum_2 = None
     expand_1 = torch.ops.aten.expand.default(ones_like_1, [4, 4]);  ones_like_1 = None
     detach_5 = torch.ops.aten.detach.default(detach_4);  detach_4 = None
     sigmoid_backward = torch.ops.aten.sigmoid_backward.default(expand_1, detach_5);  expand_1 = detach_5 = None
-    t_1 = torch.ops.aten.t.default(arg2_1);  arg2_1 = None
+    t_1 = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
     mm_4 = torch.ops.aten.mm.default(sigmoid_backward, t_1);  sigmoid_backward = t_1 = None
-    add = torch.ops.aten.add.Tensor(mm_3, mm_4);  mm_3 = mm_4 = None
+    add = torch.ops.aten.add.Tensor(mm_2, mm_4);  mm_2 = mm_4 = None
     detach_6 = torch.ops.aten.detach.default(add);  add = None
     return (detach_6,)""",
         )
@@ -3200,7 +3460,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
 
 instantiate_device_type_tests(
-    ActivationCheckpointingViaTagsTests, globals(), except_for="cpu"
+    ActivationCheckpointingViaTagsTests, globals(), except_for="cpu", allow_xpu=True
 )
 
 
@@ -3407,9 +3667,9 @@ def forward(self, arg0_1, arg1_1):
     ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
     expand = torch.ops.aten.expand.default(ones_like, [2, 4]);  ones_like = None
     mm_1 = torch.ops.aten.mm.default(arg1_1, arg0_1);  arg0_1 = None
-    detach = torch.ops.aten.detach.default(mm_1);  mm_1 = None
-    detach_1 = torch.ops.aten.detach.default(detach);  detach = None
-    cos = torch.ops.aten.cos.default(detach_1);  detach_1 = None
+    alias = torch.ops.aten.alias.default(mm_1);  mm_1 = None
+    alias_1 = torch.ops.aten.alias.default(alias);  alias = None
+    cos = torch.ops.aten.cos.default(alias_1);  alias_1 = None
     mul = torch.ops.aten.mul.Tensor(expand, cos);  expand = cos = None
     t = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
     mm_2 = torch.ops.aten.mm.default(t, mul);  t = mul = None
@@ -3439,21 +3699,22 @@ def forward(self, arg0_1, arg1_1):
         gm = self._trace_train_step(Model(), torch.randn(2, 4))
 
         # mm is PREFER_RECOMPUTE so it gets recomputed in backward (mm_1).
-        # sin is MUST_SAVE so its output is saved via detach.
+        # sin is MUST_SAVE so its output is saved via alias under make_fx's
+        # default detach decomposition.
         self.assertExpectedInline(
             gm.code.strip(),
             """\
 def forward(self, arg0_1, arg1_1):
     mm = torch.ops.aten.mm.default(arg1_1, arg0_1)
     sin = torch.ops.aten.sin.default(mm);  mm = None
-    detach = torch.ops.aten.detach.default(sin);  detach = None
+    alias = torch.ops.aten.alias.default(sin);  alias = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
     ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
     expand = torch.ops.aten.expand.default(ones_like, [2, 4]);  ones_like = None
     mm_1 = torch.ops.aten.mm.default(arg1_1, arg0_1);  arg0_1 = None
-    detach_1 = torch.ops.aten.detach.default(mm_1);  mm_1 = None
-    detach_2 = torch.ops.aten.detach.default(detach_1);  detach_1 = None
-    cos = torch.ops.aten.cos.default(detach_2);  detach_2 = None
+    alias_1 = torch.ops.aten.alias.default(mm_1);  mm_1 = None
+    alias_2 = torch.ops.aten.alias.default(alias_1);  alias_1 = None
+    cos = torch.ops.aten.cos.default(alias_2);  alias_2 = None
     mul = torch.ops.aten.mul.Tensor(expand, cos);  expand = cos = None
     t = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
     mm_2 = torch.ops.aten.mm.default(t, mul);  t = mul = None
@@ -3515,14 +3776,14 @@ def forward(self, arg0_1, arg1_1):
     ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
     expand = torch.ops.aten.expand.default(ones_like, [2, 4]);  ones_like = None
     mm_1 = torch.ops.aten.mm.default(arg1_1, arg0_1);  arg0_1 = None
-    detach = torch.ops.aten.detach.default(mm_1)
+    alias = torch.ops.aten.alias.default(mm_1)
     sin_1 = torch.ops.aten.sin.default(mm_1);  mm_1 = None
     empty_like_1 = torch.ops.aten.empty_like.default(sin_1);  sin_1 = None
     bernoulli__1 = torch.ops.aten.bernoulli_.float(empty_like_1);  empty_like_1 = None
     div__1 = torch.ops.aten.div_.Scalar(bernoulli__1, 0.5);  bernoulli__1 = None
     mul_1 = torch.ops.aten.mul.Tensor(expand, div__1);  expand = div__1 = None
-    detach_1 = torch.ops.aten.detach.default(detach);  detach = None
-    cos = torch.ops.aten.cos.default(detach_1);  detach_1 = None
+    alias_1 = torch.ops.aten.alias.default(alias);  alias = None
+    cos = torch.ops.aten.cos.default(alias_1);  alias_1 = None
     mul_2 = torch.ops.aten.mul.Tensor(mul_1, cos);  mul_1 = cos = None
     t = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
     mm_2 = torch.ops.aten.mm.default(t, mul_2);  t = mul_2 = None
@@ -3531,14 +3792,14 @@ def forward(self, arg0_1, arg1_1):
 
 
 class ActivationCheckpointingNestedCompileTests(torch._dynamo.test_case.TestCase):
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_checkpoint_recompute_preserves_nested_fx_trace_policy(self):
         from torch._guards import tracing, TracingContext
         from torch._subclasses import FakeTensorMode
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch.fx.traceback import preserve_node_meta
 
-        compiled_f = torch.compile(lambda x: x.sin().cos(), fullgraph=True)
+        compiled_f = torch.compile(lambda x: x.sin().cos(), fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
 
         @contextlib.contextmanager
         def skip_nested_compile():
@@ -3556,8 +3817,8 @@ class ActivationCheckpointingNestedCompileTests(torch._dynamo.test_case.TestCase
             def block(self, x):
                 return compiled_f(x)
 
-        m = M().cuda()
-        x = torch.randn(8, device="cuda", requires_grad=True)
+        m = getattr(M(), device_type)()
+        x = torch.randn(8, device=device_type, requires_grad=True)
 
         def fn(x):
             y = m(x).sum()
@@ -3592,18 +3853,18 @@ def forward(self, x_1):
     sum_1 = torch.ops.aten.sum.default(cos);  cos = None
     ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format)
     expand = torch.ops.aten.expand.default(ones_like, [8]);  ones_like = None
-    detach = torch.ops.aten.detach.default(x_1)
+    alias = torch.ops.aten.alias.default(x_1)
     sin_1 = torch.ops.aten.sin.default(x_1);  x_1 = None
-    detach_1 = torch.ops.aten.detach.default(sin_1);  sin_1 = None
-    detach_2 = torch.ops.aten.detach.default(detach_1);  detach_1 = None
-    sin_2 = torch.ops.aten.sin.default(detach_2);  detach_2 = None
+    alias_1 = torch.ops.aten.alias.default(sin_1);  sin_1 = None
+    alias_2 = torch.ops.aten.alias.default(alias_1);  alias_1 = None
+    sin_2 = torch.ops.aten.sin.default(alias_2);  alias_2 = None
     neg = torch.ops.aten.neg.default(sin_2);  sin_2 = None
     mul = torch.ops.aten.mul.Tensor(expand, neg);  expand = neg = None
-    detach_3 = torch.ops.aten.detach.default(detach);  detach = None
-    cos_1 = torch.ops.aten.cos.default(detach_3);  detach_3 = None
+    alias_3 = torch.ops.aten.alias.default(alias);  alias = None
+    cos_1 = torch.ops.aten.cos.default(alias_3);  alias_3 = None
     mul_1 = torch.ops.aten.mul.Tensor(mul, cos_1);  mul = cos_1 = None
-    detach_4 = torch.ops.aten.detach.default(sum_1);  sum_1 = None
-    return (detach_4, mul_1)""",
+    alias_4 = torch.ops.aten.alias.default(sum_1);  sum_1 = None
+    return (alias_4, mul_1)""",
         )
 
 

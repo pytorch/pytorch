@@ -8,7 +8,11 @@ from collections import namedtuple
 import torch._C as C
 import torch.utils.cpp_extension
 from torch._python_dispatcher import PythonDispatcher
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 # TODO: Expand the dispatcher API to be a generic API for interfacing with
@@ -55,6 +59,7 @@ def extract_dispatch_table_with_keys(table, dispatch_keys):
 
 
 class TestDispatch(TestCase):
+    hw_classification = HardwareClassification.GENERIC
     namespace_index = 0
 
     def test_all_invariants(self):
@@ -181,8 +186,11 @@ class TestDispatch(TestCase):
             refs = None
             self.assertTrue(
                 False,
-                "expected exception to be raised, but nothing was raised "
-                f"(after running ctors {ctor_order})",
+                lambda msg: f"{msg}\n"
+                + (
+                    "expected exception to be raised, but nothing was raised "
+                    f"(after running ctors {ctor_order})"
+                ),
             )
         # In the order specified by dtor_order, run deregistrations
         for i, op_ix in enumerate(dtor_order):
@@ -950,7 +958,7 @@ CompositeImplicitAutograd[alias] (inactive): fn1 :: (Tensor _0) -> Tensor _0 [ b
         self.assertEqual(
             0,
             len(dangling_impls),
-            msg=f"Expect zero dangling impls, but found: {dangling_impls}",
+            msg=lambda msg: f"{msg}\nExpect zero dangling impls, but found: {dangling_impls}",
         )
 
     def test_find_dangling_impls_ext(self):
@@ -985,6 +993,8 @@ CPU: registered at {extension_path}:5 :: () -> () [ boxed unboxed ]
 
 
 class TestPythonDispatcher(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_basic(self):
         dispatcher = PythonDispatcher()
         dispatcher.register(["CPU", "XLA", "Lazy", "CompositeImplicitAutograd"])

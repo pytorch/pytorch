@@ -32,6 +32,7 @@ OBJECT_ALIASING = guards.OBJECT_ALIASING
 install_object_aliasing_guard = guards.install_object_aliasing_guard
 NO_TENSOR_ALIASING = guards.NO_TENSOR_ALIASING
 install_no_tensor_aliasing_guard = guards.install_no_tensor_aliasing_guard
+install_storage_overlapping_guard = guards.install_storage_overlapping_guard
 
 
 x = torch.tensor(4)
@@ -555,6 +556,9 @@ user_stack=None)
         self.assertTrue(isinstance(x_guards[0], NO_TENSOR_ALIASING))
         self.assertTrue(isinstance(y_guards[0], NO_TENSOR_ALIASING))
         self.assertTrue(isinstance(z_guards[0], NO_TENSOR_ALIASING))
+        self.assertFalse(x_guard_mgr.has_unoptimized_relational_guard())
+        self.assertFalse(y_guard_mgr.has_unoptimized_relational_guard())
+        self.assertFalse(z_guard_mgr.has_unoptimized_relational_guard())
         # Check that the two guards are the same object
         self.assertTrue(x_guards[0] is y_guards[0] is z_guards[0])
         self.assertFalse(guard_manager.check(f_locals))
@@ -780,6 +784,72 @@ user_stack=None)
 
         self.assertTrue(guards_manager.check(foo))
         self.assertFalse(guards_manager.check({"a": 1, "b": 3}))
+
+    def test_dict_getitem_accessor_with_object_aliasing_guard(self):
+        a = tuple(range(1000, 1002))
+        b = tuple(range(1000, 1002))
+        d = {"a": a}
+
+        guards_manager = RootGuardManager()
+        x_mgr = guards_manager.framelocals_manager(("x", 0), "x", a, default_mgr_enum)
+        d_mgr = guards_manager.framelocals_manager(("d", 1), "d", d, default_mgr_enum)
+        d_a_mgr = d_mgr.dict_getitem_manager("a", "d['a']", a, default_mgr_enum)
+        install_object_aliasing_guard(x_mgr, d_a_mgr, ["x is d['a']"], None)
+
+        self.assertTrue(d_a_mgr.has_object_aliasing_guard())
+        self.assertTrue(d_a_mgr.has_unoptimized_relational_guard())
+        self.assertTrue(guards_manager.check({"x": a, "d": d}))
+        self.assertFalse(guards_manager.check({"x": b, "d": d}))
+
+    def test_nested_framelocals_accessor_with_object_aliasing_guard(self):
+        a = tuple(range(1000, 1002))
+        b = tuple(range(1000, 1002))
+        d = {"t": (a,)}
+
+        guards_manager = RootGuardManager()
+        x_mgr = guards_manager.framelocals_manager(("x", 0), "x", a, default_mgr_enum)
+        d_mgr = guards_manager.framelocals_manager(("d", 1), "d", d, default_mgr_enum)
+        # This synthetic nested FrameLocals accessor directly exercises the
+        # descendant-accessor condition; production installs it only at root.
+        d_t_mgr = d_mgr.framelocals_manager(
+            ("t", 0), "d['t']", d["t"], default_mgr_enum
+        )
+        d_t_item_mgr = d_t_mgr.tuple_getitem_manager(
+            0, "d['t'][0]", a, default_mgr_enum
+        )
+        install_object_aliasing_guard(x_mgr, d_t_item_mgr, ["x is d['t'][0]"], None)
+
+        self.assertTrue(guards_manager.check({"x": a, "d": d}))
+        self.assertFalse(guards_manager.check({"x": b, "d": d}))
+
+    def test_storage_overlapping_guard_not_tag_safe(self):
+        from torch._dynamo.guards import GuardManagerWrapper
+
+        storage = torch.randn(6)
+        a = storage[:2]
+        overlapping = storage[1:3]
+        non_overlapping = storage[3:5]
+        d = {"a": a}
+
+        guards_manager = RootGuardManager()
+        x_mgr = guards_manager.framelocals_manager(
+            ("x", 0), "x", overlapping, default_mgr_enum
+        )
+        d_mgr = guards_manager.framelocals_manager(("d", 1), "d", d, default_mgr_enum)
+        d_a_mgr = d_mgr.dict_getitem_manager("a", "d['a']", a, default_mgr_enum)
+        install_storage_overlapping_guard(
+            [x_mgr, d_a_mgr], [], ["x overlaps d['a']"], None
+        )
+
+        GuardManagerWrapper(guards_manager).find_tag_safe_roots()
+
+        self.assertTrue(x_mgr.has_unoptimized_relational_guard())
+        self.assertTrue(d_a_mgr.has_unoptimized_relational_guard())
+        self.assertFalse(x_mgr.is_tag_safe())
+        self.assertFalse(d_mgr.is_tag_safe())
+        self.assertFalse(d_a_mgr.is_tag_safe())
+        self.assertTrue(guards_manager.check({"x": overlapping, "d": d}))
+        self.assertFalse(guards_manager.check({"x": non_overlapping, "d": d}))
 
     def test_globals(self):
         global global_pair, Pair
@@ -1406,6 +1476,145 @@ class TagSafetyChecks(RecursiveDictTagTests):
         with install_guard_manager_testing_hook(hook):
             opt_fn(torch.randn(4, 4))
 
+    def test_unoptimized_relational_guard_not_tag_safe(self):
+        from torch._dynamo.guards import GuardManagerWrapper
+
+        a = tuple(range(1000, 1002))
+        d = {"a": a}
+        root = RootGuardManager()
+        x_mgr = root.framelocals_manager(("x", 0), "x", a, default_mgr_enum)
+        d_mgr = root.framelocals_manager(("d", 1), "d", d, default_mgr_enum)
+        d_a_mgr = d_mgr.dict_getitem_manager("a", "d['a']", a, default_mgr_enum)
+        install_object_aliasing_guard(x_mgr, d_a_mgr, ["x is d['a']"], None)
+
+        GuardManagerWrapper(root).find_tag_safe_roots()
+
+        self.assertTrue(x_mgr.has_unoptimized_relational_guard())
+        self.assertTrue(d_a_mgr.has_unoptimized_relational_guard())
+        self.assertFalse(x_mgr.is_tag_safe())
+        self.assertFalse(d_mgr.is_tag_safe())
+        self.assertFalse(d_a_mgr.is_tag_safe())
+
+    def test_nested_relational_guard_not_tag_safe(self):
+        from torch._dynamo.testing import CompileCounter
+
+        class Mod(torch.nn.Module):
+            def __init__(self, value):
+                super().__init__()
+                self.a = (value,)
+
+        base = torch.randn(2)
+        different = base.clone()
+        mod = Mod(base)
+
+        def fn(t, x, m):
+            if x is m.a[0]:
+                return t + 1
+            return t - 1
+
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        checked_matching_graph = False
+
+        def hook(guard_wrapper, f_locals, builder):
+            nonlocal checked_matching_graph
+
+            if f_locals["x"] is not f_locals["m"].a[0]:
+                return
+
+            from torch._dynamo.source import AttrSource, GetItemSource, LocalSource
+
+            checked_matching_graph = True
+            m_source = LocalSource("m")
+            m_a_source = AttrSource(m_source, "a")
+            m_a_item_source = GetItemSource(m_a_source, 0)
+
+            m_mgr = builder.get_guard_manager_from_source(m_source)
+            m_a_mgr = builder.get_guard_manager_from_source(m_a_source)
+            m_a_item_mgr = builder.get_guard_manager_from_source(m_a_item_source)
+
+            self.assertTrue(m_a_item_mgr.has_unoptimized_relational_guard())
+            self.assertFalse(m_a_item_mgr.is_tag_safe())
+            self.assertFalse(m_a_mgr.is_tag_safe())
+            self.assertFalse(m_mgr.is_tag_safe())
+
+        with torch._dynamo.config.patch(use_recursive_dict_tags_for_guards=True):
+            counter = CompileCounter()
+            opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+            t = torch.tensor(0)
+
+            with install_guard_manager_testing_hook(hook):
+                self.assertEqual(
+                    [
+                        opt_fn(t, base, mod).item(),
+                        opt_fn(t, base, mod).item(),
+                        opt_fn(t, different, mod).item(),
+                    ],
+                    [1, 1, -1],
+                )
+            self.assertEqual(counter.frame_count, 2)
+            self.assertTrue(checked_matching_graph)
+
+    def test_custom_metaclass_mro_first_item_source(self):
+        from torch._dynamo.testing import CompileCounter
+
+        class Meta(type):
+            def mro(cls):
+                return [object, cls]
+
+        class Foo(metaclass=Meta):
+            pass
+
+        def fn(x):
+            if type(x).__mro__[0] is object:
+                return torch.ones(1)
+            return torch.zeros(1)
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        foo = Foo()
+        expected = fn(foo)
+
+        self.assertEqual(opt_fn(foo), expected)
+        self.assertEqual(opt_fn(foo), expected)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_custom_metaclass_mro_first_item_mutation(self):
+        from torch._dynamo.testing import CompileCounter
+
+        use_object_first = False
+
+        class Meta(type):
+            def mro(cls):
+                return [object, cls] if use_object_first else [cls, object]
+
+        class Foo(metaclass=Meta):
+            pass
+
+        def fn(x):
+            if type(x).__mro__[0] is object:
+                return torch.ones(1)
+            return torch.zeros(1)
+
+        counter = CompileCounter()
+        with torch._dynamo.config.patch(
+            assume_dunder_attributes_remain_unchanged=False
+        ):
+            opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+            foo = Foo()
+
+            self.assertEqual(opt_fn(foo), torch.zeros(1))
+            self.assertEqual(counter.frame_count, 1)
+
+            use_object_first = True
+            Foo.__bases__ = Foo.__bases__
+
+            self.assertEqual(opt_fn(foo), torch.ones(1))
+            self.assertEqual(counter.frame_count, 2)
+
     def test_nn_module_tag_safe(self):
         class Foo(torch.nn.Module):
             c = 2
@@ -1448,9 +1657,15 @@ class TagSafetyChecks(RecursiveDictTagTests):
             from utils import install_guard_manager_testing_hook
 
         def hook(guard_wrapper, f_locals, builder):
-            from torch._dynamo.source import LocalSource
+            from torch._dynamo.source import LocalSource, TypeSource
 
             baz_source = LocalSource("baz")
+
+            # type(baz).__mro__[0] and type(baz) are the same object. Their
+            # sources should be canonicalized rather than related by a
+            # redundant object-aliasing guard, which would make baz tag-unsafe.
+            baz_type_mgr = builder.get_guard_manager_from_source(TypeSource(baz_source))
+            self.assertFalse(baz_type_mgr.has_unoptimized_relational_guard())
 
             # Check tagness of baz
             baz_mgr = builder.get_guard_manager_from_source(baz_source)
@@ -2160,7 +2375,9 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
 
         # Only fail if the leak is larger than 1MB.
         self.assertLessEqual(
-            delta, 1 * 1024 * 1024, f"Memory leaked: {delta / 1024 / 1024:.2f} MB"
+            delta,
+            1 * 1024 * 1024,
+            lambda msg: f"{msg}\nMemory leaked: {delta / 1024 / 1024:.2f} MB",
         )
 
     def test_dict_keys_match(self):
