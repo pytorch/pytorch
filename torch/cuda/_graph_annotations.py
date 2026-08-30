@@ -105,12 +105,21 @@ _annotations_enabled: bool = False
 # annotations are enabled.
 _annotation_backend: str = "edge_walk"
 
-# Merged annotations of the ``mark_kernels`` scopes currently open, innermost last: each
-# entry already includes its enclosing scopes, with the inner scope winning shared keys. So
-# the innermost entry is what to annotate with, and leaving a scope just pops. Only the
-# "cupti" backend reads this (at node-creation time); the edge walk derives the same
-# information from graph topology after the fact.
-_active_scopes: list[dict[str, Any]] = []
+# The annotations currently published for nodes as they are created, innermost last: each
+# entry already includes its enclosing scopes, with the inner one winning shared keys, so
+# the innermost entry is what to annotate with. Only the "cupti" backend reads this (at
+# node-creation time); the edge walk derives the same information from graph topology after
+# the fact.
+#
+# Entries are (annotation, region): ``region`` is the TLS region a backward bracket
+# installed alongside its entry, and None for a ``mark_kernels`` scope. A bracket's entry
+# has no guaranteed pop -- the autograd engine skips the posthook when the node raises --
+# and this list is module-global (capture can span threads), so nothing restores it on
+# unwind. What does get restored is the region TLS, via the engine task's
+# ThreadLocalStateGuard, so an entry whose region is no longer current has unwound and is
+# dropped by current_annotation() below. Without that, a backward failure caught inside the
+# capture would leave every later unmarked node wearing the failed node's annotation.
+_active_scopes: list[tuple[dict[str, Any], dict[str, Any] | None]] = []
 
 # Id of the top-level capture graph of the active capture, read once at capture_begin (see
 # maybe_stamp_capture_root) and then used by everyone who needs it: mark_kernels compares
@@ -148,9 +157,17 @@ def _set_annotation_backend(backend: str) -> None:
 
 
 def current_annotation() -> dict[str, Any] | None:
-    """The merged annotation for the ``mark_kernels`` scopes currently open, or ``None`` when
-    none are. Not a public API."""
-    return _active_scopes[-1] if _active_scopes else None
+    """The annotation to attribute a node created right now to, or ``None``.
+
+    Entries whose region has been restored out from under them are dropped first: see
+    :data:`_active_scopes`, a backward bracket whose node raised leaves one behind. Not a
+    public API."""
+    while _active_scopes:
+        annotation, region = _active_scopes[-1]
+        if region is None or region is _current_region():
+            return annotation
+        _active_scopes.pop()
+    return None
 
 
 def record_node_annotation(tools_id: int, annotation: dict[str, Any]) -> None:
@@ -620,7 +637,7 @@ class _BracketState(threading.local):
     """
 
     def __init__(self) -> None:
-        # Entries are (scope, prev_region, merged_region) or _SKIPPED.
+        # Entries are (scope, prev_region, tagged_region, published, depth) or _SKIPPED.
         self.stack: list[Any] = []
 
 
@@ -664,11 +681,13 @@ def _attach_backward_hooks(node: Any, frozen: dict[str, Any], generation: int) -
     ``frozen`` is the region that was current when the node was created:
     the annotations of every scope then open, already collapsed inner-wins.
     The pair brackets the node's execution the same way ``mark_kernels``
-    brackets forward work: snapshot the capture frontier before, collect
-    the new nodes after. It runs on the autograd engine thread executing
-    the node, which during a whole-graph capture participates in the
-    capture; when backward runs outside a capture the prehook sees no
-    active capture and the pair is a no-op.
+    brackets forward work, and splits on the backend the same way: under the
+    edge walk it snapshots the capture frontier before and collects the new
+    nodes after, under CUPTI it publishes itself as the ambient annotation
+    for the nodes created while it runs. It runs on the autograd engine
+    thread executing the node, which during a whole-graph capture
+    participates in the capture; when backward runs outside a capture the
+    prehook sees no active capture and the pair is a no-op.
 
     Executing the node is semantically re-entering its frozen region, so
     the prehook merges ``frozen`` over the live region (a ``mark_kernels``
@@ -682,9 +701,12 @@ def _attach_backward_hooks(node: Any, frozen: dict[str, Any], generation: int) -
     enclosing scope. The posthook records the merged region once; scope
     completion order then yields exactly that precedence at resolve.
 
-    The pops are exception-safe without a finally: each engine task runs
+    The TLS pops are exception-safe without a finally: each engine task runs
     under an ``at::ThreadLocalStateGuard`` that restores both the
-    creation-hook TLS and the region slot even when the node throws.
+    creation-hook TLS and the region slot even when the node throws. The
+    ambient-annotation entry the CUPTI path publishes is module-global and so
+    is not restored that way; it is dropped on next read instead (see
+    :data:`_active_scopes`).
 
     ``generation`` is the annotation generation the owning scope was opened
     under; the bracket only records (and only propagates to created nodes)
@@ -704,10 +726,24 @@ def _attach_backward_hooks(node: Any, frozen: dict[str, Any], generation: int) -
         # captured: kernels of nodes created here may be captured by a
         # later (e.g. second-order) annotated capture.
         merged = {**(_current_region() or {}), **frozen}
+        tagged = {**merged, "autograd_phase": "backward"}
         prev = _enter_region(merged)
         torch._C._autograd._push_node_creation_hook(creation_hook)
-        scope = _begin_kernel_scope() if _annotations_enabled else None
-        state.stack.append((scope, prev, merged))
+        # Under CUPTI the nodes this backward creates are attributed as they are created,
+        # so the bracket publishes itself instead of walking edges -- and it has to, since
+        # what CUPTI would otherwise record is the scope lexically open around the
+        # ``backward()`` call, which this outranks. The entry is published with the region
+        # installed above, which is what lets current_annotation() drop it if this node
+        # raises and its posthook never runs; the truncation below covers the same for any
+        # entry left above it.
+        published = _annotations_enabled and _annotation_backend == "cupti"
+        depth = len(_active_scopes)
+        if published:
+            _active_scopes.append((tagged, merged))
+        scope = (
+            _begin_kernel_scope() if _annotations_enabled and not published else None
+        )
+        state.stack.append((scope, prev, tagged, published, depth))
 
     def posthook(_grad_inputs: Any, _grad_outputs: Any) -> None:
         if not state.stack:
@@ -715,18 +751,45 @@ def _attach_backward_hooks(node: Any, frozen: dict[str, Any], generation: int) -
         entry = state.stack.pop()
         if entry is _SKIPPED:
             return
-        scope, prev, merged = entry
+        scope, prev, tagged, published, depth = entry
+        if published:
+            del _active_scopes[depth:]
         torch._C._autograd._pop_node_creation_hook()
         _exit_region(prev)
         if scope is None:
             return
         tools_ids = _end_kernel_scope(scope)
         if tools_ids:
-            tagged = {**merged, "autograd_phase": "backward"}
             _pending_scopes.append((tagged, tools_ids))
 
     node.register_prehook(prehook)
     node.register_hook(posthook)
+
+
+@contextmanager  # type: ignore[arg-type]
+def _annotation_region(annotation: dict[str, Any], backward: bool):
+    """Publish ``annotation`` as the current region for the body, hooking the autograd
+    nodes created in it when ``backward``.
+
+    Backend-independent, and shared by both of ``mark_kernels``' paths. The region is
+    entered even when ``backward`` is False, since it must reflect the full dynamic scope
+    for nodes hooked by a nested ``backward=True`` scope (or by an executing hooked node)
+    to freeze this annotation too.
+    """
+    generation = _annotation_generation
+
+    def creation_hook(node: Any) -> None:
+        _freeze_region_hook(node, generation)
+
+    prev = _enter_region({**(_current_region() or {}), **annotation})
+    try:
+        if backward:
+            with torch.autograd.graph.node_creation_hook(creation_hook):
+                yield
+        else:
+            yield
+    finally:
+        _exit_region(prev)
 
 
 @contextmanager  # type: ignore[arg-type]
@@ -818,14 +881,18 @@ def mark_kernels(annotation: str | dict[str, Any], *, backward: bool = True):
         # Nodes are attributed as CUPTI reports their creation, so the scope only has to
         # publish itself as the ambient annotation -- no frontier snapshot, and no rescan
         # per enclosing scope. Merge into the enclosing scope on the way in (inner wins), so
-        # leaving is a pop and the enclosing annotation is restored as it was.
+        # leaving restores the enclosing annotation as it was. Leaving truncates rather than
+        # pops one, to also clear any entry a failed backward left above this one.
+        enclosing = current_annotation()
+        depth = len(_active_scopes)
         _active_scopes.append(
-            {**_active_scopes[-1], **annotation} if _active_scopes else annotation
+            ({**enclosing, **annotation} if enclosing else annotation, None)
         )
         try:
-            yield
+            with _annotation_region(annotation, backward):
+                yield
         finally:
-            _active_scopes.pop()
+            del _active_scopes[depth:]
         return
 
     scope = _begin_kernel_scope()
@@ -851,23 +918,8 @@ def mark_kernels(annotation: str | dict[str, Any], *, backward: bool = True):
         yield
         return
 
-    generation = _annotation_generation
-
-    def creation_hook(node: Any) -> None:
-        _freeze_region_hook(node, generation)
-
-    # Enter the region even when backward=False: the region must reflect the
-    # full dynamic scope so that nodes hooked by a nested backward=True scope
-    # (or by an executing hooked node) freeze this annotation too.
-    prev = _enter_region({**(_current_region() or {}), **annotation})
-    try:
-        if backward:
-            with torch.autograd.graph.node_creation_hook(creation_hook):
-                yield
-        else:
-            yield
-    finally:
-        _exit_region(prev)
+    with _annotation_region(annotation, backward):
+        yield
 
     tools_ids = _end_kernel_scope(scope)
     if tools_ids:
