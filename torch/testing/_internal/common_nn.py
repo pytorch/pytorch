@@ -3809,7 +3809,8 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
             module(*input_tuple)
             assert_module_parameters_are(torch.DoubleTensor)
 
-            if TEST_ACCELERATOR and self.should_test_device:
+            # Skip MPS due to MPS limitations in BF16 or FP16 and some ops
+            if TEST_ACCELERATOR and self.should_test_device and not TEST_MPS:
                 # check that to(device) moves module parameters to correct GPU device,
                 # and that float() casts parameters correctly
 
@@ -3845,7 +3846,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
                     module(*input_tuple).to(1)
                     assert_module_parameters_are(torch.FloatTensor, 1)  # type: ignore[attr-defined]
 
-                if not self.skip_double and not TEST_MPS:
+                if not self.skip_double:
                     # test double()
                     input_tuple = tuple(to_double(t).to(self.device) for t in input_tuple)
                     module.double().to(self.device)
