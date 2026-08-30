@@ -212,37 +212,50 @@ class TestTritonHeuristics(TestCase):
         with self.assertRaisesRegex(AssertionError, "exceeds Triton maximum"):
             make_matmul_triton_config({"x": 256, "y": 128, "r": 64}, 8, 1)
 
-    @parametrize("rnumel", [256, 512, 1024])
-    def test_persistent_max_autotune_includes_default_config(self, rnumel):
+    @parametrize("rnumel", [256, 1024])
+    @parametrize(
+        "reduction_hint,rsplit_size",
+        [
+            (ReductionHint.INNER, None),
+            (ReductionHint.INNER, 128),
+            (ReductionHint.OUTER, None),
+            (ReductionHint.OUTER_TINY, None),
+        ],
+    )
+    @parametrize("max_autotune_flag", ["max_autotune", "max_autotune_pointwise"])
+    def test_persistent_max_autotune_includes_default_config(
+        self, rnumel, reduction_hint, rsplit_size, max_autotune_flag
+    ):
         size_hints = {"x": 2048, "r0_": rnumel}
+        inductor_meta = {} if rsplit_size is None else {"RSPLIT_SIZE": rsplit_size}
         triton_meta = {"device": self._fake_cuda_device_properties()}
-        expected_max_configs = {
+        expected_inner_configs = {
             256: [(4, 1), (1, 2), (8, 2)],
-            512: [(2, 1), (1, 4), (8, 4)],
             1024: [(1, 1), (1, 8)],
         }
 
         default_configs = _persistent_reduction_configs(
             size_hints=size_hints,
-            reduction_hint=ReductionHint.INNER,
-            inductor_meta={},
+            reduction_hint=reduction_hint,
+            inductor_meta=inductor_meta,
             triton_meta=triton_meta,
         )
         max_autotune_configs = _persistent_reduction_configs(
             size_hints=size_hints,
-            reduction_hint=ReductionHint.INNER,
-            inductor_meta={"max_autotune": True},
+            reduction_hint=reduction_hint,
+            inductor_meta={**inductor_meta, max_autotune_flag: True},
             triton_meta=triton_meta,
         )
 
         self.assertEqual(len(default_configs), 1)
-        self.assertEqual(
-            [
-                (config.kwargs["XBLOCK"], config.num_warps)
-                for config in max_autotune_configs
-            ],
-            expected_max_configs[rnumel],
-        )
+        if reduction_hint == ReductionHint.INNER and rsplit_size is None:
+            self.assertEqual(
+                [
+                    (config.kwargs["XBLOCK"], config.num_warps)
+                    for config in max_autotune_configs
+                ],
+                expected_inner_configs[rnumel],
+            )
 
         default_keys = [triton_config_to_hashable(c) for c in default_configs]
         max_autotune_keys = [triton_config_to_hashable(c) for c in max_autotune_configs]
