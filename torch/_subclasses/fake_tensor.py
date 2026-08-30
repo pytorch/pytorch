@@ -1373,13 +1373,17 @@ class TensorMetadata:
                 result.append(value)
 
 
-def _same_int_expr(a: IntLikeType, b: IntLikeType) -> bool:
-    if isinstance(a, SymInt) or isinstance(b, SymInt):
-        return (
-            isinstance(a, SymInt)
-            and isinstance(b, SymInt)
-            and a.node.expr == b.node.expr
-        )
+def _same_int_expr(a: _MetadataIntLike, b: _MetadataIntLike) -> bool:
+    if isinstance(a, _SymIntOutputStub):
+        if not isinstance(b, _SymIntOutputStub):
+            return False
+        if isinstance(a.value, int):
+            return isinstance(b.value, int) and a.value == b.value
+        return not isinstance(b.value, int) and a.value._expr == b.value._expr
+    if isinstance(a, SymInt):
+        return isinstance(b, SymInt) and a.node.expr == b.node.expr
+    if isinstance(b, (_SymIntOutputStub, SymInt)):
+        return False
     return a == b
 
 
@@ -2167,34 +2171,38 @@ class FakeTensorMode(TorchDispatchMode):
             view_idx = idxs[0]
 
         metadata = extract_tensor_metadata(output)
-        from torch.fx.experimental.symbolic_shapes import statically_known_true
-
-        is_canonical_contiguous = (
-            view_idx is None
-            and metadata.layout == torch.strided
-            and statically_known_true(metadata.storage_offset == 0)
-            and all(
-                _same_int_expr(cast(IntLikeType, actual), expected)
-                for actual, expected in zip(
-                    metadata.stride,
-                    make_contiguous_strides_for(output.shape),
-                    strict=True,
-                )
-            )
-        )
-        metadata.shape = tuple(state.convert_output(v) for v in metadata.shape)
-        metadata.stride = tuple(state.convert_output(v) for v in metadata.stride)
-        metadata.storage_offset = state.convert_output(metadata.storage_offset)
-        # An int payload is a backreference to an input SymNode. torch.empty
-        # would recompute the stride or offset and lose that node identity.
-        is_canonical_contiguous = is_canonical_contiguous and not any(
-            isinstance(value, _SymIntOutputStub) and isinstance(value.value, int)
-            for value in (*metadata.stride, metadata.storage_offset)
-        )
+        shape = metadata.shape
+        stride = metadata.stride
+        storage_offset = metadata.storage_offset
+        metadata.shape = tuple(state.convert_output(v) for v in shape)
+        metadata.stride = tuple(state.convert_output(v) for v in stride)
+        metadata.storage_offset = state.convert_output(storage_offset)
         metadata.storage_bytes = (
             None
             if metadata.storage_bytes is None
             else state.convert_output(metadata.storage_bytes)
+        )
+        from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+        # An int output-stub payload identifies an input SymNode. torch.empty
+        # would recompute the stride or offset and lose that node identity.
+        has_input_symnode_backref = any(
+            isinstance(value, _SymIntOutputStub) and isinstance(value.value, int)
+            for value in (*metadata.stride, metadata.storage_offset)
+        )
+        is_canonical_contiguous = (
+            view_idx is None
+            and metadata.layout == torch.strided
+            and statically_known_true(storage_offset == 0)
+            and not has_input_symnode_backref
+            and all(
+                _same_int_expr(actual, state.convert_output(expected))
+                for actual, expected in zip(
+                    metadata.stride,
+                    make_contiguous_strides_for(shape),
+                    strict=True,
+                )
+            )
         )
 
         entry = _DispatchCacheEntryOutputInfo(
