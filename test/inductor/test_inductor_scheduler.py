@@ -11,7 +11,7 @@ import torch._inductor.ir as ir
 import torch._inductor.metrics as metrics
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
-from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites
+from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites, StarDep, WeakDep
 from torch._inductor.ir import GraphPartitionSignature
 from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
 from torch._inductor.scheduler import (
@@ -1219,6 +1219,77 @@ class TestScoreFusionMemory(TestCase):
         # Should NOT fuse (2 kernels) because overlap_ratio = 0.25 < 0.5 threshold
         # The _score_fusion_memory_by_buffer_overlap returns 0 for this case
         self.assertEqual(metrics.generated_kernel_count, 2)
+
+
+class TestScoreFusionMemoryTemplateMatch(TestCase):
+    """
+    Exercises the template / UserDefinedTritonKernel name-based matching branch
+    of Scheduler.score_fusion_memory on CPU (no GPU needed). Asserts the
+    name-bucketed matching returns the same score as the reference O(d1 * d2)
+    double loop it replaced.
+    """
+
+    def _make_node(self, reads, writes, is_template):
+        node = Mock(spec=BaseSchedulerNode)
+        node.node = Mock()  # not a UserDefinedTritonKernel
+        node.is_template.return_value = is_template
+        rw = Mock(spec=ReadWrites)
+        rw.reads = OrderedSet(reads)
+        rw.writes = OrderedSet(writes)
+        node.read_writes = rw
+        return node
+
+    @staticmethod
+    def _reference_score(node1, node2, size_hint):
+        def _match(dep1, dep2):
+            if dep1 == dep2:
+                return True
+            if isinstance(dep1, (StarDep, MemoryDep)) and isinstance(
+                dep2, (StarDep, MemoryDep)
+            ):
+                return dep1.name == dep2.name
+            return False
+
+        n1 = node1.read_writes.reads | node1.read_writes.writes
+        n2 = node2.read_writes.reads | node2.read_writes.writes
+        score = 0
+        for a in n1:
+            for b in n2:
+                if _match(a, b):
+                    score += max(size_hint[a], size_hint[b])
+        return score
+
+    def test_template_branch_matches_double_loop(self):
+        i0 = sympy.Symbol("i0")
+        sz = (sympy.Integer(8),)
+        vn = (i0,)
+
+        def md(name, idx):
+            return MemoryDep(name, idx, vn, sz)
+
+        deps = [
+            md("buf0", i0),
+            md("buf0", i0 + 1),  # same name, different index (name-only match)
+            StarDep("buf0"),
+            md("buf1", i0),
+            StarDep("buf2"),
+            WeakDep("buf1", "buf9"),
+            md("buf3", sympy.Integer(0)),
+        ]
+        size_hint = {d: (i + 1) * 10 for i, d in enumerate(deps)}
+
+        node1 = self._make_node(deps[:4], [md("buf1", i0)], is_template=True)
+        node2 = self._make_node(deps[2:], [StarDep("buf0")], is_template=False)
+
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler.dep_size_hint = Mock(side_effect=lambda dep, *a, **k: size_hint[dep])
+
+        got = Scheduler.score_fusion_memory(
+            scheduler, node1, node2, allow_mix_order_reduction=False
+        )
+        expected = self._reference_score(node1, node2, size_hint)
+        self.assertEqual(got, expected)
+        self.assertGreater(got, 0)
 
 
 instantiate_device_type_tests(TestScheduler, globals(), allow_xpu=True)
