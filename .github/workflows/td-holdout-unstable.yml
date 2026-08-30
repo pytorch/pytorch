@@ -1,12 +1,19 @@
 # Owner(s): ["module: ci"]
+#
+# Runs pull-equivalent shards with TD disabled. Keep the copied matrices in sync
+# with pull.yml. "unstable" is required for CI tooling to treat jobs as non-blocking.
 name: td-holdout-unstable
 
 on:
-  # Preserve the PR's initial snapshot; later pushes must not replace this run.
+  # Capture the initial PR snapshot; synchronize events do not rerun it.
   pull_request:
     branches-ignore:
       - nightly
     types: [opened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
 
 permissions:
   id-token: write
@@ -33,7 +40,6 @@ jobs:
       build-environment: linux-jammy-py3.10-gcc11
       docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      allow-reuse-old-whl: false
       ignore-test-config-labels: true
       test-matrix: |
         { include: [
@@ -61,7 +67,6 @@ jobs:
     secrets: inherit
 
   linux-jammy-py3_10-gcc11-test:
-    # run_test.py does not enable TD for this workflow name.
     name: linux-jammy-py3.10-gcc11
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-jammy-py3_10-gcc11-build
@@ -71,6 +76,7 @@ jobs:
       test-matrix: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.test-matrix }}
       tests-to-exclude: "inductor/test_torchinductor_opinfo"
       force-keep-going: true
+      force-no-td: true
       python-version: "3.10"
       compiler: gcc11
     secrets: inherit
@@ -84,7 +90,6 @@ jobs:
       build-environment: linux-jammy-py3.10-clang21
       docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      allow-reuse-old-whl: false
       ignore-test-config-labels: true
       test-matrix: |
         { include: [
@@ -119,6 +124,7 @@ jobs:
       test-matrix: ${{ needs.linux-jammy-py3_10-clang21-build.outputs.test-matrix }}
       tests-to-exclude: "inductor/test_torchinductor_opinfo"
       force-keep-going: true
+      force-no-td: true
       python-version: "3.10"
       compiler: clang21
     secrets: inherit

@@ -138,6 +138,7 @@ runs:
         EVENT_NAME: ${{ github.event_name }}
         SCHEDULE: ${{ github.event.schedule }}
         HEAD_BRANCH: ${{ steps.parse-ref.outputs.branch }}
+        IGNORE_TEST_CONFIG_LABELS: ${{ inputs.ignore-test-config-labels }}
       id: filter
       run: |
         echo "Workflow: ${GITHUB_WORKFLOW}"
@@ -150,7 +151,7 @@ runs:
           --job-name "${JOB_NAME}" \
           --test-matrix "${{ inputs.test-matrix }}" \
           --selected-test-configs "${{ inputs.selected-test-configs }}" \
-          --ignore-test-config-labels "${{ inputs.ignore-test-config-labels }}" \
+          --ignore-test-config-labels "${IGNORE_TEST_CONFIG_LABELS:-false}" \
           --pr-number "${PR_NUMBER}" \
           --tag "${TAG}" \
           --event-name "${EVENT_NAME}" \

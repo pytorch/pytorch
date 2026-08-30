@@ -20,6 +20,7 @@ from filter_test_configs import (
     PREFIX,
     remove_disabled_jobs,
     set_periodic_modes,
+    str_to_bool,
     SUPPORTED_PERIODICAL_MODES,
 )
 
@@ -301,6 +302,14 @@ class TestConfigFilter(TestCase):
             filter(test_matrix, {f"{PREFIX}cfg"}, ignore_test_config_labels=True),
             test_matrix,
         )
+
+    def test_str_to_bool(self) -> None:
+        for value in ("true", "True", " TRUE ", "1", "y", "t", "yes", "on"):
+            self.assertTrue(str_to_bool(value), value)
+        for value in ("false", "False", "0", "", "   ", "n", "no", "f", "off"):
+            self.assertFalse(str_to_bool(value), value)
+        with self.assertRaises(ValueError):
+            str_to_bool("junk")
 
     def test_filter_selected_test_configs(self) -> None:
         testcases = [
