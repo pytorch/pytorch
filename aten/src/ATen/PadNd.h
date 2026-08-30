@@ -7,6 +7,7 @@ enum class padding_mode {
   replicate,
   circular,
   constant,
+  symmetric,
 };
 
 } // namespace at
