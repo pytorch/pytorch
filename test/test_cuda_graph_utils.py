@@ -2020,34 +2020,56 @@ class TestCuptiAnnotationBackend(TestCase):
         return dict(get_kernel_annotations())
 
     def test_parity_with_edge_walk(self):
-        # Both backends must attribute the same nodes for a plain single-stream scope, and
-        # key them the same way: the node ids must match, and every key must be rekeyed to
-        # that capture's exec graph id (what lets an annotation join a trace's "graph node
-        # id"). Comparing keys rather than just counts is what catches the CUPTI handler
-        # recording into a different id space.
+        # Both backends must attribute the same nodes the same way, and key them the same
+        # way: the node ids must match, and every key must be rekeyed to that capture's exec
+        # graph id (what lets an annotation join a trace's "graph node id"). Comparing keys
+        # rather than just counts is what catches the CUPTI handler recording into a
+        # different id space. The backward pass is part of the comparison because it is
+        # attributed by a different mechanism -- hooks the scope installs on the autograd
+        # nodes its forward creates -- that both backends share.
         from cuda.bindings import runtime as cuda_runtime
 
-        node_ids = {}
+        def warm(x):
+            s = torch.cuda.Stream()
+            s.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(s):
+                for _ in range(3):
+                    torch.autograd.grad((x * 2).sin().sum(), x)
+            torch.cuda.current_stream().wait_stream(s)
+
+        by_backend = {}
         for backend in ("edge_walk", "cupti"):
             clear_kernel_annotations()
-            x = self._warm(torch.randn(64, 64, device="cuda"))
+            x = torch.randn(64, 64, device="cuda", requires_grad=True)
+            warm(x)
             g = torch.cuda.CUDAGraph()
             with torch.cuda.graph(
                 g, enable_annotations=True, annotation_config={"backend": backend}
             ):
                 with mark_kernels("phase"):
-                    for _ in range(4):
-                        x = x + 1
+                    y = (x * 2).sin()
+                with mark_kernels({"name": "bwd_region", "lane": 1}):
+                    torch.autograd.grad(y.sum(), x)
             exec_graph_id = _check_cuda_bindings(
                 cuda_runtime.cudaGraphExecGetId(g.raw_cuda_graph_exec())
             )
             annotations = self._annotations()
-            for tools_id, entries in annotations.items():
-                self.assertEqual(entries, [{"name": "phase"}])
+            for tools_id in annotations:
                 self.assertEqual(tools_id >> 32, exec_graph_id)
-            node_ids[backend] = {tools_id & 0xFFFFFFFF for tools_id in annotations}
-        self.assertEqual(node_ids["cupti"], node_ids["edge_walk"])
-        self.assertEqual(len(node_ids["cupti"]), 4)
+            by_backend[backend] = {
+                tools_id & 0xFFFFFFFF: entries
+                for tools_id, entries in annotations.items()
+            }
+        self.assertEqual(by_backend["cupti"], by_backend["edge_walk"])
+
+        # Parity alone would also hold if both backends broke the same way, so pin the
+        # annotation the hooks are there to produce: the forward scope owns its backward
+        # kernels even though a different scope is open around the backward call, whose
+        # other keys still merge in.
+        self.assertIn(
+            [{"name": "phase", "lane": 1, "autograd_phase": "backward"}],
+            by_backend["cupti"].values(),
+        )
 
     def test_scope_entered_before_stream_joins_capture(self):
         # The edge walk snapshots the CURRENT stream's capture state on scope entry, so a
@@ -2184,6 +2206,39 @@ class TestCuptiAnnotationBackend(TestCase):
             y = y + 1
         # No scope was open, so nothing should be attributed to the doomed one.
         self.assertEqual(self._annotations(), {})
+
+    def test_failed_backward_does_not_leak_its_annotation(self):
+        # A node that raises never runs its posthook, so the annotation its bracket
+        # published stays on the module-global stack. If the failure is caught inside the
+        # capture, every later unmarked node would inherit it.
+        class Boom(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad):
+                raise RuntimeError("boom")
+
+        x = torch.randn(64, 64, device="cuda", requires_grad=True)
+        self._warm(x.detach())
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(
+            g, enable_annotations=True, annotation_config={"backend": "cupti"}
+        ):
+            with mark_kernels("fwd"):
+                y = Boom.apply(x)
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                torch.autograd.grad(y.sum(), x)
+            # Outside every scope, and after the failure: must be attributed to nothing.
+            _ = x + 1
+
+        recorded = [
+            entry for entries in self._annotations().values() for entry in entries
+        ]
+        self.assertNotIn("autograd_phase", {k for entry in recorded for k in entry})
+        # The forward scope's own kernels are still attributed.
+        self.assertIn({"name": "fwd"}, recorded)
 
     def test_callback_disarmed_after_capture(self):
         from torch.cuda import _graph_node_callbacks
