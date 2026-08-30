@@ -38,6 +38,7 @@ from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.numbers import int_oo, IntInfinity, NegativeIntInfinity
 from torch.utils._sympy.printers import CppPrinter
 from torch.utils._sympy.reference import (
+    OptimizedPythonReferenceAnalysis,
     PythonReferenceAnalysis,
     ReferenceAnalysis,
     TensorReferenceAnalysis,
@@ -1147,6 +1148,79 @@ class TestSympyFunctions(TestCase):
                 expected = (nv * nv + (-1 - q0v) // 2) % (nv * nv)
                 self.assertEqual(actual, expected)
                 self.assertTrue(0 <= actual < nv * nv)
+
+
+class TestOptimizedPythonReferenceAnalysis(TestCase):
+    @staticmethod
+    def _symfloat():
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        return ShapeEnv().create_unbacked_symfloat()
+
+    @staticmethod
+    def _symint():
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        return ShapeEnv().create_unbacked_symint()
+
+    def test_float_to_int_casts_symfloat(self):
+        # A symbolic float must lower to a SymInt rather than stay a SymFloat;
+        # e.g. the float-bound arange length ceil((end - start) / step) feeds a
+        # tensor size, which must be integral. The unoptimized default no-ops on
+        # symbolic inputs, which would leave a SymFloat here.
+        for cast in (
+            OptimizedPythonReferenceAnalysis.floor_to_int,
+            OptimizedPythonReferenceAnalysis.ceil_to_int,
+            OptimizedPythonReferenceAnalysis.trunc_to_int,
+        ):
+            result = cast(self._symfloat(), torch.int64)
+            self.assertIsInstance(result, torch.SymInt)
+
+    def test_symint_passthrough(self):
+        si = self._symint()
+        for cast in (
+            OptimizedPythonReferenceAnalysis.floor_to_int,
+            OptimizedPythonReferenceAnalysis.ceil_to_int,
+            OptimizedPythonReferenceAnalysis.trunc_to_int,
+        ):
+            self.assertIs(cast(si, torch.int64), si)
+
+    def test_concrete_float(self):
+        self.assertEqual(
+            OptimizedPythonReferenceAnalysis.floor_to_int(3.9, torch.int64), 3
+        )
+        self.assertEqual(
+            OptimizedPythonReferenceAnalysis.ceil_to_int(3.1, torch.int64), 4
+        )
+        self.assertEqual(
+            OptimizedPythonReferenceAnalysis.trunc_to_int(3.9, torch.int64), 3
+        )
+
+    def test_proxy_symfloat_routes_through_dunder(self):
+        # The production caller (the Inductor FX wrapper) evaluates the analysis
+        # under proxy tracing, so the input is a Proxy wrapping a SymFloat rather
+        # than a bare SymFloat. _is_float_symbolic must detect it, and the cast
+        # must emit the integer-producing dunder.
+        from torch.utils._sympy.reference import _is_float_symbolic
+
+        graph = torch.fx.Graph()
+        tracer = torch.fx.proxy.GraphAppendingTracer(graph)
+
+        fnode = graph.placeholder("f")
+        fnode.meta["val"] = self._symfloat()
+        fproxy = torch.fx.Proxy(fnode, tracer)
+        self.assertTrue(_is_float_symbolic(fproxy))
+
+        inode = graph.placeholder("i")
+        inode.meta["val"] = self._symint()
+        iproxy = torch.fx.Proxy(inode, tracer)
+        self.assertFalse(_is_float_symbolic(iproxy))
+
+        result = OptimizedPythonReferenceAnalysis.ceil_to_int(fproxy, torch.int64)
+        self.assertIsInstance(result, torch.fx.Proxy)
+        self.assertTrue(
+            any(n.op == "call_method" and n.target == "__ceil__" for n in graph.nodes)
+        )
 
 
 class TestSingletonInt(TestCase):
