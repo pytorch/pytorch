@@ -13,6 +13,7 @@
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
 #include <limits>
+#include <tuple>
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
@@ -1486,7 +1487,7 @@ struct TORCH_API WeakIValue final {
               reclaim(static_cast<at::TensorImpl*>(payload.as_intrusive_ptr));
       c10::intrusive_ptr<at::TensorImpl, c10::UndefinedTensorImpl> ip(
           temp.lock());
-      temp.release();
+      std::ignore = temp.release();
       if (!ip) {
         return IValue();
       } else {
@@ -1499,7 +1500,7 @@ struct TORCH_API WeakIValue final {
               : payload.as_intrusive_ptr);
       IValue::Payload pl;
       pl.u.as_intrusive_ptr = temp.lock().release();
-      temp.release();
+      std::ignore = temp.release();
       if (!pl.u.as_intrusive_ptr) {
         return IValue();
       } else {
@@ -1516,7 +1517,7 @@ struct TORCH_API WeakIValue final {
         c10::intrusive_ptr_target,
         c10::UndefinedTensorImpl>::reclaim(payload.as_intrusive_ptr);
     size_t result = temp.use_count();
-    temp.release();
+    std::ignore = temp.release();
     return result;
   }
 
@@ -1528,7 +1529,7 @@ struct TORCH_API WeakIValue final {
         c10::intrusive_ptr_target,
         c10::UndefinedTensorImpl>::reclaim(payload.as_intrusive_ptr);
     size_t result = temp.weak_use_count();
-    temp.release();
+    std::ignore = temp.release();
     return result;
   }
   size_t hash() const {
