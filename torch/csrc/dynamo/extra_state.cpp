@@ -131,6 +131,9 @@ void ExtraState::invalidate_locked(
 }
 
 void ExtraState::drain_pending_invalidations() {
+  if (!this->has_pending_invalidations.load(std::memory_order_acquire)) {
+    return;
+  }
   // Swap out under the pending mutex: applying an invalidation can run
   // arbitrary Python (dropping a guard manager reference), which must not
   // happen while that mutex is held.
@@ -138,6 +141,7 @@ void ExtraState::drain_pending_invalidations() {
   {
     std::lock_guard<std::mutex> lock(this->pending_invalidation_mutex);
     pending.swap(this->pending_invalidations);
+    this->has_pending_invalidations.store(false, std::memory_order_release);
   }
   for (auto& [deleted_gm, live_gm] : pending) {
     this->invalidate_locked(deleted_gm, live_gm);
@@ -174,6 +178,7 @@ void ExtraState::invalidate(
           this->pending_invalidation_mutex);
       this->pending_invalidations.emplace_back(
           std::move(deleted_guard_manager), std::move(live_guard_manager));
+      this->has_pending_invalidations.store(true, std::memory_order_release);
     } else {
       this->drain_pending_invalidations();
       this->invalidate_locked(deleted_guard_manager, live_guard_manager);
@@ -206,9 +211,13 @@ void ExtraState::clear_in_place() {
     dead_pending.swap(this->pending_invalidations);
   }
   // frame_state itself is only touched under the GIL (see
-  // extract_frame_state), which the caller holds.
+  // extract_frame_state), which the caller holds. The fresh dict is built
+  // BEFORE the member moves: PyDict_New can trigger a gen-0 collection whose
+  // finalizers run arbitrary Python (or drop the GIL), and in that window
+  // extract_frame_state would Py_INCREF a moved-from null pointer.
+  py::dict fresh_frame_state;
   dead_frame_state = std::move(this->frame_state);
-  this->frame_state = py::dict();
+  this->frame_state = std::move(fresh_frame_state);
   {
     std::lock_guard<std::mutex> lock(this->region_frame_state_mutex);
     dead_region_frame_state.swap(this->region_frame_state_map);
@@ -228,6 +237,7 @@ CacheEntry* extract_cache_entry(
     return nullptr;
   }
   CacheLock lock(extra_state->cache_mutex);
+  extra_state->drain_pending_invalidations();
   // Search own bucket first, then fall back to default bucket (-1),
   // matching lookup() behavior.
   int64_t ids_to_search[] = {isolate_recompiles_id, -1};
@@ -576,6 +586,9 @@ bool try_lookup_without_guard_eval(
     const char** trace_annotation,
     bool is_skip_guard_eval_unsafe) {
   CacheLock lock(extra_state->cache_mutex);
+  // A parked invalidation must not keep serving through this no-guard-eval
+  // fast path (a guardless entry would never be re-checked otherwise).
+  extra_state->drain_pending_invalidations();
   // Own region only, matching lookup().
   const PrecompileEntry* first_precompile_entry = nullptr;
   for (const auto& entry : extra_state->precompile_entries) {
@@ -632,6 +645,7 @@ CacheEntry* create_cache_entry(
     PyObject* guarded_code,
     PyObject* backend) {
   CacheLock lock(extra_state->cache_mutex);
+  extra_state->drain_pending_invalidations();
   int64_t id = get_current_isolate_recompiles_id();
   auto& entries = extra_state->cache_entry_list(id);
   std::list<CacheEntry>::iterator new_iter;
