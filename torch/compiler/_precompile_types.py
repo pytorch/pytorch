@@ -65,6 +65,27 @@ class PrecompileSummary:
     dropped_guards: tuple[tuple[str, str], ...] = ()
     kept_guards: tuple[tuple[str, str], ...] = ()
     risky_dropped_guards: tuple[tuple[str, str], ...] = ()
+    # Guards that COULD have been serialized and were not, because they held
+    # identically across every captured variant. Reported apart from
+    # dropped_guards, which is "could not be serialized", because the reason and
+    # the remedy differ -- but reported, because a capture that silently
+    # discards a precondition should not look like one that had none.
+    policy_dropped_guards: tuple[tuple[str, str], ...] = ()
+    # (guard_type, source, rendered check) for each dropped slot that HAS a
+    # rendered check. Some do not: EMPTY_NN_MODULE_HOOKS_DICT installs nothing
+    # under the default skip_nnmodule_hook_guards, and the global-state guards
+    # are checked in C++ against no source, so those appear in the drop lists
+    # with no entry here rather than with an empty one.
+    #
+    # A slot is identified by its type and its SOURCE, which
+    # for some types is not enough to judge the drop: a dropped
+    # ``('HASATTR', "counts['pixel']")`` may be the benign companion of a kept
+    # TENSOR_MATCH on the same source, or the only thing standing between the
+    # artifact and an optional attribute going missing, and those want very
+    # different reactions. The rendered check names the attribute and so tells
+    # them apart. Reported alongside the three lists rather than folded into
+    # them, so the slot tuples stay the identity the policy compares on.
+    dropped_guard_code: tuple[tuple[str, str, str], ...] = ()
     capture_errors: tuple[str, ...] = ()
 
     @property
@@ -73,6 +94,12 @@ class PrecompileSummary:
 
         False if any frame produced NO guarded code at all, if any frame hit the
         recompile limit, if any was bypassed, or if a capture call raised.
+
+        ``backend_graphs`` is checked too, because ``guarded_codes`` alone cannot
+        tell a real capture from an empty one: ``allow_empty_graphs`` lets a frame
+        that compiled nothing still count as one guarded code, so a model whose
+        every graph sits behind a recursive ``torch._dynamo.disable`` reported
+        complete while carrying no compiled compute at all.
         """
         return (
             not self.bypassed
@@ -80,6 +107,7 @@ class PrecompileSummary:
             and not self.uncovered_frames
             and not self.capture_errors
             and self.guarded_codes > 0
+            and self.backend_graphs > 0
         )
 
     def dropped_guard_types(self) -> dict[str, int]:
