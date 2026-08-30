@@ -2999,10 +2999,8 @@ def to_gpu(obj, type_map=None):
         if not obj.is_leaf:
             raise AssertionError("expected obj to be a leaf tensor")
         t = type_map.get(obj.dtype, obj.dtype)
+        device_type = torch.accelerator.current_accelerator(check_available=True).type
         with torch.no_grad():
-            if not torch.accelerator.is_available():
-                raise AssertionError("expected torch.accelerator to be available")
-            device_type = torch.accelerator.current_accelerator(check_available=True).type
             res = obj.to(dtype=t, device=device_type, copy=True)
             res.requires_grad = obj.requires_grad
         return res
@@ -6768,4 +6766,5 @@ def run_concurrently(worker_func, num_threads=None, args=(), kwargs=None):
     # If a worker thread raises an exception, re-raise it.
     if exc_value is not None:
         raise exc_value
+
     return results

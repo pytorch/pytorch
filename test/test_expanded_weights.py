@@ -37,6 +37,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
     TEST_ACCELERATOR,
+    TEST_MPS,
     TestCase,
 )
 from torch.utils._pytree import tree_map_only
@@ -963,7 +964,7 @@ class TestExpandedWeightModule(TestCase):
 class ContextManagerTests(TestBase):
     def __init__(self, *args, **kwargs):
         self.test_cpu = kwargs.get("test_cpu", True)
-        self.test_device = kwargs.get("test_device", True)
+        self.test_accelerator = kwargs.get("test_accelerator", True)
         super().__init__(*args, **kwargs)
 
     @property
@@ -1047,15 +1048,14 @@ for test_param in supported_tests:
                 )
             ),
         )
-    if TEST_ACCELERATOR and test.test_device:
+    if TEST_ACCELERATOR and not TEST_MPS and test.test_accelerator:
         # since this checks derivatives, only use double for precision
+        device_type = torch.accelerator.current_accelerator(True).type
         setattr(
             TestExpandedWeightModule,
-            test_name + "_accelerator_double",
+            test_name + f"_{device_type}_double",
             decorator(
-                lambda self, test=test: test.test_context_manager(
-                    self, torch.accelerator.current_accelerator()
-                )
+                lambda self, test=test: test.test_context_manager(self, device_type)
             ),
         )
 

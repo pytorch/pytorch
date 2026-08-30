@@ -7,7 +7,6 @@ from collections import namedtuple
 import torch
 import torch.testing._internal.common_nn as common_nn
 import torch.utils.cpp_extension
-from torch.testing._internal.common_utils import TEST_ACCELERATOR, ACCELERATOR_TYPE
 
 
 # Note that this namedtuple is for C++ parity test mechanism's internal use.
@@ -340,13 +339,17 @@ def compute_arg_dict(test_params_dict, test_instance):
     return arg_dict
 
 
-def decorate_test_fn(test_fn, test_device, has_impl_parity, device):
-    if device == ACCELERATOR_TYPE:
-        test_fn = unittest.skipIf(not TEST_ACCELERATOR, "Accelerator unavailable")(test_fn)
+def decorate_test_fn(test_fn, test_accelerator, has_impl_parity, device):
+    if hasattr(torch.get_device_module(device), "is_available"):
+        test_fn = unittest.skipIf(
+            not torch.get_device_module(device).is_available(),
+            f"{device.upper()} unavailable",
+        )(test_fn)
+
     if device != "cpu":
-        test_fn = unittest.skipIf(not test_device, "Excluded from accelerator tests")(
-            test_fn
-        )
+        test_fn = unittest.skipIf(
+            not test_accelerator, "Excluded from accelerator tests"
+        )(test_fn)
 
     # If `Implementation Parity` entry in parity table for this module is `No`,
     # or `has_parity` entry in test params dict is `False`, we mark the test as
