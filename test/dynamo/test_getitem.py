@@ -840,6 +840,20 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(fn(x), self._compile(fn, x))
 
+    def test_str_subscript_symbolic_index(self):
+        # A non-constant key must fall through to the generic "unsupported
+        # subscript" graph break, not leak AsPythonConstantNotImplementedError.
+        def fn(t):
+            i = t.item()
+            torch._check(i >= 0)
+            torch._check(i < 3)
+            return "abc"[i]
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "does not yet support subscripting 'str'"
+        ):
+            self._compile(fn, torch.tensor(1))
+
     # ===================================================================
     # Explicit __getitem__ dunder call path tests
     # Exercises: obj.__getitem__(key) → LOAD_ATTR + CALL, which may

@@ -253,12 +253,9 @@ void THXPEvent_init(PyObject* module) {
   Py_INCREF(THPEventClass);
   THXPEventType.tp_base = THPEventClass;
   THXPEventClass = (PyObject*)&THXPEventType;
-  if (PyType_Ready(&THXPEventType) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyType_Ready(&THXPEventType) >= 0);
   Py_INCREF(&THXPEventType);
-  if (PyModule_AddObject(module, "_XpuEventBase", (PyObject*)&THXPEventType) <
-      0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(
+      PyModule_AddObject(module, "_XpuEventBase", (PyObject*)&THXPEventType) >=
+      0);
 }

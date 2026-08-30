@@ -1,10 +1,8 @@
-// @allow-raw-throw
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 #include <c10/util/Type.h>
 
 #include <atomic>
-#include <iostream>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -118,7 +116,7 @@ void torchCheckFail(
     const char* file,
     uint32_t line,
     const std::string& msg) {
-  // NOLINTNEXTLINE(modernize-use-designated-initializers)
+  // @allow-raw-throw: this is the throw TORCH_CHECK routes to
   throw ::c10::Error({func, file, line}, msg);
 }
 
@@ -127,7 +125,7 @@ void torchCheckFail(
     const char* file,
     uint32_t line,
     const char* msg) {
-  // NOLINTNEXTLINE(modernize-use-designated-initializers)
+  // @allow-raw-throw: this is the throw TORCH_CHECK routes to
   throw ::c10::Error({func, file, line}, msg);
 }
 

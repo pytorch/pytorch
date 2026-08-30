@@ -105,6 +105,8 @@
 #                            debug flags (may OOM nvcc). This was always a CMake
 #                            option; the setup.py comment that listed it as an env
 #                            var was inaccurate -- it was never forwarded.
+#   CUDA_DEVICE_DEBUG        build CUDA device code with -g -G (read in
+#                            cmake/public/cuda.cmake; no effect on MSVC)
 #
 # Removed with setup.py (no longer available):
 #   CMAKE_FRESH              force a fresh configure. Delete the build/ directory
