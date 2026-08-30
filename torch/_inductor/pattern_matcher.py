@@ -1532,6 +1532,11 @@ class ReplacementPatternEntry(PatternEntry):
                     f"expected GraphModule, got {type(replacement_graph)}"
                 )
             replacement = Replacer(replacement_graph).run(*args)
+            # A bare node means the replacement graph returned a single value,
+            # while a sequence means it returned a pack. 
+            # Record it before normalizing, because afterwards a one-element pack 
+            # would be indistinguishable from a bare node.
+            replacement_is_packed = not isinstance(replacement, torch.fx.Node)
             if isinstance(replacement, torch.fx.Node):
                 replacement = [replacement]
 
@@ -1630,7 +1635,24 @@ class ReplacementPatternEntry(PatternEntry):
                         replace(user, new[idx])
                 graph.erase_node(old)
 
-            if len(output_nodes) == len(replacement):
+            # A single matched node consumed through `getitem` needs the packed-return
+            # surgery in `replace()` even when the replacement pack holds exactly one
+            # value: `len(output_nodes) == len(replacement)` is 1 == 1 for a packed
+            # return of one value and for a plain 1:1 replacement alike, and the zip
+            # branch would leave the `getitem` users hanging off the replacement value
+            # (`getitem(<tensor>, 0)`, which then fails to lower).
+            packed_single_output = (
+                len(output_nodes) == 1
+                and len(replacement) == 1
+                and replacement_is_packed
+                and isinstance(replacement[0], torch.fx.Node)
+                and isinstance(output_nodes[0], torch.fx.Node)
+                and len(output_nodes[0].users) > 0
+                and all(
+                    maybe_getitem(user) is not None for user in output_nodes[0].users
+                )
+            )
+            if len(output_nodes) == len(replacement) and not packed_single_output:
                 for old, new in zip(output_nodes, replacement):
                     replace(old, new)
             else:
