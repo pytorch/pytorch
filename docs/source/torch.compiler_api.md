@@ -166,7 +166,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
            example_inputs=[(example_a,), (example_b,)],
        )
        compiled = torch.compiler.precompile.load(python_code, cache)
-       with compiled, torch.no_grad():
+       # staged() breaks only within its own frame, so this artifact is
+       # STANDALONE: a plain callable (an installing artifact -- one whose
+       # capture holds frames the entry cannot reach -- supports `with`).
+       with torch.no_grad():
            out = compiled(example_a)
 ```
 
@@ -196,12 +199,14 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        call. A standalone artifact rejects ``fn=`` with ``PrecompileError``.
    :returns: A runnable callable with the same calling convention as the captured ``fn``.
        Arguments are matched positionally at both capture and load time; keyword-argument
-       calling conventions are not supported. A dynamo artifact whose capture graph-broke
-       or recompiled serves by INSTALLING onto the captured code objects: the returned
+       calling conventions are not supported. A dynamo artifact with captured frames the
+       entry bytecode cannot reach on its own -- for example a graph break inside a child
+       module's frame -- serves by INSTALLING onto the captured code objects: the returned
        callable mutates process state on first call (or on ``__enter__``) and supports
-       ``with`` / ``unload()`` to take that back out. An artifact that captured a single
-       whole graph is standalone: a plain callable, no installation and no ``unload``.
-       Which one you get is a property of the capture, not a load-time choice.
+       ``with`` / ``unload()`` to take that back out. An artifact whose frames are all
+       reachable from the entry -- including one that graph-broke or recompiled only
+       within the entry frame -- is standalone: a plain callable, no installation and no
+       ``unload``. Which one you get is a property of the capture, not a load-time choice.
    :raises PrecompileError: if ``python_code`` is not a valid precompile artifact (it
        fails to parse or is missing its calling-convention metadata), if ``cache`` is
        paired with a different ``python_code`` (mismatched ``backend`` tag, ``tracer``

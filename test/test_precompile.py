@@ -341,12 +341,18 @@ def _precompile_reads_holder_in_list(objs, y):
     return y * 2 if objs[0].bad is not None else y
 
 
-_precompile_reads_shadowed = {
-    "pytype": lambda x: x * x.pytype,
-    "fake_mode": lambda x: x * x.fake_mode,
-    "dispatch_keys": lambda x: x * x.dispatch_keys,
-    "_fake_device": lambda x: x * x._fake_device,
-}
+class _PrecompileClassA:
+    def f(self, x):
+        return x * 2
+
+
+class _PrecompileClassB:
+    def f(self, x):
+        return x * 100
+
+
+def _precompile_calls_method(obj, x, k):
+    return obj.f(x) + k
 
 
 class _PrecompileStepCounter(torch.nn.Module):
@@ -2915,6 +2921,30 @@ class TestPrecompile(TestCase):
         with _maybe_scoped(loaded), torch.no_grad():
             self.assertEqual(loaded(model, x), expected)
 
+    def test_a_different_class_is_refused_not_served(self):
+        # The invariant-guard policy drops what held across every captured
+        # variant, and TYPE_MATCH used to be in that set: a graph traced for one
+        # class was served another and returned the first one's answer. There is
+        # no shape to crash on, so nothing caught it -- and it shipped at the
+        # strict defaults, since a policy drop is not a risky drop.
+        x = torch.randn(4)
+        a = _PrecompileClassA()
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _precompile_calls_method,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                # Two variants differing only in k, so obj's type never varies.
+                example_inputs=[(a, x, 1.0), (a, x, 2.0)],
+            )
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertEqual(loaded(a, x, 1.0), _precompile_calls_method(a, x, 1.0))
+            with self.assertRaisesRegex(RuntimeError, "no captured variant"):
+                loaded(_PrecompileClassB(), x, 1.0)
+
     def test_shape_guards_survive_a_single_example(self):
         # Invariant-guard dropping is licensed by "it discriminated nothing",
         # but with ONE example nothing can discriminate, so the rule would drop
@@ -3185,22 +3215,45 @@ class TestPrecompile(TestCase):
         # An entry frame with no variants has two very different causes. If
         # Dynamo BYPASSED the frame it recorded why, and saying so beats the
         # thin-wrapper advice, which in that case is simply wrong -- it sent one
-        # user restructuring a callable that was never the problem.
+        # user restructuring a callable that was never the problem. Only the
+        # ENTRY's own bypassed codes count: an unrelated bypassed helper frame
+        # must not relabel a thin-wrapper entry as a bypass.
+        from torch._dynamo.package import SerializedCode
         from torch._precompile import _reject_uninstallable_entry
 
-        class _Code:
-            bypassed = True
-            bypass_reason = "cannot pickle 'generator' object"
+        def fwd_loss_bwd():
+            pass
+
+        def helper():
+            pass
+
+        def _make_code(fn, bypassed=True):
+            class _Code:
+                pass
+
+            code = _Code()
+            code.bypassed = bypassed
+            code.bypass_reason = "cannot pickle 'generator' object"
+            code.install_to_global = False
+            code.python_code = SerializedCode.from_code_object(fn.__code__)
+            return code
 
         class _Entry:
             fn_name = "fwd_loss_bwd"
-            codes = [_Code()]
+            codes = [_make_code(fwd_loss_bwd)]
 
         frames = [{"is_entry": True, "variants": []}]
         with self.assertRaisesRegex(PrecompileError, "were BYPASSED during capture"):
             _reject_uninstallable_entry(frames, _Entry())
         with self.assertRaisesRegex(PrecompileError, "cannot pickle 'generator'"):
             _reject_uninstallable_entry(frames, _Entry())
+
+        class _EntryWithForeignBypass:
+            fn_name = "fwd_loss_bwd"
+            codes = [_make_code(helper)]
+
+        with self.assertRaisesRegex(PrecompileError, "thin wrapper"):
+            _reject_uninstallable_entry(frames, _EntryWithForeignBypass())
 
     def test_no_dispatchable_graph_keeps_the_wrapper_hint_when_nothing_bypassed(self):
         from torch._precompile import _reject_uninstallable_entry
