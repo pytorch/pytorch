@@ -108,6 +108,7 @@ import copy
 import functools
 import hashlib
 import importlib.machinery
+import itertools
 import logging
 import os
 import pickle
@@ -124,7 +125,7 @@ from typing_extensions import Self
 
 import torch
 import torch._functorch.config as functorch_config
-from torch._guards import ChainedSource, Source
+from torch._guards import ChainedSource, Guard, Source
 from torch.compiler._precompile_types import (
     ExampleInput,
     FrameInvariants,
@@ -134,7 +135,7 @@ from torch.compiler._precompile_types import (
 from torch.utils._pytree import tree_leaves
 
 from .exc import PackageError
-from .guards import CheckFunctionManager
+from .guards import CheckFunctionManager, record_live_guard_leaves
 from .package import (
     _BackendId,
     _defining_module_name,
@@ -192,6 +193,11 @@ def _capture_config(training: bool = False) -> Iterator[None]:
             functorch_config.force_non_lazy_backward_lowering,
         )
         functorch_config.bundled_autograd_cache = True
+        # Keeps an empty graph as a compiled frame so its guards reach the
+        # artifact. Note it also extends the lifetime of objects the frame
+        # holds: with it on, a weakref callback on a value the frame captured
+        # does not fire when the caller drops its reference
+        # (test/dynamo/test_repros.py ReproTests.test_weakref_callback).
         dynamo_config.allow_empty_graphs = True
         if training:
             # AOTAutograd lowers the backward on the first .backward() call, so
@@ -942,6 +948,14 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
         "CONSTANT_MATCH",
         "EQUALS_MATCH",
         "DUPLICATE_INPUT",
+        # And the guard that pins an input's KIND. Dropped, a graph traced for
+        # one class is served to another and returns the first one's answer,
+        # silently -- there is no shape to crash on. Upstream depends on this
+        # specifically: an AsyncCollectiveTensor's tensor-class guards are
+        # deliberately removed so an ACT-traced graph can be reused for the
+        # resolved tensor, and the observation sites reinstall exactly this
+        # guard to keep that sound.
+        "TYPE_MATCH",
     }
 )
 
@@ -1111,6 +1125,64 @@ def _wont_generalize(
     return tuple(sorted(pinned))
 
 
+# Healing re-serializes, which can in principle prune something new. Bounded
+# rather than open: in practice one pass is always enough.
+_VALIDATION_PASSES = 4
+
+
+def _autograd_cache_bypasses() -> int:
+    """How many graphs AOTAutogradCache declined. Nonzero means the artifact is
+    empty because the cache refused the graph, not because of the grad mode."""
+    from torch._dynamo.utils import counters
+
+    return counters["aot_autograd"].get("autograd_cache_bypass", 0)
+
+
+def _grad_snapshot(
+    fn: object, examples: Sequence[object]
+) -> dict[torch.Tensor, torch.Tensor | None]:
+    """Every tensor an example could accumulate a gradient into, and its .grad.
+
+    Keyed by the tensor itself so one entry survives a tensor appearing in
+    several examples; Tensor hashes by identity, which is what is wanted here.
+    """
+    found: dict[torch.Tensor, torch.Tensor | None] = {}
+
+    def visit(value: object) -> None:
+        if isinstance(value, torch.Tensor):
+            found.setdefault(value, value.grad)
+        elif isinstance(value, torch.nn.Module):
+            for tensor in itertools.chain(value.parameters(), value.buffers()):
+                found.setdefault(tensor, tensor.grad)
+
+    visit(fn if isinstance(fn, torch.nn.Module) else getattr(fn, "__self__", None))
+    for example in examples:
+        args, kwargs = _example_call(example)
+        for leaf in tree_leaves((args, kwargs)):
+            visit(leaf)
+        # tree_leaves flattens a Module to nothing, so visit the raw arguments too.
+        for value in (*args, *kwargs.values()):
+            visit(value)
+    return found
+
+
+def _unrebuildable_guards(code_entry: Any, cause: Exception) -> PackageError:
+    """The error for a frame whose serialized guards will not rebuild.
+
+    Phrased as a property of the captured model rather than of precompile: this
+    is reached when a guard's SOURCE reaches state that reconstruction does not
+    restore, which is something the caller can act on, and the underlying
+    exception names it.
+    """
+    return PackageError(
+        f"precompile: the guards captured for {code_entry.python_code.co_name} "
+        f"cannot be rebuilt from their serialized form, so the artifact would "
+        f"fail on the machine that loads it. A guard's source reaches state "
+        f"that reconstructing its inputs does not restore: "
+        f"{type(cause).__name__}: {cause}"
+    )
+
+
 def varying_guard_slots(
     guard_sets: Mapping[tuple[str, str, int], Sequence[frozenset[_GuardFact]]],
 ) -> frozenset[tuple[str, str]]:
@@ -1217,6 +1289,10 @@ class PrecompileSession:
         # variant of every frame. Off by default: the capture session API
         # serializes everything serializable, and precompile() turns it on.
         self._prune_invariant_guards = False
+        # The leaves every live guard build produced, to compare a rebuild
+        # against; see _report_guard_drift.
+        self._live_guard_leaves: set[tuple[str, str]] = set()
+        self._drifted_guards: set[tuple[str, str]] = set()
         # A training capture traces with grad on and lowers the backward
         # eagerly, so the artifact carries AOTAutograd's CompiledFunction and
         # calling .backward() on a served output runs precompiled code.
@@ -1336,10 +1412,12 @@ class PrecompileSession:
             raise RuntimeError("PrecompileSession cannot be re-entered")
         if self._stack is not None:
             raise RuntimeError("PrecompileSession is already active")
+        grads: dict[torch.Tensor, torch.Tensor | None] = {}
         stack = contextlib.ExitStack()
         # Backends must serialize into the artifact rather than into the
         # process-local inductor cache.
         stack.enter_context(_capture_config(self._training))
+        self._live_guard_leaves = stack.enter_context(record_live_guard_leaves())
         self._stack = stack
         try:
             if self._example_inputs:
@@ -1370,6 +1448,15 @@ class PrecompileSession:
                 _register_explicit_compile_region(isolate_recompiles_id, self)
                 self._optimized = optimize_ctx(self._fn)
             self._compiled = self._optimized
+            # A training example runs a real backward, which ACCUMULATES into
+            # the caller's tensors. Snapshot and clear first, restore in the
+            # finally below: capturing a model must not leave its gradients
+            # changed, and on the documented warmup-step-then-capture flow it
+            # would otherwise double them. make_fx does the same; see the
+            # rationale at torch._precompile._capture.
+            grads = _grad_snapshot(self._fn, self._example_inputs)
+            for tensor in grads:
+                tensor.grad = None
             # Automatic examples are the ordinary no_grad inference path.
             # inference_mode is a distinct guarded state and is disabled here
             # even when the caller entered it before starting capture.
@@ -1416,6 +1503,11 @@ class PrecompileSession:
                     self._finished = True
             raise
         finally:
+            # The SAME grad object, not a copy: a caller holding a prior p.grad
+            # reference, or optimizer state keyed on grad identity, must not be
+            # invalidated by having been used as an example.
+            for tensor, grad in grads.items():
+                tensor.grad = grad
             # Guard/backend state is already in the package. Do not retain the
             # caller's potentially large CPU/GPU example tensors with the session.
             self._example_inputs = ()
@@ -1452,7 +1544,9 @@ class PrecompileSession:
                         self._state.notify_all()
         self._recorded_exception_keys.clear()
         # Before the report, so that it describes the artifact actually written.
-        if self._prune_invariant_guards and exc[0] is None:
+        # The rebuildability check for the other path is in artifact()/save(),
+        # where a caller can catch it like every other artifact-quality gate.
+        if exc[0] is None and self._prune_invariant_guards:
             self._apply_guard_policy()
         if self._invariants_path is None:
             return
@@ -1469,6 +1563,192 @@ class PrecompileSession:
                 getattr(exc[0], "__name__", exc[0]),
                 self._invariants_path,
             )
+
+    def _drop_unrebuildable_guards(self) -> None:
+        """
+        Drop the guards that cannot be rebuilt from their own pickle.
+
+        Serialization records a guard's VALUE, and rebuilding the tree walks its
+        SOURCE against the reconstructed scope -- so a source reaching state the
+        reconstruction does not restore serializes fine and then explodes on the
+        serving machine, at load or, in the installed mode, inside the first
+        served call. Rebuild each frame's guards here, and drop the ones that
+        raise rather than refusing the artifact over them: whether a guard can
+        be rebuilt and whether it is worth keeping are different questions, and
+        the second one already has an answer the caller controls.
+
+        Recorded as RISKY rather than as an ordinary drop. Dropping a guard is
+        not free -- a guard whose source is a bare attribute leaves its
+        companion HASATTR behind, which rebuilds INVERTED against the
+        attribute-less value and routes calls into the graph traced for the
+        other branch -- so this must fail closed under the default
+        require_no_risky_drops, and pass only where the caller has said it
+        accepts unchecked slots.
+        """
+        from torch._dynamo.guards import CheckFunctionManager
+        from torch._dynamo.output_graph import OutputGraphCommon
+        from torch._dynamo.package import load_guards_state, SerializedCode
+
+        for code_entry in self._package.code_entries():
+            f_code = None
+            for guarded in code_entry.guarded_codes:
+                if f_code is None:
+                    f_code = SerializedCode.to_code_object(code_entry.python_code)
+                loaded = load_guards_state(guarded.guards_state)
+                failures: list[tuple[Guard, Exception]] = []
+                try:
+                    probe = CheckFunctionManager(
+                        f_code,
+                        OutputGraphCommon(loaded.output_graph),
+                        shape_code_parts=loaded.shape_code_parts,
+                        runtime_global_scope=None,
+                        guard_build_local_state=getattr(loaded, "local_state", None),
+                        collect_guard_failures=failures,
+                    )
+                except Exception as e:
+                    raise _unrebuildable_guards(code_entry, e) from e
+                self._report_guard_drift(code_entry, probe.guard_manager)
+                if not failures:
+                    continue
+                guarded.guards_state = self._validated(
+                    code_entry,
+                    f_code,
+                    self._reserialize_without(code_entry, f_code, loaded, failures),
+                )
+
+    def _report_guard_drift(self, code_entry: Any, rebuilt: Any) -> None:
+        """Warn when a guard rebuilds into something the live build never made.
+
+        A guard that cannot be rebuilt at all raises, and is dropped. The
+        quieter half of the same failure is a guard that rebuilds into a
+        DIFFERENT check, because reconstruction lost a value it reads -- a
+        dimension marking, a subclass's requires_grad. That serializes, loads,
+        and then never matches, so nothing downstream notices.
+
+        One-directional on purpose: the invariant-guard policy legitimately
+        drops guards, so a leaf present live and absent at load is expected. A
+        leaf the live build never produced is not.
+
+        A warning rather than a refusal. The exclusions this comparison rests on
+        were established on a handful of models, and refusing an artifact over a
+        false positive is worse than the drift it would catch.
+        """
+        if not self._live_guard_leaves:
+            return
+        extra = rebuilt.leaf_fingerprint() - self._live_guard_leaves
+        if not extra:
+            return
+        self._drifted_guards |= extra
+        log.warning(
+            "precompile: %s's guards rebuild into %d check(s) the capture never "
+            "made, so reconstruction lost something they read. They will not "
+            "match at serve time: %s",
+            code_entry.python_code.co_name,
+            len(extra),
+            sorted(f"{cls}: {payload}" for cls, payload in extra)[:5],
+        )
+
+    def _validated(
+        self, code_entry: Any, f_code: types.CodeType, written: bytes
+    ) -> bytes:
+        """Rebuild the pickle that will SHIP, and heal it if it does not.
+
+        The policy pass validates the pickle it READ and ships the one it WROTE.
+        Those differ -- re-serialization rebuilds the value-pruning tree against
+        reconstructed objects, so a value whose identity the reconstruction
+        changed is pruned on the way out even though the guard naming it was
+        kept. Nothing downstream rebuilds the shipped bytes, so that lands on
+        the serving machine as a load failure.
+
+        Loops rather than checking once, because healing re-serializes and a
+        re-serialization is what introduces this class in the first place.
+        """
+        from torch._dynamo.guards import CheckFunctionManager
+        from torch._dynamo.output_graph import OutputGraphCommon
+        from torch._dynamo.package import load_guards_state
+
+        for _ in range(_VALIDATION_PASSES):
+            loaded = load_guards_state(written)
+            failures: list[tuple[Guard, Exception]] = []
+            try:
+                CheckFunctionManager(
+                    f_code,
+                    OutputGraphCommon(loaded.output_graph),
+                    shape_code_parts=loaded.shape_code_parts,
+                    runtime_global_scope=None,
+                    guard_build_local_state=getattr(loaded, "local_state", None),
+                    collect_guard_failures=failures,
+                )
+            except Exception as e:
+                raise _unrebuildable_guards(code_entry, e) from e
+            if not failures:
+                return written
+            written = self._reserialize_without(code_entry, f_code, loaded, failures)
+        raise _unrebuildable_guards(
+            code_entry,
+            AssertionError(f"still not rebuildable after {_VALIDATION_PASSES} passes"),
+        )
+
+    def _record_unrebuildable(
+        self, code_entry: Any, failures: list[tuple[Guard, Exception]]
+    ) -> set[tuple[str, str]]:
+        dropped = set()
+        for guard, exc in failures:
+            slot = (guard.create_fn_name(), guard.name)
+            dropped.add(slot)
+            # Naming the frame matters: several frames can guard the same source
+            # string, so "dropped" and "still failing" are otherwise
+            # indistinguishable between one frame swept and another missed.
+            log.warning(
+                "precompile: dropping guard %s on %s in %s -- it cannot be "
+                "rebuilt from the artifact (%s: %s). Nothing checks it at load "
+                "time.",
+                slot[0],
+                slot[1],
+                code_entry.python_code.co_name,
+                type(exc).__name__,
+                exc,
+            )
+        self._dropped_guards |= dropped
+        self._risky_dropped_guards |= dropped
+        return dropped
+
+    def _reserialize_without(
+        self,
+        code_entry: Any,
+        f_code: types.CodeType,
+        loaded: Any,
+        failures: list[tuple[Guard, Exception]],
+    ) -> bytes:
+        """Re-serialize a frame's guards with the unrebuildable ones removed."""
+        from torch._dynamo.guards import CheckFunctionManager
+        from torch._dynamo.output_graph import OutputGraphCommon
+
+        dropped = self._record_unrebuildable(code_entry, failures)
+
+        def without(entries: Sequence[GuardFilterEntry]) -> Sequence[bool]:
+            return [(e.guard_type, e.name) not in dropped for e in entries]
+
+        failures.clear()
+        try:
+            state = CheckFunctionManager(
+                f_code,
+                OutputGraphCommon(loaded.output_graph),
+                shape_code_parts=loaded.shape_code_parts,
+                runtime_global_scope=None,
+                guard_build_local_state=getattr(loaded, "local_state", None),
+                save_guards=True,
+                serialization_guard_filter_fn=without,
+                strict_error=True,
+                collect_guard_failures=failures,
+            ).guards_state
+        except Exception as e:
+            raise _unrebuildable_guards(code_entry, e) from e
+        if state is None:
+            raise _unrebuildable_guards(
+                code_entry, AssertionError("save_guards produced no guards_state")
+            )
+        return state
 
     def _apply_guard_policy(self) -> None:
         """
@@ -1518,8 +1798,13 @@ class PrecompileSession:
                 if f_code is None:
                     f_code = SerializedCode.to_code_object(code_entry.python_code)
                 loaded = load_guards_state(guarded.guards_state)
+                # This rebuild is also the rebuildability check: a guard whose
+                # source cannot be re-evaluated against the reconstructed values
+                # is collected here rather than aborting the frame, so the
+                # public path never pays for a second pass.
+                failures: list[tuple[Guard, Exception]] = []
                 try:
-                    pruned = CheckFunctionManager(
+                    manager = CheckFunctionManager(
                         f_code,
                         OutputGraphCommon(loaded.output_graph),
                         shape_code_parts=loaded.shape_code_parts,
@@ -1528,20 +1813,21 @@ class PrecompileSession:
                         save_guards=True,
                         # The pickle holds only guards that already survived the
                         # default and user filters, so the policy is the whole
-                        # filter here; and a failure is an internal bug, not
-                        # something to bypass silently.
+                        # filter here.
                         serialization_guard_filter_fn=policy,
                         strict_error=True,
-                    ).guards_state
+                        collect_guard_failures=failures,
+                    )
+                    rebuilt = manager.guard_manager
+                    pruned = manager.guards_state
                     if pruned is None:
                         raise AssertionError("save_guards produced no guards_state")
                 except Exception as e:
-                    raise PackageError(
-                        f"precompile: could not re-serialize the guards of "
-                        f"{code_entry.python_code.co_name} while dropping "
-                        f"invariant ones: {type(e).__name__}: {e}"
-                    ) from e
-                guarded.guards_state = pruned
+                    raise _unrebuildable_guards(code_entry, e) from e
+                if failures:
+                    self._record_unrebuildable(code_entry, failures)
+                self._report_guard_drift(code_entry, rebuilt)
+                guarded.guards_state = self._validated(code_entry, f_code, pruned)
 
         self._policy_dropped_guards |= dropped
         # Not "risky": the policy is the caller stating that the environment is
@@ -1784,6 +2070,11 @@ class PrecompileSession:
         """Run the coverage and guard gates, or raise saying which one failed."""
         if self._stack is not None:
             raise RuntimeError(f"{caller} must be called after the capture block exits")
+        # Here rather than in __exit__ so a caller can catch it like every other
+        # gate below. On the precompile() path _apply_guard_policy already
+        # rebuilt every frame, so this is a no-op there.
+        if not self._prune_invariant_guards:
+            self._drop_unrebuildable_guards()
         summary = self.summary()
         if require_complete and summary.capture_errors:
             raise PackageError(
@@ -1910,6 +2201,8 @@ class PrecompileSession:
         """
         if self._stack is not None:
             raise RuntimeError("save() must be called after the capture block exits")
+        if not self._prune_invariant_guards:
+            self._drop_unrebuildable_guards()
         summary = self.summary()
         if require_complete and summary.capture_errors:
             raise PackageError(
@@ -2027,13 +2320,18 @@ class PrecompileSession:
                 raise
             raise PackageError(
                 "Precompilation captured graphs but their compiled backends were "
-                "never recorded, so there is nothing to serialize. AOTAutograd only "
-                "records the bundled artifact once the BACKWARD compiles, so a "
-                "forward-only capture with grad enabled records nothing on its own. "
-                "Pass training=True to lower the backward eagerly (the joint "
-                "trace synthesizes tangents, so no loss is needed), capture "
-                "under torch.no_grad()/torch.inference_mode() for an inference "
-                "artifact, or run .backward() inside the capture block."
+                "never recorded, so there is nothing to serialize. AOTAutograd "
+                f"records the bundled artifact only when its cache accepts the "
+                f"graph, and it bypassed {_autograd_cache_bypasses()} time(s) "
+                "here. The two things that cause that are a graph the cache "
+                "refuses -- re-run with TORCH_LOGS=+torch._functorch._aot_autograd "
+                "to see the reason at the offending graph -- and a capture whose "
+                "backward never compiles, which is a forward-only capture with "
+                "grad enabled. For the second, pass training=True to lower the "
+                "backward eagerly (the joint trace synthesizes tangents, so no "
+                "loss is needed), capture under torch.no_grad() / "
+                "torch.inference_mode() for an inference artifact, or run "
+                ".backward() inside the capture block."
             ) from e
         log.info("precompile: saved %s to %s", summary, path)
         return summary
@@ -2105,13 +2403,18 @@ class PrecompileSession:
         if missing:
             raise PackageError(
                 "Precompilation captured graphs but their compiled backends were "
-                "never recorded, so there is nothing to serialize. AOTAutograd only "
-                "records the bundled artifact once the BACKWARD compiles, so a "
-                "forward-only capture with grad enabled records nothing on its own. "
-                "Pass training=True to lower the backward eagerly (the joint "
-                "trace synthesizes tangents, so no loss is needed), capture "
-                "under torch.no_grad()/torch.inference_mode() for an inference "
-                "artifact, or run .backward() inside the capture block."
+                "never recorded, so there is nothing to serialize. AOTAutograd "
+                f"records the bundled artifact only when its cache accepts the "
+                f"graph, and it bypassed {_autograd_cache_bypasses()} time(s) "
+                "here. The two things that cause that are a graph the cache "
+                "refuses -- re-run with TORCH_LOGS=+torch._functorch._aot_autograd "
+                "to see the reason at the offending graph -- and a capture whose "
+                "backward never compiles, which is a forward-only capture with "
+                "grad enabled. For the second, pass training=True to lower the "
+                "backward eagerly (the joint trace synthesizes tangents, so no "
+                "loss is needed), capture under torch.no_grad() / "
+                "torch.inference_mode() for an inference artifact, or run "
+                ".backward() inside the capture block."
             )
         return {str(b): collected[b] for b in entry.backend_ids}
 
@@ -2277,6 +2580,35 @@ def precompile_load(
     )
 
 
+def prepare_cache_entry(
+    fn: Callable[..., object], cache_entry: PrecompileCacheEntry
+) -> CompilePackage:
+    """Build everything serving needs that does not touch the interpreter.
+
+    An installed artifact defers its mutation to the first served call, which is
+    the right default -- the mutation should happen where the caller can see it
+    -- but every way an artifact can be wrong for the host it landed on was
+    deferred with it, so the failure arrived several batches into a training
+    loop. The version and inlined-source checks run in the constructor here, and
+    the guard trees and backends are built now and CONSUMED by the later
+    install() rather than rebuilt, so this is not extra work, only earlier work.
+    """
+    package = CompilePackage(
+        _entry_fn_of(fn),
+        cache_entry.dynamo,
+        serialization_guard_filter_fn=default_guard_filter_fn,
+    )
+    try:
+        package.prepare(cache_entry.backends)
+    except Exception as e:
+        raise PackageError(
+            f"precompile: this artifact does not fit this host, so serving it "
+            f"would fail inside the first call rather than here: "
+            f"{type(e).__name__}: {e}"
+        ) from e
+    return package
+
+
 def serve_cache_entry(
     fn: Callable[..., object],
     cache_entry: PrecompileCacheEntry,
@@ -2286,6 +2618,7 @@ def serve_cache_entry(
     | None = None,
     recompile_limit: int = 256,
     dynamic: bool | None = None,
+    prepared: CompilePackage | None = None,
 ) -> PrecompiledCallable:
     """Wire an already-loaded cache entry onto ``fn`` and install it.
 
@@ -2296,7 +2629,9 @@ def serve_cache_entry(
     place rather than being written twice.
     """
     entry_fn = _entry_fn_of(fn)
-    package = CompilePackage(
+    # prepare_cache_entry already built this package's guard trees and backends
+    # at load; install() below consumes them instead of rebuilding.
+    package = prepared or CompilePackage(
         entry_fn,
         cache_entry.dynamo,
         serialization_guard_filter_fn=(

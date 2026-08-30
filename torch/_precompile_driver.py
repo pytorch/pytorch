@@ -469,6 +469,30 @@ def _build_multigraph_forward():
             f"artifact was produced on Python {produced_on[0]}.{produced_on[1]}"
         )
 
+    # A dynamo artifact carries Dynamo internals in its opaque blobs, so it is
+    # locked to the build that made it. Say so, rather than letting the mismatch
+    # surface as whatever import or attribute error happens to come first.
+    produced_by = globals().get("TORCH_VERSION")
+    if produced_by is not None and produced_by != torch.__version__:
+        raise ValueError(
+            f"artifact was produced by torch {produced_by}, "
+            f"this is torch {torch.__version__}"
+        )
+
+    # The graphs below were captured with these functions inlined into them, so
+    # their current source has to be the source that was traced. The installed
+    # mode gets this check from CompilePackage; here it is the artifact's own.
+    from torch._dynamo.package import _hash_sourcelines
+
+    for _module, _first, _last, _checksum in globals().get("INLINED_SOURCES", ()):
+        if _hash_sourcelines(importlib.import_module(_module), _first, _last) != (
+            _checksum
+        ):
+            raise ValueError(
+                f"source code changes detected for {_module} "
+                f"(line {_first} - line {_last}); recapture the artifact"
+            )
+
     frames = pickle.loads(base64.b64decode(_FRAMES))
     backends = pickle.loads(base64.b64decode(_BACKENDS)) if _BACKENDS else {}
 
@@ -660,7 +684,7 @@ def _build_installed_forward():
             code, sys.modules[code_entry.python_module].__dict__, code.co_name
         )
 
-    def _serve(fn):
+    def _serve(fn, prepared=None):
         from torch._dynamo.precompile_context import PrecompileContext
         from torch._dynamo.precompile_package import serve_cache_entry
 
@@ -669,6 +693,6 @@ def _build_installed_forward():
         # form of this artifact.
         for _backend in cache_entry.backends.values():
             PrecompileContext.record_artifact(_backend)
-        return serve_cache_entry(fn, cache_entry, backend=BACKEND)
+        return serve_cache_entry(fn, cache_entry, backend=BACKEND, prepared=prepared)
 
     return _InstalledArtifact(_serve, _entry_function)

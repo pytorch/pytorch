@@ -328,6 +328,82 @@ class _PrecompileTrainMod(torch.nn.Module):
         return torch.relu(self.b(torch.relu(self.a(x))))
 
 
+# A tensor carrying side metadata as a plain Python attribute -- APS hangs a CPU
+# twin on a GPU tensor this way, and torch itself hangs _dynamo_dynamic_indices.
+# Reconstruction rebuilds a tensor from its metadata alone, so a guard whose
+# source traverses the attribute has to carry it or it cannot be rebuilt.
+class _PrecompileReadsAttr(torch.nn.Module):
+    def forward(self, x):
+        companion = getattr(x, "_cpu_copy", None)
+        if companion is not None:
+            return x * 2 + companion.to(x.device)
+        return x * 2
+
+
+def _precompile_attr_helper(model, x):
+    # x itself must cross the break: rebinding it to an intermediate would drop
+    # the attribute and the guard under test would never be built.
+    torch._dynamo.graph_break()
+    return model(x).sum()
+
+
+def _precompile_attr_entry(model, x):
+    return _precompile_attr_helper(model, x)
+
+
+_DRIFT_MODULE = None
+
+
+def _precompile_drift_entry(x):
+    return _DRIFT_MODULE.scaled(x).sum()
+
+
+_LUT_MODULE = None
+
+
+def _precompile_reads_module_global(x):
+    return x * _LUT_MODULE.LUT.sum()
+
+
+class _PrecompileClassA:
+    def f(self, x):
+        return x * 2
+
+
+class _PrecompileClassB:
+    def f(self, x):
+        return x * 100
+
+
+def _precompile_calls_method(obj, x, k):
+    return obj.f(x) + k
+
+
+def _precompile_reads_flag(x):
+    return x * getattr(x, "my_flag", 1)
+
+
+def _serialized_guard_names(code):
+    """Every guard name actually present in a shipped artifact's guard state."""
+    from torch._dynamo.package import load_guards_state
+    from torch._precompile import _read_literal
+
+    names = []
+    for frame in pickle.loads(
+        base64.b64decode(_read_literal(ast.parse(code), "_FRAMES"))
+    ):
+        for variant in frame["variants"]:
+            state = load_guards_state(variant["guards_state"])
+            names += [g.name for g in state.output_graph.guards]
+    return " ".join(names)
+
+
+def _read_risky(code):
+    from torch._precompile import _read_literal
+
+    return _read_literal(ast.parse(code), "RISKY_DROPPED_GUARDS")
+
+
 class _PrecompileUnpicklableHolder:
     def __init__(self, bad):
         self.bad = bad
@@ -2708,7 +2784,150 @@ class TestPrecompile(TestCase):
         )
         self.assertTrue(_read_literal(ast.parse(code), "POLICY_DROPPED_GUARDS"))
 
+    def test_installed_artifact_reuses_what_load_prepared(self):
+        # Preparing at load is only worth doing if install CONSUMES the result;
+        # otherwise it is the same work twice and a per-artifact memory cost.
+        import torch._dynamo.package as package_module
 
+        built = []
+        real = package_module.load_guard_manager
+
+        def count(*args, **kwargs):
+            built.append(1)
+            return real(*args, **kwargs)
+
+        model = _PrecompileBreakingModule().eval()
+        x = torch.randn(3, 8)
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _precompile_attr_entry,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+                example_inputs=[(model, x)],
+            )
+        from torch._precompile import _parse_artifact_metadata
+
+        self.assertEqual(_parse_artifact_metadata(code)["SERVING_MODE"], "installed")
+        torch._dynamo.reset()
+        with mock.patch.object(package_module, "load_guard_manager", count):
+            loaded = torch.compiler.precompile.load(code, cache)
+            at_load = len(built)
+            with _maybe_scoped(loaded), torch.no_grad():
+                loaded(model, x)
+        self.assertGreater(at_load, 0)
+        self.assertEqual(len(built), at_load)
+
+    def test_installed_artifact_is_prepared_at_load_not_at_first_call(self):
+        # An installed artifact defers its mutation to the first call, which is
+        # the right default -- but it used to defer every way the artifact can
+        # be wrong for this host along with it, so a guard that would not
+        # rebuild surfaced as a bare AttributeError in the middle of a training
+        # step. Injected here, because capture now refuses this at the source.
+        from torch._dynamo.guards import GuardsStatePickler
+        from torch._dynamo.precompile_package import PrecompileSession
+
+        model = _PrecompileReadsAttr()
+        x = torch.randn(8)
+        x._cpu_copy = torch.randn(8)
+        drop = mock.patch.object(
+            GuardsStatePickler, "_carried_tensor_attributes", lambda self, obj: None
+        )
+        with (
+            drop,
+            mock.patch.object(
+                PrecompileSession, "_drop_unrebuildable_guards", lambda self: None
+            ),
+            mock.patch.object(
+                PrecompileSession, "_apply_guard_policy", lambda self: None
+            ),
+            torch.no_grad(),
+        ):
+            code, cache = torch.compiler.precompile(
+                _precompile_attr_entry,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+                example_inputs=[(model, x)],
+            )
+        from torch._precompile import _parse_artifact_metadata
+
+        self.assertEqual(_parse_artifact_metadata(code)["SERVING_MODE"], "installed")
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(PrecompileError, "does not fit this host"):
+            torch.compiler.precompile.load(code, cache)
+
+    @parametrize("api", ["session", "public"])
+    def test_guards_that_cannot_be_rebuilt_are_dropped_not_refused(self, api):
+        # A guard that cannot be rebuilt is dropped and recorded, not grounds
+        # for refusing the other frames. Whether it is worth keeping is a
+        # separate question with an answer the caller already controls, so the
+        # drop is RISKY: the default rail still refuses, and only a caller who
+        # said it accepts unchecked slots gets an artifact.
+        # Fault-injected, because the reachable causes are fixed.
+        from torch._dynamo.exc import PackageError
+        from torch._dynamo.guards import GuardsStatePickler
+        from torch._dynamo.precompile_package import precompile_capture
+
+        model = _PrecompileReadsAttr()
+        x = torch.randn(8)
+        x._cpu_copy = torch.randn(8)
+        # Stop carrying ONE attribute, leaving the rest intact, so this can tell
+        # a dropped guard apart from a wrecked artifact. Bound before patching,
+        # or the replacement calls itself.
+        real_carry = GuardsStatePickler._carried_tensor_attributes
+
+        def drop_only_cpu_copy(self, obj):
+            carried = real_carry(self, obj)
+            if carried:
+                carried = {k: v for k, v in carried.items() if k != "_cpu_copy"}
+            return carried or None
+
+        drop = mock.patch.object(
+            GuardsStatePickler, "_carried_tensor_attributes", drop_only_cpu_copy
+        )
+        if api == "public":
+            with drop, torch.no_grad():
+                with self.assertRaisesRegex(PrecompileError, "can affect dispatch"):
+                    torch.compiler.precompile(
+                        _precompile_call_model,
+                        backend="eager",
+                        dynamic=False,
+                        tracer="dynamo",
+                        example_inputs=[(model, x)],
+                    )
+                code, cache = torch.compiler.precompile(
+                    _precompile_call_model,
+                    backend="eager",
+                    dynamic=False,
+                    tracer="dynamo",
+                    require_no_risky_drops=False,
+                    example_inputs=[(model, x)],
+                )
+            self.assertIn("_cpu_copy", str(_read_risky(code)))
+            # Recorded is not enough: the pickle is what the serving machine
+            # rebuilds from, so a dropped guard still in it fails there exactly
+            # as it failed here.
+            self.assertNotIn("_cpu_copy", _serialized_guard_names(code))
+            torch._dynamo.reset()
+            loaded = torch.compiler.precompile.load(code, cache)
+            # Serving is the point: dropping the guard is only useful if what
+            # is left still matches the call it was captured on.
+            with _maybe_scoped(loaded), torch.no_grad():
+                self.assertEqual(loaded(model, x), _precompile_call_model(model, x))
+            return
+        with drop, torch.no_grad():
+            session = precompile_capture(_precompile_call_model, backend="eager")
+            with session as compiled:
+                compiled(model, x)
+            with self.assertRaisesRegex(PackageError, "can affect dispatch"):
+                session.artifact(require_complete=False)
+            summary = session.summary()
+        self.assertTrue(
+            any("_cpu_copy" in name for _, name in summary.risky_dropped_guards)
+        )
 
     @parametrize("where", ["object", "in_a_list"])
     def test_unpicklable_guard_value_names_where_it_lives(self, where):
@@ -2736,10 +2955,124 @@ class TestPrecompile(TestCase):
                 example_inputs=[args],
             )
 
+    @parametrize("broken", [False, True])
+    def test_guard_through_a_tensor_attribute_round_trips(self, broken):
+        # The whole point: a guard rooted at x._cpu_copy. Both serving modes,
+        # because the standalone one raised at load() while the installed one
+        # deferred the same AttributeError into the first served call.
+        model = _PrecompileReadsAttr()
+        x = torch.randn(8)
+        x._cpu_copy = torch.randn(8)
+        entry = _precompile_attr_entry if broken else _precompile_call_model
+        args = (model, x)
+        with torch.no_grad():
+            expected = entry(*args)
+            code, cache = torch.compiler.precompile(
+                entry,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+                example_inputs=[args],
+            )
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertEqual(loaded(*args), expected)
 
+    def test_tensor_attribute_is_carried_by_value_not_baked(self):
+        # The attribute is carried so the guard can be REBUILT, not so its value
+        # can be reused: rebinding it between capture and serve must change the
+        # answer, and a large one must not land in the artifact.
+        model = _PrecompileReadsAttr()
+        x = torch.randn(8)
+        x._cpu_copy = torch.zeros(2048, 8)[0]
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _precompile_call_model,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+                example_inputs=[(model, x)],
+            )
+        self.assertLess(len(code), 200_000)
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            for _ in range(2):
+                x._cpu_copy = torch.randn(8)
+                self.assertEqual(loaded(model, x), model(x))
 
+    def test_self_referential_tensor_attribute_round_trips(self):
+        # Carried in the reduce STATE slot rather than as a constructor
+        # argument, so pickle memoizes the tensor before it saves the state and
+        # an attribute pointing back at its own tensor terminates.
+        x = torch.randn(4)
+        x.my_flag = x
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _precompile_reads_flag,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+                example_inputs=[(x,)],
+            )
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertEqual(loaded(x), _precompile_reads_flag(x))
 
+    @parametrize(
+        "marking",
+        ["unbacked", "unbacked_bounds", "unbacked_shape_id", "static", "dynamic"],
+    )
+    def test_marked_artifact_serves_the_tensor_it_captured(self, marking):
+        # The dimension-marking guard reads its attributes off the example value
+        # rather than through a source, so nothing registers them in the guard
+        # tree and value pruning drops them -- leaving the rebuilt guard
+        # comparing against nothing and the artifact refusing the very tensor it
+        # was captured on.
+        #
+        # Serving the SAME marked tensor is the whole point. Every other marking
+        # test in these suites marks one tensor and serves a fresh unmarked one,
+        # which passes with the bug fully present.
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(8, 4)
+        {
+            "unbacked": lambda t: mark_unbacked(t, 0),
+            "unbacked_bounds": lambda t: mark_unbacked(t, 0, min=4, max=16),
+            "unbacked_shape_id": lambda t: mark_unbacked(t, 0, shape_id="b"),
+            "static": lambda t: torch._dynamo.decorators.mark_static(t, 0),
+            "dynamic": lambda t: mark_dynamic(t, 0),
+        }[marking](x)
+        code, cache = torch.compiler.precompile(
+            _precompile_call_model,
+            example_inputs=[(m, x)],
+            training=True,
+            tracer="dynamo",
+            require_no_risky_drops=False,
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(loaded(m, x), m(x))
 
+    def test_attribute_shadowing_fake_tensor_state_is_refused(self):
+        # A reconstructed tensor IS a FakeTensor, so an attribute of the same
+        # name as one a FakeTensor keeps its own state in cannot be carried.
+        # Refuse by name rather than fail somewhere inside the rebuild.
+        for name, fn in _precompile_reads_shadowed.items():
+            x = torch.randn(4)
+            x.__dict__[name] = 3
+            with self.assertRaisesRegex(PrecompileError, f"a guard reads '{name}'"):
+                torch.compiler.precompile(
+                    fn,
+                    backend="eager",
+                    dynamic=False,
+                    tracer="dynamo",
+                    require_no_risky_drops=False,
+                    example_inputs=[(x,)],
+                )
 
     def test_serialized_guards_drop_export_bookkeeping(self):
         # Guard.code_list and .guard_types are rebuilt by create_fn at load, and
@@ -2795,6 +3128,220 @@ class TestPrecompile(TestCase):
         for name in (b"FakeTensorMode", b"MetaTensorDescriber", b"WeakIdRef"):
             self.assertNotIn(name, blob)
 
+    def test_capture_builds_each_guard_tree_twice_not_three_times(self):
+        # A serialization-only filter used to force an extra inspection build:
+        # with no runtime filter the runtime build already sees every guard, so
+        # it IS the inspection build and its builder answers the same questions.
+        from torch._dynamo.guards import CheckFunctionManager
+
+        # Per manager, not in total: the capture also rebuilds guards to
+        # validate them, and those builds are deliberate.
+        builds: dict[int, int] = {}
+        real_build = CheckFunctionManager.build_guards
+
+        def count_build(self, *args, **kwargs):
+            builds[id(self)] = builds.get(id(self), 0) + 1
+            return real_build(self, *args, **kwargs)
+
+        with (
+            mock.patch.object(CheckFunctionManager, "build_guards", count_build),
+            torch.no_grad(),
+        ):
+            torch.compiler.precompile(
+                _precompile_call_model,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                example_inputs=[
+                    (torch.nn.Linear(8, 4).eval(), torch.randn(n, 8)) for n in (3, 5)
+                ],
+            )
+        self.assertTrue(builds)
+        self.assertEqual(max(builds.values()), 2)
+
+    def test_standalone_artifact_refuses_a_foreign_torch(self):
+        # A dynamo artifact carries Dynamo internals in its opaque blobs, so it
+        # is locked to the build that made it. TORCH_VERSION was emitted and
+        # read by nothing, leaving the mismatch to surface as whatever import
+        # or attribute error came first.
+        x = torch.randn(4)
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _precompile_single_graph,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                example_inputs=[(x,)],
+            )
+        torch._dynamo.reset()
+        with (
+            mock.patch.object(torch, "__version__", "0.0.0+notreal"),
+            self.assertRaisesRegex(Exception, "produced by torch"),
+        ):
+            torch.compiler.precompile.load(code, cache)
+
+    def test_standalone_artifact_refuses_drifted_inlined_source(self):
+        # A standalone artifact builds no CompilePackage, so it never ran the
+        # inlined-source check the installed mode gets for free -- and an
+        # artifact whose inlined helper has since changed does not fail, it
+        # answers with the OLD number.
+        import importlib.util
+
+        def import_from_path(name, path):
+            spec = importlib.util.spec_from_file_location(name, path)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+            spec.loader.exec_module(module)
+            return module
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            original = os.path.join(tmp_dir, "orig.py")
+            modified = os.path.join(tmp_dir, "modified.py")
+            with open(original, "w") as f:
+                f.write("def scaled(x):\n    return x * 3.0\n")
+            with open(modified, "w") as f:
+                f.write("def scaled(x):\n    return x * 5.0\n")
+            global _DRIFT_MODULE
+            _DRIFT_MODULE = import_from_path("torch.test_precompile_drift", original)
+            entry = _precompile_drift_entry
+            x = torch.ones(4)
+            with torch.no_grad():
+                code, cache = torch.compiler.precompile(
+                    entry,
+                    backend="eager",
+                    dynamic=False,
+                    tracer="dynamo",
+                    require_no_risky_drops=False,
+                    example_inputs=[(x,)],
+                )
+            from torch._precompile import _parse_artifact_metadata
+
+            self.assertEqual(
+                _parse_artifact_metadata(code)["SERVING_MODE"], "standalone"
+            )
+            torch._dynamo.reset()
+            loaded = torch.compiler.precompile.load(code, cache)
+            with _maybe_scoped(loaded), torch.no_grad():
+                self.assertEqual(loaded(x), entry(x))
+
+            _DRIFT_MODULE = import_from_path("torch.test_precompile_drift", modified)
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(Exception, "source code changes detected"):
+                torch.compiler.precompile.load(code, cache)
+
+    def test_guard_drift_is_reported(self):
+        # The loud half of a lossy reconstruction is a guard that will not
+        # rebuild at all. The quiet half is one that rebuilds into a DIFFERENT
+        # check, which serializes, loads, and then never matches -- here, an
+        # attribute guard whose companion comes back as its own inverse.
+        from torch._dynamo.guards import GuardsStatePickler
+        from torch._dynamo.precompile_package import PrecompileSession
+
+        drift = []
+        real = PrecompileSession._report_guard_drift
+
+        def spy(self, code_entry, rebuilt):
+            before = set(self._drifted_guards)
+            real(self, code_entry, rebuilt)
+            drift.extend(self._drifted_guards - before)
+
+        model = _PrecompileReadsAttr()
+        x = torch.randn(8)
+        x._cpu_copy = torch.randn(8)
+        with (
+            mock.patch.object(PrecompileSession, "_report_guard_drift", spy),
+            torch.no_grad(),
+        ):
+            torch.compiler.precompile(
+                _precompile_call_model,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+                example_inputs=[(model, x)],
+            )
+            self.assertEqual(drift, [])
+            with mock.patch.object(
+                GuardsStatePickler,
+                "_carried_tensor_attributes",
+                lambda self, obj: None,
+            ):
+                torch.compiler.precompile(
+                    _precompile_call_model,
+                    backend="eager",
+                    dynamic=False,
+                    tracer="dynamo",
+                    require_no_risky_drops=False,
+                    example_inputs=[(model, x)],
+                )
+        self.assertTrue(any("_cpu_copy" in payload for _, payload in drift))
+
+    def test_guard_on_a_module_global_tensor_round_trips(self):
+        # A TENSOR_MATCH carries its own subject inside its create_fn partial.
+        # When the source root round-trips by ALIAS -- a module global comes
+        # back live -- that carried copy is a different object from the one the
+        # source walk reaches, so id-keyed value pruning replaced a KEPT guard's
+        # own subject with the _Missing sentinel and load died in
+        # _dispatch_keys. Any model reading a module-global tensor hits it.
+        import importlib.util
+
+        def import_from_path(name, path):
+            spec = importlib.util.spec_from_file_location(name, path)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+            spec.loader.exec_module(module)
+            return module
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = os.path.join(tmp_dir, "lut.py")
+            with open(path, "w") as f:
+                f.write("import torch\n\nLUT = torch.tensor([0.0, 0.5, 1.0])\n")
+            global _LUT_MODULE
+            _LUT_MODULE = import_from_path("torch.test_precompile_lut", path)
+            x = torch.randn(4)
+            with torch.no_grad():
+                want = _precompile_reads_module_global(x)
+                code, cache = torch.compiler.precompile(
+                    _precompile_reads_module_global,
+                    backend="eager",
+                    dynamic=False,
+                    tracer="dynamo",
+                    require_no_risky_drops=False,
+                    example_inputs=[(x,)],
+                )
+            torch._dynamo.reset()
+            loaded = torch.compiler.precompile.load(code, cache)
+            with _maybe_scoped(loaded), torch.no_grad():
+                self.assertEqual(loaded(x), want)
+                # Keeping the guard is only worth anything if it still checks.
+                _LUT_MODULE.LUT = _LUT_MODULE.LUT.double()
+                with self.assertRaisesRegex(RuntimeError, "no captured variant"):
+                    loaded(x)
+
+    def test_a_different_class_is_refused_not_served(self):
+        # The invariant-guard policy drops what held across every captured
+        # variant, and TYPE_MATCH used to be in that set: a graph traced for one
+        # class was served another and returned the first one's answer. There is
+        # no shape to crash on, so nothing caught it -- and it shipped at the
+        # strict defaults, since a policy drop is not a risky drop.
+        x = torch.randn(4)
+        a = _PrecompileClassA()
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _precompile_calls_method,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                # Two variants differing only in k, so obj's type never varies.
+                example_inputs=[(a, x, 1.0), (a, x, 2.0)],
+            )
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertEqual(loaded(a, x, 1.0), _precompile_calls_method(a, x, 1.0))
+            with self.assertRaisesRegex(RuntimeError, "no captured variant"):
+                loaded(_PrecompileClassB(), x, 1.0)
+
     def test_capture_runs_each_example_once(self):
         # Learning the guard policy from a throwaway first capture would run
         # every example twice. That is not free: the region below counts its
@@ -2812,27 +3359,33 @@ class TestPrecompile(TestCase):
             )
         self.assertEqual(len(_precompile_counted_calls), len(xs))
 
-    def test_capture_does_not_double_the_gradients_it_accumulates(self):
-        # Same defect seen through autograd: a training capture leaves .grad on
-        # the caller's module, so a second pass silently doubles it.
+    @parametrize("tracer", ["make_fx", "dynamo"])
+    def test_capture_does_not_touch_the_example_gradients(self, tracer):
+        # A training example runs a real backward, which ACCUMULATES. Leaving
+        # that behind silently doubles the gradients of anyone who took a warmup
+        # step before capturing -- the documented flow -- and then perturbs
+        # every subsequent step through the optimizer. The same grad OBJECT has
+        # to come back, too: optimizer state can be keyed on its identity.
         torch.manual_seed(0)
         model = _PrecompileTrainMod()
         xs = [torch.randn(n, 8) for n in (3, 5)]
         with torch.enable_grad():
-            for x in xs:
-                _precompile_backward_step(model, x)
-            expected = [p.grad.detach().clone() for p in model.parameters()]
-            for p in model.parameters():
-                p.grad = None
+            _precompile_backward_step(model, xs[0])
+            before = [(p.grad, p.grad.detach().clone()) for p in model.parameters()]
+            # make_fx captures a single call; dynamo records one per call.
+            examples = [(model, x) for x in xs]
+            extra = {"dynamic": False, "training": True}
+            if tracer == "make_fx":
+                examples, extra = examples[:1], {}
             torch.compiler.precompile(
                 _precompile_backward_step,
                 backend="eager",
-                dynamic=False,
-                tracer="dynamo",
-                training=True,
-                example_inputs=[(model, x) for x in xs],
+                tracer=tracer,
+                example_inputs=examples,
+                **extra,
             )
-        for p, want in zip(model.parameters(), expected):
+        for p, (grad_object, want) in zip(model.parameters(), before):
+            self.assertIs(p.grad, grad_object)
             self.assertEqual(p.grad, want)
 
     def test_a_mutating_module_is_guarded_on_what_the_capture_saw(self):
@@ -3245,14 +3798,14 @@ class TestPrecompile(TestCase):
 
         holder = _Scope()
         holder.deep = _Scope()
+        # A same-typed decoy the value-blind version reported instead.
+        holder.deep.decoy = (n for n in range(3))
         holder.deep.it = (n for n in range(3))
         state = _Scope()
         state.output_graph = _Scope()
         state.output_graph.local_scope = {"p": holder}
         state.output_graph.global_scope = {}
-        path = _offending_value_path(
-            state, TypeError("cannot pickle 'generator' object")
-        )
+        path = _offending_value_path(state, holder.deep.it)
         self.assertIn("local_scope['p'].deep.it", path)
 
     def test_offending_value_path_never_masks_the_real_error(self):
@@ -3266,7 +3819,7 @@ class TestPrecompile(TestCase):
                 raise RuntimeError("boom")
 
         self.assertEqual(
-            _offending_value_path(_Exploding(), TypeError("cannot pickle 'x' object")),
+            _offending_value_path(_Exploding(), object()),
             "",
         )
 
