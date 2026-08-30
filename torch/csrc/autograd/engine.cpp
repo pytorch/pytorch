@@ -1083,14 +1083,16 @@ static variable_list call_function(
     std::shared_ptr<GraphTask>& graph_task,
     Node* func,
     InputBuffer& inputBuffer,
-    std::string* grad_outputs_metadata) {
+    bool capture_grad_metadata,
+    std::string& grad_outputs_metadata) {
   CheckpointValidGuard cpvguard(graph_task);
   auto& fn = *func;
   auto inputs =
       call_tensor_pre_hooks(fn, InputBuffer::variables(std::move(inputBuffer)));
   inputs = call_pre_hooks(fn, std::move(inputs));
-  if (grad_outputs_metadata != nullptr) {
-    *grad_outputs_metadata = format_tensor_metadata(inputs);
+  if (capture_grad_metadata ||
+      (AnomalyMode::is_enabled() && AnomalyMode::should_check_nan())) {
+    grad_outputs_metadata = format_tensor_metadata(inputs);
   }
   if (!graph_task->keep_graph_) {
     fn.will_release_variables();
@@ -1211,10 +1213,7 @@ void Engine::evaluate_function(
       AnomalyMode::is_enabled() && AnomalyMode::should_check_nan();
   std::string grad_outputs_metadata;
   auto outputs = call_function(
-      graph_task,
-      func,
-      inputs,
-      capture_grad_metadata ? &grad_outputs_metadata : nullptr);
+      graph_task, func, inputs, capture_grad_metadata, grad_outputs_metadata);
 
   auto& fn = *func;
   if (!graph_task->keep_graph_) {
@@ -1244,7 +1243,9 @@ void Engine::evaluate_function(
           "' returned nan values in its ",
           i,
           "th output.\ngrad_outputs: ",
-          grad_outputs_metadata,
+          grad_outputs_metadata.empty()
+              ? "<unavailable: anomaly mode enabled during node execution>"
+              : grad_outputs_metadata.c_str(),
           "\ngrad_inputs: ",
           format_tensor_metadata(outputs));
     }
