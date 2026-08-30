@@ -11168,7 +11168,7 @@ Example:
 add_docstr(
     torch.std_mean,
     r"""
-std_mean(input, dim=None, *, correction=1, keepdim=False, out=None) -> (Tensor, Tensor)
+std_mean(input, dim=None, *, correction=1, keepdim=False) -> (Tensor, Tensor)
 
 Calculates the standard deviation and mean over the dimensions specified by
 :attr:`dim`. :attr:`dim` can be a single dimension, list of dimensions, or
@@ -11200,7 +11200,6 @@ Keyword args:
             with ``True`` corresponding to ``correction=1`` and ``False`` being
             ``correction=0``.
     {opt_keepdim}
-    {out}
 
 Returns:
     A tuple (std, mean) containing the standard deviation and mean.
@@ -12561,7 +12560,7 @@ Example:
 add_docstr(
     torch.var_mean,
     r"""
-var_mean(input, dim=None, *, correction=1, keepdim=False, out=None) -> (Tensor, Tensor)
+var_mean(input, dim=None, *, correction=1, keepdim=False) -> (Tensor, Tensor)
 
 Calculates the variance and mean over the dimensions specified by :attr:`dim`.
 :attr:`dim` can be a single dimension, list of dimensions, or ``None`` to
@@ -12592,7 +12591,6 @@ Keyword args:
             with ``True`` corresponding to ``correction=1`` and ``False`` being
             ``correction=0``.
     {opt_keepdim}
-    {out}
 
 Returns:
     A tuple (var, mean) containing the variance and mean.
