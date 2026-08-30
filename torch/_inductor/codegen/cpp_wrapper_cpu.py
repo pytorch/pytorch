@@ -7,6 +7,7 @@ import dataclasses
 import functools
 import math
 import os
+import re
 import sys
 import textwrap
 from itertools import chain, count
@@ -69,6 +70,61 @@ if TYPE_CHECKING:
     _OUTPUT_ARGS_TYPE = list[str | None | list[str | None]]
 
     from ..scheduler import BaseSchedulerNode
+
+
+_SHIM_SYMBOL_PREFIX_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _shim_symbol_prefix() -> str:
+    """Read config.aot_inductor.shim_symbol_prefix, validated as a C identifier.
+
+    The prefix is token-pasted onto aoti_torch_* names both here and in the
+    macros.h layer, so an invalid value would fail as a cryptic paste error far
+    from its cause. Reject it up front instead. A prefix that itself starts with
+    "aoti_torch_" is also rejected: it would break the idempotency of
+    _apply_shim_symbol_prefix_in_decl (a second pass would re-match and
+    double-prefix).
+    """
+    prefix = config.aot_inductor.shim_symbol_prefix
+    if prefix and (
+        not _SHIM_SYMBOL_PREFIX_RE.fullmatch(prefix) or prefix.startswith("aoti_torch_")
+    ):
+        raise ValueError(
+            "aot_inductor.shim_symbol_prefix must be a valid C identifier "
+            'prefix that does not start with "aoti_torch_", '
+            f"got {prefix!r}"
+        )
+    return prefix
+
+
+def _apply_shim_symbol_prefix(name: str) -> str:
+    """Prefix an aoti_torch_* shim identifier per config; no-op when unset.
+
+    Only the codegen fallback-op call names need this Python-side prefixing so
+    they agree with the backend's shim declarations; the bulk of the rename is
+    done by the aoti_torch/c/macros.h macro layer at compile time. Guarded on a
+    non-empty config so default builds are byte-identical.
+    """
+    prefix = _shim_symbol_prefix()
+    if prefix and name.startswith("aoti_torch_"):
+        return prefix + name
+    return name
+
+
+def _apply_shim_symbol_prefix_in_decl(decl: str) -> str:
+    """Prefix every aoti_torch_* identifier inside a C-shim declaration string.
+
+    custom_ops_to_c_shims values are full extern-"C" declarations (e.g.
+    "AOTITorchError aoti_torch_cuda_foo(...)"), so the model calls them by the
+    prefixed name (see _apply_shim_symbol_prefix in get_c_shim_func_name) but the
+    declaration must be prefixed too, else the call is to an undeclared function.
+    No-op when the prefix is unset. Idempotent: an already-prefixed name is not
+    matched again since the prefix does not itself start with "aoti_torch_".
+    """
+    prefix = _shim_symbol_prefix()
+    if not prefix:
+        return decl
+    return re.sub(r"\baoti_torch_", prefix + "aoti_torch_", decl)
 
 
 @dataclasses.dataclass
@@ -640,7 +696,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 chain(*config.aot_inductor.custom_ops_to_c_shims.values())
             )
             declarations = "\n".join(
-                [f"extern {textwrap.dedent(shim)};" for shim in custom_c_shims]
+                [
+                    f"extern {textwrap.dedent(_apply_shim_symbol_prefix_in_decl(shim))};"
+                    for shim in custom_c_shims
+                ]
             )
             self.prefix.splice(f"""
                 extern "C" {{
@@ -1875,7 +1934,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
     @staticmethod
     def get_c_shim_func_name(kernel: str, device: str) -> str:
         if kernel.startswith("aoti_torch_"):
-            return kernel
+            return _apply_shim_symbol_prefix(kernel)
 
         if "::" not in kernel:
             raise AssertionError(
@@ -1887,7 +1946,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             kernel_suffix = kernel_tokens[-2]
 
         shim_fn = f"aoti_torch_{device}_{kernel_suffix}"
-        return shim_fn
+        return _apply_shim_symbol_prefix(shim_fn)
 
     def generate_c_shim_extern_kernel_call(
         self,
