@@ -20,6 +20,7 @@ set(UBSAN_FLAG "-fsanitize=undefined")
 
 # ---[ CUDA
 if(USE_CUDA)
+  list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/third_party/cudnn_frontend/cmake)
   # public/*.cmake uses CAFFE2_USE_*
   set(CAFFE2_USE_CUDA ${USE_CUDA})
   set(CAFFE2_USE_CUDNN ${USE_CUDNN})
