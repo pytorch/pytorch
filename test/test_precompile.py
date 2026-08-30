@@ -5119,22 +5119,45 @@ class TestPrecompile(TestCase):
         # An entry frame with no variants has two very different causes. If
         # Dynamo BYPASSED the frame it recorded why, and saying so beats the
         # thin-wrapper advice, which in that case is simply wrong -- it sent one
-        # user restructuring a callable that was never the problem.
+        # user restructuring a callable that was never the problem. Only the
+        # ENTRY's own bypassed codes count: an unrelated bypassed helper frame
+        # must not relabel a thin-wrapper entry as a bypass.
+        from torch._dynamo.package import SerializedCode
         from torch._precompile import _reject_uninstallable_entry
 
-        class _Code:
-            bypassed = True
-            bypass_reason = "cannot pickle 'generator' object"
+        def fwd_loss_bwd():
+            pass
+
+        def helper():
+            pass
+
+        def _make_code(fn, bypassed=True):
+            class _Code:
+                pass
+
+            code = _Code()
+            code.bypassed = bypassed
+            code.bypass_reason = "cannot pickle 'generator' object"
+            code.install_to_global = False
+            code.python_code = SerializedCode.from_code_object(fn.__code__)
+            return code
 
         class _Entry:
             fn_name = "fwd_loss_bwd"
-            codes = [_Code()]
+            codes = [_make_code(fwd_loss_bwd)]
 
         frames = [{"is_entry": True, "variants": []}]
         with self.assertRaisesRegex(PrecompileError, "were BYPASSED during capture"):
             _reject_uninstallable_entry(frames, _Entry())
         with self.assertRaisesRegex(PrecompileError, "cannot pickle 'generator'"):
             _reject_uninstallable_entry(frames, _Entry())
+
+        class _EntryWithForeignBypass:
+            fn_name = "fwd_loss_bwd"
+            codes = [_make_code(helper)]
+
+        with self.assertRaisesRegex(PrecompileError, "thin wrapper"):
+            _reject_uninstallable_entry(frames, _EntryWithForeignBypass())
 
     def test_no_dispatchable_graph_keeps_the_wrapper_hint_when_nothing_bypassed(self):
         from torch._precompile import _reject_uninstallable_entry

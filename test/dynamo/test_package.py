@@ -1180,6 +1180,61 @@ class TestPackage(torch._inductor.test_case.TestCase):
         torch._dynamo.reset()
         PrecompileContext.clear()
 
+    def test_mixed_device_capture_records_cpu_codegen_target(self):
+        # A mixed cpu+accelerator capture still holds native CPU code, so the
+        # codegen target must be recorded and compared even though the
+        # collapsed device_type reads as the accelerator. The graph is
+        # fabricated (never run), so no accelerator is needed.
+        import dataclasses
+
+        from torch._dynamo.package import SystemInfo
+
+        if SystemInfo.current().cpu_codegen_target is None:
+            self.skipTest("no CPU codegen target on this host")
+
+        def fn(x):
+            return x + 1
+
+        package = CompilePackage(fn)
+        graph = torch.fx.Graph()
+        node = graph.placeholder("x")
+        node.meta["val"] = torch.empty(2)
+        graph.call_function(torch.ops.aten.add.Tensor, (node, torch.device("cuda")))
+        package.update_device_type(graph)
+        self.assertEqual(package._device_types, {"cpu", "cuda"})
+
+        entry = package.cache_entry()
+        self.assertEqual(entry.device_type, "cuda")
+        self.assertEqual(entry.device_types, frozenset(("cpu", "cuda")))
+        self.assertIsNotNone(entry.system_info.cpu_codegen_target)
+
+        stale = ("mips", "DEFAULT", None, "INVALID", None, None)
+        entry.system_info = dataclasses.replace(
+            entry.system_info, cpu_codegen_target=stale
+        )
+        with self.assertRaisesRegex(RuntimeError, "CPU codegen target"):
+            entry.check_versions()
+
+    def test_codegen_drift_refuses_serialization_not_introspection(self):
+        # A drifted package can never be serialized, but building a
+        # cache_entry() for introspection (summary(), backend enumeration,
+        # session teardown) must keep working -- a refusal there would erupt
+        # out of __exit__ and mask the in-flight capture exception.
+        from torch._dynamo.exc import PackageError
+
+        def fn(x):
+            return x + 1
+
+        package = CompilePackage(fn)
+        package._cpu_codegen_target_drift = (
+            "CPU codegen target changed during capture: test"
+        )
+        self.assertIsNotNone(package.cache_entry())
+        with self.assertRaisesRegex(PackageError, "cannot be serialized"):
+            package.refuse_unserializable()
+        with self.assertRaisesRegex(PackageError, "cannot be serialized"):
+            DynamoCache.record_package(package)
+
     def test_guarded_code_records_backend_ids_from_bytecode(self):
         def fn(x):
             return x + 1

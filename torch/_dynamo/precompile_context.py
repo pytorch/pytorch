@@ -125,9 +125,15 @@ class _SourceGraphModule(torch.nn.Module):
         new = object.__new__(type(self))
         memo[id(self)] = new
         new.__dict__.update(self.__dict__)
-        new.__dict__["_modules"] = {
-            name: copy.deepcopy(sub, memo) for name, sub in self._modules.items()
-        }
+        # _src and the exec'd forward are safely shared; the STATEFUL
+        # containers are not -- a "deep" copy sharing the parameter/buffer
+        # dicts and tensors lets an in-place update on one copy silently edit
+        # the other.
+        for stateful in ("_modules", "_parameters", "_buffers"):
+            new.__dict__[stateful] = {
+                name: copy.deepcopy(value, memo)
+                for name, value in self.__dict__[stateful].items()
+            }
         return new
 
 

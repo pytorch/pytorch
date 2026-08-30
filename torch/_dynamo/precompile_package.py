@@ -806,8 +806,8 @@ class _PrecompileBackend:
             inner, "backend_ctx_ctor", contextlib.nullcontext
         )
         # Rendering a subgraph as source needs the graph, which only exists
-        # here. Kept for the REAL capture only: the guard probe throws its
-        # graphs away, and rendering is a second full lowering.
+        # here. Kept only where something will render it (see the caller):
+        # retaining deepcopies every compiled graph for the session.
         self._keep_graphs = keep_graphs
         self.graphs: dict[str, tuple[torch.fx.GraphModule, list[Any]]] = {}
         # Serving an INSTALLED artifact answers a guard miss by compiling,
@@ -1554,8 +1554,8 @@ class PrecompileSession:
         # torch._dynamo.optimize either -- it mints its own from a private
         # counter -- so the only way to keep them is to keep the region.
         self._resumable = False
-        # Set by the caller for the real capture; the guard probe leaves it off
-        # so it does not pay for a lowering whose source is thrown away.
+        # Set by the caller only where the graphs will actually be rendered,
+        # so a capture does not pay to retain a lowering nothing reads.
         self._keep_graphs = False
         self._backend_obj: _PrecompileBackend | None = None
         self._policy_dropped_guards: set[tuple[str, str]] = set()
@@ -1683,8 +1683,6 @@ class PrecompileSession:
                 raise RuntimeError("PrecompileSession is not active")
             compiled = self._compiled
             self._active_calls += 1
-        from .pgo import _use_code_state
-
         try:
             with _capture_config(), _use_code_state(self._pgo_state):
                 return compiled(*args, **kwargs)
@@ -1802,26 +1800,31 @@ class PrecompileSession:
             # the session is wedged: save() reports the block as still open.
             self._stack = None
             self._compiled = None
+            # Drain in-flight calls FIRST, before any teardown, exactly as
+            # __exit__ does: a concurrent resumable-session call can still be
+            # compiling against a borrowed cache entry, and both stack.close()
+            # and the region clear below mutate state it reads. The cleanup
+            # chain sits in the drain's finally so an interrupt raised out of
+            # wait() (e.g. KeyboardInterrupt) still tears the region down
+            # rather than leaking it until process exit.
             try:
-                stack.close()
+                with self._state:
+                    self._closing = True
+                    while self._active_calls:
+                        self._state.wait()
             finally:
                 try:
-                    self._take_backend_artifacts()
+                    stack.close()
                 finally:
-                    # Drain in-flight calls before erasing the region, exactly
-                    # as __exit__ does: a concurrent resumable-session call can
-                    # still be compiling against a borrowed cache entry, and
-                    # clearing under it destroys the entry it holds.
-                    with self._state:
-                        self._closing = True
-                        while self._active_calls:
-                            self._state.wait()
                     try:
-                        self._clear_runtime_cache()
-                        self._finished = True
+                        self._take_backend_artifacts()
                     finally:
-                        with self._state:
-                            self._state.notify_all()
+                        try:
+                            self._clear_runtime_cache()
+                            self._finished = True
+                        finally:
+                            with self._state:
+                                self._state.notify_all()
             raise
         finally:
             # The SAME grad object, not a copy: a caller holding a prior p.grad
@@ -2211,13 +2214,17 @@ class PrecompileSession:
             for guarded in code_entry.guarded_codes:
                 if f_code is None:
                     f_code = SerializedCode.to_code_object(code_entry.python_code)
-                loaded = load_guards_state(guarded.guards_state)
                 # This rebuild is also the rebuildability check: a guard whose
                 # source cannot be re-evaluated against the reconstructed values
                 # is collected here rather than aborting the frame, so the
                 # public path never pays for a second pass.
                 failures: list[tuple[Guard, Exception]] = []
                 try:
+                    # Inside the try: unpickling the capture's own guard state
+                    # can fail too, and that must surface as the same
+                    # PackageError as a re-serialization failure, not escape
+                    # raw out of artifact()/__exit__.
+                    loaded = load_guards_state(guarded.guards_state)
                     manager = CheckFunctionManager(
                         f_code,
                         OutputGraphCommon(loaded.output_graph),
@@ -2623,6 +2630,7 @@ class PrecompileSession:
             # own, so they have to be handed to the store explicitly.
             for backend_id, backend in self._package.cached_backends.items():
                 store.record_eager_backend(backend_id, backend)
+        self._package.refuse_unserializable()
         try:
             # save_cache_entry, not save_package: the latter also files the
             # package into the process-global PrecompileContext, which is for
@@ -2781,6 +2789,7 @@ class PrecompileSession:
         )
         from torch._precompile import _build_multigraph_artifact
 
+        self._package.refuse_unserializable()
         entry = self._package.cache_entry()
         backends = self._collect_backends()
         return _build_multigraph_artifact(

@@ -2362,14 +2362,19 @@ class GuardBuilder(GuardBuilderBase):
             # acts as hasattr guard.
             attr_source = AttrSource(source, attr)
             example_value = self.get(attr_source)
+            base_example_value = self.get(guard)
             # Register the value with the guard tree, as
             # get_guard_manager_from_source does for every sourced value.
             # Without it, serialization prunes a tensor attribute nothing else
             # references, and the rebuilt HASATTR then recomputes val=False --
             # a silent inversion that routes attr-less inputs into the graph
-            # traced for the attr-present branch.
-            self.guard_tree_values[id(example_value)] = example_value
-            base_example_value = self.get(guard)
+            # traced for the attr-present branch. TENSOR bases only: the
+            # nn.Module and user-object pruners carry a _Missing sentinel that
+            # keeps hasattr true, and registering there would instead drag a
+            # possibly-unpicklable value into the pickle and turn a
+            # serializable frame into a bypass.
+            if isinstance(base_example_value, torch.Tensor):
+                self.guard_tree_values[id(example_value)] = example_value
             guard_manager_enum = self.get_guard_manager_type(attr_source, example_value)
 
             # if the base value is nn.Module, check if we can speedup the

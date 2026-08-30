@@ -2243,18 +2243,25 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
         # guessing the wrong one sends the caller restructuring code that was
         # never the problem. If Dynamo BYPASSED the frame, it recorded why --
         # say that, because the thin-wrapper advice below is then simply wrong.
+        # Only the ENTRY's own bypassed codes count (matched by the same
+        # heuristic that picked entry_frames): an unrelated bypassed helper
+        # frame must not relabel a thin-wrapper entry as a bypass.
+        entry_name = str(entry.fn_name).rsplit(".", 1)[-1]
         bypassed = [
             code
             for code in entry.codes
-            if code.bypassed and getattr(code, "bypass_reason", None)
+            if code.bypassed
+            and getattr(code, "bypass_reason", None)
+            and not code.install_to_global
+            and SerializedCode.to_code_object(code.python_code).co_name == entry_name
         ]
         if bypassed:
             reasons = ", ".join(sorted({str(c.bypass_reason) for c in bypassed}))
             raise PrecompileError(
                 f"precompile captured no dispatchable graph for {entry.fn_name!r}: "
-                f"{len(bypassed)} frame(s) were BYPASSED during capture, so their "
-                f"guards were never written. Reason: {reasons}. Fix that rather "
-                f"than restructuring the captured callable."
+                f"{len(bypassed)} entry frame(s) were BYPASSED during capture, so "
+                f"their guards were never written. Reason: {reasons}. Fix that "
+                f"rather than restructuring the captured callable."
             )
         # Handing precompile a bare nn.Module compiles Dynamo's own wrapper
         # frame (external_utils.wrap_inline's `inner`) rather than the module:
@@ -3415,11 +3422,14 @@ class _PrecompileApi:
         param/buffer list from it (same interning/order as capture).
 
         The returned object comes in two shapes, decided by the CAPTURE, not by a
-        load-time choice. A dynamo artifact whose capture graph-broke or recompiled
-        serves by INSTALLING onto the captured code objects: the returned callable
+        load-time choice. A dynamo artifact with captured frames the entry bytecode
+        cannot reach on its own -- e.g. a graph break inside a child module's frame
+        -- serves by INSTALLING onto the captured code objects: the returned callable
         mutates process state on first call (or on ``__enter__``) and supports
-        ``with`` / ``unload()`` to take that back out. A single-whole-graph artifact
-        is standalone: a plain callable with neither. ``fn=`` applies to the
+        ``with`` / ``unload()`` to take that back out. An artifact whose frames are
+        all reachable from the entry -- including one that graph-broke or recompiled
+        only within the entry frame -- is standalone: a plain callable with neither.
+        ``fn=`` applies to the
         installing shape only -- pass the function object to install onto when it is
         not importable from where it was captured (defined in ``__main__``, a
         notebook, or a REPL); it must be passed before the first call, and a

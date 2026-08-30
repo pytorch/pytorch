@@ -25,6 +25,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TestCase,
 )
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
@@ -333,30 +334,39 @@ class TestAOTCompileToPython(TestCase):
         ):
             _restride_backward_placeholders(gm, [("3*s0", "1")], spec)
 
-    @requires_cuda_and_triton
+    @unittest.skipIf(not HAS_GPU, "requires gpu")
     def test_training_conv_restride_matches_eager(self):
         # Conv nets are what the backward restride exists for: inductor's
-        # layout optimization can hand back channels-last saved activations,
-        # and a backward lowered against the joint trace's eager strides
-        # raises a size assert -- or, with size asserts off, silently computes
-        # wrong gradients.
-        m = torch.nn.Conv2d(16, 32, 3).to("cuda")
-        x = torch.randn(2, 16, 16, 16, device="cuda")
-        for p in m.parameters():
-            p.grad = None
-        m(x).sum().backward()
-        expected = {n: p.grad.detach().clone() for n, p in m.named_parameters()}
+        # layout optimization hands back channels-last saved activations, and
+        # a backward lowered against the joint trace's eager strides raises a
+        # size assert -- or, with size asserts off, silently computes wrong
+        # gradients. Layout optimization is FORCED so the restride is
+        # genuinely engaged (at default heuristics this shape keeps contiguous
+        # strides and the test would pass with the restride deleted), and
+        # cuDNN TF32 is off so the gradients compare at default tolerance.
+        with (
+            torch._inductor.config.patch(force_layout_optimization=True),
+            torch.backends.cudnn.flags(enabled=True, allow_tf32=False),
+        ):
+            m = torch.nn.Conv2d(16, 32, 3).to(GPU_TYPE)
+            x = torch.randn(2, 16, 16, 16, device=GPU_TYPE)
+            for p in m.parameters():
+                p.grad = None
+            m(x).sum().backward()
+            expected = {n: p.grad.detach().clone() for n, p in m.named_parameters()}
 
-        gm = _capture(m, x)
-        with torch.enable_grad():
-            src, _cache = compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
-        out = _exec(src)(_flat_inputs(m, x))
-        out = out[0] if isinstance(out, (list, tuple)) else out
-        for p in m.parameters():
-            p.grad = None
-        out.sum().backward()
-        for name, param in m.named_parameters():
-            self.assertEqual(param.grad, expected[name], atol=1e-4, rtol=1e-4)
+            gm = _capture(m, x)
+            with torch.enable_grad():
+                src, _cache = compile_to_python(
+                    gm, _flat_inputs(m, x), grad_enabled=True
+                )
+            out = _exec(src)(_flat_inputs(m, x))
+            out = out[0] if isinstance(out, (list, tuple)) else out
+            for p in m.parameters():
+                p.grad = None
+            out.sum().backward()
+            for name, param in m.named_parameters():
+                self.assertEqual(param.grad, expected[name])
 
     def test_linear_addmm_runs_like_eager(self):
         m = torch.nn.Linear(4, 3).eval()
