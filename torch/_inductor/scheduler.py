@@ -392,19 +392,12 @@ class MixOrderReduction:
             ):
                 return False
 
-            # We require more more row than columns since
-            # 1, we prefer doing persistent reduction for each row
-            # 2, we will split the reduction across the rows
-            if not V.graph.sizevars.evaluate_expr(
-                sympy.Ge(nrow, ncol * 2),
-                size_oblivious=True,
-                fallback_value=False,
-            ):
-                return False
+            # Don't gate on the nrow/ncol ratio: mix-order reduction can also
+            # be helpful on relatively flat inputs, and a `nrow >= ncol * 2`
+            # gate would reject profitable shapes.
 
-            # When nrow is small, ncol should also be small (due to the check
-            # above). Thus the entire tensor should be well cached in L2.
-            # Mix order reduction is less beneficial.
+            # Need enough rows to split the other reduction across; too few
+            # gives insufficient parallelism to justify the fusion overhead.
             if not V.graph.sizevars.evaluate_expr(
                 sympy.Ge(nrow, 4096),
                 size_oblivious=True,
