@@ -161,7 +161,10 @@ if [[ "$BUILD_ENVIRONMENT" == *riscv64*cross* ]]; then
 
   # NATIVE_BUILD_DIR is a sleef-internal name, so it is passed as a CMake define
   # rather than added to the environment forwarding in cmake/EnvVarForwarding.cmake.
-  export SKBUILD_CMAKE_DEFINE="NATIVE_BUILD_DIR=${SLEEF_NATIVE_BUILD_DIR}"
+  # Append rather than assign: scikit-build-core reads SKBUILD_CMAKE_DEFINE as a
+  # ';'-separated list, so overwriting it would silently drop anything an outer
+  # caller had set.
+  export SKBUILD_CMAKE_DEFINE="${SKBUILD_CMAKE_DEFINE:+${SKBUILD_CMAKE_DEFINE};}NATIVE_BUILD_DIR=${SLEEF_NATIVE_BUILD_DIR}"
 
 elif [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
   export USE_CUDA=0
