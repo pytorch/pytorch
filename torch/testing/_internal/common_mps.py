@@ -642,6 +642,7 @@ if torch.backends.mps.is_available():
             "signal.windows.hamming": [torch.float32],
             "signal.windows.hann": [torch.float32],
             "signal.windows.kaiser": [torch.float32],
+            "signal.windows.kaiser_bessel_derived": [torch.float32],
             "signal.windows.nuttall": [torch.float32],
             "eye": [torch.float16, torch.float32],
             # Could not run 'aten::uniform_' with arguments from the 'SparseCPU' backend

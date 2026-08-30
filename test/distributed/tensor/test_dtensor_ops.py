@@ -114,6 +114,7 @@ dtensor_fails = {
     xfail("signal.windows.hamming"),
     xfail("signal.windows.hann"),
     xfail("signal.windows.kaiser"),
+    xfail("signal.windows.kaiser_bessel_derived"),
     xfail("signal.windows.nuttall"),
     xfail("zeros"),
     # random/stochastic ops: different RNG states between DTensor and reference
@@ -322,6 +323,7 @@ dtensor_numeric_only_fails = {
     xfail("signal.windows.hamming"),
     xfail("signal.windows.hann"),
     xfail("signal.windows.kaiser"),
+    xfail("signal.windows.kaiser_bessel_derived"),
     xfail("signal.windows.nuttall"),
     xfail("sparse.mm", "reduce"),
     xfail("sparse.sampled_addmm"),
