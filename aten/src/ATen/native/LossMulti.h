@@ -11,7 +11,7 @@ namespace at::native {
     const int64_t& ndims,
     const Tensor& input,
     const Tensor& target) {
-    TORCH_CHECK(
+    TORCH_CHECK_VALUE(
         (ndims == 2 && input.size(1) != 0) || (ndims == 1 && input.size(0) != 0) || ndims == 0,
         "Expected input to be a scalar, non-empty 1D tensor, or non-empty 2D "
         "tensor, but got input with ",
@@ -22,7 +22,7 @@ namespace at::native {
     if (ndims <= 1) {
       nframe = 1;
       dim = ndims == 0 ? 1 : input.size(0);
-      TORCH_CHECK(
+      TORCH_CHECK_VALUE(
           target.dim() <= 1 && target.numel() == dim,
           "Expected target to have at most 1 dimension and ",
           dim,
@@ -31,7 +31,7 @@ namespace at::native {
     } else {
       nframe = input.size(0);
       dim = input.size(1);
-      TORCH_CHECK(
+      TORCH_CHECK_VALUE(
           target.dim() == 2 && target.size(0) == nframe &&
           target.size(1) == dim,
           "Expected target to be 2D with shape [",
