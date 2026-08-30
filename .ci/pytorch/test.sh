@@ -249,6 +249,10 @@ elif [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   export PYTHON_TEST_EXTRA_OPTION="--xpu"
   # disable timeout due to shard not balance for xpu
   export NO_TEST_TIMEOUT=True
+  python -m pip install pytest-timeout
+  export PYTEST_ADDOPTS="--timeout=900"
+  # use serial mode run unit tests for xpu
+  export PYTORCH_TEST_RUN_EVERYTHING_IN_SERIAL=1
 elif [[ "$BUILD_ENVIRONMENT" == *pallas-tpu* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="tpu"
 fi
