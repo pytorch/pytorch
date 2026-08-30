@@ -146,7 +146,10 @@ const ScriptProfile::SourceMap& ScriptProfile::dumpStats() {
   for (const auto& datapoint : datapoints_) {
     if (const auto& source = datapoint->sourceRange.source()) {
       if (auto fileLineCol = datapoint->sourceRange.file_line_col()) {
-        auto it = sourceMap_.try_emplace(SourceRef{source}).first;
+        auto it = sourceMap_.find(*source);
+        if (it == sourceMap_.end()) {
+          it = sourceMap_.emplace(SourceRef{source}, LineMap{}).first;
+        }
         auto& stats = it->second[std::get<1>(*fileLineCol)];
         stats.count++;
         stats.duration += datapoint->end - datapoint->start;
