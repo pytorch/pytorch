@@ -27,6 +27,32 @@
 namespace at::native {
 namespace xpu {
 
+namespace {
+
+enum class AddmmActivation {
+  None,
+  Relu,
+  GeluErf, // Match at::gelu_ default / XPU tests (CUDA _addmm_activation uses tanh).
+};
+
+void append_addmm_activation(onednn::Attr& attr, AddmmActivation activation) {
+  if (activation == AddmmActivation::GeluErf) {
+    attr.append_post_eltwise(1.f, 0.f, 0.f, attr.kind_with_gelu_erf);
+  } else if (activation == AddmmActivation::Relu) {
+    attr.append_post_eltwise(1.f, 0.f, 0.f, attr.kind_with_relu);
+  }
+}
+
+void apply_addmm_activation_inplace(Tensor& result, AddmmActivation activation) {
+  if (activation == AddmmActivation::GeluErf) {
+    at::gelu_(result);
+  } else if (activation == AddmmActivation::Relu) {
+    at::relu_(result);
+  }
+}
+
+} // namespace
+
 // result = beta * self + alpha * (mat1 * mat2)
 Tensor& addmm_out(
     const Tensor& self,
@@ -34,7 +60,8 @@ Tensor& addmm_out(
     const Tensor& mat2,
     const Scalar& beta,
     const Scalar& alpha,
-    Tensor& result) {
+    Tensor& result,
+    AddmmActivation activation = AddmmActivation::None) {
   checkBackend("addmm_out", {result, self, mat1, mat2}, Backend::XPU);
   check_mm_shapes(mat1, mat2, "addmm");
   TORCH_CHECK(
@@ -50,7 +77,7 @@ Tensor& addmm_out(
   // complex case
   if (self.is_complex()) {
     at::native::addmm_complex_out_xpu(self, mat1, mat2, beta, alpha, result);
-
+    apply_addmm_activation_inplace(result, activation);
     return result;
   }
 
@@ -61,13 +88,16 @@ Tensor& addmm_out(
 
   if (mat1.numel() == 0) {
     if (beta.to<float>() == 0.f) {
-      return result.zero_();
+      result.zero_();
+    } else {
+      at::mul_out(
+          result,
+          self.expand(result.sizes()),
+          at::native::scalar_tensor(
+              beta, self.scalar_type(), std::nullopt, at::kCPU, std::nullopt));
     }
-    return at::mul_out(
-        result,
-        self.expand(result.sizes()),
-        at::native::scalar_tensor(
-            beta, self.scalar_type(), std::nullopt, at::kCPU, std::nullopt));
+    apply_addmm_activation_inplace(result, activation);
+    return result;
   }
 
   TORCH_CHECK(
@@ -107,10 +137,11 @@ Tensor& addmm_out(
       result.add_(is_inplace ? self_copy : self, beta);
     }
 
+    apply_addmm_activation_inplace(result, activation);
     return result;
   }
 
-  // general case
+  // general case: fuse activation as oneDNN post-op when requested
   Tensor bias = Tensor();
   onednn::Attr attr;
   float beta_ = beta.to<float>();
@@ -147,6 +178,7 @@ Tensor& addmm_out(
       attr.append_post_eltwise(1.f, beta_, 0.f, attr.kind_with_linear);
     }
   }
+  append_addmm_activation(attr, activation);
   onednn::matmul(result, mat1, mat2, bias, true, attr);
   return result;
 }
@@ -159,13 +191,14 @@ Tensor& _addmm_activation_out(
     const Scalar& alpha,
     bool use_gelu,
     at::Tensor& result) {
-  addmm_out(self, mat1, mat2, beta, alpha, result);
-  if (use_gelu) {
-    at::gelu_(result);
-  } else {
-    at::relu_(result);
-  }
-  return result;
+  return addmm_out(
+      self,
+      mat1,
+      mat2,
+      beta,
+      alpha,
+      result,
+      use_gelu ? AddmmActivation::GeluErf : AddmmActivation::Relu);
 }
 
 Tensor& mm_out(const Tensor& self, const Tensor& mat2, Tensor& result) {
