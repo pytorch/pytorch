@@ -12,7 +12,9 @@ from torch._functorch.utils import exposed_in
 @exposed_in("torch.func")
 def functional_call(
     module: torch.nn.Module,
-    parameter_and_buffer_dicts: dict[str, Tensor] | Iterable[dict[str, Tensor]] | Iterable[tuple[str, Tensor]],
+    parameter_and_buffer_dicts: (
+        dict[str, Tensor] | Iterable[dict[str, Tensor]] | Iterable[tuple[str, Tensor]]
+    ),
     args: Any = None,
     kwargs: dict[str, Any] | None = None,
     *,
