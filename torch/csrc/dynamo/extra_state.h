@@ -17,6 +17,8 @@
 #include <list>
 #include <mutex>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace py = pybind11;
 
@@ -106,6 +108,14 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // Per-region strategies for isolated compiles. When an isolated region
   // hits its recompile limit, only that region goes RUN_ONLY.
   std::unordered_map<int64_t, FrameExecStrategy> region_strategy_map;
+  // Invalidations that arrived while cache_mutex was contended. invalidate()
+  // must never BLOCK on cache_mutex: it is reached from weakref.finalize,
+  // which GC can fire while ANOTHER ExtraState's cache_mutex is held during
+  // its guard evaluation, and two threads doing that against each other's
+  // states deadlock (CacheLock releases only the GIL, not the peer's lock).
+  // Parked requests are applied by the next holder of cache_mutex.
+  std::mutex pending_invalidation_mutex;
+  std::vector<std::pair<py::object, py::object>> pending_invalidations;
 
   ExtraState(PyCodeObject* orig_code_arg);
   std::list<CacheEntry>& cache_entry_list(int64_t isolate_recompiles_id);
@@ -120,6 +130,18 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
       CacheEntry* cache_entry,
       py::object deleted_guard_manager,
       py::object live_guard_manager);
+  // The identity-search body of invalidate. Caller must hold cache_mutex.
+  void invalidate_locked(
+      const py::object& deleted_guard_manager,
+      const py::object& live_guard_manager);
+  // Apply invalidations parked while cache_mutex was contended. Caller must
+  // hold cache_mutex (and must NOT hold pending_invalidation_mutex).
+  void drain_pending_invalidations();
+  // Empty this state back to freshly-constructed contents WITHOUT freeing it.
+  // reset_code uses this instead of destroy: destroying while another thread
+  // is blocked on cache_mutex (CacheLock releases the GIL while it waits)
+  // would delete the very mutex the waiter is parked on.
+  void clear_in_place();
 } ExtraState;
 
 #else
@@ -209,6 +231,19 @@ ExtraState* get_extra_state(PyCodeObject* code);
 // directly inside set_extra_state. If you are in a situation trying to call
 // this function, consider if set_extra_state should be called.
 void destroy_extra_state(void* obj);
+
+// Empties the code object's ExtraState in place, without freeing it. This is
+// what torch._dynamo.reset_code must use: destroying the state (via
+// set_extra_state(code, NULL)) while another thread is blocked on its
+// cache_mutex -- CacheLock releases the GIL while waiting, so reset can run
+// concurrently -- deletes the mutex under the waiter. The husk stays attached
+// to the still-alive code object and behaves like a fresh state; the real
+// destroy happens only from the code object's dealloc, when no frame of that
+// code can be mid-lookup.
+// Ownership contract
+// args
+//  - code: Borrowed
+void reset_extra_state(PyCodeObject* code);
 
 // Clears the existing object sitting on the extra scratch spance and sets it
 // up with the new state. Note that _PyCode_SetExtra calls the

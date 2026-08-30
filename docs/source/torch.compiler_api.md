@@ -141,16 +141,17 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        and overrides a lower ambient accumulated-recompile limit for this capture.
    :param dynamic: Multi-graph dynamic-shape policy forwarded to ``torch.compile``.
    :param invariants: Optional path receiving the multi-graph invariant report.
-   :returns: For positional input, ``(python_code, cache)`` -- a self-contained Python
-       source string and binary acceleration cache. For keyword ``example_inputs``, a
-       session exposing ``summary()``, ``save()``, and invariant reporting. Its
-       ``summary().complete`` covers the successful calls that ran, not every possible input.
+   :returns: ``(python_code, cache)`` -- a self-contained Python source string and a
+       binary acceleration cache. Positional example arguments are rejected with a
+       ``TypeError``; ``example_inputs`` is the only calling convention.
    :raises PrecompileError: if capture, lowering, or a runtime call violates the
        contract (see the exception below).
 
    Example::
 
-       python_code, cache = torch.compiler.precompile(lambda m, x: m(x), model, x)
+       python_code, cache = torch.compiler.precompile(
+           lambda m, x: m(x), example_inputs=[(model, x)]
+       )
        f = torch.compiler.precompile.load(python_code, cache)
        out = f(model, x)   # pass the model again at runtime
 
@@ -161,6 +162,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
        python_code, cache = torch.compiler.precompile(
            staged,
+           tracer="dynamo",  # graph breaks and several examples need the dynamo tracer
            example_inputs=[(example_a,), (example_b,)],
        )
        compiled = torch.compiler.precompile.load(python_code, cache)
@@ -169,7 +171,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 ```
 
 ```{eval-rst}
-.. py:method:: precompile.load(python_code, cache)
+.. py:method:: precompile.load(python_code, cache, *, fn=None)
 
    Reconstruct a runnable from the ``(python_code, cache)`` pair returned by
    ``precompile``. The calling convention is read from ``python_code`` (the single
@@ -188,9 +190,18 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
    :param python_code: The self-contained Python source string returned by ``precompile``.
    :param cache: The binary acceleration cache returned by ``precompile``.
+   :param fn: For a dynamo artifact that serves by installing onto live code objects,
+       the function object to install onto, when it is not importable from where it was
+       captured (e.g. defined in ``__main__`` or a notebook); pass it before the first
+       call. A standalone artifact rejects ``fn=`` with ``PrecompileError``.
    :returns: A runnable callable with the same calling convention as the captured ``fn``.
        Arguments are matched positionally at both capture and load time; keyword-argument
-       calling conventions are not supported.
+       calling conventions are not supported. A dynamo artifact whose capture graph-broke
+       or recompiled serves by INSTALLING onto the captured code objects: the returned
+       callable mutates process state on first call (or on ``__enter__``) and supports
+       ``with`` / ``unload()`` to take that back out. An artifact that captured a single
+       whole graph is standalone: a plain callable, no installation and no ``unload``.
+       Which one you get is a property of the capture, not a load-time choice.
    :raises PrecompileError: if ``python_code`` is not a valid precompile artifact (it
        fails to parse or is missing its calling-convention metadata), if ``cache`` is
        paired with a different ``python_code`` (mismatched ``backend`` tag, ``tracer``
@@ -205,6 +216,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
        torch.compiler.precompile(
            fn,
+           tracer="dynamo",
            example_inputs=[
                (x,),
                torch.compiler.precompile.ExampleInput(args=(x,), kwargs={"scale": 2}),

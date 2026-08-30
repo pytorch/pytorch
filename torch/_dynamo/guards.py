@@ -4340,6 +4340,11 @@ class GuardsStatePickler(pickle.Pickler):
             argdefs,
             closure,
         )
+        # FunctionType reads __module__ from globals["__name__"], which the
+        # snapshot branch does not have (the snapshot arrives later, as pickle
+        # STATE), so a guard rooted at fn.__module__ would rebuild against
+        # None. Restore it explicitly; in the import branch this is a no-op.
+        fn.__module__ = module
         fn.__qualname__ = qualname
         fn.__kwdefaults__ = kwdefaults
         if attributes:
