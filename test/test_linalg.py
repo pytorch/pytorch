@@ -30,7 +30,7 @@ from torch.testing._internal.common_utils import \
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, skipIfTorchDynamo,
      skipIfRocmArch, skipIfRocmVersionAtLeast, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
      runOnRocmArch, MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA,
-     skipIfNoNvmath)
+     recover_orig_fp32_precision, skipIfNoNvmath)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIf,
@@ -42,7 +42,7 @@ from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex_and, floating_and_complex_types, integral_types,
     floating_and_complex_types_and, floating_types_and, complex_types,
 )
-from torch.testing._internal.common_cuda import CDNA2OrLater, CDNA5OrLater, SM80OrLater, SM90OrLater, tf32_enabled, tf32_on_and_off, _get_magma_version, \
+from torch.testing._internal.common_cuda import BF16X9_SUPPORTED, CDNA2OrLater, CDNA5OrLater, SM80OrLater, SM90OrLater, tf32_enabled, tf32_on_and_off, _get_magma_version, \
     _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_FP8, blas_library_context, ROCM_VERSION
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
     _group_quantize_tensor_symmetric
@@ -10733,6 +10733,38 @@ class TestLinalgCudaOnly(TestCase):
             else:
                 count = 6
             self.assertEqual((total_num_results - ref_num_results), count)
+
+    @unittest.skipUnless(
+        BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
+    )
+    @recover_orig_fp32_precision
+    @dtypes(torch.float)
+    def test_16x9_tunableop(self, device, dtype):
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_rotating_buffer_size(0)
+            torch.cuda.tunable.set_max_tuning_duration(1)
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+            a = torch.randn(37, 37, device=device, dtype=dtype)
+            b = torch.randn(37, 37, device=device, dtype=dtype)
+
+            torch.backends.cuda.matmul.fp32_precision = "ieee"
+            torch.mm(a, b)
+            torch.backends.cuda.matmul.fp32_precision = "16x9"
+            torch.mm(a, b)
+
+            results = torch.cuda.tunable.get_results()
+            ieee = find_tunableop_result(
+                results,
+                "GemmTunableOp_float_NN",
+                "nn_37_37_37_ld_37_37_37",
+            )
+            x9 = find_tunableop_result(
+                results,
+                "GemmTunableOp_16x9_NN",
+                "nn_37_37_37_ld_37_37_37_compute_bf16x9_r",
+            )
+            self.assertIsNotNone(ieee)
+            self.assertIsNotNone(x9)
 
     @runOnRocmArch(MI300_ARCH)
     @dtypes(torch.float)

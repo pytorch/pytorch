@@ -561,6 +561,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         aten_extra_kwargs = {"out_dtype": out_dtype}
 
     if use_bf16x9:
+        # See Note [16x9 precision] in torch/_inductor/utils.py.
         choices.extend(
             V.choices.get_template_configs(
                 kernel_inputs,

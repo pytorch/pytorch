@@ -250,31 +250,6 @@ using detail::CuBlasLtGroupedMatrixLayout;
     CUDABLAS_NONNEGINT_CHECK(bgemm<Dtype>, num_batches);  \
   } while (0)
 
-namespace {
-
-bool useBF16x9() {
-  return !at::NoTF32Guard::should_disable_tf32() &&
-      at::globalContext().float32Precision(
-          at::Float32Backend::CUDA, at::Float32Op::MATMUL) ==
-      at::Float32Precision::BF16X9;
-}
-
-void checkBF16x9Support() {
-#ifdef USE_ROCM
-  TORCH_CHECK(false, "bf16x9 precision is only supported on NVIDIA CUDA");
-#elif defined(CUDA_VERSION) && CUDA_VERSION >= 13000
-  TORCH_CHECK(
-      at::cuda::getCurrentDeviceProperties()->major >= 10,
-      "bf16x9 precision requires a CUDA device with compute capability 10.0 or later");
-#else
-  TORCH_CHECK(
-      false,
-      "bf16x9 precision requires PyTorch to be built with CUDA 13.0 or later");
-#endif
-}
-
-} // namespace
-
 template <typename Dtype, typename C_Dtype = Dtype>
 static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
 #if defined(USE_ROCM) && ROCM_VERSION == 60400
@@ -528,8 +503,7 @@ void bgemm_internal_cublas<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
   detail::cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   BGEMM_CHECK_ARGVALUES(float);
   if (useBF16x9()) {
-    checkBF16x9Support();
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13000
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12090
     TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedEx(
         handle,
         opa,
@@ -935,6 +909,7 @@ void bgemm<double>(CUDABLAS_BGEMM_ARGTYPES(double)) {
 
 template <>
 void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
+  checkBF16x9Support();
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()
       && bgemm_tunable<float>(CUDABLAS_BGEMM_ARGS(float))) {
@@ -1030,8 +1005,7 @@ void gemm_internal_cublas<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
   detail::cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(float);
   if (useBF16x9()) {
-    checkBF16x9Support();
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13000
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12090
     TORCH_CUDABLAS_CHECK(cublasGemmEx(
         handle,
         opa,
@@ -1508,6 +1482,7 @@ void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
 
 template <>
 void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
+  checkBF16x9Support();
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()
       && gemm_tunable<float>(CUDABLAS_GEMM_ARGS(float))) {

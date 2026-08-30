@@ -392,6 +392,10 @@ bool launchGemmAndBiasCublasLt(
     const Scalar& alpha,
     Activation activation = Activation::None
 ) {
+  if constexpr (std::is_same_v<scalar_t, float>) {
+    at::cuda::blas::checkBF16x9Support();
+  }
+
   // We apply bias in the epilogue only when it is 1D,
   // or when it can be squeezed to 1D.
   // self_ptr == nullptr implies ignore bias epilogue

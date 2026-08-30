@@ -467,11 +467,7 @@ def _step_logger() -> Callable[..., None]:
 
 @functools.cache
 def _warn_tf32_disabled() -> None:
-    if (
-        torch.cuda.is_available()
-        and torch.backends.cuda.matmul.fp32_precision not in ("tf32", "bf16x9")
-        and torch.cuda.get_device_capability() >= (8, 0)
-    ):
+    if torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0):
         perf_hint_log.info(
             "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. "
             "Consider setting `torch.set_float32_matmul_precision('high')` for better performance."
@@ -1579,7 +1575,10 @@ class _InProcessFxCompile(FxCompile):
                 )
                 time.sleep(sleep_sec)
 
-            if is_tf32_warning_applicable(gm):
+            if torch.backends.cuda.matmul.fp32_precision not in (
+                "tf32",
+                "16x9",
+            ) and is_tf32_warning_applicable(gm):
                 _warn_tf32_disabled()
 
             inductor_counters = counters["inductor"].copy()

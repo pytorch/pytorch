@@ -3011,12 +3011,16 @@ def use_cpp_gemm_template(
     )
 
 
+# Note [16x9 precision]
+# The CUDA "16x9" mode requests cuBLAS's full nine-product BF16 emulation.
+# Triton's bf16x3 and bf16x6 modes use different arithmetic, and Triton has no
+# bf16x9 input_precision. FP32 CUDA matmuls must therefore remain ATen extern
+# calls. Fused kernels without an ATen path warn and fall back to IEEE.
 def is_bf16x9_matmul(device_type: str, dtype: torch.dtype) -> bool:
-    """Return whether a matmul must preserve cuBLAS BF16x9 emulation."""
     return (
         device_type == "cuda"
         and dtype == torch.float32
-        and torch.backends.cuda.matmul.fp32_precision == "bf16x9"
+        and torch.backends.cuda.matmul.fp32_precision == "16x9"
     )
 
 

@@ -157,9 +157,8 @@ inline const char* TypeName(float v) {
   if (precision == at::Float32Precision::TF32) {
     return "tf32";
   }
-  if (!at::NoTF32Guard::should_disable_tf32() &&
-      precision == at::Float32Precision::BF16X9) {
-    return "bf16x9";
+  if (at::cuda::blas::useBF16x9()) {
+    return "16x9";
   }
   return "float";
 }

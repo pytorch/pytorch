@@ -377,7 +377,7 @@ def is_b2b_gemm_good_on(
     )  # torch._subclasses.fake_tensor.FakeTensor
 
     A, B, C = fake_tensors
-    if is_bf16x9_matmul(A.device.type, A.dtype):
+    if any(is_bf16x9_matmul(t.device.type, t.dtype) for t in fake_tensors):
         return False
 
     def check_all_attr_true(objects, attr):

@@ -202,11 +202,15 @@ inline std::string ComputeTypeFor() {
 // ROCBLAS and hipBLASLt.
 template <>
 inline std::string ComputeTypeFor<float>() {
-  if (at::globalContext().float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL) != at::Float32Precision::TF32) {
-    return "f32_r";
-  } else {
+  const auto precision = at::globalContext().float32Precision(
+      at::Float32Backend::CUDA, at::Float32Op::MATMUL);
+  if (precision == at::Float32Precision::TF32) {
     return "xf32_r";
   }
+  if (at::cuda::blas::useBF16x9()) {
+    return "bf16x9_r";
+  }
+  return "f32_r";
 }
 
 template <>
@@ -252,6 +256,17 @@ inline std::string ComputeTypeFor<Float8_e4m3fnuz>() {
 template <>
 inline std::string ComputeTypeFor<Float8_e5m2fnuz>() {
   return "f32_r";
+}
+
+// CublasltMatmulTunableOp caches candidate names by Params::Signature(),
+// independently of the precision-aware TunableOp signature. Preserve existing
+// IEEE/TF32 keys while giving 16x9 its own candidate set.
+template <typename T>
+inline std::string ComputeTypeSignature() {
+  if constexpr (std::is_same_v<T, float>) {
+    return at::cuda::blas::useBF16x9() ? "_compute_bf16x9_r" : "";
+  }
+  return "";
 }
 
 // Convert opmath_type<T> to string

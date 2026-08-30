@@ -83,21 +83,30 @@ The `fp32_precision` setting can be set to `ieee` or `tf32` for CUDA matmuls
 and cuDNN. `ieee` uses FP32 for internal computation, while `tf32` allows TF32
 for internal computation.
 
-On NVIDIA GPUs, CUDA matmuls also support `bf16x9`:
+On supported NVIDIA GPUs, CUDA matmuls also accept `16x9`, which selects the
+cuBLAS BF16x9 algorithm:
 
 ```python
-torch.backends.cuda.matmul.fp32_precision = "bf16x9"
+torch.backends.cuda.matmul.fp32_precision = "16x9"
 ```
 
 This mode keeps the inputs and output in FP32 while cuBLAS decomposes each input
 into three BF16 values and evaluates the resulting nine BF16 products with FP32
-accumulation. It generally provides more accuracy than TF32, but relative
-accuracy is workload-dependent and is not guaranteed to match IEEE FP32.
-`bf16x9` requires a CUDA 13.0 or newer build and a GPU with compute capability
-10.0 or newer. It is valid only for `torch.backends.cuda.matmul.fp32_precision`;
-using it for a generic, cuDNN, or MKLDNN precision setting raises an error.
-Unsupported CUDA builds, CUDA devices, and ROCm executions also raise an error
-instead of using another computation mode.
+accumulation. The decomposition retains all FP32 input bits, but the resulting
+arithmetic is not IEEE-754 compliant and its relative accuracy is
+workload-dependent. `16x9` requires a PyTorch build with CUDA 12.9 or newer and
+a GPU with compute capability 10.0 or 10.3. It is valid only for
+`torch.backends.cuda.matmul.fp32_precision`; using it for a generic, cuDNN, or
+MKLDNN precision setting raises an error. ATen/cuBLAS GEMM execution on an
+unsupported CUDA build, CUDA device, or ROCm raises an error instead of using
+another computation mode.
+
+As with `tf32`, operations implemented using CUDA GEMM can inherit the matmul
+precision setting, including slow or naive convolution fallbacks. Under
+`torch.compile`, FP32 matmuls using `16x9` remain ATen/cuBLAS calls because
+Triton's `bf16x3` and `bf16x6` modes do not implement the full nine-product
+algorithm. Fused Triton kernels that cannot preserve 16x9, such as FP32
+FlexAttention, warn once and use IEEE precision instead.
 
 We can override a generic setting for a specific operator if the fp32_precision is set to `ieee`.
 

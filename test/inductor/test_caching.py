@@ -32,6 +32,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    recover_orig_fp32_precision,
 )
 
 
@@ -2544,6 +2545,36 @@ class ShouldPadMemoizerTest(TestMixin, TestCase):
         self.assertIn("op", encoded1)
         self.assertEqual(encoded1["mat1"]["shape"], tuple(mat1.shape))
         self.assertEqual(encoded1["mat2"]["shape"], tuple(mat2.shape))
+
+    @recover_orig_fp32_precision
+    @patch("torch._prims_common.is_contiguous_or_false", return_value=True)
+    def test_should_pad_keys_distinguish_fp32_precision(
+        self, mock_is_contiguous
+    ) -> None:
+        import torch
+        from torch._inductor.fx_passes.pad_mm import should_pad_bench_key
+        from torch._inductor.runtime.caching import encoders
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        mock_match = self._create_mock_match()
+        with FakeTensorMode():
+            mat1 = torch.empty(8, 16, device="cuda")
+            mat2 = torch.empty(16, 32, device="cuda")
+
+        encoded_precisions = set()
+        benchmark_keys = set()
+        for precision in ("ieee", "tf32", "16x9"):
+            torch.backends.cuda.matmul.fp32_precision = precision
+            encoded = encoders.should_pad_params_encoder(
+                mock_match, mat1, mat2, torch.ops.aten.mm
+            )
+            encoded_precisions.add(encoded["fp32_precision"])
+            benchmark_keys.add(
+                should_pad_bench_key(mock_match, mat1, mat2, torch.ops.aten.mm)
+            )
+
+        self.assertEqual(encoded_precisions, {"ieee", "tf32", "16x9"})
+        self.assertEqual(len(benchmark_keys), 3)
 
     @patch("torch._prims_common.is_contiguous_or_false", return_value=True)
     @patch_on_disk_cache_base_dir

@@ -49,7 +49,7 @@ enum class TORCH_API Float32Backend { GENERIC, CUDA, MKLDNN };
 enum class TORCH_API Float32Op { ALL, CONV, RNN, MATMUL };
 // DEFAULT is an internal-only sentinel meaning "use legacy backend default
 // unless a parent setting overrides it". NONE means "explicitly set to
-// inherit/no-op".
+// inherit/no-op". Append new values because Dynamo guards serialize this enum.
 enum class TORCH_API Float32Precision {
   NONE,
   IEEE,

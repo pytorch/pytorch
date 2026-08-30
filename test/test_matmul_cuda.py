@@ -22,6 +22,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     _get_torch_rocm_version,
     _get_torch_cuda_version,
+    BF16X9_SUPPORTED,
     blas_library_context,
     IS_SM90,
     PLATFORM_SUPPORTS_BF16,
@@ -29,6 +30,7 @@ from torch.testing._internal.common_cuda import (
     SM90OrLater,
     SM100OrLater,
     SM120OrLater,
+    x9_on_and_off,
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -68,13 +70,6 @@ from torch._inductor.utils import run_and_get_code
 _IS_SM8X = False
 if TEST_CUDA:
     _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
-
-_BF16X9_SUPPORTED = bool(
-    TEST_CUDA
-    and not TEST_WITH_ROCM
-    and _get_torch_cuda_version() >= (13, 0)
-    and SM100OrLater
-)
 
 # Protects against includes accidentally setting the default dtype
 if torch.get_default_dtype() is not torch.float32:
@@ -142,38 +137,97 @@ class TestMatmulCuda(InductorTestCase):
         super().tearDown()
 
     @serialTest()
-    def test_bf16x9_only_affects_float32_matmuls(self, device):
+    def test_16x9_does_not_affect_non_float32_matmuls(self, device):
         for dtype in (torch.float64, torch.complex64):
             with self.subTest(dtype=dtype):
                 a = torch.randn(32, 32, device=device, dtype=dtype)
                 torch.backends.cuda.matmul.fp32_precision = "ieee"
                 expected = torch.mm(a, a)
-                torch.backends.cuda.matmul.fp32_precision = "bf16x9"
+                torch.backends.cuda.matmul.fp32_precision = "16x9"
                 self.assertEqual(torch.mm(a, a), expected)
 
-    @unittest.skipIf(_BF16X9_SUPPORTED, "requires unsupported BF16x9 hardware")
-    @parametrize(
-        "backend", ("cublas",) if TEST_WITH_ROCM else ("cublas", "cublaslt")
-    )
+    @onlyCUDA
+    @skipIfRocm
+    @torch._inductor.config.patch(coordinate_descent_tuning=True)
     @serialTest()
-    def test_bf16x9_unsupported(self, device, backend):
-        torch.backends.cuda.matmul.fp32_precision = "bf16x9"
-        a = torch.randn(128, 128, device=device)
+    def test_16x9_does_not_change_float16_decomposition(self, device):
+        torch.backends.cuda.matmul.fp32_precision = "16x9"
+        a = torch.randn(8, 1, device=device, dtype=torch.float16)
+        b = torch.randn(1, 8, device=device, dtype=torch.float16)
+        actual, code = run_and_get_code(
+            torch.compile(lambda x, y: torch.mm(x, y), fullgraph=True), a, b
+        )
+        self.assertEqual(actual, torch.mm(a, b))
+        self.assertNotIn("extern_kernels.mm(", "\n".join(code))
+
+    @unittest.skipUnless(
+        BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
+    )
+    @x9_on_and_off()
+    @serialTest()
+    def test_16x9_gemm_backed_convolution(self, device):
+        torch.manual_seed(1234)
+        input = torch.randn(2, 3, 16, 16, device=device)
+        weight = torch.randn(5, 3, 3, 3, device=device)
+        bias = torch.randn(5, device=device)
+        args = (input, weight, [3, 3], bias, [1, 1], [1, 1])
+        actual = torch.ops.aten._slow_conv2d_forward(*args)
+        reference = torch.ops.aten._slow_conv2d_forward(
+            input.double(), weight.double(), [3, 3], bias.double(), [1, 1], [1, 1]
+        )
+        self.assertEqual(actual, reference.float(), atol=2e-4, rtol=2e-4)
+
+    @unittest.skipIf(BF16X9_SUPPORTED, "requires unsupported BF16x9 hardware")
+    @parametrize(
+        "backend",
+        ("cublas", "cublaslt", "ck")
+        if TEST_WITH_ROCM
+        else ("cublas", "cublaslt"),
+    )
+    @parametrize("tunable", (False, True))
+    @parametrize("op", ("mm", "bmm", "addmm", "grouped_mm"))
+    @serialTest()
+    def test_16x9_unsupported(self, device, backend, tunable, op):
+        torch.backends.cuda.matmul.fp32_precision = "16x9"
+        shape = (
+            (2, 128, 128) if op in ("bmm", "grouped_mm") else (128, 128)
+        )
+        a = torch.randn(shape, device=device)
+
+        def run_op():
+            if op == "addmm":
+                return torch.addmm(torch.zeros(128, device=device), a, a)
+            if op == "grouped_mm":
+                return torch._grouped_mm(a, a)
+            return getattr(torch, op)(a, a)
+
         expected_error = (
             "only supported on NVIDIA CUDA"
             if TEST_WITH_ROCM
-            else "CUDA 13.0 or later"
-            if _get_torch_cuda_version() < (13, 0)
-            else "compute capability 10.0 or later"
+            else "CUDA 12.9 or later"
+            if _get_torch_cuda_version() < (12, 9)
+            else "compute capability 10.0 or 10.3"
         )
-        with blas_library_context(backend):
-            with self.assertRaisesRegex(RuntimeError, expected_error):
-                torch.mm(a, a)
+        old_tunable = torch.cuda.tunable.is_enabled()
+        try:
+            torch.cuda.tunable.enable(tunable)
+            try:
+                with blas_library_context(backend):
+                    with self.assertRaisesRegex(RuntimeError, expected_error):
+                        run_op()
+            except RuntimeError as error:
+                if "Cannot set preferred" in str(error):
+                    self.skipTest(str(error))
+                raise
+        finally:
+            torch.cuda.tunable.enable(old_tunable)
 
-    @unittest.skipUnless(_BF16X9_SUPPORTED, "requires CUDA 13+ and SM100+")
+    @unittest.skipUnless(
+        BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
+    )
     @parametrize("backend", ("cublas", "cublaslt"))
     @serialTest()
-    def test_bf16x9_matmul_precision(self, device, backend):
+    def test_16x9_matmul_precision(self, device, backend):
         torch.manual_seed(1234)
         a = make_tensor((257, 513), device=device, dtype=torch.float32)
         b = make_tensor((513, 129), device=device, dtype=torch.float32)
@@ -181,7 +235,7 @@ class TestMatmulCuda(InductorTestCase):
 
         results = {}
         with blas_library_context(backend):
-            for precision in ("ieee", "tf32", "bf16x9"):
+            for precision in ("ieee", "16x9"):
                 torch.backends.cuda.matmul.fp32_precision = precision
                 results[precision] = torch.mm(a, b)
 
@@ -189,40 +243,43 @@ class TestMatmulCuda(InductorTestCase):
             precision: (result.double() - reference).abs()
             for precision, result in results.items()
         }
-        self.assertTrue(torch.isfinite(results["bf16x9"]).all())
-        self.assertLess(
-            errors["bf16x9"].mean().item(), errors["tf32"].mean().item()
-        )
-        self.assertLessEqual(
-            errors["bf16x9"].max().item(), errors["tf32"].max().item()
-        )
+        self.assertTrue(torch.isfinite(results["16x9"]).all())
         rounding_atol = (
             math.sqrt(a.shape[1])
             * torch.finfo(torch.float32).eps
             * reference.abs().mean()
         )
         self.assertLessEqual(
-            errors["bf16x9"].mean().item(),
+            errors["16x9"].mean().item(),
             (errors["ieee"].mean() + rounding_atol).item(),
         )
+        max_rounding_atol = (
+            math.sqrt(a.shape[1])
+            * torch.finfo(torch.float32).eps
+            * reference.abs().max()
+        )
+        self.assertLessEqual(
+            errors["16x9"].max().item(),
+            (errors["ieee"].max() + max_rounding_atol).item(),
+        )
 
-    @unittest.skipUnless(_BF16X9_SUPPORTED, "requires CUDA 13+ and SM100+")
+    @unittest.skipUnless(
+        BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
+    )
+    @x9_on_and_off()
     @serialTest()
-    def test_bf16x9_matmul_operations(self, device):
+    def test_16x9_matmul_operations(self, device):
         torch.manual_seed(1234)
         a = make_tensor((65, 67), device=device, dtype=torch.float32)
         b = make_tensor((67, 33), device=device, dtype=torch.float32)
         bias = make_tensor((33,), device=device, dtype=torch.float32)
         batch_a = a[:8].reshape(2, 4, 67)
         batch_b = b.unsqueeze(0).expand(2, -1, -1)
+        batch_bias = make_tensor((2, 4, 33), device=device, dtype=torch.float32)
+        group_a = make_tensor((2, 64, 64), device=device, dtype=torch.float32)
+        group_b = make_tensor((2, 64, 64), device=device, dtype=torch.float32)
 
         cases = (
-            ("mm", lambda: torch.mm(a, b), lambda: torch.mm(a.double(), b.double())),
-            (
-                "matmul",
-                lambda: torch.matmul(a, b),
-                lambda: torch.matmul(a.double(), b.double()),
-            ),
             (
                 "addmm",
                 lambda: torch.addmm(bias, a, b),
@@ -233,76 +290,140 @@ class TestMatmulCuda(InductorTestCase):
                 lambda: torch.bmm(batch_a, batch_b),
                 lambda: torch.bmm(batch_a.double(), batch_b.double()),
             ),
+            (
+                "baddbmm",
+                lambda: torch.baddbmm(batch_bias, batch_a, batch_b),
+                lambda: torch.baddbmm(
+                    batch_bias.double(), batch_a.double(), batch_b.double()
+                ),
+            ),
+            (
+                "grouped_mm",
+                lambda: torch._grouped_mm(group_a, group_b),
+                lambda: torch.bmm(group_a.double(), group_b.double()),
+            ),
         )
         for name, op, reference_op in cases:
             with self.subTest(op=name):
-                reference = reference_op()
-                torch.backends.cuda.matmul.fp32_precision = "tf32"
-                tf32 = op()
-                torch.backends.cuda.matmul.fp32_precision = "bf16x9"
-                bf16x9 = op()
-                self.assertTrue(torch.isfinite(bf16x9).all())
-                self.assertLessEqual(
-                    (bf16x9.double() - reference).abs().max().item(),
-                    (tf32.double() - reference).abs().max().item(),
+                actual = op()
+                self.assertTrue(torch.isfinite(actual).all())
+                self.assertEqual(
+                    actual,
+                    reference_op().float(),
+                    atol=1e-4,
+                    rtol=1e-4,
                 )
 
-    @unittest.skipUnless(_BF16X9_SUPPORTED, "requires CUDA 13+ and SM100+")
+    @unittest.skipUnless(
+        BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
+    )
     @parametrize("backend", ("cublas", "cublaslt"))
+    @x9_on_and_off()
     @serialTest()
-    def test_bf16x9_matmul_gradients(self, device, backend):
+    def test_16x9_matmul_gradients(self, device, backend):
         torch.manual_seed(4321)
-        a = torch.randn(67, 65, device=device)
-        b = torch.randn(65, 33, device=device)
+        a = torch.randn(67, 65, device=device, requires_grad=True)
+        b = torch.randn(65, 33, device=device, requires_grad=True)
         grad_output = torch.randn(67, 33, device=device)
-        reference_a = torch.mm(grad_output.double(), b.double().t())
-        reference_b = torch.mm(a.double().t(), grad_output.double())
+        reference_a = torch.mm(
+            grad_output.double(), b.detach().double().t()
+        ).float()
+        reference_b = torch.mm(
+            a.detach().double().t(), grad_output.double()
+        ).float()
 
-        errors = {}
         with blas_library_context(backend):
-            for precision in ("tf32", "bf16x9"):
-                torch.backends.cuda.matmul.fp32_precision = precision
-                mode_a = a.detach().requires_grad_()
-                mode_b = b.detach().requires_grad_()
-                output = torch.mm(mode_a, mode_b)
-                grad_a, grad_b = torch.autograd.grad(
-                    output, (mode_a, mode_b), grad_output
-                )
-                errors[precision] = (
-                    (grad_a.double() - reference_a).abs().max().item(),
-                    (grad_b.double() - reference_b).abs().max().item(),
-                )
+            output = torch.mm(a, b)
+            grad_a, grad_b = torch.autograd.grad(output, (a, b), grad_output)
 
-        self.assertLessEqual(errors["bf16x9"][0], errors["tf32"][0])
-        self.assertLessEqual(errors["bf16x9"][1], errors["tf32"][1])
+        self.assertEqual(grad_a, reference_a, atol=1e-4, rtol=1e-4)
+        self.assertEqual(grad_b, reference_b, atol=1e-4, rtol=1e-4)
 
-    @unittest.skipUnless(_BF16X9_SUPPORTED, "requires CUDA 13+ and SM100+")
+    @unittest.skipUnless(
+        BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
+    )
     @serialTest()
-    def test_bf16x9_compile_uses_aten_gemm(self, device):
-        torch.backends.cuda.matmul.fp32_precision = "bf16x9"
-        a = torch.randn(64, 64, device=device)
-        b = torch.randn(64, 64, device=device)
-        bias = torch.randn(64, device=device)
-        batch_a = torch.randn(2, 64, 64, device=device)
-        batch_b = torch.randn(2, 64, 64, device=device)
+    def test_16x9_compile_uses_aten_gemm(self, device):
+        torch.backends.cuda.matmul.fp32_precision = "16x9"
 
-        def fn(a, b, bias, batch_a, batch_b):
-            return a @ b, torch.addmm(bias, a, b), torch.bmm(batch_a, batch_b)
+        def matrix(*shape):
+            return torch.randn(*shape, device=device)
 
-        expected = fn(a, b, bias, batch_a, batch_b)
+        a, b = matrix(64, 64), matrix(64, 64)
+        batch_a, batch_b = matrix(2, 64, 64), matrix(2, 64, 64)
+        cases = (
+            ("mm", lambda x, y: x @ y, (a, b), "extern_kernels.mm("),
+            (
+                "addmm",
+                lambda bias, x, y: torch.addmm(bias, x, y),
+                (matrix(64), a, b),
+                "extern_kernels.addmm(",
+            ),
+            (
+                "addmm_beta_zero",
+                lambda bias, x, y: torch.addmm(bias, x, y, beta=0, alpha=2),
+                (matrix(64), a, b),
+                "extern_kernels.addmm(",
+            ),
+            (
+                "bmm",
+                lambda x, y: torch.bmm(x, y),
+                (batch_a, batch_b),
+                "extern_kernels.bmm(",
+            ),
+            (
+                "baddbmm",
+                lambda bias, x, y: torch.baddbmm(bias, x, y),
+                (matrix(2, 64, 64), batch_a, batch_b),
+                "extern_kernels.baddbmm(",
+            ),
+            (
+                "small_mm",
+                lambda x, y: torch.mm(x, y),
+                (matrix(8, 8), matrix(8, 8)),
+                "extern_kernels.mm(",
+            ),
+            (
+                "outer_mm",
+                lambda x, y: torch.mm(x, y),
+                (matrix(8, 1), matrix(1, 8)),
+                "extern_kernels.mm(",
+            ),
+            (
+                "dot_bmm",
+                lambda x, y: torch.bmm(x, y),
+                (matrix(2, 1, 64), matrix(2, 64, 1)),
+                "extern_kernels.bmm(",
+            ),
+            (
+                "outer_bmm",
+                lambda x, y: torch.bmm(x, y),
+                (matrix(2, 8, 1), matrix(2, 1, 8)),
+                "extern_kernels.bmm(",
+            ),
+            (
+                "outer_addmm",
+                lambda bias, x, y: torch.addmm(bias, x, y),
+                (matrix(8), matrix(8, 1), matrix(1, 8)),
+                "extern_kernels.addmm(",
+            ),
+        )
+
         with torch._inductor.config.patch(
+            coordinate_descent_tuning=True,
             max_autotune=True,
             max_autotune_gemm_backends="TRITON",
         ):
-            actual, code = run_and_get_code(
-                torch.compile(fn, fullgraph=True), a, b, bias, batch_a, batch_b
-            )
-
-        self.assertEqual(actual, expected)
-        source = "\n".join(code)
-        self.assertIn("extern_kernels.mm", source)
-        self.assertIn("extern_kernels.addmm", source)
-        self.assertIn("extern_kernels.bmm", source)
+            for name, fn, args, expected_call in cases:
+                with self.subTest(op=name):
+                    expected = fn(*args)
+                    actual, code = run_and_get_code(
+                        torch.compile(fn, fullgraph=True), *args
+                    )
+                    self.assertEqual(actual, expected)
+                    source = "\n".join(code)
+                    self.assertIn(expected_call, source)
+                    self.assertNotIn("tl.dot", source)
 
     @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
     def test_legacy_cublas_honors_sm_carveout(self, device):
