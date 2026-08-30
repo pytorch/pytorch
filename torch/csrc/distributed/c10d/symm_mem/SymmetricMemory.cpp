@@ -162,7 +162,7 @@ static at::Tensor empty_strided_p2p_persistent(
 
   auto allocator = get_allocator(device.type());
   void* dev_ptr = nullptr;
-  if (alloc_id_to_dev_ptr.find(alloc_id) != alloc_id_to_dev_ptr.end()) {
+  if (alloc_id_to_dev_ptr.contains(alloc_id)) {
     dev_ptr = alloc_id_to_dev_ptr[alloc_id];
     TORCH_CHECK(
         alloc_size == allocator->get_alloc_size(dev_ptr),
@@ -568,6 +568,8 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
       "nccl_reduce_scatter_offset(Tensor input, Tensor(a!)[] out, str group_name, int dim, int[]? offsets=None, int[]? dst_ranks=None, str red_op='sum') -> ()");
   m.def(
       "nccl_all_to_all_nd(Tensor input, Tensor(a!) out, int scatter_dim, int gather_dim, str group_name) -> ()");
+  m.def(
+      "nccl_all_gather_offset(Tensor input, Tensor(a!) out, str group_name, int[] split_sizes, int[]? split_offsets=None) -> ()");
   m.def(
       "nvshmem_all_to_all(Tensor input, Tensor(a!) out, str group_name) -> Tensor(a!)");
   m.def(

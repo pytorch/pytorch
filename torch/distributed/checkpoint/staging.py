@@ -199,7 +199,7 @@ class DefaultStager(AsyncStager):
         **kwargs: Any,
     ) -> STATE_DICT_TYPE | Future[STATE_DICT_TYPE]:
         """
-        This function is responsible for staging staging the state_dict.
+        This function is responsible for staging the state_dict.
         See class docstring for more details on staging.
         If use_async_staging is True, it will return a Future object that will be
         fulfilled when staging is complete.

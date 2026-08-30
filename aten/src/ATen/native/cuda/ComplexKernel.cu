@@ -4,6 +4,7 @@
 #include <ATen/native/TensorFactories.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <c10/cuda/CUDAMathCompat.h>
 
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
@@ -27,9 +28,12 @@ void polar_kernel_cuda(TensorIterator& iter) {
         gpu_kernel(
             iter,
             [] GPU_LAMBDA(scalar_t a, scalar_t b) -> c10::complex<scalar_t> {
+              opmath_t sin_b;
+              opmath_t cos_b;
+              c10::cuda::compat::sincos(opmath_t(b), &sin_b, &cos_b);
               return c10::complex<scalar_t>(
-                  static_cast<scalar_t>(opmath_t(a) * std::cos(opmath_t(b))),
-                  static_cast<scalar_t>(opmath_t(a) * std::sin(opmath_t(b))));
+                  static_cast<scalar_t>(opmath_t(a) * cos_b),
+                  static_cast<scalar_t>(opmath_t(a) * sin_b));
             });
       });
 }

@@ -29,6 +29,7 @@ if torch.backends.mps.is_available():
             "abs",
             "add",
             "addbmm",
+            "addmm",
             "alias_copy",
             "argwhere",
             "atleast_1d",
@@ -99,12 +100,16 @@ if torch.backends.mps.is_available():
             "linalg.cholesky_ex",
             "linalg.cond",
             "linalg.cross",
+            "linalg.det",
             "linalg.diagonal",
             "linalg.eigh",
             "linalg.eigvalsh",
             "linalg.householder_product",
             "linalg.lstsq",
             "linalg.lstsqgrad_oriented",
+            "linalg.lu",
+            "linalg.lu_factor",
+            "linalg.lu_factor_ex",
             "linalg.matrix_norm",
             "linalg.matrix_rank",
             "linalg.matrix_rankhermitian",
@@ -112,6 +117,7 @@ if torch.backends.mps.is_available():
             "linalg.normsubgradients_at_zero",
             "linalg.pinvhermitian",
             "linalg.polar",
+            "linalg.slogdet",
             "linalg.svd",
             "linalg.svdvals",
             "linalg.vander",
@@ -124,6 +130,9 @@ if torch.backends.mps.is_available():
             "logaddexp",
             "logaddexp2",
             "logcumsumexp",
+            "logdet",
+            "lu",
+            "lu_unpack",
             "mH",
             "mT",
             "masked_fill",
@@ -169,6 +178,7 @@ if torch.backends.mps.is_available():
             "permute",
             "permute_copy",
             "positive",
+            "put",
             "randn",
             "ravel",
             "real",
@@ -213,6 +223,7 @@ if torch.backends.mps.is_available():
             "svd",
             "t",
             "t_copy",
+            "take",
             "take_along_dim",
             "tanh",
             "tan",
@@ -309,6 +320,8 @@ if torch.backends.mps.is_available():
             "logical_not",
             "logical_or",
             "logical_xor",
+            "logspace",
+            "logspacetensor_overload",
             "logsumexp",
             "long",
             "masked.cumsum",
@@ -367,11 +380,8 @@ if torch.backends.mps.is_available():
         # Those ops are not expected to work
         UNIMPLEMENTED_XFAILLIST: dict[str, list | None] = {
             # Failures due to lack of op implementation on MPS backend
-            "logspace": None,
-            "logspacetensor_overload": None,
             "linalg.eig": None,
             "linalg.eigvals": None,
-            "put": None,
             "frexp": None,
             "hash_tensor": None,
             "heaviside": None,
@@ -594,7 +604,6 @@ if torch.backends.mps.is_available():
             "special.ndtri": None,
             "stft": [torch.float16, torch.bfloat16],
             "svd_lowrank": None,
-            "take": None,
             "to": None,
             "_upsample_bilinear2d_aa": [torch.uint8],  # uint8 is for CPU only
             "_upsample_bicubic2d_aa": [torch.uint8],  # uint8 is for CPU only
@@ -862,8 +871,6 @@ if torch.backends.mps.is_available():
             "scalar_tensor": [torch.float16, torch.float32],
             "igamma": None,  # currently not supported for any device
             "igammac": None,  # currently not supported for any device
-            "special.i1": [torch.float16],  # "i1_backward" not implemented for 'Half'
-            "special.i1e": [torch.float16],  # "i1e_backward" not implemented for 'Half'
             # Correctness issues
             # Same issue as `argsort` and `sort` with duplicate elements (undefined behaviour).
             # Forward pass is passing since `msort` doesn't return the indices, just the values, which match the CPU.
@@ -1016,4 +1023,10 @@ else:
         xfail_exclusion: list[str] | None = None,
         sparse: bool = False,
     ) -> Sequence[OpInfo]:
+        return ops
+
+    def mps_ops_grad_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
+        return ops
+
+    def mps_ops_error_inputs_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
         return ops
