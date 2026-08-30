@@ -14420,8 +14420,8 @@ op_db: list[OpInfo] = [
     OpInfo('lu',
            op=torch.lu,
            dtypes=floating_and_complex_types(),
-           # complex64 backward needs lu_solve/solve_triangular, which are
-           # float32-only on MPS, so only the float forward+backward runs there.
+           # complex64 backward needs solve_triangular, which is float32-only on
+           # MPS, so only the float forward+backward runs there.
            backward_dtypesIfMPS=floating_types(),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
@@ -21333,9 +21333,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
     OpInfo(
         'logdet',
         dtypes=floating_and_complex_types(),
-        # complex64 backward needs lu_solve/solve_triangular, which are
-        # float32-only on MPS, so only the float forward+backward runs there.
-        backward_dtypesIfMPS=floating_types(),
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
