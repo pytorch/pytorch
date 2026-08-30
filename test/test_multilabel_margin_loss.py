@@ -12,7 +12,7 @@ class TestMultiLabelMarginLossErrors(TestCase):
         target = torch.zeros(2, 3, dtype=torch.long)
 
         with self.assertRaisesRegex(
-            RuntimeError,
+            ValueError,
             "Expected input to be a scalar, non-empty 1D tensor, or non-empty 2D tensor",
         ):
             loss(input, target)
@@ -23,7 +23,7 @@ class TestMultiLabelMarginLossErrors(TestCase):
         target = torch.zeros(2, 2, dtype=torch.long)
 
         with self.assertRaisesRegex(
-            RuntimeError,
+            ValueError,
             r"Expected target to be 2D with shape \[1, 3\] to match input",
         ):
             loss(input, target)
@@ -34,7 +34,7 @@ class TestMultiLabelMarginLossErrors(TestCase):
         target = torch.zeros(2, 2, dtype=torch.long)
 
         with self.assertRaisesRegex(
-            RuntimeError,
+            ValueError,
             "Expected target to have at most 1 dimension and 3 elements to match input",
         ):
             loss(input, target)
