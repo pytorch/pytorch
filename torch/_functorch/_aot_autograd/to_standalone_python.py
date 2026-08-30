@@ -1363,13 +1363,14 @@ def _compose_training_module(
     outer_blocks = [splice(gen) for gen in outer_wrappers]
 
     fw_metadata_src = emit_value(spec.fw_metadata, imports)
-    rng_src = emit_value(
-        _rw._AutogradRngStateTracker(
-            num_rng=spec.fw_metadata.num_graphsafe_rng_states,
-            graphsafe_idx=spec.fw_metadata.graphsafe_rng_state_index,
-            device=spec.fw_metadata.graphsafe_rng_device,
-        ),
-        imports,
+    # Emit a constructor call, not the pickled object: the tracker's runtime
+    # state belongs fresh in the artifact anyway, and its curr_fwd_iter
+    # (itertools.count) default is unpicklable on Python >= 3.14.
+    rng_src = (
+        "_AutogradRngStateTracker("
+        f"num_rng={emit_value(spec.fw_metadata.num_graphsafe_rng_states, imports)}, "
+        f"graphsafe_idx={emit_value(spec.fw_metadata.graphsafe_rng_state_index, imports)}, "
+        f"device={emit_value(spec.fw_metadata.graphsafe_rng_device, imports)})"
     )
     backward_output_dependencies = _rw._backward_output_tangent_dependencies(
         bw_gm, spec.fw_metadata
@@ -1409,7 +1410,8 @@ def _compose_training_module(
         "import torch",
         "import weakref",
         "from torch._functorch._aot_autograd.runtime_wrappers import "
-        "_AutogradSavedState, _mask_pruned_backward_outputs, "
+        "_AutogradRngStateTracker, _AutogradSavedState, "
+        "_mask_pruned_backward_outputs, "
         "_pruned_backward_output_indices_from_dependencies, "
         "_snapshot_external_objects, index_to_external_object_weakref",
         "from torch._functorch._aot_autograd.standalone_runtime import "

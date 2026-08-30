@@ -27,6 +27,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfCrossRef,
     skipIfTorchDynamo,
     TEST_NUMPY,
     TestCase,
@@ -2740,6 +2741,10 @@ class TestPrecompile(TestCase):
         y = torch.randn(3, requires_grad=True)
         self.assertEqual(loaded(y), torch.sin(y))
 
+    # Crossref installs a torch-function mode during capture; the fresh
+    # plain subprocess does not have it, so the artifact correctly rejects
+    # the changed environment (the contract's declared invariant).
+    @skipIfCrossRef
     def test_tracer_dynamo_inference_source_runs_in_fresh_process(self):
         x = torch.randn(4)
         code, _cache = torch.compiler.precompile(

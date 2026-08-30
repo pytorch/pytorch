@@ -25,6 +25,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfTorchDynamo,
     subtest,
     TestCase,
 )
@@ -387,6 +388,11 @@ class TestAOTCompileToPython(TestCase):
         self.assertIsNone(actual_inputs[2].grad)
         self.assertIsNone(expected_inputs[2].grad)
 
+    @skipIfTorchDynamo(
+        "under dynamo-wrapped testing the test body itself is compiled, so the"
+        " artifact's backward runs under compiled autograd, which deliberately"
+        " rejects _CompiledFunction's boxed_grads_call"
+    )
     def test_training_dedup_mutated_duplicate_input(self):
         def flat_fn(a, b, c, d):
             d.mul_(2)
