@@ -99,9 +99,7 @@ class APoTObserver(ObserverBase):
         # if signed, add element at index 0 for each tensor
         # else, add element at index 1 for each tensor
         # gamma defined to ensure alpha is at max of range
-        p_sum = torch.zeros(
-            (), dtype=torch.get_default_dtype(), device=alpha.device
-        )
+        p_sum = torch.zeros((), dtype=torch.get_default_dtype(), device=alpha.device)
         for tens in p_all:
             if signed:
                 p_sum += tens[0]
@@ -125,9 +123,7 @@ class APoTObserver(ObserverBase):
                 row_sum += ele
             quantization_levels_list.append(row_sum)
 
-        quantization_levels = gamma.reshape(()) * torch.stack(
-            quantization_levels_list
-        )
+        quantization_levels = gamma.reshape(()) * torch.stack(quantization_levels_list)
         quantization_levels, level_indices = quantization_levels.sort()
 
         return (alpha, gamma, quantization_levels, level_indices)
