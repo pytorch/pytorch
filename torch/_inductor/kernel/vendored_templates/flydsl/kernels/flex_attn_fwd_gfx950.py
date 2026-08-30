@@ -149,7 +149,12 @@ def build_flex_attn_fwd_module(
     )
     BM = OWNER_WAVES * 32
     BN = 64
-    NW = OWNER_WAVES
+    SPLIT_KV = (
+        (num_q_heads // num_kv_heads) * seq_q == 1
+        and batch_size * num_kv_heads < 256
+        and seq_kv >= 2048
+    )
+    NW = 2 if SPLIT_KV else OWNER_WAVES
     NT = NW * 64
     WAVES_PER_EU = _select_waves_per_eu(
         owner_waves=OWNER_WAVES,
@@ -230,8 +235,9 @@ def build_flex_attn_fwd_module(
     K_DCH = DQK // VPT
     V_DCH = DV // VPT
     Q_LOAD_IT = (BM * K_DCH) // NT
-    K_LOAD_IT = (BN * K_DCH) // NT
-    V_LOAD_IT = (BN * V_DCH) // NT
+    KV_LOAD_THREADS = 64 if SPLIT_KV else NT
+    K_LOAD_IT = (BN * K_DCH) // KV_LOAD_THREADS
+    V_LOAD_IT = (BN * V_DCH) // KV_LOAD_THREADS
     DQK_SUBTILES = DQK // MFMA_MN
 
     def contiguous_stride(heads, sequence, dimension):
@@ -270,6 +276,15 @@ def build_flex_attn_fwd_module(
             k1: fx.Array[fx.BFloat16, BN * DQK, 16]
             v0: fx.Array[fx.BFloat16, BN * DV, 16]
             v1: fx.Array[fx.BFloat16, BN * DV, 16]
+
+    elif SPLIT_KV:
+
+        @fx.struct
+        class FwdSmem:
+            query: fx.Array[fx.BFloat16, BM * DQK, 16]
+            # One reusable K/V tile per worker wave keeps the CTA below 64 KiB.
+            kv: fx.Array[fx.BFloat16, NW * BN * DQK, 16]
+            reduction: fx.Array[fx.Float32, 2 * (2 + D_CHUNKS * 16), 16]
 
     else:
 
@@ -325,9 +340,12 @@ def build_flex_attn_fwd_module(
                 query_position = packed_row
             return valid, row_head, query_position
 
-        query_valid, query_head, query_pos = row_coordinates(
-            wave * fx.Int32(MFMA_MN) + lane_row
+        query_row = (
+            lane_row
+            if const_expr(SPLIT_KV)
+            else wave * fx.Int32(MFMA_MN) + lane_row
         )
+        query_valid, query_head, query_pos = row_coordinates(query_row)
 
         lds = fx.SharedAllocator().allocate(FwdSmem).peek()
         if const_expr(PIPELINED_KV):
@@ -336,8 +354,15 @@ def build_flex_attn_fwd_module(
         else:
             pquery = lds.query.ptr
             pkv = lds.kv.ptr
+            if const_expr(SPLIT_KV):
+                pkv = fx.add_offset(
+                    pkv,
+                    fx.make_int_tuple(wave * fx.Int32(BN * DQK)),
+                )
             pk_stages = [pkv]
             pv_stages = [pkv]
+            if const_expr(SPLIT_KV):
+                preduction = lds.reduction.ptr
 
         batch_i64 = fx.Int64(batch)
         kv_head_i64 = fx.Int64(kv_head)
@@ -501,14 +526,11 @@ def build_flex_attn_fwd_module(
         q_scale = Vec.from_elements([_f32(SCALE_LOG2)], fx.Float32).broadcast_to(VPT)
         q_register_packs = []
         if const_expr(PIPELINED_KV):
-            if const_expr(DECODE):
-                local_head = query_head - kv_head * fx.Int32(GROUP_SIZE)
-                query_source = fx.slice(
-                    gQ,
-                    (local_head, query_pos, None),
-                )
-            else:
-                query_source = fx.slice(gQ, (query_pos, None))
+            local_head = query_head - kv_head * fx.Int32(GROUP_SIZE)
+            query_source = fx.slice(
+                gQ,
+                (local_head, query_pos, None),
+            )
             query_row = fx.logical_divide(
                 query_source,
                 fx.make_layout(VPT, 1),
@@ -633,7 +655,8 @@ def build_flex_attn_fwd_module(
         def stage_k(kv_base, stage=0):
             destination_base = pk_stages[stage]
             for load_step in fx.range_constexpr(K_LOAD_IT):
-                linear = fx.Int32(load_step * NT) + tid
+                load_tid = lane if const_expr(SPLIT_KV) else tid
+                linear = fx.Int32(load_step * KV_LOAD_THREADS) + load_tid
                 lds_offset = linear * fx.Int32(VPT)
                 subtile = lds_offset // fx.Int32(MFMA_MN * MFMA_MN)
                 within_subtile = lds_offset % fx.Int32(MFMA_MN * MFMA_MN)
@@ -686,7 +709,8 @@ def build_flex_attn_fwd_module(
         def stage_v(kv_base, stage=0):
             destination_base = pv_stages[stage]
             for load_step in fx.range_constexpr(V_LOAD_IT):
-                linear = fx.Int32(load_step * NT) + tid
+                load_tid = lane if const_expr(SPLIT_KV) else tid
+                linear = fx.Int32(load_step * KV_LOAD_THREADS) + load_tid
                 lds_offset = linear * fx.Int32(VPT)
                 subtile = lds_offset // fx.Int32(8 * MFMA_MN)
                 within_subtile = lds_offset % fx.Int32(8 * MFMA_MN)
@@ -736,7 +760,8 @@ def build_flex_attn_fwd_module(
                 halves.append(Vec(destination.load()))
             return halves[0].shuffle(halves[1], list(range(8))).ir_value()
 
-        q_wave_offset = wave * fx.Int32(DQK_SUBTILES * MFMA_MN * MFMA_MN)
+        q_wave = fx.Int32(0) if const_expr(SPLIT_KV) else wave
+        q_wave_offset = q_wave * fx.Int32(DQK_SUBTILES * MFMA_MN * MFMA_MN)
         even_column = lane_half * fx.Int32(VPT)
         odd_column = fx.Int32(16) + even_column
         if const_expr(not PIPELINED_KV):
@@ -785,7 +810,7 @@ def build_flex_attn_fwd_module(
             tile_running_max,
             tile_running_sum,
             stage=0,
-            prefetch_next=False,
+            tile_active=None,
         ):
             kv_base = kv_chunk * fx.Int32(BN)
             if const_expr(not PIPELINED_KV):
@@ -803,7 +828,7 @@ def build_flex_attn_fwd_module(
                 scores_hi = mfma(key_hi, query_pack, scores_hi)
             schedule_fwd_qk_pipeline(
                 reduction_steps=K_STEPS,
-                vmem_count=(K_LOAD_IT if PIPELINED_KV and prefetch_next else 0),
+                vmem_count=(K_LOAD_IT if PIPELINED_KV else 0),
             )
 
             if const_expr(not PIPELINED_KV):
@@ -826,37 +851,32 @@ def build_flex_attn_fwd_module(
                         + fx.Int32(8 * (element // 4) + element % 4)
                     )
                     keep = query_valid
+                    if tile_active is not None:
+                        keep = keep & tile_active
                     if const_expr(CAUSAL_DOCUMENT_MASK):
-                        mask_keep = (query_pos >= key_pos) & (key_pos >= document_start)
                         if isinstance(masked, bool):
                             if masked:
-                                keep = keep & mask_keep
+                                keep = keep & (query_pos >= key_pos) & (
+                                    key_pos >= document_start
+                                )
                         else:
+                            mask_keep = (query_pos >= key_pos) & (
+                                key_pos >= document_start
+                            )
                             keep = keep & ((~masked) | mask_keep)
                     elif const_expr(WINDOW_SIZE is not None):
-                        mask_keep = (query_pos >= key_pos) & (
-                            query_pos - key_pos < fx.Int32(WINDOW_SIZE)
-                        )
-                        if isinstance(masked, bool):
-                            if masked:
-                                keep = keep & mask_keep
-                        else:
-                            keep = keep & ((~masked) | mask_keep)
-                    elif const_expr(CAUSAL_PARTIAL):
-                        mask_keep = key_pos <= (query_pos + fx.Int32(SK - SQ))
-                        if isinstance(masked, bool):
-                            if masked:
-                                keep = keep & mask_keep
-                        else:
-                            keep = keep & ((~masked) | mask_keep)
-                    elif const_expr(bool(MASK_PROGRAM)):
-                        if isinstance(masked, bool):
-                            if masked:
-                                keep = keep & evaluate_mask(query_pos, key_pos)
-                        else:
-                            keep = keep & (
-                                (~masked) | evaluate_mask(query_pos, key_pos)
+                        if masked:
+                            keep = keep & (query_pos >= key_pos) & (
+                                query_pos - key_pos < fx.Int32(WINDOW_SIZE)
                             )
+                    elif const_expr(CAUSAL_PARTIAL):
+                        if masked:
+                            keep = keep & (
+                                key_pos <= (query_pos + fx.Int32(SK - SQ))
+                            )
+                    elif const_expr(bool(MASK_PROGRAM)):
+                        if masked:
+                            keep = keep & evaluate_mask(query_pos, key_pos)
                     keep_values.append(keep)
                     score_values.append(keep.select(_f32(raw[element]), _f32(_NEG_BIG)))
 
@@ -894,9 +914,7 @@ def build_flex_attn_fwd_module(
                     .to(fx.BFloat16)
                     .ir_value()
                 )
-            schedule_fwd_softmax_pipeline(
-                vmem_count=(V_LOAD_IT if not PIPELINED_KV or prefetch_next else 0)
-            )
+            schedule_fwd_softmax_pipeline(vmem_count=V_LOAD_IT)
             peer_sum = _f32(fx.gpu.shuffle_xor(local_sum, 32, 64))
             tile_sum = local_sum + peer_sum
             tile_running_sum = tile_running_sum * correction + tile_sum
@@ -969,7 +987,6 @@ def build_flex_attn_fwd_module(
                         iter_max,
                         iter_sum,
                         stage=0,
-                        prefetch_next=True,
                     )
                     fx.rocdl.s_waitcnt(vmcnt=0, lgkmcnt=0, expcnt=0)
                     fx.gpu.barrier()
@@ -991,7 +1008,6 @@ def build_flex_attn_fwd_module(
                         iter_max,
                         iter_sum,
                         stage=1,
-                        prefetch_next=True,
                     )
                     fx.rocdl.s_waitcnt(vmcnt=0, lgkmcnt=0, expcnt=0)
                     fx.gpu.barrier()
@@ -1003,6 +1019,107 @@ def build_flex_attn_fwd_module(
                     ]
                 run_results = pipeline_results[1:]
             return run_results
+
+        def process_split_run(
+            block_count,
+            block_indices,
+            block_base,
+            masked,
+            run_state,
+        ):
+            run_results = run_state
+            split_count = (block_count + fx.Int32(NW - 1)) // fx.Int32(NW)
+            for split_index, iter_args in range(
+                fx.Int32(0),
+                split_count,
+                fx.Int32(1),
+                init=run_state,
+            ):
+                iter_max = _f32(iter_args[0])
+                iter_sum = _f32(iter_args[1])
+                iter_output = [
+                    iter_args[2 + d_chunk]
+                    for d_chunk in fx.range_constexpr(D_CHUNKS)
+                ]
+                block_index = fx.Int32(split_index * NW) + wave
+                tile_active = block_index < block_count
+                safe_index = tile_active.select(block_index, fx.Int32(0))
+                sparse_block = load_uniform_i32(
+                    block_indices,
+                    block_base + safe_index,
+                )
+                for sub_block in fx.range_constexpr(CPB):
+                    iter_output, iter_max, iter_sum = process_tile(
+                        sparse_block * fx.Int32(CPB) + fx.Int32(sub_block),
+                        masked,
+                        iter_output,
+                        iter_max,
+                        iter_sum,
+                        tile_active=tile_active,
+                    )
+                run_results = yield [iter_max, iter_sum] + iter_output
+            return run_results
+
+        def reduce_split_results(split_results):
+            split_max = _f32(split_results[0])
+            split_sum = _f32(split_results[1])
+            split_output = [
+                split_results[2 + d_chunk]
+                for d_chunk in fx.range_constexpr(D_CHUNKS)
+            ]
+            reduction_stride = 2 + D_CHUNKS * 16
+            reduction_offset = lane_half * fx.Int32(reduction_stride)
+            reduction_pointer = fx.add_offset(
+                preduction,
+                fx.make_int_tuple(reduction_offset),
+            )
+            if (wave == fx.Int32(1)) & (lane_row == fx.Int32(0)):
+                fx.ptr_store(split_max, reduction_pointer)
+                fx.ptr_store(
+                    split_sum,
+                    fx.add_offset(reduction_pointer, fx.make_int_tuple(fx.Int32(1))),
+                )
+                for d_chunk in fx.range_constexpr(D_CHUNKS):
+                    output_pointer = fx.add_offset(
+                        reduction_pointer,
+                        fx.make_int_tuple(fx.Int32(2 + d_chunk * 16)),
+                    )
+                    fx.ptr_store(Vec(split_output[d_chunk]), output_pointer)
+            fx.gpu.barrier()
+
+            other_max = _f32(fx.ptr_load(reduction_pointer))
+            other_sum = _f32(
+                fx.ptr_load(
+                    fx.add_offset(
+                        reduction_pointer,
+                        fx.make_int_tuple(fx.Int32(1)),
+                    )
+                )
+            )
+            combined_max = _maximum(split_max, other_max)
+            split_scale = _exp2(split_max - combined_max)
+            other_scale = _exp2(other_max - combined_max)
+            split_sum = split_sum * split_scale + other_sum * other_scale
+            split_max = combined_max
+            split_scale_vec = Vec.from_elements(
+                [split_scale], fx.Float32
+            ).broadcast_to(16)
+            other_scale_vec = Vec.from_elements(
+                [other_scale], fx.Float32
+            ).broadcast_to(16)
+            for d_chunk in fx.range_constexpr(D_CHUNKS):
+                output_pointer = fx.add_offset(
+                    reduction_pointer,
+                    fx.make_int_tuple(fx.Int32(2 + d_chunk * 16)),
+                )
+                other_output = Vec(
+                    fx.make_view(output_pointer, fx.make_layout(16, 1)).load()
+                )
+                split_output[d_chunk] = (
+                    Vec(split_output[d_chunk]) * split_scale_vec
+                    + other_output * other_scale_vec
+                )
+            return [split_max, split_sum] + split_output
 
         def store_results(final_results):
             final_max = _f32(final_results[0])
@@ -1029,7 +1146,10 @@ def build_flex_attn_fwd_module(
                 output_source,
                 fx.make_layout(4, 1),
             )
-            if query_valid:
+            store_valid = query_valid
+            if const_expr(SPLIT_KV):
+                store_valid = store_valid & (wave == fx.Int32(0))
+            if store_valid:
                 for d_chunk in fx.range_constexpr(D_CHUNKS):
                     normalized = Vec(final_output[d_chunk]) * inverse_vec
                     for column_group in fx.range_constexpr(4):
@@ -1056,7 +1176,7 @@ def build_flex_attn_fwd_module(
                             ),
                         )
 
-            if query_valid & (lane_half == fx.Int32(0)):
+            if store_valid & (lane_half == fx.Int32(0)):
                 has_values = final_sum > _f32(0.0)
                 lse_value = final_max + fx.math.log2(final_sum)
                 max_value = final_max
@@ -1083,7 +1203,23 @@ def build_flex_attn_fwd_module(
         partial_base = mask_row * fx.Int32(MAX_PARTIAL)
         initial_state = [running_max, running_sum] + output
 
-        if const_expr(PIPELINED_KV):
+        if const_expr(SPLIT_KV):
+            full_results = process_split_run(
+                full_count,
+                gFKVI,
+                full_base,
+                False,
+                initial_state,
+            )
+            split_results = process_split_run(
+                partial_count,
+                gKVI,
+                partial_base,
+                True,
+                full_results,
+            )
+            final_results = reduce_split_results(split_results)
+        elif const_expr(PIPELINED_KV):
             full_results = process_pipelined_run(
                 full_count,
                 gFKVI,
