@@ -803,10 +803,13 @@ def reduce_scatter_tensor_backward(ctx, grad_output: torch.Tensor):
     reduce_op = ctx.reduce_op
 
     # Lazy validation: check reduce_op only when backward is called
-    if reduce_op != "sum":
+    if reduce_op not in ("sum", "avg"):
         raise RuntimeError(
-            f"reduce_scatter_tensor backward only supports 'sum' reduction, got '{reduce_op}'"
+            f"reduce_scatter_tensor backward only supports 'sum' and 'avg' reductions, got '{reduce_op}'"
         )
+
+    if reduce_op == "avg":
+        grad_output = grad_output / group_size
 
     # Backward is all_gather
     output = torch.ops._c10d_functional.all_gather_into_tensor(
@@ -1030,10 +1033,13 @@ def reduce_scatter_tensor_coalesced_backward(ctx, grad_outputs: list[torch.Tenso
     reduce_op = ctx.reduce_op
 
     # Lazy validation: check reduce_op only when backward is called
-    if reduce_op != "sum":
+    if reduce_op not in ("sum", "avg"):
         raise RuntimeError(
-            f"reduce_scatter_tensor_coalesced backward only supports 'sum' reduction, got '{reduce_op}'"
+            f"reduce_scatter_tensor_coalesced backward only supports 'sum' and 'avg' reductions, got '{reduce_op}'"
         )
+
+    if reduce_op == "avg":
+        grad_outputs = [grad_output / group_size for grad_output in grad_outputs]
 
     # Backward does all_gather on list of gradients
     grad_inputs = torch.ops._c10d_functional.all_gather_into_tensor_coalesced(
