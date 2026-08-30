@@ -534,16 +534,31 @@ def _get_model_state_dict(
 
     if info.submodule_prefixes:
         new_state_dict: dict[str, ValueType] = {}
-        # TODO: make this faster.
+        # Build a character trie of the submodule prefixes so that every FQN can
+        # be matched against all prefixes in a single O(len(fqn)) walk, instead
+        # of scanning every prefix for every FQN (previously O(len(fqn) *
+        # num_prefixes)). A ``None`` key marks the end of a complete prefix and
+        # stores that prefix's length; it never collides with a character key.
+        prefix_trie: dict[Any, Any] = {}
+        for prefix in info.submodule_prefixes:
+            node = prefix_trie
+            for char in prefix:
+                node = node.setdefault(char, {})
+            node[None] = len(prefix)
         for fqn in state_dict:
-            for prefix in info.submodule_prefixes:
-                if not fqn.startswith(prefix):
-                    continue
-                if info.keep_submodule_prefixes:
-                    new_state_dict[fqn] = state_dict[fqn]
-                else:
-                    new_fqn = fqn[len(prefix) :]
-                    new_state_dict[new_fqn] = state_dict[fqn]
+            node = prefix_trie
+            idx = 0
+            while node is not None:
+                prefix_len = node.get(None)
+                if prefix_len is not None:
+                    if info.keep_submodule_prefixes:
+                        new_state_dict[fqn] = state_dict[fqn]
+                    else:
+                        new_state_dict[fqn[prefix_len:]] = state_dict[fqn]
+                if idx == len(fqn):
+                    break
+                node = node.get(fqn[idx])
+                idx += 1
         state_dict = new_state_dict
 
     if info.ignore_frozen_params:
