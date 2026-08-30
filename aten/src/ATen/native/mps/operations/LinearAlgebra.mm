@@ -688,25 +688,32 @@ static void lu_factor_panel_encode(const Tensor& LU,
                                    int64_t B,
                                    bool transposeResult) {
   auto stream = getCurrentMPSStream();
-  const bool useMpp = has_mpp();
+  // complex64 runs the same blocked schedule through the float2 kernel
+  // instantiations; the float pipeline behavior is unchanged.
+  const bool isComplex = LU.scalar_type() == kComplexFloat;
+  const auto tname = mps::scalarToMetalTypeString(LU);
+  const bool useMpp = has_mpp() && !isComplex;
 
-  auto factorW32PSO = lib.getPipelineStateForFunc("factorPanelLU_1_32");
-  auto factorW16PSO = lib.getPipelineStateForFunc("factorPanelLU_2_16");
-  auto factorW8PSO = lib.getPipelineStateForFunc("factorPanelLU_4_8");
-  auto streamUpdatePSO = lib.getPipelineStateForFunc("luStreamUpdate");
-  auto streamPivotPSO = lib.getPipelineStateForFunc("luStreamPivot");
-  auto laswpPSO = lib.getPipelineStateForFunc("laswpGatherLU");
-  auto trsm8PSO = lib.getPipelineStateForFunc("trsmPanelLU_8");
-  auto trsm16PSO = lib.getPipelineStateForFunc("trsmPanelLU_16");
-  auto trsm32PSO = lib.getPipelineStateForFunc("trsmPanelLU_32");
+  auto factorW32PSO = lib.getPipelineStateForFunc(fmt::format("factorPanelLU_{}_1_32", tname));
+  auto factorW16PSO = lib.getPipelineStateForFunc(fmt::format("factorPanelLU_{}_2_16", tname));
+  auto factorW8PSO = lib.getPipelineStateForFunc(fmt::format("factorPanelLU_{}_4_8", tname));
+  auto streamUpdatePSO = lib.getPipelineStateForFunc(fmt::format("luStreamUpdate_{}", tname));
+  auto streamPivotPSO = lib.getPipelineStateForFunc(fmt::format("luStreamPivot_{}", tname));
+  auto laswpPSO = lib.getPipelineStateForFunc(fmt::format("laswpGatherLU_{}", tname));
+  auto trsm8PSO = lib.getPipelineStateForFunc(fmt::format("trsmPanelLU_{}_8", tname));
+  auto trsm16PSO = lib.getPipelineStateForFunc(fmt::format("trsmPanelLU_{}_16", tname));
+  auto trsm32PSO = lib.getPipelineStateForFunc(fmt::format("trsmPanelLU_{}_32", tname));
   uint32_t maxG = static_cast<uint32_t>(std::min({factorW32PSO.maxTotalThreadsPerThreadgroup,
                                                   factorW16PSO.maxTotalThreadsPerThreadgroup,
                                                   factorW8PSO.maxTotalThreadsPerThreadgroup}));
   maxG = std::max(32u, maxG / 32 * 32);
+  // simdgroup_matrix and MPP matmul2d are float-only hardware paths, so the
+  // complex Schur update routes to the threadgroup-tiled scalar kernel.
   auto gemmBigPSO = useMpp ? lib.getPipelineStateForFunc("gemmLU_64_64_4") : nil;
   auto gemmSmallPSO = useMpp ? lib.getPipelineStateForFunc("gemmLU_32_64_2") : nil;
-  auto gemmSimdPSO = useMpp ? nil : lib.getPipelineStateForFunc("gemmSimdLU");
-  auto transposePSO = transposeResult ? lib.getPipelineStateForFunc("transposeInPlaceLU") : nil;
+  auto gemmSimdPSO = (!useMpp && !isComplex) ? lib.getPipelineStateForFunc("gemmSimdLU") : nil;
+  auto gemmTiledPSO = isComplex ? lib.getPipelineStateForFunc(fmt::format("gemmTiledLU_{}", tname)) : nil;
+  auto transposePSO = transposeResult ? lib.getPipelineStateForFunc(fmt::format("transposeInPlaceLU_{}", tname)) : nil;
 
   const auto uM = static_cast<uint32_t>(M);
   const auto uN = static_cast<uint32_t>(N);
@@ -714,11 +721,14 @@ static void lu_factor_panel_encode(const Tensor& LU,
   const uint32_t mn = std::min(uM, uN);
   const uint32_t NBo = mn <= 1024 ? 32 : mn <= 2048 ? 64 : 128;
   // panels taller than this use the streaming kernels (kLUStreamNT argmax
-  // partials and the 32-float U row per batch in scratch)
+  // partials and the 32-element U row per batch in scratch; the partials are
+  // always floats, the U row is in the element type: 32 floats for float,
+  // 64 for complex64)
   const uint32_t kStreamMinRows = 4 * maxG;
   Tensor scratch;
   if (uM > kStreamMinRows) {
-    scratch = at::empty({B, 2 * kLUStreamNT + 32}, LU.options());
+    const int64_t scratchStride = 2 * kLUStreamNT + (isComplex ? 64 : 32);
+    scratch = at::empty({B, scratchStride}, LU.options().dtype(kFloat));
   }
 
   @autoreleasepool {
@@ -744,11 +754,15 @@ static void lu_factor_panel_encode(const Tensor& LU,
         if (W == 0) {
           return;
         }
+        // column-chunk width staged per threadgroup: 64 floats, 32 float2
+        // (matches CW in the laswpGatherLU instantiations)
+        const uint32_t lcw = isComplex ? 32 : 64;
         setP5(cs0, ce0, cs1, ce1);
         [enc setComputePipelineState:laswpPSO];
         for (uint32_t s0 = 0; s0 < nb; s0 += 32) {
           setP4(d0 + s0, std::min(32u, nb - s0), 0, 0);
-          [enc dispatchThreadgroups:MTLSizeMake((W + 63) / 64, uB, 1) threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
+          [enc dispatchThreadgroups:MTLSizeMake((W + lcw - 1) / lcw, uB, 1)
+              threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
         }
       };
       auto trsm = [&](uint32_t d0, uint32_t cs, uint32_t ce, id<MTLComputePipelineState> pso, uint32_t nr) {
@@ -768,6 +782,12 @@ static void lu_factor_panel_encode(const Tensor& LU,
         setP5(kc, kw, 0, 0);
         const uint32_t Tm = re - rs;
         const uint32_t Tn = ce - cs;
+        if (isComplex) {
+          [enc setComputePipelineState:gemmTiledPSO];
+          [enc dispatchThreadgroups:MTLSizeMake((Tn + 15) / 16, (Tm + 15) / 16, uB)
+              threadsPerThreadgroup:MTLSizeMake(16, 16, 1)];
+          return;
+        }
         if (!useMpp) {
           [enc setComputePipelineState:gemmSimdPSO];
           [enc dispatchThreadgroups:MTLSizeMake((Tn + 63) / 64, (Tm + 31) / 32, uB)
@@ -886,8 +906,9 @@ static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
                                              bool check_errors) {
   using namespace mps;
 
-  TORCH_CHECK(A.scalar_type() == kFloat && LU.scalar_type() == kFloat,
-              "linalg.lu_factor(): MPS doesn't support complex types.");
+  TORCH_CHECK((A.scalar_type() == kFloat || A.scalar_type() == kComplexFloat) && LU.scalar_type() == A.scalar_type(),
+              "linalg.lu_factor(): MPS supports float32 and complex64 inputs, got ",
+              A.scalar_type());
   TORCH_CHECK(pivot, "linalg.lu_factor(): MPS doesn't allow pivot == False.");
 
   int64_t aRows = A.size(-2);
