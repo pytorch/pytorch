@@ -129,12 +129,3 @@ def _graph_device_types(graph: Graph | None) -> frozenset[str]:
     return frozenset(devices)
 
 
-def _graph_device_type(graph: Graph | None) -> str:
-    """The single device an artifact records for a graph.
-
-    An accelerator wins over cpu: a mixed graph's generated code is the
-    accelerator's, and "cpu" here would arm a CPU codegen-target check the
-    artifact does not need.
-    """
-    devices = _graph_device_types(graph)
-    return next((d for d in sorted(devices) if d != "cpu"), "cpu")
