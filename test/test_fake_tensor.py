@@ -3824,7 +3824,6 @@ class FakeTensorDispatchCache(TestCase):
 
     def test_cache_view_output_preserves_resized_storage(self):
         fake_mode = FakeTensorMode()
-        fake_mode.cache_crosscheck_enabled = False
 
         with fake_mode:
             x = torch.randn(4, 8)
