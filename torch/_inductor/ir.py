@@ -589,6 +589,28 @@ def try_get_name(x):
     return x.get_name() if isinstance(x, Buffer) else None
 
 
+# Compute-node tracking for FQN annotation of fused kernels.
+# When active, every Loops.inner_fn that executes records its lowering_fx_node
+# into the sink. Tracing a fused buffer's inner_fn therefore collects ALL the
+# original FX nodes inlined into it — one per original layer that was fused.
+# Realized inputs are read via ops.load (not inner_fn descent), so they are
+# natural boundaries with no transitive cascade. None when collection is off.
+_active_compute_sink: OrderedSet[Any] | None = None
+
+
+@contextlib.contextmanager
+def collect_compute_nodes(
+    sink: OrderedSet[Any],
+) -> Generator[None, None, None]:
+    global _active_compute_sink
+    prev = _active_compute_sink
+    _active_compute_sink = sink
+    try:
+        yield
+    finally:
+        _active_compute_sink = prev
+
+
 class IRNode:
     """Base class for all intermediate representation (IR) nodes in TorchInductor.
 
@@ -1076,6 +1098,30 @@ class Loops(IRNode):
     inner_fn: Callable[..., Any]
     ranges: Sequence[_IntLike]
 
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        # Wrap inner_fn so executing it under an active collect_compute_nodes
+        # sink records this node's lowering_fx_node. When a fused kernel's
+        # outer inner_fn is traced, it calls each inlined Loops's inner_fn,
+        # which records that Loops's original layer FX node. This gives the
+        # complete set of original layers fused into the kernel.
+        # Only installed when both annotation flags are on.
+        if not (
+            config.triton.cudagraph_kernel_annotations
+            and config.triton.cudagraph_fqn_compute_tracking
+        ):
+            return
+        orig_inner_fn = self.inner_fn
+
+        def _tracking_inner_fn(*args: Any, **kwargs: Any) -> Any:
+            if _active_compute_sink is not None:
+                node = self.lowering_fx_node
+                if node is not None:
+                    _active_compute_sink.add(node)
+            return orig_inner_fn(*args, **kwargs)
+
+        self._post_init_setattr("inner_fn", _tracking_inner_fn)
+
     @cache_on_self_and_args("Loops")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
@@ -1143,16 +1189,22 @@ class Loops(IRNode):
             return opcounter.getvalue()
 
     def collect_compute_fx_nodes(self) -> OrderedSet[torch.fx.Node]:
-        """Return the FX node directly lowered into this loop body.
+        """Return all FX nodes whose compute is inlined into this loop body.
 
-        Each fused scheduler node corresponds to one Loops whose lowering_fx_node
-        is the FX op whose run_node call created it.  Returning just that node
-        (rather than walking transitively accumulated origins) prevents
-        over-attribution: a kernel is only attributed to the ops it actually
-        computes, not to upstream ops it merely reads.
+        Traces inner_fn under MockHandler with an active sink. Each inlined
+        Loops's _tracking_inner_fn fires and records its lowering_fx_node,
+        giving the complete set of original-layer FX nodes fused into this
+        kernel. Reads of realized buffers go through ops.load (not inner_fn
+        descent) so are natural boundaries — no transitive cascade.
         """
-        node = self.lowering_fx_node
-        return OrderedSet([node]) if node is not None else OrderedSet()
+        sink: OrderedSet[torch.fx.Node] = OrderedSet()
+        with (
+            collect_compute_nodes(sink),
+            V.set_ops_handler(V.MockHandler()),
+            patch.object(FlexibleLayout, "allow_indexing", True),
+        ):
+            self.inner_fn(*self.inner_fn_args())
+        return sink
 
     def inner_fn_args(self) -> Sequence[Sequence[_IntLike]]:
         return (self._index(self.ranges),)
