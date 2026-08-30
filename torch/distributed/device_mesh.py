@@ -1431,7 +1431,7 @@ else:
             Its length must match the length of mesh_sizes.
 
             For example, if we have a 1D mesh DeviceMesh([0, 1, 2, 3, 4, 5, 6, 7], mesh_dim_names=("world")),
-            calling mesh_1d._unflatten(0, (2, 2, 4), ["dp", "pp", "tp"]) will create a 3D mesh
+            calling mesh_1d._unflatten(0, (2, 2, 2), ["dp", "pp", "tp"]) will create a 3D mesh
             DeviceMesh([[[0, 1], [2, 3]], [[4, 5], [6, 7]]], mesh_dim_names=("dp", "cp", "tp")).
 
             Note that after calling the unflatten, there is no access to the unflattened dimension in mesh_1d, one can only
