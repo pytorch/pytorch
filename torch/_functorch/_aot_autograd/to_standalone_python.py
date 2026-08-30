@@ -990,9 +990,10 @@ def _compose_training_module(
         "compiled_function_backward",
         "runtime_wrapper_orchestration",
     )
-    missing = [
-        name for name in modeled if name != "compiled_fn_wrapper" and name not in by_name
-    ]
+    # All six modeled names are REQUIRED: AOTAutograd codegens
+    # compiled_fn_wrapper unconditionally alongside the forward/backward
+    # artifacts, and the emitted glue calls _transform_raw_returns unguarded.
+    missing = [name for name in modeled if name not in by_name]
     if missing:
         raise NotImplementedError(
             f"aot_autograd.compile_to_python: the training compose expects "
