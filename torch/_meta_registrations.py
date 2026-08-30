@@ -7541,7 +7541,7 @@ def upsample_common_check(input_size, output_size, num_spatial_dims):
 )
 def upsample_nearest1d(input, output_size, scales=None):
     torch._check(
-        input.numel() != 0 or multiply_integers(input.size()[1:]),
+        input.numel() != 0 or multiply_integers(input.size()[1:]) != 0,
         lambda: f"Non-empty 3D data tensor expected but got a tensor with sizes {input.size()}",
     )
     full_output_size = upsample_common_check(
@@ -7557,7 +7557,7 @@ def upsample_nearest1d(input, output_size, scales=None):
 )
 def upsample_nearest2d(input, output_size, scales_h=None, scales_w=None):
     torch._check(
-        input.numel() != 0 or multiply_integers(input.size()[1:]),
+        input.numel() != 0 or multiply_integers(input.size()[1:]) != 0,
         lambda: f"Non-empty 4D data tensor expected but got a tensor with sizes {input.size()}",
     )
     full_output_size = upsample_common_check(
@@ -7618,7 +7618,7 @@ def upsample_nearest2d_backward(
 )
 def upsample_nearest3d(input, output_size, scales_d=None, scales_h=None, scales_w=None):
     torch._check(
-        input.numel() != 0 or multiply_integers(input.size()[1:]),
+        input.numel() != 0 or multiply_integers(input.size()[1:]) != 0,
         lambda: f"Non-empty 5D data tensor expected but got a tensor with sizes {input.size()}",
     )
     full_output_size = upsample_common_check(
