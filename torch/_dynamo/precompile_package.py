@@ -1313,7 +1313,7 @@ def _warn_risky_drops(risky: Sequence[tuple[str, str]]) -> None:
 
 
 def _grad_snapshot(
-    fn: object, examples: Sequence[object]
+    fn: object, examples: Sequence[ExampleInput | tuple[object, ...]]
 ) -> dict[torch.Tensor, torch.Tensor | None]:
     """Every tensor an example could accumulate a gradient into, and its .grad.
 

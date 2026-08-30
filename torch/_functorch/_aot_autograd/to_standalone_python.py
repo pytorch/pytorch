@@ -1011,14 +1011,18 @@ def _compose_training_module(
     orchestration = splice(by_name["runtime_wrapper_orchestration"][0])
 
     fw_metadata_src = emit_value(spec.fw_metadata, imports)
-    rng_src = emit_value(
-        _rw._AutogradRngStateTracker(
-            num_rng=spec.fw_metadata.num_graphsafe_rng_states,
-            graphsafe_idx=spec.fw_metadata.graphsafe_rng_state_index,
-            device=spec.fw_metadata.graphsafe_rng_device,
-        ),
-        imports,
-    )
+    # Emit the tracker as a constructor call over its three config fields rather
+    # than baking a live instance: every other field is per-run state the default
+    # factories rebuild anyway, and one of them defaults to an itertools.count,
+    # whose pickle support CPython removed in 3.14. Baking it there leaves
+    # emit_value with no reduce, and the whole training compose is rejected.
+    rng_cfg = {
+        "num_rng": spec.fw_metadata.num_graphsafe_rng_states,
+        "graphsafe_idx": spec.fw_metadata.graphsafe_rng_state_index,
+        "device": spec.fw_metadata.graphsafe_rng_device,
+    }
+    rng_kwargs = ", ".join(f"{k}={emit_value(v, imports)}" for k, v in rng_cfg.items())
+    rng_src = f"{emit_value(_rw._AutogradRngStateTracker, imports)}({rng_kwargs})"
     imports |= {
         "import contextlib",
         "import torch",
