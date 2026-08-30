@@ -334,9 +334,9 @@ class PytreeNodeRegistry {
   void registerOrReplaceNode(std::string_view typeName, NodeDef nodeDef) {
     auto it = registry_.find(typeName);
     if (it != registry_.end()) {
-      it->second = nodeDef;
+      it->second = std::move(nodeDef);
     } else {
-      registry_.emplace(typeName, nodeDef);
+      registry_.emplace(typeName, std::move(nodeDef));
     }
   }
 
@@ -389,7 +389,8 @@ ITreeSpec makeITreeSpec(
     offset += children.back().numIValues();
   }
 
-  return ITreeSpec(name, context, std::move(children), nodeDefCache);
+  return ITreeSpec(
+      name, std::move(context), std::move(children), std::move(nodeDefCache));
 }
 
 } // namespace
@@ -427,7 +428,7 @@ c10::IValue itreeUnflatten(
   if (spec.isIValue()) {
     return std::move(ivalues[0]);
   }
-  auto unflattenFn = spec.nodeDefCache().unflattenFn;
+  const auto& unflattenFn = spec.nodeDefCache().unflattenFn;
   if (spec.allIValues()) {
     return unflattenFn(std::move(ivalues), spec.context());
   }
@@ -599,7 +600,7 @@ ITreeSpec::ITreeSpec(
     : uniformName_(uniformName),
       context_(std::move(context)),
       children_(std::move(children)),
-      nodeDefCache_(nodeDefCache),
+      nodeDefCache_(std::move(nodeDefCache)),
       numIValues_(0),
       value_(nullptr),
       isUsed_(false) {
