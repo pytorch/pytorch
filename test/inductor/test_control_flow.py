@@ -2114,6 +2114,21 @@ class ScanModels:
                 torch.cat(grad_inputs, dim=0) / chunks,
             )
 
+    class ScanReduceOnly(torch.nn.Module):
+        """A pure reduction: one carry leaf and no per-step output.
+
+        The scan's total flat output is then a single tensor, the shape whose
+        while_loop decomposition used to leave the `getitem` users of the scan node
+        hanging off the replacement value (`<built-in function getitem> is not an
+        OpOverload` while lowering).
+        """
+
+        def forward(self, scan_op, initial, xs):
+            def step(acc, x):
+                return acc + x.sin(), ()
+
+            return scan_op(step, initial, xs)
+
     class ScanWithClamp(torch.nn.Module):
         def __init__(self):
             super().__init__()
@@ -2380,6 +2395,23 @@ class ScanTests(TestCase):
             device=device,
             dynamic=dynamic,
             autograd=autograd,
+        )
+
+    # Not @requires_gpu: the bug this guards is a CPU-reproducible lowering failure.
+    @parametrize("device", ["cpu"] + ([GPU_TYPE] if HAS_GPU else []))
+    @parametrize("dynamic", [True, False])
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_scan_single_flat_output(self, device, dynamic):
+        # Forward only: eager scan's backward does not support an empty ys.
+        self._run_test(
+            model=ScanModels.ScanReduceOnly(),
+            inputs=(
+                torch.randn(4, 5),
+                torch.randn(3, 4, 5),
+            ),
+            device=device,
+            dynamic=dynamic,
+            autograd=False,
         )
 
 
