@@ -293,6 +293,44 @@ def _module_level_names(tree: ast.Module) -> set[str]:
     return names
 
 
+def _check_runtime_wrapper_signature(orch: "GeneratedSource") -> None:
+    """The composed ``call`` invokes the orchestration POSITIONALLY:
+    _runtime_wrapper(inner, contextlib.nullcontext, lambda: None, flat_inputs),
+    hardcoded to the codegen'd signature in runtime_wrappers.py (``def
+    _runtime_wrapper(_compiled_fn_, _first_ctx_, _on_before_call_, args)``).
+    Verify the captured signature still matches so a future rename/reorder
+    fails loudly here instead of silently passing wrong arguments. The FULL
+    signature is compared, not just positional params: the standalone call is
+    purely positional, so a keyword-only / *args / **kwargs param would be
+    silently dropped.
+    """
+    expected = ["_compiled_fn_", "_first_ctx_", "_on_before_call_", "args"]
+    orch_def = next(
+        (
+            n
+            for n in ast.walk(ast.parse(orch.source))
+            if isinstance(n, ast.FunctionDef) and n.name == orch.fn_name
+        ),
+        None,
+    )
+    args_node = orch_def.args if orch_def is not None else None
+    if args_node is None:
+        params = None
+    else:
+        params = [a.arg for a in (*args_node.posonlyargs, *args_node.args)]
+        params += [a.arg for a in args_node.kwonlyargs]
+        if args_node.vararg is not None:
+            params.append("*" + args_node.vararg.arg)
+        if args_node.kwarg is not None:
+            params.append("**" + args_node.kwarg.arg)
+    if params != expected:
+        raise NotImplementedError(
+            "aot_autograd.compile_to_python: the orchestration wrapper signature "
+            f"changed (expected {expected}, got {params}); the "
+            "standalone module invokes it positionally and must be updated to match."
+        )
+
+
 def _compose_standalone_module(
     inner_python: str, captured: list[GeneratedSource], inner_call_obj: Any
 ) -> str:
@@ -358,41 +396,7 @@ def _compose_standalone_module(
     orch = orchestration[0]
     non_orch = [g for g in captured if g is not orch]
 
-    # The generated ``call`` invokes the orchestration POSITIONALLY by its own name (see
-    # the bottom of this function): _runtime_wrapper(chain_head, contextlib.nullcontext,
-    # lambda: None, flat_inputs). That mapping is hardcoded to the codegen'd signature in
-    # runtime_wrappers.py (``def _runtime_wrapper(_compiled_fn_, _first_ctx_,
-    # _on_before_call_, args)``). Verify the captured signature still matches so a future
-    # rename/reorder fails loudly here instead of silently passing wrong arguments.
-    expected_orch_params = ["_compiled_fn_", "_first_ctx_", "_on_before_call_", "args"]
-    orch_def = next(
-        (
-            n
-            for n in ast.walk(ast.parse(orch.source))
-            if isinstance(n, ast.FunctionDef) and n.name == orch.fn_name
-        ),
-        None,
-    )
-    args_node = orch_def.args if orch_def is not None else None
-    if args_node is None:
-        orch_params = None
-    else:
-        # Compare the FULL signature, not just positional params: the standalone call is
-        # purely positional, so a keyword-only / *args / **kwargs param (e.g. an added
-        # kw-only-with-default) would be silently dropped. Surface any such param so it
-        # trips this guard rather than passing.
-        orch_params = [a.arg for a in (*args_node.posonlyargs, *args_node.args)]
-        orch_params += [a.arg for a in args_node.kwonlyargs]
-        if args_node.vararg is not None:
-            orch_params.append("*" + args_node.vararg.arg)
-        if args_node.kwarg is not None:
-            orch_params.append("**" + args_node.kwarg.arg)
-    if orch_params != expected_orch_params:
-        raise NotImplementedError(
-            "aot_autograd.compile_to_python: the orchestration wrapper signature "
-            f"changed (expected {expected_orch_params}, got {orch_params}); the "
-            "standalone module invokes it positionally and must be updated to match."
-        )
+    _check_runtime_wrapper_signature(orch)
 
     helper_table = _known_helper_table()
     # Every wrapper is inlined (below) as a real def at module scope under its OWN codegen'd
@@ -964,24 +968,52 @@ def _compose_training_module(
             "carries a BackwardState into standalone source yet."
         )
 
+    # Same hazards as the inference composer above: a re-entrant lowering
+    # under a DISTINCT TracingContext appends ITS wrappers to this sink, so
+    # filter to the target orchestration's origin; a same-context re-entry is
+    # caught by the exactly-one check below instead.
+    orchestrations = [
+        g for g in captured if g.artifact_name == "runtime_wrapper_orchestration"
+    ]
+    if orchestrations:
+        target_origin = orchestrations[-1].origin_id
+        captured = [g for g in captured if g.origin_id == target_origin]
+
     by_name: dict[str, list[GeneratedSource]] = {}
     for gen in captured:
         by_name.setdefault(gen.artifact_name, []).append(gen)
+    modeled = (
+        "backward_prologue",
+        "backward_epilogue",
+        "compiled_fn_wrapper",
+        "compiled_function_forward",
+        "compiled_function_backward",
+        "runtime_wrapper_orchestration",
+    )
     missing = [
-        name
-        for name in (
-            "backward_prologue",
-            "backward_epilogue",
-            "compiled_function_forward",
-            "compiled_function_backward",
-            "runtime_wrapper_orchestration",
-        )
-        if name not in by_name
+        name for name in modeled if name != "compiled_fn_wrapper" and name not in by_name
     ]
     if missing:
         raise NotImplementedError(
             f"aot_autograd.compile_to_python: the training compose expects "
             f"AOTAutograd to codegen {missing}, which this graph did not produce."
+        )
+    # Refuse, never mis-render: a captured wrapper this compose does not
+    # splice (synthetic base, dedup, functionalized RNG, debug asserts, ...)
+    # changes the inner calling convention or the runtime behaviour, so
+    # silently dropping it ships an artifact that only fails at serve time,
+    # while a raise here keeps the caller's working pickled-bundle fallback.
+    unmodeled = sorted(name for name in by_name if name not in modeled)
+    if unmodeled:
+        raise NotImplementedError(
+            "aot_autograd.compile_to_python: the training compose cannot yet "
+            f"model these captured runtime wrappers: {unmodeled}."
+        )
+    if len(by_name["runtime_wrapper_orchestration"]) != 1:
+        raise NotImplementedError(
+            "aot_autograd.compile_to_python expected exactly one training "
+            "orchestration wrapper, captured "
+            f"{len(by_name['runtime_wrapper_orchestration'])}."
         )
 
     imports: set[str] = set()
@@ -1008,7 +1040,9 @@ def _compose_training_module(
         )
         for gen in by_name.get(name, [])
     ]
-    orchestration = splice(by_name["runtime_wrapper_orchestration"][0])
+    orch = by_name["runtime_wrapper_orchestration"][0]
+    _check_runtime_wrapper_signature(orch)
+    orchestration = splice(orch)
 
     fw_metadata_src = emit_value(spec.fw_metadata, imports)
     rng_src = emit_value(
@@ -1156,7 +1190,7 @@ def _graph_differentiates(gm: GraphModule) -> bool:
 
 def _restride_backward_placeholders(
     bw_gm: GraphModule,
-    fwd_output_strides: Sequence[tuple[int, ...] | None],
+    fwd_output_strides: Sequence[tuple[str, ...] | None],
     spec: Any,
 ) -> None:
     """Restride the backward's saved-activation inputs to what the forward chose.
@@ -1191,7 +1225,18 @@ def _restride_backward_placeholders(
         offset = index - num_symints
         if not (0 <= offset < len(saved)) or not saved[offset]:
             continue
-        real = tuple(int(s) for s in saved[offset])
+        # CompiledFxGraph.output_strides entries are PRINTED stride
+        # expressions (strings), not ints; under dynamic shapes they are
+        # symbolic ("3*s0") and cannot be applied to a static fake. Lowering
+        # the backward against strides other than the ones the forward chose
+        # risks silently wrong gradients, so refuse rather than guess.
+        try:
+            real = tuple(int(s) for s in saved[offset])
+        except (TypeError, ValueError) as e:
+            raise NotImplementedError(
+                "aot_autograd.compile_to_python cannot yet restride the "
+                f"backward for symbolic forward output strides {saved[offset]!r}."
+            ) from e
         if len(real) == val.dim() and tuple(val.stride()) != real:
             node.meta["val"] = val.as_strided(val.size(), real)
 
@@ -1371,7 +1416,7 @@ def compile_to_python(
         # -- a silent ~2e-4 relative difference in the gradients.
         has_joint = "bw" in dense
         differentiates = has_joint or _graph_differentiates(dense["gm"])
-        fwd_output_strides: list[tuple[int, ...] | None] = []
+        fwd_output_strides: list[tuple[str, ...] | None] = []
         inner_python, cache = _inductor_compile_to_python(
             dense["gm"],
             example_inputs,

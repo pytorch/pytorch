@@ -329,6 +329,7 @@ import logging
 import os
 import pickle
 import sys
+import threading
 import types
 from collections.abc import Callable, Mapping, Sequence
 from types import MappingProxyType
@@ -486,14 +487,20 @@ class _InstalledArtifact:
         self._fn: Callable[..., object] | None = None
         self._inner: Any = None
         self._prepared: Any = None
+        # Serving is documented as multi-thread safe, and installing is a
+        # process-global mutation of live code objects: two first calls racing
+        # through an unlocked check-then-act would both install, and the
+        # loser's installed state leaks with nothing left holding it.
+        self._install_lock = threading.Lock()
 
     def _rebind(self, fn: Callable[..., object]) -> None:
-        if self._inner is not None:
-            raise PrecompileError(
-                "precompile: this artifact is already installed; pass fn= to load() "
-                "before the first call."
-            )
-        self._fn = fn
+        with self._install_lock:
+            if self._inner is not None:
+                raise PrecompileError(
+                    "precompile: this artifact is already installed; pass fn= to load() "
+                    "before the first call."
+                )
+            self._fn = fn
 
     def _prepare(self, package_blob: str) -> None:
         """Build what serving needs, at load rather than at the first call."""
@@ -514,18 +521,22 @@ class _InstalledArtifact:
             raise PrecompileError(str(e)) from e
 
     def _ensure(self) -> Any:
-        if self._inner is None:
-            fn = self._entry_factory() if self._fn is None else self._fn
-            # An artifact emitted before _serve took a prepared package still
-            # serves; it just rebuilds what _prepare already built.
-            if self._prepared is not None and "prepared" in _serve_parameters(
-                self._serve
-            ):
-                self._inner = self._serve(fn, prepared=self._prepared)
-            else:
-                self._inner = self._serve(fn)
-            self._prepared = None
-        return self._inner
+        inner = self._inner
+        if inner is None:
+            with self._install_lock:
+                if self._inner is None:
+                    fn = self._entry_factory() if self._fn is None else self._fn
+                    # An artifact emitted before _serve took a prepared package
+                    # still serves; it just rebuilds what _prepare already built.
+                    if self._prepared is not None and "prepared" in _serve_parameters(
+                        self._serve
+                    ):
+                        self._inner = self._serve(fn, prepared=self._prepared)
+                    else:
+                        self._inner = self._serve(fn)
+                    self._prepared = None
+                inner = self._inner
+        return inner
 
     def __call__(self, *args: object, **kwargs: object) -> object:
         return self._ensure()(*args, **kwargs)
@@ -542,7 +553,8 @@ class _InstalledArtifact:
         return inner.serve_time_compiles() if inner is not None else 0
 
     def unload(self) -> None:
-        inner, self._inner = self._inner, None
+        with self._install_lock:
+            inner, self._inner = self._inner, None
         if inner is not None:
             inner.unload()
 
@@ -3401,6 +3413,17 @@ class _PrecompileApi:
         2 of Note [precompile programming model], the runtime model must match the
         example model's parameter/buffer structure; precompile re-derives the
         param/buffer list from it (same interning/order as capture).
+
+        The returned object comes in two shapes, decided by the CAPTURE, not by a
+        load-time choice. A dynamo artifact whose capture graph-broke or recompiled
+        serves by INSTALLING onto the captured code objects: the returned callable
+        mutates process state on first call (or on ``__enter__``) and supports
+        ``with`` / ``unload()`` to take that back out. A single-whole-graph artifact
+        is standalone: a plain callable with neither. ``fn=`` applies to the
+        installing shape only -- pass the function object to install onto when it is
+        not importable from where it was captured (defined in ``__main__``, a
+        notebook, or a REPL); it must be passed before the first call, and a
+        standalone artifact rejects it with ``PrecompileError``.
 
         Raises ``PrecompileError`` if ``python_code`` is malformed or is not a
         ``torch.compiler.precompile`` artifact (it fails to parse, or is missing the

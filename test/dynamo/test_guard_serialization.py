@@ -870,6 +870,49 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ref, loaded, {"self": mod, "x": torch.randn(3), "func": inner}, True
         )
 
+    def test_snapshot_globals_function_preserves_module(self):
+        # The globals snapshot arrives as pickle STATE, so FunctionType is
+        # constructed with empty globals and reads __module__ = None from
+        # them; a guard rooted at fn.__module__ would rebuild against None.
+        from torch._dynamo.guards import GuardsStatePickler
+
+        def outer():
+            def inner():
+                return FQN_MISMATCH_GLOBAL
+
+            return inner
+
+        fn = outer()
+        self.assertIsNotNone(fn.__module__)
+        buf = io.BytesIO()
+        g = fn.__globals__
+        gtv = {id(fn): fn, id(g): g}
+        pickler = GuardsStatePickler(gtv, {}, {}, buf)
+        pickler.dump(fn)
+        out = pickle.loads(buf.getvalue())
+        self.assertEqual(out.__module__, fn.__module__)
+
+    def test_retained_grad_non_leaf_survives_pickle(self):
+        # .grad is dropped from the pickle for plain non-leafs (reading it
+        # warns and is None), but a RETAINED-grad non-leaf -- which torch.optim
+        # explicitly permits as a param -- has a real .grad that a guard can
+        # chain through; dropping it breaks such a load with an AttributeError.
+        from torch._dynamo.guards import GuardsStatePickler
+
+        base = torch.randn(4, requires_grad=True)
+        x = base * 1
+        x.retain_grad()
+        x.sum().backward()
+        grad = x.grad
+        self.assertIsNotNone(grad)
+        buf = io.BytesIO()
+        gtv = {id(x): x, id(grad): grad}
+        pickler = GuardsStatePickler(gtv, {}, {}, buf)
+        pickler.dump(x)
+        out = pickle.loads(buf.getvalue())
+        self.assertIsNotNone(out.grad)
+        self.assertEqual(out.grad.shape, grad.shape)
+
     def test_fqn_mismatched_function_prunes_unguarded_defaults(self):
         mod = DecoratedUnpicklableDefaultForwardModule()
         ref, loaded = self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))

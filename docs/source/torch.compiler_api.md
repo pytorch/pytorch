@@ -290,10 +290,16 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        ``artifact_path``. Pass it together with ``cache_path``.
    :param cache_path: File holding ``cache``; see ``artifact_path``.
    :param fn: The original callable, for an artifact that installs onto live code objects
-       rather than dispatching its own entry. Supply it before the first call.
+       rather than dispatching its own entry. Supply it before the first call; a
+       standalone artifact rejects ``fn=`` with ``PrecompileError``.
    :returns: A runnable callable with the same calling convention as the captured ``fn``.
        Arguments are matched positionally at both capture and load time; keyword-argument
-       calling conventions are not supported.
+       calling conventions are not supported. A dynamo artifact whose capture graph-broke
+       or recompiled serves by INSTALLING onto the captured code objects: the returned
+       callable mutates process state on first call (or on ``__enter__``) and supports
+       ``with`` / ``unload()`` to take that back out. An artifact that captured a single
+       whole graph is standalone: a plain callable, no installation and no ``unload``.
+       Which one you get is a property of the capture, not a load-time choice.
    :raises PrecompileError: if ``python_code`` is not a valid precompile artifact (it
        fails to parse or is missing its calling-convention metadata), if ``cache`` is
        paired with a different ``python_code`` (mismatched ``backend`` tag, ``tracer``

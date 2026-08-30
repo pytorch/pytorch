@@ -2362,6 +2362,13 @@ class GuardBuilder(GuardBuilderBase):
             # acts as hasattr guard.
             attr_source = AttrSource(source, attr)
             example_value = self.get(attr_source)
+            # Register the value with the guard tree, as
+            # get_guard_manager_from_source does for every sourced value.
+            # Without it, serialization prunes a tensor attribute nothing else
+            # references, and the rebuilt HASATTR then recomputes val=False --
+            # a silent inversion that routes attr-less inputs into the graph
+            # traced for the attr-present branch.
+            self.guard_tree_values[id(example_value)] = example_value
             base_example_value = self.get(guard)
             guard_manager_enum = self.get_guard_manager_type(attr_source, example_value)
 
@@ -4639,6 +4646,11 @@ class GuardsStatePickler(pickle.Pickler):
             argdefs,
             closure,
         )
+        # FunctionType reads __module__ from globals["__name__"], which the
+        # snapshot branch does not have (the snapshot arrives later, as pickle
+        # STATE), so a guard rooted at fn.__module__ would rebuild against
+        # None. Restore it explicitly; in the import branch this is a no-op.
+        fn.__module__ = module
         fn.__qualname__ = qualname
         fn.__kwdefaults__ = kwdefaults
         if attributes:
@@ -4880,10 +4892,13 @@ class GuardsStatePickler(pickle.Pickler):
                     obj.device,
                     pytype,
                     dispatch_keys.raw_repr(),
-                    # Reading .grad off a non-leaf warns and is always None
-                    # anyway; a training capture hits plenty of non-leaf
-                    # tensors.
-                    obj.grad if obj.is_leaf else None,
+                    # Reading .grad off a plain non-leaf warns and is None,
+                    # and a training capture hits plenty of those -- but a
+                    # RETAINED-grad non-leaf (which torch.optim explicitly
+                    # permits as a param) has a real .grad that reads cleanly,
+                    # and dropping it breaks any guard whose source chains
+                    # through it at load.
+                    obj.grad if obj.is_leaf or obj.retains_grad else None,
                 ),
                 # Deliberately the reduce STATE slot rather than a sixth
                 # constructor argument: pickle memoizes the tensor before it

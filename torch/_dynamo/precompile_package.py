@@ -1808,8 +1808,20 @@ class PrecompileSession:
                 try:
                     self._take_backend_artifacts()
                 finally:
-                    self._clear_runtime_cache()
-                    self._finished = True
+                    # Drain in-flight calls before erasing the region, exactly
+                    # as __exit__ does: a concurrent resumable-session call can
+                    # still be compiling against a borrowed cache entry, and
+                    # clearing under it destroys the entry it holds.
+                    with self._state:
+                        self._closing = True
+                        while self._active_calls:
+                            self._state.wait()
+                    try:
+                        self._clear_runtime_cache()
+                        self._finished = True
+                    finally:
+                        with self._state:
+                            self._state.notify_all()
             raise
         finally:
             # The SAME grad object, not a copy: a caller holding a prior p.grad

@@ -429,6 +429,11 @@ def _precompile_scale_sum(x):
     return torch.relu(x * 2.0).sum()
 
 
+def _precompile_attr_probe(x):
+    tmp = x.side_note  # noqa: F841 -- installs HASATTR without a value guard
+    return x + 1
+
+
 def _brk_call(model, x):
     return model(x)
 
@@ -4846,6 +4851,32 @@ class TestPrecompile(TestCase):
             ):
                 with self.assertRaisesRegex(RuntimeError, "no captured variant"):
                     loaded(bad)
+
+    def test_hasattr_guard_survives_serialization(self):
+        # A tensor attribute whose ONLY guard is HASATTR (a getattr dynamo
+        # traces without a value guard) must register with the guard tree.
+        # Unregistered, serialization prunes it, the reconstructed tensor
+        # lacks the attribute, and the rebuilt HASATTR recomputes val=False --
+        # a silent inversion that routes attr-less inputs into the graph
+        # traced for the attr-present branch and refuses attr-present ones.
+        x = torch.randn(4)
+        x.side_note = torch.ones(1)
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _precompile_attr_probe,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+                example_inputs=[(x,)],
+            )
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertEqual(loaded(x), x + 1)
+            bare = torch.randn(4)
+            with self.assertRaisesRegex(RuntimeError, "no captured variant"):
+                loaded(bare)
 
     def test_discriminating_guards_are_kept(self):
         # The other half: a value that DID vary is what selects between the

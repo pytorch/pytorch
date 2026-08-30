@@ -1029,6 +1029,11 @@ class CompilePackage:
         self._uncovered_frames: set[str] = set()
         self._device_types: set[str] = set()
         self._system_info: SystemInfo | None = None
+        # Set when the CPU codegen target changed between compiles of one
+        # capture. The compile itself must not fail over it (the ambient
+        # caching_precompile path reaches update_device_type on every user
+        # compile), but the mixed-target package can never be serialized.
+        self._cpu_codegen_target_drift: str | None = None
         self._default_requires_native_backend_compatibility = (
             requires_native_backend_compatibility
         )
@@ -1070,6 +1075,7 @@ class CompilePackage:
         self._codes = {}
         self._device_types = set()
         self._system_info = None
+        self._cpu_codegen_target_drift = None
         self._requires_native_backend_compatibility = (
             self._default_requires_native_backend_compatibility
         )
@@ -1268,11 +1274,21 @@ class CompilePackage:
                     self._system_info, cpu_codegen_target=current.cpu_codegen_target
                 )
             elif self._system_info.cpu_codegen_target != current.cpu_codegen_target:
-                raise RuntimeError(
-                    "CPU codegen target changed during precompile capture: "
-                    f"first={self._system_info.cpu_codegen_target}, "
-                    f"current={current.cpu_codegen_target}"
-                )
+                # Never fail the COMPILE over this: the ambient
+                # caching_precompile path runs through here on every user
+                # torch.compile. The mixed-target package is unserviceable, so
+                # cache_entry() refuses it instead, and the ambient recorder
+                # downgrades that to a skipped save.
+                if self._cpu_codegen_target_drift is None:
+                    self._cpu_codegen_target_drift = (
+                        "CPU codegen target changed during capture: "
+                        f"first={self._system_info.cpu_codegen_target}, "
+                        f"current={current.cpu_codegen_target}"
+                    )
+                    logger.warning(
+                        "%s; this package will not be serialized.",
+                        self._cpu_codegen_target_drift,
+                    )
         self._device_types.update(device_types)
 
     def has_current_entry(self) -> bool:
@@ -1880,6 +1896,11 @@ class CompilePackage:
 
     def cache_entry(self) -> _DynamoCacheEntry:
         self.validate()
+        if self._cpu_codegen_target_drift is not None:
+            raise PackageError(
+                f"{self._cpu_codegen_target_drift}; the package mixes native "
+                "code for two targets and cannot be serialized."
+            )
         if self._innermost_fn is None:
             raise AssertionError("_innermost_fn is not set in cache_entry")
         device_types = frozenset(self._device_types or ("cpu",))
