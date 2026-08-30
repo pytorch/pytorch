@@ -26,7 +26,25 @@ else:
     TEST_CUDNN = LazyVal(lambda: TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.tensor(1., device=CUDA_DEVICE)))
 
 TEST_CUDNN_VERSION = LazyVal(lambda: torch.backends.cudnn.version() if TEST_CUDNN else 0)
-ROCM_VERSION = LazyVal(lambda : tuple(int(v) for v in torch.version.hip.split('.')[:2]) if torch.version.hip else (0, 0))
+
+def _rocm_version_str():
+    """ROCm release version string, or None when this is not a ROCm build.
+
+    torch.version.hip is the HIP runtime version. It tracks the ROCm release
+    version on shipped ROCm but not on preview builds, so prefer
+    torch.version.rocm and fall back only for builds that never recorded it.
+    """
+    if torch.version.hip is None:
+        return None
+    return getattr(torch.version, 'rocm', None) or torch.version.hip
+
+def _rocm_major_minor():
+    version = _rocm_version_str()
+    if version is None:
+        return (0, 0)
+    return tuple(int(v) for v in version.split('.')[:2])
+
+ROCM_VERSION = LazyVal(_rocm_major_minor)
 
 # The CUPTI monitor needs both the cupti-python bindings and the build-generated
 # _cupti_stubs catalogs (emitted only on CUDA >= 13.3 builds where the field-id codegen
@@ -92,6 +110,24 @@ IS_SM10X = LazyVal(lambda: torch.version.hip is None and torch.cuda.is_available
                    torch.cuda.get_device_capability()[0] == 10)
 IS_SM12X = LazyVal(lambda: torch.version.hip is None and torch.cuda.is_available() and
                    torch.cuda.get_device_capability()[0] == 12)
+
+# Substrings a subprocess prints when it dies from a device-side assert, or
+# from the GPU fault ROCm reports instead when device-side asserts are not
+# enabled. Tests that trigger a device assert in a child process should check
+# its output with has_device_side_assert rather than growing a local copy.
+DEVICE_ASSERT_MARKERS = (
+    "device-side assert triggered",  # CUDA
+    "Assertion `",  # CUDA/ROCm device-side printf: Assertion `cond` failed.
+    "HSA_STATUS_ERROR_EXCEPTION",  # ROCm with TORCH_USE_HIP_DSA
+    "Device-side assertion",  # ROCm with TORCH_USE_HIP_DSA
+    "hipErrorLaunchFailure",
+    "launch failure",  # covers "unspecified launch failure"
+    "illegal memory access",
+    "Memory access fault",  # ROCm 7.14+ VM fault abort
+)
+
+def has_device_side_assert(output):
+    return any(marker in output for marker in DEVICE_ASSERT_MARKERS)
 
 @contextlib.contextmanager
 def blas_library_context(backend):
@@ -506,9 +542,9 @@ def _get_torch_cuda_version():
     return tuple(int(x) for x in cuda_version.split("."))
 
 def _get_torch_rocm_version():
-    if not TEST_WITH_ROCM or torch.version.hip is None:
+    rocm_version = _rocm_version_str()
+    if not TEST_WITH_ROCM or rocm_version is None:
         return (0, 0)
-    rocm_version = str(torch.version.hip)
     rocm_version = rocm_version.split("-", maxsplit=1)[0]    # ignore git sha
     return tuple(int(x) for x in rocm_version.split("."))
 

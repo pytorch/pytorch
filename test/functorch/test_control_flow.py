@@ -4228,6 +4228,65 @@ class GraphModule(torch.nn.Module):
                 compiled_loss,
             )
 
+    @skipIfTorchDynamo("not a dynamo test")
+    @parametrize("layers", [1, 2, 3])
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    # donated_buffer defaults to False;
+    @torch._functorch.config.patch(donated_buffer=True)
+    def test_scan_chained_closure_gradient_inductor(self, layers):
+        B, T, D, DT = 2, 8, 4, 0.1
+
+        def make_grads(backend):
+            torch.manual_seed(0)
+            cells = []
+            params = []
+            for _ in range(layers):
+                gp = torch.full((D,), 0.4, requires_grad=True)
+                gm = torch.full((D,), 0.2, requires_grad=True)
+                po = torch.zeros(D, requires_grad=True)
+                cells.append((gp, gm, po))
+                params += [gp, gm, po]
+            phi = torch.randn(B, T, D)
+
+            def scan_rollout(cell, x):
+                gp, gm, po = cell
+
+                def combine(carry, frame):
+                    g = torch.tanh(frame + po)
+                    state = carry + DT * (gp * g - gm * carry)
+                    return state, state.clone()
+
+                return scan(combine, torch.zeros(B, D), x, dim=1)[1]
+
+            def loop_rollout(cell, x):
+                gp, gm, po = cell
+                state, hist = torch.zeros(B, D), []
+                for t in range(x.shape[1]):
+                    g = torch.tanh(x[:, t] + po)
+                    state = state + DT * (gp * g - gm * state)
+                    hist.append(state)
+                return torch.stack(hist, dim=1)
+
+            rollout = loop_rollout if backend is None else scan_rollout
+
+            def chain(x):
+                for cell in cells:
+                    x = rollout(cell, x)
+                return x
+
+            torch._dynamo.reset()
+            fn = (
+                torch.compile(chain, fullgraph=True, backend=backend)
+                if backend is not None
+                else chain
+            )
+            fn(phi).square().sum().backward()
+            return [p.grad.clone() for p in params]
+
+        ref = make_grads(None)
+        got = make_grads("inductor")
+        self.assertEqual(ref, got)
+
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
@@ -5703,12 +5762,6 @@ class GraphModule(torch.nn.Module):
             )
         ),
     )
-    # Skipping the autograd=True because
-    # associative_scan does currently not support gradients for lifted parameters
-    @decorateIf(
-        unittest.skip,
-        lambda params: (params["combine_mode"] == "pointwise" and params["autograd"]),
-    )
     def test_associative_scan_downstream_scan_scan_different_dim(
         self,
         combine_mode,
@@ -5745,8 +5798,8 @@ class GraphModule(torch.nn.Module):
             autograd_param=None if not autograd else (inp,),
         )
 
-    # TODO: Does not work because of the usage of vmap within associative_scan
-    # TODO: Re-enable additional parameters again once this issues has been resolved
+    # TODO: NestedFn does not accept the kwargs passed here (dim, reverse, ...),
+    # so this fails at model construction. Fix NestedFn's signature to re-enable.
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @unittest.expectedFailure
@@ -6630,6 +6683,42 @@ class GraphModule(torch.nn.Module):
                 0,
                 combine_mode="pointwise",
             )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    def test_associative_scan_pointwise_multiple_additional_inputs_autograd(self):
+        device = torch.device("cuda")
+        H1 = torch.rand(2, device=device, requires_grad=False)
+        H2 = torch.rand(2, device=device, requires_grad=False)
+
+        # Multiplicative body so bwys is non-unit: this is what exercises the
+        # bwys-alignment (torch.cat([bwys[1:], ones])) in the reversed backward scan.
+        # A purely additive body degenerates bwys to all-ones and hides alignment bugs.
+        # Multiplication by the constant freevars keeps combine_fn associative.
+        def combine_fn(x, y):
+            return x * y * H1 * H2
+
+        xs = torch.randn(4, 2, device=device, requires_grad=True)
+        result = associative_scan(combine_fn, xs, dim=0, combine_mode="pointwise")
+        result_ref = _fake_associative_scan(combine_fn, xs, dim=0)
+        self.assertEqual(result, result_ref)
+
+        grads = torch.autograd.grad(result.sum(), xs)
+        grads_ref = torch.autograd.grad(result_ref.sum(), xs)
+        self.assertEqual(grads, grads_ref)
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    def test_associative_scan_pointwise_additional_input_requires_grad_raises(self):
+        device = torch.device("cuda")
+        H = torch.rand(2, device=device, requires_grad=True)
+
+        def combine_fn(x, y):
+            return x + y + H
+
+        xs = torch.randn(4, 2, device=device, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "lifted parameters"):
+            associative_scan(combine_fn, xs, dim=0, combine_mode="pointwise")
 
     @requires_cuda
     def test_associative_scan_input_mutation(self):

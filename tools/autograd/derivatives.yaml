@@ -2946,7 +2946,7 @@
 
 - name: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? bias, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, SymInt? max_seqlen_q, SymInt? max_seqlen_k, float dropout_p, int custom_mask_type, bool compute_log_sumexp=False, *, float? scale=None, Tensor? seqlen_k=None, int? window_size=None) -> (Tensor output, Tensor logsumexp, Tensor philox_seed, Tensor philox_offset, SymInt max_seqlen_batch_q, SymInt max_seqlen_batch_k)
   output_differentiability: [True, False, False, False, False, False]
-  query, key, value, bias: _efficient_attention_backward_symint(grad, query, key, value, bias, output, cu_seqlens_q, cu_seqlens_k, max_seqlen_batch_q, max_seqlen_batch_k, logsumexp, dropout_p, philox_seed, philox_offset, custom_mask_type, bias.requires_grad(), scale)
+  query, key, value, bias: _efficient_attention_backward_symint(grad, query, key, value, bias, output, cu_seqlens_q, cu_seqlens_k, max_seqlen_batch_q, max_seqlen_batch_k, logsumexp, dropout_p, philox_seed, philox_offset, custom_mask_type, bias.requires_grad(), scale, std::nullopt, window_size)
 
 - name: _cudnn_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, Tensor? cum_seq_q, Tensor? cum_seq_k, SymInt max_q, SymInt max_k, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None, Tensor? seqused_k=None, Tensor? block_table=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
   output_differentiability: [True, False, False, False, False, False, False, False, False]
@@ -3092,16 +3092,20 @@
   x: non_differentiable
 
 - name: special_bessel_j0(Tensor self) -> Tensor
-  self: non_differentiable
+  self: grad * -at::special_bessel_j1(self)
+  result: auto_element_wise
 
 - name: special_bessel_j1(Tensor self) -> Tensor
-  self: non_differentiable
+  self: bessel_j1_backward(grad, self, result)
+  result: auto_element_wise
 
 - name: special_bessel_y0(Tensor self) -> Tensor
-  self: non_differentiable
+  self: grad * -at::special_bessel_y1(self)
+  result: auto_element_wise
 
 - name: special_bessel_y1(Tensor self) -> Tensor
-  self: non_differentiable
+  self: bessel_y1_backward(grad, self, result)
+  result: auto_element_wise
 
 - name: special_chebyshev_polynomial_t(Tensor x, Tensor n) -> Tensor
   x: non_differentiable
@@ -3184,16 +3188,20 @@
   x: non_differentiable
 
 - name: special_modified_bessel_i0(Tensor self) -> Tensor
-  self: non_differentiable
+  self: grad * at::special_modified_bessel_i1(self)
+  result: auto_element_wise
 
 - name: special_modified_bessel_i1(Tensor self) -> Tensor
-  self: non_differentiable
+  self: i1_backward(grad, self, result)
+  result: auto_element_wise
 
 - name: special_modified_bessel_k0(Tensor self) -> Tensor
-  self: non_differentiable
+  self: grad * -at::special_modified_bessel_k1(self)
+  result: auto_element_wise
 
 - name: special_modified_bessel_k1(Tensor self) -> Tensor
-  self: non_differentiable
+  self: grad * -(at::special_modified_bessel_k0(self) + result * self.reciprocal())
+  result: auto_element_wise
 
 - name: special_scaled_modified_bessel_k0(Tensor x) -> Tensor
   x: non_differentiable
