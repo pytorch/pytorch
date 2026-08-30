@@ -43,7 +43,6 @@ static Tensor& pad_out_template(Tensor& output,
                                 IntArrayRef padding,
                                 const std::optional<Tensor>& grad_output_opt,
                                 MPSGraphPaddingMode mode,
-                                double constantValue,
                                 const std::string& op_name) {
   using CachedGraph = MPSUnaryGradCachedGraph;
   const int padding_size = (int)padding.size();
@@ -72,7 +71,7 @@ static Tensor& pad_out_template(Tensor& output,
   int dim_d = padding_dim - 2;
   int dim_slices = 0;
 
-  if (!is_backward_pass && mode != MPSGraphPaddingModeConstant && ndims > padding_dim) {
+  if (!is_backward_pass && ndims > padding_dim) {
     bool valid_dims = input_.size(1) != 0 && input_.size(padding_dim) != 0;
     TORCH_CHECK((ndims == 1 + padding_dim && valid_dims) ||
                     (ndims == 2 + padding_dim && valid_dims && input_.size(1 + padding_dim) != 0),
@@ -125,77 +124,57 @@ static Tensor& pad_out_template(Tensor& output,
                 output_w);
 
     std::vector<int64_t> outputSizes;
-    if (mode == MPSGraphPaddingModeConstant) {
-      // support arbitrary input dimensions for constant pad.
-      auto input_sizes = input_.sizes();
-      auto ori_padding_dim = padding_size / 2;
-      auto l_diff = ndims - ori_padding_dim;
+    // these checks are only relevant for reflection padding (code taken from ReflectionPad.cpp)
+    if (mode == MPSGraphPaddingModeReflect) {
+      TORCH_CHECK(pad_l < input_w && pad_r < input_w,
+                  "Argument #4: Padding size should be less than the corresponding "
+                  "input dimension, but got: padding (",
+                  pad_l,
+                  ", ",
+                  pad_r,
+                  ") at dimension ",
+                  dim_w,
+                  " of input ",
+                  input_.sizes());
 
-      for (size_t i = 0; i < (size_t)l_diff; i++) {
-        outputSizes.emplace_back(input_sizes[i]);
-      }
-      for (const auto i : c10::irange((size_t)ori_padding_dim)) {
-        auto pad_idx = padding.size() - ((i + 1) * 2);
-        auto new_dim = input_sizes[l_diff + i] + padding[pad_idx] + padding[pad_idx + 1];
-        outputSizes.emplace_back(new_dim);
-      }
-    } else {
-      // these checks are only relevant for reflection padding (code taken from ReflectionPad.cpp)
-      if (mode == MPSGraphPaddingModeReflect) {
-        TORCH_CHECK(pad_l < input_w && pad_r < input_w,
-                    "Argument #4: Padding size should be less than the corresponding "
+      if (padding_dim > 1) {
+        TORCH_CHECK(pad_t < input_h && pad_b < input_h,
+                    "Argument #6: Padding size should be less than the corresponding "
                     "input dimension, but got: padding (",
-                    pad_l,
+                    pad_t,
                     ", ",
-                    pad_r,
+                    pad_b,
                     ") at dimension ",
-                    dim_w,
+                    dim_h,
                     " of input ",
                     input_.sizes());
-
-        if (padding_dim > 1) {
-          TORCH_CHECK(pad_t < input_h && pad_b < input_h,
-                      "Argument #6: Padding size should be less than the corresponding "
-                      "input dimension, but got: padding (",
-                      pad_t,
-                      ", ",
-                      pad_b,
-                      ") at dimension ",
-                      dim_h,
-                      " of input ",
-                      input_.sizes());
-        }
-        if (padding_dim > 2) {
-          TORCH_CHECK(pad_front < input_d && pad_back < input_d,
-                      "Argument #8: Padding size should be less than the corresponding "
-                      "input dimension, but got: padding (",
-                      pad_front,
-                      ", ",
-                      pad_back,
-                      ") at dimension ",
-                      dim_d,
-                      " of input ",
-                      input_.sizes());
-        }
       }
-      outputSizes.insert(outputSizes.begin(), output_w);
-      if (padding_dim >= 2)
-        outputSizes.insert(outputSizes.begin(), output_h);
-      if (padding_dim >= 3)
-        outputSizes.insert(outputSizes.begin(), output_d);
-      if (ndims >= 1 + padding_dim)
-        outputSizes.insert(outputSizes.begin(), nplane);
-      if (ndims >= 2 + padding_dim)
-        outputSizes.insert(outputSizes.begin(), nbatch);
+      if (padding_dim > 2) {
+        TORCH_CHECK(pad_front < input_d && pad_back < input_d,
+                    "Argument #8: Padding size should be less than the corresponding "
+                    "input dimension, but got: padding (",
+                    pad_front,
+                    ", ",
+                    pad_back,
+                    ") at dimension ",
+                    dim_d,
+                    " of input ",
+                    input_.sizes());
+      }
     }
+    outputSizes.insert(outputSizes.begin(), output_w);
+    if (padding_dim >= 2)
+      outputSizes.insert(outputSizes.begin(), output_h);
+    if (padding_dim >= 3)
+      outputSizes.insert(outputSizes.begin(), output_d);
+    if (ndims >= 1 + padding_dim)
+      outputSizes.insert(outputSizes.begin(), nplane);
+    if (ndims >= 2 + padding_dim)
+      outputSizes.insert(outputSizes.begin(), nbatch);
 
     output.resize_(outputSizes);
 
     if (output.numel() == 0) {
-      return output;
-    }
-    if (input_.numel() == 0) {
-      output.fill_(constantValue);
       return output;
     }
     input = input_.contiguous();
@@ -257,8 +236,8 @@ static Tensor& pad_out_template(Tensor& output,
   }
 
   @autoreleasepool {
-    std::string key = op_name + getTensorsStringKey({input, grad_output, output}) + ":[" + getArrayRefString(padding) +
-        "]:" + std::to_string(constantValue);
+    std::string key =
+        op_name + getTensorsStringKey({input, grad_output, output}) + ":[" + getArrayRefString(padding) + "]";
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, dataType, getMPSShape(input));
@@ -269,7 +248,7 @@ static Tensor& pad_out_template(Tensor& output,
                                         withPaddingMode:mode
                                             leftPadding:leftPadding
                                            rightPadding:rightPadding
-                                          constantValue:constantValue
+                                          constantValue:0.0
                                                    name:nil];
         // workaround for the right padding bug in Monterey
         if (needsSlice) {
@@ -575,7 +554,6 @@ TORCH_IMPL_FUNC(reflection_pad1d_out_mps)
                         padding,
                         std::nullopt,
                         MPSGraphPaddingModeReflect,
-                        0.0,
                         "reflection_pad1d_out_mps");
 }
 
@@ -587,7 +565,6 @@ TORCH_IMPL_FUNC(reflection_pad1d_backward_out_mps)
                         padding,
                         grad_output,
                         MPSGraphPaddingModeReflect,
-                        0.0,
                         "reflection_pad1d_backward_out_mps");
 }
 
@@ -603,12 +580,12 @@ TORCH_IMPL_FUNC(replication_pad1d_backward_out_mps)
 
 // 2D Reflection and Replication Padding
 Tensor& reflection_pad2d_out_mps(const Tensor& input, IntArrayRef padding, Tensor& output) {
-  return mps::pad_out_template(output, input, padding, std::nullopt, MPSGraphPaddingModeReflect, 0.0, __func__);
+  return mps::pad_out_template(output, input, padding, std::nullopt, MPSGraphPaddingModeReflect, __func__);
 }
 
 Tensor reflection_pad2d_mps(const Tensor& input, IntArrayRef padding) {
   Tensor output = at::empty({0}, input.options());
-  return mps::pad_out_template(output, input, padding, std::nullopt, MPSGraphPaddingModeReflect, 0.0, __func__);
+  return mps::pad_out_template(output, input, padding, std::nullopt, MPSGraphPaddingModeReflect, __func__);
 }
 
 Tensor& reflection_pad2d_backward_out_mps(const Tensor& grad_output,
@@ -616,12 +593,12 @@ Tensor& reflection_pad2d_backward_out_mps(const Tensor& grad_output,
                                           IntArrayRef padding,
                                           Tensor& grad_input) {
   grad_input.resize_as_(input).zero_();
-  return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeReflect, 0.0, __func__);
+  return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeReflect, __func__);
 }
 
 Tensor reflection_pad2d_backward_mps(const Tensor& grad_output, const Tensor& input, IntArrayRef padding) {
   auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeReflect, 0.0, __func__);
+  return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeReflect, __func__);
 }
 
 TORCH_IMPL_FUNC(replication_pad2d_out_mps)
@@ -631,7 +608,6 @@ TORCH_IMPL_FUNC(replication_pad2d_out_mps)
                         padding,
                         std::nullopt,
                         MPSGraphPaddingModeClampToEdge,
-                        0.0,
                         "replication_pad2d_out_mps");
 }
 
@@ -640,12 +616,12 @@ Tensor& replication_pad2d_backward_out_mps(const Tensor& grad_output,
                                            IntArrayRef padding,
                                            Tensor& grad_input) {
   grad_input.resize_as_(input).zero_();
-  return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeClampToEdge, 0.0, __func__);
+  return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeClampToEdge, __func__);
 }
 
 Tensor replication_pad2d_backward_mps(const Tensor& grad_output, const Tensor& input, IntArrayRef padding) {
   auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeClampToEdge, 0.0, __func__);
+  return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeClampToEdge, __func__);
 }
 
 // 3D Reflection and Replication Padding
@@ -656,7 +632,6 @@ TORCH_IMPL_FUNC(reflection_pad3d_out_mps)
                         padding,
                         std::nullopt,
                         MPSGraphPaddingModeReflect,
-                        0.0,
                         "reflection_pad3d_out_mps");
 }
 
@@ -668,7 +643,6 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_mps)
                         padding,
                         grad_output,
                         MPSGraphPaddingModeReflect,
-                        0.0,
                         "reflection_pad3d_backward_out_mps");
 }
 
@@ -679,7 +653,6 @@ TORCH_IMPL_FUNC(replication_pad3d_out_mps)
                         padding,
                         std::nullopt,
                         MPSGraphPaddingModeClampToEdge,
-                        0.0,
                         "replication_pad3d_out_mps");
 }
 
@@ -688,12 +661,12 @@ Tensor& replication_pad3d_backward_out_mps(const Tensor& grad_output,
                                            IntArrayRef padding,
                                            Tensor& grad_input) {
   grad_input.resize_as_(input).zero_();
-  return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeClampToEdge, 0.0, __func__);
+  return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeClampToEdge, __func__);
 }
 
 Tensor replication_pad3d_backward_mps(const Tensor& grad_output, const Tensor& input, IntArrayRef padding) {
   auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeClampToEdge, 0.0, __func__);
+  return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeClampToEdge, __func__);
 }
 
 // backward pass is explicitly handled in autograd by negating the "pad" argument
@@ -727,7 +700,7 @@ Tensor constant_pad_nd_mps(const Tensor& self, IntArrayRef pad, const Scalar& va
   const Scalar fill = all_pads_non_positive ? Scalar(0) : value;
   if (mps::constant_pad_dense_eligible(cropped, output, padding_dim)) {
     mps::constant_pad_dense_kernel_mps(cropped, output, pad, padding_dim, fill);
-  } else if (output.numel() > std::numeric_limits<uint32_t>::max()) {
+  } else if (output.numel() > std::numeric_limits<uint32_t>::max() || ndim > c10::metal::max_ndim) {
     return at::native::constant_pad_nd(self, pad, value);
   } else {
     mps::constant_pad_strided_kernel_mps(cropped, output, pad, padding_dim, fill);
