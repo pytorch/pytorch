@@ -38,6 +38,7 @@ std::optional<TypePtr> subtractTypeSetFrom(std::vector<TypePtr>& to_subtract, Ar
 
   // Copy all the elements that should NOT be subtracted to the `types`
   // vector
+  types.reserve(from.size());
   std::copy_if(from.begin(), from.end(),
               std::back_inserter(types),
               [&](const TypePtr& t) {

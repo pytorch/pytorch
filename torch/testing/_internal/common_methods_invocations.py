@@ -48,7 +48,8 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM, IS_FBCODE, IS_LINUX, IS_WINDOWS, IS_MACOS, MACOS_VERSION, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
-    TEST_WITH_TORCHINDUCTOR, skipIfNoTritonDSL, skipIfNoCuteDSL, skipIfRocm, TEST_XPU
+    TEST_WITH_TORCHINDUCTOR, skipIfNoTritonDSL, skipIfNoCuteDSL, skipIfRocm, TEST_XPU,
+    TEST_CUDA, skipIfNoFlyDSL
 )
 from torch.testing._utils import wrapper_set_seed
 
@@ -785,6 +786,22 @@ def sample_inputs_add_sub(op, device, dtype, requires_grad, **kwargs):
         yield SampleInput(lhs, args=(rhs,), kwargs={'alpha': neg_alpha})
     else:
         yield SampleInput(lhs, args=(rhs,), kwargs={'alpha': False})
+
+
+def sample_inputs_nextafter(op, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
+
+    # nextafter is defined on bit patterns; backends that flush subnormals return
+    # the wrong value there and random samples never reach that range.
+    if dtype is not torch.bfloat16:
+        return
+    bits = torch.tensor([1, 2, 3, 7, -32767, -32766, 0, -32768], dtype=torch.int16)
+    lhs = bits.view(torch.bfloat16).to(device)
+    for to in (1.0, -1.0, 0.0):
+        yield SampleInput(
+            lhs.clone().requires_grad_(requires_grad),
+            args=(torch.full_like(lhs, to),),
+        )
 
 
 def sample_inputs_ldexp(op_info, device, dtype, requires_grad, **kwargs):
@@ -4773,6 +4790,23 @@ def sample_inputs_rms_norm_cutedsl(opinfo, device, dtype, requires_grad, **kwarg
     yield SampleInput(make_arg((8, 128)), args=((128,),), kwargs={'eps': 1e-5})
 
 
+def sample_inputs_rms_norm_flydsl(opinfo, device, dtype, requires_grad, **kwargs):
+    # Keep one large dispatching shape here; dedicated tests cover the other bands.
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    cases = (
+        ((8192, 4096), (4096,), {}),
+        # Exercise row- and N-threshold fallbacks.
+        ((64, 4096), (4096,), {'eps': 1e-5}),
+        ((8, 128), (128,), {'eps': 1e-5}),
+        ((8, 128), (128,), {}),
+    )
+    for input_shape, normalized_shape, kw in cases:
+        weight = make_arg(normalized_shape)
+        yield SampleInput(make_arg(input_shape), args=(normalized_shape, weight), kwargs=kw)
+    # weight=None is declined by the predicate and handled by aten.
+    yield SampleInput(make_arg((8, 128)), args=((128,),), kwargs={'eps': 1e-5})
+
+
 def error_inputs_group_norm(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32, requires_grad=False)
 
@@ -4915,6 +4949,23 @@ def sample_inputs_linear(self, device, dtype, requires_grad, include_empty=True,
     if include_empty:
         yield SampleInput(create_tensor(3, 4, 0), create_tensor(5, 0))
         yield SampleInput(create_tensor(3, 4, 0), create_tensor(5, 0), create_tensor(5))
+
+    # 1D weight contracts away the last input dim (out_features == 1 with the
+    # trailing output dim squeezed); its backward used to SIGABRT on MPS, see
+    # https://github.com/pytorch/pytorch/issues/187988. No bias samples: a 1D
+    # weight only takes a scalar bias, which functorch transforms reject, see
+    # https://github.com/pytorch/pytorch/issues/188891.
+    # Skipped on ROCm: the decomposed matmul reduces in a different order than
+    # eager, so test_eager_equivalence (which runs at ~1 ULP tolerance) fails.
+    if torch.version.hip is None:
+        yield SampleInput(create_tensor(8, 3), create_tensor(3))
+        yield SampleInput(create_tensor(2, 3, 4), create_tensor(4))
+        yield SampleInput(create_tensor(2, 1, 2, 1, 2), create_tensor(2))
+        if include_empty:
+            # An empty reduction dim and an empty batch, where the shortcuts taken for
+            # zero-element tensors still have to drop the 1D weight's output dim.
+            yield SampleInput(create_tensor(3, 4, 0), create_tensor(0))
+            yield SampleInput(create_tensor(0, 8), create_tensor(8))
 
 def sample_inputs_bilinear(self, device, dtype, requires_grad, **kwargs):
     features_options = [[3, 4, 5], [8, 8, 8]]
@@ -7140,6 +7191,10 @@ def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, *,
                 # skip samples with linear bias as unsupported
                 continue
 
+            if linear_weight.dim() == 1:
+                # linear_cross_entropy requires a linear weight of rank >= 2
+                continue
+
             num_classes = linear_weight.shape[0]
             num_batches = linear_input.shape[:-1]
             input_shape = (*num_batches, num_classes)
@@ -8995,6 +9050,10 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
 
     target = torch.tensor([-1, 2], device=device, dtype=torch.long)
     yield SampleInput(make_input(shape), args=(target,), kwargs={'ignore_index': -1})
+
+    # Noncontiguous target
+    target = torch.randint(num_classes, (2 * shape[0],), device=device)[::2]
+    yield SampleInput(make_input(shape), args=(target,))
 
 
 def sample_inputs_binary_cross_entropy_with_logits(
@@ -12331,9 +12390,6 @@ op_db: list[OpInfo] = [
                    dtypes=(torch.complex64, torch.complex128)),
                DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-3, rtol=2e-3)}),
                             "TestConsistency", "test_output_grad_match", device_type="mps"),
-               # RuntimeError: value cannot be converted to type double without overflow
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
            )),
     OpInfo('addmm',
            # When alpha=beta=1 as compile-time constants, JIT will decompose addmm into mm and add.
@@ -14359,14 +14415,14 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            skips=(
                skipCPUIfNoLapack,
-               # RuntimeError: linalg.lu_factor(): MPS doesn't support complex types.
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
            ),
            sample_inputs_func=sample_inputs_lu_unpack),
     OpInfo('lu',
            op=torch.lu,
            dtypes=floating_and_complex_types(),
+           # complex64 backward needs lu_solve/solve_triangular, which are
+           # float32-only on MPS, so only the float forward+backward runs there.
+           backward_dtypesIfMPS=floating_types(),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
@@ -14388,9 +14444,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-               # Exception: linalg.lu_factor(): MPS doesn't support complex types.
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
            )),
     OpInfo('lu_solve',
            op=torch.lu_solve,
@@ -17539,10 +17592,16 @@ op_db: list[OpInfo] = [
         assert_autodiffed=False,
         supports_gradgrad=True,
         supports_out=False,
-        sample_kwargs=lambda device, dtype, input: ({'threshold': float.fromhex('0x1.3ap-3'),
-                                                    'value': -9},
-                                                    {'threshold': float.fromhex('0x1.3ap-3'),
-                                                    'value': -9}),
+        # NumPy >= 2.5 deliberately stopped truncating out-of-range Python ints
+        # in np.where (the reference path), so value=-9 against uint8 raises
+        # OverflowError. Use 247 for uint8 (what -9 wrapped to pre-2.5, keeping
+        # the compared values byte-identical and outside make_tensor's [0, 9]
+        # range) and keep -9 for signed/float dtypes to retain negative coverage.
+        sample_kwargs=lambda device, dtype, input: (
+            {'threshold': float.fromhex('0x1.3ap-3'),
+             'value': 247 if dtype == torch.uint8 else -9},
+            {'threshold': float.fromhex('0x1.3ap-3'),
+             'value': 247 if dtype == torch.uint8 else -9}),
         # TODO(whc) should not need sample_inputs_func, but without it
         # kwargs aren't being hooked up properly
         sample_inputs_func=sample_inputs_threshold,
@@ -17581,6 +17640,7 @@ op_db: list[OpInfo] = [
     ),
     BinaryUfuncInfo('nextafter',
                     dtypes=floating_types_and(torch.bfloat16, torch.half),
+                    sample_inputs_func=sample_inputs_nextafter,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     supports_rhs_python_scalar=False),
@@ -21273,15 +21333,13 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
     OpInfo(
         'logdet',
         dtypes=floating_and_complex_types(),
+        # complex64 backward needs lu_solve/solve_triangular, which are
+        # float32-only on MPS, so only the float forward+backward runs there.
+        backward_dtypesIfMPS=floating_types(),
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_linalg_det_logdet_slogdet,
-        skips=(
-            # Exception: linalg.lu_factor(): MPS doesn't support complex types.
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
-        ),
         decorators=[skipCUDAIfNoMagmaAndNoLinalgsolver, skipCPUIfNoLapack]),
     # `log_softmax` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
@@ -22564,8 +22622,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                 "test_cow_input",
                 device_type=('cuda', 'xpu'),
             ),
-            DecorateInfo(unittest.skip("FP16 nll_loss cases have not been enabled on MPS yet"),
-                         dtypes=(torch.half,), device_type="mps"),
         ),
     ),
     OpInfo(
@@ -23049,6 +23105,52 @@ if "cutedsl" in dsl_ops_by_dsl:
             **_cutedsl_topk_kwargs,
         ),
     ])
+
+if "flydsl" in dsl_ops_by_dsl:
+    from torch._native.flydsl_utils import (
+        _is_supported_arch as _is_flydsl_supported_arch,
+    )
+    from torch._native.ops.norm.flydsl_rmsnorm_impl import (
+        _SUPPORTED_ARCHES as _FLYDSL_RMSNORM_ARCHES,
+    )
+
+    dsl_ops_by_dsl["flydsl"].append(
+        OpInfo(
+            "nn.functional.rms_norm",
+            variant_test_name="flydsl",
+            aten_name="rms_norm",
+            ref=reference_rms_norm,
+            dtypes=custom_types(torch.float16, torch.bfloat16, torch.float32),
+            dtypesIfCUDA=custom_types(torch.float16, torch.bfloat16, torch.float32),
+            supports_out=False,
+            supports_forward_ad=False,
+            supports_fwgrad_bwgrad=False,
+            sample_inputs_func=sample_inputs_rms_norm_flydsl,
+            decorators=[
+                onlyCUDA,
+                skipIfNoFlyDSL,
+                skipCUDAIf(
+                    not (
+                        TEST_CUDA
+                        and _is_flydsl_supported_arch(
+                            torch.cuda.current_device(), _FLYDSL_RMSNORM_ARCHES
+                        )
+                    ),
+                    "flydsl rms_norm override requires gfx950",
+                ),
+            ],
+            skips=(
+                # Unsupported FlyDSL dtypes fall through to aten and appear supported,
+                # so the probe's dtype set never matches the one listed here. xfail
+                # rather than skip: the failure is a plain deterministic assertion, and
+                # an XPASS is the signal to reconcile the set and restore coverage.
+                DecorateInfo(
+                    unittest.expectedFailure,
+                    "TestCommon", "test_dtypes",
+                ),
+            ),
+        )
+    )
 
 op_db += opinfo.definitions.op_db
 

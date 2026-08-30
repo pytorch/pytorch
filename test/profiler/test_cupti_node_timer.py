@@ -6,7 +6,7 @@ CUDA + libcupti >= 13.3 (gated the same way as the rest of the monitor suite).""
 import unittest
 
 import torch
-from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUPTI_V13_3
+from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUPTI, TEST_CUPTI_V13_3
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -268,8 +268,11 @@ class TestCuptiNodeTimerCUDA(TestCase):
         self.assertTrue(bool((end >= start).all()))
 
 
+@unittest.skipIf(not TEST_CUPTI, "requires cupti bindings + generated _cupti_stubs")
 class TestNodeTimerBucketName(TestCase):
-    """``_bucket_name`` normalizes whatever a graph annotation resolver returns; no CUDA."""
+    """``_bucket_name`` normalizes whatever a graph annotation resolver returns; no CUDA
+    or libcupti at runtime, but importing it pulls in ``records`` -> the build-generated
+    ``_cupti_stubs``, which is what TEST_CUPTI gates on."""
 
     def test_shapes(self):
         from torch.profiler._cupti.observers.node_timer import _bucket_name

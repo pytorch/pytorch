@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_contextlib.py b/test/cpython/v3_13/test_contextlib.py
-index cf651959803..9d4d7cc7dd4 100644
+index cf6519598037e9a9ab45e334cc25eb5284daa3ba..62f69e7767bcdc7178ad2754421f0e72c00b195e 100644
 --- a/test/cpython/v3_13/test_contextlib.py
 +++ b/test/cpython/v3_13/test_contextlib.py
 @@ -1,3 +1,57 @@
@@ -104,7 +104,15 @@ index cf651959803..9d4d7cc7dd4 100644
  
      def test_contextmanager_non_normalised(self):
          @contextmanager
-@@ -396,7 +450,7 @@ def woohoo():
+@@ -243,6 +297,7 @@ class ContextManagerTestCase(unittest.TestCase):
+                 else:
+                     self.fail(f'{stop_exc} was suppressed')
+ 
++    @torch._dynamo.error_on_graph_break(False)
+     def test_contextmanager_except_pep479(self):
+         code = """\
+ from __future__ import generator_stop
+@@ -396,7 +451,7 @@ def woohoo():
          self.assertEqual(depth, 0)
  
  
@@ -113,7 +121,7 @@ index cf651959803..9d4d7cc7dd4 100644
  
      @support.requires_docstrings
      def test_instance_docs(self):
-@@ -430,7 +484,7 @@ class ClosingTestCase(unittest.TestCase):
+@@ -430,7 +485,7 @@ class ClosingTestCase(unittest.TestCase):
          self.assertEqual(state, [1])
  
  
@@ -122,16 +130,18 @@ index cf651959803..9d4d7cc7dd4 100644
      def test_nullcontext(self):
          class C:
              pass
-@@ -439,7 +493,7 @@ class NullcontextTestCase(unittest.TestCase):
+@@ -439,8 +494,9 @@ class NullcontextTestCase(unittest.TestCase):
              self.assertIs(c_in, c)
  
  
 -class FileContextTestCase(unittest.TestCase):
 +class FileContextTestCase(__TestCase):
  
++    @torch._dynamo.error_on_graph_break(False)
      def testWithOpen(self):
          tfn = tempfile.mktemp()
-@@ -457,7 +511,7 @@ class FileContextTestCase(unittest.TestCase):
+         try:
+@@ -457,7 +513,7 @@ class FileContextTestCase(unittest.TestCase):
          finally:
              os_helper.unlink(tfn)
  
@@ -140,7 +150,7 @@ index cf651959803..9d4d7cc7dd4 100644
  
      def boilerPlate(self, lock, locked):
          self.assertFalse(locked())
-@@ -520,7 +574,7 @@ class mycontext(ContextDecorator):
+@@ -520,7 +576,7 @@ class mycontext(ContextDecorator):
          return self.catch
  
  
@@ -149,7 +159,7 @@ index cf651959803..9d4d7cc7dd4 100644
  
      @support.requires_docstrings
      def test_instance_docs(self):
-@@ -680,7 +734,7 @@ class TestContextDecorator(unittest.TestCase):
+@@ -680,7 +736,7 @@ class TestContextDecorator(unittest.TestCase):
          self.assertEqual(state, [1, 'something else', 999])
  
  
@@ -158,7 +168,7 @@ index cf651959803..9d4d7cc7dd4 100644
      exit_stack = None
  
      @support.requires_docstrings
-@@ -1089,6 +1143,7 @@ class TestBaseExitStack:
+@@ -1089,6 +1145,7 @@ class TestBaseExitStack:
              stack.push(lambda *exc: 1/0)
              stack.push(lambda *exc: {}[1])
  
@@ -166,7 +176,7 @@ index cf651959803..9d4d7cc7dd4 100644
      def test_excessive_nesting(self):
          # The original implementation would die with RecursionError here
          with self.exit_stack() as stack:
-@@ -1141,7 +1196,7 @@ class TestBaseExitStack:
+@@ -1141,7 +1198,7 @@ class TestBaseExitStack:
          self.assertIs(exc.__cause__, exc.__context__)
  
  
@@ -175,7 +185,7 @@ index cf651959803..9d4d7cc7dd4 100644
      exit_stack = ExitStack
      callback_error_internal_frames = [
          ('__exit__', 'raise exc'),
-@@ -1149,7 +1204,7 @@ class TestExitStack(TestBaseExitStack, unittest.TestCase):
+@@ -1149,7 +1206,7 @@ class TestExitStack(TestBaseExitStack, unittest.TestCase):
      ]
  
  
@@ -184,7 +194,7 @@ index cf651959803..9d4d7cc7dd4 100644
  
      redirect_stream = None
      orig_stream = None
-@@ -1206,19 +1261,19 @@ class TestRedirectStream:
+@@ -1206,19 +1263,19 @@ class TestRedirectStream:
          self.assertEqual(s, "Hello World!\n")
  
  
@@ -207,7 +217,7 @@ index cf651959803..9d4d7cc7dd4 100644
  
      @support.requires_docstrings
      def test_instance_docs(self):
-@@ -1315,7 +1370,7 @@ class TestSuppress(ExceptionIsLikeMixin, unittest.TestCase):
+@@ -1315,7 +1372,7 @@ class TestSuppress(ExceptionIsLikeMixin, unittest.TestCase):
          )
  
  
@@ -216,7 +226,7 @@ index cf651959803..9d4d7cc7dd4 100644
      def make_relative_path(self, *parts):
          return os.path.join(
              os.path.dirname(os.path.realpath(__file__)),
-@@ -1331,6 +1386,7 @@ class TestChdir(unittest.TestCase):
+@@ -1331,6 +1388,7 @@ class TestChdir(unittest.TestCase):
              self.assertEqual(os.getcwd(), target)
          self.assertEqual(os.getcwd(), old_cwd)
  
@@ -224,7 +234,7 @@ index cf651959803..9d4d7cc7dd4 100644
      def test_reentrant(self):
          old_cwd = os.getcwd()
          target1 = self.make_relative_path('data')
-@@ -1363,4 +1419,4 @@ class TestChdir(unittest.TestCase):
+@@ -1363,4 +1421,4 @@ class TestChdir(unittest.TestCase):
  
  
  if __name__ == "__main__":
