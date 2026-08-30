@@ -1492,9 +1492,7 @@ def _build_dynamo_eager_graph_source(gm: torch.fx.GraphModule) -> str:
     return "\n".join(parts)
 
 
-def _dynamo_backend_compiler(
-    backend: str
-) -> Callable[..., _DynamoPythonBackend]:
+def _dynamo_backend_compiler(backend: str) -> Callable[..., _DynamoPythonBackend]:
     def compile_graph(
         gm: torch.fx.GraphModule, example_inputs: list[object]
     ) -> _DynamoPythonBackend:
@@ -2855,9 +2853,7 @@ def _precompile_dynamo_stateful(
                 )
             mismatches = [
                 f"{name}={got!r} (the state was created with {want!r})"
-                for name, got, want in (
-                    ("backend", backend, state.backend),
-                )
+                for name, got, want in (("backend", backend, state.backend),)
                 if got != want
             ]
             if recompile_limit is not None and recompile_limit != state.capture_limit:
@@ -2883,7 +2879,9 @@ def _precompile_dynamo_stateful(
                 )
         try:
             with (
-                _dynamo_capture_context(state.pgo_state, grad_enabled, state.capture_limit),
+                _dynamo_capture_context(
+                    state.pgo_state, grad_enabled, state.capture_limit
+                ),
                 # A FRESH call that hits the limit self-closes and never
                 # returns its state, so the close()-and-recapture advice only
                 # fits resumed calls.

@@ -207,6 +207,11 @@ class TestAOTCompileToPython(TestCase):
                     load_from_python(src, cache)(_flat_inputs(m, x))[0], m(x)
                 )
 
+    @skipIfTorchDynamo(
+        "under dynamo-wrapped testing the test body itself is compiled, so the"
+        " artifact's backward runs under compiled autograd, which deliberately"
+        " rejects _CompiledFunction's boxed_grads_call"
+    )
     def test_training_graph_composes_forward_and_backward(self):
         # grad_enabled with inputs that require grad makes AOTAutograd emit a
         # JOINT forward+backward: two dense graphs, bridged by an autograd
@@ -245,6 +250,11 @@ class TestAOTCompileToPython(TestCase):
         for name, param in m.named_parameters():
             self.assertEqual(param.grad, expected[name])
 
+    @skipIfTorchDynamo(
+        "under dynamo-wrapped testing the test body itself is compiled, so the"
+        " artifact's backward runs under compiled autograd, which deliberately"
+        " rejects _CompiledFunction's boxed_grads_call"
+    )
     def test_training_preserves_undefined_output_tangents(self):
         def flat_fn(flat):
             return [flat[0].sin(), flat[1].sin()]
@@ -263,6 +273,11 @@ class TestAOTCompileToPython(TestCase):
         self.assertEqual(run_x.grad, x.cos())
         self.assertIsNone(run_y.grad)
 
+    @skipIfTorchDynamo(
+        "under dynamo-wrapped testing the test body itself is compiled, so the"
+        " artifact's backward runs under compiled autograd, which deliberately"
+        " rejects _CompiledFunction's boxed_grads_call"
+    )
     def test_training_passthrough_backward_runs_like_eager(self):
         def flat_fn(flat):
             return [flat[0] + 1]
@@ -292,6 +307,11 @@ class TestAOTCompileToPython(TestCase):
         self.assertEqual(out[1], float("inf"))
         self.assertTrue(math.isnan(out[2]))
 
+    @skipIfTorchDynamo(
+        "under dynamo-wrapped testing the test body itself is compiled, so the"
+        " artifact's backward runs under compiled autograd, which deliberately"
+        " rejects _CompiledFunction's boxed_grads_call"
+    )
     def test_training_serializes_observed_tangent_mask(self):
         def flat_fn(flat):
             return [flat[0].sin(), flat[1].sin()]
@@ -345,6 +365,11 @@ class TestAOTCompileToPython(TestCase):
         ):
             loaded([unseen_x, unseen_y])[1].sum().backward()
 
+    @skipIfTorchDynamo(
+        "under dynamo-wrapped testing the test body itself is compiled, so the"
+        " artifact's backward runs under compiled autograd, which deliberately"
+        " rejects _CompiledFunction's boxed_grads_call"
+    )
     def test_training_synthetic_base_and_undefined_tangent(self):
         def flat_fn(flat):
             first, alias, unused = flat
@@ -810,6 +835,11 @@ class TestAOTCompileToPython(TestCase):
     @unittest.skipIf(
         not torch.cuda.is_available(),
         "functionalize_rng_ops requires CUDA RNG state",
+    )
+    @skipIfTorchDynamo(
+        "under dynamo-wrapped testing the test body itself is compiled, so the"
+        " artifact's backward runs under compiled autograd, which deliberately"
+        " rejects _CompiledFunction's boxed_grads_call"
     )
     def test_training_functionalized_rng_runs_like_eager(self):
         def flat_fn(flat):
