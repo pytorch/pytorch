@@ -28,7 +28,11 @@ from torch.fx.experimental.dynamic_spec import (
     TensorSpec as T,
 )
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 def _reset_uid_counter():
@@ -105,6 +109,8 @@ class _ModBranch(torch.nn.Module):
 class _TestExportDynamicSpecBase(TestCase):
     """torch.export.export support for the new ShapesSpec/ParamsSpec API."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         _reset_uid_counter()
@@ -120,7 +126,7 @@ class _TestExportDynamicSpecBase(TestCase):
         )
         shape = _first_tensor_placeholder_shape(ep.graph_module)
         self.assertIsInstance(shape[0], torch.SymInt)
-        self.assertGreater(len(free_unbacked_symbols(shape[0])), 0)
+        self.assertEqual(len(free_unbacked_symbols(shape[0])), 1)
         self.assertExpectedInline(
             str(ep).strip(),
             """\
@@ -815,6 +821,69 @@ Range constraints: {u0: VR[0, int_oo]}""",
         self.assertEqual(int(vr.lower), 10)
         self.assertEqual(int(vr.upper), 100)
 
+    # ---- @dynamic_spec(...) decorator (auto-attach) ----
+
+    def test_spec_decorator_per_param_form(self):
+        """``@dynamic_spec({"x": ...})`` attached to ``forward`` is auto-applied."""
+        from torch.fx.experimental.dynamic_spec import dynamic_spec
+
+        class M(torch.nn.Module):
+            @dynamic_spec({"x": T([VAR("B"), STATIC])})
+            def forward(self, x):
+                return x.sum(0)
+
+        ep = export(M(), (torch.randn(8, 3),), strict=self.strict)
+        shape = _first_tensor_placeholder_shape(ep.graph_module)
+        self.assertIsInstance(shape[0], torch.SymInt)
+        self.assertEqual(len(free_unbacked_symbols(shape[0])), 1)
+
+    def test_spec_decorator_full_form_with_assumptions(self):
+        """``@dynamic_spec(ShapesSpec(params=..., assumptions=...))`` form is auto-applied,
+        and the assumption is enforced as a runtime assertion."""
+        from torch.fx.experimental.dynamic_spec import dynamic_spec
+
+        B = VAR("batch")
+
+        class M(torch.nn.Module):
+            @dynamic_spec(
+                ShapesSpec(
+                    PARAMS({"x": T([B, STATIC])}),
+                    assumptions=[B % 2 == 0],
+                )
+            )
+            def forward(self, x):
+                return x.sum(0)
+
+        ep = export(M(), (torch.randn(8, 3),), strict=self.strict)
+        # Valid input (dim 0 is even) -- runs cleanly.
+        ep.module()(torch.randn(8, 3))
+        ep.module()(torch.randn(20, 3))
+        # Violation (dim 0 is odd) -- runtime assertion fires, proving the
+        # assumption from the decorator was actually wired into the graph.
+        with self.assertRaisesRegex(RuntimeError, "Runtime assertion failed"):
+            ep.module()(torch.randn(7, 3))
+
+    def test_spec_decorator_and_explicit_dynamic_shapes_raises(self):
+        """Mixing ``@dynamic_spec(...)`` with an explicit ``dynamic_shapes=`` kwarg
+        is ambiguous and must raise."""
+        from torch.fx.experimental.dynamic_spec import dynamic_spec
+
+        class M(torch.nn.Module):
+            @dynamic_spec({"x": T([VAR("B"), STATIC])})
+            def forward(self, x):
+                return x.sum(0)
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"`@dynamic_spec\(\.\.\.\)` is attached.*AND a `dynamic_shapes=`",
+        ):
+            export(
+                M(),
+                (torch.randn(8, 3),),
+                dynamic_shapes=PARAMS({"x": T([VAR("B"), STATIC])}),
+                strict=self.strict,
+            )
+
     def test_export_to_torch_ir_shapes_spec_direct(self):
         # Strict-only internal-API test; skip in non-strict mode.
         if not self.strict:
@@ -923,10 +992,12 @@ class <lambda>(torch.nn.Module):
 
 
 class TestExportDynamicSpecStrict(_TestExportDynamicSpecBase):
+    hw_classification = HardwareClassification.GENERIC
     strict = True
 
 
 class TestExportDynamicSpecNonStrict(_TestExportDynamicSpecBase):
+    hw_classification = HardwareClassification.GENERIC
     strict = False
 
 
@@ -934,6 +1005,8 @@ del _TestExportDynamicSpecBase
 
 
 class _TestContainerSpecBase(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         _reset_uid_counter()
@@ -1442,7 +1515,9 @@ class _TestContainerSpecBase(TestCase):
             leaves = pytree.tree_leaves(arg_value)
             out = _walk_spec(spec, arg_value, where="<root>")
             self.assertEqual(
-                len(out), len(leaves), f"leaf-count drift for case {arg_value!r}"
+                len(out),
+                len(leaves),
+                lambda msg: f"{msg}\nleaf-count drift for case {arg_value!r}",
             )
             # Per-slot check: each slot's spec name must match the
             # tensor at that flat position from pytree.tree_flatten.
@@ -1450,7 +1525,7 @@ class _TestContainerSpecBase(TestCase):
                 self.assertIsInstance(
                     slot_spec,
                     T,
-                    msg=f"slot {i} is {slot_spec!r} (expected TensorSpec) "
+                    msg=lambda msg: f"{msg}\nslot {i} is {slot_spec!r} (expected TensorSpec) "
                     f"for case {arg_value!r}",
                 )
                 expected = f"t{id(leaf)}"
@@ -1459,7 +1534,7 @@ class _TestContainerSpecBase(TestCase):
                     actual,
                     expected,
                     msg=(
-                        f"alignment drift at slot {i}: spec name "
+                        lambda msg: f"{msg}\nalignment drift at slot {i}: spec name "
                         f"{actual!r} does not match pytree-flatten leaf "
                         f"name {expected!r} for case {arg_value!r}"
                     ),
@@ -1481,15 +1556,19 @@ class _TestContainerSpecBase(TestCase):
             expected = len(pytree.tree_leaves(arg_value))
             out = _walk_spec(None, arg_value, where="<root>")
             self.assertEqual(
-                len(out), expected, f"no-spec leaf-count drift for {arg_value!r}"
+                len(out),
+                expected,
+                lambda msg: f"{msg}\nno-spec leaf-count drift for {arg_value!r}",
             )
 
 
 class TestContainerSpecStrict(_TestContainerSpecBase):
+    hw_classification = HardwareClassification.GENERIC
     strict = True
 
 
 class TestContainerSpecNonStrict(_TestContainerSpecBase):
+    hw_classification = HardwareClassification.GENERIC
     strict = False
 
 

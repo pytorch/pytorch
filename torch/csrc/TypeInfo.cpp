@@ -16,8 +16,7 @@
 static PyObject* THPFInfo_New(const at::ScalarType& type) {
   auto finfo = &THPFInfoType;
   auto self = THPObjectPtr{finfo->tp_alloc(finfo, 0)};
-  if (!self)
-    throw python_error();
+  TORCH_CHECK_PYTHON(self);
   auto self_ = reinterpret_cast<THPDTypeInfo*>(self.get());
   self_->type = c10::toRealValueType(type);
   return self.release();
@@ -26,8 +25,7 @@ static PyObject* THPFInfo_New(const at::ScalarType& type) {
 static PyObject* THPIInfo_New(const at::ScalarType& type) {
   auto iinfo = &THPIInfoType;
   auto self = THPObjectPtr{iinfo->tp_alloc(iinfo, 0)};
-  if (!self)
-    throw python_error();
+  TORCH_CHECK_PYTHON(self);
   auto self_ = reinterpret_cast<THPDTypeInfo*>(self.get());
   self_->type = type;
   return self.release();
@@ -254,7 +252,8 @@ static PyObject* THPFInfo_str(THPFInfo* self) {
   if (dtypeStr != nullptr) {
     oss << ", dtype=" << PyUnicode_AsUTF8(dtypeStr) << ')';
   }
-  return !PyErr_Occurred() ? THPUtils_packString(oss.str().c_str()) : nullptr;
+  return !PyErr_Occurred() ? THPUtils_packString(std::move(oss).str().c_str())
+                           : nullptr;
 }
 
 static PyObject* THPIInfo_str(THPIInfo* self) {
@@ -267,7 +266,8 @@ static PyObject* THPIInfo_str(THPIInfo* self) {
     oss << ", dtype=" << PyUnicode_AsUTF8(dtypeStr) << ')';
   }
 
-  return !PyErr_Occurred() ? THPUtils_packString(oss.str().c_str()) : nullptr;
+  return !PyErr_Occurred() ? THPUtils_packString(std::move(oss).str().c_str())
+                           : nullptr;
 }
 
 static const std::initializer_list<PyGetSetDef> THPFInfo_properties = {
@@ -401,10 +401,6 @@ PyTypeObject THPIInfoType = {
 };
 
 void THPDTypeInfo_init(PyObject* module) {
-  if (PyModule_AddType(module, &THPFInfoType) < 0) {
-    throw python_error();
-  }
-  if (PyModule_AddType(module, &THPIInfoType) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyModule_AddType(module, &THPFInfoType) >= 0);
+  TORCH_CHECK_PYTHON(PyModule_AddType(module, &THPIInfoType) >= 0);
 }

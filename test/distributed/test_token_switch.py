@@ -150,7 +150,7 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
         received = out_tokens[:NUM_TOKENS].float()
         self.assertTrue(
             received.eq(expected_val).all(),
-            f"rank {self.rank}: expected {expected_val}, got {received[0, 0].item()}",
+            lambda msg: f"{msg}\nrank {self.rank}: expected {expected_val}, got {received[0, 0].item()}",
         )
 
     @skip_if_lt_x_gpu(2)
@@ -639,6 +639,14 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
 
 
 instantiate_parametrized_tests(TokenSwitchNCCLTest)
+
+
+class TokenSwitchNCCL2Test(TokenSwitchNCCLTest):
+    _cached_token_switch: TokenSwitchNCCL | None = None
+
+    @classmethod
+    def backend_str(cls):
+        return "nccl2"
 
 
 if __name__ == "__main__":

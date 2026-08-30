@@ -5,9 +5,9 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #include <nccl_ep.h>
 
 #include <string_view>
@@ -103,10 +103,9 @@ static ncclEpLayout_t to_nccl_layout(NcclEpLayout layout) {
 
 static ncclComm_t get_nccl_comm(
     const c10::intrusive_ptr<::c10d::ProcessGroup>& pg) {
-    auto* ncclPg = dynamic_cast<c10d::ProcessGroupNCCL*>(
-        pg->getBackend(c10::DeviceType::CUDA).get());
-    TORCH_CHECK(ncclPg != nullptr, "backend must be a NCCL process group");
-    return reinterpret_cast<ncclComm_t>(ncclPg->getCommPtr());
+    auto device = c10::Device(at::kCUDA, at::cuda::current_device());
+    return c10d::symmetric_memory::NCCLDevCommManager::get(device).get_comm(
+        pg->getGroupName());
 }
 
 NcclEpGroup::~NcclEpGroup() {

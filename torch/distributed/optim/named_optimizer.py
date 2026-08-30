@@ -23,7 +23,7 @@ class _NamedOptimizer(optim.Optimizer):
     We replace the original key (number) in an optim to the
     fully qualified name (FQN) string. User can initialize the optim as they
     initialize a PyTorch optim, the only difference is that they also need to
-    pass in the FQN of each parameters.
+    pass in the FQN of each parameter.
 
     Args:
         named_parameters (Mapping[str, Union[torch.Tensor, ShardedTensor]]):

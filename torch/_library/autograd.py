@@ -25,6 +25,7 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     name: str = f"GeneratedBackwardFor_{op._namespace}_{op._opname}_{op._overloadname}"
 
     schema = op._schema
+    is_out_op = utils.is_out(op)
     has_kwarg_only_args = utils.has_kwarg_only_args(op._schema)
     num_positional_args = sum(not a.kwarg_only for a in schema.arguments)
     has_tensorlist_like_args = any(
@@ -37,13 +38,8 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
         keyset: _C.DispatchKeySet
         keyword_only_args: dict[str, Any]
 
-    def forward_no_grad(*args):
-        metadata = args[-1]
-        args = args[:-1]
-
+    def redispatch_no_grad(keyset, args, kwargs):
         with _C._AutoDispatchBelowAutograd():
-            keyset = metadata.keyset
-            kwargs = metadata.keyword_only_args
             result = op.redispatch(keyset & _C._after_autograd_keyset, *args, **kwargs)
             return result
 
@@ -134,7 +130,7 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     # The dispatcher passes any keyword-only-args as kwargs and the
     # rest of the args (even if specified as kwargs) as args.
     def autograd_impl(keyset, *args, **keyword_only_args):
-        if utils.is_out(op):
+        if is_out_op:
             if _C.is_grad_enabled() and _C._any_requires_grad(
                 *args, **keyword_only_args
             ):
@@ -143,12 +139,12 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
                     "support automatic differentiation, but one of the arguments "
                     "requires grad."
                 )
-            return forward_no_grad(*args, Metadata(keyset, keyword_only_args))
+            return redispatch_no_grad(keyset, args, keyword_only_args)
 
         if _C.is_grad_enabled() and _C._any_requires_grad(*args):
             result = Generated.apply(*args, Metadata(keyset, keyword_only_args))  # type: ignore[attr-defined]
         else:
-            result = forward_no_grad(*args, Metadata(keyset, keyword_only_args))
+            result = redispatch_no_grad(keyset, args, keyword_only_args)
         return result
 
     return autograd_impl

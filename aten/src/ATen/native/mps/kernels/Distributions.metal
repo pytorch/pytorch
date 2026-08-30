@@ -95,9 +95,12 @@ kernel void exponential(
   float lambda = params.x;
   uint count = min(4u, numel - base);
   for (uint i = 0; i < count; ++i) {
-    // Only `u = 1` is the failure mode (`log(0)`); `u = 0` gives `log(1) = 0`.
-    float u = ::metal::min(
-        c10::metal::detail::uint32_to_uniform_float(raw[i]), 1.0f - eps);
+    // Clamp `u` away from 0 to prevent `1.0f - u` from rounding to 1.0f
+    // and producing `-0.0` from `-log(1.0f - u)`.
+    float u = ::metal::clamp(
+        c10::metal::detail::uint32_to_uniform_float(raw[i]),
+        eps / 2,
+        1.0f - eps);
     output[base + i] =
         static_cast<T>(-::metal::precise::log(1.0f - u) / lambda);
   }
@@ -434,6 +437,39 @@ REGISTER_BERNOULLI(int);
 REGISTER_BERNOULLI(long);
 REGISTER_BERNOULLI(float2);
 REGISTER_BERNOULLI(half2);
+
+constant constexpr int BINOMIAL_RANDOMS_STRIDE = 32;
+
+template <typename T>
+kernel void standard_binomial(
+    device T* output [[buffer(0)]],
+    device const T* count_in [[buffer(1)]],
+    device const T* prob_in [[buffer(2)]],
+    constant long2& seed_base_offset [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  float count = static_cast<float>(count_in[tid]);
+  float prob = static_cast<float>(prob_in[tid]);
+  long seed = seed_base_offset.x;
+  long base =
+      seed_base_offset.y + static_cast<long>(tid) * BINOMIAL_RANDOMS_STRIDE;
+  BaseSampler<float, c10::metal::RandSampler> sampler(
+      c10::metal::RandSampler(seed, base));
+  output[tid] = static_cast<T>(
+      sample_binomial<float, float, RandSampler>(count, prob, sampler));
+}
+
+#define REGISTER_BINOMIAL(DTYPE)                      \
+  template [[host_name("standard_binomial_" #DTYPE)]] \
+  kernel void standard_binomial<DTYPE>(               \
+      device DTYPE*,                                  \
+      device const DTYPE*,                            \
+      device const DTYPE*,                            \
+      constant long2&,                                \
+      uint)
+
+REGISTER_BINOMIAL(float);
+REGISTER_BINOMIAL(half);
+REGISTER_BINOMIAL(bfloat);
 
 // Marsaglia & Tsang (2000) acceptance-rejection method for Gamma distribution.
 // Adapted from aten/src/ATen/native/Distributions.h sample_gamma(),
