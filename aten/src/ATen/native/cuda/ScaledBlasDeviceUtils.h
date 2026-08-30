@@ -4,7 +4,8 @@
 
 namespace at::native::scaled {
 
-// True if the current device supports torch._scaled_mm / torch._scaled_grouped_mm.
+// Device architecture gate shared by the scaled matrix multiplication kernels,
+// including _scaled_mm_v2 (the backend for torch.nn.functional.scaled_mm).
 // On CUDA: with no flags, allows SM >= 9.0 or SM 8.9 (Ada/L4). With sm90_only
 // and/or sm100_only set, checks for a matching SM major version (OR semantics
 // if both are set). On ROCm, sm90_only and sm100_only are ignored.

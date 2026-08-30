@@ -960,6 +960,7 @@ during migration, we recommend using the public APIs.
     is_autocast_ipu_enabled
     is_autocast_xla_enabled
     is_distributed
+    is_scaled_mm_supported
     is_vulkan_available
     merge_type_from_type_comment
     parse_ir

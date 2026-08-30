@@ -275,6 +275,14 @@ def is_tf32_supported() -> bool:
     return is_bf16_supported(including_emulation=False)
 
 
+def _is_scaled_mm_supported(device: Device = None) -> bool:
+    if not is_available():
+        return False
+    _lazy_init()
+    device_index = _get_device_index(device, optional=True)
+    return bool(torch._C._cuda_isScaledMMAllowed(device_index))
+
+
 def _sleep(cycles):
     torch._C._cuda_sleep(cycles)
 

@@ -714,7 +714,54 @@ def _build_scaled_grouped_mm_kwargs(scale_a, scale_b, offs, format):
     kwargs['mxfp4'] = kwargs['mxfp8']
     return kwargs[format]
 
+
+class TestScaledMMCapability(TestCase):
+    def test_device_routing(self) -> None:
+        self.assertTrue(torch.is_scaled_mm_supported("cpu"))
+        self.assertTrue(torch.is_scaled_mm_supported(torch.device("cpu")))
+        self.assertFalse(torch.is_scaled_mm_supported("meta"))
+
+        current_device = torch.accelerator.current_accelerator() or torch.device("cpu")
+        self.assertEqual(
+            torch.is_scaled_mm_supported(),
+            torch.is_scaled_mm_supported(current_device),
+        )
+        self.assertEqual(
+            torch.is_scaled_mm_supported(0),
+            torch.is_scaled_mm_supported(torch.device(current_device.type, 0)),
+        )
+
+
 class TestFP8Matmul(TestCase):
+    def test_is_scaled_mm_supported(self, device) -> None:
+        supported = torch.is_scaled_mm_supported(device)
+        self.assertIsInstance(supported, bool)
+        for device_form in (device, torch.device(device)):
+            self.assertEqual(torch.is_scaled_mm_supported(device_form), supported)
+
+        size = 16
+        mat_a = torch.eye(size, device=device).to(e4m3_type)
+        mat_b = torch.eye(size, device=device).to(e4m3_type).t()
+        scale = torch.tensor(1.0, device=device)
+
+        def run_scaled_mm():
+            return scaled_mm(
+                mat_a,
+                mat_b,
+                scale,
+                ScalingType.TensorWise,
+                scale,
+                ScalingType.TensorWise,
+            )
+
+        if supported:
+            self.assertEqual(run_scaled_mm().shape, (size, size))
+        else:
+            self.assertRaisesRegex(
+                RuntimeError,
+                "only supported",
+                run_scaled_mm,
+            )
 
     def _test_tautological_mm(self, device: str,
                               x_dtype: torch.dtype = e4m3_type,
@@ -1857,6 +1904,7 @@ class TestFP8Matmul(TestCase):
         y = torch.rand((m, l), device=device).to(e4m3_type).t()
         scale_a = torch.tensor(1.0, device=device)
         scale_b = torch.tensor(1.0, device=device)
+        self.assertFalse(torch.is_scaled_mm_supported(device))
         self.assertRaisesRegex(
             RuntimeError,
             r"torch\.\_scaled\_mm is only supported on CUDA devices with compute capability \>\= 9\.0 or 8\.9, or ROCm MI300\+",

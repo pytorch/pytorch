@@ -128,6 +128,7 @@ __all__ = [
     "inference_mode",
     "initial_seed",
     "is_deterministic_algorithms_warn_only_enabled",
+    "is_scaled_mm_supported",
     "is_storage",
     "is_tensor",
     "is_warn_always_enabled",
@@ -3486,6 +3487,37 @@ def get_device_module(device: "torch.device | str | None" = None) -> _ModuleType
             f"Device '{device_module_name}' does not have a corresponding module registered as 'torch.{device_module_name}'."
         )
     return device_module
+
+
+def is_scaled_mm_supported(device: "Device" = None) -> builtins.bool:
+    r"""Return device-level support for :func:`torch.nn.functional.scaled_mm`.
+
+    This checks device- and build-level availability. It does not validate a
+    particular invocation. Individual dtypes, scaling recipes, layouts,
+    swizzles, and output configurations may have additional restrictions.
+
+    Args:
+        device (:class:`torch.device`, str, int, optional): Device for which to
+            query support. If unspecified, uses the current accelerator, or the
+            CPU when PyTorch was built without an accelerator. An integer
+            selects a device index on the current accelerator.
+    """
+    if isinstance(device, builtins.int):
+        resolved_device = torch.device(torch._C._get_accelerator().type, device)
+    elif device is None:
+        resolved_device = torch._C._get_accelerator()
+    else:
+        resolved_device = torch.device(device)
+
+    try:
+        device_module = get_device_module(resolved_device)
+    except RuntimeError:
+        return False
+
+    backend_query = getattr(device_module, "_is_scaled_mm_supported", None)
+    if backend_query is None:
+        return False
+    return builtins.bool(backend_query(resolved_device))
 
 
 def _constrain_as_size(
