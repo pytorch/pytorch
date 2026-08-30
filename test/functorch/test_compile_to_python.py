@@ -22,6 +22,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    runWithoutCompiledAutograd,
     subtest,
     TestCase,
 )
@@ -203,6 +204,11 @@ class TestAOTCompileToPython(TestCase):
                     load_from_python(src, cache)(_flat_inputs(m, x))[0], m(x)
                 )
 
+    @runWithoutCompiledAutograd(
+        "make_fx traces through the .backward() this test needs, and compiled "
+        "autograd serves that backward from a dynamo-optimized function, which "
+        "FX symbolic tracing rejects"
+    )
     def test_inline_backward_graph_is_not_lowered_as_inference(self):
         # A graph that differentiates INLINE (make_fx tracing through a
         # .backward()) has no joint, so a joint-only check would call it
@@ -233,6 +239,11 @@ class TestAOTCompileToPython(TestCase):
             any("convolution_backward" in str(n.target) for n in traced.graph.nodes)
         )
 
+    @runWithoutCompiledAutograd(
+        "the composed module's autograd.Function sets boxed_grads_call and carries "
+        "no _aot_id, so compiled autograd cannot trace its backward -- the "
+        "standalone artifact is self-contained and never joins an AOT backward"
+    )
     def test_training_graph_composes_forward_and_backward(self):
         # grad_enabled with inputs that require grad makes AOTAutograd emit a
         # JOINT forward+backward: two dense graphs, bridged by an autograd
