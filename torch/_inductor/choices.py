@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import dataclasses
+import inspect
+import logging
 import typing
 from typing import Any, TYPE_CHECKING
 
@@ -13,14 +15,8 @@ from torch.utils._sympy.value_ranges import bound_sympy
 
 from . import config
 from .codecache import write_text
-from .kernel_inputs import KernelInputs, MMKernelInputs
-from .kernel_template_choice import make_ktc_generator
-from .metrics import get_metric_table, is_metric_table_enabled
-from .runtime.hints import DeviceProperties, ReductionHint
-from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
-from .select_algorithm import ExternKernelChoice
-from .template_heuristics import get_template_heuristic
-from .template_heuristics.triton import (
+from .heuristics.template import get_template_heuristic
+from .heuristics.template.triton import (
     _origami_enabled,
     BaseConfigHeuristic,
     CPUConfigHeuristic,
@@ -30,6 +26,12 @@ from .template_heuristics.triton import (
     ROCmConfigHeuristic,
     XPUConfigHeuristic,
 )
+from .kernel_inputs import KernelInputs, MMKernelInputs
+from .kernel_template_choice import make_ktc_generator
+from .metrics import get_metric_table, is_metric_table_enabled
+from .runtime.hints import DeviceProperties, ReductionHint
+from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
+from .select_algorithm import ExternKernelChoice
 from .utils import _use_autotune_backend
 from .virtualized import V
 
@@ -47,6 +49,9 @@ if TYPE_CHECKING:
     from .kernel_template_choice import KernelTemplateChoice
 
     from torch.utils._ordered_set import OrderedSet  # isort: skip
+
+
+log: logging.Logger = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING or not config.is_fbcode():
@@ -124,8 +129,9 @@ class InductorChoices:
 
             torch._inductor.virtualized.V.set_choices_handler(MyHeuristics())
 
-    Subclasses used with inductor_choices_class must implement uuid() for
-    cache key computation.
+    Subclasses used with inductor_choices_class or register_inductor_choices
+    must implement uuid() for cache key computation. When multiple handlers
+    are configured, the first handler that overrides each method is used.
     """
 
     def get_config_heuristics(
@@ -392,7 +398,20 @@ class InductorChoices:
                 if hasattr(ktc, "_choice"):
                     del ktc._choice
         # Third pass: Convert to ChoiceCaller objects
-        return [ktc.choice for ktc in adjusted_choices if ktc.choice is not None]
+        callers = [ktc.choice for ktc in adjusted_choices if ktc.choice is not None]
+
+        if config.cuda.autotune_tunableop_dynamic_dims_wildcard:
+            # Only ExternKernelCaller (aten) reads this mask to drive TunableOp
+            # wildcard persistence; Triton/CUTLASS callers ignore it. Imported
+            # here rather than at module scope to avoid an import cycle.
+            from torch._inductor.select_algorithm import ExternKernelCaller
+
+            mask = kernel_inputs.dynamic_dim_mask(op_name)
+            for caller in callers:
+                if isinstance(caller, ExternKernelCaller):
+                    caller.tunable_dyn_dims_mask = mask
+
+        return callers
 
     def triton_kernel_kwargs(
         self,
@@ -440,18 +459,26 @@ class InductorChoices:
 
     @staticmethod
     def should_use_persistent_reduction(
-        features: SIMDKernelFeatures, cooperative_reduction: bool
+        features: SIMDKernelFeatures,
+        cooperative_reduction: bool,
     ) -> bool:
         """
         Heuristic to decide if a persistent reduction should be used.
         """
         if not config.triton.persistent_reductions:
             return False
+        reduction_hint = features.get_reduction_hint()
+        rblock = features.strict_reduction_rblock()
+        if rblock is not None and not features.has_strict_multirow_reduction():
+            if not (
+                V.graph.sizevars.statically_known_geq(rblock, features.reduction_numel)
+            ):
+                return False
         threshold = {
             ReductionHint.INNER: 1024,
-        }.get(features.get_reduction_hint(), 64)
+        }.get(reduction_hint, 64)
 
-        if features.get_reduction_hint() not in (
+        if reduction_hint not in (
             ReductionHint.INNER,
             ReductionHint.OUTER_TINY,
         ):
@@ -498,8 +525,31 @@ class InductorChoices:
             features.reduction_numel, threshold
         )  # type: ignore[arg-types]
 
-    @staticmethod
+    def _inner_reduction_no_split_threshold(
+        self,
+        props: DeviceProperties,
+        xnumel: int,
+        num_sm: int,
+    ) -> int:
+        # Benchmark results from two scenarios:
+        # (1) Standalone ops/small models: CPU wall time measures end-to-end
+        #     latency and generally prefers a large no-split threshold.
+        # (2) Sections inside large compiled models: kernel/device time is the
+        #     local codegen signal and prefers the smaller xnumel-dependent
+        #     threshold. Kernel launch overhead is amortized by cuda-graph.
+        # Benchmarked ops: sum, entropy, RMSNorm, Welford, GroupNorm(+SiLU),
+        # plus Stable Diffusion v1.5 UNet batch-1/8 validation.
+        # Chosen GB200 thresholds: 32768 for xnumel < num_sm, otherwise 40960.
+        # Reducing these thresholds further did not improve scenario (2), but
+        # hurts scenario (1).
+        if props.major is not None and props.major >= 10:
+            if xnumel < num_sm:
+                return 32768
+            return 40960
+        return 8192
+
     def reduction_split_factor(
+        self,
         device: torch.device,
         reduction_numel_hint: int,
         numel_hint: int,
@@ -529,10 +579,8 @@ class InductorChoices:
             # we leak reduction autotune configs here, and will need to refactor to avoid this later
             if numel_hint >= 2 * num_sm:  # don't split if there are enough outputs
                 return 1
-            # based on sum(x[N]) on GB200, split reduction provides higher performance when N >= 1M
-            # TODO: test more hardwares
-            no_split_threshold = (
-                524288 if props.major is not None and props.major >= 10 else 8192
+            no_split_threshold = self._inner_reduction_no_split_threshold(
+                props, numel_hint, num_sm
             )
             if reduction_numel_hint <= no_split_threshold:
                 return 1
@@ -756,3 +804,159 @@ class InductorChoices:
             buffer_overlap_score,
             proximity_score,
         )
+
+
+InductorChoicesFactory: typing.TypeAlias = typing.Callable[[], InductorChoices]
+InductorChoicesFactoryConfig: typing.TypeAlias = InductorChoicesFactory | None
+
+_registered_inductor_choices: dict[str, InductorChoicesFactory] = {}
+
+
+def _validate_choice_uuid(
+    key: str, choice: InductorChoices
+) -> typing.Callable[[], Any]:
+    uuid = getattr(choice, "uuid", None)
+    if not callable(uuid):
+        raise RuntimeError(
+            f"InductorChoices contributor {key!r} does not implement uuid(). "
+            "Implement uuid() for cache key participation."
+        )
+    return uuid
+
+
+class _ComposedInductorChoices(InductorChoices):
+    """Use the first contributor that overrides each InductorChoices hook."""
+
+    def __init__(self, choices: list[InductorChoices]) -> None:
+        super().__init__()
+        self._choices = tuple(choices)
+        self._dispatchers: dict[str, typing.Callable[..., Any] | None] = {}
+
+    def __getattribute__(self, name: str) -> Any:
+        try:
+            attributes = object.__getattribute__(self, "__dict__")
+        except AttributeError:
+            return object.__getattribute__(self, name)
+        if name in attributes:
+            return attributes[name]
+
+        dispatchers = attributes.get("_dispatchers")
+        if dispatchers is None:
+            return object.__getattribute__(self, name)
+        if name in dispatchers:
+            dispatcher = dispatchers[name]
+            if dispatcher is None:
+                return object.__getattribute__(self, name)
+            return dispatcher
+
+        default = inspect.getattr_static(InductorChoices, name, None)
+        if name == "uuid" or not (
+            callable(default) or isinstance(default, (classmethod, staticmethod))
+        ):
+            dispatchers[name] = None
+            return object.__getattribute__(self, name)
+
+        dispatcher = None
+        owner = ""
+        choices = object.__getattribute__(self, "_choices")
+        for choice in choices:
+            if inspect.getattr_static(choice, name) is default:
+                continue
+            if dispatcher is not None:
+                log.warning(
+                    "InductorChoices hook %r is overridden by both %s and %s; "
+                    "list order selects %s",
+                    name,
+                    owner,
+                    type(choice).__name__,
+                    owner,
+                )
+                continue
+            dispatcher = getattr(choice, name)
+            owner = type(choice).__name__
+
+        dispatchers[name] = dispatcher
+        if dispatcher is None:
+            return object.__getattribute__(self, name)
+        return dispatcher
+
+    def uuid(self) -> tuple[str, tuple[Any, ...]]:
+        return (
+            "composed_inductor_choices",
+            tuple(
+                _validate_choice_uuid(f"config:{index}", choice)()
+                for index, choice in enumerate(self._choices)
+            ),
+        )
+
+
+def create_inductor_choices(
+    factory: InductorChoicesFactoryConfig,
+) -> InductorChoices:
+    return _create_inductor_choices(factory, registered_inductor_choices())
+
+
+def _create_inductor_choices(
+    factory: InductorChoicesFactoryConfig,
+    registrations: tuple[tuple[str, InductorChoicesFactory], ...],
+) -> InductorChoices:
+    if not registrations:
+        return InductorChoices() if factory is None else factory()
+
+    factories = list(registrations)
+    if factory is not None:
+        factories.insert(0, ("config", factory))
+
+    choices = []
+    for key, choice_factory in factories:
+        choice = choice_factory()
+        if not isinstance(choice, InductorChoices):
+            raise TypeError(
+                "Inductor choices factories must return InductorChoices instances, "
+                f"got {type(choice).__qualname__} from {key!r}"
+            )
+        _validate_choice_uuid(key, choice)
+        choices.append(choice)
+
+    if len(choices) == 1:
+        return choices[0]
+    return _ComposedInductorChoices(choices)
+
+
+def registered_inductor_choices() -> tuple[tuple[str, InductorChoicesFactory], ...]:
+    return tuple(_registered_inductor_choices.items())
+
+
+def register_inductor_choices(key: str, factory: InductorChoicesFactory) -> None:
+    global _registered_inductor_choices
+    registrations = dict(_registered_inductor_choices)
+    registrations[key] = factory
+    handler = _create_inductor_choices(
+        config.inductor_choices_class, tuple(registrations.items())
+    )
+    _registered_inductor_choices = registrations
+    V.set_choices_handler(handler)
+
+
+def unregister_inductor_choices(key: str) -> None:
+    global _registered_inductor_choices
+    registrations = dict(_registered_inductor_choices)
+    registrations.pop(key, None)
+    handler = _create_inductor_choices(
+        config.inductor_choices_class, tuple(registrations.items())
+    )
+    _registered_inductor_choices = registrations
+    V.set_choices_handler(handler)
+
+
+def inductor_choices_cache_key(factory: InductorChoicesFactoryConfig) -> Any:
+    if factory is None and not _registered_inductor_choices:
+        return None
+    choice = create_inductor_choices(factory)
+    uuid = getattr(choice, "uuid", None)
+    if not callable(uuid):
+        raise RuntimeError(
+            f"Config 'inductor_choices_class' is set to {factory} which does not "
+            "implement uuid(). Implement uuid() for cache key participation."
+        )
+    return uuid()

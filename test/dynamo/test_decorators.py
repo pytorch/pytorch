@@ -1,15 +1,19 @@
 # Owner(s): ["module: dynamo"]
+import base64
+import binascii
 import functools
-import operator
 import os
 import re
+import sys
 import unittest
 import unittest.mock as mock
 from unittest.mock import patch
 
 import torch
 import torch._dynamo.testing
+from torch._dynamo.backends.debugging import invoke_subgraph_inner_compiler
 from torch._dynamo.exc import Unsupported
+from torch._dynamo.trace_rules import is_callable_allowed
 from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -47,6 +51,27 @@ class DecoratorTests(PytreeRegisteringTestCase):
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 4)
 
+    def test_invoke_subgraph_wrapper_is_allow_in_graph(self):
+        # `invoke_subgraph_inner_compiler` returns a boxed wrapper that, when
+        # called, invokes an inner closure decorated with `@disable` and
+        # `@torch._dynamo.allow_in_graph`. The id of that inner closure must
+        # be in the allow_in_graph registry — otherwise dynamo's
+        # `lookup_callable` will fall through to the disable check and graph
+        # break, defeating the point of `allow_in_graph`.
+        def f(x):
+            return x + 1
+
+        gm = torch.fx.symbolic_trace(f)
+        boxed = invoke_subgraph_inner_compiler(gm, [torch.randn(4)])
+
+        # The boxed wrapper closes over `invoke_subgraph_wrapper_unboxed`.
+        self.assertEqual(
+            boxed.__code__.co_freevars, ("invoke_subgraph_wrapper_unboxed",)
+        )
+        unboxed = boxed.__closure__[0].cell_contents
+
+        self.assertTrue(is_callable_allowed(unboxed))
+
     def test_disable_for_custom_op(self):
         import torch.library
 
@@ -80,6 +105,38 @@ class DecoratorTests(PytreeRegisteringTestCase):
                 self.assertEqual(ref, res)
             finally:
                 torch.ops.foo.custom = orig_custom
+
+    def test_disable_not_traced_and_correct(self):
+        # disable must keep Dynamo from tracing into the function while still
+        # returning correct results (exercises the non-export hot path).
+        @torch._dynamo.disable
+        def inner(x):
+            return x + 1
+
+        def fn(x):
+            return torch.cos(inner(torch.sin(x)))
+
+        x = torch.randn(4)
+        ref = fn(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        res = torch.compile(fn, backend=cnts)(x)
+        self.assertEqual(ref, res)
+        # inner is disabled -> graph break around it -> two compiled frames.
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_disable_under_eager_on_recompile_stance(self):
+        # A disabled function honors the stance for its body: under
+        # eager_on_recompile the stance callback is False (run-only), not fully
+        # off. Pin that it still returns correct results.
+        @torch._dynamo.disable
+        def inner(x):
+            return x + 1
+
+        x = torch.randn(4)
+        with torch.compiler.set_stance("eager_on_recompile"):
+            self.assertEqual(inner(x), x + 1)
+            self.assertEqual(inner(x), x + 1)
 
     def test_disable_ignores_outer_wraps(self):
         def orig_inner():
@@ -1165,13 +1222,13 @@ class DecoratorTests(PytreeRegisteringTestCase):
     def test_substitute_in_graph(self):
         counters.clear()
 
-        # NB: Choose another C function for test when we support operator.indexOf
+        # NB: Choose another C function for test when we support base64.b64encode
         #     out of the box
         cnts = torch._dynamo.testing.CompileCounter()
-        fn = operator.indexOf
+        fn = base64.b64encode
         opt_fn = torch.compile(fn, backend=cnts)
-        out = fn([1, 2, 3, 4, 5], 3)
-        opt_out = opt_fn([1, 2, 3, 4, 5], 3)
+        out = fn(b"abc")
+        opt_out = opt_fn(b"abc")
         self.assertEqual(out, opt_out)
         self.assertEqual(cnts.frame_count, 0)
         self.assertEqual(len(counters["graph_break"]), 1)
@@ -1179,27 +1236,72 @@ class DecoratorTests(PytreeRegisteringTestCase):
         torch._dynamo.reset()
         counters.clear()
 
+        base46_map = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
         with self.assertRaisesRegex(TypeError, "Signature mismatch"):
 
-            @torch._dynamo.substitute_in_graph(operator.indexOf)
-            def _(sequence, x):
-                for i, item in enumerate(sequence):
-                    if item is x or item == x:
-                        return i
-                raise ValueError("sequence.index(x): x not in sequence")
+            @torch._dynamo.substitute_in_graph(binascii.b2a_base64)
+            def _(x, /, *, newline=True):
+                return b""
 
-        @torch._dynamo.substitute_in_graph(operator.indexOf)
-        def polyfill(a, b):
-            for i, item in enumerate(a):
-                if item is b or item == b:
-                    return i
-            raise ValueError("sequence.index(x): x not in sequence")
+        def polyfill(data, /, *, newline=True):
+            buffer = []
+            cipher = []
+            for byte in data:
+                buffer.append(byte)
+                if len(buffer) == 3:
+                    cipher.append(base46_map[int(buffer[0]) >> 2])
+                    cipher.append(
+                        base46_map[
+                            ((int(buffer[0]) & 0x03) << 4) | (int(buffer[1]) >> 4)
+                        ]
+                    )
+                    cipher.append(
+                        base46_map[
+                            ((int(buffer[1]) & 0x0F) << 2) | (int(buffer[2]) >> 6)
+                        ]
+                    )
+                    cipher.append(base46_map[int(buffer[2]) & 0x3F])
+                    buffer = []
+            if len(buffer) != 0:
+                cipher.append(base46_map[int(buffer[0]) >> 2])
+                if len(buffer) == 1:
+                    cipher.append(base46_map[(int(buffer[0]) & 0x03) << 4])
+                    cipher.append(b"=")
+                else:
+                    cipher.append(
+                        base46_map[
+                            ((int(buffer[0]) & 0x03) << 4) | (int(buffer[1]) >> 4)
+                        ]
+                    )
+                    cipher.append(base46_map[((int(buffer[1]) & 0x0F) << 2)])
+                cipher.append("=")
+            if newline:
+                cipher.append("\n")
+            return "".join(cipher).encode()
+
+        if sys.version_info < (3, 15):
+            wrapper = polyfill
+        else:
+
+            def wrapper(
+                data,
+                /,
+                *,
+                padded=True,
+                alphabet=binascii.BASE64_ALPHABET,
+                wrapcol=0,
+                newline=True,
+            ):
+                return polyfill(data, newline=newline)
+
+        wrapped = torch._dynamo.substitute_in_graph(binascii.b2a_base64)(wrapper)
 
         cnts = torch._dynamo.testing.CompileCounter()
-        fn = operator.indexOf
+        fn = binascii.b2a_base64
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
-        out = fn([1, 2, 3, 4, 5], 3)
-        opt_out = opt_fn([1, 2, 3, 4, 5], 3)
+        out = fn(b"abc")
+        opt_out = opt_fn(b"abc")
         self.assertEqual(out, opt_out)
         self.assertEqual(cnts.frame_count, 0)
         self.assertEqual(len(counters["graph_break"]), 0)
@@ -1208,10 +1310,10 @@ class DecoratorTests(PytreeRegisteringTestCase):
         counters.clear()
 
         cnts = torch._dynamo.testing.CompileCounter()
-        fn = polyfill
+        fn = wrapped
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
-        out = fn([1, 2, 3, 4, 5], 3)
-        opt_out = opt_fn([1, 2, 3, 4, 5], 3)
+        out = fn(b"abc")
+        opt_out = opt_fn(b"abc")
         self.assertEqual(out, opt_out)
         self.assertEqual(cnts.frame_count, 0)
         self.assertEqual(len(counters["graph_break"]), 0)
@@ -1380,6 +1482,54 @@ class DecoratorTests(PytreeRegisteringTestCase):
 
     def test_mark_static_address_unguarded(self):
         self._test_mark_static_address(guarded=False)
+
+    @parametrize("compile_outer", [False, True])
+    @parametrize("fullgraph", [False, True])
+    def test_compile_staticmethod(self, compile_outer, fullgraph):
+        cnt = torch._dynamo.testing.CompileCounter()
+        compile_decorator = torch.compile(backend=cnt, fullgraph=fullgraph)
+
+        if compile_outer:
+
+            class Foo:
+                @compile_decorator
+                @staticmethod
+                def bar(x):
+                    return x.sin()
+
+        else:
+
+            class Foo:
+                @staticmethod
+                @compile_decorator
+                def bar(x):
+                    return x.sin()
+
+        x = torch.randn(4)
+        expected = x.sin()
+        self.assertEqual(Foo.bar(x), expected)
+        self.assertEqual(Foo().bar(x), expected)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_compile_staticmethod_caching_precompile(self):
+        from torch._dynamo.package import DynamoCache
+
+        DynamoCache.clear()
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        class Foo:
+            @torch.compile(backend=cnt)
+            @staticmethod
+            def bar(x):
+                return x.sin()
+
+        x = torch.randn(4)
+        expected = x.sin()
+        self.assertEqual(Foo.bar(x), expected)
+        self.assertEqual(Foo().bar(x), expected)
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_class_methods(self):
         class A:
@@ -1806,7 +1956,7 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
             g(torch.ones(3))
 
     def test_set_stance_force_backend(self):
-        @torch.compile
+        @torch.compile  # noqa: UNSPECIFIED_BACKEND
         def a(x):
             return x + 1
 
@@ -2548,7 +2698,7 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
             wrapped_fn = torch.compiler.allow_in_graph(my_custom_function)
             return wrapped_fn(x)
 
-        compiled = torch.compile(forward, fullgraph=True)
+        compiled = torch.compile(forward, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
             "allow_in_graph",

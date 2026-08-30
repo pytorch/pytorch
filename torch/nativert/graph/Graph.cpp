@@ -53,10 +53,11 @@ size_t expectImpl(std::string_view source, char expected, size_t curPos) {
   }
   TORCH_CHECK(
       expected == source[curPos],
-      "Parser error: expected '{}' at position {}, but found '{}'.",
-      expected,
-      curPos,
-      source[curPos]);
+      fmt::format(
+          "Parser error: expected '{}' at position {}, but found '{}'.",
+          expected,
+          curPos,
+          source[curPos]));
   curPos++;
   return curPos;
 }
@@ -84,7 +85,7 @@ Graph::Graph()
 
 std::string Graph::getUniqueValueName() {
   auto name = fmt::format("v{}", uniqueValueName_);
-  while (values_.find(name) != values_.end()) {
+  while (values_.contains(name)) {
     name = fmt::format("v{}", uniqueValueName_++);
   }
   return name;
@@ -475,8 +476,8 @@ Value* Graph::tryGetValue(std::string_view name) const {
   // TODO: can eliminate this string copy by enabling heterogeneous lookup for
   // the container
   const auto key = std::string(name);
-  if (values_.find(key) != values_.end()) {
-    return values_.at(key).get();
+  if (auto it = values_.find(key); it != values_.end()) {
+    return it->second.get();
   }
   return nullptr;
 }
@@ -534,7 +535,7 @@ bool Graph::cleanupDeadNodes() {
       if (!producer) {
         continue;
       }
-      if (!visited.count(producer)) {
+      if (!visited.contains(producer)) {
         visited.insert(producer);
         visitStack.push_back(producer);
       }
@@ -545,7 +546,7 @@ bool Graph::cleanupDeadNodes() {
   std::vector<Node*> toRemove;
   for (auto& n : nodes()) {
     if (n.target() == "prim.Input" || n.target() == "prim.Output" ||
-        visited.count(&n)) {
+        visited.contains(&n)) {
       continue;
     }
     toRemove.push_back(&n);
@@ -1188,8 +1189,7 @@ c10::Device convertDevice(std::string_view symbol) {
   TORCH_CHECK(indexValue.has_value(), "Invalid device index format");
   int64_t deviceIndex = indexValue.value();
   TORCH_CHECK(
-      deviceIndex >= std::numeric_limits<c10::DeviceIndex>::min() &&
-          deviceIndex <= std::numeric_limits<c10::DeviceIndex>::max(),
+      std::in_range<c10::DeviceIndex>(deviceIndex),
       "Device index out of range for int8_t");
   device.set_index(static_cast<c10::DeviceIndex>(deviceIndex));
   return device;

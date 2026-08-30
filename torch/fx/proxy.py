@@ -186,7 +186,7 @@ def _register_stack_trace_anchor(fn: Callable[..., Any]) -> None:
 class TracerBase:
     graph: Graph
     record_stack_traces: bool = False
-    # When record_stack_traces is True, only reocrd stack traces
+    # When record_stack_traces is True, only record stack traces
     # with forward function names.
     # This helps when we want stack trace back to model code
     _record_forward_stack_traces_only: bool = False
@@ -513,9 +513,9 @@ class TracerBase:
 
     @compatibility(is_backward_compatible=True)
     def keys(self, obj: "Proxy") -> "Proxy":
-        """Called when a proxy object is has the keys() method called.
+        """Called when a proxy object has the keys() method called.
         This is what happens when ** is called on a proxy. This should return an
-        iterator it ** is suppose to work in your custom tracer.
+        iterator if ** is supposed to work in your custom tracer.
         """
         return Attribute(obj, "keys")()
 

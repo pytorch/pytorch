@@ -11,6 +11,13 @@ import click
 import spin
 
 
+# tomllib is built in on Python 3.11+, and spin depends on tomli for older versions.
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
+
+
 CWD = Path(__file__).absolute().parent.parent
 sys.path.insert(0, str(CWD))  # this only affects the current process
 from tools.clean import clean as _clean
@@ -144,7 +151,10 @@ VERY_FAST_LINTERS = {
     "C10_NODISCARD",
     "C10_UNUSED",
     "CALL_ONCE",
+    "CMAKE_INSTALL_PREFIX_ROOT",
     "CMAKE_MINIMUM_REQUIRED",
+    "CMAKE_PLATLIB_DESTINATION",
+    "CODEOWNERS_TAXONOMY",
     "CONTEXT_DECORATOR",
     "COPYRIGHT",
     "CUBINCLUDE",
@@ -154,6 +164,7 @@ VERY_FAST_LINTERS = {
     "HEADER_ONLY_LINTER",
     "IMPORT_LINTER",
     "INCLUDE",
+    "ISINSTANCE_FAKE_TENSOR",
     "LINTRUNNER_VERSION",
     "MERGE_CONFLICTLESS_CSV",
     "META_NO_CREATE_UNBACKED",
@@ -174,6 +185,7 @@ VERY_FAST_LINTERS = {
     "TESTOWNERS",
     "TYPEIGNORE",
     "TYPENOSKIP",
+    "UNSPECIFIED_BACKEND",
     "WORKFLOWSYNC",
 }
 
@@ -200,6 +212,7 @@ SLOW_LINTERS = {
     "CLANGFORMAT",
     "CLANGTIDY",
     "CODESPELL",
+    "CPYTHON_DIFF_SYNC",
     "FLAKE8",
     "GB_REGISTRY",
     "GENERATED_SHIMS_VERSION",
@@ -233,6 +246,31 @@ LINTRUNNER_BASE_CMD = [
 ]
 
 
+def _check_linter_python_versions():
+    invalid_linters = []
+
+    with Path(".lintrunner.toml").open("rb") as config_file:
+        config = tomllib.load(config_file)
+    for linter in config["linter"]:
+        command = linter.get("command", [])
+        if command[:2] != ["uv", "run"] or "--script" not in command:
+            continue
+        try:
+            python_index = command.index("--python")
+        except ValueError:
+            python_index = -1
+        if python_index == -1 or command[python_index + 1 : python_index + 2] != [
+            "3.10"
+        ]:
+            invalid_linters.append(linter["code"])
+
+    if invalid_linters:
+        raise click.ClickException(
+            "Linters using `uv run --script` must specify `--python 3.10`: "
+            + ", ".join(invalid_linters)
+        )
+
+
 @click.command()
 def setup_lint():
     """Set up lintrunner with current CI version."""
@@ -241,6 +279,7 @@ def setup_lint():
 
 
 def _check_linters():
+    _check_linter_python_versions()
     cmd = LINTRUNNER_BASE_CMD + ["list"]
     ret = spin.util.run(cmd, output=False, stderr=subprocess.PIPE)
     linters = {l.strip() for l in ret.stdout.decode().strip().split("\n")[1:]}
@@ -539,7 +578,8 @@ def develop():
 
     Runs an editable pip install using uv when available, falling back to
     regular pip.  Build configuration comes from the environment, e.g.
-    `BUILD_CONFIG spin develop`.
+    `BUILD_CONFIG spin develop`.  The build stages are documented at the top of
+    CMakeLists.txt and the supported env vars in cmake/EnvVarForwarding.cmake.
     """
     spin.util.run(_pip_install_cmd(editable=True))
 
@@ -555,7 +595,8 @@ def install():
 
     Runs a regular pip install using uv when available, falling back to
     regular pip.  Build configuration comes from the environment, e.g.
-    `BUILD_CONFIG spin install`.
+    `BUILD_CONFIG spin install`.  The build stages are documented at the top of
+    CMakeLists.txt and the supported env vars in cmake/EnvVarForwarding.cmake.
     """
     spin.util.run(_pip_install_cmd(editable=False))
 

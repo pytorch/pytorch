@@ -6,7 +6,7 @@ import yaml
 import textwrap
 import torch
 
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, HardwareClassification
 from collections import namedtuple
 
 
@@ -14,7 +14,7 @@ path = os.path.dirname(os.path.realpath(__file__))
 aten_native_yaml = os.path.join(path, '../aten/src/ATen/native/native_functions.yaml')
 all_operators_with_namedtuple_return = {
     'max', 'min', 'aminmax', 'median', 'nanmedian', 'mode', 'kthvalue', 'svd',
-    'qr', 'geqrf', 'slogdet', 'sort', 'topk', 'linalg_inv_ex',
+    'geqrf', 'slogdet', 'sort', 'topk', 'linalg_inv_ex',
     'triangular_solve', 'cummax', 'cummin', 'linalg_eigh', "_linalg_eigh", "_unpack_dual", 'linalg_qr',
     'linalg_svd', '_linalg_svd', 'linalg_slogdet', '_linalg_slogdet', 'fake_quantize_per_tensor_affine_cachemask',
     'fake_quantize_per_channel_affine_cachemask', 'linalg_lstsq', 'linalg_eig', 'linalg_cholesky_ex',
@@ -35,6 +35,7 @@ all_operators_with_namedtuple_return_skip_list = {
 
 
 class TestNamedTupleAPI(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_import_return_types(self):
         import torch.return_types  # noqa: F401
@@ -86,7 +87,7 @@ class TestNamedTupleAPI(TestCase):
             op(operators=['linalg_svd', '_linalg_svd'], input=(), names=('U', 'S', 'Vh'), hasout=True),
             op(operators=['slogdet', 'linalg_slogdet'], input=(), names=('sign', 'logabsdet'), hasout=True),
             op(operators=['_linalg_slogdet'], input=(), names=('sign', 'logabsdet', 'LU', 'pivots'), hasout=True),
-            op(operators=['qr', 'linalg_qr'], input=(), names=('Q', 'R'), hasout=True),
+            op(operators=['linalg_qr'], input=(), names=('Q', 'R'), hasout=True),
             op(operators=['linalg_polar'], input=(), names=('U', 'H'), hasout=True),
             op(operators=['geqrf'], input=(), names=('a', 'tau'), hasout=True),
             op(operators=['triangular_solve'], input=(a,), names=('solution', 'cloned_coefficient'), hasout=True),
