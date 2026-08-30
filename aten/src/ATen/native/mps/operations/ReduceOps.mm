@@ -370,7 +370,7 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
   // complex input split into real/imaginary parts inside the graph and sum the
   // two variances. The real dtype is used for the output and Bessel constant.
   const bool is_complex = input_t.is_complex();
-  const auto out_dtype = is_complex ? c10::toRealValueType(input_t.scalar_type()) : input_t.scalar_type();
+  const auto out_dtype = c10::toRealValueType(input_t.scalar_type());
 
   using CachedGraph = MPSUnaryCachedGraph;
 
