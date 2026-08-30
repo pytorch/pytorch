@@ -6,8 +6,8 @@ from collections import namedtuple
 
 import torch
 import torch.testing._internal.common_nn as common_nn
+import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
-from torch.testing._internal.common_utils import TEST_ACCELERATOR, ACCELERATOR_TYPE
 
 
 # Note that this namedtuple is for C++ parity test mechanism's internal use.
@@ -340,13 +340,28 @@ def compute_arg_dict(test_params_dict, test_instance):
     return arg_dict
 
 
-def decorate_test_fn(test_fn, test_device, has_impl_parity, device):
-    if device == ACCELERATOR_TYPE:
-        test_fn = unittest.skipIf(not TEST_ACCELERATOR, "Accelerator unavailable")(test_fn)
-    if device != "cpu":
-        test_fn = unittest.skipIf(not test_device, "Excluded from accelerator tests")(
+def decorate_test_fn(test_fn, test_accelerator, has_impl_parity, device):
+    if device == "cuda":
+        test_fn = unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")(
             test_fn
         )
+
+    if device == "xpu":
+        test_fn = unittest.skipIf(not torch.xpu.is_available(), "XPU unavailable")(
+            test_fn
+        )
+
+    if device == common.TEST_PRIVATEUSE1_DEVICE_TYPE:
+        test_fn = unittest.skipIf(
+            not torch.privateuseone.is_available(), "PrivateUse1 unavailable"
+        )(test_fn)
+
+    if device != "cpu":
+        if not test_accelerator:
+            print("skipped: Excluded from accelerator tests")
+        test_fn = unittest.skipIf(
+            not test_accelerator, "Excluded from accelerator tests"
+        )(test_fn)
 
     # If `Implementation Parity` entry in parity table for this module is `No`,
     # or `has_parity` entry in test params dict is `False`, we mark the test as

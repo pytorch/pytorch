@@ -75,6 +75,7 @@ void ${functional_variant_name}_test_forward(
 
 def run_forward(unit_test_class, test_params):
     device = test_params.device
+    print("\n\n run_forward " + device)
 
     inputs = set_python_tensors_requires_grad(
         move_python_tensors_to_device(
@@ -279,7 +280,7 @@ def write_test_to_test_class(
 
         test_fn = decorate_test_fn(
             test_fn=test_fn,
-            test_device=test_params_dict.get("test_device", True),
+            test_accelerator=test_params_dict.get("test_accelerator", True),
             has_impl_parity=parity_table["torch::nn::functional"][functional_full_name][
                 0
             ]
