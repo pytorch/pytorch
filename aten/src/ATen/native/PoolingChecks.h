@@ -311,6 +311,12 @@ inline void adaptive_avg_pool_backward_check(
   TORCH_CHECK(
       grad_output.dim() == ndim,
       fn_name, ": Expected dimensions ", ndim, " for `grad_output` but got dimensions ", grad_output.dim());
+  for (const auto i : c10::irange(ndim - pooling_dims)) {
+    TORCH_CHECK(
+        input.size(i) == grad_output.size(i),
+        fn_name, ": input and grad_output must have the same size at dim ", i,
+        ", but got ", input.size(i), " and ", grad_output.size(i));
+  }
   TORCH_CHECK(
       grad_output.dtype() == input.dtype(),
       fn_name, ": Expected dtype ", input.dtype(), " for `grad_output` but got dtype ", grad_output.dtype());
