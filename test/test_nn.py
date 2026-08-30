@@ -10839,8 +10839,11 @@ class TestNNDeviceType(NNTestCase):
             msg="View must use 64-bit indexing")
         for mode, padding_mode, align_corners in itertools.product(
                 ('nearest', 'bilinear', 'bicubic'), ('zeros', 'border', 'reflection'), (True, False)):
-            if mode == 'bicubic' and torch.device(device).type == 'mps':
-                continue  # MPS has no 5-D bicubic sampler
+            # Neither MPS nor XPU has a 5-D bicubic sampler. XPU never reaches this today,
+            # since instantiate_device_type_tests below passes allow_xpu=False, and its eager
+            # refusal cannot be tested in tree at all: the kernel lives in torch-xpu-ops.
+            if mode == 'bicubic' and torch.device(device).type in ('mps', 'xpu'):
+                continue
             a = F.grid_sample(
                 small_image, coords, mode=mode,
                 padding_mode=padding_mode, align_corners=align_corners)
@@ -11701,22 +11704,25 @@ class TestNNDeviceType(NNTestCase):
         tolerance = {} if dtype == torch.double else {"atol": 1e-4, "rtol": 1e-4}
         self.assertEqual(out_3d.squeeze(2), out_2d, **tolerance)
 
+    @parametrize_test("padding_mode", ["zeros", "border", "reflection"])
     @parametrize_test("wrt", ["input", "grid"])
     @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     @onlyNativeDeviceTypes
     @dtypes(torch.double)
-    def test_grid_sample_3d_bicubic_one_sided_grad(self, device, dtype, wrt):
+    def test_grid_sample_3d_bicubic_one_sided_grad(self, device, dtype, wrt, padding_mode):
         # The double backward builds the tap gather and the coefficient derivatives only for
         # the outputs asked of it, and the OpInfo samples ask for both at once.
         volume = torch.randn(1, 2, 4, 5, 5, device=device, dtype=dtype)
-        grid = torch.rand(1, 2, 3, 3, 3, device=device, dtype=dtype) * 2 - 1
+        # far enough inside that every tap stays in bounds: under zeros padding a tap the
+        # rim drops takes the value away with it, a step gradcheck cannot difference through
+        grid = torch.rand(1, 2, 3, 3, 3, device=device, dtype=dtype) * 0.5 - 0.25
 
         def fn(t):
             args = (t, grid) if wrt == "input" else (volume, t)
-            return F.grid_sample(*args, mode='bicubic', padding_mode='border', align_corners=False)
+            return F.grid_sample(*args, mode='bicubic', padding_mode=padding_mode, align_corners=False)
 
         wrt_tensor = (volume if wrt == "input" else grid).clone().requires_grad_(True)
-        self.assertTrue(gradgradcheck(fn, (wrt_tensor,)))
+        gradgradcheck(fn, (wrt_tensor,))
 
     @parametrize_test("padding_mode", ["zeros", "border", "reflection"])
     @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
