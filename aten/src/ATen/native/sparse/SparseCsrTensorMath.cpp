@@ -9,6 +9,7 @@
 #include <ATen/mkl/Sparse.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/CPUBlas.h>
+#include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/SparseTensorUtils.h>
 #include <ATen/native/TensorConversions.h>
@@ -29,8 +30,6 @@
 #include <ATen/ops/_convert_indices_from_coo_to_csr_native.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo_native.h>
-#include <ATen/ops/_sparse_bsr_tensor_unsafe_native.h>
-#include <ATen/ops/_sparse_compressed_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_csr_prod_native.h>
 #include <ATen/ops/_sparse_csr_sum_native.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
@@ -141,6 +140,7 @@ TORCH_META_FUNC(_convert_indices_from_coo_to_csr)
 (const Tensor& self, const int64_t size, const bool out_int32) {
   TORCH_CHECK(self.dim() <= 1, "Input is supposed to be a vector, but got ",
               self.dim(), " dimensional tensor.");
+  TORCH_CHECK(size >= 0, "size must be non-negative, got ", size);
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options =
       TensorOptions().device(self.options().device()).dtype(scalar_type);
@@ -593,15 +593,7 @@ Tensor& addmm_out_sparse_compressed_cpu(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
-  // All the checks are from addmm_out_cuda_impl (ATen/native/cuda/Blas.cpp) and
-  // TORCH_META_FUNC(addmm) (ATen/native/LinearAlgebra.cpp)
-  // TODO: remove code duplication and unify code
-  sparse::impl::_check_dim(mat1, 2, "mat1");
-  sparse::impl::_check_dim(mat2, 2, "mat2");
-
-  TORCH_CHECK(
-      mat1.size(1) == mat2.size(0), "mat1 and mat2 shapes cannot be multiplied (",
-      mat1.size(0), "x", mat1.size(1), " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
+  check_mm_shapes(mat1, mat2, "addmm");
 
   c10::MaybeOwned<at::Tensor> self_;
   // Don't expand self if this is an in-place operation
@@ -1094,14 +1086,13 @@ Tensor reduce_sparse_csr_dim0_cpu_template(const Tensor& sparse, ReductionOp rop
   using acc_t = at::acc_type<scalar_t, true>;
   auto acc_buffer = at::sparse_csr::create_acc_buffer<acc_t, scalar_t>(
       values.options(), values.scalar_type(), nnz);
-  Tensor new_values = std::get<0>(acc_buffer);
-  Tensor new_values_acc = std::get<1>(acc_buffer);
+  Tensor new_values = std::move(std::get<0>(acc_buffer));
+  Tensor new_values_acc = std::move(std::get<1>(acc_buffer));
   new_values_acc.fill_(rop.identity());
 
   const int64_t* columns_map_ptr = columns_map.const_data_ptr<int64_t>();
   const scalar_t* values_ptr = values.const_data_ptr<scalar_t>();
-  acc_t* new_values_acc_ptr =
-      new_values_acc.data_ptr<acc_t>();
+  acc_t* new_values_acc_ptr = new_values_acc.data_ptr<acc_t>();
 
   // There is no point in parallelizing the following for-loop
   // because about 99.3% of the computation time is spent in the
@@ -1182,8 +1173,8 @@ Tensor reduce_sparse_csr_dim1_cpu_template(const Tensor& sparse, ReductionOp rop
   using acc_t = at::acc_type<scalar_t, true>;
   auto acc_buffer = at::sparse_csr::create_acc_buffer<acc_t, scalar_t>(
       values.options(), values.scalar_type());
-  Tensor new_values = std::get<0>(acc_buffer);
-  Tensor new_values_acc = std::get<1>(acc_buffer);
+  Tensor new_values = std::move(std::get<0>(acc_buffer));
+  Tensor new_values_acc = std::move(std::get<1>(acc_buffer));
 
   AT_DISPATCH_INDEX_TYPES(crow_indices.scalar_type(), "reduce_sparse_csr_dim1_cpu_indices",
                           [&]() {

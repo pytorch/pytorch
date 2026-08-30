@@ -35,6 +35,7 @@ __all__ = [
     "wrap_top_frame",
     "reorderable_logging_functions",
     "force_disable_caches",
+    "compile_on_one_rank",
 ]
 
 
@@ -64,7 +65,7 @@ they remember it is dynamic.  This profile information, however, is sensitive
 to what workload you are running, so we require you to tell us that two jobs
 are *related* (i.e., are the same workload) before we are willing to reuse
 this information.  Notably, PGO does nothing (even if explicitly enabled)
-unless a valid ``job_id`` is available.  In some situations, PyTorch can
+unless a valid ``job_id`` is available.  In some situations, PyTorch can be
 configured to automatically compute a ``job_id`` based on the environment it
 is running in.
 
@@ -106,6 +107,19 @@ force_disable_caches: bool = Config(
 Force disables all caching -- This will take precedence over and override any other caching flag
 """
 
+compile_on_one_rank: bool = Config(
+    default=False,
+    env_name_default=[
+        "TORCH_COMPILE_ON_ONE_RANK",
+        "TORCH_DISTRIBUTED_COMPILE_ON_ONE_RANK",
+    ],
+)
+"""
+When enabled, device- and rank-specific values (devices, process groups) are computed at
+runtime via custom ops rather than baked in at compile time, so a graph can be compiled on
+one rank and run on all ranks. Read across the stack: make_fx, inductor, and distributed.
+"""
+
 dynamic_sources: str = Config(
     env_name_default="TORCH_COMPILE_DYNAMIC_SOURCES", default=""
 )
@@ -133,7 +147,7 @@ Regex examples (``re.match`` anchors at the start, not the end)::
 The ``:N`` suffix is ignored for non-tensor (int/scalar) sources, which have no dim.
 
 Entries in this list are dominant over all other flags dynamic=False, force_nn_module_property_static_shapes
-and force_parameter_static_shapes.
+and force_parameter_static_shapes, but lose to ``static_sources``.
 """
 
 dynamic_values: str = Config(
@@ -175,7 +189,30 @@ Supports the same ``:N`` per-dim suffix syntax as ``dynamic_sources``; see that 
 docstring for details.
 
 Entries in this list are dominant over all other flags dynamic=False, force_nn_module_property_static_shapes
-and force_parameter_static_shapes.
+and force_parameter_static_shapes, but lose to ``static_sources``.
+"""
+
+static_sources: str = Config(
+    env_name_default="TORCH_COMPILE_STATIC_SOURCES", default=""
+)
+r"""
+Comma delimited list of sources that should be marked as static. This is the inverse of
+``dynamic_sources``: it is useful when automatic dynamic shapes (or PGO) makes a source
+dynamic and that dynamism hurts you, e.g. it produces a worse kernel, or it causes an
+unwanted specialization/guard failure downstream. Ints listed here are specialized as
+constants and tensor dims listed here are held static.
+
+Supports the same exact-name / regex / ``:N`` per-dim suffix syntax as ``dynamic_sources``;
+see that config's docstring for details. Examples::
+
+    L['x']                  # all dims of x static
+    L['x']:0                # only dim 0 of x static
+    L\['x.*'\]              # every source whose name starts with L['x
+
+Entries in this list override automatic dynamic shapes, PGO, ``dynamic_values``,
+``dynamic=True``, ``dynamic_sources`` and ``unbacked_sources``: when the same source is
+listed in both, static wins. They do NOT override an explicit
+``torch._dynamo.mark_dynamic`` / ``mark_unbacked`` call.
 """
 
 # force a python GC before recording cudagraphs

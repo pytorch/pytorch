@@ -61,7 +61,7 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.mock_cache import global_stats, PatchCaches, Stats
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import clear_caches, fresh_cache, GPU_KERNEL_BIN_EXTS
+from torch._inductor.utils import clear_caches, fresh_cache
 from torch._library import capture_triton
 from torch._subclasses import FakeTensorMode
 from torch.compiler._cache import (
@@ -99,6 +99,7 @@ from torch.testing._internal.triton_utils import (
     requires_cuda_and_triton,
     requires_gpu_and_triton,
 )
+from torch.testing._internal.two_tensor import TwoTensor
 
 
 try:
@@ -325,15 +326,15 @@ class MyModelConv2d(torch.nn.Module):
         return x
 
 
-class _CyclicOpaque(torch._opaque_base.OpaqueBase):
+class _CyclicOpaque(torch._custom_class_base.CustomClassBase):
     """Test helper: opaque type whose instances can form reference cycles."""
 
     def __init__(self):
         self.child = None
 
 
-if not torch._library.opaque_object.is_opaque_type(_CyclicOpaque):
-    torch._library.opaque_object.register_opaque_type(_CyclicOpaque, typ="reference")
+if not torch._library.opaque_object.is_custom_class(_CyclicOpaque):
+    torch._library.opaque_object.register_custom_class(_CyclicOpaque, typ="symbolic")
 
 
 def _custom_empty(*args: object, **kwargs: object) -> None:
@@ -530,17 +531,6 @@ class TestFxGraphCache(TestCase):
         torch._dynamo.reset()
         clear_caches()
 
-    def _find_triton_kernel_binaries(self):
-        found = []
-        triton_dir = os.path.join(cache_dir(), "triton")
-        device_type = "hip" if torch.version.hip else "cuda"
-        binary_ext = GPU_KERNEL_BIN_EXTS[device_type]
-        for dirpath, _, filenames in os.walk(triton_dir):
-            for filename in filenames:
-                if filename.endswith(binary_ext):
-                    found.append(os.path.join(dirpath, filename))
-        return found
-
     def _check_cpu_thread_count_cache_key_no_input(self, return_expr):
         script = textwrap.dedent(
             f"""
@@ -650,6 +640,9 @@ class TestFxGraphCache(TestCase):
         with config.patch(
             bundle_triton_into_fx_graph_cache=bundle_triton,
             use_static_triton_launcher=use_static_triton_launcher,
+            # Avoid non-deterministic pad_mm benchmarking changing numerics or
+            # the number of bundled Triton static autotuners across runs.
+            shape_padding=False,
         ):
             compiled_fn = torch.compile(fn, dynamic=dynamic)
 
@@ -1028,55 +1021,6 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
 
-    @requires_cuda_and_triton
-    @config.patch(
-        {
-            "fx_graph_cache": True,
-            "fx_graph_remote_cache": False,
-            "bundle_triton_into_fx_graph_cache": True,
-            "triton.store_cubin": True,
-            "compile_threads": 1,
-        }
-    )
-    def test_cache_artifact_load_emits_triton_bundle(self):
-        def fn(x, y):
-            return (x.sin() + y.cos()).relu()
-
-        with (
-            tempfile.TemporaryDirectory() as tmpdir,
-            mock.patch.dict(
-                os.environ,
-                {
-                    "TORCHINDUCTOR_CACHE_DIR": tmpdir,
-                    "TRITON_CACHE_DIR": os.path.join(tmpdir, "triton"),
-                },
-            ),
-        ):
-            self.reset()
-            CacheArtifactManager.clear()
-
-            x = torch.randn(256, 256, device="cuda")
-            y = torch.randn(256, 256, device="cuda")
-            compiled_fn = torch.compile(fn, dynamic=False)
-
-            self.assertEqual(fn(x, y), compiled_fn(x, y))
-            torch.cuda.synchronize()
-
-            artifacts = torch.compiler.save_cache_artifacts()
-            self.assertIsNotNone(artifacts)
-            artifact_bytes, _ = artifacts
-
-            self.assertGreater(len(self._find_triton_kernel_binaries()), 0)
-
-            self.reset()
-            CacheArtifactManager.clear()
-            shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
-
-            cache_info = torch.compiler.load_cache_artifacts(artifact_bytes)
-
-            self.assertIsNotNone(cache_info)
-            self.assertGreater(len(self._find_triton_kernel_binaries()), 0)
-
     @requires_triton()
     @config.patch(
         {
@@ -1183,6 +1127,50 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
             self.assertEqual(counters["dynamo_cache"]["dynamo_cache_miss"], 2)
+            self.assertEqual(counters["dynamo_cache"]["dynamo_cache_hit"], 1)
+
+    @requires_cuda_and_triton
+    @config.patch(
+        {
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+        }
+    )
+    @torch._dynamo.config.patch(
+        {
+            "caching_precompile": True,
+        }
+    )
+    def test_cache_hot_load_caching_precompile_autocast(self):
+        def fn(x):
+            return x + 1 * x
+
+        x = torch.randn(3, 2, device="cuda")
+
+        with fresh_cache():
+            compiled_fn = torch.compile(fn)
+            with torch.amp.autocast(device_type="cuda"):
+                eager_result = fn(x)
+                compiled_result = compiled_fn(x)
+            self.assertEqual(eager_result, compiled_result)
+
+        artifacts = torch.compiler.save_cache_artifacts()
+        self.assertIsNotNone(artifacts)
+        artifact_bytes, cache_info = artifacts
+        self.assertEqual(len(cache_info.precompile_artifacts), 1)
+
+        self.reset()
+        shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
+
+        with fresh_cache(), torch.compiler.set_stance("fail_on_recompile"):
+            cache_info = torch.compiler.load_cache_artifacts(artifact_bytes)
+            self.assertEqual(len(cache_info.precompile_artifacts), 1)
+
+            compiled_fn = torch.compile(fn)
+            with torch.amp.autocast(device_type="cuda"):
+                eager_result = fn(x)
+                compiled_result = compiled_fn(x)
+            self.assertEqual(eager_result, compiled_result)
             self.assertEqual(counters["dynamo_cache"]["dynamo_cache_hit"], 1)
 
     @config.patch(
@@ -2876,7 +2864,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
         x = torch.ones(3)
         torch._dynamo.mark_dynamic(x, 0)
         with fresh_cache():
-            # captured graph is lambda s0, x: x * s0
+            # captured graph is lambda x, s0: x * s0
             gm, args, kwargs = self.capture(f)(x)
             if kwargs:
                 raise AssertionError
@@ -2885,7 +2873,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             gm, args, dynamic_shapes="from_graph", aot=is_aot
         )
         x = torch.ones(4)
-        (result,) = compiled_artifact(4, x)
+        (result,) = compiled_artifact(x, 4)
         self.assertEqual(result, x * 4)
 
     @config.patch({"fx_graph_cache": True})
@@ -2901,21 +2889,6 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
                 x = x + (c0**2) + (c1 / 2)
                 return x
 
-        seen = 0
-        splits = [4, 8]
-
-        def split(n):
-            nonlocal seen
-            if seen < splits[0]:
-                seen += 1
-                return 0
-            elif seen < splits[1]:
-                seen += 1
-                return 1
-            else:
-                seen += 1
-                return 2
-
         def t():
             return torch.randn([])
 
@@ -2929,22 +2902,73 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
 
         example_inputs = (x, a0, a1, b0, b1, c0, c1)
         gm, inps, _ = self.capture(Mod())(*example_inputs)
-        split = torch.fx.passes.split_module.split_module(gm, gm, split)
 
-        # Each of the split graphs only has one output.
-        ca0 = torch._inductor.standalone_compile(
-            split.submod_0, (a0, x, a1), aot=is_aot
-        )
-        ca1 = torch._inductor.standalone_compile(
-            split.submod_1, (b0, x, b1), aot=is_aot
-        )
-        ca2 = torch._inductor.standalone_compile(
-            split.submod_2, (c0, x, c1), aot=is_aot
+        # Partition by data dependency: nodes depending on a0/a1 -> 0,
+        # b0/b1 -> 1, c0/c1 -> 2. This produces 3 structurally identical
+        # subgraphs regardless of canonicalized node order.
+        placeholder_group = {}
+        for node in gm.graph.nodes:
+            if node.op == "placeholder":
+                name = node.name
+                if "a0" in name or "a1" in name:
+                    placeholder_group[node] = 0
+                elif "b0" in name or "b1" in name:
+                    placeholder_group[node] = 1
+                elif "c0" in name or "c1" in name:
+                    placeholder_group[node] = 2
+                else:
+                    placeholder_group[node] = -1
+
+        node_group: dict = {}
+
+        def get_group(node):
+            if node in node_group:
+                return node_group[node]
+            if node.op == "placeholder":
+                return placeholder_group[node]
+            if node.op == "output":
+                return -1
+            groups = {get_group(a) for a in node.all_input_nodes}
+            groups.discard(-1)
+            g = max(groups) if groups else -1
+            node_group[node] = g
+            return g
+
+        def split_fn(node):
+            return max(get_group(node), 0)
+
+        split = torch.fx.passes.split_module.split_module(
+            gm,
+            gm,
+            split_fn,
+            keep_original_node_name=False,
+            keep_original_input_name=False,
         )
 
-        y = ca0(a0, x, a1)
-        y = ca1(b0, y, b1)
-        y = ca2(c0, y, c1)
+        # Derive each submodule's inputs from the split graph's
+        # call_module args rather than hardcoding the order, which
+        # depends on canonicalization.
+        node_to_val = {}
+        ph_idx = 0
+        for n in split.graph.nodes:
+            if n.op == "placeholder":
+                node_to_val[n] = inps[ph_idx]
+                ph_idx += 1
+
+        for call_node in split.graph.nodes:
+            if call_node.op != "call_module":
+                continue
+            submod = getattr(split, call_node.target)
+            submod_inputs = tuple(node_to_val[a] for a in call_node.args)
+            compiled = torch._inductor.standalone_compile(
+                submod,
+                submod_inputs,
+                aot=is_aot,
+            )
+            node_to_val[call_node] = compiled(*submod_inputs)
+
+        output_node = next(n for n in split.graph.nodes if n.op == "output")
+        y = node_to_val[output_node.args[0][0]]
         if not is_aot:
             # fx graph cache doesn't run in AOT mode
             self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
@@ -3045,6 +3069,41 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
         self.assertIsInstance(seen_fake_modes[0], FakeTensorMode)
         self.assertIsNotNone(seen_fake_modes[0].shape_env)
 
+    def test_dynamic_shapes_from_graph_tensor_subclass_fake_mode(self):
+        @torch._dynamo.allow_in_graph
+        def to_subclass(x):
+            return TwoTensor(x.clone(), x.clone())
+
+        def f(x):
+            return to_subclass(x).view(-1)
+
+        x = torch.ones(2)
+        torch._dynamo.mark_dynamic(x, 0)
+        with fresh_cache():
+            gm, args, kwargs = self.capture(f, dynamic=True)(x)
+            if kwargs:
+                raise AssertionError
+
+        output_node = next(iter(reversed(gm.graph.nodes)))
+        value_node = output_node.args[0][0]
+        self.assertIsInstance(value_node, torch.fx.Node)
+        output_example_value = value_node.meta["example_value"]
+        self.assertIsInstance(output_example_value, TwoTensor)
+        fake_mode = output_example_value.a.fake_mode
+
+        seen_fake_modes = []
+
+        def fake_compile_fx(gm, example_inputs, **kwargs):
+            seen_fake_modes.append(torch._guards.TracingContext.get().fake_mode)
+            return lambda *args: args
+
+        with mock.patch(
+            "torch._inductor.compile_fx.compile_fx", side_effect=fake_compile_fx
+        ):
+            torch._inductor.standalone_compile(gm, args, dynamic_shapes="from_graph")
+
+        self.assertIs(seen_fake_modes[0], fake_mode)
+
     def test_standalone_compile_fake_mode_requires_shape_env(self):
         def f(x):
             return x + 1
@@ -3122,7 +3181,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
                 gm, args, dynamic_shapes=dynamic_shapes, aot=is_aot
             )
             y = torch.randn(4)
-            (result,) = compiled_artifact(4, y)
+            (result,) = compiled_artifact(y, 4)
             self.assertEqual(result, y * 4)
             return compiled_artifact
 
@@ -3141,18 +3200,25 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
         torch._dynamo.mark_dynamic(x, 0)
 
         def backend(gm, args, **kwargs):
+            example_inputs = [
+                5 if isinstance(a, (int, torch.SymInt)) else torch.ones(4) for a in args
+            ]
             compiled_artifact = torch._inductor.standalone_compile(
-                gm, [5, torch.ones(4)], dynamic_shapes="from_example_inputs", aot=is_aot
+                gm, example_inputs, dynamic_shapes="from_example_inputs", aot=is_aot
             )
             y = torch.ones(4)
-            (result,) = compiled_artifact(4, y)
+            call_args = [4 if isinstance(a, (int, torch.SymInt)) else y for a in args]
+            (result,) = compiled_artifact(*call_args)
             # 5 was baked in
             self.assertEqual(result, y * 5)
 
             # shape of y was baked in
             with self.assertRaisesRegex(AssertionError, "expected size 5==4"):
                 y = torch.ones(5)
-                (result,) = compiled_artifact(4, y)
+                call_args = [
+                    4 if isinstance(a, (int, torch.SymInt)) else y for a in args
+                ]
+                (result,) = compiled_artifact(*call_args)
 
             return compiled_artifact
 
@@ -3262,7 +3328,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
 
-class TestCustomPartitionerFn(CustomPartitionerFn):
+class _TestCustomPartitionerFn(CustomPartitionerFn):
     def __init__(self):
         self._uuid = None
 
@@ -3487,6 +3553,128 @@ class TestFxGraphCacheHashing(TestCase):
 
         with self.assertRaisesRegex(BypassFxGraphCache, "mkldnn tensors unpickleable"):
             CacheabilityValidator(gm, require_shape_env=False).validate()
+
+    def _nested_region_gm(self, patches):
+        from torch._higher_order_ops.invoke_subgraph import (
+            get_invoke_subgraph_compile_options,
+        )
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        gm.meta["nested_region_config"] = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches=patches
+        )
+        return gm
+
+    def test_nested_region_config_patches_affect_cache_key(self):
+        # A region's inductor_config_patches must be part of the cache key,
+        # otherwise two regions differing only in their patches would collide
+        # and reuse a stale compiled artifact.
+        same1 = self._nested_region_gm({"max_autotune": True})
+        same2 = self._nested_region_gm({"max_autotune": True})
+        different = self._nested_region_gm({"max_autotune": False})
+
+        self.assertEqual(
+            FxGraphHashDetails(
+                same1, [], cast(Any, {}), []
+            ).nested_inductor_config_patches,
+            (("", (("max_autotune", True),)),),
+        )
+        self.assertEqual(
+            self._fx_graph_cache_key(same1, []),
+            self._fx_graph_cache_key(same2, []),
+        )
+        self.assertNotEqual(
+            self._fx_graph_cache_key(same1, []),
+            self._fx_graph_cache_key(different, []),
+        )
+
+    def test_nested_region_uncacheable_config_bypasses_cache(self):
+        # A callable patch value can't be hashed into the cache key.
+        def custom_pass(graph):
+            return graph
+
+        with self.assertRaisesRegex(BypassFxGraphCache, "callable value"):
+            CacheabilityValidator(
+                self._nested_region_gm({"post_grad_custom_pre_pass": custom_pass}),
+                require_shape_env=False,
+            ).validate()
+
+        # A non-callable value under a custom-pass key is uncacheable too.
+        with self.assertRaisesRegex(BypassFxGraphCache, "custom pass"):
+            CacheabilityValidator(
+                self._nested_region_gm({"post_grad_custom_pre_pass": "sentinel"}),
+                require_shape_env=False,
+            ).validate()
+
+        # A callable hidden inside a list value (e.g.
+        # _fuse_ddp_communication_passes) is uncacheable too.
+        with self.assertRaisesRegex(BypassFxGraphCache, "callable value"):
+            CacheabilityValidator(
+                self._nested_region_gm(
+                    {"_fuse_ddp_communication_passes": [custom_pass]}
+                ),
+                require_shape_env=False,
+            ).validate()
+
+        # A list of non-callables stays cacheable.
+        CacheabilityValidator(
+            self._nested_region_gm(
+                {"_fuse_ddp_communication_passes": ["fuse_ddp_with_concat_op"]}
+            ),
+            require_shape_env=False,
+        ).validate()
+
+    def _nested_region_bw_gm(self, bw_patches):
+        from torch._higher_order_ops.invoke_subgraph import (
+            get_backward_nested_region_config,
+            get_invoke_subgraph_compile_options,
+        )
+
+        fw_config = get_invoke_subgraph_compile_options(
+            bw_inductor_config_patches=bw_patches
+        )
+        bw_config = get_backward_nested_region_config(fw_config)
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        # Mirror run_joint_graph_passes_on_hops: the backward config is stamped on
+        # the partitioned backward invoke_subgraph node's meta["custom"] (the
+        # source of truth), not the subgraph module.
+        node = gm.graph.call_function(torch.ops.higher_order.invoke_subgraph)
+        node.meta["custom"] = {"nested_region_config": bw_config}
+        gm.graph.output(())
+        gm.recompile()
+        return gm
+
+    def test_nested_region_bw_config_patches_affect_cache_key(self):
+        # bw_inductor_config_patches (stamped on the backward invoke_subgraph
+        # node) must be part of the cache key, or two graphs differing only in
+        # backward config would collide.
+        from torch._higher_order_ops.invoke_subgraph import (
+            get_backward_nested_region_config,
+            get_invoke_subgraph_compile_options,
+        )
+
+        # Backward config replaces (does not merge with) the forward config.
+        bw_config = get_backward_nested_region_config(
+            get_invoke_subgraph_compile_options(
+                bw_inductor_config_patches={"max_autotune": True}
+            )
+        )
+        self.assertEqual(
+            bw_config.inductor_config_patches,
+            {"max_autotune": True},
+        )
+
+        same1 = self._nested_region_bw_gm({"max_autotune": True})
+        same2 = self._nested_region_bw_gm({"max_autotune": True})
+        different = self._nested_region_bw_gm({"max_autotune": False})
+        self.assertEqual(
+            self._fx_graph_cache_key(same1, []),
+            self._fx_graph_cache_key(same2, []),
+        )
+        self.assertNotEqual(
+            self._fx_graph_cache_key(same1, []),
+            self._fx_graph_cache_key(different, []),
+        )
 
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "requires MKLDNN")
     def test_check_for_hop_skips_constants(self):
@@ -4112,7 +4300,7 @@ class TestFxGraphCacheHashing(TestCase):
         """
         Test that the custom partitioner function's UUID is properly used in the FX graph cache hashing.
         """
-        custom_partitioner_fn = TestCustomPartitionerFn()
+        custom_partitioner_fn = _TestCustomPartitionerFn()
         with config.patch({"custom_partitioner_fn": custom_partitioner_fn}):
             custom_partitioner_fn._uuid = "1"
             details1 = FxGraphHashDetails(None, [], {}, [])
@@ -5049,7 +5237,7 @@ class TestVecISACheckBuild(TestCase):
         self.assertEqual(calls, [60])
         self.assertTrue(
             any("hung after 60s" in str(w.message) for w in caught),
-            msg=f"expected timeout warning, got: {[str(w.message) for w in caught]}",
+            msg=lambda msg: f"{msg}\nexpected timeout warning, got: {[str(w.message) for w in caught]}",
         )
 
     def test_probe_load_returns_false_on_called_process_error(self):
@@ -5081,8 +5269,76 @@ class TestVecISACheckBuild(TestCase):
         self.assertEqual(
             value.split(os.pathsep)[0],
             torch_lib,
-            msg=f"LD_LIBRARY_PATH should be prepended with {torch_lib!r}, got {value!r}",
+            msg=lambda msg: f"{msg}\nLD_LIBRARY_PATH should be prepended with {torch_lib!r}, got {value!r}",
         )
+
+    @unittest.skipUnless(sys.platform == "linux", "Linux loader semantics")
+    def test_avx_py_load_falls_back_to_import_torch(self):
+        # Wheels whose native deps only resolve once `import torch` has run
+        # (e.g. ROCm wheels with DT_NEEDED refs on sonames that exist only as
+        # already-loaded renamed bundles, see #189194) fail the cold dlopen,
+        # so the probe child must retry after importing torch. Simulate that:
+        # a probe .so that DT_NEEDEDs libc10.so with no rpath and no
+        # LD_LIBRARY_PATH fails to load cold, and resolves only once
+        # `import torch` maps libc10 into the child process.
+        from torch._inductor import cpu_vec_isa
+
+        compiler = shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
+        if compiler is None:
+            raise unittest.SkipTest("no C compiler available")
+        torch_lib = os.path.join(os.path.dirname(torch.__file__), "lib")
+        if not os.path.isfile(os.path.join(torch_lib, "libc10.so")):
+            raise unittest.SkipTest("libc10.so not found in torch lib dir")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            src = os.path.join(tmp, "probe.c")
+            with open(src, "w") as f:
+                f.write("void __vec_isa_probe_dummy(void) {}\n")
+            lib_path = os.path.join(tmp, "libvec_isa_probe_needs_c10.so")
+            # --no-as-needed: the probe references no c10 symbol, so without it
+            # the linker would drop the DT_NEEDED entry this test relies on
+            cmd = [
+                compiler,
+                "-shared",
+                "-fPIC",
+                src,
+                "-o",
+                lib_path,
+                "-Wl,--no-as-needed",
+                f"-L{torch_lib}",
+                "-lc10",
+            ]
+            subprocess.run(cmd, check=True)
+
+            # Keep external runtime libraries (for example, SYCL/MKL/XCCL
+            # libraries required by XPU wheels) visible to the child. Only
+            # remove torch's own library directory so the cold load still
+            # fails for the intended reason: libc10.so is not findable until
+            # ``import torch`` has run.
+            env = os.environ.copy()
+            torch_lib = os.path.realpath(torch_lib)
+            loader_paths = env.get("LD_LIBRARY_PATH", "").split(os.pathsep)
+            loader_paths = [
+                path
+                for path in loader_paths
+                if path and os.path.realpath(path) != torch_lib
+            ]
+            if loader_paths:
+                env["LD_LIBRARY_PATH"] = os.pathsep.join(loader_paths)
+            else:
+                env.pop("LD_LIBRARY_PATH", None)
+            cold_load = f'from ctypes import cdll; cdll.LoadLibrary("{lib_path}")'
+            cold = subprocess.run(
+                [sys.executable, "-c", cold_load], env=env, stderr=subprocess.DEVNULL
+            )
+            if cold.returncode == 0:
+                raise unittest.SkipTest("loader resolves libc10.so without torch")
+
+            script = cpu_vec_isa.VecISA._avx_py_load.replace("__lib_path__", lib_path)
+            probe = subprocess.run(
+                [sys.executable, "-c", script], env=env, stderr=subprocess.PIPE
+            )
+            self.assertEqual(probe.returncode, 0, msg=probe.stderr.decode())
 
 
 class TestCompilationEventLogging(TestCase):

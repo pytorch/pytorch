@@ -1,11 +1,8 @@
 #include <ATen/RedispatchFunctions.h>
-#include <ATen/TracerMode.h>
 #include <ATen/core/op_registration/op_registration.h>
-#include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/FunctionsManual.h>
 #include <torch/csrc/autograd/VariableTypeUtils.h>
-#include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/autograd/generated/ViewFuncs.h>
@@ -136,6 +133,7 @@ Tensor _fw_primal(c10::DispatchKeySet ks, const Tensor& self, int64_t level) {
 
   if (grad_fn) {
     set_history(flatten_tensor_args(result), grad_fn);
+    fire_node_creation_hooks(grad_fn);
   }
   if (isFwGradDefined(self)) {
     // Modified from original codegen
@@ -181,6 +179,7 @@ Tensor _make_dual(
 
   if (grad_fn) {
     set_history(flatten_tensor_args(result), grad_fn);
+    fire_node_creation_hooks(grad_fn);
   }
 
   TORCH_CHECK(level == 0, "Invalid level given to _make_dual");
@@ -212,7 +211,10 @@ Tensor& copy_(
     at::redispatch::copy_(
         ks & c10::after_autograd_keyset, self_, src_, non_blocking);
   }
-  rebase_history(self, std::move(grad_fn));
+  auto attached_fn = rebase_history(self, std::move(grad_fn));
+  if (attached_fn) {
+    fire_node_creation_hooks(attached_fn);
+  }
 
   if (isDifferentiableType(self.scalar_type()) &&
       (isFwGradDefined(self) || isFwGradDefined(src))) {
