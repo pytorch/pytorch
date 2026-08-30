@@ -1885,6 +1885,61 @@ class AbstractLargeCommTest:
         self.assertEqual(output_tensor_list, expected)
 
 
+class CppStacktraceTest(TestCase):
+    @parametrize(
+        "distributed_debug,show_cpp_stacktraces,expect_backtrace",
+        [
+            ("DETAIL", None, True),
+            ("detail", None, True),
+            ("INFO", None, False),
+            ("DETAIL", "0", False),
+            ("OFF", "1", True),
+        ],
+        name_fn=lambda distributed_debug, show_cpp_stacktraces, _: (
+            f"{distributed_debug}_show_{show_cpp_stacktraces or 'unset'}"
+        ),
+    )
+    def test_cpp_stacktraces_with_distributed_debug(
+        self,
+        distributed_debug,
+        show_cpp_stacktraces,
+        expect_backtrace,
+    ):
+        script = """
+import torch
+
+try:
+    torch.empty(-1)
+except RuntimeError as error:
+    print(error)
+"""
+        env = os.environ.copy()
+        env.pop("TORCH_DISTRIBUTED_DEBUG", None)
+        env.pop("TORCH_SHOW_CPP_STACKTRACES", None)
+        env["TORCH_DISABLE_ADDR2LINE"] = "1"
+        env["TORCH_DISTRIBUTED_DEBUG"] = distributed_debug
+        if show_cpp_stacktraces is not None:
+            env["TORCH_SHOW_CPP_STACKTRACES"] = show_cpp_stacktraces
+
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            check=True,
+            env=env,
+            timeout=60,
+        )
+
+        self.assertIn("negative dimension", result.stdout)
+        self.assertEqual(
+            "Exception raised from" in result.stdout,
+            expect_backtrace,
+        )
+
+
+instantiate_parametrized_tests(CppStacktraceTest)
+
+
 class CommTest(AbstractCommTest, MultiProcessTestCase):
     def setUp(self):
         super().setUp()
