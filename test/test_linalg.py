@@ -30,7 +30,7 @@ from torch.testing._internal.common_utils import \
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, skipIfTorchDynamo,
      skipIfRocmArch, skipIfRocmVersionAtLeast, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
      runOnRocmArch, MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA,
-     recover_orig_fp32_precision, skipIfNoNvmath)
+     skipIfNoNvmath)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIf,
@@ -10737,7 +10737,6 @@ class TestLinalgCudaOnly(TestCase):
     @unittest.skipUnless(
         BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
     )
-    @recover_orig_fp32_precision
     @dtypes(torch.float)
     def test_16x9_tunableop(self, device, dtype):
         with self._tunableop_ctx():
@@ -10753,18 +10752,17 @@ class TestLinalgCudaOnly(TestCase):
             torch.mm(a, b)
 
             results = torch.cuda.tunable.get_results()
-            ieee = find_tunableop_result(
-                results,
-                "GemmTunableOp_float_NN",
-                "nn_37_37_37_ld_37_37_37",
+            signatures = (
+                ("GemmTunableOp_float_NN", "nn_37_37_37_ld_37_37_37"),
+                (
+                    "GemmTunableOp_16x9_NN",
+                    "nn_37_37_37_ld_37_37_37_compute_bf16x9_r",
+                ),
             )
-            x9 = find_tunableop_result(
-                results,
-                "GemmTunableOp_16x9_NN",
-                "nn_37_37_37_ld_37_37_37_compute_bf16x9_r",
-            )
-            self.assertIsNotNone(ieee)
-            self.assertIsNotNone(x9)
+            for op_signature, params_signature in signatures:
+                self.assertIsNotNone(
+                    find_tunableop_result(results, op_signature, params_signature)
+                )
 
     @runOnRocmArch(MI300_ARCH)
     @dtypes(torch.float)

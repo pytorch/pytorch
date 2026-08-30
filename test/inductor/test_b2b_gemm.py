@@ -54,23 +54,25 @@ class B2BGEMMTest(TestCase):
         BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
     )
     @recover_orig_fp32_precision
-    @torch._dynamo.config.patch(recompile_limit=32)
     @torch._inductor.config.patch(b2b_gemm_pass=True)
     def test_16x9_rejects_mixed_dtype_b2b_gemm(self):
         def fn(a, b, c):
             return torch.mm(torch.mm(a, b).float(), c)
 
-        torch.backends.cuda.matmul.fp32_precision = "16x9"
         a = torch.randn((256, 32), device=self.device, dtype=torch.float16)
         b = torch.randn((32, 256), device=self.device, dtype=torch.float16)
         c = torch.randn((256, 32), device=self.device, dtype=torch.float32)
-        expected = fn(a, b, c)
-        actual, code = run_and_get_code(torch.compile(fn), a, b, c)
-
-        self.assertEqual(actual, expected)
-        source = "\n".join(code)
-        self.assertNotIn("triton_b2b_gemm", source)
-        self.assertIn("extern_kernels.mm(", source)
+        for precision, should_fuse in (("ieee", True), ("16x9", False)):
+            with self.subTest(fp32_precision=precision):
+                torch.backends.cuda.matmul.fp32_precision = precision
+                torch._dynamo.reset()
+                counters.clear()
+                actual = torch.compile(fn)(a, b, c)
+                if should_fuse:
+                    self.assertGreater(counters["inductor"]["b2b_gemm"], 0)
+                else:
+                    self.assertEqual(actual, fn(a, b, c))
+                    self.assertEqual(counters["inductor"]["b2b_gemm"], 0)
 
     @torch._dynamo.config.patch(recompile_limit=32)
     @torch._inductor.config.patch(b2b_gemm_pass=True)

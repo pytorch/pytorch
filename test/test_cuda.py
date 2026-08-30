@@ -1330,15 +1330,6 @@ print(t.is_pinned())
     @recover_orig_fp32_precision
     @serialTest()
     def test_16x9_fp32_precision_get_set(self):
-        original_matmul_precision = torch.get_float32_matmul_precision()
-        original_cuda_precision = torch.backends.cuda.matmul.fp32_precision
-        self.addCleanup(
-            setattr,
-            torch.backends.cuda.matmul,
-            "fp32_precision",
-            original_cuda_precision,
-        )
-        self.addCleanup(torch.set_float32_matmul_precision, original_matmul_precision)
         torch.set_float32_matmul_precision("highest")
         torch.backends.cuda.matmul.fp32_precision = "16x9"
         self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "16x9")

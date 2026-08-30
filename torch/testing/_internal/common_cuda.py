@@ -463,44 +463,6 @@ def tf32_enabled():
         torch.backends.cuda.matmul.fp32_precision = old_fp32_precision
 
 
-@contextlib.contextmanager
-def x9_on():
-    old_fp32_precision = torch.backends.cuda.matmul.fp32_precision
-    try:
-        torch.backends.cuda.matmul.fp32_precision = "16x9"
-        yield
-    finally:
-        torch.backends.cuda.matmul.fp32_precision = old_fp32_precision
-
-
-def x9_on_and_off():
-    """Run an FP32 CUDA test once with IEEE and once with 16x9 precision."""
-
-    def wrapper(f):
-        params = inspect.signature(f).parameters
-        arg_names = tuple(params.keys())
-
-        @functools.wraps(f)
-        def wrapped(*args, **kwargs):
-            kwargs.update(zip(arg_names, args, strict=False))
-            cond = bool(BF16X9_SUPPORTED)
-            if "device" in kwargs:
-                cond = cond and torch.device(kwargs["device"]).type == "cuda"
-            if "dtype" in kwargs:
-                cond = cond and kwargs["dtype"] == torch.float32
-            if cond:
-                with kwargs["self"].subTest(fp32_precision="ieee"), tf32_off():
-                    f(**kwargs)
-                with kwargs["self"].subTest(fp32_precision="16x9"), x9_on():
-                    f(**kwargs)
-            else:
-                f(**kwargs)
-
-        return wrapped
-
-    return wrapper
-
-
 # This is a wrapper that wraps a test to run this test twice, one with
 # allow_tf32=True, another with allow_tf32=False. When running with
 # allow_tf32=True, it will use reduced precision as specified by the

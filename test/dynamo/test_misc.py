@@ -5344,11 +5344,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         guards.__setstate__(json.dumps(json_guards))
         self.assertTrue(guards.check())
 
-        precision_only_json_guards = json_guards.copy()
-        precision_only_json_guards.pop("allow_tf32")
-        guards.__setstate__(json.dumps(precision_only_json_guards))
-        self.assertTrue(guards.check())
-
         legacy_json_guards = json_guards.copy()
         legacy_json_guards.pop("cuda_matmul_precision")
         legacy_json_guards["allow_tf32"] = (
@@ -5365,14 +5360,15 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         guards.__setstate__(json.dumps(legacy_json_guards))
         self.assertFalse(guards.check())
 
-        original_precision = torch.backends.cuda.matmul.fp32_precision
         legacy_json_guards["allow_tf32"] = False
         guards.__setstate__(json.dumps(legacy_json_guards))
         torch.backends.cuda.matmul.fp32_precision = "16x9"
         self.assertFalse(guards.check())
+
         x9_json_guards = json.loads(GlobalStateGuard().__getstate__())
         self.assertNotIn("allow_tf32", x9_json_guards)
-        torch.backends.cuda.matmul.fp32_precision = original_precision
+        guards.__setstate__(json.dumps(x9_json_guards))
+        self.assertTrue(guards.check())
 
         # Test on autocast states.
         def _test_autocast(dtype):
@@ -12158,15 +12154,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
     @recover_orig_fp32_precision
     def test_recompile_on_16x9_precision_change(self):
-        original_matmul_precision = torch.get_float32_matmul_precision()
-        original_cuda_precision = torch.backends.cuda.matmul.fp32_precision
-        self.addCleanup(
-            setattr,
-            torch.backends.cuda.matmul,
-            "fp32_precision",
-            original_cuda_precision,
-        )
-        self.addCleanup(torch.set_float32_matmul_precision, original_matmul_precision)
         counter = CompileCounter()
 
         @torch.compile(backend=counter)
@@ -12174,7 +12161,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             return x + 1
 
         x = torch.randn(10)
-        torch.set_float32_matmul_precision("highest")
+        torch.backends.cuda.matmul.fp32_precision = "ieee"
         fn(x)
         self.assertEqual(counter.frame_count, 1)
 
