@@ -750,6 +750,45 @@ def scaled_mm(
 
 __all__ += ["scaled_mm"]
 
+def scaled_addmm(
+    input: Tensor,
+    mat1: Tensor,
+    mat2: Tensor,
+    scale_a: Tensor | list[Tensor],
+    scale_recipe_a: ScalingType | list[ScalingType],
+    scale_b: Tensor | list[Tensor],
+    scale_recipe_b: ScalingType | list[ScalingType],
+    swizzle_a: SwizzleType | list[SwizzleType] | None = None,
+    swizzle_b: SwizzleType | list[SwizzleType] | None = None,
+    contraction_dim: list[int] | tuple[int, ...] = (),
+    use_fast_accum: bool = False,
+    *,
+    beta: float = 1.0,
+    alpha: float = 1.0,
+    out: Tensor | None = None,
+) -> Tensor: ...
+
+__all__ += ["scaled_addmm"]
+
+def scaled_addmm_(
+    input: Tensor,
+    mat1: Tensor,
+    mat2: Tensor,
+    scale_a: Tensor | list[Tensor],
+    scale_recipe_a: ScalingType | list[ScalingType],
+    scale_b: Tensor | list[Tensor],
+    scale_recipe_b: ScalingType | list[ScalingType],
+    swizzle_a: SwizzleType | list[SwizzleType] | None = None,
+    swizzle_b: SwizzleType | list[SwizzleType] | None = None,
+    contraction_dim: list[int] | tuple[int, ...] = (),
+    use_fast_accum: bool = False,
+    *,
+    beta: float = 1.0,
+    alpha: float = 1.0,
+) -> Tensor: ...
+
+__all__ += ["scaled_addmm_"]
+
 def grouped_mm(
     mat_a: Tensor,
     mat_b: Tensor,
