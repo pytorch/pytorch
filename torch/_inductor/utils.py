@@ -1671,16 +1671,8 @@ def unload_xpu_triton_pyds() -> None:
                                 run.mod.__del__()
         del sys.modules[module_name]
 
-    # unload spirv_utils.pyd
-    if "triton.runtime.driver" in sys.modules:
-        driver_mod = sys.modules["triton.runtime.driver"]
-        if hasattr(driver_mod.driver.active, "utils"):
-            utils_cls = type(driver_mod.driver.active.utils)
-            if hasattr(utils_cls, "instance"):
-                del utils_cls.instance
-            elif hasattr(utils_cls, "_instance"):
-                utils_cls._instance = None
-            del driver_mod.driver.active.utils
+    # Never unload spirv_utils.pyd: Triton publishes type objects from it in its own module
+    # globals, so freeing the library crashes the next gc pass.
 
     gc.collect()
 

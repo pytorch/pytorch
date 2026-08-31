@@ -15,6 +15,7 @@ import textwrap
 import types
 import unittest
 import warnings
+import weakref
 from contextlib import contextmanager
 from typing import Any, cast
 from typing_extensions import override
@@ -5720,6 +5721,46 @@ class TestAutotuneCacheExtraOptions(TestCase):
         mock_local_backend.put.assert_called_once()
         saved_data = mock_local_backend.put.call_args[0][1]
         self.assertNotIn("extra_options", saved_data)
+
+
+@unittest.skipUnless(HAS_XPU_AND_TRITON, "requires XPU and Triton")
+class TestUnloadXpuTritonPyds(TestCase):
+    def test_unload_keeps_xpu_utils_alive(self):
+        """
+        ``unload_xpu_triton_pyds`` must not drop Triton's ``XPUUtils`` singleton. That object owns
+        the only handle to ``spirv_utils.pyd``, so destroying it ``FreeLibrary()``s a library whose
+        type objects Triton still publishes in its module globals, and the next gc pass aborts the
+        process with an access violation.
+
+        The abort itself cannot be asserted -- it kills the interpreter, and it only triggers with a
+        full test-harness object graph. Assert the invariant that prevents it instead: the singleton
+        must survive the call. Called directly rather than via ``fresh_cache`` so that non-Windows
+        CI covers it too.
+        """
+        from torch._inductor.utils import unload_xpu_triton_pyds
+
+        def fn(x):
+            return x * 2 + 1
+
+        x = torch.randn(64, device="xpu")
+        self.assertEqual(torch.compile(fn)(x), fn(x))
+
+        active = sys.modules["triton.runtime.driver"].driver._active
+        self.assertIsNotNone(active, "compiling on xpu should have built the Triton driver")
+        self.assertIn("utils", vars(active), "compiling should have created XPUUtils")
+
+        # Weak, so the test itself does not keep the singleton alive.
+        utils_ref = weakref.ref(active.utils)
+
+        unload_xpu_triton_pyds()
+
+        self.assertIsNotNone(
+            utils_ref(), "XPUUtils was destroyed, so spirv_utils.pyd got unloaded"
+        )
+        self.assertIs(active.utils, utils_ref())
+
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(fn)(x), fn(x))
 
 
 if __name__ == "__main__":
