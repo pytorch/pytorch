@@ -643,7 +643,7 @@ class TestReplicateMixedPrecisionCasts(FSDPTestMultiThread):
         else:
             with self.assertRaisesRegex(
                 RuntimeError,
-                "Expected running_mean to have type",  # Error not seen on HPUs or NPUs, and hence it can be skipped
+                "Expected running_mean to have type",  # Error not seen on HPUs and hence it can be skipped
             ):
                 # Errors in batch norm 2D backward
                 inner(model, torch.randn((3, 1, 9, 9), device=device))
