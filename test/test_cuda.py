@@ -5801,6 +5801,71 @@ print(ret)
         )
         self.assertEqual(r, "1.0")
 
+    @unittest.skipIf(not TEST_MULTIGPU, "requires multiple devices")
+    def test_primary_context_devices(self):
+        # _primary_context_devices() reports every device holding a primary
+        # context, without itself creating one; the caller excludes the device it
+        # owns. Run in a subprocess for a clean CUDA state.
+        test_script = """\
+import torch
+
+# Read-only query reports nothing before any context exists.
+assert torch.cuda._primary_context_devices() == [], "expected a clean start"
+
+# A primary context on device 0 is visible; a rank owning device 1 treats it as
+# stray, while a rank owning device 0 does not.
+torch.zeros(1, device="cuda:0")
+ctxs = torch.cuda._primary_context_devices()
+assert ctxs == [0], ctxs
+assert [d for d in ctxs if d != 1] == [0], ctxs
+assert [d for d in ctxs if d != 0] == [], ctxs
+print("OK")
+"""
+        r = (
+            subprocess.check_output([sys.executable, "-c", test_script])
+            .decode("ascii")
+            .strip()
+        )
+        self.assertEqual(r, "OK")
+
+    @unittest.skipIf(not TEST_MULTIGPU, "requires multiple devices")
+    def test_set_device_stray_context_check(self):
+        # TORCH_CUDA_CHECK_STRAY_CONTEXT=error makes set_device raise when a
+        # primary context already exists on another device (created before the
+        # process pinned its own).
+        raise_script = """\
+import os
+os.environ["TORCH_CUDA_CHECK_STRAY_CONTEXT"] = "error"
+import torch
+torch.zeros(1, device="cuda:0")
+try:
+    torch.cuda.set_device(1)
+    print("NO_RAISE")
+except RuntimeError:
+    print("RAISED")
+"""
+        r = (
+            subprocess.check_output([sys.executable, "-c", raise_script])
+            .decode("ascii")
+            .strip()
+        )
+        self.assertEqual(r, "RAISED")
+
+        # No stray context -> set_device does not raise even in error mode.
+        clean_script = """\
+import os
+os.environ["TORCH_CUDA_CHECK_STRAY_CONTEXT"] = "error"
+import torch
+torch.cuda.set_device(1)
+print("OK")
+"""
+        r = (
+            subprocess.check_output([sys.executable, "-c", clean_script])
+            .decode("ascii")
+            .strip()
+        )
+        self.assertEqual(r, "OK")
+
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @unittest.skipIf(
