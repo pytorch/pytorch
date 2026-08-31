@@ -1616,15 +1616,18 @@ class Tensor(torch._C.TensorBase):
                 "Can't export tensors with layout other than torch.strided"
             )
 
-        if (
-            self.device.type == "cuda"
-            and self.device.index != torch.cuda.current_device()
-        ):
-            raise BufferError(
-                "Can't export tensors on a different CUDA device index. "
-                f"Expected: {self.device.index}. "
-                f"Current device: {torch.cuda.current_device()}."
-            )
+        # The consumer resolves the capsule against the current device of the
+        # accelerator, so exporting from any other device index would silently
+        # hand out a pointer belonging to another device.
+        acc = torch.accelerator.current_accelerator()
+        if acc is not None and self.device.type == acc.type:
+            current_index = torch.accelerator.current_device_index()
+            if self.device.index != current_index:
+                raise BufferError(
+                    f"Can't export tensors on a different {acc.type.upper()} device index. "
+                    f"Expected: {self.device.index}. "
+                    f"Current device: {current_index}."
+                )
 
         if stream is not None and type(stream) is not int:
             # Stream pointers in CUDA/ROCm are uniquely numbered and can
