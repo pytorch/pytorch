@@ -19962,7 +19962,6 @@ op_db: list[OpInfo] = [
            )),
     OpInfo('randint',
            dtypes=all_types_and(torch.half, torch.bfloat16, torch.bool),
-           dtypesIfMPS=all_types_and(torch.half, torch.bfloat16, torch.complex64, torch.bool),
            op=lambda *args, **kwargs:
                wrapper_set_seed(torch.randint, *args, **kwargs),
            supports_out=False,
