@@ -21357,11 +21357,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         sample_inputs_func=sample_inputs_softmax_variant,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        skips=(
-            # The following dtypes worked in forward but are not listed by the
-            # OpInfo: {torch.int16, torch.int8, torch.uint8, torch.int32}.
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-        ),
         assert_autodiffed=True),
     OpInfo(
         'log_softmax',
