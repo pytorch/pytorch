@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import unittest
+import unittest.mock
 
 import torch
 from torch._inductor import config
@@ -728,6 +729,31 @@ class TestBlackwellExhaustiveConfigs(TestCase):
             len(addmm_configs),
             "Scaled TMA should use the larger scaled_persistent list, not the small addmm list",
         )
+
+
+class TestBlackwellAutoWSConstraints(TestCase):
+    def test_two_ctas_allows_all_pipeline_depths(self):
+        kwargs = {
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "EPILOGUE_SUBTILE": 2,
+            "DATA_PARTITION_FACTOR": 1,
+            "TWO_CTAS": True,
+        }
+        with (
+            config.patch({"triton.enable_template_tma_store": True}),
+            unittest.mock.patch(
+                "torch._inductor.heuristics.template.triton.has_two_ctas",
+                return_value=True,
+            ),
+        ):
+            for num_stages in range(2, 7):
+                kwargs["num_stages"] = num_stages
+                self.assertTrue(
+                    CUDABlackwellPersistentTMATemplateConfigHeuristic._autows_constraints_ok(
+                        kwargs
+                    )
+                )
 
 
 if __name__ == "__main__":

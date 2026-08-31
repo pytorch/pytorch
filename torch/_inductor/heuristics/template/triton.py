@@ -18,7 +18,7 @@ from torch.utils._sympy.functions import Min, Mod
 from torch.utils._triton import has_triton_stable_tma_api
 
 from ... import config
-from ...autows_utils import meta_ws_enabled
+from ...autows_utils import has_two_ctas, meta_ws_enabled
 from ...kernel.bmm import bmm_template
 from ...kernel.mm import (
     blackwell_ws_persistent_device_tma_mm_template,
@@ -193,6 +193,7 @@ class BlackwellGPUGemmConfig(GemmConfig):
     use_meta_ws: bool = dataclasses.field(kw_only=True, default=False)
     data_partition_factor: int = dataclasses.field(kw_only=True, default=1)
     separate_epilogue_store: bool = dataclasses.field(kw_only=True, default=False)
+    two_ctas: bool = dataclasses.field(kw_only=True, default=False)
 
 
 # FlexAttention Configs
@@ -912,6 +913,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                     conf.use_meta_ws,
                     conf.data_partition_factor,
                     conf.separate_epilogue_store,
+                    conf.two_ctas,
                 )
 
             extra_key, extra_kwargs = self._get_extra_config_key_and_kwargs(conf)
@@ -938,6 +940,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                     kwargs["USE_META_WS"] = conf.use_meta_ws
                     kwargs["DATA_PARTITION_FACTOR"] = conf.data_partition_factor
                     kwargs["SEPARATE_EPILOGUE_STORE"] = conf.separate_epilogue_store
+                    kwargs["TWO_CTAS"] = conf.two_ctas
 
                 kwargs.update(extra_kwargs)
 
@@ -2753,12 +2756,15 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                 and not constraints_violated
                 and not use_meta_ws
             )
-            yield {
+            out = {
                 **template_kwargs,
                 "NUM_SMS": get_num_sms(),
                 "WARP_SPECIALIZE": ws,
                 "FLATTEN": flatten,
             }
+            if template_kwargs.get("TWO_CTAS", False):
+                out["ctas_per_cga"] = (2, 1, 1)
+            yield out
 
     @staticmethod
     def _autows_constraints_ok(template_kwargs: dict[str, Any]) -> bool:
@@ -2766,14 +2772,25 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
         block_m = template_kwargs["BLOCK_M"]
         block_n = template_kwargs["BLOCK_N"]
         subtile = template_kwargs.get("EPILOGUE_SUBTILE", 1)
+        dp = template_kwargs.get("DATA_PARTITION_FACTOR", 1)
         # each epilogue subtile is BLOCK_N // EPILOGUE_SUBTILE wide
         if block_n // subtile < 32:
             return False
         # dp=2 splits the row tile into two MMA partitions; BLOCK_M=64 fails in
         # the fb-triton WS pass pipeline, so keep the tile at 128 or 256
-        dp = template_kwargs.get("DATA_PARTITION_FACTOR", 1)
         if dp == 2 and block_m not in (128, 256):
             return False
+        if template_kwargs.get("TWO_CTAS", False):
+            # 2-CTA deadlocks without the TMA epilogue store to drive the cluster
+            # barrier.
+            if not (has_two_ctas() and config.triton.enable_template_tma_store):
+                return False
+            # 2-CTA halves B along N, and BLOCK_N=64 leaves 32 elements per CTA,
+            # under the 64 the 128-byte swizzle needs. Below BLOCK_M=128 the MMA
+            # lowering falls back to 1-CTA, so those configs only duplicate the
+            # non-2-CTA sweep.
+            if block_m < 128 or block_n < 128:
+                return False
         return True
 
     def _get_config_generator(
@@ -2799,22 +2816,24 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                     for epilogue_subtile in [1, 2, 4, 8]:
                         for data_partition_factor in [1, 2]:
                             for separate_epilogue_store in [False, True]:
-                                configs.append(
-                                    BlackwellGPUGemmConfig(
-                                        block_m=BLOCK_M,
-                                        block_n=BLOCK_N,
-                                        block_k=BLOCK_K,
-                                        num_stages=num_stages,
-                                        num_warps=num_warps,
-                                        group_m=8,
-                                        epilogue_subtile=epilogue_subtile,
-                                        use_meta_ws=True,
-                                        data_partition_factor=data_partition_factor,
-                                        separate_epilogue_store=separate_epilogue_store,
-                                        warp_specialize=True,
-                                        flatten=False,
+                                for two_ctas in [False, True]:
+                                    configs.append(
+                                        BlackwellGPUGemmConfig(
+                                            block_m=BLOCK_M,
+                                            block_n=BLOCK_N,
+                                            block_k=BLOCK_K,
+                                            num_stages=num_stages,
+                                            num_warps=num_warps,
+                                            group_m=8,
+                                            epilogue_subtile=epilogue_subtile,
+                                            use_meta_ws=True,
+                                            data_partition_factor=data_partition_factor,
+                                            separate_epilogue_store=separate_epilogue_store,
+                                            two_ctas=two_ctas,
+                                            warp_specialize=True,
+                                            flatten=False,
+                                        )
                                     )
-                                )
         return configs
 
     @staticmethod
