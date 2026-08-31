@@ -1,4 +1,5 @@
 # Owner(s): ["module: sdpa"]
+import math
 import unittest
 from collections import namedtuple
 from contextlib import contextmanager, nullcontext
@@ -11,8 +12,10 @@ import torch.nn.functional as F
 from torch.nn.attention import (
     activate_flash_attention_impl,
     restore_flash_attention_impl,
+    sdpa_kernel,
+    SDPBackend,
 )
-from torch.nn.attention.varlen import varlen_attn, varlen_attn_out
+from torch.nn.attention.varlen import AuxRequest, varlen_attn, varlen_attn_out
 from torch.testing._internal.common_cuda import (
     IS_SM90,
     PLATFORM_SUPPORTS_CK_SDPA,
@@ -26,6 +29,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     decorateIf,
+    HardwareClassification,
     parametrize,
     run_tests,
     setSdpaBackendsToDefaultFinally,
@@ -86,6 +90,24 @@ def _check_cudnn_varlen_supported(device):
         )
 
 
+def _make_causal_varlen_inputs(
+    device: str | torch.device, *, requires_grad: bool = False
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    seq_len = 256
+    q = torch.randn(
+        seq_len,
+        2,
+        64,
+        device=device,
+        dtype=torch.bfloat16,
+        requires_grad=requires_grad,
+    )
+    k = torch.randn_like(q, requires_grad=requires_grad)
+    v = torch.randn_like(q, requires_grad=requires_grad)
+    cu_seq = torch.tensor([0, seq_len], device=device, dtype=torch.int32)
+    return q, k, v, cu_seq
+
+
 @contextmanager
 def _use_cudnn_varlen(_should_use_cudnn, device):
     if _should_use_cudnn:
@@ -100,7 +122,7 @@ def _use_cudnn_varlen(_should_use_cudnn, device):
 def _varlen_backends(*, include_fa4_paged_kv: bool) -> list[str]:
     fa4_supported = (
         SM100OrLater if include_fa4_paged_kv else SM90OrLater
-    ) and not SM120OrLater
+    ) and torch.cuda.get_device_capability()[0] in (9, 10)
     return ["fa2"] + (["fa3"] if IS_SM90 else []) + (["fa4"] if fa4_supported else [])
 
 
@@ -286,6 +308,14 @@ def pack_sequences(seqs, device):
     return x_packed, cu_seq, max_len
 
 
+def gather_paged_cache(cache: torch.Tensor, block_table: torch.Tensor) -> torch.Tensor:
+    """Gather a logical batched KV cache from a physical page pool."""
+    page_size, num_heads, head_dim = cache.shape[1:]
+    index = block_table.flatten().long().view(-1, 1, 1, 1)
+    index = index.expand(-1, page_size, num_heads, head_dim)
+    return cache.gather(0, index).view(block_table.size(0), -1, num_heads, head_dim)
+
+
 def create_variable_length_batch(
     shape: VarlenShape,
     device: torch.device,
@@ -332,6 +362,17 @@ def create_variable_length_batch(
 
 
 class TestVarlenAttention(NNTestCase):
+    # NOTE: This class is currently CUDA-specific, although a significant portion of its
+    # functionality can be shared by other backends. Separating the common logic from
+    # CUDA-specific logic would require a substantial refactoring, so this is deferred
+    # for now.
+    # The planned refactoring is to introduce a Capability mechanism, allowing each backend
+    # to report its supported Flash Attention implementations (FA2/FA3/FA4) and determine
+    # whether to enable them accordingly. The cuDNN-related logic will also be separated
+    # from the current class and kept CUDA-specific, ultimately resulting in a generic
+    # Accelerator class and a CUDA-specific class.
+    hw_classification = HardwareClassification.CUDA
+
     def _test_varlen_vs_sdpa(
         self,
         device,
@@ -677,6 +718,9 @@ class TestVarlenAttention(NNTestCase):
                 shape.max_seq_len,
                 False,
                 rng_state,
+                None,
+                None,
+                SDPBackend.FLASH_ATTENTION.value,
             ),
             test_utils=["test_schema", "test_faketensor"],
         )
@@ -818,17 +862,574 @@ class TestVarlenAttention(NNTestCase):
     @skipIfRocm
     @setSdpaBackendsToDefaultFinally
     @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize("window_size", [(-1, -1), (-1, 0), [-1, 0]])
     @parametrize("_should_use_cudnn", [True])
-    def test_cudnn_attention_varlen(self, device, dtype, _should_use_cudnn):
+    def test_cudnn_attention_varlen(
+        self, device, dtype, window_size, _should_use_cudnn
+    ):
         self._test_varlen_vs_sdpa(
             device,
             dtype,
             scale=None,
-            window_size=(-1, -1),
+            window_size=window_size,
             backend="fa2",
             enable_gqa=False,
             _should_use_cudnn=_should_use_cudnn,
         )
+
+    @parametrize("scale", [0.0, -0.125, float("nan")])
+    def test_varlen_invalid_scale(self, device, scale):
+        q, k, v, cu_seq = _make_causal_varlen_inputs(device)
+        seq_len = q.size(0)
+
+        with self.assertRaisesRegex(ValueError, "scale must be greater than 0"):
+            varlen_attn(q, k, v, cu_seq, cu_seq, seq_len, seq_len, scale=scale)
+
+        with self.assertRaisesRegex(ValueError, "scale must be greater than 0"):
+            varlen_attn_out(
+                torch.empty_like(q),
+                q,
+                k,
+                v,
+                cu_seq,
+                cu_seq,
+                seq_len,
+                seq_len,
+                scale=scale,
+            )
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @parametrize("backend", [SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION])
+    def test_varlen_lse_is_not_differentiable(self, device, backend):
+        if backend == SDPBackend.CUDNN_ATTENTION:
+            _check_cudnn_varlen_supported(device)
+        q, k, v, cu_seq = _make_causal_varlen_inputs(device, requires_grad=True)
+        seq_len = q.size(0)
+
+        with sdpa_kernel(backend):
+            out, lse = varlen_attn(
+                q,
+                k,
+                v,
+                cu_seq,
+                cu_seq,
+                seq_len,
+                seq_len,
+                window_size=(-1, 0),
+                return_aux=AuxRequest(lse=True),
+            )
+
+        self.assertTrue(out.requires_grad)
+        self.assertFalse(lse.requires_grad)
+        torch.autograd.grad(out.sum(), (q, k, v))
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    def test_cudnn_causal_varlen_requires_shared_cu_seq(self, device):
+        _check_cudnn_varlen_supported(device)
+        seq_len = 256
+        q = torch.randn(
+            seq_len,
+            4,
+            64,
+            device=device,
+            dtype=torch.bfloat16,
+            requires_grad=True,
+        )
+        k = torch.randn_like(q, requires_grad=True)
+        v = torch.randn_like(q, requires_grad=True)
+        cu_seq_q = torch.tensor([0, seq_len], device=device, dtype=torch.int32)
+        cu_seq_k = cu_seq_q.clone()
+
+        with (
+            _use_cudnn_varlen(True, device),
+            patch.object(
+                torch.ops.aten,
+                "_cudnn_attention_forward",
+                wraps=torch.ops.aten._cudnn_attention_forward,
+            ) as cudnn_forward,
+            patch.object(
+                torch.ops.aten,
+                "_cudnn_attention_backward",
+                wraps=torch.ops.aten._cudnn_attention_backward,
+            ) as cudnn_backward,
+        ):
+            out = varlen_attn(
+                q,
+                k,
+                v,
+                cu_seq_q,
+                cu_seq_k,
+                seq_len,
+                seq_len,
+                window_size=(-1, 0),
+            )
+            torch.autograd.grad(out, (q, k, v), torch.randn_like(out))
+
+        self.assertEqual(cudnn_forward.call_count, 0)
+        self.assertEqual(cudnn_backward.call_count, 0)
+
+    @skipIfRocm
+    @parametrize("different_kv_stride", [False, True])
+    def test_cudnn_varlen_shared_cu_seq(self, device, different_kv_stride):
+        """Reusing shared Q/K metadata preserves forward and backward results."""
+        _check_cudnn_varlen_supported(device)
+        torch.manual_seed(42)
+        total, num_heads, head_dim = 512, 4, 64
+        q = torch.randn(
+            total, num_heads, head_dim, device=device, dtype=torch.bfloat16
+        ).requires_grad_()
+
+        def make_kv():
+            shape = (total, num_heads, head_dim + 8) if different_kv_stride else q.shape
+            tensor = torch.randn(shape, device=device, dtype=torch.bfloat16)
+            return tensor[..., :head_dim].requires_grad_()
+
+        k, v = make_kv(), make_kv()
+        cu_seq = torch.tensor([0, 192, total], device=device, dtype=torch.int32)
+        grad_out = torch.randn_like(q)
+
+        def run(cu_seq_k):
+            with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+                out = varlen_attn(q, k, v, cu_seq, cu_seq_k, 320, 320)
+                return (out, *torch.autograd.grad(out, (q, k, v), grad_out))
+
+        expected = run(cu_seq.clone())
+        actual = run(cu_seq)
+        self.assertEqual(actual, expected)
+
+    @skipIfRocm
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize("different_kv_stride", [False, True])
+    def test_cudnn_varlen_cumulative_sequence_lengths(
+        self, device, dtype, different_kv_stride
+    ):
+        """Direct cumulative lengths match the legacy per-sequence path."""
+        _check_cudnn_varlen_supported(device)
+        torch.manual_seed(42)
+        total, num_heads, head_dim = 512, 4, 64
+        q = torch.randn(
+            total, num_heads, head_dim, device=device, dtype=dtype
+        ).requires_grad_()
+
+        def make_kv():
+            shape = (total, num_heads, head_dim + 8) if different_kv_stride else q.shape
+            tensor = torch.randn(shape, device=device, dtype=dtype)
+            return tensor[..., :head_dim].requires_grad_()
+
+        k, v = make_kv(), make_kv()
+        cu_seq_q = torch.tensor([-1, 0, 192, total], device=device, dtype=torch.int32)[
+            1:
+        ]
+        cu_seq_k = torch.tensor([-1, 0, 256, total], device=device, dtype=torch.int32)[
+            1:
+        ]
+        self.assertNotEqual(cu_seq_q.data_ptr() % 16, 0)
+        self.assertNotEqual(cu_seq_k.data_ptr() % 16, 0)
+
+        def run(seqused_k):
+            with torch.no_grad(), sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+                return varlen_attn(
+                    q,
+                    k,
+                    v,
+                    cu_seq_q,
+                    cu_seq_k,
+                    320,
+                    256,
+                    seqused_k=seqused_k,
+                    return_aux=AuxRequest(lse=True),
+                )
+
+        direct = run(None)
+        legacy = run(torch.diff(cu_seq_k))
+        direct_again = run(None)
+        self.assertEqual(direct, legacy)
+        self.assertEqual(direct_again, direct)
+        with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+            out = varlen_attn(q, k, v, cu_seq_q, cu_seq_k, 320, 256)
+            grads = torch.autograd.grad(out, (q, k, v), torch.randn_like(out))
+        for grad in grads:
+            self.assertTrue(torch.isfinite(grad).all())
+
+    @skipIfRocm
+    @parametrize("tensor_idx", [0, 1, 2])
+    def test_cudnn_varlen_unaligned_input_raises(self, device, tensor_idx):
+        """Reject varlen inputs whose row strides are not 16-byte aligned.
+
+        cuDNN's varlen kernels silently produce wrong results (forward) or
+        fault (backward) on such layouts.
+        """
+        _check_cudnn_varlen_supported(device)
+        seq_len, num_heads, head_dim = 256, 2, 8
+
+        def make(unaligned):
+            if unaligned:
+                # Row stride (head_dim + 3) * 2 bytes is not 16-byte aligned.
+                storage = torch.randn(
+                    seq_len, num_heads, head_dim + 3, device=device, dtype=torch.float16
+                )
+                return storage[..., :head_dim]
+            return torch.randn(
+                seq_len, num_heads, head_dim, device=device, dtype=torch.float16
+            )
+
+        q, k, v = (make(i == tensor_idx) for i in range(3))
+        cu_seq = torch.tensor([0, seq_len], device=device, dtype=torch.int32)
+        with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+            with self.assertRaisesRegex(RuntimeError, "16-byte-aligned"):
+                varlen_attn(q, k, v, cu_seq, cu_seq, seq_len, seq_len)
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    def test_cudnn_varlen_unaligned_grad_out(self, device, dtype):
+        """Unaligned grad_output row strides are contiguified, not crashed on."""
+        _check_cudnn_varlen_supported(device)
+        torch.manual_seed(42)
+        seq_len, num_heads, head_dim = 256, 2, 8
+        tensors = [
+            torch.randn(
+                seq_len, num_heads, head_dim, device=device, dtype=dtype
+            ).requires_grad_()
+            for _ in range(3)
+        ]
+        q, k, v = tensors
+        cu_seq = torch.tensor([0, seq_len], device=device, dtype=torch.int32)
+
+        def grads(grad_out, use_cudnn):
+            with _use_cudnn_varlen(use_cudnn, device):
+                out = varlen_attn(q, k, v, cu_seq, cu_seq, seq_len, seq_len)
+                return torch.autograd.grad(out, tensors, grad_out)
+
+        # Row stride (head_dim + 3) * itemsize is not 16-byte aligned.
+        storage = torch.randn(
+            seq_len, num_heads, head_dim + 3, device=device, dtype=dtype
+        )
+        unaligned = storage[..., :head_dim]
+        self.assertNotEqual(unaligned.stride(-2) * unaligned.element_size() % 16, 0)
+        expected = grads(unaligned.clone(), use_cudnn=False)
+        actual = grads(unaligned, use_cudnn=True)
+        for got, want in zip(actual, expected):
+            self.assertEqual(got.float(), want.float(), atol=2e-2, rtol=2e-2)
+
+    @skipIfRocm
+    @unittest.skipUnless(SM100OrLater, "large varlen head dimensions require SM100")
+    @parametrize(
+        "qk_dim,value_dim,requires_backward,supported",
+        [
+            (192, 128, False, True),
+            (192, 192, False, True),
+            (256, 128, False, True),
+            (256, 256, False, True),
+            (128, 256, False, False),
+            (192, 128, True, True),
+            (192, 192, True, False),
+            (256, 128, True, False),
+            (256, 256, True, False),
+        ],
+    )
+    def test_cudnn_varlen_large_head_dims(
+        self, device, qk_dim, value_dim, requires_backward, supported
+    ):
+        """Select only large head-dimension combinations supported by cuDNN."""
+        _check_cudnn_varlen_supported(device)
+        cudnn_version = torch.backends.cudnn.version() or 0
+        required_version = 91900 if requires_backward else 92400
+        is_supported = supported and cudnn_version >= required_version
+        torch.manual_seed(42)
+        seq_len, num_heads = 256, 2
+        q = torch.randn(
+            seq_len, num_heads, qk_dim, device=device, dtype=torch.bfloat16
+        ).requires_grad_(requires_backward)
+        k = torch.randn_like(q, requires_grad=requires_backward)
+        v = torch.randn(
+            seq_len, num_heads, value_dim, device=device, dtype=torch.bfloat16
+        ).requires_grad_(requires_backward)
+        cu_seq = torch.tensor([0, seq_len], device=device, dtype=torch.int32)
+
+        q_ref, k_ref, v_ref = (
+            tensor.detach().double().requires_grad_(requires_backward)
+            for tensor in (q, k, v)
+        )
+        scores = torch.einsum("thd,shd->hts", q_ref, k_ref) / math.sqrt(qk_dim)
+        expected = torch.einsum("hts,shd->thd", scores.softmax(-1), v_ref)
+
+        if not is_supported:
+            with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+                with self.assertRaisesRegex(
+                    RuntimeError, "unsupported for cuDNN varlen"
+                ):
+                    varlen_attn(q, k, v, cu_seq, cu_seq, seq_len, seq_len)
+                if requires_backward and cudnn_version >= 92400:
+                    with torch.no_grad():
+                        out = varlen_attn(q, k, v, cu_seq, cu_seq, seq_len, seq_len)
+                    self.assertEqual(
+                        out.float(), expected.float(), atol=2e-2, rtol=2e-2
+                    )
+            return
+
+        grad_out = torch.randn_like(v)
+        if requires_backward:
+            expected_grads = torch.autograd.grad(
+                expected, (q_ref, k_ref, v_ref), grad_out.double()
+            )
+
+        with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+            out = varlen_attn(q, k, v, cu_seq, cu_seq, seq_len, seq_len)
+            self.assertEqual(out.float(), expected.float(), atol=2e-2, rtol=2e-2)
+            if requires_backward:
+                grads = torch.autograd.grad(out, (q, k, v), grad_out)
+                for grad, expected_grad in zip(grads, expected_grads):
+                    self.assertEqual(
+                        grad.float(), expected_grad.float(), atol=2e-2, rtol=2e-2
+                    )
+
+    @skipIfRocm
+    def test_cudnn_varlen_key_head_dim_mismatch_raises(self, device):
+        """A mismatched key head dim must raise instead of overreading K."""
+        _check_cudnn_varlen_supported(device)
+        seq_len, num_heads = 256, 2
+        q = torch.randn(seq_len, num_heads, 64, device=device, dtype=torch.bfloat16)
+        k = torch.randn(seq_len, num_heads, 32, device=device, dtype=torch.bfloat16)
+        v = torch.randn(seq_len, num_heads, 64, device=device, dtype=torch.bfloat16)
+        cu_seq = torch.tensor([0, seq_len], device=device, dtype=torch.int32)
+        with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+            with self.assertRaisesRegex(
+                RuntimeError, "key head dimension to match query"
+            ):
+                varlen_attn(q, k, v, cu_seq, cu_seq, seq_len, seq_len)
+
+    @skipIfRocm
+    def test_cudnn_varlen_empty_batch(self, device):
+        """Zero-token batches return well-formed empties, matching Flash."""
+        _check_cudnn_varlen_supported(device)
+        num_heads, head_dim = 2, 64
+        q = torch.randn(0, num_heads, head_dim, device=device, dtype=torch.bfloat16)
+        k, v = torch.randn_like(q), torch.randn_like(q)
+        cu_seq = torch.tensor([0, 0], device=device, dtype=torch.int32)
+        with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+            out, lse = varlen_attn(
+                q, k, v, cu_seq, cu_seq, 256, 256, return_aux=AuxRequest(lse=True)
+            )
+        self.assertEqual(out.shape, torch.Size([0, num_heads, head_dim]))
+        self.assertEqual(lse.shape, torch.Size([num_heads, 0]))
+
+    @skipIfRocm
+    def test_cudnn_varlen_empty_kv(self, device):
+        """Empty KV returns constant outputs and zero gradients."""
+        _check_cudnn_varlen_supported(device)
+        num_heads, head_dim = 2, 64
+        q = torch.randn(
+            256, num_heads, head_dim, device=device, dtype=torch.bfloat16
+        ).requires_grad_()
+        k = torch.randn(
+            0, num_heads, head_dim, device=device, dtype=torch.bfloat16
+        ).requires_grad_()
+        v = torch.randn_like(k, requires_grad=True)
+        cu_seq_q = torch.tensor([0, 256], device=device, dtype=torch.int32)
+        cu_seq_k = torch.tensor([0, 0], device=device, dtype=torch.int32)
+
+        with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+            out, lse = varlen_attn(
+                q,
+                k,
+                v,
+                cu_seq_q,
+                cu_seq_k,
+                256,
+                0,
+                return_aux=AuxRequest(lse=True),
+            )
+            grads = torch.autograd.grad(out, (q, k, v), torch.randn_like(out))
+
+        self.assertEqual(out, torch.zeros_like(out))
+        self.assertEqual(lse, torch.full_like(lse, -torch.inf))
+        for grad in grads:
+            self.assertEqual(grad, torch.zeros_like(grad))
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    def test_cudnn_varlen_compile_noncontiguous_query(self, device):
+        """The real and fake ops preserve the query's dimension order."""
+        _check_cudnn_varlen_supported(device)
+        torch.manual_seed(42)
+        seq_len, num_heads, head_dim = 256, 4, 64
+
+        def make():
+            # Head-major storage: strides (head_dim, seq_len * head_dim, 1).
+            return torch.randn(
+                num_heads, seq_len, head_dim, device=device, dtype=torch.bfloat16
+            ).permute(1, 0, 2)
+
+        q, k, v = make(), make(), make()
+        cu_seq = torch.tensor([0, seq_len], device=device, dtype=torch.int32)
+
+        def fn(q, k, v):
+            return varlen_attn(q, k, v, cu_seq, cu_seq, seq_len, seq_len)
+
+        with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+            eager = fn(q, k, v)
+            compiled = torch.compile(fn, fullgraph=True)(q, k, v)
+        # The real output matches the query's layout, like Flash and the fake.
+        self.assertEqual(eager.stride(), q.stride())
+        self.assertEqual(compiled, eager)
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize("compile", [False, True])
+    def test_sdpa_kernel_backend_selection(self, device, dtype, compile):
+        """Honor forced backends and preserve the forward choice for backward."""
+        torch.manual_seed(42)
+        seq_len = 256
+        num_heads, head_dim = 4, 64
+        cu_seq = torch.tensor([0, seq_len], device=device, dtype=torch.int32)
+        tensors = [
+            torch.randn(seq_len, num_heads, head_dim, device=device, dtype=dtype)
+            for _ in range(3)
+        ]
+        grad_out = torch.randn_like(tensors[0])
+        _check_cudnn_varlen_supported(device)
+
+        for backend, backward_backend in (
+            (SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION),
+            (SDPBackend.CUDNN_ATTENTION, SDPBackend.FLASH_ATTENTION),
+        ):
+            with (
+                patch.object(
+                    torch.ops.aten,
+                    "_cudnn_attention_forward",
+                    wraps=torch.ops.aten._cudnn_attention_forward,
+                ) as cudnn_forward,
+                patch.object(
+                    torch.ops.aten,
+                    "_cudnn_attention_backward",
+                    wraps=torch.ops.aten._cudnn_attention_backward,
+                ) as cudnn_backward,
+            ):
+                q, k, v = [
+                    tensor.detach().clone().requires_grad_() for tensor in tensors
+                ]
+                if compile:
+                    # SDP enablement is captured when the graph is traced.
+                    torch._dynamo.reset()
+                attn = (
+                    torch.compile(varlen_attn, backend="eager", fullgraph=True)
+                    if compile
+                    else varlen_attn
+                )
+                with sdpa_kernel(backend):
+                    out = attn(
+                        q,
+                        k,
+                        v,
+                        cu_seq,
+                        cu_seq,
+                        seq_len,
+                        seq_len,
+                        window_size=(-1, 0),
+                    )
+                with sdpa_kernel(backward_backend):
+                    torch.autograd.grad(out, (q, k, v), grad_out)
+                expected_calls = int(backend == SDPBackend.CUDNN_ATTENTION)
+                self.assertEqual(cudnn_forward.call_count, expected_calls)
+                self.assertEqual(cudnn_backward.call_count, expected_calls)
+
+    @parametrize("compile", [False, True])
+    def test_sdpa_kernel_backend_priority(self, device, compile):
+        q, k, v, cu_seq = _make_causal_varlen_inputs(device)
+        args = (q, k, v, cu_seq, cu_seq, q.size(0), [-1, 0])
+
+        with patch.object(varlen_attention, "_should_use_cudnn", return_value=True):
+            for backend_order in (
+                [SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION],
+                [SDPBackend.CUDNN_ATTENTION, SDPBackend.FLASH_ATTENTION],
+            ):
+                with sdpa_kernel(backend_order, set_priority=True):
+                    if compile:
+                        torch._dynamo.reset()
+                        get_priority = torch.compile(
+                            lambda x: x + varlen_attention._get_sdp_priority_order()[0],
+                            backend="eager",
+                            fullgraph=True,
+                        )
+                        priority = get_priority(torch.zeros((), device=device)).item()
+                        self.assertEqual(priority, backend_order[0].value)
+                    backend = varlen_attention._select_backend(*args)
+                self.assertEqual(backend, backend_order[0].value)
+            self.assertEqual(
+                varlen_attention._select_backend(*args),
+                SDPBackend.CUDNN_ATTENTION.value,
+            )
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    def test_sdpa_kernel_backend_errors(self, device):
+        """Report forced-backend constraints instead of silently falling back."""
+        seq_len = 256
+        q = torch.randn(seq_len, 4, 64, device=device, dtype=torch.bfloat16)
+        k = torch.randn_like(q)
+        v = torch.randn_like(q)
+        cu_seq = torch.tensor([0, seq_len], device=device, dtype=torch.int32)
+
+        short_seq = torch.tensor([0, 128], device=device, dtype=torch.int32)
+        with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+            with self.assertRaises(RuntimeError) as error:
+                varlen_attn(
+                    q[:128],
+                    k[:128],
+                    v[:128],
+                    short_seq,
+                    short_seq,
+                    128,
+                    128,
+                    num_splits=1,
+                )
+        self.assertIn("max_q must", str(error.exception))
+        self.assertIn("num_splits", str(error.exception))
+
+        with (
+            sdpa_kernel(SDPBackend.CUDNN_ATTENTION),
+            self.assertRaisesRegex(RuntimeError, "same cu_seq tensor"),
+        ):
+            varlen_attn(
+                q,
+                k,
+                v,
+                cu_seq,
+                cu_seq.clone(),
+                seq_len,
+                seq_len,
+                window_size=(-1, 0),
+            )
+
+        with (
+            sdpa_kernel(SDPBackend.MATH),
+            self.assertRaisesRegex(RuntimeError, "No viable backend"),
+        ):
+            varlen_attn(q, k, v, cu_seq, cu_seq, seq_len, seq_len)
+
+        with (
+            sdpa_kernel(SDPBackend.CUDNN_ATTENTION),
+            self.assertRaisesRegex(RuntimeError, "only supports.*FLASH_ATTENTION"),
+        ):
+            varlen_attn_out(
+                torch.empty_like(q), q, k, v, cu_seq, cu_seq, seq_len, seq_len
+            )
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179968")
     @unittest.skipIf(
@@ -856,8 +1457,10 @@ class TestVarlenAttention(NNTestCase):
         self, device, dtype, num_splits, window_size, backend, sdpa_backend=None
     ):
         use_cudnn = backend == "cudnn"
-        if use_cudnn and (window_size != (-1, -1) or num_splits is not None):
-            self.skipTest("cuDNN does not support window_size or num_splits")
+        if use_cudnn and (
+            window_size not in ((-1, -1), (-1, 0)) or num_splits is not None
+        ):
+            self.skipTest("cuDNN does not support this window_size or num_splits")
         if TEST_WITH_ROCM:
             if num_splits is not None:
                 self.skipTest("num_splits is not supported on ROCm")
@@ -1180,17 +1783,8 @@ class TestVarlenAttention(NNTestCase):
         ).view(batch_size, max_pages_per_seq)
         seqused_k = torch.tensor(actual_kv_lens, device=device, dtype=torch.int32)
 
-        idx = (
-            block_table.long()
-            .view(-1, 1, 1, 1)
-            .expand(-1, page_size, num_heads, head_dim)
-        )
-        k_gathered = k_pages.gather(0, idx).view(
-            batch_size, cache_size, num_heads, head_dim
-        )
-        v_gathered = v_pages.gather(0, idx).view(
-            batch_size, cache_size, num_heads, head_dim
-        )
+        k_gathered = gather_paged_cache(k_pages, block_table)
+        v_gathered = gather_paged_cache(v_pages, block_table)
         k_seqs = [k_gathered[i, : actual_kv_lens[i]] for i in range(batch_size)]
         v_seqs = [v_gathered[i, : actual_kv_lens[i]] for i in range(batch_size)]
 
@@ -1306,6 +1900,412 @@ class TestVarlenAttention(NNTestCase):
                 )
             self.assertTrue(torch.equal(paged_num_splits, ref_num_splits))
 
+    @skipIfRocm
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize(
+        "paged,page_size,strided_table",
+        [
+            (False, 64, False),
+            (True, 32, False),
+            (True, 64, False),
+            (True, 128, True),
+            (True, 256, False),
+        ],
+    )
+    def test_cudnn_kv_cache(self, device, dtype, paged, page_size, strided_table):
+        """Test cuDNN seqused_k with packed and paged KV caches."""
+        torch.manual_seed(42)
+        actual_kv_lens = [200, 128, 7, 300]
+        batch_size = len(actual_kv_lens)
+        num_heads, head_dim = 8, 64
+        q_seqs = [
+            torch.randn(n, num_heads, head_dim, device=device, dtype=dtype)
+            for n in [192, 256, 192, 129]
+        ]
+        q_packed, cu_seq_q, max_q = pack_sequences(q_seqs, device)
+
+        pages_per_seq = math.ceil(max(actual_kv_lens) / page_size)
+        cache_size = pages_per_seq * page_size
+        if paged:
+            total_pages = batch_size * pages_per_seq
+            k_cache = torch.randn(
+                total_pages, page_size, num_heads, head_dim, device=device, dtype=dtype
+            )
+            v_cache = torch.randn_like(k_cache)
+            block_table = torch.randperm(
+                total_pages, device=device, dtype=torch.int32
+            ).view(batch_size, pages_per_seq)
+            if strided_table:
+                padded_table = torch.empty(
+                    batch_size, pages_per_seq + 1, device=device, dtype=torch.int32
+                )
+                padded_table[:, :pages_per_seq].copy_(block_table)
+                block_table = padded_table[:, :pages_per_seq]
+            k_logical = gather_paged_cache(k_cache, block_table)
+            v_logical = gather_paged_cache(v_cache, block_table)
+            cu_seq_k = None
+        else:
+            k_logical = torch.randn(
+                batch_size, cache_size, num_heads, head_dim, device=device, dtype=dtype
+            )
+            v_logical = torch.randn_like(k_logical)
+            k_cache, v_cache = k_logical.flatten(0, 1), v_logical.flatten(0, 1)
+            block_table = None
+            cu_seq_k = torch.arange(
+                0,
+                (batch_size + 1) * cache_size,
+                cache_size,
+                device=device,
+                dtype=torch.int32,
+            )
+
+        seqused_k = torch.tensor(actual_kv_lens, device=device, dtype=torch.int32)
+        cudnn_forward = patch.object(
+            torch.ops.aten,
+            "_cudnn_attention_forward",
+            wraps=torch.ops.aten._cudnn_attention_forward,
+        )
+        with (
+            _use_cudnn_varlen(True, device),
+            cudnn_forward as spy,
+            torch.no_grad(),
+        ):
+            output = varlen_attn(
+                q_packed,
+                k_cache,
+                v_cache,
+                cu_seq_q,
+                cu_seq_k,
+                max_q,
+                cache_size,
+                seqused_k=seqused_k,
+                block_table=block_table,
+            )
+        self.assertEqual(spy.call_count, 1, "expected the cuDNN backend to be used")
+
+        scale = 1.0 / math.sqrt(head_dim)
+        expected = torch.empty_like(q_packed)
+        for i, kv_len in enumerate(actual_kv_lens):
+            lo, hi = int(cu_seq_q[i]), int(cu_seq_q[i + 1])
+            q_i = q_packed[lo:hi].float()
+            k_i, v_i = k_logical[i, :kv_len].float(), v_logical[i, :kv_len].float()
+            attn = (torch.einsum("qhd,khd->hqk", q_i, k_i) * scale).softmax(-1)
+            expected[lo:hi] = torch.einsum("hqk,khd->qhd", attn, v_i).to(dtype)
+        self.assertEqual(output.float(), expected.float(), atol=2e-2, rtol=2e-2)
+
+    @skipIfRocm
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    def test_cudnn_varlen_lse(self, device, dtype):
+        """cuDNN returns log-sum-exp in (num_heads, total_q) layout."""
+        torch.manual_seed(42)
+        num_heads, head_dim = 4, 64
+        q_lens, kv_lens = [192, 256, 192], [256, 300, 192]
+        q_seqs = [
+            torch.randn(n, num_heads, head_dim, device=device, dtype=dtype)
+            for n in q_lens
+        ]
+        k_seqs = [
+            torch.randn(n, num_heads, head_dim, device=device, dtype=dtype)
+            for n in kv_lens
+        ]
+        q, cu_seq_q, max_q = pack_sequences(q_seqs, device)
+        k, cu_seq_k, max_k = pack_sequences(k_seqs, device)
+
+        cudnn_forward = patch.object(
+            torch.ops.aten,
+            "_cudnn_attention_forward",
+            wraps=torch.ops.aten._cudnn_attention_forward,
+        )
+        with (
+            _use_cudnn_varlen(True, device),
+            cudnn_forward as spy,
+            torch.no_grad(),
+        ):
+            _, lse = varlen_attn(
+                q,
+                k,
+                torch.randn_like(k),
+                cu_seq_q,
+                cu_seq_k,
+                max_q,
+                max_k,
+                return_aux=AuxRequest(lse=True),
+            )
+
+        self.assertEqual(spy.call_count, 1, "expected the cuDNN backend to be used")
+        self.assertEqual(lse.shape, (num_heads, q.size(0)))
+        scale = 1.0 / math.sqrt(head_dim)
+        expected = torch.empty_like(lse)
+        for i, k_i in enumerate(k_seqs):
+            lo, hi = int(cu_seq_q[i]), int(cu_seq_q[i + 1])
+            scores = torch.einsum("qhd,khd->hqk", q[lo:hi].float(), k_i.float())
+            expected[:, lo:hi] = (scores * scale).logsumexp(-1)
+        self.assertEqual(lse, expected, atol=2e-2, rtol=2e-2)
+
+    @skipIfRocm
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    def test_cudnn_varlen_cached_graph_grad_out_layout(self, device, dtype):
+        """Key cached backward graphs by grad_output layout."""
+        torch.manual_seed(42)
+        num_heads, head_dim = 4, 64
+        q_lens = [192, 256]
+        total, max_len = sum(q_lens), max(q_lens)
+        cu_seq_q = torch.tensor([0, q_lens[0], total], device=device, dtype=torch.int32)
+        tensors = [
+            torch.randn(
+                total, num_heads, head_dim, device=device, dtype=dtype
+            ).requires_grad_()
+            for _ in range(3)
+        ]
+        q, k, v = tensors
+
+        def grads(grad_out, use_cudnn):
+            with _use_cudnn_varlen(use_cudnn, device):
+                out = varlen_attn(q, k, v, cu_seq_q, cu_seq_q, max_len, max_len)
+                return torch.autograd.grad(out, tensors, grad_out)
+
+        contiguous = torch.randn(total, num_heads, head_dim, device=device, dtype=dtype)
+        # Same shape and innermost stride 1, but a wider row stride.
+        padded = torch.randn(
+            total, num_heads, head_dim * 2, device=device, dtype=dtype
+        )[..., :head_dim]
+        self.assertEqual(padded.stride(-1), 1)
+        self.assertNotEqual(padded.stride(-2), contiguous.stride(-2))
+        expanded = torch.randn(
+            total, num_heads, 1, device=device, dtype=dtype
+        ).expand_as(contiguous)
+        self.assertEqual(expanded.stride(-1), 0)
+        storage = torch.empty(contiguous.numel() + 1, device=device, dtype=dtype)
+        misaligned = torch.as_strided(
+            storage, contiguous.shape, contiguous.stride(), storage_offset=1
+        )
+        misaligned.copy_(contiguous)
+        self.assertEqual(misaligned.stride(), contiguous.stride())
+        self.assertNotEqual(misaligned.data_ptr() % 16, 0)
+
+        cudnn_backward = patch.object(
+            torch.ops.aten,
+            "_cudnn_attention_backward",
+            wraps=torch.ops.aten._cudnn_attention_backward,
+        )
+        # Prime the cache before exercising alternate strides and alignment.
+        with cudnn_backward as spy:
+            for grad_out in (contiguous, padded, expanded, misaligned):
+                expected = grads(grad_out.clone(), use_cudnn=False)
+                actual = grads(grad_out, use_cudnn=True)
+                for got, want in zip(actual, expected):
+                    self.assertEqual(got.float(), want.float(), atol=2e-2, rtol=2e-2)
+        self.assertEqual(spy.call_count, 4, "expected the cuDNN backend to be used")
+
+    @skipIfRocm
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    def test_cudnn_varlen_cached_graph_aux_layouts(self, device, dtype):
+        """Key cached backward graphs by output and LSE layouts."""
+        _check_cudnn_varlen_supported(device)
+        torch.manual_seed(42)
+        total, num_heads, head_dim, max_len = 384, 4, 64, 192
+        cu_seq = torch.tensor([0, max_len, total], device=device, dtype=torch.int32)
+        q, k, v = (
+            torch.randn(total, num_heads, head_dim, device=device, dtype=dtype)
+            for _ in range(3)
+        )
+        grad_out = torch.randn_like(q)
+
+        with torch.no_grad():
+            result = torch.ops.aten._cudnn_attention_forward(
+                q,
+                k,
+                v,
+                None,
+                cu_seq,
+                cu_seq,
+                max_len,
+                max_len,
+                True,
+                0.0,
+                False,
+                False,
+            )
+        out, lse, seed, offset = result[0], result[1], result[6], result[7]
+
+        def backward(output, output_grad, stats):
+            return torch.ops.aten._cudnn_attention_backward(
+                output_grad,
+                q,
+                k,
+                v,
+                output,
+                stats,
+                seed,
+                offset,
+                None,
+                cu_seq,
+                cu_seq,
+                max_len,
+                max_len,
+                0.0,
+                False,
+            )
+
+        # Prime the cache with contiguous auxiliary tensors.
+        expected = backward(out, grad_out, lse)
+        out_permuted = (
+            torch.empty(num_heads, total, head_dim, device=device, dtype=dtype)
+            .permute(1, 0, 2)
+            .copy_(out)
+        )
+        grad_permuted = (
+            torch.empty(num_heads, total, head_dim, device=device, dtype=dtype)
+            .permute(1, 0, 2)
+            .copy_(grad_out)
+        )
+        out_padded = torch.empty(
+            total, num_heads, 2 * head_dim, device=device, dtype=dtype
+        )[..., :head_dim]
+        out_padded.copy_(out)
+        lse_padded = torch.empty(num_heads, 2 * total, device=device, dtype=lse.dtype)[
+            :, :total
+        ]
+        lse_padded.copy_(lse)
+
+        cases = [
+            (out_permuted, grad_permuted, lse),
+            (out_padded, grad_out, lse),
+            (out, grad_out, lse_padded),
+        ]
+        for output, output_grad, stats in cases:
+            actual = backward(output, output_grad, stats)
+            for got, want in zip(actual, expected):
+                self.assertEqual(got.float(), want.float(), atol=2e-2, rtol=2e-2)
+
+    @skipIfRocm
+    def test_cudnn_kv_cache_validation(self, device):
+        """Validate cuDNN KV-cache metadata and inference-only inputs."""
+        dtype = torch.bfloat16
+        batch_size, num_heads, head_dim, page_size = 2, 8, 64, 64
+        pages_per_seq = 4
+        cache_size = pages_per_seq * page_size
+
+        q = torch.randn(2 * 192, num_heads, head_dim, device=device, dtype=dtype)
+        cu_seq_q = torch.tensor([0, 192, 384], device=device, dtype=torch.int32)
+        k = torch.randn(
+            batch_size * pages_per_seq,
+            page_size,
+            num_heads,
+            head_dim,
+            device=device,
+            dtype=dtype,
+        )
+        v = torch.randn_like(k)
+        block_table = torch.arange(
+            batch_size * pages_per_seq, device=device, dtype=torch.int32
+        ).view(batch_size, pages_per_seq)
+        seqused_k = torch.tensor([200, 128], device=device, dtype=torch.int32)
+
+        def run(query=q, key=k, value=v, **overrides):
+            kwargs = dict(seqused_k=seqused_k, block_table=block_table)
+            kwargs.update(overrides)
+            with _use_cudnn_varlen(True, device), torch.no_grad():
+                return varlen_attn(
+                    query, key, value, cu_seq_q, None, 192, cache_size, **kwargs
+                )
+
+        bad_inputs = [
+            ("seqused_k must have shape", {"seqused_k": seqused_k[:1]}),
+            ("seqused_k must be on the same", {"seqused_k": seqused_k.cpu()}),
+            ("seqused_k must have dtype int32", {"seqused_k": seqused_k.long()}),
+            ("block_table must have shape", {"block_table": block_table[:1]}),
+            ("block_table must have dtype int32", {"block_table": block_table.long()}),
+            ("block_table must be on the same", {"block_table": block_table.cpu()}),
+        ]
+        for message, override in bad_inputs:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(RuntimeError, message):
+                    run(**override)
+
+        value_head_dim = 32
+        v_narrow = torch.randn(
+            *v.shape[:-1], value_head_dim, device=device, dtype=dtype
+        )
+        output = run(value=v_narrow)
+        self.assertEqual(output.shape, (q.size(0), num_heads, value_head_dim))
+
+        k_logical = gather_paged_cache(k, block_table)
+        v_logical = gather_paged_cache(v_narrow, block_table)
+        expected = torch.empty_like(output)
+        scale = 1.0 / math.sqrt(head_dim)
+        for i, kv_len in enumerate((200, 128)):
+            lo, hi = int(cu_seq_q[i]), int(cu_seq_q[i + 1])
+            q_i = q[lo:hi].float()
+            k_i = k_logical[i, :kv_len].float()
+            v_i = v_logical[i, :kv_len].float()
+            attn = (torch.einsum("qhd,khd->hqk", q_i, k_i) * scale).softmax(-1)
+            expected[lo:hi] = torch.einsum("hqk,khd->qhd", attn, v_i).to(dtype)
+        self.assertEqual(output.float(), expected.float(), atol=2e-2, rtol=2e-2)
+
+        with self.assertRaisesRegex(RuntimeError, "head dimension must match query"):
+            run(key=k[..., :32])
+
+        mismatched_values = [
+            ("page count", v[:-1]),
+            ("page size", v[:, :-1]),
+            ("number of heads", v[:, :, :-1]),
+        ]
+        for axis, bad_value in mismatched_values:
+            with self.subTest(axis=axis):
+                with self.assertRaisesRegex(RuntimeError, "matching page count"):
+                    run(value=bad_value)
+
+        with self.assertRaisesRegex(RuntimeError, "same dtype"):
+            run(key=k.half(), value=v.half())
+
+        aten_kwargs = dict(
+            query=q,
+            key=k,
+            value=v,
+            attn_bias=None,
+            cum_seq_q=cu_seq_q,
+            cum_seq_k=None,
+            max_q=192,
+            max_k=cache_size,
+            compute_log_sumexp=True,
+            dropout_p=0.0,
+            is_causal=False,
+            return_debug_mask=False,
+            seqused_k=seqused_k,
+            block_table=block_table,
+        )
+        with self.assertRaisesRegex(RuntimeError, "only supports float16"):
+            torch.ops.aten._cudnn_attention_forward(
+                **(aten_kwargs | {"query": q.float()})
+            )
+
+        storage = torch.empty(k.numel() + 1, device=device, dtype=dtype)
+        misaligned_k = torch.as_strided(storage, k.shape, k.stride(), storage_offset=1)
+        misaligned_k.copy_(k)
+        with self.assertRaisesRegex(RuntimeError, "16-byte-aligned"):
+            run(key=misaligned_k)
+
+        # Exercise both the custom-op and direct-aten autograd guards.
+        q_grad = q.clone().requires_grad_()
+        with _use_cudnn_varlen(True, device):
+            with self.assertRaisesRegex(RuntimeError, "inference-only parameter"):
+                varlen_attn(
+                    q_grad,
+                    k,
+                    v,
+                    cu_seq_q,
+                    None,
+                    192,
+                    cache_size,
+                    seqused_k=seqused_k,
+                    block_table=block_table,
+                )
+        with self.assertRaisesRegex(
+            RuntimeError, "seqused_k and block_table are inference-only"
+        ):
+            torch.ops.aten._cudnn_attention_forward(**(aten_kwargs | {"query": q_grad}))
+
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
@@ -1357,9 +2357,7 @@ class TestVarlenAttention(NNTestCase):
             self.assertEqual(out_buf, out)
 
 
-device_types = ("cuda",)
-
-instantiate_device_type_tests(TestVarlenAttention, globals(), only_for=device_types)
+instantiate_device_type_tests(TestVarlenAttention, globals(), only_for=("cuda",))
 
 if __name__ == "__main__":
     run_tests()

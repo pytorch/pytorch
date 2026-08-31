@@ -212,6 +212,19 @@ static Tensor& pad_out_template(Tensor& output,
     grad_output = grad_output_.contiguous();
   }
 
+  // MPSGraph pads a rank > 4 operand incorrectly once the output inner extent is large
+  // (https://github.com/pytorch/pytorch/issues/194922). Only the trailing padding_size / 2 dims
+  // are padded, so fold the leading dims into one batch dim.
+  const bool needs_flatten = ndims > 4;
+  if (needs_flatten) {
+    const int64_t batch_end = ndims - padding_size / 2 - 1;
+    input = input.flatten(0, batch_end);
+    if (is_backward_pass) {
+      grad_output = grad_output.flatten(0, batch_end);
+    }
+    ndims = input.dim();
+  }
+
   const uint32_t dims_mask = (1U << ndims) - 1;
   uint32_t startMask = dims_mask, endMask = dims_mask;
   std::vector<NSNumber*> leftPadVec(ndims, @(0));
@@ -312,6 +325,11 @@ static Tensor& pad_out_template(Tensor& output,
           newCachedGraph->gradInputTensor_ = padGradTensor;
         }
       }
+      if (needs_flatten) {
+        newCachedGraph->gradInputTensor_ = [mpsGraph reshapeTensor:newCachedGraph->gradInputTensor_
+                                                         withShape:getMPSShape(output)
+                                                              name:nil];
+      }
     });
 
     Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input, nullptr, true, dataType);
@@ -368,13 +386,13 @@ static void replication_pad1d_kernel_mps(const Tensor& input_, IntArrayRef paddi
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      getMPSProfiler().beginProfileKernel(pso, "replication_pad1d_forward", {input, output_c});
+      getMPSProfiler().beginProfileKernel(pso, "replication_pad1d_forward", {input, output_c}, stream);
       auto encoder = stream->commandEncoder();
       [encoder setComputePipelineState:pso];
       mtl_setArgs(encoder, input, output_c, sizes_pad);
       [encoder dispatchThreads:MTLSizeMake(output_W, nplane, nbatch)
           threadsPerThreadgroup:replication_pad1d_threadgroup(pso, output_W, nplane, nbatch)];
-      getMPSProfiler().endProfileKernel(pso);
+      getMPSProfiler().endProfileKernel(pso, stream);
     }
   });
   if (output_needs_copy) {
@@ -412,13 +430,13 @@ static void replication_pad1d_backward_kernel_mps(const Tensor& grad_output_,
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      getMPSProfiler().beginProfileKernel(pso, "replication_pad1d_backward", {grad_output, grad_input_c});
+      getMPSProfiler().beginProfileKernel(pso, "replication_pad1d_backward", {grad_output, grad_input_c}, stream);
       auto encoder = stream->commandEncoder();
       [encoder setComputePipelineState:pso];
       mtl_setArgs(encoder, grad_output, grad_input_c, sizes_pad);
       [encoder dispatchThreads:MTLSizeMake(input_W, nplane, nbatch)
           threadsPerThreadgroup:replication_pad1d_threadgroup(pso, input_W, nplane, nbatch)];
-      getMPSProfiler().endProfileKernel(pso);
+      getMPSProfiler().endProfileKernel(pso, stream);
     }
   });
   if (grad_input_needs_copy) {

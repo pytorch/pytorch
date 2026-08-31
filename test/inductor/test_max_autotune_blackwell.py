@@ -732,6 +732,31 @@ class TestBlackwellExhaustiveConfigs(TestCase):
         )
 
 
+class TestBlackwellAutoWSConstraints(TestCase):
+    def test_two_ctas_allows_all_pipeline_depths(self):
+        kwargs = {
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "EPILOGUE_SUBTILE": 2,
+            "DATA_PARTITION_FACTOR": 1,
+            "TWO_CTAS": True,
+        }
+        with (
+            config.patch({"triton.enable_template_tma_store": True}),
+            unittest.mock.patch(
+                "torch._inductor.heuristics.template.triton.has_two_ctas",
+                return_value=True,
+            ),
+        ):
+            for num_stages in range(2, 7):
+                kwargs["num_stages"] = num_stages
+                self.assertTrue(
+                    CUDABlackwellPersistentTMATemplateConfigHeuristic._autows_constraints_ok(
+                        kwargs
+                    )
+                )
+
+
 class TestBlackwellAutoWSConfigs(TestCase):
     """autoWS config selection for the Blackwell persistent-TMA template."""
 
@@ -763,6 +788,15 @@ class TestBlackwellAutoWSConfigs(TestCase):
         for cfg in heuristic.mm_configs:
             self.assertIsInstance(cfg, BlackwellGPUGemmConfig)
             self.assertTrue(cfg.use_meta_ws)
+        expected_stages = [
+            cfg.num_stages for cfg in heuristic.blackwell_persistent_mm_configs
+        ]
+        two_cta_stages = [
+            cfg.num_stages
+            for cfg in heuristic.mm_configs
+            if cfg.two_ctas and cfg.data_partition_factor == 1
+        ]
+        self.assertEqual(two_cta_stages, expected_stages)
 
     def tearDown(self):
         super().tearDown()
