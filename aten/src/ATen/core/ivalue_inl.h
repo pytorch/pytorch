@@ -353,13 +353,14 @@ struct TORCH_API TupleElements {
   // The implementation of TupleElements can be simplified if we can
   // use variant<vector<IValue>, inplace_vector<IValue, 3>> (C++26).
   // The default ctor, dtor, and assignment operators should suffice.
+  static constexpr size_t kInlineCapacity = 3;
   union {
     std::vector<IValue> elementsVector_;
     // Don't want to declare a std::array because the convenient
     // iteration and size members are a footgun in this case -- the
     // actual size of the array may be smaller than 3!
     // NOLINTNEXTLINE(*c-arrays*)
-    IValue elementsInline_[3];
+    IValue elementsInline_[kInlineCapacity];
   };
 
  public:
@@ -433,7 +434,7 @@ struct TORCH_API TupleElements {
     if (inlineSize_ == 0 && rhs.inlineSize_ == 0) {
       elementsVector_ = rhs.elementsVector_;
     } else if (inlineSize_ == 0 && rhs.inlineSize_ > 0) {
-      IValue tmp[3];
+      IValue tmp[kInlineCapacity];
       std::copy_n(rhs.elementsInline_, rhs.inlineSize_, tmp);
       std::destroy_at(&elementsVector_);
       std::uninitialized_move_n(tmp, rhs.inlineSize_, elementsInline_);
