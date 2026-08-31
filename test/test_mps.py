@@ -18361,6 +18361,25 @@ class TestGraphCapture(TestCaseMPS):
             g.replay()
         g.reset()  # idempotent
 
+    def test_dropping_graph_mid_recording_leaves_stream_usable(self):
+        # A graph dropped without ever calling capture_end() must still clear the
+        # stream's active capture, or every later capture on it would raise
+        # "already in progress". This is what captureEndIfRecording() is for.
+        x = torch.ones(4, 4, device="mps")
+        g = torch.mps.MetalGraph()
+        g.capture_begin()
+        _ = x @ x
+        del g  # destructor runs while still recording
+        self.assertFalse(torch.mps.is_current_stream_capturing())
+
+        g2 = torch.mps.MetalGraph()
+        with torch.mps.metal_graph(g2):
+            out = x @ x
+        out.fill_(float("nan"))
+        g2.replay()
+        self.assertEqual(out[0, 0].item(), 4.0)
+        g2.reset()
+
     def test_dropping_graphs_without_reset_leaves_stream_usable(self):
         # Graphs are released by their destructor, not by an explicit reset(). If
         # that release were skipped or partial the stream would accumulate live
@@ -18429,6 +18448,7 @@ class TestGraphCapture(TestCaseMPS):
         squatters = [torch.full(shape, 9.0, device="mps") for _ in range(16)]
         self.assertNotIn(recorded_ptr, [t.data_ptr() for t in squatters])
 
+        out.fill_(float("nan"))  # so a no-op replay cannot pass
         g.replay()
         self.assertEqual(out, torch.full(shape, 2.0, device="mps"))
         g.reset()
@@ -18448,6 +18468,7 @@ class TestGraphCapture(TestCaseMPS):
         del idx
 
         squatters = [torch.full((4,), 63, dtype=torch.int64, device="mps") for _ in range(16)]
+        out.fill_(float("nan"))  # so a no-op replay cannot pass
         g.replay()
         self.assertEqual(out, expected)
         del squatters
@@ -18481,6 +18502,7 @@ class TestGraphCapture(TestCaseMPS):
             squatters.append(torch.full(shape, 9.0, device="mps"))
             if squatters[-1].data_ptr() == w_ptr:
                 break
+        mid.fill_(float("nan"))  # so a no-op replay cannot pass
         outer.replay()
         self.assertEqual(mid, expected)
         del squatters
@@ -18542,8 +18564,14 @@ class TestGraphCapture(TestCaseMPS):
         after_capture = model.weight.detach().clone()
         self.assertNotEqual(before[0, 0].item(), after_capture[0, 0].item())
 
+        # A replayed step must reproduce what a real step would have done next.
+        reference = model.weight.detach().clone()
+        opt.step()
+        expected = model.weight.detach().clone()
+        model.weight.data.copy_(reference)
+
         g.replay()
-        # The replayed step must move the weights again, not leave them frozen.
+        self.assertEqual(model.weight, expected, atol=1e-5, rtol=1e-5)
         self.assertNotEqual(after_capture[0, 0].item(), model.weight[0, 0].item())
         g.reset()
 
