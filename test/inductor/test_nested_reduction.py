@@ -215,7 +215,6 @@ def _mxfp6_preshuffled_quantize(x, shifted=False):
 
 
 def _float_to_mxfp6_e2m3(x):
-    # The op count is load-bearing: plain round/mask changes preshuffle fusion.
     sign = (x < 0).to(torch.int32)
     absolute = torch.clamp(torch.abs(x), max=7.5)
     subnormal_mantissa = torch.round(absolute * 8.0).to(torch.int32)
