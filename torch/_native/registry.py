@@ -228,7 +228,7 @@ _DISALLOWED_DISPATCH_KEYS: frozenset[str] = frozenset(
 # `_native` must never appear here: it holds the opaque `_native::<node_id>` ops
 # that carry the override impls, so a router installed there would route into
 # itself.
-_ALLOWED_LIB_SYMBOLS: frozenset[str] = frozenset({"aten", "torch_nn"})
+_ALLOWED_LIB_SYMBOLS: frozenset[str] = frozenset({"aten"})
 
 
 def _build_key_set(
@@ -474,7 +474,10 @@ def reenable_op_overrides(
 
     Args:
         enable_dsl_names: DSL names to re-enable
-        enable_op_symbols: Operation symbols to re-enable
+        enable_op_symbols: Operation symbols to re-enable. Matched as bare op
+            symbols against every namespace, so ``"scatter_add"`` re-enables
+            it wherever it is registered; a qualified ``"ns::op"`` string
+            matches nothing.
         enable_dispatch_keys: Dispatch keys to re-enable
 
     Note:
@@ -531,7 +534,10 @@ def deregister_op_overrides(
 
     Args:
         disable_dsl_names: DSL names to disable
-        disable_op_symbols: Operation symbols to disable
+        disable_op_symbols: Operation symbols to disable. Matched as bare op
+            symbols against every namespace, so ``"scatter_add"`` disables it
+            wherever it is registered; a qualified ``"ns::op"`` string matches
+            nothing.
         disable_dispatch_keys: Dispatch keys to disable
 
     Note:
@@ -572,7 +578,10 @@ def get_dsl_operations(dsl_name: str) -> list[str]:
         dsl_name: Name of the DSL to query.
 
     Returns:
-        Sorted list of operation names registered by the DSL.
+        Sorted list of operation names registered by the DSL. Bare op symbols,
+        collapsed across namespaces: an op registered under two namespaces
+        appears once, and the namespace it came from is not recoverable from
+        the result.
     """
     operations = set()
     for (_, op_symbol, _), nodes in _graphs.items():
