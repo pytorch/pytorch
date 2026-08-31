@@ -3,15 +3,9 @@
 #include <torch/csrc/Stream.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/cuda/Event.h>
-#include <torch/csrc/cuda/Module.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
-
-#include <c10/cuda/CUDAGuard.h>
-
-#include <cuda_runtime_api.h>
-#include <structmember.h>
 
 PyObject* THCPEventClass = nullptr;
 
@@ -266,12 +260,9 @@ void THCPEvent_init(PyObject* module) {
   Py_INCREF(THPEventClass);
   THCPEventType.tp_base = THPEventClass;
   THCPEventClass = (PyObject*)&THCPEventType;
-  if (PyType_Ready(&THCPEventType) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyType_Ready(&THCPEventType) >= 0);
   Py_INCREF(&THCPEventType);
-  if (PyModule_AddObject(module, "_CudaEventBase", (PyObject*)&THCPEventType) <
-      0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(
+      PyModule_AddObject(module, "_CudaEventBase", (PyObject*)&THCPEventType) >=
+      0);
 }

@@ -7,19 +7,20 @@
 #include <metal_stdlib>
 
 using namespace metal;
+#include <ATen/native/mps/kernels/Gemv.h>
+
 constant uint TILE_DIM = 16;
 
-template <typename T>
-inline c10::metal::opmath_t<T> matmul_inner(
-    constant T* mat1Data,
-    constant T* mat2Data,
+template <typename T1, typename T2, typename TA>
+inline TA matmul_inner(
+    constant T1* mat1Data,
+    constant T2* mat2Data,
     constant array<ulong2, 3>& strides,
     constant uint3& sizes,
-    threadgroup c10::metal::opmath_t<T> A_tile[TILE_DIM][TILE_DIM],
-    threadgroup c10::metal::opmath_t<T> B_tile[TILE_DIM][TILE_DIM],
+    threadgroup TA A_tile[TILE_DIM][TILE_DIM],
+    threadgroup TA B_tile[TILE_DIM][TILE_DIM],
     uint2 tid,
     uint2 thread_id) {
-  using TA = c10::metal::opmath_t<T>;
   TA sum = 0;
 
   uint numTiles = (sizes.y + TILE_DIM - 1) / TILE_DIM;
@@ -118,6 +119,25 @@ kernel void matmul(
   if (thread_id.y < sizes.x && thread_id.x < sizes.z) {
     outputData[thread_id.y * strides[2].x + thread_id.x * strides[2].y] =
         static_cast<T>(sum);
+  }
+}
+
+template <typename T>
+kernel void int_mm(
+    constant T* mat1Data [[buffer(0)]],
+    constant char* mat2Data [[buffer(1)]],
+    device int* outputData [[buffer(2)]],
+    constant array<ulong2, 3>& strides [[buffer(3)]],
+    constant uint3& sizes [[buffer(4)]],
+    uint2 tid [[thread_position_in_threadgroup]],
+    uint2 thread_id [[thread_position_in_grid]]) {
+  threadgroup int A_tile[TILE_DIM][TILE_DIM];
+  threadgroup int B_tile[TILE_DIM][TILE_DIM];
+
+  auto sum = matmul_inner(
+      mat1Data, mat2Data, strides, sizes, A_tile, B_tile, tid, thread_id);
+  if (thread_id.y < sizes.x && thread_id.x < sizes.z) {
+    outputData[thread_id.y * strides[2].x + thread_id.x * strides[2].y] = sum;
   }
 }
 
@@ -1310,10 +1330,57 @@ INSTANTIATE_SYRK_TRAILING(L, false, 32, 128, 4)
 //   transposeInPlaceLU        -> row-major factor to column-major LU output
 // Buffer slots: (0) A in/out, (1) pivots (1-based), (2) info, (3) dims{M,N},
 // (4) per-kernel params, (5) window descriptor, (6) streaming scratch.
+// The LU kernels are templated over the element type: float (sgetrf) and
+// float2/complex64 (cgetrf, host_name suffix _c64). Pivot magnitude is fabs
+// for real and cabs1 = |re| + |im| for complex (LAPACK icamax); the complex
+// elimination math routes through c10::metal::mul/div so the float path keeps
+// its exact fma instruction sequence. Plain LU is purely algebraic, so the
+// complex path uses NO conjugation anywhere.
+//
+// Type dispatch below uses `if IF_CONSTEXPR`, which lowers to a plain runtime
+// `if` on Metal 3 (see c10/metal/common.h), so both arms are parsed and must
+// type-check for every T. Where an arm is well-formed for only one element
+// type -- the reciprocal, the pivot magnitude, and the float4 vectorized
+// stores -- it lives in an overload instead of a branch.
+inline float luPivotMag(float v) {
+  return ::metal::fabs(v);
+}
+inline float luPivotMag(float2 v) {
+  // cabs1 = |re| + |im| (LAPACK icamax)
+  const float2 a = ::metal::precise::abs(v);
+  return a.x + a.y;
+}
+inline float luRecip(float v) {
+  return 1.0f / v;
+}
+inline float2 luRecip(float2 v) {
+  return c10::metal::div(float2(1.0f, 0.0f), v);
+}
+
+// 4-wide vectorized store. The complex overloads are never selected at run
+// time (the callers' vec4/aligned guards are false for complex), but they must
+// exist so the call type-checks when T is float2.
+inline void luStore4(device float* dst, thread const float* src) {
+  *(device float4*)dst = float4(src[0], src[1], src[2], src[3]);
+}
+inline void luStore4(device float2* dst, thread const float2* src) {
+  for (short i = 0; i < 4; i++) {
+    dst[i] = src[i];
+  }
+}
+inline void luStore4(device float* dst, threadgroup const float* src) {
+  *(device float4*)dst = float4(src[0], src[1], src[2], src[3]);
+}
+inline void luStore4(device float2* dst, threadgroup const float2* src) {
+  for (short i = 0; i < 4; i++) {
+    dst[i] = src[i];
+  }
+}
+
 // Unblocked 32-wide panel factor; each thread owns R rows, W = 32/R columns.
-template <short R, short W>
+template <typename T, short R, short W>
 kernel void factorPanelLU(
-    device float* A [[buffer(0)]],
+    device T* A [[buffer(0)]],
     device int* pivots [[buffer(1)]],
     device int* info [[buffer(2)]],
     constant uint2& dims [[buffer(3)]],
@@ -1331,27 +1398,33 @@ kernel void factorPanelLU(
   const uint d0 = params.x;
   const uint H = M - d0;
   const uint nb = min(uint(W), minMN - d0);
-  device float* Ab = A + ulong(bid.x) * M * N;
+  device T* Ab = A + ulong(bid.x) * M * N;
   device int* pv = pivots + ulong(bid.x) * minMN;
 
   if (d0 == 0 && tid == 0) {
     info[bid.x] = 0;
   }
 
-  threadgroup float pivBuf[W];
-  threadgroup float rowJBuf[W];
+  threadgroup T pivBuf[W];
+  threadgroup T rowJBuf[W];
   threadgroup float wval[32];
   threadgroup uint widx[32];
   threadgroup uint sPiv[1];
 
-  float row[R][W];
-  const bool vec4 = ((N % 4u) == 0) && (nb == W);
+  T row[R][W];
+  const bool vec4 =
+      !c10::metal::is_complex_v<T> && ((N % 4u) == 0) && (nb == W);
 #pragma unroll
   for (short r = 0; r < R; r++) {
     const uint lr = tid + uint(r) * G;
     if (lr < H) {
-      device const float* src = Ab + ulong(d0 + lr) * N + d0;
-      if (vec4) {
+      device const T* src = Ab + ulong(d0 + lr) * N + d0;
+      if IF_CONSTEXPR (c10::metal::is_complex_v<T>) {
+#pragma unroll
+        for (short c = 0; c < W; c++) {
+          row[r][c] = (uint(c) < nb) ? src[c] : T(0.0f);
+        }
+      } else if (vec4) {
 #pragma unroll
         for (short c = 0; c < W; c += 4) {
           const float4 v = *(device const float4*)(src + c);
@@ -1378,7 +1451,7 @@ kernel void factorPanelLU(
     for (short r = 0; r < R; r++) {
       const uint lr = tid + uint(r) * G;
       if (lr < H && lr >= j) {
-        const float v = fabs(row[r][j]);
+        const float v = luPivotMag(row[r][j]);
         if (v > bv) {
           bv = v;
           bi = lr;
@@ -1447,11 +1520,11 @@ kernel void factorPanelLU(
       }
     }
 
-    const float upiv = pivBuf[j];
-    if (upiv != 0.0f) {
-      const float rp = 1.0f / upiv;
+    const T upiv = pivBuf[j];
+    if (luPivotMag(upiv) != 0.0f) {
+      const T rp = luRecip(upiv);
       // batch the smem loads ahead of the fma burst (in-order pipe)
-      float uc[W];
+      T uc[W];
 #pragma unroll
       for (short c = 0; c < W; c++) {
         uc[c] = pivBuf[c];
@@ -1460,12 +1533,16 @@ kernel void factorPanelLU(
       for (short r = 0; r < R; r++) {
         const uint lr = tid + uint(r) * G;
         if (lr < H && lr > j) {
-          const float l = row[r][j] * rp;
+          const T l = c10::metal::mul(row[r][j], rp);
           row[r][j] = l;
 #pragma unroll
           for (short c = 0; c < W; c++) {
             if (uint(c) > j) {
-              row[r][c] = fma(-l, uc[c], row[r][c]);
+              if IF_CONSTEXPR (c10::metal::is_complex_v<T>) {
+                row[r][c] -= c10::metal::mul(l, uc[c]);
+              } else {
+                row[r][c] = fma(-l, uc[c], row[r][c]);
+              }
             }
           }
         }
@@ -1477,12 +1554,11 @@ kernel void factorPanelLU(
   for (short r = 0; r < R; r++) {
     const uint lr = tid + uint(r) * G;
     if (lr < H) {
-      device float* dst = Ab + ulong(d0 + lr) * N + d0;
+      device T* dst = Ab + ulong(d0 + lr) * N + d0;
       if (vec4) {
 #pragma unroll
         for (short c = 0; c < W; c += 4) {
-          *(device float4*)(dst + c) =
-              float4(row[r][c], row[r][c + 1], row[r][c + 2], row[r][c + 3]);
+          luStore4(dst + c, &row[r][c]);
         }
       } else {
 #pragma unroll
@@ -1496,35 +1572,39 @@ kernel void factorPanelLU(
   }
 }
 
-#define INSTANTIATE_FACTOR_PANEL_LU(R, W)              \
-  template [[host_name("factorPanelLU_" #R "_" #W)]]   \
-  kernel void factorPanelLU<R, W>(                     \
-      device float* A [[buffer(0)]],                   \
-      device int* pivots [[buffer(1)]],                \
-      device int* info [[buffer(2)]],                  \
-      constant uint2& dims [[buffer(3)]],              \
-      constant uint4& params [[buffer(4)]],            \
-      uint3 tid3 [[thread_position_in_threadgroup]],   \
-      uint3 bid [[threadgroup_position_in_grid]],      \
-      uint3 tpg [[threads_per_threadgroup]],           \
-      uint warp_id [[simdgroup_index_in_threadgroup]], \
+#define INSTANTIATE_FACTOR_PANEL_LU(T, R, W)                \
+  template [[host_name("factorPanelLU_" #T "_" #R "_" #W)]] \
+  kernel void factorPanelLU<T, R, W>(                       \
+      device T * A [[buffer(0)]],                           \
+      device int* pivots [[buffer(1)]],                     \
+      device int* info [[buffer(2)]],                       \
+      constant uint2& dims [[buffer(3)]],                   \
+      constant uint4& params [[buffer(4)]],                 \
+      uint3 tid3 [[thread_position_in_threadgroup]],        \
+      uint3 bid [[threadgroup_position_in_grid]],           \
+      uint3 tpg [[threads_per_threadgroup]],                \
+      uint warp_id [[simdgroup_index_in_threadgroup]],      \
       uint lane [[thread_index_in_simdgroup]]);
 
-INSTANTIATE_FACTOR_PANEL_LU(1, 32)
-INSTANTIATE_FACTOR_PANEL_LU(2, 16)
-INSTANTIATE_FACTOR_PANEL_LU(4, 8)
+INSTANTIATE_FACTOR_PANEL_LU(float, 1, 32)
+INSTANTIATE_FACTOR_PANEL_LU(float, 2, 16)
+INSTANTIATE_FACTOR_PANEL_LU(float, 4, 8)
+INSTANTIATE_FACTOR_PANEL_LU(float2, 1, 32)
+INSTANTIATE_FACTOR_PANEL_LU(float2, 2, 16)
+INSTANTIATE_FACTOR_PANEL_LU(float2, 4, 8)
 
 // Streaming panel factorization for tall panels (H > kStreamMinRows): factor
 // one column at a time across many threadgroups when the register-resident
 // factorPanelLU no longer fits. luStreamUpdate applies column j's rank-1 update
 // over all rows and writes each threadgroup's local argmax partial to scratch;
 // luStreamPivot then reduces those partials to the global pivot for column j.
+template <typename T>
 [[max_total_threads_per_threadgroup(kLUStreamNT)]]
 kernel void luStreamUpdate(
-    device float* A [[buffer(0)]],
+    device T* A [[buffer(0)]],
     constant uint2& dims [[buffer(3)]],
     constant uint4& params [[buffer(4)]], // d0, j, RPT, searchOnly
-    device float* scratch [[buffer(6)]],
+    device LUStreamScratch<T>* scratch [[buffer(6)]],
     uint3 tgid [[threadgroup_position_in_grid]],
     uint warp_id [[simdgroup_index_in_threadgroup]],
     uint lane [[thread_index_in_simdgroup]]) {
@@ -1537,22 +1617,21 @@ kernel void luStreamUpdate(
   const uint minMN = min(M, N);
   const uint nb = min(32u, minMN - d0);
   const uint H = M - d0;
-  device float* Ab = A + ulong(tgid.y) * M * N;
-  device float* scr = scratch + ulong(tgid.y) * (2 * kLUStreamNT + 32);
-  device float* uRow = scr + 2 * kLUStreamNT;
+  device T* Ab = A + ulong(tgid.y) * M * N;
+  device auto& scr = scratch[tgid.y];
 
   const uint rowStart = searchOnly ? j : j + 1;
   const uint sc = searchOnly ? j : j + 1; // column searched for next pivot
   const uint base = rowStart + (tgid.x * kLUStreamWarpsPerTG + warp_id) * RPT;
 
-  float uc = 0.0f;
-  float rp = 0.0f;
+  T uc = T(0.0f);
+  T rp = T(0.0f);
   bool doUpdate = false;
   if (!searchOnly) {
-    const float upiv = uRow[j];
-    doUpdate = upiv != 0.0f;
-    rp = doUpdate ? (1.0f / upiv) : 0.0f;
-    uc = (lane < nb) ? uRow[lane] : 0.0f;
+    const T upiv = scr.uRow[j];
+    doUpdate = luPivotMag(upiv) != 0.0f;
+    rp = doUpdate ? luRecip(upiv) : T(0.0f);
+    uc = (lane < nb) ? scr.uRow[lane] : T(0.0f);
   }
 
   float bv = -1.0f;
@@ -1563,21 +1642,25 @@ kernel void luStreamUpdate(
     if (lr >= H) {
       break;
     }
-    device float* rowp = Ab + ulong(d0 + lr) * N + d0;
-    float v = active ? rowp[lane] : 0.0f;
+    device T* rowp = Ab + ulong(d0 + lr) * N + d0;
+    T v = active ? rowp[lane] : T(0.0f);
     if (doUpdate) {
-      const float l = simd_broadcast(v, ushort(j)) * rp;
+      const T l = c10::metal::mul(simd_broadcast(v, ushort(j)), rp);
       if (lane == uint(j)) {
         v = l;
       } else if (lane > j && lane < nb) {
-        v = fma(-l, uc, v);
+        if IF_CONSTEXPR (c10::metal::is_complex_v<T>) {
+          v -= c10::metal::mul(l, uc);
+        } else {
+          v = fma(-l, uc, v);
+        }
       }
       if (active) {
         rowp[lane] = v;
       }
     }
     if (lane == sc && sc < nb) {
-      const float av = fabs(v);
+      const float av = luPivotMag(v);
       if (av > bv) {
         bv = av;
         bi = lr;
@@ -1599,23 +1682,38 @@ kernel void luStreamUpdate(
     const float m2 = simd_max(v2);
     const uint p2 = simd_min((v2 == m2) ? i2 : 0xffffffffu);
     if (lane == 0) {
-      scr[tgid.x] = m2;
-      ((device uint*)(scr + kLUStreamNT))[tgid.x] = p2;
+      scr.vpart[tgid.x] = m2;
+      scr.ipart[tgid.x] = p2;
     }
   }
 }
 
+#define INSTANTIATE_LU_STREAM_UPDATE(T)                  \
+  template [[host_name("luStreamUpdate_" #T)]]           \
+  kernel void luStreamUpdate<T>(                         \
+      device T * A [[buffer(0)]],                        \
+      constant uint2 & dims [[buffer(3)]],               \
+      constant uint4 & params [[buffer(4)]],             \
+      device LUStreamScratch<T> * scratch [[buffer(6)]], \
+      uint3 tgid [[threadgroup_position_in_grid]],       \
+      uint warp_id [[simdgroup_index_in_threadgroup]],   \
+      uint lane [[thread_index_in_simdgroup]]);
+
+INSTANTIATE_LU_STREAM_UPDATE(float)
+INSTANTIATE_LU_STREAM_UPDATE(float2)
+
 // Reduce luStreamUpdate's per-threadgroup argmax partials to the global pivot
 // for column j, record it (1-based, like LAPACK), swap the pivot row, and
 // broadcast the resulting U row back to scratch for the next update.
+template <typename T>
 [[max_total_threads_per_threadgroup(kLUStreamNT)]]
 kernel void luStreamPivot(
-    device float* A [[buffer(0)]],
+    device T* A [[buffer(0)]],
     device int* pivots [[buffer(1)]],
     device int* info [[buffer(2)]],
     constant uint2& dims [[buffer(3)]],
     constant uint4& params [[buffer(4)]], // d0, j, npart
-    device float* scratch [[buffer(6)]],
+    device LUStreamScratch<T>* scratch [[buffer(6)]],
     uint3 tid3 [[thread_position_in_threadgroup]],
     uint3 tgid [[threadgroup_position_in_grid]],
     uint warp_id [[simdgroup_index_in_threadgroup]],
@@ -1628,11 +1726,9 @@ kernel void luStreamPivot(
   const uint minMN = min(M, N);
   const uint nb = min(32u, minMN - d0);
   const uint tid = tid3.x; // threadgroup of kLUStreamNT threads
-  device float* Ab = A + ulong(tgid.x) * M * N;
+  device T* Ab = A + ulong(tgid.x) * M * N;
   device int* pv = pivots + ulong(tgid.x) * minMN;
-  device float* scr = scratch + ulong(tgid.x) * (2 * kLUStreamNT + 32);
-  device const uint* sidx = (device const uint*)(scr + kLUStreamNT);
-  device float* uRow = scr + 2 * kLUStreamNT;
+  device auto& scr = scratch[tgid.x];
 
   if (d0 == 0 && j == 0 && tid == 0) {
     info[tgid.x] = 0;
@@ -1645,8 +1741,8 @@ kernel void luStreamPivot(
   float bv = -1.0f;
   uint bi = 0xffffffffu;
   for (uint i = tid; i < npart; i += kLUStreamNT) {
-    const float v = scr[i];
-    const uint ix = sidx[i];
+    const float v = scr.vpart[i];
+    const uint ix = scr.ipart[i];
     if (v > bv || (v == bv && ix < bi)) {
       bv = v;
       bi = ix;
@@ -1677,24 +1773,44 @@ kernel void luStreamPivot(
     simdgroup_barrier(mem_flags::mem_threadgroup);
     const uint p = sPiv[0];
     if (lane < nb) {
-      device float* rj = Ab + ulong(d0 + j) * N + d0 + lane;
-      float vj = *rj;
+      device T* rj = Ab + ulong(d0 + j) * N + d0 + lane;
+      T vj = *rj;
       if (p != j) {
-        device float* rp2 = Ab + ulong(d0 + p) * N + d0 + lane;
-        const float vp = *rp2;
+        device T* rp2 = Ab + ulong(d0 + p) * N + d0 + lane;
+        const T vp = *rp2;
         *rj = vp;
         *rp2 = vj;
         vj = vp;
       }
-      uRow[lane] = vj;
+      scr.uRow[lane] = vj;
     }
   }
 }
 
+#define INSTANTIATE_LU_STREAM_PIVOT(T)                  \
+  template [[host_name("luStreamPivot_" #T)]]           \
+  kernel void luStreamPivot<T>(                         \
+      device T * A [[buffer(0)]],                       \
+      device int* pivots [[buffer(1)]],                 \
+      device int* info [[buffer(2)]],                   \
+      constant uint2& dims [[buffer(3)]],               \
+      constant uint4& params [[buffer(4)]],             \
+      device LUStreamScratch<T>* scratch [[buffer(6)]], \
+      uint3 tid3 [[thread_position_in_threadgroup]],    \
+      uint3 tgid [[threadgroup_position_in_grid]],      \
+      uint warp_id [[simdgroup_index_in_threadgroup]],  \
+      uint lane [[thread_index_in_simdgroup]]);
+
+INSTANTIATE_LU_STREAM_PIVOT(float)
+INSTANTIATE_LU_STREAM_PIVOT(float2)
+
 // slaswp: apply a block's pivot interchanges as one staged gather/scatter
-// through threadgroup memory, not nb sequential row swaps.
+// through threadgroup memory, not nb sequential row swaps. CW is the staged
+// column-chunk width: 64 floats, 32 float2 (the 64x64 float2 tile would be
+// 32KB and exceed the threadgroup memory budget with the index arrays).
+template <typename T, short CW>
 kernel void laswpGatherLU(
-    device float* A [[buffer(0)]],
+    device T* A [[buffer(0)]],
     device const int* pivots [[buffer(1)]],
     constant uint2& dims [[buffer(3)]],
     constant uint4& params [[buffer(4)]],
@@ -1712,13 +1828,13 @@ kernel void laswpGatherLU(
   const uint W = W0 + (w.w - w.z);
   const uint tid = tid3.x;
   const uint G = tpg.x;
-  device float* Ab = A + ulong(tgid.y) * M * N;
+  device T* Ab = A + ulong(tgid.y) * M * N;
   device const int* pvt = pivots + ulong(tgid.y) * min(M, N) + d0;
 
   threadgroup uint rowIds[64]; // global row of each slot
   threadgroup uint src[64]; // slot whose staged data this slot receives
   threadgroup uint counts[1];
-  threadgroup float stage[64][64];
+  threadgroup T stage[64][CW];
 
   if (warp_id == 0) {
     // pivots are stored 1-based (LAPACK convention)
@@ -1766,20 +1882,24 @@ kernel void laswpGatherLU(
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
   const uint nlist = counts[0];
-  const uint vbase = tgid.x * 64;
+  const uint vbase = tgid.x * CW;
   const bool aligned = (N % 4u) == 0;
 
-  for (uint i = tid; i < nlist * 16; i += G) {
-    const uint r = i / 16;
-    const uint q = (i % 16) * 4;
+  for (uint i = tid; i < nlist * (CW / 4); i += G) {
+    const uint r = i / (CW / 4);
+    const uint q = (i % (CW / 4)) * 4;
     const uint v = vbase + q;
     if (v >= W) {
       continue;
     }
     const uint c = (v < W0) ? (w.x + v) : (w.z + (v - W0));
     const uint cnt = min(4u, W - v);
-    device const float* sp = Ab + ulong(rowIds[r]) * N + c;
-    if (cnt == 4 && aligned) {
+    device const T* sp = Ab + ulong(rowIds[r]) * N + c;
+    if IF_CONSTEXPR (c10::metal::is_complex_v<T>) {
+      for (uint e = 0; e < cnt; e++) {
+        stage[r][q + e] = sp[e];
+      }
+    } else if (cnt == 4 && aligned) {
       const float4 t = *(device const float4*)sp;
       stage[r][q + 0] = t.x;
       stage[r][q + 1] = t.y;
@@ -1793,23 +1913,22 @@ kernel void laswpGatherLU(
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
-  for (uint i = tid; i < nlist * 16; i += G) {
-    const uint r = i / 16;
+  for (uint i = tid; i < nlist * (CW / 4); i += G) {
+    const uint r = i / (CW / 4);
     const uint sr = src[r];
     if (sr == r) {
       continue;
     }
-    const uint q = (i % 16) * 4;
+    const uint q = (i % (CW / 4)) * 4;
     const uint v = vbase + q;
     if (v >= W) {
       continue;
     }
     const uint c = (v < W0) ? (w.x + v) : (w.z + (v - W0));
     const uint cnt = min(4u, W - v);
-    device float* dp = Ab + ulong(rowIds[r]) * N + c;
+    device T* dp = Ab + ulong(rowIds[r]) * N + c;
     if (cnt == 4 && aligned) {
-      *(device float4*)dp = float4(
-          stage[sr][q], stage[sr][q + 1], stage[sr][q + 2], stage[sr][q + 3]);
+      luStore4(dp, &stage[sr][q]);
     } else {
       for (uint e = 0; e < cnt; e++) {
         dp[e] = stage[sr][q + e];
@@ -1818,11 +1937,28 @@ kernel void laswpGatherLU(
   }
 }
 
+#define INSTANTIATE_LASWP_GATHER_LU(T, CW)             \
+  template [[host_name("laswpGatherLU_" #T)]]          \
+  kernel void laswpGatherLU<T, CW>(                    \
+      device T * A [[buffer(0)]],                      \
+      device const int* pivots [[buffer(1)]],          \
+      constant uint2& dims [[buffer(3)]],              \
+      constant uint4& params [[buffer(4)]],            \
+      constant uint4& w [[buffer(5)]],                 \
+      uint3 tid3 [[thread_position_in_threadgroup]],   \
+      uint3 tgid [[threadgroup_position_in_grid]],     \
+      uint3 tpg [[threads_per_threadgroup]],           \
+      uint warp_id [[simdgroup_index_in_threadgroup]], \
+      uint lane [[thread_index_in_simdgroup]]);
+
+INSTANTIATE_LASWP_GATHER_LU(float, 64)
+INSTANTIATE_LASWP_GATHER_LU(float2, 32)
+
 // strsm: solve unit-lower L*X = B for the panel's off-diagonal block, with L
 // staged in threadgroup memory and one thread per column of B.
-template <short TS>
+template <typename T, short TS>
 kernel void trsmPanelLU(
-    device float* A [[buffer(0)]],
+    device T* A [[buffer(0)]],
     constant uint2& dims [[buffer(3)]],
     constant uint4& params [[buffer(4)]],
     uint3 tid3 [[thread_position_in_threadgroup]],
@@ -1836,10 +1972,18 @@ kernel void trsmPanelLU(
   const uint nr = params.w;
   const uint tid = tid3.x;
   const uint G = tpg.x;
-  device float* Ab = A + ulong(tgid.x) * M * N;
+  device T* Ab = A + ulong(tgid.x) * M * N;
 
-  threadgroup float L[TS][TS + 1];
-  if ((N % 4u) == 0 && nr == TS) {
+  threadgroup T L[TS][TS + 1];
+  if IF_CONSTEXPR (c10::metal::is_complex_v<T>) {
+    // zero-pad the ragged block so the unrolled solve below stays a no-op
+    // past nr (scalar loads; no float4 path for complex)
+    for (uint i = tid; i < TS * TS; i += G) {
+      const uint r = i / TS;
+      const uint c = i % TS;
+      L[r][c] = (r < nr && c < nr) ? Ab[ulong(d0 + r) * N + d0 + c] : T(0.0f);
+    }
+  } else if ((N % 4u) == 0 && nr == TS) {
     for (uint i = tid; i < TS * TS / 4; i += G) {
       const uint r = i / (TS / 4);
       const uint c = (i % (TS / 4)) * 4;
@@ -1864,24 +2008,35 @@ kernel void trsmPanelLU(
   if (col >= ce) {
     return;
   }
-  float x[TS];
+  T x[TS];
 #pragma unroll
   for (short r = 0; r < TS; r++) {
-    x[r] = (uint(r) < nr) ? Ab[ulong(d0 + r) * N + col] : 0.0f;
+    x[r] = (uint(r) < nr) ? Ab[ulong(d0 + r) * N + col] : T(0.0f);
   }
 #pragma unroll
   for (short c = 0; c < TS; c++) {
-    // batch the column loads ahead of the fma burst (in-order pipe)
-    float dcol[TS];
+    const T xc = x[c];
+    if IF_CONSTEXPR (c10::metal::is_complex_v<T>) {
+      // no dcol register staging for complex: it would double the per-thread
+      // register bytes; read L directly instead
 #pragma unroll
-    for (short i = 0; i < TS; i++) {
-      dcol[i] = L[i][c];
-    }
-    const float xc = x[c];
+      for (short i = 0; i < TS; i++) {
+        if (i > c) {
+          x[i] -= c10::metal::mul(xc, L[i][c]);
+        }
+      }
+    } else {
+      // batch the column loads ahead of the fma burst (in-order pipe)
+      T dcol[TS];
 #pragma unroll
-    for (short i = 0; i < TS; i++) {
-      if (i > c) {
-        x[i] = fma(-xc, dcol[i], x[i]);
+      for (short i = 0; i < TS; i++) {
+        dcol[i] = L[i][c];
+      }
+#pragma unroll
+      for (short i = 0; i < TS; i++) {
+        if (i > c) {
+          x[i] = fma(-xc, dcol[i], x[i]);
+        }
       }
     }
   }
@@ -1893,24 +2048,28 @@ kernel void trsmPanelLU(
   }
 }
 
-#define INSTANTIATE_TRSM_PANEL_LU(TS)                \
-  template [[host_name("trsmPanelLU_" #TS)]]         \
-  kernel void trsmPanelLU<TS>(                       \
-      device float* A [[buffer(0)]],                 \
-      constant uint2& dims [[buffer(3)]],            \
-      constant uint4& params [[buffer(4)]],          \
+#define INSTANTIATE_TRSM_PANEL_LU(T, TS)             \
+  template [[host_name("trsmPanelLU_" #T "_" #TS)]]  \
+  kernel void trsmPanelLU<T, TS>(                    \
+      device T * A [[buffer(0)]],                    \
+      constant uint2 & dims [[buffer(3)]],           \
+      constant uint4 & params [[buffer(4)]],         \
       uint3 tid3 [[thread_position_in_threadgroup]], \
       uint3 tgid [[threadgroup_position_in_grid]],   \
       uint3 tpg [[threads_per_threadgroup]]);
 
-INSTANTIATE_TRSM_PANEL_LU(8)
-INSTANTIATE_TRSM_PANEL_LU(16)
-INSTANTIATE_TRSM_PANEL_LU(32)
+INSTANTIATE_TRSM_PANEL_LU(float, 8)
+INSTANTIATE_TRSM_PANEL_LU(float, 16)
+INSTANTIATE_TRSM_PANEL_LU(float, 32)
+INSTANTIATE_TRSM_PANEL_LU(float2, 8)
+INSTANTIATE_TRSM_PANEL_LU(float2, 16)
+INSTANTIATE_TRSM_PANEL_LU(float2, 32)
 
 // In-place square transpose so the row-major factor matches the column-major LU
 // view; tiles with tj < ti are produced by their mirror.
+template <typename T>
 kernel void transposeInPlaceLU(
-    device float* A [[buffer(0)]],
+    device T* A [[buffer(0)]],
     constant uint2& dims [[buffer(3)]],
     uint3 tid3 [[thread_position_in_threadgroup]],
     uint3 tgid [[threadgroup_position_in_grid]]) {
@@ -1920,9 +2079,9 @@ kernel void transposeInPlaceLU(
   if (tj < ti) {
     return;
   }
-  device float* Ab = A + ulong(tgid.z) * N * N;
-  threadgroup float ta[32][33];
-  threadgroup float tb[32][33];
+  device T* Ab = A + ulong(tgid.z) * N * N;
+  threadgroup T ta[32][33];
+  threadgroup T tb[32][33];
   const uint lx = tid3.x; // 0..31
   const uint ly = tid3.y; // 0..7
 
@@ -1944,6 +2103,85 @@ kernel void transposeInPlaceLU(
     }
   }
 }
+
+#define INSTANTIATE_TRANSPOSE_IN_PLACE_LU(T)         \
+  template [[host_name("transposeInPlaceLU_" #T)]]   \
+  kernel void transposeInPlaceLU<T>(                 \
+      device T * A [[buffer(0)]],                    \
+      constant uint2 & dims [[buffer(3)]],           \
+      uint3 tid3 [[thread_position_in_threadgroup]], \
+      uint3 tgid [[threadgroup_position_in_grid]]);
+
+INSTANTIATE_TRANSPOSE_IN_PLACE_LU(float)
+INSTANTIATE_TRANSPOSE_IN_PLACE_LU(float2)
+
+// Schur update A -= A@A for complex64: simdgroup_matrix and MPP matmul2d are
+// float-only hardware paths, so complex uses this threadgroup-tiled scalar
+// kernel (c10::metal::mul complex multiply, zero-padded ragged edges).
+// addmm_ cannot be used instead: it does not produce the correct result when
+// all of its inputs alias the same tensor, which is exactly this in-place
+// update where L21, U12 and the destination are windows of one buffer.
+// Window convention matches gemmSimdLU/gemmLU: params = {rs, re, cs, ce},
+// w = {kc, kw, 0, 0}; C = A[rs:re, cs:ce] -= A[rs:re, kc:kc+kw] @
+// A[kc:kc+kw, cs:ce]. In-place safe: C rows/cols are disjoint from the
+// L21 columns and U12 rows, and each thread only RMWs its own element.
+template <typename T>
+kernel void gemmTiledLU(
+    device T* A [[buffer(0)]],
+    constant uint2& dims [[buffer(3)]],
+    constant uint4& params [[buffer(4)]],
+    constant uint4& w [[buffer(5)]],
+    uint3 tid3 [[thread_position_in_threadgroup]], // 16 x 16 x 1
+    uint3 tgid [[threadgroup_position_in_grid]]) { // (col tile, row tile, B)
+  const uint M = dims.x;
+  const uint N = dims.y;
+  const uint rs = params.x;
+  const uint re = params.y;
+  const uint cs = params.z;
+  const uint ce = params.w;
+  const uint kc = w.x;
+  const uint kw = w.y;
+  (void)M;
+
+  device T* Ab = A + ulong(tgid.z) * M * N;
+
+  const uint i = rs + tgid.y * 16 + tid3.y; // C row
+  const uint jc = cs + tgid.x * 16 + tid3.x; // C col
+
+  threadgroup T Atile[16][16];
+  threadgroup T Btile[16][16];
+
+  T sum = T(0.0f);
+  const uint numTiles = (kw + 15) / 16;
+  for (uint t = 0; t < numTiles; ++t) {
+    const uint kA = kc + t * 16 + tid3.x; // column into L21
+    const uint kB = kc + t * 16 + tid3.y; // row into U12
+    Atile[tid3.y][tid3.x] =
+        (i < re && kA < kc + kw) ? Ab[ulong(i) * N + kA] : T(0.0f);
+    Btile[tid3.y][tid3.x] =
+        (kB < kc + kw && jc < ce) ? Ab[ulong(kB) * N + jc] : T(0.0f);
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    for (uint kk = 0; kk < 16; ++kk) {
+      sum += c10::metal::mul(Atile[tid3.y][kk], Btile[kk][tid3.x]);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+  if (i < re && jc < ce) {
+    Ab[ulong(i) * N + jc] -= sum;
+  }
+}
+
+#define INSTANTIATE_GEMM_TILED_LU(T)                 \
+  template [[host_name("gemmTiledLU_" #T)]]          \
+  kernel void gemmTiledLU<T>(                        \
+      device T * A [[buffer(0)]],                    \
+      constant uint2 & dims [[buffer(3)]],           \
+      constant uint4 & params [[buffer(4)]],         \
+      constant uint4 & w [[buffer(5)]],              \
+      uint3 tid3 [[thread_position_in_threadgroup]], \
+      uint3 tgid [[threadgroup_position_in_grid]]);
+
+INSTANTIATE_GEMM_TILED_LU(float2)
 
 // Schur-complement trailing update C -= A*B (sgemm) via simdgroup matmul;
 // fallback used when matmul2d is unavailable (cf. gemmLU).
@@ -2023,6 +2261,76 @@ kernel void gemmSimdLU(
 #if __METAL_VERSION__ >= 400 && \
     __has_include(<MetalPerformancePrimitives/MetalPerformancePrimitives.h>)
 #include <MetalPerformancePrimitives/MetalPerformancePrimitives.h>
+
+template <int BM, int BN, int NSG>
+kernel void int_mm_mpp(
+    device int8_t* mat1Data [[buffer(0)]],
+    device int8_t* mat2Data [[buffer(1)]],
+    device int* outputData [[buffer(2)]],
+    constant array<ulong2, 3>& strides [[buffer(3)]],
+    constant uint3& sizes [[buffer(4)]],
+    uint3 tgid [[threadgroup_position_in_grid]]) {
+  const int m = int(sizes.x);
+  const int k = int(sizes.y);
+  const int n = int(sizes.z);
+  const int row = int(tgid.y) * BM;
+  const int col = int(tgid.x) * BN;
+
+  constexpr auto desc = mpp::tensor_ops::matmul2d_descriptor(
+      BM,
+      BN,
+      static_cast<int>(dynamic_extent),
+      false,
+      false,
+      false,
+      mpp::tensor_ops::matmul2d_descriptor::mode::multiply);
+  mpp::tensor_ops::matmul2d<desc, execution_simdgroups<NSG>> op;
+
+  tensor<device int8_t, dextents<int32_t, 2>, tensor_inline> mat1(
+      mat1Data,
+      dextents<int32_t, 2>(k, m),
+      array<int32_t, 2>{int(strides[0].y), int(strides[0].x)});
+  tensor<device int8_t, dextents<int32_t, 2>, tensor_inline> mat2(
+      mat2Data,
+      dextents<int32_t, 2>(n, k),
+      array<int32_t, 2>{int(strides[1].y), int(strides[1].x)});
+  tensor<device int, dextents<int32_t, 2>, tensor_inline> output(
+      outputData,
+      dextents<int32_t, 2>(n, m),
+      array<int32_t, 2>{int(strides[2].y), int(strides[2].x)});
+
+  const bool inside = row + BM <= m && col + BN <= n;
+  if (inside) {
+    auto a = mat1.template slice<dynamic_extent, BM>(0, row);
+    auto b = mat2.template slice<BN, dynamic_extent>(col, 0);
+    auto c = output.template slice<BN, BM>(col, row);
+    auto result = op.template get_destination_cooperative_tensor<
+        decltype(a),
+        decltype(b),
+        int>();
+    op.run(a, b, result);
+    result.store(c);
+  } else {
+    auto a = mat1.slice(0, row);
+    auto b = mat2.slice(col, 0);
+    auto c = output.slice(col, row);
+    auto result = op.template get_destination_cooperative_tensor<
+        decltype(a),
+        decltype(b),
+        int>();
+    op.run(a, b, result);
+    result.store(c);
+  }
+}
+
+template [[host_name("int_mm_mpp_64_64_4")]]
+kernel void int_mm_mpp<64, 64, 4>(
+    device int8_t* mat1Data [[buffer(0)]],
+    device int8_t* mat2Data [[buffer(1)]],
+    device int* outputData [[buffer(2)]],
+    constant array<ulong2, 3>& strides [[buffer(3)]],
+    constant uint3& sizes [[buffer(4)]],
+    uint3 tgid [[threadgroup_position_in_grid]]);
 
 // Same Schur update C -= A*B (sgemm) as gemmSimdLU, but via MetalPerformance-
 // Primitives matmul2d (macOS 26.2+, gated by lu_has_matmul2d()).
@@ -2109,9 +2417,9 @@ INSTANTIATE_GEMM_LU(32, 64, 2)
 
 #endif // __METAL_VERSION__ >= 400 && MetalPerformancePrimitives
 
-template <bool upper, bool unit, short TS>
+template <typename T, bool upper, bool unit, short TS>
 kernel void trsmDiagSolveLU(
-    device float* A [[buffer(0)]],
+    device T* A [[buffer(0)]],
     constant uint2& dims [[buffer(3)]],
     constant uint4& params [[buffer(4)]],
     uint3 tid3 [[thread_position_in_threadgroup]],
@@ -2125,14 +2433,20 @@ kernel void trsmDiagSolveLU(
   const uint nr = params.w;
   const uint tid = tid3.x;
   const uint G = tpg.x;
-  device float* Ab = A + ulong(tgid.x) * M * N;
+  device T* Ab = A + ulong(tgid.x) * M * N;
 
-  threadgroup float T[TS][TS + 1];
+  threadgroup T Td[TS][TS + 1];
   for (uint i = tid; i < TS * TS; i += G) {
     const uint r = i / TS;
     const uint c = i % TS;
-    T[r][c] = (r < nr && c < nr) ? Ab[ulong(d0 + r) * N + d0 + c]
-                                 : (r == c ? 1.0f : 0.0f);
+    if IF_CONSTEXPR (c10::metal::is_complex_v<T>) {
+      // pad with zeros; the divide below is guarded on c < nr so the zero
+      // diagonal in the padding never produces a 0/0 NaN (no complex one)
+      Td[r][c] = (r < nr && c < nr) ? Ab[ulong(d0 + r) * N + d0 + c] : T(0.0f);
+    } else {
+      Td[r][c] = (r < nr && c < nr) ? Ab[ulong(d0 + r) * N + d0 + c]
+                                    : (r == c ? T(1.0f) : T(0.0f));
+    }
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
@@ -2140,20 +2454,50 @@ kernel void trsmDiagSolveLU(
   if (col >= ce) {
     return;
   }
-  float x[TS];
+  T x[TS];
 #pragma unroll
   for (short r = 0; r < TS; r++) {
-    x[r] = (uint(r) < nr) ? Ab[ulong(d0 + r) * N + col] : 0.0f;
+    x[r] = (uint(r) < nr) ? Ab[ulong(d0 + r) * N + col] : T(0.0f);
   }
-  if (!upper) {
+  if IF_CONSTEXPR (c10::metal::is_complex_v<T>) {
+    // no dcol register staging for complex: it would double the per-thread
+    // register bytes; read Td directly instead (cf. trsmPanelLU)
+    if (!upper) {
+#pragma unroll
+      for (short c = 0; c < TS; c++) {
+        const T xc =
+            (unit || uint(c) >= nr) ? x[c] : c10::metal::div(x[c], Td[c][c]);
+        x[c] = xc;
+#pragma unroll
+        for (short i = 0; i < TS; i++) {
+          if (i > c) {
+            x[i] -= c10::metal::mul(xc, Td[i][c]);
+          }
+        }
+      }
+    } else {
+#pragma unroll
+      for (short c = TS - 1; c >= 0; c--) {
+        const T xc =
+            (unit || uint(c) >= nr) ? x[c] : c10::metal::div(x[c], Td[c][c]);
+        x[c] = xc;
+#pragma unroll
+        for (short i = 0; i < TS; i++) {
+          if (i < c) {
+            x[i] -= c10::metal::mul(xc, Td[i][c]);
+          }
+        }
+      }
+    }
+  } else if (!upper) {
 #pragma unroll
     for (short c = 0; c < TS; c++) {
-      float dcol[TS];
+      T dcol[TS];
 #pragma unroll
       for (short i = 0; i < TS; i++) {
-        dcol[i] = T[i][c];
+        dcol[i] = Td[i][c];
       }
-      const float xc = unit ? x[c] : x[c] / T[c][c];
+      const T xc = unit ? x[c] : x[c] / Td[c][c];
       x[c] = xc;
 #pragma unroll
       for (short i = 0; i < TS; i++) {
@@ -2165,12 +2509,12 @@ kernel void trsmDiagSolveLU(
   } else {
 #pragma unroll
     for (short c = TS - 1; c >= 0; c--) {
-      float dcol[TS];
+      T dcol[TS];
 #pragma unroll
       for (short i = 0; i < TS; i++) {
-        dcol[i] = T[i][c];
+        dcol[i] = Td[i][c];
       }
-      const float xc = unit ? x[c] : x[c] / T[c][c];
+      const T xc = unit ? x[c] : x[c] / Td[c][c];
       x[c] = xc;
 #pragma unroll
       for (short i = 0; i < TS; i++) {
@@ -2188,23 +2532,28 @@ kernel void trsmDiagSolveLU(
   }
 }
 
-#define INSTANTIATE_TRSM_DIAG_SOLVE(UP, UN, SUFF)    \
-  template [[host_name("trsmDiagSolveLU_" #SUFF)]]   \
-  kernel void trsmDiagSolveLU<UP, UN, 32>(           \
-      device float* A [[buffer(0)]],                 \
-      constant uint2& dims [[buffer(3)]],            \
-      constant uint4& params [[buffer(4)]],          \
-      uint3 tid3 [[thread_position_in_threadgroup]], \
-      uint3 tgid [[threadgroup_position_in_grid]],   \
+#define INSTANTIATE_TRSM_DIAG_SOLVE(T, UP, UN, SUFF)      \
+  template [[host_name("trsmDiagSolveLU_" #T "_" #SUFF)]] \
+  kernel void trsmDiagSolveLU<T, UP, UN, 32>(             \
+      device T * A [[buffer(0)]],                         \
+      constant uint2 & dims [[buffer(3)]],                \
+      constant uint4 & params [[buffer(4)]],              \
+      uint3 tid3 [[thread_position_in_threadgroup]],      \
+      uint3 tgid [[threadgroup_position_in_grid]],        \
       uint3 tpg [[threads_per_threadgroup]]);
 
-INSTANTIATE_TRSM_DIAG_SOLVE(false, true, lower_unit)
-INSTANTIATE_TRSM_DIAG_SOLVE(true, false, upper_nonunit)
-INSTANTIATE_TRSM_DIAG_SOLVE(false, false, lower_nonunit)
-INSTANTIATE_TRSM_DIAG_SOLVE(true, true, upper_unit)
+INSTANTIATE_TRSM_DIAG_SOLVE(float, false, true, lower_unit)
+INSTANTIATE_TRSM_DIAG_SOLVE(float, true, false, upper_nonunit)
+INSTANTIATE_TRSM_DIAG_SOLVE(float, false, false, lower_nonunit)
+INSTANTIATE_TRSM_DIAG_SOLVE(float, true, true, upper_unit)
+INSTANTIATE_TRSM_DIAG_SOLVE(float2, false, true, lower_unit)
+INSTANTIATE_TRSM_DIAG_SOLVE(float2, true, false, upper_nonunit)
+INSTANTIATE_TRSM_DIAG_SOLVE(float2, false, false, lower_nonunit)
+INSTANTIATE_TRSM_DIAG_SOLVE(float2, true, true, upper_unit)
 
+template <typename T>
 kernel void luApplyPivotsRHS(
-    device float* A [[buffer(0)]],
+    device T* A [[buffer(0)]],
     device const int* pivots [[buffer(1)]],
     constant uint2& dims [[buffer(3)]],
     constant uint4& params [[buffer(4)]],
@@ -2219,7 +2568,7 @@ kernel void luApplyPivotsRHS(
   const uint inverse = params.w;
   const uint tid = tid3.x;
   const uint G = tpg.x;
-  device float* Ab = A + ulong(tgid.x) * M * N;
+  device T* Ab = A + ulong(tgid.x) * M * N;
   device const int* pv = pivots + ulong(tgid.x) * npiv;
 
   for (uint s = 0; s < npiv; s++) {
@@ -2228,7 +2577,7 @@ kernel void luApplyPivotsRHS(
     if (p != i) {
       for (uint col = tid; col < k; col += G) {
         const uint cc = coff + col;
-        const float t = Ab[ulong(i) * N + cc];
+        const T t = Ab[ulong(i) * N + cc];
         Ab[ulong(i) * N + cc] = Ab[ulong(p) * N + cc];
         Ab[ulong(p) * N + cc] = t;
       }
@@ -2236,6 +2585,20 @@ kernel void luApplyPivotsRHS(
     threadgroup_barrier(mem_flags::mem_threadgroup);
   }
 }
+
+#define INSTANTIATE_LU_APPLY_PIVOTS_RHS(T)           \
+  template [[host_name("luApplyPivotsRHS_" #T)]]     \
+  kernel void luApplyPivotsRHS<T>(                   \
+      device T * A [[buffer(0)]],                    \
+      device const int* pivots [[buffer(1)]],        \
+      constant uint2& dims [[buffer(3)]],            \
+      constant uint4& params [[buffer(4)]],          \
+      uint3 tid3 [[thread_position_in_threadgroup]], \
+      uint3 tgid [[threadgroup_position_in_grid]],   \
+      uint3 tpg [[threads_per_threadgroup]]);
+
+INSTANTIATE_LU_APPLY_PIVOTS_RHS(float)
+INSTANTIATE_LU_APPLY_PIVOTS_RHS(float2)
 
 kernel void applyPivots(
     device float* P [[buffer(0)]],
@@ -2712,6 +3075,19 @@ INSTANTIATE_MM_OPS(int);
 INSTANTIATE_MM_OPS(short);
 INSTANTIATE_MM_OPS(char);
 INSTANTIATE_MM_OPS(uchar);
+
+#define INSTANTIATE_INT_MM_OP(DTYPE)                                  \
+  template [[host_name("int_mm_" #DTYPE)]] kernel void int_mm<DTYPE>( \
+      constant DTYPE * mat1Data [[buffer(0)]],                        \
+      constant char* mat2Data [[buffer(1)]],                          \
+      device int* outputData [[buffer(2)]],                           \
+      constant array<ulong2, 3>& strides [[buffer(3)]],               \
+      constant uint3& sizes [[buffer(4)]],                            \
+      uint2 tid [[thread_position_in_threadgroup]],                   \
+      uint2 thread_id [[thread_position_in_grid]])
+
+INSTANTIATE_INT_MM_OP(char);
+INSTANTIATE_INT_MM_OP(uchar);
 
 #define REGISTER_ORGQR(T)                            \
   template [[host_name("orgqr_" #T)]]                \
@@ -3331,529 +3707,3 @@ kernel void eigh_jacobi(
 
 REGISTER_EIGH_JACOBI(float);
 REGISTER_EIGH_JACOBI(float2);
-
-// Rank-1 GEMV kernels (M==1 xor N==1): gemv_t/gemv_nt for float/half/bfloat.
-template <typename DT, int VEC, bool XC, typename IDX>
-inline ::c10::metal::aligned_vector<DT, VEC> load_x(
-    device const DT* x,
-    IDX k,
-    IDX xs) {
-  using Vec = ::c10::metal::aligned_vector<DT, VEC>;
-  if IF_CONSTEXPR (XC) {
-    return *((const device Vec*)(&x[k]));
-  } else {
-    Vec r;
-#pragma unroll
-    for (int i = 0; i < VEC; ++i) {
-      r.v[i] = x[(k + i) * xs];
-    }
-    return r;
-  }
-}
-
-template <typename DT, int VEC, bool STRIDED, typename IDX>
-inline ::c10::metal::aligned_vector<DT, VEC> load_matrix(
-    device const DT* matrix,
-    IDX offset,
-    IDX stride) {
-  using Vec = ::c10::metal::aligned_vector<DT, VEC>;
-  if IF_CONSTEXPR (!STRIDED) {
-    return *((const device Vec*)(&matrix[offset]));
-  } else {
-    Vec result;
-#pragma unroll
-    for (int i = 0; i < VEC; ++i) {
-      result.v[i] = matrix[(offset + i) * stride];
-    }
-    return result;
-  }
-}
-
-template <typename DT, bool STRIDED, typename IDX>
-inline DT load_matrix_element(device const DT* matrix, IDX offset, IDX stride) {
-  if IF_CONSTEXPR (STRIDED) {
-    return matrix[offset * stride];
-  } else {
-    return matrix[offset];
-  }
-}
-
-// Epilogue applied to one output element, cast to OUT_T. beta==0 must not read
-// bias (may be uninitialized/NaN; matches addmm semantics).
-template <GemmEpilogue EPI, typename OUT_T, typename ACC_T, typename IDX>
-inline OUT_T apply_epilogue(
-    ACC_T acc,
-    IDX r,
-    IDX c,
-    device const OUT_T* bias,
-    IDX bias_r,
-    IDX bias_c,
-    float alpha,
-    float beta) {
-  using op_t = ::c10::metal::opmath_t<OUT_T>;
-  op_t v = static_cast<op_t>(acc);
-  if IF_CONSTEXPR (EPI == GemmEpilogue::Bias) {
-    v = alpha * v;
-    if (beta != op_t(0)) {
-      v += beta * static_cast<op_t>(bias[r * bias_r + c * bias_c]);
-    }
-  }
-  return static_cast<OUT_T>(v);
-}
-
-// y = x @ B, B is (K, N) row-major. Lanes own VEC columns (a coalesced line);
-// NSIMD simdgroups split K and reduce in threadgroup memory.
-template <
-    typename DT,
-    int NSIMD,
-    int VEC,
-    GemmEpilogue EPI,
-    bool STRIDED = false,
-    typename IDX = int>
-kernel void gemv_t(
-    device const DT* B [[buffer(0)]],
-    device const DT* x [[buffer(1)]],
-    device DT* y [[buffer(2)]],
-    constant GemvDims& gP [[buffer(3)]],
-    device const DT* bias [[buffer(4)]],
-    constant ::c10::metal::array<float, 2>& alpha_beta [[buffer(5)]],
-    uint3 tgid [[threadgroup_position_in_grid]],
-    uint sgid [[simdgroup_index_in_threadgroup]],
-    uint lane [[thread_index_in_simdgroup]]) {
-  using ACC_T = ::c10::metal::opmath_t<DT>;
-  using Vec = ::c10::metal::aligned_vector<DT, VEC>;
-  constexpr int BLOCK_N = 32 * VEC;
-  const IDX gN = IDX(gP.n), gK = IDX(gP.K), gLdb = IDX(gP.ld);
-  const IDX gMs = IDX(gP.ms), gXs = IDX(gP.xs);
-  // +1 pad: the reduce reads partials[lane][cc] down a column; an odd row
-  // stride keeps those 32 accesses on distinct banks.
-  threadgroup ACC_T partials[NSIMD][BLOCK_N + 1];
-
-  const IDX col0 = IDX(tgid.x) * BLOCK_N;
-  const IDX n0 = col0 + IDX(lane) * VEC;
-
-  const IDX k_per_simd = (gK + NSIMD - 1) / NSIMD;
-  const IDX k_start = IDX(sgid) * k_per_simd;
-  const IDX k_end = min(gK, k_start + k_per_simd);
-
-  ACC_T acc[VEC];
-#pragma unroll
-  for (int i = 0; i < VEC; ++i) {
-    acc[i] = (ACC_T)0;
-  }
-
-  const bool full = (n0 + VEC) <= gN;
-  if (full) {
-    IDX k = k_start;
-    for (; k + 4 <= k_end; k += 4) {
-      Vec b0 = load_matrix<DT, VEC, STRIDED>(&B[(k + 0) * gLdb], n0, gMs);
-      Vec b1 = load_matrix<DT, VEC, STRIDED>(&B[(k + 1) * gLdb], n0, gMs);
-      Vec b2 = load_matrix<DT, VEC, STRIDED>(&B[(k + 2) * gLdb], n0, gMs);
-      Vec b3 = load_matrix<DT, VEC, STRIDED>(&B[(k + 3) * gLdb], n0, gMs);
-      ACC_T x0 = (ACC_T)x[(k + 0) * gXs], x1 = (ACC_T)x[(k + 1) * gXs];
-      ACC_T x2 = (ACC_T)x[(k + 2) * gXs], x3 = (ACC_T)x[(k + 3) * gXs];
-#pragma unroll
-      for (int i = 0; i < VEC; ++i) {
-        acc[i] += (ACC_T)b0.v[i] * x0;
-        acc[i] += (ACC_T)b1.v[i] * x1;
-        acc[i] += (ACC_T)b2.v[i] * x2;
-        acc[i] += (ACC_T)b3.v[i] * x3;
-      }
-    }
-    for (; k < k_end; ++k) {
-      Vec bv = load_matrix<DT, VEC, STRIDED>(&B[k * gLdb], n0, gMs);
-      ACC_T xk = (ACC_T)x[k * gXs];
-#pragma unroll
-      for (int i = 0; i < VEC; ++i) {
-        acc[i] += (ACC_T)bv.v[i] * xk;
-      }
-    }
-  } else {
-    for (IDX k = k_start; k < k_end; ++k) {
-      ACC_T xk = (ACC_T)x[k * gXs];
-#pragma unroll
-      for (int i = 0; i < VEC; ++i) {
-        IDX n = n0 + i;
-        if (n < gN) {
-          acc[i] +=
-              (ACC_T)load_matrix_element<DT, STRIDED>(&B[k * gLdb], n, gMs) *
-              xk;
-        }
-      }
-    }
-  }
-#pragma unroll
-  for (int i = 0; i < VEC; ++i) {
-    partials[sgid][int(lane) * VEC + i] = acc[i];
-  }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-
-  // Cross-simdgroup reduce: every simdgroup owns BLOCK_N/NSIMD columns and
-  // simd_sums the NSIMD partials of each (lanes >= NSIMD contribute zero).
-  const ACC_T alpha = alpha_beta[0];
-  const ACC_T beta = alpha_beta[1];
-  for (int cc = int(sgid); cc < BLOCK_N; cc += NSIMD) {
-    ACC_T v = int(lane) < NSIMD ? partials[lane][cc] : (ACC_T)0;
-    v = simd_sum(v);
-    const IDX n = col0 + cc;
-    if (lane == 0 && n < gN) {
-      y[n] = apply_epilogue<EPI, DT, ACC_T>(
-          v, IDX(0), n, bias, IDX(gP.bias_r), IDX(gP.bias_c), alpha, beta);
-    }
-  }
-}
-
-// gemv_t with a 2D lane layout (KQ k-sublanes x C=32/KQ column groups), each
-// lane loading a full 16-byte vector: up to 8x fewer/wider loads, which holds
-// up under reduced GPU clocks. Requires ld and offset VEC-aligned (host
-// checks).
-template <typename DT, int NSIMD, int KQ, GemmEpilogue EPI, typename IDX = int>
-kernel void gemv_t2d(
-    device const DT* B [[buffer(0)]],
-    device const DT* x [[buffer(1)]],
-    device DT* y [[buffer(2)]],
-    constant GemvDims& gP [[buffer(3)]],
-    device const DT* bias [[buffer(4)]],
-    constant ::c10::metal::array<float, 2>& alpha_beta [[buffer(5)]],
-    uint3 tgid [[threadgroup_position_in_grid]],
-    uint sgid [[simdgroup_index_in_threadgroup]],
-    uint lane [[thread_index_in_simdgroup]]) {
-  using ACC_T = ::c10::metal::opmath_t<DT>;
-  constexpr int VEC = 16 / sizeof(DT);
-  constexpr int C = 32 / KQ;
-  constexpr int BLOCK_N = C * VEC;
-  using Vec = ::c10::metal::aligned_vector<DT, VEC>;
-  threadgroup ACC_T partials[NSIMD][BLOCK_N + 1];
-  const IDX gN = IDX(gP.n), gK = IDX(gP.K), gLdb = IDX(gP.ld), gXs = IDX(gP.xs);
-  const IDX col0 = IDX(tgid.x) * BLOCK_N;
-  const int kq = int(lane) / C;
-  const int cl = int(lane) % C;
-  const IDX n0 = col0 + cl * VEC;
-  const IDX kps = (gK + NSIMD - 1) / NSIMD;
-  const IDX k_start = IDX(sgid) * kps;
-  const IDX k_end = min(gK, k_start + kps);
-  ACC_T acc[VEC];
-#pragma unroll
-  for (int i = 0; i < VEC; ++i) {
-    acc[i] = (ACC_T)0;
-  }
-  if ((n0 + VEC) <= gN) {
-    IDX k = k_start + kq;
-    for (; k + 3 * KQ < k_end; k += 4 * KQ) {
-      Vec b0 = *((const device Vec*)(&B[(k + 0 * KQ) * gLdb + n0]));
-      Vec b1 = *((const device Vec*)(&B[(k + 1 * KQ) * gLdb + n0]));
-      Vec b2 = *((const device Vec*)(&B[(k + 2 * KQ) * gLdb + n0]));
-      Vec b3 = *((const device Vec*)(&B[(k + 3 * KQ) * gLdb + n0]));
-      ACC_T x0 = (ACC_T)x[(k + 0 * KQ) * gXs];
-      ACC_T x1 = (ACC_T)x[(k + 1 * KQ) * gXs];
-      ACC_T x2 = (ACC_T)x[(k + 2 * KQ) * gXs];
-      ACC_T x3 = (ACC_T)x[(k + 3 * KQ) * gXs];
-#pragma unroll
-      for (int i = 0; i < VEC; ++i) {
-        acc[i] += (ACC_T)b0.v[i] * x0;
-        acc[i] += (ACC_T)b1.v[i] * x1;
-        acc[i] += (ACC_T)b2.v[i] * x2;
-        acc[i] += (ACC_T)b3.v[i] * x3;
-      }
-    }
-    for (; k < k_end; k += KQ) {
-      Vec bv = *((const device Vec*)(&B[k * gLdb + n0]));
-      ACC_T xk = (ACC_T)x[k * gXs];
-#pragma unroll
-      for (int i = 0; i < VEC; ++i) {
-        acc[i] += (ACC_T)bv.v[i] * xk;
-      }
-    }
-  } else {
-    for (IDX k = k_start + kq; k < k_end; k += KQ) {
-      ACC_T xk = (ACC_T)x[k * gXs];
-#pragma unroll
-      for (int i = 0; i < VEC; ++i) {
-        IDX n = n0 + i;
-        if (n < gN) {
-          acc[i] += (ACC_T)B[k * gLdb + n] * xk;
-        }
-      }
-    }
-  }
-  // Fold the KQ k-sublanes of each column group (lane stride C).
-#pragma unroll
-  for (int i = 0; i < VEC; ++i) {
-    for (uint off = 16; off >= uint(C); off >>= 1) {
-      acc[i] += simd_shuffle_down(acc[i], off);
-    }
-  }
-  if (kq == 0) {
-#pragma unroll
-    for (int i = 0; i < VEC; ++i) {
-      partials[sgid][cl * VEC + i] = acc[i];
-    }
-  }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-  const ACC_T alpha = alpha_beta[0];
-  const ACC_T beta = alpha_beta[1];
-  for (int cc = int(sgid); cc < BLOCK_N; cc += NSIMD) {
-    ACC_T v = int(lane) < NSIMD ? partials[lane][cc] : (ACC_T)0;
-    v = simd_sum(v);
-    const IDX n = col0 + cc;
-    if (lane == 0 && n < gN) {
-      y[n] = apply_epilogue<EPI, DT, ACC_T>(
-          v, IDX(0), n, bias, IDX(gP.bias_r), IDX(gP.bias_c), alpha, beta);
-    }
-  }
-}
-
-// y = A @ x, A is (M, K) row-major. Each simdgroup owns one row; lanes stride
-// K and reduce with simd_sum. XC: x is unit-stride and VEC-aligned.
-template <
-    typename DT,
-    int NSIMD,
-    int VEC,
-    GemmEpilogue EPI,
-    bool XC,
-    bool STRIDED = false,
-    typename IDX = int>
-kernel void gemv_nt(
-    device const DT* A [[buffer(0)]],
-    device const DT* x [[buffer(1)]],
-    device DT* y [[buffer(2)]],
-    constant GemvDims& gP [[buffer(3)]],
-    device const DT* bias [[buffer(4)]],
-    constant ::c10::metal::array<float, 2>& alpha_beta [[buffer(5)]],
-    uint3 tgid [[threadgroup_position_in_grid]],
-    uint sgid [[simdgroup_index_in_threadgroup]],
-    uint lane [[thread_index_in_simdgroup]]) {
-  using ACC_T = ::c10::metal::opmath_t<DT>;
-  using Vec = ::c10::metal::aligned_vector<DT, VEC>;
-  const IDX gM = IDX(gP.n), gK = IDX(gP.K), gLda = IDX(gP.ld);
-  const IDX gMs = IDX(gP.ms), gXs = IDX(gP.xs);
-  const int K_STRIDE = 32 * VEC;
-
-  const IDX row = IDX(tgid.x) * NSIMD + IDX(sgid);
-  if (row >= gM) {
-    return;
-  }
-  const device DT* Arow = &A[row * gLda];
-  ACC_T acc = (ACC_T)0;
-  IDX k = IDX(lane) * VEC;
-  for (; k + 3 * K_STRIDE + VEC <= gK; k += 4 * K_STRIDE) {
-    Vec x0 = load_x<DT, VEC, XC>(x, k + 0 * K_STRIDE, gXs);
-    Vec x1 = load_x<DT, VEC, XC>(x, k + 1 * K_STRIDE, gXs);
-    Vec x2 = load_x<DT, VEC, XC>(x, k + 2 * K_STRIDE, gXs);
-    Vec x3 = load_x<DT, VEC, XC>(x, k + 3 * K_STRIDE, gXs);
-    Vec a0 = load_matrix<DT, VEC, STRIDED>(Arow, k + 0 * K_STRIDE, gMs);
-    Vec a1 = load_matrix<DT, VEC, STRIDED>(Arow, k + 1 * K_STRIDE, gMs);
-    Vec a2 = load_matrix<DT, VEC, STRIDED>(Arow, k + 2 * K_STRIDE, gMs);
-    Vec a3 = load_matrix<DT, VEC, STRIDED>(Arow, k + 3 * K_STRIDE, gMs);
-#pragma unroll
-    for (int i = 0; i < VEC; ++i) {
-      acc += (ACC_T)a0.v[i] * (ACC_T)x0.v[i];
-      acc += (ACC_T)a1.v[i] * (ACC_T)x1.v[i];
-      acc += (ACC_T)a2.v[i] * (ACC_T)x2.v[i];
-      acc += (ACC_T)a3.v[i] * (ACC_T)x3.v[i];
-    }
-  }
-  for (; k + VEC <= gK; k += K_STRIDE) {
-    Vec xv = load_x<DT, VEC, XC>(x, k, gXs);
-    Vec av = load_matrix<DT, VEC, STRIDED>(Arow, k, gMs);
-#pragma unroll
-    for (int i = 0; i < VEC; ++i) {
-      acc += (ACC_T)av.v[i] * (ACC_T)xv.v[i];
-    }
-  }
-  if (lane == 0) {
-    for (IDX kk = (gK / VEC) * VEC; kk < gK; ++kk) {
-      acc += (ACC_T)load_matrix_element<DT, STRIDED>(Arow, kk, gMs) *
-          (ACC_T)x[kk * gXs];
-    }
-  }
-
-  const ACC_T s = simd_sum(acc);
-  if (lane == 0) {
-    y[row] = apply_epilogue<EPI, DT, ACC_T>(
-        s,
-        row,
-        IDX(0),
-        bias,
-        IDX(gP.bias_r),
-        IDX(gP.bias_c),
-        alpha_beta[0],
-        alpha_beta[1]);
-  }
-}
-
-// Explicit instantiations (host_name = dispatch key): exactly the configs the
-// GemvPolicy can emit, closed under clamp_vec (vec halved when the matrix is
-// not vec-aligned) and the T2D->Standard misalignment fallback.
-#define MB_GEMV_T(DT, NSIMD, VEC, EN, EV, SN, SV)                            \
-  template[                                                                  \
-      [host_name("gemv_t_" #DT "_" #NSIMD "_" #VEC "_" #EN SN)]] kernel void \
-  gemv_t<DT, NSIMD, VEC, GemmEpilogue::EV, SV>(                              \
-      device const DT*,                                                      \
-      device const DT*,                                                      \
-      device DT*,                                                            \
-      constant GemvDims&,                                                    \
-      device const DT*,                                                      \
-      constant ::c10::metal::array<float, 2>&,                               \
-      uint3,                                                                 \
-      uint,                                                                  \
-      uint);
-#define MB_GEMV_T_E(DT, NSIMD, VEC)                       \
-  MB_GEMV_T(DT, NSIMD, VEC, none, None, "", false)        \
-  MB_GEMV_T(DT, NSIMD, VEC, ab, Bias, "", false)          \
-  MB_GEMV_T(DT, NSIMD, VEC, none, None, "_strided", true) \
-  MB_GEMV_T(DT, NSIMD, VEC, ab, Bias, "_strided", true)
-
-#define MB_GEMV_T2D(DT, NSIMD, KQ, EN, EV)                           \
-  template [[host_name("gemv_t2d_" #DT "_" #NSIMD "_" #KQ "_" #EN)]] \
-  kernel void gemv_t2d<DT, NSIMD, KQ, GemmEpilogue::EV>(             \
-      device const DT*,                                              \
-      device const DT*,                                              \
-      device DT*,                                                    \
-      constant GemvDims&,                                            \
-      device const DT*,                                              \
-      constant ::c10::metal::array<float, 2>&,                       \
-      uint3,                                                         \
-      uint,                                                          \
-      uint);
-#define MB_GEMV_T2D_E(DT, NSIMD, KQ)     \
-  MB_GEMV_T2D(DT, NSIMD, KQ, none, None) \
-  MB_GEMV_T2D(DT, NSIMD, KQ, ab, Bias)
-
-#define MB_GEMV_NT(DT, NSIMD, VEC, EN, EV, XN, XV, SN, SV)       \
-  template[[host_name("gemv_nt_" #DT "_" #NSIMD "_" #VEC "_" #EN \
-                      "_" #XN SN)]] kernel void                  \
-  gemv_nt<DT, NSIMD, VEC, GemmEpilogue::EV, XV, SV>(             \
-      device const DT*,                                          \
-      device const DT*,                                          \
-      device DT*,                                                \
-      constant GemvDims&,                                        \
-      device const DT*,                                          \
-      constant ::c10::metal::array<float, 2>&,                   \
-      uint3,                                                     \
-      uint,                                                      \
-      uint);
-// VEC==1: a vector x load degenerates to a scalar one, strided-x only.
-#define MB_GEMV_NT_E1(DT, NSIMD)                                    \
-  MB_GEMV_NT(DT, NSIMD, 1, none, None, xs, false, "", false)        \
-  MB_GEMV_NT(DT, NSIMD, 1, ab, Bias, xs, false, "", false)          \
-  MB_GEMV_NT(DT, NSIMD, 1, none, None, xs, false, "_strided", true) \
-  MB_GEMV_NT(DT, NSIMD, 1, ab, Bias, xs, false, "_strided", true)
-
-#define MB_GEMV_NT_EV(DT, NSIMD, VEC)                                 \
-  MB_GEMV_NT(DT, NSIMD, VEC, none, None, xs, false, "", false)        \
-  MB_GEMV_NT(DT, NSIMD, VEC, ab, Bias, xs, false, "", false)          \
-  MB_GEMV_NT(DT, NSIMD, VEC, none, None, xc, true, "", false)         \
-  MB_GEMV_NT(DT, NSIMD, VEC, ab, Bias, xc, true, "", false)           \
-  MB_GEMV_NT(DT, NSIMD, VEC, none, None, xs, false, "_strided", true) \
-  MB_GEMV_NT(DT, NSIMD, VEC, ab, Bias, xs, false, "_strided", true)   \
-  MB_GEMV_NT(DT, NSIMD, VEC, none, None, xc, true, "_strided", true)  \
-  MB_GEMV_NT(DT, NSIMD, VEC, ab, Bias, xc, true, "_strided", true)
-
-// fp32 t: nsimd tiers {4, 8, 16, 32} at vec 2 (clamped to 1), scalar columns
-// {32, 1}; nt: nsimd {4, 16} at vec 4 (clamped to 2/1); t2d at kq=4.
-#define MB_GEMV_FLOAT(DT)  \
-  MB_GEMV_T_E(DT, 4, 1)    \
-  MB_GEMV_T_E(DT, 8, 1)    \
-  MB_GEMV_T_E(DT, 16, 1)   \
-  MB_GEMV_T_E(DT, 32, 1)   \
-  MB_GEMV_T_E(DT, 4, 2)    \
-  MB_GEMV_T_E(DT, 8, 2)    \
-  MB_GEMV_T_E(DT, 16, 2)   \
-  MB_GEMV_T_E(DT, 32, 2)   \
-  MB_GEMV_NT_E1(DT, 4)     \
-  MB_GEMV_NT_E1(DT, 16)    \
-  MB_GEMV_NT_EV(DT, 4, 2)  \
-  MB_GEMV_NT_EV(DT, 16, 2) \
-  MB_GEMV_NT_EV(DT, 4, 4)  \
-  MB_GEMV_NT_EV(DT, 16, 4) \
-  MB_GEMV_T2D_E(DT, 16, 4)
-
-// half/bf16 t: nsimd {16, 32} at vec 2 (clamped to 1); nt: nsimd {4, 8} at
-// vec 8 (clamped to 4/2/1); t2d at kq=8.
-#define MB_GEMV_LP(DT)    \
-  MB_GEMV_T_E(DT, 16, 1)  \
-  MB_GEMV_T_E(DT, 32, 1)  \
-  MB_GEMV_T_E(DT, 16, 2)  \
-  MB_GEMV_T_E(DT, 32, 2)  \
-  MB_GEMV_NT_E1(DT, 4)    \
-  MB_GEMV_NT_E1(DT, 8)    \
-  MB_GEMV_NT_EV(DT, 4, 2) \
-  MB_GEMV_NT_EV(DT, 4, 4) \
-  MB_GEMV_NT_EV(DT, 4, 8) \
-  MB_GEMV_NT_EV(DT, 8, 2) \
-  MB_GEMV_NT_EV(DT, 8, 4) \
-  MB_GEMV_NT_EV(DT, 8, 8) \
-  MB_GEMV_T2D_E(DT, 16, 8)
-
-MB_GEMV_FLOAT(float)
-MB_GEMV_LP(half)
-MB_GEMV_LP(bfloat)
-
-// 64-bit-index variants for operands whose element offsets overflow int32
-// (matrix numel > 2^31, or huge view strides). Such matrices are DRAM-bound,
-// so the host skips the policy and uses one fixed config per side, closed
-// under the alignment clamps: gemv_t {16, 2}, gemv_nt {8, 8} (fp32 {8, 4});
-// no t2d.
-#define MB_GEMV_T_I64(DT, NSIMD, VEC, EN, EV, SN, SV)              \
-  template[[host_name("gemv_t_" #DT "_" #NSIMD "_" #VEC "_" #EN SN \
-                      "_i64")]] kernel void                        \
-  gemv_t<DT, NSIMD, VEC, GemmEpilogue::EV, SV, long>(              \
-      device const DT*,                                            \
-      device const DT*,                                            \
-      device DT*,                                                  \
-      constant GemvDims&,                                          \
-      device const DT*,                                            \
-      constant ::c10::metal::array<float, 2>&,                     \
-      uint3,                                                       \
-      uint,                                                        \
-      uint);
-#define MB_GEMV_T_I64_E(DT, NSIMD, VEC)                       \
-  MB_GEMV_T_I64(DT, NSIMD, VEC, none, None, "", false)        \
-  MB_GEMV_T_I64(DT, NSIMD, VEC, ab, Bias, "", false)          \
-  MB_GEMV_T_I64(DT, NSIMD, VEC, none, None, "_strided", true) \
-  MB_GEMV_T_I64(DT, NSIMD, VEC, ab, Bias, "_strided", true)
-
-#define MB_GEMV_NT_I64(DT, NSIMD, VEC, EN, EV, XN, XV, SN, SV)              \
-  template[[host_name("gemv_nt_" #DT "_" #NSIMD "_" #VEC "_" #EN "_" #XN SN \
-                      "_i64")]] kernel void                                 \
-  gemv_nt<DT, NSIMD, VEC, GemmEpilogue::EV, XV, SV, long>(                  \
-      device const DT*,                                                     \
-      device const DT*,                                                     \
-      device DT*,                                                           \
-      constant GemvDims&,                                                   \
-      device const DT*,                                                     \
-      constant ::c10::metal::array<float, 2>&,                              \
-      uint3,                                                                \
-      uint,                                                                 \
-      uint);
-#define MB_GEMV_NT_I64_E1(DT, NSIMD)                                    \
-  MB_GEMV_NT_I64(DT, NSIMD, 1, none, None, xs, false, "", false)        \
-  MB_GEMV_NT_I64(DT, NSIMD, 1, ab, Bias, xs, false, "", false)          \
-  MB_GEMV_NT_I64(DT, NSIMD, 1, none, None, xs, false, "_strided", true) \
-  MB_GEMV_NT_I64(DT, NSIMD, 1, ab, Bias, xs, false, "_strided", true)
-#define MB_GEMV_NT_I64_EV(DT, NSIMD, VEC)                                 \
-  MB_GEMV_NT_I64(DT, NSIMD, VEC, none, None, xs, false, "", false)        \
-  MB_GEMV_NT_I64(DT, NSIMD, VEC, ab, Bias, xs, false, "", false)          \
-  MB_GEMV_NT_I64(DT, NSIMD, VEC, none, None, xc, true, "", false)         \
-  MB_GEMV_NT_I64(DT, NSIMD, VEC, ab, Bias, xc, true, "", false)           \
-  MB_GEMV_NT_I64(DT, NSIMD, VEC, none, None, xs, false, "_strided", true) \
-  MB_GEMV_NT_I64(DT, NSIMD, VEC, ab, Bias, xs, false, "_strided", true)   \
-  MB_GEMV_NT_I64(DT, NSIMD, VEC, none, None, xc, true, "_strided", true)  \
-  MB_GEMV_NT_I64(DT, NSIMD, VEC, ab, Bias, xc, true, "_strided", true)
-
-#define MB_GEMV_I64_LP(DT)    \
-  MB_GEMV_T_I64_E(DT, 16, 2)  \
-  MB_GEMV_T_I64_E(DT, 16, 1)  \
-  MB_GEMV_NT_I64_EV(DT, 8, 8) \
-  MB_GEMV_NT_I64_EV(DT, 8, 4) \
-  MB_GEMV_NT_I64_EV(DT, 8, 2) \
-  MB_GEMV_NT_I64_E1(DT, 8)
-
-MB_GEMV_I64_LP(half)
-MB_GEMV_I64_LP(bfloat)
-MB_GEMV_T_I64_E(float, 16, 2)
-MB_GEMV_T_I64_E(float, 16, 1)
-MB_GEMV_NT_I64_EV(float, 8, 4)
-MB_GEMV_NT_I64_EV(float, 8, 2)
-MB_GEMV_NT_I64_E1(float, 8)
