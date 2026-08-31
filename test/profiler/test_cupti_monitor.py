@@ -33,6 +33,7 @@ from torch.profiler._cupti.observers.observation_window import WindowFinalizerMi
 from torch.testing._internal.common_cuda import (
     SM100OrLater,
     TEST_CUDA,
+    TEST_CUDA_GRAPH_TOOLS_ID,
     TEST_CUPTI as TEST_CUPTI_PYTHON,
     TEST_CUPTI_V13_3,
 )
@@ -226,6 +227,46 @@ class TestCuptiRecords(TestCase):
         self.assertFalse(m._started)
         self.assertIsNone(m.push_external_correlation_id())
         self.assertIsNone(m.pop_external_correlation_id())
+
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    def test_kernel_latency_timestamps_track_the_field_union(self):
+        # The per-subscriber latency-timestamp attribute is only wanted while some
+        # observer selects the QUEUED kernel field. It used to latch on and never
+        # come back off, so one observer asking for QUEUED left the feature enabled
+        # for the rest of the process -- including after that observer unregistered.
+        from cupti.cupti import ActivityKind
+
+        from torch.profiler._cupti.monitor import CuptiMonitor
+        from torch.profiler._cupti.records import Kernel
+
+        m = CuptiMonitor()
+        calls = []
+
+        with patch.object(
+            type(m._cupti),
+            "enable_kernel_latency_timestamps",
+            lambda _self, _sub, enable: calls.append(enable) or True,
+        ):
+            timing = m.register(
+                {ActivityKind.CONCURRENT_KERNEL: [Kernel.START.id, Kernel.END.id]},
+                lambda columns: None,
+            )
+            self.assertEqual(calls, [], "no observer wants QUEUED yet")
+            self.assertFalse(m._latency_enabled)
+
+            queued = m.register(
+                {ActivityKind.CONCURRENT_KERNEL: [Kernel.START.id, Kernel.QUEUED.id]},
+                lambda columns: None,
+            )
+            self.assertEqual(calls, [True], "QUEUED selected -> enable once")
+            self.assertTrue(m._latency_enabled)
+
+            # Dropping the QUEUED observer must turn it back off, not leave it armed.
+            m.unregister(queued)
+            self.assertEqual(calls, [True, False])
+            self.assertFalse(m._latency_enabled)
+
+            m.unregister(timing)
 
     def test_external_correlation_id_mirror(self):
         # The native per-thread mirror of CUPTI's external-correlation stack lets
@@ -590,7 +631,10 @@ class TestCuptiRecords(TestCase):
         # kernel moves to the process-group lane.
         import numpy as np
 
-        from torch.profiler._cupti.observers.profiler import _add_graph_event_node_spans
+        from torch.profiler._cupti.observers.profiler import (
+            _add_graph_event_node_spans,
+            LOGICAL_LANE_BASE,
+        )
 
         node = (7 << 32) | 11
 
@@ -615,7 +659,8 @@ class TestCuptiRecords(TestCase):
             cols, 1000, 2000, lane_resolver=lambda g: (61, "DP")
         )
         gen = cols["graph_event_node"]
-        self.assertEqual(gen["logical_lane"].tolist(), [61])
+        # the resolver's ordinal 61, placed in the reserved lane range at assignment time
+        self.assertEqual(gen["logical_lane"].tolist(), [LOGICAL_LANE_BASE + 61])
         self.assertEqual(gen["lane_name"].tolist(), ["DP"])
         self.assertEqual(gen["stream_id"].tolist(), [377])  # capture stream preserved
 
@@ -1003,6 +1048,177 @@ class TestCuptiRecords(TestCase):
         self.assertEqual(names[(0, 8)], "side comms")
         self.assertEqual(names[(0, 7)].strip(), "stream 7")
 
+    def test_resolve_lane_columns_offsets_and_is_stable(self):
+        # Lanes are assigned into the reserved range by a CONSTANT offset -- not "next free id
+        # in this window" -- so one logical lane keeps one id whatever streams happen to be
+        # live, which is what lets a lane be compared across traces of a job. Covers a lane
+        # colliding with a live stream, one colliding with nothing, and a negative ordinal
+        # (which the chrome path would otherwise abs()-fold and pftrace would not).
+        import numpy as np
+
+        from torch.profiler._cupti.observers.profiler import (
+            _resolve_lane_columns,
+            LOGICAL_LANE_BASE,
+        )
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        # node 101 -> lane 9, which stream 9's eager kernel already owns; node 202 -> lane 50,
+        # which nothing owns; node 303 -> a negative ordinal; plus an eager row.
+        resolver = {101: (9, "a"), 202: (50, "b"), 303: (-5, "c")}.get
+        frame = {
+            "graph_node_id": i64(101, 202, 303, 0),
+            "stream_id": i64(7, 40, 7, 9),
+        }
+        logical, names = _resolve_lane_columns(resolver, frame)
+        b = LOGICAL_LANE_BASE
+        self.assertEqual(logical.tolist(), [b + 9, b + 50, b - 5, 9])
+        self.assertEqual(names.tolist(), ["a", "b", "c", None])
+
+        # same resolver, wildly different stream occupancy -> same ids
+        for streams in ([7, 7, 7, 8], [26674, 1, 2, 3]):
+            other = dict(frame, stream_id=i64(*streams))
+            self.assertEqual(
+                _resolve_lane_columns(resolver, other)[0].tolist()[:3],
+                [b + 9, b + 50, b - 5],
+                msg=f"{streams}",
+            )
+
+        # an ordinal already in the reserved range is left alone, so the offset never stacks
+        again, _n = _resolve_lane_columns({101: (b + 9, "a")}.get, frame)
+        self.assertEqual(again.tolist()[0], b + 9)
+
+    def test_pftrace_lane_names_are_per_device(self):
+        # A lane is (gpu, stream), so the pftrace stream-lane names are interned on that pair,
+        # not on the bare stream id: one device's resolver name must not relabel another device's
+        # identically-numbered lane. Two collisions in one window -- dev 0's REAL stream 8 vs
+        # dev 1's lane 8 named "DP", and lane 9 named differently on each device. Lanes arrive
+        # in the reserved range, as _resolve_lane_columns assigns them. No CUDA.
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import (
+            _assign_render_event_ids,
+            _build_render_stages,
+            _STREAM_IID_BASE,
+        )
+        from torch.profiler._cupti.observers.profiler import LOGICAL_LANE_BASE
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        b = LOGICAL_LANE_BASE
+        columns = {
+            "kernel": {
+                "start_ns": i64(1000, 3000, 5000, 7000),
+                "end_ns": i64(2000, 4000, 6000, 8000),
+                "device_id": i64(0, 1, 0, 1),
+                "stream_id": i64(8, 7, 7, 7),  # dev 0's eager row is on real stream 8
+                "graph_node_id": i64(0, 102, 103, 104),
+                "logical_lane": i64(8, b + 8, b + 9, b + 9),
+                "lane_name": np.array([None, "DP", "TP", "PP"], dtype=object),
+                "name": np.array(["eagerOnEight", "k1", "k2", "k3"], dtype=object),
+            },
+        }
+
+        event_id, _corr, wait_off, wait_ids = _assign_render_event_ids(columns, {})
+        specs, *_ = _build_render_stages(
+            columns, 1, {}, [], event_id, (wait_off, wait_ids)
+        )
+        lane_names = [name for iid, name, _cat in specs if iid >= _STREAM_IID_BASE]
+        # One lane per (device, lane id), ordered by that pair; dev 1's stream 7 is absent
+        # because both of its ops moved off it. Interning on the bare stream id would collapse
+        # this to 2 lanes, labelling dev 0's real stream 8 "DP" and its lane 9 "PP".
+        self.assertEqual(
+            lane_names,
+            [
+                "[000008] stream 8",
+                f"[{b + 9}] TP",
+                f"[{b + 8}] DP",
+                f"[{b + 9}] PP",
+            ],
+        )
+
+    def test_merge_renders_reserved_range_lane(self):
+        # End to end through the merge entry point, on a window shaped as the observer hands it
+        # over (lanes already in the reserved range): the graphed kernel gets its own lane, named
+        # by the resolver, and the stream whose id its ordinal shadows keeps its work and its
+        # name. No CUDA.
+        import tempfile
+
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import (
+            merge_trace_window_into_chrome_trace,
+        )
+        from torch.profiler._cupti.observers.profiler import LOGICAL_LANE_BASE
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        columns = {
+            "kernel": {
+                "start_ns": i64(1000, 3000, 5000),
+                "end_ns": i64(2000, 4000, 6000),
+                "device_id": i64(0, 0, 0),
+                "context_id": i64(1, 1, 1),
+                # graphed replayed on stream 7 -> resolver ordinal 9, whose bare value
+                # eagerOnNine's stream already owns
+                "stream_id": i64(7, 7, 9),
+                "correlation_id": i64(11, 12, 13),
+                "graph_id": i64(0, 1, 0),
+                "graph_node_id": i64(0, 102, 0),
+                "logical_lane": i64(7, LOGICAL_LANE_BASE + 9, 9),
+                "lane_name": np.array([None, "side comms", None], dtype=object),
+                "name": np.array(
+                    ["eagerKernel", "graphKernel", "eagerOnNine"], dtype=object
+                ),
+                "annotation": np.array([None, None, None], dtype=object),
+                "grid_x": i64(1, 1, 1),
+                "grid_y": i64(1, 1, 1),
+                "grid_z": i64(1, 1, 1),
+                "block_x": i64(32, 32, 32),
+                "block_y": i64(1, 1, 1),
+                "block_z": i64(1, 1, 1),
+                "registers_per_thread": i64(0, 0, 0),
+                "static_shared_memory": i64(0, 0, 0),
+                "dynamic_shared_memory": i64(0, 0, 0),
+                "priority": i64(0, 0, 0),
+                "queued": i64(0, 0, 0),
+                "channel": i64(0, 0, 0),
+                "channel_type": i64(0, 0, 0),
+            },
+        }
+        window = {"columns": columns, "user_annotations": {}}
+
+        with tempfile.TemporaryDirectory() as d:
+            cpu_path = os.path.join(d, "cpu.json")
+            with open(cpu_path, "wb") as f:
+                f.write(
+                    json.dumps({"baseTimeNanoseconds": 0, "traceEvents": []}).encode()
+                )
+            out_path = os.path.join(d, "out.json")
+            merge_trace_window_into_chrome_trace(cpu_path, out_path, window)
+            with open(out_path, "rb") as f:
+                out = json.loads(f.read())
+
+        kernels = {e["name"]: e for e in out["traceEvents"] if e.get("cat") == "kernel"}
+        graphed = kernels["graphKernel"]
+        lane = LOGICAL_LANE_BASE + 9
+        self.assertEqual(graphed["tid"], lane)
+        self.assertEqual(graphed["args"]["stream"], lane)
+        self.assertEqual(graphed["args"]["original_stream"], 7)
+        self.assertEqual(kernels["eagerKernel"]["tid"], 7)
+        self.assertEqual(kernels["eagerOnNine"]["tid"], 9)
+
+        names = {
+            (e["pid"], e["tid"]): e["args"]["name"]
+            for e in out["traceEvents"]
+            if e.get("ph") == "M" and e.get("name") == "thread_name"
+        }
+        self.assertEqual(names[(0, lane)], "side comms")
+        self.assertEqual(names[(0, 9)].strip(), "stream 9")
+
     def test_gpu_user_annotation_stays_on_capture_stream(self):
         # A GPU-side user annotation stays on its kernels' real capture stream, never a lane the
         # resolver reassigned kernels onto. But when a capture stream has no work left to
@@ -1298,7 +1514,7 @@ class TestCuptiRecords(TestCase):
         self.assertEqual(meta_off[1] - meta_off[0], 0)  # kernel row: no spread blob
 
     def test_pftrace_lane_names_order_by_id(self):
-        # Perfetto sorts GPU hardware-queue lanes lexicographically by name, so lane names must
+        # Perfetto sorts GPU stream lanes lexicographically by name, so lane names must
         # be prefixed with the zero-padded lane id -> the lane order matches the chrome path's
         # numeric lane-id order. A resolver-named lane must not sort ahead of a lower-id stream
         # lane (regression: "aaa_comm" (lane 50) sorted before "stream 7"). No CUDA.
@@ -1307,7 +1523,7 @@ class TestCuptiRecords(TestCase):
         from torch.profiler._cupti.monitor_trace import (
             _assign_render_event_ids,
             _build_render_stages,
-            _HW_QUEUE_IID_BASE,
+            _STREAM_IID_BASE,
         )
 
         def i64(*vals):
@@ -1332,7 +1548,7 @@ class TestCuptiRecords(TestCase):
         )
         # hw-queue lanes are appended in ascending lane-id order; Perfetto re-sorts by name, so
         # the names sorted lexicographically must equal that ascending-id order.
-        lane_names = [name for iid, name, _cat in specs if iid >= _HW_QUEUE_IID_BASE]
+        lane_names = [name for iid, name, _cat in specs if iid >= _STREAM_IID_BASE]
         self.assertEqual(len(lane_names), 2)
         self.assertEqual(
             sorted(lane_names), lane_names
@@ -1662,11 +1878,11 @@ class TestCuptiRecords(TestCase):
 
             name_table = captured["name_table"]
             specs, _gfx, stage_cols, *_ = captured["render"]
-            ts, dur, event_id, gpu, hw_queue_iid, stage, _context, name_iid, _wait = (
+            ts, dur, event_id, gpu, stream_iid, stage, _context, name_iid, _wait = (
                 stage_cols
             )
             # specs maps every iid -> name: the stage iids (Kernel/Memcpy/Memset/Annotation)
-            # and the hardware-queue lane iids (labeled "[<padded lane id>] <label>").
+            # and the stream-lane iids (labeled "[<padded lane id>] <label>").
             name_by_iid = {int(iid): name for iid, name, _cat in specs}
             render_slices = []
             render_lane_names = {}  # (device, lane_id) -> lane label, id prefix stripped
@@ -1676,7 +1892,7 @@ class TestCuptiRecords(TestCase):
                 # kernels/annotations carry a name_iid into the global table; memcpy/memset
                 # fall back to the stage spec name ("Memcpy"/"Memset").
                 name = name_table[niid - 1] if niid else name_by_iid[int(stage[i])]
-                label = name_by_iid[int(hw_queue_iid[i])]
+                label = name_by_iid[int(stream_iid[i])]
                 lane_id = int(label[1 : label.index("]")])
                 render_lane_names[(int(gpu[i]), lane_id)] = label[
                     label.index("]") + 1 :
@@ -1754,22 +1970,23 @@ class TestCuptiRecords(TestCase):
 
     def test_pftrace_chrome_lane_order_parity(self):
         # The GPU lane DISPLAY ORDER matches across formats -- both order by numeric lane id.
-        # Chrome orders lanes by tid (numeric); pftrace names its hardware-queue lanes
+        # Chrome orders lanes by tid (numeric); pftrace names its stream lanes
         # "[<zero-padded id>] <label>" so that Perfetto's lexicographic sort of those labels
         # reproduces the numeric id order. Assert the id sequences agree and are strictly
         # ascending. The window mixes a low-id "stream" lane (7), a higher-id resolver-named
-        # lane (17, "side comms"), and a mid "stream" lane (9): the named high-id lane must NOT
-        # sort ahead of the low-id stream lane (the regression the id prefix fixes), and the
-        # single- vs double-digit pair (7 vs 17) locks the zero-padding -- without it "[17]"
-        # would sort before "[7]". No CUDA.
+        # lane (ordinal 17, "side comms" -- rendered in the reserved range as 100017), and a mid
+        # "stream" lane (9): the named high-id lane must NOT sort ahead of the low-id stream lane
+        # (the regression the id prefix fixes), and the differing digit counts lock the
+        # zero-padding -- without it "[100017]" would sort before "[7]". No CUDA.
         import tempfile
 
         import numpy as np
 
         from torch.profiler._cupti.monitor_trace import (
-            _HW_QUEUE_IID_BASE,
+            _STREAM_IID_BASE,
             merge_trace_window_into_chrome_trace,
         )
+        from torch.profiler._cupti.observers.profiler import LOGICAL_LANE_BASE
 
         def i64(*vals):
             return np.array(vals, dtype=np.int64)
@@ -1786,7 +2003,9 @@ class TestCuptiRecords(TestCase):
                 "graph_node_id": i64(0, 202, 0),
                 "name": np.array(["k0", "k1", "k2"], dtype=object),
                 "annotation": np.array([None, None, None], dtype=object),
-                "logical_lane": i64(7, 17, 9),  # k1 reassigned to lane 17
+                # k1 reassigned to resolver ordinal 17, i.e. the reserved-range id the
+                # observer assigns for it
+                "logical_lane": i64(7, LOGICAL_LANE_BASE + 17, 9),
                 "lane_name": np.array([None, "side comms", None], dtype=object),
                 "grid_x": i64(1, 1, 1),
                 "grid_y": i64(1, 1, 1),
@@ -1852,15 +2071,15 @@ class TestCuptiRecords(TestCase):
         # hw-queue lane specs, sorted lexicographically by label as Perfetto would, then the
         # lane id parsed back out of each "[<padded id>] ..." prefix.
         lane_specs = sorted(
-            (name for iid, name, _cat in specs if iid >= _HW_QUEUE_IID_BASE)
+            (name for iid, name, _cat in specs if iid >= _STREAM_IID_BASE)
         )
         pftrace_order = [int(name[1 : name.index("]")]) for name in lane_specs]
 
-        self.assertEqual(chrome_order, [7, 9, 17])
+        self.assertEqual(chrome_order, [7, 9, LOGICAL_LANE_BASE + 17])
         self.assertEqual(chrome_order, pftrace_order)
         self.assertEqual(pftrace_order, sorted(pftrace_order))  # strictly ascending
-        # zero-padding is load-bearing: labels are "[07]"/"[09]"/"[17]", so lexicographic
-        # order == id order (unpadded "[17]" would sort before "[7]").
+        # zero-padding is load-bearing: labels are "[000007]"/"[000009]"/"[100017]", so
+        # lexicographic order == id order (unpadded "[100017]" would sort before "[7]").
         self.assertTrue(
             all("]" in name and name.startswith("[0") for name in lane_specs[:2])
         )
@@ -2424,6 +2643,10 @@ class TestCuptiMonitorCUDA(TestCase):
         self.assertNotIn(sync, monitor._enabled)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_TOOLS_ID,
+        "requires cudaGraphNodeGetToolsId (cuda-bindings >= 13.1 and CUDA driver >= 13.1)",
+    )
     def test_event_node_recorder_arm_before_capture(self):
         # End-to-end usage, and the ordering contract it depends on: the recorder learns a
         # graph's ordered event-record nodes from a graph-INSTANTIATE hook, so it has to be
@@ -2488,6 +2711,10 @@ class TestCuptiMonitorCUDA(TestCase):
         self.assertNotIn(before_exec_id, r.graph_event_nodes)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_TOOLS_ID,
+        "requires cudaGraphNodeGetToolsId (cuda-bindings >= 13.1 and CUDA driver >= 13.1)",
+    )
     def test_event_nodes_on_concurrent_branches_use_node_id_order(self):
         # The serial-chain case above is the one where every candidate ordering agrees. This
         # is the case that separates them: two event nodes on CONCURRENT branches of differing
@@ -3088,6 +3315,205 @@ class TestCuptiMonitorCUDA(TestCase):
         self.assertGreater(stats["buffers_completed"], 0)
 
 
+def _graph_node_created_key():
+    """The ``(domain, cbid)`` the registry tests exercise: RESOURCE / GRAPHNODE_CREATED.
+
+    Graph-node creation is the motivating consumer, and RESOURCE callbacks need no CUDA work
+    beyond building a graph. Resolved from cupti-python rather than hardcoded, and lazily
+    because this module must import without it.
+    """
+    from cupti.cupti import (  # pyrefly: ignore[missing-import]
+        CallbackDomain,
+        CallbackIdResource,
+    )
+
+    return int(CallbackDomain.RESOURCE), int(CallbackIdResource.GRAPHNODE_CREATED)
+
+
+@unittest.skipIf(not TEST_CUDA, "CUDA required")
+# setUp imports the monitor, which hard-imports the build-generated _cupti_stubs, so the
+# whole class has to be gated -- a method-level gate would still let setUp error out where
+# the stubs were not generated (see TEST_CUPTI in common_cuda).
+@unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+class TestCuptiCallbackRegistry(TestCase):
+    """The monitor's shared *subscriber-callback* registry -- a separate axis from activity
+    records: handlers fire synchronously on the application thread inside the CUDA call."""
+
+    def setUp(self):
+        from torch.profiler._cupti import monitor as _cupti_monitor
+
+        _cupti_monitor._reset_for_test()
+        self.addCleanup(_cupti_monitor._reset_for_test)
+
+    def _monitor(self):
+        from torch.profiler._cupti.monitor import CuptiMonitor
+
+        return CuptiMonitor()
+
+    def test_capability_flag_advertised(self):
+        # Consumers (e.g. an out-of-tree CUPTI subscriber) branch on this to stop taking a
+        # subscription of their own. Needs no CUDA/CUPTI.
+        from torch.profiler._cupti import monitor as _cupti_monitor
+
+        self.assertTrue(_cupti_monitor.get_config()["supports_callback_handlers"])
+
+    def test_register_unregister_handler(self):
+        monitor = self._monitor()
+        key = _graph_node_created_key()
+        first = monitor.register_callback_handler(*key, lambda *a: None)
+        second = monitor.register_callback_handler(*key, lambda *a: None)
+        self.addCleanup(monitor.unregister_callback_handler, second)
+        self.assertEqual(len(monitor._callback_handlers[key]), 2)
+
+        monitor.unregister_callback_handler(first)
+        self.assertEqual(monitor._callback_handlers[key], (second.fn,))
+        # Idempotent: removing an already-removed handler leaves the survivor alone.
+        monitor.unregister_callback_handler(first)
+        self.assertEqual(monitor._callback_handlers[key], (second.fn,))
+
+    def test_arm_refcount_disables_only_at_zero(self):
+        # Two consumers scoping the same callback to different windows must not disable
+        # each other, so cuptiEnableCallback is driven only on the 0->1 and 1->0 edges.
+        monitor = self._monitor()
+        key = _graph_node_created_key()
+        handler = monitor.register_callback_handler(*key, lambda *a: None)
+        self.addCleanup(monitor.unregister_callback_handler, handler)
+
+        calls = []
+        real = monitor._cupti.enable_callback
+
+        def recording(sub, domain, cbid, enable):
+            calls.append(enable)
+            return real(sub, domain, cbid, enable)
+
+        with patch.object(monitor._cupti, "enable_callback", recording):
+            monitor.arm_callback(*key)
+            monitor.arm_callback(*key)
+            self.assertEqual(calls, [True])
+            self.assertEqual(monitor._callback_armed[key], 2)
+
+            monitor.disarm_callback(*key)
+            self.assertEqual(calls, [True])
+            monitor.disarm_callback(*key)
+            self.assertEqual(calls, [True, False])
+            self.assertNotIn(key, monitor._callback_armed)
+            # Disarming when not armed is a no-op, not an error.
+            monitor.disarm_callback(*key)
+            self.assertEqual(calls, [True, False])
+
+    def test_handler_exception_is_isolated(self):
+        # A raise must not reach CUPTI's C dispatch, and one bad handler must not silence
+        # the others (order-independent, so check both orderings).
+        monitor = self._monitor()
+        key = _graph_node_created_key()
+        seen = []
+
+        def boom(*_args):
+            raise RuntimeError("handler blew up")
+
+        bad = monitor.register_callback_handler(*key, boom)
+        good = monitor.register_callback_handler(*key, lambda *a: seen.append("good"))
+        self.addCleanup(monitor.unregister_callback_handler, good)
+        self.addCleanup(monitor.unregister_callback_handler, bad)
+
+        monitor._dispatch_callback(0, *key, 0)
+        self.assertEqual(seen, ["good"])
+
+    def test_handler_alone_holds_subscription(self):
+        # A callback-only consumer must be able to bring CUPTI up and hold it with no
+        # activity observers -- the motivating case captures graphs before any profiling.
+        monitor = self._monitor()
+        self.assertIsNone(monitor._subscriber)
+
+        handler = monitor.register_callback_handler(
+            *_graph_node_created_key(), lambda *a: None
+        )
+        self.assertIsNotNone(monitor._subscriber)
+        # No user-defined records and no decode worker: the activity path stayed off.
+        self.assertFalse(monitor._started)
+        self.assertFalse(monitor._callbacks_registered)
+
+        monitor.unregister_callback_handler(handler)
+        self.assertIsNone(monitor._subscriber)
+
+    def test_subscription_survives_activity_session_either_way(self):
+        # The subscription is shared, so it must outlive whichever consumer leaves first.
+        from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
+
+        from torch.profiler._cupti.records import Kernel
+
+        monitor = self._monitor()
+        handler = monitor.register_callback_handler(
+            *_graph_node_created_key(), lambda *a: None
+        )
+        obs = monitor.register(
+            {ActivityKind.CONCURRENT_KERNEL: {Kernel.END}}, lambda c: None
+        )
+        self.assertTrue(monitor._started)
+        subscriber = monitor._subscriber
+
+        # Observer leaves first: stop() disarms user-defined records but must not
+        # unsubscribe from under the live handler.
+        monitor.unregister(obs)
+        self.assertFalse(monitor._started)
+        self.assertEqual(monitor._subscriber, subscriber)
+
+        # Handler leaves last -> released.
+        monitor.unregister_callback_handler(handler)
+        self.assertIsNone(monitor._subscriber)
+
+    def test_noop_cb_swap_does_not_clobber_dispatch(self):
+        # An out-of-tree consumer that swaps cupti_python._NOOP_CB (to route its own
+        # subscription to its own callback) must not steal the monitor's dispatch, so the
+        # monitor passes its switchboard to subscribe() explicitly.
+        from torch.profiler._cupti import cupti_python
+
+        other = cupti_python._CB_FUNC(lambda *a: None)
+        with patch.object(cupti_python, "_NOOP_CB", other):
+            monitor = self._monitor()
+            handler = monitor.register_callback_handler(
+                *_graph_node_created_key(), lambda *a: None
+            )
+            self.addCleanup(monitor.unregister_callback_handler, handler)
+            self.assertIsNotNone(monitor._callback_trampoline)
+            self.assertIsNot(monitor._callback_trampoline, other)
+
+    def test_graph_node_callback_fires_during_capture_only(self):
+        # End-to-end proof of the mechanism: GRAPHNODE_CREATED fires once per node while
+        # armed during a capture, and not at all once disarmed (so replay pays nothing).
+        key = _graph_node_created_key()
+        n_kernels = 4
+        monitor = self._monitor()
+        fired = []
+        handler = monitor.register_callback_handler(*key, lambda *a: fired.append(a))
+        self.addCleanup(monitor.unregister_callback_handler, handler)
+
+        x = torch.randn(64, 64, device="cuda")
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            for _ in range(3):
+                x = x + 1
+        torch.cuda.current_stream().wait_stream(s)
+
+        g = torch.cuda.CUDAGraph()
+        monitor.arm_callback(*key)
+        try:
+            with torch.cuda.graph(g):
+                for _ in range(n_kernels):
+                    x = x + 1
+        finally:
+            monitor.disarm_callback(*key)
+        self.assertGreaterEqual(len(fired), n_kernels)
+
+        # Disarmed: replay must not enter the dispatcher at all.
+        before = len(fired)
+        for _ in range(5):
+            g.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(len(fired), before)
+
+
 class TestWindowFinalizer(TestCase):
     """Cover-and-finalize loop of WindowFinalizerMixin -- pure Python, no CUDA/CUPTI.
     A fake user supplies a settable native clock and a synthetic record buffer."""
@@ -3265,6 +3691,10 @@ _cupti_monitor.enable_hes_early()
         self.assertGreater(stats["buffers_completed"], 0)
         self.assertEqual(stats["buffers_pending"], 0)
         self.assertGreater(len(start), 0)
+
+        # obs.close() unregistered the last observer, stopping the monitor. The pool
+        # must survive that: CUPTI can still own buffers it never returned.
+        self.assertGreater(torch._C._profiler._cupti_monitor.allocated_buffers(), 0)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     @_isolated
