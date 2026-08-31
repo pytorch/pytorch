@@ -85,7 +85,6 @@ from .base import (
     AsPythonConstantNotImplementedError,
     GetSet,
     Member,
-    Method,
     ValueMutationNew,
     VariableTracker,
 )
@@ -481,51 +480,52 @@ class BaseBuiltinVariable(VariableTracker):
     ) -> VariableTracker:
         return python_constant_richcompare_impl(self, tx, other, op)
 
-    def str_(
+    def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return VariableTracker.build(tx, str(self.as_python_constant()))
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return VariableTracker.build(tx, repr(self.as_python_constant()))
+
+    def call_method(
         self,
         tx: "InstructionTranslatorBase",
+        name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker | None:
-        if len(args) != 1 or kwargs:
-            return None
-        arg = args[0]
-        if self.as_python_constant() is object:
+    ) -> VariableTracker:
+        # Unbound Type.__str__/__repr__(instance) is not this type object's
+        # own tp_str/tp_repr slot (those are 0-arg).
+        if name == "__str__" and len(args) == 1 and not kwargs:
+            arg = args[0]
+            if self.as_python_constant() is object:
+                return generic_repr(tx, arg)
+            if self.as_python_constant() is type:
+                if isinstance(arg, variables.UserDefinedClassVariable):
+                    return VariableTracker.build(tx, type.__str__(arg.value))
+                if arg.is_python_constant() and isinstance(
+                    arg.as_python_constant(), type
+                ):
+                    return VariableTracker.build(
+                        tx, type.__str__(arg.as_python_constant())
+                    )
+            return generic_str(tx, arg)
+        if name == "__repr__" and len(args) == 1 and not kwargs:
+            arg = args[0]
+            if self.as_python_constant() is object and isinstance(
+                arg, variables.UserDefinedObjectVariable
+            ):
+                return VariableTracker.build(tx, object.__repr__(arg.value))
+            if self.as_python_constant() is type:
+                if isinstance(arg, variables.UserDefinedClassVariable):
+                    return VariableTracker.build(tx, type.__repr__(arg.value))
+                if arg.is_python_constant() and isinstance(
+                    arg.as_python_constant(), type
+                ):
+                    return VariableTracker.build(
+                        tx, type.__repr__(arg.as_python_constant())
+                    )
             return generic_repr(tx, arg)
-        if self.as_python_constant() is type:
-            if isinstance(arg, variables.UserDefinedClassVariable):
-                return VariableTracker.build(tx, type.__str__(arg.value))
-            if arg.is_python_constant() and isinstance(arg.as_python_constant(), type):
-                return VariableTracker.build(tx, type.__str__(arg.as_python_constant()))
-        return generic_str(tx, arg)
-
-    def repr_(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker | None:
-        if len(args) != 1 or kwargs:
-            return None
-        arg = args[0]
-        if self.as_python_constant() is object and isinstance(
-            arg, variables.UserDefinedObjectVariable
-        ):
-            return VariableTracker.build(tx, object.__repr__(arg.value))
-        if self.as_python_constant() is type:
-            if isinstance(arg, variables.UserDefinedClassVariable):
-                return VariableTracker.build(tx, type.__repr__(arg.value))
-            if arg.is_python_constant() and isinstance(arg.as_python_constant(), type):
-                return VariableTracker.build(
-                    tx, type.__repr__(arg.as_python_constant())
-                )
-        return generic_repr(tx, arg)
-
-    # Named str_/repr_ so these do not shadow Python's debug __str__/__repr__.
-    tp_methods = {
-        "__str__": Method(str_),
-        "__repr__": Method(repr_),
-    }
+        return super().call_method(tx, name, args, kwargs)
 
 
 def _uses_custom_classinfo_check(
