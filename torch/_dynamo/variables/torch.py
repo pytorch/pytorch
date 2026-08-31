@@ -140,6 +140,21 @@ T = TypeVar("T")
 log = logging.getLogger(__name__)
 
 
+def _schema_out_kwarg_names(fn: Any, kwargs: "dict[str, VariableTracker]") -> list[str]:
+    """Names of `kwargs` that are out= arguments of `fn`, other than "out".
+
+    "out" itself is excluded because the caller handles it separately; the rest
+    are only discoverable from the schema, so the `"out" in kwargs` check alone
+    silently skips them.
+    """
+    if not kwargs or not isinstance(
+        fn, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)
+    ):
+        return []
+    names = torch._ops._out_arg_names(fn)
+    return sorted(n for n in names if n != "out" and n in kwargs)
+
+
 def _is_supported_out_tensor_layout(
     fake_out: torch.Tensor, *, false_if_dde: bool
 ) -> bool:
@@ -3503,6 +3518,22 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     out_kwarg_vt.as_proxy().node.meta["example_value"].shape
                 )
 
+        # Out arguments the schema spells with another name (out0/out1/...,
+        # aten.aminmax uses min/max) are invisible to the `out=` handling above,
+        # so the resize below is applied to the fake tensor only and the caller
+        # silently reads back the original. They are checked for resizing on
+        # their own: the layout restriction the `out=` paths impose is not
+        # extended to them, since that would newly reject calls that compile
+        # correctly today.
+        named_out_vts = [
+            vt
+            for name in _schema_out_kwarg_names(self.value, kwargs)
+            if (vt := kwargs[name]).is_tensor()
+        ]
+        saved_named_out_shapes = [
+            vt.as_proxy().node.meta["example_value"].shape for vt in named_out_vts
+        ]
+
         ctx = nullcontext
         if fn_ in ops_consuming_unbacked_scalars:
             if tx.fake_mode and tx.fake_mode.shape_env:
@@ -3626,6 +3657,26 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                             *graph_break_hints.SUPPORTABLE,
                         ],
                     )
+
+        for named_out_vt, saved_named_out_shape in zip(
+            named_out_vts, saved_named_out_shapes
+        ):
+            fake_out = named_out_vt.as_proxy().node.meta["example_value"]
+            if saved_named_out_shape != fake_out.shape:
+                # It's hard to get out variants with resizing on graph inputs work
+                # properly across dynamo/aot/inductor, just fall back.
+                unimplemented(
+                    gb_type="Shape mismatch with schema-named out= tensor variant",
+                    context=f"fn={self.value}, args={args}, kwargs={kwargs}",
+                    explanation=(
+                        f"Shape mismatch when calling {self.value} with an out= argument "
+                        f"the schema names something other than `out`. "
+                        f"Provided shape: {saved_named_out_shape}. Actual shape: {fake_out.shape}."
+                    ),
+                    hints=[
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
 
         return tensor_variable
 

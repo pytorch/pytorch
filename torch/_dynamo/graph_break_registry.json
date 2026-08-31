@@ -3840,6 +3840,16 @@
       ]
     }
   ],
+  "GB2730": [
+    {
+      "Gb_type": "Shape mismatch with schema-named out= tensor variant",
+      "Context": "fn={self.value}, args={args}, kwargs={kwargs}",
+      "Explanation": "Shape mismatch when calling {self.value} with an out= argument the schema names something other than `out`. Provided shape: {saved_named_out_shape}. Actual shape: {fake_out.shape}.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0249": [
     {
       "Gb_type": "bad device argument to torch.accelerator.current_stream",
