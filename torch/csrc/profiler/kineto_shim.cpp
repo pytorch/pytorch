@@ -420,10 +420,14 @@ void prepareTrace(
 
   const std::string traceIdStr = setTraceID(trace_id);
   for (const auto& [name, value] : profiler_extensions) {
-    extraConfig += name + '=' + value + '\n';
+    extraConfig += name;
+    extraConfig += '=';
+    extraConfig += value;
+    extraConfig += '\n';
   }
   const std::string configStr =
-      appendCustomConfig(traceIdStr, config.custom_profiler_config) + extraConfig;
+      appendCustomConfig(traceIdStr, config.custom_profiler_config) +
+      extraConfig;
 
   libkineto::api().activityProfiler().prepareTrace(k_activities, configStr);
 #endif // USE_KINETO
