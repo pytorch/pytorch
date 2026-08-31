@@ -46,7 +46,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
     module_tests, criterion_tests, loss_reference_fns, _create_basic_net, \
     ctcloss_reference, get_new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_device_type_tests, dtypes, \
-    dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, \
+    dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, onlyOn, \
     skipCUDAIf, skipCUDAIfNoCudnn, skipCUDAIfRocm, skipMPSIf, skipMPS, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, expectedFailureMPS, \
     expectedFailureMPSPre27, skipMeta, get_all_device_types
@@ -12102,8 +12102,8 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue(torch.allclose(loss_cpu, loss.cpu(), rtol=1e-4, atol=1e-4))
 
     # Ref: https://github.com/pytorch/pytorch/issues/190139
-    @onlyCUDA
-    @largeTensorTest("5GB", "cuda")
+    @onlyOn(["cuda", "mps"])
+    @largeTensorTest("5GB")
     def test_nll_loss2d_backward_large_sample_offset(self, device):
         batch_size = 2**16 + 1
         num_classes = 2**15
@@ -12135,7 +12135,7 @@ class TestNNDeviceType(NNTestCase):
             one,
         )
 
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
         self.assertEqual(grad_input[-1, 0, 0, 0], -1)
 
     def _nll_loss_helper(self, input_size, reduction, expected, device, dtype):
