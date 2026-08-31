@@ -188,7 +188,8 @@ DispatchResult DispatchStubImpl::try_get_call_ptr(
 #endif
         );
         if (!std::holds_alternative<ErrorType>(result)) {
-          cpu_dispatch_ptr.store(fptr, std::memory_order_relaxed);
+          cpu_dispatch_ptr.store(
+              std::get<void*>(result), std::memory_order_relaxed);
         }
       return result;
       }
