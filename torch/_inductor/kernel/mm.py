@@ -1126,8 +1126,8 @@ def tuned_scaled_mm_v2(
 
     # Inductor only has Triton/extern lowerings for single-level, fp32-scaled,
     # non-swizzled _scaled_mm_v2 with the "supported" recipes (TensorWise,
-    # RowWise, and DeepSeek BlockWise1x128/128x128). Everything else has no
-    # template or extern choice here, so defer to the eager _scaled_mm_v2 op:
+    # RowWise, and DeepSeek BlockWise1x128/128x128) on CUDA. XPU and everything
+    # else without a template or extern choice defer to the eager _scaled_mm_v2 op:
     #   - swizzled scale layouts (e.g. CUDA/Blackwell MXFP8/NVFP4)
     #   - the blockwise MX/NVFP4 recipes BlockWise1x32/1x16 (also how XPU
     #     expresses MX/NVFP4, with NO_SWIZZLE)
@@ -1144,7 +1144,8 @@ def tuned_scaled_mm_v2(
         recipe_b
     )
     if (
-        any(s != 0 for s in swizzle_a)
+        mat_a.get_device().type == "xpu"
+        or any(s != 0 for s in swizzle_a)
         or any(s != 0 for s in swizzle_b)
         or not supported_recipe
         or not is_single_level_scale
