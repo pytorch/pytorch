@@ -79,32 +79,26 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.nn import functional as F
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FLASH_ATTENTION,
-    SM80OrLater,
-    TEST_CUDA,
-)
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import (
+    Capability,
     instantiate_device_type_tests,
     onlyCUDA,
     PYTORCH_CUDA_MEMCHECK,
+    requires_capabilities,
 )
 from torch.testing._internal.common_methods_invocations import (
     sample_inputs_take_along_dim,
 )
 from torch.testing._internal.common_utils import (
     freeze_rng_state,
+    HardwareClassification,
     instantiate_parametrized_tests,
-    IS_FBCODE,
     parametrize,
     recover_orig_fp32_precision,
-    scoped_load_inline,
     set_default_dtype,
-    skipIfHpu,
-    skipIfNNModuleInlined,
     skipIfWindows,
     subtest,
-    TEST_HPU,
     TEST_XPU,
     wrapDeterministicFlagAPITest,
 )
@@ -204,6 +198,8 @@ class UserDefineSetAttr:
 
 
 class MiscTests(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_get_cache_entry(self):
         def f(x):
             return x + 1
@@ -285,61 +281,6 @@ class MiscTests(torch._inductor.test_case.TestCase):
         self.assertTrue(same(val3, correct3))
         self.assertTrue(same(val4, correct1))
         self.assertEqual(counter.frame_count, 3)
-
-    @unittest.skipIf(not TEST_CUDA, "cuda needed")
-    def test_assume_32_bit_indexing(self):
-        @torch.compile(backend="inductor")
-        def func(a, b):
-            # Multiple concat operations
-            x = torch.concat([a, b], dim=0)
-            y = torch.concat([a, b], dim=1)
-
-            # Reshape to create indexing patterns
-            x_flat = x.reshape(-1)
-            y_flat = y.reshape(-1)
-
-            # Take the smaller one and expand
-            min_size = min(x_flat.shape[0], y_flat.shape[0])
-            x_trunc = x_flat[:min_size]
-            y_trunc = y_flat[:min_size]
-
-            # Combine and compute
-            result = (x_trunc + y_trunc) * 10
-
-            # Cumulative operations create complex indexing
-            cumsum = result.cumsum(dim=0)
-
-            return cumsum.sum()
-
-        a = torch.rand(100, 30, device="cuda")
-        b = torch.rand(100, 30, device="cuda")
-
-        torch._dynamo.decorators.mark_unbacked(a, 0)
-        torch._dynamo.decorators.mark_unbacked(a, 1)
-        torch._dynamo.decorators.mark_unbacked(b, 0)
-        torch._dynamo.decorators.mark_unbacked(b, 1)
-
-        source_code = run_and_get_code(func, a, b)[1]
-        # Check that int64 indexing is used (either 1D [:] or 2D [:, None] form)
-        self.assertTrue(
-            "tl.arange(0, XBLOCK)[:].to(tl.int64)" in str(source_code)
-            or "tl.arange(0, XBLOCK)[:, None].to(tl.int64)" in str(source_code)
-        )
-        # Check that 32-bit indexing is NOT used
-        self.assertFalse(
-            "tl.arange(0, XBLOCK)[:]\n" in str(source_code)
-            and ".to(tl.int64)" not in str(source_code)
-        )
-
-        torch._dynamo.reset()
-
-        with torch._inductor.config.patch(assume_32bit_indexing=True):
-            source_code = run_and_get_code(func, a, b)[1]
-            # Check that int64 indexing is NOT used when assume_32bit_indexing=True
-            self.assertFalse(
-                "tl.arange(0, XBLOCK)[:].to(tl.int64)" in str(source_code)
-                or "tl.arange(0, XBLOCK)[:, None].to(tl.int64)" in str(source_code)
-            )
 
     def test_dynamo_side_effect(self):
         class GlobalContext:
@@ -9787,23 +9728,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             # This guard was created
             self.assertTrue(guard.name != "nested_fn.__closure__[0].cell_contents")
 
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "Test requires CUDA or XPU.")
-    def test_symint_as_device_kwarg_non_strict_export(self):
-        class Mod(torch.nn.Module):
-            def forward(self, x):
-                # -2 to make device id 0 for easier testing on CI
-                return torch.ones(10, device=x.size(0) - 2)
-
-        x = torch.randn(2)
-        m = Mod()
-        d1 = torch.export.Dim("d1", max=2048)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError, r"Constraints violated \(d1\)"
-        ):
-            ep = torch.export.export(
-                m, (x,), dynamic_shapes={"x": {0: d1}}, strict=False
-            )
-
     def test_call_parent_non_class_methods_from_child(self):
         class A:
             a = 4
@@ -18256,11 +18180,94 @@ def forward(self, L_x_ : torch.Tensor):
         with self.assertRaises(RuntimeError):
             fn(torch.randn(3))
 
+    def test_scalar_isin_decomposition(self):
+        def f():
+            x = torch.tensor(0)
+            return torch.isin(x, x)
+
+        opt_f = torch.compile(f, backend="inductor", fullgraph=True)
+        ref = f()
+        res = opt_f()
+        self.assertEqual(ref, res)
+
+    def test_randint_no_graphbreak(self):
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def f(actions, n_act, epsilon=0.1):
+            actions_random = torch.randint_like(actions, n_act)
+
+            return actions_random
+
+        x = torch.ones([1], dtype=torch.int64)
+        y = torch.tensor(5)
+        f(x, y)
+
+    def test_full_graph_capture_scalar_outputs(self):
+        @torch.compile(fullgraph=True, backend="eager")
+        def foo(a):
+            return torch.randn(5) * a.item()
+
+        # We expect to no longer raise here
+        foo(torch.tensor(2.0))
+
+    def test_full_graph_capture_dynamic_output_shape_ops(self):
+        def fn(x):
+            nz = torch.nonzero(x)
+            squared = nz * nz
+            sliced = torch.ops.aten.slice.Tensor(squared, dim=1, start=-2, end=None)
+            view = sliced.unsqueeze(dim=0)
+            return view.squeeze(dim=0)
+
+        example_inputs = (torch.randn(1, 1, 1, 1),)
+        # we expect to no longer raise here
+        torch.compile(fn, fullgraph=True, backend="eager")(*example_inputs)
+
+    def test_dynamic_fill_diagonal_(self):
+        @torch.compile(dynamic=True, backend="eager")
+        def f(x):
+            x.fill_diagonal_(True)
+
+        x = torch.zeros(4, 4)
+        f(x)
+
+    def test_dynamic_float_scalar_tensor_coersion(self):
+        # Minified version of https://github.com/pytorch/pytorch/issues/158376#issuecomment-3079591367
+        class Foo:
+            def __init__(self):
+                self.config = type(
+                    "Config", (), {"pad_val": 1123581321.0, "tolerance": 1e-6}
+                )
+
+            @torch.compile(fullgraph=True, backend="eager")
+            def forward(self, input):
+                outputs = torch.where(
+                    torch.abs(input - self.config.pad_val) < self.config.tolerance,
+                    torch.tensor(
+                        self.config.pad_val, dtype=input.dtype, device=input.device
+                    ),
+                    torch.tensor(
+                        self.config.pad_val + 1, dtype=input.dtype, device=input.device
+                    ),
+                )
+                return outputs
+
+        foo = Foo()
+        inputs = torch.randn(3, 4)
+        result = foo.forward(inputs)
+
+        original_pad_val = foo.config.pad_val
+        foo.config.pad_val += 1.0
+        result2 = foo.forward(inputs)
+
+        # Previously would crash with:
+        #   RuntimeError: value cannot be converted to type at::Half without overflow
+
 
 instantiate_parametrized_tests(MiscTests)
 
 
 class MiscTestsPyTree(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize_pytree_module
     def test_tracing_pytree(self, pytree):
         def fn(xs):
@@ -18582,6 +18589,8 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
 
 
 class TestTracer(JitTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_jit_save(self):
         def fn():
             class Foo(torch.nn.Module):
@@ -18611,6 +18620,8 @@ class TestTracer(JitTestCase):
 
 
 class TestCustomFunction(torch.testing._internal.common_utils.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_autograd_function_with_matmul_folding_at_output(self):
         """
         When tensor folding occurs during matmul operation returned tensor is a view.
@@ -18675,6 +18686,78 @@ class TestCustomFunction(torch.testing._internal.common_utils.TestCase):
 
 
 class MiscTestsDevice(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_assume_32_bit_indexing(self, device):
+        @torch.compile(backend="inductor")
+        def func(a, b):
+            # Multiple concat operations
+            x = torch.concat([a, b], dim=0)
+            y = torch.concat([a, b], dim=1)
+
+            # Reshape to create indexing patterns
+            x_flat = x.reshape(-1)
+            y_flat = y.reshape(-1)
+
+            # Take the smaller one and expand
+            min_size = min(x_flat.shape[0], y_flat.shape[0])
+            x_trunc = x_flat[:min_size]
+            y_trunc = y_flat[:min_size]
+
+            # Combine and compute
+            result = (x_trunc + y_trunc) * 10
+
+            # Cumulative operations create complex indexing
+            cumsum = result.cumsum(dim=0)
+
+            return cumsum.sum()
+
+        a = torch.rand(100, 30, device=device)
+        b = torch.rand(100, 30, device=device)
+
+        torch._dynamo.decorators.mark_unbacked(a, 0)
+        torch._dynamo.decorators.mark_unbacked(a, 1)
+        torch._dynamo.decorators.mark_unbacked(b, 0)
+        torch._dynamo.decorators.mark_unbacked(b, 1)
+
+        source_code = run_and_get_code(func, a, b)[1]
+        # Check that int64 indexing is used (either 1D [:] or 2D [:, None] form)
+        self.assertTrue(
+            "tl.arange(0, XBLOCK)[:].to(tl.int64)" in str(source_code)
+            or "tl.arange(0, XBLOCK)[:, None].to(tl.int64)" in str(source_code)
+        )
+        # Check that 32-bit indexing is NOT used
+        self.assertFalse(
+            "tl.arange(0, XBLOCK)[:]\n" in str(source_code)
+            and ".to(tl.int64)" not in str(source_code)
+        )
+
+        torch._dynamo.reset()
+
+        with torch._inductor.config.patch(assume_32bit_indexing=True):
+            source_code = run_and_get_code(func, a, b)[1]
+            # Check that int64 indexing is NOT used when assume_32bit_indexing=True
+            self.assertFalse(
+                "tl.arange(0, XBLOCK)[:].to(tl.int64)" in str(source_code)
+                or "tl.arange(0, XBLOCK)[:, None].to(tl.int64)" in str(source_code)
+            )
+
+    def test_symint_as_device_kwarg_non_strict_export(self, device):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                # -2 to make device id 0 for easier testing on CI
+                return torch.ones(10, device=x.size(0) - 2)
+
+        x = torch.randn(2, device=device)
+        m = Mod()
+        d1 = torch.export.Dim("d1", max=2048)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError, r"Constraints violated \(d1\)"
+        ):
+            ep = torch.export.export(
+                m, (x,), dynamic_shapes={"x": {0: d1}}, strict=False
+            )
+
     def test_rand(self, device):
         cnts = torch._dynamo.testing.CompileCounter()
         device = device
@@ -18695,10 +18778,7 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
 
         self.assertTrue(same(res, ref_run1))
 
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
-        "Can't run fused SDPA on this platform",
-    )
+    @requires_capabilities(Capability.attention.flash_attention)
     def test_parsing_sdpa(self, device):
         class MyModule(torch.nn.Module):
             def forward(self, query, key, value):
@@ -18911,87 +18991,6 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         torch._dynamo.reset()
         gc.collect()
         self.assertTrue(all(ref() is None for ref in real_tensor_refs))
-
-    def test_scalar_isin_decomposition(self):
-        def f():
-            x = torch.tensor(0)
-            return torch.isin(x, x)
-
-        opt_f = torch.compile(f, backend="inductor", fullgraph=True)
-        ref = f()
-        res = opt_f()
-        self.assertEqual(ref, res)
-
-    def test_randint_no_graphbreak(self):
-        @torch.compile(backend="aot_eager", fullgraph=True)
-        def f(actions, n_act, epsilon=0.1):
-            actions_random = torch.randint_like(actions, n_act)
-
-            return actions_random
-
-        x = torch.ones([1], dtype=torch.int64)
-        y = torch.tensor(5)
-        f(x, y)
-
-    def test_full_graph_capture_scalar_outputs(self):
-        @torch.compile(fullgraph=True, backend="eager")
-        def foo(a):
-            return torch.randn(5) * a.item()
-
-        # We expect to no longer raise here
-        foo(torch.tensor(2.0))
-
-    def test_full_graph_capture_dynamic_output_shape_ops(self):
-        def fn(x):
-            nz = torch.nonzero(x)
-            squared = nz * nz
-            sliced = torch.ops.aten.slice.Tensor(squared, dim=1, start=-2, end=None)
-            view = sliced.unsqueeze(dim=0)
-            return view.squeeze(dim=0)
-
-        example_inputs = (torch.randn(1, 1, 1, 1),)
-        # we expect to no longer raise here
-        torch.compile(fn, fullgraph=True, backend="eager")(*example_inputs)
-
-    def test_dynamic_fill_diagonal_(self):
-        @torch.compile(dynamic=True, backend="eager")
-        def f(x):
-            x.fill_diagonal_(True)
-
-        x = torch.zeros(4, 4)
-        f(x)
-
-    def test_dynamic_float_scalar_tensor_coersion(self):
-        # Minified version of https://github.com/pytorch/pytorch/issues/158376#issuecomment-3079591367
-        class Foo:
-            def __init__(self):
-                self.config = type(
-                    "Config", (), {"pad_val": 1123581321.0, "tolerance": 1e-6}
-                )
-
-            @torch.compile(fullgraph=True, backend="eager")
-            def forward(self, input):
-                outputs = torch.where(
-                    torch.abs(input - self.config.pad_val) < self.config.tolerance,
-                    torch.tensor(
-                        self.config.pad_val, dtype=input.dtype, device=input.device
-                    ),
-                    torch.tensor(
-                        self.config.pad_val + 1, dtype=input.dtype, device=input.device
-                    ),
-                )
-                return outputs
-
-        foo = Foo()
-        inputs = torch.randn(3, 4)
-        result = foo.forward(inputs)
-
-        original_pad_val = foo.config.pad_val
-        foo.config.pad_val += 1.0
-        result2 = foo.forward(inputs)
-
-        # Previously would crash with:
-        #   RuntimeError: value cannot be converted to type at::Half without overflow
 
     def test_symbool_tensor_mul(self, device):
         def symbool_mul_fn(x_bool, sentinel):
