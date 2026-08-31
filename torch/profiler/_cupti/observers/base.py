@@ -37,6 +37,12 @@ GraphAnnotationResolver = Callable[[int], "Any | None"]
 # graph node's annotation, hence its lane, is stable once baked), or None to keep the op on its
 # CUDA stream. Keyed on graph_node_id alone, so it is wrapped in functools.cache like the
 # annotation resolver; it reads the node's name via the graph annotation registry.
+# The returned lane is an ordinal in the resolver's own space -- small ints are the norm -- and
+# is offset into the reserved lane range (LOGICAL_LANE_BASE, applied by _resolve_lane_columns)
+# when the column is built, since a bare ordinal would otherwise be indistinguishable from a
+# CUDA stream id. So the ordinal, not the rendered id, is what stays stable for a given lane
+# across traces, and returning the op's own stream number still means "a logical lane that
+# happens to be numbered like that stream", not "leave it".
 LaneResolver = Callable[[int], "tuple[int, str] | None"]
 
 # graph_node_id -> predecessor graph_node_ids (or None when the node has no recorded
@@ -47,17 +53,17 @@ GraphDependencyResolver = Callable[[int], "list[int] | None"]
 
 
 def default_graph_annotation_resolver(graph_node_id: int) -> Any | None:
-    """Default resolver: map a CUDA-graph node id to its registered annotation, or None when
-    it has none."""
+    """Default resolver: map a CUDA-graph node id to its registered annotation dict, or None
+    when it has none. Reads the registry's in-process accessor rather than the list-wrapped
+    public view, so the exporters spread the annotation's fields instead of re-serializing a
+    list."""
     if graph_node_id == 0:
         return None
     try:
-        from torch.cuda._graph_annotations import get_kernel_annotations
-
-        annotations = get_kernel_annotations()
+        from torch.cuda._graph_annotations import annotation_for
     except Exception:
         return None
-    return annotations.get(graph_node_id)
+    return annotation_for(graph_node_id)
 
 
 @dataclass(frozen=True)
@@ -149,15 +155,21 @@ class CuptiMonitorObserver:
         # windows, so it holds topology this per-window observer -- created at prepare_trace,
         # long after warm-up capture, and torn down each window -- would otherwise never see.
         if record_deps:
-            from torch.profiler._cupti._graph_deps import (
-                arm_graph_dependency_recording,
-                graph_dependencies,
-            )
+            from torch.profiler._cupti._graph_deps import _GraphDependencyRecorder
 
-            arm_graph_dependency_recording()
-            self._graph_dependencies: dict[int, list[int]] = graph_dependencies()
+            rec = _GraphDependencyRecorder()
+            rec.arm()
+            self._graph_dependencies: dict[int, list[int]] = rec.deps
+            # event-record node graph_node_id -> cudaEvent_t handle, recorded by the same
+            # recorder (its CUDA_EVENT record has no event handle). Shared by reference.
+            self._graph_event_record_events: dict[int, int] = rec.event_record_events
+            # graph_node_id -> (host_fn_name, host_fn_addr), recorded by the same recorder
+            # (host nodes carry no name in the CUPTI record). Shared by reference.
+            self._graph_host_fns: dict[int, tuple[str | None, int]] = rec.host_fns
         else:
             self._graph_dependencies = {}
+            self._graph_event_record_events = {}
+            self._graph_host_fns = {}
         # Region naming (see ObserverAnnotationSettings): an enabled source folds its
         # required fields into the selection (graph: just graph_node_id; eager: extra kinds).
         if annotations is None:
@@ -229,7 +241,7 @@ class CuptiMonitorObserver:
         acceptable on the infrequent destroy path and what bounds cache growth over a
         long run). Hooks capture only the cache wrapper + purge fn (never self, so they
         cannot pin this observer -- the dependency purge closes over the map dict, not the
-        observer); run_graph_destroy_hooks also swallows any error they raise
+        observer); the destroy fan-out also swallows any error they raise
         (finalizer-safe, since a destroy may fire from a GC/finalizer thread). The lane
         resolver is externally backed (nothing to purge), so its hook only clears the
         cache."""
@@ -238,10 +250,16 @@ class CuptiMonitorObserver:
 
         handles = self._destroy_hook_handles
         deps = self._graph_dependencies
+        event_record_events = self._graph_event_record_events
+        host_fns = self._graph_host_fns
 
         def purge_deps(ids: set[int]) -> None:
             for key in [k for k in deps if k >> 32 in ids]:
                 del deps[key]
+            for key in [k for k in event_record_events if k >> 32 in ids]:
+                del event_record_events[key]
+            for key in [k for k in host_fns if k >> 32 in ids]:
+                del host_fns[key]
 
         def add(cache: Any, purge: Any) -> None:
             def hook(ids: set[int]) -> None:
