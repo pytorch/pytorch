@@ -1858,14 +1858,18 @@ void scaled_gemm(
     int64_t result_ld,
     ScalarType result_dtype,
     bool use_fast_accum,
-    const std::optional<Tensor>& alpha) {
+    const std::optional<Tensor>& alpha,
+    const void* c_ptr,
+    float beta,
+    float alpha_multiplier,
+    const Tensor* device_beta) {
   // Note: see `cublasCommonArgs` for various non-intuitive manipulations
   // of input arguments to this function.
   const auto computeType = CUBLAS_COMPUTE_32F;
   const auto scaleType = CUDA_R_32F;
   // Note: alpha_val may change later depending on user-passed argument
-  float alpha_val = 1.0;
-  float beta_val = 0.0;
+  float alpha_val = alpha_multiplier;
+  float beta_val = beta;
 #ifndef USE_ROCM
   // Note: unused, but cublasLtMatmul requires a C pointer that is not result_ptr or nullptr
   const void* dummy_C_ptr = mat1_ptr;
@@ -1932,12 +1936,15 @@ void scaled_gemm(
 #endif // ifndef USE_ROCM
   CuBlasLtMatrixLayout Adesc(ScalarTypeToCudaDataType(mat1_dtype), m, k, mat1_ld, transa == 't');
   CuBlasLtMatrixLayout Bdesc(ScalarTypeToCudaDataType(mat2_dtype), k, n, mat2_ld, transb == 't');
+  TORCH_INTERNAL_ASSERT(c_ptr != nullptr || beta_val == 0.0f);
+  TORCH_INTERNAL_ASSERT(c_ptr == nullptr || bias_ptr == nullptr);
 #ifdef USE_ROCM
-  // Cdesc is unused, beta is 0. But hipblaslt needs this set to something reasonable.
-  CuBlasLtMatrixLayout Cdesc(ScalarTypeToCudaDataType(result_dtype), m, n, result_ld);
+  const auto c_desc_dtype = result_dtype;
 #else
-  CuBlasLtMatrixLayout Cdesc(ScalarTypeToCudaDataType(bias_dtype), m, n, result_ld);
-#endif // ifdef USE_ROCM
+  const auto c_desc_dtype = c_ptr == nullptr ? bias_dtype : result_dtype;
+#endif
+  CuBlasLtMatrixLayout Cdesc(
+      ScalarTypeToCudaDataType(c_desc_dtype), m, n, result_ld);
   CuBlasLtMatrixLayout Ddesc(ScalarTypeToCudaDataType(result_dtype), m, n, result_ld);
   if (bias_ptr) {
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias_ptr);
@@ -1945,22 +1952,33 @@ void scaled_gemm(
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, ScalarTypeToCudaDataType(bias_dtype));
   }
 
-  // Handle user-passed alpha
+  // Handle user-passed alpha and its optional device-side beta.
   const float* alpha_ptr = &alpha_val;
   const float* beta_ptr = &beta_val;
+  TORCH_INTERNAL_ASSERT(device_beta == nullptr || alpha.has_value());
 
   if (alpha.has_value()) {
     auto& a = alpha.value();
 
     // if device-tensor
     if (a.is_cuda()) {
+      TORCH_INTERNAL_ASSERT(alpha_multiplier == 1.0f);
       // Tell cublasLt we're using device-side pointers for alpha/beta
       auto pointer_mode = CUBLASLT_POINTER_MODE_DEVICE;
       computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_POINTER_MODE, pointer_mode);
       alpha_ptr = a.const_data_ptr<float>();
-      beta_ptr = at::cuda::detail::get_cublas_device_zero();
+      if (device_beta != nullptr) {
+        TORCH_INTERNAL_ASSERT(
+            device_beta->is_cuda() && device_beta->device() == a.device() &&
+            device_beta->numel() == 1 && device_beta->scalar_type() == kFloat);
+        beta_ptr = device_beta->const_data_ptr<float>();
+      } else {
+        TORCH_INTERNAL_ASSERT(beta_val == 0.0f);
+        beta_ptr = at::cuda::detail::get_cublas_device_zero();
+      }
     } else {
-      alpha_val = a.item<float>();
+      TORCH_INTERNAL_ASSERT(device_beta == nullptr);
+      alpha_val = a.item<float>() * alpha_multiplier;
     }
   }
     // For other data types, use the get_scale_mode function based on scaling type
@@ -1977,6 +1995,16 @@ void scaled_gemm(
   CuBlasLtMatmulPreference preference;
   auto ltworkspace = CublasLtWorkspace();
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, ltworkspace.size);
+#ifndef USE_ROCM
+  if (c_ptr != nullptr) {
+    preference.setAttribute(
+        CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_C_BYTES,
+        detail::getAlignment(reinterpret_cast<uintptr_t>(c_ptr)));
+    preference.setAttribute(
+        CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_D_BYTES,
+        detail::getAlignment(reinterpret_cast<uintptr_t>(result_ptr)));
+  }
+#endif
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
   cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
@@ -2050,9 +2078,9 @@ void scaled_gemm(
       Bdesc.descriptor(),
       beta_ptr,
 #ifdef USE_ROCM
-      result_ptr, // unused, since beta_val is 0, but hipblaslt can't handle nullptr
+      c_ptr == nullptr ? result_ptr : c_ptr,
 #else
-      dummy_C_ptr, // also unused, but cuBLAS can't use nullptr or result_ptr
+      c_ptr == nullptr ? dummy_C_ptr : c_ptr,
 #endif // ifdef USE_ROCM
       Cdesc.descriptor(),
       result_ptr,

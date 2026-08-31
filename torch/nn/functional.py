@@ -7263,6 +7263,133 @@ def scaled_mm(
     return out
 
 
+def scaled_addmm(
+    input: Tensor,
+    mat1: Tensor,
+    mat2: Tensor,
+    scale_a: Tensor | list[Tensor],
+    scale_recipe_a: ScalingType | list[ScalingType],
+    scale_b: Tensor | list[Tensor],
+    scale_recipe_b: ScalingType | list[ScalingType],
+    swizzle_a: SwizzleType | list[SwizzleType] | None = None,
+    swizzle_b: SwizzleType | list[SwizzleType] | None = None,
+    contraction_dim: list[int] | tuple[int, ...] = (),
+    use_fast_accum: bool = False,
+    *,
+    beta: float = 1.0,
+    alpha: float = 1.0,
+    out: Tensor | None = None,
+) -> Tensor:
+    r"""Compute a scaled matrix product and add it to ``input``.
+
+    The result is
+
+    .. math::
+        \mathrm{out} = \beta\,\mathrm{input} +
+        \alpha\,\mathrm{scaled\_mm}(\mathrm{mat1}, \mathrm{mat2}).
+
+    The scaling recipes and swizzles have the same meaning as in
+    :func:`scaled_mm`. ``input`` must be a canonically contiguous, 16-byte-aligned
+    matrix with shape ``(mat1.size(0), mat2.size(1))`` and dtype ``float16``, ``bfloat16``, or
+    ``float32``. CUDA recipes are supported when their selected implementation
+    uses cuBLASLt; non-cuBLAS fallbacks and ROCm are not supported.
+
+    Args:
+        input: Matrix accumulated into the scaled matrix product.
+        mat1: Left matrix operand.
+        mat2: Right matrix operand.
+        scale_a: Tensor containing decoding scaling factors for ``mat1``.
+        scale_recipe_a: Scaling recipe for ``mat1``.
+        scale_b: Tensor containing decoding scaling factors for ``mat2``.
+        scale_recipe_b: Scaling recipe for ``mat2``.
+        swizzle_a: Swizzling pattern, if any, for ``scale_a``.
+        swizzle_b: Swizzling pattern, if any, for ``scale_b``.
+        contraction_dim: Dimensions contracted by the matrix multiply.
+        use_fast_accum: Whether to enable tensor-core fast accumulation.
+        beta: Multiplier for ``input``.
+        alpha: Multiplier for the scaled matrix product.
+        out: Optional destination tensor.
+
+    .. note::
+        Fusing the addition removes an intermediate output rounding step, so
+        the result need not be bitwise equal to a separate scaled matrix
+        multiply followed by an addition.
+    """
+    scale_a = _expand_single_value(scale_a)
+    scale_recipe_a = _expand_single_value(scale_recipe_a)
+    scale_b = _expand_single_value(scale_b)
+    scale_recipe_b = _expand_single_value(scale_recipe_b)
+    swizzle_a = _expand_single_value(swizzle_a)
+    swizzle_b = _expand_single_value(swizzle_b)
+
+    return torch._scaled_addmm(
+        input,
+        mat1,
+        mat2,
+        scale_a,
+        _enum_list_as_int_list(scale_recipe_a),
+        _enum_list_as_int_list(_list_or_empty(swizzle_a)),
+        scale_b,
+        _enum_list_as_int_list(scale_recipe_b),
+        _enum_list_as_int_list(_list_or_empty(swizzle_b)),
+        contraction_dim,
+        beta=beta,
+        alpha=alpha,
+        use_fast_accum=use_fast_accum,
+        out=out,
+    )
+
+
+def scaled_addmm_(
+    input: Tensor,
+    mat1: Tensor,
+    mat2: Tensor,
+    scale_a: Tensor | list[Tensor],
+    scale_recipe_a: ScalingType | list[ScalingType],
+    scale_b: Tensor | list[Tensor],
+    scale_recipe_b: ScalingType | list[ScalingType],
+    swizzle_a: SwizzleType | list[SwizzleType] | None = None,
+    swizzle_b: SwizzleType | list[SwizzleType] | None = None,
+    contraction_dim: list[int] | tuple[int, ...] = (),
+    use_fast_accum: bool = False,
+    *,
+    beta: float = 1.0,
+    alpha: float = 1.0,
+) -> Tensor:
+    r"""In-place version of :func:`scaled_addmm`.
+
+    This function preserves the storage of ``input`` and returns ``input``. A
+    serialized WGRAD loop can create the first contribution with
+    :func:`scaled_mm`, then use ``scaled_addmm_`` for later contributions.
+
+    .. warning::
+        In-place accumulation is not safe for concurrent writers. Callers must
+        serialize writes or provide external coordination.
+    """
+    scale_a = _expand_single_value(scale_a)
+    scale_recipe_a = _expand_single_value(scale_recipe_a)
+    scale_b = _expand_single_value(scale_b)
+    scale_recipe_b = _expand_single_value(scale_recipe_b)
+    swizzle_a = _expand_single_value(swizzle_a)
+    swizzle_b = _expand_single_value(swizzle_b)
+
+    return torch._scaled_addmm_(
+        input,
+        mat1,
+        mat2,
+        scale_a,
+        _enum_list_as_int_list(scale_recipe_a),
+        _enum_list_as_int_list(_list_or_empty(swizzle_a)),
+        scale_b,
+        _enum_list_as_int_list(scale_recipe_b),
+        _enum_list_as_int_list(_list_or_empty(swizzle_b)),
+        contraction_dim,
+        beta=beta,
+        alpha=alpha,
+        use_fast_accum=use_fast_accum,
+    )
+
+
 def scaled_grouped_mm(
     mat_a: Tensor,
     mat_b: Tensor,
