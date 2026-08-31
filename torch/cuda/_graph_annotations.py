@@ -533,13 +533,6 @@ def _exit_region(prev: dict[str, Any] | None) -> None:
 # other metadata user can collide with it.
 _HOOKED_KEY: Any = object()
 
-# Bumped by _reset_kernel_annotations. Node hooks record only while the
-# generation they were created under is current, so a reset revokes the
-# backward brackets of scopes opened before it (the hooks stay on the graph
-# but become inert) without mutating live autograd graphs. Forward recording
-# is not versioned: a scope still open across a reset registers on exit.
-_annotation_generation: int = 0
-
 
 class _KernelScope(NamedTuple):
     """Capture-frontier snapshot taken at scope entry, consumed at scope exit."""
@@ -649,7 +642,7 @@ class _BracketState(threading.local):
 _SKIPPED: Any = object()
 
 
-def _freeze_region_hook(node: Any, generation: int) -> None:
+def _freeze_region_hook(node: Any) -> None:
     """Node creation hook: freeze the current region into ``node``'s bracket.
 
     Reads the region TLS slot and, if a region is open, installs the node's
@@ -674,10 +667,10 @@ def _freeze_region_hook(node: Any, generation: int) -> None:
     if frozen is None:
         return
     node.metadata[_HOOKED_KEY] = True
-    _attach_backward_hooks(node, frozen, generation)
+    _attach_backward_hooks(node, frozen)
 
 
-def _attach_backward_hooks(node: Any, frozen: dict[str, Any], generation: int) -> None:
+def _attach_backward_hooks(node: Any, frozen: dict[str, Any]) -> None:
     """Register one pre/post hook pair bracketing ``node``'s backward execution.
 
     ``frozen`` is the region that was current when the node was created:
@@ -709,19 +702,14 @@ def _attach_backward_hooks(node: Any, frozen: dict[str, Any], generation: int) -
     ambient-annotation entry the CUPTI path publishes is module-global and so
     is not restored that way; it is dropped on next read instead (see
     :data:`_active_scopes`).
-
-    ``generation`` is the annotation generation the owning scope was opened
-    under; the bracket only records (and only propagates to created nodes)
-    while it is current, so ``clear_kernel_annotations`` makes stale hooks
-    inert.
     """
     state = _BracketState()
 
     def creation_hook(child: Any) -> None:
-        _freeze_region_hook(child, generation)
+        _freeze_region_hook(child)
 
     def prehook(_grad_outputs: Any) -> None:
-        if generation != _annotation_generation or _is_tools_id_unavailable():
+        if _is_tools_id_unavailable():
             state.stack.append(_SKIPPED)
             return
         # Re-establish ownership even when this backward is not itself
@@ -778,10 +766,9 @@ def _annotation_region(annotation: dict[str, Any], backward: bool):
     for nodes hooked by a nested ``backward=True`` scope (or by an executing hooked node)
     to freeze this annotation too.
     """
-    generation = _annotation_generation
 
     def creation_hook(node: Any) -> None:
-        _freeze_region_hook(node, generation)
+        _freeze_region_hook(node)
 
     prev = _enter_region({**(_current_region() or {}), **annotation})
     try:
@@ -1104,15 +1091,15 @@ def get_kernel_annotations() -> Mapping[int, list[Any]]:
 
 
 def _reset_kernel_annotations() -> None:
-    """Wipe the registry and revoke the backward brackets of every scope opened so far.
+    """Empty the annotation registry.
 
-    The implementation behind the deprecated :func:`clear_kernel_annotations`, and what
-    tests use to isolate themselves without tripping its deprecation warning. Not a
-    public API."""
-    global _annotation_generation
+    Backward brackets already attached to live autograd nodes are NOT revoked -- they
+    cannot be detached, and they go on recording into the emptied registry. The
+    implementation behind the deprecated :func:`clear_kernel_annotations`, and what tests
+    use to isolate themselves without tripping its deprecation warning. Not a public
+    API."""
     _kernel_annotations.clear()
     _pending_scopes.clear()
-    _annotation_generation += 1
 
 
 @deprecated(
@@ -1134,11 +1121,12 @@ def clear_kernel_annotations() -> None:
         replayed for the whole run -- a global wipe instead discards annotations for
         graphs that are still live and still being joined against.
 
-    Forgets everything recorded so far, and makes the backward brackets of scopes
-    opened before the clear inert: hooks :func:`mark_kernels` attached to existing
-    autograd nodes stay on the graph but stop recording. Note this does not reach an
-    enclosing forward scope -- one still open across the clear goes on recording its
-    own kernels, because the pending scope is only registered when it exits.
+    Forgets everything recorded so far. It does not stop anything from recording:
+    the backward hooks :func:`mark_kernels` attached to live autograd nodes cannot be
+    detached and go on writing into the emptied registry, and a forward scope open
+    across the clear registers on exit as usual. In particular this breaks backward
+    projection across a forward/backward capture pair -- the forward graph's entries
+    are gone and its scope no longer names the backward graph's kernels.
 
     .. warning::
         This API is in prototype and may change in future releases.

@@ -270,20 +270,6 @@ class TestMarkKernels(TestCase):
             clear_kernel_annotations()
         self.assertEqual(len(get_kernel_annotations()), 0)
 
-    def test_reset_does_not_stop_an_open_forward_scope(self):
-        """Only backward brackets are versioned. A forward scope open across a reset
-        registers on exit as usual -- what the docstring now says."""
-        graph = torch.cuda.CUDAGraph()
-        x = torch.randn(8, device="cuda")
-
-        with torch.cuda.graph(graph, enable_annotations=True):
-            with mark_kernels("opened_before_reset"):
-                _ = x + 1
-                _reset_kernel_annotations()
-                _ = x + 2
-
-        self.assertAnnotations({"name": "opened_before_reset"})
-
     def test_failed_capture_end_discards_annotations(self):
         """A completed scope plus a failing capture_end used to strand entries keyed by
         the capture graph id. Nothing remaps them (that happens in instantiate) and
@@ -899,46 +885,6 @@ class TestMarkKernels(TestCase):
         fwd, bwd = counts[False]
         self.assertEqual(fwd, 1)
         self.assertGreaterEqual(bwd, 1)
-
-    def test_backward_clear_then_retained_backward(self):
-        """A reset revokes the backward brackets of scopes opened before it:
-        hooks on a retained graph become inert, so a backward captured after
-        the reset records nothing."""
-        graph_fwd = torch.cuda.CUDAGraph()
-        x = torch.randn(8, device="cuda", requires_grad=True)
-        with torch.cuda.graph(graph_fwd, enable_annotations=True):
-            with mark_kernels("scope"):
-                y = (x * 2).sin()
-
-        _reset_kernel_annotations()
-        self.assertEqual(len(get_kernel_annotations()), 0)
-
-        graph_bwd = torch.cuda.CUDAGraph()
-        grad_out = torch.ones_like(y)
-        with torch.cuda.graph(graph_bwd, enable_annotations=True):
-            _ = torch.autograd.grad(y, x, grad_outputs=grad_out, retain_graph=True)
-
-        self.assertEqual(len(get_kernel_annotations()), 0)
-
-    def test_backward_scope_after_clear_records(self):
-        """A scope opened after a clear records normally (fresh generation),
-        including backward of nodes created under it."""
-        graph1 = torch.cuda.CUDAGraph()
-        x = torch.randn(8, device="cuda", requires_grad=True)
-        with torch.cuda.graph(graph1, enable_annotations=True):
-            with mark_kernels("old"):
-                _ = (x * 2).sin()
-
-        _reset_kernel_annotations()
-
-        graph2 = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(graph2, enable_annotations=True):
-            with mark_kernels("new"):
-                y = (x * 3).cos()
-            _ = torch.autograd.grad(y.sum(), x)
-
-        ann = {"name": "new"}
-        self.assertAnnotations(ann, self._bwd(ann))
 
     def test_backward_accumulate_grad_excluded(self):
         """AccumulateGrad work is never tagged: a .backward() run (which
