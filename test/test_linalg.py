@@ -43,7 +43,7 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and, floating_types_and, complex_types,
 )
 from torch.testing._internal.common_cuda import CDNA2OrLater, CDNA5OrLater, SM80OrLater, SM90OrLater, tf32_enabled, tf32_on_and_off, _get_magma_version, \
-    _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_FP8, blas_library_context
+    _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_FP8, blas_library_context, ROCM_VERSION
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
     _group_quantize_tensor_symmetric
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
@@ -67,8 +67,7 @@ if TEST_SCIPY:
 
 def blaslt_supported_device():
     if torch.cuda.is_available():
-        if torch.version.rocm:
-            ROCM_VERSION = tuple(int(v) for v in torch.version.rocm.split('.')[:2])
+        if torch.version.hip:
             archs = ['gfx90a', 'gfx94']
             if ROCM_VERSION >= (6, 3):
                 archs.extend(['gfx110', 'gfx120'])

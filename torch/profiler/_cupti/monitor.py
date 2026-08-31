@@ -342,7 +342,7 @@ class CuptiMonitor:
         self._subscriber: int | None = None
         self._latency_enabled = False
         self._device_ts_enabled = False
-        # Layout state -- a function of registration, recomputed only when the
+        # Layout state -- a function of registration.
         # The fields enabled per kind on the subscriber (a function of the observer
         # field union, recomputed only on register/deregister, never per buffer). The
         # record byte layout is NOT tracked here -- each completed buffer carries
@@ -1089,8 +1089,7 @@ class CuptiMonitor:
         # whose selection is unchanged stay enabled -- toggling them off/on is needless
         # churn and, for RUNTIME/DRIVER, breaks CUPTI's CUDA-graph kernel tracing (a
         # graph captured while those kinds were enabled stops emitting per-node kernel
-        # records once they're disabled+re-enabled). Each completed buffer carries
-        # CUPTI's own captured layout, so buffers from before a switch still decode.
+        # records once they're disabled+re-enabled).
         sub = self._subscriber
         if sub is None:
             return
@@ -1101,13 +1100,18 @@ class CuptiMonitor:
         added = [k for k in target if k not in self._enabled]
         for kind in (*removed, *changed):
             self._cupti.activity_disable(sub, kind)
-        # Flush between disabling and (re-)enabling a kind with a new field selection
-        # so records pending under the old selection aren't lost. NON-forced: we only
-        # force-flush while syncing (the fence). Forcing here would push in-progress
-        # buffers concurrently with host activity -- the flush race that freezes the
-        # decode worker.
+        # FENCE between disabling and (re-)enabling a kind with a new field selection.
+        # A completed buffer carries one layout per kind (ppRecordLayouts), so a buffer
+        # that spans the switch has one of its two record shapes read at the other's
+        # offsets -- field 24 (the kernel name) is the schema's only const char*, so it
+        # is the only field whose misparse faults; every misparsed numeric field is
+        # silently wrong. activity_flush_all() hands over COMPLETED buffers only and
+        # leaves the partially-filled one to refill under the new selection, so it must
+        # be the fence. Placement matters as much as the fence: the disable above is
+        # what stops the kind producing, so by here nothing is refilling the buffer the
+        # fence evacuates. No forced flush is involved.
         if removed or changed:
-            self._cupti.activity_flush_all()
+            self.flush(sync=True)
         for kind in (*added, *changed):
             self._cupti.activity_enable(sub, kind, target[kind])
 
