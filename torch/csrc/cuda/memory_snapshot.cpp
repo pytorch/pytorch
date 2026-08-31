@@ -2,7 +2,6 @@
 #include <ATen/core/CachingHostAllocator.h>
 #include <ATen/record_function.h>
 #include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/util/ApproximateClock.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/cuda/memory_snapshot.h>
 #include <torch/csrc/jit/runtime/interpreter.h>

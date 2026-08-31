@@ -85,6 +85,7 @@ from .ir import (
     validate_ir,
     View,
 )
+from .ops_handler import register_pointwise_op
 from .utils import (
     ceildiv,
     convert_symint_to_expr,
@@ -981,6 +982,9 @@ def to_dtype(
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
 
+register_pointwise_op("to_dtype")
+
+
 _FLOAT8_E8M0FNU_TO_FLOAT_DTYPES = (
     torch.float32,
     torch.float64,
@@ -1149,6 +1153,7 @@ def register_pointwise(
 ):
     """A pointwise function that maps ops.{name} to inputs"""
     name = name or aten_fn.__name__
+    register_pointwise_op(name)
     fn = ops_wrapper(name)
 
     register_op_dtype_propagation_rules(
@@ -7815,6 +7820,9 @@ def mul(a, b):
         return make_pointwise(fn)(a, b)
 
 
+register_pointwise_op("mul")
+
+
 def get_constant_value(x: ir.IRNode) -> ir.Constant | None:
     """Try convert an arbitrary IR node into an ir.Constant value"""
 
@@ -7872,6 +7880,9 @@ def div_prim(a, b):
         return ops.truediv(*args)
 
     return make_pointwise(fn)(a, b)
+
+
+register_pointwise_op("truediv")
 
 
 @register_lowering(
@@ -9524,6 +9535,25 @@ def with_effects(token, op, *args, **kwargs):
                         raise AssertionError("Multiple effects NYI")
                     effect_type = next(iter(effects))
 
+    # An effectful op may retain its tensor inputs in state inductor cannot see
+    # (e.g. pushing a tensor onto a torchbind queue), so the input buffers must
+    # never have their storage recycled for another buffer. This is retention,
+    # not ordering: no dependency edge can express "the callee kept a reference",
+    # so the ordering dep below (deliberately weak) does not cover it. We pin the
+    # inputs of every ORDERED op rather than only those that can actually retain
+    # them, since there is no reliable "retains inputs" signal: retention happens
+    # inside the op implementation, so it is absent from the schema (queue_push
+    # reports alias_info=None), the EffectType enum only encodes ordering, and a
+    # ScriptObject argument merely triggers the default effect. Under-pinning
+    # silently miscompiles, so the bounded over-pinning is the intended tradeoff.
+    # never_reuse_but_free_buffers rather than never_reuse_buffers: dropping
+    # inductor's own reference is safe here, only recycling the storage is not.
+    if effect_type:
+        for arg in pytree.tree_leaves((args, kwargs)):
+            if isinstance(arg, TensorBox):
+                arg.realize()
+                V.graph.never_reuse_but_free_buffers.add(arg.get_name())
+
     # Track operations before
     operation_len = len(V.graph.operations)
 
@@ -9541,8 +9571,13 @@ def with_effects(token, op, *args, **kwargs):
             wrap_tensors, ir.FallbackKernel.create(op, *args, **kwargs)
         )
 
-    # Get all the operations created during the lowering above, and add StarDeps
-    # to the previous node with the same effect
+    # Get all the operations created during the lowering above, and order them
+    # after the previous op with the same effect. This is an ordering constraint
+    # only: an effect edge says nothing about whether this op reads the previous
+    # one's buffer, so it goes through additional_buffer_deps, which the
+    # scheduler installs as WeakDep(is_fake=True). A strong dep would be counted
+    # as a real read and would extend the previous buffer's lifetime past its
+    # last true use, defeating both reuse and deallocation.
     if len(V.graph.operations[operation_len:]) <= 0:
         raise AssertionError(
             f"No operation nodes were generated when lowering effectful operator {op}."
@@ -9553,8 +9588,12 @@ def with_effects(token, op, *args, **kwargs):
             # Patch has_side_effects to return True
             new_op.has_side_effects = lambda: True  # pyrefly: ignore[missing-attribute]
             if prev_effect_buffer:
-                op_name = new_op.get_name()  # pyrefly: ignore[missing-attribute]
-                V.graph.additional_star_deps[op_name].add(prev_effect_buffer.get_name())
+                op_name = (
+                    new_op.get_operation_name()
+                )  # pyrefly: ignore[missing-attribute]
+                V.graph.additional_buffer_deps[op_name].add(
+                    prev_effect_buffer.get_name()
+                )
         # Update the effectful ops chain to point to the latest operation
         V.graph.effectful_ops[effect_type] = (
             new_op  # pyrefly: ignore[unsupported-operation]
@@ -9682,32 +9721,41 @@ def lower_inline_asm_elementwise(
     inputs = broadcast_tensors(*inputs)
 
     input_dtypes = tuple(inp.get_dtype() for inp in inputs)
+    output_dtypes = dtype if isinstance(dtype, tuple) else (dtype,)
     loaders = [inp.make_loader() for inp in inputs]
 
-    def inner_fn(idx):
-        vals = tuple(loader(idx) for loader in loaders)
-        result = ops.inline_asm_elementwise(
-            *vals,
-            asm=asm_str,
-            constraints=constraints,
-            dtype=dtype,
-            is_pure=is_pure,
-            pack=pack,
-            input_dtypes=input_dtypes,
-        )
-        # Inductor computes in fp32 for bf16/fp16. Upcast so fused downstream
-        # ops (reductions, etc.) see fp32 values. The Pointwise's storage dtype
-        # handles the final downcast on store.
-        if dtype in (torch.float16, torch.bfloat16):
-            result = ops.to_dtype(result, torch.float32)
-        return result
+    def make_output(output_index):
+        output_dtype = output_dtypes[output_index]
 
-    return ir.Pointwise.create(
-        device=inputs[0].get_device(),
-        dtype=dtype,
-        inner_fn=inner_fn,
-        ranges=list(inputs[0].get_size()),
-    )
+        def inner_fn(idx):
+            vals = tuple(loader(idx) for loader in loaders)
+            result = ops.inline_asm_elementwise(
+                *vals,
+                asm=asm_str,
+                constraints=constraints,
+                dtype=output_dtype,
+                is_pure=is_pure,
+                pack=pack,
+                input_dtypes=input_dtypes,
+                output_dtypes=output_dtypes if len(output_dtypes) > 1 else None,
+                output_index=output_index,
+            )
+            # Inductor computes bf16/fp16 in fp32. Upcast so fused downstream
+            # ops (reductions, etc.) see fp32 values. The Pointwise's storage dtype
+            # handles the final downcast on store.
+            if output_dtype in (torch.float16, torch.bfloat16):
+                result = ops.to_dtype(result, torch.float32)
+            return result
+
+        return ir.Pointwise.create(
+            device=inputs[0].get_device(),
+            dtype=output_dtype,
+            inner_fn=inner_fn,
+            ranges=list(inputs[0].get_size()),
+        )
+
+    outputs = tuple(make_output(i) for i in range(len(output_dtypes)))
+    return outputs if isinstance(dtype, tuple) else outputs[0]
 
 
 # populate lowerings defined in kernel/*
