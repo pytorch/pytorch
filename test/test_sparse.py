@@ -3416,6 +3416,7 @@ class TestSparse(TestSparseBase):
                     dtype=int64_dtype, requires_grad=False)
 
     @onlyAccelerator
+    @skipIfMPS
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @parametrize('requires_grad', (True, False))
     def test_empty_full(self, device, dtype, requires_grad):
