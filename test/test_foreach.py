@@ -2160,6 +2160,25 @@ _FOREACH_MM_SHAPES = [
 ]
 
 
+class TestForeachMM(TestCase):
+    def test_foreach_mm_gradcheck(self):
+        G = 4
+        shapes = [(32, 32, 32)] * G
+        A = [
+            torch.randn(M, K, dtype=torch.float64, requires_grad=True)
+            for M, _, K in shapes
+        ]
+        B = [
+            torch.randn(K, N, dtype=torch.float64, requires_grad=True)
+            for _, N, K in shapes
+        ]
+
+        def fn(*tensors):
+            return torch.foreach.mm(list(tensors[:G]), list(tensors[G:]))
+
+        gradcheck(fn, (*A, *B))
+
+
 class TestForeachMMDevice(TestCase):
     def _check(self, shapes, dtype, device):
         A = [torch.randn(M, K, dtype=dtype, device=device) for M, _, K in shapes]
@@ -2184,23 +2203,6 @@ class TestForeachMMDevice(TestCase):
     @dtypesIfCPU(torch.float32)
     def test_foreach_mm(self, device, dtype, label, shapes):
         self._check(shapes, dtype, device)
-
-    def test_foreach_mm_gradcheck(self):
-        G = 4
-        shapes = [(32, 32, 32)] * G
-        A = [
-            torch.randn(M, K, dtype=torch.float64, requires_grad=True)
-            for M, _, K in shapes
-        ]
-        B = [
-            torch.randn(K, N, dtype=torch.float64, requires_grad=True)
-            for _, N, K in shapes
-        ]
-
-        def fn(*tensors):
-            return torch.foreach.mm(list(tensors[:G]), list(tensors[G:]))
-
-        gradcheck(fn, (*A, *B))
 
     @parametrize(
         "label,a_dtype,b_dtype,K,expected",
