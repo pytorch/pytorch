@@ -916,20 +916,22 @@ class DistMatrixOpsSDPATestCUDA(DTensorTestBase):
         device_type = torch.device(device).type
         device_mesh = init_device_mesh(device_type, (self.world_size,))
         comm_mode = CommDebugMode()
+        head_dim = 8
+        # bsz, n_heads, slen, head_dim
         query = torch.rand(
-            (4, 8, 8, 8),
+            (4, 8, 8, head_dim),
             device=device_type,
             dtype=torch.bfloat16,
             requires_grad=True,
         )
         key = torch.rand(
-            (4, 8, 8, 8),
+            (4, 8, 8, head_dim),
             device=device_type,
             dtype=torch.bfloat16,
             requires_grad=True,
         )
         value = torch.rand(
-            (4, 8, 8, 8),
+            (4, 8, 8, head_dim),
             device=device_type,
             dtype=torch.bfloat16,
             requires_grad=True,
@@ -937,19 +939,23 @@ class DistMatrixOpsSDPATestCUDA(DTensorTestBase):
 
         from torch.nn.attention import sdpa_kernel, SDPBackend
 
-        dropout_p = 0.0
-        is_causal = True
-        params = torch.backends.cuda.SDPAParams(
-            query, key, value, None, dropout_p, is_causal, False
-        )
         available_backends = []
+        dropout_p = 0.0
+        # TODO: Add test cases where is_causal=False and an attention mask is provided.
+        #       Gaps include missing op support for aten.masked_fill_.Scalar.
+        is_causal = True
+        enable_gqa = False
+        params = torch.backends.cuda.SDPAParams(
+            query, key, value, None, dropout_p, is_causal, enable_gqa
+        )
         if torch.backends.cuda.can_use_flash_attention(params, debug=False):
             available_backends.append(SDPBackend.FLASH_ATTENTION)
         if torch.backends.cuda.can_use_efficient_attention(params, debug=False):
             available_backends.append(SDPBackend.EFFICIENT_ATTENTION)
 
+        placement_specs = [(Replicate(),), (Shard(0),), (Shard(1),)]
         for backend, input_placements in itertools.product(
-            available_backends, [(Replicate(),), (Shard(0),), (Shard(1),)]
+            available_backends, placement_specs
         ):
             dist_query = distribute_tensor(query, device_mesh, input_placements)
             dist_key = distribute_tensor(key, device_mesh, input_placements)
