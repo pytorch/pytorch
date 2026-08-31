@@ -19,7 +19,7 @@ import torch
 from torch._inductor import config
 from torch._inductor.ir import Buffer, FixedLayout
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import try_import_ck_lib
+from torch._inductor.utils import run_and_get_code, try_import_ck_lib
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import tf32_off
 from torch.testing._internal.common_utils import (
@@ -54,6 +54,22 @@ _parametrize_dtype = parametrize(
     (torch.float16, torch.bfloat16),
     name_fn=_dtype_test_name,
 )
+
+
+# A selected CK-Tile kernel embeds the CK-Tile instance name
+# `ck_tile_gemm_universal_*` (see CKTileGemmOperation.name()) inside its
+# async_compile.rocm block. Matching that name rather than the generic
+# `async_compile.rocm(` marker is what distinguishes CK-Tile from the classic
+# CKGemmTemplate, which also emits a ROCm kernel and would satisfy the marker.
+_CKTILE_KERNEL_RE = re.compile(r"ck_tile_gemm_universal_")
+
+
+def _assert_cktile_selected(codes):
+    if not _CKTILE_KERNEL_RE.search("\n".join(codes)):
+        raise AssertionError(
+            "Expected a CK-Tile (ck_tile_gemm_universal_) kernel in the generated "
+            "code; CK-Tile was not selected (fell back to ATen/Triton/classic-CK)."
+        )
 
 
 @instantiate_parametrized_tests
@@ -141,6 +157,58 @@ class TestCKBackend(TestCase):
                     return mm(x, w)
 
                 Y_compiled = compiled_mm(a, b)
+
+            Y = mm(a=a, b=b)
+            torch.testing.assert_close(Y_compiled, Y)
+
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @unittest.mock.patch.dict(os.environ, _test_env)
+    def test_cktile_selected_smoke_mm(self):
+        """
+        Tier-1 smoke for the CK-Tile backend: on the runtime GPU, force the
+        standalone CK-Tile backend for a small float16 mm and assert a CK-Tile
+        kernel is actually selected (not ATen/Triton/classic-CK) and produces
+        correct numerics. The shape (M=N=512, K=256, Row/Row/Row) is served by a
+        CK-Tile instance on both gfx9 (MFMA 32x32x16) and gfx1250 (WMMA 16x16x32):
+        the block tile 256x256 divides M/N and K is a multiple of both warp-tile K
+        values, so a CK-Tile candidate must win when the backend works.
+
+        Deliberately float16 (F16), not bf16: the CK-Tile ops() product previously
+        tagged fp16 as "FP16" which did not match the "F16" dtype key, silently
+        filtering out every fp16 CK-Tile instance. This test is the CI regression
+        guard for that mismatch class -- it fails if the dtype tokens drift again.
+        A bf16 test would have stayed green through the entire bug.
+        """
+
+        def mm(a, b):
+            return a @ b
+
+        tensor_options = {"device": "cuda", "dtype": torch.float16}
+        a = torch.randn(512, 256, **tensor_options)
+        b = torch.randn(256, 512, **tensor_options)
+
+        if "rocm" not in dir(config):
+            raise AssertionError("'rocm' not found in dir(config)")
+
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "CKTILE",
+                    "compile_threads": 4,
+                    "rocm.ck_tile_max_profiling_configs": 8,
+                    "rocm.ck_dir": self.ck_dir,
+                }
+            ),
+            tf32_off(),
+        ):
+
+            @torch.compile(dynamic=False)
+            def compiled_mm(x, w):
+                return mm(x, w)
+
+            Y_compiled, codes = run_and_get_code(compiled_mm, a, b)
+            _assert_cktile_selected(codes)
 
             Y = mm(a=a, b=b)
             torch.testing.assert_close(Y_compiled, Y)
