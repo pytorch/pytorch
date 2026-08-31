@@ -787,9 +787,8 @@ class TestArch(unittest.TestCase):
         self.assertIn("launch_fakeop_p__sm100a(", src)
         self.assertNotIn("launch_fakeop_p__sm100(", src)
 
-    def test_cc_of_and_device_match(self):
-        self.assertEqual(gen_aot_lib._cc_of("sm_90"), (9, 0))
-        self.assertEqual(gen_aot_lib._cc_of("sm_103a"), (10, 3))
+    def test_device_match_renders_the_full_capability(self):
+        # cc_of itself is covered above, against native_aot_decl directly.
         m = gen_aot_lib._device_match(10, 3)
         self.assertIn("major == 10", m)
         self.assertIn("minor == 3", m)
@@ -1162,6 +1161,26 @@ class TestAotSourceGeneration(unittest.TestCase):
         self.assertNotIn("scalar_type() != at::kFloat", src)
         self.assertIn("if (N == 1024 && k == 8) {", src)
 
+    def test_a_hook_that_returns_nothing_emits_nothing(self):
+        # The attribute EXISTS, so the callable default does not fire, and a body
+        # that computes without returning is an easy authoring slip. `or ""` is
+        # what keeps "None" out of the generated C++.
+        class NoneHooks(_FakeDecl):
+            @staticmethod
+            def cpp_dispatch_prelude():
+                return None
+
+            @staticmethod
+            def cpp_helpers():
+                return None
+
+        sidecar = dict(SIDECAR, spec={"N": 1024, "K": 8})
+        src = gen_aot_lib.gen_op(
+            "fakeop", "CUDA", NoneHooks, [sidecar], "const at::Tensor & self, int64_t k"
+        )
+        self.assertNotIn("None", src)
+        self.assertIn("if (N == 1024 && k == 8) {", src)
+
     def test_the_branch_launches_inside_its_condition(self):
         # The BLOCK, not its three pieces: asserting the cond line, the launch call
         # and a trailing `return false` separately is satisfied by a branch that
@@ -1352,6 +1371,36 @@ class TestShippedVsDeclaredArchs(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "declaration supports only"):
             gen_aot_lib.gen_op(
                 "fakeop", "CUDA", _Narrow, [s90], "const at::Tensor & self, int64_t k"
+            )
+
+    def test_a_disowned_tree_beside_a_claimed_one_is_fatal(self):
+        # Same capability as the claimed tree, so the plain spelling loses
+        # _by_arch's tie-break: the check has to run over every exported tree, or a
+        # stale sm_100 beside the sm_100a this declaration pins passes unnoticed
+        # and the build quietly ships nothing from it.
+        class _Narrow(_FakeDecl):
+            ARCHS = ("sm_100a",)
+
+        s100 = dict(SIDECAR, prefix="fakeop_p__sm100", arch="sm_100", _dir="out/sm_100")
+        s100a = dict(
+            SIDECAR, prefix="fakeop_p__sm100a", arch="sm_100a", _dir="out/sm_100a"
+        )
+        with self.assertRaisesRegex(RuntimeError, "declaration supports only"):
+            gen_aot_lib.gen_op(
+                "fakeop",
+                "CUDA",
+                _Narrow,
+                [s100, s100a],
+                "const at::Tensor & self, int64_t k",
+            )
+        # The message must name the tree to delete, not the survivor.
+        with self.assertRaisesRegex(RuntimeError, r"Delete out/sm_100 --"):
+            gen_aot_lib.gen_op(
+                "fakeop",
+                "CUDA",
+                _Narrow,
+                [s100, s100a],
+                "const at::Tensor & self, int64_t k",
             )
 
     def test_declaring_more_than_was_shipped_is_fine(self):
