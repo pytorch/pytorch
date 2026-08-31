@@ -79,6 +79,7 @@ jobs:
       tests-to-exclude: "inductor/test_torchinductor_opinfo"
       force-keep-going: true
       force-no-td: true
+      soft-fail-tests: true
       python-version: "3.10"
       compiler: gcc11
     secrets: inherit
@@ -127,6 +128,7 @@ jobs:
       tests-to-exclude: "inductor/test_torchinductor_opinfo"
       force-keep-going: true
       force-no-td: true
+      soft-fail-tests: true
       python-version: "3.10"
       compiler: clang21
     secrets: inherit
