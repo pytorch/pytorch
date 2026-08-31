@@ -23,11 +23,12 @@ from torch.distributed.checkpoint.optimizer import load_sharded_optimizer_state_
 from torch.distributed.checkpoint.utils import CheckpointException
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_distributed import (
-    requires_accelerator_dist_backend,
-    skip_if_lt_x_gpu,
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
 )
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -92,11 +93,11 @@ class TestFSSpec(ShardedTensorTestBase):
         return 2
 
     @with_comms(init_rpc=False)
-    @requires_accelerator_dist_backend()
+    @requires_capabilities(Capability.distributed.backend)
     @skip_if_lt_x_gpu(2)
     @with_temp_dir
     def test_fsspec(self, device):
-        device_type = torch.accelerator.current_accelerator().type
+        device_type = torch.device(device).type
         CHECKPOINT_DIR = self.temp_dir
 
         model = FSDP(MyTestModule().to(device_type))
@@ -167,7 +168,7 @@ class TestFSSpec(ShardedTensorTestBase):
         )
 
     @with_comms(init_rpc=False)
-    @requires_accelerator_dist_backend()
+    @requires_capabilities(Capability.distributed.backend)
     @skip_if_lt_x_gpu(2)
     @with_temp_dir
     def test_overwrite(self, device):
