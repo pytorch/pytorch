@@ -3,6 +3,7 @@
 
 #include <ATen/core/IListRef.h>
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/core/VariableHooksInterface.h>
 #include <c10/util/Exception.h>
 
 #include <c10/util/irange.h>
@@ -217,10 +218,6 @@ void FunctionalTensorWrapper::mutate_view_meta(const std::shared_ptr<at::functio
 void FunctionalTensorWrapper::replace_(const Tensor& other, bool from_lazy_regenerate) {
   // TODO: going to need to change this if we want nested functionalize() transforms.
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(other));
-  if (!from_lazy_regenerate) {
-    // A value that did not come from a replay cannot be a cheap one.
-    regenerated_cheaply_ = false;
-  }
   value_ = other;
   TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
   // out= ops are allowed to resize the output tensors, mutating both the data and metadata of the tensor.
@@ -264,9 +261,8 @@ void FunctionalTensorWrapper::set__impl(const FunctionalTensorWrapper* other) {
   generation_ = other->generation_;
   view_metas_ = other->view_metas_;
   is_symbolic_ = other->is_symbolic_;
-  // Must travel with view_metas_: the flag says whether that chain contains a
-  // multi-output view, and _unwrap_functional_tensor now uses it to decide
-  // between an exact and a cheap replay.
+  // Must travel with view_metas_: the flag describes that chain, and
+  // _functionalize_is_multi_output_view reports it to AOTAutograd.
   is_multi_output_view_ = other->is_multi_output_view_;
   // FREEZE the old storage, preventing mutations to it.
   // this is a huge pain to handle properly in all cases, so we ban it.
@@ -371,7 +367,7 @@ void FunctionalTensorWrapper::sync_() {
     return;
   }
   apply_updates();
-  regenerate_from_base_cheap();
+  regenerate_from_base();
 }
 
 const std::vector<std::shared_ptr<functionalization::ViewMeta>>& FunctionalTensorWrapper::view_metas() const {
@@ -379,25 +375,15 @@ const std::vector<std::shared_ptr<functionalization::ViewMeta>>& FunctionalTenso
 }
 
 void FunctionalTensorWrapper::regenerate_from_base() {
-  regenerate_from_base_impl(/*cheap_replay=*/false);
-}
-
-void FunctionalTensorWrapper::regenerate_from_base_cheap() {
-  regenerate_from_base_impl(/*cheap_replay=*/true);
-}
-
-void FunctionalTensorWrapper::regenerate_from_base_impl(bool cheap_replay) {
   at::AutoDispatchSkipFunctionalize guard;
   auto storage_impl = functional_storage_impl();
   auto t = storage_impl->base();
 
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t));
-  t = at::functionalization::impl::apply_view_meta_sequence(
-      t, view_metas_, cheap_replay);
+  t = at::functionalization::impl::apply_view_meta_sequence(t, view_metas_);
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t));
 
   replace_(t, /*from_lazy_regenerate=*/true);
-  regenerated_cheaply_ = cheap_replay;
   generation_ = storage_impl->generation();
 }
 
@@ -810,11 +796,16 @@ void mutate_view_meta(const at::Tensor& self, const std::shared_ptr<functionaliz
 
 Tensor apply_view_meta_sequence(
     const Tensor& base,
-    const std::vector<std::shared_ptr<functionalization::ViewMeta>>& sequence,
-    bool cheap_replay) {
+    const std::vector<std::shared_ptr<functionalization::ViewMeta>>& sequence) {
   Tensor r = base;
   for (auto& vm : sequence) {
-    r = cheap_replay ? vm->forward_cheap(r) : vm->forward(r);
+    r = vm->forward(r);
+    if (vm->is_multi_output && at::impl::HasVariableHooks()) {
+      // See [Note: multi-output view replay]. `forward` rebuilt this output as
+      // a single-output view, so autograd does not know it came from an op
+      // returning several views and would let the user mutate it in place.
+      at::impl::GetVariableHooks()->mark_multi_output_view(r);
+    }
   }
   return r;
 }

@@ -104,23 +104,22 @@ struct ViewMeta {
 
   virtual ~ViewMeta() = default;
 
+  // Note [multi-output view replay]
+  //
+  // A multi-output view rebuilds just the output this ViewMeta describes,
+  // rather than replaying the whole operation and discarding the sibling views:
+  // one output of `unbind` comes back as a `select` of the base. Replaying the
+  // operation is O(number of outputs), so rebuilding every view of one base
+  // that way is quadratic.
+  //
+  // The one thing the replayed operation provides that a `select` does not is
+  // autograd's restriction on mutating an output of a multi-output view.
+  // apply_view_meta_sequence restores that directly, by setting
+  // CreationMeta::MULTI_OUTPUT_NODE on the regenerated view. The grad_fn is a
+  // SelectBackward rather than an UnbindBackward, which computes the same
+  // gradient.
   virtual Tensor forward(const Tensor& base) = 0;
   virtual Tensor reverse(const Tensor& base, const Tensor& mutated_view) = 0;
-
-  // The cheap replay. Same tensor as `forward`, the exact replay, but a
-  // multi-output view rebuilds just this output rather than replaying the whole
-  // operation and discarding the sibling views (one output of `unbind` is a
-  // `select` of the base). The exact replay is O(number of outputs), so
-  // rebuilding every view of one base with it is quadratic.
-  //
-  // Only valid where the result is not visible to autograd. The cheap replay
-  // loses the multi-output-view bookkeeping the exact one sets up: an `unbind`
-  // output rebuilt as a `select` gets SelectBackward rather than
-  // UnbindBackward, and so does not inherit the restrictions autograd places on
-  // mutating a multi-output view.
-  virtual Tensor forward_cheap(const Tensor& base) {
-    return forward(base);
-  }
 
   // See Note [out_idx in ViewMeta]
   int64_t out_index;

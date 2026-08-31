@@ -2118,7 +2118,15 @@ def forward(self, primals_1):
         inp_clone = inp.clone()
         out_ref = f3(inp_ref_clone)
         out_test = f3_compiled(inp_clone)
-        self.assertTrue(all("UnbindBackward" in str(o.grad_fn) for o in out_test[:3]))
+        # Regeneration rebuilds each unbind output as a select, so the grad_fn
+        # is a SelectBackward. What has to survive is autograd's refusal to let
+        # us mutate an output of a multi-output view, which rides on
+        # CreationMeta rather than on the grad_fn.
+        for o in out_test[:3]:
+            with self.assertRaisesRegex(
+                RuntimeError, "output of a function that returns multiple views"
+            ):
+                o.mul_(2)
 
         # The last output is not from a multi-output view, so autograd will let us mutate it.
         out_ref[-1].mul_(2)

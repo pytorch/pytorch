@@ -808,13 +808,11 @@ def forward(self, arg0_1):
     getitem_1 = split_copy[1];  split_copy = None
     diagonal_copy = torch.ops.aten.diagonal_copy.default(getitem_1);  getitem_1 = None
     add = torch.ops.aten.add.Tensor(diagonal_copy, ones);  diagonal_copy = ones = None
-    split_copy_1 = torch.ops.aten.split_copy.Tensor(arg0_1, 2)
-    getitem_2 = split_copy_1[0];  getitem_2 = None
-    getitem_3 = split_copy_1[1];  split_copy_1 = None
-    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(getitem_3, add);  getitem_3 = add = None
+    slice_copy = torch.ops.aten.slice_copy.Tensor(arg0_1, 0, 2, 4)
+    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(slice_copy, add);  slice_copy = add = None
     slice_scatter = torch.ops.aten.slice_scatter.default(arg0_1, diagonal_scatter, 0, 2, 4);  diagonal_scatter = None
-    slice_copy = torch.ops.aten.slice_copy.Tensor(slice_scatter, 0, 2, 4)
-    diagonal_copy_1 = torch.ops.aten.diagonal_copy.default(slice_copy);  slice_copy = None
+    slice_copy_1 = torch.ops.aten.slice_copy.Tensor(slice_scatter, 0, 2, 4)
+    diagonal_copy_1 = torch.ops.aten.diagonal_copy.default(slice_copy_1);  slice_copy_1 = None
     mul = torch.ops.aten.mul.Tensor(slice_scatter, slice_scatter);  mul = None
     copy_ = torch.ops.aten.copy_.default(arg0_1, slice_scatter);  arg0_1 = slice_scatter = copy_ = None
     return diagonal_copy_1
@@ -838,13 +836,11 @@ def forward(self, arg0_1):
     getitem_1 = split[1];  split = None
     diagonal = torch.ops.aten.diagonal.default(getitem_1);  getitem_1 = None
     add = torch.ops.aten.add.Tensor(diagonal, ones);  diagonal = ones = None
-    split_1 = torch.ops.aten.split.Tensor(arg0_1, 2)
-    getitem_2 = split_1[0];  getitem_2 = None
-    getitem_3 = split_1[1];  split_1 = None
-    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(getitem_3, add);  getitem_3 = add = None
+    slice_1 = torch.ops.aten.slice.Tensor(arg0_1, 0, 2, 4)
+    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(slice_1, add);  slice_1 = add = None
     slice_scatter = torch.ops.aten.slice_scatter.default(arg0_1, diagonal_scatter, 0, 2, 4);  diagonal_scatter = None
-    slice_1 = torch.ops.aten.slice.Tensor(slice_scatter, 0, 2, 4)
-    diagonal_1 = torch.ops.aten.diagonal.default(slice_1);  slice_1 = None
+    slice_2 = torch.ops.aten.slice.Tensor(slice_scatter, 0, 2, 4)
+    diagonal_1 = torch.ops.aten.diagonal.default(slice_2);  slice_2 = None
     mul = torch.ops.aten.mul.Tensor(slice_scatter, slice_scatter);  mul = None
     copy_ = torch.ops.aten.copy_.default(arg0_1, slice_scatter);  arg0_1 = slice_scatter = copy_ = None
     return diagonal_1
@@ -876,13 +872,11 @@ def forward(self, arg0_1):
     getitem_1 = split_with_sizes_copy[1];  split_with_sizes_copy = getitem_1 = None
     diagonal_copy = torch.ops.aten.diagonal_copy.default(getitem);  getitem = None
     add = torch.ops.aten.add.Tensor(diagonal_copy, ones);  diagonal_copy = ones = None
-    split_with_sizes_copy_1 = torch.ops.aten.split_with_sizes_copy.default(arg0_1, [2, 2])
-    getitem_2 = split_with_sizes_copy_1[0]
-    getitem_3 = split_with_sizes_copy_1[1];  split_with_sizes_copy_1 = getitem_3 = None
-    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(getitem_2, add);  getitem_2 = add = None
+    slice_copy = torch.ops.aten.slice_copy.Tensor(arg0_1, 0, 0, 2)
+    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(slice_copy, add);  slice_copy = add = None
     slice_scatter = torch.ops.aten.slice_scatter.default(arg0_1, diagonal_scatter, 0, 0, 2);  diagonal_scatter = None
-    slice_copy = torch.ops.aten.slice_copy.Tensor(slice_scatter, 0, 0, 2)
-    diagonal_copy_1 = torch.ops.aten.diagonal_copy.default(slice_copy);  slice_copy = None
+    slice_copy_1 = torch.ops.aten.slice_copy.Tensor(slice_scatter, 0, 0, 2)
+    diagonal_copy_1 = torch.ops.aten.diagonal_copy.default(slice_copy_1);  slice_copy_1 = None
     mul = torch.ops.aten.mul.Tensor(slice_scatter, slice_scatter);  mul = None
     copy_ = torch.ops.aten.copy_.default(arg0_1, slice_scatter);  arg0_1 = slice_scatter = copy_ = None
     return diagonal_copy_1
@@ -906,13 +900,11 @@ def forward(self, arg0_1):
     getitem_1 = split_with_sizes[1];  split_with_sizes = getitem_1 = None
     diagonal = torch.ops.aten.diagonal.default(getitem);  getitem = None
     add = torch.ops.aten.add.Tensor(diagonal, ones);  diagonal = ones = None
-    split_with_sizes_1 = torch.ops.aten.split_with_sizes.default(arg0_1, [2, 2])
-    getitem_2 = split_with_sizes_1[0]
-    getitem_3 = split_with_sizes_1[1];  split_with_sizes_1 = getitem_3 = None
-    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(getitem_2, add);  getitem_2 = add = None
+    slice_1 = torch.ops.aten.slice.Tensor(arg0_1, 0, 0, 2)
+    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(slice_1, add);  slice_1 = add = None
     slice_scatter = torch.ops.aten.slice_scatter.default(arg0_1, diagonal_scatter, 0, 0, 2);  diagonal_scatter = None
-    slice_1 = torch.ops.aten.slice.Tensor(slice_scatter, 0, 0, 2)
-    diagonal_1 = torch.ops.aten.diagonal.default(slice_1);  slice_1 = None
+    slice_2 = torch.ops.aten.slice.Tensor(slice_scatter, 0, 0, 2)
+    diagonal_1 = torch.ops.aten.diagonal.default(slice_2);  slice_2 = None
     mul = torch.ops.aten.mul.Tensor(slice_scatter, slice_scatter);  mul = None
     copy_ = torch.ops.aten.copy_.default(arg0_1, slice_scatter);  arg0_1 = slice_scatter = copy_ = None
     return diagonal_1
