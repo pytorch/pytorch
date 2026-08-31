@@ -5861,13 +5861,14 @@ class TestLinalg(TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'LU without pivoting is not implemented on the CPU'):
                     f(torch.empty(1, 2, 2), pivot=False)
 
-    @skipIfRocm
     @slowTest
+    @skipIfRocm
     @onlyCUDA
     @skipCUDAIfNoCusolver
     @setLinalgBackendsToDefaultFinally
+    @parametrize("pivot", [True, False])
     @dtypes(*floating_and_complex_types())
-    def test_linalg_batched_lu_stability_large_inputs(self, device, dtype):
+    def test_linalg_batched_lu_stability_large_inputs(self, device, dtype, pivot):
         # Check whether LU factorization is stable.
         # We use the criterion from Netlib/MAGMA:
         # scaled_residul < K, where
@@ -5890,17 +5891,49 @@ class TestLinalg(TestCase):
 
         shapes = itertools.chain(itertools.product(bsl, nsl), itertools.product(bsh, nsh))
 
-        make_well_conditioned = partial(make_fullrank_matrices_with_distinct_singular_values, device=device, dtype=dtype)
-        make_ill_conditioned = partial(torch.randn, device=device, dtype=dtype)
+        def make_well_conditioned_system(*shape):
+            t = torch.randn(*shape, device=device, dtype=dtype)
+            u, _ = torch.linalg.qr(t)
+            v, _ = torch.linalg.qr(t.mT)
+            s = torch.rand(*shape[:-2], min(shape[-1], shape[-2]), device=device, dtype=dtype).add_(0.5)
+            return (u * s.unsqueeze(-2)) @ v.mH
+
+        if pivot:
+            make_well_conditioned = make_well_conditioned_system
+            make_ill_conditioned = partial(torch.randn, device=device, dtype=dtype)
+        else:
+            def make_diagonally_dominant(t):
+                # This bounds the growth factor by 2
+                t_diag = t.diagonal(dim1=-2, dim2=-1)
+                col_abs_sum = t.abs().sum(-2)
+                t_diag.copy_(t_diag.sgn() * col_abs_sum)
+                return t
+
+            def make_well_conditioned(*shape):
+                # Diagonal dominance limits the growth factor to be no larger than 2,
+                # so that nopiv Gaussian elimination becomes stable.
+                t = make_well_conditioned_system(*shape)
+                return make_diagonally_dominant(t)
+
+            def make_ill_conditioned(*shape):
+                t = make_well_conditioned(*shape)
+                t[..., :2, :].zero_()
+                # This makes the input ill-conditioned (the condition number is at least 1e8),
+                # but the growth factor is still limited by 2 (diagonal dominance), so
+                # nopiv Gaussian elimination should be stable.
+                t[..., 0, 0] = 1
+                t[..., 1, 1] = 1e-8
+                return t
+
         make_input_methods = (make_well_conditioned, make_ill_conditioned)
         matrix_norm = partial(torch.linalg.norm, dim=(-2, -1))
 
         torch.backends.cuda.preferred_linalg_library("cusolver")
         for (b, n), make_input in product(shapes, make_input_methods):
             A = make_input(b, n, n)
-            P, L, U = torch.linalg.lu(A)
+            P, L, U = torch.linalg.lu(A, pivot=pivot)
             A, P, L, U = (t.to(compute_dtype) for t in (A, P, L, U))
-            residual = P @ L @ U - A
+            residual = P @ L @ U - A if pivot else L @ U - A
 
             # Netlib uses 1-norm, MAGMA uses Frobenius
             for norm in (partial(matrix_norm, ord=1), partial(matrix_norm, ord='fro')):
@@ -5928,7 +5961,7 @@ class TestLinalg(TestCase):
             A[0, :, 150:] = 0
             A[2, :, :150] = 0
             A[4, :, 17] = 0
-            _, _, info = torch.linalg.lu_factor_ex(A)
+            _, _, info = torch.linalg.lu_factor_ex(A, pivot=pivot)
             self.assertEqual(info[0], 151)
             self.assertEqual(info[2], 1)
             self.assertEqual(info[4], 18)
