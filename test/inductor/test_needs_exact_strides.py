@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._triton import has_triton
 
+
 if has_triton():
     import triton
     import triton.language as tl
@@ -41,8 +42,8 @@ class TestNeedsExactStrides(InductorTestCase):
     @parametrize("dtype", [torch.float, torch.float8_e8m0fnu])
     def test_custom_op(self, device, dtype):
         # float8_e8m0fnu errors on "cpu"
-        x = torch.ones(4, 4, 2, 2, device=device, dtype=torch.float8_e8m0fnu)
-        other = torch.ones(4, 4, 2, 2, device=device, dtype=torch.float8_e8m0fnu)
+        x = torch.ones(4, 4, 2, 2, device=device, dtype=dtype)
+        other = torch.ones(4, 4, 2, 2, device=device, dtype=dtype)
 
         class _CustomPass(PatternMatcherPass):
             def __init__(self) -> None:
