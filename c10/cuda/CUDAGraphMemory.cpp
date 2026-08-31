@@ -1,0 +1,319 @@
+#include <c10/cuda/impl/CUDAGraphMemory.h>
+
+#include <c10/cuda/CUDAException.h>
+#include <c10/util/Exception.h>
+#include <c10/util/SmallVector.h>
+
+#include <deque>
+
+namespace c10::cuda::CUDAGraphMemory {
+
+void CaptureTracker::captureBegin() {
+  ++active_captures_;
+}
+
+void CaptureTracker::captureBegin(const CaptureRegistration& registration) {
+  TORCH_INTERNAL_ASSERT(registration.capture_id != 0);
+  TORCH_INTERNAL_ASSERT(
+      registration.parent_capture_id.has_value() ==
+      registration.parent_dependency_stream.has_value());
+  TORCH_INTERNAL_ASSERT(!capture_tree_.count(registration.capture_id));
+
+  CaptureId_t root_capture_id = registration.capture_id;
+  cudaStream_t block_reuse_stream = registration.primary_stream;
+  if (registration.parent_capture_id.has_value()) {
+    auto parent_it = capture_tree_.find(*registration.parent_capture_id);
+    TORCH_INTERNAL_ASSERT(
+        parent_it != capture_tree_.end() && parent_it->second.is_active,
+        "Conditional capture parent is not active");
+    TORCH_INTERNAL_ASSERT(
+        parent_it->second.mempool_id == registration.mempool_id,
+        "Conditional capture must share its parent's memory pool");
+    const CaptureTreeNode& parent = parent_it->second;
+    root_capture_id = parent.root_capture_id;
+    block_reuse_stream = *registration.parent_dependency_stream;
+    if (block_reuse_stream == parent.primary_stream) {
+      block_reuse_stream = parent.block_reuse_stream;
+    }
+  }
+
+  capture_tree_.emplace(
+      registration.capture_id,
+      CaptureTreeNode{
+          registration.mempool_id,
+          registration.primary_stream,
+          block_reuse_stream,
+          registration.parent_capture_id,
+          root_capture_id,
+          true});
+  captureBegin();
+}
+
+void CaptureTracker::captureEnd() {
+  TORCH_INTERNAL_ASSERT(
+      active_captures_ > 0, "captureEnd called with no active capture");
+  --active_captures_;
+}
+
+size_t CaptureTracker::captureEnd(CaptureId_t capture_id) {
+  auto capture_it = capture_tree_.find(capture_id);
+  TORCH_INTERNAL_ASSERT(
+      capture_it != capture_tree_.end() && capture_it->second.is_active,
+      "Capture is not registered or has already ended");
+  const CaptureTreeNode ended_capture = capture_it->second;
+
+  if (ended_capture.parent_capture_id.has_value()) {
+    capture_it->second.is_active = false;
+    auto parent_it = capture_tree_.find(*ended_capture.parent_capture_id);
+    TORCH_INTERNAL_ASSERT(
+        parent_it != capture_tree_.end() && parent_it->second.is_active,
+        "Conditional capture parent is not active");
+    parent_it->second.invalid_capture_free_count +=
+        ended_capture.invalid_capture_free_count;
+    captureEnd();
+  } else {
+    const int erased_active_captures =
+        eraseCaptureTree(ended_capture.root_capture_id);
+    TORCH_INTERNAL_ASSERT(active_captures_ >= erased_active_captures);
+    active_captures_ -= erased_active_captures;
+  }
+  return ended_capture.invalid_capture_free_count;
+}
+
+AllocationContext CaptureTracker::allocationContextSlow(
+    cudaStream_t request_stream) const {
+  const auto info = c10::cuda::captureInfoMayInitCtx(request_stream);
+  AllocationContext context{
+      info.status != CaptureStatus::None,
+      std::nullopt,
+      request_stream,
+      request_stream};
+  if (info.status != CaptureStatus::Active) {
+    return context;
+  }
+
+  auto capture_it = capture_tree_.find(info.id);
+  if (capture_it == capture_tree_.end()) {
+    return context;
+  }
+  TORCH_INTERNAL_ASSERT(
+      capture_it->second.is_active,
+      "Active CUDA capture has inactive graph-memory state");
+  context.tracked_capture_id = info.id;
+  if (request_stream == capture_it->second.primary_stream) {
+    context.block_reuse_stream = capture_it->second.block_reuse_stream;
+  }
+  return context;
+}
+
+void CaptureTracker::recordAllocation(
+    const void* block,
+    const AllocationContext& context) {
+  TORCH_INTERNAL_ASSERT(context.tracked_capture_id.has_value());
+  block_allocation_captures_.insert_or_assign(
+      block,
+      AllocationRecord{*context.tracked_capture_id, context.request_stream});
+}
+
+std::optional<CaptureTracker::AllocationRecord> CaptureTracker::recordFree(
+    const void* block,
+    std::optional<CaptureId_t> free_capture_id) {
+  auto allocation_it = block_allocation_captures_.find(block);
+  if (allocation_it == block_allocation_captures_.end()) {
+    return std::nullopt;
+  }
+
+  const AllocationRecord allocation = allocation_it->second;
+  if (free_capture_id.has_value() &&
+      !isFreeInAllocationCaptureOrAncestor(
+          allocation.capture_id, *free_capture_id)) {
+    ++capture_tree_.at(*free_capture_id).invalid_capture_free_count;
+  }
+  block_allocation_captures_.erase(allocation_it);
+  return allocation;
+}
+
+bool CaptureTracker::isFreeInAllocationCaptureOrAncestor(
+    CaptureId_t allocation_capture_id,
+    CaptureId_t free_capture_id) const {
+  while (true) {
+    if (allocation_capture_id == free_capture_id) {
+      return true;
+    }
+    auto allocation_capture_it = capture_tree_.find(allocation_capture_id);
+    if (allocation_capture_it == capture_tree_.end() ||
+        !allocation_capture_it->second.parent_capture_id.has_value()) {
+      return false;
+    }
+    allocation_capture_id = *allocation_capture_it->second.parent_capture_id;
+  }
+}
+
+int CaptureTracker::eraseCaptureTree(CaptureId_t root_capture_id) {
+  int erased_active_captures = 0;
+  ska::flat_hash_set<CaptureId_t> capture_ids;
+  for (auto it = capture_tree_.begin(); it != capture_tree_.end();) {
+    if (it->second.root_capture_id == root_capture_id) {
+      erased_active_captures += it->second.is_active ? 1 : 0;
+      capture_ids.insert(it->first);
+      it = capture_tree_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  for (auto it = block_allocation_captures_.begin();
+       it != block_allocation_captures_.end();) {
+    if (capture_ids.count(it->second.capture_id)) {
+      it = block_allocation_captures_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  return erased_active_captures;
+}
+namespace {
+
+class CUDARuntimeCaptureDAGQuery final : public CaptureDAGQuery {
+ public:
+  CaptureDAGInfo captureInfo(cudaStream_t stream) const override {
+    CaptureDAGInfo info{};
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 13000)
+    C10_CUDA_CHECK(cudaStreamGetCaptureInfo(
+        stream,
+        &info.status,
+        &info.capture_id,
+        &info.graph,
+        &info.terminals,
+        nullptr,
+        &info.num_terminals));
+#else
+    C10_CUDA_CHECK(cudaStreamGetCaptureInfo_v2(
+        stream,
+        &info.status,
+        &info.capture_id,
+        &info.graph,
+        &info.terminals,
+        &info.num_terminals));
+#endif
+    return info;
+  }
+
+  std::vector<cudaGraphNode_t> dependencies(
+      cudaGraphNode_t node) const override {
+    size_t count = 0;
+    nodeGetDependencies(node, nullptr, &count);
+    std::vector<cudaGraphNode_t> result(count);
+    if (count != 0) {
+      nodeGetDependencies(node, result.data(), &count);
+      result.resize(count);
+    }
+    return result;
+  }
+
+ private:
+  static void nodeGetDependencies(
+      cudaGraphNode_t node,
+      cudaGraphNode_t* dependencies,
+      size_t* count) {
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 13000)
+    if (dependencies == nullptr) {
+      C10_CUDA_CHECK(
+          cudaGraphNodeGetDependencies(node, dependencies, nullptr, count));
+    } else {
+      SmallVector<cudaGraphEdgeData> edge_data;
+      edge_data.resize(*count);
+      C10_CUDA_CHECK(cudaGraphNodeGetDependencies(
+          node, dependencies, edge_data.data(), count));
+    }
+#else
+    C10_CUDA_CHECK(cudaGraphNodeGetDependencies(node, dependencies, count));
+#endif
+  }
+};
+
+const CUDARuntimeCaptureDAGQuery runtime_query;
+
+} // namespace
+
+CaptureDAG::CaptureDAG() : query_(runtime_query) {}
+
+CaptureDAG::CaptureDAG(const CaptureDAGQuery& query) : query_(query) {}
+
+CaptureDAGInfo CaptureDAG::captureInfo(cudaStream_t stream) const {
+  return query_.captureInfo(stream);
+}
+
+bool CaptureDAG::recordFreeMarkersForStream(
+    cudaStream_t stream,
+    FreeMarkerState& state) const {
+  TORCH_INTERNAL_ASSERT(
+      state.valid_, "Cannot append to an invalid free-marker state");
+  auto info = captureInfo(stream);
+  if (info.status != cudaStreamCaptureStatusActive) {
+    state.valid_ = false;
+    return false;
+  }
+  if (state.graph_ == nullptr) {
+    state.graph_ = info.graph;
+    state.capture_id_ = info.capture_id;
+  } else if (
+      info.graph != state.graph_ || info.capture_id != state.capture_id_) {
+    // Stream uses from another capture cannot be ordered by this capture's
+    // DAG. Keep the free deferred instead of treating the mismatch as an
+    // allocator invariant violation.
+    state.valid_ = false;
+    return false;
+  }
+  for (size_t i = 0; i < info.num_terminals; ++i) {
+    state.markers_.insert(info.terminals[i]);
+  }
+  return true;
+}
+
+std::vector<cudaGraphNode_t> CaptureDAG::takeFreeMarkers(
+    FreeMarkerState&& state) const {
+  TORCH_INTERNAL_ASSERT(
+      state.valid_, "Cannot take markers from an invalid free-marker state");
+  return {state.markers_.begin(), state.markers_.end()};
+}
+
+void CaptureDAG::updateVisited(
+    const CaptureDAGInfo& info,
+    TraversalState& state) const {
+  if (!state.initialized_) {
+    state.initialized_ = true;
+    state.capture_id_ = info.capture_id;
+    state.graph_ = info.graph;
+  }
+  TORCH_INTERNAL_ASSERT(
+      state.capture_id_ == info.capture_id && state.graph_ == info.graph,
+      "Capture DAG traversal state cannot be shared across captures");
+
+  std::deque<cudaGraphNode_t> pending;
+  for (size_t i = 0; i < info.num_terminals; ++i) {
+    pending.push_back(info.terminals[i]);
+  }
+  while (!pending.empty()) {
+    auto node = pending.back();
+    pending.pop_back();
+    if (!state.visited_.insert(node).second) {
+      continue;
+    }
+    for (const auto dependency : query_.dependencies(node)) {
+      pending.push_back(dependency);
+    }
+  }
+}
+
+bool CaptureDAG::areMarkersReachable(
+    ArrayRef<cudaGraphNode_t> markers,
+    const TraversalState& state) const {
+  for (const auto marker : markers) {
+    if (state.visited_.count(marker) == 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+} // namespace c10::cuda::CUDAGraphMemory

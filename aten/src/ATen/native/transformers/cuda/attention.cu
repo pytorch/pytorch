@@ -84,6 +84,7 @@
 #ifdef USE_MEM_EFF_ATTENTION
 #ifndef USE_ROCM
 // MemoryEfficient Attention Specific Imports for CUDA
+#include <ATen/native/transformers/cuda/mem_eff_attention/gemm_kernel_utils.h>
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernel_forward.h>
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassF.h>
 #include <ATen/native/transformers/cuda/mem_eff_attention/pytorch_utils.h>
@@ -985,31 +986,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
   return std::make_tuple(Tensor(), Tensor(), Tensor(), Tensor(), c10::SymInt(0), c10::SymInt(0), Tensor(), Tensor(), Tensor());
 }
 
-namespace {
-
-// Check the pointer and stride alignment required by cuDNN varlen SDPA.
-bool has_aligned_varlen_layout(const Tensor& tensor) {
-  constexpr int64_t alignment_bytes = 16;
-  if (!tensor.numel()) {
-    return true;
-  }
-  if (tensor.dim() == 0 || tensor.stride(-1) != 1 ||
-      reinterpret_cast<uintptr_t>(tensor.const_data_ptr()) % alignment_bytes !=
-          0) {
-    return false;
-  }
-  const int64_t alignment = alignment_bytes / tensor.element_size();
-  for (int64_t dim = 0; dim < tensor.dim() - 1; ++dim) {
-    if (tensor.size(dim) > 1 &&
-        (tensor.stride(dim) <= 0 || tensor.stride(dim) % alignment != 0)) {
-      return false;
-    }
-  }
-  return true;
-}
-
-} // namespace
-
 std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Tensor, Tensor> _cudnn_attention_forward(
     const Tensor& query,
     const Tensor& key,
@@ -1033,6 +1009,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
   const bool is_nested = cumulative_sequence_length_q.has_value();
   const bool has_kv_cache = seqused_k.has_value() || block_table.has_value();
   TORCH_CHECK(
+      is_nested || query.size(2) != 1 || !sdp::is_cudnn_attention_decode_disabled(),
+      "cuDNN SDPA decode is disabled for cuDNN versions 9.19-9.25.0 (except 9.24.1) on SM 10.x and 11.x.");
+  TORCH_CHECK(
       query.scalar_type() == at::kHalf || query.scalar_type() == at::kBFloat16,
       "cuDNN attention only supports float16 and bfloat16, got ",
       query.scalar_type());
@@ -1042,11 +1021,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
       "cuDNN attention expects query, key and value to have the same dtype, got ",
       query.scalar_type(), ", ", key.scalar_type(), " and ", value.scalar_type());
   TORCH_CHECK(
-      !has_kv_cache ||
+      !is_nested ||
           (has_aligned_varlen_layout(query) &&
            has_aligned_varlen_layout(key) &&
            has_aligned_varlen_layout(value)),
-      "cuDNN KV-cache attention requires query, key and value to have "
+      "cuDNN varlen attention requires query, key and value to have "
       "16-byte-aligned storage and non-broadcast strides, with a contiguous "
       "last dimension.");
   TORCH_CHECK(
@@ -1138,6 +1117,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
     const int64_t num_heads_v = value.size(-2);
     const int64_t head_dim_qk = query.size(-1);
     const int64_t head_dim_v = value.size(-1);
+    TORCH_CHECK(
+        block_table.has_value() || key.size(-1) == query.size(-1),
+        "cuDNN varlen attention requires key head dimension to match query, got ",
+        key.size(-1), " and ", query.size(-1));
     TORCH_CHECK(
         block_table.has_value() || cumulative_sequence_length_kv.has_value(),
         "cuDNN varlen attention requires cum_seq_k unless a block_table is given.");
@@ -1399,7 +1382,15 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
 
 int64_t _fused_sdp_choice_cuda(const Tensor& query_, const Tensor& key, const Tensor& value,
         const std::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, std::optional<double> scale, bool enable_gqa){
-  sdp::sdp_params kernel_params{query_, key, value, attn_mask_, dropout_p, is_causal, enable_gqa};
+  auto kernel_params = sdp::normalize_unbatched_input({
+      .query = query_,
+      .key = key,
+      .value = value,
+      .attn_mask = attn_mask_,
+      .dropout = dropout_p,
+      .is_causal = is_causal,
+      .enable_gqa = enable_gqa,
+  });
   auto backend = select_sdp_backend(kernel_params);
   if (backend == sdp::SDPBackend::error) {
     TORCH_CHECK(
@@ -1845,10 +1836,20 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     }
     kernel_launched = true;
 
-    res = at::empty(
-        {B, M, num_heads, Kv},
-        query.options().dtype(
-            CutlassToAtenDtype<typename Kernel::output_t>::atScalarType()));
+    const auto output_options = query.options().dtype(
+        CutlassToAtenDtype<typename Kernel::output_t>::atScalarType());
+    // Local windows can fully mask rows. Without a window, shared cumulative
+    // metadata proves packed Q/K lengths match unless seqlen_k shortens K.
+    const bool may_have_fully_masked_rows =
+        window_size.value_or(0) > 0 ||
+        (custom_mask_type ==
+             static_cast<int64_t>(sdp::CustomMaskType::CausalFromBottomRight) &&
+         (seqstart_q.has_value()
+              ? seqlen_k.has_value() || !seqstart_q->is_same(*seqstart_k)
+              : max_seqlen_q > max_seqlen_k));
+    res = may_have_fully_masked_rows
+        ? at::zeros({B, M, num_heads, Kv}, output_options)
+        : at::empty({B, M, num_heads, Kv}, output_options);
 
     // NOTE: Should be aligned (by padding) in case M is
     // not a good number for loading during backward
@@ -2027,8 +2028,9 @@ __global__ void rand_uniform_kernel(
 
   const auto [seed, offset] = at::cuda::philox::unpack(rng_engine_inputs);
 
-  const int dropout_seq_start = batch_id * (n_heads * n_queries * n_keys) +
-      head_id * (n_queries * n_keys);
+  // See NOTE [Mem-efficient attention dropout RNG offset]
+  const int64_t dropout_seq_start = gemm_kernel_utils::dropout_rng_offset(
+      batch_id, head_id, n_heads, n_queries, n_keys);
   const int64_t query_start_idx = query_idx * n_keys;
 
   curandStatePhilox4_32_10_t curand_state;
@@ -2038,7 +2040,7 @@ __global__ void rand_uniform_kernel(
       offset + dropout_seq_start + query_start_idx,
       &curand_state);
 
-  for (int key_start_idx = 0; key_start_idx < n_keys; key_start_idx += 4) {
+  for (int64_t key_start_idx = 0; key_start_idx < n_keys; key_start_idx += 4) {
     float4 rand_quad = curand_uniform4(&curand_state);
 
 #pragma unroll
