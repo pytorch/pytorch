@@ -515,7 +515,7 @@ void lookup(
     PyObject* backend,
     int64_t isolate_recompiles_id,
     PyObject** maybe_cached_code,
-    const char** trace_annotation,
+    std::string* trace_annotation,
     bool is_skip_guard_eval_unsafe) {
   CacheLock lock(extra_state->cache_mutex);
   extra_state->drain_pending_invalidations();
@@ -572,7 +572,7 @@ void lookup(
       extra_state->move_to_front(found, *found_list);
     }
     *maybe_cached_code = found->code.ptr();
-    *trace_annotation = found->trace_annotation.c_str();
+    *trace_annotation = found->trace_annotation;
     return;
   }
   *maybe_cached_code = py::none().ptr();
@@ -583,7 +583,7 @@ bool try_lookup_without_guard_eval(
     PyObject* backend,
     int64_t isolate_recompiles_id,
     PyObject** maybe_cached_code,
-    const char** trace_annotation,
+    std::string* trace_annotation,
     bool is_skip_guard_eval_unsafe) {
   CacheLock lock(extra_state->cache_mutex);
   // A parked invalidation must not keep serving through this no-guard-eval
@@ -632,7 +632,7 @@ bool try_lookup_without_guard_eval(
       extra_state->move_to_front(found, *found_list);
     }
     *maybe_cached_code = found->code.ptr();
-    *trace_annotation = found->trace_annotation.c_str();
+    *trace_annotation = found->trace_annotation;
     return true;
   }
 
