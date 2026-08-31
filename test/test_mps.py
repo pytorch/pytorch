@@ -18420,6 +18420,59 @@ class TestGraphCapture(TestCaseMPS):
         self.assertEqual(out, torch.full(shape, 2.0, device="mps"))
         g.reset()
 
+    def test_replay_correct_after_useresource_operand_freed(self):
+        # Index tensors reach the kernel only as a raw GPU address baked into an
+        # argument blob, declared to Metal via useResource: rather than setBuffer:.
+        # Those need the same reservation as a bound buffer, or freeing the index
+        # tensor lets the allocator hand its storage to another tensor and the
+        # replay indexes with that tensor's bytes.
+        src = torch.arange(64, dtype=torch.float32, device="mps")
+        idx = torch.tensor([5, 9, 1, 30], device="mps")
+        g = torch.mps.MetalGraph()
+        with torch.mps.metal_graph(g):
+            out = src[idx]
+        expected = out.clone()
+        del idx
+
+        squatters = [torch.full((4,), 63, dtype=torch.int64, device="mps") for _ in range(16)]
+        g.replay()
+        self.assertEqual(out, expected)
+        del squatters
+        g.reset()
+
+    def test_replay_correct_after_nested_replay_source_released(self):
+        # Replaying one graph inside another's capture copies its steps into the
+        # outer graph. The outer graph must take its own reservations on those
+        # buffers, since the inner graph can be released first. `w` is a
+        # read-only input to the captured matmul, so nothing rewrites it during
+        # replay and a recycled buffer shows up directly in the result.
+        shape = (70, 70)
+        x = torch.full(shape, 2.0, device="mps")
+        w = torch.full(shape, 3.0, device="mps")
+        w_ptr = w.data_ptr()
+
+        inner = torch.mps.MetalGraph()
+        with torch.mps.metal_graph(inner):
+            mid = x @ w  # MPSGraph-routed, the step kind that had no reservation
+
+        outer = torch.mps.MetalGraph()
+        with torch.mps.metal_graph(outer):
+            inner.replay()
+        expected = mid.clone()
+
+        del w  # only the two graphs can hold that buffer now
+        inner.reset()  # outer is the only one left
+
+        squatters = []
+        for _ in range(32):
+            squatters.append(torch.full(shape, 9.0, device="mps"))
+            if squatters[-1].data_ptr() == w_ptr:
+                break
+        outer.replay()
+        self.assertEqual(mid, expected)
+        del squatters
+        outer.reset()
+
     def test_replay_ok_when_captured_tensors_stay_alive(self):
         # The ordinary supported path: inputs updated in place, nothing freed.
         x = torch.ones(73, 61, device="mps")
