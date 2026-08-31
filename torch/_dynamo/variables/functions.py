@@ -2370,6 +2370,26 @@ class SkipFunctionVariable(VariableTracker):
 
         return object_richcompare(self, tx, other, op)
 
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        # Resolve the attribute now instead of deferring to a GetAttrVariable:
+        # a deferred access is materialized wherever the value is later
+        # reconstructed, which after a graph break can be outside the
+        # try/except that guarded the original access.
+        try:
+            inspect.getattr_static(self.value, name)
+        except AttributeError:
+            # Absence is a compile-time answer baked into the trace, so it has
+            # to be guarded or adding the attribute later reuses stale code.
+            if self.source:
+                install_guard(
+                    self.source.make_guard(
+                        functools.partial(GuardBuilder.HASATTR, attr=name)
+                    )
+                )
+        return fn_getattro_impl(tx, self.value, self.source, name)
+
     def as_python_constant(self) -> Any:
         return self.value
 
