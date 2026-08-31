@@ -759,6 +759,13 @@ struct ExpandableSegment {
           "on the producer, or disable expandable_segments.");
     }
 #endif
+    // segment_size divides every address/size computation below (starting
+    // with numSegments() in the constructor); a zero from a corrupted or
+    // malicious peer would be a division by zero.
+    TORCH_CHECK(
+        header.segment_size != 0,
+        "expandable_segments IPC: received a zero segment_size in the share "
+        "header");
     auto segment = std::make_unique<ExpandableSegment>(
         device,
         std::nullopt,
@@ -775,6 +782,16 @@ struct ExpandableSegment {
 #define SYS_pidfd_getfd 438
 #endif
 #endif // !_WIN32
+    // num_handles is attacker/peer-controlled and sizes this reserve()
+    // upfront, before a single handle has been validated; bound it against
+    // the segment's own capacity, which comes from the local device's
+    // reserved virtual address space rather than the wire payload.
+    TORCH_CHECK(
+        header.num_handles <= segment->max_handles_,
+        "expandable_segments IPC: share header claims ",
+        header.num_handles,
+        " handles, more than this segment's capacity of ",
+        segment->max_handles_);
     std::vector<Handle> imported;
     imported.reserve(header.num_handles);
     if (header.handle_type != Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
