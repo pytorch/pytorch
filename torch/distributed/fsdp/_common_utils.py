@@ -648,7 +648,7 @@ def _get_root_modules(modules: set[nn.Module]) -> set[nn.Module]:
 def _override_module_mixed_precision(
     root: torch.nn.Module,
     module_classes_to_override: Iterable[type[nn.Module]],
-    wrap_override_dict: Optional[dict[str, Any]] = None,
+    wrap_override_dict: dict[str, Any] | None = None,
 ) -> set[type[nn.Module]]:
     if wrap_override_dict is None:
         wrap_override_dict = {"mixed_precision": None}

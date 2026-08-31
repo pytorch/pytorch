@@ -232,7 +232,6 @@ class TestUtils(TestCase):
         self.assertIsNot(model1.lin._wrap_overrides, model2.lin._wrap_overrides)
 
 
-
 devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(TestUtils, globals(), only_for=devices, allow_xpu=True)
 if __name__ == "__main__":
