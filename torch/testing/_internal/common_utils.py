@@ -1803,6 +1803,7 @@ _dsl_checker = LazyDSLCheck()
 TEST_TRITON_DSL = LazyVal(lambda: _dsl_checker.is_available('triton'))
 TEST_CUTEDSL = LazyVal(lambda: _dsl_checker.is_available('cutedsl'))
 TEST_HELION_DSL = LazyVal(lambda: _dsl_checker.is_available('helion'))
+TEST_FLYDSL = LazyVal(lambda: _dsl_checker.is_available('flydsl'))
 
 def split_if_not_empty(x: str):
     return x.split(",") if len(x) != 0 else []
@@ -1815,6 +1816,7 @@ skipIfNoDill = unittest.skipIf(not TEST_DILL, "no dill")
 skipIfNoTritonDSL = unittest.skipIf(not TEST_TRITON_DSL, "Triton DSL not available")
 skipIfNoCuteDSL = unittest.skipIf(not TEST_CUTEDSL, "CuTeDSL not available")
 skipIfNoHelionDSL = unittest.skipIf(not TEST_HELION_DSL, "Helion DSL not available")
+skipIfNoFlyDSL = unittest.skipIf(not TEST_FLYDSL, "FlyDSL not available")
 
 def skipIfDSLUnavailable(dsl_name: str, reason: str | None = None):
     """Skip test if specific DSL is not available"""
@@ -1871,6 +1873,12 @@ TEST_WITH_MTIA: bool = TestEnvironment.def_flag(
 # TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
 # See #64427
 TEST_WITH_MIOPEN_SUGGEST_NHWC = os.getenv('PYTORCH_MIOPEN_SUGGEST_NHWC', '0') == '1'
+# Enables tests that run only in the periodic-strict CI workflow (disabled by default)
+TEST_WITH_PERIODIC: bool = TestEnvironment.def_flag(
+    "TEST_WITH_PERIODIC",
+    env_var="PYTORCH_TEST_WITH_PERIODIC",
+    implied_by_fn=lambda: os.getenv("TEST_CONFIG") == "periodic",
+)
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW: bool = TestEnvironment.def_flag(
     "TEST_WITH_SLOW",
@@ -2886,6 +2894,37 @@ def skipIfCachingAllocatorDisabled(fn):
         and not torch._C._cuda_cudaCachingAllocator_is_enabled(),
         "requires the CUDA/HIP caching allocator (current allocator is uncached)",
     )(fn)
+
+def periodic(fn):
+    """Marks a test to run only when periodic test mode is enabled.
+
+    The periodic test configuration selects the corresponding pytest marker
+    and sets PYTORCH_TEST_WITH_PERIODIC. Tests in files outside the default
+    Python test sweep (e.g. distributed or quantization) never run.
+
+    Composes with @slowTest: periodic-strict sets PYTORCH_TEST_WITH_SLOW, so
+    slow gating (static or dynamic) does not block @periodic tests there,
+    while the periodic gate keeps a test marked both out of the slow shards;
+    it runs only in periodic-strict.
+    """
+    reason = "test is periodic; run with PYTORCH_TEST_WITH_PERIODIC to enable test"
+
+    if isinstance(fn, type):
+        if has_pytest:
+            fn = pytest.mark.periodic(fn)
+        return unittest.skipUnless(TEST_WITH_PERIODIC, reason)(fn)
+
+    # Isolate decorator metadata when parameter variants share the original
+    # test function.
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        return fn(*args, **kwargs)
+
+    if has_pytest:
+        wrapper = pytest.mark.periodic(wrapper)
+
+    return unittest.skipUnless(TEST_WITH_PERIODIC, reason)(wrapper)
+
 
 def slowTest(fn):
     @wraps(fn)
