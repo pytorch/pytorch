@@ -2160,7 +2160,7 @@ _FOREACH_MM_SHAPES = [
 ]
 
 
-class TestForeachMM(TestCase):
+class TestForeachMMDevice(TestCase):
     def _check(self, shapes, dtype, device):
         A = [torch.randn(M, K, dtype=dtype, device=device) for M, _, K in shapes]
         B = [torch.randn(K, N, dtype=dtype, device=device) for _, N, K in shapes]
@@ -2384,7 +2384,7 @@ class TestForeachMM(TestCase):
         self._check(shapes, torch.bfloat16, "cuda")
 
 
-instantiate_parametrized_tests(TestForeachMM)
+instantiate_device_type_tests(TestForeachMMDevice, globals())
 
 
 if __name__ == "__main__":
