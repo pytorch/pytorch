@@ -34,8 +34,7 @@ log = logging.getLogger(__name__)
 
 class WhyNoFuseNames(WhyNoFuse):
     def __init__(self, name1: str, name2: str) -> None:
-        self.name1 = name1
-        self.name2 = name2
+        super().__init__(name1, name2)
 
 
 class CUTLASSScheduling(BaseScheduling):
