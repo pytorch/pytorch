@@ -999,8 +999,9 @@ def gooditer():
 
 
 class TestExceptionPropagation(TestCase):
-    hw_classification = HardwareClassification.GENERIC
     """SF 628246:  Set constructor should not trap iterator TypeErrors"""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_instanceWithException(self):
         self.assertRaises(TypeError, OrderedSet, baditer())
