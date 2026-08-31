@@ -455,14 +455,10 @@ HAS_NO_CONNECTED_DIFF_TITLE = (
     "There is no internal Diff connected, this can be merged now"
 )
 # This could be set to -1 to ignore all flaky and broken trunk failures. On the
-# other hand, using a large value like 10 here might be useful in sev situation
+# other hand, using a large value like 10 here might be useful in sev situation.
+# Also caps how many gates one merge may skip on an AI CI Advisor verdict -- see
+# categorize_checks.
 IGNORABLE_FAILED_CHECKS_THESHOLD = 10
-
-# How many gates one merge may skip on an AI CI Advisor `not_related` verdict.
-# Unlike the flaky/broken-trunk budget above this is not tunable per merge rule:
-# a rule author opting out of flaky noise is not the same decision as letting a
-# classifier clear an unbounded number of failures.
-AI_NOT_RELATED_CHECKS_THRESHOLD = 3
 
 # How long one merge command will wait for an advisor verdict on a failure that
 # arrived mid-merge. The merge loop retries every 5 minutes, so this is three
@@ -3007,16 +3003,19 @@ def categorize_checks(
     # A correlated outage can make many independent jobs fail the same way, and
     # the advisor will clear each of them on its own merits. Cap how many gates
     # one merge may skip on that basis, so an outage cannot clear a whole PR at
-    # once. Kept separate from the flaky/broken-trunk budget below: that one is
-    # about noise, this one is about an unreviewed classifier deciding a merge.
+    # once. Shares the numeric budget with the flaky/broken-trunk ignore list,
+    # but reads the module constant rather than ok_failed_checks_threshold:
+    # that parameter defaults to None, meaning unlimited, and merge rules may
+    # tune it -- neither is a safe shape for a gate an unreviewed classifier
+    # opens.
     ai_not_related = failed_checks_categorization["AI_NOT_RELATED"]
-    if len(ai_not_related) > AI_NOT_RELATED_CHECKS_THRESHOLD:
+    if len(ai_not_related) > IGNORABLE_FAILED_CHECKS_THESHOLD:
         warn(
             f"The AI CI Advisor cleared {len(ai_not_related)} failed checks as "
             f"not evidence against this PR, more than the threshold of "
-            f"{AI_NOT_RELATED_CHECKS_THRESHOLD}. That many at once usually means "
-            "an outage rather than a coincidence, so they will block the merge: "
-            + ", ".join([x[0] for x in ai_not_related])
+            f"{IGNORABLE_FAILED_CHECKS_THESHOLD}. That many at once usually "
+            "means an outage rather than a coincidence, so they will block the "
+            "merge: " + ", ".join([x[0] for x in ai_not_related])
         )
         failed_checks = failed_checks + ai_not_related
 
