@@ -150,6 +150,10 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       std::vector<at::Tensor>& tensors,
       const ::c10d::AllreduceOptions& opts =
           ::c10d::AllreduceOptions()) override;
+  c10::intrusive_ptr<::c10d::Work> allreduce_sparse(
+      std::vector<at::Tensor>& tensors,
+      const ::c10d::AllreduceOptions& opts =
+          ::c10d::AllreduceOptions()) override;
   c10::intrusive_ptr<::c10d::Work> allreduce_coalesced(
       std::vector<at::Tensor>& tensors,
       const ::c10d::AllreduceCoalescedOptions& opts =
@@ -592,7 +596,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   std::pair<std::chrono::milliseconds, std::chrono::milliseconds>
   applyEphemeralTimeout(std::chrono::milliseconds timeout);
   void releaseEphemeralTimeout(std::chrono::milliseconds timeout);
-  void enqueueWork(c10::intrusive_ptr<WorkNCCL> work, cudaStream_t stream);
+  void enqueueWork(
+      const c10::intrusive_ptr<WorkNCCL>& work,
+      cudaStream_t stream);
   bool getGraphCaptureMode();
   cudaStream_t getOperationStream(bool async_op);
   void ensureTensorContiguous(const at::Tensor& tensor);
@@ -603,7 +609,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // registered does not pay for a duration measurement nobody reads.
   bool hasCompletionHooks();
   void runCompletionHooks(
-      const ::c10d::Work* work,
+      uint64_t completion_key,
       std::optional<float> duration_ms);
 
   void attachMemoryHook();
@@ -715,7 +721,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   std::unordered_map<
       unsigned long long,
-      std::vector<c10::intrusive_ptr<WorkNCCL>>>
+      std::vector<std::shared_ptr<WorkNCCL::State>>>
       graph_capture_work_refs_;
   std::mutex graph_capture_work_mutex_;
 

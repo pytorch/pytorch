@@ -909,7 +909,7 @@ def _sdpa_handler(
     args: tuple[object, ...],
     kwargs: dict[str, object],
 ) -> object:
-    # extract local tensor and sharding infos to a OpInfo
+    # extract local tensor and sharding infos to an OpInfo
     op_info = DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
     logger.debug("Dispatching op_call: %s", op_info.schema or op_call)
 

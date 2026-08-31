@@ -90,7 +90,7 @@ class StaticallyLaunchedTritonKernel:
             launch_enter = triton_knobs.runtime.launch_enter_hook
             launch_exit = triton_knobs.runtime.launch_exit_hook
 
-        def hook_is_empty(hook: Any) -> bool:
+        def hook_is_empty(hook: object) -> bool:
             if hook is None:
                 return True
             if (
