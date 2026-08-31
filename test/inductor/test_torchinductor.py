@@ -179,7 +179,7 @@ _T = TypeVar("_T")
 _P = ParamSpec("_P")
 
 
-HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
+HAS_AVX2 = torch.cpu._is_avx2_supported()
 
 _OPS_WITHOUT_GPU_LOWP: frozenset[str] = frozenset(
     {
@@ -1267,6 +1267,16 @@ def skip_if_pallas(fn):
     return wrapper
 
 
+def skip_if_mps(fn):
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        if is_mps_backend(self.device):
+            raise unittest.SkipTest("mps not supported")
+        return fn(self, *args, **kwargs)
+
+    return wrapper
+
+
 def xfail_if_mps(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
@@ -1449,6 +1459,20 @@ def target_assert_size_stride_str(
     if name is not None:
         return f"assert_size_stride({name}, {size_str}, {stride_str}"
     return f"{size_str}, {stride_str}"
+
+
+def target_assert_alignment_regex(
+    cpp_wrapper: bool, op_name: str | None = None, alignment: int = 16
+):
+    if op_name is None:
+        op_name_literal = r'"[^"]+"' if cpp_wrapper else r"'[^']+'"
+    else:
+        quote = '"' if cpp_wrapper else "'"
+        op_name_literal = re.escape(f"{quote}{op_name}{quote}")
+    return (
+        rf"assert_alignment\s*\(\s*[^,]+,\s*{alignment},\s*"
+        rf"{op_name_literal}\s*\)"
+    )
 
 
 @instantiate_parametrized_tests
@@ -16248,7 +16272,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             if code and len(code) > 0 and "assert_alignment(" in code[0]:
                 try:
                     FileCheck().check_regex(
-                        r"assert_alignment\s*\(\s*[^,]+,\s*[^,]+,\s*'[^']+'\s*\)"
+                        target_assert_alignment_regex(config.cpp_wrapper)
                     ).run(code[0])
                 except Exception as e:
                     print(f"Failed regex match for assert_alignment: {e}")
@@ -16947,15 +16971,21 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     # Skipped on MPS because avgpool size is not divisible
     @xfail_if_mps
-    @skip_if_gpu_halide
+    @skip_if_halide
     def test_adaptive_avg_pool1d_argmax(self):
         # https://github.com/pytorch/pytorch/issues/113013
+        # https://github.com/pytorch/pytorch/issues/193492
         def fn(x):
             x = torch.adaptive_avg_pool1d(input=x, output_size=2)
             x = torch.argmax(input=x)
             return x
 
-        x = torch.rand([4, 4, 3], dtype=torch.float64)
+        x = torch.zeros(4, 4, 3, device=self.device, dtype=torch.float64).transpose(
+            0, 1
+        )
+        x[1, 3] = x.new_tensor([0.0, 1.0, 2.0])
+        self.assertFalse(x.is_contiguous())
+        self.assertEqual(fn(x), torch.tensor(15, device=self.device))
         self.common(fn, (x,))
 
     @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
@@ -17263,7 +17293,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             or name
             not in [
                 "airy_ai",
-                "laguerre_polynomial_l",
                 "legendre_polynomial_p",
                 "log_ndtr",
                 "ndtri",
@@ -19131,6 +19160,57 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue("ReductionHint.OUTER" in code)
         self.assertFalse("ReductionHint.INNER" in code)
 
+    @parametrize("slice_pointwise", (False, True))
+    @skip_if_halide
+    @skip_if_pallas
+    @skip_if_mps
+    def test_argmin_argmax_fused_reduction_logical_index(self, slice_pointwise):
+        # https://github.com/pytorch/pytorch/issues/193661
+        def fn(x):
+            reduced = torch.mean(x, dim=-1)
+            if slice_pointwise:
+                reduced = reduced[1:]
+            return reduced.argmin(), reduced.argmax()
+
+        x = (
+            torch.zeros(2, 4, 4, 8, device=self.device)
+            .transpose(0, 1)
+            .contiguous()
+            .transpose(0, 1)[..., ::2]
+        )
+        batch = 1 if slice_pointwise else 0
+        x[batch, 1, 1] = -1
+        x[batch, 3, 0] = 1
+        expected = (
+            torch.tensor(5, device=self.device),
+            torch.tensor(12, device=self.device),
+        )
+
+        self.assertEqual(fn(x), expected)
+        self.common(fn, (x,))
+
+    @skip_if_halide
+    @skip_if_pallas
+    @skip_if_mps
+    def test_argreduce_native_index_cse(self):
+        def fn(x):
+            return x.argmax(), x.reshape(-1).argmax()
+
+        x = torch.arange(4 * 6 * 8, device=self.device, dtype=torch.float32).reshape(
+            4, 6, 8
+        )
+        self.common(fn, (x,))
+
+        compiled = torch.compile(fn, fullgraph=True)
+        if is_cpp_backend(self.device):
+            _, code = run_and_get_cpp_code(compiled, x)
+            self.assertIn("tmp_acc0", code)
+            self.assertNotIn("tmp_acc1", code)
+        else:
+            code = run_and_get_triton_code(compiled, x)
+            self.assertEqual(code.count("@triton_heuristics."), 1)
+            self.assertEqual(code.count("triton_helpers.max_with_index"), 1)
+
     @skip_if_halide
     @requires_gpu_and_triton
     def test_triton_argmin_argmax_transpose_logical_index(self):
@@ -19167,6 +19247,21 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return (x.argmin(), x.argmax())
 
         self.common(fn, (torch.randn(6, 4, device=GPU_TYPE).t().contiguous().t(),))
+
+        def fn(x):
+            return (
+                x.permute(1, 0, 2).argmax(),
+                x.transpose(0, 1).argmax(),
+                x.permute(2, 1, 0).argmax(),
+            )
+
+        x = torch.zeros(4, 6, 8, device=GPU_TYPE)
+        x[2, 4, 7] = 1
+        self.common(fn, (x,))
+        code = run_and_get_triton_code(torch.compile(fn, fullgraph=True), x)
+        self.assertEqual(code.count("@triton_heuristics."), 1)
+        # Equivalent value/index pairs merge; the distinct mapping does not.
+        self.assertEqual(code.count("triton_helpers.max_with_index"), 2)
 
     @skip_if_halide
     @requires_gpu_and_triton

@@ -36,6 +36,12 @@ Tensor make_feature_noise(const Tensor& input) {
   for ([[maybe_unused]] const auto i : c10::irange(2, input.dim())) {
     sizes.push_back(1);
   }
+  // The dropout mask is real-valued; for complex inputs allocate it in the real
+  // value type so bernoulli_ (which has no complex kernel) can fill it.
+  if (input.is_complex()) {
+    return input.new_empty_symint(
+        sizes, input.options().dtype(c10::toRealValueType(input.scalar_type())));
+  }
   return input.new_empty_symint(sizes);
 }
 
@@ -43,9 +49,12 @@ bool is_fused_kernel_acceptable(const Tensor& input, double p) {
   const bool mps_fused_kernel_acceptable =
       input.is_mps() && input.is_floating_point() &&
       input.is_non_overlapping_and_dense();
+  // Complex inputs go through the unfused `_dropout_impl`, whose real-valued
+  // mask handles them; the fused kernels are float-only (MPS is already
+  // excluded above via `is_floating_point`).
   return (input.is_cuda() || mps_fused_kernel_acceptable || input.is_xpu() ||
           input.is_lazy() || input.is_privateuseone()) &&
-      p > 0 && p < 1 && input.sym_numel() > 0;
+      p > 0 && p < 1 && input.sym_numel() > 0 && !input.is_complex();
 }
 
 // NB: sure, we could have used different overloads here, but I would feel insecure
@@ -74,7 +83,17 @@ Ctype<inplace> _dropout_impl(T& input, double p, bool train) {
   }
 
   at::Tensor b; // used for alpha_dropout only
-  auto noise = feature_dropout ? make_feature_noise(input) : at::empty_like(input);
+  // The dropout mask is real-valued; for complex inputs allocate it in the real
+  // value type so bernoulli_ (which has no complex kernel) can fill it.
+  at::Tensor noise;
+  if (feature_dropout) {
+    noise = make_feature_noise(input);
+  } else if (input.is_complex()) {
+    noise = at::empty_like(
+        input, input.options().dtype(c10::toRealValueType(input.scalar_type())));
+  } else {
+    noise = at::empty_like(input);
+  }
   noise.bernoulli_(1 - p);
   if (alpha_dropout) {
     constexpr double alpha = 1.7580993408473766;
