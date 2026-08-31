@@ -460,13 +460,22 @@ def _build_multigraph_forward():
         SerializedCode,
     )
 
+    # The documented contract (Note [precompile programming model]) is that the
+    # version/build locks surface as a clean PrecompileError, so an
+    # ``except torch.compiler.precompile.PrecompileError`` handler catches them.
+    from torch._precompile import PrecompileError as _PrecompileError
+
     produced_on = globals().get("_DYNAMO_PYTHON_VERSION")
     if produced_on is not None and tuple(produced_on) != _sys.version_info[:2]:
         # marshal only REJECTS a foreign blob across the 3.10 -> 3.11 layout
         # change; between 3.11 and 3.14 it loads and then segfaults when the
         # code object runs, so the version has to be checked explicitly.
-        raise ValueError(
-            f"artifact was produced on Python {produced_on[0]}.{produced_on[1]}"
+        raise _PrecompileError(
+            f"precompile: this artifact was produced on Python "
+            f"{produced_on[0]}.{produced_on[1]} and cannot load on "
+            f"{_sys.version_info[0]}.{_sys.version_info[1]}: it inlines marshalled "
+            f"bytecode, which is Python-version-locked. Regenerate the artifact "
+            f"under the serving Python."
         )
 
     frames = pickle.loads(base64.b64decode(_FRAMES))
@@ -511,7 +520,17 @@ def _build_multigraph_forward():
         ns[_backend_id] = torch._dynamo.disable(_adapt(_boxed))
     for _frame in frames:
         for _alias, _module_name in _frame["import_sources"].items():
-            ns[_alias] = importlib.import_module(_module_name)
+            try:
+                ns[_alias] = importlib.import_module(_module_name)
+            except ImportError as _e:
+                # The torch-build / environment lock, surfaced per the
+                # documented contract rather than as a raw ModuleNotFoundError.
+                raise _PrecompileError(
+                    f"precompile: this artifact references module "
+                    f"'{_module_name}', which is not importable here ({_e}). It "
+                    f"was produced against a different torch build or "
+                    f"environment; regenerate the artifact in this one."
+                ) from _e
 
     entry_binding = (
         pickle.loads(base64.b64decode(_ENTRY_BINDING)) if _ENTRY_BINDING else {}

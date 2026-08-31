@@ -1352,6 +1352,43 @@ class TestPrecompile(TestCase):
         # enforces this for every torch.compiler.__all__ member.
         self.assertEqual(torch.compiler.precompile.__module__, "torch.compiler")
 
+    def test_summary_types_pickle(self):
+        # A capture summary or invariants report is the kind of value users
+        # stash next to an artifact (torch.save of a diagnostics record, a
+        # multiprocessing capture farm). A previous revision pointed these
+        # classes' __module__ at torch.compiler, which does not export them,
+        # so pickle could not resolve the class and every instance raised.
+        from torch.compiler._precompile_types import (
+            FrameInvariants,
+            GuardFact,
+            PrecompileSummary,
+        )
+
+        fact = GuardFact("TYPE_MATCH", "L['x']", ("code",), "is int", True)
+        inv = FrameInvariants("f", "f.py", 1, 2, (fact,), (), ())
+        summary = PrecompileSummary(1, 0, 1, 1, ())
+        for obj in (fact, inv, summary):
+            self.assertEqual(pickle.loads(pickle.dumps(obj)), obj)
+
+    def test_dynamo_artifact_version_lock_raises_precompile_error(self):
+        # Note [precompile programming model] promises the driver's
+        # Python-version lock surfaces as a clean PrecompileError, so an
+        # ``except torch.compiler.precompile.PrecompileError`` handler written
+        # to the docs catches it -- not a raw ValueError.
+        def fn(x):
+            return x + 1
+
+        python_code, cache = torch.compiler.precompile(
+            fn, tracer="dynamo", backend="eager", example_inputs=[(torch.randn(3),)]
+        )
+        cur = f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}"
+        self.assertIn(cur, python_code)
+        skewed = python_code.replace(cur, "_DYNAMO_PYTHON_VERSION = (3, 9)")
+        # exec, not load(): load()'s cache-pairing hash check would reject the
+        # edited text first, and python_code is documented as self-contained.
+        with self.assertRaisesRegex(PrecompileError, "produced on Python 3.9"):
+            exec(skewed, {})
+
     @parametrize("name", ["load"])
     def test_precompile_method_public_location(self, name):
         method = getattr(torch.compiler.precompile, name)
@@ -2334,6 +2371,41 @@ class TestPrecompile(TestCase):
             self.assertEqual(loaded(x), _precompile_unreachable_helper_caller(x))
             # Served, not recompiled: the whole point of installing.
             self.assertEqual(counters["stats"]["unique_graphs"], 0)
+
+    def test_installed_artifact_call_after_unload_raises(self):
+        # Installing mutates process-global code objects, and the handle's
+        # contract is that the mutation is attributable to a point in the
+        # caller's control flow. A call after unload() must therefore raise
+        # rather than silently re-install (a stray queued task holding the
+        # handle would otherwise re-mutate live code objects with no paired
+        # unload); a fresh load() is the way to serve again.
+        code, cache = torch.compiler.precompile(
+            _precompile_unreachable_helper_caller,
+            backend="eager",
+            dynamic=False,
+            tracer="dynamo",
+            example_inputs=[(torch.randn(4),)],
+        )
+        x = torch.randn(4)
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with torch.no_grad():
+            self.assertEqual(loaded(x), _precompile_unreachable_helper_caller(x))
+            loaded.unload()
+            loaded.unload()  # idempotent
+            with self.assertRaisesRegex(PrecompileError, "unloaded"):
+                loaded(x)
+            # Re-entering is the explicit way to install again; the handle is
+            # reusable across scopes.
+            with loaded:
+                self.assertEqual(loaded(x), _precompile_unreachable_helper_caller(x))
+            with self.assertRaisesRegex(PrecompileError, "unloaded"):
+                loaded(x)
+            fresh = torch.compiler.precompile.load(code, cache)
+            try:
+                self.assertEqual(fresh(x), _precompile_unreachable_helper_caller(x))
+            finally:
+                fresh.unload()
 
     @parametrize("backend", ("eager", "inductor"))
     def test_training_capture_serves_a_backward_without_a_loss(self, backend):

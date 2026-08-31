@@ -861,7 +861,9 @@ class _RuntimeForwardEpilogue:
                             "Mutations on inputs with user-specified streams are not yet supported. "
                             "See: https://github.com/pytorch/pytorch/issues/172522"
                         )
-                    original_inpt.copy_(updated_inpt)
+                    # Keep in sync with the codegen'd epilogue, which emits
+                    # _replay_input_mutation here (see finalize()).
+                    _replay_input_mutation(original_inpt, updated_inpt)
 
     def _replay_output_aliases(
         self, orig_inputs: dict[int, Tensor], fw_outs: list[Any]
