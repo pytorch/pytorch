@@ -1209,10 +1209,7 @@ def _environment_rooted(entries: Sequence[GuardFilterEntry]) -> set[str]:
     )
 
     def under_a_module(name: str) -> bool:
-        return any(
-            name == m or name.startswith(f"{m}.") or name.startswith(f"{m}[")
-            for m in modules
-        )
+        return any(name == m or name.startswith((f"{m}.", f"{m}[")) for m in modules)
 
     rooted = set()
     for e in entries:
