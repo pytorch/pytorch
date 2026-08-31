@@ -295,6 +295,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "matrix_exp",
     "linalg_matrix_exp",
     "linalg_matrix_sqrth",
+    "linalg_polar",
     "_linalg_eigh",
     "cholesky_solve",
     "linalg_qr",
@@ -732,7 +733,7 @@ LOOP_OVER_VECTOR_OF_GRAD_FNS = CodeTemplate(
 if (!grad_fns.empty()) {
     ${preamble}
     for (const auto& i : c10::irange(grad_fns.size())) {
-        auto grad_fn = grad_fns[i];
+        const auto& grad_fn = grad_fns[i];
         if (grad_fn != nullptr) {
             ${statements}
         }
