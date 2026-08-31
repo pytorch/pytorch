@@ -428,10 +428,20 @@ def _add_global_state_dependencies(
 ) -> None:
     import torch.amp
 
+    from .external_utils import (
+        enter_autodispatch_below_autograd,
+        exit_autodispatch_below_autograd,
+    )
+
     all_nodes = list(graph.nodes)
 
     # These are targets of the nodes which need to stay in the same relative place in the graph
-    global_state_targets = {torch.amp._enter_autocast, torch.amp._exit_autocast}
+    global_state_targets = {
+        torch.amp._enter_autocast,
+        torch.amp._exit_autocast,
+        enter_autodispatch_below_autograd,
+        exit_autodispatch_below_autograd,
+    }
     all_nodes_dep_on: list[Node] = []
 
     def prev_cur_nodes(

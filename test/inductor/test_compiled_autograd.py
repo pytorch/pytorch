@@ -1986,6 +1986,45 @@ main()
             fn, count=2
         )  # should compile once for MyFn1 and once for MyFn2
 
+    def test_compiled_custom_fn_with_eager_backend_cache_hit(self):
+        class MyFn1(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, gO):
+                return gO * 2
+
+        class MyFn2(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, gO):
+                return gO * 3
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn1(x):
+            return MyFn1.apply(x)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn2(x):
+            return MyFn2.apply(x)
+
+        def fn():
+            for compiled_fn in (fn1, fn1, fn2, fn2):
+                x = torch.arange(0.0, 10, requires_grad=True)
+                compiled_fn(x).sum().backward()
+                yield x.grad
+
+        self.check_output_and_recompiles(
+            fn,
+            count=[2, 0],
+            compiler_fn=make_compiler_fn(backend="ca_eager"),
+        )
+
     def test_custom_fn_dynamically_defined_class(self):
         def fn():
             def create_class(multiplier: int):
