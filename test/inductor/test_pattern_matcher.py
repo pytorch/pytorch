@@ -906,6 +906,55 @@ class TestPatternMatcher(TestCase):
         joint_graph.joint_graph_passes(gm)
         self.assertEqual(count_calls(gm.graph), 2)
 
+    def test_index_accumulate_iota_to_slice_scatter(self):
+        def make_fn(op, start, alpha=1):
+            def fn(base, values):
+                index = torch.ops.prims.iota.default(
+                    3,
+                    start=start,
+                    step=1,
+                    dtype=torch.int64,
+                    device=base.device,
+                    requires_grad=False,
+                )
+                if op == torch.ops.aten.index_put.default:
+                    return op(base, (None, index), values, True)
+                return op(base, 1, index, values, alpha=alpha)
+
+            return fn
+
+        base = torch.randn(2, 5, 7, device=GPU_TYPE)
+        values = torch.randn(2, 3, 7, device=GPU_TYPE)
+        ops = (
+            torch.ops.aten.index_put.default,
+            torch.ops.aten.index_add.default,
+        )
+        cases = (
+            [(op, 0, 1, True) for op in ops]
+            + [(op, 1, 1, False) for op in ops]
+            + [(torch.ops.aten.index_add.default, 0, 2, False)]
+        )
+        for op, start, alpha, should_match in cases:
+            with self.subTest(op=op, start=start, alpha=alpha):
+                fn = make_fn(op, start, alpha)
+                expected = fn(base, values)
+                gm = make_fx(fn, tracing_mode="fake")(base, values)
+
+                counters.clear()
+                joint_graph.joint_graph_passes(gm)
+                torch.testing.assert_close(gm(base, values), expected)
+                self.assertEqual(
+                    counters["inductor"]["index_accumulate_iota_to_slice_scatter"],
+                    int(should_match),
+                )
+                targets = {
+                    node.target for node in gm.graph.nodes if node.op == "call_function"
+                }
+                self.assertEqual(op in targets, not should_match)
+                self.assertEqual(
+                    torch.ops.aten.slice_scatter.default in targets, should_match
+                )
+
     # Constant folding was explicitly turned off due to issue #108388
     # Turn it back on for test
     @inductor_config.patch(joint_graph_constant_folding=True)

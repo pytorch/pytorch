@@ -2886,6 +2886,43 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.assertEqual(f(x_ref, y_ref), out)
 
     @skipCUDAIf(
+        not SM90OrLater, "eager BF16 index_select backward requires BF16 atomics"
+    )
+    def test_index_select_iota_backward_no_atomic(self):
+        def f(x):
+            index = torch.arange(8, device=x.device)
+            return torch.index_select(x, 3, index)
+
+        x = torch.randn(
+            2,
+            3,
+            4,
+            17,
+            dtype=torch.bfloat16,
+            device=device_type,
+            requires_grad=True,
+        )
+        x_ref = x.detach().clone().requires_grad_(True)
+
+        counters.clear()
+        out, (_, bw_code) = run_fw_bw_and_get_code(lambda: torch.compile(f)(x))
+        expected = f(x_ref)
+        expected.sum().backward()
+
+        self.assertEqual(out, expected)
+        self.assertEqual(x.grad, x_ref.grad)
+        self.assertEqual(
+            counters["inductor"]["index_accumulate_iota_to_slice_scatter"], 1
+        )
+        (
+            FileCheck()
+            .check_not("tl.atomic_add")
+            .check_not("torch.ops.aten.index_add.default")
+            .check_not("torch.ops.aten.index_put.default")
+            .run(bw_code)
+        )
+
+    @skipCUDAIf(
         not SM90OrLater, "uses bfloat16 atomic add instrs which requires SM >= 90"
     )
     @unittest.skipIf(
