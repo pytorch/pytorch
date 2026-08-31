@@ -2161,6 +2161,8 @@ _FOREACH_MM_SHAPES = [
 
 
 class TestForeachMM(TestCase):
+    """Generic `foreach.mm` tests."""
+
     def test_foreach_mm_gradcheck(self):
         G = 4
         shapes = [(32, 32, 32)] * G
@@ -2180,6 +2182,8 @@ class TestForeachMM(TestCase):
 
 
 class _TestForeachMMHelper(TestCase):
+    """Helper class for `foreach.mm` tests."""
+
     def _check(self, shapes, dtype, device):
         A = [torch.randn(M, K, dtype=dtype, device=device) for M, _, K in shapes]
         B = [torch.randn(K, N, dtype=dtype, device=device) for _, N, K in shapes]
@@ -2196,6 +2200,8 @@ class _TestForeachMMHelper(TestCase):
 
 
 class TestForeachMMDevice(_TestForeachMMHelper, TestCase):
+    """`foreach.mm` tests for different devices."""
+
     @parametrize(
         "label,shapes",
         _FOREACH_MM_SHAPES,
@@ -2210,6 +2216,8 @@ instantiate_device_type_tests(TestForeachMMDevice, globals())
 
 
 class TestForeachMMCUDA(_TestForeachMMHelper, TestCase):
+    """CUDA-specific tests for `foreach.mm`."""
+
     @parametrize(
         "label,a_dtype,b_dtype,K,expected",
         [
