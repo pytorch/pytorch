@@ -55,6 +55,42 @@ from torch.utils import _triton as triton_utils
 from torch.utils._sympy.functions import Identity
 
 
+class TestCUDAGraphUtils(TestCase):
+    def test_accelerator_mismatch_fallback(self):
+        from torch._inductor.cudagraph_utils import (
+            check_current_accelerator_for_cudagraphs,
+        )
+
+        with mock.patch.object(
+            torch.accelerator,
+            "current_accelerator",
+            return_value=torch.device("xpu"),
+        ):
+            reason = check_current_accelerator_for_cudagraphs("cuda")
+
+        self.assertIsNotNone(reason)
+        self.assertIn("does not match graph device", reason)
+
+    def test_missing_rng_fallback(self):
+        from torch._inductor.cudagraph_utils import check_rng_state_for_cudagraphs
+
+        device_module = mock.Mock(spec=["get_rng_state"])
+        with mock.patch.object(torch, "get_device_module", return_value=device_module):
+            reason = check_rng_state_for_cudagraphs("privateuseone")
+
+        self.assertIsNotNone(reason)
+        self.assertIn("missing set_rng_state", reason)
+
+    def test_multiple_accelerators_runtime_fallback(self):
+        from torch._inductor.output_code import _get_runtime_cudagraph_fail_reason
+
+        compiled_graph = mock.Mock(device_types={"cuda", "xpu"})
+        reason = _get_runtime_cudagraph_fail_reason(compiled_graph)
+
+        self.assertIsNotNone(reason)
+        self.assertIn("expected one accelerator device", reason)
+
+
 class TestUtils(TestCase):
     def test_python_subprocess_env_prioritizes_loaded_torch(self):
         torch_package_root = os.path.dirname(
