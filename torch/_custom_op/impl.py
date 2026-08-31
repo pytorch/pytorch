@@ -233,7 +233,7 @@ class CustomOp:
             for device_type in set(device_types):
                 self._check_doesnt_have_library_impl(device_type)
                 self._register_impl(device_type, f, stacklevel=_stacklevel)
-                dispatch_key = SUPPORTED_DEVICE_TYPE_TO_KEY[device_type]
+                dispatch_key = _C._dispatch_key_for_device[device_type]
                 library.impl(self._lib, self._opname, dispatch_key)(f)
             return f
 
@@ -242,7 +242,7 @@ class CustomOp:
     def _check_doesnt_have_library_impl(self, device_type):
         if self._has_impl(device_type):
             return
-        key = SUPPORTED_DEVICE_TYPE_TO_KEY[device_type]
+        key = _C._dispatch_key_for_device[device_type]
         if _C._dispatch_has_computed_kernel_for_dispatch_key(self._qualname, key):
             raise RuntimeError(
                 f"impl(..., device_types={device_type}): the operator {self._qualname} "
