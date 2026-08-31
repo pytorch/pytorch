@@ -171,6 +171,17 @@ jobs:
       test-matrix: ${{ steps.map-runners.outputs.test-matrix }}
       build-environment: ${{ inputs.build-environment }}
     steps:
+      # TEST-ONLY: check out the action introduced in #195366 before using it locally.
+      - name: Checkout PyTorch for local action
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          fetch-depth: 1
+          submodules: "false"
+          sparse-checkout: |
+            .github/actions/filter-test-configs
+            .github/scripts
+          sparse-checkout-cone-mode: false
+
       - name: Setup Linux
         id: setup-linux
         uses: pytorch/pytorch/.github/actions/setup-linux@main
@@ -195,8 +206,7 @@ jobs:
       # Apply the filter logic to the build step too if the test-config label is already there
       - name: Select all requested test configurations (if the test matrix is available)
         id: filter
-        # TEST-ONLY: exercise the action from #195366 before it lands.
-        uses: pytorch/pytorch/.github/actions/filter-test-configs@2ef30e2fe713d6c68b77eb99bcc8aa4d2fc83335
+        uses: ./.github/actions/filter-test-configs
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           test-matrix: ${{ inputs.test-matrix }}
