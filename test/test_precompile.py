@@ -1489,6 +1489,43 @@ class TestPrecompile(TestCase):
         # enforces this for every torch.compiler.__all__ member.
         self.assertEqual(torch.compiler.precompile.__module__, "torch.compiler")
 
+    def test_summary_types_pickle(self):
+        # A capture summary or invariants report is the kind of value users
+        # stash next to an artifact (torch.save of a diagnostics record, a
+        # multiprocessing capture farm). A previous revision pointed these
+        # classes' __module__ at torch.compiler, which does not export them,
+        # so pickle could not resolve the class and every instance raised.
+        from torch.compiler._precompile_types import (
+            FrameInvariants,
+            GuardFact,
+            PrecompileSummary,
+        )
+
+        fact = GuardFact("TYPE_MATCH", "L['x']", ("code",), "is int", True)
+        inv = FrameInvariants("f", "f.py", 1, 2, (fact,), (), ())
+        summary = PrecompileSummary(1, 0, 1, 1, ())
+        for obj in (fact, inv, summary):
+            self.assertEqual(pickle.loads(pickle.dumps(obj)), obj)
+
+    def test_dynamo_artifact_version_lock_raises_precompile_error(self):
+        # Note [precompile programming model] promises the driver's
+        # Python-version lock surfaces as a clean PrecompileError, so an
+        # ``except torch.compiler.precompile.PrecompileError`` handler written
+        # to the docs catches it -- not a raw ValueError.
+        def fn(x):
+            return x + 1
+
+        python_code, cache = torch.compiler.precompile(
+            fn, tracer="dynamo", backend="eager", example_inputs=[(torch.randn(3),)]
+        )
+        cur = f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}"
+        self.assertIn(cur, python_code)
+        skewed = python_code.replace(cur, "_DYNAMO_PYTHON_VERSION = (3, 9)")
+        # exec, not load(): load()'s cache-pairing hash check would reject the
+        # edited text first, and python_code is documented as self-contained.
+        with self.assertRaisesRegex(PrecompileError, "produced on Python 3.9"):
+            exec(skewed, {})
+
     @parametrize("name", ["load"])
     def test_precompile_method_public_location(self, name):
         method = getattr(torch.compiler.precompile, name)
@@ -2472,6 +2509,41 @@ class TestPrecompile(TestCase):
             # Served, not recompiled: the whole point of installing.
             self.assertEqual(counters["stats"]["unique_graphs"], 0)
 
+    def test_installed_artifact_call_after_unload_raises(self):
+        # Installing mutates process-global code objects, and the handle's
+        # contract is that the mutation is attributable to a point in the
+        # caller's control flow. A call after unload() must therefore raise
+        # rather than silently re-install (a stray queued task holding the
+        # handle would otherwise re-mutate live code objects with no paired
+        # unload); a fresh load() is the way to serve again.
+        code, cache = torch.compiler.precompile(
+            _precompile_unreachable_helper_caller,
+            backend="eager",
+            dynamic=False,
+            tracer="dynamo",
+            example_inputs=[(torch.randn(4),)],
+        )
+        x = torch.randn(4)
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with torch.no_grad():
+            self.assertEqual(loaded(x), _precompile_unreachable_helper_caller(x))
+            loaded.unload()
+            loaded.unload()  # idempotent
+            with self.assertRaisesRegex(PrecompileError, "unloaded"):
+                loaded(x)
+            # Re-entering is the explicit way to install again; the handle is
+            # reusable across scopes.
+            with loaded:
+                self.assertEqual(loaded(x), _precompile_unreachable_helper_caller(x))
+            with self.assertRaisesRegex(PrecompileError, "unloaded"):
+                loaded(x)
+            fresh = torch.compiler.precompile.load(code, cache)
+            try:
+                self.assertEqual(fresh(x), _precompile_unreachable_helper_caller(x))
+            finally:
+                fresh.unload()
+
     @parametrize("backend", ("eager", "inductor"))
     def test_training_capture_serves_a_backward_without_a_loss(self, backend):
         # The capture never sees a loss and never calls .backward(). The joint
@@ -2713,6 +2785,100 @@ class TestPrecompile(TestCase):
             example_inputs=[(torch.randn(n), 2) for n in (3, 5)],
         )
         self.assertTrue(_read_literal(ast.parse(code), "POLICY_DROPPED_GUARDS"))
+
+    def test_source_graph_module_pickled_copy_is_isolated(self):
+        # __reduce__ used to pickle the SHARED _src, whose body aliases the
+        # original's parameter/buffer containers -- so mutating the original
+        # after a deepcopy round-tripped the mutated tensors into the copy's
+        # pickle even though live calls were isolated. __reduce__ now
+        # snapshots the instance's own state.
+        from torch._dynamo.precompile_context import (
+            _EagerGraphSource,
+            _SourceGraphModule,
+        )
+
+        src = _EagerGraphSource(
+            code="def forward(self, x):\n    return x + self.b\n",
+            import_block="",
+            body={"_buffers": {"b": torch.ones(3)}},
+        )
+        original = _SourceGraphModule(src)
+        dup = copy.deepcopy(original)
+        x = torch.randn(3)
+        original._buffers["b"].mul_(100)
+        self.assertEqual(original(x), x + 100)
+        self.assertEqual(dup(x), x + 1)  # live isolation
+        self.assertEqual(pickle.loads(pickle.dumps(dup))(x), x + 1)
+        # And an instance pickles its CURRENT state, not its load-time state.
+        self.assertEqual(pickle.loads(pickle.dumps(original))(x), x + 100)
+
+    def test_invariants_report_lists_policy_dropped_slots(self):
+        # The report header promises a dropped line is "a precondition NOTHING
+        # checks". A policy-dropped slot is exactly that, but the policy used
+        # to DELETE those facts from the report's source data rather than
+        # re-mark them, so an auditor reading the file saw a validity domain
+        # far wider than the artifact's true one.
+        import re as re_mod
+
+        from torch._precompile import _read_literal
+
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "invariants.txt")
+            code, _ = torch.compiler.precompile(
+                _precompile_scaled,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                example_inputs=[(torch.randn(n), 2) for n in (3, 5)],
+                invariants=path,
+            )
+            dropped = _read_literal(ast.parse(code), "POLICY_DROPPED_GUARDS")
+            self.assertTrue(dropped)
+            with open(path) as f:
+                report = f.read()
+        for _guard_type, name in list(dropped)[:3]:
+            self.assertRegex(report, rf"\[dropped \][^\n]*{re_mod.escape(name)}")
+
+    def test_guard_policy_classification_is_total(self):
+        # survives() defaults to KEEP for a guard type in no set, so the
+        # policy can only ever drop what _INVARIANT_DROPPABLE_GUARD_TYPES
+        # names. This test is what makes the never-drop claim enforceable:
+        # a guard type added to GuardBuilder fails here until someone triages
+        # it into exactly one of the three sets.
+        import itertools
+
+        from torch._dynamo.guards import GuardBuilder
+        from torch._dynamo.precompile_package import (
+            _INVARIANT_DROPPABLE_GUARD_TYPES,
+            _SHAPE_BEARING_GUARD_TYPES,
+            _UNMODELLED_GUARD_TYPES,
+        )
+
+        guard_types = {
+            name
+            for name, value in vars(GuardBuilder).items()
+            if name.isupper() and callable(value)
+        }
+        self.assertGreater(len(guard_types), 40)  # the enumeration itself works
+        sets = {
+            "_SHAPE_BEARING_GUARD_TYPES": _SHAPE_BEARING_GUARD_TYPES,
+            "_UNMODELLED_GUARD_TYPES": _UNMODELLED_GUARD_TYPES,
+            "_INVARIANT_DROPPABLE_GUARD_TYPES": _INVARIANT_DROPPABLE_GUARD_TYPES,
+        }
+        classified: frozenset[str] = frozenset().union(*sets.values())
+        self.assertEqual(
+            sorted(guard_types - classified),
+            [],
+            "unclassified GuardBuilder guard type(s): add each to exactly one "
+            "policy set in torch/_dynamo/precompile_package.py (KEPT until then)",
+        )
+        self.assertEqual(
+            sorted(classified - guard_types),
+            [],
+            "phantom entries: no GuardBuilder method by these names",
+        )
+        for (a_name, a), (b_name, b) in itertools.combinations(sets.items(), 2):
+            self.assertEqual(sorted(a & b), [], f"{a_name} overlaps {b_name}")
 
     @parametrize("where", ["object", "in_a_list"])
     def test_unpicklable_guard_value_names_where_it_lives(self, where):

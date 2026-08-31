@@ -35,6 +35,13 @@ dropped first-invocation custom-op aliasing analysis can itself RAISE under
 ``config.error_on_custom_op_aliasing`` (default on in CI), so a graph whose custom op
 violates the aliasing contract runs SILENTLY in the standalone artifact where the
 eager / compiled path would error -- an intentional trade-off, not a numerics bug.
+
+Not covered: a training artifact's ``.backward()`` cannot run under COMPILED AUTOGRAD.
+The emitted ``_CompiledFunction`` uses ``boxed_grads_call=True`` and carries no fx
+``bw_module`` (a source artifact has none to carry), so compiled autograd's
+``proxy_call_backward`` rejects it with a RuntimeError; run the served backward under
+the ordinary autograd engine. The runtime's real CompiledFunction does not have this
+limitation -- it is the price of the source rendering.
 """
 
 from __future__ import annotations
@@ -965,6 +972,22 @@ def _compose_training_module(
             "aot_autograd.compile_to_python cannot compose a training graph that "
             "carries a BackwardState into standalone source yet."
         )
+    from . import runtime_wrappers as _rw
+
+    if _rw._should_disable_saved_tensors_hooks():
+        # The runtime wraps a trace_joint call in _disable_saved_tensors_hooks
+        # when inlineable ambient hooks were traced INTO the joint graph. That
+        # wrapper is plain Python, never a captured GeneratedSource, so the
+        # compose cannot splice it -- and without it the ambient hooks would
+        # fire a SECOND time on _CompiledFunction's ctx.save_for_backward at
+        # serve time (pack applied to already-packed activations: silently
+        # corrupted gradients). Refuse, never mis-render.
+        raise NotImplementedError(
+            "aot_autograd.compile_to_python cannot compose a training graph "
+            "captured under inlineable saved_tensors_hooks into standalone "
+            "source yet: the runtime disables the ambient hooks around the "
+            "compiled call and the composed artifact cannot."
+        )
 
     # Same hazards as the inference composer above: a re-entrant lowering
     # under a DISTINCT TracingContext appends ITS wrappers to this sink, so
@@ -1447,8 +1470,12 @@ def compile_to_python(
             return source, cache
 
         _restride_backward_placeholders(dense["bw"], fwd_output_strides, dense["spec"])
+        # is_backward=True matches torch.compile's backward compile: it gates
+        # GraphLowering's backward-only require_contiguous safeguard for
+        # untagged implicit-fallback aten ops (#140452), without which such a
+        # fallback can silently miscompute on a non-contiguous input.
         bw_python, _ = _inductor_compile_to_python(
-            dense["bw"], [], options=options, is_inference=False
+            dense["bw"], [], options=options, is_inference=False, is_backward=True
         )
         source = _compose_training_module(
             inner_python,

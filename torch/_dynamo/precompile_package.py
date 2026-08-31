@@ -105,6 +105,7 @@ from __future__ import annotations
 import collections
 import contextlib
 import copy
+import dataclasses
 import functools
 import hashlib
 import importlib.machinery
@@ -931,7 +932,6 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
     {
         "TENSOR_MATCH",
         "SEQUENCE_LENGTH",
-        "SYMBOL_MATCH",
         # Value-equality guards belong here for the same reason and are the
         # half that bites hardest: they pin a Python value the graph
         # specialized on -- an int or bool argument, `module.training`, an
@@ -978,6 +978,50 @@ _UNMODELLED_GUARD_TYPES = frozenset(
         "SHAPE_ENV",
         "TENSOR_SUBCLASS_METADATA_MATCH",
         "TORCH_FUNCTION_STATE",
+    }
+)
+
+
+# The ONLY guard types the invariance policy may drop, and only when proven
+# invariant across every captured variant. The three sets form a total,
+# disjoint classification of GuardBuilder's guard-producing methods, pinned by
+# test_precompile.test_guard_policy_classification_is_total: a guard type in
+# none of them -- i.e. any type added to GuardBuilder after this list -- is
+# KEPT unconditionally until someone classifies it here, so a new value-pinning
+# guard can never become silently droppable by default.
+_INVARIANT_DROPPABLE_GUARD_TYPES = frozenset(
+    {
+        "AUTOGRAD_SAVED_TENSORS_HOOKS",
+        "BOOL_MATCH",
+        "BUILTIN_MATCH",
+        "CLASS_MATCH",
+        "CLOSURE_MATCH",
+        "CONSTANT_SUBCLASS_MATCH",
+        "COUNT_ITERATOR_MATCH",
+        "COW_TENSOR_MATCH",
+        "DEFAULT_DEVICE",
+        "DICT_CONTAINS",
+        "DICT_KEYS_MATCH",
+        "DICT_NOT_CONTAINS",
+        "DICT_VERSION",
+        "DUAL_LEVEL",
+        "EMPTY_NN_MODULE_HOOKS_DICT",
+        "FAKE_SCRIPT_TYPE_MATCH",
+        "FUNCTION_MATCH",
+        "FUNCTORCH_STACK_MATCH",
+        "GRAD_MODE",
+        "ID_MATCH",
+        "MAPPING_KEYS_CHECK",
+        "MODULE_MATCH",
+        "NN_MODULE",
+        "NONE_MATCH",
+        "NOT_NONE_MATCH",
+        "NOT_PRESENT_IN_GENERIC_DICT",
+        "RANGE_ITERATOR_MATCH",
+        "SET_CONTAINS",
+        "SET_NOT_CONTAINS",
+        "TUPLE_ITERATOR_LEN",
+        "WEAKREF_ALIVE",
     }
 )
 
@@ -1506,14 +1550,16 @@ class PrecompileSession:
         dropped: set[tuple[str, str]] = set()
 
         def survives(guard_type: str, name: str) -> bool:
-            # An unmodelled guard never enters _guard_sets, so it was never
-            # shown to be constant -- only never analyzed. This policy drops
-            # what it PROVED invariant, so these stay. SHAPE_ENV is the one
-            # that matters: it carries symbolic shape constraints that no
-            # TENSOR_MATCH repeats.
+            # Fail closed: only an explicitly droppable type can be dropped.
+            # Shape-bearing types stay because dropping a value/shape pin
+            # silently widens the artifact's domain; unmodelled types stay
+            # because they never enter _guard_sets, so they were never shown
+            # to be constant -- only never analyzed (SHAPE_ENV is the one that
+            # matters: it carries symbolic shape constraints no TENSOR_MATCH
+            # repeats); and a type in NO set is one GuardBuilder grew after
+            # the classification, kept until someone triages it.
             return (
-                guard_type in _UNMODELLED_GUARD_TYPES
-                or guard_type in _SHAPE_BEARING_GUARD_TYPES
+                guard_type not in _INVARIANT_DROPPABLE_GUARD_TYPES
                 or (guard_type, _normalize(name)) in keep_only
             )
 
@@ -1568,12 +1614,18 @@ class PrecompileSession:
         # varied is out of the artifact's declared domain rather than an
         # unchecked hazard.
         self._kept_guards -= dropped
+        # Re-mark the dropped facts rather than deleting them: the invariants
+        # report written from _guard_sets promises that a dropped line is "a
+        # precondition NOTHING checks", and a policy-dropped slot is exactly
+        # that -- omitting it would show an auditor a validity domain far wider
+        # than the artifact's true one.
         for key, variants in self._guard_sets.items():
             self._guard_sets[key] = [
                 frozenset(
                     f
-                    for f in facts
                     if not f.enforced or survives(f.guard_type, f.source)
+                    else dataclasses.replace(f, enforced=False)
+                    for f in facts
                 )
                 for facts in variants
             ]

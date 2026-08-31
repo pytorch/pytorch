@@ -1,4 +1,5 @@
 import copy
+import dataclasses
 import json
 import logging
 from abc import abstractmethod
@@ -111,11 +112,30 @@ class _SourceGraphModule(torch.nn.Module):
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         return self._generated_forward(self, *args, **kwargs)
 
+    def _current_src(self) -> _EagerGraphSource:
+        # _src.body still aliases the containers this instance was BUILT from,
+        # which for a deepcopy are the ORIGINAL's parameter/buffer dicts -- so
+        # pickling _src directly would round-trip the original's (possibly
+        # since-mutated) tensors into the copy's artifact. Snapshot this
+        # instance's own state instead, converting live sub-GraphModules back
+        # to blobs (GraphModule.__reduce__ is lossy for a Dynamo graph, which
+        # is why they travel as blobs in the first place).
+        body = {**self._src.body}
+        body["_parameters"] = dict(self._parameters)
+        body["_buffers"] = dict(self._buffers)
+        body["_modules"] = {
+            name: _SubgraphBlob(_graph_module_to_blob(sub))
+            if isinstance(sub, torch.fx.GraphModule)
+            else sub
+            for name, sub in self._modules.items()
+        }
+        return dataclasses.replace(self._src, body=body)
+
     def __reduce__(self) -> tuple[Any, ...]:
         # Required: an artifact can be re-serialized after having been loaded once,
         # and the default reduction would try to pickle the exec'd forward by
         # reference to a module that does not exist.
-        return (_SourceGraphModule, (self._src,))
+        return (_SourceGraphModule, (self._current_src(),))
 
     def __deepcopy__(self, memo: dict[int, Any]) -> "_SourceGraphModule":
         # Same reason GraphModule defines one: without it deepcopy falls through to
@@ -125,10 +145,12 @@ class _SourceGraphModule(torch.nn.Module):
         new = object.__new__(type(self))
         memo[id(self)] = new
         new.__dict__.update(self.__dict__)
-        # _src and the exec'd forward are safely shared; the STATEFUL
-        # containers are not -- a "deep" copy sharing the parameter/buffer
-        # dicts and tensors lets an in-place update on one copy silently edit
-        # the other.
+        # _src and the exec'd forward are safely shared -- __reduce__ snapshots
+        # the instance's own containers via _current_src(), so the shared _src
+        # never leaks the original's state into a pickled copy. The STATEFUL
+        # containers are not shareable: a "deep" copy sharing the
+        # parameter/buffer dicts and tensors lets an in-place update on one
+        # copy silently edit the other.
         for stateful in ("_modules", "_parameters", "_buffers"):
             new.__dict__[stateful] = {
                 name: copy.deepcopy(value, memo)
