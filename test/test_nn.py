@@ -9287,7 +9287,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertTrue(gradcheck(fn, (x, w, b), check_undefined_grad=undef))
             self.assertTrue(gradgradcheck(fn, (x, w, b), check_undefined_grad=undef))
 
-    @skipIfTorchDynamo("compiled autograd crashes tracing the sparse backward (pgo.is_stride_dynamic IndexError)")
+    @skipIfTorchDynamo("compiled autograd hits an IndexError in pgo.is_stride_dynamic wrapping the sparse weight")
     @skipMeta
     @onlyNativeDeviceTypes
     @skipMPS

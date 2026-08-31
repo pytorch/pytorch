@@ -77,6 +77,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
+from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 
@@ -287,6 +288,33 @@ class TestGradTransform(TestCase):
         x = torch.randn(2, 3, 4, device=device)
         result = grad(lambda x: torch.flatten(x).sum())(x)
         self.assertEqual(result, torch.ones_like(x))
+
+    def test_linear_nd_inplace_activation(self, device):
+        # linear_hack shadows at::native::linear under functorch transforms, so its
+        # nD fast path needs its own coverage: it must unflatten with _unsafe_view,
+        # otherwise the relu_ below rebases history onto CopySlices.
+        x = torch.randn(2, 3, 8, device=device, dtype=torch.double)
+        w = torch.randn(16, 8, device=device, dtype=torch.double)
+        b = torch.randn(16, device=device, dtype=torch.double)
+
+        ops = []
+
+        class RecordOps(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                ops.append(func)
+                return func(*args, **(kwargs or {}))
+
+        def f(x, w, b):
+            return F.linear(x, w, b).relu_().sum()
+
+        with RecordOps():
+            result = torch.func.grad(f, argnums=(0, 1, 2))(x, w, b)
+
+        self.assertIn(torch.ops.aten._unsafe_view.default, ops)
+
+        xr, wr, br = (t.clone().requires_grad_() for t in (x, w, b))
+        (xr @ wr.t() + br).relu().sum().backward()
+        self.assertEqual(result, (xr.grad, wr.grad, br.grad))
 
     def test_fn_with_kwargs(self, device):
         def foo(x, y):
