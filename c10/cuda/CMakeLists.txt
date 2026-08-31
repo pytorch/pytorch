@@ -31,6 +31,7 @@ set(C10_CUDA_SRCS
     CUDADeviceAssertionHost.cpp
     CUDAException.cpp
     CUDAFunctions.cpp
+    CUDAGraphMemory.cpp
     CUDAMallocAsyncAllocator.cpp
     CUDAMiscFunctions.cpp
     CUDAStream.cpp
@@ -42,6 +43,7 @@ set(C10_CUDA_SRCS
 set(C10_CUDA_HEADERS
     CUDAAllocatorConfig.h
     CUDACachingAllocator.h
+    CUDAGraphMemory.h
     CUDADeviceAssertionHost.h
     CUDAException.h
     CUDAEvent.h
@@ -52,6 +54,7 @@ set(C10_CUDA_HEADERS
     CUDAMiscFunctions.h
     CUDAStream.h
     PeerToPeerAccess.h
+    impl/CUDAGraphMemory.h
     impl/CUDAGuardImpl.h
     impl/CUDATest.h
 )
