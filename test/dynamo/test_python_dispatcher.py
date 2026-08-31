@@ -122,6 +122,50 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(fn(x), torch.tensor([6, 7, 8, 9]))
         self.assertEqual(counter.frame_count, 1)
 
+    def test_functorch_interpreter_lower(self):
+        counter = CompileCounter()
+
+        def inner(y):
+            interpreter = (
+                torch._functorch.pyfunctorch.retrieve_current_functorch_interpreter()
+            )
+            # Tensor ops must happen before lower(); after pop the batched
+            # tensor is no longer in a vmap interpreter.
+            out = y + interpreter.level()
+            with interpreter.lower():
+                pass
+            return out
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def fn(x):
+            return torch.vmap(inner)(x)
+
+        x = torch.tensor([1, 2, 3, 4])
+        self.assertEqual(fn(x), torch.tensor([2, 3, 4, 5]))
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_functorch_interpreter_process(self):
+        counter = CompileCounter()
+
+        class FakeOp:
+            functorch_table = {
+                torch._C._functorch.TransformType.Vmap: lambda interpreter, t: t * t
+            }
+
+        def inner(y):
+            interpreter = (
+                torch._functorch.pyfunctorch.retrieve_current_functorch_interpreter()
+            )
+            return interpreter.process(FakeOp(), (y,), {})
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def fn(x):
+            return torch.vmap(inner)(x)
+
+        x = torch.tensor([1, 2, 3, 4])
+        self.assertEqual(fn(x), torch.tensor([1, 4, 9, 16]))
+        self.assertEqual(counter.frame_count, 1)
+
     def test_graph_break_recovers_missing_python_tls_snapshot(self):
         @torch.compile(backend="eager_noexcept")
         def fn(x):

@@ -86,6 +86,8 @@ from ..utils import (
     has_torch_function,
     hashable,
     is_wrapper_or_member_descriptor,
+    no_keywords,
+    no_positional,
     product,
     proxy_args_kwargs,
     unpack_iterable,
@@ -4411,10 +4413,8 @@ class FuncTorchInterpreterVariable(BaseTorchVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         # Python method, so Method cannot derive METH_NOARGS from ml_flags.
-        if args:
-            raise AssertionError(f"lower() expects no args, got {len(args)}")
-        if kwargs:
-            raise AssertionError(f"lower() expects no kwargs, got {len(kwargs)}")
+        no_positional(tx, "lower", args)
+        no_keywords(tx, "lower", kwargs)
         return variables.TemporarilyPopInterpreterStackCtxManagerVariable.create(
             tx, None
         )
