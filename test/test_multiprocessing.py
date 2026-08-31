@@ -26,7 +26,6 @@ from torch.testing._internal.common_utils import (
     load_tests,
     run_tests,
     skipIfRocm,
-    skipIfRocmVersionAtLeast,
     slowTest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
@@ -89,6 +88,10 @@ def simple_fill(queue, event):
 def simple_pool_fill(tensor):
     tensor.fill_(4)
     return tensor.add(1)
+
+
+def raise_keyboard_interrupt(i):
+    raise KeyboardInterrupt
 
 
 def send_tensor(queue, event, device, dtype):
@@ -588,6 +591,12 @@ instantiate_device_type_tests(TestMultiprocessingDeviceType, globals())
 class TestMultiprocessingGeneric(_MultiprocessingTestMixin, TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    def test_spawn_child_keyboard_interrupt(self):
+        # A child interrupted while the parent lives must be reported as a
+        # failure, not exit 0 and be mistaken for success.
+        with self.assertRaisesRegex(mp.ProcessRaisedException, "KeyboardInterrupt"):
+            mp.spawn(raise_keyboard_interrupt, nprocs=1, join=True)
+
     def _test_preserve_sharing(self, ctx=mp, repeat=1):
         def do_test():
             x = torch.randn(5, 5)
@@ -648,8 +657,6 @@ class TestMultiprocessingGeneric(_MultiprocessingTestMixin, TestCase):
     def test_fd_pool(self):
         self._test_pool(repeat=TEST_REPEATS)
 
-    # torch_shm_manager cannot resolve librocprofiler-sdk.so.1 in CI child processes.
-    @skipIfRocmVersionAtLeast([7, 14])
     @unittest.skipIf(
         TEST_WITH_ASAN,
         "seems to hang with ASAN, see https://github.com/pytorch/pytorch/issues/5326",
@@ -661,17 +668,14 @@ class TestMultiprocessingGeneric(_MultiprocessingTestMixin, TestCase):
             repeat = 1 if IS_MACOS else TEST_REPEATS
             self._test_sharing(repeat=repeat)
 
-    @skipIfRocmVersionAtLeast([7, 14])
     def test_fs_preserve_sharing(self):
         with fs_sharing():
             self._test_preserve_sharing(repeat=TEST_REPEATS)
 
-    @skipIfRocmVersionAtLeast([7, 14])
     def test_fs_pool(self):
         with fs_sharing():
             self._test_pool(repeat=TEST_REPEATS)
 
-    @skipIfRocmVersionAtLeast([7, 14])
     @unittest.skipIf(not HAS_SHM_FILES, "don't not how to check if shm files exist")
     def test_fs(self):
         def queue_put():
@@ -1106,6 +1110,32 @@ if __name__ == "__main__":
     @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_mixed_types_cuda_sharing(self):
         self._test_mixed_types_cuda_sharing(mp.get_context("spawn"))
+
+    def test_empty_shared(self):
+        t = torch.tensor([])
+        t.share_memory_()
+
+    def _test_is_shared(self):
+        t = torch.randn(5, 5)
+        self.assertFalse(t.is_shared())
+        t.share_memory_()
+        self.assertTrue(t.is_shared())
+
+    @unittest.skipIf(
+        platform == "darwin", "file descriptor strategy is not supported on macOS"
+    )
+    def test_is_shared(self):
+        self._test_is_shared()
+
+    def test_fs_is_shared(self):
+        with fs_sharing():
+            self._test_is_shared()
+
+    @unittest.skipIf(sys.platform != "linux", "Only runs on Linux; requires prctl(2)")
+    def test_set_thread_name(self):
+        name = "test name"
+        mp._set_thread_name(name)
+        self.assertEqual(mp._get_thread_name(), name)
 
 
 if __name__ == "__main__":

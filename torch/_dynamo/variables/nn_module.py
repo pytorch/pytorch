@@ -171,7 +171,7 @@ def guard_to_detect_forward_monkeypatching(
 ) -> None:
     # Users sometimes patch the forward method of a nn module instance to
     # perform optimizations like quantization. Though this is not a good
-    # software practice, but python allows this and Dynamo needs to detect
+    # software practice, python allows this and Dynamo needs to detect
     # this patching.
     #
     # One way to do this is to add an ID_MATCH guard on every function
@@ -303,7 +303,7 @@ class NNModuleVariable(VariableTracker):
     def get_real_python_backed_value(self) -> object:
         return self.value
 
-    def bool_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def nb_bool_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         """nb_bool for nn.Module.
 
         nn.Module itself has no __bool__ or __len__, so bare modules are always
@@ -316,7 +316,7 @@ class NNModuleVariable(VariableTracker):
         mod = tx.output.get_submodule(self.module_key)
         return ConstantVariable.create(bool(mod))
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         mod = tx.output.get_submodule(self.module_key)
         return VariableTracker.build(tx, repr(mod))
 
@@ -413,7 +413,7 @@ class NNModuleVariable(VariableTracker):
             except Unsupported:
                 unimplemented(
                     gb_type="Custom __getattribute__ in nn.Module attribute access",
-                    context=f"getattro_impl {self} {name}",
+                    context=f"tp_getattro_impl {self} {name}",
                     explanation="Dynamo could not trace through the custom "
                     "`__getattribute__` method on this `nn.Module`.",
                     hints=[
@@ -430,7 +430,7 @@ class NNModuleVariable(VariableTracker):
         if not isinstance(getattr_fn, types.FunctionType):
             unimplemented(
                 gb_type="torch.nn.Module with a non-function custom __getattr__",
-                context=f"getattro_impl {self} {name}",
+                context=f"tp_getattro_impl {self} {name}",
                 explanation=(
                     "Dynamo detected a nn.Module object with a custom "
                     "`__getattr__` method, but this method is not a standard "
@@ -452,7 +452,7 @@ class NNModuleVariable(VariableTracker):
             tx, [VariableTracker.build(tx, name)], {}
         )
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         source = self.source and AttrSource(self.source, name)
@@ -470,7 +470,7 @@ class NNModuleVariable(VariableTracker):
         if not self.source:
             unimplemented(
                 gb_type="getattr with no source",
-                context=f"getattro_impl {self} {name}",
+                context=f"tp_getattro_impl {self} {name}",
                 explanation="Dynamo does not know how to access an attribute "
                 "on an `nn.Module` instance that lacks a source. This is "
                 "usually an internal error in Dynamo.",
@@ -513,9 +513,6 @@ class NNModuleVariable(VariableTracker):
 
         if name == "forward":
             guard_to_detect_forward_monkeypatching(self.source, base)
-
-        if name == "__class__" and not object_member:
-            return VariableTracker.build(tx, base.__class__, source=source)
 
         if object_member:
             out = VariableTracker.build(tx, subobj, NNModuleSource(source))  # type: ignore[arg-type]
@@ -569,7 +566,7 @@ class NNModuleVariable(VariableTracker):
                     ],
                 )
 
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
     def call_function(
         self,
@@ -590,7 +587,7 @@ class NNModuleVariable(VariableTracker):
                 if nnmodule_has_hooks(mod):
                     # We do not want to unroll sequential if it has hooks, since evaporating it
                     # will cause hooks to not fire!
-                    # This terminates and restart the tracing process
+                    # This terminates and restarts the tracing process
                     self.convert_to_unspecialized(tx)
 
                 # Unroll sequential
@@ -1183,7 +1180,7 @@ class NNModuleVariable(VariableTracker):
         else:
             return super().call_method(tx, name, list(args), kwargs)
 
-    def sq_length(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
+    def sq_length_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         """Sequence length for container modules (e.g., nn.Sequential)."""
         module = tx.output.get_submodule(self.module_key)
         return VariableTracker.build(tx, len(module))  # type: ignore[arg-type]
@@ -1315,7 +1312,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 globals_vt = tx.nn_modules_globals_vt
 
                 def _hooks_dict_len(obj: VariableTracker, attr: str) -> int:
-                    vt = obj.getattro_impl(tx, attr)
+                    vt = obj.tp_getattro_impl(tx, attr)
                     vt = vt.realize() if hasattr(vt, "realize") else vt
                     return vt.len()  # type: ignore[union-attr]
 
@@ -1470,14 +1467,14 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     def getattr_helper(
         self, tx: "InstructionTranslatorBase", field: str, name_vt: VariableTracker
     ) -> VariableTracker | None:
-        dict_vt = self.getattro_impl(tx, field)
+        dict_vt = self.tp_getattro_impl(tx, field)
         if isinstance(dict_vt, variables.UserDefinedDictVariable):
             dict_vt = dict_vt._base_vt
         if isinstance(dict_vt, variables.ConstDictVariable):
             return dict_vt.maybe_getitem_const(name_vt)
         return None
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if (
@@ -1572,7 +1569,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             )
 
             return variables.NNModuleHooksDictVariable(result, source=hooks_dict_source)
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
     def manually_trace_nn_module_getattr(
         self, tx: "InstructionTranslatorBase", name: str

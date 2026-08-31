@@ -42,7 +42,12 @@ from torch._subclasses.functional_tensor import (
 )
 from torch.fx.graph import _BoxedCodeGen
 from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipXPUIf,
+)
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     skipIfTorchDynamo,
     TEST_WITH_CROSSREF,
@@ -73,6 +78,8 @@ def _aot_eager_with_runtime_epilogue():
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraph(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_simple(self):
         def gn(x, y):
             return torch.mul(x, y)
@@ -241,6 +248,8 @@ class TestInvokeSubgraph(TestCase):
 @skipIfTorchDynamo("Not a torch._dynamo test")
 @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
 class TestInvokeSubgraphCompile(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def count_unique_get_attr_nodes(self, gm, args, expected):
         subgraph_attr_names = set()
         for node in gm.graph.nodes:
@@ -271,6 +280,30 @@ class TestInvokeSubgraphCompile(TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(x.grad, x_clone.grad)
         self.assertEqual(y.grad, y_clone.grad)
+
+    @torch._functorch.config.patch("donated_buffer", True)
+    @requires_cuda_and_triton
+    def test_reused_subgraph_square_backward(self):
+        @nested_compile_region
+        def region(x, weight):
+            return x / torch.sqrt(x.square().mean(dim=-1, keepdim=True) + 1e-5) * weight
+
+        def fn(x, weight1, weight2):
+            return region(x, weight1).sum() + region(x, weight2).sum()
+
+        inputs = (
+            torch.randn(4, 8, device="cuda", requires_grad=True),
+            torch.randn(1, 8, device="cuda", requires_grad=True),
+            torch.randn(1, 8, device="cuda", requires_grad=True),
+        )
+        compiled_inputs = tuple(
+            value.detach().clone().requires_grad_(True) for value in inputs
+        )
+
+        fn(*inputs).backward()
+        torch.compile(fn, fullgraph=True)(*compiled_inputs).backward()
+
+        self.assertEqual(inputs[0].grad, compiled_inputs[0].grad)
 
     def test_module_forward(self):
         class Mod(torch.nn.Module):
@@ -702,40 +735,6 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(ref, res)
         self.assertEqual(x.grad, x_clone.grad)
-
-    @requires_cuda_and_triton
-    @unittest.skipIf(not SM80OrLater, "Requires sm80 or later.")
-    def test_sdpa(self):
-        @nested_compile_region
-        def gn(q, k, v):
-            return torch.nn.functional.scaled_dot_product_attention(
-                q, k, v, attn_mask=None, dropout_p=0.0, is_causal=True
-            )
-
-        def fn(q, k, v):
-            with torch.nn.attention.sdpa_kernel(
-                [torch.nn.attention.SDPBackend.FLASH_ATTENTION]
-            ):
-                return gn(q, k, v)
-
-        q = torch.randn(
-            1, 1, 32, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True
-        )
-        k = torch.randn(
-            1, 1, 32, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True
-        )
-        v = torch.randn(
-            1, 1, 32, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True
-        )
-
-        ref = fn(q, k, v)
-        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-        res = opt_fn(q, k, v)
-        res.sum().backward()
-        self.assertEqual(ref, res)
-
-        res = opt_fn(q, k, v)
-        res.sum().backward()
 
     def test_symint_from_fwd_to_bwd(self):
         @nested_compile_region
@@ -2011,27 +2010,6 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
-    @requires_cuda_and_triton
-    def test_return_none(self):
-        from torch.nn import functional as F
-
-        weight = torch.ones(
-            1000, device="cuda:0", dtype=torch.float32, requires_grad=True
-        )
-        ones = torch.ones(1000, device="cuda:0", dtype=torch.float32)
-
-        @nested_compile_region
-        def fn(x, train):
-            return F.dropout(x * weight, 0.33, train)
-
-        @torch._dynamo.optimize_assert("inductor")
-        def run(x, train=True):
-            return fn(x, train)
-
-        r1 = run(ones, train=False)
-        r1.sum().backward()
-        weight.grad.clone()
-
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_return_none_from_fwd(self):
         @nested_compile_region
@@ -2893,9 +2871,9 @@ class GraphModule(torch.nn.Module):
         getitem_3: "f32[s77, 16]" = invoke_subgraph_14[0];  invoke_subgraph_14 = None
         sum_1: "f32[]" = torch.ops.aten.sum.default(getitem_2);  getitem_2 = None
         sum_2: "f32[]" = torch.ops.aten.sum.default(getitem_3);  getitem_3 = None
-        add_15: "f32[]" = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
+        add: "f32[]" = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
         cos: "f32[s77, 16]" = torch.ops.aten.cos.default(getitem_1);  getitem_1 = None
-        return (add_15, getitem_16, getitem_18, getitem_20, getitem_22, cos, primals_2, getitem_17, getitem_19, getitem_21, getitem_23)
+        return (add, getitem_16, getitem_18, getitem_20, getitem_22, cos, primals_2, getitem_17, getitem_19, getitem_21, getitem_23)
     class partitioned_fw_subgraph_0_1(torch.nn.Module):
         def forward(self, primals_0: "Sym(s77)", primals_1: "f32[s77, 16]"):
             cos: "f32[s77, 16]" = torch.ops.aten.cos.default(primals_1)
@@ -2915,13 +2893,13 @@ class GraphModule(torch.nn.Module):
         partitioned_bw_subgraph_0_0 = self.partitioned_bw_subgraph_0_0
         invoke_subgraph_15 = torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_0, 'partitioned_bw_subgraph_0_0', getitem_23, getitem_22, expand);  partitioned_bw_subgraph_0_0 = getitem_23 = getitem_22 = None
         getitem_5: "f32[s77, 16]" = invoke_subgraph_15[1];  invoke_subgraph_15 = None
-        add_16: "f32[s77, 16]" = torch.ops.aten.add.Tensor(expand, getitem_5);  expand = getitem_5 = None
+        add_1: "f32[s77, 16]" = torch.ops.aten.add.Tensor(expand, getitem_5);  expand = getitem_5 = None
         partitioned_bw_subgraph_0_3 = self.partitioned_bw_subgraph_0_1
-        invoke_subgraph_13 = torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_3, 'partitioned_bw_subgraph_0_1', getitem_21, getitem_20, add_16);  partitioned_bw_subgraph_0_3 = getitem_21 = getitem_20 = add_16 = None
+        invoke_subgraph_13 = torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_3, 'partitioned_bw_subgraph_0_1', getitem_21, getitem_20, add_1);  partitioned_bw_subgraph_0_3 = getitem_21 = getitem_20 = add_1 = None
         getitem_8: "f32[s77, 16]" = invoke_subgraph_13[1];  invoke_subgraph_13 = None
-        mul_10: "f32[s77, 16]" = torch.ops.aten.mul.Tensor(getitem_8, cos);  getitem_8 = cos = None
+        mul: "f32[s77, 16]" = torch.ops.aten.mul.Tensor(getitem_8, cos);  getitem_8 = cos = None
         partitioned_bw_subgraph_0_2 = self.partitioned_bw_subgraph_0_1
-        invoke_subgraph_11 = torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_2, 'partitioned_bw_subgraph_0_1', getitem_19, getitem_18, mul_10);  partitioned_bw_subgraph_0_2 = getitem_19 = getitem_18 = mul_10 = None
+        invoke_subgraph_11 = torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_2, 'partitioned_bw_subgraph_0_1', getitem_19, getitem_18, mul);  partitioned_bw_subgraph_0_2 = getitem_19 = getitem_18 = mul = None
         getitem_11: "f32[s77, 16]" = invoke_subgraph_11[1];  invoke_subgraph_11 = None
         partitioned_bw_subgraph_0_1 = self.partitioned_bw_subgraph_0_1
         invoke_subgraph_9 = torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_1, 'partitioned_bw_subgraph_0_1', getitem_17, getitem_16, getitem_11);  partitioned_bw_subgraph_0_1 = getitem_17 = getitem_16 = getitem_11 = None
@@ -2931,14 +2909,14 @@ class GraphModule(torch.nn.Module):
         def forward(self, primals_0: "Sym(s77)", primals_1: "f32[s77, 16]", tangents_0: "f32[s77, 16]"):
             sin: "f32[s77, 16]" = torch.ops.aten.sin.default(primals_1);  primals_1 = None
             neg: "f32[s77, 16]" = torch.ops.aten.neg.default(sin);  sin = None
-            mul_9: "f32[s77, 16]" = torch.ops.aten.mul.Tensor(tangents_0, neg);  tangents_0 = neg = None
-            return (None, mul_9)
+            mul: "f32[s77, 16]" = torch.ops.aten.mul.Tensor(tangents_0, neg);  tangents_0 = neg = None
+            return (None, mul)
     class partitioned_bw_subgraph_0_1(torch.nn.Module):
         def forward(self, primals_0: "Sym(s77)", primals_1: "f32[s77, 16]", tangents_0: "f32[s77, 16]"):
             sin: "f32[s77, 16]" = torch.ops.aten.sin.default(primals_1);  primals_1 = None
             neg: "f32[s77, 16]" = torch.ops.aten.neg.default(sin);  sin = None
-            mul_10: "f32[s77, 16]" = torch.ops.aten.mul.Tensor(tangents_0, neg);  tangents_0 = neg = None
-            return (None, mul_10)""",
+            mul: "f32[s77, 16]" = torch.ops.aten.mul.Tensor(tangents_0, neg);  tangents_0 = neg = None
+            return (None, mul)""",
                 ignore_empty_lines=True,
             )
 
@@ -3501,7 +3479,76 @@ _reuse_test_global = None
 
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
+class TestInvokeSubgraphCompileDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4819")
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
+    def test_return_none(self, device):
+        from torch.nn import functional as F
+
+        weight = torch.ones(
+            1000, device=device, dtype=torch.float32, requires_grad=True
+        )
+        ones = torch.ones(1000, device=device, dtype=torch.float32)
+
+        @nested_compile_region
+        def fn(x, train):
+            return F.dropout(x * weight, 0.33, train)
+
+        @torch._dynamo.optimize_assert("inductor")
+        def run(x, train=True):
+            return fn(x, train)
+
+        r1 = run(ones, train=False)
+        r1.sum().backward()
+        weight.grad.clone()
+
+
+@skipIfTorchDynamo("Not a torch._dynamo test")
+@torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
+class TestInvokeSubgraphCompileCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @requires_cuda_and_triton
+    @unittest.skipIf(not SM80OrLater, "Requires sm80 or later.")
+    def test_sdpa(self):
+        @nested_compile_region
+        def gn(q, k, v):
+            return torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, attn_mask=None, dropout_p=0.0, is_causal=True
+            )
+
+        def fn(q, k, v):
+            with torch.nn.attention.sdpa_kernel(
+                [torch.nn.attention.SDPBackend.FLASH_ATTENTION]
+            ):
+                return gn(q, k, v)
+
+        q = torch.randn(
+            1, 1, 32, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True
+        )
+        k = torch.randn(
+            1, 1, 32, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True
+        )
+        v = torch.randn(
+            1, 1, 32, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True
+        )
+
+        ref = fn(q, k, v)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        res = opt_fn(q, k, v)
+        res.sum().backward()
+        self.assertEqual(ref, res)
+
+        res = opt_fn(q, k, v)
+        res.sum().backward()
+
+
+@skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraphReuse(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @contextlib.contextmanager
     def _count_speculate_calls(self):
         count = 0
@@ -5161,6 +5208,8 @@ class GraphModule(torch.nn.Module):
     params: f"{cls.__name__}{'Strict' if params['strict'] else 'Nonstrict'}",
 )
 class TestInvokeSubgraphExport(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_simple_func(self):
         @nested_compile_region
@@ -5408,6 +5457,8 @@ class GraphModule(torch.nn.Module):
 
 
 class NegativeTesting(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_graph_break(self):
         @nested_compile_region
         def gn(x):
@@ -5428,6 +5479,8 @@ class NegativeTesting(TestCase):
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInlineInvokeSubgraph(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _assert_no_invoke_subgraph(self, fn, args):
         """Compile fn and verify the backend receives no invoke_subgraph HOPs."""
         backend = EagerAndRecordGraphs()
@@ -5500,6 +5553,8 @@ class TestInlineInvokeSubgraph(TestCase):
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInlineSingleUseInvokeSubgraph(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _assert_no_invoke_subgraph(self, fn, args):
         backend = EagerAndRecordGraphs()
         res = torch.compile(fn, backend=backend, fullgraph=True)(*args)
@@ -5651,6 +5706,8 @@ class TestInlineSingleUseInvokeSubgraph(TestCase):
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraphReuseHashFn(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @contextlib.contextmanager
     def _count_speculate_calls(self):
         count = 0
@@ -5911,6 +5968,8 @@ class TestInvokeSubgraphReuseHashFn(TestCase):
 @skipIfTorchDynamo("Not a torch._dynamo test")
 @unittest.skipIf(TEST_WITH_CROSSREF, "crossref does not support trace_autograd_ops")
 class TestInvokeSubgraphTrainStepCapture(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @torch._dynamo.config.patch(
         trace_autograd_ops=True,
         inline_single_use_invoke_subgraph=False,
@@ -6124,6 +6183,14 @@ class GraphModule(torch.nn.Module):
             ignore_comments=True,
             ignore_empty_lines=True,
         )
+
+
+instantiate_device_type_tests(
+    TestInvokeSubgraphCompileDevice,
+    globals(),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":

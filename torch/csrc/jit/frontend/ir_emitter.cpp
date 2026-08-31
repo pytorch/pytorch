@@ -734,7 +734,7 @@ struct to_ir {
   // If the graph might not return, add an implicit None return at the end
   void handleMaybeNoReturn(const Def& def, Block* block) {
     auto decl_ret = def_stack_.back().declared_return_type_;
-    if (exit_blocks.count(block) == 0) {
+    if (!exit_blocks.contains(block)) {
       auto decl_ret = def_stack_.back().declared_return_type_;
       if (decl_ret && decl_ret != NoneType::get()) {
         throw(
@@ -1161,7 +1161,7 @@ struct to_ir {
       }
       // Found an exit statement in this block. The remaining statements aren't
       // reachable so we don't emit them.
-      if (exit_blocks.count(environment_stack->block()))
+      if (exit_blocks.contains(environment_stack->block()))
         return;
     }
   }
@@ -1974,8 +1974,8 @@ struct to_ir {
     auto save_false = emitSingleIfBranch(
         false_block, falseBranch, cond_value.refinements().Not());
 
-    bool true_exits = exit_blocks.count(true_block);
-    bool false_exits = exit_blocks.count(false_block);
+    bool true_exits = exit_blocks.contains(true_block);
+    bool false_exits = exit_blocks.contains(false_block);
     if (true_exits && false_exits) {
       exit_blocks.insert(n->owningBlock());
     }
@@ -3540,9 +3540,10 @@ struct to_ir {
         checkApplyNumInputs(apply, 1);
         auto arg = emitSugaredExpr(apply.inputs()[0], 1);
         auto inputs = arg->asTuple(apply.range(), method);
-        auto inp_values = fmap(inputs, [&](const SugaredValuePtr& sv) {
-          return sv->asValue(apply.range(), method);
-        });
+        auto inp_values =
+            fmap(std::move(inputs), [&](const SugaredValuePtr& sv) {
+              return sv->asValue(apply.range(), method);
+            });
         return std::make_shared<SimpleValue>(
             graph->insertNode(graph->createTuple(inp_values))->output());
       }

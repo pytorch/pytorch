@@ -44,6 +44,22 @@ def has_triton_package() -> bool:
 
 
 @functools.cache
+def has_triton_block_ptr() -> bool:
+    """Whether the installed Triton still provides the block-pointer frontend API.
+
+    triton-lang/triton#10833 removed block pointers but kept ``tl.make_block_ptr``
+    as a raising stub while dropping ``tl.advance``, so ``advance`` is the
+    load-bearing check -- probing ``make_block_ptr`` alone would be fooled by the
+    stub. Inductor's codegen emits both builtins, so require both.
+    """
+    if not has_triton_package():
+        return False
+    import triton.language as tl
+
+    return hasattr(tl, "make_block_ptr") and hasattr(tl, "advance")
+
+
+@functools.cache
 def get_triton_version(fallback: tuple[int, int] = (0, 0)) -> tuple[int, int]:
     try:
         import triton
@@ -189,6 +205,19 @@ def has_triton_stable_tma_api() -> bool:
                 return True
             except ImportError:
                 pass
+    return False
+
+
+@functools.cache
+def has_triton_reduction_ordering() -> bool:
+    """Whether the available Triton exposes inner-tree reduction ordering."""
+    if has_triton_package():
+        try:
+            from triton.language import ReductionOrdering
+
+            return hasattr(ReductionOrdering, "INNER_TREE")
+        except ImportError:
+            pass
     return False
 
 
