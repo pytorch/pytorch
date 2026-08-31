@@ -691,8 +691,8 @@ class MatmulTest(TestCaseMPS):
         out_cpu = torch.zeros(256, 2 * 256, device="cpu")
         out_mps = torch.zeros(256, 2 * 256, device="mps")
 
-        torch.matmul(x_cpu, y_cpu, out=out_cpu[:, 128:(128+256)])
-        torch.matmul(x_mps, y_mps, out=out_mps[:, 128:(128+256)])
+        torch.matmul(x_cpu, y_cpu, out=out_cpu[:, 128:128 + 256])
+        torch.matmul(x_mps, y_mps, out=out_mps[:, 128:128 + 256])
 
         self.assertEqual(out_cpu, out_mps)
 
