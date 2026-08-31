@@ -62,9 +62,10 @@ FILE_TMPL = """\
 // {decl_path} -- do not edit
 //
 // {precompute_note}
-// core/Tensor.h, not ATen/ATen.h, which pulls ~1300 ATen/ops/*.h and made every
-// generated file depend on unrelated ops -- what AT_PER_OPERATOR_HEADERS exists
-// to avoid. TensorIterator.h and ops/empty.h are unconditional because preludes
+//
+// Includes: core/Tensor.h rather than ATen/ATen.h, which pulls ~1300
+// ATen/ops/*.h and made every generated file depend on unrelated ops -- what
+// AT_PER_OPERATOR_HEADERS exists to avoid. TensorIterator.h and ops/empty.h are unconditional because preludes
 // commonly need them and there is no per-declaration include hook yet; a body
 // calling another at:: FACTORY needs its op header added here. torch/library.h
 // is emitted only for ops with cpp_covers: its sole consumer is the covers
@@ -116,12 +117,6 @@ inline bool _naot_dim_too_big(int64_t d) {
 # the .out variant's kwarg binds). Registered as a catch-all custom op;
 # torch._native.aot_manifest prefers it over the Python covered_axes
 # matching when the library is loaded.
-# The trailing `return false;` is GENERATED, not the declaration's: a body that
-# answers only some paths would otherwise fall off the end of a bool function.
-# -Wreturn-type does not fire there -- the generated guards above it have returns of
-# their own -- so the compile is clean at -Wall -Wextra and the predicate returns
-# whatever is in the return register: a coverage claim the stub then declines (the
-# call loses its JIT route), or a crash.
 COVERS_FN_TMPL = """
 bool {op}_{key_lc}_covers({params}) {{
 {body}
@@ -200,11 +195,6 @@ def _device_match(major: int, minor: int) -> str:
     return f"{_PROPS_LOCAL}->major == {major} && {_PROPS_LOCAL}->minor == {minor}"
 
 
-# Shared with the exporter. decl.cc_of also bounds plausible capabilities, so a
-# malformed arch cannot produce a gate that is silently false on every device.
-_cc_of = decl.cc_of
-
-
 def _spec_from_json(spec):
     """A recorded spec as the DECLARATION stated it: sequences back to tuples.
 
@@ -242,7 +232,7 @@ def _by_arch(sidecars: list[dict]) -> dict[tuple[int, int], list[dict]]:
                 f"records no arch. Re-export: the runtime gate is built from "
                 f"the arch each artifact was compiled for."
             )
-        cc = _cc_of(arch)
+        cc = decl.cc_of(arch)
         is_cond = arch.endswith("a")
         if cc in groups and conditional.get(cc, False) != is_cond:
             # A conditional build for this cc wins outright; a plain one loses.
@@ -272,38 +262,23 @@ def _int32_size_gate(params: str) -> str:
     does not fit in int32.
 
     aten sizes are int64_t, but the fake tensors declare shape symbols with
-    cute.sym_int(), so export_to_c emits `int32_t dynamic_shapes[]`. Without this
-    gate the launcher's `static_cast<int32_t>(...)` truncates a >=2^31 extent and
-    hands the kernel a wrong (possibly negative) one -- wrong results or corrupted
-    memory, with no error. Declining routes the call to JIT or to aten.
+    cute.sym_int(), so export_to_c emits `int32_t dynamic_shapes[]` and the
+    launcher's `static_cast<int32_t>(...)` would truncate a >=2^31 extent into a
+    wrong (possibly negative) one, with no error. Emitted ahead of the prelude and
+    into cpp_covers, so no declaration hand-writes it and coverage never claims a
+    shape the stub will refuse.
 
-    Bounds the named tensors' DIMS only, which is the contract: every dim a caller
-    passes must fit. A prelude that DERIVES an extent -- reshaping to 2-D and handing
-    the ABI a trailing-dim product, as the TMA declarations do -- owns bounding that
-    value, because only it knows what it computed. `_naot_dim_too_big` is emitted for
-    them to use (SIZE_GATE_HELPER); a prelude that skips it truncates silently, which
-    on (2, 2, 2**30) left 256 elements un-accumulated with every dim far under the
-    limit. That duty is UNENFORCED -- the generator cannot see a value a prelude
-    computes -- so it is a per-declaration review item: topk derives M = numel/N
-    without bounding it, which is accepted because M >= 2**31 needs ~2**42 elements.
-    numel() here instead would decline any tensor over 2**31 elements even when its
-    collapsed extent is tiny, costing coverage on exactly the large shapes this path
-    exists for.
+    Bounds the named tensors' DIMS, not numel(), which would decline a large
+    tensor whose collapsed extent is tiny. A prelude that DERIVES an extent owns
+    bounding that value, with the emitted `_naot_dim_too_big` (SIZE_GATE_HELPER):
+    skipping it truncates silently, which on (2, 2, 2**30) left 256 elements
+    un-accumulated with every dim far under the limit. That duty is UNENFORCED --
+    the generator cannot see a value a prelude computes -- so it is a
+    per-declaration review item.
 
-    Emitted ahead of the prelude AND into cpp_covers, so no declaration hand-
-    writes it and coverage never claims a shape the stub will refuse.
-
-    Widening is NOT just cute.sym_int64(), which is unsafe alone: as of 4.5.2 the
-    ABI honours the symbol width but the emitted header still hardcodes
-    `int32_t dynamic_shapes[]` (c_header_generator.py) while the stride width
-    beside it is derived, so every field after the first shape is read at the
-    wrong offset. Behind that, `t.shape[i]` is Int32 whatever the symbol ("CuTe IR
-    only supports Int32 for now") so kernels must use cute.size(), and the JIT
-    path's build_memref_desc raises OverflowError for such a dim anyway.
-
-    TODO(native-aot): to serve >=2^31 dims, fix the header width upstream (NVIDIA
-    4.6+ docs direct users to sym_int64, so the int32 default is a bug), port
-    kernels off .shape[], and keep this gate for the JIT route.
+    TODO(native-aot): serving >=2^31 dims needs the exported header's int32 width
+    fixed upstream and kernels ported off `t.shape[i]`, which is Int32 whatever
+    the symbol; cute.sym_int64() alone is not enough.
     """
     # The at::Tensor names in scope: the prelude sees plain `const at::Tensor&`,
     # cpp_covers sees out-variant outputs as `const std::optional<at::Tensor>&`.
@@ -363,18 +338,13 @@ def gen_op(
             f"{pad}  return true;\n{pad}}}"
         )
 
-    # One cond chain per compute capability: a kernel built for one cc must never
-    # be launched on another, where the module load fails unchecked rather than
-    # declining.
+    # One cond chain per compute capability (see _by_arch).
     groups = _by_arch(sidecars)
-    # From the sidecars that SURVIVED the tie-break: a launcher for a dropped
-    # candidate is defined and never called, which is -Wunused-function in an
-    # anonymous namespace and fatal under CI's WERROR.
-    sidecars = [sc for scs in groups.values() for sc in scs]
     # Shipping an arch the declaration disowns is a packaging bug: error rather
-    # than gate on kernels the op does not claim to support.
-    shipped = {sc["arch"] for sc in sidecars}
-    if unclaimed := shipped - set(decl.archs_of(d)):
+    # than gate on kernels the op does not claim to support. Over EVERY exported
+    # tree, ahead of the tie-break below: a disowned tree of the same capability as
+    # a claimed one loses that tie-break, and would pass unnoticed.
+    if unclaimed := {sc["arch"] for sc in sidecars} - set(decl.archs_of(d)):
         # Name the directories and say DELETE: export skips arches outside ARCHS,
         # so it never prunes these trees and every later build fails identically.
         # .get because gen_op is also called directly, with no generation-time _dir.
@@ -391,6 +361,11 @@ def gen_op(
             f"declaration claims, so reaching this means the tree predates that or "
             f"ARCHS was narrowed since.)"
         )
+
+    # From the sidecars that SURVIVED the tie-break: a launcher for a dropped
+    # candidate is defined and never called, which is -Wunused-function in an
+    # anonymous namespace and fatal under CI's WERROR.
+    sidecars = [sc for scs in groups.values() for sc in scs]
 
     def _gate_for(props: str) -> str:
         accept = " || ".join(f"({_device_match(*cc)})" for cc in groups)
@@ -410,10 +385,14 @@ def gen_op(
         + "\n  }"
         for cc, scs in groups.items()
     ]
-    prelude_fn = getattr(d, "cpp_dispatch_prelude", None)
-    helpers_fn = getattr(d, "cpp_helpers", None)
-    prelude = (prelude_fn() or "") if prelude_fn else ""
-    helpers = (helpers_fn() or "") if helpers_fn else ""
+    # Defaulted to a callable so the use sites need no condition. `or (lambda)`
+    # rather than a getattr default: the contract's other spelling of "no hook" is
+    # the attribute set to None, which a default does not cover. The `or ""` below
+    # stays too -- a hook the declaration DID export may still return None.
+    prelude_fn = getattr(d, "cpp_dispatch_prelude", None) or (lambda: "")
+    helpers_fn = getattr(d, "cpp_helpers", None) or (lambda: "")
+    prelude = prelude_fn() or ""
+    helpers = helpers_fn() or ""
     # Only kinds whose exported ABI takes i32 extents need the size gate. ANY
     # narrowing kind among this op's points is enough: any point may be selected.
     narrows = any(
