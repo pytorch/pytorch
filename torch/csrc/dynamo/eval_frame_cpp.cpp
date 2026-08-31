@@ -314,6 +314,10 @@ int32_t dynamo_get_c_recursion_limit() {
 struct CRecursionLimitRAII {
   PyThreadState* tstate;
   int32_t old_recursion_remaining;
+  CRecursionLimitRAII(const CRecursionLimitRAII&) = delete;
+  CRecursionLimitRAII& operator=(const CRecursionLimitRAII&) = delete;
+  CRecursionLimitRAII(CRecursionLimitRAII&&) = delete;
+  CRecursionLimitRAII& operator=(CRecursionLimitRAII&&) = delete;
   CRecursionLimitRAII(PyThreadState* tstate) : tstate{tstate} {
     auto limit = dynamo_get_c_recursion_limit();
     auto& remaining = tstate->c_recursion_remaining;
