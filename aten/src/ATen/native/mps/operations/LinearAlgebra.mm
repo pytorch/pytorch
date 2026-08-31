@@ -1452,6 +1452,10 @@ static Tensor& tiled_bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2
   if (is_macos_at_least(MacOSVersion::MACOS_15_0)) {
     using namespace mps;
 
+    // Encodes through MPSNDArrayMatrixMultiplication, whose encodeToCommandEncoder:
+    // drives the encoder past the selectors MPSRecordingEncoder intercepts.
+    getCurrentMPSStream()->assertCapturable("bmm (tiled path for >2**32 elements)");
+
     id<MTLBuffer> aBuffer = getMTLBufferStorage(batch1);
     id<MTLBuffer> bBuffer = getMTLBufferStorage(batch2);
     id<MTLBuffer> resBuffer = getMTLBufferStorage(result);

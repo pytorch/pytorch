@@ -111,7 +111,6 @@
       (__bridge void*)buffer,
       static_cast<size_t>(offset),
       idx,
-      static_cast<size_t>([buffer length]),
   };
   [_inner setBuffer:buffer offset:offset atIndex:index];
 }
