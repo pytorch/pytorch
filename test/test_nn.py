@@ -11713,9 +11713,14 @@ class TestNNDeviceType(NNTestCase):
         # The double backward builds the tap gather and the coefficient derivatives only for
         # the outputs asked of it, and the OpInfo samples ask for both at once.
         volume = torch.randn(1, 2, 4, 5, 5, device=device, dtype=dtype)
-        # far enough inside that every tap stays in bounds: under zeros padding a tap the
-        # rim drops takes the value away with it, a step gradcheck cannot difference through
-        grid = torch.rand(1, 2, 3, 3, 3, device=device, dtype=dtype) * 0.5 - 0.25
+        # Two bands. The first stays far enough inside that every tap is in bounds. The
+        # second sits STABLY outside, around -1.5 in source units: a dropped tap is only a
+        # step for gradcheck when the perturbation crosses the boundary, and there the tap
+        # set is locally constant, so the dropped-tap arithmetic is differenced for real,
+        # with this single-sided mask.
+        inside = torch.rand(1, 2, 3, 3, 3, device=device, dtype=dtype) * 0.5 - 0.25
+        outside = torch.rand(1, 2, 3, 3, 3, device=device, dtype=dtype) * 0.04 - 1.42
+        grid = torch.cat([inside, outside], dim=1)
 
         def fn(t):
             args = (t, grid) if wrt == "input" else (volume, t)
