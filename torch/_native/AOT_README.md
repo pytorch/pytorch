@@ -7,8 +7,8 @@ no Python on the call path and no runtime compilation.
 
 It is both a design doc (part 1-3) and a how-to (part 4 onwards). If you only
 want to add an op, read [The declaration contract](#4-the-declaration-contract)
-and [Walkthrough: a new AOT op](#5-walkthrough-a-new-aot-op), then copy the
-closest existing declaration.
+and [Walkthrough: a new AOT op](#5-walkthrough-a-new-aot-op), then copy
+`ops/topk/aot.py`, the declaration this stack ships.
 
 **"Native AOT" is unrelated to AOTInductor / AOTAutograd.** There is no graph
 capture here. The unit of work is a single eager aten op, and the mechanism is a
@@ -59,8 +59,8 @@ Nothing in this document assumes that end state. The stub declines to `op.impl`
 today, and "there is always a stock kernel underneath" is load-bearing
 everywhere below (the fallback invariants in section 2, the arch gate's
 fall-back-rather-than-fail rationale in section 7). But the proposal explains
-why coverage is deliberately conservative -- a wrong decline costs performance,
-never correctness -- and why the standard build exports Blackwell-first.
+why coverage is deliberately conservative: a wrong decline costs performance,
+never correctness.
 
 ### Measured effect
 
@@ -69,6 +69,12 @@ end-to-end microseconds per call. Read them as "the AOT layer removes the JIT
 route's host penalty", not as a claim that AOT always wins: what the kernel does
 once launched is still the declaration's problem, and the e2e table below has
 rows where AOT loses to ATen for exactly that reason.
+
+They were measured on the full prototype tree, which declared 41 ops across 6
+modules. This stack ships one declaration (see
+[Current scope](#current-scope)), so every row other than topk's measures a
+prototype declaration that is not in this tree. They are kept because what they
+measure is the layer, which is what these commits add.
 
 BMM outer-product (Triton), host cost per route -- queue-independent, flat
 across sizes:
@@ -90,10 +96,11 @@ so the spread is host cost plus kernel quality):
 | 4096 | 94.6 | 45.0 | 45.0 | 2.10x | 1.00x |
 | 32768 | 576.2 | 338.8 | 338.7 | 1.70x | 1.00x |
 
-Note the two rows below 1.0x. `bmm_outer_product` neither ships a small-problem
-kernel nor gates on too-small problems, so at small B the AOT route is slower
-than ATen. That is a kernel/gating deficiency in the declaration, not a cost of
-the layer. **Read it as an instruction: a declaration must gate the sizes where
+Note the two rows below 1.0x. The prototype's `bmm_outer_product` declaration
+neither shipped a small-problem kernel nor gated on too-small problems, so at
+small B the AOT route is slower than ATen. That is a kernel/gating deficiency in
+the declaration, not a cost of the layer. **Read it as an instruction: a
+declaration must gate the sizes where
 its kernel loses.** topk's prelude does exactly that with its full-wave check
 (see [The declaration, annotated](#44-the-declaration-annotated)).
 
@@ -147,19 +154,15 @@ launch-queue stall is charged to `cpu_time`.
 
 ### Current scope
 
-41 declarations (all `CUDA`) across 6 declaration modules, expanding to 202
-precompiled kernels:
+One declaration, `ops/topk/aot.py` (`CUDA`), expanding to 48 precompiled kernels
+per arch: fp32 and bf16 radix top-k over N in {2048, 4096, 8192, 16384}, K in
+{64, 128, 256}, in both determinism modes. It exports `cpp_covers`; nothing here
+exports `cpp_helpers`.
 
-| module                              | declarations | grid points |
-| ----------------------------------- | ------------ | ----------- |
-| `ops/topk/aot.py`                   | 1            | 48          |
-| `ops/scatter_add/aot.py`            | 1            | 3           |
-| `ops/index_add/aot.py`              | 1            | 3           |
-| `ops/bmm_outer_product/aot.py`      | 1            | 4           |
-| `ops/reductions/aot.py` (family)    | 5            | 60          |
-| `ops/pointwise/aot.py` (family)     | 32           | 84          |
-
-39 of the 41 export `cpp_covers`; none currently export `cpp_helpers`.
+A build compiles that grid once per eligible arch, so what ships depends on
+`TORCH_CUDA_ARCH_LIST`: a manywheel CUDA 13.x list (`7.5;8.0;8.6;9.0;10.0;12.0`)
+admits `sm_90` and `sm_100` and carries 96 kernels, `b200-native-aot.yml`
+(`10.0a`) carries 48, and CUDA 12.x builds skip stage 2 entirely.
 
 ---
 
@@ -333,10 +336,12 @@ Stage 2 exists because kernel builder modules import torch while torchgen runs
 before torch exists. That is a consequence of a design choice, not a law: the
 original design required kernels to be pure DSL with no torch dependency, which
 permits a **one-stage** build (torch plus AOT ops in one pass) and, per the
-design doc, "feels cleanest". The pointwise and reduction families made that
-restriction untenable -- their kernels are entangled with torch-side plumbing --
-so it was relaxed and the build was split. Going back is possible and would be a
-large amount of op-side work; see [Known future work](#known-future-work).
+design doc, "feels cleanest". The pointwise and reduction kernel modules made
+that restriction untenable -- their kernels are entangled with torch-side
+plumbing -- so it was relaxed and the build was split. (Those are JIT overrides
+under `torch/_native/ops/`; neither carries an AOT declaration in this stack.)
+Going back is possible and would be a large amount of op-side work; see
+[Known future work](#known-future-work).
 
 **Stage 1 -- the normal torch build.** torchgen walks every
 `torch/_native/ops/*/aot.py`, validates it, and emits `NativeAotStubs.{h,cpp}`
@@ -416,7 +421,8 @@ def expand_specs(specs: list[dict]) -> list[dict]:
 Build-time budget, from the design doc, on a 1-GPU dev machine: kernel compile
 9.2 s wall (176 kernels, 36 cores); launcher and stub generation 10.2 s; build
 41 TUs and relink the .so 8 s; copy the relinked `libtorch_cuda.so` 1 s. Total
-28.5 s wallclock.
+28.5 s wallclock. Those counts are the prototype's whole tree; topk alone is 48
+kernels in one TU per arch.
 
 ### 2.4 Toolchains
 
@@ -664,7 +670,7 @@ behavior, and the diff notes underneath.
 #
 # A module declares ONE op (as here) or a FAMILY by exporting
 # declarations() -> list of objects with these same exports
-# (pointwise: 32 declarations from one table factory).
+# (a table-driven family builds its list from one row table).
 
 # ---------------------------------------------------------------- constants
 
@@ -709,9 +715,9 @@ def covered_axes(self, k, dim=-1, largest=True, sorted=True) -> dict:
     accept. It is survivable here only because cpp_covers (below) takes
     the out-variant outputs as trailing optionals and the router
     prefers it on any embedded build; a declaration WITHOUT cpp_covers
-    must absorb them itself (out=None, or *args/**kwargs -- see
-    scatter_add and pointwise), or every out= call raises TypeError and
-    covers() silently degrades it to "uncovered"."""
+    must absorb them itself (out=None, or *args/**kwargs), or every
+    out= call raises TypeError and covers() silently degrades it to
+    "uncovered"."""
     import torch
     return {
         "dtype": self.dtype,
@@ -924,10 +930,10 @@ late:
   count must match the `cute.sym_int()`s the builder put in that fake tensor;
   too many overruns a C array.
 * Non-tensor runtime arguments go in `scalar_args`:
-  `[{"name": "N", "ctype": "int32_t"}]` (see `ops/scatter_add/tma_kernel.py`,
-  which passes six). They become launcher parameters after the tensors and
-  before the stream, in list order. This is the only way to pass a runtime
-  scalar to a CuTeDSL kernel.
+  `[{"name": "N", "ctype": "int32_t"}]`. They become launcher parameters after
+  the tensors and before the stream, in list order. This is the only way to pass
+  a runtime scalar to a CuTeDSL kernel. topk needs none, so the marshalling is
+  covered by the tools tests rather than by a shipped declaration.
 
 Per-toolchain required keys are `REQUIRED_BUILD_KEYS` in
 `tools/native_aot/toolchains.py`: `("fn", "fake_args", "tensor_args")` for
@@ -937,7 +943,7 @@ Per-toolchain required keys are `REQUIRED_BUILD_KEYS` in
 
 ### Step 2: write `aot.py`
 
-Copy the closest existing declaration and adapt. Order of work that tends to go
+Copy `ops/topk/aot.py` and adapt. Order of work that tends to go
 smoothest:
 
 1. `ATEN_OP` / `DISPATCH_KEY` / `KERNEL_MODULE`, and the shared tables you will
@@ -949,9 +955,8 @@ smoothest:
    On *which* dtypes and shapes belong on the grid, the design doc's working
    policy: key off inputs -- **definitely bf16, probably fp32, maybe fp16, no to
    other dtypes** (let those JIT) -- and scale breadth by how much the op
-   matters (a `mm` warrants more dtypes than an RMSNorm). Every shipped grid
-   follows it: the `_DTYPES` tables are fp32/bf16 only, except scatter_add and
-   index_add, whose one-kernel-per-dtype TMA grid also carries fp16. Grids are
+   matters (a `mm` warrants more dtypes than an RMSNorm). topk's grid follows
+   it: `_DTYPES` is fp32/bf16 only. Grids are
    expected to change over releases; nothing outside this tree may depend on a
    given point being AOT'd.
 3. `cpp_dispatch_prelude()` + `cpp_dispatch(spec)` + `cpp_launch(spec, fn)`:
@@ -998,14 +1003,15 @@ does exactly this copy, via `_installed_lib_dir()`.
 Two more things the by-hand path assumes:
 
 * `--ops` accepts either the `ops/<dir>` name or an `ATEN_OP`. Artifacts and the
-  generated `.cpp` are named by **`decl_id`**, not by the directory: a family
-  module in `ops/reductions/` exports into `build/native_aot/sum_dim_IntList/`,
-  `mean_dim/`, `amax/`, `amin/`, `prod_dim_int/` -- one dir per declaration, and
-  there is no `build/native_aot/reductions/`.
+  generated `.cpp` are named by **`decl_id`**, not by the directory:
+  `ops/topk/aot.py` exports into `build/native_aot/topk/`, and a family module in
+  `ops/<dir>/` declaring `sum.dim_IntList` and `amax` would export into
+  `build/native_aot/sum_dim_IntList/` and `build/native_aot/amax/` -- one dir per
+  declaration, never one per directory.
 * `gen_aot_lib.py` is unfiltered and checks every artifact dir, so a filtered
   `export.py --ops <yours>` can leave it failing on somebody *else's* stale
   artifacts (see the staleness pitfall in
-  [6.6](#66-pitfall-checklist)). If that happens, re-run `export.py` with no
+  [6.2](#62-pitfall-checklist)). If that happens, re-run `export.py` with no
   `--ops`.
 
 Read the generated `build/native_aot/<decl_id>/aot_<decl_id>_cuda.cpp`. It is
@@ -1045,369 +1051,15 @@ for coverage/switch behavior with fixture declarations.
 
 ## 6. Real-world patterns
 
-### 6.1 Precomputed vs raw dims
+### 6.1 Where the worked examples are
 
-Whether a `dim` argument reaches the structured impl already wrapped varies per
-op. `index_add.out` declares `precomputed: dim -> int dim`, so its C++ side gets
-the wrapped value and can compare `dim != 0` directly. Reductions get nothing
-precomputed, and must wrap by hand:
+This stack lands one declaration, so the examples are section 4.4 (topk's
+declaration, annotated) and section 5 (adding an op end to end). The patterns that
+need other shapes of op -- a family generated from one table, precomputed dims, a
+prelude that classifies with TensorIterator, Triton's specialization parity -- are
+documented with the declarations that introduce them, not here.
 
-```python
-# torch/_native/ops/reductions/aot.py
-    def cpp_dispatch_prelude(self):
-        dtype_reject = " && ".join(f"st != {t}" for t in _DTYPES.values())
-        # Reduction dims arrive at the structured impl RAW (no
-        # maybe_wrap_dim precompute, unlike e.g. index_add's dim), so
-        # the negative spelling (dim=-1) must be wrapped here or it
-        # silently declines to stock aten while covered_axes says
-        # covered (PAIN_POINTS P14).
-        if self._dim_style == "int":
-            last_dim = (
-                "const bool last = "
-                "(c10::maybe_wrap_dim(dim, self.dim()) == self.dim() - 1);"
-            )
-        # ... "list" and "opt_list" spellings ...
-```
-
-The same prelude carries the other classic C++-side footgun (this is C++ inside
-the returned f-string):
-
-```cpp
-// from the f-string in torch/_native/ops/reductions/aot.py cpp_dispatch_prelude
-      const int64_t N = self.size(-1);
-      // N == 0 must be rejected BEFORE the division: numel()/0 is a
-      // C++ integer division by zero (SIGFPE, found by the OpInfo
-      // test_out sweep via _refs.linalg.norm's empty samples).
-      if (N == 0) return false;
-      const int64_t M = self.numel() / N;
-```
-
-### 6.2 A prelude that classifies with TensorIterator
-
-`scatter_add`'s eligibility is a layout question that aten itself answers with
-TensorIterator. The prelude does the same analysis, declares the locals the
-launch needs, and can also serve a degenerate call outright:
-
-```cpp
-// from the f-string in torch/_native/ops/scatter_add/aot.py
-// cpp_dispatch_prelude -- note the DOUBLED braces: literal C++ braces
-// must be escaped inside an f-string
-      const int64_t d = c10::maybe_wrap_dim(dim, self.dim());
-      if (index.numel() == 0) {{
-        if (!out.is_same(self)) out.copy_(self);
-        return true;
-      }}
-      // TI-driven layout analysis (same scheme as aten's
-      // fast_scatter_add_kernel_eligible in IndexKernelUtils.h): restride
-      // out so its scatter-axis stride is 0 with index's shape, let
-      // TensorIterator coalesce + reorder, then require a 2D iter whose
-      // dim 0 is the contiguous slice axis and dim 1 the index axis.
-      auto out_r_strides = out.strides().vec();
-      out_r_strides[d] = 0;
-      auto out_r = out.as_strided(index.sizes(), out_r_strides);
-      auto src_r = src.as_strided(index.sizes(), src.strides());
-      auto it = at::TensorIteratorConfig()
-                    .set_check_mem_overlap(false)
-                    .check_all_same_dtype(false)
-                    .resize_outputs(false)
-                    .add_output(out_r)
-                    .add_const_input(src_r)
-                    .add_const_input(index)
-                    .build();
-      if (it.ndim() != 2) return false;
-      // ... stride pattern checks ...
-      const int64_t N = it.shape()[0];
-      const int64_t M_src = it.shape()[1];
-```
-
-The Python side must **not** copy that: building a TensorIterator per call in
-Python costs about 30 us and would erase the whole point. So `covered_axes`
-pattern-matches the canonical layout instead, and is deliberately narrower:
-
-```python
-# torch/_native/ops/scatter_add/aot.py
-def _cheap_tma_covered(self, dim, index, src, out):
-    """Cheap (no TensorIterator) projection of TMA eligibility.
-
-    covered_axes runs on EVERY call of the op (it is the JIT-decline
-    check), so it must not build a TensorIterator the way the JIT cond
-    does -- that costs ~30us/call in Python and would erase the AOT
-    path's host-overhead win. Instead pattern-match the canonical
-    layout directly: dim 0 scatter, expanded-1D index (stride (1, 0,
-    ...)), inner-contiguous rows on src/dst with everything past dim 0
-    dense. This is deliberately NARROWER than the C++ prelude's TI
-    analysis (rank-permuted layouts that TI would coalesce stay JIT --
-    the JIT TMA path serves them with the same kernel); it must never
-    be WIDER than TMA eligibility or vec-scatter-only calls would
-    decline JIT and land unaccelerated on stock aten.
-    """
-```
-
-Note also the COW-safe alignment idiom used throughout: check
-`(t.storage_offset() * t.element_size()) % 16` in Python (allocator bases are at
-least 256B aligned, so offset alignment implies pointer alignment for framework
-tensors) and re-check the real pointer in C++.
-
-### 6.3 Kernel reuse: one kernel body, two aten ops
-
-`index_add(x, 0, index, source)` with `alpha=1` is `scatter_add` with an
-expanded index, and the TMA kernel's ABI already takes a 1D index. The entire
-reuse mechanism is a 23-line builder:
-
-```python
-# torch/_native/ops/index_add/aot_kernel.py (whole file)
-"""AOT builder for index_add: the scatter_add TMA kernel, re-exported.
-
-``index_add(x, 0, index, source)`` with alpha=1 IS
-``scatter_add(x, 0, index.unsqueeze(-1).expand_as(source), source)``,
-and the TMA kernel's ABI already takes the index as a 1D tensor (the
-expansion is pattern-matched away at the host layer), so index_add's
-natural arguments map onto it directly. One kernel body serves two
-aten ops; index bounds checks (trap_if_oob) come with it.
-
-Only the artifact prefix changes: it names the exported C symbols, and
-two declarations cannot share a prefix (duplicate symbols at link).
-"""
-
-from ..scatter_add.tma_kernel import build as _tma_build
-
-
-def build(spec: dict) -> dict:
-    b = _tma_build(spec)
-    # A silently un-renamed prefix would export duplicate C symbols and
-    # fail at link time, far from this cause.
-    assert b["prefix"].startswith("scatter_add_tma"), b["prefix"]  # noqa: S101
-    b["prefix"] = b["prefix"].replace("scatter_add_tma", "index_add_tma")
-    return b
-```
-
-Coverage is shared the same way, by file-path-loading the sibling declaration
-(there is no package context at torchgen time) and caching the load:
-
-```python
-# torch/_native/ops/index_add/aot.py
-@functools.cache
-def _scatter_add_aot():
-    # File-path load (no package context at torchgen time); the sibling
-    # declaration owns _cheap_tma_covered, the TMA-eligibility check.
-    # Cached: covered_axes calls this and exec_module costs ~80us.
-    here = os.path.dirname(os.path.abspath(__file__))
-    path = os.path.join(here, "..", "scatter_add", "aot.py")
-    # ... spec_from_file_location / exec_module ...
-```
-
-`index_add` is also the example of a declaration that deliberately omits
-`cpp_covers`:
-
-```python
-# torch/_native/ops/index_add/aot.py
-# No cpp_covers, deliberately: index_add has no JIT override, so the
-# router never consults coverage per call -- a C++ covers op would be
-# dead weight. covered_axes exists for the contract (and tooling/tests).
-```
-
-### 6.4 Triton: specialization parity matters
-
-`bmm_outer_product` is the Triton-toolchain op. The kernel body lives in its own
-file because `triton.tools.compile` executes the file standalone to find the
-`JITFunction`, so it must hold a bare `@triton.jit` function; the JIT wrapper
-imports the body from there so both routes share it.
-
-The builder result selects the toolchain and states the specialization contract:
-
-```python
-# torch/_native/ops/bmm_outer_product/aot_kernel.py
-    # Specialization parity with the JIT route: Triton's runtime
-    # specializer bakes the innermost (contiguous) strides to constexpr 1
-    # and hints 16-byte pointer alignment; without matching this the AOT
-    # SASS is generically-addressed and measurably slower (up to ~7x on
-    # this memory-bound kernel). The declaration's prelude enforces the
-    # corresponding runtime conditions (innermost stride 1, aligned
-    # data_ptrs); batch/row strides stay runtime i64.
-    ptr = f"*{tl_ty}:16"
-    signature = ", ".join(
-        [ptr, ptr, ptr, "i32", "i32", "i32"]
-        + ["i32", "1", "i32", "1", "i32", "i32", "1"]  # am/bn/on baked to 1
-        + [str(bm), str(bn)]
-    )
-    grid_x = f"B_dim*(((M+{bm - 1})/{bm})*((N+{bn - 1})/{bn}))"
-    return {
-        "kind": kind,
-        "prefix": prefix,
-        "kernel_path": os.path.abspath(__file__),
-        "kernel_name": "_bmm_outer_product_aot_kernel",
-        "signature": signature,
-        "grid": f"{grid_x}, 1, 1",
-        "launch": {"grid_x": grid_x},
-        "num_warps": 4,
-        "args": [
-            {"name": "a", "kind": "tensor", "read_only": True},
-            # ... b, out, then int32_t scalars ...
-        ],
-    }
-```
-
-`bmm` also shows dispatch-only grid fields. `BLOCK_M`/`BLOCK_N` and the
-`(m_lo, m_hi]` bucket exist for export and dispatch, and are absent from
-`covered_axes`, which mirrors the bucket as a boolean:
-
-```python
-# torch/_native/ops/bmm_outer_product/aot.py
-def kernel_precompile_grid():
-    # NB: coverage matches a call iff some point agrees on every field
-    # covered_axes() returns -- so "outer" must appear here (pinned True)
-    # or non-outer calls would falsely match on dtype alone. BLOCK_* and
-    # m_lo/m_hi are export/dispatch-only (absent from covered_axes).
-    return [
-        {
-            "dtype": list(_DTYPES),
-            "outer": True,
-            "BLOCK_M": bm,
-            "BLOCK_N": 128,
-            "m_lo": lo,
-            "m_hi": hi,
-        }
-        for bm, lo, hi in _M_BUCKETS
-    ]
-
-
-def cpp_dispatch(spec):
-    return (
-        f"st == {_DTYPES[spec['dtype']]} && M > {spec['m_lo']} && M <= {spec['m_hi']}"
-    )
-```
-
-Despite the very different plumbing, the launcher signature is the same as
-CuTeDSL's, so `cpp_launch` looks the same shape:
-
-```cpp
-// build/native_aot/bmm/aot_bmm_cuda.cpp (generated)
-extern "C" CUresult bmm_outer_bf16_bm32_bn128_d2f48e06_0d1d2d34567891011121314(CUstream stream, CUdeviceptr a, CUdeviceptr b, CUdeviceptr out, int32_t B_dim, /* ... */ int32_t stride_om);
-
-void launch_bmm_outer_bf16_bm32_bn128(const at::Tensor& a, const at::Tensor& b, const at::Tensor& out, int32_t B_dim, /* ... */ int32_t stride_om, c10::Stream stream) {
-  CUresult rc = bmm_outer_bf16_bm32_bn128_d2f48e06_0d1d2d34567891011121314(c10::cuda::CUDAStream(stream).stream(), reinterpret_cast<CUdeviceptr>(a.const_data_ptr()), /* ... */ stride_om);
-  TORCH_CHECK(rc == CUDA_SUCCESS, "bmm_outer_bf16_bm32_bn128 launch failed with CUresult ", static_cast<int>(rc));
-}
-```
-
-### 6.5 Families
-
-A family module exports `declarations()`. Shared constants become class
-attributes, `ATEN_OP` is set per instance, and the hooks become bound methods
-(so `self` is the declaration, which is why the reductions family renames the
-tensor argument to `self_t`):
-
-```python
-# torch/_native/ops/reductions/aot.py
-# op axis: (ATEN_OP, trait, has dtype= arg in schema, dim arg style)
-#   dim styles: "opt_list" (sum/mean: int[1]? dim), "list" (amax/amin:
-#   int[1] dim=[]), "int" (prod: int dim).
-_OPS = [
-    ("sum.dim_IntList", "sum", True, "opt_list"),
-    ("mean.dim", "mean", True, "opt_list"),
-    ("amax", "amax", False, "list"),
-    ("amin", "amin", False, "list"),
-    ("prod.dim_int", "prod", True, "int"),
-]
-
-
-class _RowReduceDecl:
-    DISPATCH_KEY = "CUDA"
-    KERNEL_MODULE = "aot_kernel.py"
-
-    def __init__(self, aten_op, trait, has_dtype_arg, dim_style):
-        self.ATEN_OP = aten_op
-        self._trait = trait
-        self._has_dtype_arg = has_dtype_arg
-        self._dim_style = dim_style
-
-    def kernel_precompile_grid(self):
-        return [{"trait": self._trait, "dtype": list(_DTYPES), "N": _NS}]
-
-
-def declarations():
-    return [_RowReduceDecl(*row) for row in _OPS]
-```
-
-Families signal "uncovered" by nulling a field, so no grid point can match
-(`{"trait": self._trait if covered else None, ...}`; pointwise uses
-`{"aten": None}`). This is the alternative to the pinned-boolean idiom.
-
-`reductions` is also the example of a launch whose kernel output dtype differs
-from aten's:
-
-```python
-# torch/_native/ops/reductions/aot.py
-    def cpp_launch(self, spec, launch_fn):
-        if spec["dtype"] == "float32":
-            # Kernel writes fp32 = aten's out dtype: write out directly.
-            return f"""
-      auto self_2d = self.view({{M, N}});
-      auto out_1d = out.view({{M}});
-      {launch_fn}(self_2d, out_1d, at::cuda::getCurrentCUDAStream());
-    """
-        # bf16 in -> fp32 kernel out -> cast into aten's bf16 out (the
-        # same .to() the JIT impl pays).
-        return f"""
-      auto self_2d = self.view({{M, N}});
-      auto acc = at::empty({{M}}, self.options().dtype(at::kFloat));
-      {launch_fn}(self_2d, acc, at::cuda::getCurrentCUDAStream());
-      out.view({{M}}).copy_(acc);
-    """
-```
-
-(Allocating a *scratch* buffer is fine. Allocating an output is not: `meta()`
-already did that.)
-
-`pointwise` is the largest family: 32 declarations from a 40-row table, with 8
-rows excluded and the reason recorded:
-
-```python
-# torch/_native/ops/pointwise/aot.py
-# Rows NOT AOT-able. Values are the reason (documentation; the factory
-# also derives most of these mechanically from the row).
-_EXCLUDED = {
-    "relu": "not structured (composite to clamp_min)",
-    "frexp.Tensor": "not structured; multi-output, mixed out dtypes",
-    "gt.Tensor": "bool output: not vec-able (out dtype != compute)",
-    # ... lt/ge/le/eq/ne ...
-}
-
-
-def declarations():
-    return [_PointwiseDecl(row) for row in _ROWS if row.aten not in _EXCLUDED]
-```
-
-Two details from it worth copying. First, its grid keeps the input-dtype tuple
-as **one** axis value:
-
-```python
-# torch/_native/ops/pointwise/aot.py
-    def kernel_precompile_grid(self):
-        # in_dtypes is a TUPLE, not a list: expand_specs cross-multiplies
-        # list-valued fields, and the dtype tuple must stay one axis
-        # value per point.
-        return [{"aten": self._row.aten, "in_dtypes": t} for t in self._tuples]
-```
-
-Second, its `cpp_covers` is a standalone body rather than prelude reuse, because
-the covers signature sees `out` as an optional and V is a runtime value there:
-
-```python
-# torch/_native/ops/pointwise/aot.py
-    def cpp_covers(self):
-        # ... Standalone body rather than prelude reuse:
-        # the covers signature carries `out` as an optional (functional
-        # schema + trailing out), and V is derived at runtime from the
-        # dtype tuple instead of baked per grid point. Every tuple over
-        # {fp32, bf16} is on the grid, so on-grid dtypes ARE grid
-        # membership. Out, when supplied, must pass the stub's own
-        # checks (contiguity, promotion dtype, alignment) or coverage
-        # would be wider than the stub's acceptance and gated calls
-        # would lose their JIT route to stock aten.
-```
-
-### 6.6 Pitfall checklist
+### 6.2 Pitfall checklist
 
 Every item here is a real trap recorded in the code or the design doc.
 
@@ -1451,8 +1103,8 @@ Every item here is a real trap recorded in the code or the design doc.
 * **`covered_axes` must bind out-variant calls too.** Every overload of the
   group (base, `.out`, in-place) resolves to one declaration, so a signature
   that omits the outputs raises `TypeError` on an `out=` call, which degrades to
-  "uncovered" -- a silent loss of the AOT route. Take `out=None` (scatter_add)
-  or `*args, **kwargs` (pointwise).
+  "uncovered" -- a silent loss of the AOT route. Take `out=None` or
+  `*args, **kwargs`.
 * **Re-export after editing a kernel.** Sidecars record a source-closure hash;
   `gen_aot_lib` refuses stale pairings. The closure over-approximates badly: it
   is every **loaded** `torch._native` and `torchgen.native_aot` module, and
@@ -1461,8 +1113,9 @@ Every item here is a real trap recorded in the code or the design doc.
   `aot_manifest.py` and `ops/foreach_mm/impl.py`). Editing `export.py`,
   `toolchains.py`, `torchgen/native_aot_decl.py`,
   `torchgen/native_aot_spec_grid.py` or the router therefore invalidates
-  **every** artifact and means a full re-export. Expect your first `gen_aot_lib.py` run to fail on an unrelated op
-  (`RuntimeError: acos: 2 artifact(s) were exported from different kernel
+  **every** artifact and means a full re-export. Once a second declaration
+  exists, expect your first `gen_aot_lib.py` run to fail on the other op
+  (`RuntimeError: <op>: 2 artifact(s) were exported from different kernel
   sources than the current tree`); run `export.py` with no `--ops` first.
 * **Re-run generation after renaming or removing a declaration.** Otherwise the
   orphaned generated `.cpp` is still globbed and references a stub that no
@@ -1481,31 +1134,20 @@ actually compiled (the sidecars' `arch`), and injects it into both the stub and
 
 ```python
 # tools/native_aot/gen_aot_lib.py
-def _arch_gate(d, sidecars: list[dict]) -> str:
-    """Runtime device gate: decline (fall through to the JIT/aten
-    routes) on any device outside the intersection of the arches the
-    DECLARATION supports (d.ARCHS -- op intent) and the arches the
-    artifacts were actually COMPILED for (sidecar 'arch' -- build
-    fact). Without it, a wheel whose artifacts target Blackwell would
-    attempt a wrong-arch cubin load on Hopper and fail at launch
-    instead of falling back. ...
-    Shipped arches outside d.ARCHS are a packaging bug: error here
-    rather than gate on kernels the op disowns."""
-    shipped = {a for sc in sidecars if isinstance(a := sc.get("arch"), str)}
-    if shipped - set(d.ARCHS):
-        raise RuntimeError(
-            f"{d.ATEN_OP}: artifacts exported for {sorted(shipped)} "
-            f"but the declaration supports only {d.ARCHS}; re-export "
-            f"(export.py skips unsupported arches)"
-        )
-    gate = sorted(shipped) or sorted(d.ARCHS)
-    majors = sorted({int(a.removeprefix("sm_").rstrip("a")) // 10 for a in gate})
+def _device_match(major: int, minor: int) -> str:
+    return f"{_PROPS_LOCAL}->major == {major} && {_PROPS_LOCAL}->minor == {minor}"
+
+# _by_arch groups the sidecars per compute capability (dropping the loser of the
+# sm_100/sm_100a tie-break), and the gate accepts the OR over those groups:
+#   const auto* _naot_props = at::cuda::getCurrentDeviceProperties();
+#   if (!((_naot_props->major == 10 && _naot_props->minor == 0))) return false;
 ```
 
-Two things follow. The gate is **CUDA-major only**, so `sm_100` and `sm_103`
-collapse to `major == 10`. And a sidecar with no recorded arch (an on-device
-export, `arch=None`) gates on `ARCHS` alone, because the artifact matches the
-builder by construction.
+Two things follow. The gate matches the **full capability**, major and minor, so
+`sm_100` and `sm_103` are distinct and a 10.3 device declines kernels compiled for
+10.0 rather than loading them. And shipping an arch the declaration disowns is a
+packaging bug rather than a wider gate: generation refuses it, names the arch trees
+to delete, and says why a bare re-export will not clear them.
 
 What the standard build actually exports is narrower than the default `ARCHS`:
 
@@ -1536,28 +1178,27 @@ no artifacts, no error, stock aten and JIT behavior. On-device export (unset
 build_stage2 reads it to decide whether stage 2 runs at all.
 
 Multi-arch export (`--arch sm_90a sm_100a`) nests artifacts under
-`<out-dir>/<arch>/<decl_id>/`, which the one-level CMake globs do **not** pick
-up. Multi-arch trees are exportable and generatable today but not linkable via
-the embedded build path.
+`<out-dir>/<arch>/<decl_id>/`, and that is the only layout -- a single-arch
+export nests too, so adding an arch to an op is one more directory. Generation
+groups the sidecars per capability and emits a gate branch for each, and the
+CMake it writes lists every source and object explicitly, by absolute path, so a
+multi-arch tree links like any other.
 
 On an unsupported device with artifacts present, the gate returns `false`, the
 stub declines, and the call runs stock aten. Two cases:
 
 * A declaration whose `cpp_covers` is used keeps its JIT route, because the same
   gate is injected there: coverage declines on the same devices the stub does.
+  topk is this case, so nothing in this stack is exposed to the one below.
 * A declaration with a JIT override and **no** `cpp_covers` falls back to the
   Python `covered_axes`, into which nothing is injected -- so unless it checks
-  the arch by hand, it has no arch check at all. `bmm` is that case today: on a
-  wheel carrying only Blackwell artifacts (the gate is `major == 10`), an
-  sm_80/sm_89 call is "covered", declines every JIT cond, then gets declined by
-  the stub, and lands on stock aten -- exactly the
-  coverage-wider-than-the-stub bug. `bmm` and `index_add` are the only two
-  declarations without `cpp_covers`; `index_add` is safe because it has no JIT
-  override at all, so there is no route for it to lose. If you write a
-  declaration in that
-  shape, either add `cpp_covers`, or hand-check the capability in `covered_axes`
-  the way `scatter_add` does (`get_device_capability(self.device)[0] >= 9`,
-  belt-and-braces there since it also exports `cpp_covers`).
+  the arch by hand, it has no arch check at all. On a wheel whose artifacts
+  target 10.0 only, an sm_80/sm_89 call to such an op is "covered", declines
+  every JIT cond, then gets declined by the stub, and lands on stock aten --
+  exactly the coverage-wider-than-the-stub bug. A declaration with no JIT
+  override is safe whatever it does, having no route to lose. If you write one in
+  the exposed shape, either add `cpp_covers`, or hand-check the capability in
+  `covered_axes` (`get_device_capability(self.device)[0] >= 9`).
 
 ---
 
@@ -1659,8 +1300,7 @@ Notes:
 # routing / coverage / switch behavior (needs CUDA; AOT-specific tests skip
 # without embedded artifacts)
 python test/run_test.py --include python_native/test_native_aot \
-    python_native/test_native_aot_bmm python_native/test_native_aot_scatter_add \
-    python_native/test_native_aot_index_add python_native/test_aot_manifest
+    python_native/test_aot_manifest
 
 # or directly
 python test/python_native/test_aot_manifest.py
@@ -1692,8 +1332,9 @@ print('native-AOT: embedded kernels detected')
 
 The dedicated workflow is `.github/workflows/b200-native-aot.yml`: builds with
 `cuda-arch-list: '10.0a'` and runs the `native_aot` test config on
-`linux.dgx.b200`, on PRs touching `tools/native_aot/**`, `torch/_native/**`,
-`torchgen/native_aot.py` or `test/python_native/**`, nightly, and on
+`linux.dgx.b200`, on PRs touching the native-AOT paths (`tools/native_aot/**`,
+`torch/_native/**`, `torchgen/native_aot*.py`, `test/python_native/**`, the
+stage-2 build shells and the workflow itself), nightly, and on
 `ciflow/b200-native-aot/*` tags.
 
 ---
@@ -1759,13 +1400,16 @@ plus the need for stock-aten references in tests.
 * **`ATEN_OP` must resolve to exactly one structured group.** Ambiguous base
   names are a hard codegen error, not a silent pick.
 * **Only Hopper and Blackwell export in the standard build.**
-  `EXPORTABLE_ARCHES` is `("sm_90", "sm_90a", "sm_100", "sm_100a")`. Other arches
-  in `TORCH_CUDA_ARCH_LIST` are skipped, not failed, so those builds ship without
-  artifacts. No CI job exercises AOT kernels on Hopper yet -- only
-  `b200-native-aot.yml` runs them -- so Hopper's coverage is the tools suite plus
-  the Blackwell job.
-* **Multi-arch artifact trees are not linked.** The embedded CMake globs are one
-  level deep; a multi-arch export nests per-arch directories they do not walk.
+  `EXPORTABLE_ARCHES` (in `torchgen/native_aot_decl.py`, beside `KNOWN_ARCHES`) is
+  `("sm_90", "sm_90a", "sm_100", "sm_100a")`. Other arches in
+  `TORCH_CUDA_ARCH_LIST` are skipped, not failed, so those builds ship without
+  artifacts. Both admitted capabilities ship where a build's arch list names them:
+  a release CUDA 13.x wheel carries topk for `sm_90` and `sm_100` alike. No CI job
+  exercises AOT kernels on Hopper yet -- only `b200-native-aot.yml` runs them -- so
+  Hopper's coverage is the tools suite plus the Blackwell job.
+* **A capability is admitted under one spelling.** `TORCH_CUDA_ARCH_LIST` naming
+  both `10.0` and `10.0a` collapses to the arch-conditional one, so a declaration
+  pinning only the plain spelling exports nothing for that build and says so.
 * **DSL runtimes are not standard torch build dependencies.** `nvidia_cutlass_dsl`
   and `tvm_ffi` (and Triton for triton-kind ops) must be present for stage 2 to
   do anything. The design doc records this as an implication for release
@@ -1789,17 +1433,17 @@ From the design doc, still open:
 
 * Move the coverage short-circuit ahead of the Python dispatcher interpose (the
   "parked C++ router-prefix idea"). That would let a covered call run the pure
-  stub chain, i.e. at or below aten host cost. The doc's companion item
-  (`cpp_covers` for the pointwise and reduction families) has since landed: 39
-  of 41 declarations export it.
+  stub chain, i.e. at or below aten host cost. The doc's companion item, writing
+  `cpp_covers` wherever an op also has a JIT route, is settled: the contract
+  supports it and topk uses it.
 * A documented way for users to pre-JIT the kernels they care about but that are
   not on an AOT grid, and publishing the dtype/shape policy (stated for authors
   in [Step 2](#step-2-write-aotpy)) in user-facing docs, along with the fact
   that grids can change between releases.
 * One-stage vs two-stage build. One stage "feels cleanest" per the doc, but the
   restrictions it needs (kernels structured as pure DSL, declaration and kernel
-  code stdlib-only) were relaxed to get the pointwise/reduction families
-  working; going back would be a large amount of op-side work.
+  code stdlib-only) were relaxed for the pointwise and reduction kernel modules;
+  going back would be a large amount of op-side work.
 * Tooling to author declarations: the design doc floats an AI skill for this
   workflow (structured-op check, `build(spec)`, `aot.py`, export/relink, routing
   test). Section 5 plus the pitfall checklist is the manual version of it. The
@@ -1850,12 +1494,7 @@ Declarations (`torch/_native/ops/<op>/aot.py`), in rough order of difficulty:
 
 | declaration | what it demonstrates |
 | ----------- | -------------------- |
-| `topk/aot.py` | the simplest complete single-op declaration; determinism as a grid axis. |
-| `bmm_outer_product/aot.py` | Triton toolchain; dispatch-only grid fields; specialization parity. |
-| `index_add/aot.py` (+ `aot_kernel.py`) | kernel reuse across two aten ops; precomputed dim; Scalar-value reject; prelude early return; no `cpp_covers` by design. |
-| `reductions/aot.py` | a small family; per-op schema-shape variation; out-dtype mismatch in `cpp_launch`. |
-| `scatter_add/aot.py` | TensorIterator-based prelude classification; a cheap Python coverage projection. |
-| `pointwise/aot.py` (+ `_table_data.py`) | the large table-driven family; tuple grid axes; mechanically generated C++. |
+| `topk/aot.py` | the only declaration in this stack: a complete single-op declaration, with determinism as a grid axis and `cpp_covers` for the router's fast path. |
 
 Tests: `test/python_native/test_aot_manifest.py`,
 `test/python_native/test_native_aot*.py`, `tools/test/test_native_aot.py`,
