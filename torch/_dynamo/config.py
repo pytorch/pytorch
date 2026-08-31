@@ -919,9 +919,8 @@ inline_invoke_subgraph: bool = False
 # Single-use subgraphs add overhead without deduplication benefit.
 inline_single_use_invoke_subgraph: bool = True
 
-# Clear WeakIdRef entries from TracingContext.tensor_to_context and
-# MetaTensorDescriber.lookup_tensor at the end of compile. These weakrefs
-# can block torch.utils.swap_tensors from working after compile.
+# Clear compile-context references, including ShapeEnv tracked fakes, at the
+# end of compile. These can retain tensors or block torch.utils.swap_tensors.
 # - None (default): clear for registered backends (inductor, eager, etc.),
 #   don't clear for custom backends (to support standalone_compile, etc.)
 # - True: always clear regardless of backend
