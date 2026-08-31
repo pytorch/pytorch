@@ -171,6 +171,23 @@ def _fake_while_loop(cond_fn, body_fn, operands):
     return operands
 
 
+def _skip_cuda_if_unavailable(fn):
+    # Per-parametrization counterpart of requires_cuda for tests parametrized over
+    # device: skips only the cuda instantiations, so the cpu ones still run.
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        device = kwargs.get("device")
+        if (
+            device is not None
+            and torch.device(device).type == "cuda"
+            and not torch.cuda.is_available()
+        ):
+            raise unittest.SkipTest("CUDA is unavailable")
+        return fn(self, *args, **kwargs)
+
+    return wrapper
+
+
 def compile_mode_helper(fct, compile_mode):
     if compile_mode == "compile":
         return torch.compile(fct, fullgraph=True, dynamic=False)
@@ -6829,11 +6846,11 @@ class GraphModule(torch.nn.Module):
         grads_ref = torch.autograd.grad(result_ref.sum(), grad_params)
         self.assertEqual(grads, grads_ref)
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    def test_associative_scan_additional_inputs_symint_no_grad(self):
-        device = torch.device("cuda")
-        H = torch.rand(2, device=device, requires_grad=True)
+    @skipIfTorchDynamo("don't test compile on compile")
+    def test_associative_scan_additional_inputs_lifted_symint(self):
+        # Dynamic shapes lift SymInts into additional_inputs, interleaved with the
+        # tensor freevars. Only the tensors get a gradient, the SymInts get None.
+        H = torch.rand(2, requires_grad=True)
 
         def model(xs):
             n = xs.shape[0]
@@ -6843,9 +6860,22 @@ class GraphModule(torch.nn.Module):
 
             return associative_scan(combine_fn, xs, dim=0, combine_mode="pointwise")
 
-        compiled = torch.compile(model, fullgraph=True, dynamic=True, backend="eager")
-        xs = torch.randn(9, 2, device=device, requires_grad=True)
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(model, fullgraph=True, dynamic=True, backend=backend)
+        xs = torch.randn(9, 2, requires_grad=True)
         result = compiled(xs)
+
+        # Pin the interleaving: without this the test still passes if dynamo specializes
+        # the shapes and never lifts a SymInt, which is the case the None grads are for.
+        (hop_node,) = [
+            node
+            for node in backend.graphs[0].graph.nodes
+            if node.target is torch.ops.higher_order.associative_scan
+        ]
+        is_tensor = [
+            isinstance(a.meta["example_value"], torch.Tensor) for a in hop_node.args[2]
+        ]
+        self.assertEqual(is_tensor, [False, True, False])
 
         n = xs.shape[0]
         result_ref = _fake_associative_scan(lambda x, y: x * y * H * n, xs, dim=0)
@@ -6853,6 +6883,74 @@ class GraphModule(torch.nn.Module):
 
         grads = torch.autograd.grad(result.sum(), [xs, H])
         grads_ref = torch.autograd.grad(result_ref.sum(), [xs, H])
+        self.assertEqual(grads, grads_ref)
+
+    @parametrize("scan_length", [0, 1])
+    def test_associative_scan_additional_inputs_degenerate_scan_length(
+        self, scan_length
+    ):
+        # combine_fn is applied scan_length - 1 times, so for these lengths the freevar
+        # never participates and its gradient must be all-zero.
+        H = torch.rand(2, dtype=torch.float64, requires_grad=True)
+
+        def combine_fn(x, y):
+            return x * y * H
+
+        xs = torch.randn(scan_length, 2, dtype=torch.float64, requires_grad=True)
+        result = associative_scan(combine_fn, xs, dim=0)
+        self.assertEqual(result, xs)
+
+        g_xs, g_H = torch.autograd.grad(result.sum(), [xs, H])
+        self.assertEqual(g_xs, torch.ones_like(xs))
+        self.assertEqual(g_H, torch.zeros_like(H))
+
+    @parametrize("freevar_shape", [(), (1,)])
+    def test_associative_scan_additional_inputs_broadcast_multiple_leaves(
+        self, freevar_shape
+    ):
+        # A freevar smaller than the leaves exercises the sum-to-size reduction in the
+        # joint, and the differently-shaped leaves make the backward's shape grouping
+        # non-trivial while both leaves feed the same freevar gradient.
+        H = torch.rand(freevar_shape, dtype=torch.float64, requires_grad=True) + 0.5
+
+        def combine_fn(a, b):
+            return (a[0] * b[0] * H, a[1] * b[1] * H)
+
+        xs = (
+            torch.randn(6, 2, dtype=torch.float64, requires_grad=True),
+            torch.randn(6, 3, 4, dtype=torch.float64, requires_grad=True),
+        )
+        result = associative_scan(combine_fn, xs, 0)
+        result_ref = _fake_associative_scan(combine_fn, xs, 0)
+        self.assertEqual(result, result_ref)
+
+        loss = sum(r.sum() for r in result)
+        loss_ref = sum(r.sum() for r in result_ref)
+        grad_params = [*xs, H]
+        grads = torch.autograd.grad(loss, grad_params)
+        grads_ref = torch.autograd.grad(loss_ref, grad_params)
+        self.assertEqual(grads, grads_ref)
+
+    @parametrize("scan_length", [2, 5])
+    def test_associative_scan_additional_inputs_only_freevar_requires_grad(
+        self, scan_length
+    ):
+        # bwys is the step-to-step Jacobian that chains g_ys, and it is needed for the
+        # freevar gradient even though xs itself needs none. Deriving it from slices that
+        # inherited requires_grad=False from xs silently zeroed it out, which left the
+        # freevar gradient short of every chained term (correct only for scan_length 2).
+        H = torch.rand(2, dtype=torch.float64, requires_grad=True) + 0.5
+
+        def combine_fn(x, y):
+            return x * y * H
+
+        xs = torch.randn(scan_length, 2, dtype=torch.float64, requires_grad=False)
+        result = associative_scan(combine_fn, xs, dim=0)
+        result_ref = _fake_associative_scan(combine_fn, xs, dim=0)
+        self.assertEqual(result, result_ref)
+
+        grads = torch.autograd.grad(result.sum(), [H])
+        grads_ref = torch.autograd.grad(result_ref.sum(), [H])
         self.assertEqual(grads, grads_ref)
 
     @requires_cuda
@@ -7202,12 +7300,12 @@ class GraphModule(torch.nn.Module):
         # A dim-sensitive combine_fn (transpose) passes the frontend pointwise gate
         # but is not truly elementwise. The lane must be rank >= 2 so transpose(-1, -2)
         # is valid and the call actually reaches the batch rule (a rank-1 lane would
-        # fail earlier during frontend meta tracing, making this test vacuous). Under
-        # compile the batch rule's fast path calls combine_fn directly on last-axis-
-        # batched args, and the transpose then misaligns the batch axis, so the
-        # pointwise lowering rejects it loudly rather than silently miscomputing.
-        from torch._dynamo.exc import BackendCompilerFailed
-
+        # fail earlier during frontend meta tracing, making this test vacuous). The
+        # batch rule therefore takes the base re-vmap path, whose layout permutes
+        # cannot be traced as a combine subgraph, so this must fail loudly. Which
+        # layer catches it is not the point of the test (the pointwise lowering
+        # rejects the permutes; a backend without that lowering hits the rank
+        # mismatch at graph runtime), only that it never silently miscomputes.
         x = torch.randn(4, 5, 3, 3, device="cuda")
 
         def combine_fn(a, b):
@@ -7219,7 +7317,8 @@ class GraphModule(torch.nn.Module):
 
             return torch.vmap(inner_fn, in_dims=0)(x)
 
-        with self.assertRaises(BackendCompilerFailed):
+        # BackendCompilerFailed derives from RuntimeError, so this covers both layers.
+        with self.assertRaises(RuntimeError):
             torch.compile(fn, fullgraph=True)(x)
 
     @requires_cuda
@@ -7249,10 +7348,11 @@ class GraphModule(torch.nn.Module):
     def test_associative_scan_in_vmap_eager_nonpointwise(self, batch_size):
         # Eager counterpart of the compile nonpointwise test: a dim-sensitive
         # combine_fn passes the frontend pointwise gate but is not elementwise. The
-        # batch rule must NOT take the direct-call fast path in eager (it would parse
-        # the trailing batch axis as data and silently miscompute -- notably when
-        # batch_size equals the lane feature dim). It must fall back to the base
-        # re-vmap path, which vmaps over the true batch axis and stays correct.
+        # batch rule must NOT take the direct-call fast path (it would parse the
+        # trailing batch axis as data and silently miscompute -- notably when
+        # batch_size equals the lane feature dim). It must use the base re-vmap path,
+        # which vmaps over the true batch axis and stays correct. batch_size 3 matches
+        # lane_dim, the case where shapes line up and nothing else can catch the error.
         lane_dim = 3
         x = torch.randn(batch_size, 4, lane_dim, lane_dim)
 
