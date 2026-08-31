@@ -923,11 +923,7 @@ class TestDynamoDecompositionsCUDAOnly(TestCase):
         self.assertEqual(expected, actual)
 
 
-instantiate_device_type_tests(
-    TestDynamoDecompositionsNumerics,
-    globals(),
-    allow_xpu=True,
-)
+instantiate_device_type_tests(TestDynamoDecompositionsNumerics, globals())
 instantiate_device_type_tests(
     TestDynamoDecompositionsCUDAOnly,
     globals(),
