@@ -2179,7 +2179,7 @@ class TestForeachMM(TestCase):
         gradcheck(fn, (*A, *B))
 
 
-class TestForeachMMDevice(TestCase):
+class _TestForeachMMHelper(TestCase):
     def _check(self, shapes, dtype, device):
         A = [torch.randn(M, K, dtype=dtype, device=device) for M, _, K in shapes]
         B = [torch.randn(K, N, dtype=dtype, device=device) for _, N, K in shapes]
@@ -2194,6 +2194,8 @@ class TestForeachMMDevice(TestCase):
                 o, r, msg=lambda msg: f"{msg}\nmismatch at group {i}", **kwargs
             )
 
+
+class TestForeachMMDevice(_TestForeachMMHelper, TestCase):
     @parametrize(
         "label,shapes",
         _FOREACH_MM_SHAPES,
