@@ -505,21 +505,19 @@ struct TORCH_API IValue final {
   // Tuple
   IValue(c10::intrusive_ptr<ivalue::Tuple> v);
 
+  template <typename... Ts>
+  using enable_if_ivalue_compatible =
+      std::enable_if<std::conjunction<
+          std::negation<std::is_lvalue_reference<Ts>>...,
+          std::is_constructible<IValue, Ts>...>::value>;
+
   template <
       typename... Args,
-      std::enable_if_t<
-          !std::disjunction_v<
-              std::is_lvalue_reference<Args>...,
-              std::negation<std::is_constructible<IValue, Args>>...>,
-          std::nullptr_t> = nullptr>
+      typename = enable_if_ivalue_compatible<Args...>::type>
   IValue(const std::tuple<Args...>& t);
   template <
       typename... Args,
-      std::enable_if_t<
-          !std::disjunction_v<
-              std::is_lvalue_reference<Args>...,
-              std::negation<std::is_constructible<IValue, Args>>...>,
-          std::nullptr_t> = nullptr>
+      typename = enable_if_ivalue_compatible<Args...>::type>
   IValue(std::tuple<Args...>&& t);
   bool isTuple() const {
     return Tag::Tuple == tag;
