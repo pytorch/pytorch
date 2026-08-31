@@ -147,7 +147,7 @@ Regex examples (``re.match`` anchors at the start, not the end)::
 The ``:N`` suffix is ignored for non-tensor (int/scalar) sources, which have no dim.
 
 Entries in this list are dominant over all other flags dynamic=False, force_nn_module_property_static_shapes
-and force_parameter_static_shapes.
+and force_parameter_static_shapes, but lose to ``static_sources``.
 """
 
 dynamic_values: str = Config(
@@ -189,7 +189,30 @@ Supports the same ``:N`` per-dim suffix syntax as ``dynamic_sources``; see that 
 docstring for details.
 
 Entries in this list are dominant over all other flags dynamic=False, force_nn_module_property_static_shapes
-and force_parameter_static_shapes.
+and force_parameter_static_shapes, but lose to ``static_sources``.
+"""
+
+static_sources: str = Config(
+    env_name_default="TORCH_COMPILE_STATIC_SOURCES", default=""
+)
+r"""
+Comma delimited list of sources that should be marked as static. This is the inverse of
+``dynamic_sources``: it is useful when automatic dynamic shapes (or PGO) makes a source
+dynamic and that dynamism hurts you, e.g. it produces a worse kernel, or it causes an
+unwanted specialization/guard failure downstream. Ints listed here are specialized as
+constants and tensor dims listed here are held static.
+
+Supports the same exact-name / regex / ``:N`` per-dim suffix syntax as ``dynamic_sources``;
+see that config's docstring for details. Examples::
+
+    L['x']                  # all dims of x static
+    L['x']:0                # only dim 0 of x static
+    L\['x.*'\]              # every source whose name starts with L['x
+
+Entries in this list override automatic dynamic shapes, PGO, ``dynamic_values``,
+``dynamic=True``, ``dynamic_sources`` and ``unbacked_sources``: when the same source is
+listed in both, static wins. They do NOT override an explicit
+``torch._dynamo.mark_dynamic`` / ``mark_unbacked`` call.
 """
 
 # force a python GC before recording cudagraphs
