@@ -18,10 +18,15 @@ from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     skipIfNoFBGEMM,
 )
-from torch.testing._internal.common_utils import raise_on_run_directly
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+)
 
 
 class TestBiasCorrectionEager(QuantizationTestCase):
+    hw_classification = HardwareClassification.CPU
+
     def compute_sqnr(self, x, y):
         Ps = torch.norm(x)
         Pn = torch.norm(x - y)
