@@ -293,7 +293,7 @@ def _module_level_names(tree: ast.Module) -> set[str]:
     return names
 
 
-def _check_runtime_wrapper_signature(orch: "GeneratedSource") -> None:
+def _check_runtime_wrapper_signature(orch: GeneratedSource) -> None:
     """The composed ``call`` invokes the orchestration POSITIONALLY:
     _runtime_wrapper(inner, contextlib.nullcontext, lambda: None, flat_inputs),
     hardcoded to the codegen'd signature in runtime_wrappers.py (``def
@@ -1000,11 +1000,18 @@ def _compose_training_module(
             f"AOTAutograd to codegen {missing}, which this graph did not produce."
         )
     # Refuse, never mis-render: a captured wrapper this compose does not
-    # splice (synthetic base, dedup, functionalized RNG, debug asserts, ...)
-    # changes the inner calling convention or the runtime behaviour, so
-    # silently dropping it ships an artifact that only fails at serve time,
-    # while a raise here keeps the caller's working pickled-bundle fallback.
-    unmodeled = sorted(name for name in by_name if name not in modeled)
+    # splice (synthetic base, dedup, functionalized RNG, ...) changes the
+    # inner calling convention or the runtime behaviour, so silently dropping
+    # it ships an artifact that only fails at serve time, while a raise here
+    # keeps the caller's working pickled-bundle fallback. debug_assert_wrapper
+    # is the deliberate exception: it is a metadata DIAGNOSTIC with no effect
+    # on numerics, dropped like the profiler prologue -- and it is captured
+    # whenever functorch's debug_assert is on, which the CI test environment
+    # enables, so refusing it would turn every CI training render into a blob.
+    droppable = ("debug_assert_wrapper",)
+    unmodeled = sorted(
+        name for name in by_name if name not in modeled and name not in droppable
+    )
     if unmodeled:
         raise NotImplementedError(
             "aot_autograd.compile_to_python: the training compose cannot yet "

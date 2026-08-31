@@ -2714,8 +2714,6 @@ class TestPrecompile(TestCase):
         )
         self.assertTrue(_read_literal(ast.parse(code), "POLICY_DROPPED_GUARDS"))
 
-
-
     @parametrize("where", ["object", "in_a_list"])
     def test_unpicklable_guard_value_names_where_it_lives(self, where):
         # The type in a pickle error says WHAT failed and never WHERE, which on a
@@ -2741,11 +2739,6 @@ class TestPrecompile(TestCase):
                 require_no_risky_drops=False,
                 example_inputs=[args],
             )
-
-
-
-
-
 
     def test_serialized_guards_drop_export_bookkeeping(self):
         # Guard.code_list and .guard_types are rebuilt by create_fn at load, and
