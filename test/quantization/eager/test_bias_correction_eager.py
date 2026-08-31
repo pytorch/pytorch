@@ -14,9 +14,7 @@ from torch.ao.quantization._correct_bias import (
     get_param,
     parent_child_names,
 )
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     skipIfNoFBGEMM,
@@ -131,9 +129,7 @@ class TestBiasCorrectionEager(QuantizationTestCase):
         self.correct_artificial_bias_quantize(float_model, img_data)
 
 
-instantiate_device_type_tests(
-    TestBiasCorrectionEager, globals(), only_for="cpu"
-)
+instantiate_device_type_tests(TestBiasCorrectionEager, globals(), only_for="cpu")
 
 if __name__ == "__main__":
     raise_on_run_directly("test/test_quantization.py")
