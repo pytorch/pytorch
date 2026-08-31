@@ -395,11 +395,7 @@ class AttributePropagator {
           applyToForkSubgraph(
               n,
               graph,
-              // NOLINTNEXTLINE(modernize-avoid-bind)
-              std::bind(
-                  &AttributePropagator::recordMutableAttrs,
-                  *this,
-                  std::placeholders::_1));
+              std::bind_front(&AttributePropagator::recordMutableAttrs, *this));
         }
       }
     }
@@ -724,11 +720,7 @@ class AttributePropagator {
           applyToForkSubgraph(
               n,
               graph,
-              // NOLINTNEXTLINE(modernize-avoid-bind)
-              std::bind(
-                  &AttributePropagator::propagateAttributes,
-                  *this,
-                  std::placeholders::_1));
+              std::bind_front(&AttributePropagator::propagateAttributes, *this));
         }
       }
     }
@@ -851,11 +843,7 @@ class AttributePropagator {
           applyToForkSubgraph(
               n,
               graph,
-              // NOLINTNEXTLINE(modernize-avoid-bind)
-              std::bind(
-                  &AttributePropagator::recordReferencedAttrs,
-                  *this,
-                  std::placeholders::_1));
+              std::bind_front(&AttributePropagator::recordReferencedAttrs, *this));
         }
       }
     }
