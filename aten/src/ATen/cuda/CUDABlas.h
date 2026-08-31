@@ -176,7 +176,12 @@ void scaled_gemm(
     int64_t result_ld,
     ScalarType result_dtype,
     bool use_fast_accum,
-    const std::optional<Tensor>& alpha);
+    const std::optional<Tensor>& alpha,
+    // C uses the result dtype and leading dimension. A nonzero beta requires C.
+    const void* c_ptr = nullptr,
+    float beta = 0.0f,
+    float alpha_multiplier = 1.0f,
+    const Tensor* device_beta = nullptr);
 
 void grouped_gemm(
       char transa,
