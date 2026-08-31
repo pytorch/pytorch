@@ -12,7 +12,6 @@ name: !{{ build_environment }}
     actions and custom GPU device passthrough); everything else delegates to
     _binary-test-linux.yml. -#}
 {%- set rocm_configs = build_configs | selectattr('gpu_arch_type', 'equalto', 'rocm') | list %}
-{%- set xpu_configs = build_configs | selectattr('gpu_arch_type', 'equalto', 'xpu') | list %}
 {%- set test_standard_configs = build_configs | rejectattr('gpu_arch_type', 'in', ['rocm', 'xpu']) | list %}
 
 {#- gpu_arch_types listed here are grouped into a single runner that loops over
@@ -20,9 +19,13 @@ name: !{{ build_environment }}
     invalidation handles the per-Python ABI bits). Everything else still runs
     on the per-Python matrix below. Add more arch types here as their inline
     build job is wired up. -#}
-{%- set unified_arch_types = ['cpu', 'cpu-aarch64', 'cuda', 'cuda-aarch64'] %}
+{%- set unified_arch_types = ['cpu', 'cpu-aarch64', 'cuda', 'cuda-aarch64', 'xpu'] %}
 {%- set unified_build_configs = build_configs | selectattr('gpu_arch_type', 'in', unified_arch_types) | list %}
 {%- set matrix_build_configs = build_configs | rejectattr('gpu_arch_type', 'in', unified_arch_types) | list %}
+
+{#- XPU configs not handled by the unified path (currently none, but kept for
+    future-proofing in case XPU is removed from unified_arch_types). -#}
+{%- set xpu_configs = matrix_build_configs | selectattr('gpu_arch_type', 'equalto', 'xpu') | list %}
 
 {#- Standard (non-ROCm/XPU) configs that are built by the manywheel-build matrix
     rather than an inline unified job (e.g. cpu-s390x). manywheel-test consumes
@@ -255,7 +258,7 @@ jobs:
   {%- set first = group[0] %}
   {#- Job name: keep cpu/cpu-aarch64 names stable; for cuda, include the
       desired_cuda variant so cu126/cu130/cu132 each get a distinct job. -#}
-  {%- if desired_cuda == 'cpu' %}
+  {%- if desired_cuda == 'cpu' or desired_cuda == arch_type %}
     {%- set job_name = "manywheel-" ~ arch_type ~ "-build" %}
   {%- else %}
     {%- set job_name = "manywheel-" ~ arch_type ~ "-" ~ desired_cuda ~ "-build" %}
@@ -274,7 +277,7 @@ jobs:
     if: !{{ owner_if }}
     needs: [get-label-type{%- if pin_docker_image %}, get-docker-tag{%- endif %}]
     runs-on: "!{{ runner_prefix }}!{{ build_runs_on }}"
-    timeout-minutes: !{{ timeout_minutes }}
+    timeout-minutes: !{{ 420 if arch_type == 'xpu' else timeout_minutes }}
     container:
       image: !{{ docker_registry_host }}pytorch/!{{ first['container_image'] }}:!{{ first['container_image_tag_prefix'] }}!{{ docker_image_suffix }}
     env:
@@ -388,11 +391,19 @@ jobs:
 
     ROCm/XPU already have their own test jobs below. -#}
 {%- set standard_test_jobs = [] %}
+{%- set xpu_test_jobs = [] %}
 {%- for u in unified_upload_groups %}
+  {%- if u['configs'][0]['gpu_arch_type'] == 'xpu' %}
+  {%- set _ = xpu_test_jobs.append({
+        'name': u['test_name'],
+        'needs': [u['job_name']],
+        'configs': u['configs']}) %}
+  {%- else %}
   {%- set _ = standard_test_jobs.append({
         'name': u['test_name'],
         'needs': [u['job_name']],
         'configs': u['configs']}) %}
+  {%- endif %}
 {%- endfor %}
 {%- if matrix_standard_configs %}
   {#- Standard configs built by the manywheel-build matrix (e.g. cpu-s390x)
@@ -452,6 +463,36 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 {%- endfor %}
 {%- endif %}
+
+{%- for test_job in xpu_test_jobs %}
+
+  !{{ test_job['name'] }}:
+    name: ${{ matrix.build_name }}-test
+    if: !{{ owner_if }}
+    needs: [get-label-type{%- if pin_docker_image %}, get-docker-tag{%- endif %}, !{{ test_job['needs'] | join(', ') }}]
+    uses: ./.github/workflows/_binary-test-xpu-linux.yml
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        {%- for config in test_job['configs'] %}
+          - desired_python: "!{{ config['python_version'] }}"
+            desired_cuda: "!{{ config['desired_cuda'] }}"
+            gpu_arch_type: "!{{ config['gpu_arch_type'] }}"
+            docker_image: "!{{ config['container_image'] }}"
+            docker_image_tag_prefix: "!{{ config['container_image_tag_prefix'] }}"
+            build_name: "!{{ config['build_name'] }}"
+        {%- endfor %}
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: !{{ build_configs[0]['package_type'] }}
+      DESIRED_CUDA: ${{ matrix.desired_cuda }}
+      GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
+      DOCKER_IMAGE: ${{ matrix.docker_image }}
+      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}
+      DESIRED_PYTHON: ${{ matrix.desired_python }}
+      build_name: ${{ matrix.build_name }}
+{%- endfor %}
 
 {%- if rocm_configs %}
 
@@ -534,7 +575,7 @@ jobs:
 {%- for u in unified_upload_groups %}
   {%- set _ = upload_jobs.append({
         'name': u['job_name'] | replace('-build', '-upload'),
-        'needs': [u['job_name']] + ([u['test_name']] if test_standard_configs else []),
+        'needs': [u['job_name'], u['test_name']],
         'configs': u['configs']}) %}
 {%- endfor %}
 {%- if matrix_standard_configs %}
