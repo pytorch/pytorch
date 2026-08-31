@@ -251,10 +251,6 @@ does not decide anything.
 says `unknown`, skip the two version-dependent criteria below and judge the rest on their
 own merits.
 
-The other side of the comparison usually comes from the issue itself: the environment dump
-reports the `torch` version the reporter is on, and regressions normally name the version
-that last worked.
-
 Add it when **any** of these hold:
 
 - **Regression against the most recent released minor version.** The issue reports
