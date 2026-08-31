@@ -6,7 +6,6 @@
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/MemPool.h>
 #include <ATen/Functions.h>
-#include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGraphMemory.h>
 
@@ -504,8 +503,6 @@ void CUDAGraph::begin_capture_to_conditional_node(
   TORCH_CHECK(
       !has_graph_exec_,
       "This CUDAGraph instance already owns a captured graph.");
-
-  TORCH_CHECK(!c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::graph_capture_record_stream_reuse(), "'graph_capture_record_stream_reuse:True' allocator config does not work with conditional control flow in a cuda graph today. See issue #175001 for updates");
 
   cudaStreamCaptureStatus status{};
   cudaGraph_t currently_capturing_graph{};

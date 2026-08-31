@@ -6025,6 +6025,185 @@ exit(2)
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for conditional graph nodes",
+    )
+    @unittest.skipUnless(
+        TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
+    )
+    @serialTest()
+    def test_cuda_graph_conditional_record_stream_reuse_after_join(self):
+        previous = torch.cuda.memory._snapshot()["allocator_settings"][
+            "graph_capture_record_stream_reuse"
+        ]
+        self.addCleanup(
+            torch.cuda.memory._set_allocator_settings,
+            f"graph_capture_record_stream_reuse:{previous}",
+        )
+        torch.cuda.memory._set_allocator_settings(
+            "graph_capture_record_stream_reuse:True"
+        )
+        torch.cuda.empty_cache()
+        pred = torch.ones((), device="cuda", dtype=torch.bool)
+        child_state = torch.zeros((), device="cuda")
+        auxiliary_state = torch.zeros((), device="cuda")
+        g = torch.cuda.CUDAGraph()
+        capture_stream = torch.cuda.Stream()
+        side_stream = torch.cuda.Stream()
+
+        with torch.cuda.stream(capture_stream):
+            g.capture_begin()
+            g.begin_capture_to_if_node(pred)
+            child_stream = torch.cuda.current_stream()
+
+            data = torch.empty(LARGE_BUFFER // 4, device="cuda")
+            data.fill_(2)
+            child_state.add_(data[0])
+            data_ptr = data.data_ptr()
+            side_stream.wait_stream(child_stream)
+            with torch.cuda.stream(side_stream):
+                auxiliary_state.add_(data[0])
+                data.record_stream(side_stream)
+            del data
+
+            before_join = torch.empty(LARGE_BUFFER // 4, device="cuda")
+            before_join_ptr = before_join.data_ptr()
+            child_stream.wait_stream(side_stream)
+            after_join = torch.empty(LARGE_BUFFER // 4, device="cuda")
+            after_join.fill_(3)
+            child_state.add_(after_join[0])
+            after_join_ptr = after_join.data_ptr()
+            g.end_capture_to_conditional_node()
+            g.capture_end()
+
+        self.assertNotEqual(data_ptr, before_join_ptr)
+        self.assertEqual(data_ptr, after_join_ptr)
+        for take_child, expected_child, expected_auxiliary in (
+            (True, 5, 2),
+            (False, 0, 0),
+        ):
+            child_state.zero_()
+            auxiliary_state.zero_()
+            pred.fill_(take_child)
+            g.replay()
+            torch.cuda.synchronize()
+            self.assertEqual(child_state.item(), expected_child)
+            self.assertEqual(auxiliary_state.item(), expected_auxiliary)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for conditional graph nodes",
+    )
+    @unittest.skipUnless(
+        TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
+    )
+    @serialTest()
+    def test_cuda_graph_conditional_defers_ended_child_recorded_use(self):
+        previous = torch.cuda.memory._snapshot()["allocator_settings"][
+            "graph_capture_record_stream_reuse"
+        ]
+        self.addCleanup(
+            torch.cuda.memory._set_allocator_settings,
+            f"graph_capture_record_stream_reuse:{previous}",
+        )
+        torch.cuda.memory._set_allocator_settings(
+            "graph_capture_record_stream_reuse:True"
+        )
+        torch.cuda.empty_cache()
+        pred = torch.ones((), device="cuda", dtype=torch.bool)
+        child_state = torch.zeros((), device="cuda")
+        g = torch.cuda.CUDAGraph()
+        capture_stream = torch.cuda.Stream()
+        side_stream = torch.cuda.Stream()
+
+        with torch.cuda.stream(capture_stream):
+            g.capture_begin()
+            data = torch.empty(LARGE_BUFFER // 4, device="cuda")
+            data.fill_(2)
+            data_ptr = data.data_ptr()
+            g.begin_capture_to_if_node(pred)
+            child_stream = torch.cuda.current_stream()
+            side_stream.wait_stream(child_stream)
+            with torch.cuda.stream(side_stream):
+                child_state.add_(data[0])
+                data.record_stream(side_stream)
+            child_stream.wait_stream(side_stream)
+            g.end_capture_to_conditional_node()
+
+            del data
+            replacement = torch.empty(LARGE_BUFFER // 4, device="cuda")
+            replacement_ptr = replacement.data_ptr()
+            g.capture_end()
+
+        self.assertNotEqual(data_ptr, replacement_ptr)
+        for take_child, expected_child in ((True, 2), (False, 0)):
+            child_state.zero_()
+            pred.fill_(take_child)
+            g.replay()
+            torch.cuda.synchronize()
+            self.assertEqual(child_state.item(), expected_child)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipUnless(
+        TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
+    )
+    @serialTest()
+    def test_cuda_graph_preserves_deferred_free_when_side_pool_scope_ends(self):
+        previous = torch.cuda.memory._snapshot()["allocator_settings"][
+            "graph_capture_record_stream_reuse"
+        ]
+        self.addCleanup(
+            torch.cuda.memory._set_allocator_settings,
+            f"graph_capture_record_stream_reuse:{previous}",
+        )
+        torch.cuda.memory._set_allocator_settings(
+            "graph_capture_record_stream_reuse:True"
+        )
+        torch.cuda.empty_cache()
+        state = torch.zeros((), device="cuda")
+        g = torch.cuda.CUDAGraph()
+        capture_stream = torch.cuda.Stream()
+        side_stream = torch.cuda.Stream()
+        side_pool = torch.cuda.MemPool()
+
+        with torch.cuda.stream(capture_stream):
+            g.capture_begin()
+            with torch.cuda.use_mem_pool(side_pool):
+                data = torch.empty(LARGE_BUFFER // 4, device="cuda")
+                data.fill_(2)
+                data_ptr = data.data_ptr()
+                side_stream.wait_stream(capture_stream)
+                with torch.cuda.stream(side_stream):
+                    state.add_(data[0])
+                    data.record_stream(side_stream)
+                    del data
+
+            with torch.cuda.use_mem_pool(side_pool):
+                replacement = torch.empty(LARGE_BUFFER // 4, device="cuda")
+                replacement_ptr = replacement.data_ptr()
+
+            capture_stream.wait_stream(side_stream)
+            g.capture_end()
+
+        self.assertNotEqual(data_ptr, replacement_ptr)
+        state.zero_()
+        g.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(state.item(), 2)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     def test_cuda_graph_tensor_item_not_allowed(self):
         test_script = """\
 import torch

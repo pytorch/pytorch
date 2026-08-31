@@ -2484,6 +2484,11 @@ class DeviceCachingAllocator {
       return;
     }
     const auto use_context = cuda_graph_memory_.allocationContext(use_stream);
+    if (use_context.block_reuse_stream == block->stream) {
+      // Ignore uses in the allocation's reuse domain, since they don't require
+      // separate stream-lifetime tracking.
+      return;
+    }
     block->stream_uses.insert(stream);
     if (use_context.is_capturing) {
       cuda_graph_memory_.recordStreamUse(
