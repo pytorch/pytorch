@@ -3203,6 +3203,26 @@ class GraphModule(torch.nn.Module):
         self.assertIsInstance(result, MyTensor)
         self.assertEqual(result, x)
 
+    def test_bare_subclass_with_nonraising_getattr_compiles(self):
+        # Regression test for #194323: a bare torch.Tensor subclass
+        # (no __torch_dispatch__, no __tensor_flatten__) whose __getattr__
+        # returns a value instead of raising AttributeError used to be
+        # misdetected as a traceable wrapper subclass, and Dynamo crashed
+        # with InternalTorchDynamoError: AttributeError: ... no attribute
+        # '__tensor_flatten__'. It must now trace through the ordinary
+        # tensor path.
+        def fn():
+            class CustomTensor(torch.Tensor):
+                def __getattr__(self, attr):
+                    if attr == "custom_method":
+                        return lambda x: self + x
+                    return None
+
+            ct = CustomTensor([1, 2, 3])
+            return ct.custom_method(torch.tensor([4, 5, 6]))
+
+        self.assertEqual(torch.compile(fn)(), fn())
+
 
 instantiate_parametrized_tests(SubclassTests)
 
