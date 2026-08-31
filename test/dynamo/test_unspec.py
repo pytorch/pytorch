@@ -818,7 +818,10 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
     def test_symint_number_methods(self):
         def fn(x):
             n = x.size(0)
-            return n.bit_length() + n.conjugate() + n.as_integer_ratio()[0] + n.__int__()
+            bit_length = n.bit_length()
+            conjugate = n.conjugate()
+            ratio = n.as_integer_ratio()[0]
+            return bit_length + conjugate + ratio + n.__int__()
 
         x = torch.randn(8, 3)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)

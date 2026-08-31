@@ -145,6 +145,8 @@ xfails = [
     NestedGraphBreaksSubGraphTests.test_resume_paths_join_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksReproTests.test_udf_classes_reconstruction_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksUnspecTests.test_unspecialized_float_multiply_precision,  # noqa: F821
+    # fullgraph Unsupported vs nested_graph_breaks exception handling
+    NestedGraphBreaksUnspecTests.test_symint_bit_length_wrong_arity,  # noqa: F821
 ]
 
 case = None
