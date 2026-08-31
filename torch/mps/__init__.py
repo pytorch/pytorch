@@ -285,9 +285,10 @@ class MetalGraph:
       are baked into the recorded dispatch and are **frozen** on replay; pass
       them as MPS tensors if they need to vary. 0-dim MPS tensors are already
       buffer-backed and do update in place.
-    * A CPU tensor used in a ``.copy_()`` inside the capture must stay alive for
-      the graph's lifetime: the recorded blit refers to its host memory, which
-      the graph cannot reserve the way it reserves device buffers.
+    * Copies between MPS and unpinned CPU memory raise inside a capture: the
+      recorded blit would refer to host pages the graph cannot keep alive, so
+      replaying it after the CPU tensor died would read or write freed memory.
+      Pinned CPU tensors are backed by a real buffer and are captured normally.
     * Random number generation is not supported inside a capture: the philox seed
       and offset are recorded as fixed bytes, so replays would repeat the capture
       pass's values. Ops that consume the MPS generator raise inside a capture.
@@ -300,8 +301,9 @@ class MetalGraph:
       graph that omits them.
 
     Multiple graphs may be alive at once and are fully independent. Recording is
-    exclusive, so beginning a capture while another is recording raises
-    ``RuntimeError``.
+    exclusive per stream, so beginning a capture while another is recording on the
+    same stream raises ``RuntimeError``. :meth:`replay` always runs on the stream
+    the graph was captured on, not the current one.
 
     Example::
 
@@ -392,7 +394,11 @@ def metal_graph(g: "MetalGraph"):
         # partial graph behind.
         g.reset()
         raise
-    g.capture_end()
+    try:
+        g.capture_end()
+    except BaseException:
+        g.reset()
+        raise
 
 
 from . import profiler

@@ -42,7 +42,7 @@ void MPSGeneratorImpl::set_offset(uint64_t offset) {
   // seed and offset reach the kernel via setBytes (or, for LSTM, an MPSGraph
   // feed), which a capture records as fixed data, so a replayed randn/dropout
   // would reproduce the capture pass's numbers exactly instead of drawing fresh
-  // ones. CUDA handles this by re-seeding per replay (CUDAGraph's
+  // ones. CUDA handles this by advancing the philox offset per replay (CUDAGraph's
   // replay_prologue); MPS has no equivalent yet, so fail loud rather than hand
   // back silently non-random results.
   TORCH_CHECK(!mps::getCurrentMPSStream()->captureMode(),
