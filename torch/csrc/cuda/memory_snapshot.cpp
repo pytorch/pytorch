@@ -2,7 +2,6 @@
 #include <ATen/core/CachingHostAllocator.h>
 #include <ATen/record_function.h>
 #include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/util/ApproximateClock.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/cuda/memory_snapshot.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
@@ -415,6 +414,7 @@ std::string _memory_snapshot_pickled() {
   IValue segment_unmap_s = "segment_unmap";
   IValue snapshot_s = "snapshot";
   IValue oom_s = "oom";
+  IValue annotate_s = "annotate";
   IValue device_free_s = "device_free";
 
   using namespace c10::cuda::CUDACachingAllocator;
@@ -439,6 +439,8 @@ std::string _memory_snapshot_pickled() {
         return segment_unmap_s;
       case TraceEntry::SEGMENT_MAP:
         return segment_map_s;
+      case TraceEntry::ANNOTATE:
+        return annotate_s;
     }
     TORCH_CHECK(false, "unreachable");
   };

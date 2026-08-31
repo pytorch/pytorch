@@ -59,6 +59,7 @@ set(C10_CUDA_HEADERS
 if(NOT BUILD_LIBTORCHLESS)
   torch_cuda_based_add_library(c10_cuda ${C10_CUDA_SRCS} ${C10_CUDA_HEADERS})
   torch_compile_options(c10_cuda)
+  torch_optimize_layout_if_enabled(c10_cuda)
   # If building shared library, set dllimport/dllexport proper.
   target_compile_options(c10_cuda PRIVATE "-DC10_CUDA_BUILD_MAIN_LIB")
   # Enable hidden visibility if compiler supports it.
@@ -71,8 +72,10 @@ if(NOT BUILD_LIBTORCHLESS)
 
   if(NOT WIN32)
   target_link_libraries(c10_cuda PRIVATE dl)
-  target_compile_options(c10_cuda PRIVATE "-DPYTORCH_C10_DRIVER_API_SUPPORTED")
+  else()
+  target_link_libraries(c10_cuda PRIVATE fmt::fmt)
   endif()
+  target_compile_definitions(c10_cuda PRIVATE PYTORCH_C10_DRIVER_API_SUPPORTED)
 
   target_include_directories(
       c10_cuda PUBLIC

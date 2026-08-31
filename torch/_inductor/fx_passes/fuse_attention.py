@@ -943,9 +943,27 @@ def _warn_tf32_disabled() -> None:
         )
 
 
+def _is_supported_scale(scale) -> bool:
+    # The matcher may bind the scale to a graph node, whose value lives in
+    # meta["val"]; a node carrying no "val" leaves the scale unknown, so we
+    # conservatively skip the fusion. The fused kernel takes a scalar scale, so
+    # a tensor scale is rejected here. SymFloat scales are tensorified into 0-d
+    # tensors before the joint graph passes run, so they arrive as tensors too;
+    # an untensorified one would land in the same conservative skip.
+    # TODO: the scalar behind a tensorified SymFloat scale (e.g. head_dim**0.5
+    # under dynamic shapes) could be recovered from the aten.scalar_tensor node
+    # to keep the fusion - tracked in #194444.
+    if isinstance(scale, torch.fx.Node):
+        scale = scale.meta.get("val")
+    return isinstance(scale, (float, int, torch.SymInt))
+
+
 def _sfdp_params_check(match):
     if not all(k in match.kwargs for k in ("query", "key", "value")):
         raise AssertionError("expected query, key, value in match.kwargs")
+    inv_scale = match.kwargs.get("inv_scale")
+    if inv_scale is not None and not _is_supported_scale(inv_scale):
+        return False
     query = match.kwargs["query"].meta["val"]
     key = match.kwargs["key"].meta["val"]
     value = match.kwargs["value"].meta["val"]
@@ -992,6 +1010,17 @@ def _sfdp_params_check(match):
     return True
 
 
+def _sfdp_pattern_13_check(match):
+    if not _sfdp_params_check(match):
+        return False
+    permutes = filter_nodes(match.nodes, aten.permute.default)
+    if len(permutes) != 1:
+        return False
+    # The serialized pattern wildcard-matches the permute dimensions.
+    permute_dims = permutes[0].args[1]
+    return isinstance(permute_dims, (list, tuple)) and tuple(permute_dims) == (0, 2, 1)
+
+
 def _sfdp_extra_check(scale_factor_op=None, disable_cuda=False):
     def fn(match):
         if (
@@ -1003,9 +1032,7 @@ def _sfdp_extra_check(scale_factor_op=None, disable_cuda=False):
         if scale_factor_op is not None:
             scale_factor_node = filter_nodes(match.nodes, scale_factor_op)[0]
             # Note: args[1] of the scale_factor_node is always the scale_factor for the current patterns.
-            scale_factor = scale_factor_node.args[1]
-            # make sure the scale_factor a float/int. SymInt?
-            if not isinstance(scale_factor, (float, int)):
+            if not _is_supported_scale(scale_factor_node.args[1]):
                 return False
         return _sfdp_params_check(match)
 
@@ -1210,7 +1237,7 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 _sfdp_replacement_13,
                 [g_3d(), g_3d(), g_3d()],
                 d,
-                _sfdp_params_check,
+                _sfdp_pattern_13_check,
             ),
             (
                 _sfdp_pattern_14,
