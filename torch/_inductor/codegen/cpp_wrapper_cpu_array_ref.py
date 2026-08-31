@@ -126,6 +126,10 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         # assert_size_stride would fail to compile.
         return
 
+    # Alignment assertions are queued only for ExternKernel outputs. Fallback
+    # codegen disables stack allocation below, so those values are
+    # RAIIAtenTensorHandle and can use CppWrapperCpu's assertion emitter.
+
     def _codegen_v2_raw_input_bindings(self, code: IndentedBuffer):
         for idx, (input_key, input_value) in enumerate(V.graph.graph_inputs.items()):
             input_cpp_type = CppWrapperCpuArrayRef.get_input_element_cpp_type(
