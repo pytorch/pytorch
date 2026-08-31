@@ -1069,9 +1069,9 @@ class TestForeachDevice(TestCase):
 
     @onlyAccelerator
     @ops(foreach_reduce_op_db, allowed_dtypes=floating_types())
-    @parametrize("use_cuda_graph", (False, True))
+    @parametrize("use_accelerator_graph", (False, True))
     @parametrize("w_empty", (False, True))
-    def test_big_num_tensors(self, device, dtype, op, use_cuda_graph, w_empty):
+    def test_big_num_tensors(self, device, dtype, op, use_accelerator_graph, w_empty):
         # foreach_max cannot handle empty tensors as max requires an identity
         intersperse_empty_tensors = w_empty and op.name != "_foreach_max"
 
@@ -1101,16 +1101,11 @@ class TestForeachDevice(TestCase):
 
         for ord in ords:
             kwargs = {"ord": ord} if ord else {}
-            if use_cuda_graph:
-                if "cuda" not in device:
-                    self.skipTest("only CUDA support CUDAGraph")
-                # When using CUDA graphs and the tensor metadata doesn't fit in
-                # the static kernel argument space, multi_tensor_apply creates
-                # the launch arguments once, uses cudaUserObject_t to tie its
-                # lifetime to the graph, and reuses it throughout replays. This
-                # test verifies multi_tensor_apply's behavior in the scenario.
-                g = torch.cuda.CUDAGraph()
-                with torch.cuda.graph(g):
+            if use_accelerator_graph:
+                # Verifies multi_tensor_apply's behavior when tensor metadata
+                # doesn't fit in the static kernel argument space.
+                g = torch.accelerator.Graph()
+                with g:
                     actual = fn.func(tensorlist, **kwargs)
                 g.replay()
             else:
