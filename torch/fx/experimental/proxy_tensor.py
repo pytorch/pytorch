@@ -1109,10 +1109,10 @@ def _maybe_record_pointwise_barrier(
     func: object, proxy_mode: ProxyTorchDispatchMode
 ) -> None:
     """
-    Records operators whose tensor outputs or inputs are fp16/bf16 so downstream pointwise code can
-    emulate eager's rounding behavior when emulate_precision_casts is enabled.
+    Records eager operators with fp16/bf16 tensor outputs or inputs so downstream
+    pointwise code can preserve selected eager rounding boundaries.
     """
-    if proxy_mode.decomp_layers or not proxy_mode.emulate_precision_casts:
+    if proxy_mode.decomp_layers:
         return
 
     if not isinstance(func, torch._ops.OpOverload):
@@ -2187,10 +2187,6 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self._invoke_subgraph_cache: dict[
             torch.fx.GraphModule | FunctionalizeCtxWrapper, str
         ] = {}
-        from torch._inductor import config
-
-        self.emulate_precision_casts: bool = config.emulate_precision_casts
-
     @count
     def __torch_dispatch__(
         self,

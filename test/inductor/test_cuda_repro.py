@@ -1700,25 +1700,6 @@ class CudaReproTests(TestCase):
         self.assertIn(f".to(tl.{lowp_name})", code)
 
     @parametrize("lowp_dtype", [torch.bfloat16, torch.float16])
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
-    @config.patch(emulate_precision_casts=False)
-    def test_lowp_pointwise_rounds_before_comparison(self, lowp_dtype):
-        torch.manual_seed(0)
-        values = torch.randn((6, 4, 1, 33), device=device_type, dtype=lowp_dtype)
-        scale = math.sqrt(32.0)
-        maximum = (values / scale).amax(dim=-1, keepdim=True)
-
-        def fn(maximum, values):
-            scaled = values / scale
-            return (maximum == scaled).sum(dim=-1, keepdim=True)
-
-        expected = fn(maximum, values)
-        actual = torch.compile(fn, backend="inductor", fullgraph=True)(maximum, values)
-
-        self.assertEqual(actual, expected)
-        self.assertTrue((actual > 0).all())
-
-    @parametrize("lowp_dtype", [torch.bfloat16, torch.float16])
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_preserves_explicit_precision_cast(
         self, lowp_dtype

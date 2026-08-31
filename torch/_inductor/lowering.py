@@ -729,6 +729,36 @@ def _has_saved_lowp_output_use(node: torch.fx.Node | None) -> bool:
     return False
 
 
+def _has_bool_pointwise_use(node: torch.fx.Node) -> bool:
+    cache_key = "inductor_has_bool_pointwise_use"
+    if cache_key not in node.meta:
+        for candidate in reversed(node.graph.nodes):
+            result = False
+            for user in candidate.users:
+                if user.op != "call_function":
+                    continue
+
+                target = user.target
+                if target is operator.getitem:
+                    result = user.meta.get(cache_key, False)
+                elif isinstance(target, torch._ops.OpOverload) and (
+                    is_view(target) or torch.Tag.pointwise in target.tags
+                ):
+                    value = user.meta.get("val")
+                    result = (
+                        user.meta.get("low_precision_pointwise_barrier", False)
+                        and isinstance(value, torch.Tensor)
+                        and value.dtype == torch.bool
+                    ) or user.meta.get(cache_key, False)
+
+                if result:
+                    break
+
+            candidate.meta[cache_key] = result
+
+    return node.meta[cache_key]
+
+
 def make_pointwise(
     fn: Callable[..., Any],
     override_return_dtype: torch.dtype | None = None,
@@ -794,10 +824,13 @@ def make_pointwise(
         current_node = (
             getattr(V.graph, "current_node", None) if V.graph is not None else None
         )
-        emulate_precision_casts = (
+        is_precision_barrier = (
             current_node is not None
             and current_node.meta is not None
             and current_node.meta.get("low_precision_pointwise_barrier", False)
+        )
+        emulate_precision_casts = (
+            config.emulate_precision_casts and is_precision_barrier
         )
         truncate_saved_output = (
             config.emulate_precision_casts_on_saved_tensors
@@ -805,12 +838,17 @@ def make_pointwise(
             and dtype in low_pr_fp
             and _has_saved_lowp_output_use(current_node)
         )
+        # Exact boolean results can change discontinuously if fusion elides any
+        # eager low-precision rounding boundary in their pointwise producer chain.
+        truncate_for_comparison = (
+            is_precision_barrier
+            and dtype in low_pr_fp
+            and current_node is not None
+            and _has_bool_pointwise_use(current_node)
+        )
         emulate_output_cast = (
-            emulate_precision_casts or truncate_saved_output
+            emulate_precision_casts or truncate_saved_output or truncate_for_comparison
         ) and dtype in low_pr_fp
-        # Boolean pointwise ops observe stored low-precision values in eager,
-        # so fused inputs must be rounded even outside full precision emulation.
-        truncate_inputs = emulate_precision_casts or dtype == torch.bool
 
         def inner_fn(index):
             if len(index) != len(ranges):
@@ -822,7 +860,7 @@ def make_pointwise(
                 for inp_index, load in enumerate(loaders):
                     out = load(index)
                     inp_dtype = inputs[inp_index].get_dtype()
-                    if truncate_inputs and inp_dtype in low_pr_fp:
+                    if emulate_precision_casts and inp_dtype in low_pr_fp:
                         downcast = ops.to_dtype(out, inp_dtype, use_compute_types=False)
                         out = ops.to_dtype(downcast, inp_dtype)
                     inputs_loaded.append(out)
