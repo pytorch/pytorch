@@ -1681,7 +1681,7 @@ def unload_xpu_triton_pyds() -> None:
             # Do NOT `del driver_mod.driver.active.utils` as it's the last
             # reference to the native spirv_utils, so deleting it unloads
             # spirv_utils.pyd synchronously and can crash if native pyd
-            # code from is still on stack (see intel/torch-xpu-ops#4950)
+            # code is still on stack (see intel/torch-xpu-ops#4950)
 
     gc.collect()
 
