@@ -729,6 +729,27 @@ def _has_saved_lowp_output_use(node: torch.fx.Node | None) -> bool:
     return False
 
 
+def _is_saved_for_backward_only(node: torch.fx.Node) -> bool:
+    found_saved_output = False
+    for user in node.users:
+        if user.op != "output":
+            return False
+
+        descs = user.meta.get("desc")
+        if descs is None:
+            return False
+
+        output_values = pytree.tree_leaves(user.args[0])
+        for output_value, desc in zip(output_values, descs):
+            if output_value is not node:
+                continue
+            if not isinstance(desc, _SAVED_FOR_BACKWARDS_OUTPUT_DESC_TYPES):
+                return False
+            found_saved_output = True
+
+    return found_saved_output
+
+
 def _has_bool_pointwise_use(node: torch.fx.Node) -> bool:
     cache_key = "inductor_has_bool_pointwise_use"
     if cache_key not in node.meta:
@@ -745,10 +766,13 @@ def _has_bool_pointwise_use(node: torch.fx.Node) -> bool:
                     is_view(target) or torch.Tag.pointwise in target.tags
                 ):
                     value = user.meta.get("val")
+                    # AOTAutograd may emit boolean masks only to save for backward.
+                    # Those masks must not change forward-chain precision.
                     result = (
                         user.meta.get("low_precision_pointwise_barrier", False)
                         and isinstance(value, torch.Tensor)
                         and value.dtype == torch.bool
+                        and not _is_saved_for_backward_only(user)
                     ) or user.meta.get(cache_key, False)
 
                 if result:

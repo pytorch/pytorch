@@ -11,6 +11,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCUDA,
     dtypesIfXPU,
     instantiate_device_type_tests,
+    onlyCPU,
     skipXPUIf,
 )
 
@@ -64,6 +65,30 @@ class LowPrecisionTest(TestCase):
             lowp_name = "bfloat16" if dtype == torch.bfloat16 else "float16"
             self.assertEqual(code.count(f".to(tl.{lowp_name})"), 3)
             self.assertNotIn(f".to(tl.{lowp_name})", realized_code)
+
+    @onlyCPU
+    @dtypes(torch.float16)
+    @config.patch(emulate_precision_casts=False)
+    def test_saved_backward_comparison_does_not_round_forward(self, device, dtype):
+        input = torch.tensor(
+            [0.09051513671875, -8.1796875],
+            device=device,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        target = torch.tensor([1.0, -1.0], device=device, dtype=dtype)
+
+        def fn(input, target):
+            return torch.nn.functional.hinge_embedding_loss(
+                input,
+                target,
+                margin=-7.167470387213217,
+                reduction="sum",
+            )
+
+        expected = fn(input.float(), target.float()).to(dtype)
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(input, target)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
 
 
 instantiate_device_type_tests(
