@@ -46,7 +46,6 @@ from .constant import ConstantVariable
 from .dicts import ConstDictVariable
 from .hashable import HashableTracker
 from .lists import ListVariable
-from .misc import GetAttrVariable
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -142,17 +141,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
     tp_methods = {"_init_group": Method(_init_group)}
 
-    # _init_group resolves to a GetAttrVariable so the call is intercepted by
-    # tp_methods (in the typical case, a UserMethodVariable would inline it).
-    def _get_init_group(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        if not self.source:
-            raise AssertionError("OptimizerVariable requires a source for _init_group")
-        name = "_init_group"
-        py_type = type(getattr(self.value, name))
-        return GetAttrVariable(
-            self, name, py_type=py_type, source=AttrSource(self.source, name)
-        )
-
     # param_groups only runs setup side effects (static addresses, capturable
     # guards) and declines, falling through to the generic protocol.
     def _get_param_groups(self, tx: "InstructionTranslatorBase") -> None:
@@ -166,7 +154,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
         return None
 
     tp_getset = {
-        "_init_group": GetSet(_get_init_group),
         "param_groups": GetSet(_get_param_groups),
     }
 
