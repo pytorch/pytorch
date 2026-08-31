@@ -378,8 +378,9 @@ class TestTorchDlPack(TestCase):
         with torch.device(dev0):
             x = make_tensor((5,), dtype=torch.float32, device=dev0)
 
+        device_type = torch.device(dev0).type.upper()
         with self.assertRaisesRegex(
-            BufferError, r"Can't export tensors on a different CUDA device"
+            BufferError, rf"Can't export tensors on a different {device_type} device"
         ):
             with torch.accelerator.device_index(torch.device(dev1).index):
                 x.__dlpack__()
