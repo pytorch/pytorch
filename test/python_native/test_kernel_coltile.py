@@ -46,18 +46,26 @@ class TestKernelColTile(TestCase):
         # is selected only when C >= _C_THREAD_STAGE2 AND the reduced axis is split. The existing
         # tests use C=512/256, so both took the ReduceBlock branch and the combine body -- the
         # only construction of TileReduce(combine=True) in the tree -- ran nowhere.
+        from unittest import mock
+
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_coltile as ct
+        from torch._native.ops.reductions import kernel_coltile as ct, tile as tl
 
         c = ct._C_THREAD_STAGE2 + 256  # over the thread-per-column crossover
         x = torch.randn(4096, c, device="cuda")  # tall enough that _split_p splits it
         self.assertGreater(
             ct._split_p(4096), 1, "the shape no longer splits -- test is stale"
         )
-        out = ct.reduce_col_tile(
-            T.SumOps(acc=cutlass.Float32), "combine2", x, torch.float32
+        with mock.patch.object(tl, "TileReduce", wraps=tl.TileReduce) as built:
+            out = ct.reduce_col_tile(
+                T.SumOps(acc=cutlass.Float32), "combine2", x, torch.float32
+            )
+        # The ReduceBlock stage 2 returns the same numbers, so assert the branch, not the result.
+        self.assertTrue(
+            any(call.kwargs.get("combine") for call in built.call_args_list),
+            "stage 2 took the ReduceBlock branch, so the combine body ran nowhere",
         )
         self.assertEqual(out, x.double().sum(dim=0).float(), atol=2e-3, rtol=1e-4)
 
@@ -106,20 +114,29 @@ class TestKernelColTile(TestCase):
     def test_dispatcher_routes_a_column_reduction(self):
         # The other tests call reduce_col_tile directly, so the line this commit actually changes
         # for users -- fast_kind's col arm plus the reshape/_as_shape round-trip in _reduce -- was
-        # untested. Drive it through the dispatcher, and through an n-D input that has to coalesce
-        # to a single reduced + single kept run before the col arm can take it.
+        # untested. Numbers alone cannot check it: with the col arm gone, K0 serves the same shape
+        # correctly, so a result-only assertion passes either way. Assert what identifies the arm --
+        # that the col driver is the thing that served it -- for a 2D input and for an n-D one that
+        # has to coalesce to a single reduced + single kept run first.
+        from unittest import mock
+
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_general as kg
+        from torch._native.ops.reductions import (
+            kernel_coltile as ct,
+            kernel_general as kg,
+        )
 
         trait = T.SumOps(acc=cutlass.Float32)
         x = torch.randn(512, 256, device="cuda")
-        got = kg.reduce_dim(trait, "disp_col", x, 0, torch.float32)
-        self.assertEqual(got, x.double().sum(dim=0).float(), atol=1e-3, rtol=1e-4)
-
         nd = torch.randn(8, 64, 128, device="cuda")
-        got_nd = kg.reduce_dim(trait, "disp_col_nd", nd, (0, 1), torch.float32)
+        real = ct.reduce_col_tile
+        with mock.patch.object(ct, "reduce_col_tile", wraps=real) as served:
+            got = kg.reduce_dim(trait, "disp_col", x, 0, torch.float32)
+            got_nd = kg.reduce_dim(trait, "disp_col_nd", nd, (0, 1), torch.float32)
+        self.assertEqual(served.call_count, 2, "K0 served these, not the col arm")
+        self.assertEqual(got, x.double().sum(dim=0).float(), atol=1e-3, rtol=1e-4)
         self.assertEqual(
             got_nd, nd.double().sum(dim=(0, 1)).float(), atol=1e-3, rtol=1e-4
         )
