@@ -7611,29 +7611,46 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
         "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
     )
     def test_cond_traced_record_stream_reuse(self):
+        previous = torch.cuda.memory._snapshot()["allocator_settings"][
+            "graph_capture_record_stream_reuse"
+        ]
+        self.addCleanup(
+            torch.cuda.memory._set_allocator_settings,
+            f"graph_capture_record_stream_reuse:{previous}",
+        )
         torch.cuda.memory._set_allocator_settings(
             "graph_capture_record_stream_reuse:True"
         )
-        try:
-            predicate = torch.tensor(True, device="cuda")
+        predicate = torch.tensor(True, device="cuda")
+        operand = torch.full((), 4.0, device="cuda")
+        root_capture_stream = torch.cuda.Stream()
 
-            def true_fn():
-                return torch.zeros(8, device="cuda"), torch.zeros(8, device="cuda")
+        def true_fn(value):
+            return value + 1, value + 2
 
-            def false_fn():
-                return torch.zeros(8, device="cuda"), torch.zeros(8, device="cuda")
+        def false_fn(value):
+            return value - 1, value - 2
 
-            g = torch.cuda.CUDAGraph()
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "graph_capture_record_stream_reuse:True",
-            ):
-                with torch.cuda.graph(g), CUDAGraphCaptureControlFlowOpDispatchMode():
-                    torch.cond(predicate, true_fn, false_fn, [])
-        finally:
-            torch.cuda.memory._set_allocator_settings(
-                "graph_capture_record_stream_reuse:False"
-            )
+        with (
+            torch.cuda.stream(root_capture_stream),
+            ControlFlowOpWarmupDispatchMode(),
+        ):
+            torch.cond(predicate, true_fn, false_fn, [operand])
+
+        g = torch.cuda.CUDAGraph()
+        with (
+            torch.cuda.graph(g, stream=root_capture_stream),
+            CUDAGraphCaptureControlFlowOpDispatchMode(),
+        ):
+            output = torch.cond(predicate, true_fn, false_fn, [operand])
+
+        torch.cuda.current_stream().wait_stream(root_capture_stream)
+        for take_true, expected in ((True, (5, 6)), (False, (3, 2))):
+            predicate.fill_(take_true)
+            g.replay()
+            torch.cuda.synchronize()
+            self.assertEqual(output[0].item(), expected[0])
+            self.assertEqual(output[1].item(), expected[1])
 
     def test_while_loop_nested_traced(self):
         fn, inp = WHILE_LOOP_TESTS["nested"]
