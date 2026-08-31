@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+from typing import cast
 from unittest.mock import patch
 
 import torch
@@ -17,11 +18,26 @@ from torch.distributed.checkpoint.metadata import (
     TensorProperties,
     TensorStorageMetadata,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
+class _TensorLikeWithoutStride:
+    dtype = torch.float32
+    layout = torch.strided
+    requires_grad = False
+
+    def is_pinned(self) -> bool:
+        return False
+
+
 class TestDCPCompatbility(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_metadata(self) -> None:
         # Ensure that all the new fields of all the metadata have the default
         # values so that we can always deserialize from a legacy metadata.
@@ -137,6 +153,18 @@ class TestDCPCompatbility(TestCase):
         restored = pickle.loads(pickle.dumps(props))
         self.assertEqual(restored.strides, (4, 1))
         self.assertEqual(restored.dtype, torch.float32)
+
+    def test_tensor_properties_tensor_like_without_stride(self) -> None:
+        tensor_like = cast(torch.Tensor, _TensorLikeWithoutStride())
+        props = TensorProperties.create_from_tensor(tensor_like)
+        self.assertIsNone(props.strides)
+        self.assertFalse(props.pin_memory)
+
+    def test_sharded_tensor_properties_tensor_like_without_stride(self) -> None:
+        tensor_like = cast(torch.Tensor, _TensorLikeWithoutStride())
+        props = ShardedTensorProperties.create_from_tensor(tensor_like)
+        self.assertIsNone(props.strides)
+        self.assertFalse(props.pin_memory)
 
     def test_sharded_tensor_properties_backward_compat_without_strides(self) -> None:
         """Ensure sharded tensor TensorProperties also handles old pickles without strides."""
