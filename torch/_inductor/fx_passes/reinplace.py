@@ -219,6 +219,26 @@ def scatter_always_uses_mutation(node: torch.fx.Node) -> bool:
     )
 
 
+def _result_escapes_graph(node: torch.fx.Node) -> bool:
+    """Whether node's result, or a view alias of it, is returned from the graph."""
+    aliases = OrderedSet([node])
+    stack = [node]
+    while stack:
+        cur = stack.pop()
+        for user in cur.users:
+            if user.op == "output":
+                return True
+            if user in aliases:
+                continue
+            # getitem only aliases cur when cur is a multi-output view (e.g. split)
+            if _is_view_op(user.target) or (
+                user.target is operator.getitem and _is_view_op(cur.target)
+            ):
+                aliases.add(user)
+                stack.append(user)
+    return False
+
+
 def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     """Choose between mutating and functional scatter decompositions
 
@@ -228,6 +248,13 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
 
     """
     inp, _src, _view_ops = node.args
+
+    # Reinplacing makes the result the same tensor as inp. When inp is a graph
+    # input, reinplacing here is paired with dropping the copy_ back into it, so
+    # the caller holds inp itself; returning the result as well would hand back an
+    # alias of inp where the functional scatter returns a fresh tensor.
+    if inp.op in ("placeholder", "get_attr") and _result_escapes_graph(node):  # type: ignore[union-attr]
+        return False
 
     # Mutating scatter ops unconditionally realize input and output
     if scatter_always_uses_mutation(node):

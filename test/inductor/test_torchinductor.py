@@ -11908,6 +11908,105 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         else:
             assertGeneratedKernelCountEqual(self, 1)
 
+    def test_slice_scatter_reinplace_result_escapes(self):
+        # https://github.com/pytorch/pytorch/issues/195451
+        # Reinplacing the scatter onto its input makes the two the same tensor.
+        # The copy_ back hides that from the rest of the graph, but a returned
+        # result would alias the input, where the functional scatter hands back
+        # a fresh tensor. Mutating the result would then corrupt the input.
+        def returns_result(x, src):
+            updated = torch.slice_scatter(x, src, 0, 0, 1)
+            x.copy_(updated)
+            return updated
+
+        def returns_view_of_result(x, src):
+            updated = torch.slice_scatter(x, src, 0, 0, 1)
+            x.copy_(updated)
+            return updated[1:]
+
+        def returns_split_of_result(x, src):
+            updated = torch.slice_scatter(x, src, 0, 0, 1)
+            x.copy_(updated)
+            a, b = updated.split(2, dim=0)
+            return a, b
+
+        for fn in (returns_result, returns_view_of_result, returns_split_of_result):
+            with self.subTest(fn=fn.__name__):
+
+                def run(compiled_fn, fn=fn):
+                    x = torch.arange(4.0, device=self.device)
+                    src = torch.full((1,), 10.0, device=self.device)
+                    outs = compiled_fn(x, src)
+                    outs = outs if isinstance(outs, tuple) else (outs,)
+                    for out in outs:
+                        out.add_(100)
+                    return x, outs
+
+                x_eager, outs_eager = run(fn)
+                x_compiled, outs_compiled = run(torch.compile(fn, fullgraph=True))
+                self.assertEqual(x_eager, x_compiled)
+                self.assertEqual(outs_eager, outs_compiled)
+
+        # get_attr inputs (e.g. a module buffer) hit the same aliasing hazard as
+        # placeholders. Note: AOTAutograd lifts buffers used by the traced graph
+        # into explicit placeholder inputs, so this scatter's inp is expected to
+        # be a placeholder by the time reinplace runs, exercising the same arm
+        # as returns_result above rather than the get_attr one; the guard's
+        # get_attr branch covers graphs (e.g. from export) where the buffer
+        # survives as a get_attr node. Either way, eager/compiled parity is what
+        # matters here.
+        with self.subTest(fn="returns_result_buffer"):
+            device = self.device
+
+            class BufferModule(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.register_buffer("buf", torch.arange(4.0, device=device))
+
+                def forward(self, src):
+                    updated = torch.slice_scatter(self.buf, src, 0, 0, 1)
+                    self.buf.copy_(updated)
+                    return updated
+
+            def run_buffer(mod):
+                src = torch.full((1,), 10.0, device=device)
+                out = mod(src)
+                out.add_(100)
+                return mod.buf.clone(), out
+
+            buf_eager, out_eager = run_buffer(BufferModule())
+            buf_compiled, out_compiled = run_buffer(
+                torch.compile(BufferModule(), fullgraph=True)
+            )
+            self.assertEqual(buf_eager, buf_compiled)
+            self.assertEqual(out_eager, out_compiled)
+
+        # The scatter result can be copied back into more than one input; each
+        # copy-back target must stay independent of the (mutated) returned result.
+        with self.subTest(fn="returns_result_multi_target"):
+
+            def multi_target(x, y, src):
+                updated = torch.slice_scatter(x, src, 0, 0, 1)
+                x.copy_(updated)
+                y.copy_(updated)
+                return updated
+
+            def run_multi(compiled_fn):
+                x = torch.arange(4.0, device=self.device)
+                y = torch.zeros(4, device=self.device)
+                src = torch.full((1,), 10.0, device=self.device)
+                out = compiled_fn(x, y, src)
+                out.add_(100)
+                return x, y, out
+
+            x_eager, y_eager, out_eager = run_multi(multi_target)
+            x_compiled, y_compiled, out_compiled = run_multi(
+                torch.compile(multi_target, fullgraph=True)
+            )
+            self.assertEqual(x_eager, x_compiled)
+            self.assertEqual(y_eager, y_compiled)
+            self.assertEqual(out_eager, out_compiled)
+
     def test_slice_scatter_dtype_consistency(self):
         # Test dtype consistency of slice_scatter
         def fn(x, y):
