@@ -34,7 +34,6 @@ from trymerge import (
     _find_non_matching_files,
     _revlist_to_prs,
     AdvisorWaitWindow,
-    AI_NOT_RELATED_CHECKS_THRESHOLD,
     AI_VERDICT_MAX_WAIT,
     can_skip_internal_checks,
     categorize_checks,
@@ -50,6 +49,7 @@ from trymerge import (
     gh_get_team_members,
     GitHubPR,
     HAS_NO_CONNECTED_DIFF_TITLE,
+    IGNORABLE_FAILED_CHECKS_THESHOLD,
     IMPORT_STATUS_CHECKRUN_NAME,
     INTERNAL_CHANGES_CHECKRUN_NAME,
     is_ai_not_related,
@@ -2896,14 +2896,14 @@ class TestAdvisorNotRelated(TestCase):
         return categorize_checks(checks, list(checks.keys()))
 
     def test_cleared_checks_do_not_block(self) -> None:
-        _, failed, ignorable = self._categorize(AI_NOT_RELATED_CHECKS_THRESHOLD)
+        _, failed, ignorable = self._categorize(IGNORABLE_FAILED_CHECKS_THESHOLD)
         self.assertEqual(failed, [])
         self.assertEqual(
-            len(ignorable["AI_NOT_RELATED"]), AI_NOT_RELATED_CHECKS_THRESHOLD
+            len(ignorable["AI_NOT_RELATED"]), IGNORABLE_FAILED_CHECKS_THESHOLD
         )
 
     def test_too_many_at_once_reads_as_an_outage_and_blocks(self) -> None:
-        over = AI_NOT_RELATED_CHECKS_THRESHOLD + 1
+        over = IGNORABLE_FAILED_CHECKS_THESHOLD + 1
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             _, failed, ignorable = self._categorize(over)
@@ -2918,7 +2918,7 @@ class TestAdvisorNotRelated(TestCase):
             f"job {i}": JobCheckState(
                 f"job {i}", "", "FAILURE", "AI_NOT_RELATED", i, "", ""
             )
-            for i in range(AI_NOT_RELATED_CHECKS_THRESHOLD)
+            for i in range(IGNORABLE_FAILED_CHECKS_THESHOLD)
         }
         _, failed, _ = categorize_checks(
             checks, list(checks.keys()), ok_failed_checks_threshold=0
