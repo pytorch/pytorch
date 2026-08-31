@@ -41,6 +41,32 @@ jobs:
         run: |
           git fetch origin ${{ inputs.suspect_commit }} --depth=32 || true
 
+      # Install Bun ourselves so that claude-code-action skips its own "Install
+      # Bun" step. That step runs oven-sh/setup-bun, which resolves the Bun
+      # version by requesting the oven-sh/bun tag list from api.github.com on
+      # every run, even though the version is already pinned. That request counts
+      # against this workflow's GITHUB_TOKEN API rate limit, and a 403 there fails
+      # the advisor run outright. Supplying an explicit download URL skips version
+      # resolution, so when this step succeeds that request is never made.
+      #
+      # continue-on-error preserves the existing bootstrap path: if this step
+      # fails, path_to_bun_executable below resolves to the empty string and the
+      # action falls back to installing Bun itself, as it does today.
+      #
+      # This runs before the AWS credentials are configured so that the download
+      # happens without them in the environment.
+      #
+      # The URL selects OS, architecture and version -- it does not pin the
+      # asset's bytes. Keep it consistent with the runs-on label above and with
+      # the bun-version pinned inside the claude-code-action ref below;
+      # -baseline is the portable x86-64 build.
+      - name: Install Bun
+        id: bun
+        continue-on-error: true
+        uses: oven-sh/setup-bun@3d267786b128fe76c2f16a390aa2448b815359f3 # v2.1.2
+        with:
+          bun-download-url: https://github.com/oven-sh/bun/releases/download/bun-v1.3.6/bun-linux-x64-baseline.zip
+
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
@@ -56,6 +82,9 @@ jobs:
           # source of the observed intermittent "Workflow validation failed"
           # 401s, which require the workflow to match the default branch.
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          # Skips the action's own Install Bun step. Empty if that install
+          # failed, in which case the action installs Bun itself -- see the note.
+          path_to_bun_executable: ${{ steps.bun.outcome == 'success' && steps.bun.outputs.bun-path || '' }}
           allowed_bots: "pytorch-auto-revert[bot],pytorch-bot[bot]"
           use_bedrock: "true"
           claude_args: |

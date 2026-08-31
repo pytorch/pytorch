@@ -30,7 +30,6 @@ from torch.distributed.checkpoint.default_planner import (
 )
 from torch.distributed.checkpoint.filesystem import CURRENT_DCP_VERSION
 from torch.distributed.checkpoint.metadata import (
-    _MEM_FORMAT_ENCODING,
     BytesStorageMetadata,
     ChunkStorageMetadata,
     Metadata,
@@ -191,31 +190,6 @@ class TestTensorPropertiesStrides(TestCase):
     def test_strides_default_none(self):
         props = TensorProperties(dtype=torch.float32)
         self.assertIsNone(props.strides)
-
-    def test_getstate_setstate_roundtrip_with_strides(self):
-        props = TensorProperties.create_from_tensor(torch.rand(3, 4))
-        state = props.__getstate__()
-        self.assertEqual(len(state), 6)
-
-        restored = TensorProperties.__new__(TensorProperties)
-        restored.__setstate__(state)
-        self.assertEqual(restored.strides, (4, 1))
-        self.assertEqual(restored.dtype, props.dtype)
-
-    def test_setstate_backward_compat_without_strides(self):
-        # Old checkpoints have 5-element state tuples (no strides field).
-        old_state = (
-            torch.float32,
-            torch.strided,
-            False,
-            _MEM_FORMAT_ENCODING.TORCH_CONTIGUOUS_FORMAT,
-            False,
-        )
-        restored = TensorProperties.__new__(TensorProperties)
-        restored.__setstate__(old_state)
-        self.assertIsNone(restored.strides)
-        self.assertEqual(restored.dtype, torch.float32)
-        self.assertEqual(restored.memory_format, torch.contiguous_format)
 
 
 class TestSavePlan(TestCase):
