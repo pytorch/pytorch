@@ -447,13 +447,22 @@ def _build_multigraph_forward():
         SerializedCode,
     )
 
+    # The documented contract (Note [precompile programming model]) is that the
+    # version/build locks surface as a clean PrecompileError, so an
+    # ``except torch.compiler.precompile.PrecompileError`` handler catches them.
+    from torch._precompile import PrecompileError as _PrecompileError
+
     produced_on = globals().get("_DYNAMO_PYTHON_VERSION")
     if produced_on is not None and tuple(produced_on) != _sys.version_info[:2]:
         # marshal only REJECTS a foreign blob across the 3.10 -> 3.11 layout
         # change; between 3.11 and 3.14 it loads and then segfaults when the
         # code object runs, so the version has to be checked explicitly.
-        raise ValueError(
-            f"artifact was produced on Python {produced_on[0]}.{produced_on[1]}"
+        raise _PrecompileError(
+            f"precompile: this artifact was produced on Python "
+            f"{produced_on[0]}.{produced_on[1]} and cannot load on "
+            f"{_sys.version_info[0]}.{_sys.version_info[1]}: it inlines marshalled "
+            f"bytecode, which is Python-version-locked. Regenerate the artifact "
+            f"under the serving Python."
         )
 
     # A dynamo artifact carries Dynamo internals in its opaque blobs, so it is
@@ -461,9 +470,11 @@ def _build_multigraph_forward():
     # surface as whatever import or attribute error happens to come first.
     produced_by = globals().get("TORCH_VERSION")
     if produced_by is not None and produced_by != torch.__version__:
-        raise ValueError(
-            f"artifact was produced by torch {produced_by}, "
-            f"this is torch {torch.__version__}"
+        raise _PrecompileError(
+            f"precompile: this artifact was produced by torch {produced_by} and "
+            f"this is torch {torch.__version__}: its opaque blobs carry Dynamo "
+            f"internals, which are build-locked. Regenerate the artifact under "
+            f"the serving torch."
         )
 
     # The graphs below were captured with these functions inlined into them, so
@@ -472,12 +483,21 @@ def _build_multigraph_forward():
     from torch._dynamo.package import _hash_sourcelines
 
     for _module, _first, _last, _checksum in globals().get("INLINED_SOURCES", ()):
-        if _hash_sourcelines(importlib.import_module(_module), _first, _last) != (
-            _checksum
-        ):
-            raise ValueError(
-                f"source code changes detected for {_module} "
-                f"(line {_first} - line {_last}); recapture the artifact"
+        try:
+            _hash = _hash_sourcelines(importlib.import_module(_module), _first, _last)
+        except (ImportError, OSError):
+            # The module is absent, or importable but source-less (.pyc-only):
+            # drift is UNVERIFIABLE here, not detected. The traced code is
+            # baked into the compiled graphs, and a module the bytecode
+            # actually needs is caught by the import_sources loop below with a
+            # clean error -- an unverifiable entry must not reject an artifact
+            # that would serve identically.
+            continue
+        if _hash != _checksum:
+            raise _PrecompileError(
+                f"precompile: source code changes detected for {_module} "
+                f"(line {_first} - line {_last}); the captured graphs inlined "
+                f"the old source, so recapture the artifact."
             )
 
     frames = pickle.loads(base64.b64decode(_FRAMES))
@@ -537,7 +557,17 @@ def _build_multigraph_forward():
         ns[_backend_id] = torch._dynamo.disable(_adapt(_boxed))
     for _frame in frames:
         for _alias, _module_name in _frame["import_sources"].items():
-            ns[_alias] = importlib.import_module(_module_name)
+            try:
+                ns[_alias] = importlib.import_module(_module_name)
+            except ImportError as _e:
+                # The torch-build / environment lock, surfaced per the
+                # documented contract rather than as a raw ModuleNotFoundError.
+                raise _PrecompileError(
+                    f"precompile: this artifact references module "
+                    f"'{_module_name}', which is not importable here ({_e}). It "
+                    f"was produced against a different torch build or "
+                    f"environment; regenerate the artifact in this one."
+                ) from _e
 
     entry_binding = (
         pickle.loads(base64.b64decode(_ENTRY_BINDING)) if _ENTRY_BINDING else {}

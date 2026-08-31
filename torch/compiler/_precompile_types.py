@@ -144,6 +144,6 @@ class PrecompileSummary:
         return base
 
 
-GuardFact.__module__ = "torch.compiler"
-FrameInvariants.__module__ = "torch.compiler"
-PrecompileSummary.__module__ = "torch.compiler"
+# __module__ deliberately stays truthful: torch.compiler does not export these
+# names, and pointing __module__ at it would make every instance unpicklable
+# (pickle resolves the class through __module__) and break help()/Sphinx.

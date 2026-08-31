@@ -557,6 +557,13 @@ def _precompile_drift_entry(x):
     return _DRIFT_MODULE.scaled(x).sum()
 
 
+def _precompile_slow_step(model, x, started, release):
+    out = model(x).sum()
+    started.set()
+    release.wait(timeout=60)
+    return out
+
+
 _LUT_MODULE = None
 
 
@@ -1789,6 +1796,43 @@ class TestPrecompile(TestCase):
         # enforces this for every torch.compiler.__all__ member.
         self.assertEqual(torch.compiler.precompile.__module__, "torch.compiler")
 
+    def test_summary_types_pickle(self):
+        # A capture summary or invariants report is the kind of value users
+        # stash next to an artifact (torch.save of a diagnostics record, a
+        # multiprocessing capture farm). A previous revision pointed these
+        # classes' __module__ at torch.compiler, which does not export them,
+        # so pickle could not resolve the class and every instance raised.
+        from torch.compiler._precompile_types import (
+            FrameInvariants,
+            GuardFact,
+            PrecompileSummary,
+        )
+
+        fact = GuardFact("TYPE_MATCH", "L['x']", ("code",), "is int", True)
+        inv = FrameInvariants("f", "f.py", 1, 2, (fact,), (), ())
+        summary = PrecompileSummary(1, 0, 1, 1, ())
+        for obj in (fact, inv, summary):
+            self.assertEqual(pickle.loads(pickle.dumps(obj)), obj)
+
+    def test_dynamo_artifact_version_lock_raises_precompile_error(self):
+        # Note [precompile programming model] promises the driver's
+        # Python-version lock surfaces as a clean PrecompileError, so an
+        # ``except torch.compiler.precompile.PrecompileError`` handler written
+        # to the docs catches it -- not a raw ValueError.
+        def fn(x):
+            return x + 1
+
+        python_code, cache = torch.compiler.precompile(
+            fn, tracer="dynamo", backend="eager", example_inputs=[(torch.randn(3),)]
+        )
+        cur = f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}"
+        self.assertIn(cur, python_code)
+        skewed = python_code.replace(cur, "_DYNAMO_PYTHON_VERSION = (3, 9)")
+        # exec, not load(): load()'s cache-pairing hash check would reject the
+        # edited text first, and python_code is documented as self-contained.
+        with self.assertRaisesRegex(PrecompileError, "produced on Python 3.9"):
+            exec(skewed, {})
+
     @parametrize("name", ["load"])
     def test_precompile_method_public_location(self, name):
         method = getattr(torch.compiler.precompile, name)
@@ -2010,6 +2054,76 @@ class TestPrecompile(TestCase):
                         loaded(model, x, mode),
                         _precompile_accum_step(eager, x, mode),
                     )
+
+    def test_precompile_accumulate_refuses_codegen_target_drift(self):
+        # snapshot_artifact() is a serialization boundary like save(): a CPU
+        # codegen target that drifts between accumulate() calls would write an
+        # inductor bundle mixing native code for two ISA targets -- refuse at
+        # write time, not as an illegal instruction on the loading machine.
+        model = _PrecompileAccumModel()
+        x = torch.randn(3, 8)
+        with tempfile.TemporaryDirectory() as d:
+            with torch.compiler.precompile.accumulate(
+                _precompile_accum_step,
+                artifact_path=os.path.join(d, "m.py"),
+                cache_path=os.path.join(d, "m.cache"),
+                backend="eager",
+                dynamic=False,
+                training=True,
+                require_complete=False,
+                require_no_risky_drops=False,
+            ) as capture:
+                model.zero_grad(set_to_none=True)
+                capture(model, x, "a")
+                capture._session._package._cpu_codegen_target_drift = (
+                    "CPU codegen target changed during capture: test"
+                )
+                model.zero_grad(set_to_none=True)
+                with self.assertRaisesRegex(PrecompileError, "cannot be serialized"):
+                    capture(model, x, "b")
+
+    def test_precompile_accumulate_close_waits_for_inflight_call(self):
+        # close() used to tear the region down by reaching into session
+        # privates with no drain, so a capture call on another thread could be
+        # left compiling against a destroyed cache entry. It now retires
+        # through the session's own drain handshake, like __exit__.
+        import threading
+
+        started = threading.Event()
+        release = threading.Event()
+
+        model = _PrecompileAccumModel().l
+        x = torch.randn(3, 8)
+        with tempfile.TemporaryDirectory() as d:
+            capture = torch.compiler.precompile.accumulate(
+                _precompile_slow_step,
+                artifact_path=os.path.join(d, "m.py"),
+                cache_path=os.path.join(d, "m.cache"),
+                backend="eager",
+                dynamic=False,
+                require_complete=False,
+                require_no_risky_drops=False,
+            )
+            try:
+                caller = threading.Thread(
+                    target=lambda: capture(model, x, started, release), daemon=True
+                )
+                with torch.no_grad():
+                    caller.start()
+                    self.assertTrue(started.wait(timeout=60))
+                    closer = threading.Thread(target=capture.close, daemon=True)
+                    closer.start()
+                    # The call is still in flight, so close() must be parked in
+                    # the drain, not done.
+                    closer.join(timeout=1.0)
+                    self.assertTrue(closer.is_alive())
+                    release.set()
+                    caller.join(timeout=60)
+                    closer.join(timeout=60)
+                    self.assertFalse(closer.is_alive())
+            finally:
+                release.set()
+                capture.close()
 
     def test_precompile_accumulate_artifact_is_loadable_after_every_call(self):
         # There is no finalize step, so a job that dies partway through must
@@ -3726,6 +3840,41 @@ class TestPrecompile(TestCase):
             # Served, not recompiled: the whole point of installing.
             self.assertEqual(counters["stats"]["unique_graphs"], 0)
 
+    def test_installed_artifact_call_after_unload_raises(self):
+        # Installing mutates process-global code objects, and the handle's
+        # contract is that the mutation is attributable to a point in the
+        # caller's control flow. A call after unload() must therefore raise
+        # rather than silently re-install (a stray queued task holding the
+        # handle would otherwise re-mutate live code objects with no paired
+        # unload); a fresh load() is the way to serve again.
+        code, cache = torch.compiler.precompile(
+            _precompile_unreachable_helper_caller,
+            backend="eager",
+            dynamic=False,
+            tracer="dynamo",
+            example_inputs=[(torch.randn(4),)],
+        )
+        x = torch.randn(4)
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with torch.no_grad():
+            self.assertEqual(loaded(x), _precompile_unreachable_helper_caller(x))
+            loaded.unload()
+            loaded.unload()  # idempotent
+            with self.assertRaisesRegex(PrecompileError, "unloaded"):
+                loaded(x)
+            # Re-entering is the explicit way to install again; the handle is
+            # reusable across scopes.
+            with loaded:
+                self.assertEqual(loaded(x), _precompile_unreachable_helper_caller(x))
+            with self.assertRaisesRegex(PrecompileError, "unloaded"):
+                loaded(x)
+            fresh = torch.compiler.precompile.load(code, cache)
+            try:
+                self.assertEqual(fresh(x), _precompile_unreachable_helper_caller(x))
+            finally:
+                fresh.unload()
+
     @parametrize("backend", ("eager", "inductor"))
     def test_training_capture_serves_a_backward_without_a_loss(self, backend):
         # The capture never sees a loss and never calls .backward(). The joint
@@ -3967,6 +4116,100 @@ class TestPrecompile(TestCase):
             example_inputs=[(torch.randn(n), 2) for n in (3, 5)],
         )
         self.assertTrue(_read_literal(ast.parse(code), "POLICY_DROPPED_GUARDS"))
+
+    def test_source_graph_module_pickled_copy_is_isolated(self):
+        # __reduce__ used to pickle the SHARED _src, whose body aliases the
+        # original's parameter/buffer containers -- so mutating the original
+        # after a deepcopy round-tripped the mutated tensors into the copy's
+        # pickle even though live calls were isolated. __reduce__ now
+        # snapshots the instance's own state.
+        from torch._dynamo.precompile_context import (
+            _EagerGraphSource,
+            _SourceGraphModule,
+        )
+
+        src = _EagerGraphSource(
+            code="def forward(self, x):\n    return x + self.b\n",
+            import_block="",
+            body={"_buffers": {"b": torch.ones(3)}},
+        )
+        original = _SourceGraphModule(src)
+        dup = copy.deepcopy(original)
+        x = torch.randn(3)
+        original._buffers["b"].mul_(100)
+        self.assertEqual(original(x), x + 100)
+        self.assertEqual(dup(x), x + 1)  # live isolation
+        self.assertEqual(pickle.loads(pickle.dumps(dup))(x), x + 1)
+        # And an instance pickles its CURRENT state, not its load-time state.
+        self.assertEqual(pickle.loads(pickle.dumps(original))(x), x + 100)
+
+    def test_invariants_report_lists_policy_dropped_slots(self):
+        # The report header promises a dropped line is "a precondition NOTHING
+        # checks". A policy-dropped slot is exactly that, but the policy used
+        # to DELETE those facts from the report's source data rather than
+        # re-mark them, so an auditor reading the file saw a validity domain
+        # far wider than the artifact's true one.
+        import re as re_mod
+
+        from torch._precompile import _read_literal
+
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "invariants.txt")
+            code, _ = torch.compiler.precompile(
+                _precompile_scaled,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                example_inputs=[(torch.randn(n), 2) for n in (3, 5)],
+                invariants=path,
+            )
+            dropped = _read_literal(ast.parse(code), "POLICY_DROPPED_GUARDS")
+            self.assertTrue(dropped)
+            with open(path) as f:
+                report = f.read()
+        for _guard_type, name in list(dropped)[:3]:
+            self.assertRegex(report, rf"\[dropped \][^\n]*{re_mod.escape(name)}")
+
+    def test_guard_policy_classification_is_total(self):
+        # survives() defaults to KEEP for a guard type in no set, so the
+        # policy can only ever drop what _INVARIANT_DROPPABLE_GUARD_TYPES
+        # names. This test is what makes the never-drop claim enforceable:
+        # a guard type added to GuardBuilder fails here until someone triages
+        # it into exactly one of the three sets.
+        import itertools
+
+        from torch._dynamo.guards import GuardBuilder
+        from torch._dynamo.precompile_package import (
+            _INVARIANT_DROPPABLE_GUARD_TYPES,
+            _SHAPE_BEARING_GUARD_TYPES,
+            _UNMODELLED_GUARD_TYPES,
+        )
+
+        guard_types = {
+            name
+            for name, value in vars(GuardBuilder).items()
+            if name.isupper() and callable(value)
+        }
+        self.assertGreater(len(guard_types), 40)  # the enumeration itself works
+        sets = {
+            "_SHAPE_BEARING_GUARD_TYPES": _SHAPE_BEARING_GUARD_TYPES,
+            "_UNMODELLED_GUARD_TYPES": _UNMODELLED_GUARD_TYPES,
+            "_INVARIANT_DROPPABLE_GUARD_TYPES": _INVARIANT_DROPPABLE_GUARD_TYPES,
+        }
+        classified: frozenset[str] = frozenset().union(*sets.values())
+        self.assertEqual(
+            sorted(guard_types - classified),
+            [],
+            "unclassified GuardBuilder guard type(s): add each to exactly one "
+            "policy set in torch/_dynamo/precompile_package.py (KEPT until then)",
+        )
+        self.assertEqual(
+            sorted(classified - guard_types),
+            [],
+            "phantom entries: no GuardBuilder method by these names",
+        )
+        for (a_name, a), (b_name, b) in itertools.combinations(sets.items(), 2):
+            self.assertEqual(sorted(a & b), [], f"{a_name} overlaps {b_name}")
 
     def test_installed_artifact_reuses_what_load_prepared(self):
         # Preparing at load is only worth doing if install CONSUMES the result;
@@ -4360,7 +4603,9 @@ class TestPrecompile(TestCase):
         torch._dynamo.reset()
         with (
             mock.patch.object(torch, "__version__", "0.0.0+notreal"),
-            self.assertRaisesRegex(Exception, "produced by torch"),
+            # PrecompileError, not a bare ValueError: the docs promise the
+            # version/build locks are catchable as PrecompileError.
+            self.assertRaisesRegex(PrecompileError, "produced by torch"),
         ):
             torch.compiler.precompile.load(code, cache)
 
@@ -4410,8 +4655,21 @@ class TestPrecompile(TestCase):
 
             _DRIFT_MODULE = import_from_path("torch.test_precompile_drift", modified)
             torch._dynamo.reset()
-            with self.assertRaisesRegex(Exception, "source code changes detected"):
+            with self.assertRaisesRegex(
+                PrecompileError, "source code changes detected"
+            ):
                 torch.compiler.precompile.load(code, cache)
+
+            # A serving host WITHOUT the module (its code is baked into the
+            # captured graphs) makes drift unverifiable, not detected: the
+            # check must skip rather than surface a raw ModuleNotFoundError
+            # on an artifact that serves identically -- the CAPTURED answer,
+            # x * 3, not the modified module's.
+            del sys.modules["torch.test_precompile_drift"]
+            torch._dynamo.reset()
+            loaded = torch.compiler.precompile.load(code, cache)
+            with _maybe_scoped(loaded), torch.no_grad():
+                self.assertEqual(loaded(x), (x * 3.0).sum())
 
     def test_guard_drift_is_reported(self):
         # The loud half of a lossy reconstruction is a guard that will not
@@ -5146,10 +5404,18 @@ class TestPrecompile(TestCase):
             fn_name = "fwd_loss_bwd"
             codes = [_make_code(fwd_loss_bwd)]
 
+        # The state a bypassed ENTRY actually arrives in: _multigraph_frames
+        # DROPS bypassed codes, so there is no entry frame at all -- the
+        # diagnostic must fire from the empty list, not from a variant-less
+        # entry frame it would never see.
+        with self.assertRaisesRegex(PrecompileError, "were BYPASSED during capture"):
+            _reject_uninstallable_entry([], _Entry())
+        with self.assertRaisesRegex(PrecompileError, "cannot pickle 'generator'"):
+            _reject_uninstallable_entry([], _Entry())
+        # An entry frame that compiled but produced no variants, with a
+        # bypassed sibling code of the same name, reports the bypass too.
         frames = [{"is_entry": True, "variants": []}]
         with self.assertRaisesRegex(PrecompileError, "were BYPASSED during capture"):
-            _reject_uninstallable_entry(frames, _Entry())
-        with self.assertRaisesRegex(PrecompileError, "cannot pickle 'generator'"):
             _reject_uninstallable_entry(frames, _Entry())
 
         class _EntryWithForeignBypass:
@@ -5158,6 +5424,9 @@ class TestPrecompile(TestCase):
 
         with self.assertRaisesRegex(PrecompileError, "thin wrapper"):
             _reject_uninstallable_entry(frames, _EntryWithForeignBypass())
+        # No entry frame and only a FOREIGN bypassed code: neither diagnostic
+        # applies, so neither may fire as a guess.
+        _reject_uninstallable_entry([], _EntryWithForeignBypass())
 
     def test_no_dispatchable_graph_keeps_the_wrapper_hint_when_nothing_bypassed(self):
         from torch._precompile import _reject_uninstallable_entry
