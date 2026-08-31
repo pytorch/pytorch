@@ -14,6 +14,7 @@ from torch.distributed.checkpoint.state_dict_loader import _load_state_dict_from
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Replicate, Shard, zeros
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     run_tests,
     TestCase,
@@ -38,6 +39,8 @@ class MyTestModule(torch.nn.Module):
 
 
 class TestSingleRankSaveLoad(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @with_temp_dir
     def test_save(self) -> None:
         try:
@@ -275,6 +278,8 @@ class TestSingleRankSaveLoad(TestCase):
 
 
 class TestDistributedHFSafetensorsConsolidation(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @with_comms
     @with_temp_dir
     @skip_if_lt_x_gpu(2)
@@ -355,6 +360,7 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
     """
     Test DCP reshard for DTensor with placements changes and without world_size change and mesh_tensor change.
     """
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @with_comms
     @skip_if_lt_x_gpu(2)
@@ -472,6 +478,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
     """
     Test DCP reshard for DTensor with placements changes and mesh_tensor change.
     """
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @with_comms
     @with_temp_dir
