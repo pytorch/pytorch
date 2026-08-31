@@ -42,6 +42,7 @@ from torch.testing._internal.common_methods_invocations import (
 )
 from torch.testing._internal.common_utils import (
     gradcheck,
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -168,6 +169,8 @@ def get_transform_func(num_tensors, dtype, device, is_fastpath):
 # as the pair would go through `multi_tensor_apply_kernel` if inputs are not zero size.
 @unittest.mock.patch.dict(os.environ, {"KINETO_LOG_LEVEL": "5"})
 class TestForeachDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def is_cuda(self):
         return self.device_type == "cuda"
@@ -1926,6 +1929,8 @@ instantiate_device_type_tests(TestForeachDevice, globals(), allow_xpu=True)
 class TestForeachCUDA(TestCase):
     """CUDA-specific tests for TestForeach."""
 
+    hw_classification = HardwareClassification.CUDA
+
     @onlyCUDA
     @dtypes(torch.complex128)
     def test_foreach_scalarlist_complex_double_many_tensors(self, device, dtype):
@@ -1954,6 +1959,8 @@ instantiate_device_type_tests(TestForeachCUDA, globals(), only_for="cuda")
 
 
 class TestForeachPublicAPI(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize("op", foreach_op_db, name_fn=lambda op: op.name)
     @skipIfTorchDynamo("torch.compile does not work with foreach torch function")
     def test_private_compatibility(self, op):
@@ -2159,6 +2166,8 @@ _FOREACH_MM_SHAPES = [
 class TestForeachMM(TestCase):
     """Generic `foreach.mm` tests."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_foreach_mm_gradcheck(self):
         G = 4
         shapes = [(32, 32, 32)] * G
@@ -2198,6 +2207,8 @@ class _TestForeachMMHelper(TestCase):
 class TestForeachMMDevice(_TestForeachMMHelper, TestCase):
     """`foreach.mm` tests for different devices."""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @parametrize(
         "label,shapes",
         _FOREACH_MM_SHAPES,
@@ -2214,6 +2225,8 @@ instantiate_device_type_tests(TestForeachMMDevice, globals())
 
 class TestForeachMMCUDA(_TestForeachMMHelper, TestCase):
     """CUDA-specific tests for `foreach.mm`."""
+
+    hw_classification = HardwareClassification.CUDA
 
     @parametrize(
         "label,a_dtype,b_dtype,K,expected",
