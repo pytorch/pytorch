@@ -12055,6 +12055,25 @@ class TestNNDeviceType(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, msg):
                 F.nll_loss(x, t, weight=weight)
 
+    @onlyAccelerator
+    def test_nll_loss_1d_input_backward(self, device):
+        # For 1D (no batch dim) input aten.nll_loss_backward uses only target[0].
+        # The MPS Metal kernel used to dispatch target.numel() threads, reading
+        # the single-element grad_output out of bounds and scattering garbage
+        # into grad_input. Back grad_output with a larger sentinel-filled tensor
+        # and view out a single element so any out-of-bounds read is a
+        # deterministic non-zero value. gh-195391
+        input = torch.randn(3, device=device)
+        target = torch.tensor([2, 0, 1], device=device)
+        total_weight = torch.tensor(1.0, device=device)
+        grad_output_storage = torch.full((4,), torch.finfo(torch.float32).max, device=device)
+        grad_output_storage[0] = torch.randn(())
+        grad_output = grad_output_storage[:1]
+        args = (grad_output, input, target, None, 0, 10, total_weight)
+        ref = torch.ops.aten.nll_loss_backward(*(a.cpu() if torch.is_tensor(a) else a for a in args))
+        out = torch.ops.aten.nll_loss_backward(*args)
+        self.assertEqual(out.cpu(), ref)
+
     # Ref: https://github.com/pytorch/pytorch/issues/85005
     @onlyCUDA
     @largeTensorTest("120GB", "cpu")
