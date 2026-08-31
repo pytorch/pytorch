@@ -1205,6 +1205,20 @@ class TestUserDefinedSetitem(TestCase):
         with self.assertRaises(TypeError):
             del obj[0]
 
+    @make_dynamo_test
+    def test_setitem_missing_sibling_method_raises_attributeerror(self):
+        # OnlyDel has __delitem__, so the type has an mp_ass_subscript slot and
+        # __setitem__ lookup reaches _lookup_method's missing-method path
+        # (lookup_method: PyErr_SetObject(PyExc_AttributeError, ...)), rather
+        # than failing earlier with TypeError for having no slot at all.
+        class OnlyDel:
+            def __delitem__(self, k):
+                pass
+
+        obj = OnlyDel()
+        with self.assertRaises(AttributeError):
+            obj[0] = 1
+
     # -- metaclass __delitem__: del Cls[k] --
 
     @make_dynamo_test

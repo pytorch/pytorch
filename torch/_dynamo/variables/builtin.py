@@ -69,6 +69,7 @@ from ..utils import (
     check_numpy_ndarray_args,
     check_unspec_or_constant_args,
     check_unspec_python_args,
+    cmp_name_to_op_mapping,
     dict_methods,
     extract_fake_example_value,
     get_fake_value,
@@ -85,6 +86,9 @@ from .base import (
     AsPythonConstantNotImplementedError,
     GetSet,
     Member,
+    NO_SUCH_SUBOBJ,
+    readonly_setter,
+    unmodeled_setter,
     ValueMutationNew,
     VariableTracker,
 )
@@ -116,6 +120,7 @@ from .object_protocol import (
     generic_size,
     generic_str,
     maybe_get_python_type,
+    mro_lookup,
     pycallable_check,
     pyiter_check,
     pylong_from_base,
@@ -150,7 +155,11 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .user_defined import UserDefinedObjectVariable, UserDefinedVariable
+from .user_defined import (
+    is_data_descriptor,
+    UserDefinedObjectVariable,
+    UserDefinedVariable,
+)
 
 
 if TYPE_CHECKING:
@@ -429,10 +438,10 @@ class BaseBuiltinVariable(VariableTracker):
         source = self.source and AttrSource(self.source, "__flags__")
         return VariableTracker.build(tx, fn.__flags__, source)
 
-    tp_getset = {"__bases__": GetSet(_type_get_bases, None)}
+    tp_getset = {"__bases__": GetSet(_type_get_bases, unmodeled_setter)}
     tp_members = {
-        "__base__": Member(_type_get_base, None),
-        "__flags__": Member(_type_get_flags, None),
+        "__base__": Member(_type_get_base, readonly_setter),
+        "__flags__": Member(_type_get_flags, readonly_setter),
     }
 
     @classmethod
@@ -449,6 +458,37 @@ class BaseBuiltinVariable(VariableTracker):
             raise AssertionError("shadowed global")
         codegen.append_output(codegen.create_load_global(name, add=True))
 
+    def _resolve_type_attr_descriptor(
+        self, tx: "InstructionTranslatorBase", fn: Any, name: str, source: Source | None
+    ) -> VariableTracker | None:
+        """When fn is itself a type (e.g. list, str, int), mirror CPython's
+        type_getattro step 4 (descriptor.__get__(None, cls)) so e.g.
+        `list.__len__` resolves to a WrapperDescriptorVariable like it would
+        for any other class. Returns None to signal "no such unbound
+        descriptor" (caller falls back to its own GetAttrVariable handling).
+        """
+        if not isinstance(fn, type):
+            return None
+        # Metaclass data descriptors (e.g. type.__dict__['__dict__']) take
+        # priority over fn's own MRO -- mirrors UserDefinedClassVariable's
+        # type_getattro steps 1-2. Without this, a class that separately
+        # defines its own same-named instance-level descriptor (e.g.
+        # BaseException.__dict__['__dict__'], for instance attribute storage)
+        # would incorrectly shadow the metaclass one used for class-level
+        # access like `BaseException.__dict__`.
+        meta_attr = mro_lookup(type(fn), name)
+        if meta_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(meta_attr):
+            return None
+        cls_attr = mro_lookup(fn, name)
+        if cls_attr is NO_SUCH_SUBOBJ or (
+            name in cmp_name_to_op_mapping
+            and not isinstance(cls_attr, types.FunctionType)
+        ):
+            return None
+        from .functions import resolve_unbound_class_descriptor
+
+        return resolve_unbound_class_descriptor(tx, cls_attr, self, name, source)
+
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
@@ -458,6 +498,11 @@ class BaseBuiltinVariable(VariableTracker):
         # to super().
         fn = self.as_python_constant()
         source = self.source and AttrSource(self.source, name)
+
+        result = self._resolve_type_attr_descriptor(tx, fn, name, source)
+        if result is not None:
+            return result
+
         attr = getattr(fn, name, None)
         return variables.GetAttrVariable(
             self, name, py_type=type(attr) if attr is not None else None, source=source
@@ -604,7 +649,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         return VariableTracker.build(tx, self.fn.__name__, source)
 
     tp_getset = {
-        "__name__": GetSet(_builtin_type_get_name, None),
+        "__name__": GetSet(_builtin_type_get_name, readonly_setter),
     }
 
     @classmethod
@@ -2799,6 +2844,11 @@ class BuiltinVariable(BaseBuiltinVariable):
                 raise_observed_exception(AttributeError, tx)
             if not callable(value):
                 return VariableTracker.build(tx, value, source)
+
+        result = self._resolve_type_attr_descriptor(tx, self.fn, name, source)
+        if result is not None:
+            return result
+
         attr = getattr(self.fn, name, None)
         return variables.GetAttrVariable(
             self, name, py_type=type(attr) if attr is not None else None, source=source
