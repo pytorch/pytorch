@@ -18,7 +18,9 @@ from torch._inductor.pattern_matcher import (
    CallMethodVarArgs,
    CallModule,
    CallModuleVarArgs,
+   CanonicalDims,
    ExclusiveKeywordArg,
+   GetAttr,
    Ignored,
    KeywordArg,
    ListOf,
@@ -30,9 +32,9 @@ from torch._inductor.pattern_matcher import (
    _TargetExprVarArgs,
 )
 mm_default = CallFunction(aten.mm.default, KeywordArg('mat1'), KeywordArg('mat2'))
-permute_default = CallFunction(aten.permute.default, KeywordArg('mat2'), Ignored())
+permute_default = CallFunction(aten.permute.default, KeywordArg('mat2'), CanonicalDims([1, 0], 2))
 mm_default_1 = CallFunction(aten.mm.default, KeywordArg('tangents_1'), permute_default)
-permute_default_1 = CallFunction(aten.permute.default, KeywordArg('mat1'), Ignored())
+permute_default_1 = CallFunction(aten.permute.default, KeywordArg('mat1'), CanonicalDims([1, 0], 2))
 mm_default_2 = CallFunction(aten.mm.default, permute_default_1, KeywordArg('tangents_1'))
 mm_pattern_training = MultiOutputPattern([mm_default,
   mm_default_1,

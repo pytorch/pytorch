@@ -801,6 +801,90 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         )
         self.assertEqual(counters["inductor"]["fuse_attention"], 0)
 
+    def _test_pattern_fails_with_batch_permuted_key(self):
+        # https://github.com/pytorch/pytorch/issues/195320
+        def dot_prod_attention(query, key, value):
+            # key arrives as (B, T, H, D); permute(0, 2, 3, 1) also moves
+            # batch axes, so it is not key.transpose(-2, -1) and must not
+            # fuse as attention.
+            return (
+                torch.matmul(query, key.permute(0, 2, 3, 1))
+                .mul(1.0 / math.sqrt(key.shape[-1]))
+                .softmax(dim=-1)
+                .matmul(value)
+            )
+
+        def control_dot_prod_attention(query, key, value):
+            return (
+                torch.matmul(query, key.transpose(-2, -1))
+                .mul(1.0 / math.sqrt(key.shape[-1]))
+                .softmax(dim=-1)
+                .matmul(value)
+            )
+
+        # batch 1 keeps the permuted key viewable (no clone in the matmul
+        # decomposition) and T == H keeps the mis-bound replacement shape
+        # consistent, so before the fix this silently fused and produced
+        # wrong results instead of crashing.
+        tensor_shape = (1, 8, 8, 8)
+
+        def make_args():
+            return [torch.randn(tensor_shape, device=self.device) for _ in range(3)]
+
+        self._check_common(
+            dot_prod_attention,
+            args1=make_args(),
+            contains=False,
+            has_fuse_pattern=False,
+        )
+        self.assertEqual(counters["inductor"]["fuse_attention"], 0)
+        # the same shapes spelled with a genuine transpose must still fuse
+        self._check_common(control_dot_prod_attention, args1=make_args())
+
+        # a negative-dim spelling of the same transpose must also fuse
+        def negative_dims_dot_prod_attention(query, key, value):
+            return (
+                torch.matmul(query, key.permute(0, 1, -1, -2))
+                .mul(1.0 / math.sqrt(key.shape[-1]))
+                .softmax(dim=-1)
+                .matmul(value)
+            )
+
+        self._check_common(negative_dims_dot_prod_attention, args1=make_args())
+
+    def _test_pattern_fails_with_non_last_dim_softmax(self):
+        # https://github.com/pytorch/pytorch/issues/195320
+        def dot_prod_attention(query, key, value):
+            # softmax over dim=-2 is a different computation and must not
+            # fuse as attention
+            scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(
+                query.shape[-1]
+            )
+            return scores.softmax(dim=-2).matmul(value)
+
+        def positive_dim_dot_prod_attention(query, key, value):
+            scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(
+                query.shape[-1]
+            )
+            return scores.softmax(dim=3).matmul(value)
+
+        # T == H keeps the mis-bound replacement shape consistent, so before
+        # the fix this silently fused and produced wrong results.
+        tensor_shape = (1, 8, 8, 8)
+
+        def make_args():
+            return [torch.randn(tensor_shape, device=self.device) for _ in range(3)]
+
+        self._check_common(
+            dot_prod_attention,
+            args1=make_args(),
+            contains=False,
+            has_fuse_pattern=False,
+        )
+        self.assertEqual(counters["inductor"]["fuse_attention"], 0)
+        # softmax over the last dim spelled positively must still fuse
+        self._check_common(positive_dim_dot_prod_attention, args1=make_args())
+
     def _test_pattern_fuses_with_symint_scale(self):
         # A SymInt scale is a scalar the fused kernel accepts. _check_common
         # only marks dim 0 dynamic, so the scale is taken from that dim.
@@ -1984,6 +2068,10 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
         test_pattern_fails_with_unsupported_mask_gpu = (
             TestSDPAPatternRewriterTemplate._test_pattern_fails_with_unsupported_mask
         )
+        test_pattern_fails_with_batch_permuted_key_gpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_batch_permuted_key
+        )
+        test_pattern_fails_with_non_last_dim_softmax_gpu = TestSDPAPatternRewriterTemplate._test_pattern_fails_with_non_last_dim_softmax
         test_sdpa_rewriter_11_gpu = (
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_11
         )
@@ -2131,6 +2219,10 @@ if HAS_CPU:
         test_pattern_fails_with_unsupported_mask_cpu = (
             TestSDPAPatternRewriterTemplate._test_pattern_fails_with_unsupported_mask
         )
+        test_pattern_fails_with_batch_permuted_key_cpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_batch_permuted_key
+        )
+        test_pattern_fails_with_non_last_dim_softmax_cpu = TestSDPAPatternRewriterTemplate._test_pattern_fails_with_non_last_dim_softmax
         test_sdpa_rewriter_11_cpu = (
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_11
         )

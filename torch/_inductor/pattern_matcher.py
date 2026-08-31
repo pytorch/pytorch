@@ -588,6 +588,44 @@ class Ignored(PatternExpr):
         return "Ignored()"
 
 
+class CanonicalDims(PatternExpr):
+    """
+    Match a burned-in list of dim indices, treating negative dims as
+    equivalent to their positive spelling.  `rank` is the rank of the tensor
+    the op consumes, captured when the pattern was traced; the matched graph's
+    tensor is trusted to have the same rank (for permute the dims length
+    enforces it, for reductions the surrounding pattern pins it).  Dims are
+    compared order-sensitively; fine for permute (order is the semantics) and
+    for the single-dim reductions traced today, but multi-dim reduction dims
+    are semantically unordered and would need a per-op sort.
+    """
+
+    def __init__(self, dims: Sequence[int], rank: int) -> None:
+        super().__init__()
+        if rank <= 0:
+            raise AssertionError(f"expected positive rank, got {rank}")
+        self.rank = rank
+        self.dims = [d % rank for d in dims]
+
+    def __repr__(self) -> str:
+        return f"CanonicalDims({self.dims!r}, {self.rank})"
+
+    def _match(self, node: NodeOrConstant, ctx: MatchContext) -> MatchResult:
+        if (
+            isinstance(node, (list, tuple))
+            and all(type(d) is int for d in node)
+            and [d % self.rank for d in node] == self.dims
+        ):
+            return Match(ctx, self)
+        return FailedMatch("canonical_dims: {} != {}", node, self.dims)
+
+    def pattern_eq(self, other: object) -> bool:
+        if not super().pattern_eq(other):
+            return False
+        other = typing.cast(Self, other)
+        return self.dims == other.dims and self.rank == other.rank
+
+
 def _get_fake_tensor_constant(value: torch.Tensor) -> torch.Tensor | None:
     if is_fake_tensor(value):
         return maybe_get_fake_constant(value)
@@ -2736,6 +2774,12 @@ def _not_implemented(*args: object, **kwargs: object) -> NoReturn:
     raise NotImplementedError
 
 
+# The dims list of these ops selects which computation is performed rather
+# than echoing tensor shapes, so fx_to_pattern matches it (via CanonicalDims)
+# instead of ignoring it like other traced-in int/list arguments.
+_DIM_LIST_FNS = (aten.permute.default, aten.amax.default, aten.sum.dim_IntList)
+
+
 def fx_to_pattern(
     gm: torch.fx.GraphModule | torch.fx.Graph,
     ignore_types: Sequence[type[Any]] = (),
@@ -2773,6 +2817,7 @@ def fx_to_pattern(
     class Converter(torch.fx.Interpreter):
         call_method = _not_implemented
         call_module = _not_implemented
+        _current_node: torch.fx.Node | None = None
 
         # pyrefly: ignore [bad-override]
         def placeholder(
@@ -2830,6 +2875,9 @@ def fx_to_pattern(
 
                 process_arg_fn = process_arg_fn_impl
 
+            rank = self._dims_rank(target, args)
+            if rank is not None:
+                args = (args[0], CanonicalDims(args[1], rank), *args[2:])
             args, kwargs = pytree.tree_map(process_arg_fn, (args, kwargs))
             if list in ignore_types:
                 # Handle a burned in tensor size which are now [Ignored(), Ignored(), ...]
@@ -2837,7 +2885,29 @@ def fx_to_pattern(
                 kwargs = {k: process_arg_fn(a) for k, a in kwargs.items()}
             return CallFunction(target, *args, **kwargs)
 
+        def _dims_rank(self, target: Any, args: Sequence[Any]) -> int | None:
+            """Rank context for _DIM_LIST_FNS, or None to fall back to process_arg."""
+            if target not in _DIM_LIST_FNS or len(args) < 2:
+                return None
+            dims = args[1]
+            if not (
+                isinstance(dims, (list, tuple)) and all(type(d) is int for d in dims)
+            ):
+                return None
+            if any(d in inv_scalar_workaround for d in dims):
+                # the dim is a captured pattern input (e.g. prepare_softmax's
+                # `dim`), not a constant to match
+                return None
+            if target is aten.permute.default:
+                return len(dims) or None
+            node = self._current_node
+            if node is None or not isinstance(node.args[0], torch.fx.Node):
+                return None
+            val = node.args[0].meta.get("val")
+            return val.ndim if isinstance(val, torch.Tensor) and val.ndim > 0 else None
+
         def run_node(self, n: torch.fx.Node) -> Any:
+            self._current_node = n
             rv = super().run_node(n)
             if n.op == "output" and isinstance(rv, tuple):
                 args = n.args[0]

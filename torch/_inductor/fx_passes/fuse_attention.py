@@ -1013,12 +1013,9 @@ def _sfdp_params_check(match):
 def _sfdp_pattern_13_check(match):
     if not _sfdp_params_check(match):
         return False
-    permutes = filter_nodes(match.nodes, aten.permute.default)
-    if len(permutes) != 1:
-        return False
-    # The serialized pattern wildcard-matches the permute dimensions.
-    permute_dims = permutes[0].args[1]
-    return isinstance(permute_dims, (list, tuple)) and tuple(permute_dims) == (0, 2, 1)
+    # The pattern itself matches the permute dims exactly; only reject matches
+    # that pull in additional permutes (training patterns).
+    return len(filter_nodes(match.nodes, aten.permute.default)) == 1
 
 
 def _sfdp_extra_check(scale_factor_op=None, disable_cuda=False):
