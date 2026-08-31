@@ -145,6 +145,44 @@ class TestColTileHost(TestCase):
         with self.assertRaisesRegex(AssertionError, "no tile"):
             col.tilemap
 
+    def test_over_reported_split_stays_correct(self):
+        # _split_p caps npar at _P_MAX, so q * (npar - 1) can exceed R and the last blocks get a
+        # NEGATIVE row count. They still write a partial that stage 2 folds, so this pins both
+        # halves: the fold issues no load, and the identity survives the combine. Asserted on the
+        # result rather than on the lowering, which is what the clamp stops depending on.
+        import cutlass
+
+        from torch._native.ops._cutedsl import traits as T
+        from torch._native.ops.reductions import kernel_coltile as ct
+
+        r = ct._P_MAX * ct._Q_TARGET + 1  # the smallest R whose split over-reports
+        self.assertEqual(ct._split_p(r), ct._P_MAX, "shape no longer over-reports")
+        x = torch.randn(r, 8, device="cuda")
+        out = ct.reduce_col_tile(
+            T.SumOps(acc=cutlass.Float32), "overrep", x, torch.float32
+        )
+        self.assertEqual(out, x.double().sum(dim=0).float(), atol=2e-3, rtol=1e-4)
+        # An index trait shows a stray partial as a WRONG INDEX, not a small numeric error.
+        idx = ct.reduce_col_tile(
+            T.ArgMaxOps(acc=cutlass.Float32), "overrep_idx", x, torch.int32
+        )
+        self.assertEqual(idx, x.argmax(dim=0).to(torch.int32))
+
+    def test_explicit_vec_must_divide_the_column_count(self):
+        # nchunks = C // vec, so a vec that does not divide C never stores the trailing columns
+        # and `out` keeps whatever torch.empty gave it -- a silently wrong answer, not an error.
+        # The derived vec always divides C, so only an explicit one reaches this.
+        import cutlass
+
+        from torch._native.ops._cutedsl import traits as T
+        from torch._native.ops.reductions import kernel_coltile as ct
+
+        x = torch.randn(64, 30, device="cuda")
+        with self.assertRaisesRegex(AssertionError, "vec must divide"):
+            ct.reduce_col_tile(
+                T.SumOps(acc=cutlass.Float32), "badvec", x, torch.float32, vec=4
+            )
+
 
 if __name__ == "__main__":
     run_tests()
