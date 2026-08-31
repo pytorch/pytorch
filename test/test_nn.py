@@ -46,10 +46,10 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
     module_tests, criterion_tests, loss_reference_fns, _create_basic_net, \
     ctcloss_reference, get_new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_device_type_tests, dtypes, \
-    dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, \
+    dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, onlyOn, \
     skipCUDAIf, skipCUDAIfNoCudnn, skipCUDAIfRocm, skipMPSIf, skipMPS, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, expectedFailureMPS, \
-    skipMeta, get_all_device_types
+    expectedFailureMPSPre27, skipMeta, get_all_device_types
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
 
 from hypothesis import given
@@ -7694,6 +7694,27 @@ class TestNNDeviceType(NNTestCase):
             c_cpu.backward(grad.cpu())
             self.assertEqual(x.grad, ref_x.grad)
 
+    @onlyAccelerator   # CPU is the reference the results are compared against
+    @parametrize_test("mode,shape,padding", [
+        ("constant", (1, 2, 3, 256, 256), (0, 0, 0, 0, 2, 1)),
+        ("constant", (1, 1, 2, 2, 65536), (2, 1)),
+        ("constant", (1, 1, 2, 2, 65536), (0, 0, 2, 1)),
+        ("replicate", (1, 2, 3, 256, 256), (0, 0, 0, 0, 2, 1)),
+        ("reflect", (1, 2, 3, 256, 256), (0, 0, 0, 0, 2, 1)),
+    ])
+    def test_pad_5d_large_inner_dims(self, device, mode, shape, padding):
+        # Padding a rank > 4 operand must not corrupt the copied input when the inner extent is large.
+        # https://github.com/pytorch/pytorch/issues/194922
+        x = torch.randn(shape, device=device, requires_grad=True)
+        ref_x = x.detach().cpu().requires_grad_()
+        out = F.pad(x, padding, mode=mode)
+        out_cpu = F.pad(ref_x, padding, mode=mode)
+        self.assertEqual(out, out_cpu)
+        grad = torch.randn_like(out)
+        out.backward(grad)
+        out_cpu.backward(grad.cpu())
+        self.assertEqual(x.grad, ref_x.grad)
+
     @onlyCUDA
     @largeTensorTest("48GB", "cpu")
     @largeTensorTest("48GB", "cuda")
@@ -8701,7 +8722,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(x.grad[:, :, 0], g[:, :, : pl + 1].sum(-1))
             self.assertEqual(x.grad[:, :, -1], g[:, :, -pr - 1:].sum(-1))
 
-    @expectedFailureMPS  # Correctness issue https://github.com/pytorch/pytorch/issues/135447
+    @expectedFailureMPSPre27  # Correctness issue https://github.com/pytorch/pytorch/issues/135447
     def test_ReplicationPad2d_large(self, device):
         shapes = ([2, 65736, 4, 4], [65736, 2, 4, 4])
         pl, pr, pt, pb = 3, 4, 5, 6
@@ -12102,8 +12123,8 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue(torch.allclose(loss_cpu, loss.cpu(), rtol=1e-4, atol=1e-4))
 
     # Ref: https://github.com/pytorch/pytorch/issues/190139
-    @onlyCUDA
-    @largeTensorTest("5GB", "cuda")
+    @onlyOn(["cuda", "mps"])
+    @largeTensorTest("5GB")
     def test_nll_loss2d_backward_large_sample_offset(self, device):
         batch_size = 2**16 + 1
         num_classes = 2**15
@@ -12135,7 +12156,7 @@ class TestNNDeviceType(NNTestCase):
             one,
         )
 
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
         self.assertEqual(grad_input[-1, 0, 0, 0], -1)
 
     def _nll_loss_helper(self, input_size, reduction, expected, device, dtype):
