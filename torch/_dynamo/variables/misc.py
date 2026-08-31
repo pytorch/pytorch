@@ -392,16 +392,13 @@ class SuperVariable(VariableTracker):
             return self.objvar._base_vt.call_method(tx, name, args, kwargs)
         elif inner_fn is object.__getattribute__:
             attr_name = args[0].value  # type: ignore[attr-defined]
-            # object.__getattribute__ IS PyObject_GenericGetAttr, which has no
-            # __getattr__ fallback (that lives in _Py_slot_tp_getattr_hook), so
-            # pass skip_getattr_fallback=True.  Delegate to the shared
-            # implementation so that __dict__, __class__, polyfilled C
-            # descriptors, etc. are all handled consistently.
+            # object.__getattribute__ IS PyObject_GenericGetAttr, which never
+            # touches __getattr__ (that chain lives one level up, in
+            # _Py_slot_tp_getattr_hook).  object_generic_getattr is now a
+            # faithful GenericGetAttr, so no flag is needed here.
             # https://github.com/python/cpython/blob/e76aa128fe/Objects/object.c#L1611-L1683
             if isinstance(self.objvar, UserDefinedObjectVariable):
-                return object_generic_getattr(
-                    tx, self.objvar, attr_name, skip_getattr_fallback=True
-                )
+                return object_generic_getattr(tx, self.objvar, attr_name)
 
             attr_value = None
             try:

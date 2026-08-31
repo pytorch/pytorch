@@ -1731,6 +1731,34 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, torch.tensor(2))
         self.assertFalse(hasattr(MyClass, "y"))
 
+    def test_custom_getattribute_raise_does_not_rewalk(self):
+        """After a custom __getattribute__ raises, only __getattr__ runs.
+
+        CPython's _Py_slot_tp_getattr_hook calls __getattr__ and does NOT redo
+        GenericGetAttr, so a class attribute that GenericGetAttr would have
+        found must not be returned here.
+        """
+
+        class C:
+            y = "class-attr-value"
+
+            def __getattribute__(self, n):
+                if n == "y":
+                    raise AttributeError(n)
+                return object.__getattribute__(self, n)
+
+            def __getattr__(self, n):
+                return "getattr-value"
+
+        def fn(o):
+            return o.y
+
+        o = C()
+        self.assertEqual(fn(o), "getattr-value")
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(o), "getattr-value"
+        )
+
     # --- Explicit comparison dunder access (CallMethodVariable) ---
 
     def test_function_explicit_dunder_eq(self):
