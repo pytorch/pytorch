@@ -1,12 +1,19 @@
 # Owner(s): ["module: dynamo"]
-"""Tests for getattro_impl: unified attribute access protocol in Dynamo."""
+"""Tests for tp_getattro_impl: unified attribute access protocol in Dynamo."""
+
+import inspect
+import types
 
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch.testing._internal.common_utils import HardwareClassification
+from torch.utils._triton import has_triton_package
 
 
 class TpGetattroTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # --- getattr() builtin ---
 
     def test_getattr_constant(self):
@@ -420,7 +427,7 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(result, torch.sin(x))
 
-    # --- Descriptor protocol (tp_descr_get through getattro_impl) ---
+    # --- Descriptor protocol (tp_descr_get through tp_getattro_impl) ---
 
     def test_data_descriptor_priority_over_instance_dict(self):
         """Data descriptors (property) take precedence over instance __dict__."""
@@ -564,6 +571,28 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
 
         result = torch.compile(fn, backend="eager", fullgraph=True)()
         self.assertEqual(sorted(result), ["a", "b"])
+
+    def test_nonstandard_c_method_descriptor_graph_break_binding(self):
+        if not has_triton_package():
+            self.skipTest("requires Triton package")
+
+        from triton._C.libtriton import ir
+
+        context = ir.context()
+        ir.load_dialects(context)
+        builder = ir.builder(context)
+        descriptor = inspect.getattr_static(type(builder), "get_loc")
+        if not inspect.ismethoddescriptor(descriptor) or isinstance(
+            descriptor, types.MethodDescriptorType
+        ):
+            self.skipTest("requires a nonstandard C method descriptor")
+        bound_method_type = type(builder.get_loc)
+
+        def fn():
+            builder.get_loc()
+            return isinstance(builder.get_loc, bound_method_type)
+
+        self.assertTrue(torch.compile(fn, backend="eager")())
 
     def test_classmethod_descriptor_dict_fromkeys(self):
         """dict.fromkeys is a classmethod_descriptor."""
@@ -731,7 +760,7 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
             torch.compile(fn, backend="eager")()
 
     def test_range_start_stop_step(self):
-        """RangeVariable.getattro_impl fast path for start/stop/step."""
+        """RangeVariable.tp_getattro_impl fast path for start/stop/step."""
 
         def fn():
             r = range(2, 10, 3)
