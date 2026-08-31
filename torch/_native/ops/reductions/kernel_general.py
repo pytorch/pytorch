@@ -142,7 +142,10 @@ class ReduceBlock:
         self.num_o = num_o  # number of outputs / blocks (= prod kept exts)
         # The magic-division decode (_magic) is exact only for linear indices
         # < 2^31; r spans count and o spans num_o, both Int32 in the kernel.
-        assert count < 2**31 and num_o < 2**31  # noqa: S101
+        if not (count < 2**31 and num_o < 2**31):
+            raise AssertionError(
+                f"decode needs count and num_o < 2^31, got {count} and {num_o}"
+            )
         # (extent, input-element-stride) pairs from TensorIterator, fastest first.
         self.red_pairs = tuple(red_pairs)
         self.kept_pairs = tuple(kept_pairs)
@@ -601,7 +604,8 @@ def _reduce(trait, trait_key, x, dims, out_dtypes, nouts, block=_K0_BLOCK):
     # General reduction of x over `dims` (int / tuple / None=all), driven by TI.
     # Covers row/column/n-D/transposed/sliced uniformly. Returns nouts tensors.
     # block = K0 threads-per-block (exposed knob); baked into ReduceBlock + cache_sig.
-    assert x.is_cuda  # noqa: S101
+    if not x.is_cuda:
+        raise AssertionError(f"need a CUDA input, got {x.device}")
     red_axes = (
         range(x.dim()) if dims is None else ([dims] if isinstance(dims, int) else dims)
     )
@@ -689,7 +693,10 @@ def reduce_all(
     # structure and needs no reshape, so it serves ANY element count. Index traits are
     # served too: with a single row the flat offset IS the column, so gidx_from="flat"
     # gives the true global index with no remap.
-    assert x.is_cuda and x.is_contiguous()  # noqa: S101
+    if not (x.is_cuda and x.is_contiguous()):
+        raise AssertionError(
+            f"reduce-all needs a contiguous CUDA input, got {x.device} {x.stride()}"
+        )
     L = x.numel()
     xf = x.reshape(-1)
     x2 = xf.view(1, -1)
