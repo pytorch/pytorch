@@ -42,13 +42,12 @@ from torch._inductor.autotune_process import (
 )
 from torch._inductor.codegen.common import WorkspaceArg
 from torch._inductor.graph import GraphLowering
-from torch._inductor.heuristics.registry import override_template_heuristics
+from torch._inductor.heuristics.registry import (
+    get_registered_heuristic_class,
+    override_template_heuristics,
+)
 from torch._inductor.heuristics.template.triton import (
     BlackwellGPUGemmConfig,
-    CUDAAddmmPersistentTMATemplateConfigHeuristic,
-    CUDAAddMMTemplateConfigHeuristic,
-    CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
-    CUDABlackwellPersistentTMATemplateConfigHeuristic,
     CUDAMMTemplateConfigHeuristic,
     CUDAPersistentTMATemplateConfigHeuristic,
     GemmConfig,
@@ -58,6 +57,12 @@ from torch._inductor.heuristics.template.triton import (
     XPUPersistentTMATemplateConfigHeuristic,
 )
 from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, FlexibleLayout
+from torch._inductor.kernel.mm import (
+    blackwell_ws_persistent_device_tma_mm_template,
+    mm_template,
+    persistent_mm_template,
+    persistent_tma_mm_template,
+)
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
 from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner, pointwise
@@ -3774,6 +3779,19 @@ class TestMaxAutotune(TestCase):
         self.assertNotIn("acc.to(tl.bfloat16)", code[0])
 
 
+def _pinned_config_heuristic_class(base_cls):
+    """Subclass of ``base_cls`` whose config list is set per iteration.
+
+    The heuristic base uses a singleton metaclass keyed on the class object, so
+    this is built once per test and its single instance is re-pinned each time.
+    """
+
+    class PinnedConfigHeuristic(base_cls):
+        pass
+
+    return PinnedConfigHeuristic
+
+
 @instantiate_parametrized_tests
 class TestTemplateConfigPruning(TestCase):
     """Test class for pruning logic in GEMM autotuning."""
@@ -3781,19 +3799,24 @@ class TestTemplateConfigPruning(TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        # Initialize heuristics once for all tests
-        cls.addmm_heuristic = CUDAAddMMTemplateConfigHeuristic()
-        cls.mm_heuristic = CUDAMMTemplateConfigHeuristic()
-
-        tma_addmm_heuristic_cls = CUDAAddmmPersistentTMATemplateConfigHeuristic
-        tma_mm_heuristic_cls = CUDAPersistentTMATemplateConfigHeuristic
-        if has_datacenter_blackwell_tma_device():
-            tma_addmm_heuristic_cls = (
-                CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic
+        # Initialize heuristics once for all tests. Registration is
+        # device-conditional, so the registry is the only reliable source for
+        # the heuristic class the compiler will actually use.
+        def _registered_heuristic(template_uid, op_name):
+            heuristic_cls = get_registered_heuristic_class(
+                template_uid, GPU_TYPE, op_name
             )
-            tma_mm_heuristic_cls = CUDABlackwellPersistentTMATemplateConfigHeuristic
-        cls.addmm_tma_heuristic = tma_addmm_heuristic_cls()
-        cls.mm_tma_heuristic = tma_mm_heuristic_cls()
+            return heuristic_cls() if heuristic_cls is not None else None
+
+        cls.tma_template_uid = (
+            blackwell_ws_persistent_device_tma_mm_template.uid
+            if has_datacenter_blackwell_tma_device()
+            else persistent_tma_mm_template.uid
+        )
+        cls.addmm_heuristic = _registered_heuristic(mm_template.uid, "addmm")
+        cls.mm_heuristic = _registered_heuristic(mm_template.uid, "mm")
+        cls.addmm_tma_heuristic = _registered_heuristic(cls.tma_template_uid, "addmm")
+        cls.mm_tma_heuristic = _registered_heuristic(cls.tma_template_uid, "mm")
 
         block_sizes = [64, 128, 256]
         num_stages = [4, 5]
@@ -3817,21 +3840,20 @@ class TestTemplateConfigPruning(TestCase):
             if BLOCK_M + BLOCK_N + BLOCK_K < 512 and BLOCK_M + BLOCK_N + BLOCK_K > 192
         ]
 
-    def setUp(self):
-        super().setUp()
-        # Save original configs to restore in tearDown
-        self.original_tma_mm_configs = self.mm_tma_heuristic.mm_configs
-        self.original_mm_mm_configs = self.mm_heuristic.mm_configs
-        self.original_addmm_tma_configs = self.addmm_tma_heuristic.mm_configs
-        self.original_addmm_configs = self.addmm_heuristic.mm_configs
+    def template_pairs(self, op_name, use_tma):
+        """Return the (active, disabled) template/op pairs for this variant.
 
-    def tearDown(self):
-        # Restore original configs
-        self.addmm_tma_heuristic.mm_configs = self.original_addmm_tma_configs
-        self.addmm_heuristic.mm_configs = self.original_addmm_configs
-        self.mm_tma_heuristic.mm_configs = self.original_tma_mm_configs
-        self.mm_heuristic.mm_configs = self.original_mm_mm_configs
-        super().tearDown()
+        Every GEMM template other than the one under test is disabled so that a
+        single config reaches the autotuner.
+        """
+        all_uids = (
+            mm_template.uid,
+            self.tma_template_uid,
+            persistent_mm_template.uid,
+        )
+        active_uid = self.tma_template_uid if use_tma else mm_template.uid
+        disabled = [(uid, op_name) for uid in all_uids if uid != active_uid]
+        return (active_uid, op_name), disabled
 
     @contextlib.contextmanager
     def pruning_config_context(self):
@@ -3922,12 +3944,11 @@ class TestTemplateConfigPruning(TestCase):
         )
         dtype_size = mat1.dtype.itemsize
 
-        if use_tma:
-            self.addmm_heuristic.mm_configs = []
-            heuristic = self.addmm_tma_heuristic
-        else:
-            self.addmm_tma_heuristic.mm_configs = []
-            heuristic = self.addmm_heuristic
+        heuristic = self.addmm_tma_heuristic if use_tma else self.addmm_heuristic
+        active_pair, disabled_pairs = self.template_pairs("addmm", use_tma)
+
+        if heuristic is None:
+            self.skipTest(f"No heuristic registered for {active_pair} on {GPU_TYPE}")
 
         shared_memory_checker_opts = get_shared_memory_checker_opts("addmm", dtype_size)
 
@@ -3937,6 +3958,8 @@ class TestTemplateConfigPruning(TestCase):
             (bias_1d, mat1, mat2),
             dtype_size,
             shared_memory_checker_opts,
+            active_pair,
+            disabled_pairs,
         )
 
     @skipIfXpu(msg="Missing device_properties shared_memory_per_block on xpu.")
@@ -3969,33 +3992,47 @@ class TestTemplateConfigPruning(TestCase):
         )
         dtype_size = mat1.dtype.itemsize
 
-        if use_tma:
-            self.mm_heuristic.mm_configs = []
-            heuristic = self.mm_tma_heuristic
-        else:
-            self.mm_tma_heuristic.mm_configs = []
-            heuristic = self.mm_heuristic
+        heuristic = self.mm_tma_heuristic if use_tma else self.mm_heuristic
+        active_pair, disabled_pairs = self.template_pairs("mm", use_tma)
+
+        if heuristic is None:
+            self.skipTest(f"No heuristic registered for {active_pair} on {GPU_TYPE}")
 
         shared_memory_checker_opts = get_shared_memory_checker_opts("mm", dtype_size)
 
         self.run_op_shared_mem_pruning_check(
-            heuristic, mm_op, (mat1, mat2), dtype_size, shared_memory_checker_opts
+            heuristic,
+            mm_op,
+            (mat1, mat2),
+            dtype_size,
+            shared_memory_checker_opts,
+            active_pair,
+            disabled_pairs,
         )
 
     def run_op_shared_mem_pruning_check(
-        self, heuristic, op, inputs, dtype_size, shared_memory_checker_opts
+        self,
+        heuristic,
+        op,
+        inputs,
+        dtype_size,
+        shared_memory_checker_opts,
+        active_pair,
+        disabled_pairs,
     ):
         exceeds_checker = heuristic._get_exceeding_shared_memory_checker(
             **shared_memory_checker_opts
         )
         if exceeds_checker is None:
             self.skipTest("Device does not support shared memory size query")
+        pinned_heuristic_cls = _pinned_config_heuristic_class(type(heuristic))
         for c in self.gemm_configs:
             smem_estimation = heuristic.get_shared_memory_estimation(
                 c, dtype_size, **shared_memory_checker_opts
             )
-            # Configure heuristics to use only this specific config
-            heuristic.mm_configs = [c]
+            # Configure heuristics to use only this specific config. This must
+            # go through the registry; the compiler uses its own cached instance.
+            pinned_heuristic_cls().mm_configs = [c]
             exceeds = exceeds_checker(c, dtype_size)
 
             original_precompile = CachingAutotuner.precompile
@@ -4003,6 +4040,7 @@ class TestTemplateConfigPruning(TestCase):
 
             captured_smem = 0
             triton_compilation_fails = True
+            triton_choice_count = 0
 
             def mock_precompile(self, *args, **kwargs):
                 original_precompile(self, *args, **kwargs)
@@ -4020,7 +4058,10 @@ class TestTemplateConfigPruning(TestCase):
 
             def mock_autotune(self, *args, **kwargs):
                 timings = original_autotune(self, *args, **kwargs)
-                nonlocal triton_compilation_fails
+                nonlocal triton_compilation_fails, triton_choice_count
+                triton_choice_count = sum(
+                    isinstance(caller, TritonTemplateCaller) for caller in timings
+                )
                 for caller, t in timings.items():
                     if isinstance(caller, TritonTemplateCaller) and t != float("inf"):
                         triton_compilation_fails = False
@@ -4028,6 +4069,16 @@ class TestTemplateConfigPruning(TestCase):
 
             with (
                 self.pruning_config_context(),
+                override_template_heuristics(
+                    device_type=GPU_TYPE,
+                    template_op_pairs=[active_pair],
+                    override_heuristic_class=pinned_heuristic_cls,
+                ),
+                # Disable sibling templates so only the config under test runs.
+                override_template_heuristics(
+                    device_type=GPU_TYPE,
+                    template_op_pairs=disabled_pairs,
+                ),
                 mock.patch.object(CachingAutotuner, "precompile", mock_precompile),
                 mock.patch.object(AlgorithmSelectorCache, "autotune", mock_autotune),
             ):
@@ -4035,6 +4086,15 @@ class TestTemplateConfigPruning(TestCase):
                 counters.clear()
                 compiled_fn = torch.compile(op, mode="max-autotune")
                 run_and_get_code(compiled_fn, *inputs)
+
+            # Guard the restriction itself: if it silently stops applying, the
+            # assertions below would compare against an unrelated kernel.
+            self.assertEqual(
+                triton_choice_count,
+                1,
+                f"Expected exactly the config under test to be autotuned, "
+                f"got {triton_choice_count} Triton choices for config {c}",
+            )
 
             if triton_compilation_fails:
                 self.assertTrue(
