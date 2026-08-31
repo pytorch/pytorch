@@ -1101,6 +1101,60 @@ def _linear_cross_entropy_batch_chunked_accumulator(
     )
 
 
+def _check_batch_chunked_grad_flags(
+    input: torch.Tensor,
+    linear_weight: torch.Tensor,
+    target: torch.Tensor,
+    linear_bias: torch.Tensor | None,
+    compute_input_grad: bool,
+    compute_linear_weight_grad: bool,
+    compute_linear_bias_grad: bool,
+) -> None:
+    """Raise if a ``compute_*_grad`` flag contradicts what the inputs need.
+
+    AOTAutograd/AOTInductor bake ``compute_*_grad`` at trace time; this catches
+    the silent-corruption case (False at trace, but grad-enabled at runtime
+    with a requires_grad leaf). Specific to the precompute path -- the
+    reduction='none' op recomputes grads in its own backward and guards the
+    probability-target case there instead.
+
+    Kept separate from the op body so that anything replacing that body -- a
+    ``torch._native`` override installed at a backend dispatch key, say -- can
+    run the same checks instead of restating them or silently dropping them.
+    """
+    grad_enabled = torch.is_grad_enabled()
+    if not compute_input_grad and input.requires_grad and grad_enabled:
+        raise RuntimeError(
+            "linear_cross_entropy chunked op: compute_input_grad was False at "
+            "trace time but input.requires_grad is True at runtime; recompile "
+            "the graph with the desired requires_grad."
+        )
+    if not compute_linear_weight_grad and linear_weight.requires_grad and grad_enabled:
+        raise RuntimeError(
+            "linear_cross_entropy chunked op: compute_linear_weight_grad was "
+            "False at trace time but linear_weight.requires_grad is True at "
+            "runtime; recompile the graph with the desired requires_grad."
+        )
+    if (
+        not compute_linear_bias_grad
+        and linear_bias is not None
+        and linear_bias.requires_grad
+        and grad_enabled
+    ):
+        raise RuntimeError(
+            "linear_cross_entropy chunked op: compute_linear_bias_grad was False at "
+            "trace time but linear_bias.requires_grad is True at runtime; recompile "
+            "the graph with the desired requires_grad."
+        )
+    if target.dtype.is_floating_point and target.requires_grad and grad_enabled:
+        # No gradient slot is produced for target; without this guard a
+        # probability target requiring grad would silently get none.
+        raise RuntimeError(
+            "linear_cross_entropy chunked op: gradients w.r.t. a probability "
+            "target are not supported on the chunked path; use options=None."
+        )
+
+
 # Scalar-reduction (mean/sum) op. Returns
 # ``(loss, grad_input, grad_linear_weight, grad_linear_bias)`` with grads
 # precomputed in forward (the accumulator runs the full grad loop) and
@@ -1136,42 +1190,15 @@ def _linear_cross_entropy_batch_chunked(
     gradients in forward, backward scales by the upstream gradient. The
     chunked math lives in ``_linear_cross_entropy_batch_chunked_accumulator``.
     """
-    # AOTAutograd/AOTInductor bake compute_*_grad at trace time; catch
-    # the silent-corruption case (False at trace, but grad-enabled at
-    # runtime with a requires_grad leaf). These guards are specific to
-    # the precompute path -- the reduction='none' op recomputes grads in
-    # its own backward, so it does not route through here.
-    grad_enabled = torch.is_grad_enabled()
-    if not compute_input_grad and input.requires_grad and grad_enabled:
-        raise RuntimeError(
-            "linear_cross_entropy chunked op: compute_input_grad was False at "
-            "trace time but input.requires_grad is True at runtime; recompile "
-            "the graph with the desired requires_grad."
-        )
-    if not compute_linear_weight_grad and linear_weight.requires_grad and grad_enabled:
-        raise RuntimeError(
-            "linear_cross_entropy chunked op: compute_linear_weight_grad was "
-            "False at trace time but linear_weight.requires_grad is True at "
-            "runtime; recompile the graph with the desired requires_grad."
-        )
-    if (
-        not compute_linear_bias_grad
-        and linear_bias is not None
-        and linear_bias.requires_grad
-        and grad_enabled
-    ):
-        raise RuntimeError(
-            "linear_cross_entropy chunked op: compute_linear_bias_grad was False at "
-            "trace time but linear_bias.requires_grad is True at runtime; recompile "
-            "the graph with the desired requires_grad."
-        )
-    if target.dtype.is_floating_point and target.requires_grad and grad_enabled:
-        # No gradient slot is produced for target; without this guard a
-        # probability target requiring grad would silently get none.
-        raise RuntimeError(
-            "linear_cross_entropy chunked op: gradients w.r.t. a probability "
-            "target are not supported on the chunked path; use options=None."
-        )
+    _check_batch_chunked_grad_flags(
+        input,
+        linear_weight,
+        target,
+        linear_bias,
+        compute_input_grad,
+        compute_linear_weight_grad,
+        compute_linear_bias_grad,
+    )
     return _linear_cross_entropy_batch_chunked_accumulator(
         input,
         linear_weight,
