@@ -291,6 +291,14 @@
       ]
     }
   ],
+  "GB6360": [
+    {
+      "Gb_type": "HOP: unsupported run_with_rng_state argument",
+      "Context": "str(exc)",
+      "Explanation": "run_with_rng_state received an argument that cannot be represented in the FX graph.",
+      "Hints": []
+    }
+  ],
   "GB0022": [
     {
       "Gb_type": "Bad import result",
@@ -2222,7 +2230,7 @@
   "GB0144": [
     {
       "Gb_type": "Unsupported custom jvp",
-      "Context": "call_apply {self} {args} {kwargs}",
+      "Context": "context",
       "Explanation": "Dynamo does not support tracing `torch.autograd.Function` subclasses that define a custom `jvp` method.",
       "Hints": [
         "Remove the custom `jvp` method if possible.",
@@ -2233,7 +2241,7 @@
   "GB0145": [
     {
       "Gb_type": "Unsupported custom vjp",
-      "Context": "call_apply {self} {args} {kwargs}",
+      "Context": "context",
       "Explanation": "Dynamo does not support tracing `torch.autograd.Function` subclasses that define a custom `vjp` method.",
       "Hints": [
         "Remove the custom `vjp` method if possible.",

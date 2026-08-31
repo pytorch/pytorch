@@ -359,6 +359,20 @@ main()
         with compiled_autograd._enable(compiler_fn):
             y.backward()
 
+    def test_retain_grad_fullgraph(self):
+        def fn():
+            x = torch.rand(1, 3, requires_grad=True)
+            intermediate = x * 3
+            intermediate.retain_grad()
+            (intermediate * intermediate).sum().backward()
+            yield intermediate.grad
+
+        self.check_output_and_recompiles(
+            fn,
+            count=[1, 0],
+            compiler_fn=make_compiler_fn(backend="eager", fullgraph=True),
+        )
+
     def test_tensor_grad_hook1(self):
         def fn():
             for _ in range(3):
@@ -1985,6 +1999,45 @@ main()
         self.check_output_and_recompiles(
             fn, count=2
         )  # should compile once for MyFn1 and once for MyFn2
+
+    def test_compiled_custom_fn_with_eager_backend_cache_hit(self):
+        class MyFn1(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, gO):
+                return gO * 2
+
+        class MyFn2(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, gO):
+                return gO * 3
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn1(x):
+            return MyFn1.apply(x)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn2(x):
+            return MyFn2.apply(x)
+
+        def fn():
+            for compiled_fn in (fn1, fn1, fn2, fn2):
+                x = torch.arange(0.0, 10, requires_grad=True)
+                compiled_fn(x).sum().backward()
+                yield x.grad
+
+        self.check_output_and_recompiles(
+            fn,
+            count=[2, 0],
+            compiler_fn=make_compiler_fn(backend="ca_eager"),
+        )
 
     def test_custom_fn_dynamically_defined_class(self):
         def fn():
@@ -5487,18 +5540,8 @@ known_graph_breaks_tests = {
     "test_checkpointing_without_reentrant_memory_savings",  # reentrant .backward
     "test_dtensor_basic",  # torch._dynamo.exc.Unsupported: Failed to convert args/kwargs to proxy
     "test_dtensor_contiguous_dtensor_noncontiguous_local_as_tangent",  # subclass constructor
-    "test_retain_grad",  # retains_grad_hooks
-    "test_retain_grad_cycle",  # retains_grad_hooks
-    "test_retain_grad_inplace",  # retains_grad_hooks
-    "test_retain_grad_inplace_over_view",  # retains_grad_hooks
-    "test_retains_grad_can_always_observe_tensor_prehook",  # retains_grad_hooks
-    "test_retains_grad_inplace_multiple_outputs",  # retains_grad_hooks
-    "test_hook_edge_case_when_called_with_grad",  # retains_grad_hooks
-    "test_multi_grad_all_hooks",  # retains_grad_hooks
-    "test_prehook_ordering",  # retains_grad_hooks
-    "test_will_engine_execute_node",  # retains_grad_hooks
-    "test_backward_to_node",  # retains_grad_hooks
-    "test_backward_with_nonleaf_inputs",  # retains_grad_hook on non-leaf input
+    "test_multi_grad_all_hooks",  # register_multi_grad_hook is in a skip file
+    "test_will_engine_execute_node",  # AccumulateGrad cannot be converted to a proxy
     "test_create_graph_and_full_backward_hook_cycle",  # _pack_with_none
     "test_full_backward_hook_double_backward",  # _pack_with_none
     "test_grad_mode_restored_reentrant",  # assertTrue
