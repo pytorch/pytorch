@@ -61,16 +61,8 @@ if torch.backends.mps.is_available():
             "resize_",
             "resize_as_",
             "sparse.sampled_addmm",
-            "std",
-            "std_mean",
-            "std_meanunbiased",
-            "stdunbiased",
             "to_sparse",
             "triangular_solve",
-            "var",
-            "var_mean",
-            "var_meanunbiased",
-            "varunbiased",
         }
 
         MACOS_BEFORE_14_4_XFAILLIST = {
