@@ -421,6 +421,13 @@ class CUDAGraph(_CUDAGraph):
         is live (via :meth:`raw_cuda_graph`) for both ``keep_graph`` modes. Hooks
         fire in registration order. Returns a handle whose ``remove()``
         deregisters the hook.
+
+        These hooks are best-effort: they do not run if ending the capture itself
+        fails (a mid-capture error typically leaves a forked stream unjoined, so
+        ``cudaStreamEndCapture`` raises), and a hook that raises prevents the ones
+        registered after it from running. Anything that must happen exactly once
+        per capture -- disarming a callback, releasing a subscription -- needs its
+        own cleanup on the capture's error path rather than relying on this hook.
         """
         from torch.utils.hooks import RemovableHandle
 
@@ -1293,6 +1300,7 @@ class graph:
         from torch.cuda import _graph_node_callbacks
         from torch.cuda._graph_annotations import (
             _set_annotations_enabled,
+            discard_capture_annotations,
             resolve_pending_annotations,
         )
 
@@ -1304,10 +1312,18 @@ class graph:
             if self._enable_annotations:
                 resolve_pending_annotations()
 
-            # capture_end stamps the capture id and, for keep_graph=False,
-            # instantiates (which remaps annotations to the exec id). For
+            # For keep_graph=False capture_end instantiates, which remaps annotations
+            # from the capture id (stamped back at capture_begin) to the exec id. For
             # keep_graph=True the remap is owned by the later instantiate()/replay().
-            self.cuda_graph.capture_end()
+            try:
+                self.cuda_graph.capture_end()
+            except BaseException:
+                # No exec graph, so the resolve above left entries keyed by the capture id
+                # that nothing can reach later. Scoped to capture_end alone: once it
+                # returns the capture is usable and its annotations are worth keeping.
+                if self._enable_annotations:
+                    discard_capture_annotations(self.cuda_graph)
+                raise
             self.stream_ctx.__exit__(*args)
         finally:
             # Annotation recording is capture-scoped; clear it unconditionally. disarm() is
