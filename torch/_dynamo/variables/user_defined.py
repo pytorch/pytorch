@@ -3373,13 +3373,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         """Dynamo implementation of CPython's PyObject_GenericGetAttr.
 
         This mirrors object.__getattribute__ and is called from:
-        - tp_getattro_impl (for objects without a custom __getattribute__)
+        - tp_getattribute_impl (for objects without a custom __getattribute__)
         - SuperVariable.call_method (when super().__getattribute__() resolves
           to object.__getattribute__)
 
-        The algorithm: MRO walk → data descriptor → instance __dict__ →
-        non-data descriptor / plain class attr → dynamic fallback →
-        __getattr__ → AttributeError.
+        The algorithm: MRO walk -> data descriptor -> instance __dict__ ->
+        non-data descriptor / plain class attr -> dynamic fallback ->
+        AttributeError.
+
+        There is deliberately no __getattr__ step: CPython chains to
+        __getattr__ in _Py_slot_tp_getattr_hook, one level above
+        GenericGetAttr, which is tp_getattro_impl here.
         """
         source: Source | None = AttrSource(self.source, name) if self.source else None
 
@@ -3465,11 +3469,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             except AttributeError:
                 pass
 
-        # Step 6: __getattr__ fallback.
-        result = self.call_getattr_fallback(tx, name)
-        if result is not None:
-            return result
-
         # Step 7: AttributeError.
         raise_observed_exception(
             AttributeError,
@@ -3481,6 +3480,38 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        # Literal translation of CPython's _Py_slot_tp_getattr_hook: run
+        # __getattribute__ (custom or generic), and ONLY on AttributeError chain
+        # to __getattr__ -- never re-walk GenericGetAttr.  When the type defines
+        # no __getattr__ this degenerates to _Py_slot_tp_getattro: a single
+        # __getattribute__ call whose exception propagates untouched.
+        # https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L9635-L9682
+        if self._check_for_getattr() is None:
+            return self.tp_getattribute_impl(tx, name)
+
+        try:
+            return self.tp_getattribute_impl(tx, name)
+        except ObservedAttributeError:
+            handle_observed_exception(tx)
+
+        result = self.call_getattr_fallback(tx, name)
+        if result is not None:
+            return result
+
+        raise_observed_exception(
+            AttributeError,
+            tx,
+            args=[f"'{type(self.value).__name__}' object has no attribute '{name}'"],
+            kwargs={"name": variables.ConstantVariable.create(name), "obj": self},
+        )
+
+    def tp_getattribute_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        # obj.__getattribute__(name): dispatch to a user-defined __getattribute__
+        # if present, else GenericGetAttr with NO __getattr__ fallback. Mirrors
+        # CPython's _Py_slot_tp_getattro (the no-__getattr__ dispatcher):
+        # https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L9603-L9608
         if self._object_has_getattribute:
             getattribute_fn = inspect.getattr_static(
                 type(self.value), "__getattribute__"
@@ -3488,16 +3519,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             new_source: AttrSource | None = (
                 AttrSource(self.source, "__getattribute__") if self.source else None
             )
-
-            try:
-                return variables.UserMethodVariable(
-                    getattribute_fn,
-                    self,
-                    source=new_source,
-                ).call_function(tx, [VariableTracker.build(tx, name)], {})
-            except ObservedAttributeError:
-                # Pass through to __getattr__ if __getattribute__ fails
-                handle_observed_exception(tx)
+            return variables.UserMethodVariable(
+                getattribute_fn,
+                self,
+                source=new_source,
+            ).call_function(tx, [VariableTracker.build(tx, name)], {})
 
         return self.generic_getattr(tx, name)
 
@@ -3737,6 +3763,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def call_getattr_fallback(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker | None:
+        # The __getattr__ hook CPython calls from _Py_slot_tp_getattr_hook once
+        # GenericGetAttr raises AttributeError:
+        # https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L9635-L9682
         getattr_fn = self._check_for_getattr()
         if isinstance(getattr_fn, types.FunctionType):
             if (

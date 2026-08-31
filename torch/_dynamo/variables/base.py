@@ -1054,15 +1054,22 @@ _SLOTDEFS: list[SlotDef] = [
     # TPSLOT("__hash__", "tp_hash_impl", PyTypeSlots.TP_HASH, _wrap_unaryfunc),
     TPSLOT("__call__", "call_function", PyTypeSlots.TP_CALL, wrap_call),
     TPSLOT("__str__", "tp_str_impl", PyTypeSlots.TP_STR, _wrap_unaryfunc),
+    # __getattribute__ and __getattr__ must dispatch differently, matching
+    # CPython _Py_slot_tp_getattr_hook: __getattribute__ is GenericGetAttr with
+    # NO __getattr__ fallback (tp_getattribute_impl), while an explicit
+    # __getattr__ call invokes only the type's __getattr__ hook
+    # (tp_getattr_impl, named after the dunder, not the deprecated C tp_getattr
+    # slot).  Both are the same TP_GETATTRO slot but route to different impls.
+    # https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L9635-L9682
     TPSLOT(
         "__getattribute__",
-        "tp_getattro_impl",
+        "tp_getattribute_impl",
         PyTypeSlots.TP_GETATTRO,
         _wrap_getattro,
     ),
     TPSLOT(
         "__getattr__",
-        "tp_getattro_impl",
+        "tp_getattr_impl",
         PyTypeSlots.TP_GETATTRO,
         _wrap_getattro,
     ),
@@ -1978,11 +1985,58 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> VariableTracker | None:
         """Call __getattr__ fallback (step 6 of GenericGetAttr).
 
+        CPython invokes __getattr__ from _Py_slot_tp_getattr_hook, only after
+        GenericGetAttr raises AttributeError:
+        https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L9635-L9682
+
         Returns a VT if the type defines __getattr__ and it succeeds,
         None otherwise.  The base returns None (most types have no
         __getattr__).  UDOV overrides to walk the MRO for __getattr__.
         """
         return None
+
+    def tp_getattribute_impl(
+        self, tx: InstructionTranslatorBase, name: str
+    ) -> VariableTracker:
+        """Polymorphic hook for obj.__getattribute__(name).
+
+        This is the analog of CPython's _Py_slot_tp_getattro: __getattribute__
+        alone, with no __getattr__ chain.  UDOV overrides it to dispatch to a
+        user-defined __getattribute__ when one exists, else plain GenericGetAttr;
+        the __getattr__ chain lives one level up, in tp_getattro_impl (the
+        _Py_slot_tp_getattr_hook analog).
+
+        The base delegates to tp_getattro_impl.  That is equivalent for VTs whose
+        __getattr__ hook (if any) is call_getattr_fallback, which the base
+        implements as returning None; a VT that instead folds an equivalent
+        lookup into its own tp_getattro_impl override should override this too.
+
+        CPython: explicit __getattribute__ resolves to _Py_slot_tp_getattro /
+        PyObject_GenericGetAttr, bypassing the __getattr__ chain that
+        _Py_slot_tp_getattr_hook adds for the implicit obj.attr path.
+        https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L9603-L9608"""
+        return self.tp_getattro_impl(tx, name)
+
+    def tp_getattr_impl(
+        self, tx: InstructionTranslatorBase, name: str
+    ) -> VariableTracker:
+        """obj.__getattr__(name): invoke only the type's __getattr__ hook.
+
+        Unlike normal access / __getattribute__, this does not run the descriptor
+        protocol or instance dict -- it calls just __getattr__ (via
+        call_getattr_fallback).  If the type defines no __getattr__, then
+        obj.__getattr__ is itself a missing attribute, so raise AttributeError.
+        https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L9635-L9682
+        """
+        result = self.call_getattr_fallback(tx, name)
+        if result is not None:
+            return result
+        type_name = self.python_type_name()
+        raise_observed_exception(
+            AttributeError,
+            tx,
+            args=[f"'{type_name}' object has no attribute '__getattr__'"],
+        )
 
     def tp_getattro_impl(
         self, tx: InstructionTranslatorBase, name: str
