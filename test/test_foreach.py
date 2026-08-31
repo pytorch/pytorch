@@ -1101,17 +1101,9 @@ class TestForeachDevice(TestCase):
 
         for ord in ords:
             kwargs = {"ord": ord} if ord else {}
-            if not use_cuda_graph:
-                actual = fn(
-                    inputs=[tensorlist],
-                    is_cuda=self.is_cuda,
-                    expect_fastpath=True,
-                    zero_size=False,
-                    **kwargs,
-                )
-            elif "cuda" not in device:
-                self.skipTest("only CUDA support CUDAGraph")
-            else:
+            if use_cuda_graph:
+                if "cuda" not in device:
+                    self.skipTest("only CUDA support CUDAGraph")
                 # When using CUDA graphs and the tensor metadata doesn't fit in
                 # the static kernel argument space, multi_tensor_apply creates
                 # the launch arguments once, uses cudaUserObject_t to tie its
@@ -1121,6 +1113,14 @@ class TestForeachDevice(TestCase):
                 with torch.cuda.graph(g):
                     actual = fn.func(tensorlist, **kwargs)
                 g.replay()
+            else:
+                actual = fn(
+                    inputs=[tensorlist],
+                    is_cuda=self.is_cuda,
+                    expect_fastpath=True,
+                    zero_size=False,
+                    **kwargs,
+                )
             expect = ref_fn(inputs=[tensorlist], **kwargs)
 
             self.assertEqual(expect, actual, equal_nan=True)
