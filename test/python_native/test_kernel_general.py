@@ -91,7 +91,7 @@ class TestKernelGeneral(TestCase):
         # These checks exist to hold under `python -O`, where a plain `assert` is stripped
         # entirely. A test cannot observe the -O build from here, so what it CAN pin is that each
         # check is a real raise reached on the documented input -- which is what a stripped assert
-        # would stop doing. Every check this commit converts is covered.
+        # would stop doing. Every check these kernels carry is covered.
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
@@ -102,6 +102,9 @@ class TestKernelGeneral(TestCase):
         xt = torch.randn(64, 128, device="cuda").t()
         with self.assertRaisesRegex(AssertionError, "contiguous CUDA input"):
             kg._reduce_all(trait, "inv", xt, [torch.float32], 1, 128, 4)
+        # The general path needs a CUDA input; a CPU tensor is refused, not silently run.
+        with self.assertRaisesRegex(AssertionError, "need a CUDA input"):
+            kg._reduce(trait, "inv", torch.randn(8, 8), [1], [torch.float32], 1)
         # The magic-division decode is exact only below 2^31.
         with self.assertRaisesRegex(AssertionError, "count and num_o"):
             kg.ReduceBlock(
@@ -111,10 +114,10 @@ class TestKernelGeneral(TestCase):
         with self.assertRaisesRegex(AssertionError, "CUDA"):
             xc.reduce_row_xcta(trait, "inv_xcta", xt, torch.float32)
 
-    def test_converted_checks_are_the_only_ones_left(self):
-        # The point of the commit is that NO suppressed assert survives it in this directory: a
-        # `# noqa: S101` is a check that silently does nothing under -O, and lint's own rule can be
-        # silenced. Assert the absence directly, so re-adding one fails here and not only in lint.
+    def test_no_suppressed_asserts_survive(self):
+        # A `# noqa: S101` is a check that silently does nothing under -O, and lint's own rule can
+        # be silenced. Assert the absence directly, so re-adding one fails here and not only in
+        # lint.
         import pathlib
 
         from torch._native.ops import reductions
