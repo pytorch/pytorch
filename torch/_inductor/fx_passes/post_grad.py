@@ -1236,9 +1236,7 @@ def _slice_scatter_noop_replacement(args):
     self, src = args[:2]
     if not isinstance(self, torch.fx.Node) or not isinstance(src, torch.fx.Node):
         return src
-    if src.target is not operator.getitem or not isinstance(
-        src.args[0], torch.fx.Node
-    ):
+    if src.target is not operator.getitem or not isinstance(src.args[0], torch.fx.Node):
         return src
 
     split = src.args[0]

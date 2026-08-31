@@ -22,6 +22,7 @@ from torch._inductor import config, inductor_prims
 from torch._inductor.fx_utils import get_node_storage, is_node_realized
 from torch._inductor.lowering import (
     inplaceable_foreach_ops as inplaceable_foreach_ops_lowerings,
+    lowerings,
 )
 from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import (
@@ -227,13 +228,41 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     input and output would have been realized anyway.
 
     """
-    inp, _src, _view_ops = node.args
+    inp, src, _view_ops = node.args
+
+    # _inplace_generalized_scatter ultimately lowers to a view followed by
+    # copy_.  When src aliases inp, those source and destination views can
+    # overlap, and copy_ does not provide the snapshot semantics of functional
+    # slice_scatter.  Exact self-copies are removed earlier as no-ops; keep all
+    # remaining aliasing cases functional unless/until overlap is proven safe.
+    inp_storage = get_node_storage(inp)  # type: ignore[arg-type]
+    src_storage = get_node_storage(src)  # type: ignore[arg-type]
+    if inp_storage is not None and inp_storage == src_storage:
+        return False
 
     # Mutating scatter ops unconditionally realize input and output
     if scatter_always_uses_mutation(node):
         return True
 
-    if is_node_realized(inp) and is_node_realized(node):  # type: ignore[arg-type]
+    def is_realized_or_fallback(node: torch.fx.Node) -> bool:
+        if is_node_realized(node):
+            return True
+
+        # Unknown OpOverloads are lowered through FallbackKernel.create(), so
+        # their outputs are real buffers even though they are not present in
+        # the statically registered ``fallbacks`` set consulted by
+        # is_node_realized().  This is common for custom operators.  Treating
+        # such an input as realized lets a dead functional slice_scatter be
+        # decomposed to slice + copy_ instead of scanning and rewriting the
+        # full input.  Restrict this to OpOverload: higher-order/callable nodes
+        # can have lowering behavior that this check cannot infer.
+        return (
+            node.op == "call_function"
+            and isinstance(node.target, torch._ops.OpOverload)
+            and node.target not in lowerings
+        )
+
+    if is_realized_or_fallback(inp) and is_node_realized(node):  # type: ignore[arg-type]
         return True
 
     # If the output is copied back into the input, this forces both to be
