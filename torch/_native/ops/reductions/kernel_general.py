@@ -323,7 +323,7 @@ def _flat(x):
 # (-> the cond declines, aten takes it). ---
 
 
-def fast_kind(red_pairs, kept_pairs, nouts, has_index):
+def fast_kind(red_pairs, kept_pairs, nouts):
     """Which fast kernel serves this TI-decomposed reduction, or None (-> K0/aten).
 
     "row"     : reduced axis is the single contiguous (stride-1) innermost run;
@@ -569,8 +569,7 @@ def _reduce(trait, trait_key, x, dims, out_dtypes, nouts, block=_K0_BLOCK):
     # and for the case a fast kernel itself declines (e.g. xcta on a prime N).
     if len(out_shape) > 0 and x.is_contiguous():
         red_pairs, kept_pairs = _ti_pairs(x, _probe(x, red_axes))
-        has_index = getattr(trait, "has_index", False)
-        kind = fast_kind(red_pairs, kept_pairs, nouts, has_index)
+        kind = fast_kind(red_pairs, kept_pairs, nouts)
         red_n = x.numel() // max(1, math.prod(out_shape))
         if kind == "row":
             x2 = x.reshape(math.prod(out_shape), red_n)
