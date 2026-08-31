@@ -5,12 +5,6 @@
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/macros/Macros.h>
 
-// Two warnings in Cutlass included header files
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wset-but-not-used")
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wmissing-field-initializers")
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-variable")
-
 // Determine if the architecture supports rowwise scaled mm
 // Currently failing on windows with:
 // https://github.com/NVIDIA/cutlass/issues/1571
@@ -44,10 +38,6 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-variable")
 #include <cutlass/util/packed_stride.hpp>
 
 #include <ATen/native/cuda/cutlass_common.cuh>
-
-C10_DIAGNOSTIC_POP()
-C10_DIAGNOSTIC_POP()
-C10_DIAGNOSTIC_POP()
 
 namespace {
 
@@ -253,14 +243,14 @@ void f8f8bf16_rowwise_impl(
        stride_b},
       {{{{bias.has_value()
                ? reinterpret_cast<const DtypeBias*>(bias->const_data_ptr())
-               : nullptr},                                    // Bias
+               : nullptr}, // Bias
          {{reinterpret_cast<const DtypeScale*>(w_scale.const_data_ptr())},
           {{reinterpret_cast<const DtypeScale*>(x_scale.const_data_ptr())},
-           {},                                                // Accum
-           {}},                                               // XScale * Accum
-          {}},                                                // WScale * that
-         {}},                                                 // Bias + that
-        {}},                                                  // Cast to output
+           {}, // Accum
+           {}}, // XScale * Accum
+          {}}, // WScale * that
+         {}}, // Bias + that
+        {}}, // Cast to output
        nullptr,
        stride_output,
        reinterpret_cast<DtypeOutput*>(out.mutable_data_ptr()),
@@ -452,14 +442,14 @@ void f8f8bf16_rowwise_impl_sm100_sm120(
        stride_b},
       {{{{bias.has_value()
                ? reinterpret_cast<const DtypeBias*>(bias->const_data_ptr())
-               : nullptr},                                    // Bias
+               : nullptr}, // Bias
          {{reinterpret_cast<const DtypeScale*>(w_scale.const_data_ptr())},
           {{reinterpret_cast<const DtypeScale*>(x_scale.const_data_ptr())},
-           {},                                                // Accum
-           {}},                                               // XScale * Accum
-          {}},                                                // WScale * that
-         {}},                                                 // Bias + that
-        {}},                                                  // Cast to output
+           {}, // Accum
+           {}}, // XScale * Accum
+          {}}, // WScale * that
+         {}}, // Bias + that
+        {}}, // Cast to output
        nullptr,
        stride_output,
        reinterpret_cast<DtypeOutput*>(out.mutable_data_ptr()),
@@ -1158,5 +1148,3 @@ void f8f8bf16_rowwise(
 }
 
 } // namespace at::cuda::detail
-
-C10_DIAGNOSTIC_POP()
