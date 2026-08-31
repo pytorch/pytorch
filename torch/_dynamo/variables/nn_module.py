@@ -1133,14 +1133,6 @@ class NNModuleVariable(VariableTracker):
             return None
         return ConstantVariable.create(True)
 
-    def method___iter__(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        return self.tp_iter_impl(tx)
-
     def _module_contains(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker | None:
@@ -1150,16 +1142,6 @@ class NNModuleVariable(VariableTracker):
         if not item.is_python_constant():
             return None
         return VariableTracker.build(tx, item.as_python_constant() in module)
-
-    def method___contains__(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker | None:
-        if not args:
-            return None
-        return self._module_contains(tx, args[0])
 
     def sq_contains_impl(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
@@ -1216,8 +1198,6 @@ class NNModuleVariable(VariableTracker):
         "values": Method(values),
         "items": Method(items),
         "_check_input_dim": Method(_check_input_dim),
-        "__iter__": Method(method___iter__),
-        "__contains__": Method(method___contains__),
         "_get_abs_string_index": Method(_get_abs_string_index),
         "_conv_forward": Method(_conv_forward),
         "_output_padding": Method(_output_padding),
@@ -1241,11 +1221,12 @@ class NNModuleVariable(VariableTracker):
             return invoke_and_store_as_constant(tx, fn, const_name, args, kwargs)
 
         # Loose heuristic for remaining class methods with all-tensor args.
-        # Skip tp_methods names so they reach the declarative dispatch in the
-        # base call_method. Empty-args calls (e.g. __iter__) would otherwise
-        # match `all(x.is_tensor() for x in ())`.
+        # Skip tp_methods and slot names so they reach base call_method.
+        # Empty-args calls (e.g. __iter__) would otherwise match
+        # `all(x.is_tensor() for x in ())`.
         if (
             name not in self.tp_methods
+            and self.lookup_slotdefs(name) is None
             and name in module.__class__.__dict__
             and callable(module.__class__.__dict__[name])
             and all(x.is_tensor() for x in itertools.chain(args, kwargs.values()))
