@@ -13,6 +13,8 @@ read it again. Collapsing those passes is what a DSL kernel is for.
 registration loop and the tests both read it, so adding an override is one row.
 """
 
+import importlib
+
 import torch
 
 from ... import cutedsl_utils as cu
@@ -131,6 +133,15 @@ def _no_reduction_impl(
 # (op_symbol, cond, impl) for every override this module installs on the
 # `torch_nn` namespace. Single source of truth: the registration loop below and
 # test/python_native/test_linear_cross_entropy_override.py both read it.
+# Declaration read by both the registrar below and the drift-guard test in
+# test/python_native/test_override_declarations.py. `aten` ops exist by
+# construction, so a bad symbol there dies on any `import torch`; a
+# `torch_nn` op exists only once `_DEFINING_MODULE` has executed, which makes
+# the binding a runtime property whose failures surface only where the DSL is
+# installed. The test resolves these symbols with neither a GPU nor the DSL,
+# so drift cannot ship.
+_NAMESPACE = "torch_nn"
+_DEFINING_MODULE = "torch.nn.modules.linear_cross_entropy"
 _OVERRIDES = (
     ("_linear_cross_entropy_batch_chunked", _batch_chunked_cond, _batch_chunked_impl),
     (
@@ -149,13 +160,13 @@ def register_linear_cross_entropy_overrides() -> None:
     if not cu.runtime_available() or cu.check_native_jit_disabled():
         return
 
-    # This import is what defines the `torch_nn::` ops. torch.nn cannot pull
+    # This import is what defines the ops named in `_OVERRIDES`. torch.nn cannot pull
     # the module in from torch/nn/modules/__init__.py (torch.library does not
     # exist that early in `import torch`), so it is imported lazily on first
     # use -- meaning the ops are absent at registration time unless something
     # asks for them first. Overrides are installed against ops that already
     # exist in the dispatcher, hence the import here.
-    import torch.nn.modules.linear_cross_entropy  # noqa: F401
+    importlib.import_module(_DEFINING_MODULE)
 
     for op_symbol, cond, impl in _OVERRIDES:
-        cu.register_op_override("torch_nn", op_symbol, "CUDA", cond=cond, impl=impl)
+        cu.register_op_override(_NAMESPACE, op_symbol, "CUDA", cond=cond, impl=impl)
