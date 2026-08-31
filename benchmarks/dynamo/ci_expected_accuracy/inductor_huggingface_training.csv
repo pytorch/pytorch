@@ -1,125 +1,125 @@
-name,accuracy,graph_breaks
+name,accuracy,graph_breaks,calls_captured,fallbacks_to_eager
 
 
 
-AlbertForMaskedLM,pass,4
+AlbertForMaskedLM,pass,4,397,0
 
 
 
-AllenaiLongformerBase,pass,9
+AllenaiLongformerBase,pass,9,2407,0
 
 
 
-BartForCausalLM,pass,7
+BartForCausalLM,pass,7,67,4
 
 
 
-BertForMaskedLM,pass,5
+BertForMaskedLM,pass,5,940,0
 
 
 
-BlenderbotForCausalLM,eager_fail_to_run,0
+BlenderbotForCausalLM,eager_fail_to_run,0,0,0
 
 
 
-DebertaV2ForMaskedLM,pass_due_to_skip,0
+DebertaV2ForMaskedLM,pass_due_to_skip,0,0,0
 
 
 
-DistilBertForMaskedLM,pass,5
+DistilBertForMaskedLM,pass,5,494,0
 
 
 
-DistillGPT2,pass,8
+DistillGPT2,pass,8,540,0
 
 
 
-ElectraForCausalLM,pass,4
+ElectraForCausalLM,pass,4,324,0
 
 
 
-GPT2ForSequenceClassification,pass,6
+GPT2ForSequenceClassification,pass,6,1544,0
 
 
 
-GoogleFnet,pass,5
+GoogleFnet,pass,5,573,0
 
 
 
-LayoutLMForMaskedLM,pass,5
+LayoutLMForMaskedLM,pass,5,1057,0
 
 
 
-M2M100ForConditionalGeneration,pass,4
+M2M100ForConditionalGeneration,pass,4,893,0
 
 
 
-MBartForCausalLM,pass,7
+MBartForCausalLM,pass,7,67,4
 
 
 
-MT5ForConditionalGeneration,pass,5
+MT5ForConditionalGeneration,pass,5,1776,0
 
 
 
-MegatronBertForCausalLM,pass,5
+MegatronBertForCausalLM,pass,5,1940,0
 
 
 
-MobileBertForMaskedLM,pass,3
+MobileBertForMaskedLM,pass,3,1309,0
 
 
 
-OPTForCausalLM,pass,7
+OPTForCausalLM,pass,7,62,4
 
 
 
-PLBartForCausalLM,pass,7
+PLBartForCausalLM,pass,7,67,4
 
 
 
-PegasusForCausalLM,pass,7
+PegasusForCausalLM,pass,7,63,4
 
 
 
-Qwen/Qwen3-0.6B,eager_fail_to_run,0
+Qwen/Qwen3-0.6B,eager_fail_to_run,0,0,0
 
 
 
-RobertaForCausalLM,pass,5
+RobertaForCausalLM,pass,5,954,0
 
 
 
-T5ForConditionalGeneration,pass,5
+T5ForConditionalGeneration,pass,5,1239,0
 
 
 
-T5Small,pass,5
+T5Small,pass,5,1239,0
 
 
 
-TrOCRForCausalLM,pass,6
+TrOCRForCausalLM,pass,6,61,1
 
 
 
-XGLMForCausalLM,pass,6
+XGLMForCausalLM,pass,6,,
 
 
 
-XLNetLMHeadModel,pass,5
+XLNetLMHeadModel,pass,5,1875,0
 
 
 
-YituTechConvBert,pass,5
+YituTechConvBert,pass,5,1527,0
 
 
 
-google/gemma-2-2b,eager_fail_to_run,0
+google/gemma-2-2b,eager_fail_to_run,0,0,0
 
 
 
-meta-llama/Llama-3.2-1B,eager_fail_to_run,0
+meta-llama/Llama-3.2-1B,eager_fail_to_run,0,0,0
 
 
 
-openai/whisper-tiny,eager_fail_to_run,0
+openai/whisper-tiny,eager_fail_to_run,0,0,0
