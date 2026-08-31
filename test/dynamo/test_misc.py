@@ -1201,8 +1201,7 @@ graph():
     @unittest.skipIf(
         not TEST_XPU
         and (
-            not torch.cuda.is_available()
-            or torch.cuda.get_device_capability() < (9, 0)
+            not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0)
         ),
         "requires Hopper+ (SM >= 9.0) for TMA, or XPU",
     )
