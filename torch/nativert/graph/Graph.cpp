@@ -476,8 +476,8 @@ Value* Graph::tryGetValue(std::string_view name) const {
   // TODO: can eliminate this string copy by enabling heterogeneous lookup for
   // the container
   const auto key = std::string(name);
-  if (values_.contains(key)) {
-    return values_.at(key).get();
+  if (auto it = values_.find(key); it != values_.end()) {
+    return it->second.get();
   }
   return nullptr;
 }
