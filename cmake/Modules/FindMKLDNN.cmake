@@ -56,7 +56,7 @@ IF(NOT MKLDNN_FOUND)
     endif()
     ExternalProject_Add(xpu_mkldnn_proj
       GIT_REPOSITORY https://github.com/uxlfoundation/oneDNN
-      GIT_TAG v3.12.3
+      GIT_TAG rls-v3.13
       PREFIX ${XPU_MKLDNN_DIR_PREFIX}
       BUILD_IN_SOURCE 0
       CMAKE_ARGS  -DCMAKE_C_COMPILER=${DNNL_C_COMPILER}
@@ -65,6 +65,7 @@ IF(NOT MKLDNN_FOUND)
       -DDNNL_CPU_RUNTIME=NONE
       -DDNNL_BUILD_TESTS=OFF
       -DDNNL_BUILD_EXAMPLES=OFF
+      -DONEDNN_EXPERIMENTAL_GROUPED_MEMORY=ON
       -DONEDNN_BUILD_GRAPH=ON
       -DDNNL_LIBRARY_TYPE=STATIC
       -DDNNL_DPCPP_HOST_COMPILER=${DNNL_HOST_COMPILER} # Use global cxx compiler as host compiler
