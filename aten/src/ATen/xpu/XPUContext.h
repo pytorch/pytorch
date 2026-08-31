@@ -89,7 +89,7 @@ template <auto* KernelFn>
 }
 
 // Returns the maximum number of workitems that can be concurrently resident
-// on an Xe Core, calculated from the maximum subgroup size, the number of EUs
+// on a Xe Core, calculated from the maximum subgroup size, the number of EUs
 // per Xe Core, and the number of hardware threads per EU.
 [[nodiscard]] inline size_t getDeviceMaxWorkItemsPerXeCore(
     at::DeviceIndex device = at::xpu::current_device()) {
