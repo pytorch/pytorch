@@ -109,6 +109,17 @@ def maybe_clone(x: torch.Tensor | None) -> torch.Tensor | None:
     return x
 
 
+@torch.library.custom_op("compiled_autograd::call_cpp_tensor_pre_hook", mutates_args=())
+def call_cpp_tensor_pre_hook(hook_id: int, grad: torch.Tensor) -> torch.Tensor:
+    result = torch._C._dynamo.compiled_autograd.call_cpp_tensor_pre_hooks(hook_id, grad)
+    return result.clone()
+
+
+@call_cpp_tensor_pre_hook.register_fake
+def _(hook_id: int, grad: torch.Tensor) -> torch.Tensor:
+    return grad.clone()
+
+
 class _AOTCompiledFunction(Protocol):
     """Structural type for the AOTAutograd autograd.Function subclass that
     compiled autograd retraces. The concrete class is generated locally inside
@@ -963,7 +974,7 @@ class AutogradCompilerInstance:
     ) -> list[torch.Tensor]:
         proxy = self.fx_tracer.create_proxy(
             "call_function",
-            torch._C._dynamo.compiled_autograd.call_cpp_tensor_pre_hooks,
+            torch.ops.compiled_autograd.call_cpp_tensor_pre_hook.default,
             (hook_id, self.to_proxy(inputs[i])),
             {},
         )
