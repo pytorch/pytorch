@@ -247,14 +247,15 @@ void f8f8bf16_rowwise_impl(
   typename Gemm::Arguments arguments{
       cutlass::gemm::GemmUniversalMode::kGemm,
       {M, N, K},
-      {reinterpret_cast<DtypeA*>(XQ.data_ptr()),
+      {reinterpret_cast<const DtypeA*>(XQ.const_data_ptr()),
        stride_a,
-       reinterpret_cast<DtypeB*>(WQ.data_ptr()),
+       reinterpret_cast<const DtypeB*>(WQ.const_data_ptr()),
        stride_b},
-      {{{{bias.has_value() ? reinterpret_cast<DtypeBias*>(bias->data_ptr())
-                           : nullptr},                        // Bias
-         {{reinterpret_cast<DtypeScale*>(w_scale.data_ptr())},
-          {{reinterpret_cast<DtypeScale*>(x_scale.data_ptr())},
+      {{{{bias.has_value()
+               ? reinterpret_cast<const DtypeBias*>(bias->const_data_ptr())
+               : nullptr},                                    // Bias
+         {{reinterpret_cast<const DtypeScale*>(w_scale.const_data_ptr())},
+          {{reinterpret_cast<const DtypeScale*>(x_scale.const_data_ptr())},
            {},                                                // Accum
            {}},                                               // XScale * Accum
           {}},                                                // WScale * that
@@ -262,7 +263,7 @@ void f8f8bf16_rowwise_impl(
         {}},                                                  // Cast to output
        nullptr,
        stride_output,
-       reinterpret_cast<DtypeOutput*>(out.data_ptr()),
+       reinterpret_cast<DtypeOutput*>(out.mutable_data_ptr()),
        stride_output}};
 
   Gemm gemm;
@@ -293,7 +294,7 @@ void f8f8bf16_rowwise_impl(
   }
 
   // Initialize CUTLASS kernel with arguments and workspace pointer
-  status = gemm.initialize(arguments, workspace.data_ptr(), at::cuda::getCurrentCUDAStream());
+  status = gemm.initialize(arguments, workspace.mutable_data_ptr(), at::cuda::getCurrentCUDAStream());
   if (status != cutlass::Status::kSuccess) {
     throw std::runtime_error("cutlass cannot initialize");
   }
@@ -445,14 +446,15 @@ void f8f8bf16_rowwise_impl_sm100_sm120(
   typename Gemm::Arguments arguments{
       cutlass::gemm::GemmUniversalMode::kGemm,
       {M, N, K},
-      {reinterpret_cast<DtypeA*>(XQ.data_ptr()),
+      {reinterpret_cast<const DtypeA*>(XQ.const_data_ptr()),
        stride_a,
-       reinterpret_cast<DtypeB*>(WQ.data_ptr()),
+       reinterpret_cast<const DtypeB*>(WQ.const_data_ptr()),
        stride_b},
-      {{{{bias.has_value() ? reinterpret_cast<DtypeBias*>(bias->data_ptr())
-                           : nullptr},                        // Bias
-         {{reinterpret_cast<DtypeScale*>(w_scale.data_ptr())},
-          {{reinterpret_cast<DtypeScale*>(x_scale.data_ptr())},
+      {{{{bias.has_value()
+               ? reinterpret_cast<const DtypeBias*>(bias->const_data_ptr())
+               : nullptr},                                    // Bias
+         {{reinterpret_cast<const DtypeScale*>(w_scale.const_data_ptr())},
+          {{reinterpret_cast<const DtypeScale*>(x_scale.const_data_ptr())},
            {},                                                // Accum
            {}},                                               // XScale * Accum
           {}},                                                // WScale * that
@@ -460,7 +462,7 @@ void f8f8bf16_rowwise_impl_sm100_sm120(
         {}},                                                  // Cast to output
        nullptr,
        stride_output,
-       reinterpret_cast<DtypeOutput*>(out.data_ptr()),
+       reinterpret_cast<DtypeOutput*>(out.mutable_data_ptr()),
        stride_output}};
 
   Gemm gemm;
@@ -491,7 +493,7 @@ void f8f8bf16_rowwise_impl_sm100_sm120(
   }
 
   // Initialize CUTLASS kernel with arguments and workspace pointer
-  status = gemm.initialize(arguments, workspace.data_ptr(), at::cuda::getCurrentCUDAStream());
+  status = gemm.initialize(arguments, workspace.mutable_data_ptr(), at::cuda::getCurrentCUDAStream());
   if (status != cutlass::Status::kSuccess) {
     throw std::runtime_error("cutlass cannot initialize");
   }
@@ -636,22 +638,22 @@ void f8f8bf16_rowwise_impl_sm89(
   constexpr auto SplitKFactor = 1;
 
   XScaleArguments x_scale_arguments{
-      (DtypeScale*)x_scale.data_ptr(),
+      reinterpret_cast<const DtypeScale*>(x_scale.const_data_ptr()),
       DtypeScale(1),
       {cute::_1{}, cute::_0{}, problem_size.m()}
   };
   WScaleArguments w_scale_arguments{
-      (DtypeScale*)w_scale.data_ptr(),
+      reinterpret_cast<const DtypeScale*>(w_scale.const_data_ptr()),
       DtypeScale(1),
       {cute::_0{}, cute::_1{}, problem_size.n()}
   };
   BiasArguments bias_arguments{
-      bias.has_value() ? reinterpret_cast<DtypeBias*>(bias->data_ptr()) : nullptr,
+      bias.has_value() ? reinterpret_cast<const DtypeBias*>(bias->const_data_ptr()) : nullptr,
       DtypeBias(0),
       {cute::_0{}, cute::_1{}, problem_size.n()}
   };
   typename Output::Arguments output_arguments{
-    (DtypeOutput*)out.data_ptr(),
+    reinterpret_cast<DtypeOutput*>(out.mutable_data_ptr()),
     {problem_size.n(), cute::_1{}, problem_size.mn().product()}
   };
   typename EVTOutput::Arguments callback_arguments{
@@ -676,8 +678,8 @@ void f8f8bf16_rowwise_impl_sm89(
     problem_size,
     SplitKFactor,
     callback_arguments,           // arguments of EVT callbacks
-    (DtypeA*)XQ.data_ptr(),
-    (DtypeB*)WQ.data_ptr(),
+    reinterpret_cast<const DtypeA*>(XQ.const_data_ptr()),
+    reinterpret_cast<const DtypeB*>(WQ.const_data_ptr()),
     nullptr,                      // ptr C (unused)
     nullptr,                      // ptr D (unused)
     problem_size.mk().product(),  // batch stride A
@@ -707,7 +709,7 @@ void f8f8bf16_rowwise_impl_sm89(
   }
 
   // Initialize CUTLASS kernel with arguments and workspace pointer
-  status = gemm.initialize(arguments, workspace.data_ptr(), at::cuda::getCurrentCUDAStream());
+  status = gemm.initialize(arguments, workspace.mutable_data_ptr(), at::cuda::getCurrentCUDAStream());
   if (status != cutlass::Status::kSuccess) {
     throw std::runtime_error("cutlass cannot initialize");
   }
