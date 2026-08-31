@@ -302,6 +302,13 @@ def logcumsumexp(self, dim):
 # Although the actual FFT launch is different, all the permuting code appears
 # to be the same
 def _exec_fft(out, self, out_sizes, dim, *, forward):
+    # Empty batches are short-circuited by the eager kernels (cuFFT/MKL/MPS all
+    # reject zero-element transforms); mirror that here so tracing does not call
+    # resize_ on a functionalized tensor.
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if guard_or_false(out.numel() == 0):
+        return out.new_empty(out_sizes)
     ndim = self.ndim
     signal_ndim = len(dim)
     batch_dims = ndim - signal_ndim
@@ -610,11 +617,19 @@ def meta_philox_key_fold_in_tensor(key, data):
     return torch.empty_like(key)
 
 
-def _check_philox_distribution_args(op_name, self, key):
-    torch._check(
-        self.dtype.is_floating_point,
-        lambda: f"{op_name}: self must be a floating point tensor, got {self.dtype}",
-    )
+_PHILOX_RANDINT_DTYPES = (
+    torch.uint8,
+    torch.uint16,
+    torch.uint32,
+    torch.uint64,
+    torch.int8,
+    torch.int16,
+    torch.int32,
+    torch.int64,
+)
+
+
+def _check_philox_gen_args(op_name, self, key):
     torch._check(
         key.dtype == torch.uint64,
         lambda: f"{op_name}: key must have dtype uint64, got {key.dtype}",
@@ -650,6 +665,14 @@ def _check_philox_distribution_args(op_name, self, key):
         )
 
 
+def _check_philox_distribution_args(op_name, self, key):
+    torch._check(
+        self.dtype.is_floating_point,
+        lambda: f"{op_name}: self must be a floating point tensor, got {self.dtype}",
+    )
+    _check_philox_gen_args(op_name, self, key)
+
+
 @register_meta(aten._philox_normal_.default)
 def meta_philox_normal_(self, key, mean=0.0, std=1.0):
     _check_philox_distribution_args("_philox_normal_", self, key)
@@ -659,6 +682,32 @@ def meta_philox_normal_(self, key, mean=0.0, std=1.0):
 @register_meta(aten._philox_uniform_.default)
 def meta_philox_uniform_(self, key, low=0.0, high=1.0):
     _check_philox_distribution_args("_philox_uniform_", self, key)
+    return self
+
+
+@register_meta(aten._philox_randint_.default)
+def meta_philox_randint_(self, key, low=None, high=None):
+    torch._check(
+        self.dtype in _PHILOX_RANDINT_DTYPES,
+        lambda: f"_philox_randint_: self must have an integer dtype, got {self.dtype}",
+    )
+    if self.dtype.itemsize == 4 and (low is not None or high is not None):
+        # Must match the kernels' 32-bit sample range limit; see kMaxRange32.
+        # A range dividing 2**32 evenly is exact at any size, so only guard the
+        # ranges that actually skew.
+        dtype_low = -(2**31) if self.dtype.is_signed else 0
+        lo = dtype_low if low is None else low
+        hi = (dtype_low + 2**32) if high is None else high
+        rng = (hi - lo) % 2**32
+        torch._check(
+            rng == 0 or 2**32 % rng == 0 or rng < 2**28,
+            lambda: f"_philox_randint_: range (high - low = {rng}) does not divide 2^32 "
+            f"evenly and is too large for the output dtype {self.dtype}. Each element draws "
+            "only 32 random bits, so a non-dividing range >= 2^28 gives a significantly biased "
+            "distribution. Use a range that divides 2^32 (a power of two), or a 64-bit dtype "
+            "(torch.int64 or torch.uint64).",
+        )
+    _check_philox_gen_args("_philox_randint_", self, key)
     return self
 
 
@@ -899,9 +948,10 @@ def meta__cslt_sparse_mm(
         torch.bfloat16,
         torch.int8,
         torch.float8_e4m3fn,
+        torch.float8_e4m3fnuz,
     }:
         raise AssertionError(
-            f"_cslt_sparse_mm only supports fp16, bf16, int8, and fp8e4m3, got {dense_B.dtype}"
+            f"_cslt_sparse_mm only supports fp16, bf16, int8, fp8e4m3, and fp8e4m3fnuz, got {dense_B.dtype}"
         )
     if compressed_A.dtype != dense_B.dtype:
         raise AssertionError(
@@ -912,7 +962,11 @@ def meta__cslt_sparse_mm(
             f"_cslt_sparse_mm only supports 2d inputs, got {len(dense_B.shape)}D"
         )
 
-    is_8bit_input_type = compressed_A.dtype in [torch.int8, torch.float8_e4m3fn]
+    is_fp8_input_type = compressed_A.dtype in [
+        torch.float8_e4m3fn,
+        torch.float8_e4m3fnuz,
+    ]
+    is_8bit_input_type = compressed_A.dtype == torch.int8 or is_fp8_input_type
 
     n = dense_B.size(1)
     m = compressed_A.size(0)
@@ -937,6 +991,16 @@ def meta__cslt_sparse_mm(
             raise AssertionError(
                 f"out_dtype is not supported for {compressed_A.dtype} x {dense_B.dtype} -> {out_dtype} matmul!"
             )
+        if is_fp8_input_type and torch.version.hip and out_dtype != torch.float32:
+            # Match the eager TORCH_CHECK in _cslt_sparse_mm_impl so compile
+            # rejects at trace time what eager rejects at call time.
+            raise AssertionError(
+                f"out_dtype must be float32 for fp8 inputs on ROCm, got {out_dtype}"
+            )
+    if out_dtype is None and is_fp8_input_type and torch.version.hip:
+        # hipSparseLt only produces fp32 for fp8 inputs, so _cslt_sparse_mm
+        # forces the result dtype to fp32 when out_dtype is omitted.
+        out_dtype = torch.float32
     output_shape = (n, m) if transpose_result else (m, n)
     return dense_B.new_empty(output_shape, dtype=out_dtype)
 
@@ -1019,7 +1083,8 @@ def meta_max(self):
     return self.new_empty(())
 
 
-@register_meta(aten.max.dim)
+@register_meta([aten.max.dim, aten.max.dim_max])
+@out_wrapper("max", "max_values", exact_dtype=True)
 def meta_max_dim(self, dim, keepdim=False):
     dim = utils.reduction_dims(self.shape, (dim,))
     output_shape = _compute_reduction_shape(self, dim, keepdim)
@@ -1035,7 +1100,8 @@ def meta_min(self):
     return self.new_empty(())
 
 
-@register_meta(aten.min.dim)
+@register_meta([aten.min.dim, aten.min.dim_min])
+@out_wrapper("min", "min_indices", exact_dtype=True)
 def meta_min_dim(self, dim, keepdim=False):
     dim = utils.reduction_dims(self.shape, (dim,))
     output_shape = _compute_reduction_shape(self, dim, keepdim)
@@ -4807,7 +4873,15 @@ def shift_dtype_check(fn_name, self, val):
         )
 
 
-@register_meta([aten.__rshift__.Tensor, aten.__rshift__.Scalar])
+@register_meta(
+    [
+        aten.__rshift__.Tensor,
+        aten.__rshift__.Scalar,
+        aten.__rshift__.Scalar_out,
+        aten.__rshift__.Tensor_out,
+    ]
+)
+@out_wrapper(exact_dtype=True)
 def meta_rshifts(self, other):
     shift_dtype_check("rshift", self, other)
     return elementwise_meta(
@@ -4815,7 +4889,15 @@ def meta_rshifts(self, other):
     )
 
 
-@register_meta([aten.__lshift__.Tensor, aten.__lshift__.Scalar])
+@register_meta(
+    [
+        aten.__lshift__.Tensor,
+        aten.__lshift__.Scalar,
+        aten.__lshift__.Scalar_out,
+        aten.__lshift__.Tensor_out,
+    ]
+)
+@out_wrapper(exact_dtype=True)
 def meta_lshifts(self, other):
     shift_dtype_check("lshift", self, other)
     return elementwise_meta(
@@ -6445,6 +6527,15 @@ def meta__scaled_dot_product_fused_attention_overrideable(
     S_KV = key.size(-2)
     D_V = value.size(-1)
 
+    if attn_bias is not None:
+        bias_s_kv = attn_bias.size(-1)
+        if bias_s_kv != 1:
+            torch._check(
+                bias_s_kv == S_KV,
+                lambda: f"attn_bias last dimension must match S_KV ({S_KV}) "
+                f"or be 1 for broadcasting, but got {bias_s_kv}",
+            )
+
     # Preserve input dimensionality for the output shape
     out_shape = list(query.shape)
     out_shape[-1] = D_V
@@ -7060,6 +7151,7 @@ def meta__efficient_attention_backward(
     key: Tensor,
     value: Tensor,
     bias: Tensor | None,
+    out: Tensor,
     cu_seqlens_q: Tensor | None,
     cu_seqlens_k: Tensor | None,
     max_seqlen_q: torch.SymInt,
@@ -7072,6 +7164,7 @@ def meta__efficient_attention_backward(
     bias_requires_grad: bool,
     scale: float | None = None,
     num_splits_key: int | None = None,
+    window_size: int | None = None,
     shared_storage_dqdkdv: bool = False,
 ):
     if shared_storage_dqdkdv:
@@ -7080,7 +7173,7 @@ def meta__efficient_attention_backward(
             lambda: "seqlen must match for `shared_storage_dqdkdv",
         )
         torch._check(
-            query.shape[3] == key.shape[3],
+            query.shape[3] == key.shape[3] == value.shape[3],
             lambda: "embedding dim must match for `shared_storage_dqdkdv",
         )
         torch._check(
@@ -7819,7 +7912,8 @@ def scalar_tensor(s, dtype=None, layout=None, device=None, pin_memory=None):
     )
 
 
-@register_meta(aten.topk.default)
+@register_meta([aten.topk.default, aten.topk.values])
+@out_wrapper("values", "indices", exact_dtype=True)
 def topk_meta(self, k, dim=-1, largest=True, sorted=True):
     # From aten/src/ATen/native/Sorting.cpp
     dim = maybe_wrap_dim(dim, self.dim(), wrap_scalar=True)
@@ -8184,7 +8278,7 @@ def _amp_foreach_non_finite_check_and_unscale_(self, found_inf, inv_scale):
 
 # From aten/src/ATen/native/UnaryOps.cpp
 @register_meta([aten.nan_to_num.default, aten.nan_to_num.out])
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def nan_to_num(self, nan=None, posinf=None, neginf=None):
     return torch.empty_like(self)
 

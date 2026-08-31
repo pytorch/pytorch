@@ -15,7 +15,7 @@ from torch.cuda._graph_annotations import (
     resolve_and_remap,
     resolve_pending_annotations,
 )
-from torch.cuda._utils import _check_cuda_bindings
+from torch.cuda._utils import _check_cuda_bindings, _check_cuda_bindings_driver
 from torch.cuda.graph_annotations import (
     clear_kernel_annotations,
     get_kernel_annotations,
@@ -498,6 +498,34 @@ class TestMarkKernels(TestCase):
             capture_stream.wait_event(aux_done)
 
         self.assertAnnotations({"name": "aux_branch", "stream": expected_stream_id})
+
+    def test_mark_stream_does_not_mutate_caller_annotation(self):
+        """The stream id goes onto a copy. The annotation is stored by reference, so
+        writing it through would leak back to the caller and, for a dict reused across
+        lanes, retag the regions already recorded with it to the last lane."""
+        graph = torch.cuda.CUDAGraph()
+        x = torch.randn(8, device="cuda")
+        capture_stream = torch.cuda.Stream()
+        lane_a = torch.cuda.Stream()
+        lane_b = torch.cuda.Stream()
+        id_a, id_b = _get_stream_id(lane_a), _get_stream_id(lane_b)
+        shared = {"name": "comm"}
+
+        capture_stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.graph(graph, stream=capture_stream, enable_annotations=True):
+            for lane in (lane_a, lane_b):
+                lane_ready = capture_stream.record_event()
+                lane_done = torch.cuda.Event()
+                with mark_stream(lane, shared):
+                    lane.wait_event(lane_ready)
+                    _ = x * 2
+                    lane.record_event(lane_done)
+                capture_stream.wait_event(lane_done)
+
+        self.assertNotIn("stream", shared)
+        self.assertAnnotations(
+            {"name": "comm", "stream": id_a}, {"name": "comm", "stream": id_b}
+        )
 
     def _exec_graph_id(self, graph):
         from cuda.bindings import runtime as cuda_runtime
@@ -1182,7 +1210,7 @@ class TestMarkKernels(TestCase):
         y.backward()
         torch.cuda.synchronize()
         resolve_pending_annotations()
-        self.assertEqual(get_kernel_annotations(), before)
+        self.assertEqual(dict(get_kernel_annotations()), before)
 
     def test_eager_forward_backward_noop(self):
         x = torch.randn(8, device="cuda", requires_grad=True)
@@ -1271,6 +1299,40 @@ class TestMarkKernels(TestCase):
     "cudaGraphNodeGetToolsId not available (needs cuda-compat >= 13.1)",
 )
 class TestGetGraphData(TestCase):
+    def test_batch_mem_op_node(self):
+        from cuda.bindings import driver
+
+        device = _check_cuda_bindings_driver(
+            driver.cuDeviceGet(torch.cuda.current_device())
+        )
+        can_use_stream_mem_ops = _check_cuda_bindings_driver(
+            driver.cuDeviceGetAttribute(
+                driver.CUdevice_attribute.CU_DEVICE_ATTRIBUTE_CAN_USE_STREAM_MEM_OPS_V1,
+                device,
+            )
+        )
+        if not can_use_stream_mem_ops:
+            self.skipTest("device does not support stream memory operations")
+
+        value = torch.zeros(1, dtype=torch.int32, device="cuda")
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+        with torch.cuda.graph(g, capture_error_mode="relaxed"):
+            _check_cuda_bindings_driver(
+                driver.cuStreamWriteValue32(
+                    torch.cuda.current_stream().cuda_stream,
+                    value.data_ptr(),
+                    1,
+                    driver.CUstreamWriteValue_flags.CU_STREAM_WRITE_VALUE_DEFAULT,
+                )
+            )
+
+        g.instantiate()
+        data = g.get_graph_data()
+        batch_mem_op_nodes = [
+            node for node in data["nodes"] if node["node_type"] == "batch_mem_op"
+        ]
+        self.assertEqual(len(batch_mem_op_nodes), 1)
+
     def test_basic_structure(self):
         g = torch.cuda.CUDAGraph(keep_graph=True)
         x = torch.zeros([2000], device="cuda")
@@ -1641,25 +1703,58 @@ class TestRemoveKernelAnnotations(TestCase):
 
         exec_a, exec_b = 1, 2
         ga.clear_kernel_annotations()
-        ann = ga.get_kernel_annotations()
-        ann[self._tools_id(exec_a, 10)] = ["a"]
-        ann[self._tools_id(exec_b, 10)] = ["b"]
+        ga.record_node_annotation(self._tools_id(exec_a, 10), {"name": "a"})
+        ga.record_node_annotation(self._tools_id(exec_b, 10), {"name": "b"})
 
         ga.remove_kernel_annotations([exec_a])
 
         self.assertEqual(
-            ga.get_kernel_annotations(), {self._tools_id(exec_b, 10): ["b"]}
+            dict(ga.get_kernel_annotations()),
+            {self._tools_id(exec_b, 10): [{"name": "b"}]},
         )
 
     def test_missing_and_empty_ids_are_noops(self):
         import torch.cuda._graph_annotations as ga
 
         ga.clear_kernel_annotations()
-        ann = ga.get_kernel_annotations()
-        ann[self._tools_id(2, 10)] = ["b"]
+        ga.record_node_annotation(self._tools_id(2, 10), {"name": "b"})
         ga.remove_kernel_annotations([])  # empty: no-op
         ga.remove_kernel_annotations([99])  # unknown exec id: no-op
-        self.assertEqual(ga.get_kernel_annotations(), {self._tools_id(2, 10): ["b"]})
+        self.assertEqual(
+            dict(ga.get_kernel_annotations()), {self._tools_id(2, 10): [{"name": "b"}]}
+        )
+
+
+# Pure registry logic, no CUDA needed: the store keeps one merged annotation per node,
+# which the public mapping wraps in a one-element list.
+class TestAnnotationStore(TestCase):
+    def tearDown(self):
+        import torch.cuda._graph_annotations as ga
+
+        ga.clear_kernel_annotations()
+        super().tearDown()
+
+    def test_writes_to_one_node_merge_first_wins(self):
+        import torch.cuda._graph_annotations as ga
+
+        ga.clear_kernel_annotations()
+        # Scopes reach a node innermost first, so the first write keeps the shared keys.
+        ga.record_node_annotation(7, {"name": "inner", "only_inner": 1})
+        ga.record_node_annotation(7, {"name": "outer", "only_outer": 2})
+        merged = {"name": "inner", "only_inner": 1, "only_outer": 2}
+        self.assertEqual(ga.annotation_for(7), merged)
+        self.assertEqual(dict(ga.get_kernel_annotations()), {7: [merged]})
+
+    def test_view_is_live_and_read_only(self):
+        import torch.cuda._graph_annotations as ga
+
+        ga.clear_kernel_annotations()
+        view = ga.get_kernel_annotations()
+        self.assertEqual(len(view), 0)
+        ga.record_node_annotation(7, {"name": "a"})
+        self.assertEqual(dict(view), {7: [{"name": "a"}]})
+        with self.assertRaises(TypeError):
+            view[7] = [{"name": "b"}]  # type: ignore[index]
 
 
 # Pure trace-JSON logic, no CUDA needed. Pins the canonical annotation key
@@ -1865,6 +1960,339 @@ class TestGraphGlobalLifecycleHooks(TestCase):
                 g.replay()
         self.assertEqual(seen, ["replay_start", "replay_end"])
         g.reset()
+
+
+def _cupti_backend_available():
+    """Whether the CUPTI annotation backend can be exercised: cupti-python present and the
+    monitor able to subscribe. Probed by actually bringing an observer up, since
+    ``has_live_subscription`` is false until something holds a subscription."""
+    try:
+        from torch.profiler._cupti.observers.node_timer import NodeTimerObserver
+    except ImportError:
+        return False
+    try:
+        return NodeTimerObserver().available
+    except Exception:
+        return False
+
+
+@skipIfRocm
+@requires_cuda
+@requires_cuda_python_bindings
+@unittest.skipIf(
+    _is_tools_id_unavailable(),
+    "cudaGraphNodeGetToolsId not available (needs cuda-compat >= 13.1)",
+)
+@unittest.skipIf(
+    not _cupti_backend_available(), "requires a CUPTI monitor able to subscribe"
+)
+class TestCuptiAnnotationBackend(TestCase):
+    """``annotation_config={"backend": "cupti"}``: nodes are attributed as CUPTI reports their creation
+    rather than by walking the capture graph's dependent edges."""
+
+    def setUp(self):
+        clear_kernel_annotations()
+        self.addCleanup(clear_kernel_annotations)
+        # Attributing a node needs the mark_kernels scope open on the creating thread.
+        ctx = torch.autograd.grad_mode.set_multithreading_enabled(False)
+        ctx.__enter__()
+        self.addCleanup(ctx.__exit__, None, None, None)
+        # Holding an observer keeps the monitor subscribed, which is what makes the CUPTI
+        # backend selectable (and what "auto" probes for).
+        from torch.profiler._cupti.observers.node_timer import NodeTimerObserver
+
+        self.observer = NodeTimerObserver()
+        close = getattr(self.observer, "close", None)
+        if close is not None:
+            self.addCleanup(close)
+
+    @staticmethod
+    def _warm(x):
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            for _ in range(3):
+                x = x + 1
+        torch.cuda.current_stream().wait_stream(s)
+        return x
+
+    def _annotations(self):
+        return dict(get_kernel_annotations())
+
+    def test_parity_with_edge_walk(self):
+        # Both backends must attribute the same nodes the same way, and key them the same
+        # way: the node ids must match, and every key must be rekeyed to that capture's exec
+        # graph id (what lets an annotation join a trace's "graph node id"). Comparing keys
+        # rather than just counts is what catches the CUPTI handler recording into a
+        # different id space. The backward pass is part of the comparison because it is
+        # attributed by a different mechanism -- hooks the scope installs on the autograd
+        # nodes its forward creates -- that both backends share.
+        from cuda.bindings import runtime as cuda_runtime
+
+        def warm(x):
+            s = torch.cuda.Stream()
+            s.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(s):
+                for _ in range(3):
+                    torch.autograd.grad((x * 2).sin().sum(), x)
+            torch.cuda.current_stream().wait_stream(s)
+
+        by_backend = {}
+        for backend in ("edge_walk", "cupti"):
+            clear_kernel_annotations()
+            x = torch.randn(64, 64, device="cuda", requires_grad=True)
+            warm(x)
+            g = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(
+                g, enable_annotations=True, annotation_config={"backend": backend}
+            ):
+                with mark_kernels("phase"):
+                    y = (x * 2).sin()
+                with mark_kernels({"name": "bwd_region", "lane": 1}):
+                    torch.autograd.grad(y.sum(), x)
+            exec_graph_id = _check_cuda_bindings(
+                cuda_runtime.cudaGraphExecGetId(g.raw_cuda_graph_exec())
+            )
+            annotations = self._annotations()
+            for tools_id in annotations:
+                self.assertEqual(tools_id >> 32, exec_graph_id)
+            by_backend[backend] = {
+                tools_id & 0xFFFFFFFF: entries
+                for tools_id, entries in annotations.items()
+            }
+        self.assertEqual(by_backend["cupti"], by_backend["edge_walk"])
+
+        # Parity alone would also hold if both backends broke the same way, so pin the
+        # annotation the hooks are there to produce: the forward scope owns its backward
+        # kernels even though a different scope is open around the backward call, whose
+        # other keys still merge in.
+        self.assertIn(
+            [{"name": "phase", "lane": 1, "autograd_phase": "backward"}],
+            by_backend["cupti"].values(),
+        )
+
+    def test_scope_entered_before_stream_joins_capture(self):
+        # The edge walk snapshots the CURRENT stream's capture state on scope entry, so a
+        # scope entered while that stream is not yet capturing records nothing at all --
+        # even though work inside it is captured. CUPTI reports each node as it is created,
+        # so it is unaffected.
+        def run(backend):
+            clear_kernel_annotations()
+            x = self._warm(torch.randn(64, 64, device="cuda"))
+            g = torch.cuda.CUDAGraph()
+            side = torch.cuda.Stream()
+            with torch.cuda.graph(
+                g, enable_annotations=True, annotation_config={"backend": backend}
+            ):
+                capturing = torch.cuda.current_stream()
+                joined = torch.cuda.Event()
+                joined.record(capturing)
+                with torch.cuda.stream(side):
+                    with mark_kernels("region"):
+                        # side is not capturing yet at scope entry; it joins here.
+                        side.wait_event(joined)
+                        for _ in range(3):
+                            x = x + 1
+                    done = torch.cuda.Event()
+                    done.record(side)
+                capturing.wait_event(done)
+            return len(self._annotations())
+
+        self.assertEqual(run("edge_walk"), 0)
+        self.assertEqual(run("cupti"), 3)
+
+    def test_nested_scopes_merge_inner_wins(self):
+        x = self._warm(torch.randn(64, 64, device="cuda"))
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(
+            g, enable_annotations=True, annotation_config={"backend": "cupti"}
+        ):
+            with mark_kernels({"name": "outer", "shared": "outer", "only_outer": 1}):
+                x = x + 1
+                with mark_kernels({"name": "inner", "shared": "inner"}):
+                    x = x + 1
+        annotations = sorted(self._annotations().items())
+        self.assertEqual(len(annotations), 2)
+        self.assertEqual(
+            annotations[0][1], [{"name": "outer", "shared": "outer", "only_outer": 1}]
+        )
+        # Inner wins the keys both scopes set; the outer-only key still comes through.
+        self.assertEqual(
+            annotations[1][1],
+            [{"name": "inner", "shared": "inner", "only_outer": 1}],
+        )
+
+    def test_outer_scope_restored_after_inner_exits(self):
+        # The merged annotation is cached and refreshed on scope enter/exit, so a node
+        # created after an inner scope closes must get the outer annotation back rather than
+        # the stale merge.
+        x = self._warm(torch.randn(64, 64, device="cuda"))
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(
+            g, enable_annotations=True, annotation_config={"backend": "cupti"}
+        ):
+            with mark_kernels({"name": "outer"}):
+                x = x + 1
+                with mark_kernels({"name": "inner"}):
+                    x = x + 1
+                x = x + 1
+        names = [
+            entries[0]["name"] for _, entries in sorted(self._annotations().items())
+        ]
+        self.assertEqual(names, ["outer", "inner", "outer"])
+
+    def test_conditional_body_work_warns_and_is_not_annotated(self):
+        # Parity with the edge walk's conditional-body warning, but reported on the drop
+        # rather than at scope entry: the handler cannot key body nodes to anything a trace
+        # would match, so it counts them and disarm() says how many were lost. That covers
+        # a scope *containing* a body as well as one inside it.
+        from torch._higher_order_ops.cudagraph_conditional_nodes import _if_body
+
+        x = torch.ones([2048], device="cuda")
+        pred = torch.tensor(True, device="cuda")
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+        with self.assertWarnsRegex(UserWarning, "were not annotated"):
+            with torch.cuda.graph(
+                g, enable_annotations=True, annotation_config={"backend": "cupti"}
+            ):
+                with mark_kernels("region"):
+                    z = x + 1
+                    with _if_body(pred):
+                        _ = torch.sqrt(z)
+        g.instantiate()
+
+        # Whatever was annotated is top-level: every key belongs to the exec graph, so none
+        # of the body's nodes (which live in the body graph's id space) slipped in. The
+        # exact top-level count is left alone -- _if_body emits kernels of its own.
+        annotations = self._annotations()
+        self.assertGreater(len(annotations), 0)
+        exec_graph_id = g.get_graph_data()["exec_graph_id"]
+        for tools_id in annotations:
+            self.assertEqual(tools_id >> 32, exec_graph_id)
+
+    def test_no_warning_without_body_work(self):
+        # The counter must not leak across captures: a plain capture right after one that
+        # dropped body nodes has to be silent.
+        import warnings as _warnings
+
+        x = self._warm(torch.randn(64, 64, device="cuda"))
+        g = torch.cuda.CUDAGraph()
+        with _warnings.catch_warnings():
+            _warnings.simplefilter("error")
+            with torch.cuda.graph(
+                g, enable_annotations=True, annotation_config={"backend": "cupti"}
+            ):
+                with mark_kernels("region"):
+                    x = x + 1
+
+    def test_scopes_do_not_leak_across_captures(self):
+        # A capture that raises mid-scope must not leave the scope open for the next one.
+        x = self._warm(torch.randn(64, 64, device="cuda"))
+        g = torch.cuda.CUDAGraph()
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            with torch.cuda.graph(
+                g, enable_annotations=True, annotation_config={"backend": "cupti"}
+            ):
+                with mark_kernels("doomed"):
+                    x = x + 1
+                    raise RuntimeError("boom")
+
+        clear_kernel_annotations()
+        g2 = torch.cuda.CUDAGraph()
+        y = self._warm(torch.randn(64, 64, device="cuda"))
+        with torch.cuda.graph(
+            g2, enable_annotations=True, annotation_config={"backend": "cupti"}
+        ):
+            y = y + 1
+        # No scope was open, so nothing should be attributed to the doomed one.
+        self.assertEqual(self._annotations(), {})
+
+    def test_failed_backward_does_not_leak_its_annotation(self):
+        # A node that raises never runs its posthook, so the annotation its bracket
+        # published stays on the module-global stack. If the failure is caught inside the
+        # capture, every later unmarked node would inherit it.
+        class Boom(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad):
+                raise RuntimeError("boom")
+
+        x = torch.randn(64, 64, device="cuda", requires_grad=True)
+        self._warm(x.detach())
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(
+            g, enable_annotations=True, annotation_config={"backend": "cupti"}
+        ):
+            with mark_kernels("fwd"):
+                y = Boom.apply(x)
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                torch.autograd.grad(y.sum(), x)
+            # Outside every scope, and after the failure: must be attributed to nothing.
+            _ = x + 1
+
+        recorded = [
+            entry for entries in self._annotations().values() for entry in entries
+        ]
+        self.assertNotIn("autograd_phase", {k for entry in recorded for k in entry})
+        # The forward scope's own kernels are still attributed.
+        self.assertIn({"name": "fwd"}, recorded)
+
+    def test_callback_disarmed_after_capture(self):
+        from torch.cuda import _graph_node_callbacks
+
+        x = self._warm(torch.randn(64, 64, device="cuda"))
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(
+            g, enable_annotations=True, annotation_config={"backend": "cupti"}
+        ):
+            with mark_kernels("phase"):
+                x = x + 1
+        self.assertIsNone(_graph_node_callbacks._handler)
+        before = len(self._annotations())
+        for _ in range(5):
+            g.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(len(self._annotations()), before)
+
+    def test_cupti_backend_requires_single_threaded_autograd(self):
+        x = self._warm(torch.randn(64, 64, device="cuda"))
+        g = torch.cuda.CUDAGraph()
+        with torch.autograd.grad_mode.set_multithreading_enabled(True):
+            with self.assertRaisesRegex(RuntimeError, "single-threaded autograd"):
+                with torch.cuda.graph(
+                    g, enable_annotations=True, annotation_config={"backend": "cupti"}
+                ):
+                    x = x + 1
+
+    def test_auto_falls_back_when_multithreaded(self):
+        # "auto" must never raise: multithreaded autograd just means the edge walk.
+        from torch.cuda import _graph_annotations
+
+        x = self._warm(torch.randn(64, 64, device="cuda"))
+        g = torch.cuda.CUDAGraph()
+        seen = []
+        with torch.autograd.grad_mode.set_multithreading_enabled(True):
+            with torch.cuda.graph(g, enable_annotations=True):
+                seen.append(_graph_annotations._annotation_backend)
+                with mark_kernels("phase"):
+                    x = x + 1
+        self.assertEqual(seen, ["edge_walk"])
+        self.assertEqual(len(self._annotations()), 1)
+
+    def test_invalid_backend_rejected(self):
+        with self.assertRaisesRegex(ValueError, r"annotation_config\['backend'\]"):
+            torch.cuda.graph(
+                torch.cuda.CUDAGraph(), annotation_config={"backend": "nope"}
+            )
+        # A misspelled or unsupported key must raise rather than silently leave the default
+        # in place.
+        with self.assertRaisesRegex(ValueError, "unrecognized annotation_config key"):
+            torch.cuda.graph(
+                torch.cuda.CUDAGraph(), annotation_config={"backend_name": "cupti"}
+            )
 
 
 if __name__ == "__main__":
