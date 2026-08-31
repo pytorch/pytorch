@@ -17,6 +17,7 @@ from torch.testing._internal.common_cuda import _get_torch_cuda_version, SM90OrL
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     dtypes,
+    dtypesIfCPU,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
@@ -2206,6 +2207,7 @@ class TestForeachMMDevice(_TestForeachMMHelper, TestCase):
     @dtypesIfCPU(torch.float32)
     def test_foreach_mm(self, device, dtype, label, shapes):
         self._check(shapes, dtype, device)
+
 
 instantiate_device_type_tests(TestForeachMMDevice, globals())
 
