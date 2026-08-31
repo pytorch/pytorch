@@ -57,18 +57,6 @@ class IssueType(Enum):
     UNSTABLE = "unstable"
 
 
-def str_to_bool(value: str) -> bool:
-    """Parse a GitHub Actions boolean, treating an empty value as false."""
-    value = value.strip().lower()
-    if not value:
-        return False
-    if value in ("y", "yes", "t", "true", "on", "1"):
-        return True
-    if value in ("n", "no", "f", "false", "off", "0"):
-        return False
-    raise ValueError(f"invalid truth value {value!r}")
-
-
 def parse_args() -> Any:
     from argparse import ArgumentParser
 
@@ -86,8 +74,7 @@ def parse_args() -> Any:
     )
     parser.add_argument(
         "--ignore-test-config-labels",
-        type=str_to_bool,
-        default=False,
+        action="store_true",
         help="ignore test-config/* PR labels when filtering the test matrix",
     )
     parser.add_argument(
