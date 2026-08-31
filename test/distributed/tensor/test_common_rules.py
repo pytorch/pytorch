@@ -11,7 +11,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    build_fake_device_mesh,
+    build_mesh_for_fake_pg,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
@@ -46,7 +46,7 @@ class CommonRulesTest(TestCase):
 
     def test_einop_basic_propagation(self):
         # plain einsum, mm
-        mesh = build_fake_device_mesh(torch.arange(self.world_size))
+        mesh = build_mesh_for_fake_pg(torch.arange(self.world_size))
 
         mm_call = aten.mm.default
         # propagate col-wise sharding
@@ -98,7 +98,7 @@ class CommonRulesTest(TestCase):
         self.assertTrue(output_spec.placements[0].is_partial())
 
     def test_einop_pointwise_propagation(self):
-        mesh = build_fake_device_mesh(torch.arange(self.world_size))
+        mesh = build_mesh_for_fake_pg(torch.arange(self.world_size))
 
         add_call = aten.add.Tensor
         # addition
@@ -153,7 +153,7 @@ class CommonRulesTest(TestCase):
         mesh_shape = torch.arange(self.world_size).reshape(
             self.world_size // 2, self.world_size // 2
         )
-        mesh = build_fake_device_mesh(mesh_shape)
+        mesh = build_mesh_for_fake_pg(mesh_shape)
 
         mm_call = aten.mm.default
 
@@ -177,7 +177,7 @@ class CommonRulesTest(TestCase):
         mesh_shape = torch.arange(self.world_size).reshape(
             self.world_size // 2, self.world_size // 2
         )
-        mesh = build_fake_device_mesh(mesh_shape)
+        mesh = build_mesh_for_fake_pg(mesh_shape)
 
         mm_call = aten.mm.default
 
@@ -243,7 +243,7 @@ class CommonRulesTest(TestCase):
     def test_einop_multi_sharding_on_mesh_dim(self):
         # einop prop with multi sharding on same mesh dim
         mesh_shape = torch.arange(self.world_size)
-        mesh = build_fake_device_mesh(mesh_shape)
+        mesh = build_mesh_for_fake_pg(mesh_shape)
 
         mm_call = aten.mm.default
         mat1, mat2 = [0, -1], [0, -1]
@@ -272,7 +272,7 @@ class CommonRulesTest(TestCase):
         mesh_shape = torch.arange(self.world_size).reshape(
             self.world_size // 2, self.world_size // 2
         )
-        mesh = build_fake_device_mesh(mesh_shape)
+        mesh = build_mesh_for_fake_pg(mesh_shape)
 
         add_call = aten.add.Tensor
         mat1, mat2 = [0, -1], [1, -1]
@@ -289,7 +289,7 @@ class CommonRulesTest(TestCase):
             einop_rule("ij,ij->ij", OpSchema(add_call, (mat1_spec, mat2_spec), {}))
 
     def test_pointwise_rules_broadcasting(self):
-        mesh = build_fake_device_mesh(torch.arange(self.world_size))
+        mesh = build_mesh_for_fake_pg(torch.arange(self.world_size))
 
         where_call = aten.where.self
         inp1, inp2, inp3 = [0], [], [-1, -1]
@@ -314,7 +314,7 @@ class CommonRulesTest(TestCase):
         self.assertEqual(output_spec.dim_map, [-1, 0])
 
     def test_pointwise_rules_suggestion(self):
-        mesh = build_fake_device_mesh(torch.arange(self.world_size))
+        mesh = build_mesh_for_fake_pg(torch.arange(self.world_size))
 
         lerp_call = aten.lerp.Scalar
         # propagate point-wise sharding
@@ -345,7 +345,7 @@ class CommonRulesTest(TestCase):
         mesh_shape = torch.arange(self.world_size).reshape(
             self.world_size // 2, self.world_size // 2
         )
-        mesh = build_fake_device_mesh(mesh_shape)
+        mesh = build_mesh_for_fake_pg(mesh_shape)
 
         add_call = aten.add.Tensor
 
@@ -390,7 +390,7 @@ class CommonRulesTest(TestCase):
         mesh_shape = torch.arange(self.world_size).reshape(
             self.world_size // 2, self.world_size // 2
         )
-        mesh = build_fake_device_mesh(mesh_shape)
+        mesh = build_mesh_for_fake_pg(mesh_shape)
 
         add_call = aten.add_.Tensor
 

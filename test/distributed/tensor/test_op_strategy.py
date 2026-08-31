@@ -41,7 +41,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    build_fake_device_mesh,
+    build_mesh_for_fake_pg,
     create_local_tensor_test_class,
     DTensorOpTestBase,
     DTensorTestBase,
@@ -139,41 +139,41 @@ class TestEinsumStrategies(TestCase):
         torch.distributed.destroy_process_group()
 
     def test_mm_1d_mesh(self):
-        mesh = build_fake_device_mesh(torch.arange(self.world_size))
+        mesh = build_mesh_for_fake_pg(torch.arange(self.world_size))
 
         all_strats = gen_einsum_strategies("mk,kn->mn", mesh)
         self.assertEqual(len(all_strats.strategies), 4)
 
     def test_mm_2d_mesh(self):
-        mesh = build_fake_device_mesh(torch.arange(self.world_size).reshape(2, 2))
+        mesh = build_mesh_for_fake_pg(torch.arange(self.world_size).reshape(2, 2))
 
         all_strats = gen_einsum_strategies("mk,kn->mn", mesh)
         self.assertEqual(len(all_strats.strategies), 16)
 
     def test_bmm_1d_mesh(self):
-        mesh = build_fake_device_mesh(torch.arange(self.world_size))
+        mesh = build_mesh_for_fake_pg(torch.arange(self.world_size))
 
         all_strats = gen_einsum_strategies("bmk,bkn->bmn", mesh)
         self.assertEqual(len(all_strats.strategies), 5)
 
     def test_bmm_diffinndim_2d_mesh(self):
-        mesh = build_fake_device_mesh(torch.arange(self.world_size).reshape(2, 2))
+        mesh = build_mesh_for_fake_pg(torch.arange(self.world_size).reshape(2, 2))
         all_strats = gen_einsum_strategies("bmk,kn->bmn", mesh)
         self.assertEqual(len(all_strats.strategies), 25)
 
     def test_bmm_diffoutndim_2d_mesh(self):
-        mesh = build_fake_device_mesh(torch.arange(self.world_size).reshape(2, 2))
+        mesh = build_mesh_for_fake_pg(torch.arange(self.world_size).reshape(2, 2))
         all_strats = gen_einsum_strategies("bmk,k->bm", mesh)
         self.assertEqual(len(all_strats.strategies), 16)
 
     def test_bmm_2d_mesh(self):
-        mesh = build_fake_device_mesh(torch.arange(self.world_size).reshape(2, 2))
+        mesh = build_mesh_for_fake_pg(torch.arange(self.world_size).reshape(2, 2))
 
         all_strats = gen_einsum_strategies("bmk,bkn->bmn", mesh)
         self.assertEqual(len(all_strats.strategies), 25)
 
     def test_pointwise_1d_mesh(self):
-        mesh = build_fake_device_mesh(torch.arange(self.world_size))
+        mesh = build_mesh_for_fake_pg(torch.arange(self.world_size))
 
         simple_strats = gen_einsum_strategies("abcd,abcd->abcd", mesh)
         self.assertEqual(len(simple_strats.strategies), 5)
@@ -182,7 +182,7 @@ class TestEinsumStrategies(TestCase):
         self.assertEqual(len(broadcast_strats.strategies), 5)
 
     def test_linearity_1d_mesh(self):
-        mesh = build_fake_device_mesh(torch.arange(self.world_size))
+        mesh = build_mesh_for_fake_pg(torch.arange(self.world_size))
 
         all_strats = gen_einsum_strategies("abcd,abcd->abcd", mesh, linearity=True)
         self.assertEqual(len(all_strats.strategies), 6)

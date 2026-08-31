@@ -87,7 +87,10 @@ else:
     NUM_DEVICES = 4
 
 
-def build_fake_device_mesh(mesh: torch.Tensor) -> DeviceMesh:
+def build_mesh_for_fake_pg(mesh: torch.Tensor) -> DeviceMesh:
+    if not dist.is_initialized() or dist.get_backend() != "fake":
+        raise RuntimeError("An initialized fake process group is required")
+    # DeviceMesh requires a logical device type, but FakePG performs no device work.
     return DeviceMesh("cpu", mesh)
 
 
