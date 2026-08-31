@@ -239,7 +239,8 @@ class TestAOTCompileToPython(TestCase):
         )
 
     @skipIfTorchDynamo(
-        "make_fx of a training closure cannot trace under an outer dynamo"
+        "the served _CompiledFunction sets boxed_grads_call=True, which compiled "
+        "autograd rejects; a feature limitation, see the module's not-covered list"
     )
     def test_training_graph_composes_forward_and_backward(self):
         # grad_enabled with inputs that require grad makes AOTAutograd emit a
@@ -273,9 +274,6 @@ class TestAOTCompileToPython(TestCase):
         for name, param in m.named_parameters():
             self.assertEqual(param.grad, expected[name])
 
-    @skipIfTorchDynamo(
-        "make_fx of a training closure cannot trace under an outer dynamo"
-    )
     def test_training_forward_and_backward_do_not_share_names(self):
         # The two inductor modules are spliced into ONE namespace and both define
         # call / Runner / their kernels. A module resolves those as late-bound
@@ -319,6 +317,49 @@ class TestAOTCompileToPython(TestCase):
         ):
             compile_to_python(gm, [a0, b0, w], grad_enabled=True)
 
+    def test_training_compose_refuses_inlineable_saved_tensors_hooks(self):
+        # Inlineable (GraphModule) ambient hooks are traced INTO the joint
+        # graph, and at runtime AOTAutograd disables the ambient hooks around
+        # the compiled call so they do not ALSO fire on ctx.save_for_backward.
+        # That disable is plain Python the compose cannot splice, so composing
+        # must refuse: serving would pack already-packed activations.
+        pack_gm = torch.fx.symbolic_trace(lambda x: x * 2)
+        unpack_gm = torch.fx.symbolic_trace(lambda x: x / 2)
+        m = torch.nn.Linear(4, 3)
+        x = torch.randn(5, 4)
+        gm = _capture(m, x)
+        with (
+            torch.enable_grad(),
+            torch.autograd.graph.saved_tensors_hooks(pack_gm, unpack_gm),
+            self.assertRaisesRegex(NotImplementedError, "saved_tensors_hooks"),
+        ):
+            compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
+
+    def test_training_backward_lowers_with_is_backward(self):
+        # is_backward gates GraphLowering's backward-only require_contiguous
+        # safeguard for untagged implicit-fallback aten ops (#140452); the
+        # composed training backward must lower the way torch.compile's
+        # backward does. Spy on compile_fx_inner because the safeguard itself
+        # only engages on an op with no lowering, which no small graph has.
+        import torch._inductor.compile_fx as compile_fx_mod
+
+        seen = []
+        orig = compile_fx_mod.compile_fx_inner
+
+        def spy(gm, inputs, **kwargs):
+            seen.append(kwargs.get("is_backward", False))
+            return orig(gm, inputs, **kwargs)
+
+        m = torch.nn.Linear(4, 3)
+        x = torch.randn(5, 4)
+        gm = _capture(m, x)
+        with (
+            torch.enable_grad(),
+            unittest.mock.patch.object(compile_fx_mod, "compile_fx_inner", spy),
+        ):
+            compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
+        self.assertEqual(seen, [False, True])  # forward, then backward
+
     def test_restride_refuses_symbolic_forward_strides(self):
         # CompiledFxGraph.output_strides entries are PRINTED stride
         # expressions (strings); under dynamic shapes they are symbolic and
@@ -346,7 +387,8 @@ class TestAOTCompileToPython(TestCase):
 
     @unittest.skipIf(not HAS_GPU, "requires gpu")
     @skipIfTorchDynamo(
-        "make_fx of a training closure cannot trace under an outer dynamo"
+        "the served _CompiledFunction sets boxed_grads_call=True, which compiled "
+        "autograd rejects; a feature limitation, see the module's not-covered list"
     )
     def test_training_conv_restride_matches_eager(self):
         # Conv nets are what the backward restride exists for: inductor's

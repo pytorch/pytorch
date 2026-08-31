@@ -90,7 +90,7 @@ void enable_precompile_cache_keys() {
 // clear an AttributeError on a miss, and every level of every intercepted
 // frame's callback chain is a miss for the attributes below. Interned names
 // plus the no-raise lookup keep the walk off the exception path entirely.
-static PyObject* lookup_optional(py::handle handle, PyObject* name) {
+PyObject* lookup_optional(py::handle handle, PyObject* name) {
   PyObject* value = nullptr;
 #if IS_PYTHON_3_13_PLUS
   if (PyObject_GetOptionalAttr(handle.ptr(), name, &value) < 0) {
