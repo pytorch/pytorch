@@ -1501,6 +1501,16 @@ class TestFP8Matmul(TestCase):
                 input, actual, args, beta=beta, alpha=alpha, **kwargs
             )
 
+            def fn(input):
+                return scaled_addmm_(
+                    input, *args, beta=beta, alpha=alpha, **kwargs
+                )
+
+            compiled_input = input.clone()
+            compiled = torch.compile(fn, fullgraph=True)(compiled_input)
+            self.assertIs(compiled, compiled_input)
+            self.assertEqual(compiled, actual, atol=5e-2, rtol=5e-2)
+
     @onlyCUDA
     @skipIfRocm
     def test_scaled_addmm_fake_tensor(self, device):
@@ -1519,6 +1529,49 @@ class TestFP8Matmul(TestCase):
             out = torch.empty_like(input)
             self.assertIs(scaled_addmm(input, *args, out=out), out)
             self.assertIs(scaled_addmm_(input, *args), input)
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    def test_scaled_addmm_fullgraph(self, device):
+        from torch._inductor.utils import run_and_get_code
+
+        input, mat1, mat2, scale_a, scale_b = make_tensorwise_scaled_addmm_inputs(
+            32, 32, 32, device, torch.bfloat16
+        )
+
+        def fn(input, mat1, mat2, scale_a, scale_b):
+            return scaled_addmm(
+                input, *tensorwise_scaled_mm_args(mat1, mat2, scale_a, scale_b)
+            )
+
+        operands = (mat1, mat2, scale_a, scale_b)
+        expected = fn(input, *operands)
+        actual = torch.compile(fn, fullgraph=True)(input, *operands)
+        self.assertEqual(actual, expected)
+
+        def fn_(input, mat1, mat2, scale_a, scale_b):
+            return scaled_addmm_(
+                input, *tensorwise_scaled_mm_args(mat1, mat2, scale_a, scale_b)
+            )
+
+        expected_inplace = fn_(input.clone(), *operands)
+        functionalized_input = input.clone()
+        functionalized = torch.func.functionalize(fn_)(functionalized_input, *operands)
+        self.assertEqual(functionalized, expected_inplace, atol=5e-2, rtol=5e-2)
+        self.assertEqual(
+            functionalized_input, expected_inplace, atol=5e-2, rtol=5e-2
+        )
+
+        inplace = input.clone()
+        actual_inplace, source_codes = run_and_get_code(
+            torch.compile(fn_, fullgraph=True), inplace, *operands
+        )
+        self.assertIs(actual_inplace, inplace)
+        self.assertEqual(actual_inplace, expected_inplace, atol=5e-2, rtol=5e-2)
+        source = "\n".join(source_codes)
+        self.assertIn("_scaled_addmm_", source)
+        self.assertNotIn("triton_poi_fused_copy", source)
 
     @onlyCUDA
     @skipIfRocm
