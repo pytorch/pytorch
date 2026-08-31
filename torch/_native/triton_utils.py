@@ -7,6 +7,7 @@ from importlib.metadata import (
 )
 from importlib.util import find_spec as _find_spec
 from pathlib import Path as _Path
+from re import sub as _re_sub
 from typing import cast
 
 from torch._vendor.packaging.version import Version
@@ -34,11 +35,14 @@ _TRITON_DSL_NAME = "triton"
 _TRITON_REQUIRED_VERSION_MAJOR = 3
 _TRITON_MINIMUM_VERSION_MINOR = 6
 
-# Distribution names known to publish the `triton` module, tried before the
-# sys.path scan so that no install pays for it. TRITON_DISTRIBUTIONS in
-# tools/torchtlx/dev.py lists the ones that collide; `triton-xpu` is built by
-# .ci/pytorch/binary_populate_env.sh. A name missing here costs a scan, not a
-# wrong answer, so the list falling behind the wheels is not a correctness bug.
+# Names to try before the sys.path scan, so that a recognized install does not
+# pay for it. No file in the tree is canonical here and this is not meant to be
+# one: .ci/pytorch/binary_populate_env.sh publishes `triton`, `triton-rocm` and
+# `triton-xpu`, TRITON_DISTRIBUTIONS in tools/torchtlx/dev.py covers the five
+# that collide in a dev environment, and neither is a superset of the other.
+# This is the union of what has been seen installed, kept as a fast path only:
+# the scan below resolves a name missing here, so drift costs a scan rather than
+# a wrong answer.
 _TRITON_DISTRIBUTIONS = (
     "triton",
     "triton-rocm",
@@ -46,6 +50,18 @@ _TRITON_DISTRIBUTIONS = (
     "pytorch-triton",
     "pytorch-triton-rocm",
     "fbtriton",
+)
+
+
+def _normalized_name(name: str) -> str:
+    """
+    Distribution name in the form metadata lookups compare (PEP 503)
+    """
+    return _re_sub(r"[-_.]+", "-", name).lower()
+
+
+_TRITON_DISTRIBUTION_KEYS = frozenset(
+    _normalized_name(name) for name in _TRITON_DISTRIBUTIONS
 )
 
 
@@ -65,14 +81,34 @@ def _module_origin(module_name: str) -> str | None:
     return None if spec is None else spec.origin
 
 
+def _records_only_import_shims(paths: list[str]) -> bool:
+    """
+    Whether a distribution recorded nothing but the shims that import the module
+
+    An editable install (PEP 660) records a `.pth` and a finder that put the
+    module on sys.path, and its own metadata, but never the module: setuptools
+    writes only those, and the module itself stays in the source tree. Such a
+    file list cannot say what the distribution owns.
+    """
+    for path in paths:
+        parts = _Path(path).parts
+        if any(part.endswith((".dist-info", ".egg-info")) for part in parts):
+            continue
+        name = _Path(path).name
+        if name.endswith(".pth") or name.startswith("__editable__"):
+            continue
+        return False
+    return True
+
+
 def _distribution_owns(name: str, origin: str | None) -> bool:
     """
     Whether the distribution `name` installed the file at `origin`
 
-    Undecidable in three cases -- no origin, metadata that cannot be read, and
-    a distribution with no RECORD -- and all three answer True: nothing was
-    learned, so the distribution keeps the benefit of the doubt it had before
-    the question was asked.
+    Undecidable in four cases -- no origin, metadata that cannot be read, a
+    distribution with no RECORD, and one that recorded only import shims -- and
+    all four answer True: nothing was learned, so the distribution keeps the
+    benefit of the doubt it had before the question was asked.
     """
     if origin is None:
         return True
@@ -85,14 +121,23 @@ def _distribution_owns(name: str, origin: str | None) -> bool:
     if not files:
         return True
 
-    located = [file.locate() for file in files]
-    if any(str(path) == origin for path in located):
+    # Stops at the match, so an ordinary install does not walk the whole RECORD.
+    if any(str(file.locate()) == origin for file in files):
         return True
 
-    # Only a relocated or symlinked install needs the paths resolved, which
-    # stats every file the distribution installed.
+    located = [str(file.locate()) for file in files]
+    if _records_only_import_shims(located):
+        return True
+
+    # Reached whenever the distribution does not own the module -- the stale
+    # dist-info this lookup exists to see through -- so compare only the entries
+    # that could match before resolving, which stats the file.
     origin_path = _Path(origin).resolve()
-    return any(_Path(path).resolve() == origin_path for path in located)
+    return any(
+        _Path(path).resolve() == origin_path
+        for path in located
+        if _Path(path).name == origin_path.name
+    )
 
 
 def _available_triton_version() -> Version | None:
@@ -124,13 +169,7 @@ def _available_triton_version() -> Version | None:
             return version
 
     try:
-        for provider in _packages_distributions().get("triton", ()):
-            if provider in _TRITON_DISTRIBUTIONS:
-                # Already tried above, with the same answer.
-                continue
-            version = _available_version(provider)
-            if version is not None and _distribution_owns(provider, origin):
-                return version
+        providers = _packages_distributions().get("triton", ())
     except Exception:
         # Reading the metadata is best-effort, but declining leaves the ops
         # unregistered on an install where Triton itself works, so say so.
@@ -141,6 +180,28 @@ def _available_triton_version() -> Version | None:
         )
         return None
 
+    for provider in providers:
+        try:
+            if _normalized_name(provider) in _TRITON_DISTRIBUTION_KEYS:
+                # Already tried above, with the same answer.
+                continue
+            version = _available_version(provider)
+            if version is not None and _distribution_owns(provider, origin):
+                return version
+        except Exception:
+            # A dist-info whose METADATA has no `Name` arrives here as a `None`
+            # provider, which the version lookup rejects. Skip it rather than
+            # abandoning the providers listed after it.
+            log.warning(
+                "Ignoring a distribution that reports providing triton but "
+                "cannot be read",
+                exc_info=True,
+            )
+
+    # Left at info: reaching here means no metadata reports a version at all,
+    # which is what a source checkout on PYTHONPATH looks like, and is expected
+    # rather than notable. An editable install is not this case -- it reports a
+    # version, and _distribution_owns accepts it.
     log.info(
         "no installed distribution reports a parseable version for the `triton` "
         "module; triton native DSL ops will not register"

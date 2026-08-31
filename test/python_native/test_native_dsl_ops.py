@@ -10,7 +10,7 @@ import uuid
 from importlib.metadata import PackageNotFoundError
 from unittest.mock import patch
 
-from torch._native import triton_utils
+from torch._native import common_utils as native_common_utils, triton_utils
 from torch._vendor.packaging.version import Version
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -748,8 +748,9 @@ class TestTritonDistributionDiscovery(TestCase):
             self.assertEqual(triton_utils._available_triton_version(), Version("3.7.1"))
 
     def test_module_owned_by_no_distribution_reports_no_version(self):
-        # A source or editable install: importable, with no metadata to read a
-        # version from.
+        # A source checkout on PYTHONPATH: importable, with no dist-info at all,
+        # so nothing reports a version. An editable install is a different case
+        # -- it has metadata and reports a version -- and is covered below.
         with (
             _triton_installed({}),
             _triton_provided_by(),
@@ -812,6 +813,60 @@ class TestTritonDistributionDiscovery(TestCase):
 
         scan.assert_called_once()
 
+    def test_editable_install_keeps_the_version_it_reports(self):
+        # A PEP 660 editable install records the `.pth` and finder that put the
+        # module on sys.path and its own metadata, never the module -- which
+        # stays in the source tree, where the resolved origin points. Rejecting
+        # it would disable the ops on an install where `import triton` works,
+        # and where the plain name lookup used to answer fine.
+        with (
+            _triton_installed({"triton": "3.7.1"}),
+            _triton_records(
+                {
+                    "triton": [
+                        "/site-packages/__editable__.triton-3.7.1.pth",
+                        "/site-packages/__editable___triton_3_7_1_finder.py",
+                        "/site-packages/triton-3.7.1.dist-info/METADATA",
+                        "/site-packages/triton-3.7.1.dist-info/RECORD",
+                        "/site-packages/triton-3.7.1.dist-info/top_level.txt",
+                    ]
+                }
+            ),
+            _triton_module_at("/home/dev/triton/python/triton/__init__.py"),
+            _triton_provided_by("triton"),
+        ):
+            self.assertEqual(triton_utils._available_triton_version(), Version("3.7.1"))
+
+    def test_unreadable_provider_does_not_abandon_the_ones_after_it(self):
+        # The scan lists providers in sys.path order, so a dist-info with no
+        # `Name` must not decide the answer for the ones behind it.
+        def version_of(distribution):
+            if distribution is None:
+                raise ValueError("A distribution name is required.")
+            return Version("3.7.1") if distribution == "triton-nightly" else None
+
+        with (
+            patch.object(triton_utils, "_available_version", side_effect=version_of),
+            _triton_records({"triton-nightly": [_MODULE_ORIGIN]}),
+            _triton_provided_by(None, "triton-nightly"),
+            self.assertLogs("torch._native.triton_utils", level="WARNING"),
+        ):
+            self.assertEqual(triton_utils._available_triton_version(), Version("3.7.1"))
+
+    def test_provider_already_tried_under_another_spelling_is_not_retried(self):
+        # Metadata lookups normalize names, so `triton_rocm` from the scan is the
+        # `triton-rocm` already tried; re-checking it cannot change the answer.
+        with (
+            _triton_installed({}) as version_lookup,
+            _triton_provided_by("triton_rocm"),
+        ):
+            self.assertIsNone(triton_utils._available_triton_version())
+
+        self.assertNotIn(
+            "triton_rocm",
+            [call.args[0] for call in version_lookup.call_args_list],
+        )
+
     def test_distribution_without_a_record_is_taken_at_its_word(self):
         # Nothing was learned about what it owns, so it keeps the answer it
         # would have given before the question was asked.
@@ -872,12 +927,14 @@ class TestTritonVersionGate(TestCase):
     def setUp(self):
         super().setUp()
         # The escape hatch is cached too, and the tests above leave it set: a
-        # verdict of "skip the version check" would pass every case here.
+        # verdict of "skip the version check" would pass every case here. It is
+        # cleared on common_utils, where it is defined; triton_utils only
+        # re-exports the same object.
         for verdict in (
             triton_utils._check_runtime_available,
             triton_utils._version_is_sufficient,
-            triton_utils.check_native_version_skip,
-            triton_utils.check_native_jit_disabled,
+            native_common_utils.check_native_version_skip,
+            native_common_utils.check_native_jit_disabled,
         ):
             verdict.cache_clear()
             self.addCleanup(verdict.cache_clear)
