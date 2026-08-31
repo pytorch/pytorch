@@ -510,6 +510,12 @@ test_python_smoke_b200() {
     --upload-artifacts-while-running \
     --pytest-xdist-workers 32
 
+  # The CuTeDSL linear_cross_entropy overrides: the routing test, and the OpInfo
+  # variants that only exist where the CuTeDSL runtime does, so they are
+  # collected nowhere else.
+  time python test/run_test.py --include python_native/test_linear_cross_entropy_override $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time env OPINFO_RESTRICT_TO_DSL=cutedsl python test/run_test.py --include test_ops -k linear_cross_entropy $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+
   time python test/run_test.py --include test_linalg -k "mm or addmv" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
