@@ -5050,16 +5050,19 @@ exit(2)
                 1 for o in gc.get_objects() if isinstance(o, torch.cuda.CUDAGraph)
             )
 
+        def graph_and_drop(as_module):
+            # Everything the callable owns goes out of scope when this returns.
+            module = torch.nn.Linear(8, 8, device="cuda")
+            x = torch.randn(4, 8, device="cuda", requires_grad=True)
+            target = module if as_module else (lambda t: module(t))
+            torch.cuda.make_graphed_callables(target, (x,), num_warmup_iters=3)
+
         for as_module in (True, False):
             gc.collect()
             before = live_graphs()
             gc.disable()
             try:
-                module = torch.nn.Linear(8, 8, device="cuda")
-                x = torch.randn(4, 8, device="cuda", requires_grad=True)
-                target = module if as_module else (lambda t: module(t))
-                torch.cuda.make_graphed_callables(target, (x,), num_warmup_iters=3)
-                del module, x, target
+                graph_and_drop(as_module)
                 self.assertEqual(
                     live_graphs() - before,
                     0,
