@@ -265,6 +265,13 @@ For full argument details see the docstring for `register_op_override` in [regis
 
 An example of an implementation of this spec can be found in [cutedsl_utils.py](cutedsl_utils.py), but please talk to us if you're planning on adding a new DSL.
 
+### Overriding an op outside `aten`
+
+`aten` ops exist before any Python runs, so a registration that names a symbol which does not exist fails on every `import torch`. Ops defined by *executing Python*, such as the `torch_nn::` ops, exist only once their defining module has run, and a bad name then surfaces only where the DSL is installed. Two requirements keep that from shipping:
+
+1. **Declare, do not open-code.** A module registering on a non-`aten` namespace declares `_NAMESPACE`, `_DEFINING_MODULE` (the module whose execution defines the ops) and `_OVERRIDES` (the rows it registers) at module level, and its `register_*` function loops over that same `_OVERRIDES`. `test/python_native/test_override_declarations.py` discovers declaring modules, imports each `_DEFINING_MODULE`, and resolves every symbol -- with neither a GPU nor a DSL runtime, so it runs on every shard. Because the registrar and the test read the same table, following this is not a separate act to remember. The declaring module must be imported unconditionally by its package `__init__`: the test discovers it through `sys.modules`, so gating the *import* on DSL availability would hide it from the test on exactly the machines the test exists to protect. Gate inside the registrar instead, as `register_linear_cross_entropy_overrides` does.
+2. **Adding the namespace itself** means adding it to `_ALLOWED_LIB_SYMBOLS` in `torch/_native/registry.py`, in the same change as the first override that uses it and its tests. Import the defining module from your registrar before installing, since overrides are installed against ops that already exist in the dispatcher.
+
 ## Registration Orders and You
 
 Currently the registration order (both in general and per-op) is set by the order of imports in `torch/_native/ops/__init__.py`, noting that registration acts as a stack, in that **the last registered override for an op is the first that will be called**. If you wish to exercise control of the override ordering, please utilize one of the methods below.
