@@ -955,8 +955,6 @@ def _compose_training_module(
     globals.
     """
 
-    from . import runtime_wrappers as _rw
-
     if spec.maybe_subclass_meta is not None:
         raise NotImplementedError(
             "aot_autograd.compile_to_python cannot compose a training graph with "
@@ -1053,21 +1051,25 @@ def _compose_training_module(
     orchestration = splice(orch)
 
     fw_metadata_src = emit_value(spec.fw_metadata, imports)
-    rng_src = emit_value(
-        _rw._AutogradRngStateTracker(
-            num_rng=spec.fw_metadata.num_graphsafe_rng_states,
-            graphsafe_idx=spec.fw_metadata.graphsafe_rng_state_index,
-            device=spec.fw_metadata.graphsafe_rng_device,
-        ),
-        imports,
+    # Emitted as a CONSTRUCTOR CALL, never by value-reduction: the tracker's
+    # default runtime-state fields include an itertools.count, whose pickle
+    # support was removed in Python 3.12+ (gone in 3.14), so reducing a live
+    # instance fails there -- and that state is per-process anyway, so a load
+    # must start it fresh.
+    rng_device_src = emit_value(spec.fw_metadata.graphsafe_rng_device, imports)
+    rng_src = (
+        "_AutogradRngStateTracker("
+        f"num_rng={spec.fw_metadata.num_graphsafe_rng_states!r}, "
+        f"graphsafe_idx={spec.fw_metadata.graphsafe_rng_state_index!r}, "
+        f"device={rng_device_src})"
     )
     imports |= {
         "import contextlib",
         "import torch",
         "import weakref",
         "from torch._functorch._aot_autograd.runtime_wrappers import "
-        "_AutogradSavedState, _snapshot_external_objects, "
-        "index_to_external_object_weakref",
+        "_AutogradRngStateTracker, _AutogradSavedState, "
+        "_snapshot_external_objects, index_to_external_object_weakref",
         "from torch._functorch._aot_autograd.standalone_runtime import "
         "normalize_as_list",
     }
@@ -1191,9 +1193,15 @@ def _graph_differentiates(gm: GraphModule) -> bool:
     ``GraphLowering.decide_layout_opt`` returns early unless the graph contains
     convolutions -- whose backward is a named ``convolution_backward``. A
     Linear's backward decomposes to ``mm``/``t`` and would not match, but such a
-    graph has no conv for layout optimization to act on either.
+    graph has no conv for layout optimization to act on either. Only CALL
+    nodes are consulted: a placeholder or attribute whose NAME happens to
+    contain "backward" (which a wrapped tracer can mint) is not an op.
     """
-    return any("backward" in str(node.target) for node in gm.graph.nodes)
+    return any(
+        node.op in ("call_function", "call_method", "call_module")
+        and "backward" in str(node.target)
+        for node in gm.graph.nodes
+    )
 
 
 def _restride_backward_placeholders(
