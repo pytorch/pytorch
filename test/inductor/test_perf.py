@@ -926,6 +926,28 @@ class NoopTests(TestCase):
         inp = T(10)
         self.assertExpectedInline(count_numel(f, inp), """20""")
 
+    def test_noop_slice_scatter_same_split(self):
+        def f(a):
+            parts = aten.split_with_sizes(a, [3, 2, 3], 1)
+            b = aten.slice_scatter(a, parts[1], 1, 3, 5)
+            c = unfusible(b)
+            return c
+
+        # This is a device-independent post-grad rewrite.  Keep the focused
+        # regression test on CPU so it does not require a GPU test worker.
+        inp = T(10, 8, device="cpu")
+        self.assertExpectedInline(count_numel(f, inp), """160""")
+
+    def test_slice_scatter_different_split_is_not_noop(self):
+        def f(a):
+            parts = aten.split_with_sizes(a, [3, 2, 3], 1)
+            b = aten.slice_scatter(a, parts[1], 1, 0, 2)
+            c = unfusible(b)
+            return c
+
+        inp = T(10, 8, device="cpu")
+        self.assertExpectedInline(count_numel(f, inp), """320""")
+
     def test_noop_dtype_conversion(self):
         def f(a):
             b = torch.ops.prims.convert_element_type(a, torch.float32)
