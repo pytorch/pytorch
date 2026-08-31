@@ -80,6 +80,11 @@ done < <(
     ':(exclude,glob)**/third-party/**'
     ':(exclude,glob)**/third_party/**'
     ':(exclude,glob)torch/_vendor/quack/**'
+    # Upstream CPython tests carry historical/dead links; headers point at
+    # raw.githubusercontent.com tags we already pin in each file.
+    ':(exclude,glob)test/cpython/**'
+    # Sync-check fixtures build headers for files that do not exist upstream.
+    ':(exclude,glob)test/test_cpython_diff_sync.py'
   )
   if [ $# -eq 2 ]; then
     for filename in $(git diff --name-only --unified=0 "$1...$2"); do
