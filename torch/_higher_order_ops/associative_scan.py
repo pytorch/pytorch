@@ -162,9 +162,8 @@ def associative_scan(
 
     .. warning::
 
-        ``torch.associative_scan`` is a prototype feature in PyTorch. Autograd is
-        supported, except for gradients with respect to lifted arguments (freevars)
-        under ``combine_mode="pointwise"``. You may still run into miscompiles.
+        ``torch.associative_scan`` is a prototype feature in PyTorch. It currently
+        does not support autograd and you may run into miscompiles.
         Read more about feature classification at:
         https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
 
@@ -893,10 +892,10 @@ def associative_scan_functionalize(ctx, combine_fn, xs, additional_inputs):
 # that never constructs the HOP, so vmap over a generic scan is handled entirely
 # by the batching rules of the individual aten ops and never reaches this rule.
 # Consequently only the pointwise cases in the vmap tests exercise the code below;
-# the generic cases guard the frontend decomposition instead. In eager the HOP
-# dense-decomposes on any device, so pointwise+CPU already covers this rule; the
-# CUDA-only restriction and the compile failure (xfail) are properties of the
-# lowered pointwise scan, not of this rule.
+# the generic cases guard the frontend decomposition instead. This rule is itself
+# device-agnostic, since in eager the HOP dense-decomposes on any device; the
+# CUDA-only parametrization of those tests and the compile-time lowering failure
+# are properties of the lowered pointwise scan, not of this rule.
 @associative_scan_op.py_impl(torch._C._functorch.TransformType.Vmap)
 def associative_scan_batch_rule(interpreter, combine_fn, xs, additional_inputs):
     unbatched_args, in_dims = unwrap_batched(

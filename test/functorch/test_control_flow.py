@@ -6986,7 +6986,7 @@ class GraphModule(torch.nn.Module):
 
     @requires_cuda
     @skipIfTorchDynamo("don't test compile on compile")
-    def test_associative_scan_in_vmap_pointwise_compile_xfail(self):
+    def test_associative_scan_in_vmap_pointwise_compile_error(self):
         from torch._inductor.exc import InductorError
 
         x = torch.randn(3, 4, 2, device="cuda")
@@ -7144,6 +7144,8 @@ class GraphModule(torch.nn.Module):
         # become batched while xs is not, so the outputs' batch dims diverge from
         # xs on later scan levels. This is not supported yet; the batch rule detects
         # it up front and raises a clear error rather than a cryptic broadcast one.
+        # JAX broadcasts here instead of erroring; see
+        # https://github.com/pytorch/pytorch/pull/192654 for the same treatment.
         xs = torch.randn(4, 2)
         h = torch.randn(3, 2)
 
