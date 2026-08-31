@@ -1106,10 +1106,7 @@ class Loops(IRNode):
         # which records that Loops's original layer FX node. This gives the
         # complete set of original layers fused into the kernel.
         # Only installed when both annotation flags are on.
-        if not (
-            config.triton.cudagraph_kernel_annotations
-            and config.triton.cudagraph_fqn_compute_tracking
-        ):
+        if not config.triton.cudagraph_kernel_annotations:
             return
         orig_inner_fn = self.inner_fn
 
