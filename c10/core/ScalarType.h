@@ -303,3 +303,4 @@ C10_API const std::unordered_map<std::string, ScalarType>& getStringToDtypeMap()
 } // namespace c10
 
 C10_DIAGNOSTIC_POP()
+C10_DIAGNOSTIC_POP()
