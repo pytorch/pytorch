@@ -1125,29 +1125,6 @@ class TestForeachDevice(TestCase):
 
             self.assertEqual(expect, actual, equal_nan=True)
 
-    @onlyCUDA
-    @dtypes(torch.complex128)
-    def test_foreach_scalarlist_complex_double_many_tensors(self, device, dtype):
-        # Prevent regressions for complex double MTA chunking, see #189827
-        N = 600
-        scalars = [i + 2.0 for i in range(N)]
-
-        def make_tensors():
-            return [
-                torch.full((1, 1, 1), i + 1, dtype=dtype, device=device)
-                for i in range(N)
-            ]
-
-        # out-of-place: depth 2
-        tensors = make_tensors()
-        expect = [t / s for t, s in zip(tensors, scalars)]
-        self.assertEqual(torch.foreach.div(tensors, scalars), expect)
-
-        # in-place: depth 1
-        tensors = make_tensors()
-        torch.foreach.div_(tensors, scalars)
-        self.assertEqual(tensors, expect)
-
     @onlyAccelerator
     @ops(foreach_reduce_op_db)
     @parametrize("w_empty", (False, True))
@@ -1948,6 +1925,36 @@ def check_autodiff_sample(op, sample, dtype, is_inplace):
 
 
 instantiate_device_type_tests(TestForeachDevice, globals(), allow_xpu=True)
+
+
+class TestForeachCUDA(TestCase):
+    """CUDA-specific tests for TestForeach."""
+
+    @onlyCUDA
+    @dtypes(torch.complex128)
+    def test_foreach_scalarlist_complex_double_many_tensors(self, device, dtype):
+        # Prevent regressions for complex double MTA chunking, see #189827
+        N = 600
+        scalars = [i + 2.0 for i in range(N)]
+
+        def make_tensors():
+            return [
+                torch.full((1, 1, 1), i + 1, dtype=dtype, device=device)
+                for i in range(N)
+            ]
+
+        # out-of-place: depth 2
+        tensors = make_tensors()
+        expect = [t / s for t, s in zip(tensors, scalars)]
+        self.assertEqual(torch.foreach.div(tensors, scalars), expect)
+
+        # in-place: depth 1
+        tensors = make_tensors()
+        torch.foreach.div_(tensors, scalars)
+        self.assertEqual(tensors, expect)
+
+
+instantiate_device_type_tests(TestForeachCUDA, globals(), only_for="cuda")
 
 
 class TestForeachPublicAPI(TestCase):
