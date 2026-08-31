@@ -38,7 +38,7 @@ try:
 except ImportError:
     import warnings
 
-    warnings.warn('unable to load "torchvision" package')
+    warnings.warn('unable to load "torchvision" package', stacklevel=2)
 
 RELEASE = os.environ.get("RELEASE", False)
 

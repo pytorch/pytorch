@@ -3584,7 +3584,8 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
         device_interface = get_interface_for_device(device.type)
         device_props = device_interface.get_device_properties(device)
         warnings.warn(
-            f"{device_props.name} does not support bfloat16 compilation natively, skipping"
+            f"{device_props.name} does not support bfloat16 compilation natively, skipping",
+            stacklevel=2,
         )
         raise SkipFrame("BF16 is not supported")
 

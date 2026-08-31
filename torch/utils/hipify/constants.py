@@ -8,7 +8,7 @@ mapping.
 """
 
 import warnings
-warnings.warn("hipify's constants.py is no longer used as of version 2.0.0", FutureWarning)
+warnings.warn("hipify's constants.py is no longer used as of version 2.0.0", FutureWarning, stacklevel=2)
 
 CONV_VERSION = 0,
 CONV_INIT = 1

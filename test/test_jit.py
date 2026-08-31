@@ -2799,13 +2799,13 @@ graph(%Ra, %Rb):
 
         def fn(x):
             if bool(x < 2):
-                warnings.warn("x is less than 2")
+                warnings.warn("x is less than 2", stacklevel=2)
             return x
 
         class M(torch.nn.Module):
             def forward(self, x):
                 if bool(x < 2):
-                    warnings.warn("x is less than 2")
+                    warnings.warn("x is less than 2", stacklevel=2)
                 return x
 
 
@@ -2830,7 +2830,7 @@ graph(%Ra, %Rb):
 
         def fn(x):
             if bool(x > 0):
-                warnings.warn('This should NOT be printed')
+                warnings.warn('This should NOT be printed', stacklevel=2)
                 x += 1
             return x
 

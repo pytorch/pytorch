@@ -84,11 +84,13 @@ def save(m, f, _extra_files=None) -> None:
             "`torch.jit.save` is not supported in Python 3.14+ and may break. "
             "Please switch to `torch.export`.",
             FutureWarning,
+            stacklevel=2,
         )
     else:
         warnings.warn(
             "`torch.jit.save` is deprecated. Please switch to `torch.export`.",
             FutureWarning,
+            stacklevel=2,
         )
     log_torchscript_usage("save", model_id=_get_model_id(m))
     if _extra_files is None:
@@ -171,11 +173,13 @@ def load(f, map_location=None, _extra_files=None, _restore_shapes=False):
             "`torch.jit.load` is not supported in Python 3.14+ and may break. "
             "Please switch to `torch.export`.",
             FutureWarning,
+            stacklevel=2,
         )
     else:
         warnings.warn(
             "`torch.jit.load` is deprecated. Please switch to `torch.export`.",
             FutureWarning,
+            stacklevel=2,
         )
     if isinstance(f, (str, os.PathLike)):
         if not os.path.exists(f):

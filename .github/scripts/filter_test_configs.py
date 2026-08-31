@@ -121,7 +121,7 @@ def get_pr_info(pr_number: int) -> dict[str, Any]:
     )
 
     if not json_response:
-        warnings.warn(f"Failed to get the labels for #{pr_number}")
+        warnings.warn(f"Failed to get the labels for #{pr_number}", stacklevel=2)
         return {}
 
     return json_response
@@ -332,7 +332,7 @@ def process_jobs(
         # it into its two components first
         current_platform, _ = (n.strip() for n in job_name.split(JOB_NAME_SEP, 1) if n)
     except ValueError:
-        warnings.warn(f"Invalid job name {job_name}, returning")
+        warnings.warn(f"Invalid job name {job_name}, returning", stacklevel=2)
         return test_matrix
 
     for record in download_json(url=url, headers={}).values():
@@ -433,7 +433,8 @@ def process_jobs(
         else:
             warnings.warn(
                 f"Found a matching {issue_type.value} issue {target_url} for {workflow} / {job_name}, "
-                + f"but the name {target_job_cfg} is invalid"
+                + f"but the name {target_job_cfg} is invalid",
+                stacklevel=2,
             )
 
     # Found no matching target, return the same input test matrix
@@ -447,9 +448,11 @@ def download_json(url: str, headers: dict[str, str], num_retries: int = 3) -> An
             content = urlopen(req, timeout=5).read().decode("utf-8")
             return json.loads(content)
         except Exception as e:
-            warnings.warn(f"Could not download {url}: {e}")
+            warnings.warn(f"Could not download {url}: {e}", stacklevel=2)
 
-    warnings.warn(f"All {num_retries} retries exhausted, downloading {url} failed")
+    warnings.warn(
+        f"All {num_retries} retries exhausted, downloading {url} failed", stacklevel=2
+    )
     return {}
 
 
@@ -489,7 +492,7 @@ def get_reenabled_issues(pr_body: str = "") -> list[str]:
             timeout=60,
         ).decode("utf-8")
     except Exception as e:
-        warnings.warn(f"failed to get commit messages: {e}")
+        warnings.warn(f"failed to get commit messages: {e}", stacklevel=2)
         commit_messages = ""
     return parse_reenabled_issues(pr_body) + parse_reenabled_issues(commit_messages)
 
@@ -593,7 +596,9 @@ def main() -> None:
     test_matrix = yaml.safe_load(args.test_matrix)
 
     if test_matrix is None:
-        warnings.warn(f"Invalid test matrix input '{args.test_matrix}', exiting")
+        warnings.warn(
+            f"Invalid test matrix input '{args.test_matrix}', exiting", stacklevel=2
+        )
         # We handle invalid test matrix gracefully by marking it as empty
         set_output("is-test-matrix-empty", True)
         sys.exit(0)

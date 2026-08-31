@@ -231,10 +231,13 @@ def gh_fetch_merge_base(org: str, repo: str, base: str, head: str) -> str:
             merge_base = json_data.get("merge_base_commit", {}).get("sha", "")
         else:
             warnings.warn(
-                f"Failed to get merge base for {base}...{head}: Empty response"
+                f"Failed to get merge base for {base}...{head}: Empty response",
+                stacklevel=2,
             )
     except Exception as error:
-        warnings.warn(f"Failed to get merge base for {base}...{head}: {error}")
+        warnings.warn(
+            f"Failed to get merge base for {base}...{head}: {error}", stacklevel=2
+        )
 
     return merge_base
 
@@ -248,7 +251,8 @@ def gh_update_pr_state(org: str, repo: str, pr_num: int, state: str = "open") ->
         # has been deleted and the API couldn't re-open it
         if err.code == 422 and state == "open":
             warnings.warn(
-                f"Failed to open {pr_num} because its head branch has been deleted: {err}"
+                f"Failed to open {pr_num} because its head branch has been deleted: {err}",
+                stacklevel=2,
             )
         else:
             raise
