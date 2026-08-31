@@ -166,6 +166,69 @@ def generate_cuda_alloc_test():
     )
 
 
+# Sized so the released fold input dominates the allocator delta across a run,
+# which is what lets the C++ side assert the post-fold release rather than just
+# the numerics. The folded output is 4 elements.
+FOLD_INPUT_ROWS = 1 << 20
+
+
+class FoldInputHeavyNet(torch.nn.Module):
+    def __init__(self, device):
+        super().__init__()
+        self.w_pre = torch.randn(FOLD_INPUT_ROWS, 4, device=device)
+        self.b = torch.randn(4, device=device)
+
+    def forward(self, x):
+        return x * (torch.nn.functional.relu(self.w_pre).sum(dim=0) + self.b)
+
+
+# AOTI model compiled with free_fold_input_only_constants, where w_pre/b feed
+# only the const graph and are therefore released after the first fold. The C++
+# side updates them and re-folds, which only works if the update re-arms the
+# buffer.
+def generate_free_fold_tests():
+    if not torch.cuda.is_available():
+        return
+
+    device = "cuda"
+    model = FoldInputHeavyNet(device)
+    x = torch.randn(4, device=device)
+    with torch.no_grad():
+        ref_output = model(x)
+
+    # Perturb both fold inputs so the post-update output must differ.
+    w_pre_updated = model.w_pre + 0.5
+    b_updated = model.b + 0.5
+    updated_model = FoldInputHeavyNet(device)
+    updated_model.w_pre = w_pre_updated
+    updated_model.b = b_updated
+    with torch.no_grad():
+        ref_output_updated = updated_model(x)
+
+    torch._dynamo.reset()
+    with torch.no_grad():
+        model_so_path = aot_compile(
+            model,
+            (x,),
+            options={
+                "aot_inductor.use_runtime_constant_folding": True,
+                "aot_inductor.free_fold_input_only_constants": True,
+            },
+        )
+
+    data.update(
+        {
+            "model_so_path_free_fold": model_so_path,
+            "inputs_free_fold": [x],
+            "outputs_free_fold": [ref_output],
+            "outputs_updated_free_fold": [ref_output_updated],
+            "w_pre_updated_free_fold": w_pre_updated,
+            "b_updated_free_fold": b_updated,
+            "fold_input_bytes_free_fold": FOLD_INPUT_ROWS * 4 * 4,
+        }
+    )
+
+
 # AOTI model which will create additional tensors during autograd.
 def generate_test_with_additional_tensors():
     if not torch.cuda.is_available():
@@ -199,6 +262,7 @@ def generate_test_with_additional_tensors():
 generate_basic_tests()
 generate_basic_tests_consts_cpp()
 generate_large_tests()
+generate_free_fold_tests()
 generate_test_with_additional_tensors()
 generate_cuda_alloc_test()
 

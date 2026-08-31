@@ -11,7 +11,7 @@ import sys
 import textwrap
 import time
 import typing_extensions
-from collections import defaultdict
+from collections import Counter, defaultdict
 from contextlib import contextmanager
 from typing import Any, cast, Literal, NoReturn, TYPE_CHECKING
 
@@ -594,6 +594,11 @@ class GraphLowering(torch.fx.Interpreter):
         self.allocated_constant_name: dict[str, str] = (
             const_module.allocated_constant_name if const_module is not None else {}
         )
+        # Unlike constants/allocated_constant_name, this is NOT inherited from
+        # const_module: it records only the constants this graph's own lowering
+        # allocated, which is how the main graph tells its reads apart from the
+        # const graph's. See get_fold_input_only_constants().
+        self.locally_allocated_constant_names: OrderedSet[str] = OrderedSet()
         init_backend_registration()
         self.get_backend_features = functools.lru_cache(None)(get_backend_features)
 
@@ -1211,6 +1216,75 @@ class GraphLowering(torch.fx.Interpreter):
             else self.constants[name]
         )
 
+    def get_fold_input_only_constants(self) -> OrderedSet[str]:
+        """
+        Names of constants that only the constant-folding graph reads, and which
+        are therefore dead once folding has run.
+
+        Two independent signals have to agree, and anything they disagree on --
+        or that cannot be attributed to exactly one graph -- is kept live:
+
+        1. Lowering. locally_allocated_constant_names records the constants each
+           graph's own lowering reached for, so a constant the main graph never
+           touched is a candidate.
+        2. FX. split_const_gm() erases from the main graph every get_attr whose
+           users were all folded away and keeps the ones a main-graph node still
+           reads, so the two graphs' get_attr targets separate them as well.
+
+        The aliasing guard matters: use_runtime_constant_folding disables
+        dedup in allocate_non_dup_const_name, so a tensor read by both graphs
+        gets two entries (L__self___w and L__self___w_0) that share one
+        original_fqn. Neither is safe to release, because the const graph's copy
+        looks fold-only in isolation while the storage behind it is the weight
+        the main graph still reads.
+        """
+        if not (
+            config.aot_inductor.free_fold_input_only_constants
+            and config.aot_inductor.use_runtime_constant_folding
+            and self.const_module is not None
+        ):
+            return OrderedSet()
+
+        # The runtime gives these constants their own storage, which the MPS
+        # path (one shared buffer addressed by offset) cannot express.
+        if "mps" in self.device_types:
+            return OrderedSet()
+
+        def attr_targets(graph_lowering: GraphLowering) -> OrderedSet[str]:
+            return OrderedSet(
+                node.target
+                for node in graph_lowering.module.graph.nodes  # type: ignore[union-attr]
+                if node.op == "get_attr" and isinstance(node.target, str)
+            )
+
+        # const_module.module is the const graph; self.module is the main graph
+        # after split_const_gm has rewritten it in place.
+        const_targets = attr_targets(self.const_module)
+        main_targets = attr_targets(self)
+
+        orig_fqn_counts: Counter[str] = Counter(
+            self.allocated_constant_name.get(name, name) for name in self.constants
+        )
+
+        def is_fold_input_only(name: str) -> bool:
+            if name in self.folded_constants:
+                return False
+            if name in self.locally_allocated_constant_names:
+                return False
+            if name not in self.const_module.locally_allocated_constant_names:  # type: ignore[union-attr]
+                return False
+            orig = self.allocated_constant_name.get(name, name)
+            if orig_fqn_counts[orig] != 1:
+                return False
+            if orig not in const_targets or orig in main_targets:
+                return False
+            # mkldnn constants carry opaque metadata and a data_size that is not
+            # derived from dtype/shape, so they cannot be re-materialized into
+            # standalone storage.
+            return not self.constants[name].is_mkldnn
+
+        return OrderedSet(name for name in self.constants if is_fold_input_only(name))
+
     def allocate_non_dup_const_name(self, name: str | None, data: Tensor) -> str:
         if not config.aot_inductor.use_runtime_constant_folding:
             for constant_name, value in self.constants.items():
@@ -1238,6 +1312,9 @@ class GraphLowering(torch.fx.Interpreter):
             f"{hash(data):x}"
         )
         self.allocated_constant_name[name] = orig_name  # type: ignore[assignment]
+        # constants is shared with const_module, but this set is per-graph: it
+        # records the constants *this* graph's lowering actually reached for.
+        self.locally_allocated_constant_names.add(name)
         return name
 
     def add_tensor_constant(self, data: Tensor, name: str | None = None) -> TensorBox:
