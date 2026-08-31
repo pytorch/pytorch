@@ -101,7 +101,7 @@ def get_backend_options():
     return get_backend_options_for_target(target)
 
 
-def _is_concrete_backend_option_value(value: Any) -> bool:
+def _is_concrete_backend_option_value(value: object) -> bool:
     import sympy
 
     import torch
