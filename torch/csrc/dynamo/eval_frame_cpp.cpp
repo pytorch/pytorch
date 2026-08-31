@@ -415,7 +415,9 @@ PyObject* dynamo__custom_eval_frame(
   // callback to run on recursively invoked frames
   py::handle recursive_callback = callback; // borrowed
   PyCodeObject* cached_code = nullptr; // borrowed
-  const char* trace_annotation = "";
+  // Owned copy: the CacheEntry whose annotation this came from can be
+  // destroyed by a concurrent unload before eval_custom() consumes it.
+  std::string trace_annotation;
   PyObject* eval_result = nullptr; // strong reference
 
   // exit functions
@@ -484,7 +486,7 @@ PyObject* dynamo__custom_eval_frame(
       debugger_cb(py::handle((PyObject*)cached_code));
     }
     eval_result = dynamo_eval_custom_code(
-        tstate, frame, cached_code, trace_annotation, throw_flag);
+        tstate, frame, cached_code, trace_annotation.c_str(), throw_flag);
     if (!callback.is(recursive_callback)) {
       eval_frame_callback_set(callback.ptr());
     }
@@ -524,16 +526,19 @@ PyObject* dynamo__custom_eval_frame(
   FrameExecStrategy strategy =
       extra_state_get_region_exec_strategy(extra, isolate_recompiles_id);
 
-  // py::hasattr on a miss raises and clears an AttributeError, so keep it off
-  // the ordinary run-only path: torch._dynamo.run() and the eager_on_recompile
-  // stance both arrive here with callback == Py_False on every frame, and only
-  // a real callback object can carry the marker.
+  // Keep the marker lookup off the ordinary run-only path: torch._dynamo.run()
+  // and the eager_on_recompile stance both arrive here with callback ==
+  // Py_False on every frame, and only a real callback object can carry the
+  // marker. lookup_optional (interned name, no raise) keeps the common miss --
+  // every call of every recompile-limited frame -- off the exception path.
   bool force_callback_on_cache_miss = false;
   if ((strategy.cur_action == FrameAction::RUN_ONLY ||
        strategy.recursive_action == FrameAction::RUN_ONLY) &&
       !callback.is_none() && callback.ptr() != Py_False) {
+    static PyObject* force_callback_marker_name =
+        PyUnicode_InternFromString("_torchdynamo_force_callback_on_cache_miss");
     force_callback_on_cache_miss =
-        py::hasattr(callback, "_torchdynamo_force_callback_on_cache_miss");
+        lookup_optional(callback, force_callback_marker_name) != nullptr;
   }
   if (!force_callback_on_cache_miss ||
       strategy.recursive_action != FrameAction::RUN_ONLY) {
@@ -601,7 +606,8 @@ PyObject* dynamo__custom_eval_frame(
   // unload can destroy the entry that owns this code object before
   // eval_custom() runs it. A precompile entry is often that code object's only
   // owner, so the result is a freed pointer handed to the interpreter. Own it
-  // for the rest of the frame.
+  // for the rest of the frame. (trace_annotation is already safe: lookup
+  // copies it out of the entry while holding the cache lock.)
   py::object cached_code_owner =
       py::reinterpret_borrow<py::object>(maybe_cached_code);
 
@@ -719,8 +725,13 @@ PyObject* dynamo__custom_eval_frame(
     // is sitting on the extra scratch space, we are just changing the
     // cache_entry ptr. As a result, extra now becomes the owner of CacheEntry
     // object. This will be cleaned up when set_extra_state is called.
-    // Re-enable custom behavior
-    cached_code = CacheEntry_get_code(new_cache_entry),
+    // Re-enable custom behavior. eval_custom() can run Python (fullgraph
+    // nested-compile handling, the bytecode debugger) before consuming
+    // these, so own the code object and copy the annotation now -- a
+    // concurrent clear can destroy new_cache_entry in that window.
+    cached_code = CacheEntry_get_code(new_cache_entry);
+    cached_code_owner =
+        py::reinterpret_borrow<py::object>((PyObject*)cached_code);
     trace_annotation = CacheEntry_get_trace_annotation(new_cache_entry);
     eval_custom();
   } else {
