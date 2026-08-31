@@ -1221,6 +1221,11 @@ def get_fused_kernel_name(
     return name
 
 
+@functools.lru_cache(maxsize=2048)
+def _overloadpacket_str(op: torch._ops.OpOverload) -> str:
+    return str(op._overloadpacket)
+
+
 def get_kernel_metadata(
     node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
     wrapper: PythonWrapperCodegen,
@@ -1266,7 +1271,8 @@ def get_kernel_metadata(
             original_aten = node.meta["original_aten"]
             key = None
             if isinstance(original_aten, torch._ops.OpOverload):
-                key = str(original_aten._overloadpacket)
+                # Same op, once per node per kernel; ops are singletons.
+                key = _overloadpacket_str(original_aten)
             elif isinstance(original_aten, torch._ops.HigherOrderOperator):
                 key = str(original_aten.name())
             if key:
@@ -1374,15 +1380,24 @@ def get_kernel_metadata(
 
                         all_writes.append("%" + output_name)
 
+        # Every kernel's comment re-formats its origin nodes, and the same node
+        # is an origin of many kernels, so on a large graph this is the same
+        # handful of strings rebuilt over and over: 258k format_node calls for
+        # 1266 kernels on one model. The graph is already built by the time we
+        # are emitting code, so a node's formatting cannot change; cache it on
+        # the graph, as the topological index map above already does.
+        line_cache = single_graph.__dict__.setdefault(
+            "_inductor_kernel_metadata_node_lines", {}
+        )
         for node in inductor_nodes:
-            formatted_node = node.format_node(include_tensor_metadata=True)
-            # Asm strings can contain newlines, which propagate into
-            # format_node() output.  Split so every line gets the comment
-            # prefix; otherwise bare newlines break the wrapper.
-            detailed_metadata.extend(
-                f"{wrapper.comment}   {line}"
-                for line in str(formatted_node).splitlines()
-            )
+            lines = line_cache.get(node)
+            if lines is None:
+                # Asm strings can contain newlines, which propagate into
+                # format_node() output.  Split so every line gets the comment
+                # prefix; otherwise bare newlines break the wrapper.
+                lines = str(node.format_node(include_tensor_metadata=True)).splitlines()
+                line_cache[node] = lines
+            detailed_metadata.extend(f"{wrapper.comment}   {line}" for line in lines)
 
         detailed_metadata.append(f"{wrapper.comment}   return {','.join(all_writes)}")
 
@@ -2168,18 +2183,22 @@ def use_triton_template(
         layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
     if enable_float8:
         layout_dtypes.extend([torch.float8_e4m3fn, torch.float8_e5m2])
+    # _use_template_for_gpu logs an SM-count warning.
+    # Keep it last so the warning only fires when a Triton template is
+    # actually in play, not on default-mode compiles or on devices without
+    # Triton template support (e.g. mps).
     return (
-        (
+        # some callers handle max-autotune checking externally
+        (config.max_autotune or config.max_autotune_gemm or not check_max_autotune)
+        and _use_autotune_backend("TRITON")
+        and has_backend_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
+        and (
             (
                 is_gpu(layout.device.type)
                 and _use_template_for_gpu(layout, layout_dtypes)
             )
             or (layout.device.type == "cpu" and layout.dtype in layout_dtypes)
         )
-        # some callers handle max-autotune checking externally
-        and (config.max_autotune or config.max_autotune_gemm or not check_max_autotune)
-        and _use_autotune_backend("TRITON")
-        and has_backend_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
     )
 
 
@@ -2587,10 +2606,12 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     # output dtype
     # FP32 not supported: https://github.com/pytorch/pytorch/issues/145952
     layout_dtypes = [torch.float16, torch.bfloat16, torch.int32]
+    # Keep _use_template_for_gpu last: it calls is_big_gpu, whose SM-count
+    # warning should only fire when the CUTLASS backend is actually enabled.
     res = (
-        _use_template_for_gpu(layout, layout_dtypes)
-        and (config.max_autotune or config.max_autotune_gemm)
+        (config.max_autotune or config.max_autotune_gemm)
         and _use_autotune_backend("CUTLASS")
+        and _use_template_for_gpu(layout, layout_dtypes)
     )
 
     if res:
