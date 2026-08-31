@@ -20,6 +20,7 @@ from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Literal, NamedTuple, TYPE_CHECKING
+from typing_extensions import TypeVarTuple, Unpack
 
 import torch
 import torch.utils._pytree as pytree
@@ -72,6 +73,7 @@ _legal_ops = dict.fromkeys(
 # Signature for functions that transform the body (`list[str]`) of the
 # generated code
 TransformCodeFunc = Callable[[list[str]], list[str]]
+_InputArgs = TypeVarTuple("_InputArgs")
 
 
 class _CustomBuiltin(NamedTuple):
@@ -471,7 +473,7 @@ class CodeGen:
         else:
             return f"return {repr_fn(output_args)}"
 
-    def process_inputs(self, *args: Any) -> Any:
+    def process_inputs(self, *args: Unpack[_InputArgs]) -> tuple[Unpack[_InputArgs]]:
         """
         Transforms the inputs so that the graph can take them as arguments, as
         non-default codegen may result in the inputs to the function being

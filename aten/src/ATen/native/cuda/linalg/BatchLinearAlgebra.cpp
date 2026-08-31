@@ -607,7 +607,7 @@ Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upp
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 static void cholesky_kernel(const Tensor& input, const Tensor& info, bool upper) {
-  _warn_once_magma_deprecation("linalg.eig");
+  _warn_once_magma_deprecation("linalg.cholesky");
   cholesky_helper_cusolver(input, upper, info);
 }
 
@@ -799,9 +799,11 @@ namespace {
   // cuSOLVER's nopiv algorithm has lower per-matrix overhead, keeping the
   // crossover n^2/batch roughly constant across batch sizes.
   inline SolverBackend get_lu_factor_solver_backend(int64_t batch, int64_t m, int64_t n, const ScalarType& dtype, bool compute_pivots = true) {
-    // Select a custom pivoted LU factorization kernel over cuSOLVER/cuBLAS.
+    // Select a custom (pivoted) LU factorization kernel over cuSOLVER/cuBLAS.
     // The kernel is benchmarked on/tuned for A100, H100, L40S, GB200.
-    if ((m == n) && ((compute_pivots && (4 <= batch && batch <= 65536) && m >= 256) || (!compute_pivots && batch >= 16 && m <= 1024))) {
+    if (m == n && batch <= 65536 && m >= 256
+      && ((compute_pivots && batch >= 4) || (!compute_pivots && batch >= 16 && m <= 1024))
+    ) {
       return SolverBackend::CUSTOM;
     }
 
@@ -880,8 +882,7 @@ namespace {
 #endif
 
 static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
-  // Unconditional cusolver dispatch when compute_pivots == true
-  _warn_once_magma_deprecation("linalg.lu_factor", /*force_cusolver=*/compute_pivots);
+  _warn_once_magma_deprecation("linalg.lu_factor");
 
   auto batch_size = batchCount(input);
   (void) batch_size; // Silence unused warning in some builds
