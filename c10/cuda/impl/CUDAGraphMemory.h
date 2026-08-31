@@ -10,6 +10,7 @@ namespace c10::cuda::CUDAGraphMemory {
 struct AllocationContext {
   bool is_capturing{false};
   std::optional<CaptureId_t> tracked_capture_id;
+  cudaStream_t block_reuse_stream;
 };
 
 // Tracks conditional capture relationships and the capture that allocated each
@@ -29,6 +30,9 @@ class CaptureTracker {
 
  private:
   struct CaptureTreeNode {
+    MempoolId_t mempool_id;
+    cudaStream_t primary_stream;
+    cudaStream_t block_reuse_stream;
     std::optional<CaptureId_t> parent_capture_id;
     CaptureId_t root_capture_id;
     bool is_active;
