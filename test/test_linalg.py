@@ -5994,7 +5994,6 @@ class TestLinalg(TestCase):
             diag = buffer.abs().sum(-2)
             buffer.diagonal(dim1=-2, dim2=-1).copy_(diag)
 
-        #torch.backends.cuda.preferred_linalg_library("magma")
         for i in range(1, r):
             A = buffer[..., :n + i, :n + i]
             P, L, U = torch.linalg.lu(A, pivot=pivot)
