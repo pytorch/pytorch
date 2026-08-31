@@ -10584,7 +10584,17 @@ class Scheduler:
                     cudagraphs_log.debug("         %s", line)
 
     def codegen(self) -> None:
+        from .optimize_indexing import remove_redundant_argreduce_indices
+
         with dynamo_timed("Scheduler.codegen"):
+            loop_bodies = OrderedSet(
+                snode._body
+                for node in self.nodes
+                for snode in node.get_nodes()
+                if isinstance(snode, SchedulerNode)
+                and isinstance(snode._body, LoopBody)
+            )
+            remove_redundant_argreduce_indices(list(loop_bodies))
             return (
                 self._codegen_partitions()
                 if torch._inductor.config.graph_partition
