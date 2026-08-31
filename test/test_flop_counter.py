@@ -1676,28 +1676,6 @@ class TestSkipUnsupported(TestCase):
         self.assertIs(result, NotImplemented)
         self.assertEqual(len(mode.get_unsupported_ops()), 0)
 
-    def test_registered_hop_counts_flops(self):
-        """flex_attention is registered and its formula matches sdpa_flop_count."""
-        from torch.utils.flop_counter import flop_registry
-
-        self.assertIn(torch.ops.higher_order.flex_attention, flop_registry)
-
-        q_shape = (2, 8, 128, 64)
-        k_shape = (2, 8, 128, 64)
-        v_shape = (2, 8, 128, 64)
-
-        q = torch.randn(*q_shape, device="meta", dtype=torch.float16)
-        k = torch.randn(*k_shape, device="meta", dtype=torch.float16)
-        v = torch.randn(*v_shape, device="meta", dtype=torch.float16)
-        out = torch.randn(*q_shape, device="meta", dtype=torch.float16)
-
-        flex_attn_flop_fn = flop_registry[torch.ops.higher_order.flex_attention]
-        flops = flex_attn_flop_fn(q, k, v, out_val=(out, None, None))
-
-        expected_flops = sdpa_flop_count(q_shape, k_shape, v_shape)
-        self.assertEqual(flops, expected_flops)
-        self.assertGreater(flops, 0)
-
     def test_flex_attention_hop_end_to_end(self):
         """The public flex_attention API executes under FlopCounterMode and its
         FLOPs are counted via the registered formula. This is the exact call from
@@ -1718,6 +1696,27 @@ class TestSkipUnsupported(TestCase):
             mode.get_total_flops(), sdpa_flop_count(q.shape, k.shape, v.shape)
         )
         self.assertEqual(len(mode.get_unsupported_ops()), 0)
+
+    def test_flex_attention_broadcast_kv_batch(self):
+        """Bkv=1 broadcast against Bq counts as if KV were expanded."""
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+
+        q = torch.randn(4, 8, 128, 64)
+        k = torch.randn(1, 8, 128, 64)
+        v = torch.randn(1, 8, 128, 64)
+        block_mask = create_block_mask(
+            lambda b, h, qi, ki: qi >= ki, 4, 8, 128, 128, device="cpu"
+        )
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            with FlopCounterMode() as mode:
+                flex_attention(q, k, v, block_mask=block_mask)
+
+        expanded_kv = (4, *k.shape[1:])
+        self.assertEqual(
+            mode.get_total_flops(), sdpa_flop_count(q.shape, expanded_kv, expanded_kv)
+        )
 
     def test_registered_hop_returns_output_not_none(self):
         """Registered HOPs return their actual output. Guards against the bug
@@ -1743,6 +1742,122 @@ class TestSkipUnsupported(TestCase):
         out, _, _ = result
         self.assertEqual(out, x * 2)
         self.assertEqual(mode.get_total_flops(), 100)
+
+    @requires_cuda_and_triton
+    def test_triton_skip_unsupported(self):
+        """Unregistered Triton kernels execute and are tracked with skip_unsupported=True."""
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def cos_kernel(x_ptr, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(x_ptr + offsets, mask=mask)
+            out = tl.cos(x)
+            tl.store(out_ptr + offsets, out, mask=mask)
+
+        x = torch.randn(3, device="cuda")
+        out = torch.full((3,), float("nan"), device="cuda")
+        expected = torch.cos(x)
+
+        def cos_grid(meta):
+            return (triton.cdiv(3, meta["BLOCK_SIZE"]),)
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            with FlopCounterMode(skip_unsupported=True) as mode:
+                torch.library.wrap_triton(cos_kernel)[cos_grid](x, out, 3, 256)
+
+        self.assertEqual(out, expected)
+        self.assertEqual(mode.get_total_flops(), 0)
+        self.assertEqual(mode.get_unsupported_ops()["cos_kernel"], 1)
+        self.assertTrue(any("cos_kernel" in str(warning.message) for warning in w))
+
+    @requires_cuda_and_triton
+    def test_triton_registered_kernel_executes_with_skip_unsupported(self):
+        """Registered Triton kernels execute (not just count) with skip_unsupported=True."""
+        import triton
+        import triton.language as tl
+
+        from torch.utils.flop_counter import flop_registry, register_flop_formula
+
+        @triton.jit
+        def sin_kernel_skip(x_ptr, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(x_ptr + offsets, mask=mask)
+            out = tl.sin(x)
+            tl.store(out_ptr + offsets, out, mask=mask)
+
+        @register_flop_formula(sin_kernel_skip)
+        def sin_kernel_skip_flops(*args, **kwargs) -> int:
+            return 2
+
+        self.addCleanup(lambda: flop_registry.pop(sin_kernel_skip, None))
+
+        x = torch.randn(3, device="cuda")
+        out = torch.full((3,), float("nan"), device="cuda")
+
+        def grid(meta):
+            return (triton.cdiv(3, meta["BLOCK_SIZE"]),)
+
+        with FlopCounterMode(skip_unsupported=True) as mode:
+            torch.library.wrap_triton(sin_kernel_skip)[grid](x, out, 3, 256)
+
+        self.assertEqual(out, torch.sin(x))
+        self.assertEqual(mode.get_total_flops(), 2)
+        self.assertEqual(len(mode.get_unsupported_ops()), 0)
+
+    @unittest.skipIf(not HAS_CUDA, "CUDA not available")
+    def test_flex_attention_score_mod_grad_under_debug_mode(self):
+        """DebugMode is compilable by dynamo, so flex_attention must not skip its
+        internal torch.compile under it; skipping drops grads for tensors closed
+        over by score_mod."""
+        from torch.nn.attention.flex_attention import flex_attention
+        from torch.utils._debug_mode import DebugMode
+
+        q = torch.randn(2, 2, 128, 16, device="cuda", requires_grad=True)
+        k = torch.randn(2, 2, 128, 16, device="cuda")
+        v = torch.randn(2, 2, 128, 16, device="cuda")
+        bias = torch.randn(128, device="cuda", requires_grad=True)
+
+        def score_mod(score, b, h, q_idx, kv_idx):
+            return score + bias[kv_idx]
+
+        with DebugMode():
+            out = flex_attention(q, k, v, score_mod=score_mod)
+        out.sum().backward()
+
+        self.assertIsNotNone(bias.grad)
+        self.assertIsNotNone(q.grad)
+
+    def test_registered_formula_wins_over_decompose(self):
+        """A CompositeImplicitAutograd op reached below autograd (inference_mode)
+        uses its registered formula instead of decomposing."""
+        from torch.utils.flop_counter import flop_registry, register_flop_formula
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("double_mm(Tensor x) -> Tensor")
+            lib.impl("double_mm", lambda x: torch.mm(x, x), "CompositeImplicitAutograd")
+
+            op = torch.ops.mylib.double_mm
+
+            @register_flop_formula(op)
+            def double_mm_flops(x_shape, out_shape=None, **kwargs):
+                return 999
+
+            self.addCleanup(lambda: flop_registry.pop(op, None))
+
+            x = torch.randn(5, 5)
+            with torch.inference_mode(), FlopCounterMode() as mode:
+                op(x)
+
+        self.assertEqual(mode.get_total_flops(), 999)
 
 
 if __name__ == "__main__":

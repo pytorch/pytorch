@@ -175,8 +175,8 @@ def register_flop_formula(targets, get_raw=False) -> Callable[[Callable[_P, _T]]
 
         # Now FlopCounterMode will count FLOPs for these operations
         with FlopCounterMode(display=True) as mode:
-            result = my_rope(x)  # 0 FLOPs counted
-            result = my_attention(q, k, v)  # Actual FLOPs counted
+            result = torch.ops.mylib.my_rope(x)  # 0 FLOPs counted
+            result = torch.ops.mylib.my_attention(q, k, v)  # Actual FLOPs counted
 
     Note:
         This decorator also works for Higher Order Operators (HOPs) like flex_attention.
@@ -771,11 +771,19 @@ def _register_flex_attention_flops() -> None:
             return 0.0
         return max(0.0, min(1.0, custom.get("sparsity_hint", 0.0)))
 
+    def _expand_kv(query_shape, shape):
+        # flex_attention allows Bkv=1 broadcast against Bq
+        if shape[0] == 1 and query_shape[0] != 1:
+            return (query_shape[0], *shape[1:])
+        return shape
+
     @register_flop_formula(flex_attention, get_raw=True)
     def flex_attention_forward_flop(
         query, key, value, *args, out_val=None, **kwargs
     ) -> int:
-        flops = sdpa_flop_count(query.shape, key.shape, value.shape)
+        k_shape = _expand_kv(query.shape, key.shape)
+        v_shape = _expand_kv(query.shape, value.shape)
+        flops = sdpa_flop_count(query.shape, k_shape, v_shape)
         sparsity = _get_sparsity_hint(kwargs)
         return int(flops * (1.0 - sparsity)) if sparsity > 0 else flops
 
@@ -784,8 +792,10 @@ def _register_flex_attention_flops() -> None:
         query, key, value, out, logsumexp, grad_out, *args, out_val=None, **kwargs
     ) -> int:
         grad_out_shape = grad_out.shape if grad_out is not None else out.shape
+        k_shape = _expand_kv(query.shape, key.shape)
+        v_shape = _expand_kv(query.shape, value.shape)
         flops = sdpa_backward_flop_count(
-            grad_out_shape, query.shape, key.shape, value.shape
+            grad_out_shape, query.shape, k_shape, v_shape
         )
         sparsity = _get_sparsity_hint(kwargs)
         return int(flops * (1.0 - sparsity)) if sparsity > 0 else flops
@@ -989,7 +999,7 @@ class FlopCounterMode:
             return 0  # Return 0 for ops with negligible FLOPs, or calculate actual FLOPs
 
         with FlopCounterMode(display=True) as flop_counter:
-            result = my_op(x)  # FLOPs will be counted using registered formula
+            result = torch.ops.mylib.my_op(x)  # FLOPs will be counted using registered formula
 
     See Also:
         :func:`register_flop_formula`: Register custom FLOP counting formulas for operations
@@ -1182,7 +1192,8 @@ class _FlopCounterMode(TorchDispatchMode):
                     stacklevel=2
                 )
                 return func(*args, **kwargs)
-            return self.counter._count_flops(kernel_name, None, args, kwargs)
+            out = func(*args, **kwargs) if self.counter.skip_unsupported else None
+            return self.counter._count_flops(kernel_name, out, args, kwargs)
 
         if func is torch.ops.higher_order.cond:
             # The flop counter for cond counts the upper bound of flops.
