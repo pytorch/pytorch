@@ -268,7 +268,7 @@ Add it when **any** of these hold:
   that shipped broken. Go by what the issue says ("new in 2.x", "added in 2.x", "since
   upgrading to 2.x") checked against the version in `RELEASE CONTEXT`; do not try to recall
   which features shipped in which release.
-- **Binary / packaging:** anything affecting wheels, conda packages, Docker images,
+- **Binary / packaging:** anything affecting wheels, Docker images,
   install, or the release build itself. Pair it with `module: binaries`.
 - **Would ship broken in the next release.** A defect on main, a nightly, an RC, or the
   release branch that reaches users if nobody fixes it — including anything surfaced by
