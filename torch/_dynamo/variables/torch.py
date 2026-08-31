@@ -4332,10 +4332,9 @@ class DispatchKeySetVariable(BaseTorchVariable):
     ) -> VariableTracker | None:
         if not check_unspec_or_constant_args(args, kwargs):
             return None
-        method = getattr(self.value, "has")
         return VariableTracker.build(
             tx,
-            method(
+            self.value.has(
                 *[x.as_python_constant() for x in args],
                 **{k: v.as_python_constant() for k, v in kwargs.items()},
             ),
