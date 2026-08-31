@@ -1,0 +1,384 @@
+diff --git a/src/compiler/cicc.rs b/src/compiler/cicc.rs
+index 2a39e7c..d5d4dbe 100644
+--- a/src/compiler/cicc.rs
++++ b/src/compiler/cicc.rs
+@@ -28,7 +28,7 @@ use crate::mock_command::{CommandCreator, CommandCreatorSync, RunCommand};
+ use async_trait::async_trait;
+ 
+ use std::collections::HashMap;
+-use std::ffi::OsString;
++use std::ffi::{OsStr, OsString};
+ use std::fs;
+ use std::path::{Path, PathBuf};
+ use std::process;
+@@ -41,6 +41,17 @@ pub struct Cicc {
+     pub version: Option<String>,
+ }
+ 
++pub(crate) const CICC_INPUT_SUFFIX: &str = ".cpp1.ii";
++pub(crate) const PTXAS_INPUT_SUFFIX: &str = ".ptx";
++
++pub(crate) fn is_cicc_input(arg: impl AsRef<OsStr>) -> bool {
++    arg.as_ref().to_string_lossy().ends_with(CICC_INPUT_SUFFIX)
++}
++
++pub(crate) fn is_ptxas_input(arg: impl AsRef<OsStr>) -> bool {
++    arg.as_ref().to_string_lossy().ends_with(PTXAS_INPUT_SUFFIX)
++}
++
+ #[async_trait]
+ impl CCompilerImpl for Cicc {
+     fn kind(&self) -> CCompilerKind {
+@@ -112,7 +123,21 @@ where
+     S: SearchableArgInfo<ArgData>,
+ {
+     let mut args = arguments.to_vec();
+-    let input_loc = arguments.len() - input_arg_offset_from_end;
++    let is_input = |arg: &OsString| match language {
++        Language::Ptx => is_cicc_input(arg),
++        Language::Cubin => is_ptxas_input(arg),
++        _ => false,
++    };
++    // nvcc has historically passed the input at a fixed offset from the end.
++    // nvcc 13.3+ injects a valueless --simt-only before -o, pushing the input off
++    // that offset, so fall back to locating it by its generated-file suffix. Only
++    // do so when the offset is visibly wrong, so that every command line nvcc
++    // still emits in the old shape parses exactly as it did before.
++    let offset_loc = arguments.len().saturating_sub(input_arg_offset_from_end);
++    let input_loc = match arguments.get(offset_loc) {
++        Some(arg) if is_input(arg) => offset_loc,
++        _ => arguments.iter().position(is_input).unwrap_or(offset_loc),
++    };
+     let input = args.splice(input_loc..input_loc + 1, []).next().unwrap();
+ 
+     let mut take_next = false;
+@@ -271,7 +296,18 @@ pub fn generate_compile_commands(
+     let lang_str = &parsed_args.language.as_str();
+     let out_file = match parsed_args.outputs.get("obj") {
+         Some(obj) => &obj.path,
+-        None => return Err(anyhow!("Missing {:?} file output", lang_str)),
++        // Report what was parsed: reaching here means the input was located at the
++        // wrong argument, so -o was consumed or dropped. nvcc reshapes these
++        // sub-commands between CUDA releases and the failure is otherwise opaque.
++        None => {
++            return Err(anyhow!(
++                "Missing {:?} file output (input={:?}, common_args={:?}, unhashed_args={:?})",
++                lang_str,
++                parsed_args.input,
++                parsed_args.common_args,
++                parsed_args.unhashed_args
++            ));
++        }
+     };
+ 
+     let mut arguments: Vec<OsString> = vec![];
+@@ -349,3 +385,99 @@ counted_array!(pub static ARGS: [ArgInfo<ArgData>; _] = [
+     take_arg!("--stub_file_name", PathBuf, Separated, UnhashedOutput),
+     take_arg!("-o", PathBuf, Separated, Output),
+ ]);
++
++#[cfg(test)]
++mod test {
++    use super::*;
++    use crate::compiler::ptxas;
++
++    fn os_strings(args: &[&str]) -> Vec<OsString> {
++        args.iter().map(OsString::from).collect()
++    }
++
++    #[test]
++    fn test_parse_cicc_input_before_simt_only() {
++        let args = os_strings(&[
++            "--device-c",
++            "-arch",
++            "compute_80",
++            "--module_id_file_name",
++            "kernel.module_id",
++            "kernel.cpp1.ii",
++            "--simt-only",
++            "-o",
++            "kernel.ptx",
++        ]);
++
++        let parsed = match parse_arguments(&args, ".".as_ref(), Language::Ptx, &ARGS[..], 3) {
++            CompilerArguments::Ok(parsed) => parsed,
++            other => panic!("Got unexpected parse result: {:?}", other),
++        };
++
++        assert_eq!(PathBuf::from("kernel.cpp1.ii"), parsed.input);
++        assert_eq!(
++            Some(&ArtifactDescriptor {
++                path: PathBuf::from(".").join("kernel.ptx"),
++                optional: false
++            }),
++            parsed.outputs.get("obj")
++        );
++    }
++
++    #[test]
++    fn test_parse_ptxas_input_by_ptx_extension() {
++        let args = os_strings(&[
++            "-arch=sm_80",
++            "kernel.ptx",
++            "--some-new-flag",
++            "-o",
++            "kernel.cubin",
++        ]);
++
++        let parsed =
++            match parse_arguments(&args, ".".as_ref(), Language::Cubin, &ptxas::ARGS[..], 3) {
++                CompilerArguments::Ok(parsed) => parsed,
++                other => panic!("Got unexpected parse result: {:?}", other),
++            };
++
++        assert_eq!(PathBuf::from("kernel.ptx"), parsed.input);
++        assert_eq!(
++            Some(&ArtifactDescriptor {
++                path: PathBuf::from(".").join("kernel.cubin"),
++                optional: false
++            }),
++            parsed.outputs.get("obj")
++        );
++    }
++
++    #[test]
++    fn test_parse_ptxas_prefers_offset_when_it_holds_the_input() {
++        // An earlier argument that happens to share the input's suffix must not
++        // displace the input sitting at the historical offset, otherwise command
++        // lines from nvcc versions without --simt-only parse differently than
++        // they did before.
++        let args = os_strings(&[
++            "-arch=sm_80",
++            "other.ptx",
++            "-m64",
++            "kernel.ptx",
++            "-o",
++            "kernel.cubin",
++        ]);
++
++        let parsed =
++            match parse_arguments(&args, ".".as_ref(), Language::Cubin, &ptxas::ARGS[..], 3) {
++                CompilerArguments::Ok(parsed) => parsed,
++                other => panic!("Got unexpected parse result: {:?}", other),
++            };
++
++        assert_eq!(PathBuf::from("kernel.ptx"), parsed.input);
++        assert_eq!(
++            Some(&ArtifactDescriptor {
++                path: PathBuf::from(".").join("kernel.cubin"),
++                optional: false
++            }),
++            parsed.outputs.get("obj")
++        );
++    }
++}
+diff --git a/src/compiler/nvcc.rs b/src/compiler/nvcc.rs
+index e6f72a7..6dba231 100644
+--- a/src/compiler/nvcc.rs
++++ b/src/compiler/nvcc.rs
+@@ -20,7 +20,7 @@ use crate::compiler::c::{ArtifactDescriptor, CCompilerImpl, CCompilerKind, Parse
+ use crate::compiler::gcc::ArgData::*;
+ use crate::compiler::{
+     self, CCompileCommand, Cacheable, CompileCommand, CompileCommandImpl, CompilerArguments,
+-    Language, gcc, get_compiler_info, write_temp_file,
++    Language, cicc, gcc, get_compiler_info, write_temp_file,
+ };
+ use crate::mock_command::{
+     CommandChild, CommandCreator, CommandCreatorSync, ExitStatusValue, RunCommand, exit_status,
+@@ -46,6 +46,21 @@ use which::which_in;
+ 
+ use crate::errors::*;
+ 
++const NVCC_GENERATED_FILENAME_SUFFIXES: &[&str] = &[
++    cicc::CICC_INPUT_SUFFIX,
++    ".cpp4.ii",
++    ".cudafe1.c",
++    ".cudafe1.cpp",
++    ".cudafe1.stub.c",
++];
++
++fn nvcc_generated_filename_suffix(arg: &str) -> Option<&'static str> {
++    NVCC_GENERATED_FILENAME_SUFFIXES
++        .iter()
++        .find(|ext| arg.ends_with(*ext))
++        .copied()
++}
++
+ /// A unit struct on which to implement `CCompilerImpl`.
+ #[derive(Clone, Debug)]
+ pub enum NvccHostCompiler {
+@@ -759,19 +774,33 @@ where
+                     }
+                     _ => {}
+                 }
+-                let group = device_compile_groups.get_mut(&args[args.len() - 3]);
++                let group = args
++                    .iter()
++                    .find(|arg| cicc::is_cicc_input(OsStr::new(arg)))
++                    .and_then(|input| device_compile_groups.get_mut(input));
+                 (env_vars.clone(), Cacheable::Yes, group)
+             }
+             Some("ptxas") => {
+                 let group = device_compile_groups.values_mut().find(|cmds| {
+                     if let Some(cicc) = cmds.last() {
+                         if let Some(cicc_out) = cicc.args.last() {
+-                            return cicc_out == &args[args.len() - 3];
++                            return args
++                                .iter()
++                                .find(|arg| cicc::is_ptxas_input(OsStr::new(arg)))
++                                .is_some_and(|input| cicc_out == input);
+                         }
+                     }
+                     false
+                 });
+-                (env_vars.clone(), Cacheable::Yes, group)
++                // For a virtual-only gencode (e.g. -gencode arch=compute_120,
++                // code=compute_120) nvcc runs ptxas with no -o just to verify the
++                // PTX. There is no artifact to cache, so run it directly.
++                let cacheable = if args.iter().any(|arg| arg == "-o") {
++                    Cacheable::Yes
++                } else {
++                    Cacheable::No
++                };
++                (env_vars.clone(), cacheable, group)
+             }
+             // cudafe++ _must be_ cached, because the `.module_id` file is unique to each invocation (new in CTK 12.8)
+             Some("cudafe++") => {
+@@ -824,7 +853,7 @@ where
+                         // If the output file ends with...
+                         // * .cpp1.ii - cicc/ptxas input
+                         // * .cpp4.ii - cudafe++ input
+-                        if out_name.ends_with(".cpp1.ii") {
++                        if cicc::is_cicc_input(OsStr::new(&out_name)) {
+                             Some(out_name.clone())
+                         } else {
+                             None
+@@ -1139,22 +1168,9 @@ fn remap_generated_filenames(
+             // If the argument doesn't start with `-` and is a file that
+             // ends in one of the below extensions, rename the file to an
+             // auto-incrementing stable name
+-            let maybe_extension = if !arg.starts_with('-') {
+-                {
+-                    [
+-                        ".cpp1.ii",
+-                        ".cpp4.ii",
+-                        ".cudafe1.c",
+-                        ".cudafe1.cpp",
+-                        ".cudafe1.stub.c",
+-                    ]
+-                    .iter()
+-                    .find(|ext| arg.ends_with(*ext))
+-                    .copied()
+-                }
+-            } else {
+-                None
+-            };
++            let maybe_extension = (!arg.starts_with('-'))
++                .then(|| nvcc_generated_filename_suffix(&arg))
++                .flatten();
+ 
+             // If the argument is a file that ends in one of the above extensions:
+             // * If it's our first time seeing this file, create a unique name for it
+@@ -1483,6 +1499,8 @@ mod test {
+     use crate::mock_command::*;
+     use crate::test::utils::*;
+     use std::collections::HashMap;
++    #[cfg(unix)]
++    use std::os::unix::fs::PermissionsExt;
+     use std::path::PathBuf;
+ 
+     fn parse_arguments_gcc(arguments: Vec<String>) -> CompilerArguments<ParsedArguments> {
+@@ -1538,6 +1556,93 @@ mod test {
+         }
+     }
+ 
++    fn fake_executable(dir: &Path, name: &str) {
++        let path = dir.join(name);
++        fs::write(&path, "").unwrap();
++        #[cfg(unix)]
++        {
++            let mut permissions = fs::metadata(&path).unwrap().permissions();
++            permissions.set_mode(0o755);
++            fs::set_permissions(&path, permissions).unwrap();
++        }
++    }
++
++    #[test]
++    fn test_group_nvcc_subcommands_with_simt_only_cicc_input() {
++        let bin_dir = tempfile::tempdir().unwrap();
++        for exe in ["nvcc", "gcc", "cudafe++", "cicc", "ptxas", "fatbinary"] {
++            fake_executable(bin_dir.path(), exe);
++        }
++
++        let path = bin_dir.path().to_string_lossy();
++        let dryrun = format!(
++            r#"#$ PATH={path}
++#$ gcc -D__CUDACC__ -E -x c++ "kernel.cu" -o "kernel.cpp4.ii"
++#$ cudafe++ --gen_c_file_name "kernel.cudafe1.cpp" --stub_file_name "kernel.cudafe1.stub.c" --module_id_file_name "kernel.module_id" --simt-only "kernel.cpp4.ii"
++#$ gcc -D__CUDA_ARCH__=800 -D__CUDACC__ -E -x c++ "kernel.cu" -o "kernel.cpp1.ii"
++#$ cicc --device-c -arch compute_80 --module_id_file_name "kernel.module_id" --gen_c_file_name "kernel.cudafe1.c" --stub_file_name "kernel.cudafe1.stub.c" --gen_device_file_name "kernel.cudafe1.gpu" "kernel.cpp1.ii" --simt-only -o "kernel.ptx"
++#$ ptxas -arch=sm_80 --compile-only "kernel.ptx" -o "kernel.cubin"
++#$ fatbinary --create="kernel.fatbin" "--image3=kind=elf,sm=80,file=kernel.cubin" --embedded-fatbin="kernel.fatbin.c" --device-c
++#$ gcc -D__CUDA_ARCH__=800 -D__CUDACC__ -c -x c++ "kernel.cudafe1.cpp" -o "kernel.o"
++"#
++        );
++
++        let creator = new_creator();
++        next_command(
++            &creator,
++            Ok(MockChild::new(exit_status(0), "", dryrun.as_bytes())),
++        );
++        next_command(
++            &creator,
++            Ok(MockChild::new(exit_status(0), "", dryrun.as_bytes())),
++        );
++
++        let groups = group_nvcc_subcommands_by_compilation_stage(
++            &creator,
++            &bin_dir.path().join("nvcc"),
++            &ovec!["-c", "kernel.cu", "-o", "kernel.o"],
++            OsStr::new("-c"),
++            bin_dir.path(),
++            bin_dir.path(),
++            None,
++            &[],
++            &NvccHostCompiler::Gcc,
++            OsStr::new("kernel.o"),
++        )
++        .wait()
++        .unwrap();
++
++        let device_group = groups
++            .iter()
++            .find(|group| {
++                group
++                    .iter()
++                    .any(|cmd| cmd.exe.file_stem().and_then(|stem| stem.to_str()) == Some("cicc"))
++            })
++            .expect("missing device compile group");
++
++        assert_eq!(
++            vec!["gcc", "cicc", "ptxas"],
++            device_group
++                .iter()
++                .map(|cmd| cmd.exe.file_stem().unwrap().to_str().unwrap())
++                .collect::<Vec<_>>()
++        );
++
++        let cicc = device_group
++            .iter()
++            .find(|cmd| cmd.exe.file_stem().and_then(|stem| stem.to_str()) == Some("cicc"))
++            .unwrap();
++        assert!(cicc.args.iter().any(cicc::is_cicc_input));
++        assert!(cicc.args.iter().any(|arg| arg == "--simt-only"));
++
++        let ptxas = device_group
++            .iter()
++            .find(|cmd| cmd.exe.file_stem().and_then(|stem| stem.to_str()) == Some("ptxas"))
++            .unwrap();
++        assert!(ptxas.args.iter().any(cicc::is_ptxas_input));
++    }
++
+     #[test]
+     fn test_parse_arguments_simple_c() {
+         let a = parses!("-c", "foo.c", "-o", "foo.o");

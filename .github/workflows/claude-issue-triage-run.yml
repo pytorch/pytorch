@@ -68,32 +68,40 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Setup GitHub MCP Server
-        run: |
-          mkdir -p /tmp/mcp-config
-          cat > /tmp/mcp-config/mcp-servers.json << 'EOF'
-          {
-            "mcpServers": {
-              "github": {
-                "command": "docker",
-                "args": [
-                  "run",
-                  "-i",
-                  "--rm",
-                  "-e",
-                  "GITHUB_PERSONAL_ACCESS_TOKEN",
-                  "ghcr.io/github/github-mcp-server:v0.30.1"
-                ],
-                "env": {
-                  "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
-                }
-              }
-            }
-          }
-          EOF
-
+      # The bot is limited to five GitHub MCP calls and cannot read the releases
+      # API, so the current release train has to be handed to it. Left to itself it
+      # would answer "what is the latest release" from training data, and a version
+      # written into the skill file would go stale at every release.
+      - name: Resolve the most recent released version
+        id: release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          minor="unknown"
+          # /releases/latest excludes drafts and prereleases, so this is the newest GA.
+          if tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name')"; then
+            candidate="${tag#v}"
+            candidate="${candidate%.*}"
+            if [[ "${candidate}" =~ ^[0-9]+\.[0-9]+$ ]]; then
+              minor="${candidate}"
+            else
+              echo "::warning::Could not parse a minor version from release tag '${tag}'"
+            fi
+          else
+            echo "::warning::Could not read the latest release"
+          fi
+          # Never fail triage over this: the skill drops the version-dependent
+          # criteria when this is "unknown" rather than guessing.
+          echo "minor=${minor}" >> "${GITHUB_OUTPUT}"
+          echo "Most recent released minor: ${minor}"
+
+      - name: Pre-pull GitHub MCP Server
+        env:
+          # claude-code-action v1.0.89 injects this image when GitHub MCP tools are allowed.
+          GITHUB_MCP_IMAGE: "ghcr.io/github/github-mcp-server:sha-23fa0dd"
+        run: docker pull "$GITHUB_MCP_IMAGE"
+
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
@@ -110,12 +118,19 @@ jobs:
         with:
           use_bedrock: "true"
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          # Allow pytorch-bot (opens the DISABLED-test issues) past the
+          # action's bot gate. Widen to "*" if other bots start opening issues.
+          allowed_bots: "pytorch-bot"
           claude_args: |
             --model global.anthropic.claude-sonnet-5
-            --mcp-config /tmp/mcp-config/mcp-servers.json
-            --allowedTools "mcp__github__issue_read,mcp__github__get_issue,mcp__github__issue_write,mcp__github__update_issue,mcp__github__add_issue_comment,mcp__github__search_issues"
+            --allowedTools "mcp__github__get_issue,mcp__github__get_issue_comments,mcp__github__update_issue,mcp__github__add_issue_comment,mcp__github__search_issues"
           prompt: |
             /triaging-issues #${{ steps.issue.outputs.number }}
+
+            RELEASE CONTEXT (authoritative -- use this and nothing else for the current
+            release version; ignore any version written in the skill files and do not rely
+            on your own knowledge of PyTorch releases):
+            - Most recent released minor version: ${{ steps.release.outputs.minor }}
 
             SECURITY:
             - ONLY modify issue #${{ steps.issue.outputs.number }} in ${{ github.repository }}

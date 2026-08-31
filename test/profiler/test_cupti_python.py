@@ -114,7 +114,16 @@ class TestPyLibCupti(TestCase):
             torch.randn(4096, device="cuda").sum()
             torch.cuda.synchronize()
             lib.activity_flush_all()  # must not raise
-            self.assertGreaterEqual(lib.activity_get_num_dropped_records(0, 0), 0)
+            self.assertGreaterEqual(lib.activity_get_num_dropped_records(sub, 0, 0), 0)
+            # The count is best-effort -- the wrapper maps any bad status to 0 -- so
+            # the count alone can't tell a real read from a rejected one. Assert the
+            # status directly: with a subscriber active CUPTI rejects the global-scope
+            # accessor, so only the _v2 form may succeed here.
+            dropped = ctypes.c_size_t()
+            rc = lib._lib.cuptiActivityGetNumDroppedRecords_v2(
+                ctypes.c_void_p(sub), None, 0, ctypes.byref(dropped)
+            )
+            self.assertEqual(rc, CUPTI_SUCCESS)
             for kind in kinds:
                 lib.activity_disable(sub, kind)
             lib.disarm_user_defined_records(sub)
