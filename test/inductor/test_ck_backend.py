@@ -708,12 +708,13 @@ class TestCKTileUniversalGemmTemplate(TestCase):
                 return op
         raise AssertionError(f"no CK-Tile gemm op for {pipeline=} {epilogue=}")
 
-    def _compile_ck_tile_source(self, source: str) -> None:
+    def _compile_ck_tile_source(self, source: str, arch: str | None = None) -> None:
         from torch._inductor.codegen.rocm.compile_command import rocm_compile_command
 
-        if not torch.cuda.is_available():
-            raise unittest.SkipTest("ROCm device required to select --offload-arch")
-        arch = torch.cuda.get_device_properties(0).gcnArchName.split(":")[0]
+        if arch is None:
+            if not torch.cuda.is_available():
+                raise unittest.SkipTest("ROCm device required to select --offload-arch")
+            arch = torch.cuda.get_device_properties(0).gcnArchName.split(":")[0]
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             src_path = os.path.join(tmp_dir, "instance.hip")
@@ -970,6 +971,42 @@ struct FlatmmPipelineProblem
                 ]
             )
         )
+
+    @_parametrize_dtype
+    @parametrize("arch", ("gfx942", "gfx950", "gfx1250"))
+    def test_offered_instance_compiles_for_arch(self, dtype, arch):
+        """
+        The warp tile is chosen from the compile target, so an instance must
+        compile for an arch other than the one this test runs on.
+
+        This is what catches emitting source for one arch while compiling it for
+        another: gfx1250 needs a 16x16 WMMA warp tile, and rendering that shape
+        into a gfx9 compile (or the reverse) leaves the warp GEMM unresolved.
+        Driving the arch through config.rocm.arch rather than the runtime device
+        is the only way to cover the target that is not under the test.
+        """
+        rocm = config.rocm
+        if self._ck_tile._find_ck_tile_header(rocm.rocm_home, rocm.ck_dir) is None:
+            raise unittest.SkipTest("ck_tile headers are not installed")
+
+        with config.patch({"rocm.arch": [arch]}):
+            template = self._make_template(dtype=dtype)
+            ops = template.gen_ops()
+            if not ops:
+                raise unittest.SkipTest(f"no instance offered for {arch}")
+            op = ops[0]
+            expected = (16, 16) if arch == "gfx1250" else (32, 32)
+            self.assertEqual((op.warp_tile_m, op.warp_tile_n), expected)
+            source = "\n".join(
+                [
+                    template.header().getvalue(),
+                    template.globals().getvalue(),
+                    template.emit_ck_instance(
+                        op, use_v2_api=self._probe(rocm.rocm_home)
+                    ),
+                ]
+            )
+        self._compile_ck_tile_source(source, arch=arch)
 
 
 if __name__ == "__main__":
