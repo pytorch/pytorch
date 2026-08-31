@@ -230,10 +230,10 @@ def _deserialize_graph_module(
     # Try to retrieve the forward source in a backward-compatible way
     _CodeOnlyModule.forward = forward
 
+    from ._symbolic_trace import Tracer
+
     tracer_cls = body.get("_tracer_cls")
     if tracer_cls is None:
-        from ._symbolic_trace import Tracer
-
         tracer_cls = Tracer
 
     graphmodule_cls_name = body.get("_graphmodule_cls_name", "GraphModule")
@@ -251,7 +251,8 @@ def _deserialize_graph_module(
     com = _CodeOnlyModule(body)
 
     tracer_extras = body.get("_tracer_extras", {})
-    graph = KeepModules().trace(com, **tracer_extras)
+    tracer = KeepModules._graph_module_deserialization_tracer(com)
+    graph = tracer.trace(com, **tracer_extras)
 
     # Recover node.meta["stack_trace"] after re-tracing
     node_meta_stack_trace = body.get("_graphmodule_graph_node_meta_stack_trace")
@@ -305,7 +306,8 @@ def _copy_attr(
     # If it is a tensor and not a parameter attribute of a module, it should be a named buffer.
     # So, we register it as a named buffer in the target module.
     if isinstance(orig, torch.Tensor) and not isinstance(orig, torch.nn.Parameter):
-        to_module.register_buffer(field, orig)
+        persistent = field not in from_module._non_persistent_buffers_set
+        to_module.register_buffer(field, orig, persistent=persistent)
     else:
         setattr(to_module, field, orig)
 

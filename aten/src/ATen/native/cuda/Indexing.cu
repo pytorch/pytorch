@@ -27,6 +27,7 @@
 #include <ATen/ops/aminmax.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
 #include <ATen/ops/zeros_like.h>
 #include <ATen/ops/ones_like.h>
 #include <ATen/ops/empty_quantized.h>
@@ -72,7 +73,6 @@ __global__ void indexing_backward_kernel_many_indices(
   int smem_offset = threadIdx.y * C10_WARP_SIZE;
 
   int laneIdx = threadIdx.x % C10_WARP_SIZE;
-  int64_t grad_row = 0;
 
   for (int64_t z = blockIdx.z; z < outer_dim; z += gridDim.z) {
     // Init duplicates every time we compute a new set of entries:
@@ -992,8 +992,8 @@ static size_t getSliceSize(const Tensor & dst,
   }
 
   TORCH_CHECK(dstSliceSize == srcSliceSize,
-             "Source/destination tensor have different slice sizes (%ld vs %ld)",
-             dstSliceSize, srcSliceSize);
+             "Source/destination tensor have different slice sizes (",
+             dstSliceSize, " vs ", srcSliceSize, ")");
 
   if (mismatch) {
     TORCH_WARN_ONCE(
@@ -1028,7 +1028,6 @@ __global__ void indexFuncSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
   // this is a good choice (small number of chosen indices), since
   // re-accessing indices in addition to src elements can be slow.
   for (IndexType srcIndex = 0; srcIndex < indices.sizes[0]; ++srcIndex) {
-    // Lua indices begin at 1
     IndexType dstIndex =
         indices.data[cuda::detail::IndexToOffset<const IndicesType, IndexType, IdxDim>::get(srcIndex, indices)];
     CUDA_KERNEL_ASSERT(dstIndex < dstAddDimSize);
@@ -1087,7 +1086,6 @@ __global__ void indexFuncLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
       srcIndex = linearIndex % innerSize;
     }
 
-    // Lua indices begin at 1
     IndexType dstIndex =
         indices.data[cuda::detail::IndexToOffset<const IndicesType, IndexType, IdxDim>::get(srcIndex, indices)];
     CUDA_KERNEL_ASSERT(dstIndex < dstAddDimSize);
@@ -1910,8 +1908,8 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
     Tensor intrsc_counts_nneg_index;
     Tensor intrsc_first_match_nneg_index;
     std::tie(intrsc_counts_nneg_index, intrsc_first_match_nneg_index) = [&]() -> std::tuple<Tensor, Tensor> {
-      auto intrsc_counts_nneg_index = at::zeros_like(nneg_index);
-      auto intrsc_first_match_nneg_index = at::zeros_like(nneg_index);
+      auto intrsc_counts_nneg_index = at::empty_like(nneg_index);
+      auto intrsc_first_match_nneg_index = at::empty_like(nneg_index);
 
       auto iter = TensorIteratorConfig()
         .add_output(intrsc_first_match_nneg_index)

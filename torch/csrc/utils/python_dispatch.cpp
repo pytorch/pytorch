@@ -14,6 +14,7 @@
 
 #include <c10/core/SafePyObject.h>
 #include <c10/util/SmallVector.h>
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/autograd/autograd_not_implemented_fallback.h>
 #include <torch/csrc/autograd/python_variable.h>
@@ -27,6 +28,7 @@
 #include <torch/csrc/utils/python_raii.h>
 
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <utility>
 
@@ -185,9 +187,7 @@ class PythonKernelHolder : public c10::OperatorKernel {
                   **args_kwargs.second)
         : with_keyset_ ? func(keyset, *args_kwargs.first, **args_kwargs.second)
                         : func(*args_kwargs.first, **args_kwargs.second);
-    if (!obj) {
-      throw python_error();
-    }
+    TORCH_CHECK_PYTHON(obj);
     pushPyOutToStack(op, stack, obj, "PythonKernelHolder");
   }
 };
@@ -202,6 +202,7 @@ static py::object ophandle_call_boxed(
     const c10::OperatorHandle& handle,
     const py::args& args,
     const py::kwargs& kwargs) {
+  HANDLE_TH_ERRORS
   auto stack = torch::jit::createStackForSchema(
       handle.schema(),
       args,
@@ -212,6 +213,7 @@ static py::object ophandle_call_boxed(
     handle.callBoxed(stack);
   }
   return torch::jit::createPyObjectForStack(std::move(stack));
+  END_HANDLE_TH_ERRORS_PYBIND
 }
 
 // Function that performs PyObject dispatch
@@ -262,8 +264,8 @@ static c10::DispatchKeySet pyobject_dispatch_compute_keyset(
     PyObject* const* args,
     Py_ssize_t nargs) {
   uint64_t key_set = 0;
-  extractor.dispatchArgIndicesReverse().for_each_set_bit(
-      [&](size_t reverse_arg_index) {
+  c10::utils::for_each_set_bit(
+      extractor.dispatchArgIndicesReverse(), [&](size_t reverse_arg_index) {
         pyobject_dispatch_collect_keys(
             args[nargs - 1 - static_cast<Py_ssize_t>(reverse_arg_index)],
             key_set);
@@ -594,17 +596,14 @@ static PyObject* make_pyobject_dispatch_func(
     PyObject* cpp_dispatch_fn,
     PyObject* cpp_redispatch_fn,
     vectorcallfunc vectorcall) {
-  auto* owned_handle = new c10::OperatorHandle(handle);
+  auto owned_handle = std::make_unique<c10::OperatorHandle>(handle);
   auto* result = PyObject_New(PyObjectDispatchFunc, &PyObjectDispatchFuncType);
-  if (result == nullptr) {
-    delete owned_handle;
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(result != nullptr);
   Py_INCREF(cpp_dispatch_fn);
   Py_INCREF(cpp_redispatch_fn);
   result->cpp_dispatch_fn = cpp_dispatch_fn;
   result->cpp_redispatch_fn = cpp_redispatch_fn;
-  result->handle = owned_handle;
+  result->handle = owned_handle.release();
   result->interpreter = getPyInterpreter();
   result->vectorcall = vectorcall;
   return reinterpret_cast<PyObject*>(result);
@@ -614,16 +613,13 @@ static PyObject* make_pyobject_redispatch_func(
     const c10::OperatorHandle& handle,
     PyObject* cpp_redispatch_fn,
     vectorcallfunc vectorcall) {
-  auto* owned_handle = new c10::OperatorHandle(handle);
+  auto owned_handle = std::make_unique<c10::OperatorHandle>(handle);
   auto* result =
       PyObject_New(PyObjectRedispatchFunc, &PyObjectRedispatchFuncType);
-  if (result == nullptr) {
-    delete owned_handle;
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(result != nullptr);
   Py_INCREF(cpp_redispatch_fn);
   result->cpp_redispatch_fn = cpp_redispatch_fn;
-  result->handle = owned_handle;
+  result->handle = owned_handle.release();
   result->interpreter = getPyInterpreter();
   result->vectorcall = vectorcall;
   return reinterpret_cast<PyObject*>(result);
@@ -673,6 +669,15 @@ class SetExcludeDispatchKeyGuard {
   bool old;
 };
 
+// Thread-local stack used to save/restore the local dispatch key set around a
+// torch.compile'd call (see compile_wrapper in eval_frame.py). Keeping the
+// saved keyset in C++ avoids materializing it as a (registered) pybind11
+// instance on every compiled call, and a stack supports nested compiled calls.
+static std::vector<c10::impl::LocalDispatchKeySet>& dynamoDispatchKeySetStack() {
+  static thread_local std::vector<c10::impl::LocalDispatchKeySet> stack;
+  return stack;
+}
+
 void initDispatchBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
@@ -685,9 +690,7 @@ void initDispatchBindings(PyObject* module) {
   PyObjectDispatchFuncType.tp_call = PyVectorcall_Call;
   PyObjectDispatchFuncType.tp_vectorcall_offset =
       offsetof(PyObjectDispatchFunc, vectorcall);
-  if (PyType_Ready(&PyObjectDispatchFuncType) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyType_Ready(&PyObjectDispatchFuncType) >= 0);
 
   PyObjectRedispatchFuncType.tp_name = "torch._C._PyObjectRedispatchFunc";
   PyObjectRedispatchFuncType.tp_basicsize = sizeof(PyObjectRedispatchFunc);
@@ -698,9 +701,7 @@ void initDispatchBindings(PyObject* module) {
   PyObjectRedispatchFuncType.tp_call = PyVectorcall_Call;
   PyObjectRedispatchFuncType.tp_vectorcall_offset =
       offsetof(PyObjectRedispatchFunc, vectorcall);
-  if (PyType_Ready(&PyObjectRedispatchFuncType) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyType_Ready(&PyObjectRedispatchFuncType) >= 0);
 
   py::class_<c10::OperatorHandle>(m, "_DispatchOperatorHandle")
       .def("schema", &c10::OperatorHandle::schema)
@@ -711,6 +712,7 @@ void initDispatchBindings(PyObject* module) {
              c10::DispatchKeySet keyset,
              const py::args& args,
              const py::kwargs& kwargs) {
+            HANDLE_TH_ERRORS
             auto& handle = self.cast<c10::OperatorHandle&>();
             auto stack = torch::jit::createStackForSchema(
                 handle.schema(),
@@ -722,6 +724,7 @@ void initDispatchBindings(PyObject* module) {
               handle.redispatchBoxed(keyset, &stack);
             }
             return torch::jit::createPyObjectForStack(std::move(stack));
+            END_HANDLE_TH_ERRORS_PYBIND
           });
 
   m.def("_dispatch_call_boxed", &ophandle_call_boxed);
@@ -1320,6 +1323,22 @@ void initDispatchBindings(PyObject* module) {
     auto* impl = tensor.unsafeGetTensorImpl();
     return impl->key_set();
   });
+  // Save the current local dispatch key set onto a C++ thread-local stack, to
+  // be restored by _dynamo_restore_local_dispatch_key_set. Used by
+  // torch.compile's per-call wrapper to preserve dispatch state across the
+  // compiled call without constructing pybind11 DispatchKeySet instances.
+  m.def("_dynamo_save_local_dispatch_key_set", []() {
+    dynamoDispatchKeySetStack().push_back(
+        c10::impl::tls_local_dispatch_key_set());
+  });
+  m.def("_dynamo_restore_local_dispatch_key_set", []() {
+    auto& stack = dynamoDispatchKeySetStack();
+    TORCH_CHECK(
+        !stack.empty(),
+        "_dynamo_restore_local_dispatch_key_set called with an empty stack");
+    c10::impl::_force_tls_local_dispatch_key_set(stack.back());
+    stack.pop_back();
+  });
   m.def("_dispatch_tls_local_include_set", []() {
     return c10::impl::tls_local_dispatch_key_set().included_;
   });
@@ -1547,9 +1566,7 @@ void python_op_registration_trampoline_impl(
                                          **args_kwargs.second)
       : with_keyset ? callable(keyset, *args_kwargs.first, **args_kwargs.second)
                     : callable(*args_kwargs.first, **args_kwargs.second);
-  if (!obj) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(obj);
   pushPyOutToStack(op, stack, obj, "PythonKernelHolder");
 }
 

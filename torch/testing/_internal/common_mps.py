@@ -29,6 +29,7 @@ if torch.backends.mps.is_available():
             "abs",
             "add",
             "addbmm",
+            "addmm",
             "alias_copy",
             "argwhere",
             "atleast_1d",
@@ -95,6 +96,8 @@ if torch.backends.mps.is_available():
             "istft",
             "item",
             "kron",
+            "linalg.cholesky",
+            "linalg.cholesky_ex",
             "linalg.cond",
             "linalg.cross",
             "linalg.diagonal",
@@ -167,6 +170,7 @@ if torch.backends.mps.is_available():
             "permute",
             "permute_copy",
             "positive",
+            "put",
             "randn",
             "ravel",
             "real",
@@ -211,6 +215,7 @@ if torch.backends.mps.is_available():
             "svd",
             "t",
             "t_copy",
+            "take",
             "take_along_dim",
             "tanh",
             "tan",
@@ -307,6 +312,8 @@ if torch.backends.mps.is_available():
             "logical_not",
             "logical_or",
             "logical_xor",
+            "logspace",
+            "logspacetensor_overload",
             "logsumexp",
             "long",
             "masked.cumsum",
@@ -365,11 +372,8 @@ if torch.backends.mps.is_available():
         # Those ops are not expected to work
         UNIMPLEMENTED_XFAILLIST: dict[str, list | None] = {
             # Failures due to lack of op implementation on MPS backend
-            "logspace": None,
-            "logspacetensor_overload": None,
             "linalg.eig": None,
             "linalg.eigvals": None,
-            "put": None,
             "frexp": None,
             "hash_tensor": None,
             "heaviside": None,
@@ -554,7 +558,6 @@ if torch.backends.mps.is_available():
             ],
             "nn.functional.padreplicate_negative": [torch.bool],
             "nn.functional.pdist": None,
-            "nn.functional.relu": [torch.bool],
             "nn.functional.rrelu": None,
             "nn.functional.silu": [
                 torch.int16,
@@ -593,7 +596,6 @@ if torch.backends.mps.is_available():
             "special.ndtri": None,
             "stft": [torch.float16, torch.bfloat16],
             "svd_lowrank": None,
-            "take": None,
             "to": None,
             "_upsample_bilinear2d_aa": [torch.uint8],  # uint8 is for CPU only
             "_upsample_bicubic2d_aa": [torch.uint8],  # uint8 is for CPU only
@@ -661,16 +663,6 @@ if torch.backends.mps.is_available():
             # logcumsumexp on complex inputs disagrees with CPU at branch
             # cuts (off by 2*pi); shifted RNG exposed a sample on the cut.
             "logcumsumexp": [torch.complex64],
-            # Random ops: `test_output_match` / `test_output_grad_match` route
-            # these to a metadata + summary-stats comparator
-            # (`_assert_random_op_match`) since MPS and CPU consume independent
-            # Philox streams. The xfail entries that used to live here are
-            # gone with the comparator; if a new test under
-            # `mps_ops_modifier` needs them, add a per-test skip locally.
-            # `randint(to>1, dtype=bool)` errors at the CPU op itself with
-            # "to - 1 is out of bounds for bool" - not a comparator issue.
-            "randint": [torch.bool],
-            "randint_like": [torch.bool],
             # `nn.functional.dropout` keeps a complex64 entry because the
             # MPS dropout kernel doesn't support complex inputs at all (the
             # shape comparison would fail to even run).
@@ -867,14 +859,10 @@ if torch.backends.mps.is_available():
             "linalg.lstsq": [torch.float32],
             "linalg.lstsqgrad_oriented": [torch.float32],
             "geqrf": None,
-            # linalg.polar does not have an autograd implementation yet.
-            "linalg.polar": None,
             "unique_consecutive": [torch.float16, torch.float32],
             "scalar_tensor": [torch.float16, torch.float32],
             "igamma": None,  # currently not supported for any device
             "igammac": None,  # currently not supported for any device
-            "special.i1": [torch.float16],  # "i1_backward" not implemented for 'Half'
-            "special.i1e": [torch.float16],  # "i1e_backward" not implemented for 'Half'
             # Correctness issues
             # Same issue as `argsort` and `sort` with duplicate elements (undefined behaviour).
             # Forward pass is passing since `msort` doesn't return the indices, just the values, which match the CPU.
@@ -1027,4 +1015,10 @@ else:
         xfail_exclusion: list[str] | None = None,
         sparse: bool = False,
     ) -> Sequence[OpInfo]:
+        return ops
+
+    def mps_ops_grad_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
+        return ops
+
+    def mps_ops_error_inputs_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
         return ops
