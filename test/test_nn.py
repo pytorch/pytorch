@@ -7694,6 +7694,27 @@ class TestNNDeviceType(NNTestCase):
             c_cpu.backward(grad.cpu())
             self.assertEqual(x.grad, ref_x.grad)
 
+    @onlyAccelerator   # CPU is the reference the results are compared against
+    @parametrize_test("mode,shape,padding", [
+        ("constant", (1, 2, 3, 256, 256), (0, 0, 0, 0, 2, 1)),
+        ("constant", (1, 1, 2, 2, 65536), (2, 1)),
+        ("constant", (1, 1, 2, 2, 65536), (0, 0, 2, 1)),
+        ("replicate", (1, 2, 3, 256, 256), (0, 0, 0, 0, 2, 1)),
+        ("reflect", (1, 2, 3, 256, 256), (0, 0, 0, 0, 2, 1)),
+    ])
+    def test_pad_5d_large_inner_dims(self, device, mode, shape, padding):
+        # Padding a rank > 4 operand must not corrupt the copied input when the inner extent is large.
+        # https://github.com/pytorch/pytorch/issues/194922
+        x = torch.randn(shape, device=device, requires_grad=True)
+        ref_x = x.detach().cpu().requires_grad_()
+        out = F.pad(x, padding, mode=mode)
+        out_cpu = F.pad(ref_x, padding, mode=mode)
+        self.assertEqual(out, out_cpu)
+        grad = torch.randn_like(out)
+        out.backward(grad)
+        out_cpu.backward(grad.cpu())
+        self.assertEqual(x.grad, ref_x.grad)
+
     @onlyCUDA
     @largeTensorTest("48GB", "cpu")
     @largeTensorTest("48GB", "cuda")

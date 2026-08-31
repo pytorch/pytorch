@@ -1168,7 +1168,10 @@ class TestScheduler(TestCase):
             scheduler._prove_staged_fusion_dependencies(producer, consumer, plan)
         )
 
-    def test_empty_planned_dependency_matches_prevent_later_loop_rewrites(self):
+    @parametrize("vertical_fusion_legal", [False, True])
+    def test_empty_planned_dependency_matches_prevent_later_loop_rewrites(
+        self, vertical_fusion_legal
+    ):
         producer = self._mock_base_snode("producer", torch.device("cpu"))
         consumer = self._mock_base_snode("consumer", torch.device("cpu"))
         producer.has_strict_reduction.return_value = False
@@ -1197,7 +1200,10 @@ class TestScheduler(TestCase):
         scheduler.can_fuse_vertical = Mock(
             side_effect=AssertionError("staged fusion must use staged legality")
         )
-        scheduler._can_fuse_vertical_impl = Mock(return_value=True)
+        scheduler._can_fuse_vertical_impl = Mock(return_value=vertical_fusion_legal)
+        scheduler._try_reindex_pointwise_for_reduction = Mock(
+            side_effect=AssertionError("staged plan must prevent reindexing")
+        )
         backend = Mock()
         backend.can_fuse_vertical.return_value = True
         scheduler.get_backend = Mock(return_value=backend)
@@ -1215,21 +1221,61 @@ class TestScheduler(TestCase):
                 {
                     "expand_dimension_for_pointwise_nodes": True,
                     "loop_ordering_after_fusion": True,
+                    "loop_reindexing_after_fusion": True,
                     "loop_index_inversion_in_fusion": True,
                 }
             ),
         ):
-            self.assertTrue(
+            self.assertEqual(
                 scheduler._can_fuse(
                     producer,
                     consumer,
                     can_reorder=True,
-                )
+                ),
+                vertical_fusion_legal,
             )
 
         scheduler.get_expand_dim_for_pointwise_nodes.assert_not_called()
         scheduler.shared_data_after_reordering_loop.assert_not_called()
         scheduler.shared_data_after_inverting_indexing.assert_not_called()
+        scheduler._try_reindex_pointwise_for_reduction.assert_not_called()
+
+    def test_vertical_fusion_retries_after_reindexing(self):
+        producer = self._mock_base_snode("producer", torch.device("cuda"))
+        consumer = self._mock_base_snode("consumer", torch.device("cuda"))
+        producer.has_strict_reduction.return_value = False
+        consumer.has_strict_reduction.return_value = False
+        producer.ancestors = OrderedSet()
+        consumer.ancestors = OrderedSet(["producer"])
+        producer.get_operation_names.return_value = OrderedSet(["producer"])
+        consumer.get_operation_names.return_value = OrderedSet(["consumer"])
+
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler._fusion_blocked_by_placement = Mock(return_value=False)
+        scheduler._score_fusion_memory_for_can_fuse = Mock(return_value=1_000_000)
+        scheduler.can_fuse_vertical = Mock(side_effect=[False, True])
+        scheduler._try_reindex_pointwise_for_reduction = Mock(return_value=True)
+        backend = Mock()
+        backend.can_fuse_vertical.return_value = True
+        scheduler.get_backend = Mock(return_value=backend)
+        graph = Mock(no_fuse_buffer_names=OrderedSet())
+        choices = Mock()
+        choices.can_fuse.return_value = True
+        choices.can_fuse_vertical.return_value = True
+
+        with (
+            V.set_graph_handler(graph),
+            V.set_choices_handler(choices),
+            patch.object(NestedReduction, "is_candidate", return_value=False),
+            patch.object(NestedReduction, "_is_enabled_for", return_value=False),
+            inductor_config.patch(loop_reindexing_after_fusion=True),
+        ):
+            self.assertTrue(Scheduler._can_fuse(scheduler, producer, consumer))
+
+        self.assertEqual(scheduler.can_fuse_vertical.call_count, 2)
+        scheduler._try_reindex_pointwise_for_reduction.assert_called_once_with(
+            producer, consumer
+        )
 
     def test_nested_reduction_sub_parent_rate_preserves_group_axis(self):
         grouped = Mock()
