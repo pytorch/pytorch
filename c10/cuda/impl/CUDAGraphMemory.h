@@ -26,12 +26,7 @@ class CaptureTracker {
   bool hasActiveCaptures() const {
     return active_captures_ != 0;
   }
-  AllocationContext allocationContext(cudaStream_t request_stream) const {
-    if (C10_LIKELY(active_captures_ == 0)) {
-      return {false, std::nullopt, request_stream};
-    }
-    return allocationContextSlow(request_stream);
-  }
+  AllocationContext allocationContext(cudaStream_t request_stream) const;
   void recordAllocation(const void* block, const AllocationContext& context);
   void recordFree(const void* block, cudaStream_t free_stream);
 
@@ -51,7 +46,6 @@ class CaptureTracker {
   bool isFreeInAllocationCaptureOrAncestor(
       CaptureId_t allocation_capture_id,
       CaptureId_t free_capture_id) const;
-  AllocationContext allocationContextSlow(cudaStream_t request_stream) const;
   int eraseCaptureTree(CaptureId_t root_capture_id);
 
   int active_captures_{0};
