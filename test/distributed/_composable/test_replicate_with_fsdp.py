@@ -85,7 +85,7 @@ class ReplicateTest(MultiProcContinuousTest):
         This tests that replicate works on a transformer model with fully_shard and replicate layers
 
         Args:
-            device: Device to run the test on. Typically "cuda:0", "npu:0", etc.
+            device: Device to run the test on. typically designated by an identifier such as "cuda:0".
         """
         run_subtests(
             self,
@@ -165,7 +165,7 @@ class ReplicateTest(MultiProcContinuousTest):
                 14. resid_dropout
 
         Args:
-            device: Device to run the test on. Typically "cuda:0", "npu:0", etc.
+            device: Device to run the test on. typically designated by an identifier such as "cuda:0".
         """
 
         model_args = ModelArgs()
@@ -209,7 +209,7 @@ class ReplicateTest(MultiProcContinuousTest):
         This tests that a user can pass in a device mesh to replicate a module
 
         Args:
-            device: Device to run the test on. Typically "cuda:0", "npu:0", etc.
+            device: Device to run the test on. typically designated by an identifier such as "cuda:0".
         """
 
         device = torch.device(f"{device}:{self.rank % getattr(torch, device).device_count()}")
@@ -238,7 +238,7 @@ class ReplicateTest(MultiProcContinuousTest):
         Tests that replicate_model has the same behavior as original model when training
 
         Args:
-            device: Device to run the test on. Typically "cuda:0", "npu:0", etc.
+            device: Device to run the test on. typically designated by an identifier such as "cuda:0".
         """
 
         device = torch.device(f"{device}:{self.rank % getattr(torch, device).device_count()}")
@@ -287,7 +287,7 @@ class ReplicateTest(MultiProcContinuousTest):
         Verifies when a device mesh is passed in, the model has the same behavior as the original model when training
 
         Args:
-            device: Device to run the test on. Typically "cuda:0", "npu:0", etc.
+            device: Device to run the test on. typically designated by an identifier such as "cuda:0".
         """
         global_mesh = self.init_replicate_tp_mesh()
         run_subtests(
