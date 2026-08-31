@@ -9578,7 +9578,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         x = torch.ones(2, 2, requires_grad=True)
 
         def call_foobar(x):
-            warnings.warn("foobar")
+            warnings.warn("foobar", stacklevel=2)
 
         @torch.compile(backend="eager")
         def f(x):

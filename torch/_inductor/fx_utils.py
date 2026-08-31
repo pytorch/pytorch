@@ -419,7 +419,8 @@ def _extract_subgraphs_and_args(
         yield args[1], tuple(args[2])
     else:
         warnings.warn(
-            f"Please add support for subgraph args to function {node.target}!"
+            f"Please add support for subgraph args to function {node.target}!",
+            stacklevel=2,
         )
 
         # By default, just return the detected list of subgraphs so that we can run

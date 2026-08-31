@@ -304,7 +304,8 @@ def create_type_hint(x: object) -> object:
     except Exception:
         # We tried to create a type hint for list but failed.
         warnings.warn(
-            f"We were not able to successfully create type hint from the type {x}"
+            f"We were not able to successfully create type hint from the type {x}",
+            stacklevel=2,
         )
     return x
 
@@ -331,7 +332,8 @@ def type_matches(signature_type: Any, argument_type: Any) -> bool:
 
         if not inspect.isclass(sig_el_type):
             warnings.warn(
-                f"Does not support nested parametric types, got {signature_type}. Please file a bug."
+                f"Does not support nested parametric types, got {signature_type}. Please file a bug.",
+                stacklevel=2,
             )
             return False
         if getattr(argument_type, "__origin__", None) is list:

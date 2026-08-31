@@ -2469,7 +2469,8 @@ class OutputGraph(OutputGraphCommon):
                 if torch._dynamo.config.side_effect_replay_policy == "warn":
                     warnings.warn(
                         f"While compiling, we found certain side effects happened in the model.forward. "
-                        f"Here are the list of potential sources you can double check: {side_effect_refs}"
+                        f"Here are the list of potential sources you can double check: {side_effect_refs}",
+                        stacklevel=2,
                     )
                 else:
                     raise RuntimeError(

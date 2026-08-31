@@ -241,7 +241,8 @@ class _KinetoProfile:
             warn(
                 "trace_only=True is incompatible with with_stack=True "
                 "(stack traces require event post-processing). "
-                "Disabling trace_only."
+                "Disabling trace_only.",
+                stacklevel=2,
             )
             experimental_config_copy: _ExperimentalConfig = copy.copy(
                 experimental_config
@@ -1306,7 +1307,8 @@ class profile(_KinetoProfile):
             warn(
                 "Device profiling activity collection was stopped early "
                 f"at step {self.step_num}. Profiler schedule is proceeding "
-                "until next cycle without actual profiler activity collection."
+                "until next cycle without actual profiler activity collection.",
+                stacklevel=2,
             )
             self.current_action = ProfilerAction.DEVICE_STOPPED
 

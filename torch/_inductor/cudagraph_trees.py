@@ -3108,7 +3108,8 @@ class CUDAGraphTreeManager:
         warnings.warn(
             "Unable to hit fast path of CUDAGraphs because outputs from a previous step "
             "still require backward. Ensure backward() is invoked or detach outputs. "
-            "You may also call torch.compiler.cudagraph_mark_step_begin() before each model invocation."
+            "You may also call torch.compiler.cudagraph_mark_step_begin() before each model invocation.",
+            stacklevel=2,
         )
 
     @staticmethod

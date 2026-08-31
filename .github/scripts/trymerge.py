@@ -550,7 +550,7 @@ def gh_get_team_members(org: str, name: str) -> list[str]:
         )
         team = query["data"]["organization"]["team"]
         if team is None:
-            warn(f"Requested non-existing team {org}/{name}")
+            warn(f"Requested non-existing team {org}/{name}", stacklevel=2)
             return []
         team_members = team["members"]
         rc += [member["login"] for member in team_members["nodes"]]
@@ -639,7 +639,10 @@ def add_workflow_conclusions(
             while checkruns is not None:
                 for checkrun_node in checkruns["nodes"]:
                     if not isinstance(checkrun_node, dict):
-                        warn(f"Expected dictionary, but got {type(checkrun_node)}")
+                        warn(
+                            f"Expected dictionary, but got {type(checkrun_node)}",
+                            stacklevel=2,
+                        )
                         continue
                     checkrun_name = f"{get_check_run_name_prefix(workflow_run)}{checkrun_node['name']}"
                     existing_checkrun = workflow_obj.jobs.get(checkrun_name)
@@ -2518,7 +2521,7 @@ def get_classifications(
             print(f"From Dr.CI checkrun summary: {drci_summary}")
             drci_classifications = json.loads(str(drci_summary))
         except json.JSONDecodeError:
-            warn("Invalid Dr.CI checkrun summary")
+            warn("Invalid Dr.CI checkrun summary", stacklevel=2)
             drci_classifications = {}
 
     checks_with_classifications = checks.copy()
@@ -2905,7 +2908,8 @@ def categorize_checks(
                 if ok_failed_checks_threshold is not None
                 and len(flaky_or_broken_trunk) > ok_failed_checks_threshold
                 else ""
-            )
+            ),
+            stacklevel=2,
         )
 
     if (

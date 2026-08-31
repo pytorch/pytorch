@@ -161,7 +161,7 @@ class MpsMemoryLeakCheck:
                    f"Caching allocator allocated memory was {self.caching_allocator_before} "
                    f"and is now reported as {caching_allocator_mem_allocated}. "
                    f"MPS driver allocated memory was {self.driver_before} and is now {driver_mem_allocated}.")
-            warnings.warn(msg)
+            warnings.warn(msg, stacklevel=2)
         elif caching_allocator_discrepancy and driver_discrepancy:
             # A caching allocator discrepancy validated by the driver API is a failure
             msg = (f"MPS driver API confirmed a leak in {self.name}! "

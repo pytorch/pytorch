@@ -104,6 +104,7 @@ def fork(func, *args, **kwargs):
     warnings.warn(
         "`torch.jit.fork` is deprecated. Please use `torch.compile` instead.",
         FutureWarning,
+        stacklevel=2,
     )
     return torch._C.fork(func, *args, **kwargs)
 
@@ -124,6 +125,7 @@ def wait(future):
     warnings.warn(
         "`torch.jit.wait` is deprecated. Please use `torch.compile` instead.",
         FutureWarning,
+        stacklevel=2,
     )
     return torch._C.wait(future)
 

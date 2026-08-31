@@ -913,7 +913,8 @@ class TestTorchDeviceType(TestCase):
 
         # Checks jitted Python warning
         def warn_fn():
-            warnings.warn("Warning!")
+            # stacklevel=1 so warning.lineno points at this line, as asserted below
+            warnings.warn("Warning!", stacklevel=1)
 
         # The jit mimics an eager-mode Python warning in this case
         with warnings.catch_warnings(record=True) as w:

@@ -860,6 +860,7 @@ def create_flex_flash_attention_backward_kernel(
             "a deterministic implementation for this configuration, but you set "
             "'torch.use_deterministic_algorithms(True, warn_only=True)'. "
             "Running non-deterministic backward.",
+            stacklevel=2,
         )
 
     has_score_mod = fw_subgraph_buffer is not None and joint_subgraph_buffer is not None

@@ -1471,7 +1471,8 @@ def _get_amdsmi_device_index_from_hip_index(device: int) -> int:
                 "Cannot translate HIP ID to AMD SMI ID due to"
                 " lack of translation information prior to ROCm 6.4."
                 " Functions that rely on amdsmi"
-                " (e.g. temperature()) may operate on wrong devices."
+                " (e.g. temperature()) may operate on wrong devices.",
+                stacklevel=2,
             )
     if device not in _cached_hip_to_amdsmi:
         warnings.warn(
@@ -1480,7 +1481,8 @@ def _get_amdsmi_device_index_from_hip_index(device: int) -> int:
             " amdsmi_get_gpu_enumeration_info() only report these HIP IDs"
             f" {list(_cached_hip_to_amdsmi.keys())}."
             " Functions that rely on amdsmi"
-            " (e.g. temperature()) may operate on wrong devices."
+            " (e.g. temperature()) may operate on wrong devices.",
+            stacklevel=2,
         )
     return _cached_hip_to_amdsmi.get(device, device)
 
