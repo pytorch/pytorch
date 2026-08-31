@@ -1803,7 +1803,12 @@ class DeviceCachingAllocator {
 
     std::unique_lock<std::recursive_mutex> lock(mutex);
 
-    const auto allocation_context = capture_tracker_.allocationContext(stream);
+    const bool has_active_captures =
+        C10_UNLIKELY(capture_tracker_.hasActiveCaptures());
+    CUDAGraphMemory::AllocationContext allocation_context;
+    if (has_active_captures) {
+      allocation_context = capture_tracker_.allocationContext(stream);
+    }
     prepare_for_malloc(context, stream, allocation_context.is_capturing);
 
     size_t size = round_size(orig_size);
@@ -2080,7 +2085,7 @@ class DeviceCachingAllocator {
         params.block, params.size(), params.is_expandable_segments_active);
     Block* block = alloc_found_block(
         params, orig_size, std::move(context), split_remainder);
-    if (allocation_context.tracked_capture_id.has_value()) {
+    if (has_active_captures) {
       capture_tracker_.recordAllocation(block, allocation_context);
     }
     return block;
@@ -2099,7 +2104,12 @@ class DeviceCachingAllocator {
     // to have.
     auto context = maybeGatherContext(RecordContext::STATE);
     std::unique_lock<std::recursive_mutex> lock(mutex);
-    const auto allocation_context = capture_tracker_.allocationContext(stream);
+    const bool has_active_captures =
+        C10_UNLIKELY(capture_tracker_.hasActiveCaptures());
+    CUDAGraphMemory::AllocationContext allocation_context;
+    if (has_active_captures) {
+      allocation_context = capture_tracker_.allocationContext(stream);
+    }
     prepare_for_malloc(context, stream, allocation_context.is_capturing);
 
     const size_t size = round_size(orig_size);
@@ -2174,7 +2184,7 @@ class DeviceCachingAllocator {
     if (prefix_block) {
       free_locked(prefix_block, nullptr);
     }
-    if (allocation_context.tracked_capture_id.has_value()) {
+    if (has_active_captures) {
       capture_tracker_.recordAllocation(requested_block, allocation_context);
     }
     return requested_block;
