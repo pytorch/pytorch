@@ -24619,11 +24619,13 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Expected: dropout is not comparable"),
                          'TestMathBits',
                          'test_neg_view'),
-            # dropout is not comparable. For complex the executor mismatch is
-            # dtype-dependent (complex64 happens to match), so skip rather than
-            # xfail to avoid a flaky unexpected-success.
+            # dropout is not comparable. On CUDA/ROCm the aten-executor result
+            # for complex happens to match eager (unexpected success vs the xfail
+            # below), unlike MPS where it stays non-comparable, so skip complex
+            # there rather than xfail.
             DecorateInfo(unittest.skip("dropout is not comparable"), 'TestCommon',
-                         'test_python_ref_executor', dtypes=(torch.complex64, torch.complex128)),
+                         'test_python_ref_executor', device_type='cuda',
+                         dtypes=(torch.complex64, torch.complex128)),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
             DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
         )
