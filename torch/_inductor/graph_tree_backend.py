@@ -239,7 +239,7 @@ class CUDAGraphTreeAllocatorInterface:
     ) -> None:
         torch._C._cuda_setCheckpointPoolState(
             device,
-            state,
+            cast(torch._C._cuda_CUDAAllocator_AllocatorState, state),
             cast(list[int], stale_storages),
             cast(list[int], storages_to_add_deleters),
         )

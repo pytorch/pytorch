@@ -322,17 +322,18 @@ def reset_cudagraph_trees() -> None:
         # TLS not set up for this thread, nothing to reset
         return
     container_dict = get_obj(local, "tree_manager_containers")
-    locks_dict = get_obj(local, "tree_manager_locks")
-    for device, lock in locks_dict.items():
-        with lock:
-            container = container_dict.get(device)
-            if not container or not container.tree_manager:
-                continue
+    if container_dict:
+        locks_dict = get_obj(local, "tree_manager_locks")
+        for device, lock in locks_dict.items():
+            with lock:
+                container = container_dict.get(device)
+                if not container or not container.tree_manager:
+                    continue
 
-            container.tree_manager.shutdown()
+                container.tree_manager.shutdown()
 
-    torch._C._set_cached_tensors_enabled(False)
-    container_dict.clear()
+        torch._C._set_cached_tensors_enabled(False)
+        container_dict.clear()
 
     MarkStepBox.mark_step_counter = 0
 
@@ -366,6 +367,7 @@ def get_manager(
             return None
         device_module = torch.get_device_module(accelerator)
         is_initialized = getattr(device_module, "is_initialized", None)
+        # Device modules without is_initialized are assumed ready.
         if is_initialized is not None and not is_initialized():
             return None
         device_index = torch.accelerator.current_device_index()
@@ -2362,7 +2364,7 @@ class CUDAGraphTreeManager:
         graph_interface = tree_backend.get_graph_interface()
         with graph_capture_lock, torch.accelerator.device_index(device_index):
             torch.accelerator.synchronize()
-            self.stream = torch.Stream()
+            self.stream = torch.Stream(device=device_index)
             self.stream.wait_stream(torch.accelerator.current_stream())
 
             # Keeps Memory Pool Alive
@@ -3259,7 +3261,6 @@ class CUDAGraphTreeManager:
         allocator = tree_backend.get_allocator_interface()
         allocator.set_checkpoint_pool_state(
             device,
-            # pyrefly: ignore [bad-argument-type]
             state,
             stale_storages,
             live_storages_weak_refs,

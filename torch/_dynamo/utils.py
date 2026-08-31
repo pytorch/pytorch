@@ -2725,6 +2725,8 @@ def preserve_rng_state(
 
     With no device type, retain the existing CUDA/XPU behavior. When a device
     type is provided, preserve only that accelerator's RNG state.
+    The device module must accept ``device_index`` in ``get_rng_state`` and
+    ``set_rng_state``.
     """
     disable_functorch = torch._C._DisableFuncTorch
     disable_current_modes = torch.utils._python_dispatch._disable_current_modes

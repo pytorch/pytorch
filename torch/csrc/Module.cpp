@@ -3169,6 +3169,8 @@ Call this whenever a new thread is created in order to propagate values from
             // NOLINTNEXTLINE(performance-no-int-to-ptr)
             reinterpret_cast<void*>(data_ptr),
             device);
+        // A null external DataPtr is valid for a zero-sized tensor;
+        // make_storage_impl would treat it as absent and try to allocate.
         if (auto create_storage_impl =
                 c10::GetStorageImplCreate(device.type())) {
           return c10::Storage(create_storage_impl(
