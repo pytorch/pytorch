@@ -400,6 +400,43 @@ class TestKernelRowTile(TestCase):
         )
         self.assertEqual(got, x.double().sum(dim=1).float(), atol=1e-5, rtol=1e-5)
 
+    def test_use_tma_rejects_a_non_power_of_two_row(self):
+        # The staged fold rotates each thread's read order with `& (N - 1)`, which is a rotation
+        # only at a power-of-two N -- at N=24 it came back 13.2 off a float64 reference, with no
+        # error. tma_ok declines those N, but use_tma is caller-settable and bypasses the gate, so
+        # the shape has to be checked where the fold is built.
+        import cutlass
+
+        from torch._native.ops._cutedsl import traits as T
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        self.assertFalse(rt.tma_ok(24, 4, 256), "the gate should decline this N")
+        x = torch.randn(256, 24, device="cuda")
+        with self.assertRaisesRegex(ValueError, "power-of-two"):
+            rt.reduce_row_tile(
+                T.SumOps(acc=cutlass.Float32),
+                "tma_nonpo2",
+                x,
+                [torch.float32],
+                tpr=1,
+                use_tma=True,
+            )
+
+    def test_tma_gate_does_not_requery_the_device(self):
+        # tma_ok runs per launch, before the plan-cache lookup, on exactly the shapes this path
+        # exists to make fast -- so the capability read has to come from the memoized caps rather
+        # than a fresh get_device_properties.
+        from unittest.mock import patch
+
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        dev = torch.device("cuda")
+        self.assertTrue(rt.tma_ok(32, 4, 1 << 20, dev))  # warms the caps cache
+        with patch("torch.cuda.get_device_properties") as props:
+            for _ in range(4):
+                rt.tma_ok(32, 4, 1 << 20, dev)
+        self.assertEqual(props.call_count, 0)
+
 
 if __name__ == "__main__":
     run_tests()
