@@ -3258,6 +3258,20 @@ def sample_inputs_histogram(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(input_tensor, sorted_bins,
                           weight=weight_tensor, density=density)
 
+    # Elements lying on, and one ulp outside, the outermost bin edges. Out of
+    # range elements are dropped, and backends are expected to agree on which
+    # those are. The out of range elements are deliberately neither first nor
+    # binned alongside the in range ones: an invalid bin index computed for the
+    # first element can be masked by writing outside the accumulator entirely.
+    edges = torch.tensor([1., 2., 3.], dtype=dtype, device=device)
+    below = torch.nextafter(torch.tensor(1., dtype=dtype),
+                            torch.tensor(0., dtype=dtype)).to(device)
+    above = torch.nextafter(torch.tensor(3., dtype=dtype),
+                            torch.tensor(9., dtype=dtype)).to(device)
+    mid = torch.tensor(1.5, dtype=dtype, device=device)
+    yield SampleInput(torch.stack([mid, below, edges[0],
+                                   above, edges[2], mid]), edges)
+
 def sample_inputs_histogramdd(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
