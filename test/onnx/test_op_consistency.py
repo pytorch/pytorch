@@ -283,6 +283,9 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
     )
     def test_output_match(self, device: str, dtype: torch.dtype, op):
         """Test the ONNX exporter."""
+        # device is provided by instantiate_device_type_tests, but we only want to run in cpu.
+        if device != "cpu":
+            raise AssertionError(f"Expected device 'cpu', got {device!r}")
         samples = op.sample_inputs(
             device,
             dtype,
