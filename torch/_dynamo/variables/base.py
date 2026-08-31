@@ -2075,8 +2075,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> VariableTracker:
         """Mirrors CPython's tp_descr_set slot (``value is None`` deletes).
 
-        Called when type_implements_tp_descr_set returns True for this type.
-        Subclasses override to provide the actual descriptor write.
+        Dispatched by the "__set__"/"__delete__" TPSLOT entries (via
+        _wrap_descr_set/_wrap_descr_delete) for any type whose
+        PyTypeSlots.TP_DESCR_SET bit is set. Subclasses override to provide
+        the actual descriptor write.
         """
         unimplemented(
             gb_type="tp_descr_set_impl not implemented",
