@@ -111,6 +111,11 @@ class ReduceBlock:
             raise AssertionError(
                 f"decode needs count and num_o < 2^31, got {count} and {num_o}"
             )
+        if not red_pairs:
+            # A plan with no REDUCED runs is a construction bug -- the fold's decode would
+            # index vals[-1]. An empty KEPT list is legal (a full reduction): the body drops
+            # the kept decode for it.
+            raise AssertionError("a reduction needs at least one reduced run")
         # (extent, input-element-stride) pairs from TensorIterator, fastest first.
         self.red_pairs = tuple(red_pairs)
         self.kept_pairs = tuple(kept_pairs)
@@ -128,7 +133,6 @@ class ReduceBlock:
         self.ragged_chunk = ragged_chunk  # clamp to this output's reduced run
         self.from_partials = from_partials
         self.block = block
-        self.num_warps = block // WARP
         # The BODY is the shared kernel's general axis: one block per output, every thread of
         # it folding that output through the mixed-radix decode. This class is the plan --
         # the (extent, stride) pairs, the policy flags and the caches -- and owns no kernel.
@@ -150,26 +154,17 @@ class ReduceBlock:
 
     @property
     def cache_sig(self):
-        # The body's own signature covers every compile-time policy; this adds nothing but
-        # keeps the tuple shape stable for callers that build keys from it.
-        # EVERY value baked into the kernel as a const_expr -- now STRUCTURE only.
-        # count / num_o / the pair VALUES / in_base / limit / project_n are RUNTIME
-        # launch args (grid comes from the output extent), so one compiled kernel
-        # serves every geometry sharing this structure: kernel count is
-        # O(op x dtype x pair-count), not O(distinct shapes/strides). Callers
-        # prepend trait_key and the operand dtypes (not captured here).
-        return (
-            self.npairs_red,
-            self.npairs_kept,
-            self.nouts,
-            self.final,
-            self.gidx_from,
-            self.flat_tail,
-            self.ragged_chunk,
-            self.from_partials,
-            self.block,
-            self.trait.nfields,
-        )
+        # DERIVED from the body, not restated: the body is what bakes the const_exprs in, and
+        # a knob added there would otherwise be invisible to the key that selects the compiled
+        # kernel -- a stale kernel silently reused. Nothing of this plan's own is missing:
+        # `block` reaches the body as `nt` and `from_partials` as `combine`.
+        #
+        # Only STRUCTURE is baked. count / num_o / the pair VALUES / in_base / limit /
+        # project_n are RUNTIME launch args (grid comes from the output extent), so one
+        # compiled kernel serves every geometry sharing this structure: kernel count is
+        # O(op x dtype x pair-count), not O(distinct shapes/strides). Callers prepend
+        # trait_key and the operand dtypes (not captured here).
+        return self.tile.cache_sig
 
     @property
     def geom_sig(self):
