@@ -101,6 +101,11 @@ def reduce_col_tile(trait, trait_key, x, out_dtype, nt=None, npar=None, vec=None
         nt = _NT_WIDE_ACC if trait.nfields >= 3 else _NT
     R, C = x.shape
     vec = min(tile.vec_size(C, x.element_size()), _VEC_MAX) if vec is None else vec
+    if C % vec:
+        # nchunks = C // vec, so the trailing C % vec columns would never be stored and
+        # `out` would keep whatever torch.empty gave them. The derived vec always divides
+        # C; an explicit one is the caller's, so check it.
+        raise AssertionError(f"vec must divide the column count: {C=} {vec=}")
     if npar is None:
         npar = _split_p(R)
     out = torch.empty(C, device=x.device, dtype=out_dtype)
@@ -144,7 +149,9 @@ def reduce_col_tile(trait, trait_key, x, out_dtype, nt=None, npar=None, vec=None
             _stream(),
         )
 
-    key = ("coltile", trait_key, x.dtype, out_dtype) + op.cache_sig
+    # align is baked in by _compile, and the _VEC_MAX cap means equal vec no longer implies
+    # equal alignment the way the row path's uncapped vec does -- so key it.
+    key = ("coltile", trait_key, x.dtype, out_dtype, align) + op.cache_sig
     build = lambda: _compile(op, *_wrap())  # noqa: E731
     cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")(*_wrap())
     if single:
