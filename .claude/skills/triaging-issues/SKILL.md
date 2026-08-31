@@ -247,10 +247,7 @@ only surfaces the issue for whoever owns the release; it is not a cherry-pick re
 does not decide anything.
 
 **You are told which version is current — never guess it.** Your prompt carries a
-`RELEASE CONTEXT` block giving the most recent released minor version, resolved from the
-newest non-prerelease [GitHub release](https://github.com/pytorch/pytorch/releases) at run
-time. Use that value only. Do not use a version written in this file, and do not rely on
-what you remember about PyTorch releases — that is stale by construction. If the block
+`RELEASE CONTEXT` block giving the most recent released minor version. If the block
 says `unknown`, skip the two version-dependent criteria below and judge the rest on their
 own merits.
 
