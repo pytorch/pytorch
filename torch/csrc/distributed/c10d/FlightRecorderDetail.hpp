@@ -206,6 +206,7 @@ std::vector<typename FlightRecorder<EventType>::Entry> FlightRecorder<
   std::vector<Entry> result;
   {
     std::lock_guard<std::mutex> guard(mutex_);
+    result.reserve(entries_.size());
     // Filter entries during insertion - only keep entries from current epoch
     auto filter = [this](const Entry& e) {
       return e.reset_epoch_ == reset_epoch_;

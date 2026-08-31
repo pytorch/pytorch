@@ -5,14 +5,11 @@
 #include <map>
 #include <memory>
 #include <mutex>
-#include <sstream>
 #include <stdexcept>
 #include <tuple>
 #include <utility>
 
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGraph.h>
-#include <c10/core/DeviceType.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
