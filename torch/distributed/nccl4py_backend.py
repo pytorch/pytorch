@@ -133,6 +133,17 @@ class NCCL4PyBackend(C10DBackend):
             return self._internal_stream
         return torch.cuda.current_stream(self._device)
 
+    def _record_stream(self, stream, *tensors):
+        # User tensors and temp buffers are allocated on the compute stream but
+        # consumed on the internal NCCL stream; recording the NCCL stream keeps
+        # the caching allocator from reusing those blocks before the collective
+        # finishes. Mirrors CUDACachingAllocator::recordStream in
+        # ProcessGroupNCCL.
+        if stream == torch.cuda.current_stream(self._device):
+            return
+        for t in tensors:
+            t.record_stream(stream)
+
     def _make_work(self, *streams):
         # Inside a coalescing window the kernels are only enqueued at group_end,
         # so a per-op event here would be meaningless. Just record which streams
@@ -214,6 +225,7 @@ class NCCL4PyBackend(C10DBackend):
         self._check_tensors(tensor_list)
         stream = self._op_stream(opts.asyncOp)
         s = stream.cuda_stream
+        self._record_stream(stream, *tensor_list)
         with nccl.group():
             for t in tensor_list:
                 self._comm.broadcast(t, t, opts.rootRank, stream=s)
@@ -224,6 +236,7 @@ class NCCL4PyBackend(C10DBackend):
         stream = self._op_stream(opts.asyncOp)
         s = stream.cuda_stream
         nccl_op, custom = self._get_nccl_redop(opts.reduceOp, tensor_list[0])
+        self._record_stream(stream, *tensor_list)
         try:
             with nccl.group():
                 for t in tensor_list:
@@ -238,6 +251,7 @@ class NCCL4PyBackend(C10DBackend):
         stream = self._op_stream(opts.asyncOp)
         s = stream.cuda_stream
         nccl_op, custom = self._get_nccl_redop(opts.reduceOp, tensor_list[0])
+        self._record_stream(stream, *tensor_list)
         try:
             with nccl.group():
                 for t in tensor_list:
@@ -251,6 +265,7 @@ class NCCL4PyBackend(C10DBackend):
         self._check_tensors(input_tensors)
         stream = self._op_stream(opts.asyncOp)
         s = stream.cuda_stream
+        self._record_stream(stream, *input_tensors)
         flats = []
         with nccl.group():
             for output_list, inp in zip(output_tensors, input_tensors):
@@ -259,10 +274,12 @@ class NCCL4PyBackend(C10DBackend):
                     dtype=inp.dtype,
                     device=self._device,
                 )
+                self._record_stream(stream, flat)
                 self._comm.allgather(inp, flat, stream=s)
                 flats.append((flat, output_list, inp.numel()))
         with torch.cuda.stream(stream):
             for flat, output_list, chunk in flats:
+                self._record_stream(stream, *output_list)
                 for i, out in enumerate(output_list):
                     out.copy_(flat.narrow(0, i * chunk, chunk).view_as(out))
         return self._make_work(stream)
@@ -271,6 +288,7 @@ class NCCL4PyBackend(C10DBackend):
         self._check_tensor(output)
         self._check_tensor(input)
         stream = self._op_stream(opts.asyncOp)
+        self._record_stream(stream, input, output)
         self._comm.allgather(input, output, stream=stream.cuda_stream)
         return self._make_work(stream)
 
@@ -279,6 +297,7 @@ class NCCL4PyBackend(C10DBackend):
         stream = self._op_stream(opts.asyncOp)
         s = stream.cuda_stream
         root = opts.rootRank
+        self._record_stream(stream, *input_tensors)
         flats = []
         with nccl.group():
             for idx, inp in enumerate(input_tensors):
@@ -288,6 +307,7 @@ class NCCL4PyBackend(C10DBackend):
                         dtype=inp.dtype,
                         device=self._device,
                     )
+                    self._record_stream(stream, flat)
                     self._comm.gather(inp, flat, root=root, stream=s)
                     flats.append((flat, output_tensors[idx], inp.numel()))
                 else:
@@ -295,6 +315,7 @@ class NCCL4PyBackend(C10DBackend):
         if self.rank() == root:
             with torch.cuda.stream(stream):
                 for flat, output_list, chunk in flats:
+                    self._record_stream(stream, *output_list)
                     for i, out in enumerate(output_list):
                         out.copy_(flat.narrow(0, i * chunk, chunk).view_as(out))
         return self._make_work(stream)
@@ -304,10 +325,12 @@ class NCCL4PyBackend(C10DBackend):
         stream = self._op_stream(opts.asyncOp)
         s = stream.cuda_stream
         root = opts.rootRank
+        self._record_stream(stream, *output_tensors)
         with torch.cuda.stream(stream):
             with nccl.group():
                 for idx, out in enumerate(output_tensors):
                     if self.rank() == root:
+                        self._record_stream(stream, *input_tensors[idx])
                         flat = torch.cat(
                             [t.contiguous().view(-1) for t in input_tensors[idx]]
                         )
@@ -321,10 +344,12 @@ class NCCL4PyBackend(C10DBackend):
         stream = self._op_stream(opts.asyncOp)
         s = stream.cuda_stream
         nccl_op, custom = self._get_nccl_redop(opts.reduceOp, output_tensors[0])
+        self._record_stream(stream, *output_tensors)
         try:
             with torch.cuda.stream(stream):
                 with nccl.group():
                     for out, inp_list in zip(output_tensors, input_tensors):
+                        self._record_stream(stream, *inp_list)
                         flat = torch.cat([t.contiguous().view(-1) for t in inp_list])
                         self._comm.reduce_scatter(flat, out, nccl_op, stream=s)
         finally:
@@ -338,6 +363,7 @@ class NCCL4PyBackend(C10DBackend):
         stream = self._op_stream(opts.asyncOp)
         s = stream.cuda_stream
         nccl_op, custom = self._get_nccl_redop(opts.reduceOp, output)
+        self._record_stream(stream, input, output)
         try:
             self._comm.reduce_scatter(input, output, nccl_op, stream=s)
         finally:
@@ -352,6 +378,7 @@ class NCCL4PyBackend(C10DBackend):
         self._check_tensor(input)
         stream = self._op_stream(opts.asyncOp)
         s = stream.cuda_stream
+        self._record_stream(stream, input, output)
         if not output_split_sizes and not input_split_sizes:
             self._comm.alltoall(input, output, stream=s)
         else:
@@ -383,6 +410,7 @@ class NCCL4PyBackend(C10DBackend):
         self._check_tensors(input_tensors)
         stream = self._op_stream(opts.asyncOp)
         s = stream.cuda_stream
+        self._record_stream(stream, *input_tensors, *output_tensors)
         with nccl.group():
             for i in range(self.size()):
                 self._comm.send(input_tensors[i], i, stream=s)
