@@ -11,8 +11,10 @@ namespace c10::CachingAllocator {
 namespace {
 constexpr size_t kRoundUpPowerOfTwoIntervals = 16;
 constexpr size_t kMB = 1024 * 1024ul;
-constexpr size_t kRoundUpPowerOfTwoStart = 1 * kMB; // 1MB
-constexpr size_t kRoundUpPowerOfTwoEnd = 64 * 1024ul * kMB; // 64GB
+// uint64_t so these hold their true byte values (up to 64GB) even where
+// size_t is 32 bits; a size_t here would silently wrap the 64GB bound to 0.
+constexpr uint64_t kRoundUpPowerOfTwoStart = 1ull * kMB; // 1MB
+constexpr uint64_t kRoundUpPowerOfTwoEnd = 64ull * 1024 * kMB; // 64GB
 } // anonymous namespace
 
 std::unordered_set<std::string>& AcceleratorAllocatorConfig::getMutableKeys() {
