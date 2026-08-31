@@ -599,6 +599,9 @@ void MPSStream::replay(uint64_t captureId) {
       for (const void* ptr : capture.boundBuffers) {
         captureNoteBuffer((__bridge id<MTLBuffer>)ptr);
       }
+      for (const auto& storage : capture.hostStorages) {
+        captureRetainStorage(storage);
+      }
     }
     for (auto& step : steps) {
       if (step.kind == CapturedStep::Kind::MPSGraph) {

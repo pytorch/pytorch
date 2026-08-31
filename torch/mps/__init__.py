@@ -285,10 +285,18 @@ class MetalGraph:
       are baked into the recorded dispatch and are **frozen** on replay; pass
       them as MPS tensors if they need to vary. 0-dim MPS tensors are already
       buffer-backed and do update in place.
-    * Copies between MPS and unpinned CPU memory raise inside a capture: the
-      recorded blit would refer to host pages the graph cannot keep alive, so
-      replaying it after the CPU tensor died would read or write freed memory.
-      Pinned CPU tensors are backed by a real buffer and are captured normally.
+    * Copies between MPS and CPU are recorded and re-issued on replay. The graph
+      holds the CPU tensor's storage for its lifetime, so the copy stays valid
+      even if you drop your own reference, but the host memory is not reclaimed
+      until the graph is released.
+    * Ops that read device data on the host to decide an output shape - and so
+      call ``.item()`` internally, such as :func:`torch.nonzero`,
+      :func:`torch.bincount`, :func:`torch.unique` and
+      :func:`torch.repeat_interleave` - do **not** raise, but the shape they
+      computed during capture is baked into the graph: a replay with different
+      data keeps the capture pass's shape. :class:`torch.cuda.CUDAGraph` rejects
+      these outright, because a host sync is illegal during a CUDA capture. Keep
+      them outside the capture block.
     * Random number generation is not supported inside a capture: the philox seed
       and offset are recorded as fixed bytes, so replays would repeat the capture
       pass's values. Ops that consume the MPS generator raise inside a capture.
