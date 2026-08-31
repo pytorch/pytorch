@@ -25,7 +25,7 @@ namespace {
 static const std::vector<DispatchKey>& allDispatchKeysInFullSet() {
   static const auto result = []() {
     std::vector<DispatchKey> vec;
-    for (const auto dispatch_key: DispatchKeySet(DispatchKeySet::FULL)) {
+    for (const auto dispatch_key: DispatchKeySet(DispatchKeySet::Full::FULL)) {
       vec.push_back(dispatch_key);
     }
     return vec;

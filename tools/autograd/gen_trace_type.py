@@ -414,7 +414,7 @@ def emit_trace_body(f: NativeFunction) -> list[str]:
 
     # code-generated tracing kernels plumb and recompute dispatch keys directly through the kernel for performance.
     # See Note [Plumbing Keys Through The Dispatcher] for details.
-    dispatch_key_set = "ks & c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::Tracer)"
+    dispatch_key_set = "ks & c10::DispatchKeySet(c10::DispatchKeySet::FullAfter::FULL_AFTER, c10::DispatchKey::Tracer)"
     redispatch_args = ", ".join([dispatch_key_set] + [a.expr for a in dispatcher_exprs])
 
     assign_return_values = (

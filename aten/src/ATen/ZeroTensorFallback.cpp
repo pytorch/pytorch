@@ -66,7 +66,7 @@ namespace at {
       // We assume that view operators automatically handle the ZeroTensor bit
       // correctly by propagating the dispatch key in key_set.
       // This is not necessarily always right, so you should test these cases.
-      op.redispatchBoxed(dispatch_keys & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::ZeroTensor), stack);
+      op.redispatchBoxed(dispatch_keys & c10::DispatchKeySet(DispatchKeySet::FullAfter::FULL_AFTER, DispatchKey::ZeroTensor), stack);
       return;
     }
 
@@ -108,7 +108,7 @@ namespace at {
       }
     }
 
-    op.redispatchBoxed(dispatch_keys & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::ZeroTensor), stack);
+    op.redispatchBoxed(dispatch_keys & c10::DispatchKeySet(DispatchKeySet::FullAfter::FULL_AFTER, DispatchKey::ZeroTensor), stack);
   }
 
 
