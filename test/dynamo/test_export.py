@@ -1229,14 +1229,21 @@ def forward(self, x, y):
         for node in out_graph.graph.nodes:
             stack = node.meta.get("nn_module_stack") or {}
             for path, _cls in stack.values():
-                if isinstance(path, str) and path.startswith("L['self']."):
-                    found_prefixed = True
-                    # After prefix, should have valid dotted module path
-                    clean = path[len("L['self'].") :]
-                    self.assertTrue(
-                        len(clean) > 0,
-                        "Module path after L['self']. prefix should not be empty",
-                    )
+                if not isinstance(path, str):
+                    continue
+                if path == "L['self']":
+                    continue
+                self.assertTrue(
+                    path.startswith("L['self']."),
+                    f"Unexpected nn_module_stack path format: {path}",
+                )
+                found_prefixed = True
+                # After prefix, should have valid dotted module path
+                clean = path[len("L['self'].") :]
+                self.assertTrue(
+                    len(clean) > 0,
+                    "Module path after L['self']. prefix should not be empty",
+                )
         self.assertTrue(
             found_prefixed,
             "Expected at least one nn_module_stack entry using L['self']. prefix",
@@ -1412,14 +1419,11 @@ def forward(self, x, y):
                     f"Expected max nn_module_stack depth >= {depth} for model with depth={depth}",
                 )
 
-    def test_export_source_fn_stack_entries_are_named_callable_pairs(self):
-        """source_fn_stack entries are indexable sequences starting with (str, callable-with-__name__, ...).
+    def test_export_source_fn_stack_entries_have_valid_targets(self):
+        """source_fn_stack entries are indexable sequences starting with (str, target, ...).
 
-        Downstream passes use source_fn_stack[-1][1].__name__ to
-        identify the originating function or module class for an
-        operation.  This test ensures each entry is a list or tuple
-        with at least two elements, where the first is a string and
-        the second carries a __name__ attribute.
+        The target is either a string method name or an object with a
+        __name__ attribute, depending on the operation kind.
         """
         inp = torch.randn(4, 4)
 
@@ -1429,7 +1433,7 @@ def forward(self, x, y):
                 self.linear = torch.nn.Linear(4, 4)
 
             def forward(self, x):
-                return torch.relu(self.linear(x))
+                return self.linear(x).relu()
 
         m = MyModule()
         exported = torch._dynamo.export(m, aten_graph=False)(inp)
@@ -1455,11 +1459,11 @@ def forward(self, x, y):
                 )
                 # First element is a string name
                 self.assertIsInstance(entry[0], str)
-                # Second element should have __name__ (function or class)
+                # Method targets are strings; function and class targets have __name__.
                 fn_or_cls = entry[1]
                 self.assertTrue(
-                    hasattr(fn_or_cls, "__name__"),
-                    f"source_fn_stack entry[1] ({fn_or_cls}) lacks __name__",
+                    isinstance(fn_or_cls, str) or hasattr(fn_or_cls, "__name__"),
+                    f"source_fn_stack entry[1] ({fn_or_cls}) is neither a str nor named",
                 )
         self.assertTrue(found_stack, "Expected at least one source_fn_stack entry")
 
