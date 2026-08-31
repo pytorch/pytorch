@@ -50,8 +50,8 @@ template <auto* KernelFn>
     DeviceIndex device_index = at::xpu::current_device()) {
   auto& context = c10::xpu::get_device_context();
   auto& device = c10::xpu::get_raw_device(device_index);
-#if SYCL_COMPILER_VERSION < 20260100
   namespace syclex = sycl::ext::oneapi::experimental;
+#if SYCL_COMPILER_VERSION < 20260100
   auto bundle =
       syclex::get_kernel_bundle<KernelFn, sycl::bundle_state::executable>(
           context);
@@ -59,7 +59,6 @@ template <auto* KernelFn>
   return kernel.get_info<sycl::info::kernel_device_specific::work_group_size>(
       device);
 #else
-  namespace syclex = sycl::ext::oneapi::experimental;
   return syclex::get_kernel_info<
       KernelFn,
       sycl::info::kernel_device_specific::work_group_size>(context, device);
