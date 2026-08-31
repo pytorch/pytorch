@@ -256,7 +256,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertEqual(actual_field, expected_field)
         self.assertEqual(actual_workspace, expected_workspace)
 
-    @parametrize("alias", ["field", "indices"])
+    @parametrize("alias", ["field", "indices", "gain"])
     def test_index_put_does_not_reuse_aliasing_copy_back(self, alias):
         def f(field, indices, gain, workspace):
             gathered = aten.index.Tensor(field, [indices])
@@ -269,13 +269,19 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         indices = torch.tensor([2, 5, 2])
         gain = torch.tensor([2, 3, 5])
 
+        def aliasing_workspace(field, indices, gain):
+            if alias == "field":
+                return field[:3]
+            if alias == "indices":
+                return indices.view(-1)
+            return gain.view(-1)
+
         traced_field = field.clone()
         traced_indices = indices.clone()
-        traced_workspace = (
-            traced_field[:3] if alias == "field" else traced_indices.view(-1)
-        )
+        traced_gain = gain.clone()
+        traced_workspace = aliasing_workspace(traced_field, traced_indices, traced_gain)
         gm = make_fx(f, tracing_mode="fake")(
-            traced_field, traced_indices, gain, traced_workspace
+            traced_field, traced_indices, traced_gain, traced_workspace
         )
         reinplace_inplaceable_ops_core(gm.graph)
         gm.graph.lint()
@@ -298,18 +304,19 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
         expected_field = field.clone()
         expected_indices = indices.clone()
-        expected_workspace = (
-            expected_field[:3] if alias == "field" else expected_indices.view(-1)
+        expected_gain = gain.clone()
+        expected_workspace = aliasing_workspace(
+            expected_field, expected_indices, expected_gain
         )
-        f(expected_field, expected_indices, gain, expected_workspace)
+        f(expected_field, expected_indices, expected_gain, expected_workspace)
         actual_field = field.clone()
         actual_indices = indices.clone()
-        actual_workspace = (
-            actual_field[:3] if alias == "field" else actual_indices.view(-1)
-        )
-        gm(actual_field, actual_indices, gain, actual_workspace)
+        actual_gain = gain.clone()
+        actual_workspace = aliasing_workspace(actual_field, actual_indices, actual_gain)
+        gm(actual_field, actual_indices, actual_gain, actual_workspace)
         self.assertEqual(actual_field, expected_field)
         self.assertEqual(actual_indices, expected_indices)
+        self.assertEqual(actual_gain, expected_gain)
 
     def test_index_put_does_not_reorder_copy_back_across_mutation(self):
         def f(field, indices, gain, other, other_indices, other_values, workspace):

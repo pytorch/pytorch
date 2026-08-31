@@ -747,37 +747,22 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             copy_nodes.get(dst) is not copy_node
             or node_order[copy_node] <= node_order[node]
             or len(src.users) != 2
-            or node not in src.users
-            or copy_node not in src.users
             or non_blocking is not False
-            or not _same_tensor_metadata(dst, src)
             or not can_inplace(node, dst)
         ):
             return None
 
-        dst_val = dst.meta.get("val")
-        src_val = src.meta.get("val")
-        if not (
-            isinstance(dst_val, torch.Tensor)
-            and isinstance(src_val, torch.Tensor)
-            and dst_val.dtype == src_val.dtype
-            and dst_val.device == src_val.device
-        ):
+        if not _same_tensor_metadata(dst, src):
+            return None
+        dst_val = dst.meta["val"]
+        src_val = src.meta["val"]
+        if dst_val.dtype != src_val.dtype or dst_val.device != src_val.device:
             return None
         if torch._debug_has_internal_overlap(dst_val) != 0:
             return None
 
         dst_storage = get_node_storage(dst)
         if dst_storage is None or get_node_storage(src) == dst_storage:
-            return None
-
-        other_args = pytree.tree_leaves((node.args, node.kwargs))
-        if any(
-            isinstance(arg, torch.fx.Node)
-            and arg is not src
-            and get_node_storage(arg) == dst_storage
-            for arg in other_args
-        ):
             return None
 
         pending = list(pytree.tree_leaves((src.args, src.kwargs)))
