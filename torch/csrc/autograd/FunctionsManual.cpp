@@ -7647,6 +7647,54 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
       std::move(std::get<0>(grad_inputs)), std::move(std::get<1>(grad_inputs)));
 }
 
+// The scatter family allows index.size(d) <= src.size(d) for all d, an empty
+// index of any shape, and legacy rank-mismatched 0-dim/1-dim combinations
+// where missing index dims act as size 1: only the leading src region covered
+// by index participates in the output, so the gradient outside it is zero.
+static Tensor narrow_to_index_domain(Tensor t, const Tensor& index) {
+  for (const auto d : c10::irange(t.dim())) {
+    t = t.narrow_symint(
+        d, 0, d < index.dim() ? index.sym_size(d) : c10::SymInt(1));
+  }
+  return t;
+}
+
+static Tensor embed_index_domain_grad(
+    const Tensor& grad_at_index,
+    const Tensor& index,
+    c10::SymIntArrayRef src_sizes) {
+  if (index.sym_numel() == 0) {
+    return at::zeros_symint(src_sizes, grad_at_index.options());
+  }
+  const auto src_rank = static_cast<int64_t>(src_sizes.size());
+  at::SymDimVector domain_sizes;
+  domain_sizes.reserve(src_rank);
+  for (const auto d : c10::irange(src_rank)) {
+    domain_sizes.push_back(
+        d < index.dim() ? index.sym_size(d) : c10::SymInt(1));
+  }
+  // pad lists (before, after) pairs from the last dim backwards
+  at::SymDimVector pad;
+  pad.reserve(2 * src_rank);
+  for (auto d = src_rank - 1; d >= 0; --d) {
+    pad.emplace_back(0);
+    pad.push_back(src_sizes[d] - domain_sizes[d]);
+  }
+  return at::constant_pad_nd_symint(
+      grad_at_index.reshape_symint(domain_sizes), pad, 0);
+}
+
+Tensor scatter_src_backward(
+    const Tensor& grad,
+    int64_t dim,
+    const Tensor& index,
+    c10::SymIntArrayRef src_sizes) {
+  if (index.sym_sizes().equals(src_sizes)) {
+    return grad.gather(dim, index);
+  }
+  return embed_index_domain_grad(grad.gather(dim, index), index, src_sizes);
+}
+
 Tensor scatter_reduce_jvp(
     const Tensor& self_p,
     const Tensor& self_t,
@@ -7657,6 +7705,10 @@ Tensor scatter_reduce_jvp(
     std::string_view reduce,
     bool include_self,
     const Tensor& result) {
+  if (index.sym_numel() == 0) {
+    // The output equals self: no src element participates in the reduction
+    return self_t.clone();
+  }
   if (reduce == "sum" || reduce == "mean") {
     // The function is linear
     return at::scatter_reduce(self_t, dim, index, src_t, reduce, include_self);
@@ -7664,10 +7716,18 @@ Tensor scatter_reduce_jvp(
     //  return at::where(mask, dx, 0.).sum(dim, keepdim) / mask.sum(dim,
     //  keepdim);
   } else if (reduce == "amin" || reduce == "amax") {
+    auto src_p_in = src_p;
+    auto src_t_in = src_t;
+    if (!index.sym_sizes().equals(src_p.sym_sizes())) {
+      src_p_in = narrow_to_index_domain(src_p_in, index)
+                     .reshape_symint(index.sym_sizes());
+      src_t_in = narrow_to_index_domain(src_t_in, index)
+                     .reshape_symint(index.sym_sizes());
+    }
     auto gather_result = at::gather(result, dim, index);
     auto mask_self = self_p == result;
-    auto mask_src = src_p == gather_result;
-    auto masked_src_t = at::where(mask_src, src_t, 0.);
+    auto mask_src = src_p_in == gather_result;
+    auto masked_src_t = at::where(mask_src, src_t_in, 0.);
     auto div =
         mask_self.to(self_t.dtype())
             .scatter_reduce(
@@ -7700,6 +7760,20 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     return std::make_tuple(std::move(grad_self), std::move(grad_src));
   }
 
+  if (index.sym_numel() == 0) {
+    // The output equals self: no src element participates in the reduction
+    grad_self = grad;
+    grad_src = at::zeros_symint(src.sym_sizes(), grad.options());
+    return std::make_tuple(std::move(grad_self), std::move(grad_src));
+  }
+
+  // Only the src region covered by index participates in the output; compute
+  // index-shaped src gradients and embed them into src-shaped zeros at the end
+  const bool index_shape_mismatch = !index.sym_sizes().equals(src.sym_sizes());
+  Tensor src_in = index_shape_mismatch
+      ? narrow_to_index_domain(src, index).reshape_symint(index.sym_sizes())
+      : src;
+
   if (reduce == "sum") {
     grad_self = grad;
     grad_src = grad.gather(dim, index);
@@ -7707,9 +7781,9 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     // Explicitly compute exclusive prod for elements in self/src that are 0
     Tensor masked_self = self.masked_fill(self == 0, 1);
     Tensor masked_self_result =
-        masked_self.scatter_reduce(dim, index, src, reduce, include_self);
+        masked_self.scatter_reduce(dim, index, src_in, reduce, include_self);
     grad_self = grad * masked_self_result / masked_self;
-    Tensor src_zero = src == 0;
+    Tensor src_zero = src_in == 0;
     Tensor src_num_zeros =
         zeros_like(self)
             .scatter_add(dim, index, src_zero.to(self.dtype()))
@@ -7718,13 +7792,13 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     // For src positions with src_single_zero, grad * result.gather(dim,index) /
     // src.masked_fill(src_zero, 1) would incorrectly propagate zeros as the
     // gradient
-    Tensor masked_src = src.masked_fill(src_single_zero, 1);
+    Tensor masked_src = src_in.masked_fill(src_single_zero, 1);
     Tensor masked_src_result =
         self.scatter_reduce(dim, index, masked_src, reduce, include_self);
     Tensor grad_src1 = where(
         src_single_zero,
         (grad * masked_src_result).gather(dim, index),
-        (grad * result).gather(dim, index) / src.masked_fill(src_zero, 1));
+        (grad * result).gather(dim, index) / src_in.masked_fill(src_zero, 1));
     // GradMode::is_enabled() - adding the autograd Node is a no-op if autograd
     // is disabled; this also avoids having the item() call in the usual case.
     if (GradMode::is_enabled() && (src_num_zeros > 1).any().item<bool>()) {
@@ -7738,7 +7812,7 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     }
   } else if (reduce == "mean") {
     Tensor N = include_self ? ones_like(grad) : zeros_like(grad);
-    N = N.scatter_add(dim, index, ones_like(src));
+    N = N.scatter_add(dim, index, ones_like(src_in));
     N.masked_fill_(N == 0, 1);
     grad_self = grad / N;
     Tensor N_src = N.gather(dim, index);
@@ -7747,12 +7821,12 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     // Evenly distribute gradient when there are multiple max/mins
     Tensor value = result.gather(dim, index);
     Tensor self_is_result = (self == result).to(self.scalar_type());
-    Tensor src_is_result = (src == value).to(self.scalar_type());
+    Tensor src_is_result = (src_in == value).to(self.scalar_type());
     Tensor N_to_distribute =
         self_is_result.scatter_add(dim, index, src_is_result);
     Tensor grad_distributed = grad / N_to_distribute;
     grad_self = (self == result) * grad_distributed;
-    grad_src = (src == value) * grad_distributed.gather(dim, index);
+    grad_src = (src_in == value) * grad_distributed.gather(dim, index);
   } else {
     TORCH_CHECK(
         false,
@@ -7763,6 +7837,10 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
 
   if (!include_self) {
     grad_self = grad_self.scatter(dim, index, 0);
+  }
+
+  if (index_shape_mismatch) {
+    grad_src = embed_index_domain_grad(grad_src, index, src.sym_sizes());
   }
 
   return std::make_tuple(std::move(grad_self), std::move(grad_src));

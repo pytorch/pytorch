@@ -1158,6 +1158,12 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
     const c10::SymInt& groups,
     ::std::array<bool, 2> output_mask);
 
+Tensor scatter_src_backward(
+    const Tensor& grad,
+    int64_t dim,
+    const Tensor& index,
+    c10::SymIntArrayRef src_sizes);
+
 Tensor scatter_reduce_jvp(
     const Tensor& self_p,
     const Tensor& self_t,
