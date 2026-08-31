@@ -724,7 +724,7 @@ class TestForeachDevice(TestCase):
                 ):
                     foreach_op_([tensor1], [tensor2])
 
-    @unittest.skipIf(not torch.accelerator.is_available(), "CUDA/XPU not found")
+    @onlyAccelerator
     @ops(
         filter(lambda op: op.supports_out, foreach_binary_op_db),
         dtypes=OpDTypes.supported,
