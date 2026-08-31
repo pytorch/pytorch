@@ -104,9 +104,7 @@ class TestMarkKernels(TestCase):
         # Annotations are enabled per-capture via torch.cuda.graph(..,
         # enable_annotations=True); there is no global toggle.
         clear_kernel_annotations()
-
-    def tearDown(self):
-        clear_kernel_annotations()
+        self.addCleanup(clear_kernel_annotations)
 
     def _count_phases(self, name):
         """Count (forward, backward) annotations recorded under ``name``."""
@@ -1210,7 +1208,7 @@ class TestMarkKernels(TestCase):
         y.backward()
         torch.cuda.synchronize()
         resolve_pending_annotations()
-        self.assertEqual(get_kernel_annotations(), before)
+        self.assertEqual(dict(get_kernel_annotations()), before)
 
     def test_eager_forward_backward_noop(self):
         x = torch.randn(8, device="cuda", requires_grad=True)
@@ -1703,71 +1701,58 @@ class TestRemoveKernelAnnotations(TestCase):
 
         exec_a, exec_b = 1, 2
         ga.clear_kernel_annotations()
-        ann = ga.get_kernel_annotations()
-        ann[self._tools_id(exec_a, 10)] = ["a"]
-        ann[self._tools_id(exec_b, 10)] = ["b"]
+        ga.record_node_annotation(self._tools_id(exec_a, 10), {"name": "a"})
+        ga.record_node_annotation(self._tools_id(exec_b, 10), {"name": "b"})
 
         ga.remove_kernel_annotations([exec_a])
 
         self.assertEqual(
-            ga.get_kernel_annotations(), {self._tools_id(exec_b, 10): ["b"]}
+            dict(ga.get_kernel_annotations()),
+            {self._tools_id(exec_b, 10): [{"name": "b"}]},
         )
 
     def test_missing_and_empty_ids_are_noops(self):
         import torch.cuda._graph_annotations as ga
 
         ga.clear_kernel_annotations()
-        ann = ga.get_kernel_annotations()
-        ann[self._tools_id(2, 10)] = ["b"]
+        ga.record_node_annotation(self._tools_id(2, 10), {"name": "b"})
         ga.remove_kernel_annotations([])  # empty: no-op
         ga.remove_kernel_annotations([99])  # unknown exec id: no-op
-        self.assertEqual(ga.get_kernel_annotations(), {self._tools_id(2, 10): ["b"]})
+        self.assertEqual(
+            dict(ga.get_kernel_annotations()), {self._tools_id(2, 10): [{"name": "b"}]}
+        )
 
 
-# Pure trace-JSON logic, no CUDA needed. Pins the canonical annotation key
-# ("name") and reader tolerance for the two legacy pickle spellings: dicts
-# keyed "str" and bare unwrapped strings.
-class TestAnnotateTrace(TestCase):
-    @staticmethod
-    def _trace_with_kernel(graph_node_id):
-        return {
-            "traceEvents": [
-                {
-                    "ph": "X",
-                    "cat": "kernel",
-                    "name": "k",
-                    "pid": 0,
-                    "tid": 7,
-                    "ts": 100,
-                    "dur": 10,
-                    "args": {"graph node id": graph_node_id, "stream": 7},
-                }
-            ]
-        }
+# Pure registry logic, no CUDA needed: the store keeps one merged annotation per node,
+# which the public mapping wraps in a one-element list.
+class TestAnnotationStore(TestCase):
+    def tearDown(self):
+        import torch.cuda._graph_annotations as ga
 
-    def _annotated_args(self, annotations):
-        from torch.cuda._annotate_cuda_graph_trace import annotate_trace
+        ga.clear_kernel_annotations()
+        super().tearDown()
 
-        trace = self._trace_with_kernel(42)
-        count = annotate_trace(trace, annotations)
-        self.assertEqual(count, 1)
-        [event] = [e for e in trace["traceEvents"] if e.get("cat") == "kernel"]
-        return event["args"]
+    def test_writes_to_one_node_merge_first_wins(self):
+        import torch.cuda._graph_annotations as ga
 
-    def test_canonical_name_key(self):
-        args = self._annotated_args({42: [{"name": "phase_a", "dtype": "bf16"}]})
-        self.assertEqual(args["name"], "phase_a")
-        self.assertEqual(args["dtype"], "bf16")
+        ga.clear_kernel_annotations()
+        # Scopes reach a node innermost first, so the first write keeps the shared keys.
+        ga.record_node_annotation(7, {"name": "inner", "only_inner": 1})
+        ga.record_node_annotation(7, {"name": "outer", "only_outer": 2})
+        merged = {"name": "inner", "only_inner": 1, "only_outer": 2}
+        self.assertEqual(ga.annotation_for(7), merged)
+        self.assertEqual(dict(ga.get_kernel_annotations()), {7: [merged]})
 
-    def test_legacy_str_key_maps_to_name(self):
-        args = self._annotated_args({42: [{"str": "phase_a"}]})
-        self.assertEqual(args["name"], "phase_a")
-        self.assertNotIn("str", args)
+    def test_view_is_live_and_read_only(self):
+        import torch.cuda._graph_annotations as ga
 
-    def test_legacy_bare_string_maps_to_name(self):
-        args = self._annotated_args({42: ["phase_a"]})
-        self.assertEqual(args["name"], "phase_a")
-        self.assertNotIn("annotation", args)
+        ga.clear_kernel_annotations()
+        view = ga.get_kernel_annotations()
+        self.assertEqual(len(view), 0)
+        ga.record_node_annotation(7, {"name": "a"})
+        self.assertEqual(dict(view), {7: [{"name": "a"}]})
+        with self.assertRaises(TypeError):
+            view[7] = [{"name": "b"}]  # type: ignore[index]
 
 
 # Every global lifecycle registry behaves the same way -- register / fan out / remove, with
@@ -1987,34 +1972,56 @@ class TestCuptiAnnotationBackend(TestCase):
         return dict(get_kernel_annotations())
 
     def test_parity_with_edge_walk(self):
-        # Both backends must attribute the same nodes for a plain single-stream scope, and
-        # key them the same way: the node ids must match, and every key must be rekeyed to
-        # that capture's exec graph id (what lets an annotation join a trace's "graph node
-        # id"). Comparing keys rather than just counts is what catches the CUPTI handler
-        # recording into a different id space.
+        # Both backends must attribute the same nodes the same way, and key them the same
+        # way: the node ids must match, and every key must be rekeyed to that capture's exec
+        # graph id (what lets an annotation join a trace's "graph node id"). Comparing keys
+        # rather than just counts is what catches the CUPTI handler recording into a
+        # different id space. The backward pass is part of the comparison because it is
+        # attributed by a different mechanism -- hooks the scope installs on the autograd
+        # nodes its forward creates -- that both backends share.
         from cuda.bindings import runtime as cuda_runtime
 
-        node_ids = {}
+        def warm(x):
+            s = torch.cuda.Stream()
+            s.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(s):
+                for _ in range(3):
+                    torch.autograd.grad((x * 2).sin().sum(), x)
+            torch.cuda.current_stream().wait_stream(s)
+
+        by_backend = {}
         for backend in ("edge_walk", "cupti"):
             clear_kernel_annotations()
-            x = self._warm(torch.randn(64, 64, device="cuda"))
+            x = torch.randn(64, 64, device="cuda", requires_grad=True)
+            warm(x)
             g = torch.cuda.CUDAGraph()
             with torch.cuda.graph(
                 g, enable_annotations=True, annotation_config={"backend": backend}
             ):
                 with mark_kernels("phase"):
-                    for _ in range(4):
-                        x = x + 1
+                    y = (x * 2).sin()
+                with mark_kernels({"name": "bwd_region", "lane": 1}):
+                    torch.autograd.grad(y.sum(), x)
             exec_graph_id = _check_cuda_bindings(
                 cuda_runtime.cudaGraphExecGetId(g.raw_cuda_graph_exec())
             )
             annotations = self._annotations()
-            for tools_id, entries in annotations.items():
-                self.assertEqual(entries, [{"name": "phase"}])
+            for tools_id in annotations:
                 self.assertEqual(tools_id >> 32, exec_graph_id)
-            node_ids[backend] = {tools_id & 0xFFFFFFFF for tools_id in annotations}
-        self.assertEqual(node_ids["cupti"], node_ids["edge_walk"])
-        self.assertEqual(len(node_ids["cupti"]), 4)
+            by_backend[backend] = {
+                tools_id & 0xFFFFFFFF: entries
+                for tools_id, entries in annotations.items()
+            }
+        self.assertEqual(by_backend["cupti"], by_backend["edge_walk"])
+
+        # Parity alone would also hold if both backends broke the same way, so pin the
+        # annotation the hooks are there to produce: the forward scope owns its backward
+        # kernels even though a different scope is open around the backward call, whose
+        # other keys still merge in.
+        self.assertIn(
+            [{"name": "phase", "lane": 1, "autograd_phase": "backward"}],
+            by_backend["cupti"].values(),
+        )
 
     def test_scope_entered_before_stream_joins_capture(self):
         # The edge walk snapshots the CURRENT stream's capture state on scope entry, so a
@@ -2151,6 +2158,39 @@ class TestCuptiAnnotationBackend(TestCase):
             y = y + 1
         # No scope was open, so nothing should be attributed to the doomed one.
         self.assertEqual(self._annotations(), {})
+
+    def test_failed_backward_does_not_leak_its_annotation(self):
+        # A node that raises never runs its posthook, so the annotation its bracket
+        # published stays on the module-global stack. If the failure is caught inside the
+        # capture, every later unmarked node would inherit it.
+        class Boom(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad):
+                raise RuntimeError("boom")
+
+        x = torch.randn(64, 64, device="cuda", requires_grad=True)
+        self._warm(x.detach())
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(
+            g, enable_annotations=True, annotation_config={"backend": "cupti"}
+        ):
+            with mark_kernels("fwd"):
+                y = Boom.apply(x)
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                torch.autograd.grad(y.sum(), x)
+            # Outside every scope, and after the failure: must be attributed to nothing.
+            _ = x + 1
+
+        recorded = [
+            entry for entries in self._annotations().values() for entry in entries
+        ]
+        self.assertNotIn("autograd_phase", {k for entry in recorded for k in entry})
+        # The forward scope's own kernels are still attributed.
+        self.assertIn({"name": "fwd"}, recorded)
 
     def test_callback_disarmed_after_capture(self):
         from torch.cuda import _graph_node_callbacks
