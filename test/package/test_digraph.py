@@ -1,7 +1,7 @@
 # Owner(s): ["module: package/deploy"]
 
 from torch.package._digraph import DiGraph
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 
 
 try:
@@ -13,6 +13,8 @@ except ImportError:
 
 class TestDiGraph(PackageTestCase):
     """Test the DiGraph structure we use to represent dependencies in PackageExporter"""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_successors(self):
         g = DiGraph()
