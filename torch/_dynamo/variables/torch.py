@@ -199,6 +199,28 @@ supported_ctx_manager_classes = dict.fromkeys(
 )
 
 
+def _get_privateuse1_autocast() -> Any:
+    device_type = torch._C._get_privateuse1_backend_name()
+    device_module = getattr(torch, device_type, None)
+    amp_module = getattr(device_module, "amp", None)
+    return getattr(amp_module, "autocast", None)
+
+
+def _is_privateuse1_autocast(value: Any) -> bool:
+    privateuse1_autocast = _get_privateuse1_autocast()
+    if value is privateuse1_autocast:
+        return privateuse1_autocast is not None
+    if not isinstance(value, type) or not isinstance(privateuse1_autocast, type):
+        return False
+    try:
+        return (
+            inspect.getfile(value) == inspect.getfile(privateuse1_autocast)
+            and value.__qualname__ == privateuse1_autocast.__qualname__
+        )
+    except (TypeError, OSError):
+        return False
+
+
 REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
     [
         torch._shape_as_tensor,
@@ -691,7 +713,10 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             callable(value)
             and (
                 hashable(value)  # accesses value.__hash__()
-                and value in supported_ctx_manager_classes
+                and (
+                    value in supported_ctx_manager_classes
+                    or _is_privateuse1_autocast(value)
+                )
             )
         )
 
@@ -813,7 +838,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             torch.amp.autocast_mode.autocast,
             torch.cuda.amp.autocast,
             torch.cpu.amp.autocast,
-        ):
+        ) or _is_privateuse1_autocast(self.value):
             # pyrefly: ignore [bad-argument-type]
             return AutocastModeVariable.create(self.value, args, kwargs)
         elif self.value in (

@@ -4,6 +4,7 @@ import sys
 import unittest
 from collections import defaultdict
 from contextlib import contextmanager
+from unittest import mock
 
 import torch
 import torch._dynamo.test_case
@@ -90,6 +91,62 @@ def customized_ctx_manager_with_graph_break(mode):
 
 
 class CtxManagerTests(torch._dynamo.test_case.TestCase):
+    def test_privateuse1_autocast_class_match(self):
+        from torch._dynamo.variables import torch as torch_variables
+
+        base = torch.amp.autocast_mode.autocast
+        registered = type("BackendAutocast", (base,), {"__module__": __name__})
+        duplicate = type("BackendAutocast", (base,), {"__module__": __name__})
+        sibling = type("SiblingAutocast", (base,), {"__module__": __name__})
+
+        with mock.patch.object(
+            torch_variables,
+            "_get_privateuse1_autocast",
+            return_value=registered,
+        ):
+            self.assertTrue(torch_variables._is_privateuse1_autocast(registered))
+            self.assertTrue(torch_variables._is_privateuse1_autocast(duplicate))
+            self.assertFalse(torch_variables._is_privateuse1_autocast(sibling))
+            self.assertFalse(
+                torch_variables._is_privateuse1_autocast(
+                    torch.amp.autocast_mode._UnmanagedAutocast
+                )
+            )
+
+    def test_privateuse1_autocast_argument_binding(self):
+        from torch._dynamo.variables import torch as torch_variables
+        from torch._dynamo.variables.ctx_manager import AutocastModeVariable
+
+        class ReorderedAutocast(torch.amp.autocast_mode.autocast):
+            def __init__(
+                self,
+                enabled=True,
+                dtype=torch.float16,
+                cache_enabled=True,
+            ):
+                super().__init__(
+                    torch._C._get_privateuse1_backend_name(),
+                    dtype=dtype,
+                    enabled=enabled,
+                    cache_enabled=cache_enabled,
+                )
+
+        with mock.patch.object(
+            torch_variables,
+            "_get_privateuse1_autocast",
+            return_value=ReorderedAutocast,
+        ):
+            variable = AutocastModeVariable.create(ReorderedAutocast, [False], {})
+        self.assertEqual(
+            variable.target_values,
+            [
+                torch._C._get_privateuse1_backend_name(),
+                torch.float16,
+                False,
+                True,
+            ],
+        )
+
     def test_no_grad(self):
         def fn1(a, b):
             x = a + 1

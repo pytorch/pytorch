@@ -1080,11 +1080,18 @@ class AutocastModeVariable(ContextWrappingVariable):
         args: Sequence[Any],
         kwargs: dict[str, Any],
     ) -> "AutocastModeVariable":
-        if func not in [
-            torch.amp.autocast_mode.autocast,
-            torch.cuda.amp.autocast,
-            torch.cpu.amp.autocast,
-        ]:
+        from .torch import _is_privateuse1_autocast
+
+        is_privateuse1_autocast = _is_privateuse1_autocast(func)
+        if (
+            func
+            not in [
+                torch.amp.autocast_mode.autocast,
+                torch.cuda.amp.autocast,
+                torch.cpu.amp.autocast,
+            ]
+            and not is_privateuse1_autocast
+        ):
             raise AssertionError(f"unexpected autocast function: {func}")
         # device_type : str,
         # dtype : Optional[_dtype] = None,
@@ -1102,6 +1109,8 @@ class AutocastModeVariable(ContextWrappingVariable):
             ]:
                 # pyrefly: ignore [unnecessary-comparison]
                 arg = "cuda" if func is torch.cuda.amp.autocast else "cpu"
+            elif key == "device_type" and is_privateuse1_autocast:
+                arg = torch._C._get_privateuse1_backend_name()
             else:
                 arg = bound_args.arguments[key]
             if isinstance(arg, VariableTracker):
