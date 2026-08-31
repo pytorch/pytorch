@@ -475,6 +475,7 @@ class TestReplicate1DTrainingCoreSleep(FSDPTest):
         delay_before_optim: bool,
         unshard_async_op: bool,
     ):
+        # Only test individual delays or all four delays to save test time
         if (
             delay_after_forward
             + delay_before_all_gather
