@@ -29,6 +29,7 @@ from torch._inductor.runtime.triton_heuristics import (
     StaticTritonCompileResult,
 )
 from torch._inductor.test_case import TestCase
+from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_XPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
@@ -388,6 +389,71 @@ class TestStaticTritonLauncher(TestCase):
         launcher.run(1, 1, 1, stream, new_arg0, 50, 50, 50, 50)
         self.assertEqual(new_arg0, arg0)
 
+    def test_float_scalars(self):
+        @triton.jit
+        def floats(arg0, arg1: tl.float16, arg2: tl.float32, arg3: tl.float64):
+            x = tl.load(arg0)
+            y = arg1 + arg2 + arg3
+            tl.store(arg0, x + y)
+
+        # Just above the fp16 midpoint between 1.0 and 1.0 + 2**-10. Triton
+        # rounds this directly from fp64 to fp16; narrowing through fp32 first
+        # incorrectly rounds it down to 1.0.
+        scalar = float.fromhex("0x1.0020000000001p+0")
+        arg0 = torch.zeros(1, dtype=torch.float64, device=GPU_TYPE)
+        compiled_kernel = floats[(1,)](arg0, scalar, 1.0, 1.0)
+        launcher = self._make_launcher(compiled_kernel)
+        self.assertEqual(
+            arg0,
+            torch.tensor([3.0 + 2**-10], dtype=torch.float64, device=GPU_TYPE),
+        )
+        self.assertEqual(launcher.arg_tys, "Oefd")
+
+        new_arg0 = torch.zeros(1, dtype=torch.float64, device=GPU_TYPE)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        launcher.run(1, 1, 1, stream, new_arg0, scalar, 1.0, 1.0)
+        self.assertEqual(new_arg0, arg0)
+
+        with self.assertRaisesRegex(OverflowError, "too large to pack"):
+            launcher.run(1, 1, 1, stream, new_arg0, 65520.0, 0.0, 0.0)
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not HAS_XPU_AND_TRITON and not SM80OrLater,
+        "uses bfloat16 which requires SM >= 80 or XPU",
+    )
+    def test_bfloat16_scalar(self):
+        @triton.jit
+        def bfloat16(arg0, arg1: tl.bfloat16, arg2: tl.float32, arg3: tl.float64):
+            x = tl.load(arg0)
+            y = arg1 + arg2 + arg3
+            tl.store(arg0, x + y)
+
+        # Triton's launcher truncates the fp32 representation to bf16. A
+        # round-to-nearest conversion would instead produce 1.0078125.
+        scalar = float.fromhex("0x1.018p+0")
+        arg0 = torch.zeros(1, dtype=torch.float64, device=GPU_TYPE)
+        compiled_kernel = bfloat16[(1,)](arg0, scalar, 1.0, 1.0)
+        launcher = self._make_launcher(compiled_kernel)
+        self.assertEqual(
+            arg0, torch.tensor([3.0], dtype=torch.float64, device=GPU_TYPE)
+        )
+        self.assertEqual(launcher.arg_tys, "Oyfd")
+
+        new_arg0 = torch.zeros(1, dtype=torch.float64, device=GPU_TYPE)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        launcher.run(1, 1, 1, stream, new_arg0, scalar, 1.0, 1.0)
+        self.assertEqual(new_arg0, arg0)
+
+        new_arg0.zero_()
+        launcher.run(1, 1, 1, stream, new_arg0, 1e300, 0.0, 0.0)
+        self.assertEqual(
+            new_arg0,
+            torch.tensor([float("inf")], dtype=torch.float64, device=GPU_TYPE),
+        )
+
     def test_basic_1arg(self):
         @triton.jit
         def simple_kernel_1_arg(arg0):
@@ -515,7 +581,8 @@ class TestStaticTritonLauncher(TestCase):
         arg1 = 5
         args = (arg0, arg1)
         compiled_kernel = simple_kernel[(1,)](*args)
-        # Allocate 50 KB of memory
+        # Allocate 50 KB without adding a local-accessor kernel parameter. On
+        # XPU this exercises the static shared-memory argument-count path.
         compiled_kernel.shared = 50000
         launcher = self._make_launcher(compiled_kernel)
         self.assertEqual(arg0, torch.tensor([5], dtype=torch.int32, device=GPU_TYPE))
@@ -526,6 +593,31 @@ class TestStaticTritonLauncher(TestCase):
         launcher.slow_launch_kernel = True
         launcher.run(1, 1, 1, stream, new_arg0, arg1)
         self.assertEqual(new_arg0, arg0)
+
+    @unittest.skipUnless(HAS_XPU_AND_TRITON, "XPU only")
+    def test_xpu_kernel_arg_count_mismatch(self):
+        @triton.jit
+        def simple_kernel(arg0):
+            tl.store(arg0, 1)
+
+        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        compiled_kernel = simple_kernel[(1,)](arg0)
+        launcher = self._make_launcher(compiled_kernel)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+
+        with self.assertRaisesRegex(RuntimeError, "Kernel argument count mismatch"):
+            launcher.C_impl._launch_kernel(
+                launcher.function,
+                1,
+                1,
+                1,
+                launcher.num_warps,
+                launcher.shared,
+                f"{launcher.arg_tys}i",
+                (arg0, 0),
+                stream,
+            )
 
     @skipIfXpu(msg="Only testing CUDA OOM behavior")
     def test_too_high_shared_mem(self):
@@ -903,6 +995,51 @@ class TestFastCudaLauncher(TestCase):
         self.assertEqual(
             new_arg0, torch.tensor([5], dtype=torch.int32, device=GPU_TYPE)
         )
+
+    def test_float_scalars(self):
+        @triton.jit
+        def floats(arg0, arg1: tl.float16, arg2: tl.float32, arg3: tl.float64):
+            x = tl.load(arg0)
+            y = arg1 + arg2 + arg3
+            tl.store(arg0, x + y)
+
+        scalar = float.fromhex("0x1.0020000000001p+0")
+        arg0 = torch.zeros(1, dtype=torch.float64, device=GPU_TYPE)
+        compiled_kernel = floats[(1,)](arg0, scalar, 1.0, 1.0)
+        launcher = self._make_launcher(compiled_kernel)
+        expected = torch.tensor([3.0 + 2**-10], dtype=torch.float64, device=GPU_TYPE)
+        self.assertEqual(arg0, expected)
+        self.assertEqual(launcher.arg_tys, "Oefd")
+        fast = self._make_fast_launcher(launcher)
+
+        new_arg0 = torch.zeros(1, dtype=torch.float64, device=GPU_TYPE)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        fast(1, 1, 1, stream, new_arg0, scalar, 1.0, 1.0)
+        self.assertEqual(new_arg0, expected)
+
+    @unittest.skipIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    def test_bfloat16_scalar(self):
+        @triton.jit
+        def bfloat16(arg0, arg1: tl.bfloat16, arg2: tl.float32, arg3: tl.float64):
+            x = tl.load(arg0)
+            y = arg1 + arg2 + arg3
+            tl.store(arg0, x + y)
+
+        scalar = float.fromhex("0x1.018p+0")
+        arg0 = torch.zeros(1, dtype=torch.float64, device=GPU_TYPE)
+        compiled_kernel = bfloat16[(1,)](arg0, scalar, 1.0, 1.0)
+        launcher = self._make_launcher(compiled_kernel)
+        expected = torch.tensor([3.0], dtype=torch.float64, device=GPU_TYPE)
+        self.assertEqual(arg0, expected)
+        self.assertEqual(launcher.arg_tys, "Oyfd")
+        fast = self._make_fast_launcher(launcher)
+
+        new_arg0 = torch.zeros(1, dtype=torch.float64, device=GPU_TYPE)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        fast(1, 1, 1, stream, new_arg0, scalar, 1.0, 1.0)
+        self.assertEqual(new_arg0, expected)
 
     def test_multiple_tensor_args(self):
         """Verify _FastCudaLauncher handles multiple tensor pointer args correctly."""
