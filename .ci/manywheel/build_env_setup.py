@@ -82,6 +82,10 @@ TORCH_CUDA_ARCH_LIST_TABLE: dict[str, dict[str, set[int]]] = {
         "x86_64": {75, 80, 86, 90, 100, 120},
         "aarch64": {80, 90, 100, 110, 120},
     },
+    "13.4": {
+        "x86_64": {75, 80, 86, 90, 100, 120},
+        "aarch64": {80, 90, 100, 110, 120},
+    },
 }
 
 # Architectures we additionally emit PTX for on nightly/dev builds
@@ -145,6 +149,14 @@ def cuda_build_env(cuda_version: str, arch: str) -> dict[str, str]:
     if arch == "aarch64":
         # Pre-built MAGMA tarballs are x86-only.
         env["USE_MAGMA"] = "0"
+    # Bundle the CUDA 13.4 ptxas binary into nightly wheels so that users on
+    # Rubin (sm_107) hardware can use torch.compile without needing to
+    # install the CUDA 13.4 toolkit separately. Triton's default ptxas only
+    # goes up to CUDA 13.3 and will fail with "Value 'sm_107a' is not defined".
+    # torch/_inductor/runtime/compile_tasks.py picks up torch/bin/ptxas via
+    # _set_triton_ptxas_path() automatically.
+    if cuda_version == "13.4":
+        env.setdefault("BUILD_BUNDLE_PTXAS", "1")
     return env
 
 
@@ -215,6 +227,7 @@ def discover_rocm_home() -> str:
 PLATFORM_TAGS: dict[str, str] = {
     "x86_64": "manylinux_2_28_x86_64",
     "aarch64": "manylinux_2_28_aarch64",
+    "riscv64": "manylinux_2_39_riscv64",
 }
 
 
@@ -482,7 +495,13 @@ def main() -> None:
         setup_cuda(cuda_version)
         env_out.update(cuda_build_env(cuda_version, arch))
         print(f"CUDA {cuda_version} environment configured")
-    elif gpu_arch_type in ("cpu", "cpu-aarch64", "cpu-s390x", "cpu-cxx11-abi"):
+    elif gpu_arch_type in (
+        "cpu",
+        "cpu-aarch64",
+        "cpu-riscv64",
+        "cpu-s390x",
+        "cpu-cxx11-abi",
+    ):
         cleanup_cuda_for_cpu_build()
         env_out.update(CPU_BUILD_ENV)
         print("CPU environment configured")
