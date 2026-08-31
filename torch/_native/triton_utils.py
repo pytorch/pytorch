@@ -36,13 +36,13 @@ _TRITON_REQUIRED_VERSION_MAJOR = 3
 _TRITON_MINIMUM_VERSION_MINOR = 6
 
 # Names to try before the sys.path scan, so that a recognized install does not
-# pay for it. No file in the tree is canonical here and this is not meant to be
-# one: .ci/pytorch/binary_populate_env.sh publishes `triton`, `triton-rocm` and
-# `triton-xpu`, TRITON_DISTRIBUTIONS in tools/torchtlx/dev.py covers the five
-# that collide in a dev environment, and neither is a superset of the other.
-# This is the union of what has been seen installed, kept as a fast path only:
-# the scan below resolves a name missing here, so drift costs a scan rather than
-# a wrong answer.
+# pay for it. No file in the tree enumerates all of them and this is not meant to
+# become that file: .ci/pytorch/binary_populate_env.sh publishes `triton`,
+# `triton-rocm`, `fbtriton` and `triton-xpu`, while TRITON_DISTRIBUTIONS in
+# tools/torchtlx/dev.py and tools/torchtlx/_probe.py list the five that collide
+# in a dev environment, omitting `triton-xpu` and adding the `pytorch-triton`
+# names. This tuple is their union, and only a fast path: the scan below resolves
+# a name missing here, so drift costs a scan rather than a wrong answer.
 _TRITON_DISTRIBUTIONS = (
     "triton",
     "triton-rocm",
