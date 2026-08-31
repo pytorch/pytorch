@@ -58,7 +58,7 @@ size_t CaptureTracker::captureEnd(CaptureId_t capture_id) {
   return ended_capture.invalid_capture_free_count;
 }
 
-AllocationContext CaptureTracker::allocationContextSlow(
+AllocationContext CaptureTracker::allocationContext(
     cudaStream_t request_stream) const {
   const auto info = c10::cuda::captureInfoMayInitCtx(request_stream);
   AllocationContext context{info.status != CaptureStatus::None, std::nullopt};
@@ -80,7 +80,9 @@ AllocationContext CaptureTracker::allocationContextSlow(
 void CaptureTracker::recordAllocation(
     const void* block,
     const AllocationContext& context) {
-  TORCH_INTERNAL_ASSERT(context.tracked_capture_id.has_value());
+  if (!context.tracked_capture_id.has_value()) {
+    return;
+  }
   block_allocation_captures_.insert_or_assign(
       block, *context.tracked_capture_id);
 }
