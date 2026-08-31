@@ -973,7 +973,7 @@ def _sfdp_params_check(match):
         and query.dtype == torch.float32
         and torch.backends.cuda.matmul.fp32_precision != "tf32"
     ):
-        if torch.backends.cuda.matmul.fp32_precision != "16x9":
+        if torch.backends.cuda.matmul.fp32_precision != "bfx9":
             _warn_tf32_disabled()
         return False
 

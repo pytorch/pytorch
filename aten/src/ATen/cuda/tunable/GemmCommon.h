@@ -260,7 +260,7 @@ inline std::string ComputeTypeFor<Float8_e5m2fnuz>() {
 
 // CublasltMatmulTunableOp caches candidate names by Params::Signature(),
 // independently of the precision-aware TunableOp signature. Preserve existing
-// IEEE/TF32 keys while giving 16x9 its own candidate set.
+// IEEE/TF32 keys while giving BF16x9 its own candidate set.
 template <typename T>
 inline std::string ComputeTypeSignature() {
   if constexpr (std::is_same_v<T, float>) {

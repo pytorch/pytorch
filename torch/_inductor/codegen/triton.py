@@ -1796,11 +1796,11 @@ class TritonOverrides(OpOverrides):
         )
 
         precision = torch.backends.cuda.matmul.fp32_precision
-        if precision == "16x9" and orig_a.dtype == torch.float32:
-            # See Note [16x9 precision] in torch/_inductor/utils.py.
+        if precision == "bfx9" and orig_a.dtype == torch.float32:
+            # See Note [BF16x9 precision] in torch/_inductor/utils.py.
             torch._logging.warning_once(
                 log,
-                "Triton does not support 16x9 precision; using IEEE precision instead.",
+                "Triton does not support bfx9 precision; using IEEE precision instead.",
             )
             precision = "ieee"
         input_precision = "tf32" if precision == "tf32" else "ieee"

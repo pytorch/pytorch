@@ -119,7 +119,7 @@ We recommend enabling TF32 tensor cores for matrix multiplications with
 `torch.backends.cuda.matmul.fp32_precision = "tf32"` (`torch.backends.cuda.matmul.allow_tf32 = True`
 is going to be deprecated) if your network does not need full float32 precision.
 With a CUDA 12.9 or newer build on NVIDIA GPUs with compute capability 10.0 or
-10.3, `torch.backends.cuda.matmul.fp32_precision = "16x9"` instead uses cuBLAS
+10.3, `torch.backends.cuda.matmul.fp32_precision = "bfx9"` instead uses cuBLAS
 BF16x9 emulation. BF16x9 keeps FP32 inputs and outputs and retains all FP32
 input bits through its decomposition, but its arithmetic is not IEEE-754
 compliant and its relative accuracy is workload-dependent.

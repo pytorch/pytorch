@@ -55,14 +55,14 @@ class B2BGEMMTest(TestCase):
     )
     @recover_orig_fp32_precision
     @torch._inductor.config.patch(b2b_gemm_pass=True)
-    def test_16x9_rejects_mixed_dtype_b2b_gemm(self):
+    def test_bfx9_rejects_mixed_dtype_b2b_gemm(self):
         def fn(a, b, c):
             return torch.mm(torch.mm(a, b).float(), c)
 
         a = torch.randn((256, 32), device=self.device, dtype=torch.float16)
         b = torch.randn((32, 256), device=self.device, dtype=torch.float16)
         c = torch.randn((256, 32), device=self.device, dtype=torch.float32)
-        for precision, should_fuse in (("ieee", True), ("16x9", False)):
+        for precision, should_fuse in (("ieee", True), ("bfx9", False)):
             with self.subTest(fp32_precision=precision):
                 torch.backends.cuda.matmul.fp32_precision = precision
                 torch._dynamo.reset()

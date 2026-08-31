@@ -24,9 +24,9 @@ namespace at {
 /*
   These const variables defined the fp32 precisions for different backend
   We have "generic", "cuda", "mkldnn" backend now and we can choose fp32
-  precision from "ieee", "tf32", "bf16", "16x9", and "none". The "ieee"
+  precision from "ieee", "tf32", "bf16", "bfx9", and "none". The "ieee"
   precision means IEEE standard floating point format. "tf32", "bf16", and
-  "16x9" allow reduced-precision arithmetic internally for fp32 computations.
+  "bfx9" allow reduced-precision arithmetic internally for fp32 computations.
   "none" means it is override-able by its parent node.
 
   generic->mkldnn->matmul
@@ -68,7 +68,7 @@ Float32Precision str2precision(const std::string& name) {
     return Float32Precision::TF32;
   else if (name == "bf16")
     return Float32Precision::BF16;
-  else if (name == "16x9")
+  else if (name == "bfx9")
     return Float32Precision::BF16X9;
   TORCH_CHECK(false, "Unknown precision: ", name);
 }
@@ -87,7 +87,7 @@ std::string precision2str(Float32Precision prec) {
       // DEFAULT is an internal sentinel and should be resolved before reaching here
       TORCH_CHECK(false, "DEFAULT precision should not be visible externally");
     case Float32Precision::BF16X9:
-      return "16x9";
+      return "bfx9";
   }
   TORCH_CHECK(false, "Invalid enum Float32Precision(", static_cast<int>(prec), ")");
 }
@@ -493,7 +493,7 @@ void Context::setFloat32Precision(Float32Backend backend, Float32Op op, Float32P
   TORCH_CHECK(
       p != Float32Precision::BF16X9 ||
           (backend == Float32Backend::CUDA && op == Float32Op::MATMUL),
-      "precision '16x9' is only supported for backend 'cuda' and op 'matmul'");
+      "precision 'bfx9' is only supported for backend 'cuda' and op 'matmul'");
   TORCH_CHECK(
       p != Float32Precision::DEFAULT,
       "DEFAULT precision is internal and cannot be set explicitly");

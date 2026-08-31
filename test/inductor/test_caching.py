@@ -2543,7 +2543,7 @@ class ShouldPadMemoizerTest(TestMixin, TestCase):
             mat2 = torch.empty(16, 32, device="cuda")
 
         benchmark_keys = set()
-        for precision in ("ieee", "tf32", "16x9"):
+        for precision in ("ieee", "tf32", "bfx9"):
             torch.backends.cuda.matmul.fp32_precision = precision
             encoded = encoders.should_pad_params_encoder(mock_match, mat1, mat2, op)
             self.assertEqual(encoded["fp32_precision"], precision)

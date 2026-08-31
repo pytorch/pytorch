@@ -136,21 +136,21 @@ class TestMatmulCuda(InductorTestCase):
         super().tearDown()
 
     @serialTest()
-    def test_16x9_does_not_affect_non_float32_matmuls(self, device):
+    def test_bfx9_does_not_affect_non_float32_matmuls(self, device):
         for dtype in (torch.float64, torch.complex64):
             with self.subTest(dtype=dtype):
                 a = torch.randn(32, 32, device=device, dtype=dtype)
                 torch.backends.cuda.matmul.fp32_precision = "ieee"
                 expected = torch.mm(a, a)
-                torch.backends.cuda.matmul.fp32_precision = "16x9"
+                torch.backends.cuda.matmul.fp32_precision = "bfx9"
                 self.assertEqual(torch.mm(a, a), expected)
 
     @onlyCUDA
     @skipIfRocm
     @torch._inductor.config.patch(coordinate_descent_tuning=True)
     @serialTest()
-    def test_16x9_does_not_change_float16_decomposition(self, device):
-        torch.backends.cuda.matmul.fp32_precision = "16x9"
+    def test_bfx9_does_not_change_float16_decomposition(self, device):
+        torch.backends.cuda.matmul.fp32_precision = "bfx9"
         a = torch.randn(8, 1, device=device, dtype=torch.float16)
         b = torch.randn(1, 8, device=device, dtype=torch.float16)
         actual, code = run_and_get_code(
@@ -163,8 +163,8 @@ class TestMatmulCuda(InductorTestCase):
         BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
     )
     @serialTest()
-    def test_16x9_gemm_backed_convolution(self, device):
-        torch.backends.cuda.matmul.fp32_precision = "16x9"
+    def test_bfx9_gemm_backed_convolution(self, device):
+        torch.backends.cuda.matmul.fp32_precision = "bfx9"
         torch.manual_seed(1234)
         input = torch.randn(2, 3, 16, 16, device=device)
         weight = torch.randn(5, 3, 3, 3, device=device)
@@ -192,8 +192,8 @@ class TestMatmulCuda(InductorTestCase):
         ),
     )
     @serialTest()
-    def test_16x9_unsupported(self, device, backend, tunable, op):
-        torch.backends.cuda.matmul.fp32_precision = "16x9"
+    def test_bfx9_unsupported(self, device, backend, tunable, op):
+        torch.backends.cuda.matmul.fp32_precision = "bfx9"
         shape = (2, 128, 128) if op in ("bmm", "grouped_mm") else (128, 128)
         a = torch.randn(shape, device=device)
 
@@ -232,7 +232,7 @@ class TestMatmulCuda(InductorTestCase):
     )
     @parametrize("backend", ("cublas", "cublaslt"))
     @serialTest()
-    def test_16x9_matmul_precision(self, device, backend):
+    def test_bfx9_matmul_precision(self, device, backend):
         torch.manual_seed(1234)
         a = make_tensor((257, 513), device=device, dtype=torch.float32)
         b = make_tensor((513, 129), device=device, dtype=torch.float32)
@@ -240,7 +240,7 @@ class TestMatmulCuda(InductorTestCase):
 
         results = {}
         with blas_library_context(backend):
-            for precision in ("ieee", "16x9"):
+            for precision in ("ieee", "bfx9"):
                 torch.backends.cuda.matmul.fp32_precision = precision
                 results[precision] = torch.mm(a, b)
 
@@ -248,14 +248,14 @@ class TestMatmulCuda(InductorTestCase):
             precision: (result.double() - reference).abs()
             for precision, result in results.items()
         }
-        self.assertTrue(torch.isfinite(results["16x9"]).all())
+        self.assertTrue(torch.isfinite(results["bfx9"]).all())
         rounding_atol = (
             math.sqrt(a.shape[1])
             * torch.finfo(torch.float32).eps
             * reference.abs().mean()
         )
         self.assertLessEqual(
-            errors["16x9"].mean().item(),
+            errors["bfx9"].mean().item(),
             (errors["ieee"].mean() + rounding_atol).item(),
         )
         max_rounding_atol = (
@@ -264,7 +264,7 @@ class TestMatmulCuda(InductorTestCase):
             * reference.abs().max()
         )
         self.assertLessEqual(
-            errors["16x9"].max().item(),
+            errors["bfx9"].max().item(),
             (errors["ieee"].max() + max_rounding_atol).item(),
         )
 
@@ -272,8 +272,8 @@ class TestMatmulCuda(InductorTestCase):
         BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
     )
     @serialTest()
-    def test_16x9_matmul_operations(self, device):
-        torch.backends.cuda.matmul.fp32_precision = "16x9"
+    def test_bfx9_matmul_operations(self, device):
+        torch.backends.cuda.matmul.fp32_precision = "bfx9"
         torch.manual_seed(1234)
         a = make_tensor((65, 67), device=device, dtype=torch.float32)
         b = make_tensor((67, 33), device=device, dtype=torch.float32)
@@ -333,8 +333,8 @@ class TestMatmulCuda(InductorTestCase):
         BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
     )
     @serialTest()
-    def test_16x9_compile_uses_aten_gemm(self, device):
-        torch.backends.cuda.matmul.fp32_precision = "16x9"
+    def test_bfx9_compile_uses_aten_gemm(self, device):
+        torch.backends.cuda.matmul.fp32_precision = "bfx9"
 
         def matrix(*shape):
             return torch.randn(*shape, device=device)

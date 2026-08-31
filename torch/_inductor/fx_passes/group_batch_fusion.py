@@ -302,6 +302,8 @@ class PostGradBatchLinearFusion(BatchFusion):
 class GroupLinearFusion(GroupFusion):
     def _addmm_node_can_be_fused(self, node: torch.fx.Node):
         input_value = node.args[1].meta["val"]  # type: ignore[union-attr]
+        # fbgemm.gmm has no precision argument and bypasses ATen/cuBLAS.
+        # See Note [BF16x9 precision] in torch/_inductor/utils.py.
         if is_bf16x9_matmul(input_value.device.type, input_value.dtype):
             return False
         input_shape = input_value.shape

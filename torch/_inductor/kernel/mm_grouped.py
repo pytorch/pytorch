@@ -377,7 +377,7 @@ def _tuned_grouped_mm_common(
     # Native _grouped_mm accepts FP32 even though its current meta function is
     # narrower. Keep that path safe when the meta contract is corrected.
     if is_bf16x9_matmul(mat_a.get_device().type, mat_a.get_dtype()):
-        # See Note [16x9 precision] in torch/_inductor/utils.py.
+        # See Note [BF16x9 precision] in torch/_inductor/utils.py.
         choices.append(aten_choice)
         node, _ = autotune_select_algorithm(
             algorithm_name, choices, input_nodes, layout

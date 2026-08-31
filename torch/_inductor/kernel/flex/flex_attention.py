@@ -134,11 +134,11 @@ def set_float32_precision(kernel_options: dict[str, Any], dtype: torch.dtype) ->
         precision = (
             "ieee" if torch.get_float32_matmul_precision() == "highest" else "tf32"
         )
-    if dtype == torch.float32 and precision == "16x9":
-        # See Note [16x9 precision] in torch/_inductor/utils.py.
+    if dtype == torch.float32 and precision == "bfx9":
+        # See Note [BF16x9 precision] in torch/_inductor/utils.py.
         warning_once(
             log,
-            "FP32 FlexAttention does not support 16x9 precision; using IEEE precision instead.",
+            "FP32 FlexAttention does not support bfx9 precision; using IEEE precision instead.",
         )
         kernel_options["FLOAT32_PRECISION"] = "'ieee'"
         return

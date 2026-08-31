@@ -32,7 +32,7 @@ class InductorWarningTests(TestCase):
     @unittest.skipIf(not _has_cuda_sm80(), "requires CUDA SM80")
     @recover_orig_fp32_precision
     @torch._inductor.config.patch(force_disable_caches=True)
-    def test_flex_attention_warns_and_uses_ieee_for_16x9(self):
+    def test_flex_attention_warns_and_uses_ieee_for_bfx9(self):
         def fn(q, k, v):
             return flex_attention(
                 q,
@@ -44,7 +44,7 @@ class InductorWarningTests(TestCase):
                 },
             )
 
-        torch.backends.cuda.matmul.fp32_precision = "16x9"
+        torch.backends.cuda.matmul.fp32_precision = "bfx9"
         warning_once.cache_clear()
         self.addCleanup(warning_once.cache_clear)
         q = torch.randn(1, 1, 128, 64, device="cuda")

@@ -312,11 +312,13 @@ CublasLtTypeInfo<T, C_Dtype> getCublasLtTypeInfo() {
         at::Float32Backend::CUDA, at::Float32Op::MATMUL);
     if (fp32_precision == at::Float32Precision::TF32) {
       info.compute_type = CUBLAS_COMPUTE_32F_FAST_TF32;
-    } else if (at::cuda::blas::useBF16x9()) {
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12090
-      info.compute_type = CUBLAS_COMPUTE_32F_EMULATED_16BFX9;
-#endif
     }
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12090
+    if (fp32_precision == at::Float32Precision::BF16X9 &&
+        !at::NoTF32Guard::should_disable_tf32()) {
+      info.compute_type = CUBLAS_COMPUTE_32F_EMULATED_16BFX9;
+    }
+#endif
   } else if constexpr (std::is_same_v<T, c10::complex<double>>) {
     info.ab_type = CUDA_C_64F;
     info.c_type = CUDA_C_64F;

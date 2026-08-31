@@ -2987,7 +2987,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
     )
     @recover_orig_fp32_precision
-    def test_16x9_flex_gemm_falls_back_to_aten(self):
+    def test_bfx9_flex_gemm_falls_back_to_aten(self):
         def fn(a, b):
             return flex_gemm(
                 torch.mm,
@@ -2996,7 +2996,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 kernel_options={"backend": "QUACK"},
             )
 
-        torch.backends.cuda.matmul.fp32_precision = "16x9"
+        torch.backends.cuda.matmul.fp32_precision = "bfx9"
         a = self.makeTensor(64, 64, dtype=torch.float32)
         b = self.makeTensor(64, 64, dtype=torch.float32)
         actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), a, b)

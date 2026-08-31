@@ -10738,7 +10738,7 @@ class TestLinalgCudaOnly(TestCase):
         BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
     )
     @dtypes(torch.float)
-    def test_16x9_tunableop(self, device, dtype):
+    def test_bfx9_tunableop(self, device, dtype):
         with self._tunableop_ctx():
             torch.cuda.tunable.set_rotating_buffer_size(0)
             torch.cuda.tunable.set_max_tuning_duration(1)
@@ -10748,7 +10748,7 @@ class TestLinalgCudaOnly(TestCase):
 
             torch.backends.cuda.matmul.fp32_precision = "ieee"
             torch.mm(a, b)
-            torch.backends.cuda.matmul.fp32_precision = "16x9"
+            torch.backends.cuda.matmul.fp32_precision = "bfx9"
             torch.mm(a, b)
 
             results = torch.cuda.tunable.get_results()

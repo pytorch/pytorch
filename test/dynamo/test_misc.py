@@ -5362,7 +5362,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         legacy_json_guards["allow_tf32"] = False
         guards.__setstate__(json.dumps(legacy_json_guards))
-        torch.backends.cuda.matmul.fp32_precision = "16x9"
+        torch.backends.cuda.matmul.fp32_precision = "bfx9"
         self.assertFalse(guards.check())
 
         x9_json_guards = json.loads(GlobalStateGuard().__getstate__())
@@ -12153,7 +12153,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             write_state(initial_state)
 
     @recover_orig_fp32_precision
-    def test_recompile_on_16x9_precision_change(self):
+    def test_recompile_on_bfx9_precision_change(self):
         counter = CompileCounter()
 
         @torch.compile(backend=counter)
@@ -12165,7 +12165,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         fn(x)
         self.assertEqual(counter.frame_count, 1)
 
-        torch.backends.cuda.matmul.fp32_precision = "16x9"
+        torch.backends.cuda.matmul.fp32_precision = "bfx9"
         fn(x)
         fn(x)
         self.assertEqual(counter.frame_count, 2)

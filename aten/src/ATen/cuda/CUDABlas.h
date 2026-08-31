@@ -33,18 +33,20 @@ inline void checkBF16x9Support() {
   if (!useBF16x9()) {
     return;
   }
+  // Validate at dispatch: the setting is process-wide, devices can differ,
+  // and querying hardware in the setter would force CUDA initialization.
 #ifdef USE_ROCM
-  TORCH_CHECK(false, "16x9 precision is only supported on NVIDIA CUDA");
+  TORCH_CHECK(false, "bfx9 precision is only supported on NVIDIA CUDA");
 #elif defined(CUDA_VERSION) && CUDA_VERSION >= 12090
   const auto* properties = at::cuda::getCurrentDeviceProperties();
   TORCH_CHECK(
       properties->major == 10 &&
           (properties->minor == 0 || properties->minor == 3),
-      "16x9 precision requires a CUDA device with compute capability 10.0 or 10.3");
+      "bfx9 precision requires a CUDA device with compute capability 10.0 or 10.3");
 #else
   TORCH_CHECK(
       false,
-      "16x9 precision requires PyTorch to be built with CUDA 12.9 or later");
+      "bfx9 precision requires PyTorch to be built with CUDA 12.9 or later");
 #endif
 }
 

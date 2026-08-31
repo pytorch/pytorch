@@ -1577,7 +1577,7 @@ class _InProcessFxCompile(FxCompile):
 
             if torch.backends.cuda.matmul.fp32_precision not in (
                 "tf32",
-                "16x9",
+                "bfx9",
             ) and is_tf32_warning_applicable(gm):
                 _warn_tf32_disabled()
 

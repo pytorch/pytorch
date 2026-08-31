@@ -809,10 +809,10 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         if isinstance(mat1, TensorBox) and is_bf16x9_matmul(
             mat1.get_device_or_error().type, mat1.get_dtype()
         ):
-            # See Note [16x9 precision] in torch/_inductor/utils.py.
+            # See Note [BF16x9 precision] in torch/_inductor/utils.py.
             warning_once(
                 log,
-                f"FlexGEMM {backend} does not support 16x9 precision; using ATen/cuBLAS instead.",
+                f"FlexGEMM {backend} does not support bfx9 precision; using ATen/cuBLAS instead.",
             )
             return process_subgraph_nodes(subgraph.graph_module, list(args))
     if backend == "NVGEMM":

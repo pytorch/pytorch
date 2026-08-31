@@ -256,10 +256,10 @@ class GraphRegionTrackerTests(TestCase):
             )
 
     @recover_orig_fp32_precision
-    def test_16x9_global_state_key(self):
+    def test_bfx9_global_state_key(self):
         torch.backends.cuda.matmul.fp32_precision = "ieee"
         ieee_key = get_global_state_key()
-        torch.backends.cuda.matmul.fp32_precision = "16x9"
+        torch.backends.cuda.matmul.fp32_precision = "bfx9"
         self.assertNotEqual(get_global_state_key(), ieee_key)
 
     def test_mutation_tracking_simple(self):
