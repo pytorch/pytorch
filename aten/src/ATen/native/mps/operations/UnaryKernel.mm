@@ -103,7 +103,9 @@ static void frexp_kernel_mps(TensorIteratorBase& iter) {
   if (iter.numel() == 0) {
     return;
   }
-  // Bounds every operand's offsets to int32, the width FrexpParams stores.
+  // Keep numel within the kernels' uint thread-grid index (both the dense and
+  // strided variants dispatch 1D). Offsets themselves are 64-bit inside the
+  // kernel, so this split is only about grid sizing, not offset width.
   if (!iter.can_use_32bit_indexing()) {
     for (auto&& sub_iter : iter.with_32bit_indexing()) {
       frexp_kernel_mps(sub_iter);
@@ -126,21 +128,17 @@ static void frexp_kernel_mps(TensorIteratorBase& iter) {
       [computeEncoder setComputePipelineState:pipelineState];
       mps::bind_iter_tensors(computeEncoder, iter);
       if (!is_dense) {
-        // The kernel indexes typed pointers, so convert the iterator's byte
-        // strides to element strides; compute_strides() builds them as
-        // stride * element_size, so the division is exact. They must come from
-        // the iterator and not the tensors, since reorder_dimensions() and
+        // Pass the iterator's byte strides straight through; the kernel indexes
+        // with the shared long-offset primitives. Strides come from the
+        // iterator and not the tensors, since reorder_dimensions() and
         // coalesce_dimensions() leave iter.shape() in a different order from
         // the operands' own.
-        FrexpParams params{};
-        params.ndim = static_cast<int32_t>(iter.ndim());
-        for (const auto i : c10::irange(iter.ndim())) {
-          params.sizes[i] = static_cast<int32_t>(iter.shape()[i]);
-          params.mantissa_strides[i] = static_cast<int32_t>(iter.strides(0)[i] / iter.element_size(0));
-          params.exponent_strides[i] = static_cast<int32_t>(iter.strides(1)[i] / iter.element_size(1));
-          params.input_strides[i] = static_cast<int32_t>(iter.strides(2)[i] / iter.element_size(2));
-        }
-        mps::mtl_setArgs<3>(computeEncoder, params);
+        mps::mtl_setArgs<3>(computeEncoder,
+                            iter.shape(),
+                            iter.strides(0),
+                            iter.strides(1),
+                            iter.strides(2),
+                            static_cast<uint32_t>(iter.ndim()));
       }
       mps::mtl_dispatch1DJob(computeEncoder, pipelineState, iter.numel());
 

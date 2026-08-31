@@ -903,32 +903,43 @@ kernel void frexp_dense(
   exponent[index] = exp;
 }
 
+// Byte strides come straight from the TensorIterator, indexed with the shared
+// long-offset primitives, so nothing is downcast and arbitrarily large offsets
+// are addressed the same way every other strided MPS kernel does.
 template <typename T>
 kernel void frexp_strided(
-    device T* mantissa [[buffer(0)]],
-    device int* exponent [[buffer(1)]],
-    constant T* input [[buffer(2)]],
-    constant FrexpParams& params [[buffer(3)]],
+    device void* mantissa [[buffer(0)]],
+    device void* exponent [[buffer(1)]],
+    constant void* input [[buffer(2)]],
+    constant long* sizes [[buffer(3)]],
+    constant long* mantissa_strides [[buffer(4)]],
+    constant long* exponent_strides [[buffer(5)]],
+    constant long* input_strides [[buffer(6)]],
+    constant uint& ndim [[buffer(7)]],
     uint index [[thread_position_in_grid]]) {
-  int rem = int(index);
-  int mantissa_offs = 0, exponent_offs = 0, input_offs = 0;
-  for (int i = 0; i < params.ndim; ++i) {
-    const int pos = rem % params.sizes[i];
-    rem /= params.sizes[i];
-    mantissa_offs += pos * params.mantissa_strides[i];
-    exponent_offs += pos * params.exponent_strides[i];
-    input_offs += pos * params.input_strides[i];
-  }
+  long pos[max_ndim];
+  pos_from_thread_index(long(index), pos, sizes, ndim);
   int exp = 0;
-  mantissa[mantissa_offs] = frexp_(input[input_offs], exp);
-  exponent[exponent_offs] = exp;
+  const auto m = frexp_(
+      val_at_offs<T>(input, offset_from_coord(pos, input_strides, ndim)), exp);
+  ref_at_offs<T>(mantissa, offset_from_coord(pos, mantissa_strides, ndim)) = m;
+  ref_at_offs<int>(exponent, offset_from_coord(pos, exponent_strides, ndim)) =
+      exp;
 }
 
 #define REGISTER_FREXP_OP(T)                                                \
   template [[host_name("frexp_dense_" #T)]] kernel void frexp_dense<T>(     \
       device T*, device int*, constant T*, uint);                           \
   template [[host_name("frexp_strided_" #T)]] kernel void frexp_strided<T>( \
-      device T*, device int*, constant T*, constant FrexpParams&, uint)
+      device void*,                                                         \
+      device void*,                                                         \
+      constant void*,                                                       \
+      constant long*,                                                       \
+      constant long*,                                                       \
+      constant long*,                                                       \
+      constant long*,                                                       \
+      constant uint&,                                                       \
+      uint)
 
 REGISTER_FREXP_OP(float);
 REGISTER_FREXP_OP(half);
