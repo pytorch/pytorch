@@ -620,7 +620,13 @@ IMPL_ALLTOALL(PrivateUse1)
       bool asyncOp,                                                            \
       int64_t timeout) {                                                       \
     auto hook_op_id = process_group->firePreHook(                              \
-        HookOpName::ALLTOALL_BASE, asyncOp, -1, input, output);                \
+        HookOpName::ALLTOALL_BASE,                                             \
+        asyncOp,                                                               \
+        -1,                                                                    \
+        input,                                                                 \
+        output,                                                                \
+        output_split_sizes,                                                    \
+        input_split_sizes);                                                    \
     auto work =                                                                \
         process_group->getBackend(c10::DeviceType::DEV)                        \
             ->all_to_all_single(                                               \

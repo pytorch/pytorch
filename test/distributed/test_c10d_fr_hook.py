@@ -324,6 +324,32 @@ class AbstractFlightRecorderHookTest:
         self.assertEqual(self._await_retired()[-1]["state"], "completed")
         hook.remove()
 
+    def test_all_to_all_single_records_split_sizes(self):
+        pg = self._init_pg()
+        hook = self._fr_hook(pg)
+        before = len(self._hook_entries())
+        cols = 3
+        ws = self.world_size
+        input_splits = [self.rank + 1] * ws
+        output_splits = list(range(1, ws + 1))
+        inp = torch.ones(sum(input_splits), cols, device=self.device)
+        out = torch.empty(sum(output_splits), cols, device=self.device)
+        dist.all_to_all_single(
+            out, inp, output_split_sizes=output_splits, input_split_sizes=input_splits
+        )
+        if self.device_type == "cuda":
+            torch.cuda.synchronize()
+        entries = self._hook_entries()[before:]
+        a2a = [
+            e for e in entries if e["profiling_name"] == self._name("all_to_all_single")
+        ]
+        self.assertEqual(len(a2a), 1, msg=str(entries))
+        self.assertEqual(a2a[0]["input_split_sizes"], [s * cols for s in input_splits])
+        self.assertEqual(
+            a2a[0]["output_split_sizes"], [s * cols for s in output_splits]
+        )
+        hook.remove()
+
     def test_op_names_distinguish_collective_variants(self):
         # The op name is what the analyzer keys its per-collective size rules
         # off, so every dispatcher op has to keep its own spelling. Folding

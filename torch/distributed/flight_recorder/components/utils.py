@@ -39,6 +39,7 @@ __all__ = [
     "format_frames",
     "match_one_event",
     "check_size_alltoall",
+    "check_split_alltoall",
 ]
 
 logger: FlightRecorderLogger = FlightRecorderLogger()
@@ -413,13 +414,66 @@ def match_coalesced_groups_with_non_p2p(
     return True
 
 
+def _sizes_numel(sizes: list[Any] | None) -> int:
+    if not sizes:
+        return 0
+    total = 0
+    for s in sizes:
+        if s:
+            total += math.prod(s)
+    return total
+
+
 def check_size_alltoall(alltoall_cases: list[dict[str, Any]]) -> tuple[bool, int, int]:
     input_numel = 0
     output_numel = 0
     for e in alltoall_cases:
-        input_numel += math.prod(e["input_sizes"][0])
-        output_numel += math.prod(e["output_sizes"][0])
+        input_numel += _sizes_numel(e.get("input_sizes"))
+        output_numel += _sizes_numel(e.get("output_sizes"))
     return input_numel != output_numel, input_numel, output_numel
+
+
+def _split_counts_for_entry(
+    entry: dict[str, Any], pg_size: int
+) -> tuple[list[int], list[int]] | None:
+    ins = entry.get("input_split_sizes") or []
+    outs = entry.get("output_split_sizes") or []
+    if len(ins) == pg_size and len(outs) == pg_size:
+        return [int(x) for x in ins], [int(x) for x in outs]
+    in_sizes = entry.get("input_sizes") or []
+    out_sizes = entry.get("output_sizes") or []
+    if len(in_sizes) == pg_size and len(out_sizes) == pg_size:
+        return (
+            [math.prod(s) if s else 0 for s in in_sizes],
+            [math.prod(s) if s else 0 for s in out_sizes],
+        )
+    return None
+
+
+def check_split_alltoall(
+    entries_by_rank: dict[int, dict[str, Any]],
+    pg_size: int,
+) -> list[tuple[int, int, int, int]] | None:
+    # Local index i = i-th ascending global rank (same as P2P matching). Wrong
+    # if new_group(ranks=...) was non-ascending; membership is only a set.
+    splits: dict[int, tuple[list[int], list[int]]] = {}
+    for rank, entry in entries_by_rank.items():
+        got = _split_counts_for_entry(entry, pg_size)
+        if got is None:
+            return None
+        splits[rank] = got
+    pg_ranks = sorted(entries_by_rank)
+    if len(pg_ranks) != pg_size:
+        return None
+    local = {g: i for i, g in enumerate(pg_ranks)}
+    mismatches: list[tuple[int, int, int, int]] = []
+    for src in pg_ranks:
+        for dst in pg_ranks:
+            sent = splits[src][0][local[dst]]
+            recv = splits[dst][1][local[src]]
+            if sent != recv:
+                mismatches.append((src, dst, sent, recv))
+    return mismatches
 
 
 def check_current_entry_match(
@@ -501,36 +555,70 @@ def error_analysis(
     ) == 1 and match_record.expected_ranks.issubset(dumps_ranks):
         # case two: alltoall or alltoall_base case.
         if match_record.has_undecided_case:
-            alltoall_cases = [current_entry] + [
-                all_entries[o][match_record.found_idx[o]]
-                for o in match_record.found_ranks
-            ]
-            fail_check, total_input_numel, total_output_numel = check_size_alltoall(
-                alltoall_cases
-            )
+            entries_by_rank = {first_rank: current_entry}
+            for o in match_record.found_ranks:
+                entries_by_rank[o] = all_entries[o][match_record.found_idx[o]]
+            alltoall_cases = list(entries_by_rank.values())
+            pg_size = len(match_record.expected_ranks)
+            split_mismatches = check_split_alltoall(entries_by_rank, pg_size)
+            fail_check = False
+            total_input_numel = 0
+            total_output_numel = 0
+            if split_mismatches is None:
+                fail_check, total_input_numel, total_output_numel = check_size_alltoall(
+                    alltoall_cases
+                )
+            elif split_mismatches:
+                fail_check = True
             if major_v <= 2 and minor_v <= 3:
-                # We don't log the input/output sizes for alltoall before v2.4,
-                # so we don't consider the size mismatch as an error for now.
                 fail_check = False
+                split_mismatches = None
             if fail_check:
-                # When we see errors in all_to_all, it's hard to tell which rank is the source of the error.
                 mismatch[pg_name] += 1
-                logger_msg = (
-                    "Input/output mismatch in the collective sequence number: %s"
-                )
-                match_record.entry_state.log(
-                    logger,
-                    logger_msg,
-                    format_frames,
-                    total_numel=(total_input_numel, total_output_numel),
-                )
+                if split_mismatches:
+                    logger_msg = (
+                        "All2All split mismatch, collective sequence number: %s"
+                    )
+                    for src, dst, sent, recv in split_mismatches:
+                        info = MatchInfo(
+                            MatchState.SIZE_OR_SYNTAX_MISMATCH,
+                            f"All2All edge {src}->{dst}: send {sent} vs recv {recv}",
+                        )
+                        match_record.errors.add((src, info))
+                        match_record.errors.add((dst, info))
+                    match_record.entry_state.log(
+                        logger,
+                        logger_msg,
+                        format_frames,
+                        split_mismatches=split_mismatches,
+                    )
+                    involved = {src for src, _, _, _ in split_mismatches} | {
+                        dst for _, dst, _, _ in split_mismatches
+                    }
+                    for r in sorted(involved):
+                        if r == first_rank:
+                            continue
+                        frames = entries_by_rank[r].get("frames", [])
+                        logger.info(
+                            "rank %s stack trace:\n %s", r, format_frames(frames)
+                        )
+                else:
+                    logger_msg = (
+                        "Input/output mismatch in the collective sequence number: %s"
+                    )
+                    match_record.entry_state.log(
+                        logger,
+                        logger_msg,
+                        format_frames,
+                        total_numel=(total_input_numel, total_output_numel),
+                    )
+                    match_record.errors.add(
+                        (first_rank, MatchInfo(MatchState.SIZE_OR_SYNTAX_MISMATCH))
+                    )
                 match_record.candidate_ranks.update(match_record.found_ranks)
                 match_record.candidate_idx.update(match_record.found_idx)
                 match_record.found_idx.clear()
                 match_record.found_ranks.clear()
-                match_record.errors.add(
-                    (first_rank, MatchInfo(MatchState.SIZE_OR_SYNTAX_MISMATCH))
-                )
             else:
                 match_record.found_ranks.update(match_record.candidate_ranks)
                 match_record.found_idx.update(match_record.candidate_idx)

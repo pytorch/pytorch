@@ -27,8 +27,10 @@ def create_one_event(
     output_dtypes="float32",
     input_dtypes="float32",
     backend="nccl",
+    input_split_sizes=None,
+    output_split_sizes=None,
 ):
-    return {
+    event = {
         "profiling_name": f"{backend}:{collective_name}",
         "state": state,
         "process_group": pg_info,
@@ -41,6 +43,11 @@ def create_one_event(
         "time_created_ns": 0,
         "frames": [],
     }
+    if input_split_sizes is not None:
+        event["input_split_sizes"] = input_split_sizes
+    if output_split_sizes is not None:
+        event["output_split_sizes"] = output_split_sizes
+    return event
 
 
 class FlightRecorderEventTest(TestCase):
@@ -384,6 +391,8 @@ def create_one_entry(
     pg_info=("0", "default"),
     input_dtypes="float32",
     backend="nccl",
+    input_split_sizes=None,
+    output_split_sizes=None,
 ):
     event = create_one_event(
         collective_name,
@@ -396,6 +405,8 @@ def create_one_entry(
         output_dtypes,
         input_dtypes,
         backend,
+        input_split_sizes,
+        output_split_sizes,
     )
     event.update({"record_id": record_id})
     event.update({"is_p2p": False})
@@ -653,6 +664,239 @@ class FlightRecorderHookShapeTest(TestCase):
                 [self._entry(0, name, input_sizes, output_sizes, 1)]
             )
             self.assertEqual([c.pass_check for c in db.collectives], [False], msg=name)
+
+
+def _alltoall_details(rank_entries, version):
+    details = {}
+    ranks = list(range(len(rank_entries)))
+    ranks_str = str(ranks)
+    for r in ranks:
+        details[f"dump_file_rank_{r}"] = {
+            "entries": rank_entries[r],
+            "pg_config": {
+                "0": {"name": "0", "desc": "default_pg", "ranks": ranks_str},
+            },
+            "rank": r,
+            "version": version,
+        }
+    return details
+
+
+class FlightRecorderAlltoallSplitTest(TestCase):
+    version = "2.11"
+
+    def _entry(
+        self,
+        record_id,
+        collective_name,
+        input_sizes,
+        output_sizes,
+        seq,
+        input_split_sizes=None,
+        output_split_sizes=None,
+        frames=None,
+    ):
+        entry = create_one_entry(
+            record_id,
+            collective_name,
+            input_sizes,
+            output_sizes,
+            state="scheduled",
+            collective_seq_id=seq,
+            input_split_sizes=input_split_sizes,
+            output_split_sizes=output_split_sizes,
+        )
+        if frames is not None:
+            entry["frames"] = frames
+        return entry
+
+    def _build_db(self, entries_per_rank, version=None):
+        version = self.version if version is None else version
+        return build_db(
+            _alltoall_details(entries_per_rank, version),
+            JobConfig().parse_args([]),
+            version,
+        )
+
+    def test_split_matrix_healthy(self):
+        db = self._build_db(
+            [
+                [
+                    self._entry(
+                        0,
+                        "all_to_all_single",
+                        [[8]],
+                        [[8]],
+                        1,
+                        input_split_sizes=[2, 3, 3],
+                        output_split_sizes=[2, 4, 2],
+                    )
+                ],
+                [
+                    self._entry(
+                        0,
+                        "all_to_all_single",
+                        [[12]],
+                        [[8]],
+                        1,
+                        input_split_sizes=[4, 4, 4],
+                        output_split_sizes=[3, 4, 1],
+                    )
+                ],
+                [
+                    self._entry(
+                        0,
+                        "all_to_all_single",
+                        [[8]],
+                        [[12]],
+                        1,
+                        input_split_sizes=[2, 1, 5],
+                        output_split_sizes=[3, 4, 5],
+                    )
+                ],
+            ]
+        )
+        self.assertEqual([c.pass_check for c in db.collectives], [True])
+
+    def test_split_matrix_broken_edge(self):
+        e0 = self._entry(
+            0,
+            "all_to_all_single",
+            [[8]],
+            [[8]],
+            1,
+            input_split_sizes=[2, 3, 3],
+            output_split_sizes=[2, 4, 2],
+            frames=[{"name": "rank0_fn", "filename": "r0.py", "line": 1}],
+        )
+        e1 = self._entry(
+            0,
+            "all_to_all_single",
+            [[12]],
+            [[8]],
+            1,
+            input_split_sizes=[4, 4, 4],
+            output_split_sizes=[3, 4, 1],
+        )
+        e2 = self._entry(
+            0,
+            "all_to_all_single",
+            [[8]],
+            [[10]],
+            1,
+            input_split_sizes=[2, 1, 5],
+            output_split_sizes=[1, 4, 5],
+            frames=[{"name": "rank2_fn", "filename": "r2.py", "line": 2}],
+        )
+        with self.assertLogs("Flight Recorder", level="INFO") as cm:
+            db = self._build_db([[e0], [e1], [e2]])
+        self.assertEqual([c.pass_check for c in db.collectives], [False])
+        log = "\n".join(cm.output)
+        self.assertIn("rank 0 send -> rank 2: 3 elements", log)
+        self.assertIn("rank 2 recv <- rank 0: 1 elements", log)
+        self.assertNotIn("Culprit rank", log)
+        self.assertIn("rank2_fn", log)
+
+    def test_split_matrix_broken_when_global_totals_agree(self):
+        with self.assertLogs("Flight Recorder", level="INFO") as cm:
+            db = self._build_db(
+                [
+                    [
+                        self._entry(
+                            0,
+                            "all_to_all_single",
+                            [[8]],
+                            [[8]],
+                            1,
+                            input_split_sizes=[2, 4, 2],
+                            output_split_sizes=[2, 4, 2],
+                        )
+                    ],
+                    [
+                        self._entry(
+                            0,
+                            "all_to_all_single",
+                            [[12]],
+                            [[8]],
+                            1,
+                            input_split_sizes=[4, 4, 4],
+                            output_split_sizes=[3, 4, 1],
+                        )
+                    ],
+                    [
+                        self._entry(
+                            0,
+                            "all_to_all_single",
+                            [[8]],
+                            [[12]],
+                            1,
+                            input_split_sizes=[2, 1, 5],
+                            output_split_sizes=[3, 4, 5],
+                        )
+                    ],
+                ]
+            )
+        self.assertEqual([c.pass_check for c in db.collectives], [False])
+        log = "\n".join(cm.output)
+        self.assertIn("rank 0 send -> rank 1", log)
+        self.assertIn("rank 0 send -> rank 2", log)
+
+    def test_even_all_to_all_single_without_split_keys(self):
+        db = self._build_db(
+            [
+                [self._entry(0, "all_to_all_single", [[8]], [[8]], 1)],
+                [self._entry(0, "all_to_all_single", [[8]], [[8]], 1)],
+            ]
+        )
+        self.assertEqual([c.pass_check for c in db.collectives], [True])
+
+    def test_list_all_to_all_healthy(self):
+        db = self._build_db(
+            [
+                [self._entry(0, "all_to_all", [[2], [3]], [[2], [4]], 1)],
+                [self._entry(0, "all_to_all", [[4], [5]], [[3], [5]], 1)],
+            ]
+        )
+        self.assertEqual([c.pass_check for c in db.collectives], [True])
+
+    def test_list_all_to_all_broken_edge(self):
+        db = self._build_db(
+            [
+                [self._entry(0, "all_to_all", [[2], [3]], [[2], [4]], 1)],
+                [self._entry(0, "all_to_all", [[4], [5]], [[1], [5]], 1)],
+            ]
+        )
+        self.assertEqual([c.pass_check for c in db.collectives], [False])
+
+    def test_uneven_without_splits_global_numel_passes(self):
+        db = self._build_db(
+            [
+                [self._entry(0, "all_to_all_single", [[8]], [[12]], 1)],
+                [self._entry(0, "all_to_all_single", [[12]], [[8]], 1)],
+            ],
+            version="2.10",
+        )
+        self.assertEqual([c.pass_check for c in db.collectives], [True])
+
+    def test_uneven_without_splits_global_numel_fails(self):
+        db = self._build_db(
+            [
+                [self._entry(0, "all_to_all_single", [[8]], [[12]], 1)],
+                [self._entry(0, "all_to_all_single", [[12]], [[4]], 1)],
+            ],
+            version="2.10",
+        )
+        self.assertEqual([c.pass_check for c in db.collectives], [False])
+
+    def test_uneven_without_splits_per_rank_equal_totals_passes(self):
+        db = self._build_db(
+            [
+                [self._entry(0, "all_to_all_single", [[8]], [[8]], 1)],
+                [self._entry(0, "all_to_all_single", [[4]], [[4]], 1)],
+            ],
+            version="2.10",
+        )
+        self.assertEqual([c.pass_check for c in db.collectives], [True])
 
 
 if __name__ == "__main__":

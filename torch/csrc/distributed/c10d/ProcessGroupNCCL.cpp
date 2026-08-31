@@ -5409,7 +5409,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::all_to_all_single(
 
     // stashing note: collective() will stash inputTensors and
     // outputTensors.
-    return collective(
+    auto work = collective(
         inputTensor,
         outputTensor,
         [&](at::Tensor& input,
@@ -5423,6 +5423,13 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::all_to_all_single(
         OpType::ALLTOALL_BASE,
         opts.asyncOp,
         "nccl:all_to_all");
+    auto* w = static_cast<WorkNCCL*>(work.get());
+    recordAlltoallSplitSizes<at::cuda::CUDAEvent>(
+        w->trace_id_,
+        w->trace_reset_epoch_,
+        alltoallDim0SplitsToElementCounts(inputTensor, {}, size_),
+        alltoallDim0SplitsToElementCounts(outputTensor, {}, size_));
+    return work;
   } else {
     RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(
         std::make_tuple(
@@ -5445,7 +5452,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::all_to_all_single(
 
     // stashing note: collective() will stash inputTensors and
     // outputTensors.
-    return collective(
+    auto work = collective(
         inputTensor,
         outputTensor,
         [&](at::Tensor& input,
@@ -5477,6 +5484,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::all_to_all_single(
         OpType::ALLTOALL_BASE,
         opts.asyncOp,
         "nccl:all_to_all");
+    auto* w = static_cast<WorkNCCL*>(work.get());
+    recordAlltoallSplitSizes<at::cuda::CUDAEvent>(
+        w->trace_id_,
+        w->trace_reset_epoch_,
+        alltoallDim0SplitsToElementCounts(inputTensor, inputSplitSizes, size_),
+        alltoallDim0SplitsToElementCounts(
+            outputTensor, outputSplitSizes, size_));
+    return work;
   }
 }
 
@@ -5524,7 +5539,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
       this->getSize(), // worldSize
       opts.asyncOp); // is asynchronized op
 
-  return collective(
+  auto work = collective(
       inputTensors,
       outputTensors,
       [&](at::Tensor& /* unused */,
@@ -5541,6 +5556,13 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
       OpType::ALLTOALL,
       opts.asyncOp,
       "nccl:all_to_all");
+  auto* w = static_cast<WorkNCCL*>(work.get());
+  recordAlltoallSplitSizes<at::cuda::CUDAEvent>(
+      w->trace_id_,
+      w->trace_reset_epoch_,
+      alltoallTensorListElementCounts(inputTensors),
+      alltoallTensorListElementCounts(outputTensors));
+  return work;
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::send(

@@ -4,6 +4,7 @@
 
 #include <memory>
 #include <mutex>
+#include <vector>
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
@@ -20,7 +21,7 @@ namespace c10d {
 // (minor when adding fields, major when changing existing fields)
 // Also update both JSON and Pickle dumps to make use of the newly defined
 // field(s).
-DEFINE_CONSTANT(version_val, "2.10")
+DEFINE_CONSTANT(version_val, "2.11")
 DEFINE_CONSTANT(entries_key, "entries")
 DEFINE_CONSTANT(nccl_comm_key, "nccl_comm_state")
 DEFINE_CONSTANT(comm_lib_version_key, "comm_lib_version")
@@ -39,6 +40,8 @@ DEFINE_CONSTANT(input_sizes_key, "input_sizes")
 DEFINE_CONSTANT(input_dtypes_key, "input_dtypes")
 DEFINE_CONSTANT(output_sizes_key, "output_sizes")
 DEFINE_CONSTANT(output_dtypes_key, "output_dtypes")
+DEFINE_CONSTANT(input_split_sizes_key, "input_split_sizes")
+DEFINE_CONSTANT(output_split_sizes_key, "output_split_sizes")
 DEFINE_CONSTANT(time_created_key, "time_created_ns")
 DEFINE_CONSTANT(duration_key, "duration_ms")
 DEFINE_CONSTANT(timeout_key, "timeout_ms")
@@ -56,6 +59,14 @@ DEFINE_CONSTANT(started_state, "started")
 DEFINE_CONSTANT(thread_id_key, "thread_id")
 DEFINE_CONSTANT(thread_name_key, "thread_name")
 #undef DEFINE_CONSTANT
+
+TORCH_API std::vector<int64_t> alltoallDim0SplitsToElementCounts(
+    const at::Tensor& tensor,
+    const std::vector<int64_t>& dim0_splits,
+    int64_t group_size);
+
+TORCH_API std::vector<int64_t> alltoallTensorListElementCounts(
+    const std::vector<at::Tensor>& tensors);
 
 // Write NCCL debug info to local disk or any storage users define.
 // There are some constraints we set for the debug info writer:
@@ -172,6 +183,8 @@ struct FlightRecorder {
     std::string thread_name_;
     bool retired_ = false; // is this work entry no longer in the workMetaList_?
                            // a retired but not completed event has timed out
+    std::vector<int64_t> input_split_sizes_;
+    std::vector<int64_t> output_split_sizes_;
 
     // Returns the traceback of current entry, in string form.
     // Note: `getTraceback` invokes `torch::symbolize`, which may need to
@@ -243,6 +256,12 @@ struct FlightRecorder {
       std::chrono::milliseconds timeout_ms,
       std::shared_ptr<ProcessGroupStatus> pg_status,
       bool isP2P);
+
+  TORCH_API void record_split_sizes(
+      std::optional<size_t> id,
+      std::optional<size_t> reset_epoch,
+      std::vector<int64_t> input_split_sizes,
+      std::vector<int64_t> output_split_sizes);
 
   TORCH_API void record_pg_ranks(
       const std::tuple<std::string, std::string>& pg_name,
@@ -334,6 +353,22 @@ struct FlightRecorder {
       bool includeStackTraces,
       bool onlyActive);
 };
+
+template <typename EventType>
+inline void recordAlltoallSplitSizes(
+    std::optional<uint64_t> trace_id,
+    std::optional<uint64_t> trace_reset_epoch,
+    std::vector<int64_t> in_counts,
+    std::vector<int64_t> out_counts) {
+  FlightRecorder<EventType>::get()->record_split_sizes(
+      trace_id ? std::optional<size_t>(static_cast<size_t>(*trace_id))
+               : std::nullopt,
+      trace_reset_epoch
+          ? std::optional<size_t>(static_cast<size_t>(*trace_reset_epoch))
+          : std::nullopt,
+      std::move(in_counts),
+      std::move(out_counts));
+}
 
 // Whether to include stack trace in the Flight Recorder trace (default true)
 static std::vector<std::string> TORCH_INCLUDE_STACK_TRACE = {

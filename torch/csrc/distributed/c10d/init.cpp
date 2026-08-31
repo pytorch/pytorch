@@ -1335,7 +1335,11 @@ Example:
       .def_readwrite("input_tensors", &::c10d::PreHookArgs::input_tensors)
       .def_readwrite("output_tensors", &::c10d::PreHookArgs::output_tensors)
       .def_readwrite("root", &::c10d::PreHookArgs::root)
-      .def_readwrite("op_id", &::c10d::PreHookArgs::op_id);
+      .def_readwrite("op_id", &::c10d::PreHookArgs::op_id)
+      .def_readwrite(
+          "output_split_sizes", &::c10d::PreHookArgs::output_split_sizes)
+      .def_readwrite(
+          "input_split_sizes", &::c10d::PreHookArgs::input_split_sizes);
 
   py::class_<::c10d::PostHookArgs>(module, "PostHookArgs")
       .def(py::init<>())

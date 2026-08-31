@@ -269,6 +269,23 @@ std::optional<typename FlightRecorder<EventType>::Entry> FlightRecorder<
 }
 
 template <typename EventType>
+void FlightRecorder<EventType>::record_split_sizes(
+    std::optional<size_t> id,
+    std::optional<size_t> reset_epoch,
+    std::vector<int64_t> input_split_sizes,
+    std::vector<int64_t> output_split_sizes) {
+  if (!enabled_ || !id || !reset_epoch) {
+    return;
+  }
+  std::lock_guard<std::mutex> guard(mutex_);
+  Entry* entry = &entries_.at(getIdxFromId(*id, *reset_epoch));
+  if (entry->id_ == *id && entry->reset_epoch_ == *reset_epoch) {
+    entry->input_split_sizes_ = std::move(input_split_sizes);
+    entry->output_split_sizes_ = std::move(output_split_sizes);
+  }
+}
+
+template <typename EventType>
 void FlightRecorder<EventType>::retire_id(
     std::optional<size_t> id,
     std::optional<size_t> reset_epoch,
@@ -452,6 +469,12 @@ const c10::List<c10::IValue> FlightRecorder<EventType>::getCollectiveTrace(
       output_dtypes_strs.emplace_back(c10::toString(output_dtype));
     }
     dict.insert(output_dtypes_key, output_dtypes_strs);
+    if (!e.input_split_sizes_.empty()) {
+      dict.insert(input_split_sizes_key, e.input_split_sizes_);
+    }
+    if (!e.output_split_sizes_.empty()) {
+      dict.insert(output_split_sizes_key, e.output_split_sizes_);
+    }
     if (e.time_discovered_completed_.has_value()) {
       dict.insert(state_key, completed_state);
     } else if (e.time_discovered_started_.has_value()) {
@@ -600,6 +623,12 @@ std::string FlightRecorder<EventType>::dump_json(
         output_dtypes_strs.emplace_back(c10::toString(output_dtype));
       }
       j[output_dtypes_key_str] = output_dtypes_strs;
+      if (!e.input_split_sizes_.empty()) {
+        j[input_split_sizes_key_str] = e.input_split_sizes_;
+      }
+      if (!e.output_split_sizes_.empty()) {
+        j[output_split_sizes_key_str] = e.output_split_sizes_;
+      }
       if (e.time_discovered_completed_.has_value()) {
         j[state_key_str] = completed_state_str;
       } else if (e.time_discovered_started_.has_value()) {

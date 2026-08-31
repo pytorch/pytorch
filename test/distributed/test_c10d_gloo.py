@@ -3275,7 +3275,7 @@ class ProcessGroupGlooFRTest(ProcessGroupGlooTest):
 
     def _verify_trace(self, t, is_json):
         ver = t["version"]
-        self.assertEqual(ver, "2.10")
+        self.assertEqual(ver, "2.11")
         pg_config = t["pg_config"]
         self.assertEqual(len(pg_config), 1)
         default_pg_info = pg_config["0"]
@@ -3378,6 +3378,33 @@ class ProcessGroupGlooFRTest(ProcessGroupGlooTest):
         self.assertEqual(last["output_dtypes"], ["Float"])
         self.assertEqual(last["timeout_ms"], 50000)
         self.assertEqual(last["collective_seq_id"] - first["collective_seq_id"], 9)
+
+    @requires_gloo()
+    def test_all_to_all_single_records_split_sizes(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts(group_name="0")
+        )
+        cols = 3
+        ws = self.world_size
+        input_splits = [self.rank + 1] * ws
+        output_splits = list(range(1, ws + 1))
+        inp = torch.ones(sum(input_splits), cols)
+        out = torch.empty(sum(output_splits), cols)
+        pg.all_to_all_single(out, inp, output_splits, input_splits).wait()
+        dumps = [
+            pickle.loads(torch._C._distributed_c10d._dump_fr_trace()),
+            json.loads(torch._C._distributed_c10d._dump_fr_trace_json()),
+        ]
+        for t in dumps:
+            a2a = [e for e in t["entries"] if e["profiling_name"] == "gloo:all_to_all"]
+            self.assertEqual(len(a2a), 1)
+            self.assertEqual(
+                a2a[0]["input_split_sizes"], [s * cols for s in input_splits]
+            )
+            self.assertEqual(
+                a2a[0]["output_split_sizes"], [s * cols for s in output_splits]
+            )
 
 
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):

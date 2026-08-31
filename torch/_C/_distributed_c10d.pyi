@@ -287,6 +287,8 @@ class PreHookArgs:
     output_tensors: list[Tensor]
     root: int
     op_id: int
+    output_split_sizes: list[int]
+    input_split_sizes: list[int]
 
 class PostHookArgs:
     name: HookOpName

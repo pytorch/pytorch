@@ -1255,7 +1255,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       bool async_op,
       int64_t root,
       std::vector<at::Tensor> input_tensors,
-      std::vector<at::Tensor> output_tensors) {
+      std::vector<at::Tensor> output_tensors,
+      std::vector<int64_t> output_split_sizes = {},
+      std::vector<int64_t> input_split_sizes = {}) {
     int64_t op_id = hookOpIdCounter_++;
     if (!preHooks_.empty()) {
       PreHookArgs args{
@@ -1264,7 +1266,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
           std::move(input_tensors),
           std::move(output_tensors),
           root,
-          op_id};
+          op_id,
+          std::move(output_split_sizes),
+          std::move(input_split_sizes)};
       for (auto& entry : preHooks_) {
         entry.second(args);
       }
@@ -1330,12 +1334,20 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       bool async_op,
       int64_t root,
       const at::Tensor& input_tensor,
-      const at::Tensor& output_tensor) {
+      const at::Tensor& output_tensor,
+      std::vector<int64_t> output_split_sizes = {},
+      std::vector<int64_t> input_split_sizes = {}) {
     if (preHooks_.empty() && postHooks_.empty()) {
       return 0;
     }
     return firePreHookImpl(
-        name, async_op, root, {input_tensor}, {output_tensor});
+        name,
+        async_op,
+        root,
+        {input_tensor},
+        {output_tensor},
+        std::move(output_split_sizes),
+        std::move(input_split_sizes));
   }
 
   int64_t firePreHook(HookOpName name, bool async_op, int64_t root) {

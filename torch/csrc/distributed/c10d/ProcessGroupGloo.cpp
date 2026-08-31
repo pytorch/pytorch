@@ -2448,6 +2448,10 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::all_to_all_single(
   c10d::checkSplitSizes(inputCounts, inputTensor, getSize());
   c10d::checkSplitSizes(outputCounts, outputTensor, getSize());
 
+  auto in_splits =
+      alltoallDim0SplitsToElementCounts(inputTensor, inputCounts, getSize());
+  auto out_splits =
+      alltoallDim0SplitsToElementCounts(outputTensor, outputCounts, getSize());
   const auto& device = outputTensor.device();
   c10::intrusive_ptr<AsyncAlltoallWork> work;
   auto tag = nextTag();
@@ -2478,6 +2482,11 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::all_to_all_single(
     invalidArgument(c10::str("unsupported device type ", device.type()));
   }
   enqueue(work);
+  recordAlltoallSplitSizes<c10::Event>(
+      work->trace_id_,
+      work->trace_reset_epoch_,
+      std::move(in_splits),
+      std::move(out_splits));
   return work;
 }
 
@@ -2705,6 +2714,11 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::alltoall(
   }
 
   enqueue(work);
+  recordAlltoallSplitSizes<c10::Event>(
+      work->trace_id_,
+      work->trace_reset_epoch_,
+      alltoallTensorListElementCounts(inputTensors),
+      alltoallTensorListElementCounts(outputTensors));
   return work;
 }
 

@@ -52,6 +52,8 @@ struct PreHookArgs {
   int64_t root = -1;
   // Correlates a pre-hook call with its matching post-hook call.
   int64_t op_id = 0;
+  std::vector<int64_t> output_split_sizes;
+  std::vector<int64_t> input_split_sizes;
 };
 
 using PreHook = std::function<void(const PreHookArgs&)>;

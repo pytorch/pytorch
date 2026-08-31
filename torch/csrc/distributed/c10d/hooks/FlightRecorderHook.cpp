@@ -77,6 +77,21 @@ bool isP2POp(HookOpName name) {
   return name == HookOpName::SEND || name == HookOpName::RECV;
 }
 
+std::vector<int64_t> alltoallSplitElementCounts(
+    const std::vector<at::Tensor>& tensors,
+    const std::vector<int64_t>& dim0_splits,
+    HookOpName name,
+    int64_t group_size) {
+  if (name == HookOpName::ALLTOALL) {
+    return alltoallTensorListElementCounts(tensors);
+  }
+  if (name != HookOpName::ALLTOALL_BASE || tensors.empty()) {
+    return {};
+  }
+  return alltoallDim0SplitsToElementCounts(
+      tensors.front(), dim0_splits, group_size);
+}
+
 // The dispatcher schema for these has a single tensor list because they
 // operate in place, so Ops.cpp fires the pre-hook with no output tensors and
 // the entry would carry no output sizes or dtypes at all. The analyzer matches
@@ -502,6 +517,7 @@ void FlightRecorderHook::onPre(const PreHookArgs& args) {
   size_t p2p_seq = 0;
   std::tuple<std::string, std::string> pg_name;
   int rank = 0;
+  int group_size = 0;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!pg_) {
@@ -514,6 +530,7 @@ void FlightRecorderHook::onPre(const PreHookArgs& args) {
     pg_status_->lastEnqueuedWorkName = std::string(hookOpName(args.name));
     pg_name = std::make_tuple(pg_->getGroupName(), pg_->getGroupDesc());
     rank = pg_->getRank();
+    group_size = pg_->getSize();
   }
 
   // Recording happens outside mutex_ because recordWithResetEnabled() gathers
@@ -543,6 +560,20 @@ void FlightRecorderHook::onPre(const PreHookArgs& args) {
       target.timeout,
       pg_status_,
       is_p2p);
+
+  if (args.name == HookOpName::ALLTOALL ||
+      args.name == HookOpName::ALLTOALL_BASE) {
+    recorder->record_split_sizes(
+        op.trace_id.id,
+        op.trace_id.reset_epoch,
+        alltoallSplitElementCounts(
+            args.input_tensors, args.input_split_sizes, args.name, group_size),
+        alltoallSplitElementCounts(
+            args.output_tensors,
+            args.output_split_sizes,
+            args.name,
+            group_size));
+  }
 
   std::lock_guard<std::mutex> lock(mutex_);
   if (!pg_) {

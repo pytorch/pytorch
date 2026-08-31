@@ -283,6 +283,7 @@ class EntryState:
         total_numel: tuple[int, int] | None = None,
         errors: set[tuple[int, MatchInfo]] | None = None,
         missing_ranks: set[int] | None = None,
+        split_mismatches: list[tuple[int, int, int, int]] | None = None,
     ) -> None:
         logger.info(
             logger_msg,
@@ -304,7 +305,13 @@ class EntryState:
         logger.info("world size: %d", len(self.expected_ranks))
         logger.info("expected ranks: %s", self.expected_ranks)
         logger.info("collective state: %s", self.collective_state)
-        if errors:
+        if split_mismatches:
+            if errors:
+                self.errors = errors
+            for src, dst, sent, recv in split_mismatches:
+                logger.info("  rank %s send -> rank %s: %s elements", src, dst, sent)
+                logger.info("  rank %s recv <- rank %s: %s elements", dst, src, recv)
+        elif errors:
             self.errors = errors
             error_msg = ", ".join(
                 f"Culprit rank {error[0]}; {str(error[1])}" for error in errors

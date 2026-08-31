@@ -4,6 +4,50 @@
 
 namespace c10d {
 
+std::vector<int64_t> alltoallDim0SplitsToElementCounts(
+    const at::Tensor& tensor,
+    const std::vector<int64_t>& dim0_splits,
+    int64_t group_size) {
+  if (!tensor.defined() || group_size <= 0 || tensor.dim() < 1) {
+    return {};
+  }
+  const int64_t row = tensor.size(0) ? tensor.numel() / tensor.size(0) : 0;
+  std::vector<int64_t> counts;
+  counts.reserve(group_size);
+  if (dim0_splits.empty()) {
+    if (tensor.size(0) % group_size != 0) {
+      return {};
+    }
+    const int64_t even = tensor.size(0) / group_size;
+    for (int64_t i = 0; i < group_size; ++i) {
+      counts.push_back(even * row);
+    }
+    return counts;
+  }
+  if (static_cast<int64_t>(dim0_splits.size()) != group_size) {
+    return {};
+  }
+  int64_t dim0_sum = 0;
+  for (int64_t s : dim0_splits) {
+    dim0_sum += s;
+    counts.push_back(s * row);
+  }
+  if (dim0_sum != tensor.size(0)) {
+    return {};
+  }
+  return counts;
+}
+
+std::vector<int64_t> alltoallTensorListElementCounts(
+    const std::vector<at::Tensor>& tensors) {
+  std::vector<int64_t> counts;
+  counts.reserve(tensors.size());
+  for (const auto& t : tensors) {
+    counts.push_back(t.defined() ? t.numel() : 0);
+  }
+  return counts;
+}
+
 void DebugInfoWriter::write(const std::string& trace) {
   std::string filename = filename_;
   if (enable_dynamic_filename_) {

@@ -5947,7 +5947,7 @@ class NCCLTraceTestBase(MultiProcessTestCase):
 class NCCLTraceTest(NCCLTraceTestBase):
     def _verify_trace(self, t, include_collectives, timing_enabled, is_json):
         ver = t["version"]
-        self.assertEqual(ver, "2.10")
+        self.assertEqual(ver, "2.11")
         comm_lib_version = t["comm_lib_version"]
         torch_comm_lib_version = torch.cuda.nccl.version()
         self.assertEqual(
@@ -6195,6 +6195,36 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertEqual(last["output_dtypes"], ["Float"])
         self.assertEqual(last["timeout_ms"], 600000)
         self.assertEqual(last["collective_seq_id"] - first["collective_seq_id"], 9)
+        dist.destroy_process_group()
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_all_to_all_single_records_split_sizes(self):
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
+        pg = self._create_process_group_nccl()
+        device = self.local_device
+        cols = 3
+        ws = self.world_size
+        input_splits = [self.rank + 1] * ws
+        output_splits = list(range(1, ws + 1))
+        inp = torch.ones(sum(input_splits), cols, device=device)
+        out = torch.empty(sum(output_splits), cols, device=device)
+        pg.all_to_all_single(out, inp, output_splits, input_splits).wait()
+        torch.cuda.synchronize(device=device)
+        dumps = [
+            pickle.loads(torch._C._distributed_c10d._dump_nccl_trace()),
+            json.loads(torch._C._distributed_c10d._dump_nccl_trace_json()),
+        ]
+        for t in dumps:
+            a2a = [e for e in t["entries"] if e["profiling_name"] == "nccl:all_to_all"]
+            self.assertEqual(len(a2a), 1)
+            self.assertEqual(
+                a2a[0]["input_split_sizes"], [s * cols for s in input_splits]
+            )
+            self.assertEqual(
+                a2a[0]["output_split_sizes"], [s * cols for s in output_splits]
+            )
         dist.destroy_process_group()
 
     @requires_nccl()
