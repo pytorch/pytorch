@@ -3886,6 +3886,24 @@ def error_inputs_max_pool1d(op_info, device, **kwargs):
                                      kwargs={'kernel_size': 5, 'stride': 1, 'padding': 0, 'dilation': 1}),
                          error_regex=error_msg)
 
+        # error inputs for invalid output size, with a kernel past INT32_MAX:
+        # div_rtn() used to floor-divide in `int`, wrapping the negative output
+        # size positive and letting the kernel read out of bounds.
+        for kernel_size in (2 ** 31 - 1, 2 ** 31, 2147483697):
+            yield ErrorInput(SampleInput(make_arg((2, 10, 4)),
+                                         kwargs={'kernel_size': kernel_size, 'stride': kernel_size,
+                                                 'padding': 0, 'dilation': kernel_size, 'ceil_mode': True}),
+                             error_regex='Invalid computed output size: -')
+        yield ErrorInput(SampleInput(make_arg((2, 10, 4)),
+                                     kwargs={'kernel_size': 2 ** 63 - 1, 'stride': 2 ** 63 - 1}),
+                         error_regex='Invalid computed output size: 0')
+
+        # error inputs when dilation * (kernel_size - 1) + 1 overflows int64
+        yield ErrorInput(SampleInput(make_arg((1, 2, 3)),
+                                     kwargs={'kernel_size': 8608480567731124087, 'padding': 1250999896764,
+                                             'dilation': 1250999896764, 'ceil_mode': True}),
+                         error_regex='effective kernel size overflows')
+
         # error inputs when kernel_size=0
         error_msg = 'kernel_size must be greater than zero'
         yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 0}),
