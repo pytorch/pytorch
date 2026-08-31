@@ -2,7 +2,6 @@
 
 #ifdef USE_C10D_NCCL
 #include <fmt/format.h>
-#include <mutex>
 #include <thread>
 #include <vector>
 

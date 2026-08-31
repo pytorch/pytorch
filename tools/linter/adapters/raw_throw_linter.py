@@ -359,7 +359,12 @@ def replacement_macro(path: str) -> str:
     posix = path.replace("\\", "/")
     if "torch/csrc/inductor/aoti_runtime/" in posix:
         return "AOTI_RUNTIME_CHECK"
-    if "torch/headeronly/" in posix or "torch/csrc/stable/" in posix:
+    if (
+        "torch/headeronly/" in posix
+        or "torch/csrc/stable/" in posix
+        # Installed, and deliberately depends on torch/headeronly only.
+        or posix.endswith("torch/csrc/utils/generated_serialization_types.h")
+    ):
         return "STD_TORCH_CHECK"
     return "TORCH_CHECK"
 

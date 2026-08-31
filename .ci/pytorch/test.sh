@@ -231,6 +231,13 @@ if [[ "$TEST_CONFIG" == 'slow' ]]; then
   export PYTORCH_TEST_SKIP_FAST=1
 fi
 
+if [[ "$TEST_CONFIG" == 'periodic' ]]; then
+  export PYTORCH_TEST_WITH_PERIODIC=1
+  # Allows @periodic tests that are also marked slow (@slowTest or
+  # slow-tests.json) to run.
+  export PYTORCH_TEST_WITH_SLOW=1
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *slow-gradcheck* ]]; then
   export PYTORCH_TEST_WITH_SLOW_GRADCHECK=1
   # TODO: slow gradcheck tests run out of memory a lot recently, so setting this
@@ -542,7 +549,7 @@ _run_fabric_handle_tests() {
   time python test/run_test.py --include distributed/test_symmetric_memory.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_nvshmem.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_shmem_triton.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
-  time python test/run_test.py --include distributed/test_nccl.py -k NCCLSymmetricMemoryTest $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include distributed/test_nccl.py -k "NCCLSymmetricMemoryTest or NCCLSymmMemWatchdogTest" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include inductor/test_symm_mem_registry.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include inductor/test_low_contention_collectives.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
@@ -2228,6 +2235,9 @@ test_executorch() {
 test_torchtitan() {
   install_torchao
   install_torchcomms
+  # muse_glimmer and kimi_k2_7 import torchvision at model-build time. Build it
+  # from the pinned commit rather than PyPI so it links the CI-built torch.
+  install_torchvision
 
   local torchtitan_commit
   torchtitan_commit=$(get_pinned_commit torchtitan)
@@ -2563,6 +2573,10 @@ elif [[ "${TEST_CONFIG}" == *dynamo_wrapped* ]]; then
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_aten
   fi
+elif [[ "${TEST_CONFIG}" == periodic ]]; then
+  # Sweeps the default test files; run_test.py selects the @periodic tests.
+  install_torchvision
+  test_python_shard "$SHARD_NUMBER"
 elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
   install_torchvision
   test_python_shard "$SHARD_NUMBER"

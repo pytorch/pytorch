@@ -18,7 +18,7 @@ import warnings
 from functools import wraps
 from io import StringIO
 from tempfile import mkdtemp, mkstemp
-from types import FunctionType, ModuleType
+from types import ModuleType
 from typing import cast, overload, ParamSpec, TYPE_CHECKING, TypeVar
 from warnings import WarningMessage
 
@@ -129,15 +129,21 @@ def assert_(val: object, msg: _Message = "") -> None:
         raise AssertionError(smsg)
 
 
-def gisnan(x: object) -> object:
+def _callable_name(func: Callable[..., object]) -> str:
+    # These helpers accept any callable; builtins and functools.partial objects
+    # do not necessarily have __name__.
+    return getattr(func, "__name__", repr(func))
+
+
+def gisnan(x: object) -> ndarray:
     return np.isnan(x)  # pyrefly: ignore[missing-attribute]
 
 
-def gisfinite(x: object) -> object:
+def gisfinite(x: object) -> ndarray:
     return np.isfinite(x)  # pyrefly: ignore[missing-attribute]
 
 
-def gisinf(x: object) -> object:
+def gisinf(x: object) -> ndarray:
     return np.isinf(x)  # pyrefly: ignore[missing-attribute]
 
 
@@ -1019,7 +1025,6 @@ def assert_array_almost_equal(
         # torch._numpy.ndarray methods/operators are dynamic, so the ndarray
         # operations below are invisible to pyrefly.
         try:
-            # pyrefly: ignore[bad-argument-type]
             if npany(gisinf(x)) or npany(gisinf(y)):
                 xinfid = gisinf(x)
                 yinfid = gisinf(y)
@@ -1711,9 +1716,9 @@ def assert_warns(
     if not args:
         return _assert_warns_context(warning_class)
 
-    func = cast(FunctionType, args[0])
+    func = cast("Callable[..., object]", args[0])
     args = args[1:]
-    with _assert_warns_context(warning_class, name=func.__name__):
+    with _assert_warns_context(warning_class, name=_callable_name(func)):
         return func(*args, **kwargs)
 
 
@@ -1764,14 +1769,16 @@ def assert_no_warnings(*args: object, **kwargs: object) -> object:
     if not args:
         return _assert_no_warnings_context()
 
-    func = cast(FunctionType, args[0])
+    func = cast("Callable[..., object]", args[0])
     args = args[1:]
-    with _assert_no_warnings_context(name=func.__name__):
+    with _assert_no_warnings_context(name=_callable_name(func)):
         return func(*args, **kwargs)
 
 
 def _gen_alignment_data(
-    dtype: object = float32, type: str = "binary", max_size: int = 24
+    dtype: object = float32,
+    type: Literal["unary", "binary"] = "binary",
+    max_size: int = 24,
 ) -> Iterator[tuple[object, ...]]:
     """
     generator producing data with different alignment and offsets
@@ -2062,10 +2069,10 @@ class clear_and_catch_warnings(warnings.catch_warnings):
                 mod.__warningregistry__.update(self._warnreg_copies[mod])
 
 
-_Suppression = tuple[
+_Suppression: TypeAlias = tuple[
     type[Warning],
     str,
-    "re.Pattern[str]",
+    re.Pattern[str],
     ModuleType | None,
     list[WarningMessage] | None,
 ]
@@ -2147,6 +2154,12 @@ class suppress_warnings:
             # do something which causes a warning in np.ma.core
             pass
     """
+
+    # Established by __enter__ and read by __exit__ / _showwarning.
+    _tmp_suppressions: list[_Suppression]
+    _tmp_modules: set[ModuleType]
+    _forwarded: set[tuple[object, ...]]
+    log: list[WarningMessage]
 
     def __init__(self, forwarding_rule: _ForwardingRule = "always") -> None:
         self._entered = False
@@ -2287,11 +2300,11 @@ class suppress_warnings:
         warnings.filters = self._filters[:]
 
         self._entered = True
-        self._tmp_suppressions: list[_Suppression] = []
-        self._tmp_modules: set[ModuleType] = set()
-        self._forwarded: set[object] = set()
+        self._tmp_suppressions = []
+        self._tmp_modules = set()
+        self._forwarded = set()
 
-        self.log: list[WarningMessage] = []  # reset global log
+        self.log = []  # reset global log
 
         for cat, mess, _, mod, log in self._suppressions:
             if log is not None:
@@ -2498,9 +2511,9 @@ def assert_no_gc_cycles(*args: object, **kwargs: object) -> object:
     if not args:
         return _assert_no_gc_cycles_context()
 
-    func = cast(FunctionType, args[0])
+    func = cast("Callable[..., object]", args[0])
     args = args[1:]
-    with _assert_no_gc_cycles_context(name=func.__name__):
+    with _assert_no_gc_cycles_context(name=_callable_name(func)):
         func(*args, **kwargs)
 
 
@@ -2527,10 +2540,7 @@ def requires_memory(free_bytes: int) -> Callable[[Callable[_P, _R]], Callable[_P
     import pytest  # pyrefly: ignore[missing-import]
 
     def decorator(func: Callable[_P, _R]) -> Callable[_P, _R]:
-        # The except branch ends in pytest.xfail(), which is NoReturn; pytest is
-        # not resolvable here, so the fall-through looks like a missing return.
         @wraps(func)
-        # pyrefly: ignore[bad-return]
         def wrapper(*a: _P.args, **kw: _P.kwargs) -> _R:
             msg = check_free_memory(free_bytes)
             if msg is not None:
@@ -2541,6 +2551,7 @@ def requires_memory(free_bytes: int) -> Callable[[Callable[_P, _R]], Callable[_P
             except MemoryError:
                 # Probably ran out of memory regardless: don't regard as failure
                 pytest.xfail("MemoryError raised")
+                raise
 
         return wrapper
 
