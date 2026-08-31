@@ -2180,18 +2180,10 @@ class TestForeachMMDevice(TestCase):
         _FOREACH_MM_SHAPES,
         name_fn=lambda label, shapes: label,
     )
-    def test_foreach_mm_cpu(self, label, shapes):
-        self._check(shapes, torch.float32, "cpu")
-
-    @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
-    @parametrize(
-        "label,shapes",
-        _FOREACH_MM_SHAPES,
-        name_fn=lambda label, shapes: label,
-    )
-    @parametrize("dtype", [torch.bfloat16, torch.float32])
-    def test_foreach_mm_cuda(self, label, shapes, dtype):
-        self._check(shapes, dtype, "cuda")
+    @dtypes(torch.bfloat16, torch.float32)
+    @dtypesIfCPU(torch.float32)
+    def test_foreach_mm(self, device, dtype, label, shapes):
+        self._check(shapes, dtype, device)
 
     def test_foreach_mm_gradcheck(self):
         G = 4
