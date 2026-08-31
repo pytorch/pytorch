@@ -538,18 +538,18 @@ static PyObject* pyobject_redispatch_vectorcall(
   auto* self = reinterpret_cast<PyObjectRedispatchFunc*>(callable);
   Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
   Py_ssize_t nkwargs = kwnames == nullptr ? 0 : PyTuple_GET_SIZE(kwnames);
+  if (nargs == 0) {
+    PyErr_SetString(
+        PyExc_TypeError,
+        "redispatch() expected redispatch(keyset, *args, **kwargs)");
+    return nullptr;
+  }
   bool skip_torch_function = torch::peek_should_skip_torch_function();
   if (C10_UNLIKELY(
           !skip_torch_function &&
           pyobject_dispatch_has_torch_function(args, nargs, nkwargs, 1))) {
     return PyObject_Vectorcall(
         self->cpp_redispatch_fn, args, static_cast<size_t>(nargs), kwnames);
-  }
-  if (nargs == 0) {
-    PyErr_SetString(
-        PyExc_TypeError,
-        "redispatch() expected redispatch(keyset, *args, **kwargs)");
-    return nullptr;
   }
 
   PyObject* raw_key_set = PyObject_CallMethod(args[0], "raw_repr", nullptr);

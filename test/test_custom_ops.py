@@ -889,6 +889,17 @@ class TestCustomOp(CustomOpTestCaseBase):
         ):
             op._pyobj_dispatcher.redispatch()
 
+        class RedispatchMode(torch.overrides.TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                return torch.overrides.redispatch_function(func, types, args, kwargs)
+
+        with RedispatchMode():
+            with self.assertRaisesRegex(
+                TypeError,
+                "redispatch\\(\\) expected redispatch\\(keyset, \\*args, \\*\\*kwargs\\)",
+            ):
+                op._pyobj_dispatcher.redispatch()
+
     @skipIfTorchDynamo("PyObject dispatch test is eager-only")
     def test_pyobject_dispatch_respects_torch_function_mode(self):
         import torch._refs
