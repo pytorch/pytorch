@@ -131,6 +131,9 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 TEST_CUDAMALLOCASYNC = TEST_CUDA and (
     torch.cuda.get_allocator_backend() == "cudaMallocAsync"
 )
+TEST_CUDA_NATIVE_ALLOCATOR = TEST_CUDA and (
+    torch.cuda.get_allocator_backend() == "native"
+)
 TEST_LARGE_TENSOR = TEST_CUDA
 TEST_MEDIUM_TENSOR = TEST_CUDA
 TEST_BF16 = False
@@ -5474,6 +5477,171 @@ exit(2)
                 g.begin_capture_to_if_node(pred)
                 x.add_(1.0)
                 g.end_capture_to_conditional_node()
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for conditional graph nodes",
+    )
+    @unittest.skipUnless(
+        TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
+    )
+    @serialTest()
+    def test_cuda_graph_conditional_allows_nested_body_free_in_ancestor(self):
+        torch.cuda.empty_cache()
+        pred = torch.ones((), device="cuda", dtype=torch.bool)
+        g = torch.cuda.CUDAGraph()
+        stream = torch.cuda.Stream()
+
+        with torch.cuda.stream(stream):
+            g.capture_begin()
+            g.begin_capture_to_if_node(pred)
+            g.begin_capture_to_if_node(pred)
+            nested = torch.ones(64, device="cuda")
+            g.end_capture_to_conditional_node()
+            child_output = nested + 1
+            del nested
+            g.end_capture_to_conditional_node()
+            output = child_output + 1
+            del child_output
+            g.capture_end()
+
+        g.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(output, torch.full_like(output, 3))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for conditional graph nodes",
+    )
+    @unittest.skipUnless(
+        TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
+    )
+    @serialTest()
+    def test_cuda_graph_conditional_rejects_parent_free_in_body(self):
+        torch.cuda.empty_cache()
+        pred = torch.zeros((), device="cuda", dtype=torch.bool)
+        g = torch.cuda.CUDAGraph()
+        stream = torch.cuda.Stream()
+
+        with torch.cuda.stream(stream):
+            g.capture_begin()
+            parent = torch.empty(1024 * 1024, device="cuda")
+            g.begin_capture_to_if_node(pred)
+            del parent
+            with self.assertRaisesRegex(
+                RuntimeError, "invalid conditional capture scope"
+            ):
+                g.end_capture_to_conditional_node()
+            with self.assertRaisesRegex(
+                RuntimeError, "invalid conditional capture scope"
+            ):
+                g.capture_end()
+            with self.assertRaisesRegex(
+                RuntimeError, r"capture_end\(\) must have been called"
+            ):
+                g.instantiate()
+        g.reset()
+
+        # The failed capture must not poison the allocator or leak its graph.
+        recovery = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(recovery, stream=stream):
+            recovered = torch.ones(1, device="cuda") + 1
+        recovery.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(recovered, torch.full_like(recovered, 2))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for conditional graph nodes",
+    )
+    @unittest.skipUnless(
+        TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
+    )
+    @serialTest()
+    def test_cuda_graph_conditional_tracks_auxiliary_stream_allocations(self):
+        torch.cuda.empty_cache()
+        pred = torch.ones((), device="cuda", dtype=torch.bool)
+        g = torch.cuda.CUDAGraph()
+        stream = torch.cuda.Stream()
+        auxiliary_stream = torch.cuda.Stream()
+
+        with torch.cuda.stream(stream):
+            g.capture_begin()
+            g.begin_capture_to_if_node(pred)
+            child_stream = torch.cuda.current_stream()
+            auxiliary_stream.wait_stream(child_stream)
+            with torch.cuda.stream(auxiliary_stream):
+                parent_value = torch.ones(64, device="cuda")
+                sibling_value = torch.ones(64, device="cuda")
+            child_stream.wait_stream(auxiliary_stream)
+            g.end_capture_to_conditional_node()
+
+            output = parent_value + 1
+            del parent_value
+            g.begin_capture_to_if_node(pred)
+            del sibling_value
+            with self.assertRaisesRegex(
+                RuntimeError, "invalid conditional capture scope"
+            ):
+                g.end_capture_to_conditional_node()
+            with self.assertRaisesRegex(
+                RuntimeError, "invalid conditional capture scope"
+            ):
+                g.capture_end()
+        del output
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(TEST_WITH_ROCM, "CUDA-specific capture ID regression")
+    @unittest.skipUnless(
+        TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
+    )
+    @serialTest()
+    def test_graph_allocator_free_after_auxiliary_capture_invalidation(self):
+        torch.cuda.empty_cache()
+        g = torch.cuda.CUDAGraph()
+        capture_stream = torch.cuda.Stream()
+        auxiliary_stream = torch.cuda.Stream()
+
+        torch.cuda.synchronize()
+        with torch.cuda.stream(capture_stream):
+            g.capture_begin()
+            root = torch.ones((), device="cuda")
+            auxiliary_stream.wait_stream(capture_stream)
+            with torch.cuda.stream(auxiliary_stream):
+                temporary = root + 1
+                with self.assertRaises(RuntimeError):
+                    temporary.item()
+                # Destruction on an invalidated captured stream must not throw.
+                del temporary
+            with self.assertRaises(RuntimeError):
+                g.capture_end()
+        del root
+        g.reset()
+
+        # Invalidated capture metadata must not poison the next capture.
+        recovery = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(recovery, stream=capture_stream):
+            recovered = torch.ones(1, device="cuda") + 1
+        recovery.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(recovered, torch.full_like(recovered, 2))
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
