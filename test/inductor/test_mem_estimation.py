@@ -25,6 +25,11 @@ def tensor_storage_id(tensor):
     return tensor._typed_storage()._cdata
 
 
+def make_device_filter(device):
+    dev_type = torch.device(device).type
+    return lambda d: d.type == dev_type
+
+
 class FakeTensorMemoryProfilerMode(TorchDispatchMode):
     def __init__(self, device_filter: Callable[[torch.device], bool] | None = None):
         # counter of storage ids to live references
@@ -175,9 +180,7 @@ class TestMemoryTracker(InductorTestCase):
 
     def test_memory_tracker_original_order(self, device):
         """Test that MemoryTracker works correctly with original scheduling order and matches runtime profiling."""
-
-        dev_type = torch.device(device).type
-        df = lambda device: device.type == dev_type
+        device_filter = make_device_filter(device)
 
         def create_inputs_and_weights():
             """Create inputs and weights on device."""
@@ -201,7 +204,7 @@ class TestMemoryTracker(InductorTestCase):
             fx_graph = make_fx(fn)(x, w1, w2)
 
             # Test MemoryTracker with original order
-            memory_tracker = MemoryTracker(fx_graph.graph, device_filter=df)
+            memory_tracker = MemoryTracker(fx_graph.graph, device_filter=device_filter)
 
             # Schedule nodes in original order
             compute_nodes = [
@@ -216,7 +219,7 @@ class TestMemoryTracker(InductorTestCase):
             memory_tracker_peak = memory_tracker.get_current_memory_bytes()
 
             # Compare with runtime profiling using FakeTensorMemoryProfilerMode
-            profiler = FakeTensorMemoryProfilerMode(device_filter=df)
+            profiler = FakeTensorMemoryProfilerMode(device_filter=device_filter)
 
             with profiler:
                 x_runtime, w1_runtime, w2_runtime = create_inputs_and_weights()
@@ -235,9 +238,7 @@ class TestMemoryTracker(InductorTestCase):
 
     def test_memory_tracker_different_scheduling(self, device):
         """Test that different scheduling orders produce different memory usage patterns."""
-
-        dev_type = torch.device(device).type
-        df = lambda device: device.type == dev_type
+        device_filter = make_device_filter(device)
 
         def foo(primals_1):
             zeros = torch.zeros_like(primals_1)  # Create zeros tensor
@@ -263,7 +264,7 @@ class TestMemoryTracker(InductorTestCase):
 
             # Test original order: zeros_like, add, sum
             # zeros gets freed after sum (last use of zeros)
-            memory_tracker1 = MemoryTracker(fx_graph.graph, device_filter=df)
+            memory_tracker1 = MemoryTracker(fx_graph.graph, device_filter=device_filter)
             memory_profile1 = []
             initial_mem = memory_tracker1.get_current_memory_bytes()
 
@@ -276,7 +277,7 @@ class TestMemoryTracker(InductorTestCase):
 
             # Test different order: zeros_like, sum, add
             # zeros gets freed after add (last use of zeros in new order)
-            memory_tracker2 = MemoryTracker(fx_graph.graph, device_filter=df)
+            memory_tracker2 = MemoryTracker(fx_graph.graph, device_filter=device_filter)
             memory_profile2 = []
 
             # Alternative schedule: change which operation is the last use of zeros
