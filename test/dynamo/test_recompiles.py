@@ -6,9 +6,12 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo import config as dc
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class RecompileTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_automatic_dynamic_reduce_recompiles(self):
         # Test the counterfactual, lots of recompiles without this config
         def foo(x, y):
@@ -586,6 +589,41 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(counter.frame_count, 1)
         apply_patches(f, x, [("c", 3), ("d", 4)])
         self.assertEqual(counter.frame_count, 1)
+
+    def test_out_variant_does_not_overrecompile(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/135859.
+        # The out= variants of max/min/topk used to recompile on every new input
+        # shape because their out overloads (e.g. aten.max.dim_max) lacked a meta
+        # function, so dynamic shapes were not propagated to the out tensors.
+        # They should now recompile exactly once, like the functional variant.
+        def count_recompiles(fn):
+            cnt = torch._dynamo.testing.CompileCounter()
+            opt = torch.compile(fn, backend=cnt, dynamic=None)
+            for n in range(4, 10):
+                opt(torch.randn(n, 8))
+            return cnt.frame_count
+
+        def max_out(x):
+            values = x.new_empty(x.shape[0])
+            indices = x.new_empty(x.shape[0], dtype=torch.long)
+            torch.max(x, dim=1, out=(values, indices))
+            return values, indices
+
+        def min_out(x):
+            values = x.new_empty(x.shape[0])
+            indices = x.new_empty(x.shape[0], dtype=torch.long)
+            torch.min(x, dim=1, out=(values, indices))
+            return values, indices
+
+        def topk_out(x):
+            values = x.new_empty((x.shape[0], 3))
+            indices = x.new_empty((x.shape[0], 3), dtype=torch.long)
+            torch.topk(x, 3, dim=1, out=(values, indices))
+            return values, indices
+
+        for out_fn in (max_out, min_out, topk_out):
+            torch._dynamo.reset()
+            self.assertEqual(count_recompiles(out_fn), 2)
 
 
 if __name__ == "__main__":

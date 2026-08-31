@@ -78,6 +78,8 @@ from ..source import (
     GlobalStateSource,
     ImportSource,
     SyntheticLocalSource,
+    TensorProperty,
+    TensorPropertySource,
 )
 from ..utils import (
     _is_tensorify_enabled,
@@ -91,7 +93,7 @@ from ..utils import (
     unpack_iterable,
     unwrap_if_wrapper,
 )
-from .base import typestr, VariableTracker
+from .base import AsPythonConstantNotImplementedError, typestr, VariableTracker
 from .ctx_manager import (
     AutocastModeVariable,
     ProfilerContextVariable,
@@ -105,7 +107,7 @@ from .functions import (
     NestedUserFunctionVariable,
     UserFunctionVariable,
 )
-from .lists import ListVariable, TupleVariable
+from .lists import ListVariable, SizeVariable, TupleVariable
 from .object_protocol import vt_is_iterable
 from .script_object import CustomClassObjectVariable
 from .torch_function import (
@@ -647,7 +649,7 @@ class BaseTorchVariable(VariableTracker):
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         return hash(self.value), False
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         from .object_protocol import object_richcompare
@@ -1110,7 +1112,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     raise AssertionError(
                         "Expected first argument to accumulate_grad_ to be a tensor"
                     )
-                variable_grad = variable.getattro_impl(tx, "grad")
+                variable_grad = variable.tp_getattro_impl(tx, "grad")
                 updated_grad = tx.inline_user_function_return(
                     VariableTracker.build(tx, polyfills.accumulate_grad),
                     [variable, variable_grad, new_grad],
@@ -1976,6 +1978,150 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 list(args),
                 kwargs,
             )
+
+        @register(torch._C._infer_size)
+        def handle_infer_size(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker:
+            if kwargs:
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=["_infer_size() takes no keyword arguments"],
+                )
+            if len(args) != 2:
+                raise_observed_exception(
+                    RuntimeError,
+                    tx,
+                    args=["expected exactly 2 arguments"],
+                )
+
+            arg1, arg2 = args
+            if not isinstance(arg1, SizeVariable):
+                raise_observed_exception(
+                    RuntimeError,
+                    tx,
+                    args=["expected a torch.Size as argument 1"],
+                )
+            if not isinstance(arg2, SizeVariable):
+                raise_observed_exception(
+                    RuntimeError,
+                    tx,
+                    args=["expected a torch.Size as argument 2"],
+                )
+
+            def normalize_size(size: SizeVariable) -> SizeVariable:
+                items: list[VariableTracker] = []
+
+                def normalize_concrete_item(value: Any) -> VariableTracker:
+                    try:
+                        normalized = torch._C._infer_size(
+                            torch.Size([value]), torch.Size([1])
+                        )[0]
+                    except (TypeError, ValueError) as exc:
+                        raise_observed_exception(
+                            type(exc),
+                            tx,
+                            args=list(exc.args),
+                        )
+                    return ConstantVariable.create(normalized)
+
+                for item in size.items:
+                    if item.is_python_constant():
+                        # Mixed symbolic/concrete sizes cannot be materialized
+                        # below, so validate each concrete item through the C
+                        # binding before taking the symbolic fallback.
+                        items.append(normalize_concrete_item(item.as_python_constant()))
+                    elif isinstance(item, TensorVariable):
+                        if (
+                            item.dtype is None
+                            or item.dtype.is_floating_point
+                            or item.dtype.is_complex
+                            or not item.valid_size()
+                            or not torch.fx.experimental.symbolic_shapes.guard_or_false(
+                                product(item.size) == 1
+                            )
+                        ):
+                            raise_observed_exception(
+                                TypeError,
+                                tx,
+                                args=[
+                                    "torch.Size() takes an iterable of 'int' "
+                                    f"(item {len(items)} is 'Tensor')"
+                                ],
+                            )
+                        if item.dtype is torch.uint64:
+                            unimplemented(
+                                gb_type="Data-dependent uint64 torch.Size element in torch._C._infer_size",
+                                context="torch.uint64 tensor-backed size",
+                                explanation="Dynamo cannot safely validate that a data-dependent "
+                                "torch.uint64 value fits in torch.Size's signed int64 range.",
+                                hints=[*graph_break_hints.SUPPORTABLE],
+                            )
+                        if item.dtype is torch.bool:
+                            item = item.call_method(
+                                tx,
+                                "to",
+                                [ConstantVariable.create(torch.int64)],
+                                {},
+                            )
+                        items.append(item.nb_index_impl(tx))
+                    elif isinstance(item, SymNodeVariable):
+                        node = item.sym_num.node
+                        expr = node.expr
+                        # Bare tensor dimensions already fit in signed int64;
+                        # preserve them symbolically instead of specializing.
+                        is_tensor_size = expr.is_Symbol and any(
+                            isinstance(source, TensorPropertySource)
+                            and source.prop is TensorProperty.SIZE
+                            for source in node.shape_env.var_to_sources.get(expr, ())
+                        )
+                        if is_tensor_size:
+                            items.append(item)
+                        elif torch.fx.experimental.symbolic_shapes.has_guarding_hint(
+                            item.sym_num
+                        ):
+                            items.append(
+                                normalize_concrete_item(
+                                    item.nb_index_impl(tx).as_python_constant()
+                                )
+                            )
+                        else:
+                            unimplemented(
+                                gb_type="Unhinted data-dependent torch.Size element in torch._C._infer_size",
+                                context=f"symbolic size: {item.sym_num}",
+                                explanation="Dynamo cannot safely validate that a data-dependent "
+                                "torch.Size element fits in the signed int64 range.",
+                                hints=[*graph_break_hints.SUPPORTABLE],
+                            )
+                    else:
+                        items.append(item)
+                return SizeVariable(items)
+
+            arg1 = normalize_size(arg1)
+            arg2 = normalize_size(arg2)
+
+            try:
+                size1 = torch.Size(i.as_python_constant() for i in arg1.items)
+                size2 = torch.Size(i.as_python_constant() for i in arg2.items)
+            except AsPythonConstantNotImplementedError:
+                return tx.inline_user_function_return(
+                    VariableTracker.build(tx, polyfills.infer_size),
+                    [arg1, arg2],
+                    {},
+                )
+
+            try:
+                return VariableTracker.build(tx, torch._C._infer_size(size1, size2))
+            except RuntimeError as exc:
+                raise_observed_exception(
+                    RuntimeError,
+                    tx,
+                    args=list(exc.args),
+                )
 
         @register(torch._assert)
         def handle_assert(
@@ -3283,6 +3429,26 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 return ConstDictVariable(items)
             return result
 
+        @register(torch._functorch.eager_transforms._set_tensor_requires_grad)
+        def handle_set_tensor_requires_grad(
+            self, tx: "InstructionTranslatorBase", x: VariableTracker
+        ) -> VariableTracker:
+            # _create_differentiable flips requires_grad in place on the tensor
+            # functorch wrapped for grad/vjp, so re-read x's metadata from the
+            # fake tensor rather than leaving the stale requires_grad=False.
+            result = wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    torch._functorch.eager_transforms._set_tensor_requires_grad,
+                    (x.as_proxy(),),
+                    {},
+                ),
+            )
+            # pyrefly: ignore [missing-attribute]
+            x.synchronize_attributes(tx)
+            return result
+
         @register(torch._functorch.eager_transforms._autograd_grad)
         def handle_functorch_autograd_grad(
             self,
@@ -3347,7 +3513,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         return handlers
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> "VariableTracker":
         source = self.source and AttrSource(self.source, name)
@@ -4199,9 +4365,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             )
 
         try:
-            shape = tuple(data.getattro_impl(tx, "shape").as_python_constant())
-            dtype = data.getattro_impl(tx, "dtype").as_python_constant()
-            device = data.getattro_impl(tx, "device").as_python_constant()
+            shape = tuple(data.tp_getattro_impl(tx, "shape").as_python_constant())
+            dtype = data.tp_getattro_impl(tx, "dtype").as_python_constant()
+            device = data.tp_getattro_impl(tx, "device").as_python_constant()
         except NotImplementedError as e:
             unimplemented(
                 gb_type="`torch.nn.Parameter` with non-constant Tensor attributes",
@@ -4348,7 +4514,7 @@ class DispatchKeySetVariable(BaseTorchVariable):
         install_guard(source.make_guard(GuardBuilder.DISPATCH_KEY_SET_MATCH))
         return cls(value, source=source)
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         from .object_protocol import python_constant_richcompare_impl
