@@ -45,13 +45,13 @@ SystemEnv = namedtuple(
         "pip_version",  # 'pip' or 'pip3'
         "pip_packages",
         "conda_packages",
-        "rocm_compiled_version",
         "hip_compiled_version",
         "hip_runtime_version",
         "miopen_runtime_version",
         "caching_allocator_config",
         "is_xnnpack_available",
         "cpu_info",
+        "rocm_compiled_version",
     ],
 )
 
@@ -764,7 +764,6 @@ def get_env_info():
         nvidia_driver_version=get_nvidia_driver_version(run_lambda),
         cudnn_version=get_cudnn_version(run_lambda),
         is_xpu_available=xpu_available_str,
-        rocm_compiled_version=rocm_compiled_version,
         hip_compiled_version=hip_compiled_version,
         hip_runtime_version=hip_runtime_version,
         miopen_runtime_version=miopen_runtime_version,
@@ -779,6 +778,7 @@ def get_env_info():
         caching_allocator_config=get_cachingallocator_config(),
         is_xnnpack_available=is_xnnpack_available(),
         cpu_info=get_cpu_info(run_lambda),
+        rocm_compiled_version=rocm_compiled_version,
     )
 
 

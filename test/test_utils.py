@@ -1006,9 +1006,11 @@ class TestCppExtensionUtils(TestCase):
 def _load_verify_dynamo():
     path = Path(__file__).resolve().parents[1] / "tools" / "dynamo" / "verify_dynamo.py"
     spec = importlib.util.spec_from_file_location("verify_dynamo_under_test", path)
+    loader = spec.loader if spec is not None else None
+    if spec is None or loader is None:
+        raise AssertionError(f"Could not load verify_dynamo from {path}")
     module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
+    loader.exec_module(module)
     return module
 
 
@@ -1074,9 +1076,7 @@ class TestVerifyDynamoRocm(TestCase):
             warnings.simplefilter("always")
             result = self.verify_dynamo.check_rocm()
         self.assertEqual(str(result), "7.14")
-        self.assertFalse(
-            any("mismatch" in str(w.message) for w in caught)
-        )
+        self.assertFalse(any("mismatch" in str(w.message) for w in caught))
 
     def test_check_rocm_sdk_warns_on_minor_mismatch(self):
         from torch.torch_version import TorchVersion
@@ -1116,9 +1116,7 @@ class TestVerifyDynamoRocm(TestCase):
             warnings.simplefilter("always")
             result = self.verify_dynamo.check_rocm()
         self.assertEqual(str(result), "7.15")
-        self.assertFalse(
-            any("mismatch" in str(w.message) for w in caught)
-        )
+        self.assertFalse(any("mismatch" in str(w.message) for w in caught))
 
 
 class TestTraceback(TestCase):
