@@ -224,11 +224,11 @@ ProcessGroupNCCL::RedOpRAII ProcessGroupNCCL::getNcclReduceOp(
     case ::c10d::ReduceOp::MAX:
       return ncclMax;
     case ::c10d::ReduceOp::BAND:
-      C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BAND with NCCL");
+      TORCH_CHECK(false, "Cannot use ReduceOp.BAND with NCCL");
     case ::c10d::ReduceOp::BOR:
-      C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BOR with NCCL");
+      TORCH_CHECK(false, "Cannot use ReduceOp.BOR with NCCL");
     case ::c10d::ReduceOp::BXOR:
-      C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BXOR with NCCL");
+      TORCH_CHECK(false, "Cannot use ReduceOp.BXOR with NCCL");
     case ::c10d::ReduceOp::PREMUL_SUM:
       return RedOpRAII(op, comm, getNcclDataType(tensor), nccl_api_);
     case ::c10d::ReduceOp::AVG:

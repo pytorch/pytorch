@@ -598,15 +598,6 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::_allgather_base(
     at::Tensor& outputBuffer,
     at::Tensor& inputBuffer,
     const ::c10d::AllgatherOptions& opts) {
-  if (inputBuffer.dtype() != outputBuffer.dtype()) {
-    C10_THROW_ERROR(
-        TypeError, "output tensor must have the same type as input tensor");
-  }
-  if (inputBuffer.numel() * getSize() != outputBuffer.numel()) {
-    C10_THROW_ERROR(
-        ValueError,
-        "output tensor size must be equal to world_size times input tensor size");
-  }
   ++sequence_number_;
   auto work = allGatherSingleImpl(
       outputBuffer, inputBuffer, opts.asyncOp, operationTimeout(opts.timeout));
