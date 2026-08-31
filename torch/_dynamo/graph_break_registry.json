@@ -2923,6 +2923,36 @@
       ]
     }
   ],
+  "GB1157": [
+    {
+      "Gb_type": "__replace__ on a namespace whose type returned a non-namespace",
+      "Context": "type={type(self.value)}, returned={new_vt}",
+      "Explanation": "types.SimpleNamespace.__replace__ calls type(self)() and requires the result to be a namespace.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1618": [
+    {
+      "Gb_type": "str subclass key in SimpleNamespace()",
+      "Context": "key={attr}, type={type(attr)}",
+      "Explanation": "Dynamo models namespace attribute names as exact strings, so a str subclass key cannot be tracked.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1354": [
+    {
+      "Gb_type": "non-constant key in SimpleNamespace()",
+      "Context": "key={key.vt}",
+      "Explanation": "Dynamo needs the attribute names a namespace is built from to be constants.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB9648": [
     {
       "Gb_type": "Missing tp_richcompare_impl override",
@@ -3201,6 +3231,26 @@
       "Gb_type": "Unresolved GetAttrVariable comparison",
       "Context": "richcompare_impl {self} {op}",
       "Explanation": "Cannot compare {self} because the attribute could not be resolved to a concrete value.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9352": [
+    {
+      "Gb_type": "Data-dependent uint64 torch.Size element in torch._C._infer_size",
+      "Context": "torch.uint64 tensor-backed size",
+      "Explanation": "Dynamo cannot safely validate that a data-dependent torch.uint64 value fits in torch.Size's signed int64 range.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9211": [
+    {
+      "Gb_type": "Unhinted data-dependent torch.Size element in torch._C._infer_size",
+      "Context": "symbolic size: {item.sym_num}",
+      "Explanation": "Dynamo cannot safely validate that a data-dependent torch.Size element fits in the signed int64 range.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]

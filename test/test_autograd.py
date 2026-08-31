@@ -6845,6 +6845,13 @@ Done""",
         check(fast_mode=True)
         check(fast_mode=False)
 
+    def test_gradcheck_mixed_differentiable_outputs(self):
+        def fn(x):
+            return torch.ones_like(x), x.square()
+
+        x = torch.randn(2, dtype=torch.double, requires_grad=True)
+        self.assertTrue(gradcheck(fn, (x,), fast_mode=True))
+
     @parametrize(
         "layout",
         (
@@ -7584,6 +7591,58 @@ Done""",
 
         check(fast_mode=True)
         check(fast_mode=False)
+
+    def test_gradcheck_fast_mode_forward_ad_error_indexing(self):
+        from torch.autograd.gradcheck import FAST_FAIL_SLOW_OK_MSG, GradcheckError
+
+        class BadMul(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.mul(2)
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad.mul(2)
+
+            @staticmethod
+            def jvp(ctx, grad):
+                return grad.mul(5)
+
+        x = torch.ones(2, dtype=torch.double, requires_grad=True)
+        a = torch.ones(3, dtype=torch.double)
+        cases = (
+            (
+                "non-differentiable output",
+                lambda x: (torch.zeros_like(x), BadMul.apply(x)),
+                (x,),
+                1,
+            ),
+            (
+                "integer output",
+                lambda x: (torch.ones_like(x, dtype=torch.int64), BadMul.apply(x)),
+                (x,),
+                0,
+            ),
+            ("non-differentiable input", lambda a, x: BadMul.apply(x), (a, x), 0),
+        )
+        kwargs = {
+            "fast_mode": True,
+            "check_backward_ad": False,
+            "check_batched_grad": False,
+            "check_forward_ad": True,
+        }
+
+        for name, fn, inputs, output_idx in cases:
+            with self.subTest(name=name):
+                err_msg = (
+                    "Jacobian computed with forward mode mismatch for output "
+                    f"{output_idx} with respect to input 0"
+                )
+                with self.assertRaisesRegex(GradcheckError, err_msg) as cm:
+                    gradcheck(fn, inputs, **kwargs)
+                if name == "integer output":
+                    self.assertNotIn(FAST_FAIL_SLOW_OK_MSG, str(cm.exception))
+                self.assertFalse(gradcheck(fn, inputs, raise_exception=False, **kwargs))
 
     def test_gradcheck_forward_ad(self):
         def fn(x, y):

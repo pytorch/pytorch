@@ -1,7 +1,5 @@
 #include <ATen/native/sparse/cuda/cuSPARSELtOps.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <mutex>
-#include <string_view>
 #include <unordered_map>
 #include <vector>
 #include <c10/util/StringUtil.h>
