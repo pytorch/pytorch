@@ -11,10 +11,11 @@ Each library has a YAML profile named `lib<target>.yaml`. Each call to
 the first profile found is used. The optimized libraries are: `libtorch_cuda`,
 `libtorch_cpu`, `libtorch_python`, `libc10`, and `libc10_cuda`.
 
-`libtorch_python` may also have profiles for individual Python major and minor
-versions, named `libtorch_python-py<major>.<minor>.yaml` (for example,
-`libtorch_python-py3.13.yaml`). The matching version-specific profile is
-preferred when present; otherwise the build uses `libtorch_python.yaml`.
+`libtorch_python` may also have profiles for individual Python versions,
+named `libtorch_python-${Python_SOABI}.yaml` (for example,
+`libtorch_python-cpython-313-aarch64-linux-gnu.yaml`). The matching
+version-specific profile is preferred when present; otherwise the build
+uses `libtorch_python.yaml`.
 
 ## How profiles are consumed
 
