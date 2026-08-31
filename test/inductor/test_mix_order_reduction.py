@@ -16,17 +16,19 @@ from torch._inductor.runtime.triton_heuristics import persistent_reduction
 from torch._inductor.scheduler import MixOrderReduction
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing import FileCheck
-from torch.testing._internal.common_device_type import largeTensorTest
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    largeTensorTest,
+)
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
     recover_orig_fp32_precision,
     skipIfXpu,
     TEST_XPU,
 )
 from torch.testing._internal.common_xpu import PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-from torch.utils._triton import has_triton_tma_device
+from torch.utils._triton import has_triton, has_triton_tma_device
 
 
 class TestBase(TestCase):
@@ -47,9 +49,10 @@ class SkipPatternTest(TestBase):
     like when the outer reduction is followed by a pointwise that load
     the un-reduced tensor.
     """
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @inductor_config.patch(split_reductions=False)
-    def test_dimension_too_close(self):
+    def test_dimension_too_close(self, device):
         """
         Skip if the two reduction size are too close.
         We require one reduction dimension to be much larger so we can split
@@ -61,21 +64,28 @@ class SkipPatternTest(TestBase):
             out2 = x.sum(dim=0)
             return out1, out2
 
-        x = torch.randn(768, 768, device=GPU_TYPE)
+        x = torch.randn(768, 768, device=device)
         torch.compile(f)(x)
         self.assertEqual(2, metrics.generated_kernel_count)
 
 
 # Cooperative reductions disable split reductions, which are necessary for mix order
 # reductions.
-@inductor_config.patch(
-    {
-        "triton.cooperative_reductions": False,
-        "triton.force_cooperative_reductions": False,
-    }
-)
-@instantiate_parametrized_tests
 class MixOrderReductionTest(TestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._exit_stack.enter_context(
+            inductor_config.patch(
+                {
+                    "triton.cooperative_reductions": False,
+                    "triton.force_cooperative_reductions": False,
+                }
+            )
+        )
+
     @parametrize(
         "name",
         [
@@ -88,7 +98,9 @@ class MixOrderReductionTest(TestBase):
     @parametrize("swap", (False, True))
     @parametrize("split_reductions", (False, True))
     @parametrize("shape", ((32768, 768), (32769, 768), (32, 1024, 768)))
-    def test_mix_order_reduction(self, name, dtype, swap, split_reductions, shape):
+    def test_mix_order_reduction(
+        self, device, name, dtype, swap, split_reductions, shape
+    ):
         # torch.prod does not accept tuple for dim argument
         if name == "prod" and len(shape) == 3:
             self.skipTest("Invalid combination")
@@ -107,7 +119,7 @@ class MixOrderReductionTest(TestBase):
                 return reduction_fn(x, dim=-1), outer_red()
 
         reduction_fn = getattr(torch, name)
-        x = torch.randn(shape, dtype=dtype, device=GPU_TYPE)
+        x = torch.randn(shape, dtype=dtype, device=device)
 
         opt_f = torch.compile(
             f,
@@ -127,7 +139,7 @@ class MixOrderReductionTest(TestBase):
             metrics.codegen_mix_order_reduction,
         )
 
-    def test_xmask(self):
+    def test_xmask(self, device):
         """
         Make sure xmask is setup properly
         """
@@ -139,7 +151,7 @@ class MixOrderReductionTest(TestBase):
 
         M, N = 32768 + 1023, 768
         EXTRA_ROW = 1
-        buf = torch.randn(M + EXTRA_ROW, N, device=GPU_TYPE)
+        buf = torch.randn(M + EXTRA_ROW, N, device=device)
         x = buf[:M, :]
         # make sure wrong xmask error loud if read excess elements
         buf[M:, :] = 1000000
@@ -162,15 +174,15 @@ class MixOrderReductionTest(TestBase):
             metrics.codegen_mix_order_reduction,
         )
 
-    def test_avoid_non_coalesced_access(self):
+    def test_avoid_non_coalesced_access(self, device):
         if not inductor_config.triton.mix_order_reduction:
             self.skipTest("Mix order reduction not enabled")
 
         def f(x, y):
             return (x + y).sum(dim=-1), x.sum(dim=(0, 1))
 
-        x = torch.randn(128, 256, 768, device=GPU_TYPE)
-        y = torch.randn(128, 768, 256, device=GPU_TYPE).transpose(1, 2)
+        x = torch.randn(128, 256, 768, device=device)
+        y = torch.randn(128, 768, 256, device=device).transpose(1, 2)
         self.check_numeric(f, (x, y))
 
         # we skip mix order reduction for such kernel since
@@ -182,7 +194,7 @@ class MixOrderReductionTest(TestBase):
         self.assertEqual(metrics.codegen_mix_order_reduction, 0)
 
     @inductor_config.patch(split_reductions=False)
-    def test_fuse_non_contiguous_pointwise(self):
+    def test_fuse_non_contiguous_pointwise(self, device):
         if not inductor_config.triton.mix_order_reduction:
             self.skipTest("Mix order reduction not enabled")
 
@@ -202,11 +214,11 @@ class MixOrderReductionTest(TestBase):
             return y, r2
 
         # Large, asymmetric shape encourages mix-order reduction heuristics.
-        x = torch.randn(32768, 768, dtype=torch.float, device=GPU_TYPE)
+        x = torch.randn(32768, 768, dtype=torch.float, device=device)
         self.check_numeric(f, (x,))
 
     @inductor_config.patch(coordinate_descent_tuning=True)
-    def test_XBLOCK_coordest_tuning(self):
+    def test_XBLOCK_coordest_tuning(self, device):
         """
         We should skip XBLOCK coordinate descent tuning for
         mix order reduction.
@@ -217,12 +229,12 @@ class MixOrderReductionTest(TestBase):
         def f(x):
             return x.sum(dim=-1), x.sum(dim=0)
 
-        x = torch.randn(32768, 256, dtype=torch.float, device=GPU_TYPE)
+        x = torch.randn(32768, 256, dtype=torch.float, device=device)
         self.check_numeric(f, (x,))
         self.assertEqual(metrics.codegen_mix_order_reduction, 1)
 
     @inductor_config.patch(unroll_reductions_threshold=1)
-    def test_3layer_split_reduction(self):
+    def test_3layer_split_reduction(self, device):
         """
         Use a larger M and smaller N to trigger a 3 layer split reduction.
         """
@@ -233,7 +245,7 @@ class MixOrderReductionTest(TestBase):
             return x.sum(dim=-1), x.sum(dim=0)
 
         M = 32768 * 1024 if torch.version.hip is not None else 32768 * 256
-        x = torch.randn(M, 2, dtype=torch.float, device=GPU_TYPE)
+        x = torch.randn(M, 2, dtype=torch.float, device=device)
         self.check_numeric(f, (x,))
         # We don't do mix order reduction for split redutions
         # with more than 2 layers
@@ -245,7 +257,7 @@ class MixOrderReductionTest(TestBase):
             else 0,
         )
 
-    def test_independent_split_size(self):
+    def test_independent_split_size(self, device):
         """
         Make sure mix order reduction can pick the split size it wants
         """
@@ -270,17 +282,17 @@ class MixOrderReductionTest(TestBase):
                 _, (code,) = utils.run_and_get_code(torch.compile(f), x)
                 self.assertTrue(f"'RSPLIT_SIZE': {split_size}" in code)
 
-        x = torch.randn(32768, 768, dtype=torch.float, device=GPU_TYPE)
+        x = torch.randn(32768, 768, dtype=torch.float, device=device)
 
         check_one_split_size(8)
         check_one_split_size(16)
 
     @inductor_config.patch(split_reductions=False)
-    def test_non_contiguous_input(self):
+    def test_non_contiguous_input(self, device):
         def f(x):
             return x.sum(dim=-1), x.sum(dim=[0, 1])
 
-        x = torch.randn(1024, 32, 768, dtype=torch.float, device=GPU_TYPE).permute(
+        x = torch.randn(1024, 32, 768, dtype=torch.float, device=device).permute(
             1, 0, 2
         )
         self.check_numeric(f, (x,))
@@ -290,12 +302,12 @@ class MixOrderReductionTest(TestBase):
         )
 
     @inductor_config.patch(split_reductions=False)
-    def test_multi_workspace_allocation(self):
+    def test_multi_workspace_allocation(self, device):
         def f(x, y):
             return x.sum(dim=0), x.sum(dim=1), y.sum(dim=0), y.sum(dim=1)
 
-        x = torch.randn(4096 * 64, 32, device=GPU_TYPE)
-        y = torch.randn(4098 * 64, 34, device=GPU_TYPE)
+        x = torch.randn(4096 * 64, 32, device=device)
+        y = torch.randn(4098 * 64, 34, device=device)
 
         self.check_numeric(f, (x, y))
         expected_mix_order_reduction = (
@@ -320,9 +332,10 @@ class MixOrderReductionTest(TestBase):
     @parametrize("initial_xblock", (1, 2))
     @parametrize("add_1dim", (False, True))
     # The test OOM in CI sometimes. Ask for more memory to make it stable.
-    @largeTensorTest("16GB", device=GPU_TYPE, inductor=True)
+    @largeTensorTest("16GB", inductor=True)
     def test_rms_norm_bwd(
         self,
+        device,
         wdtype,
         split_reductions,
         shape,
@@ -363,11 +376,11 @@ class MixOrderReductionTest(TestBase):
 
         # M, N = 1152 * 500, 384
         M, N = shape
-        x = torch.randn(M, N, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True)
+        x = torch.randn(M, N, dtype=torch.bfloat16, device=device, requires_grad=True)
         if add_1dim:
             x = x[:, None, :]
 
-        w = torch.randn(N, dtype=wdtype, device=GPU_TYPE, requires_grad=True)
+        w = torch.randn(N, dtype=wdtype, device=device, requires_grad=True)
         dy = torch.randn_like(x)
         eps = 1e-5
 
@@ -409,8 +422,8 @@ class MixOrderReductionTest(TestBase):
         }
     )
     # The 1M-row input plus its grads needs a fair amount of device memory.
-    @largeTensorTest("16GB", device=GPU_TYPE, inductor=True)
-    def test_rms_norm_bwd_tma(self, allow_multi_stages):
+    @largeTensorTest("16GB", inductor=True)
+    def test_rms_norm_bwd_tma(self, device, allow_multi_stages):
         """
         Regression test for https://github.com/pytorch/pytorch/issues/186241.
 
@@ -443,8 +456,8 @@ class MixOrderReductionTest(TestBase):
         # Large M so the RSPLIT loop runs many iterations per program: this is
         # what surfaces the stale-xoffset bug (a single iteration would hide it).
         M, N = 1000000, 256
-        x = torch.randn(M, N, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True)
-        w = torch.randn(N, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True)
+        x = torch.randn(M, N, dtype=torch.bfloat16, device=device, requires_grad=True)
+        w = torch.randn(N, dtype=torch.bfloat16, device=device, requires_grad=True)
         dy = torch.randn_like(x)
         eps = 1e-5
 
@@ -491,7 +504,7 @@ class MixOrderReductionTest(TestBase):
             "triton.mix_order_reduction_split_size": 64,
         }
     )
-    def test_rms_norm_bwd_tma_small(self, allow_multi_stages, shape):
+    def test_rms_norm_bwd_tma_small(self, device, allow_multi_stages, shape):
         """
         Small, CI-friendly variant of test_rms_norm_bwd_tma (regression test for
         https://github.com/pytorch/pytorch/issues/186241).
@@ -519,8 +532,8 @@ class MixOrderReductionTest(TestBase):
 
         torch.manual_seed(1337)
         M, N = shape
-        x = torch.randn(M, N, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True)
-        w = torch.randn(N, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True)
+        x = torch.randn(M, N, dtype=torch.bfloat16, device=device, requires_grad=True)
+        w = torch.randn(N, dtype=torch.bfloat16, device=device, requires_grad=True)
         dy = torch.randn_like(x)
         eps = 1e-5
 
@@ -558,7 +571,7 @@ class MixOrderReductionTest(TestBase):
     )
     @parametrize("split_reductions", (False, True))
     @parametrize("shape", ((32768, 768), (32769, 768)))
-    def test_layer_norm_bwd_with_bias(self, wbdtype, split_reductions, shape):
+    def test_layer_norm_bwd_with_bias(self, device, wbdtype, split_reductions, shape):
         def f(x, w, b, eps):
             return F.layer_norm(x, x.shape[-1:], w.float(), b.float(), eps)
 
@@ -573,9 +586,9 @@ class MixOrderReductionTest(TestBase):
         # M, N = 1152 * 500, 384
         M, N = shape
         xdtype = torch.float
-        x = torch.randn(M, N, dtype=xdtype, device=GPU_TYPE, requires_grad=True)
-        w = torch.randn(N, dtype=wbdtype, device=GPU_TYPE, requires_grad=True)
-        b = torch.randn(N, dtype=wbdtype, device=GPU_TYPE, requires_grad=True)
+        x = torch.randn(M, N, dtype=xdtype, device=device, requires_grad=True)
+        w = torch.randn(N, dtype=wbdtype, device=device, requires_grad=True)
+        b = torch.randn(N, dtype=wbdtype, device=device, requires_grad=True)
         dy = torch.randn_like(x)
         eps = 1e-5
 
@@ -598,7 +611,7 @@ class MixOrderReductionTest(TestBase):
         )
 
     @parametrize("dynamic_dims", ([0], [1], [0, 1]))
-    def test_rms_norm_bwd_with_dynamic_shape(self, dynamic_dims):
+    def test_rms_norm_bwd_with_dynamic_shape(self, device, dynamic_dims):
         if not inductor_config.triton.mix_order_reduction:
             self.skipTest("Mix order reduction not enabled")
 
@@ -615,9 +628,9 @@ class MixOrderReductionTest(TestBase):
         M0, M1, N = 251, 223, 128
         wbdtype = torch.float
         xdtype = torch.float
-        x = torch.randn(M0, M1, N, dtype=xdtype, device=GPU_TYPE, requires_grad=True)
+        x = torch.randn(M0, M1, N, dtype=xdtype, device=device, requires_grad=True)
         torch._dynamo.mark_dynamic(x, (0, 1))
-        w = torch.randn(N, dtype=wbdtype, device=GPU_TYPE, requires_grad=True)
+        w = torch.randn(N, dtype=wbdtype, device=device, requires_grad=True)
         dy = torch.randn_like(x)
         eps = 1e-5
 
@@ -640,7 +653,7 @@ class MixOrderReductionTest(TestBase):
         )
 
     @parametrize("dynamic_dims", ([0], [1], [0, 1]))
-    def test_layer_norm_bwd_with_dynamic_shape(self, dynamic_dims):
+    def test_layer_norm_bwd_with_dynamic_shape(self, device, dynamic_dims):
         if not inductor_config.triton.mix_order_reduction:
             self.skipTest("Mix order reduction not enabled")
 
@@ -657,9 +670,9 @@ class MixOrderReductionTest(TestBase):
         M0, M1, N = 251, 223, 128
         wbdtype = torch.float
         xdtype = torch.float
-        x = torch.randn(M0, M1, N, dtype=xdtype, device=GPU_TYPE, requires_grad=True)
+        x = torch.randn(M0, M1, N, dtype=xdtype, device=device, requires_grad=True)
         torch._dynamo.mark_dynamic(x, dynamic_dims)
-        w = torch.randn(N, dtype=wbdtype, device=GPU_TYPE, requires_grad=True)
+        w = torch.randn(N, dtype=wbdtype, device=device, requires_grad=True)
         dy = torch.randn_like(x)
         eps = 1e-5
 
@@ -678,7 +691,7 @@ class MixOrderReductionTest(TestBase):
 
     @parametrize("split_reductions", (False, True))
     @parametrize("shape", ((32768, 768), (32769, 768)))
-    def test_layer_norm_bwd_no_bias(self, split_reductions, shape):
+    def test_layer_norm_bwd_no_bias(self, device, split_reductions, shape):
         def f(x, w, eps):
             return F.layer_norm(x, x.shape[-1:], w, bias=None, eps=eps)
 
@@ -693,8 +706,8 @@ class MixOrderReductionTest(TestBase):
         M, N = shape
         xdtype = torch.float
         wbdtype = torch.float
-        x = torch.randn(M, N, dtype=xdtype, device=GPU_TYPE, requires_grad=True)
-        w = torch.randn(N, dtype=wbdtype, device=GPU_TYPE, requires_grad=True)
+        x = torch.randn(M, N, dtype=xdtype, device=device, requires_grad=True)
+        w = torch.randn(N, dtype=wbdtype, device=device, requires_grad=True)
         dy = torch.randn_like(x)
         eps = 1e-5
 
@@ -718,7 +731,7 @@ class MixOrderReductionTest(TestBase):
 
     @parametrize("split_reductions", (False, True))
     @parametrize("dtype", [torch.bfloat16, torch.float])
-    def test_rms_norm_sharing_weights(self, split_reductions, dtype):
+    def test_rms_norm_sharing_weights(self, device, split_reductions, dtype):
         if not inductor_config.triton.mix_order_reduction:
             self.skipTest("Mix order reduction not enabled")
 
@@ -731,10 +744,10 @@ class MixOrderReductionTest(TestBase):
         num_norm = 3
         M, N = 32768, 768
         xs = [
-            torch.randn(M, N, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+            torch.randn(M, N, dtype=dtype, device=device, requires_grad=True)
             for _ in range(num_norm)
         ]
-        w = torch.randn(N, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+        w = torch.randn(N, dtype=dtype, device=device, requires_grad=True)
         dys = [torch.randn_like(xs[0]) for _ in range(num_norm)]
         eps = 1e-5
 
@@ -772,7 +785,9 @@ class MixOrderReductionTest(TestBase):
     @parametrize("split_reductions", (False, True))
     @parametrize("dtype", [torch.bfloat16, torch.float])
     @parametrize("has_bias", [False, True])
-    def test_layer_norm_sharing_weights(self, split_reductions, dtype, has_bias):
+    def test_layer_norm_sharing_weights(
+        self, device, split_reductions, dtype, has_bias
+    ):
         if not inductor_config.triton.mix_order_reduction:
             self.skipTest("Mix order reduction not enabled")
 
@@ -785,12 +800,12 @@ class MixOrderReductionTest(TestBase):
         num_norm = 3
         M, N = 32768, 768
         xs = [
-            torch.randn(M, N, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+            torch.randn(M, N, dtype=dtype, device=device, requires_grad=True)
             for _ in range(num_norm)
         ]
-        w = torch.randn(N, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+        w = torch.randn(N, dtype=dtype, device=device, requires_grad=True)
         b = (
-            torch.randn(N, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+            torch.randn(N, dtype=dtype, device=device, requires_grad=True)
             if has_bias
             else None
         )
@@ -813,7 +828,7 @@ class MixOrderReductionTest(TestBase):
             lambda: torch.autograd.grad(act, inputs_for_grad, dys)
         )
         tol = 1e-3 if dtype == torch.float32 else 1e-2
-        if GPU_TYPE == "xpu":
+        if torch.device(device).type == "xpu":
             tol = 1e-3 if dtype == torch.float32 else 2e-2
         self.assertTrue(same((ref, ref_grads[:-2]), (act, act_grads[:-2]), tol=tol))
         if dtype == torch.float32:
@@ -831,7 +846,7 @@ class MixOrderReductionTest(TestBase):
         FileCheck().check_count("MixOrderReductionGrid", 1, exactly=True).run(wrapper)
 
     @parametrize("split_reductions", (False, True))
-    def test_chained_modulated_norm_shared_table(self, split_reductions):
+    def test_chained_modulated_norm_shared_table(self, device, split_reductions):
         """
         Regression test for https://github.com/pytorch/pytorch/issues/193061
 
@@ -853,8 +868,8 @@ class MixOrderReductionTest(TestBase):
                 x = x + (F.layer_norm(x, x.shape[-1:], eps=eps) * (1 + scale) + shift)
             return x.square().mean()
 
-        x = torch.randn(1, M, N, device=GPU_TYPE)
-        table = torch.randn(1, 4, N, device=GPU_TYPE, requires_grad=True)
+        x = torch.randn(1, M, N, device=device)
+        table = torch.randn(1, 4, N, device=device, requires_grad=True)
 
         (ref_grad,) = torch.autograd.grad(f(x, table), table)
         act = torch.compile(
@@ -875,7 +890,7 @@ class MixOrderReductionTest(TestBase):
         torch.testing.assert_close(ref_grad, act_grad, atol=1e-4, rtol=1e-4)
 
     @inductor_config.patch(split_reductions=False)
-    def test_dont_fuse_nodes_that_introduce_producer_consumer_rel(self):
+    def test_dont_fuse_nodes_that_introduce_producer_consumer_rel(self, device):
         """
         The test constructs an inner reduction, an outer reduction and
         a pointwise kernel.
@@ -893,13 +908,566 @@ class MixOrderReductionTest(TestBase):
             out2 = x.sum(dim=0, keepdim=True) + x
             return out1, out2
 
-        x = torch.randn(32768, 768, device=GPU_TYPE)
+        x = torch.randn(32768, 768, device=device)
         self.check_numeric(f, (x,))
         self.assertEqual(1, metrics.codegen_mix_order_reduction)
         # two kernels
         # one is the mix-order reduction kernel
         # the other is the piontwise kernel
         self.assertTrue(2, metrics.generated_kernel_count)
+
+    @inductor_config.patch({"triton.mix_order_reduction_non_strict_mode": True})
+    def test_no_recompile(self, device):
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x):
+            return x.sum(dim=1), x.sum(dim=0)
+
+        x0 = torch.randn(2048, 1024, device=device)
+        torch._dynamo.mark_dynamic(x0, (0,))
+        opt_f = torch.compile(f)
+
+        ref = f(x0)
+        act = opt_f(x0)
+
+        torch.testing.assert_close(ref, act, atol=1e-3, rtol=1e-3)
+        self.assertEqual(metrics.codegen_mix_order_reduction, 1)
+
+        opt_f(torch.randn(4096, 1024, device=device))
+        opt_f(torch.randn(512, 1024, device=device))
+
+        compile_metrics = torch._dynamo.utils._compilation_metrics
+        self.assertEqual(len(compile_metrics), 1, "Don't recompile")
+
+    @skipIfXpu(msg="https://github.com/intel/intel-xpu-backend-for-triton/issues/6398")
+    def test_additive_rnumel(self, device):
+        """
+        Fix https://github.com/pytorch/pytorch/issues/176375
+        """
+        x = torch.randn(32768, 300, device=device)
+        y = torch.randn(32768, 200, device=device)
+        w = torch.randn(550, device=device)
+        torch._dynamo.mark_dynamic(x, 1)
+        torch._dynamo.mark_dynamic(y, 1)
+
+        def f(x, y, w):
+            z = torch.cat((x, y), dim=1)
+
+            # Slice w_pool to match dynamic dim. This avoids a guard that would
+            # resolve s0+s1 to a concrete value (640), which is essential for
+            # keeping rnumel symbolic in the generated code.
+            w = w[: z.shape[-1]]  # [s0+s1], no concrete-equality guard
+            z = z * w
+            scale = z.sum()
+            z = z + scale
+            return z.sum(dim=0), z.sum(dim=1)
+
+        ref = f(x, y, w)
+        act = torch.compile(f)(x, y, w)
+
+        torch.testing.assert_close(ref, act, atol=1e-3, rtol=1e-3)
+
+        self.assertEqual(
+            inductor_config.triton.mix_order_reduction,
+            metrics.codegen_mix_order_reduction,
+        )
+
+    @recover_orig_fp32_precision
+    def test_additive_num_splits(self, device):
+        """
+        When the `num_splits` is an additive expression, a pair of
+        parenthesis is required.
+        """
+        torch.set_float32_matmul_precision("high")
+        linear1 = nn.Linear(1000, 1000).to(device)
+        norm = nn.LayerNorm(1000).to(device)
+
+        def model(x):
+            return norm(linear1(x[:, :-1].reshape(-1, 1000)))
+
+        compiled_model = torch.compile(model)
+        x = torch.randn(32, 200, 1000, device=device)
+        torch._dynamo.mark_dynamic(x, 1)
+        compiled_model(x).sum().backward()
+
+        act = linear1.weight.grad, linear1.bias.grad
+
+        linear1.zero_grad()
+        norm.zero_grad()
+        model(x).sum().backward()
+        ref = linear1.weight.grad, linear1.bias.grad
+
+        torch.testing.assert_close(ref, act, atol=1e-3, rtol=1e-3)
+
+    @largeTensorTest("36GB", inductor=True)
+    def test_out_of_shared_memory(self, device):
+        """
+        Fix https://github.com/pytorch/pytorch/issues/175250
+        """
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        NUM_HEADS = 32
+        NUM_KV_HEADS = 8
+        HEAD_DIM = 128
+        HIDDEN_SIZE = NUM_HEADS * HEAD_DIM * 2
+        SEQ_LEN = 8192 * 2
+
+        def rotate_half(x):
+            x1 = x[..., : x.shape[-1] // 2]
+            x2 = x[..., x.shape[-1] // 2 :]
+            return torch.cat((-x2, x1), dim=-1)
+
+        def apply_rotary_pos_emb(q, k, cos, sin):
+            cos = cos[:, None, :, :]
+            sin = sin[:, None, :, :]
+            return (q * cos) + (rotate_half(q) * sin), (k * cos) + (
+                rotate_half(k) * sin
+            )
+
+        @torch.compile
+        def forward(
+            x,
+            q_proj,
+            k_proj,
+            v_proj,
+            o_proj,
+            embed_norm,
+            hidden_norm,
+            cos,
+            sin,
+        ):
+            batch, seq_len, _ = x.shape
+
+            # Eagle3 first layer: split concatenated [embeds, hidden] input
+            mid = x.shape[2] // 2
+            embeds, hidden = x.split(mid, dim=-1)
+
+            # Dual RMSNorm (pow, sum, div, mul in backward)
+            embeds = embed_norm(embeds)
+            hidden = hidden_norm(hidden)
+            residual = hidden
+
+            # Recombine for attention input (2 * HIDDEN_SIZE)
+            x = torch.cat([embeds, hidden], dim=-1)
+
+            # Adding a graph break here "fixes" the issue
+            # by breaking up the fused op
+            # torch._dynamo.graph_break()
+
+            # Q/K/V projections from 2*hidden_size input
+            q = q_proj(x).view(batch, seq_len, NUM_HEADS, HEAD_DIM).transpose(1, 2)
+            k = k_proj(x).view(batch, seq_len, NUM_KV_HEADS, HEAD_DIM).transpose(1, 2)
+            v = v_proj(x).view(batch, seq_len, NUM_KV_HEADS, HEAD_DIM).transpose(1, 2)
+
+            q, k = apply_rotary_pos_emb(q, k, cos, sin)
+            k = torch.repeat_interleave(k, NUM_HEADS // NUM_KV_HEADS, dim=1)
+            v = torch.repeat_interleave(v, NUM_HEADS // NUM_KV_HEADS, dim=1)
+            out = q.contiguous() @ k.contiguous().transpose(-2, -1) @ v.contiguous()
+
+            out = out.transpose(1, 2).contiguous().reshape(batch, seq_len, -1)
+            return o_proj(out) + residual
+
+        # Layers
+        embed_norm = nn.RMSNorm(HIDDEN_SIZE).to(device)
+        hidden_norm = nn.RMSNorm(HIDDEN_SIZE).to(device)
+        # Q/K/V project from 2*HIDDEN_SIZE (concatenated embeds + hidden)
+        q_proj = nn.Linear(2 * HIDDEN_SIZE, NUM_HEADS * HEAD_DIM, bias=False).to(
+            device
+        )
+        k_proj = nn.Linear(2 * HIDDEN_SIZE, NUM_KV_HEADS * HEAD_DIM, bias=False).to(
+            device
+        )
+        v_proj = nn.Linear(2 * HIDDEN_SIZE, NUM_KV_HEADS * HEAD_DIM, bias=False).to(
+            device
+        )
+        o_proj = nn.Linear(NUM_HEADS * HEAD_DIM, HIDDEN_SIZE, bias=False).to(device)
+
+        # Block mask - simple causal only
+        def causal_mask(_b, _h, q, kv):
+            return q >= kv
+
+        # Rotary embeddings (precomputed, no grad needed)
+        inv_freq = 1.0 / (
+            500000.0
+            ** (
+                torch.arange(0, HEAD_DIM, 2, dtype=torch.float32, device=device)
+                / HEAD_DIM
+            )
+        )
+        pos = torch.arange(1, SEQ_LEN + 1, dtype=torch.float32, device=device)
+        freqs = torch.outer(pos, inv_freq)
+        emb = torch.cat((freqs, freqs), dim=-1).unsqueeze(0)
+        cos, sin = emb.cos(), emb.sin()
+
+        # Input: 2*HIDDEN_SIZE to match split [embeds, hidden]
+        x = torch.randn(1, SEQ_LEN, 2 * HIDDEN_SIZE, device=device, requires_grad=True)
+
+        out = forward(
+            x,
+            q_proj,
+            k_proj,
+            v_proj,
+            o_proj,
+            embed_norm,
+            hidden_norm,
+            cos,
+            sin,
+        )
+        loss = out.sum()
+        loss.backward()
+        self.assertTrue(metrics.codegen_mix_order_reduction > 1)
+
+    @inductor_config.patch("triton.mix_order_reduction", True)
+    @inductor_config.patch("triton.mix_order_reduction_non_strict_mode", True)
+    def test_dimension_refactoring_mismatch(self, device):
+        """
+        This reproduces an issue where `simplify_and_reorder()` produces a different
+        dimension factorization than `_original_ranges` used during fusion decision.
+        For example, fusion might see (13, 8472) but codegen sees (26, 4236) after
+        the reduction split optimization adds a factor of 2 to the pointwise dimensions.
+
+        We skip fusing split reductions for node1 in this case.
+        """
+
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        # Reproduce the RMSNorm backward pattern that triggered the bug.
+        # The key is:
+        # - Shape (M, N) = (13, 8472) where N=8472 is large enough to trigger split
+        # - RMSNorm backward creates reductions along both dimensions
+        # - The feature dimension reduction (8472) gets split with factor 2
+        # - Mix order reduction tries to fuse these, but groups don't match after split
+        def f(x, w, eps):
+            orig_dtype = x.dtype
+            x = x.float()
+            # RMSNorm forward: y = x * rsqrt(mean(x^2) + eps) * w
+            rsqrt = torch.rsqrt((x * x).sum(dim=-1) / x.shape[-1] + eps)
+            y = (x * rsqrt[:, None] * w).to(dtype=orig_dtype)
+            return y
+
+        def fwd_bwd(compiled_f):
+            x.grad = None
+            w.grad = None
+            out = compiled_f(x, w, eps)
+            out.backward(dy)
+            return x.grad, w.grad
+
+        # Use the exact shape from the bug report: (13, 8472)
+        # 8472 = 2 * 4236, so split with factor 2 gives sub-reductions of 4236
+        M, N = 13, 8472
+        x = torch.randn(M, N, dtype=torch.float32, device=device, requires_grad=True)
+        w = torch.randn(N, dtype=torch.float32, device=device, requires_grad=True)
+        dy = torch.randn_like(x)
+        eps = 1e-5
+
+        opt_f = torch.compile(f)
+
+        ref = fwd_bwd(f)
+        act = fwd_bwd(opt_f)
+        torch.testing.assert_close(ref, act, atol=1e-3, rtol=1e-3)
+        self.assertGreaterEqual(metrics.codegen_mix_order_reduction, 0)
+
+    def test_keepdim_shape_mismatch(self, device):
+        """
+        Test that MixOrderReduction correctly handles keepdim=True reductions.
+
+        This test reproduces a bug where the final reduction in MixOrderReduction
+        generates `view(nsplit, rnumel).sum(dim=0)` which produces shape [rnumel],
+        but the expected output should be [1, rnumel] when keepdim=True.
+
+        The error manifests as:
+        RuntimeError: Function CompiledFunctionBackward returned an invalid gradient
+        at index N - got [2048] but expected shape compatible with [1, 2048]
+        """
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        # Create a model that produces reductions with keepdim=True in the backward pass
+        # This pattern is common in normalization layers like RMSNorm/LayerNorm
+        class KeepDimReductionModel(nn.Module):
+            def __init__(self, hidden_size):
+                super().__init__()
+                # Using shape [1, hidden_size] to ensure keepdim=True in backward
+                self.weight = nn.Parameter(torch.ones(1, hidden_size))
+                self.bias = nn.Parameter(torch.zeros(1, hidden_size))
+
+            def forward(self, x):
+                # x: [batch, hidden_size]
+                # Normalization-like operation that produces keepdim reductions in backward
+                mean = x.mean(dim=-1, keepdim=True)
+                var = ((x - mean) ** 2).mean(dim=-1, keepdim=True)
+                x_norm = (x - mean) / (var + 1e-5).sqrt()
+                return x_norm * self.weight + self.bias
+
+        M, N = 32768, 2048  # Large batch to trigger mix order reduction
+        model = KeepDimReductionModel(N).to(device)
+
+        x = torch.randn(M, N, dtype=torch.float32, device=device, requires_grad=True)
+        dy = torch.randn_like(x)
+
+        def fwd_bwd(model, x, dy):
+            x.grad = None
+            model.zero_grad()
+            out = model(x)
+            out.backward(dy)
+            return x.grad, model.weight.grad, model.bias.grad
+
+        # Reference (eager)
+        ref = fwd_bwd(model, x, dy)
+
+        # Compiled with mix order reduction
+        compiled_model = torch.compile(model)
+        act = fwd_bwd(compiled_model, x, dy)
+
+        # Verify numerical correctness
+        self.assertTrue(
+            same(ref, act, tol=1e-3), lambda msg: f"{msg}\nref:\n{ref}\nact:\n{act}"
+        )
+
+        # Verify mix order reduction was used
+        self.assertGreater(
+            metrics.codegen_mix_order_reduction,
+            0,
+            "Mix order reduction should be triggered",
+        )
+
+    def test_multi_dim_reduction_output_shape(self, device):
+        """
+        Regression test for https://github.com/pytorch/pytorch/issues/178080:
+        two reductions over different dims in the same compiled function must
+        produce correctly-shaped outputs.
+
+        x.sum(dim=(1, 2)) over [32768, 512, 2] -> [32768]
+        x.sum(dim=0)      over [32768, 512, 2] -> [512, 2]
+        """
+
+        def f(x):
+            return x.sum(dim=(1, 2)), x.sum(dim=0)
+
+        x = torch.randn(32768, 512, 2, device=device)
+        ref = f(x)
+        act = torch.compile(f)(x)
+
+        self.assertEqual(list(act[0].shape), list(ref[0].shape))
+        self.assertEqual(list(act[1].shape), list(ref[1].shape))
+        self.assertTrue(same(ref, act, tol=1e-3))
+
+
+class OverFusionTest(TestBase):
+    """
+    Regression test for mix-order reduction over-fusion in transformer backward
+    passes. When can_fuse_with absorbs too many pointwise nodes into a
+    mixed-order kernel, the resulting kernel has excessive buffer reads (loads)
+    per RSPLIT loop iteration, causing register spills and performance
+    regression. See #179423.
+    """
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @unittest.skipIf(
+        TEST_XPU and not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
+        "XPU: SYCL TLA backward does not guarantee precision on non-Xe2 devices. "
+        "Re-enable once oneDNN adds SDPA backward support. "
+        "See https://github.com/intel/torch-xpu-ops/issues/4094",
+    )
+    @inductor_config.patch(
+        {
+            "triton.mix_order_reduction": True,
+            "triton.mix_order_reduction_max_reads": 10,
+            # These assertions inspect scheduler/codegen metrics populated only
+            # during fresh compilation; a warm FX graph cache bypasses that path.
+            "force_disable_caches": True,
+        }
+    )
+    def test_max_reads_limits_fusion(self, device):
+        """
+        Verify that max_reads limits over-fusion in a transformer backward
+        pass without disabling mix-order reduction entirely.
+
+        Uses the exact model pattern from #179423: GQA attention with QK-norm
+        and squared leaky-relu MLP. The QK-norm creates extra intermediate
+        buffers in the backward pass that push read counts above the threshold.
+        """
+        if not has_triton():
+            self.skipTest("requires triton")
+
+        num_heads = 8
+        num_kv_heads = 4
+        dim = 512
+        head_dim = dim // num_heads
+
+        class Attention(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.c_q = nn.Linear(dim, dim, bias=False)
+                self.c_k = nn.Linear(dim, num_kv_heads * head_dim, bias=False)
+                self.c_v = nn.Linear(dim, num_kv_heads * head_dim, bias=False)
+                self.proj = nn.Linear(dim, dim, bias=False)
+
+            def forward(self, x):
+                B, T, D = x.shape
+                q = self.c_q(x).reshape(B, T, num_heads, head_dim)
+                k = self.c_k(x).reshape(B, T, num_kv_heads, head_dim)
+                v = self.c_v(x).reshape(B, T, num_kv_heads, head_dim)
+                q = F.rms_norm(q, (q.size(-1),))
+                k = F.rms_norm(k, (k.size(-1),))
+                q = q.transpose(1, 2)
+                k = k.transpose(1, 2).repeat_interleave(
+                    num_heads // num_kv_heads, dim=1
+                )
+                v = v.transpose(1, 2).repeat_interleave(
+                    num_heads // num_kv_heads, dim=1
+                )
+                y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+                return self.proj(y.transpose(1, 2).reshape(B, T, D))
+
+        class Block(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attn_norm = nn.RMSNorm(dim)
+                self.mlp_norm = nn.RMSNorm(dim)
+                self.attn = Attention()
+                self.fc1 = nn.Linear(dim, dim * 4, bias=False)
+                self.fc2 = nn.Linear(dim * 4, dim, bias=False)
+
+            def forward(self, x):
+                x = x + self.attn(self.attn_norm(x))
+                h = self.mlp_norm(x)
+                x = x + self.fc2(F.leaky_relu(self.fc1(h), negative_slope=0.5).square())
+                return x
+
+        model = nn.Sequential(*[Block() for _ in range(3)]).to(device).bfloat16()
+
+        x = torch.randn(
+            8, 2048, dim, device=device, dtype=torch.bfloat16, requires_grad=True
+        )
+        dy = torch.randn_like(x)
+
+        out_ref = model(x)
+        out_ref.backward(dy)
+        grad_ref = x.grad.clone()
+        x.grad = None
+
+        compiled = torch.compile(model, dynamic=False, fullgraph=True)
+        out_act = compiled(x)
+        out_act.backward(dy)
+        grad_act = x.grad.clone()
+
+        self.assertTrue(same(grad_ref, grad_act, tol=5e-2))
+
+        # max_reads should limit over-fusion, not disable mix_order entirely
+        self.assertGreater(metrics.codegen_mix_order_reduction, 0)
+        self.assertGreater(metrics.rejected_mix_order_reduction_fusion, 0)
+
+
+class MixOrderReductionHeuristicTest(TestBase):
+    """
+    CPU-runnable unit tests for the mix-order persistent_reduction autotuning
+    heuristic. These exercise the config generation logic directly (via
+    ``return_configs=True``) without needing a GPU.
+    """
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_uses_tma_tracks_emitted_descriptors(self):
+        for source in (None, "host", "device"):
+            with self.subTest(source=source):
+                kernel = object.__new__(TritonKernel)
+                host_descriptors = {}
+                if source == "host":
+                    host_descriptors["arg"] = mock.sentinel.descriptor
+                kernel.host_tma_descriptor_args = host_descriptors
+                kernel._emitted_device_tma = source == "device"
+                self.assertEqual(kernel.uses_tma, source is not None)
+                self.assertEqual(kernel.uses_device_tma, source == "device")
+
+    def _gen_num_stages(
+        self, *, tma, allow_multi_stages, device_tma=False, rsplit_size=256, rnumel=256
+    ):
+        """
+        Drive the mix-order branch of persistent_reduction and return the set of
+        NUM_STAGES values across the generated configs.
+        """
+        inductor_meta = {
+            "RSPLIT_SIZE": rsplit_size,
+            "mix_order_reduction_allow_multi_stages": allow_multi_stages,
+        }
+        if tma:
+            inductor_meta["uses_tma"] = True
+        if device_tma:
+            inductor_meta["uses_device_tma"] = True
+        configs = persistent_reduction(
+            {"x": 4096, "r0_": rnumel},
+            triton_meta={
+                "device": DeviceProperties(
+                    type="cpu", index=0, multi_processor_count=1, cc=0
+                )
+            },
+            inductor_meta=inductor_meta,
+            return_configs=True,
+        )
+        self.assertTrue(configs, "expected at least one config")
+        return {c.kwargs["NUM_STAGES"] for c in configs}
+
+    def test_num_stages_support_matrix(self):
+        cases = (
+            ("no TMA", False, False, {3}),
+            ("device TMA", True, True, {1}),
+        )
+        for name, tma, device_tma, expected in cases:
+            with self.subTest(name):
+                stages = self._gen_num_stages(
+                    tma=tma,
+                    device_tma=device_tma,
+                    allow_multi_stages=True,
+                )
+                self.assertEqual(stages, expected)
+
+    def test_num_stages_single_when_multi_stage_disabled(self):
+        """
+        When multi-staging is disabled, NUM_STAGES collapses to 1 regardless of
+        whether TMA is active.
+        """
+        for tma in (False, True):
+            stages = self._gen_num_stages(tma=tma, allow_multi_stages=False)
+            self.assertEqual(stages, {1}, f"tma={tma}: expected {{1}}, got {stages}")
+
+    def test_device_tma_disables_multi_stages_across_shapes(self):
+        for rsplit_size in (16, 64, 128, 256):
+            for rnumel in (256, 1024, 8192, 16384):
+                stages = self._gen_num_stages(
+                    tma=True,
+                    device_tma=True,
+                    allow_multi_stages=True,
+                    rsplit_size=rsplit_size,
+                    rnumel=rnumel,
+                )
+                self.assertEqual(stages, {1})
+
+
+class NoMixOrderReductionTest(MixOrderReductionTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._exit_stack.enter_context(
+            inductor_config.patch(
+                "triton.mix_order_reduction",
+                not inductor_config.triton.mix_order_reduction,
+            )
+        )
+
+
+for _name, _value in [
+    (n, v) for n, v in vars(MixOrderReductionTest).items() if n.startswith("test")
+]:
+    setattr(NoMixOrderReductionTest, _name, _value)
+
+
+class MixOrderReductionTestGeneric(TestBase):
+    hw_classification = HardwareClassification.GENERIC
 
     @patch("torch._inductor.scheduler.MixOrderReduction.is_split_reduction")
     @patch("torch._inductor.scheduler.MixOrderReduction.get_numel_rnumel")
@@ -1034,543 +1602,21 @@ class MixOrderReductionTest(TestBase):
         ):
             self.assertFalse(MixOrderReduction.can_fuse(mock_node_1, mock_node_2))
 
-    @inductor_config.patch({"triton.mix_order_reduction_non_strict_mode": True})
-    def test_no_recompile(self):
-        if not inductor_config.triton.mix_order_reduction:
-            self.skipTest("Mix order reduction not enabled")
 
-        def f(x):
-            return x.sum(dim=1), x.sum(dim=0)
-
-        x0 = torch.randn(2048, 1024, device=GPU_TYPE)
-        torch._dynamo.mark_dynamic(x0, (0,))
-        opt_f = torch.compile(f)
-
-        ref = f(x0)
-        act = opt_f(x0)
-
-        torch.testing.assert_close(ref, act, atol=1e-3, rtol=1e-3)
-        self.assertEqual(metrics.codegen_mix_order_reduction, 1)
-
-        opt_f(torch.randn(4096, 1024, device=GPU_TYPE))
-        opt_f(torch.randn(512, 1024, device=GPU_TYPE))
-
-        compile_metrics = torch._dynamo.utils._compilation_metrics
-        self.assertEqual(len(compile_metrics), 1, "Don't recompile")
-
-    @skipIfXpu(msg="https://github.com/intel/intel-xpu-backend-for-triton/issues/6398")
-    def test_additive_rnumel(self):
-        """
-        Fix https://github.com/pytorch/pytorch/issues/176375
-        """
-        x = torch.randn(32768, 300, device=GPU_TYPE)
-        y = torch.randn(32768, 200, device=GPU_TYPE)
-        w = torch.randn(550, device=GPU_TYPE)
-        torch._dynamo.mark_dynamic(x, 1)
-        torch._dynamo.mark_dynamic(y, 1)
-
-        def f(x, y, w):
-            z = torch.cat((x, y), dim=1)
-
-            # Slice w_pool to match dynamic dim. This avoids a guard that would
-            # resolve s0+s1 to a concrete value (640), which is essential for
-            # keeping rnumel symbolic in the generated code.
-            w = w[: z.shape[-1]]  # [s0+s1], no concrete-equality guard
-            z = z * w
-            scale = z.sum()
-            z = z + scale
-            return z.sum(dim=0), z.sum(dim=1)
-
-        ref = f(x, y, w)
-        act = torch.compile(f)(x, y, w)
-
-        torch.testing.assert_close(ref, act, atol=1e-3, rtol=1e-3)
-
-        self.assertEqual(
-            inductor_config.triton.mix_order_reduction,
-            metrics.codegen_mix_order_reduction,
-        )
-
-    @recover_orig_fp32_precision
-    def test_additive_num_splits(self):
-        """
-        When the `num_splits` is an additive expression, a pair of
-        parenthesis is required.
-        """
-        torch.set_float32_matmul_precision("high")
-        linear1 = nn.Linear(1000, 1000).to(GPU_TYPE)
-        norm = nn.LayerNorm(1000).to(GPU_TYPE)
-
-        def model(x):
-            return norm(linear1(x[:, :-1].reshape(-1, 1000)))
-
-        compiled_model = torch.compile(model)
-        x = torch.randn(32, 200, 1000, device=GPU_TYPE)
-        torch._dynamo.mark_dynamic(x, 1)
-        compiled_model(x).sum().backward()
-
-        act = linear1.weight.grad, linear1.bias.grad
-
-        linear1.zero_grad()
-        norm.zero_grad()
-        model(x).sum().backward()
-        ref = linear1.weight.grad, linear1.bias.grad
-
-        torch.testing.assert_close(ref, act, atol=1e-3, rtol=1e-3)
-
-    @largeTensorTest("36GB", device=GPU_TYPE, inductor=True)
-    def test_out_of_shared_memory(self):
-        """
-        Fix https://github.com/pytorch/pytorch/issues/175250
-        """
-        if not inductor_config.triton.mix_order_reduction:
-            self.skipTest("Mix order reduction not enabled")
-
-        NUM_HEADS = 32
-        NUM_KV_HEADS = 8
-        HEAD_DIM = 128
-        HIDDEN_SIZE = NUM_HEADS * HEAD_DIM * 2
-        SEQ_LEN = 8192 * 2
-
-        def rotate_half(x):
-            x1 = x[..., : x.shape[-1] // 2]
-            x2 = x[..., x.shape[-1] // 2 :]
-            return torch.cat((-x2, x1), dim=-1)
-
-        def apply_rotary_pos_emb(q, k, cos, sin):
-            cos = cos[:, None, :, :]
-            sin = sin[:, None, :, :]
-            return (q * cos) + (rotate_half(q) * sin), (k * cos) + (
-                rotate_half(k) * sin
-            )
-
-        @torch.compile
-        def forward(
-            x,
-            q_proj,
-            k_proj,
-            v_proj,
-            o_proj,
-            embed_norm,
-            hidden_norm,
-            cos,
-            sin,
-        ):
-            batch, seq_len, _ = x.shape
-
-            # Eagle3 first layer: split concatenated [embeds, hidden] input
-            mid = x.shape[2] // 2
-            embeds, hidden = x.split(mid, dim=-1)
-
-            # Dual RMSNorm (pow, sum, div, mul in backward)
-            embeds = embed_norm(embeds)
-            hidden = hidden_norm(hidden)
-            residual = hidden
-
-            # Recombine for attention input (2 * HIDDEN_SIZE)
-            x = torch.cat([embeds, hidden], dim=-1)
-
-            # Adding a graph break here "fixes" the issue
-            # by breaking up the fused op
-            # torch._dynamo.graph_break()
-
-            # Q/K/V projections from 2*hidden_size input
-            q = q_proj(x).view(batch, seq_len, NUM_HEADS, HEAD_DIM).transpose(1, 2)
-            k = k_proj(x).view(batch, seq_len, NUM_KV_HEADS, HEAD_DIM).transpose(1, 2)
-            v = v_proj(x).view(batch, seq_len, NUM_KV_HEADS, HEAD_DIM).transpose(1, 2)
-
-            q, k = apply_rotary_pos_emb(q, k, cos, sin)
-            k = torch.repeat_interleave(k, NUM_HEADS // NUM_KV_HEADS, dim=1)
-            v = torch.repeat_interleave(v, NUM_HEADS // NUM_KV_HEADS, dim=1)
-            out = q.contiguous() @ k.contiguous().transpose(-2, -1) @ v.contiguous()
-
-            out = out.transpose(1, 2).contiguous().reshape(batch, seq_len, -1)
-            return o_proj(out) + residual
-
-        # Layers
-        embed_norm = nn.RMSNorm(HIDDEN_SIZE).to(GPU_TYPE)
-        hidden_norm = nn.RMSNorm(HIDDEN_SIZE).to(GPU_TYPE)
-        # Q/K/V project from 2*HIDDEN_SIZE (concatenated embeds + hidden)
-        q_proj = nn.Linear(2 * HIDDEN_SIZE, NUM_HEADS * HEAD_DIM, bias=False).to(
-            GPU_TYPE
-        )
-        k_proj = nn.Linear(2 * HIDDEN_SIZE, NUM_KV_HEADS * HEAD_DIM, bias=False).to(
-            GPU_TYPE
-        )
-        v_proj = nn.Linear(2 * HIDDEN_SIZE, NUM_KV_HEADS * HEAD_DIM, bias=False).to(
-            GPU_TYPE
-        )
-        o_proj = nn.Linear(NUM_HEADS * HEAD_DIM, HIDDEN_SIZE, bias=False).to(GPU_TYPE)
-
-        # Block mask - simple causal only
-        def causal_mask(_b, _h, q, kv):
-            return q >= kv
-
-        # Rotary embeddings (precomputed, no grad needed)
-        inv_freq = 1.0 / (
-            500000.0
-            ** (
-                torch.arange(0, HEAD_DIM, 2, dtype=torch.float32, device=GPU_TYPE)
-                / HEAD_DIM
-            )
-        )
-        pos = torch.arange(1, SEQ_LEN + 1, dtype=torch.float32, device=GPU_TYPE)
-        freqs = torch.outer(pos, inv_freq)
-        emb = torch.cat((freqs, freqs), dim=-1).unsqueeze(0)
-        cos, sin = emb.cos(), emb.sin()
-
-        # Input: 2*HIDDEN_SIZE to match split [embeds, hidden]
-        x = torch.randn(
-            1, SEQ_LEN, 2 * HIDDEN_SIZE, device=GPU_TYPE, requires_grad=True
-        )
-
-        out = forward(
-            x,
-            q_proj,
-            k_proj,
-            v_proj,
-            o_proj,
-            embed_norm,
-            hidden_norm,
-            cos,
-            sin,
-        )
-        loss = out.sum()
-        loss.backward()
-        self.assertTrue(metrics.codegen_mix_order_reduction > 1)
-
-    @inductor_config.patch("triton.mix_order_reduction", True)
-    @inductor_config.patch("triton.mix_order_reduction_non_strict_mode", True)
-    def test_dimension_refactoring_mismatch(self):
-        """
-        This reproduces an issue where `simplify_and_reorder()` produces a different
-        dimension factorization than `_original_ranges` used during fusion decision.
-        For example, fusion might see (13, 8472) but codegen sees (26, 4236) after
-        the reduction split optimization adds a factor of 2 to the pointwise dimensions.
-
-        We skip fusing split reductions for node1 in this case.
-        """
-
-        if not inductor_config.triton.mix_order_reduction:
-            self.skipTest("Mix order reduction not enabled")
-
-        # Reproduce the RMSNorm backward pattern that triggered the bug.
-        # The key is:
-        # - Shape (M, N) = (13, 8472) where N=8472 is large enough to trigger split
-        # - RMSNorm backward creates reductions along both dimensions
-        # - The feature dimension reduction (8472) gets split with factor 2
-        # - Mix order reduction tries to fuse these, but groups don't match after split
-        def f(x, w, eps):
-            orig_dtype = x.dtype
-            x = x.float()
-            # RMSNorm forward: y = x * rsqrt(mean(x^2) + eps) * w
-            rsqrt = torch.rsqrt((x * x).sum(dim=-1) / x.shape[-1] + eps)
-            y = (x * rsqrt[:, None] * w).to(dtype=orig_dtype)
-            return y
-
-        def fwd_bwd(compiled_f):
-            x.grad = None
-            w.grad = None
-            out = compiled_f(x, w, eps)
-            out.backward(dy)
-            return x.grad, w.grad
-
-        # Use the exact shape from the bug report: (13, 8472)
-        # 8472 = 2 * 4236, so split with factor 2 gives sub-reductions of 4236
-        M, N = 13, 8472
-        x = torch.randn(M, N, dtype=torch.float32, device=GPU_TYPE, requires_grad=True)
-        w = torch.randn(N, dtype=torch.float32, device=GPU_TYPE, requires_grad=True)
-        dy = torch.randn_like(x)
-        eps = 1e-5
-
-        opt_f = torch.compile(f)
-
-        ref = fwd_bwd(f)
-        act = fwd_bwd(opt_f)
-        torch.testing.assert_close(ref, act, atol=1e-3, rtol=1e-3)
-        self.assertGreaterEqual(metrics.codegen_mix_order_reduction, 0)
-
-    def test_keepdim_shape_mismatch(self):
-        """
-        Test that MixOrderReduction correctly handles keepdim=True reductions.
-
-        This test reproduces a bug where the final reduction in MixOrderReduction
-        generates `view(nsplit, rnumel).sum(dim=0)` which produces shape [rnumel],
-        but the expected output should be [1, rnumel] when keepdim=True.
-
-        The error manifests as:
-        RuntimeError: Function CompiledFunctionBackward returned an invalid gradient
-        at index N - got [2048] but expected shape compatible with [1, 2048]
-        """
-        if not inductor_config.triton.mix_order_reduction:
-            self.skipTest("Mix order reduction not enabled")
-
-        # Create a model that produces reductions with keepdim=True in the backward pass
-        # This pattern is common in normalization layers like RMSNorm/LayerNorm
-        class KeepDimReductionModel(nn.Module):
-            def __init__(self, hidden_size):
-                super().__init__()
-                # Using shape [1, hidden_size] to ensure keepdim=True in backward
-                self.weight = nn.Parameter(torch.ones(1, hidden_size))
-                self.bias = nn.Parameter(torch.zeros(1, hidden_size))
-
-            def forward(self, x):
-                # x: [batch, hidden_size]
-                # Normalization-like operation that produces keepdim reductions in backward
-                mean = x.mean(dim=-1, keepdim=True)
-                var = ((x - mean) ** 2).mean(dim=-1, keepdim=True)
-                x_norm = (x - mean) / (var + 1e-5).sqrt()
-                return x_norm * self.weight + self.bias
-
-        M, N = 32768, 2048  # Large batch to trigger mix order reduction
-        model = KeepDimReductionModel(N).to(GPU_TYPE)
-
-        x = torch.randn(M, N, dtype=torch.float32, device=GPU_TYPE, requires_grad=True)
-        dy = torch.randn_like(x)
-
-        def fwd_bwd(model, x, dy):
-            x.grad = None
-            model.zero_grad()
-            out = model(x)
-            out.backward(dy)
-            return x.grad, model.weight.grad, model.bias.grad
-
-        # Reference (eager)
-        ref = fwd_bwd(model, x, dy)
-
-        # Compiled with mix order reduction
-        compiled_model = torch.compile(model)
-        act = fwd_bwd(compiled_model, x, dy)
-
-        # Verify numerical correctness
-        self.assertTrue(
-            same(ref, act, tol=1e-3), lambda msg: f"{msg}\nref:\n{ref}\nact:\n{act}"
-        )
-
-        # Verify mix order reduction was used
-        self.assertGreater(
-            metrics.codegen_mix_order_reduction,
-            0,
-            "Mix order reduction should be triggered",
-        )
-
-    def test_multi_dim_reduction_output_shape(self):
-        """
-        Regression test for https://github.com/pytorch/pytorch/issues/178080:
-        two reductions over different dims in the same compiled function must
-        produce correctly-shaped outputs.
-
-        x.sum(dim=(1, 2)) over [32768, 512, 2] -> [32768]
-        x.sum(dim=0)      over [32768, 512, 2] -> [512, 2]
-        """
-
-        def f(x):
-            return x.sum(dim=(1, 2)), x.sum(dim=0)
-
-        x = torch.randn(32768, 512, 2, device=GPU_TYPE)
-        ref = f(x)
-        act = torch.compile(f)(x)
-
-        self.assertEqual(list(act[0].shape), list(ref[0].shape))
-        self.assertEqual(list(act[1].shape), list(ref[1].shape))
-        self.assertTrue(same(ref, act, tol=1e-3))
-
-
-class OverFusionTest(TestBase):
-    """
-    Regression test for mix-order reduction over-fusion in transformer backward
-    passes. When can_fuse_with absorbs too many pointwise nodes into a
-    mixed-order kernel, the resulting kernel has excessive buffer reads (loads)
-    per RSPLIT loop iteration, causing register spills and performance
-    regression. See #179423.
-    """
-
-    @unittest.skipIf(
-        TEST_XPU and not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
-        "XPU: SYCL TLA backward does not guarantee precision on non-Xe2 devices. "
-        "Re-enable once oneDNN adds SDPA backward support. "
-        "See https://github.com/intel/torch-xpu-ops/issues/4094",
-    )
-    @inductor_config.patch(
-        {
-            "triton.mix_order_reduction": True,
-            "triton.mix_order_reduction_max_reads": 10,
-            # These assertions inspect scheduler/codegen metrics populated only
-            # during fresh compilation; a warm FX graph cache bypasses that path.
-            "force_disable_caches": True,
-        }
-    )
-    def test_max_reads_limits_fusion(self):
-        """
-        Verify that max_reads limits over-fusion in a transformer backward
-        pass without disabling mix-order reduction entirely.
-
-        Uses the exact model pattern from #179423: GQA attention with QK-norm
-        and squared leaky-relu MLP. The QK-norm creates extra intermediate
-        buffers in the backward pass that push read counts above the threshold.
-        """
-        if not HAS_GPU:
-            self.skipTest("requires GPU")
-
-        num_heads = 8
-        num_kv_heads = 4
-        dim = 512
-        head_dim = dim // num_heads
-
-        class Attention(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.c_q = nn.Linear(dim, dim, bias=False)
-                self.c_k = nn.Linear(dim, num_kv_heads * head_dim, bias=False)
-                self.c_v = nn.Linear(dim, num_kv_heads * head_dim, bias=False)
-                self.proj = nn.Linear(dim, dim, bias=False)
-
-            def forward(self, x):
-                B, T, D = x.shape
-                q = self.c_q(x).reshape(B, T, num_heads, head_dim)
-                k = self.c_k(x).reshape(B, T, num_kv_heads, head_dim)
-                v = self.c_v(x).reshape(B, T, num_kv_heads, head_dim)
-                q = F.rms_norm(q, (q.size(-1),))
-                k = F.rms_norm(k, (k.size(-1),))
-                q = q.transpose(1, 2)
-                k = k.transpose(1, 2).repeat_interleave(
-                    num_heads // num_kv_heads, dim=1
-                )
-                v = v.transpose(1, 2).repeat_interleave(
-                    num_heads // num_kv_heads, dim=1
-                )
-                y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
-                return self.proj(y.transpose(1, 2).reshape(B, T, D))
-
-        class Block(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.attn_norm = nn.RMSNorm(dim)
-                self.mlp_norm = nn.RMSNorm(dim)
-                self.attn = Attention()
-                self.fc1 = nn.Linear(dim, dim * 4, bias=False)
-                self.fc2 = nn.Linear(dim * 4, dim, bias=False)
-
-            def forward(self, x):
-                x = x + self.attn(self.attn_norm(x))
-                h = self.mlp_norm(x)
-                x = x + self.fc2(F.leaky_relu(self.fc1(h), negative_slope=0.5).square())
-                return x
-
-        model = nn.Sequential(*[Block() for _ in range(3)]).to(GPU_TYPE).bfloat16()
-
-        x = torch.randn(
-            8, 2048, dim, device=GPU_TYPE, dtype=torch.bfloat16, requires_grad=True
-        )
-        dy = torch.randn_like(x)
-
-        out_ref = model(x)
-        out_ref.backward(dy)
-        grad_ref = x.grad.clone()
-        x.grad = None
-
-        compiled = torch.compile(model, dynamic=False, fullgraph=True)
-        out_act = compiled(x)
-        out_act.backward(dy)
-        grad_act = x.grad.clone()
-
-        self.assertTrue(same(grad_ref, grad_act, tol=5e-2))
-
-        # max_reads should limit over-fusion, not disable mix_order entirely
-        self.assertGreater(metrics.codegen_mix_order_reduction, 0)
-        self.assertGreater(metrics.rejected_mix_order_reduction_fusion, 0)
-
-
-class MixOrderReductionHeuristicTest(TestBase):
-    """
-    CPU-runnable unit tests for the mix-order persistent_reduction autotuning
-    heuristic. These exercise the config generation logic directly (via
-    ``return_configs=True``) without needing a GPU.
-    """
-
-    def test_uses_tma_tracks_emitted_descriptors(self):
-        for source in (None, "host", "device"):
-            with self.subTest(source=source):
-                kernel = object.__new__(TritonKernel)
-                host_descriptors = {}
-                if source == "host":
-                    host_descriptors["arg"] = mock.sentinel.descriptor
-                kernel.host_tma_descriptor_args = host_descriptors
-                kernel._emitted_device_tma = source == "device"
-                self.assertEqual(kernel.uses_tma, source is not None)
-                self.assertEqual(kernel.uses_device_tma, source == "device")
-
-    def _gen_num_stages(
-        self, *, tma, allow_multi_stages, device_tma=False, rsplit_size=256, rnumel=256
-    ):
-        """
-        Drive the mix-order branch of persistent_reduction and return the set of
-        NUM_STAGES values across the generated configs.
-        """
-        inductor_meta = {
-            "RSPLIT_SIZE": rsplit_size,
-            "mix_order_reduction_allow_multi_stages": allow_multi_stages,
-        }
-        if tma:
-            inductor_meta["uses_tma"] = True
-        if device_tma:
-            inductor_meta["uses_device_tma"] = True
-        configs = persistent_reduction(
-            {"x": 4096, "r0_": rnumel},
-            triton_meta={
-                "device": DeviceProperties(
-                    type="cpu", index=0, multi_processor_count=1, cc=0
-                )
-            },
-            inductor_meta=inductor_meta,
-            return_configs=True,
-        )
-        self.assertTrue(configs, "expected at least one config")
-        return {c.kwargs["NUM_STAGES"] for c in configs}
-
-    def test_num_stages_support_matrix(self):
-        cases = (
-            ("no TMA", False, False, {3}),
-            ("device TMA", True, True, {1}),
-        )
-        for name, tma, device_tma, expected in cases:
-            with self.subTest(name):
-                stages = self._gen_num_stages(
-                    tma=tma,
-                    device_tma=device_tma,
-                    allow_multi_stages=True,
-                )
-                self.assertEqual(stages, expected)
-
-    def test_num_stages_single_when_multi_stage_disabled(self):
-        """
-        When multi-staging is disabled, NUM_STAGES collapses to 1 regardless of
-        whether TMA is active.
-        """
-        for tma in (False, True):
-            stages = self._gen_num_stages(tma=tma, allow_multi_stages=False)
-            self.assertEqual(stages, {1}, f"tma={tma}: expected {{1}}, got {stages}")
-
-    def test_device_tma_disables_multi_stages_across_shapes(self):
-        for rsplit_size in (16, 64, 128, 256):
-            for rnumel in (256, 1024, 8192, 16384):
-                stages = self._gen_num_stages(
-                    tma=True,
-                    device_tma=True,
-                    allow_multi_stages=True,
-                    rsplit_size=rsplit_size,
-                    rnumel=rnumel,
-                )
-                self.assertEqual(stages, {1})
-
-
-@inductor_config.patch(
-    "triton.mix_order_reduction", not inductor_config.triton.mix_order_reduction
+instantiate_device_type_tests(
+    SkipPatternTest, globals(), except_for="cpu", allow_xpu=True
 )
-class NoMixOrderReductionTest(MixOrderReductionTest):
-    pass
+instantiate_device_type_tests(
+    MixOrderReductionTest, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    OverFusionTest, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    NoMixOrderReductionTest, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
-    if HAS_GPU:
+    if has_triton():
         run_tests()
