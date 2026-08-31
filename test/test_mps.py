@@ -2924,14 +2924,16 @@ class TestMPS(TestCaseMPS):
         check_grad(make_A(2, n, n), torch.randn(n), left=True)  # vector rhs
         check_grad(make_A(2, n, n), torch.randn(1, k, n), left=False)  # left=False
 
-    def test_linalg_lu_solve(self):
+    @parametrize("dtype", [torch.float32, torch.complex64])
+    def test_linalg_lu_solve(self, dtype):
         # Native Metal lu_solve: all (left, adjoint) combinations and batch broadcasting vs CPU.
         from functools import partial
         from torch.testing._internal.common_utils import (
             make_fullrank_matrices_with_distinct_singular_values,
         )
 
-        make_A = partial(make_fullrank_matrices_with_distinct_singular_values, device="cpu", dtype=torch.float32)
+        make_A = partial(make_fullrank_matrices_with_distinct_singular_values, device="cpu", dtype=dtype)
+        make_B = partial(torch.randn, dtype=dtype)
         n, k = 4, 3
 
         def check(A_cpu, B_cpu, left, adjoint):
@@ -2945,10 +2947,41 @@ class TestMPS(TestCaseMPS):
                 for adjoint in [True, False]:
                     A = make_A(*a_batch, n, n)
                     mat = (n, k) if left else (k, n)
-                    check(A, torch.randn(*b_batch, *mat), left, adjoint)
+                    check(A, make_B(*b_batch, *mat), left, adjoint)
 
         # multi-block (n > 32) path
-        check(make_A(2, 40, 40), torch.randn(2, 40, 5), left=True, adjoint=False)
+        check(make_A(2, 40, 40), make_B(2, 40, 5), left=True, adjoint=False)
+
+    def test_linalg_lu_backed_complex_backward(self):
+        # complex64 backward for det/slogdet/logdet/solve routes through the
+        # native complex lu_solve; the standard OpInfo grad harnesses only run
+        # float on MPS (MPS_GRAD_DTYPES), so check the grads against CPU here.
+        # Drive backward with a constant grad_output rather than a scalar loss:
+        # make_fullrank produces |det| ~= 1, so a loss like logabsdet.abs() sits
+        # on the kink at 0 where sign() flips on fp noise and doubles the grad.
+        from functools import partial
+        from torch.testing._internal.common_utils import (
+            make_fullrank_matrices_with_distinct_singular_values,
+        )
+
+        make_A = partial(make_fullrank_matrices_with_distinct_singular_values, dtype=torch.complex64)
+
+        def check(fn, *shape, with_rhs=False):
+            A = make_A(*shape, device="cpu")
+            B = torch.randn(*shape[:-1], 2, dtype=torch.complex64) if with_rhs else None
+            grads = {}
+            for dev in ("cpu", "mps"):
+                a = A.detach().clone().to(dev).requires_grad_()
+                out = fn(a, B.to(dev)) if with_rhs else fn(a)
+                out.backward(torch.ones_like(out))
+                grads[dev] = a.grad
+            self.assertEqual(grads["cpu"], grads["mps"])
+
+        for shape in [(5, 5), (3, 6, 6)]:
+            check(lambda a: torch.linalg.det(a), *shape)
+            check(lambda a: torch.linalg.slogdet(a).logabsdet, *shape)
+            check(lambda a: torch.logdet(a), *shape)
+            check(lambda a, b: torch.linalg.solve(a, b), *shape, with_rhs=True)
 
     @parametrize("dtype", [torch.float32, torch.complex64])
     def test_linalg_det(self, dtype):
@@ -16338,7 +16371,7 @@ class TestConsistency(TestCaseMPS):
         for mps_sample in op.sample_inputs(
                 device,
                 dtype,
-                requires_grad=(dtype.is_floating_point or dtype.is_complex),
+                requires_grad=(op.supports_autograd and (dtype.is_floating_point or dtype.is_complex)),
                 include_conjugated_inputs=include_conjugated_inputs,
                 set_seed=True):
 
@@ -16436,7 +16469,7 @@ class TestConsistency(TestCaseMPS):
 
         for mps_sample in op.sample_inputs(
                 device, dtype,
-                requires_grad=(dtype.is_floating_point or dtype.is_complex),
+                requires_grad=(op.supports_autograd and (dtype.is_floating_point or dtype.is_complex)),
                 set_seed=True):
             #
             # Forward check
