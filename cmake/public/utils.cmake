@@ -588,7 +588,15 @@ function(torch_optimize_layout_if_enabled tgt)
     # BOLT needs --emit-relocs. This flag increases the binary size so we
     # scope it to bolt optimized targets rather than applying globally.
     target_link_options_if_supported(${tgt} "--emit-relocs")
-    find_file(_profile NAMES ${ARGN} PATHS "${LLVM_BOLT_PROFILES_DIR}" NO_DEFAULT_PATH NO_CACHE REQUIRED)
+    find_file(
+      _profile
+      NAMES ${ARGN}
+      PATHS "${LLVM_BOLT_PROFILES_DIR}"
+      NO_DEFAULT_PATH
+      NO_CMAKE_FIND_ROOT_PATH
+      NO_CACHE
+      REQUIRED
+    )
     message(STATUS "Using BOLT profile for ${tgt}: ${_profile}")
     set_property(TARGET ${tgt} APPEND PROPERTY LINK_DEPENDS "${_profile}")
     set(_logfile "${CMAKE_BINARY_DIR}/logs/llvm-bolt-lib${tgt}.txt")
