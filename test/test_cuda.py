@@ -5839,6 +5839,109 @@ exit(2)
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
+    @unittest.skipIf(
+        not SM70OrLater, "Compute capability >= SM70 required for relaxed ptx flag"
+    )
+    @unittest.skipUnless(
+        TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
+    )
+    @serialTest()
+    def test_graph_record_stream_noncapturing_target_during_capture(self):
+        previous = torch.cuda.memory._snapshot()["allocator_settings"][
+            "graph_capture_record_stream_reuse"
+        ]
+        self.addCleanup(
+            torch.cuda.memory._set_allocator_settings,
+            f"graph_capture_record_stream_reuse:{previous}",
+        )
+        torch.cuda.memory._set_allocator_settings(
+            "graph_capture_record_stream_reuse:True"
+        )
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+
+        shared_pool = torch.cuda.graph_pool_handle()
+        capture_stream = torch.cuda.Stream()
+        side_stream = torch.cuda.Stream()
+        numel = (8 * 1024 * 1024) // 4
+
+        allocate_graph = torch.cuda.CUDAGraph()
+        with torch.cuda.stream(capture_stream):
+            allocate_graph.capture_begin(pool=shared_pool)
+            data = torch.empty(numel, device="cuda")
+            data_ptr = data.data_ptr()
+            allocate_graph.capture_end()
+        torch.cuda.synchronize()
+
+        free_graph = torch.cuda.CUDAGraph()
+        with torch.cuda.stream(capture_stream):
+            free_graph.capture_begin(pool=shared_pool)
+            data.record_stream(side_stream)
+            del data
+            replacement = torch.empty(numel, device="cuda")
+            replacement_ptr = replacement.data_ptr()
+            torch.cuda._sleep(1)
+            free_graph.capture_end()
+
+        self.assertNotEqual(data_ptr, replacement_ptr)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipUnless(
+        TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
+    )
+    @serialTest()
+    def test_graph_capture_reclaim_multiple_blocks(self):
+        previous = torch.cuda.memory._snapshot()["allocator_settings"][
+            "graph_capture_record_stream_reuse"
+        ]
+        self.addCleanup(
+            torch.cuda.memory._set_allocator_settings,
+            f"graph_capture_record_stream_reuse:{previous}",
+        )
+        torch.cuda.memory._set_allocator_settings(
+            "graph_capture_record_stream_reuse:True"
+        )
+        torch.cuda.empty_cache()
+
+        s1, s2 = torch.cuda.Stream(), torch.cuda.Stream()
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+        torch.cuda.synchronize()
+
+        with torch.cuda.stream(s1):
+            g.capture_begin()
+            sink = torch.empty(8, device="cuda")
+            first = torch.empty(8, device="cuda")
+            second = torch.empty(8, device="cuda")
+            original_ptrs = {first.data_ptr(), second.data_ptr()}
+
+            s2.wait_stream(s1)
+            with torch.cuda.stream(s2):
+                first.fill_(1.0)
+                second.fill_(2.0)
+                first.record_stream(s2)
+                second.record_stream(s2)
+
+            del first, second
+
+            s1.wait_stream(s2)
+            sink.fill_(3.0)
+
+            # One allocation discovers both reclaimable blocks. They remain
+            # protected from coalescing until each queued Block* is applied.
+            reused_first = torch.empty(8, device="cuda")
+            reused_second = torch.empty(8, device="cuda")
+            reused_ptrs = {reused_first.data_ptr(), reused_second.data_ptr()}
+            g.capture_end()
+
+        torch.cuda.synchronize()
+        self.assertEqual(original_ptrs, reused_ptrs)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     @unittest.skipIf(
         TEST_WITH_ROCM
         or not torch.version.cuda
