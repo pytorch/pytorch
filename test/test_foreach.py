@@ -15,6 +15,7 @@ from torch.testing import make_tensor
 from torch.testing._comparison import default_tolerances
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, SM90OrLater
 from torch.testing._internal.common_device_type import (
+    deviceCountAtLeast,
     dtypes,
     instantiate_device_type_tests,
     largeTensorTest,
@@ -46,7 +47,6 @@ from torch.testing._internal.common_utils import (
     serialTest,
     skipIfNoNvmath,
     skipIfTorchDynamo,
-    TEST_MULTIACCELERATOR,
     TEST_WITH_ROCM,
     TestCase,
 )
@@ -1358,17 +1358,15 @@ class TestForeachDevice(TestCase):
                     sample.args = new_args
             _test(func, sample)
 
-    @unittest.skipIf(not TEST_MULTIACCELERATOR, "multi-GPU not supported")
-    def test_tensors_grouping(self):
+    @onlyAccelerator
+    @deviceCountAtLeast(2)
+    def test_tensors_grouping(self, devices):
         num_tensors_per_list = 10
-        num_devices = torch.accelerator.device_count()
         dtypes = (torch.float16, torch.float32, torch.float64)
         list1 = [
             torch.tensor(
                 i,
-                device=torch.device(
-                    self.device_type, random.randint(0, num_devices - 1)
-                ),
+                device=devices[random.randint(0, len(devices) - 1)],
                 dtype=dtypes[random.randint(0, 2)],
             )
             for i in range(num_tensors_per_list)
