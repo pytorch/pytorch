@@ -1225,14 +1225,80 @@ def slice_noop(self, dim=0, start=None, end=None, step=1):
     return False
 
 
-@register_noop_decomp(aten.slice_scatter, 1)
+def _slice_scatter_noop_replacement(node):
+    """Return ``self`` when ``src`` is exactly the slice being overwritten.
+
+    Functionalization can produce split/getitem/slice_scatter chains that copy
+    an unmodified view back to the same range of its base.  Replacing such a
+    scatter with the base avoids materializing the whole tensor.  Fall back to
+    the historical full-replacement behavior (replace with ``src``).
+    """
+    self = get_arg_value(node, 0)
+    src = get_arg_value(node, 1)
+    if not isinstance(self, torch.fx.Node) or not isinstance(src, torch.fx.Node):
+        return src
+    if src.target is not operator.getitem or not isinstance(src.args[0], torch.fx.Node):
+        return src
+
+    split = src.args[0]
+    if split.target is not aten.split_with_sizes.default or split.args[0] is not self:
+        return src
+    split_sizes = get_arg_value(split, 1, "split_sizes")
+    split_dim = get_arg_value(split, 2, "dim")
+    index = get_arg_value(src, 1)
+    scatter_dim = get_arg_value(node, 2, "dim")
+    start = get_arg_value(node, 3, "start")
+    end = get_arg_value(node, 4, "end")
+    step = get_arg_value(node, 5, "step")
+    if split_dim is None:
+        split_dim = 0
+    if scatter_dim is None:
+        scatter_dim = 0
+    if step is None:
+        step = 1
+    if (
+        not isinstance(split_sizes, (list, tuple))
+        or not all(isinstance(size, int) for size in split_sizes)
+        or not isinstance(index, int)
+        or not isinstance(split_dim, int)
+        or not isinstance(scatter_dim, int)
+        or (start is not None and not isinstance(start, int))
+        or (end is not None and not isinstance(end, int))
+        or (step is not None and not isinstance(step, int))
+    ):
+        return src
+    self_val = self.meta.get("val")
+    if not isinstance(self_val, torch.Tensor):
+        return src
+    ndim = self_val.dim()
+    if ndim == 0:
+        return src
+    split_dim %= ndim
+    scatter_dim %= ndim
+    if split_dim != scatter_dim or step != 1 or not 0 <= index < len(split_sizes):
+        return src
+    expected_start = sum(split_sizes[:index])
+    expected_end = expected_start + split_sizes[index]
+    if start is None:
+        start = 0
+    if end is None:
+        end = 2**63 - 1
+    if start == expected_start and end == expected_end:
+        return self
+    return src
+
+
+@register_noop_decomp(aten.slice_scatter, _slice_scatter_noop_replacement)
 def slice_scatter_noop(self, src, dim=0, start=None, end=None, step=1):
+    if not -self.dim() <= dim < self.dim():
+        return False
+    dim %= self.dim()
     if start is None:
         start = 0
     if end is None:
         end = 2**63 - 1
     slice_scatter_dim_size = self.shape[dim]
-    if (
+    full_replacement = (
         self.shape == src.shape
         and start == 0
         and (
@@ -1240,9 +1306,18 @@ def slice_scatter_noop(self, src, dim=0, start=None, end=None, step=1):
             or statically_known_true(end >= slice_scatter_dim_size)
         )
         and step == 1
-    ):
-        return True
-    return False
+    )
+    partial_self_replacement = (
+        step == 1
+        and self.dim() == src.dim()
+        and all(
+            statically_known_true(sym_eq(src.shape[d], self.shape[d]))
+            for d in range(self.dim())
+            if d != dim
+        )
+        and statically_known_true(sym_eq(src.shape[dim], end - start))
+    )
+    return full_replacement or partial_self_replacement
 
 
 @register_noop_decomp(aten.repeat)
@@ -1279,7 +1354,7 @@ def pow_noop(a, b):
     return isinstance(b, int) and b == 1
 
 
-@register_noop_decomp([aten.cat], lambda args: args[0][0])
+@register_noop_decomp([aten.cat], lambda node: node.args[0][0])
 def cat_noop(inputs, dim=0):
     return len(inputs) == 1
 
@@ -1331,7 +1406,7 @@ def remove_noop_ops(graph: torch.fx.Graph):
             if isinstance(src_index, int):
                 src = node.args[src_index]
             else:
-                src = src_index(node.args)
+                src = src_index(node)
             if not isinstance(src, torch.fx.Node):
                 continue
 
