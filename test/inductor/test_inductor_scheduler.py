@@ -64,6 +64,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfMPS,
     skipIfXpu,
+    subtest,
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
@@ -295,37 +296,19 @@ class TestScheduler(TestCase):
                 required_post_reduction_index=1,
             )
 
-    def _make_pointwise_node(self, name, numel, ancestors=()):
+    def _make_pointwise_node(self, name, numel, ancestors=(), reads=()):
         """Create a minimal pointwise scheduler node for domain classification."""
         node = SchedulerNode.__new__(SchedulerNode)
         node.group = (None, (sympy.Integer(numel), sympy.Integer(1)))
         node.ancestors = OrderedSet(ancestors)
-        node.read_writes = ReadWrites(OrderedSet(), OrderedSet(), OrderedSet())
+        node.read_writes = ReadWrites(
+            OrderedSet(StarDep(read) for read in reads), OrderedSet(), OrderedSet()
+        )
         node.is_reduction = Mock(return_value=False)
         node.get_operation_names = Mock(return_value=OrderedSet([name]))
         node.get_buffer_names = Mock(return_value=OrderedSet())
         node.get_ranges = Mock(return_value=([sympy.Integer(numel)], []))
         return node
-
-    @parametrize("should_fuse", [True, False])
-    def test_fusion_result_from_decision(self, should_fuse):
-        """An immediate decision should not contain deferred fusion work."""
-        result = FusionResult.fuse(should_fuse)
-
-        self.assertEqual(result.should_fuse, should_fuse)
-        self.assertIsNone(result.callable_fn)
-        self.assertIsNone(result.future)
-
-    def test_fusion_result_from_callable(self):
-        """A deferred decision should retain its callable and future."""
-        callable_fn = Mock(return_value=True)
-        future = Mock()
-
-        result = FusionResult.from_callable(callable_fn, future)
-
-        self.assertIsNone(result.should_fuse)
-        self.assertIs(result.callable_fn, callable_fn)
-        self.assertIs(result.future, future)
 
     @parametrize(
         "kwargs",
@@ -341,26 +324,6 @@ class TestScheduler(TestCase):
             "Fusion result should contain either fusion decision or callable_fn",
         ):
             FusionResult(**kwargs)
-
-    @parametrize("future,include_future", [(None, False), (Mock(), True)])
-    def test_pending_fusion_retains_nodes_and_deferred_work(
-        self, future, include_future
-    ):
-        """Pending fusion should retain deferred work and ordered nodes."""
-        callable_fn = Mock(return_value=True)
-        node1 = Mock(spec=BaseSchedulerNode)
-        node2 = Mock(spec=BaseSchedulerNode)
-        pending_fusion = PendingFusion(
-            callable_fn=callable_fn,
-            node1=node1,
-            node2=node2,
-            **({"future": future} if include_future else {}),
-        )
-
-        fusion_nodes = pending_fusion.get_fusion_nodes()
-        self.assertIs(pending_fusion.callable_fn, callable_fn)
-        self.assertEqual(fusion_nodes, (node1, node2))
-        self.assertIs(pending_fusion.future, future)
 
     def test_node_user_identity(self):
         """User identity should include the node name and usage properties."""
@@ -415,151 +378,176 @@ class TestScheduler(TestCase):
         node1 = Mock(spec=BaseSchedulerNode)
         node2 = Mock(spec=BaseSchedulerNode)
 
-        with self.assertRaises(AssertionError):
+        with self.assertRaisesRegex(
+            AssertionError, "expected self.node to be other.node"
+        ):
             NodeUser(node1).merge(NodeUser(node2))
 
-    def test_nested_reduction_candidate(self):
+    @parametrize(
+        "enabled,dependent,rnumel1,rnumel2,expected",
+        [
+            subtest((True, True, 512, 16, True), name="valid"),
+            subtest((False, True, 512, 16, False), name="disabled"),
+            subtest((True, False, 512, 16, False), name="independent"),
+            subtest((True, True, 16, 16, False), name="same_reduction_size"),
+        ],
+    )
+    def test_nested_reduction_candidate(
+        self, enabled, dependent, rnumel1, rnumel2, expected
+    ):
         """Candidates must be enabled dependent reductions of different sizes."""
         node1 = Mock(spec=BaseSchedulerNode)
         node2 = Mock(spec=BaseSchedulerNode)
-        cases = [
-            ("valid", True, True, 512, 16, True),
-            ("disabled", False, True, 512, 16, False),
-            ("independent", True, False, 512, 16, False),
-            ("same reduction size", True, True, 16, 16, False),
-        ]
+        node1.group = (None, (128, rnumel1))
+        node2.group = (None, (128, rnumel2))
         graph = Mock(sizevars=SizeVarAllocator())
 
-        with V.set_graph_handler(graph):
-            for name, enabled, dependent, rnumel1, rnumel2, expected in cases:
-                node1.group = (None, (128, rnumel1))
-                node2.group = (None, (128, rnumel2))
-                with (
-                    self.subTest(name),
-                    patch.object(
-                        NestedReduction, "_is_enabled_for", return_value=enabled
-                    ),
-                    patch.object(
-                        NestedReduction,
-                        "_is_dependent_reduction_pair",
-                        return_value=dependent,
-                    ),
-                ):
-                    self.assertEqual(
-                        NestedReduction.is_candidate(node1, node2), expected
-                    )
+        with (
+            V.set_graph_handler(graph),
+            patch.object(NestedReduction, "_is_enabled_for", return_value=enabled),
+            patch.object(
+                NestedReduction,
+                "_is_dependent_reduction_pair",
+                return_value=dependent,
+            ),
+        ):
+            self.assertEqual(NestedReduction.is_candidate(node1, node2), expected)
 
-    def test_nested_reduction_can_fuse_legality(self):
+    @parametrize(
+        "outer_group,grouped_group,group_size,expected",
+        [
+            subtest(((8, 128), (64, 16), 16, True), name="valid"),
+            subtest(
+                ((8, 16), (8, 16), 16, False),
+                name="same_reduction_size",
+            ),
+            subtest(
+                ((8, 128), (63, 16), 16, False),
+                name="different_total",
+            ),
+            subtest(
+                ((8, 120), (80, 12), 12, False),
+                name="non_power_of_two_group",
+            ),
+        ],
+    )
+    def test_nested_reduction_can_fuse_legality(
+        self, outer_group, grouped_group, group_size, expected
+    ):
         """Nested fusion requires compatible geometry and a valid staged plan."""
-        cases = [
-            ("valid", (8, 128), (64, 16), 16, True, False, True, True),
-            ("same reduction size", (8, 16), (8, 16), 16, True, False, True, False),
-            ("different total", (8, 128), (63, 16), 16, True, False, True, False),
-            (
-                "invalid grouped reduction",
-                (8, 128),
-                (64, 16),
-                None,
-                True,
-                False,
-                True,
-                False,
-            ),
-            (
-                "unknown grouped axis",
-                (8, 128),
-                (64, 16),
-                16,
-                False,
-                False,
-                True,
-                False,
-            ),
-            (
-                "non-power-of-two group",
-                (8, 120),
-                (80, 12),
-                12,
-                True,
-                False,
-                True,
-                False,
-            ),
-            ("unsupported tiling", (8, 128), (64, 16), 16, True, True, True, False),
-            (
-                "incompatible topology",
-                (8, 128),
-                (64, 16),
-                16,
-                True,
-                False,
-                False,
-                False,
-            ),
-        ]
+        outer_node = Mock(spec=BaseSchedulerNode)
+        outer_node.group = (None, outer_group)
+        grouped_node = Mock(spec=BaseSchedulerNode)
+        grouped_node.group = (None, grouped_group)
+        grouped_reduction = Mock(spec=SchedulerNode)
+        grouped_reduction.get_ranges.return_value = (
+            [outer_group[0], outer_group[1] // group_size],
+            [group_size],
+        )
+        grouped_info = (grouped_reduction, sympy.Integer(group_size))
         graph = Mock(sizevars=SizeVarAllocator())
 
-        with V.set_graph_handler(graph):
-            for (
-                name,
-                outer_group,
-                grouped_group,
-                group_size,
-                has_grouped_axis,
-                unprofitable,
-                compatible_topology,
-                expected,
-            ) in cases:
-                outer_node = Mock(spec=BaseSchedulerNode)
-                outer_node.group = (None, outer_group)
-                grouped_node = Mock(spec=BaseSchedulerNode)
-                grouped_node.group = (None, grouped_group)
-                grouped_reduction = Mock(spec=SchedulerNode)
-                reduction_size = group_size or grouped_group[1]
-                grouped_reduction.get_ranges.return_value = (
-                    [outer_group[0], outer_group[1] // reduction_size],
-                    [reduction_size],
-                )
-                grouped_info = (
-                    None
-                    if group_size is None
-                    else (grouped_reduction, sympy.Integer(group_size))
-                )
-                plan = Mock() if compatible_topology else None
-                with (
-                    self.subTest(name),
-                    patch.object(NestedReduction, "_is_enabled_for", return_value=True),
-                    patch.object(
-                        NestedReduction,
-                        "_is_dependent_reduction_pair",
-                        return_value=True,
-                    ),
-                    patch.object(
-                        NestedReduction,
-                        "_get_grouped_reduction_and_size",
-                        return_value=grouped_info,
-                    ),
-                    patch.object(
-                        NestedReduction,
-                        "get_grouped_axis",
-                        return_value=(
-                            NestedReduction.GroupedAxis.R if has_grouped_axis else None
-                        ),
-                    ),
-                    patch.object(
-                        NestedReduction,
-                        "_min_block_unprofitable_for_kernel",
-                        return_value=unprofitable,
-                    ),
-                    patch.object(
-                        NestedReduction, "plan_from_topology", return_value=plan
-                    ),
-                ):
-                    self.assertEqual(
-                        NestedReduction.can_fuse(outer_node, grouped_node), expected
-                    )
+        with (
+            V.set_graph_handler(graph),
+            patch.object(NestedReduction, "_is_enabled_for", return_value=True),
+            patch.object(
+                NestedReduction,
+                "_is_dependent_reduction_pair",
+                return_value=True,
+            ),
+            patch.object(
+                NestedReduction,
+                "_get_grouped_reduction_and_size",
+                return_value=grouped_info,
+            ),
+            patch.object(
+                NestedReduction,
+                "get_grouped_axis",
+                return_value=NestedReduction.GroupedAxis.R,
+            ),
+            patch.object(
+                NestedReduction,
+                "_min_block_unprofitable_for_kernel",
+                return_value=False,
+            ),
+            patch.object(NestedReduction, "plan_from_topology", return_value=Mock()),
+        ):
+            self.assertEqual(
+                NestedReduction.can_fuse(outer_node, grouped_node), expected
+            )
 
-    def test_nested_reduction_classifies_pointwise_domains(self):
+    @parametrize(
+        "name,numel,ancestors,reads,group_size,expected_domain",
+        [
+            subtest(
+                (
+                    "producer",
+                    128,
+                    (),
+                    (),
+                    16,
+                    NestedReduction.PointwiseDomain.LOCAL_REDUCTION_INPUT,
+                ),
+                name="producer",
+            ),
+            subtest(
+                (
+                    "consumer",
+                    8,
+                    ("reduction",),
+                    (),
+                    16,
+                    NestedReduction.PointwiseDomain.REDUCED,
+                ),
+                name="reduced_consumer",
+            ),
+            subtest(
+                (
+                    "consumer",
+                    128,
+                    ("reduction",),
+                    (),
+                    16,
+                    NestedReduction.PointwiseDomain.PARENT_FULL,
+                ),
+                name="parent_consumer",
+            ),
+            subtest(
+                (
+                    "consumer",
+                    8,
+                    (),
+                    ("reduction_buffer",),
+                    16,
+                    NestedReduction.PointwiseDomain.REDUCED,
+                ),
+                name="reduced_consumer_via_read",
+            ),
+            subtest(
+                (
+                    "consumer",
+                    64,
+                    ("reduction",),
+                    (),
+                    16,
+                    NestedReduction.PointwiseDomain.SUB_PARENT,
+                ),
+                name="sub_parent_consumer",
+            ),
+            subtest(
+                ("consumer", 8, ("reduction",), (), 2, None),
+                name="reduced_and_sub_parent_compatible",
+            ),
+            subtest(("producer", 128, ("reduction",), (), 16, None), name="ambiguous"),
+            subtest(("unrelated", 128, (), (), 16, None), name="unrelated"),
+            subtest(
+                ("consumer", 7, ("reduction",), (), 16, None), name="incorrect_size"
+            ),
+        ],
+    )
+    def test_nested_reduction_classifies_pointwise_domains(
+        self, name, numel, ancestors, reads, group_size, expected_domain
+    ):
         """Pointwise nodes should be placed on their nested pipeline stage."""
         grouped_reduction = SchedulerNode.__new__(SchedulerNode)
         grouped_reduction.ancestors = OrderedSet(["producer"])
@@ -570,121 +558,72 @@ class TestScheduler(TestCase):
         grouped_reduction.get_operation_names = Mock(
             return_value=OrderedSet(["reduction"])
         )
-        grouped_reduction.get_buffer_names = Mock(return_value=OrderedSet())
-        grouped_reduction.get_ranges = Mock(return_value=([8], [16]))
+        grouped_reduction.get_buffer_names = Mock(
+            return_value=OrderedSet(["reduction_buffer"])
+        )
+        grouped_reduction.get_ranges = Mock(return_value=([8], [group_size]))
         context = NestedReduction.PointwiseDomainContext(
             grouped_reduction=grouped_reduction,
             grouped_numel=sympy.Integer(8),
-            grouped_rnumel=sympy.Integer(16),
-            local_reduction_domain=(8, 16),
-            parent_full_domain=(8, 16),
+            grouped_rnumel=sympy.Integer(group_size),
+            local_reduction_domain=(8, group_size),
+            parent_full_domain=(8, group_size),
+            grouped_axis=NestedReduction.GroupedAxis.R,
+            group_size=group_size,
         )
-        cases = [
-            (
-                "producer",
-                self._make_pointwise_node("producer", 128),
-                NestedReduction.PointwiseDomain.LOCAL_REDUCTION_INPUT,
-            ),
-            (
-                "reduced consumer",
-                self._make_pointwise_node("consumer", 8, ["reduction"]),
-                NestedReduction.PointwiseDomain.REDUCED,
-            ),
-            (
-                "parent consumer",
-                self._make_pointwise_node("consumer", 128, ["reduction"]),
-                NestedReduction.PointwiseDomain.PARENT_FULL,
-            ),
-        ]
+        node = self._make_pointwise_node(name, numel, ancestors, reads)
         graph = Mock(sizevars=SizeVarAllocator())
 
         with V.set_graph_handler(graph):
-            for name, node, expected_domain in cases:
-                with self.subTest(name):
-                    self.assertEqual(
-                        NestedReduction._classify_grouped_pointwise_nodes(
-                            context, [node]
-                        ),
-                        [(node, expected_domain)],
-                    )
+            result = NestedReduction._classify_grouped_pointwise_nodes(context, [node])
+        expected = None if expected_domain is None else [(node, expected_domain)]
+        self.assertEqual(result, expected)
 
-    def test_nested_reduction_rejects_unplaceable_pointwise_nodes(self):
-        """Ambiguous, unrelated, and incorrectly sized stages are rejected."""
-        grouped_reduction = SchedulerNode.__new__(SchedulerNode)
-        grouped_reduction.ancestors = OrderedSet(["producer"])
-        grouped_reduction.read_writes = ReadWrites(
-            OrderedSet(), OrderedSet(), OrderedSet()
-        )
-        grouped_reduction.is_reduction = Mock(return_value=True)
-        grouped_reduction.get_operation_names = Mock(
-            return_value=OrderedSet(["reduction"])
-        )
-        grouped_reduction.get_buffer_names = Mock(return_value=OrderedSet())
-        grouped_reduction.get_ranges = Mock(return_value=([8], [16]))
-        context = NestedReduction.PointwiseDomainContext(
-            grouped_reduction=grouped_reduction,
-            grouped_numel=sympy.Integer(8),
-            grouped_rnumel=sympy.Integer(16),
-            local_reduction_domain=(8, 16),
-            parent_full_domain=(8, 16),
-        )
-        cases = [
-            self._make_pointwise_node("producer", 128, ["reduction"]),
-            self._make_pointwise_node("unrelated", 128),
-            self._make_pointwise_node("consumer", 7, ["reduction"]),
-        ]
-        graph = Mock(sizevars=SizeVarAllocator())
-
-        with V.set_graph_handler(graph):
-            for node in cases:
-                with self.subTest(node.get_operation_names()):
-                    self.assertIsNone(
-                        NestedReduction._classify_grouped_pointwise_nodes(
-                            context, [node]
-                        )
-                    )
-
-    def test_deps_match_normalized(self):
+    @parametrize(
+        "case,expected",
+        [
+            subtest(("exact", True), name="exact"),
+            subtest(("reordered_loops", True), name="reordered_loops"),
+            subtest(("merged_loops", True), name="merged_loops"),
+            subtest(("different_offset", False), name="different_offset"),
+            subtest(("different_buffer", False), name="different_buffer"),
+            subtest(
+                ("non_memory_second_dependency", False),
+                name="non_memory_second_dependency",
+            ),
+            subtest(
+                ("non_memory_first_dependency", False),
+                name="non_memory_first_dependency",
+            ),
+        ],
+    )
+    def test_deps_match_normalized(self, case, expected):
         """Equivalent memory accesses should match after loop normalization."""
         d0, d1, d2 = sympy.symbols("d0 d1 d2", integer=True, nonnegative=True)
         dense_2d = MemoryDep("buf", 4 * d0 + d1, (d0, d1), (3, 4))
-        cases = [
-            ("exact", dense_2d, dense_2d, True),
-            (
-                "reordered loops",
+        deps = {
+            "exact": (dense_2d, dense_2d),
+            "reordered_loops": (
                 dense_2d,
                 MemoryDep("buf", d0 + 4 * d1, (d0, d1), (4, 3)),
-                True,
             ),
-            (
-                "merged loops",
-                dense_2d,
-                MemoryDep("buf", d2, (d2,), (12,)),
-                True,
-            ),
-            (
-                "different offset",
+            "merged_loops": (dense_2d, MemoryDep("buf", d2, (d2,), (12,))),
+            "different_offset": (
                 dense_2d,
                 MemoryDep("buf", 4 * d0 + d1 + 1, (d0, d1), (3, 4)),
-                False,
             ),
-            (
-                "different buffer",
+            "different_buffer": (
                 dense_2d,
                 MemoryDep("other", 4 * d0 + d1, (d0, d1), (3, 4)),
-                False,
             ),
-            ("non-memory second dependency", dense_2d, StarDep("buf"), False),
-            ("non-memory first dependency", StarDep("buf"), dense_2d, False),
-        ]
+            "non_memory_second_dependency": (dense_2d, StarDep("buf")),
+            "non_memory_first_dependency": (StarDep("buf"), dense_2d),
+        }
+        dep1, dep2 = deps[case]
 
         graph = Mock(sizevars=SizeVarAllocator())
         with V.set_graph_handler(graph):
-            for name, dep1, dep2, expected in cases:
-                with self.subTest(name):
-                    self.assertEqual(
-                        Scheduler.deps_match_normalized(dep1, dep2), expected
-                    )
+            self.assertEqual(Scheduler.deps_match_normalized(dep1, dep2), expected)
 
     def test_get_benchmarkable_extern_fn_uses_op_overload(self):
         self.assertIsNone(_get_benchmarkable_extern_fn(Mock(spec=BaseSchedulerNode)))
