@@ -2681,6 +2681,97 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = fn()
         self.assertEqual(((3, 5), (3, 5)), res)
 
+    def test_missing_attr_on_skipped_function_is_catchable(self):
+        # A missing attribute on a skipped callable used to become a deferred
+        # GetAttrVariable, which the graph break below materialized where the
+        # value is reconstructed -- outside the try/except guarding the original
+        # access -- so the AttributeError escaped. Shape taken from
+        # inspect._signature_from_callable, which probes obj.__signature__.
+        import torch.fx
+
+        obj = torch.fx.Node.prepend  # skipped callable
+
+        def fn(t):
+            torch._dynamo.graph_break()
+            try:
+                s = obj.__signature__
+            except AttributeError:
+                s = "caught"
+            return t + 1, s
+
+        x = torch.zeros(2)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    def test_getattr_on_skipped_function_matches_eager(self):
+        # Pins what the catchability test does not: a present attribute still
+        # resolves, a missing non-dunder also raises, and hasattr agrees with
+        # eager in both directions.
+        import torch.fx
+
+        obj = torch.fx.Node.prepend
+
+        def fn(t):
+            present = obj.__name__
+            try:
+                obj.not_a_real_attr
+                missing = "no-raise"
+            except AttributeError:
+                missing = "raised"
+            return (
+                t + 1,
+                present,
+                missing,
+                hasattr(obj, "__name__"),
+                hasattr(obj, "__nope__"),
+            )
+
+        x = torch.zeros(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_missing_attr_on_skipped_function_is_guarded(self):
+        # The absence is a compile-time answer baked into the trace, so it must
+        # be guarded: adding the attribute later has to recompile rather than
+        # reuse the "missing" branch.
+        import torch.fx
+
+        obj = torch.fx.Node.prepend
+        x = torch.zeros(2)
+
+        def fn(t):
+            try:
+                s = obj.late_bound_attr
+            except AttributeError:
+                s = "missing"
+            return t + 1, s
+
+        cfn = torch.compile(fn, backend="eager")
+        try:
+            self.assertEqual(cfn(x), fn(x))
+            obj.late_bound_attr = "PRESENT"
+            self.assertEqual(cfn(x), fn(x))
+        finally:
+            if hasattr(obj, "late_bound_attr"):
+                del obj.late_bound_attr
+
+    # the deferred access is only reached through inspect under nested graph
+    # breaks; without them the whole inspect frame falls back to eager
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_inspect_signature_on_skipped_function(self):
+        # The reported failure: test_fx.py's test_function_back_compat calls
+        # inspect.signature on @compatibility-marked functions, and
+        # _signature_from_callable probes obj.__signature__ inside a
+        # try/except AttributeError.
+        import torch.fx
+
+        obj = torch.fx.Node.prepend
+
+        def fn(t):
+            name = torch.typename(obj)
+            return t + 1, name, str(inspect.signature(obj))
+
+        x = torch.zeros(2)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
     def _assert_named_out_resize_break(self, fn):
         # Out variants whose out arguments are not spelled "out" used to skip
         # the resize check, so the resize landed on the fake tensor only and the
