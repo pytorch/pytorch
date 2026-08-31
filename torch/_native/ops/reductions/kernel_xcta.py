@@ -232,7 +232,10 @@ def _reduce_row_xcta(
     # twice. This is what turns the few-row/huge-N regime from ~0.6x ATen (two
     # separate launches) into ~1.15-1.44x in plain eager -- graph-class perf without
     # graphs. It also captures into CUDA graphs cleanly.
-    assert x.is_cuda and x.is_contiguous()  # noqa: S101
+    if not (x.is_cuda and x.is_contiguous()):
+        raise AssertionError(
+            f"need a contiguous CUDA input, got {x.device} {x.stride()}"
+        )
     if x.dim() == 1:
         x = x.view(1, -1)
     M, N = x.shape
