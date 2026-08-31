@@ -1125,6 +1125,7 @@
 # /test/dynamo_skips/
 # /test/export/test_dynamic_shapes.py
 # /test/onnx/exporter/test_dynamic_shapes.py
+# /test/test_cpython_diff_sync.py
 # /torch/_dynamo/
 # /torch/csrc/dynamo/
 /torch/_dynamo/backends/tvm.py @guan404ming
