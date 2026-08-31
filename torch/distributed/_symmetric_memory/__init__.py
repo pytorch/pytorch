@@ -15,9 +15,66 @@ import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
 from torch._C._autograd import DeviceType
-from torch._C._distributed_c10d import _SymmetricMemory, Work as _Work
+from torch._C._distributed_c10d import (
+    _is_process_group_registered,
+    _SymmetricMemory,
+    Work as _Work,
+)
 from torch._prims_common import make_contiguous_strides_for
 from torch.utils._triton import has_triton
+
+
+_watchdog_timeout: float | timedelta | None = timedelta(minutes=10)
+
+
+def set_watchdog_timeout(timeout: float | timedelta | None) -> None:
+    """
+    Set the watchdog timeout for symmetric memory operations. This is a global
+    setting. When set, blocking operations (e.g. rendezvous) are guarded by a
+    CPU watchdog timer that fires if the operation exceeds the configured
+    duration. Stream operations (e.g. put_signal, wait_signal) are guarded by
+    a stream watchdog timer.
+
+    The stream watchdog is skipped during CUDA graph capture: its deadline
+    would be anchored at capture time rather than replay time, and the recorded
+    event would be baked into the graph. The CPU watchdog is unaffected.
+
+    Pass ``None`` to disable the watchdog.
+
+    Args:
+        timeout (float | timedelta | None): timeout in seconds (float) or as a
+            timedelta. ``None`` disables the watchdog.
+    """
+    global _watchdog_timeout
+    _watchdog_timeout = timeout
+
+
+def get_watchdog_timeout() -> float | timedelta | None:
+    """
+    Return the current watchdog timeout for symmetric memory operations, or
+    ``None`` if no watchdog is configured.
+    """
+    return _watchdog_timeout
+
+
+def _resolve_watchdog_timeout(
+    timeout: float | timedelta | None,
+) -> float | timedelta | None:
+    # A per-op ``timeout`` overrides the global default from
+    # ``set_watchdog_timeout``; ``None`` falls back to that default.
+    return timeout if timeout is not None else _watchdog_timeout
+
+
+def _stream_is_capturing() -> bool:
+    # The stream watchdog is not supported under CUDA graph capture: its
+    # deadline is anchored when it is registered (capture time), not when the
+    # captured op actually runs (replay time), so it would false-fire, and the
+    # recorded event would be baked into the graph. Skip registration while
+    # capturing.
+    return (
+        torch.accelerator.is_available()
+        and torch.accelerator.current_stream().is_capturing()
+    )
 
 
 _group_name_to_store: dict[str, c10d.Store] = {}
@@ -81,21 +138,31 @@ def _test_mode(group_names: set[str] | None = None) -> Generator[None, None, Non
 
 def is_symm_mem_enabled_for_group(group_name: c10d.GroupName) -> bool:
     """
-    Check if symmetric memory is enabled for a process group.
+    Check if symmetric memory can be used with a process group.
+
+    Symmetric memory no longer requires explicit enablement via
+    ``enable_symm_mem_for_group``. This returns ``True`` if the group is
+    resolvable and a symmetric memory allocator is registered for the current
+    accelerator.
 
     Args:
         group_name (str): the name of the process group.
     """
     if _is_test_mode:
         return _mocked_group_names is None or group_name in _mocked_group_names
-    return group_name in _group_name_to_store
+    device = torch.accelerator.current_accelerator(check_available=True)
+    if device is None or _SymmetricMemory.get_backend(device) is None:
+        return False
+    return _is_process_group_registered(group_name)
 
 
 _group_name_to_workspace_tensor: dict[str, torch.Tensor | None] = {}
 
 
 def get_symm_mem_workspace(
-    group_name: c10d.GroupName, min_size: int
+    group_name: c10d.GroupName,
+    min_size: int,
+    timeout: float | timedelta | None = None,
 ) -> _SymmetricMemory:
     """
     Get the symmetric memory workspace associated with the process group. If
@@ -105,6 +172,9 @@ def get_symm_mem_workspace(
     Args:
         group_name (str): the name of the process group.
         min_size (int): the size requirement for the workspace in bytes.
+        timeout (float | timedelta | None): per-op CPU watchdog timeout override.
+            Falls back to the global default from :func:`set_watchdog_timeout`
+            when ``None``.
 
     Returns:
         _SymmetricMemory: the symmetric memory workspace associated with the
@@ -135,6 +205,15 @@ def get_symm_mem_workspace(
             group_name,
         )
         _group_name_to_workspace_tensor[group_name] = tensor
+    effective_timeout = _resolve_watchdog_timeout(timeout)
+    if effective_timeout is not None:
+        from torch.distributed._watchdog import cpu_timeout
+
+        handle = cpu_timeout(effective_timeout)
+        try:
+            return _SymmetricMemory.rendezvous(tensor)
+        finally:
+            handle.cancel()
     return _SymmetricMemory.rendezvous(tensor)
 
 
@@ -2196,7 +2275,8 @@ def empty(  # type: ignore[misc]
         device (:class:`torch.device`, optional): the desired device of returned tensor.
             Default: if ``None``, uses the current device for the default tensor type
             (see :func:`torch.set_default_device`). :attr:`device` will be the CPU
-            for CPU tensor types and the current CUDA device for CUDA tensor types.
+            for CPU tensor types, the current CUDA device for CUDA tensor types,
+            and the current XPU device for XPU tensor types.
     """
     if len(size) == 1 and isinstance(size[0], Sequence):
         size = tuple(size[0])
@@ -2235,10 +2315,12 @@ def _resolve_group_name(group: c10d.GroupName | ProcessGroup) -> c10d.GroupName:
 
 
 def rendezvous(
-    tensor: torch.Tensor, group: c10d.GroupName | ProcessGroup
+    tensor: torch.Tensor,
+    group: c10d.GroupName | ProcessGroup,
+    timeout: float | timedelta | None = None,
 ) -> _SymmetricMemory:
     r"""
-    rendezvous(tensor, group) -> _SymmetricMemory
+    rendezvous(tensor, group, timeout=None) -> _SymmetricMemory
 
     Establish a symmetric memory tensor among participating processes. This is
     a collective operation.
@@ -2257,8 +2339,20 @@ def rendezvous(
             dtype, and device type must be identical across all participating processes.
         group (Union[str, :class:`torch.distributed.ProcessGroup`]): The group identifying the
             participating processes. This can be either a group name or a process group object.
+        timeout (float | timedelta | None): per-op CPU watchdog timeout override.
+            Falls back to the global default from :func:`set_watchdog_timeout`
+            when ``None``.
     """
     group_name = _resolve_group_name(group)
+    effective_timeout = _resolve_watchdog_timeout(timeout)
+    if effective_timeout is not None:
+        from torch.distributed._watchdog import cpu_timeout
+
+        handle = cpu_timeout(effective_timeout)
+        try:
+            return _SymmetricMemory.rendezvous(tensor, group_name)
+        finally:
+            handle.cancel()
     return _SymmetricMemory.rendezvous(tensor, group_name)
 
 
@@ -2484,9 +2578,14 @@ def get(
         raise ValueError(f"get: unsupported backend: {backend}")
 
 
-def put_signal(src: torch.Tensor, hdl: _SymmetricMemory, peer: int) -> None:
+def put_signal(
+    src: torch.Tensor,
+    hdl: _SymmetricMemory,
+    peer: int,
+    timeout: float | timedelta | None = None,
+) -> None:
     r"""
-    put_signal(src, hdl, peer) -> None
+    put_signal(src, hdl, peer, timeout=None) -> None
 
     Put data to a peer's symmetric memory and signal the peer.
 
@@ -2494,6 +2593,9 @@ def put_signal(src: torch.Tensor, hdl: _SymmetricMemory, peer: int) -> None:
         src (torch.Tensor): the source tensor to read data from.
         hdl (SymmetricMemory): the symmetric memory to put data to.
         peer (int): the peer to put data to.
+        timeout (float | timedelta | None): per-op stream watchdog timeout
+            override. Falls back to the global default from
+            :func:`set_watchdog_timeout` when ``None``.
     """
     backend = get_backend(src.device)
     # `hdl` is a pybind `_SymmetricMemory` object. Dispatcher expects the
@@ -2505,17 +2607,27 @@ def put_signal(src: torch.Tensor, hdl: _SymmetricMemory, peer: int) -> None:
     # TODO: other backends' dispatch goes here
     else:
         raise ValueError(f"put_signal: unsupported backend: {backend}")
+    effective_timeout = _resolve_watchdog_timeout(timeout)
+    if effective_timeout is not None and not _stream_is_capturing():
+        from torch.distributed._watchdog import stream_timeout
+
+        stream_timeout(effective_timeout)
 
 
-def wait_signal(hdl: _SymmetricMemory, peer: int) -> None:
+def wait_signal(
+    hdl: _SymmetricMemory, peer: int, timeout: float | timedelta | None = None
+) -> None:
     r"""
-    wait_signal(hdl, peer) -> None
+    wait_signal(hdl, peer, timeout=None) -> None
 
     Wait for a signal from a peer.
 
     Args:
         hdl (SymmetricMemory): the symmetric memory handle on which to wait for a signal.
         peer (int): the peer to wait for a signal from.
+        timeout (float | timedelta | None): per-op stream watchdog timeout
+            override. Falls back to the global default from
+            :func:`set_watchdog_timeout` when ``None``.
     """
     backend = get_backend(hdl.device)
     # See note in `put_signal` about `_SymmetricMemory` vs TorchBind type.
@@ -2525,6 +2637,11 @@ def wait_signal(hdl: _SymmetricMemory, peer: int) -> None:
     # TODO: other backends' dispatch goes here
     else:
         raise ValueError(f"wait_signal: unsupported backend: {backend}")
+    effective_timeout = _resolve_watchdog_timeout(timeout)
+    if effective_timeout is not None and not _stream_is_capturing():
+        from torch.distributed._watchdog import stream_timeout
+
+        stream_timeout(effective_timeout)
 
 
 def reduce_scatter_offset(

@@ -353,14 +353,7 @@ Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
 
 Tensor& int_mm_out_mps_impl(const Tensor& self, const Tensor& mat2, Tensor& result) {
   static constexpr std::string_view func_name = "int_mm_out_mps";
-  TORCH_CHECK(self.dim() == 2, func_name, ": Expected self to be of dimension 2 but got ", self.dim());
-  TORCH_CHECK(mat2.dim() == 2, func_name, ": Expected mat2 to be of dimension 2 but got ", mat2.dim());
-  TORCH_CHECK(self.size(1) == mat2.size(0),
-              func_name,
-              ": self.size(1) needs to match mat2.size(0) but got ",
-              self.size(1),
-              " and ",
-              mat2.size(0));
+  check_mm_shapes(self, mat2, "_int_mm");
   TORCH_CHECK(self.dtype() == at::kChar || self.dtype() == at::kByte,
               func_name,
               ": Expected self dtype to be int8 or uint8 but got ",
@@ -470,8 +463,14 @@ Tensor& do_metal_addmm(const Tensor& self,
                        const Scalar& alpha,
                        const Scalar& beta,
                        const Tensor& bias) {
-  if (beta.isFloatingPoint() && alpha.isFloatingPoint() && beta.toDouble() == 0 && alpha.toDouble() == 1) {
-    return do_metal_mm(self, other, output);
+  // beta == 0 means bias is ignored, so nan/inf in it must not propagate. Lower to a plain
+  // mm (skipping the bias) and scale by alpha in place only for the uncommon alpha != 1.
+  if (beta.toComplexDouble() == 0.0) {
+    do_metal_mm(self, other, output);
+    if (alpha.toComplexDouble() != 1.0) {
+      output.mul_(alpha);
+    }
+    return output;
   }
   // Handle conjugated inputs by creating resolved copies
   auto self_ = self.is_conj() ? self.resolve_conj() : self;
@@ -519,10 +518,22 @@ Tensor& do_metal_addbmm_or_baddbmm(const Tensor& bias,
                                    const Scalar& beta,
                                    Tensor& output,
                                    bool is_baddbmm) {
-  // Handle conjugated inputs by creating resolved copies
+  // beta == 0 means bias is ignored, so nan/inf in it must not propagate. baddbmm then
+  // lowers to a plain bmm (skipping the bias) with an in-place alpha scale for alpha != 1.
+  if (is_baddbmm && beta.toComplexDouble() == 0.0) {
+    do_metal_bmm(batch1, batch2, output);
+    if (alpha.toComplexDouble() != 1.0) {
+      output.mul_(alpha);
+    }
+    return output;
+  }
+
+  // Handle conjugated inputs by creating resolved copies. addbmm still needs its batch
+  // reduction, so when beta == 0 feed the kernel a broadcast scalar zero for the bias.
   auto batch1_ = batch1.is_conj() ? batch1.resolve_conj() : batch1;
   auto batch2_ = batch2.is_conj() ? batch2.resolve_conj() : batch2;
-  auto bias_ = bias.is_conj() ? bias.resolve_conj() : bias;
+  auto bias_src = beta.toComplexDouble() == 0.0 ? at::zeros({}, bias.options()) : bias;
+  auto bias_ = bias_src.is_conj() ? bias_src.resolve_conj() : bias_src;
 
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
@@ -1197,7 +1208,11 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
     return result;
   }
   if ((opType == ADDBMM_OP_TYPE && batch1.size(0) == 0) || batch1.size(2) == 0) {
-    at::mul_out(result, input, wrapped_scalar_tensor(beta));
+    if (beta.toComplexDouble() == 0.0) {
+      result.zero_();
+    } else {
+      at::mul_out(result, input, wrapped_scalar_tensor(beta));
+    }
     return result;
   }
 
@@ -1315,7 +1330,7 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
   // Inner dimension is 0
   // Early out as some paths in the code below do not handle this case correctly
   if (self.size(1) == 0) {
-    if (beta.toDouble() == 0.0) {
+    if (beta.toComplexDouble() == 0.0) {
       output.zero_();
     } else {
       output.copy_(*bias_);
@@ -1329,7 +1344,10 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
     return output;
   }
 
-  if (use_metal_mm(self, other, output)) {
+  // Complex addmm must use the Metal kernel (like bmm/baddbmm): the MPSGraph-based fallback
+  // for real types below encodes alpha/beta as real (double) constants via toDouble(), which
+  // throws for a complex scalar and drops its imaginary part.
+  if (use_metal_mm(self, other, output) || c10::isComplexType(self.scalar_type())) {
     return do_metal_addmm(self, other, output, alpha, beta, *bias_);
   }
 

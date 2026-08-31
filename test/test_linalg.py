@@ -43,7 +43,7 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and, floating_types_and, complex_types,
 )
 from torch.testing._internal.common_cuda import CDNA2OrLater, CDNA5OrLater, SM80OrLater, SM90OrLater, tf32_enabled, tf32_on_and_off, _get_magma_version, \
-    _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_FP8, blas_library_context
+    _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_FP8, blas_library_context, ROCM_VERSION
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
     _group_quantize_tensor_symmetric
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
@@ -68,7 +68,6 @@ if TEST_SCIPY:
 def blaslt_supported_device():
     if torch.cuda.is_available():
         if torch.version.hip:
-            ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split('.')[:2])
             archs = ['gfx90a', 'gfx94']
             if ROCM_VERSION >= (6, 3):
                 archs.extend(['gfx110', 'gfx120'])
@@ -6911,7 +6910,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                                r"self.size\(1\) needs to be greater than 0 and a multiple of 8, but got 7",
                                lambda: torch._int_mm(*_gen_pair(17, 7, 32)))
         self.assertRaisesRegex(RuntimeError,
-                               r"self.size\(1\) needs to match mat2.size\(0\) but got 8 and 7",
+                               r"mat1 and mat2 shapes cannot be multiplied \(17x8 and 7x32\)",
                                lambda: torch._int_mm(genf_int(17, 8), genf_int(7, 32)))
         self.assertRaisesRegex(RuntimeError,
                                r"mat2.size\(1\) needs to be greater than 0 and a multiple of 8, but got 31",
