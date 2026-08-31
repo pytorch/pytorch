@@ -8,6 +8,7 @@ import re
 import tempfile
 from contextlib import contextmanager, nullcontext
 from unittest import skipIf, SkipTest, skipUnless
+from unittest.mock import MagicMock, patch
 
 import torch
 import torch.distributed as dist
@@ -70,6 +71,12 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 test_contexts = [nullcontext, _test_mode]
+
+
+# Every MXFP8 call takes the same pair; spelling them out at each call site
+# buries the argument that actually varies.
+_MX_RECIPE = [ScalingType.BlockWise1x32.value]
+_MX_SWIZZLE = [SwizzleType.SWIZZLE_32_4_4.value]
 
 
 def _mxfp8_quantize(t: torch.Tensor):
@@ -1257,10 +1264,10 @@ class AsyncTPTest(MultiProcContinuousTest):
             [None] * 3,
             [torch.bfloat16] * 3,
             [False] * 3,
-            [ScalingType.BlockWise1x32.value],
-            [SwizzleType.SWIZZLE_32_4_4.value],
-            [ScalingType.BlockWise1x32.value],
-            [SwizzleType.SWIZZLE_32_4_4.value],
+            _MX_RECIPE,
+            _MX_SWIZZLE,
+            _MX_RECIPE,
+            _MX_SWIZZLE,
         )
         outputs = []
         for context in test_contexts:
@@ -1308,8 +1315,6 @@ class AsyncTPTest(MultiProcContinuousTest):
         _, A_q, A_sb = _mxfp8_quantize(A)
         _, B_q, B_sb = _mxfp8_quantize(B)
 
-        recipe = [ScalingType.BlockWise1x32.value]
-        swizzle = [SwizzleType.SWIZZLE_32_4_4.value]
         with self.assertRaisesRegex(ValueError, "multiple of 128"):
             torch.ops.symm_mem.fused_all_gather_scaled_matmul(
                 A_q,
@@ -1322,10 +1327,10 @@ class AsyncTPTest(MultiProcContinuousTest):
                 [None],
                 [torch.bfloat16],
                 [False],
-                recipe,
-                swizzle,
-                recipe,
-                swizzle,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
             )
 
     @skipIf(
@@ -1396,8 +1401,6 @@ class AsyncTPTest(MultiProcContinuousTest):
             torch.randn(N, device="cuda", dtype=torch.bfloat16) if with_bias else None
         )
 
-        recipe = [ScalingType.BlockWise1x32.value]
-        swizzle = [SwizzleType.SWIZZLE_32_4_4.value]
         args = (
             A_q,
             [B_q.t()],
@@ -1409,10 +1412,10 @@ class AsyncTPTest(MultiProcContinuousTest):
             [None],
             [out_dtype],
             [False],
-            recipe,
-            swizzle,
-            recipe,
-            swizzle,
+            _MX_RECIPE,
+            _MX_SWIZZLE,
+            _MX_RECIPE,
+            _MX_SWIZZLE,
         )
         outputs = []
         for context in test_contexts:
@@ -1440,8 +1443,6 @@ class AsyncTPTest(MultiProcContinuousTest):
         group = dist.group.WORLD
         world = self.world_size
 
-        recipe = [ScalingType.BlockWise1x32.value]
-        swizzle = [SwizzleType.SWIZZLE_32_4_4.value]
         K, N = 128, 64
         B = torch.randn(N, K, device="cuda", dtype=torch.bfloat16)
         _, B_q, B_sb = _mxfp8_quantize(B)
@@ -1461,10 +1462,10 @@ class AsyncTPTest(MultiProcContinuousTest):
                 [None],
                 [torch.bfloat16],
                 [False],
-                recipe,
-                swizzle,
-                recipe,
-                swizzle,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
             )
 
         # reduce-scatter chunk not 128-aligned: 64 rows per rank
@@ -1485,10 +1486,10 @@ class AsyncTPTest(MultiProcContinuousTest):
                 None,
                 torch.bfloat16,
                 False,
-                recipe,
-                swizzle,
-                recipe,
-                swizzle,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
             )
 
         # result_scale cannot be expressed on v2, which block scaling requires
@@ -1505,10 +1506,10 @@ class AsyncTPTest(MultiProcContinuousTest):
                 [rs],
                 [torch.bfloat16],
                 [False],
-                recipe,
-                swizzle,
-                recipe,
-                swizzle,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
             )
         with self.assertRaisesRegex(ValueError, "result_scale"):
             torch.ops.symm_mem.fused_scaled_matmul_reduce_scatter(
@@ -1525,10 +1526,10 @@ class AsyncTPTest(MultiProcContinuousTest):
                 rs,
                 torch.bfloat16,
                 False,
-                recipe,
-                swizzle,
-                recipe,
-                swizzle,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
             )
 
     @skipIf(
@@ -1545,9 +1546,6 @@ class AsyncTPTest(MultiProcContinuousTest):
         """
         self._init_process()
         group = dist.group.WORLD
-
-        recipe = [ScalingType.BlockWise1x32.value]
-        swizzle = [SwizzleType.SWIZZLE_32_4_4.value]
 
         def meta(*shape, dtype=torch.float8_e4m3fn):
             return torch.empty(*shape, device="meta", dtype=dtype)
@@ -1567,10 +1565,10 @@ class AsyncTPTest(MultiProcContinuousTest):
             [None],
             [torch.bfloat16],
             [False],
-            recipe,
-            swizzle,
-            recipe,
-            swizzle,
+            _MX_RECIPE,
+            _MX_SWIZZLE,
+            _MX_RECIPE,
+            _MX_SWIZZLE,
         )
         self.assertEqual(out[1][0].dtype, torch.bfloat16)
         self.assertEqual(out[1][0].device.type, "meta")
@@ -1589,10 +1587,10 @@ class AsyncTPTest(MultiProcContinuousTest):
                 [None],
                 [torch.bfloat16],
                 [False],
-                recipe,
-                swizzle,
-                recipe,
-                swizzle,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
             )
 
     @skipIf(
@@ -1613,8 +1611,6 @@ class AsyncTPTest(MultiProcContinuousTest):
         group = dist.group.WORLD
         world = self.world_size
 
-        recipe = [ScalingType.BlockWise1x32.value]
-        swizzle = [SwizzleType.SWIZZLE_32_4_4.value]
         K, N = 128, 64
         B = torch.randn(N, K, device="cuda", dtype=torch.bfloat16)
         _, B_q, B_sb = _mxfp8_quantize(B)
@@ -1635,10 +1631,10 @@ class AsyncTPTest(MultiProcContinuousTest):
                 [None],
                 [torch.bfloat16],
                 [False],
-                recipe,
-                swizzle,
-                recipe,
-                swizzle,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
             )
 
         A_rs = torch.randn(64 * world, K, device="cuda", dtype=torch.bfloat16)
@@ -1658,10 +1654,10 @@ class AsyncTPTest(MultiProcContinuousTest):
                 None,
                 torch.bfloat16,
                 False,
-                recipe,
-                swizzle,
-                recipe,
-                swizzle,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
             )
 
     @skipIf(
@@ -1690,8 +1686,6 @@ class AsyncTPTest(MultiProcContinuousTest):
         A_q = A_q.view(b, m, K)
         B_hp, B_q, B_sb = _mxfp8_quantize(B)
 
-        recipe = [ScalingType.BlockWise1x32.value]
-        swizzle = [SwizzleType.SWIZZLE_32_4_4.value]
         args = (
             A_q,
             [B_q.t()],
@@ -1703,10 +1697,10 @@ class AsyncTPTest(MultiProcContinuousTest):
             [None],
             [torch.bfloat16],
             [False],
-            recipe,
-            swizzle,
-            recipe,
-            swizzle,
+            _MX_RECIPE,
+            _MX_SWIZZLE,
+            _MX_RECIPE,
+            _MX_SWIZZLE,
         )
         outputs = []
         for context in test_contexts:
@@ -1745,8 +1739,6 @@ class AsyncTPTest(MultiProcContinuousTest):
         group = dist.group.WORLD
         world = self.world_size
 
-        recipe = [ScalingType.BlockWise1x32.value]
-        swizzle = [SwizzleType.SWIZZLE_32_4_4.value]
         K, N = 128, 64
         B = torch.randn(N, K, device="cuda", dtype=torch.bfloat16)
         _, B_q, B_sb = _mxfp8_quantize(B)
@@ -1767,10 +1759,10 @@ class AsyncTPTest(MultiProcContinuousTest):
                 [None],
                 [torch.bfloat16],
                 [False],
-                recipe,
-                swizzle,
-                recipe,
-                swizzle,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
             )
 
         A_rs = torch.randn(2, 256 * world, K, device="cuda", dtype=torch.bfloat16)
@@ -1794,10 +1786,10 @@ class AsyncTPTest(MultiProcContinuousTest):
                 None,
                 torch.bfloat16,
                 False,
-                recipe,
-                swizzle,
-                recipe,
-                swizzle,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
             )
 
     @skipIf(
@@ -1819,7 +1811,6 @@ class AsyncTPTest(MultiProcContinuousTest):
         B = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
         _, A_q, A_sb = _mxfp8_quantize(A)
         _, B_q, B_sb = _mxfp8_quantize(B)
-        recipe = [ScalingType.BlockWise1x32.value]
 
         with self.assertRaisesRegex(ValueError, "SWIZZLE_32_4_4"):
             torch.ops.symm_mem.fused_all_gather_scaled_matmul(
@@ -1833,9 +1824,9 @@ class AsyncTPTest(MultiProcContinuousTest):
                 [None],
                 [torch.bfloat16],
                 [False],
-                recipe,
+                _MX_RECIPE,
                 [SwizzleType.NO_SWIZZLE.value],
-                recipe,
+                _MX_RECIPE,
                 [SwizzleType.NO_SWIZZLE.value],
             )
 
@@ -1862,8 +1853,6 @@ class AsyncTPTest(MultiProcContinuousTest):
         _, A_q, A_sb = _mxfp8_quantize(A_full.chunk(world, dim=0)[rank].contiguous())
         _, B_q, B_sb = _mxfp8_quantize(B)
 
-        recipe = [ScalingType.BlockWise1x32.value]
-        swizzle = [SwizzleType.SWIZZLE_32_4_4.value]
         args = (
             A_q,
             [B_q.t()],
@@ -1875,10 +1864,10 @@ class AsyncTPTest(MultiProcContinuousTest):
             [None],
             [None],
             [False],
-            recipe,
-            swizzle,
-            recipe,
-            swizzle,
+            _MX_RECIPE,
+            _MX_SWIZZLE,
+            _MX_RECIPE,
+            _MX_SWIZZLE,
         )
         outputs = []
         for context in test_contexts:
@@ -1928,10 +1917,10 @@ class AsyncTPTest(MultiProcContinuousTest):
             None,
             torch.bfloat16,
             False,
-            [ScalingType.BlockWise1x32.value],
-            [SwizzleType.SWIZZLE_32_4_4.value],
-            [ScalingType.BlockWise1x32.value],
-            [SwizzleType.SWIZZLE_32_4_4.value],
+            _MX_RECIPE,
+            _MX_SWIZZLE,
+            _MX_RECIPE,
+            _MX_SWIZZLE,
         )
         outputs = []
         for context in test_contexts:
@@ -3336,6 +3325,221 @@ class SymmMemSingleProcTest(TestCase):
                 self.assertFalse(symm_mem.is_symm_mem_enabled_for_group(group_name))
         finally:
             dist.destroy_process_group()
+
+
+class SymmMemWatchdogUnitTest(TestCase):
+    def tearDown(self) -> None:
+        symm_mem.set_watchdog_timeout(None)
+        super().tearDown()
+
+    # -- rendezvous --
+
+    @patch("torch.distributed._symmetric_memory._SymmetricMemory")
+    def test_rendezvous_uses_cpu_timeout(self, MockSymmMem: MagicMock) -> None:
+        MockSymmMem.rendezvous.return_value = MagicMock()
+        symm_mem.set_watchdog_timeout(30.0)
+        with patch("torch.distributed._watchdog.cpu_timeout") as mock_cpu_timeout:
+            mock_handle = MagicMock()
+            mock_cpu_timeout.return_value = mock_handle
+            symm_mem.rendezvous(MagicMock(), "test_group")
+            mock_cpu_timeout.assert_called_once_with(30.0)
+            mock_handle.cancel.assert_called_once()
+
+    @patch("torch.distributed._symmetric_memory._SymmetricMemory")
+    def test_rendezvous_no_timeout_by_default(self, MockSymmMem: MagicMock) -> None:
+        MockSymmMem.rendezvous.return_value = MagicMock()
+        with patch("torch.distributed._watchdog.cpu_timeout") as mock_cpu_timeout:
+            symm_mem.rendezvous(MagicMock(), "test_group")
+            mock_cpu_timeout.assert_not_called()
+
+    @patch("torch.distributed._symmetric_memory._SymmetricMemory")
+    def test_rendezvous_cancels_on_exception(self, MockSymmMem: MagicMock) -> None:
+        MockSymmMem.rendezvous.side_effect = RuntimeError("boom")
+        symm_mem.set_watchdog_timeout(30.0)
+        with patch("torch.distributed._watchdog.cpu_timeout") as mock_cpu_timeout:
+            mock_handle = MagicMock()
+            mock_cpu_timeout.return_value = mock_handle
+            with self.assertRaises(RuntimeError):
+                symm_mem.rendezvous(MagicMock(), "test_group")
+            mock_handle.cancel.assert_called_once()
+
+    @patch("torch.distributed._symmetric_memory._SymmetricMemory")
+    def test_rendezvous_per_op_timeout_overrides_global(
+        self, MockSymmMem: MagicMock
+    ) -> None:
+        MockSymmMem.rendezvous.return_value = MagicMock()
+        symm_mem.set_watchdog_timeout(30.0)
+        with patch("torch.distributed._watchdog.cpu_timeout") as mock_cpu_timeout:
+            mock_cpu_timeout.return_value = MagicMock()
+            symm_mem.rendezvous(MagicMock(), "test_group", timeout=5.0)
+            mock_cpu_timeout.assert_called_once_with(5.0)
+
+    # -- get_symm_mem_workspace --
+
+    @patch("torch.distributed._symmetric_memory._SymmetricMemory")
+    def test_get_workspace_uses_cpu_timeout(self, MockSymmMem: MagicMock) -> None:
+        from torch.distributed._symmetric_memory import _group_name_to_workspace_tensor
+
+        mock_tensor = MagicMock()
+        mock_tensor.numel.return_value = 1024
+        mock_tensor.element_size.return_value = 1
+        _group_name_to_workspace_tensor["wd_test"] = mock_tensor
+        try:
+            MockSymmMem.rendezvous.return_value = MagicMock()
+            symm_mem.set_watchdog_timeout(30.0)
+            with patch("torch.distributed._watchdog.cpu_timeout") as mock_cpu_timeout:
+                mock_handle = MagicMock()
+                mock_cpu_timeout.return_value = mock_handle
+                symm_mem.get_symm_mem_workspace("wd_test", 512)
+                mock_cpu_timeout.assert_called_once_with(30.0)
+                mock_handle.cancel.assert_called_once()
+        finally:
+            _group_name_to_workspace_tensor.pop("wd_test", None)
+
+    @patch("torch.distributed._symmetric_memory._SymmetricMemory")
+    def test_get_workspace_cancels_on_exception(self, MockSymmMem: MagicMock) -> None:
+        from torch.distributed._symmetric_memory import _group_name_to_workspace_tensor
+
+        mock_tensor = MagicMock()
+        mock_tensor.numel.return_value = 1024
+        mock_tensor.element_size.return_value = 1
+        _group_name_to_workspace_tensor["wd_test2"] = mock_tensor
+        try:
+            MockSymmMem.rendezvous.side_effect = RuntimeError("boom")
+            symm_mem.set_watchdog_timeout(30.0)
+            with patch("torch.distributed._watchdog.cpu_timeout") as mock_cpu_timeout:
+                mock_handle = MagicMock()
+                mock_cpu_timeout.return_value = mock_handle
+                with self.assertRaises(RuntimeError):
+                    symm_mem.get_symm_mem_workspace("wd_test2", 512)
+                mock_handle.cancel.assert_called_once()
+        finally:
+            _group_name_to_workspace_tensor.pop("wd_test2", None)
+
+    @patch("torch.distributed._symmetric_memory._SymmetricMemory")
+    def test_get_workspace_per_op_timeout_overrides_global(
+        self, MockSymmMem: MagicMock
+    ) -> None:
+        from torch.distributed._symmetric_memory import _group_name_to_workspace_tensor
+
+        mock_tensor = MagicMock()
+        mock_tensor.numel.return_value = 1024
+        mock_tensor.element_size.return_value = 1
+        _group_name_to_workspace_tensor["wd_test3"] = mock_tensor
+        try:
+            MockSymmMem.rendezvous.return_value = MagicMock()
+            symm_mem.set_watchdog_timeout(30.0)
+            with patch("torch.distributed._watchdog.cpu_timeout") as mock_cpu_timeout:
+                mock_cpu_timeout.return_value = MagicMock()
+                symm_mem.get_symm_mem_workspace("wd_test3", 512, timeout=5.0)
+                mock_cpu_timeout.assert_called_once_with(5.0)
+        finally:
+            _group_name_to_workspace_tensor.pop("wd_test3", None)
+
+    # -- put_signal --
+
+    @patch("torch.distributed._symmetric_memory.get_backend", return_value="NCCL")
+    @patch("torch.ops.symm_mem.nccl_put_signal")
+    def test_put_signal_uses_stream_timeout(
+        self, mock_nccl_put: MagicMock, mock_get_backend: MagicMock
+    ) -> None:
+        symm_mem.set_watchdog_timeout(30.0)
+        with patch("torch.distributed._watchdog.stream_timeout") as mock_stream_timeout:
+            hdl = MagicMock(spec=[])
+            symm_mem.put_signal(MagicMock(), hdl, 0)
+            mock_stream_timeout.assert_called_once_with(30.0)
+
+    @patch("torch.distributed._symmetric_memory.get_backend", return_value="NCCL")
+    @patch("torch.ops.symm_mem.nccl_put_signal")
+    def test_put_signal_no_timeout_by_default(
+        self, mock_nccl_put: MagicMock, mock_get_backend: MagicMock
+    ) -> None:
+        with patch("torch.distributed._watchdog.stream_timeout") as mock_stream_timeout:
+            hdl = MagicMock(spec=[])
+            symm_mem.put_signal(MagicMock(), hdl, 0)
+            mock_stream_timeout.assert_not_called()
+
+    @patch(
+        "torch.distributed._symmetric_memory._stream_is_capturing", return_value=True
+    )
+    @patch("torch.distributed._symmetric_memory.get_backend", return_value="NCCL")
+    @patch("torch.ops.symm_mem.nccl_put_signal")
+    def test_put_signal_skips_stream_timeout_during_capture(
+        self,
+        mock_nccl_put: MagicMock,
+        mock_get_backend: MagicMock,
+        mock_capturing: MagicMock,
+    ) -> None:
+        symm_mem.set_watchdog_timeout(30.0)
+        with patch("torch.distributed._watchdog.stream_timeout") as mock_stream_timeout:
+            hdl = MagicMock(spec=[])
+            symm_mem.put_signal(MagicMock(), hdl, 0)
+            mock_stream_timeout.assert_not_called()
+
+    @patch("torch.distributed._symmetric_memory.get_backend", return_value="NCCL")
+    @patch("torch.ops.symm_mem.nccl_put_signal")
+    def test_put_signal_per_op_timeout_overrides_global(
+        self, mock_nccl_put: MagicMock, mock_get_backend: MagicMock
+    ) -> None:
+        symm_mem.set_watchdog_timeout(30.0)
+        with patch("torch.distributed._watchdog.stream_timeout") as mock_stream_timeout:
+            symm_mem.put_signal(MagicMock(), MagicMock(spec=[]), 0, timeout=5.0)
+            mock_stream_timeout.assert_called_once_with(5.0)
+
+    # -- wait_signal --
+
+    @patch("torch.distributed._symmetric_memory.get_backend", return_value="NCCL")
+    @patch("torch.ops.symm_mem.nccl_wait_signal")
+    def test_wait_signal_uses_stream_timeout(
+        self, mock_nccl_wait: MagicMock, mock_get_backend: MagicMock
+    ) -> None:
+        symm_mem.set_watchdog_timeout(30.0)
+        with patch("torch.distributed._watchdog.stream_timeout") as mock_stream_timeout:
+            hdl = MagicMock(spec=[])
+            hdl.device = "cuda:0"
+            symm_mem.wait_signal(hdl, 0)
+            mock_stream_timeout.assert_called_once_with(30.0)
+
+    @patch("torch.distributed._symmetric_memory.get_backend", return_value="NCCL")
+    @patch("torch.ops.symm_mem.nccl_wait_signal")
+    def test_wait_signal_no_timeout_by_default(
+        self, mock_nccl_wait: MagicMock, mock_get_backend: MagicMock
+    ) -> None:
+        with patch("torch.distributed._watchdog.stream_timeout") as mock_stream_timeout:
+            hdl = MagicMock(spec=[])
+            hdl.device = "cuda:0"
+            symm_mem.wait_signal(hdl, 0)
+            mock_stream_timeout.assert_not_called()
+
+    @patch(
+        "torch.distributed._symmetric_memory._stream_is_capturing", return_value=True
+    )
+    @patch("torch.distributed._symmetric_memory.get_backend", return_value="NCCL")
+    @patch("torch.ops.symm_mem.nccl_wait_signal")
+    def test_wait_signal_skips_stream_timeout_during_capture(
+        self,
+        mock_nccl_wait: MagicMock,
+        mock_get_backend: MagicMock,
+        mock_capturing: MagicMock,
+    ) -> None:
+        symm_mem.set_watchdog_timeout(30.0)
+        with patch("torch.distributed._watchdog.stream_timeout") as mock_stream_timeout:
+            hdl = MagicMock(spec=[])
+            hdl.device = "cuda:0"
+            symm_mem.wait_signal(hdl, 0)
+            mock_stream_timeout.assert_not_called()
+
+    @patch("torch.distributed._symmetric_memory.get_backend", return_value="NCCL")
+    @patch("torch.ops.symm_mem.nccl_wait_signal")
+    def test_wait_signal_per_op_timeout_overrides_global(
+        self, mock_nccl_wait: MagicMock, mock_get_backend: MagicMock
+    ) -> None:
+        symm_mem.set_watchdog_timeout(30.0)
+        with patch("torch.distributed._watchdog.stream_timeout") as mock_stream_timeout:
+            hdl = MagicMock(spec=[])
+            hdl.device = "cuda:0"
+            symm_mem.wait_signal(hdl, 0, timeout=5.0)
+            mock_stream_timeout.assert_called_once_with(5.0)
 
 
 @instantiate_parametrized_tests

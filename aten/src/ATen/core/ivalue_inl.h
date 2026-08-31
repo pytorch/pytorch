@@ -2463,29 +2463,17 @@ inline bool IValue::isSameIdentity(const IValue& rhs) const {
 }
 
 namespace ivalue {
-namespace detail {
-
-template <typename T>
-IValue from_(T&& x, std::true_type /*unused*/) {
-  return IValue(std::forward<T>(x));
-}
-template <typename T>
-IValue from_(c10::intrusive_ptr<T> x, std::false_type /*unused*/) {
-  return IValue(std::move(x));
-}
-template <typename T>
-IValue from_(T&& /*x*/, std::false_type /*unused*/) {
-  static_assert(
-      guts::false_t<T>::value,
-      "You are calling from with a type that it doesn't support, and isn't a potential custom class (ie: is an intrusive_ptr)");
-  return IValue();
-}
-} // namespace detail
 
 template <typename T>
 IValue from(T&& x) {
-  return detail::from_(
-      std::forward<T>(x), typename std::is_constructible<IValue, T>::type{});
+  if constexpr (std::is_constructible_v<IValue, T>) {
+    return IValue(std::forward<T>(x));
+  } else {
+    static_assert(
+        guts::false_t<T>::value,
+        "You are calling from with a type that it doesn't support, and isn't a potential custom class (ie: is an intrusive_ptr)");
+    return IValue();
+  }
 }
 
 } // namespace ivalue
