@@ -430,15 +430,17 @@ class TestRegistryRuntime(TestCase):
         self.registry._dispatch_key_to_lib_graph.clear()
 
     def tearDown(self):
-        # Destroy any aten overrides the test installed so the dispatcher
-        # returns to its pre-test state.
-        for lib in list(self.registry._aten_override_libs.values()):
-            lib._destroy()
+        # Destroy only what this test installed. On a DSL-equipped machine
+        # `import torch` leaves production overrides live in
+        # `_aten_override_libs`; destroying those would strip the dispatcher
+        # of kernels the registry still lists as installed, for the rest of
+        # the process.
+        saved_override_libs = self._saved["aten_override_libs"]
+        for key, lib in list(self.registry._aten_override_libs.items()):
+            if key not in saved_override_libs:
+                lib._destroy()
         self.registry._aten_override_libs.clear()
-
-        # Restore aten override libs (none expected from other tests, but
-        # be defensive).
-        self.registry._aten_override_libs.update(self._saved["aten_override_libs"])
+        self.registry._aten_override_libs.update(saved_override_libs)
 
         # _native namespace DEF libraries and the ops defined on them persist
         # for the lifetime of the process (torch.library has no "undefine"),
@@ -963,9 +965,15 @@ class TestRegistryNonAtenNamespace(TestCase):
     implementation sits at CompositeExplicitAutograd (what
     `torch.library.custom_op` produces), so the override is installed at the
     backend key and the captured fallback resolves to the composite kernel.
+
+    These ops carry no Autograd kernel above the router, so the autograd
+    layer -- the shape a real `torch.library.custom_op` takes, and the
+    motivation for the widened keys -- is not covered here. That coverage
+    lives with the first torch_nn override and its own test.
     """
 
     NS = "_native_registry_test"
+    NS2 = "_native_registry_test2"
     MISSING_NS = "_native_registry_missing_ns"
 
     def setUp(self):
@@ -990,7 +998,8 @@ class TestRegistryNonAtenNamespace(TestCase):
             patch.object(
                 self.registry,
                 "_ALLOWED_LIB_SYMBOLS",
-                self.registry._ALLOWED_LIB_SYMBOLS | {self.NS, self.MISSING_NS},
+                self.registry._ALLOWED_LIB_SYMBOLS
+                | {self.NS, self.NS2, self.MISSING_NS},
             )
         )
 
@@ -1003,13 +1012,42 @@ class TestRegistryNonAtenNamespace(TestCase):
         self.lib.impl("twice", lambda x: x * 2, "CompositeExplicitAutograd")
         self.op = getattr(torch.ops, self.NS).twice.default
 
+        # A second namespace defining the SAME op symbol, so the tests below
+        # exercise the per-op-symbol maps the widened keys share. Its
+        # fallback triples rather than doubles, to tell the two apart.
+        self.lib2 = self._stack.enter_context(
+            torch.library._scoped_library(self.NS2, "DEF")
+        )
+        self.lib2.define("twice(Tensor self) -> Tensor")
+        self.lib2.impl("twice", lambda x: x * 3, "CompositeExplicitAutograd")
+        self.op2 = getattr(torch.ops, self.NS2).twice.default
+
+        self._saved_filter_state = (
+            set(self.registry._filter_state._dsl_names),
+            set(self.registry._filter_state._op_symbols),
+            set(self.registry._filter_state._dispatch_keys),
+        )
+
     def tearDown(self):
-        for lib in list(self.registry._aten_override_libs.values()):
-            lib._destroy()
+        # Only what this test installed; production overrides in the snapshot
+        # stay live (see TestRegistryRuntime.tearDown).
+        for key, lib in list(self.registry._aten_override_libs.items()):
+            if key not in self._saved_override_libs:
+                lib._destroy()
         self.registry._aten_override_libs.clear()
         self.registry._aten_override_libs.update(self._saved_override_libs)
 
         self._stack.close()
+
+        dsl_names, op_symbols, dispatch_keys = self._saved_filter_state
+        for attr, saved in (
+            ("_dsl_names", dsl_names),
+            ("_op_symbols", op_symbols),
+            ("_dispatch_keys", dispatch_keys),
+        ):
+            target = getattr(self.registry._filter_state, attr)
+            target.clear()
+            target.update(saved)
 
         self.registry._graphs.clear()
         self.registry._graphs.update(self._saved_graphs)
@@ -1060,19 +1098,59 @@ class TestRegistryNonAtenNamespace(TestCase):
         self.assertNotIn((self.NS, "twice", "CPU"), self.registry._aten_override_libs)
         self.assertEqual(self.op(torch.tensor([1.0])), torch.tensor([2.0]))
 
-    def test_same_op_name_in_two_namespaces_is_independent(self):
-        """Overriding `<ns>::twice` must leave `aten` alone even though both
-        namespaces share the registry's per-op-symbol maps."""
+    def _register_both(self):
         self._register(lambda *a, **k: True, lambda x: torch.full_like(x, 99.0))
+        self._register(
+            lambda *a, **k: True,
+            lambda x: torch.full_like(x, 7.0),
+            lib_symbol=self.NS2,
+        )
         self._install(self.NS)
+        self._install(self.NS2)
 
-        a, b = torch.tensor([2.0, 3.0]), torch.tensor([4.0, 5.0])
-        self.assertEqual(torch.ops.aten.mul.Tensor(a, b), torch.tensor([8.0, 15.0]))
-        self.assertEqual(self.op(a), torch.tensor([99.0, 99.0]))
+    def test_same_op_symbol_in_two_namespaces_is_independent(self):
+        """Two namespaces defining the same op symbol land in one
+        per-op-symbol bucket; each must still route to its own override."""
+        self._register_both()
+
+        x = torch.tensor([1.0, 2.0])
+        self.assertEqual(self.op(x), torch.full_like(x, 99.0))
+        self.assertEqual(self.op2(x), torch.full_like(x, 7.0))
+
+        bucket = self.registry._op_symbol_to_lib_graph["twice"]
+        self.assertIn((self.NS, "twice", "CPU"), bucket)
+        self.assertIn((self.NS2, "twice", "CPU"), bucket)
+
+    def test_op_symbol_filters_are_namespace_blind(self):
+        """`disable_op_symbols` matches the bare op symbol in every namespace,
+        and a "ns::op"-qualified string matches nothing. Pinned here because
+        the widened keys make same-symbol collisions across namespaces
+        possible for the first time."""
+        self._register_both()
+        x = torch.tensor([1.0, 2.0])
+
+        self.registry.deregister_op_overrides(disable_op_symbols=[f"{self.NS}::twice"])
+        self.assertEqual(self.op(x), torch.full_like(x, 99.0))
+        self.assertEqual(self.op2(x), torch.full_like(x, 7.0))
+
+        self.registry.deregister_op_overrides(disable_op_symbols=["twice"])
+        self.assertEqual(self.op(x), x * 2)
+        self.assertEqual(self.op2(x), x * 3)
+
+        self.registry.reenable_op_overrides(enable_op_symbols=["twice"])
+        self.assertEqual(self.op(x), torch.full_like(x, 99.0))
+        self.assertEqual(self.op2(x), torch.full_like(x, 7.0))
 
     def test_undefined_op_raises_on_install(self):
         """A namespace whose op is not in the dispatcher must fail loudly at
-        install time rather than silently registering nothing."""
+        install time rather than silently registering nothing.
+
+        Loud failure is the deliberate contract: a registration naming an op
+        that does not resolve breaks `import torch` rather than degrading
+        quietly. Unlike `aten`, whose ops the build guarantees, a non-aten
+        op's existence is a runtime property, so drift is caught before it
+        ships by the drift-guard test that accompanies each such override.
+        """
         self._register(lambda *a, **k: True, lambda x: x, lib_symbol=self.MISSING_NS)
         with self.assertRaisesRegex(AttributeError, "twice op not found"):
             self._install(self.MISSING_NS)
