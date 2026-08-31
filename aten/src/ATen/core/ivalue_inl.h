@@ -1957,7 +1957,8 @@ inline T IValue::to() && {
 
 template <typename T>
 inline typename c10::detail::ivalue_to_const_ref_overload_return<T>::type IValue::to() const& {
-  using return_type = c10::detail::ivalue_to_const_ref_overload_return<T>::type;
+  using return_type =
+      typename c10::detail::ivalue_to_const_ref_overload_return<T>::type;
 #define DEFINE_BRANCH(type, converter)                                         \
   if constexpr (std::is_same_v<T, type>) {                                     \
     return static_cast<return_type>(this->converter());                        \
