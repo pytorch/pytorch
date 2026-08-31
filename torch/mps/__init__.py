@@ -15,11 +15,15 @@ from .._utils import _dummy_type
 
 
 if not hasattr(torch._C, "_MetalGraph"):
-    # Built without MPS: keep this module importable, and make MetalGraph() raise
-    # the same "not compiled with" error the rest of the MPS API gives.
+    # Built without MPS: keep this module importable. Constructing a MetalGraph
+    # then raises RuntimeError from the dummy type, matching torch.cuda.graphs.
     torch._C.__dict__["_MetalGraph"] = _dummy_type("_MetalGraph")
 
 _is_in_bad_fork = getattr(torch._C, "_mps_is_in_bad_fork", lambda: False)
+# Absent on a non-MPS build, where nothing can be capturing.
+_is_current_stream_capturing = getattr(
+    torch._C, "_mps_isCurrentStreamCapturing", lambda: False
+)
 _default_mps_generator: torch._C.Generator = None  # type: ignore[assignment]
 
 
@@ -265,21 +269,25 @@ class MetalGraph:
     .. note::
 
         Replay re-binds the exact buffers seen during capture, so the graph keeps
-        every buffer it bound reserved: the allocator will not hand that storage
-        to another tensor until the graph is released. Freeing a captured tensor
-        is therefore safe, but its memory is not reclaimed until then, which is
-        the same trade :class:`torch.cuda.CUDAGraph` makes with its private
-        memory pool. Call :meth:`reset` (or drop the graph) to give it back.
+        every device buffer it bound reserved: the allocator will not hand that
+        storage to another tensor until the graph is released. Freeing a captured
+        tensor is therefore safe, but its memory is not reclaimed until then.
+        Call :meth:`reset` (or drop the graph) to give it back. This reserves
+        more than :class:`torch.cuda.CUDAGraph` does, which pools only the
+        allocations made during capture and can reuse them across replays.
 
     Constraints:
 
     * Tensor shapes must not change between the capture pass and replays.
     * Input data must be updated **in-place** via ``.copy_()`` before each
       replay - do **not** create new tensors or reassign variables. This only
-      propagates for buffer-backed inputs; scalar / 0-dim tensor inputs are
-      encoded via ``setBytes`` at capture time and are **frozen** on replay.
-      Materialize scalars as 1-element tensors to make them buffer-backed if you
-      need to vary them across replays.
+      propagates for buffer-backed inputs. Python scalar operands (``x * 2``)
+      are baked into the recorded dispatch and are **frozen** on replay; pass
+      them as MPS tensors if they need to vary. 0-dim MPS tensors are already
+      buffer-backed and do update in place.
+    * A CPU tensor used in a ``.copy_()`` inside the capture must stay alive for
+      the graph's lifetime: the recorded blit refers to its host memory, which
+      the graph cannot reserve the way it reserves device buffers.
     * Random number generation is not supported inside a capture: the philox seed
       and offset are recorded as fixed bytes, so replays would repeat the capture
       pass's values. Ops that consume the MPS generator raise inside a capture.
@@ -349,7 +357,7 @@ def is_current_stream_capturing() -> bool:
     a capture is in progress. If MPS has not been initialized, returns False
     without initializing it.
     """
-    return torch._C._mps_isCurrentStreamCapturing()
+    return _is_current_stream_capturing()
 
 
 @contextmanager
@@ -379,8 +387,9 @@ def metal_graph(g: "MetalGraph"):
         # prefix of the intended graph. Replaying it would silently run partial
         # work, so drop it: reset() stops the recording and releases the steps,
         # after which replay() raises the same way it does for a graph that
-        # never captured. torch.cuda.graph reaches the same state by leaving the
-        # graph uninstantiated when cudaStreamEndCapture reports the failure.
+        # never captured. This is deliberately stricter than torch.cuda.graph,
+        # whose __exit__ ends the capture regardless and can leave a replayable
+        # partial graph behind.
         g.reset()
         raise
     g.capture_end()

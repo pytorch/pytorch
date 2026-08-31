@@ -75,7 +75,7 @@ MPSStream::~MPSStream() {
   _errorBuffer = nil;
   _compilationDescriptor = nil;
 
-  TORCH_INTERNAL_ASSERT(_commandBuffer == nil);
+  assert(_commandBuffer == nil);
 }
 
 MPSCommandBuffer* MPSStream::commandBuffer() {
@@ -473,7 +473,7 @@ void MPSStream::captureEnd(uint64_t captureId) {
 
 bool MPSStream::captureEndIfRecording(uint64_t captureId) {
   __block bool ended = false;
-  dispatch_sync(_serialQueue, ^() {
+  dispatch_sync_with_rethrow(_serialQueue, ^() {
     if (_activeCaptureId.load(std::memory_order_relaxed) != captureId) {
       return;
     }
@@ -535,6 +535,13 @@ void MPSStream::pushCapturedMetalKernel(std::unique_ptr<CapturedMetalKernel> ker
   for (const auto& b : kernel->buffers) {
     captureNoteBuffer((__bridge id<MTLBuffer>)b.buffer);
   }
+  // useResource: resources reach the kernel by raw GPU address (argument buffers
+  // in the fused optimizers, index tensors in advanced indexing) rather than
+  // through setBuffer, so they need the same reservation. Pinning something the
+  // allocator does not own is harmless: the pin key simply never matches.
+  for (const auto& r : kernel->resourceUsages) {
+    captureNoteBuffer((__bridge id<MTLBuffer>)r.resource);
+  }
   CapturedStep step;
   step.kind = CapturedStep::Kind::MetalKernel;
   step.metalKernel = std::move(kernel);
@@ -567,6 +574,15 @@ void MPSStream::replay(uint64_t captureId) {
     // BlitCopy steps encode directly and bypass that proxy entirely, so they
     // need to be duplicated into the active capture explicitly below.
     const uint64_t recordInto = _activeCaptureId.load(std::memory_order_relaxed);
+    if (recordInto != 0 && recordInto != captureId) {
+      // The outer capture re-executes everything this one does, so it depends on
+      // the same buffers and must reserve them itself: this graph may be released
+      // first. Done for every step kind at once, since MPSGraph steps cannot
+      // recover their buffers from the feeds/results arrays.
+      for (const void* ptr : capture.boundBuffers) {
+        captureNoteBuffer((__bridge id<MTLBuffer>)ptr);
+      }
+    }
     for (auto& step : steps) {
       if (step.kind == CapturedStep::Kind::MPSGraph) {
         endKernelCoalescing(); // End compute encoder before MPSGraph encoding
@@ -611,8 +627,6 @@ void MPSStream::replay(uint64_t captureId) {
           dup.blitSrcOffset = step.blitSrcOffset;
           dup.blitDstOffset = step.blitDstOffset;
           _captures[recordInto].steps.push_back(std::move(dup));
-          captureNoteBuffer(srcBuffer);
-          captureNoteBuffer(dstBuffer);
         }
       } else {
         auto& mk = *step.metalKernel;
@@ -765,16 +779,16 @@ void MPSStream::MetalGraph::reset() {
   // pointing at a capture it no longer owns.
   _id = 0;
   _stream = nullptr;
-  // A graph dropped mid-recording must stop recording first: otherwise
-  // captureFree refuses, and the stream would be left with an active capture id
-  // that nothing can clear, wedging every later capture on this stream. Asking
-  // by id rather than by the stream-global captureMode(), so another graph's
-  // recording is left alone.
-  stream->captureEndIfRecording(id);
-  // Runs from the destructor, so it must not throw. A handle that is already
-  // gone (released when the stream was torn down) returns false and needs no
-  // action; anything else is a real bug and is surfaced rather than dropped.
+  // Runs from the destructor, so nothing here may escape. A handle that is
+  // already gone returns false and needs no action; anything else is a real bug
+  // and is surfaced rather than silently dropped.
   try {
+    // A graph dropped mid-recording must stop recording first: otherwise
+    // captureFree refuses, and the stream would be left with an active capture
+    // id that nothing can clear, wedging every later capture on this stream.
+    // Asking by id rather than by the stream-global captureMode(), so another
+    // graph's recording is left alone.
+    stream->captureEndIfRecording(id);
     stream->captureFree(id);
   } catch (const std::exception& e) {
     TORCH_WARN("Failed to release MetalGraph capture ", id, ": ", e.what());
