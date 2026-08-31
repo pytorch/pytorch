@@ -41,7 +41,9 @@ struct TORCH_API RMSNormOptions {
   /// input shape from an expected input.
   TORCH_ARG(std::vector<int64_t>, normalized_shape);
   /// a value added to the denominator for numerical stability. If unset, the
-  /// machine epsilon of the input dtype is used. ``Default: std::nullopt``.
+  /// machine epsilon of the computation (opmath) type is used: fp16, bf16 and
+  /// fp32 inputs use the float epsilon, fp64 inputs the double one.
+  /// ``Default: std::nullopt``.
   TORCH_ARG(std::optional<double>, eps) = std::nullopt;
   /// a boolean value that when set to ``true``, this module
   /// has a learnable per-element affine parameter initialized to ones.
@@ -91,7 +93,9 @@ struct TORCH_API RMSNormFuncOptions {
   TORCH_ARG(Tensor, weight);
 
   /// a value added to the denominator for numerical stability. If unset, the
-  /// machine epsilon of the input dtype is used. ``Default: std::nullopt``.
+  /// machine epsilon of the computation (opmath) type is used: fp16, bf16 and
+  /// fp32 inputs use the float epsilon, fp64 inputs the double one.
+  /// ``Default: std::nullopt``.
   TORCH_ARG(std::optional<double>, eps) = std::nullopt;
 };
 

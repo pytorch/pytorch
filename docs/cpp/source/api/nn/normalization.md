@@ -1,8 +1,8 @@
 ---
 myst:
   html_meta:
-    description: Normalization layers in PyTorch C++ — BatchNorm, LayerNorm, GroupNorm, InstanceNorm, and LocalResponseNorm.
-    keywords: PyTorch, C++, normalization, BatchNorm, LayerNorm, GroupNorm, InstanceNorm
+    description: Normalization layers in PyTorch C++ — BatchNorm, LayerNorm, RMSNorm, GroupNorm, InstanceNorm, and LocalResponseNorm.
+    keywords: PyTorch, C++, normalization, BatchNorm, LayerNorm, RMSNorm, GroupNorm, InstanceNorm
 ---
 
 # Normalization Layers
@@ -13,6 +13,7 @@ activations. They help with gradient flow and allow higher learning rates.
 - **BatchNorm**: Normalizes across batch dimension; most common in CNNs
 - **InstanceNorm**: Normalizes each sample independently; popular in style transfer
 - **LayerNorm**: Normalizes across feature dimension; standard in transformers
+- **RMSNorm**: Rescales by root mean square only, without centring; common in recent LLMs
 - **GroupNorm**: Normalizes within groups of channels; works with small batches
 - **LocalResponseNorm**: Lateral inhibition inspired by neuroscience (less common today)
 
@@ -108,6 +109,25 @@ auto bn = torch::nn::BatchNorm2d(
 ```cpp
 auto ln = torch::nn::LayerNorm(
     torch::nn::LayerNormOptions({768}));  // normalized_shape
+```
+
+## RMSNorm
+
+```{doxygenclass} torch::nn::RMSNorm
+:members:
+:undoc-members:
+```
+
+```{doxygenclass} torch::nn::RMSNormImpl
+:members:
+:undoc-members:
+```
+
+**Example:**
+
+```cpp
+auto rn = torch::nn::RMSNorm(
+    torch::nn::RMSNormOptions({768}));  // normalized_shape
 ```
 
 ## GroupNorm

@@ -2634,6 +2634,24 @@ def get_new_module_tests():
             check_half=True,
             desc='3d_no_affine_large_feature',
         ),
+        dict(
+            module_name='RMSNorm',
+            constructor_args=([5], 1e-3, True),
+            cpp_constructor_args='torch::nn::RMSNormOptions({5}).eps(1e-3).elementwise_affine(true)',
+            input_size=(4, 2, 5),
+            check_eval=True,
+            desc='1d_elementwise_affine',
+            default_dtype=torch.double,
+        ),
+        dict(
+            module_name='RMSNorm',
+            constructor_args=([5], 1e-3, False),
+            cpp_constructor_args='torch::nn::RMSNormOptions({5}).eps(1e-3).elementwise_affine(false)',
+            input_size=(4, 2, 5),
+            check_eval=True,
+            desc='1d_no_elementwise_affine',
+            default_dtype=torch.double,
+        ),
     ]
 
     # add conv padding mode tests:
