@@ -166,7 +166,7 @@ def get_transform_func(num_tensors, dtype, device, is_fastpath):
 # note(crcrpar): `zero_size` is `False` unless (dtype, device) == (torch.float32, "cuda")
 # as the pair would go through `multi_tensor_apply_kernel` if inputs are not zero size.
 @unittest.mock.patch.dict(os.environ, {"KINETO_LOG_LEVEL": "5"})
-class TestForeach(TestCase):
+class TestForeachDevice(TestCase):
     @property
     def is_cuda(self):
         return self.device_type == "cuda"
@@ -1950,7 +1950,7 @@ def check_autodiff_sample(op, sample, dtype, is_inplace):
     return True, ""
 
 
-instantiate_device_type_tests(TestForeach, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestForeachDevice, globals(), allow_xpu=True)
 
 
 class TestForeachPublicAPI(TestCase):
