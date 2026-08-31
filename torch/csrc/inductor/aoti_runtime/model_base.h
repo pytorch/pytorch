@@ -1041,15 +1041,15 @@ class AOTInductorModelBase {
   void load_constants(bool force = false) {
     did_call_load_constants_ = true;
     size_t num_constants = this->num_constants();
-    size_t num_folded_constants = this->num_folded_constants();
+    size_t num_blobless_constants = this->num_blobless_constants();
     constants_map_->reserve(num_constants);
 
     // A CUDA model can still have constants on CPU,
     // so we need a separate secondary blob for them.
     std::vector<size_t> constants_internal_offset(
-        num_constants - num_folded_constants);
+        num_constants - num_blobless_constants);
     std::vector<size_t> aux_cpu_constants_internal_offset(
-        num_constants - num_folded_constants);
+        num_constants - num_blobless_constants);
     size_t blob_size = 0;
     size_t aux_cpu_blob_size = 0;
     compute_constant_blob(
@@ -1092,6 +1092,14 @@ class AOTInductorModelBase {
     AOTI_LOG_LOADING(
         "load_constants: starting H2D copy of " << num_constants
                                                 << " constants");
+    // Evaluated only when logging is on, so the count walk costs nothing
+    // otherwise. Reported unconditionally: a zero here is the signal that
+    // free_fold_input_only_constants marked nothing.
+    AOTI_LOG_LOADING(
+        "load_constants: " << this->num_fold_input_only_constants() << " of "
+                           << num_constants
+                           << " constants are fold-input-only and will be"
+                              " released after constant folding");
 
     for (size_t i = 0; i < num_constants; i++) {
       bool from_folded = this->constant_from_folded(i);
@@ -1116,6 +1124,20 @@ class AOTInductorModelBase {
               "Hint: This can happen if you compiled on GPU but are loading "
               "on CPU, which is not supported. In AOTI, you must compile and "
               "load on the same device type.");
+
+      if (this->constant_fold_input_only(i)) {
+        // Owns its storage instead of aliasing the shared blob, so the
+        // container can release it once const folding has consumed it. Blob
+        // indices are deliberately not advanced -- compute_constant_blob()
+        // reserved no slot for this constant -- but bytes_read must still
+        // advance, since the serialized blob does contain its bytes.
+        AtenTensorHandle tensor_handle = nullptr;
+        create_owned_constant(
+            i, _get_constants_start() + bytes_read, &tensor_handle);
+        bytes_read += data_size;
+        constants_map_->emplace(std::move(name), tensor_handle);
+        continue;
+      }
 
       uint8_t* internal_ptr = nullptr;
       if (data_size != 0) {
@@ -1278,6 +1300,86 @@ class AOTInductorModelBase {
     return internal_ptr;
   }
 
+  // Allocates dedicated storage for constant `idx`, copies `data_size` bytes
+  // from the host pointer `src` into it, and returns a tensor with the
+  // constant's real shape/stride/offset over that storage.
+  //
+  // Unlike the shared-blob path, the returned tensor owns its storage (the
+  // reinterpret below shares the allocation's refcount), so releasing the
+  // handle is what frees the memory. Used for fold-input-only constants.
+  void create_owned_constant(
+      size_t idx,
+      const uint8_t* src,
+      AtenTensorHandle* ret) {
+#ifdef USE_MPS
+    // MPS keeps all constants in one buffer addressed by offset, which cannot
+    // express per-constant storage. Codegen never marks fold-input-only
+    // constants for MPS; this is the backstop.
+    (void)idx;
+    (void)src;
+    (void)ret;
+    throw std::runtime_error(
+        "fold-input-only constants are not supported on MPS");
+#else
+    auto dtype = this->constant_dtype(static_cast<int64_t>(idx));
+    size_t data_size = this->constant_data_size(static_cast<int64_t>(idx));
+    int32_t const_device_type =
+        this->constant_device_type(static_cast<int64_t>(idx));
+    bool device_type_matches = const_device_type == device_type_;
+
+    auto elem_size = static_cast<size_t>(aoti_torch_dtype_element_size(dtype));
+    AOTI_RUNTIME_CHECK(
+        elem_size > 0 && data_size % elem_size == 0,
+        "Constant " +
+            std::string(this->constant_name(static_cast<int64_t>(idx))) +
+            " has data_size " + std::to_string(data_size) +
+            " that is not a multiple of its element size");
+
+    auto numel = static_cast<int64_t>(data_size / elem_size);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+    int64_t storage_sizes[] = {numel};
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+    int64_t storage_strides[] = {1};
+    AtenTensorHandle storage_handle = nullptr;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided(
+        1,
+        storage_sizes,
+        storage_strides,
+        dtype,
+        const_device_type,
+        device_type_matches ? device_idx_ : 0,
+        &storage_handle));
+    RAIIAtenTensorHandle storage(storage_handle);
+
+    if (data_size != 0) {
+      void* dst = nullptr;
+      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr(storage.get(), &dst));
+      if (!device_type_matches) {
+        // Constant lives on CPU in a mixed-device model.
+        memcpy(dst, src, data_size);
+      } else {
+#ifdef USE_XPU
+        sycl::queue* queue_ptr = nullptr;
+        aoti_torch_get_current_sycl_queue((void**)&queue_ptr);
+        queue_ptr->memcpy(dst, src, data_size).wait();
+#elif defined(USE_CUDA)
+        aoti_cuda_memcpy_throttled(dst, src, data_size, cudaMemcpyHostToDevice);
+#else
+        memcpy(dst, src, data_size);
+#endif
+      }
+    }
+
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__reinterpret_tensor(
+        storage.get(),
+        static_cast<int64_t>(this->constant_ndim(static_cast<int64_t>(idx))),
+        this->constant_shape(static_cast<int64_t>(idx)),
+        this->constant_stride(static_cast<int64_t>(idx)),
+        static_cast<int64_t>(this->constant_offset(static_cast<int64_t>(idx))),
+        ret));
+#endif // USE_MPS
+  }
+
   void compute_constant_blob(
       size_t& blob_size,
       std::vector<size_t>& constants_internal_offset,
@@ -1290,7 +1392,7 @@ class AOTInductorModelBase {
     size_t aux_idx = 0;
 
     for (size_t i = 0; i < num_constants; i++) {
-      if (this->constant_from_folded(i)) {
+      if (this->constant_is_blobless(i)) {
         continue;
       }
 
@@ -1323,15 +1425,29 @@ class AOTInductorModelBase {
     return constants_info_.size();
   }
 
-  size_t num_folded_constants() const {
+  // Number of constants that occupy no slot in the shared constant blob. Sizes
+  // the per-blob offset vectors, so it must stay in sync with the skip
+  // condition in compute_constant_blob().
+  size_t num_blobless_constants() const {
     size_t total_consts = this->num_constants();
-    size_t folded_consts = 0;
+    size_t blobless = 0;
     for (size_t i = 0; i < total_consts; i++) {
-      if (this->constant_from_folded(i)) {
-        folded_consts++;
+      if (this->constant_is_blobless(i)) {
+        blobless++;
       }
     }
-    return folded_consts;
+    return blobless;
+  }
+
+  size_t num_fold_input_only_constants() const {
+    size_t total_consts = this->num_constants();
+    size_t count = 0;
+    for (size_t i = 0; i < total_consts; i++) {
+      if (this->constant_fold_input_only(i)) {
+        count++;
+      }
+    }
+    return count;
   }
 
   const char* input_name(int64_t idx) const {
@@ -1388,6 +1504,18 @@ class AOTInductorModelBase {
 
   bool constant_from_folded(int64_t idx) const {
     return constants_info_.at(idx).from_folded;
+  }
+
+  bool constant_fold_input_only(int64_t idx) const {
+    return constants_info_.at(idx).fold_input_only;
+  }
+
+  // Constants that get no slice of the shared constant blob: folded outputs
+  // (produced by the const run) and fold-input-only constants (separately
+  // allocated so they can be released after folding).
+  bool constant_is_blobless(int64_t idx) const {
+    const auto& info = constants_info_.at(idx);
+    return info.from_folded || info.fold_input_only;
   }
 
   int32_t constant_type(int64_t idx) const {
@@ -1583,6 +1711,12 @@ class AOTInductorModelBase {
     int64_t opaque_metadata_size{};
     const char* original_fqn = nullptr;
     bool from_folded{};
+    // Only the const-folding graph reads this constant, so it is dead once
+    // folding has run. Such constants are kept out of the shared constant blob
+    // and given their own storage, so the runtime can release them
+    // individually. Set by codegen only under
+    // config.aot_inductor.free_fold_input_only_constants.
+    bool fold_input_only{};
     int32_t type{};
   };
 
