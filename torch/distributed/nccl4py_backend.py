@@ -28,30 +28,43 @@ except ModuleNotFoundError:
 
 
 class _NcclWork(dist._Work):
-    """Work handle backed by a CUDA event recorded after the NCCL operation."""
+    """Work handle backed by CUDA events recorded after the NCCL operation(s).
 
-    def __init__(self, event, device, wd_handle=None):
+    A single collective records one event. A coalesced window records one event
+    per distinct stream it ran on, and waiting joins all of them (the analog
+    of ProcessGroupNCCL(nccl2)'s coalesceWorks)
+    """
+
+    def __init__(self, events, device, wd_handles=None):
         super().__init__()
-        self._event = event
+        self._events = list(events)
         self._device = device
-        self._wd_handle = wd_handle
+        self._wd_handles = list(wd_handles) if wd_handles else []
 
     def wait(self, timeout=None):
-        if self._event is not None:
-            current = torch.cuda.current_stream(self._device)
-            self._event.wait(current)
-            self._event = None
-        if self._wd_handle is not None:
-            self._wd_handle.cancel()
-            self._wd_handle = None
+        current = torch.cuda.current_stream(self._device)
+        for event in self._events:
+            event.wait(current)
+        self._events = []
+        for handle in self._wd_handles:
+            handle.cancel()
+        self._wd_handles = []
         return True
 
     def get_future(self):
         fut = torch.futures.Future(devices=[self._device])
-        if self._event is not None:
-            stream_complete(lambda: fut.set_result(True), event=self._event)
-        else:
+        if not self._events:
             fut.set_result(True)
+            return fut
+        remaining = [len(self._events)]
+
+        def on_complete():
+            remaining[0] -= 1
+            if remaining[0] == 0:
+                fut.set_result(True)
+
+        for event in self._events:
+            stream_complete(on_complete, event=event)
         return fut
 
 
@@ -84,6 +97,8 @@ class NCCL4PyBackend(C10DBackend):
         self._comm = nccl.Communicator.init(nranks=size, rank=rank, unique_id=uid)
         self._internal_stream = torch.cuda.Stream(device=self._device)
         self._barrier_tensor = torch.zeros(1, dtype=torch.float32, device=self._device)
+        self._coalescing = False
+        self._coalesced_streams = set()
         _get_watchdog()
 
     @property
@@ -118,12 +133,22 @@ class NCCL4PyBackend(C10DBackend):
             return self._internal_stream
         return torch.cuda.current_stream(self._device)
 
-    def _make_work(self, stream):
-        event = torch.cuda.Event()
-        event.record(stream)
-        with torch.cuda.stream(stream):
-            wd_handle = stream_timeout(self._options._timeout)
-        return _NcclWork(event, self._device, wd_handle)
+    def _make_work(self, *streams):
+        # Inside a coalescing window the kernels are only enqueued at group_end,
+        # so a per-op event here would be meaningless. Just record which streams
+        # the op used; end_coalescing records the events after group_end.
+        if self._coalescing:
+            self._coalesced_streams.update(streams)
+            return _NcclWork((), self._device)
+        events = []
+        wd_handles = []
+        for stream in streams:
+            event = torch.cuda.Event()
+            event.record(stream)
+            with torch.cuda.stream(stream):
+                wd_handles.append(stream_timeout(self._options._timeout))
+            events.append(event)
+        return _NcclWork(events, self._device, wd_handles)
 
     def _get_nccl_redop(self, reduce_op, tensor):
         """Returns (nccl_op, custom_op_or_None).
@@ -154,12 +179,18 @@ class NCCL4PyBackend(C10DBackend):
         raise RuntimeError(f"nccl4py backend: unsupported reduce op {reduce_op}")
 
     def start_coalescing(self):
+        self._coalescing = True
+        self._coalesced_streams = set()
         nccl.group_start()
 
     def end_coalescing(self):
         nccl.group_end()
-        stream = torch.cuda.current_stream(self._device)
-        return self._make_work(stream)
+        self._coalescing = False
+        streams = self._coalesced_streams
+        self._coalesced_streams = set()
+        if not streams:
+            streams = {torch.cuda.current_stream(self._device)}
+        return self._make_work(*streams)
 
     def send(self, tensor_list, dst, tag=0):
         self._check_tensors(tensor_list)
@@ -390,6 +421,8 @@ class NCCL4PyBackend(C10DBackend):
         child._comm = new_comm
         child._internal_stream = torch.cuda.Stream(device=self._device)
         child._barrier_tensor = torch.zeros(1, dtype=torch.float32, device=self._device)
+        child._coalescing = False
+        child._coalescing_stream = None
         return child
 
     def shutdown(self):
