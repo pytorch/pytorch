@@ -6,6 +6,7 @@ import torch
 from torch._inductor import config
 from torch._inductor.heuristics.registry import _HEURISTIC_CACHE
 from torch._inductor.heuristics.template.triton import (
+    BaseHeuristicSingleton,
     BlackwellGPUGemmConfig,
     CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
     CUDABlackwellPersistentTMATemplateConfigHeuristic,
@@ -754,6 +755,57 @@ class TestBlackwellAutoWSConstraints(TestCase):
                         kwargs
                     )
                 )
+
+
+class TestBlackwellAutoWSConfigs(TestCase):
+    """autoWS config selection for the Blackwell persistent-TMA template."""
+
+    def test_autows_heuristic_uses_autows_configs(self):
+        with (
+            unittest.mock.patch(
+                "torch._inductor.heuristics.template.triton.USE_META_WS", True
+            ),
+            config.patch({"triton.enable_template_autows": True}),
+        ):
+            _HEURISTIC_CACHE.clear()
+            for cls in (
+                CUDABlackwellPersistentTMATemplateConfigHeuristic,
+                CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
+            ):
+                BaseHeuristicSingleton._instances.pop(cls, None)
+            heuristic = CUDABlackwellPersistentTMATemplateConfigHeuristic()
+            addmm_heuristic = CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic()
+
+        self.assertEqual(heuristic.mm_configs, heuristic._generate_autows_configs())
+        # addmm shares the autoWS set rather than its own non-autoWS configs
+        self.assertEqual(
+            addmm_heuristic.mm_configs, heuristic._generate_autows_configs()
+        )
+        self.assertEqual(
+            len(heuristic.exhaustive_configs),
+            len(heuristic._generate_autows_exhaustive_configs()),
+        )
+        for cfg in heuristic.mm_configs:
+            self.assertIsInstance(cfg, BlackwellGPUGemmConfig)
+            self.assertTrue(cfg.use_meta_ws)
+        expected_stages = [
+            cfg.num_stages for cfg in heuristic.blackwell_persistent_mm_configs
+        ]
+        two_cta_stages = [
+            cfg.num_stages
+            for cfg in heuristic.mm_configs
+            if cfg.two_ctas and cfg.data_partition_factor == 1
+        ]
+        self.assertEqual(two_cta_stages, expected_stages)
+
+    def tearDown(self):
+        super().tearDown()
+        _HEURISTIC_CACHE.clear()
+        for cls in (
+            CUDABlackwellPersistentTMATemplateConfigHeuristic,
+            CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
+        ):
+            BaseHeuristicSingleton._instances.pop(cls, None)
 
 
 if __name__ == "__main__":
