@@ -169,6 +169,7 @@ supported_ctx_manager_classes = dict.fromkeys(
         torch.autograd.forward_ad.dual_level,
         torch.autograd.profiler.profile,
         torch.autograd.profiler.record_function,
+        torch._C._AutoDispatchBelowAutograd,
         torch._C.DisableTorchFunctionSubclass,
         torch._C.DisableTorchFunction,
         torch._functorch.vmap.vmap_increment_nesting,
@@ -702,6 +703,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import (
+            AutoDispatchBelowAutogradVariable,
             CUDAMemPoolContextVariable,
             DisabledSavedTensorsHooksVariable,
             DualLevelContextManager,
@@ -840,6 +842,12 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             return TorchFunctionDisableVariable.create(
                 tx, only_subclass=self.value is torch._C.DisableTorchFunctionSubclass
             )
+        elif self.value is torch._C._AutoDispatchBelowAutograd:
+            if args or kwargs:
+                raise AssertionError(
+                    "_AutoDispatchBelowAutograd expects no args or kwargs"
+                )
+            return AutoDispatchBelowAutogradVariable.create(tx)
         elif self.value is torch._functorch.vmap.vmap_increment_nesting:
             if len(args) != 2:
                 raise AssertionError(
