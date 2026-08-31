@@ -5766,7 +5766,8 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     TestHigherOrderOperatorInteraction,
     globals(),
-    only_for=only_for,
+    only_for=("cpu", "cuda", "xpu"),
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestFunctionalize,
