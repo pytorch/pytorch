@@ -54,6 +54,9 @@ def _make_gemm_param(gemm_config: dict[str, int | bool]):
         use_half_tile_interleaved=bool(
             gemm_config.get("USE_HALF_TILE_INTERLEAVED", False)
         ),
+        # Tile validation is layout-independent; runtime callers pass the layout.
+        a_is_transposed=False,
+        b_is_transposed=False,
     )
 
 
@@ -63,8 +66,9 @@ def is_gemm_config_valid_for_shape(
     k: int,
     dtype_id: int,
     gemm_config: dict[str, int | bool],
-    a_is_transposed: bool = False,
-    b_is_transposed: bool = True,
+    *,
+    a_is_transposed: bool,
+    b_is_transposed: bool,
 ) -> bool:
     """Return whether a FlyDSL config supports this concrete GEMM shape."""
     from torch._inductor.kernel.vendored_templates.flydsl.kernels import (

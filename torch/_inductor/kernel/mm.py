@@ -260,7 +260,7 @@ def get_flydsl_mm_template_kwargs(
     else:
         return []
 
-    # Prefer the existing column-major RHS path when both strides are one.
+    # FlyDSL consumes aten.mm's logical [K, N] RHS view directly.
     if sizevars.statically_known_equals(mat2_stride[0], 1):
         b_is_transposed = True
     elif sizevars.statically_known_equals(mat2_stride[1], 1):
@@ -307,13 +307,7 @@ def get_flydsl_mm_template_kwargs(
     k_static = PythonWrapperCodegen.statically_known_int_or_none(k)
     if m_static is None or n_static is None or k_static is None:
         return []
-    if n_static % 32 != 0 or k_static % 32 != 0:
-        return []
-
-    vector_width = GPU_ALIGN_BYTES // itemsize
-    if (a_is_transposed and m_static % vector_width != 0) or (
-        not b_is_transposed and n_static % vector_width != 0
-    ):
+    if k_static % 32 != 0:
         return []
 
     tensor_spans = (
@@ -340,7 +334,6 @@ def get_flydsl_mm_template_kwargs(
     ):
         return []
 
-    # FlyDSL consumes aten.mm's logical [K, N] RHS view directly.
     from .vendored_templates.flydsl.kernels import GEMM_DTYPE_BF16, GEMM_DTYPE_FP16
 
     gemm_dtype_id = GEMM_DTYPE_FP16 if dtype == torch.float16 else GEMM_DTYPE_BF16

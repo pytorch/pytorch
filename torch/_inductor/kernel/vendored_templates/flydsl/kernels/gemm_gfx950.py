@@ -52,8 +52,9 @@ def make_gemm_gfx950_param(
     n_waves: int = 4,
     group_m: int = 0,
     use_half_tile_interleaved: bool = False,
-    a_is_transposed: bool = False,
-    b_is_transposed: bool = True,
+    *,
+    a_is_transposed: bool,
+    b_is_transposed: bool,
     has_bias: bool = False,
     has_k_tail: bool = False,
     mma_m: int = 16,
@@ -277,7 +278,25 @@ def make_transposed_lds_layout(rows, block_k):
             fx.static(fx.SwizzleType.get(2, 4, 4)),
             base_layout,
         )
+    # Other supported tile sizes intentionally remain unswizzled. The layout is
+    # correct for ds_read_tr16 but may incur additional LDS bank conflicts.
     return base_layout
+
+
+def make_gemm_ab_lds_layouts(
+    rows_a, rows_b, block_k, a_is_transposed, b_is_transposed
+):
+    a_lds_layout = (
+        make_transposed_lds_layout(rows_a, block_k)
+        if const_expr(a_is_transposed)
+        else make_lds_layout(rows_a, block_k)
+    )
+    b_lds_layout = (
+        make_transposed_lds_layout(rows_b, block_k)
+        if const_expr(not b_is_transposed)
+        else make_lds_layout(rows_b, block_k)
+    )
+    return a_lds_layout, b_lds_layout
 
 
 def get_wave_lds_offset(tid, async_load_bytes):
@@ -324,7 +343,8 @@ def buffer_load_lds_inline(rsrc, lds_ptr, global_offset, dma_bytes):
         8: "buffer_load_dwordx2",
         4: "buffer_load_dword",
     }
-    # CDNA4 requires one wait state after a SALU write to M0 before VMEM LDS use.
+    # Match LLVM's gfx950 buffer_load_lds lowering: VMEM needs one wait state
+    # after the SALU write to M0 (llvm-project#116681).
     llvm.InlineAsmOp(
         None,
         [
@@ -343,6 +363,41 @@ def buffer_load_lds_inline(rsrc, lds_ptr, global_offset, dma_bytes):
 
 def _elem_dtype(param: GemmGfx950Param):
     return fx.Float16 if const_expr(param.dtype_id == GEMM_DTYPE_FP16) else fx.BFloat16
+
+
+def make_gemm_ab_copies(
+    elem_dtype, tiled_mma, tid, a_is_transposed, b_is_transposed
+):
+    uni_copy_atom = fx.make_copy_atom(fx.UniversalCopy128b(), elem_dtype)
+    buffer_copy_atom = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), elem_dtype)
+
+    if const_expr(a_is_transposed):
+        a_s2r_copy_atom = fx.make_copy_atom(
+            fx.rocdl.cdna4.LDSReadTrans16_64b(), elem_dtype
+        )
+        a_tiled_copy_atom = a_s2r_copy_atom
+    else:
+        a_s2r_copy_atom = uni_copy_atom
+        a_tiled_copy_atom = buffer_copy_atom
+    if const_expr(not b_is_transposed):
+        b_s2r_copy_atom = fx.make_copy_atom(
+            fx.rocdl.cdna4.LDSReadTrans16_64b(), elem_dtype
+        )
+        b_tiled_copy_atom = b_s2r_copy_atom
+    else:
+        b_s2r_copy_atom = uni_copy_atom
+        b_tiled_copy_atom = buffer_copy_atom
+
+    thr_copy_A = fx.make_tiled_copy_A(a_tiled_copy_atom, tiled_mma).get_slice(tid)
+    thr_copy_B = fx.make_tiled_copy_B(b_tiled_copy_atom, tiled_mma).get_slice(tid)
+    return (
+        uni_copy_atom,
+        buffer_copy_atom,
+        a_s2r_copy_atom,
+        b_s2r_copy_atom,
+        thr_copy_A,
+        thr_copy_B,
+    )
 
 
 def async_load_to_lds(
@@ -478,40 +533,28 @@ def gemm_gfx950_kernel(
     a_rsrc = fx.rocdl.get_buffer_rsrc(fx.get_iter(a_buf))
     b_rsrc = fx.rocdl.get_buffer_rsrc(fx.get_iter(b_buf))
 
-    uni_copy_atom = fx.make_copy_atom(fx.UniversalCopy128b(), elem_dtype)
-    buffer_copy_atom = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), elem_dtype)
-
-    if const_expr(param.a_is_transposed):
-        a_s2r_copy_atom = fx.make_copy_atom(
-            fx.rocdl.cdna4.LDSReadTrans16_64b(), elem_dtype
-        )
-        a_tiled_copy_atom = a_s2r_copy_atom
-    else:
-        a_s2r_copy_atom = uni_copy_atom
-        a_tiled_copy_atom = buffer_copy_atom
-    if const_expr(not param.b_is_transposed):
-        b_s2r_copy_atom = fx.make_copy_atom(
-            fx.rocdl.cdna4.LDSReadTrans16_64b(), elem_dtype
-        )
-        b_tiled_copy_atom = b_s2r_copy_atom
-    else:
-        b_s2r_copy_atom = uni_copy_atom
-        b_tiled_copy_atom = buffer_copy_atom
-
     gC = fx.flat_divide(out_buf, (block_m, block_n))[None, None, bid_m, bid_n]
     thr_mma = tiled_mma.thr_slice(tid)
-    thr_copy_A = fx.make_tiled_copy_A(a_tiled_copy_atom, tiled_mma).get_slice(tid)
-    thr_copy_B = fx.make_tiled_copy_B(b_tiled_copy_atom, tiled_mma).get_slice(tid)
-
-    a_lds_layout = (
-        make_transposed_lds_layout(block_m, block_k)
-        if const_expr(param.a_is_transposed)
-        else make_lds_layout(block_m, block_k)
+    (
+        uni_copy_atom,
+        buffer_copy_atom,
+        a_s2r_copy_atom,
+        b_s2r_copy_atom,
+        thr_copy_A,
+        thr_copy_B,
+    ) = make_gemm_ab_copies(
+        elem_dtype,
+        tiled_mma,
+        tid,
+        param.a_is_transposed,
+        param.b_is_transposed,
     )
-    b_lds_layout = (
-        make_transposed_lds_layout(block_n, block_k)
-        if const_expr(not param.b_is_transposed)
-        else make_lds_layout(block_n, block_k)
+    a_lds_layout, b_lds_layout = make_gemm_ab_lds_layouts(
+        block_m,
+        block_n,
+        block_k,
+        param.a_is_transposed,
+        param.b_is_transposed,
     )
     c_lds_layout = fx.make_layout((block_m, block_n), (block_n, 1))
 
@@ -756,39 +799,27 @@ def gemm_hti_gfx950_kernel(
     a_rsrc = fx.rocdl.get_buffer_rsrc(fx.get_iter(a_buf))
     b_rsrc = fx.rocdl.get_buffer_rsrc(fx.get_iter(b_buf))
 
-    uni_copy_atom = fx.make_copy_atom(fx.UniversalCopy128b(), elem_dtype)
-    buffer_copy_atom = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), elem_dtype)
-
-    if const_expr(param.a_is_transposed):
-        a_s2r_copy_atom = fx.make_copy_atom(
-            fx.rocdl.cdna4.LDSReadTrans16_64b(), elem_dtype
-        )
-        a_tiled_copy_atom = a_s2r_copy_atom
-    else:
-        a_s2r_copy_atom = uni_copy_atom
-        a_tiled_copy_atom = buffer_copy_atom
-    if const_expr(not param.b_is_transposed):
-        b_s2r_copy_atom = fx.make_copy_atom(
-            fx.rocdl.cdna4.LDSReadTrans16_64b(), elem_dtype
-        )
-        b_tiled_copy_atom = b_s2r_copy_atom
-    else:
-        b_s2r_copy_atom = uni_copy_atom
-        b_tiled_copy_atom = buffer_copy_atom
-
     thr_mma = tiled_mma.thr_slice(tid)
-    thr_copy_A = fx.make_tiled_copy_A(a_tiled_copy_atom, tiled_mma).get_slice(tid)
-    thr_copy_B = fx.make_tiled_copy_B(b_tiled_copy_atom, tiled_mma).get_slice(tid)
-
-    a_lds_layout = (
-        make_transposed_lds_layout(half_block_m, block_k)
-        if const_expr(param.a_is_transposed)
-        else make_lds_layout(half_block_m, block_k)
+    (
+        uni_copy_atom,
+        buffer_copy_atom,
+        a_s2r_copy_atom,
+        b_s2r_copy_atom,
+        thr_copy_A,
+        thr_copy_B,
+    ) = make_gemm_ab_copies(
+        elem_dtype,
+        tiled_mma,
+        tid,
+        param.a_is_transposed,
+        param.b_is_transposed,
     )
-    b_lds_layout = (
-        make_transposed_lds_layout(half_block_n, block_k)
-        if const_expr(not param.b_is_transposed)
-        else make_lds_layout(half_block_n, block_k)
+    a_lds_layout, b_lds_layout = make_gemm_ab_lds_layouts(
+        half_block_m,
+        half_block_n,
+        block_k,
+        param.a_is_transposed,
+        param.b_is_transposed,
     )
     c_lds_layout = fx.make_layout((half_block_m, half_block_n), (half_block_n, 1))
 
@@ -1100,6 +1131,11 @@ def gemm_gfx950(
     param: GemmGfx950Param,
     stream: fx.Stream = fx.Stream(None),
 ):
+    r"""gemm_gfx950(out, a, b, param, stream=fx.Stream(None))
+
+    Compute ``out[M, N] = a[M, K] @ b[K, N]``. The physical input layouts are
+    specified by ``param.a_is_transposed`` and ``param.b_is_transposed``.
+    """
     m = fx.Int32(fx.get_scalar(a.shape[0]))
     n = fx.Int32(fx.get_scalar(b.shape[1]))
     k = fx.Int32(fx.get_scalar(a.shape[1]))
@@ -1168,12 +1204,11 @@ def make_gemm_param_and_validate(m, n, k, kwargs):
         result = make_gemm_gfx950_param(**kwargs)
     except Exception:
         return None
-    if not ((n % 32 == 0) and (k % result.mma_k == 0)):
+    output_vec_size = GFX950_DMA_BYTES // result.out_data_bytes
+    if n % output_vec_size != 0 or k % result.mma_k != 0:
         return None
     async_load_vec_size = GFX950_DMA_BYTES // result.in_data_bytes
     if result.a_is_transposed and m % async_load_vec_size != 0:
-        return None
-    if not result.b_is_transposed and n % async_load_vec_size != 0:
         return None
     if result.use_half_tile_interleaved:
         k_tiles = (k + result.block_k - 1) // result.block_k
