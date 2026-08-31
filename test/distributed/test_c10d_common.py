@@ -30,6 +30,7 @@ import torch.distributed.distributed_c10d as c10d
 import torch.nn.functional as F
 import torch.testing._internal.common_utils as common
 from torch import nn
+from torch._C._distributed_c10d import Backend as C10DBackend
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
@@ -357,6 +358,12 @@ class BackendEntryPointTest(TestCase):
         self.assertIn("gloo", looked_up)
         self.assertIn("nccl", looked_up)
         self.assertEqual(str(backend_config), "cpu:gloo,cuda:nccl")
+
+    @parametrize("backend", ["nccl", "nccl-legacy", "nccl2", "nccl-lazy"])
+    def test_nccl_backend_default_timeout(self, backend):
+        timeout = timedelta(seconds=1)
+        with unittest.mock.patch.object(c10d, "default_pg_nccl_timeout", timeout):
+            self.assertEqual(c10d._get_default_timeout(backend), timeout)
 
     @parametrize("use_nccl2", [False, True])
     def test_nccl_backend_registration(self, use_nccl2):
@@ -2601,6 +2608,80 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
 
 
 instantiate_parametrized_tests(CommonDistributedDataParallelTest)
+
+
+class SplitGroupOptionsTest(TestCase):
+    class _SplittingBackend(C10DBackend):
+        def __init__(self, rank, size, name):
+            super().__init__(rank, size)
+            self._name = name
+            self._options = C10DBackend.Options(name, timeout=timedelta(seconds=111))
+            self.split_opts = None
+
+        @property
+        def supports_splitting(self):
+            return True
+
+        @property
+        def options(self):
+            return self._options
+
+        def getBackendName(self):
+            return self._name
+
+        def split(self, store, ranks, opts):
+            self.split_opts = opts
+            return SplitGroupOptionsTest._SplittingBackend(
+                ranks.index(self.rank()), len(ranks), f"{self._name}-child"
+            )
+
+    def _make_group(self):
+        # Shaped like a "cpu:gloo,cuda:nccl" group: two distinct backends, the
+        # accelerator one being the group's default. The backend type tags are
+        # just map keys here, the backends themselves are Python ones.
+        cpu_backend = self._SplittingBackend(0, 1, "cpu-backend")
+        default_backend = self._SplittingBackend(0, 1, "default-backend")
+        pg = dist.ProcessGroup(dist.HashStore(), 0, 1)
+        pg._register_backend(
+            torch.device("cpu"), dist.ProcessGroup.BackendType.GLOO, cpu_backend
+        )
+        pg._register_backend(
+            torch.device("cuda"), dist.ProcessGroup.BackendType.NCCL, default_backend
+        )
+        pg._set_default_backend(dist.ProcessGroup.BackendType.NCCL)
+        pg._set_group_name("split-options-test")
+        return pg, cpu_backend, default_backend
+
+    def test_split_group_clones_parent_options(self):
+        # getBackendOptions() returns the backend's live options_, and split()
+        # implementations write into what they are given, so splitGroup used to
+        # rewrite the parent's group_name/timeout and hand the child an object
+        # aliasing the parent's.
+        pg, cpu_backend, default_backend = self._make_group()
+        pg.split_group([0], timeout=timedelta(seconds=222), group_name="child")
+
+        for backend in (cpu_backend, default_backend):
+            self.assertIsNot(backend.split_opts, backend.options)
+            self.assertEqual(backend.options.group_name, "")
+            self.assertEqual(backend.options._timeout, timedelta(seconds=111))
+            self.assertEqual(backend.split_opts.group_name, "child")
+            self.assertEqual(backend.split_opts._timeout, timedelta(seconds=222))
+
+    def test_split_group_opts_apply_to_default_backend_only(self):
+        # An explicit `opts` describes the group's default backend, the same way
+        # pg_options does for init_process_group. Handing it to every device's
+        # backend made the others reject it (and silently fall back to their
+        # defaults, losing the caller's timeout).
+        pg, cpu_backend, default_backend = self._make_group()
+        opts = C10DBackend.Options("caller-supplied", timeout=timedelta(seconds=5))
+        pg.split_group([0], opts=opts, timeout=timedelta(seconds=222))
+
+        self.assertEqual(default_backend.split_opts.backend, "caller-supplied")
+        self.assertEqual(cpu_backend.split_opts.backend, "cpu-backend")
+        # The caller's object is not mutated either.
+        self.assertIsNot(default_backend.split_opts, opts)
+        self.assertEqual(opts.group_name, "")
+        self.assertEqual(opts._timeout, timedelta(seconds=5))
 
 
 class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
