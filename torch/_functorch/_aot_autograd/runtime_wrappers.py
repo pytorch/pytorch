@@ -3125,12 +3125,10 @@ def _set_grad_output_prototypes(
         return
 
     ctx.set_materialize_grads(False)
-    # A node with one differentiable output cannot be invoked with that sole
-    # tangent undefined, so avoid creating metadata carriers for this common
-    # case.
-    if len(_grad_output_surviving_indices(fw_metadata)) <= 1:
-        return
-
+    # This runs even for a node with a single differentiable output: a
+    # downstream custom Function whose backward returns None hands the sole
+    # tangent in as undefined, and when neither retrace nor structural
+    # specialization applies, materializing that tangent needs a prototype.
     prototypes, runtime_objects = _grad_output_prototypes(raw_returns, fw_metadata)
     ctx._aot_grad_output_prototypes = prototypes
     ctx._aot_grad_output_prototype_objects = runtime_objects
@@ -3665,6 +3663,8 @@ def _specialize_bw_module_for_undefined_grad_outputs(
     undefined_grad_out_indices: Sequence[int],
     all_args: list[Any],
 ) -> tuple[torch.fx.GraphModule, list[Any], tuple[int, ...]] | None:
+    # Grads folded to zero here come out as None; see
+    # Note [Pruned-tangent grads: None vs zeros].
     undefined_tangent_flat_indices = _undefined_tangent_flat_indices(
         fw_metadata, undefined_grad_out_indices
     )
@@ -3807,6 +3807,17 @@ def _pruned_backward_output_indices_for_undefined_grad_outputs(
     fw_metadata: ViewAndMutationMeta,
     undefined_grad_out_indices: Sequence[int],
 ) -> tuple[int, ...]:
+    # Note [Pruned-tangent grads: None vs zeros]
+    # This masking (and the structural specialization, which prunes the same
+    # way) returns None for grads that are provably zero given the undefined
+    # tangents. For plain graph outputs this matches eager, where the unused
+    # branch never executes and leaves .grad = None. For a custom Function
+    # whose backward is linear in the pruned tangent (e.g. g1 * 5), eager
+    # instead executes the node with materialized zeros and accumulates real
+    # zeros into .grad; the backward retrace reproduces that, but by the time
+    # these fallbacks run, custom-function provenance has been inlined away,
+    # so the graph analysis cannot tell the two cases apart. The divergence is
+    # None vs a zero gradient, which autograd accumulation treats identically.
     undefined_tangent_flat_indices = _undefined_tangent_flat_indices(
         fw_metadata, undefined_grad_out_indices
     )
@@ -4383,6 +4394,7 @@ class _AutogradBackwardCompiler:
         if specialization_key:
             specialization_indices = _bitmask_to_indices(specialization_key)
             specialized = None
+            retrace_decline_reasons: list[str] = []
             trace_info = self.lazy_backward_info.autograd_trace_info
             if trace_info is not None:
                 from .graph_compile import _retrace_backward_for_undefined_grad_outputs
@@ -4398,6 +4410,7 @@ class _AutogradBackwardCompiler:
                             specialization_indices,
                             bw_module,
                             placeholder_list,
+                            decline_reason=retrace_decline_reasons,
                         )
                 except Exception as e:
                     from torch._precompile import PrecompileError
@@ -4411,19 +4424,17 @@ class _AutogradBackwardCompiler:
                         exc_info=True,
                     )
                     specialized = None
-                if (
-                    specialized is None
-                    and self.aot_config.precompile_backend_id is not None
-                ):
-                    raise RuntimeError(
-                        "AOTAutograd could not compile the backward for undefined "
-                        f"grad output indices {specialization_indices} (mask "
-                        f"{specialization_key:#b}) without changing the compiled "
-                        "forward's saved activation ABI. Cover this backward "
-                        "pattern during capture, or run a full backward through "
-                        "every forward output."
-                    )
+                    retrace_decline_reasons.append("the backward retrace raised")
+            else:
+                retrace_decline_reasons.append(
+                    "no retrace information was captured for this graph"
+                )
             if specialized is None:
+                # Structural specialization prunes the original backward module
+                # and the materialize fallback below runs it with zero tangents;
+                # both preserve the compiled forward's saved-activation ABI, so
+                # they stay available under precompile even when the retrace
+                # declines.
                 specialized = _specialize_bw_module_for_undefined_grad_outputs(
                     bw_module,
                     placeholder_list,
@@ -4432,13 +4443,27 @@ class _AutogradBackwardCompiler:
                     all_args,
                 )
             if specialized is None:
-                if self.aot_config.precompile_backend_id is not None:
+                can_materialize = all(
+                    idx < len(grad_output_prototypes)
+                    and grad_output_prototypes[idx] is not None
+                    for idx in specialization_indices
+                )
+                if (
+                    not can_materialize
+                    and self.aot_config.precompile_backend_id is not None
+                ):
+                    reasons = (
+                        "; ".join(retrace_decline_reasons)
+                        or "the backward retrace declined"
+                    )
                     raise RuntimeError(
                         "AOTAutograd could not compile the backward for undefined "
                         f"grad output indices {specialization_indices} (mask "
-                        f"{specialization_key:#b}). Cover this backward pattern "
-                        "during capture, or run a full backward through every "
-                        "forward output."
+                        f"{specialization_key:#b}): {reasons}; structural "
+                        "specialization did not apply; and no grad-output "
+                        "prototypes are available to materialize zero tangents. "
+                        "Cover this backward pattern during capture, or run a "
+                        "full backward through every forward output."
                     )
                 _materialize_missing_tangent_args(
                     all_args,

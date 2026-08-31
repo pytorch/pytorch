@@ -1091,15 +1091,15 @@ def forward(self, primals_1):
             patch.object(
                 graph_compile,
                 "_retrace_backward_for_undefined_grad_outputs",
-                lambda *args: None,
+                lambda *args, **kwargs: None,
             ),
             patch.object(
                 runtime_wrappers,
                 "_specialize_bw_module_for_undefined_grad_outputs",
-                lambda *args: None,
+                lambda *args, **kwargs: None,
             ),
             patch.object(
-                runtime_wrappers, "_grad_output_prototype", lambda *args: None
+                runtime_wrappers, "_grad_output_prototype", lambda *args, **kwargs: None
             ),
         ):
             outputs = torch.compile(fn, backend="inductor")(x)
@@ -1162,7 +1162,7 @@ def forward(self, primals_1):
                     patch.object(
                         graph_compile,
                         "_retrace_backward_for_undefined_grad_outputs",
-                        lambda *args: None,
+                        lambda *args, **kwargs: None,
                     )
                 )
             if fallback == "structural":
@@ -1178,7 +1178,7 @@ def forward(self, primals_1):
                     patch.object(
                         runtime_wrappers,
                         "_specialize_bw_module_for_undefined_grad_outputs",
-                        lambda *args: None,
+                        lambda *args, **kwargs: None,
                     )
                 )
             torch.compile(fn, backend="inductor")(x)[3].sum().backward()
@@ -1537,6 +1537,189 @@ def forward(self, primals_1):
         self.assertEqual(y_ref.grad, y_test.grad)
 
     @torch._functorch.config.patch(aot_autograd_prune_unused_outputs=True)
+    def test_unused_differentiable_outputs_precompile_autocast_fallback(self):
+        # Under precompile, an autocast-declined retrace must fall back to the
+        # ABI-preserving structural specialization instead of raising.
+        from torch._inductor.utils import fresh_cache
+
+        def fn(x, y):
+            return (x @ y).sum(0), (x + y).sum(1)
+
+        with torch._dynamo.config.patch(caching_precompile=True), fresh_cache():
+            torch._dynamo.reset()
+            compiled_fn = torch.compile(fn)
+
+            x_ref = torch.randn(4, 4, requires_grad=True)
+            y_ref = torch.randn(4, 4, requires_grad=True)
+            x_test = x_ref.detach().clone().requires_grad_()
+            y_test = y_ref.detach().clone().requires_grad_()
+
+            with torch.autocast("cpu", torch.bfloat16):
+                out_ref = fn(x_ref, y_ref)
+                out_test = compiled_fn(x_test, y_test)
+
+            aot_config = out_test[0].grad_fn._forward_cls._aot_config
+            self.assertIsNotNone(aot_config.precompile_backend_id)
+
+            out_ref[0].sum().backward()
+            out_test[0].sum().backward()
+
+            self.assertEqual(x_ref.grad, x_test.grad)
+            self.assertEqual(y_ref.grad, y_test.grad)
+
+    @torch._functorch.config.patch(aot_autograd_prune_unused_outputs=True)
+    def test_unused_differentiable_outputs_precompile_error_names_reason(self):
+        # When no ABI-preserving fallback exists under precompile, the error
+        # must name the actual retrace decline reason.
+        import torch._functorch._aot_autograd.runtime_wrappers as runtime_wrappers
+
+        def fn(x, y):
+            return (x @ y).sum(0), (x + y).sum(1)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
+
+        with (
+            patch.object(
+                runtime_wrappers,
+                "_specialize_bw_module_for_undefined_grad_outputs",
+                lambda *args, **kwargs: None,
+            ),
+            patch.object(
+                runtime_wrappers, "_grad_output_prototype", lambda *args: None
+            ),
+        ):
+            compiled_fn = aot_function(fn, fw_compiler=nop, bw_compiler=nop)
+            with torch.autocast("cpu", torch.bfloat16):
+                out = compiled_fn(x, y)
+            # AOTConfig is frozen; simulate a precompile-produced function.
+            aot_config = out[0].grad_fn._forward_cls._aot_config
+            object.__setattr__(aot_config, "precompile_backend_id", "test")
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "autocast state at backward time differs from capture time",
+            ):
+                out[0].sum().backward()
+
+    @torch._functorch.config.patch(aot_autograd_prune_unused_outputs=True)
+    def test_single_output_sole_undefined_tangent_materializes(self):
+        # A downstream custom Function returning None hands the sole tangent
+        # in undefined; with retrace and structural specialization both
+        # unavailable, the materialize fallback needs a prototype even for a
+        # single-differentiable-output graph.
+        class Affine(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, g):
+                return g + 1
+
+        class DropGrad(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, y):
+                return y.clone()
+
+            @staticmethod
+            def backward(ctx, g):
+                return None
+
+        def fn(x):
+            return Affine.apply(x).sin()
+
+        def run(fn, x):
+            DropGrad.apply(fn(x)).sum().backward()
+            return x.grad
+
+        x_ref = torch.randn(4, requires_grad=True)
+        expected = run(fn, x_ref)
+        self.assertEqual(expected, torch.ones_like(x_ref))
+
+        torch._dynamo.reset()
+        x = x_ref.detach().clone().requires_grad_()
+        compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        self.assertEqual(run(compiled, x), expected)
+
+    def test_autocast_fingerprint_covers_non_input_devices(self):
+        # Autocast state on a device used only inside the traced region (never
+        # among the inputs) must still be able to decline the retrace.
+        from torch._functorch._aot_autograd.graph_compile import _autocast_fingerprint
+
+        args = [torch.randn(2)]
+        baseline = _autocast_fingerprint(args)
+        prior = torch.is_autocast_enabled("xpu")
+        torch.set_autocast_enabled("xpu", True)
+        try:
+            changed = _autocast_fingerprint(args)
+        finally:
+            torch.set_autocast_enabled("xpu", prior)
+        self.assertNotEqual(baseline[1], changed[1])
+
+    @skipIfDynamoInput(
+        "Dynamo traces an autograd.Function backward before AOTAutograd sees it"
+    )
+    @torch._functorch.config.patch(aot_autograd_prune_unused_outputs=True)
+    def test_unused_differentiable_outputs_provably_zero_custom_backward(self):
+        # See Note [Pruned-tangent grads: None vs zeros]: for a custom Function
+        # whose backward is linear in the pruned tangent, eager materializes
+        # zeros; the retrace fallback reproduces that, while the structural and
+        # mask fallbacks cannot see custom-function provenance and prune the
+        # provably-zero grad to None. This pins the documented behavior of each
+        # internal path.
+        class Fn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                return x * 2, y * 3
+
+            @staticmethod
+            def backward(ctx, g1, g2):
+                return g1 * 5, g2
+
+        def fn(x, y):
+            return Fn.apply(x, y)
+
+        def run_path(path):
+            compiled_fn = aot_function(fn, fw_compiler=nop, bw_compiler=nop)
+            if path == "mask":
+                x0, y0 = (torch.randn(4, requires_grad=True) for _ in range(2))
+                out0 = compiled_fn(x0, y0)
+                (out0[0].sum() + out0[1].sum()).backward()
+            x = torch.randn(4, requires_grad=True)
+            y = torch.randn(4, requires_grad=True)
+            out = compiled_fn(x, y)
+            if path in ("structural", "mask"):
+                lazy_info = out[0].grad_fn._forward_cls._lazy_backward_info
+                lazy_info.autograd_trace_info = None
+            out[1].sum().backward()
+            return x.grad
+
+        x_ref = torch.randn(4, requires_grad=True)
+        y_ref = torch.randn(4, requires_grad=True)
+        fn(x_ref, y_ref)[1].sum().backward()
+        self.assertEqual(x_ref.grad, torch.zeros_like(x_ref))
+
+        self.assertEqual(run_path("retrace"), torch.zeros(4))
+        self.assertIsNone(run_path("structural"))
+        self.assertIsNone(run_path("mask"))
+
+    def test_autograd_trace_info_capture_gated_on_config(self):
+        def fn(x, y):
+            return x.sin(), y.cos()
+
+        def lazy_info_for_fresh_compile():
+            compiled_fn = aot_function(fn, fw_compiler=nop, bw_compiler=nop)
+            x = torch.randn(4, requires_grad=True)
+            y = torch.randn(4, requires_grad=True)
+            out = compiled_fn(x, y)
+            return out[0].grad_fn._forward_cls._lazy_backward_info
+
+        with torch._functorch.config.patch(aot_autograd_prune_unused_outputs=False):
+            self.assertIsNone(lazy_info_for_fresh_compile().autograd_trace_info)
+        with torch._functorch.config.patch(aot_autograd_prune_unused_outputs=True):
+            self.assertIsNotNone(lazy_info_for_fresh_compile().autograd_trace_info)
+
+    @torch._functorch.config.patch(aot_autograd_prune_unused_outputs=True)
     def test_unused_differentiable_outputs_retrace_with_dropout(self):
         # The backward-time retrace runs the inductor partition_fn, whose RNG
         # replacement passes need inductor's virtualized fake mode.
@@ -1559,7 +1742,7 @@ def forward(self, primals_1):
         def fn(x, y):
             return x.sin(), y.cos()
 
-        def raising_retrace(*args):
+        def raising_retrace(*args, **kwargs):
             raise RuntimeError("injected retrace failure")
 
         x_ref = torch.randn(4, requires_grad=True)
@@ -1694,7 +1877,7 @@ def forward(self, primals_1):
                 with patch.object(
                     graph_compile,
                     "_retrace_backward_for_undefined_grad_outputs",
-                    lambda *args: None,
+                    lambda *args, **kwargs: None,
                 ):
                     out_test[1].sum().backward()
 
@@ -10563,15 +10746,15 @@ def forward(self, primals_1, tangents_1):
             patch.object(
                 graph_compile,
                 "_retrace_backward_for_undefined_grad_outputs",
-                lambda *args: None,
+                lambda *args, **kwargs: None,
             ),
             patch.object(
                 compiled_autograd_impl,
                 "_specialize_bw_module_for_undefined_grad_outputs",
-                lambda *args: None,
+                lambda *args, **kwargs: None,
             ),
             patch.object(
-                runtime_wrappers, "_grad_output_prototype", lambda *args: None
+                runtime_wrappers, "_grad_output_prototype", lambda *args, **kwargs: None
             ),
         ):
             outputs = torch.compile(fn, backend="aot_eager")(x)

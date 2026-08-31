@@ -73,6 +73,7 @@ from ..utils import (
     DelayReplaceLine,
     get_benchmark_name,
     get_dtype_size,
+    get_importable_constexpr_types,
     IndentedBuffer,
     is_codegen_graph_partition_subgraph,
     is_using_cudagraph_partition,
@@ -225,12 +226,33 @@ def _constexpr_constructor_items(value: Any) -> list[tuple[str | None, Any]] | N
 
 
 def _constexpr_source_impl(
-    value: Any, module_aliases: dict[str, str], imports: list[str]
+    value: Any,
+    module_aliases: dict[str, str],
+    imports: list[str],
+    stack: OrderedSet[int],
+) -> str | None:
+    # `stack` holds ids of the values currently being rendered: a
+    # self-referential value cannot be spelled as an expression, so decline
+    # into the loud rendering error instead of overflowing the stack.
+    if id(value) in stack:
+        return None
+    stack.add(id(value))
+    try:
+        return _constexpr_source_node(value, module_aliases, imports, stack)
+    finally:
+        stack.discard(id(value))
+
+
+def _constexpr_source_node(
+    value: Any,
+    module_aliases: dict[str, str],
+    imports: list[str],
+    stack: OrderedSet[int],
 ) -> str | None:
     if isinstance(value, enum.Enum):
         normalized = _constexpr_constant(value)
         if normalized is not value:
-            return _constexpr_source_impl(normalized, module_aliases, imports)
+            return _constexpr_source_impl(normalized, module_aliases, imports, stack)
         cls = type(value)
         cls_ref = _constexpr_type_ref(cls, module_aliases, imports)
         if (
@@ -254,8 +276,8 @@ def _constexpr_source_impl(
             return None
         items = []
         for key, item in value.items():
-            key_source = _constexpr_source_impl(key, module_aliases, imports)
-            item_source = _constexpr_source_impl(item, module_aliases, imports)
+            key_source = _constexpr_source_impl(key, module_aliases, imports, stack)
+            item_source = _constexpr_source_impl(item, module_aliases, imports, stack)
             if key_source is None or item_source is None:
                 return None
             items.append(f"{key_source}: {item_source}")
@@ -265,7 +287,7 @@ def _constexpr_source_impl(
             return None
         items = []
         for item in value:
-            source = _constexpr_source_impl(item, module_aliases, imports)
+            source = _constexpr_source_impl(item, module_aliases, imports, stack)
             if source is None:
                 return None
             items.append(source)
@@ -276,12 +298,12 @@ def _constexpr_source_impl(
         # subclass declines rather than degrade to a plain tuple.
         if type(value) is torch.Size:
             normalized = _constexpr_constant(value)
-            return _constexpr_source_impl(normalized, module_aliases, imports)
+            return _constexpr_source_impl(normalized, module_aliases, imports, stack)
         if not hasattr(value, "_fields") and type(value) is not tuple:
             return None
         items = []
         for item in value:
-            source = _constexpr_source_impl(item, module_aliases, imports)
+            source = _constexpr_source_impl(item, module_aliases, imports, stack)
             if source is None:
                 return None
             items.append(source)
@@ -322,7 +344,7 @@ def _constexpr_source_impl(
         )
         items = []
         for item in elements:
-            source = _constexpr_source_impl(item, module_aliases, imports)
+            source = _constexpr_source_impl(item, module_aliases, imports, stack)
             if source is None:
                 return None
             items.append(source)
@@ -336,7 +358,7 @@ def _constexpr_source_impl(
     if isinstance(value, slice):
         items = []
         for item in (value.start, value.stop, value.step):
-            source = _constexpr_source_impl(item, module_aliases, imports)
+            source = _constexpr_source_impl(item, module_aliases, imports, stack)
             if source is None:
                 return None
             items.append(source)
@@ -358,24 +380,17 @@ def _constexpr_source_impl(
             return None
         parts = []
         for name, item in constructor_items:
-            item_source = _constexpr_source_impl(item, module_aliases, imports)
+            item_source = _constexpr_source_impl(item, module_aliases, imports, stack)
             if item_source is None:
                 return None
             parts.append(item_source if name is None else f"{name}={item_source}")
-        source = f"{cls_ref}({', '.join(parts)})"
         # The repr contract only promises constructor syntax over repr-visible
-        # fields; verify the call actually rebuilds an instance (a field may be
-        # init=False, a hidden init parameter may be required, an init argument
-        # may be renamed, ...) so unrenderable values decline loudly at codegen
-        # instead of crashing the generated module.
-        namespace = {
-            alias: sys.modules.get(module) for module, alias in module_aliases.items()
-        }
-        try:
-            reconstructed = eval(source, namespace)
-        except Exception:
-            return None
-        return source if type(reconstructed) is type(value) else None
+        # fields; _verify_constexpr_source at the top-level entry evaluates the
+        # rendered source (executing user constructors at compile time, once
+        # per object) and checks the rebuilt value's fidelity, so unrenderable
+        # or state-losing values decline loudly at codegen instead of crashing
+        # or silently miscomputing in the generated module.
+        return f"{cls_ref}({', '.join(parts)})"
     source = repr(value)
     try:
         reconstructed = ast.literal_eval(source)
@@ -404,10 +419,66 @@ def _constexpr_source_impl(
     return None
 
 
+def _constexpr_values_match(original: Any, rebuilt: Any) -> bool:
+    """Check that a value rebuilt from rendered source is faithful to the
+    original: rebuilding from a constructor-style repr can silently lose state
+    (a repr=False field falling back to its default, a coercing
+    ``__post_init__``, ...), so compare the full enumerable state, not just the
+    type."""
+    original = _constexpr_constant(original)
+    rebuilt = _constexpr_constant(rebuilt)
+    if type(rebuilt) is not type(original):
+        return False
+    if dataclasses.is_dataclass(original) and not isinstance(original, type):
+        fields = dataclasses.fields(original)
+        return all(
+            _constexpr_values_match(getattr(original, f.name), getattr(rebuilt, f.name))
+            for f in fields
+        )
+    attrs_fields = getattr(type(original), "__attrs_attrs__", None)
+    if attrs_fields is not None:
+        return all(
+            _constexpr_values_match(getattr(original, f.name), getattr(rebuilt, f.name))
+            for f in attrs_fields
+        )
+    if isinstance(original, dict):
+        return len(original) == len(rebuilt) and all(
+            _constexpr_values_match(key, rebuilt_key)
+            and _constexpr_values_match(item, rebuilt_item)
+            for (key, item), (rebuilt_key, rebuilt_item) in zip(
+                original.items(), rebuilt.items()
+            )
+        )
+    if isinstance(original, (list, tuple)):
+        return len(original) == len(rebuilt) and all(
+            _constexpr_values_match(item, rebuilt_item)
+            for item, rebuilt_item in zip(original, rebuilt)
+        )
+    # Where the full state is not enumerable, conservatively require the exact
+    # type's own equality; anything unequal (or raising, handled by the caller)
+    # declines.
+    return (original == rebuilt) is True
+
+
+def _verify_constexpr_source(
+    value: Any, source: str, module_aliases: dict[str, str]
+) -> bool:
+    namespace = {
+        alias: sys.modules.get(module) for module, alias in module_aliases.items()
+    }
+    try:
+        return _constexpr_values_match(value, eval(source, namespace))
+    except Exception:
+        return False
+
+
 def _constexpr_source(value: Any) -> tuple[str, list[str]] | None:
     imports: list[str] = []
-    source = _constexpr_source_impl(value, {}, imports)
-    return None if source is None else (source, imports)
+    module_aliases: dict[str, str] = {}
+    source = _constexpr_source_impl(value, module_aliases, imports, OrderedSet())
+    if source is None or not _verify_constexpr_source(value, source, module_aliases):
+        return None
+    return source, imports
 
 
 class _SourceLiteral:
@@ -446,7 +517,13 @@ def _render_constexpr_mappings(
     for constants in mappings:
         rendered: dict[str, Any] = {}
         for name, value in constants.items():
-            expression = _constexpr_source_impl(value, module_aliases, imports)
+            expression = _constexpr_source_impl(
+                value, module_aliases, imports, OrderedSet()
+            )
+            if expression is not None and not _verify_constexpr_source(
+                value, expression, module_aliases
+            ):
+                expression = None
             if expression is None:
                 detail = (
                     " NaN constexprs are rejected because autotune config matching "
@@ -4317,6 +4394,29 @@ class PythonWrapperCodegen(CodeGen):
         )
         for import_line in constexpr_imports:
             compile_wrapper.writeline(import_line)
+        # A constexpr parameter default in the kernel signature (e.g.
+        # ``cfg: tl.constexpr = Cfg()``) is evaluated when the generated module
+        # re-execs the spliced kernel def below, and that def-time expression
+        # references the type by its bare root name; bind it with an import.
+        constexpr_defaults = [
+            p.default for p in kernel.params if p.is_constexpr and p.has_default
+        ]
+        alias_names = OrderedSet(
+            line.rsplit(" as ", 1)[1] for line in constexpr_imports
+        )
+        for type_spec in get_importable_constexpr_types(constexpr_defaults):
+            if type_spec.root_name in alias_names:
+                raise RuntimeError(
+                    "Triton kernel constexpr default of type "
+                    f"{type_spec.module}.{type_spec.qualname} requires import "
+                    f"name {type_spec.root_name}, which collides with a module "
+                    "alias emitted for rendered constexpr constants. Rename "
+                    "the root type."
+                )
+            compile_wrapper.writeline(
+                f"from {type_spec.module} import "
+                f"{type_spec.root_name} as {type_spec.root_name}"
+            )
         if config.triton.proton_profiling:
             compile_wrapper.writeline('pl.enable_semantic("triton")')
 

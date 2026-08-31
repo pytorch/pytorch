@@ -112,25 +112,31 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       own rejection, and any other layout (e.g. jagged) is refused at capture and at
       serve because its aliasing cannot be verified.
 
-      With ``tracer="dynamo"`` and ``backend="inductor"``, capture runs with
-      gradients enabled and each captured graph's differentiability is inferred from
-      its inputs, mirroring ``torch.compile``: inputs with ``requires_grad`` yield a
-      joint forward+backward whose compiled segments contain readable Inductor source
-      for both the AOTAutograd forward and backward, bridged by an emitted
-      ``torch.autograd.Function``; inputs without ``requires_grad`` yield inference
-      graphs. Differentiable outputs retain their ``grad_fn``, so a later
-      ``backward()`` executes the captured backward kernels, across captured
-      recompilations. Backward variants are specialized to output-tangent
-      patterns observed during capture, and an unseen pattern fails instead of compiling
-      at runtime; the ordinary all-tangents-defined pattern is always covered, even
-      when capture runs no backward. ``requires_grad`` is part of each input's guards,
-      so an input whose ``requires_grad`` flipped since capture fails dispatch loudly
-      rather than silently changing behavior. With ``backend="eager"`` the backward is
+      With ``tracer="dynamo"``, capture runs with gradients enabled on every backend
+      and each captured graph's differentiability is inferred from its inputs,
+      mirroring ``torch.compile``: inputs with ``requires_grad`` yield differentiable
+      graphs, inputs without stay inference graphs, and ``requires_grad`` is part of
+      each input's guards, so an input whose flag flipped since capture fails dispatch
+      loudly rather than silently changing behavior. With ``backend="inductor"``, a
+      differentiable graph is a joint forward+backward whose compiled segments contain
+      readable Inductor source for both the AOTAutograd forward and backward, bridged
+      by an emitted ``torch.autograd.Function``; differentiable outputs retain their
+      ``grad_fn``, so a later ``backward()`` executes the captured backward kernels,
+      across captured recompilations. Backward variants are specialized to
+      output-tangent patterns observed during capture, and an unseen pattern fails
+      instead of compiling at runtime; the ordinary all-tangents-defined pattern is
+      always covered, even when capture runs no backward. On the inductor backend only
+      first-order backward is supported, the captured backward does not run under
+      compiled autograd, and tensor-subclass and ``BackwardState`` training graphs are
+      rejected. With ``backend="eager"`` the backward is
       live eager autograd through the emitted forward ops -- neither captured nor
       specialized (any tangent pattern and higher-order grad work), and, like the
       eager forward's kernels, resolved against the loaded torch rather than frozen
-      in the artifact. On the inductor backend only first-order backward is
-      supported; tensor-subclass and ``BackwardState`` training graphs are rejected.
+      in the artifact. The loaded artifact serves under the capture-time grad mode:
+      called under an ambient ``torch.no_grad()``, freshly created outputs are
+      returned detached (matching eager and ``torch.compile``) while inputs passed
+      through are returned untouched, and calling under ``torch.inference_mode()``
+      raises ``PrecompileError`` -- serve under ``torch.no_grad()`` instead.
 
    With ``tracer="make_fx"``, if ``fn`` runs a backward, the artifact re-runs the whole
    forward and backward and scatters the resulting parameter gradients onto the runtime

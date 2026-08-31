@@ -258,7 +258,7 @@ log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Mapping, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 
     from torch._subclasses.fake_tensor import FakeTensorMode
 
@@ -1417,22 +1417,35 @@ class _DynamoPythonBackend:
     def __call__(self, *args: object) -> object:
         return self._call(list(args))
 
-    def _finalize_masks(self) -> tuple[int, ...]:
+    def _observed_masks(self) -> set[int]:
         globals_dict = getattr(self._call, "__globals__", {})
-        observed = globals_dict.get("_AOT_OBSERVED_UNDEFINED_TANGENT_MASKS", ())
+        return set(globals_dict.get("_AOT_OBSERVED_UNDEFINED_TANGENT_MASKS", ()))
+
+    def _finalize_masks(self, extra_masks: Iterable[int] = ()) -> tuple[int, ...]:
+        # extra_masks carries patterns observed on SIBLING backends of the same
+        # code (an automatic-dynamic recompile supersedes earlier backends in
+        # newest-first dispatch, so this backend must cover their masks too).
+        # Canonicalize against THIS backend's metadata -- observed masks are
+        # recorded canonically by the emitted backward, but a sibling's mask
+        # was canonicalized against its own.
+        observed = self._observed_masks() | set(extra_masks)
+        if self._compile_state is not None:
+            observed = {self._compile_state.canonical_mask(mask) for mask in observed}
         # Always cover the ordinary all-tangents-defined backward (mask 0): a
         # caller who only ran partial backwards between stateful calls must not
         # regress the rewritten artifact's default path.
-        return (0, *sorted(set(observed) - {0}))
+        return (0, *sorted(observed - {0}))
 
-    def finalize_training(self, keep_capture: bool = False) -> None:
+    def finalize_training(
+        self, keep_capture: bool = False, extra_masks: Iterable[int] = ()
+    ) -> None:
         # keep_capture snapshots the training module (finalize is a pure compose
         # over the variants recorded so far) while leaving the live variant
         # compiler hook installed, so a stateful capture can keep accumulating.
         if self._compile_state is None:
             return
         globals_dict = getattr(self._call, "__globals__", {})
-        masks = self._finalize_masks()
+        masks = self._finalize_masks(extra_masks)
         if keep_capture:
             try:
                 self.python_code, self.cache = self._compile_state.finalize(masks)
@@ -2453,9 +2466,24 @@ def _build_dynamo_artifact(
     the backward variants recorded so far when keep_capture is set), so a
     stateful capture can rebuild after every example call.
     """
-    for compiled_backend in package.cached_backends.values():
-        if isinstance(compiled_backend, _DynamoPythonBackend):
-            compiled_backend.finalize_training(keep_capture=keep_capture)
+    training_backends = [
+        compiled_backend
+        for compiled_backend in package.cached_backends.values()
+        if isinstance(compiled_backend, _DynamoPythonBackend)
+    ]
+    # An automatic-dynamic recompile supersedes earlier backends of the same
+    # code in the artifact's newest-first dispatch, so a tangent mask observed
+    # only on a superseded backend (e.g. a partial backward run before the
+    # recompile) would be served by a newer backend that never saw it. Union
+    # the observed masks across backends and cover the union everywhere; each
+    # backend's finalize re-canonicalizes them against its own metadata.
+    observed_masks: set[int] = set()
+    for compiled_backend in training_backends:
+        observed_masks |= compiled_backend._observed_masks()
+    for compiled_backend in training_backends:
+        compiled_backend.finalize_training(
+            keep_capture=keep_capture, extra_masks=observed_masks
+        )
 
     cache_entry = package.cache_entry()
     active_codes = [code for code in cache_entry.codes if not code.bypassed]
@@ -2556,13 +2584,15 @@ def _teardown_dynamo_capture(
 def _freeze_tensor_metadata(tensor: torch.Tensor) -> torch.Tensor:
     # A metadata-frozen alias: shares storage (no data copy; guards check
     # metadata, not data) but owns its sizes/strides/requires_grad, so a later
-    # in-place METADATA mutation of the input (resize_, transpose_,
-    # requires_grad_) cannot invalidate the recorded example. Built under
-    # no_grad so the alias is a leaf that keeps no autograd graph alive.
-    with torch.no_grad():
-        frozen = tensor.as_strided(
-            tensor.size(), tensor.stride(), tensor.storage_offset()
-        )
+    # in-place mutation of the input (resize_, transpose_, requires_grad_, or
+    # a grad-mode data mutation that flips requires_grad) cannot invalidate
+    # the recorded example. detach() rather than a no_grad as_strided view: a
+    # detached alias is autograd-inert, while a no_grad view reads its BASE's
+    # requires_grad once the base is mutated in-place under grad mode (e.g.
+    # ``x.add_(y_requires_grad)`` flips x to requires_grad=True) and its
+    # grad_fn access then raises, so the recorded example would stop matching
+    # the entry-state guards the variant recorded.
+    frozen = tensor.detach()
     if type(frozen) is not type(tensor):
         # A _disabled_torch_function_impl subclass (nn.Parameter) view-decays
         # to plain Tensor, which would fail TENSOR_MATCH's exact-type check.
@@ -3366,9 +3396,11 @@ class _PrecompileApi:
         With ``tracer="dynamo"``, differentiability is inferred per captured graph
         exactly as ``torch.compile`` infers it: capture runs with grad enabled, and a
         graph whose inputs require grad is differentiable; no-grad inputs stay
-        inference graphs. The input tensors that require gradients must do so in
-        every example and at runtime (requires_grad is guarded, so a flipped input
-        fails dispatch loudly). How the backward is realized depends on the backend,
+        inference graphs. Examples may mix requires_grad states for the same
+        input: requires_grad is guarded per input per variant, so each runtime
+        call dispatches to a variant captured for its inputs' requires_grad
+        states, and raises if none was.
+        How the backward is realized depends on the backend,
         mirroring ``torch.compile``: with ``backend="inductor"`` a differentiable
         graph is compiled as a joint forward+backward -- readable AOTAutograd source
         bridged by an emitted ``torch.autograd.Function`` -- so served outputs retain

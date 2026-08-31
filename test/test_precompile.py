@@ -49,6 +49,10 @@ def _precompile_dynamo_torch_sin(x):
     return torch.sin(x)
 
 
+def _precompile_dynamo_sin_and_passthrough(x):
+    return torch.sin(x), x
+
+
 def _precompile_dynamo_input_global_identity(x):
     return x + 1 if x is _DYNAMO_INPUT_GLOBAL else x - 1
 
@@ -63,6 +67,20 @@ def _precompile_dynamo_varargs(*xs):
 
 def _precompile_dynamo_independent_outputs(x, y):
     return x.sin(), y.cos()
+
+
+def _precompile_dynamo_nondiff_second_output(x):
+    return x.sin(), x.detach() + 1
+
+
+def _precompile_dynamo_inplace_add(x, y):
+    x.add_(y)
+    return x.sum()
+
+
+def _precompile_dynamo_inplace_copy(x, src):
+    x.copy_(src * 2)
+    return x + 1
 
 
 def _precompile_dynamo_dynamic_branch(x):
@@ -1494,11 +1512,10 @@ class TestPrecompile(TestCase):
 
     def test_tracer_dynamo_eager_backward_is_live_autograd(self):
         # Both backends capture grad-enabled and infer differentiability from
-        # requires_grad inputs; the driver pins the capture-time grad mode, so
-        # served outputs stay differentiable even under an ambient no_grad.
-        # The eager backend's backward is LIVE autograd through the emitted
-        # ops (not captured), like torch.compile(backend="eager") -- so it
-        # matches eager gradients with no tangent-pattern specialization.
+        # requires_grad inputs. The eager backend's backward is LIVE autograd
+        # through the emitted ops (not captured), like
+        # torch.compile(backend="eager") -- so it matches eager gradients with
+        # no tangent-pattern specialization.
         x = torch.randn(4, requires_grad=True)
         code, cache = torch.compiler.precompile(
             _precompile_dynamo_torch_sin,
@@ -1507,23 +1524,53 @@ class TestPrecompile(TestCase):
             backend="eager",
         )
         self.assertIn("_DYNAMO_GRAD_ENABLED = True", code)
-        with torch.no_grad():
-            out = torch.compiler.precompile.load(code, cache)(x)
+        out = torch.compiler.precompile.load(code, cache)(x)
         self.assertTrue(out.requires_grad)
         out.sum().backward()
         x_ref = x.detach().clone().requires_grad_()
         _precompile_dynamo_torch_sin(x_ref).sum().backward()
         self.assertEqual(x.grad, x_ref.grad)
-
         x.grad = None
+
+    @parametrize("backend", ["eager", "inductor"])
+    def test_tracer_dynamo_serves_eager_semantics_under_no_grad(self, backend):
+        # The driver dispatches under the pinned capture-time grad mode (the
+        # serialized guards require it), but an ambient no_grad at call time
+        # gets eager semantics: freshly created outputs are detached, while
+        # inputs passed through are returned untouched -- exactly what eager
+        # and torch.compile produce under no_grad.
+        x = torch.randn(4, requires_grad=True)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_sin_and_passthrough,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend=backend,
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        with torch.no_grad():
+            out, passthrough = loaded(x)
+            ref, _ = _precompile_dynamo_sin_and_passthrough(x)
+        self.assertFalse(out.requires_grad)
+        self.assertIsNone(out.grad_fn)
+        self.assertEqual(out, ref)
+        self.assertIs(passthrough, x)
+        self.assertTrue(passthrough.requires_grad)
+        # A grad-mode call of the same loaded artifact stays differentiable.
+        out, _ = loaded(x)
+        self.assertTrue(out.requires_grad)
+
+    def test_tracer_dynamo_rejects_inference_mode_serving(self):
+        x = torch.randn(4, requires_grad=True)
         code, cache = torch.compiler.precompile(
             _precompile_dynamo_torch_sin,
             example_inputs=[(x,)],
             tracer="dynamo",
+            backend="eager",
         )
-        with torch.no_grad():
-            out = torch.compiler.precompile.load(code, cache)(x)
-        self.assertTrue(out.requires_grad)
+        loaded = torch.compiler.precompile.load(code, cache)
+        with self.assertRaisesRegex(PrecompileError, "inference_mode"):
+            with torch.inference_mode():
+                loaded(x)
 
     def test_tracer_dynamo_rejects_input_global_alias(self):
         with self.assertRaisesRegex(PrecompileError, "aliases the Python environment"):
@@ -2440,6 +2487,84 @@ class TestPrecompile(TestCase):
             loaded(p2, q2)[0].sum().backward()
             self.assertEqual(p2.grad, p2.detach().cos())
 
+    def test_tracer_dynamo_stateful_partial_mask_survives_dynamic_recompile(self):
+        # A tangent mask observed on a backend must survive a later
+        # automatic-dynamic recompile: the new dynamic backend supersedes the
+        # static one in newest-first dispatch, so it serves the sizes the
+        # static backend was captured for and must cover the masks that
+        # backend observed -- otherwise the exact captured backward pattern
+        # raises after the recompile.
+        def clones(size):
+            a = torch.randn(size, requires_grad=True)
+            b = torch.randn(size, requires_grad=True)
+            return a, b
+
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = {
+                "artifact_path": os.path.join(tmp, "m.py"),
+                "cache_path": os.path.join(tmp, "m.cache"),
+            }
+            x, y = clones(4)
+            [(out_a, _out_b)], state = torch.compiler.precompile.stateful(
+                _precompile_dynamo_independent_outputs,
+                example_inputs=[(x, y)],
+                state=None,
+                **paths,
+            )
+            self.addCleanup(state.close)
+            out_a.sum().backward()  # partial mask observed on the size-4 backend
+            _, state = torch.compiler.precompile.stateful(
+                _precompile_dynamo_independent_outputs,
+                example_inputs=[clones(8)],
+                state=state,
+                **paths,
+            )
+            with open(paths["artifact_path"]) as f:
+                code = f.read()
+            with open(paths["cache_path"], "rb") as f:
+                cache = f.read()
+            loaded = torch.compiler.precompile.load(code, cache)
+            p, q = clones(4)  # served by the newer dynamic variant
+            loaded(p, q)[0].sum().backward()
+            self.assertEqual(p.grad, p.detach().cos())
+            self.assertIsNone(q.grad)
+
+    def test_tracer_dynamo_stateful_inplace_flip_keeps_state_healthy(self):
+        # x.add_(y_requires_grad) flips the live x's requires_grad while the
+        # recorded example runs; the state's snapshots must keep the entry
+        # state or every later rebuild fails guard re-checking.
+        def make():
+            return torch.randn(4), torch.randn(4, requires_grad=True)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = {
+                "artifact_path": os.path.join(tmp, "m.py"),
+                "cache_path": os.path.join(tmp, "m.cache"),
+            }
+            _, state = torch.compiler.precompile.stateful(
+                _precompile_dynamo_inplace_add,
+                example_inputs=[make()],
+                state=None,
+                **paths,
+            )
+            self.addCleanup(state.close)
+            # The rebuild on a later call re-checks the earlier (mutated)
+            # recorded example; a poisoned snapshot fails here.
+            _, state = torch.compiler.precompile.stateful(
+                _precompile_dynamo_inplace_add,
+                example_inputs=[make()],
+                state=state,
+                **paths,
+            )
+            with open(paths["artifact_path"]) as f:
+                code = f.read()
+            with open(paths["cache_path"], "rb") as f:
+                cache = f.read()
+            loaded = torch.compiler.precompile.load(code, cache)
+            p, q = make()
+            loaded(p, q).backward()
+            self.assertEqual(q.grad, torch.ones(4))
+
     def test_tracer_dynamo_stateful_close_releases_session(self):
         from torch._dynamo.utils import guard_failures
 
@@ -3059,6 +3184,58 @@ class TestPrecompile(TestCase):
         loaded = torch.compiler.precompile.load(code, cache)
         with self.assertRaisesRegex(PrecompileError, "undefined-output-tangent"):
             loaded(x, y)[0].sum().backward()
+
+    def test_tracer_dynamo_training_nondifferentiable_output_backward(self):
+        # A forward-only capture of a fn with a non-differentiable output must
+        # still serve the ordinary backward: that output's tangent is ALWAYS
+        # undefined, so keying variants on the raw scanned tangent mask (rather
+        # than the canonical mask over specializable user outputs, like the
+        # live runtime path) made the auto-covered mask 0 unreachable and every
+        # backward raised PrecompileError.
+        x = torch.randn(4, requires_grad=True)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_nondiff_second_output,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        y = torch.randn(4, requires_grad=True)
+        out_a, out_b = loaded(y)
+        self.assertIsNone(out_b.grad_fn)
+        out_a.sum().backward()
+        self.assertEqual(y.grad, y.detach().cos())
+
+    @parametrize("backend", ("inductor", "eager"))
+    def test_tracer_dynamo_inplace_mutation_flips_nograd_input(self, backend):
+        # In-place mutation of a no-grad tensor input from a differentiable
+        # source (x.add_(y_requires_grad)) flips the LIVE input's requires_grad
+        # while the example runs. The recorded example snapshot must keep the
+        # ENTRY state the variant's guards recorded -- a storage-sharing
+        # autograd view would read the flipped state back through its base and
+        # fail capture with "does not match any example input".
+        for fn, expected_grad in (
+            (_precompile_dynamo_inplace_add, torch.ones(4)),
+            (_precompile_dynamo_inplace_copy, torch.full((4,), 2.0)),
+        ):
+            code, cache = torch.compiler.precompile(
+                fn,
+                example_inputs=[(torch.randn(4), torch.randn(4, requires_grad=True))],
+                tracer="dynamo",
+                backend=backend,
+            )
+            loaded = torch.compiler.precompile.load(code, cache)
+            p = torch.randn(4)
+            q = torch.randn(4, requires_grad=True)
+            p_ref = p.detach().clone()
+            q_ref = q.detach().clone().requires_grad_()
+            out = loaded(p, q)
+            expected = fn(p_ref, q_ref)
+            out.sum().backward()
+            expected.sum().backward()
+            self.assertEqual(out, expected)
+            self.assertEqual(p, p_ref)  # the mutation lands on the input
+            self.assertEqual(q.grad, expected_grad)
+            self.assertEqual(q.grad, q_ref.grad)
 
     def test_tracer_dynamo_differentiability_inferred_per_graph(self):
         # Differentiability mirrors torch.compile on the inductor backend: a

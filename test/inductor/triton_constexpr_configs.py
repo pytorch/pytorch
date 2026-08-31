@@ -1,7 +1,7 @@
 import dataclasses
 from enum import IntEnum
 from types import SimpleNamespace
-from typing import NamedTuple
+from typing import ClassVar, NamedTuple
 
 
 class UserDefinedTritonKernelConfigMode(IntEnum):
@@ -50,6 +50,39 @@ class UserDefinedTritonKernelNonInitConfig:
     derived: int = dataclasses.field(init=False, default=0)
 
 
+@dataclasses.dataclass(frozen=True)
+class UserDefinedTritonKernelHiddenDefaultConfig:
+    offset: int
+    scale: int = dataclasses.field(default=1, repr=False)
+
+
+@dataclasses.dataclass
+class UserDefinedTritonKernelCoercingConfig:
+    offset: int
+
+    def __post_init__(self):
+        self.offset *= 2
+
+
+@dataclasses.dataclass
+class UserDefinedTritonKernelCountingConfig:
+    child: object = None
+    constructed: ClassVar[int] = 0
+
+    def __post_init__(self):
+        type(self).constructed += 1
+
+
+@dataclasses.dataclass
+class UserDefinedTritonKernelSelfReferentialConfig:
+    child: object = None
+
+
+@dataclasses.dataclass(frozen=True)
+class UserDefinedTritonKernelDefaultArgConfig:
+    offset: int = 1
+
+
 # This root name would overwrite the conventional triton.language import alias.
 tl = dataclasses.make_dataclass("tl", [("offset", int)], frozen=True)
 
@@ -84,3 +117,12 @@ class UserDefinedPydanticLikeConfig:
 
     def __repr__(self):
         return f"{type(self).__name__}(nested={self.nested!r})"
+
+    # Pydantic models compare (and hash frozen models) over all fields.
+    def __eq__(self, other):
+        if type(other) is not type(self):
+            return NotImplemented
+        return (self.nested, self.hidden) == (other.nested, other.hidden)
+
+    def __hash__(self):
+        return hash((type(self), self.nested, self.hidden))

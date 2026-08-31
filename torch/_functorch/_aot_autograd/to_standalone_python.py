@@ -961,7 +961,12 @@ class _CompileToPythonState:
     """Capture-only state for specializing standalone backwards.
 
     ``install_capture`` connects the generated module's private compiler hook to
-    ``compile_mask``. Bit ``i`` is set when grad output ``i`` is undefined. The first
+    ``compile_mask``. Bit ``i`` is set when grad output ``i`` is undefined. Masks are
+    kept CANONICAL throughout -- restricted to the specializable user-output indices
+    (``_specializable_user_grad_output_mask``), exactly like the live runtime path --
+    so a non-differentiable output's always-undefined tangent cannot fork spurious
+    variants or make the auto-covered mask 0 unreachable; every entry point
+    re-canonicalizes defensively. The first
     real backward with a new mask compiles and runs that specialization immediately,
     then records its source and cache. After running its examples, the CALLER reads
     the observed masks out of ``call.__globals__["_AOT_OBSERVED_UNDEFINED_TANGENT_MASKS"]``
@@ -991,13 +996,17 @@ class _CompileToPythonState:
     _observed_variants: dict[int, _StandaloneBackwardVariant] = field(
         default_factory=dict, init=False
     )
-    _observed_specialization_keys: dict[int, int] = field(
-        default_factory=dict, init=False
-    )
 
     def install_capture(self, globals_dict: dict[str, Any]) -> None:
         self._capture_backward_call = globals_dict["_inner_call_bw_0"]
         globals_dict["_AOT_BACKWARD_VARIANT_COMPILER"] = self.compile_mask
+
+    def canonical_mask(self, mask: int) -> int:
+        from . import runtime_wrappers as _rw
+
+        return _rw._specializable_user_grad_output_mask(
+            self.spec.fw_metadata, _rw._bitmask_to_indices(mask)
+        )
 
     def compile_mask(
         self, mask: int
@@ -1018,9 +1027,13 @@ class _CompileToPythonState:
         tuple[int, ...] | None,
         tuple[int, ...],
     ]:
+        # Re-canonicalize defensively: the emitted backward records canonical
+        # masks, but finalize can be handed masks observed on a superseded
+        # sibling backend (a stateful automatic-dynamic recompile) whose
+        # canonical form is computed against ITS metadata.
+        mask = self.canonical_mask(mask)
         if mask in self._observed_variants:
-            specialization_key = self._observed_specialization_keys[mask]
-            compiled = self._specializations[specialization_key]
+            compiled = self._specializations[mask]
             return (
                 compiled.call,
                 compiled.kept_arg_indices,
@@ -1038,13 +1051,9 @@ class _CompileToPythonState:
         from . import runtime_wrappers as _rw
         from .graph_compile import _retrace_backward_for_undefined_grad_outputs
 
-        undefined_grad_out_indices = _rw._bitmask_to_indices(mask)
-        specialization_key = _rw._specializable_user_grad_output_mask(
-            self.spec.fw_metadata, undefined_grad_out_indices
-        )
-        compiled = self._specializations.get(specialization_key)
+        compiled = self._specializations.get(mask)
         if compiled is None:
-            if not specialization_key:
+            if not mask:
                 call = self._capture_backward_call
                 if call is None:
                     call = _inductor_load_from_python(
@@ -1056,7 +1065,7 @@ class _CompileToPythonState:
                     cache=self.backward_cache,
                 )
             else:
-                specialization_indices = _rw._bitmask_to_indices(specialization_key)
+                specialization_indices = _rw._bitmask_to_indices(mask)
                 result = None
                 attempted_exact_retrace = False
                 lazy_info = self.spec.lazy_backward_info
@@ -1132,7 +1141,7 @@ class _CompileToPythonState:
                         kept_arg_indices=kept_arg_indices,
                         skip_materialize_grad_output_indices=specialization_indices,
                     )
-            self._specializations[specialization_key] = compiled
+            self._specializations[mask] = compiled
 
         self._observed_variants[mask] = _StandaloneBackwardVariant(
             undefined_grad_out_mask=mask,
@@ -1143,7 +1152,6 @@ class _CompileToPythonState:
                 compiled.skip_materialize_grad_output_indices
             ),
         )
-        self._observed_specialization_keys[mask] = specialization_key
         return (
             compiled.call,
             compiled.kept_arg_indices,
@@ -1158,16 +1166,14 @@ class _CompileToPythonState:
     def _finalize(self, tangent_masks: Sequence[int]) -> tuple[str, bytes | None]:
         from torch.compiler._cache import CacheArtifactManager
 
-        masks = sorted(set(tangent_masks)) if tangent_masks else [0]
+        canonical = {self.canonical_mask(mask) for mask in tangent_masks}
+        masks = sorted(canonical) if canonical else [0]
         for mask in masks:
             if mask not in self._observed_variants:
                 self._compile_mask(mask)
 
         variants = [self._observed_variants[mask] for mask in masks]
-        caches = [
-            self._specializations[self._observed_specialization_keys[mask]].cache
-            for mask in masks
-        ]
+        caches = [self._specializations[mask].cache for mask in masks]
 
         return (
             _compose_training_module(
@@ -1376,6 +1382,44 @@ def _compose_training_module(
         bw_gm, spec.fw_metadata
     )
     backward_output_dependencies_src = emit_value(backward_output_dependencies, imports)
+    # The grad-output indices a backward variant may specialize on (surviving
+    # user outputs). The emitted backward canonicalizes its scanned
+    # undefined-tangent mask over these, exactly like the live runtime path
+    # (_specializable_user_grad_output_mask): a non-differentiable output's
+    # tangent is ALWAYS undefined, so keying the variant table on the raw mask
+    # would make the auto-covered mask 0 unreachable and fail every backward.
+    specializable_indices = _rw._specializable_user_grad_output_indices(
+        spec.fw_metadata, range(spec.fw_metadata.num_forward_returns)
+    )
+    specializable_src = f"frozenset({tuple(sorted(specializable_indices))!r})"
+    # Provably-zero bit per backward output, computed once with EVERY
+    # specializable tangent pruned: a dependency-eligible output's cone
+    # contains exactly the visible tangents its dependency entry lists, so one
+    # pass answers "is output i zero once the tangents it depends on are
+    # undefined" for all of them. The default-variant fallback in
+    # _backward_impl masks only outputs that are BOTH dependency-implied AND in
+    # this set -- dependency alone is wrong for a backward that is not linear
+    # in its tangents (a custom Function returning g + 1 yields a nonzero grad
+    # from an undefined tangent, which eager materializes zeros for). Mirrors
+    # the runtime _pruned_backward_output_indices_for_undefined_grad_outputs.
+    tangent_placeholders = [
+        node
+        for node in bw_gm.graph.find_nodes(op="placeholder")
+        if _rw._is_grad_tangent(node)
+    ]
+    expected_tangents = sum(
+        _rw._tangent_meta_arg_count(meta)
+        for meta in spec.fw_metadata.subclass_tangent_meta
+    )
+    provably_zero_outputs: frozenset[int] = frozenset()
+    if len(tangent_placeholders) == expected_tangents:
+        flat_indices = _rw._undefined_tangent_flat_indices(
+            spec.fw_metadata, specializable_indices
+        )
+        provably_zero_outputs = _rw._provably_zero_backward_output_indices(
+            bw_gm, {tangent_placeholders[i] for i in flat_indices}
+        )
+    provably_zero_src = f"frozenset({tuple(sorted(provably_zero_outputs))!r})"
     unique_backward_sources: list[str] = []
     source_indices: dict[str, int] = {}
     variant_source_indices: list[int] = []
@@ -1421,16 +1465,15 @@ def _compose_training_module(
     # The artifact bakes aot_autograd_prune_unused_outputs=True at emission
     # time instead of calling _set_grad_output_prototypes, which would re-read
     # the ambient config wherever the artifact happens to be loaded. Like the
-    # runtime helper, a node with a single differentiable output cannot see
-    # that sole tangent undefined, so skip building prototype carriers for it.
-    if len(_rw._grad_output_surviving_indices(spec.fw_metadata)) > 1:
-        prototypes_expr = "_grad_output_prototypes(raw_returns, _fw_metadata)"
-        imports.add(
-            "from torch._functorch._aot_autograd.runtime_wrappers import "
-            "_grad_output_prototypes"
-        )
-    else:
-        prototypes_expr = "((), ())"
+    # runtime helper, prototypes are built even for a node with a single
+    # differentiable output: a downstream custom Function whose backward
+    # returns None hands that sole tangent in as undefined, and materializing
+    # it needs a prototype.
+    prototypes_expr = "_grad_output_prototypes(raw_returns, _fw_metadata)"
+    imports.add(
+        "from torch._functorch._aot_autograd.runtime_wrappers import "
+        "_grad_output_prototypes"
+    )
 
     glue = f"""
 _fw_metadata = {fw_metadata_src}
@@ -1442,6 +1485,8 @@ _fw_metadata.num_forward = {spec.fw_metadata.num_forward!r}
 _saved_state = _AutogradSavedState(metadata=_fw_metadata)
 _rng_state = {rng_src}
 _BACKWARD_OUTPUT_DEPENDENCIES = {backward_output_dependencies_src}
+_BACKWARD_OUTPUT_PROVABLY_ZERO = {provably_zero_src}
+_AOT_SPECIALIZABLE_GRAD_OUT_INDICES = {specializable_src}
 _AOT_OBSERVED_UNDEFINED_TANGENT_MASKS = set()
 _AOT_BACKWARD_VARIANT_COMPILER = None
 _NUM_FORWARD_RETURNS = {spec.fw_metadata.num_forward_returns}
@@ -1476,9 +1521,16 @@ def _backward_impl(ctx, all_args):
         out = inner_call_bw(all_args)
     out = normalize_as_list(out)
     if pruned is None:
-        pruned = _pruned_backward_output_indices_from_dependencies(
-            _BACKWARD_OUTPUT_DEPENDENCIES,
-            ctx._undefined_grad_out_indices,
+        # Dependency alone is not enough to null a grad: only outputs that are
+        # ALSO provably zero with their tangents undefined may be masked (an
+        # affine custom backward yields a nonzero grad from a zero tangent).
+        pruned = tuple(
+            index
+            for index in _pruned_backward_output_indices_from_dependencies(
+                _BACKWARD_OUTPUT_DEPENDENCIES,
+                ctx._undefined_grad_out_indices,
+            )
+            if index in _BACKWARD_OUTPUT_PROVABLY_ZERO
         )
     return _mask_pruned_backward_outputs(out, pruned)
 
@@ -1523,7 +1575,15 @@ class _CompiledFunction(torch.autograd.Function):
             )
         else:
             ctx._undefined_grad_out_indices = ()
-        mask = sum(1 << index for index in ctx._undefined_grad_out_indices)
+        # Canonical mask: only specializable (surviving user-output) indices
+        # key the variant table -- a non-differentiable output's tangent is
+        # always undefined and must not fork variants (mirrors the live
+        # runtime's _specializable_user_grad_output_mask).
+        mask = sum(
+            1 << index
+            for index in ctx._undefined_grad_out_indices
+            if index in _AOT_SPECIALIZABLE_GRAD_OUT_INDICES
+        )
         if _AOT_BACKWARD_VARIANT_COMPILER is not None:
             _AOT_OBSERVED_UNDEFINED_TANGENT_MASKS.add(mask)
         variant = _AOT_BACKWARD_VARIANTS.get(mask)

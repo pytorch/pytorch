@@ -91,6 +91,11 @@ size_hints_regex = re.compile(
 _constexpr_module_import_re = re.compile(
     r"^import ([\w.]+) as __inductor_constexpr_module_\d+$", re.MULTILINE
 )
+# Matches the root-name imports emitted for object-valued constexpr parameter
+# defaults (define_user_defined_triton_kernel), e.g. `from m import Cfg as Cfg`.
+_constexpr_root_import_re = re.compile(
+    r"^from ([\w.]+) import (\w+) as \2$", re.MULTILINE
+)
 _worker_missing_module_re = re.compile(r"No module named '([^']+)'")
 
 
@@ -115,7 +120,9 @@ def _constexpr_module_missing_in_worker(
         name = missing.group(1) if missing else None
     if name is None:
         return None
-    for module in _constexpr_module_import_re.findall(source_code):
+    modules = _constexpr_module_import_re.findall(source_code)
+    modules += [module for module, _ in _constexpr_root_import_re.findall(source_code)]
+    for module in modules:
         if module == name or module.startswith(name + "."):
             return module
     return None

@@ -65,12 +65,17 @@ try:
         tl as TritonLanguageShadowConfig,
         UserDefinedAttrsLikeConfig,
         UserDefinedPydanticLikeConfig,
+        UserDefinedTritonKernelCoercingConfig,
         UserDefinedTritonKernelConfigMode,
         UserDefinedTritonKernelConfigNamespace,
+        UserDefinedTritonKernelCountingConfig,
+        UserDefinedTritonKernelDefaultArgConfig,
         UserDefinedTritonKernelEnumConfig,
         UserDefinedTritonKernelHiddenConfig,
+        UserDefinedTritonKernelHiddenDefaultConfig,
         UserDefinedTritonKernelNestedConfig,
         UserDefinedTritonKernelNonInitConfig,
+        UserDefinedTritonKernelSelfReferentialConfig,
     )
 except ImportError:
     from test.inductor.triton_constexpr_configs import (
@@ -78,12 +83,17 @@ except ImportError:
         tl as TritonLanguageShadowConfig,
         UserDefinedAttrsLikeConfig,
         UserDefinedPydanticLikeConfig,
+        UserDefinedTritonKernelCoercingConfig,
         UserDefinedTritonKernelConfigMode,
         UserDefinedTritonKernelConfigNamespace,
+        UserDefinedTritonKernelCountingConfig,
+        UserDefinedTritonKernelDefaultArgConfig,
         UserDefinedTritonKernelEnumConfig,
         UserDefinedTritonKernelHiddenConfig,
+        UserDefinedTritonKernelHiddenDefaultConfig,
         UserDefinedTritonKernelNestedConfig,
         UserDefinedTritonKernelNonInitConfig,
+        UserDefinedTritonKernelSelfReferentialConfig,
     )
 
 
@@ -1368,6 +1378,110 @@ def helper(x):
         HAS_GPU_AND_TRITON or (HAS_CPU and has_triton_package()),
         "requires CPU or GPU Triton",
     )
+    def test_hidden_field_constexpr_value_fidelity(self):
+        # A config whose repr omits a field only renders when the omitted state
+        # still matches what the constructor call rebuilds; otherwise the
+        # kernel would silently compute with wrong constants.
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def scaled_offset_kernel(
+            x, out, n_elements, cfg: tl.constexpr, BLOCK_SIZE: tl.constexpr
+        ):
+            pid = tl.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(x + offsets, mask=mask)
+            tl.store(out + offsets, values + cfg.offset * cfg.scale, mask=mask)
+
+        def make_op(name, cfg):
+            @torch.library.triton_op(f"test_codegen_triton::{name}", mutates_args={})
+            def op(x: torch.Tensor) -> torch.Tensor:
+                out = torch.empty_like(x)
+                n_elements = x.numel()
+
+                def grid(meta):
+                    return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+                torch.library.wrap_triton(scaled_offset_kernel)[grid](
+                    x, out, n_elements, cfg=cfg, BLOCK_SIZE=128
+                )
+                return out
+
+            return op
+
+        device = GPU_TYPE if HAS_GPU_AND_TRITON else "cpu"
+        x = torch.randn(1024, device=device)
+        faithful = UserDefinedTritonKernelHiddenDefaultConfig(offset=3)
+        op = make_op("scaled_offset_faithful", faithful)
+        compiled = torch.compile(lambda t, op=op: op(t), fullgraph=True)
+        self.assertEqual(compiled(x), x + 3)
+        unfaithful = UserDefinedTritonKernelHiddenDefaultConfig(offset=3, scale=7)
+        op = make_op("scaled_offset_unfaithful", unfaithful)
+        compiled = torch.compile(lambda t, op=op: op(t), fullgraph=True)
+        with self.assertRaisesRegex(Exception, "cannot be written into"):
+            compiled(x)
+
+    @unittest.skipUnless(
+        HAS_GPU_AND_TRITON or (HAS_CPU and has_triton_package()),
+        "requires CPU or GPU Triton",
+    )
+    def test_object_constexpr_default_in_user_defined_triton_kernel(self):
+        # The def-time default expression is evaluated when the generated
+        # module re-execs the spliced kernel def (even when the caller passes
+        # cfg explicitly), and it references the config type by its bare root
+        # name, so the module must bind it via `from module import Root as
+        # Root`.
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def add_default_cfg_kernel(
+            x,
+            out,
+            n_elements,
+            BLOCK_SIZE: tl.constexpr,
+            cfg: tl.constexpr = UserDefinedTritonKernelDefaultArgConfig(),
+        ):
+            pid = tl.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(x + offsets, mask=mask)
+            tl.store(out + offsets, values + cfg.offset, mask=mask)
+
+        @torch.library.triton_op(
+            "test_codegen_triton::add_default_cfg", mutates_args={}
+        )
+        def add_default_cfg(x: torch.Tensor) -> torch.Tensor:
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            torch.library.wrap_triton(add_default_cfg_kernel)[grid](
+                x,
+                out,
+                n_elements,
+                BLOCK_SIZE=128,
+                cfg=UserDefinedTritonKernelDefaultArgConfig(offset=5),
+            )
+            return out
+
+        device = GPU_TYPE if HAS_GPU_AND_TRITON else "cpu"
+        x = torch.randn(1024, device=device)
+        compiled = torch.compile(lambda t: add_default_cfg(t), fullgraph=True)
+        actual, code = run_and_get_code(compiled, x)
+        self.assertEqual(actual, x + 5)
+        root = "UserDefinedTritonKernelDefaultArgConfig"
+        module = UserDefinedTritonKernelDefaultArgConfig.__module__
+        self.assertIn(f"from {module} import {root} as {root}", " ".join(code))
+
+    @unittest.skipUnless(
+        HAS_GPU_AND_TRITON or (HAS_CPU and has_triton_package()),
+        "requires CPU or GPU Triton",
+    )
     def test_user_defined_triton_kernel_python_float_arg_signature_matches_triton(self):
         import triton
         import triton.language as tl
@@ -1518,6 +1632,57 @@ def helper(x):
         self.assertIsNone(
             _constexpr_source(UserDefinedTritonKernelHiddenConfig(2, object()))
         )
+
+    def test_constexpr_source_declines_value_unfaithful_configs(self):
+        from torch._inductor.codegen.wrapper import (
+            _constexpr_source,
+            _render_constexpr_constants,
+        )
+
+        # The repr omits scale, so evaluating it would silently rebuild the
+        # config with the default scale=1 instead of 7; rendering must decline
+        # into the loud error rather than compile with wrong constants.
+        unfaithful = UserDefinedTritonKernelHiddenDefaultConfig(offset=3, scale=7)
+        self.assertIsNone(_constexpr_source(unfaithful))
+        with self.assertRaisesRegex(RuntimeError, "cannot be written into"):
+            _render_constexpr_constants({"CFG": unfaithful})
+        # __post_init__ coerces again on rebuild: repr shows offset=6, but
+        # evaluating Cfg(offset=6) produces offset=12.
+        coercing = UserDefinedTritonKernelCoercingConfig(offset=3)
+        self.assertEqual(coercing.offset, 6)
+        self.assertIsNone(_constexpr_source(coercing))
+        # A hidden field still holding its default rebuilds faithfully.
+        faithful = UserDefinedTritonKernelHiddenDefaultConfig(offset=3)
+        source, imports = _constexpr_source(faithful)
+        scope = {}
+        exec("\n".join(imports), scope)
+        self.assertEqual(eval(source, scope), faithful)
+
+    def test_constexpr_source_declines_self_referential_config(self):
+        from torch._inductor.codegen.wrapper import (
+            _constexpr_source,
+            _render_constexpr_constants,
+        )
+
+        cfg = UserDefinedTritonKernelSelfReferentialConfig()
+        cfg.child = cfg
+        self.assertIsNone(_constexpr_source(cfg))
+        with self.assertRaisesRegex(RuntimeError, "cannot be written into"):
+            _render_constexpr_constants({"CFG": cfg})
+
+    def test_constexpr_source_constructs_each_object_once(self):
+        from torch._inductor.codegen.wrapper import _constexpr_source
+
+        inner = UserDefinedTritonKernelCountingConfig()
+        cfg = UserDefinedTritonKernelCountingConfig(
+            UserDefinedTritonKernelCountingConfig(inner)
+        )
+        UserDefinedTritonKernelCountingConfig.constructed = 0
+        result = _constexpr_source(cfg)
+        self.assertIsNotNone(result)
+        # Rendering verifies by evaluating the source once at the top level, so
+        # compile-time constructor work stays linear in the number of objects.
+        self.assertEqual(UserDefinedTritonKernelCountingConfig.constructed, 3)
 
     def test_constexpr_constant_enum_interchange(self):
         from torch._inductor.codegen.wrapper import _constexpr_constant
@@ -2476,6 +2641,13 @@ def helper(x):
         self.assertIsNone(_constexpr_module_missing_in_worker(src, other))
         nameless = ModuleNotFoundError("No module named 'foo'")
         self.assertIsNone(_constexpr_module_missing_in_worker(src, nameless))
+        # The root-name imports emitted for object-valued constexpr parameter
+        # defaults must also trigger the in-process fallback.
+        root_src = "from foo.bar import Cfg as Cfg\n"
+        self.assertEqual(_constexpr_module_missing_in_worker(root_src, err), "foo.bar")
+        self.assertIsNone(_constexpr_module_missing_in_worker(root_src, other))
+        aliased = "from foo.bar import Cfg as Renamed\n"
+        self.assertIsNone(_constexpr_module_missing_in_worker(aliased, err))
 
     @unittest.skipUnless(has_triton_package(), "requires Triton")
     def test_constexpr_fallback_catches_raw_module_not_found(self):

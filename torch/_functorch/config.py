@@ -46,7 +46,10 @@ debug_assert = False
 # undefined-tangent pattern). Default OFF: the machinery trades per-call
 # overhead and backward-time compiles for specialized backwards, and is
 # consumed by torch.compiler.precompile (which enables it during capture);
-# ordinary torch.compile keeps the zero-materialization behavior.
+# ordinary torch.compile keeps the zero-materialization behavior. When ON, a
+# pruned backward output's grad is None on the structural/mask paths but a
+# real zero tensor on the retrace path -- see Note [Pruned-tangent grads:
+# None vs zeros] in _aot_autograd/runtime_wrappers.py.
 aot_autograd_prune_unused_outputs = False
 
 debug_partitioner = os.environ.get("AOT_PARTITIONER_DEBUG", "0") != "0"

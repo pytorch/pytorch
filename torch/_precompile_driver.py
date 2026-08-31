@@ -585,7 +585,39 @@ def _build_dynamo_forward():
                 furthest_end = max(furthest_end, end)
         return False
 
+    def detach_fresh_outputs(result, args):
+        # An ambient no_grad at call time means the caller expects eager
+        # semantics: tensors CREATED by the call carry no autograd history.
+        # The variant ran under the pinned capture-time grad mode (the
+        # serialized guards require it), so strip the tape from fresh output
+        # tensors; inputs passed through are returned as-is, exactly like
+        # eager. Two knowingly accepted corners: a view-of-input output gets
+        # requires_grad False where eager keeps True (gradient flow matches
+        # either way -- an eager no_grad view does not flow to its base), and
+        # tensors inside non-pytree output containers keep their history.
+        input_ids = {
+            id(v) for v in instance_values(args) if isinstance(v, torch.Tensor)
+        }
+
+        def strip(value):
+            if isinstance(value, torch.Tensor) and id(value) not in input_ids:
+                return value.detach() if value.grad_fn is not None else value
+            return value
+
+        import torch.utils._pytree as pytree
+
+        return pytree.tree_map(strip, result)
+
     def forward(*args):
+        if torch.is_inference_mode_enabled():
+            from torch._precompile import PrecompileError
+
+            raise PrecompileError(
+                "precompile: this artifact cannot be served under "
+                "torch.inference_mode(); capture ran in grad mode and the "
+                "serialized guards require it. Call the loaded artifact "
+                "outside inference mode (torch.no_grad() is supported)."
+            )
         if has_storage_overlap(args):
             from torch._precompile import PrecompileError
 
@@ -605,12 +637,16 @@ def _build_dynamo_forward():
             ) from e
         bound.apply_defaults()
         local_scope = dict(bound.arguments)
-        # Pin grad mode to the capture-time state: inference graphs stay
-        # inference either way, and requires_grad is guarded per input.
+        ambient_grad = torch.is_grad_enabled()
+        # Pin grad mode to the capture-time state: the serialized guards were
+        # minimized under it, and requires_grad is guarded per input.
         with torch.set_grad_enabled(_DYNAMO_GRAD_ENABLED):
             for manager, function in variants:
                 if manager.check(local_scope):
-                    return function(*args)
+                    result = function(*args)
+                    if _DYNAMO_GRAD_ENABLED and not ambient_grad:
+                        result = detach_fresh_outputs(result, args)
+                    return result
         from torch._precompile import PrecompileError
 
         raise PrecompileError(

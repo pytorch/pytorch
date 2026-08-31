@@ -370,6 +370,110 @@ class TestAOTCompileToPython(TestCase):
         " artifact's backward runs under compiled autograd, which deliberately"
         " rejects _CompiledFunction's boxed_grads_call"
     )
+    def test_training_nondifferentiable_output_uses_canonical_mask(self):
+        # A non-differentiable output's tangent is ALWAYS undefined, so the
+        # emitted backward must canonicalize its scanned mask over the
+        # specializable (surviving user-output) indices before the variant
+        # lookup AND before recording it -- like the live runtime path
+        # (_specializable_user_grad_output_mask). Keying on the raw mask makes
+        # the auto-covered mask 0 unreachable: every backward of a forward-only
+        # capture then raises PrecompileError.
+        def f(x):
+            return x.sin(), x.detach() + 1
+
+        holder = {}
+
+        def backend(gm, example_inputs):
+            holder["gm"] = gm
+            return gm.forward
+
+        # A Dynamo graph keeps the detach (a genuinely non-differentiable
+        # output); make_fx would trace it as aten.alias, which stays
+        # differentiable under AOTAutograd and never hits this case.
+        x = torch.randn(4, requires_grad=True)
+        torch.compile(f, backend=backend, fullgraph=True)(x)
+        gm = holder["gm"]
+        graph_inputs = [
+            node.meta["example_value"]
+            for node in gm.graph.nodes
+            if node.op == "placeholder"
+        ]
+        capture_source, cache, state = _compile_to_python_with_state(
+            gm, graph_inputs, grad_enabled=True
+        )
+        if state is None:
+            raise AssertionError("expected a training compile state")
+
+        # A backward run through the live capture call records the CANONICAL
+        # mask (0, not 0b10 for the always-undefined non-diff slot).
+        capture_call = load_from_python(capture_source, cache)
+        state.install_capture(capture_call.__globals__)
+        capture_x = x.detach().clone().requires_grad_()
+        capture_call([capture_x])[0].sum().backward()
+        masks = capture_call.__globals__["_AOT_OBSERVED_UNDEFINED_TANGENT_MASKS"]
+        self.assertEqual(masks, {0})
+
+        # A forward-only finalize (mask 0 only) must serve that same backward.
+        source, final_cache = state.finalize((0,))
+        loaded = load_from_python(source, final_cache)
+        run_x = x.detach().clone().requires_grad_()
+        out = loaded([run_x])
+        self.assertIsNone(out[1].grad_fn)
+        out[0].sum().backward()
+        self.assertEqual(run_x.grad, x.detach().cos())
+
+    @skipIfTorchDynamo(
+        "under dynamo-wrapped testing the test body itself is compiled, so the"
+        " artifact's backward runs under compiled autograd, which deliberately"
+        " rejects _CompiledFunction's boxed_grads_call"
+    )
+    def test_training_default_variant_keeps_affine_custom_backward_grad(self):
+        # The default variant's fallback masks backward outputs to None when
+        # their tangent dependencies are all undefined -- but ONLY if the
+        # output is also provably zero. A custom Function backward that is not
+        # linear in its tangents (g1 + 1) produces a nonzero grad from an
+        # undefined tangent, which eager materializes zeros for; masking it by
+        # dependency alone silently drops the gradient.
+        class AddOne(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.sin(), x.cos()
+
+            @staticmethod
+            def backward(ctx, g0, g1):
+                return g1 + 1
+
+        def f(x):
+            return AddOne.apply(x)
+
+        holder = {}
+
+        def backend(gm, example_inputs):
+            holder["gm"] = gm
+            return gm.forward
+
+        # Dynamo preserves the custom backward as an autograd_function_apply
+        # HOP; make_fx would trace only the forward ops and lose it.
+        x = torch.randn(4, requires_grad=True)
+        torch.compile(f, backend=backend, fullgraph=True)(x)
+        gm = holder["gm"]
+        graph_inputs = [
+            node.meta["example_value"]
+            for node in gm.graph.nodes
+            if node.op == "placeholder"
+        ]
+        source, cache = compile_to_python(gm, graph_inputs, grad_enabled=True)
+        loaded = load_from_python(source, cache)
+        run_x = x.detach().clone().requires_grad_()
+        out = loaded([run_x])
+        out[0].sum().backward()
+        self.assertEqual(run_x.grad, torch.ones_like(run_x))
+
+    @skipIfTorchDynamo(
+        "under dynamo-wrapped testing the test body itself is compiled, so the"
+        " artifact's backward runs under compiled autograd, which deliberately"
+        " rejects _CompiledFunction's boxed_grads_call"
+    )
     def test_training_synthetic_base_and_undefined_tangent(self):
         def flat_fn(flat):
             first, alias, unused = flat
@@ -396,7 +500,11 @@ class TestAOTCompileToPython(TestCase):
         _, capture_inputs = make_inputs()
         capture_call(capture_inputs)[0].sum().backward()
         masks = capture_call.__globals__["_AOT_OBSERVED_UNDEFINED_TANGENT_MASKS"]
-        self.assertEqual(masks, {0b101})
+        # The recorded mask is CANONICAL (specializable user outputs only,
+        # matching the live runtime's _specializable_user_grad_output_mask):
+        # the undefined mutated-input tangent at bit 0 is not specializable
+        # (it is zero-materialized instead), so only output 1's bit remains.
+        self.assertEqual(masks, {0b100})
 
         source, final_cache = state.finalize(tuple(masks))
         self.assertIn("_synthetic_base_wrapper", source)

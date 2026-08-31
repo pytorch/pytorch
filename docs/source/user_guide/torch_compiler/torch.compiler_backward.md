@@ -24,19 +24,18 @@ eager-mode PyTorch and how to work around it.
 Unused output gradients
 -----------------------
 
-``torch.compile`` now matches eager autograd when a differentiable output of a
-compiled region is not used by the loss. Independent inputs that only affect
-that output receive ``.grad = None`` instead of a zero tensor, and
-``torch.autograd.grad(..., allow_unused=False)`` can therefore raise the same
-error as it does in eager mode. This is a backward-compatibility change from
-older AOTAutograd behavior, which materialized every missing output gradient
-as zeros and ran the corresponding backward computation.
-
-To temporarily restore the previous behavior, disable pruning before running
-the compiled forward:
+By default, when a differentiable output of a compiled region is not used by
+the loss, AOTAutograd materializes its missing output gradient as zeros and
+runs the corresponding backward computation, so independent inputs that only
+affect that output receive zero gradients where eager autograd leaves
+``.grad = None``. The opt-in config below makes ``torch.compile`` match eager
+autograd instead: such inputs receive ``.grad = None``, their backward
+computation is pruned, and ``torch.autograd.grad(..., allow_unused=False)``
+raises the same error as it does in eager mode. The setting is read when the
+compiled forward runs:
 
 ```py
-with torch._functorch.config.patch(aot_autograd_prune_unused_outputs=False):
+with torch._functorch.config.patch(aot_autograd_prune_unused_outputs=True):
     output = compiled_fn(*inputs)
     loss_fn(output).backward()
 ```
