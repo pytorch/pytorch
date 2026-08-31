@@ -1,6 +1,10 @@
 #include <c10/cuda/impl/CUDAGraphMemory.h>
 
+#include <c10/cuda/CUDAException.h>
 #include <c10/util/Exception.h>
+#include <c10/util/SmallVector.h>
+
+#include <deque>
 
 namespace c10::cuda::CUDAGraphMemory {
 
@@ -165,6 +169,150 @@ int CaptureTracker::eraseCaptureTree(CaptureId_t root_capture_id) {
     }
   }
   return erased_active_captures;
+}
+namespace {
+
+class CUDARuntimeCaptureDAGQuery final : public CaptureDAGQuery {
+ public:
+  CaptureDAGInfo captureInfo(cudaStream_t stream) const override {
+    CaptureDAGInfo info{};
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 13000)
+    C10_CUDA_CHECK(cudaStreamGetCaptureInfo(
+        stream,
+        &info.status,
+        &info.capture_id,
+        &info.graph,
+        &info.terminals,
+        nullptr,
+        &info.num_terminals));
+#else
+    C10_CUDA_CHECK(cudaStreamGetCaptureInfo_v2(
+        stream,
+        &info.status,
+        &info.capture_id,
+        &info.graph,
+        &info.terminals,
+        &info.num_terminals));
+#endif
+    return info;
+  }
+
+  std::vector<cudaGraphNode_t> dependencies(
+      cudaGraphNode_t node) const override {
+    size_t count = 0;
+    nodeGetDependencies(node, nullptr, &count);
+    std::vector<cudaGraphNode_t> result(count);
+    if (count != 0) {
+      nodeGetDependencies(node, result.data(), &count);
+      result.resize(count);
+    }
+    return result;
+  }
+
+ private:
+  static void nodeGetDependencies(
+      cudaGraphNode_t node,
+      cudaGraphNode_t* dependencies,
+      size_t* count) {
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 13000)
+    if (dependencies == nullptr) {
+      C10_CUDA_CHECK(
+          cudaGraphNodeGetDependencies(node, dependencies, nullptr, count));
+    } else {
+      SmallVector<cudaGraphEdgeData> edge_data;
+      edge_data.resize(*count);
+      C10_CUDA_CHECK(cudaGraphNodeGetDependencies(
+          node, dependencies, edge_data.data(), count));
+    }
+#else
+    C10_CUDA_CHECK(cudaGraphNodeGetDependencies(node, dependencies, count));
+#endif
+  }
+};
+
+const CUDARuntimeCaptureDAGQuery runtime_query;
+
+} // namespace
+
+CaptureDAG::CaptureDAG() : query_(runtime_query) {}
+
+CaptureDAG::CaptureDAG(const CaptureDAGQuery& query) : query_(query) {}
+
+CaptureDAGInfo CaptureDAG::captureInfo(cudaStream_t stream) const {
+  return query_.captureInfo(stream);
+}
+
+bool CaptureDAG::recordFreeMarkersForStream(
+    cudaStream_t stream,
+    FreeMarkerState& state) const {
+  TORCH_INTERNAL_ASSERT(
+      state.valid_, "Cannot append to an invalid free-marker state");
+  auto info = captureInfo(stream);
+  if (info.status != cudaStreamCaptureStatusActive) {
+    state.valid_ = false;
+    return false;
+  }
+  if (state.graph_ == nullptr) {
+    state.graph_ = info.graph;
+    state.capture_id_ = info.capture_id;
+  } else if (
+      info.graph != state.graph_ || info.capture_id != state.capture_id_) {
+    // Stream uses from another capture cannot be ordered by this capture's
+    // DAG. Keep the free deferred instead of treating the mismatch as an
+    // allocator invariant violation.
+    state.valid_ = false;
+    return false;
+  }
+  for (size_t i = 0; i < info.num_terminals; ++i) {
+    state.markers_.insert(info.terminals[i]);
+  }
+  return true;
+}
+
+std::vector<cudaGraphNode_t> CaptureDAG::takeFreeMarkers(
+    FreeMarkerState&& state) const {
+  TORCH_INTERNAL_ASSERT(
+      state.valid_, "Cannot take markers from an invalid free-marker state");
+  return {state.markers_.begin(), state.markers_.end()};
+}
+
+void CaptureDAG::updateVisited(
+    const CaptureDAGInfo& info,
+    TraversalState& state) const {
+  if (!state.initialized_) {
+    state.initialized_ = true;
+    state.capture_id_ = info.capture_id;
+    state.graph_ = info.graph;
+  }
+  TORCH_INTERNAL_ASSERT(
+      state.capture_id_ == info.capture_id && state.graph_ == info.graph,
+      "Capture DAG traversal state cannot be shared across captures");
+
+  std::deque<cudaGraphNode_t> pending;
+  for (size_t i = 0; i < info.num_terminals; ++i) {
+    pending.push_back(info.terminals[i]);
+  }
+  while (!pending.empty()) {
+    auto node = pending.back();
+    pending.pop_back();
+    if (!state.visited_.insert(node).second) {
+      continue;
+    }
+    for (const auto dependency : query_.dependencies(node)) {
+      pending.push_back(dependency);
+    }
+  }
+}
+
+bool CaptureDAG::areMarkersReachable(
+    ArrayRef<cudaGraphNode_t> markers,
+    const TraversalState& state) const {
+  for (const auto marker : markers) {
+    if (state.visited_.count(marker) == 0) {
+      return false;
+    }
+  }
+  return true;
 }
 
 } // namespace c10::cuda::CUDAGraphMemory
