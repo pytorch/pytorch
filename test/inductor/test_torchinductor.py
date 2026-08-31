@@ -1267,6 +1267,16 @@ def skip_if_pallas(fn):
     return wrapper
 
 
+def skip_if_mps(fn):
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        if is_mps_backend(self.device):
+            raise unittest.SkipTest("mps not supported")
+        return fn(self, *args, **kwargs)
+
+    return wrapper
+
+
 def xfail_if_mps(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
@@ -18988,6 +18998,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @parametrize("slice_pointwise", (False, True))
     @skip_if_halide
     @skip_if_pallas
+    @skip_if_mps
     def test_argmin_argmax_fused_reduction_logical_index(self, slice_pointwise):
         # https://github.com/pytorch/pytorch/issues/193661
         def fn(x):
@@ -19015,10 +19026,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @skip_if_halide
     @skip_if_pallas
+    @skip_if_mps
     def test_argreduce_native_index_cse(self):
-        if is_mps_backend(self.device):
-            self.skipTest("CPP or Triton codegen is required")
-
         def fn(x):
             return x.argmax(), x.reshape(-1).argmax()
 
