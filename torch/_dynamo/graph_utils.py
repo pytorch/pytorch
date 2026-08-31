@@ -127,5 +127,3 @@ def _graph_device_types(graph: Graph | None) -> frozenset[str]:
             if (device := _device_type(obj)) is not None:
                 devices.add(device)
     return frozenset(devices)
-
-
