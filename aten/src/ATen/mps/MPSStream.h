@@ -12,6 +12,7 @@
 
 #include <ATen/mps/MPSDevice.h>
 #include <c10/core/DeviceGuard.h>
+#include <c10/core/Storage.h>
 #include <c10/core/Stream.h>
 #include <c10/util/Exception.h>
 
@@ -253,6 +254,17 @@ class TORCH_API MPSStream {
   // dictionaries, so ops register them as they wrap them (see OperationUtils.mm).
   void captureNoteBuffer(MTLBuffer_t buffer);
 
+  // Hands the capture currently recording a reference to host memory that one of
+  // its recorded blits reads or writes. No-op when nothing is recording.
+  //
+  // A CPU tensor's pages are only borrowed by the MTLBuffer wrapping them
+  // (newBufferWithBytesNoCopy), so retaining that buffer is not enough to keep
+  // the pages alive for a replay. The blit's own deallocator cannot hold the
+  // storage either: it runs on Metal's completion thread, where dropping the
+  // last reference to a CPU tensor would need the GIL. The capture holds it
+  // instead and drops it from captureFree(), on the calling thread.
+  void captureRetainStorage(const c10::Storage& storage);
+
   /// Get the MPS device index that this stream is associated with.
   c10::DeviceIndex device_index() const {
     return _stream.device_index();
@@ -321,6 +333,7 @@ class TORCH_API MPSStream {
   struct Capture {
     std::vector<CapturedStep> steps;
     std::vector<const void*> boundBuffers; // id<MTLBuffer>, retained
+    std::vector<c10::Storage> hostStorages; // host pages a recorded blit touches
   };
   std::unordered_map<uint64_t, Capture> _captures;
   // Buffers registered by captureNoteBuffer() for the capture being recorded.
@@ -329,6 +342,7 @@ class TORCH_API MPSStream {
   // pending set per stream is enough.
   std::mutex _notedBuffersMutex;
   std::unordered_set<const void*> _notedBuffers;
+  std::vector<c10::Storage> _notedStorages;
   uint64_t _nextCaptureId = 1; // allocated only inside _serialQueue dispatches
 
   // Retains and clears the noted-buffer set into `capture`.

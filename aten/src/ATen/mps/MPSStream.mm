@@ -391,11 +391,26 @@ void MPSStream::captureNoteBuffer(id<MTLBuffer> buffer) {
   }
 }
 
+void MPSStream::captureRetainStorage(const c10::Storage& storage) {
+  if (!storage || !captureMode()) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(_notedBuffersMutex);
+  if (!captureMode()) {
+    return;
+  }
+  _notedStorages.push_back(storage);
+}
+
 void MPSStream::takeNotedBuffers(Capture& capture) {
   std::lock_guard<std::mutex> lock(_notedBuffersMutex);
   capture.boundBuffers.reserve(capture.boundBuffers.size() + _notedBuffers.size());
   capture.boundBuffers.insert(capture.boundBuffers.end(), _notedBuffers.begin(), _notedBuffers.end());
   _notedBuffers.clear();
+  capture.hostStorages.insert(capture.hostStorages.end(),
+                              std::make_move_iterator(_notedStorages.begin()),
+                              std::make_move_iterator(_notedStorages.end()));
+  _notedStorages.clear();
 }
 
 void MPSStream::releaseCaptureBuffers(Capture& capture) {
@@ -404,6 +419,7 @@ void MPSStream::releaseCaptureBuffers(Capture& capture) {
     [(__bridge id<MTLBuffer>)ptr release];
   }
   capture.boundBuffers.clear();
+  capture.hostStorages.clear();
 }
 
 void MPSStream::discardNotedBuffers() {
@@ -413,6 +429,7 @@ void MPSStream::discardNotedBuffers() {
     [(__bridge id<MTLBuffer>)ptr release];
   }
   _notedBuffers.clear();
+  _notedStorages.clear();
 }
 
 uint64_t MPSStream::captureBegin() {

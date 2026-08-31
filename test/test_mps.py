@@ -18051,14 +18051,15 @@ class TestGraphCapture(TestCaseMPS):
         # Batched small eigh uses the on-GPU jacobi kernel, which binds dynamic
         # threadgroup memory via setThreadgroupMemoryLength:. That binding must
         # be recorded, or replay runs with a zero-length threadgroup buffer.
-        def make(seed):
+        def make():
             g = torch.randn(8, 64, 64, device="mps")
             return (g + g.transpose(-1, -2)) / 2
-        s = make(0)
+
+        s = make()
         g = torch.mps.MetalGraph()
         with torch.mps.metal_graph(g):
             out = torch.linalg.eigh(s).eigenvalues
-        s2 = make(1)
+        s2 = make()
         s.copy_(s2)
         g.replay()
         self.assertEqual(out, torch.linalg.eigh(s2).eigenvalues, atol=1e-2, rtol=1e-2)
@@ -18277,33 +18278,45 @@ class TestGraphCapture(TestCaseMPS):
         outer.reset()
 
     def test_capture_with_cpu_copies(self):
-        # Host copies inside a capture are recorded, not rejected: they encode as
-        # blits through MPSStream::copy, which the capture records. Pinned
-        # explicitly, because "recorded" and "rejected" are both defensible and
-        # only one of them can be true.
+        # Copies between MPS and unpinned CPU memory are recorded. The host pages
+        # are only borrowed by the MTLBuffer wrapping them, so the capture holds
+        # the CPU storage itself; without that, replaying after the CPU tensor
+        # died would touch freed memory.
         x = torch.ones(8, 8, device="mps")
         host_dst = torch.zeros(8, 8)
 
         g = torch.mps.MetalGraph()
         with torch.mps.metal_graph(g):
             out = torch.relu(x @ x)
-            host_dst.copy_(out)  # device -> host inside capture
+            host_dst.copy_(out)  # device -> host
         self.assertEqual(out[0, 0].item(), 8.0)
         self.assertEqual(host_dst[0, 0].item(), 8.0)
 
+        # Drop the only Python reference; the graph must still own the pages.
+        del host_dst
         x.copy_(torch.full((8, 8), 2.0, device="mps"))
         g.replay()
         self.assertEqual(out[0, 0].item(), 32.0)
         g.reset()
 
-        # Host-to-device direction, tested separately so a failure names which one.
-        y = torch.ones(8, 8, device="mps")
-        host_src = torch.full((8, 8), 3.0)
+        # Host-to-device direction: pins that the copy is actually re-issued on
+        # replay (y is zeroed first, so a dropped blit shows up as 0). The capture
+        # also holds the CPU storage so replay cannot read freed pages, but that
+        # is a use-after-free, which Python cannot observe deterministically.
+        y = torch.ones(64, 64, device="mps")
+        host_src = torch.full((64, 64), 3.0)
         g2 = torch.mps.MetalGraph()
         with torch.mps.metal_graph(g2):
-            y.copy_(host_src)  # host -> device inside capture
-            out2 = torch.relu(y @ y)
-        self.assertEqual(out2[0, 0].item(), 72.0)  # relu(3s @ 3s) = 8*9
+            y.copy_(host_src)
+            out2 = y * 2
+        self.assertEqual(out2[0, 0].item(), 6.0)
+
+        del host_src
+        squatters = [torch.full((64, 64), 7.0) for _ in range(64)]
+        y.fill_(0.0)
+        g2.replay()
+        self.assertEqual(out2[0, 0].item(), 6.0)  # 3.0 from the captured host pages
+        del squatters
         g2.reset()
 
     def test_is_current_stream_capturing(self):
