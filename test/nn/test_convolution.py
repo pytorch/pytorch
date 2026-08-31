@@ -1613,7 +1613,7 @@ class TestConvolutionNNDevice(NNTestCase):
     @dtypes(
         *floating_types_and(torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else [])
     )
-    @dtypesIfXPU(torch.half, torch.bfloat16)
+    @dtypesIfXPU(*floating_types_and(torch.half, torch.bfloat16))
     @dtypesIfMPS(torch.float, torch.half)
     def test_noncontig_conv_grad(self, device, dtype):
         # FIXME: remove after adding non-contiguous grad tests for all modules
@@ -3745,7 +3745,6 @@ class TestConvolutionNNDevice(NNTestCase):
     @onlyAccelerator
     @largeTensorTest("40GB")
     @largeTensorTest("24GB", "cpu")
-    @largeTensorTest("24GB", "xpu")
     @serialTest()
     @tf32_on_and_off(0.005)
     def test_conv3d_64bit_indexing(self, device):
