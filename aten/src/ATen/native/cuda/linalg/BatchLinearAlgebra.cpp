@@ -607,7 +607,7 @@ Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upp
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 static void cholesky_kernel(const Tensor& input, const Tensor& info, bool upper) {
-  _warn_once_magma_deprecation("linalg.eig");
+  _warn_once_magma_deprecation("linalg.cholesky");
   cholesky_helper_cusolver(input, upper, info);
 }
 
@@ -880,8 +880,7 @@ namespace {
 #endif
 
 static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
-  // Unconditional cusolver dispatch when compute_pivots == true
-  _warn_once_magma_deprecation("linalg.lu_factor", /*force_cusolver=*/compute_pivots);
+  _warn_once_magma_deprecation("linalg.lu_factor");
 
   auto batch_size = batchCount(input);
   (void) batch_size; // Silence unused warning in some builds
