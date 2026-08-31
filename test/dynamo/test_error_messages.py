@@ -23,7 +23,15 @@ from torch._dynamo.exc import (
 )
 from torch._dynamo.testing import skipIfNotPy312, skipIfOnlyNotPy312
 from torch._dynamo.utils import counters
-from torch.testing._internal.common_utils import IS_FBCODE, munge_exc
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_FBCODE,
+    munge_exc,
+)
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
@@ -59,6 +67,8 @@ warning_once_logger = WarningOnceLogger("warning_once_logger")
 
 
 class ErrorMessagesTest(LoggingTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_inplace_view_on_graph_input_hint(self):
         def fn(x):
             x.transpose_(1, 2)
@@ -1046,24 +1056,6 @@ from user code:
    File "test_error_messages.py", line N, in fn
     return x + y""",
         )
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_fx_node_error_cross_device(self):
-        linear = torch.nn.Linear(10, 20, device="cuda").eval()
-
-        def fn(x):
-            return linear(x)
-
-        with self.assertRaises(TorchRuntimeError) as cm:
-            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(1, 10))
-
-        msg = str(cm.exception)
-        self.assertIn("Tensor device mismatch", msg)
-        self.assertIn("Expected all tensors to be on the same device", msg)
-        self.assertIn("cpu", msg)
-        self.assertIn("cuda", msg)
-        self.assertNotIn("Dynamo failed to run FX node with fake tensors", msg)
-        self.assertNotIn("Unhandled FakeTensor Device Propagation", msg)
 
     def test_data_dependent_branching_fullgraph(self):
         def fn(x):
@@ -3024,6 +3016,30 @@ User code traceback:
 """,
         )
 
+
+class ErrorMessagesAcceleratorTest(LoggingTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    def test_fx_node_error_cross_device(self, device):
+        linear = torch.nn.Linear(10, 20, device=device).eval()
+
+        def fn(x):
+            return linear(x)
+
+        with self.assertRaises(TorchRuntimeError) as cm:
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(1, 10))
+
+        msg = str(cm.exception)
+        self.assertIn("Tensor device mismatch", msg)
+        self.assertIn("Expected all tensors to be on the same device", msg)
+        self.assertIn("cpu", msg)
+        self.assertIn(torch.device(device).type, msg)
+        self.assertNotIn("Dynamo failed to run FX node with fake tensors", msg)
+        self.assertNotIn("Unhandled FakeTensor Device Propagation", msg)
+
+
+instantiate_device_type_tests(ErrorMessagesAcceleratorTest, globals(), except_for="cpu")
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
