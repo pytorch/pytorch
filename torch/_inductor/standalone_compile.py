@@ -699,6 +699,7 @@ def compile_to_python(
     *,
     options: dict[str, Any] | None = None,
     is_inference: bool = True,
+    is_backward: bool = False,
     # The entries are CompiledFxGraph.output_strides: PRINTED stride
     # expressions (strings), symbolic under dynamic shapes -- not ints.
     output_strides: list[tuple[str, ...] | None] | None = None,
@@ -858,6 +859,10 @@ def compile_to_python(
             static_input_idxs=(),
             cudagraphs=BoxedBool(False),
             is_inference=is_inference,
+            # Gates GraphLowering's backward-only require_contiguous safeguard
+            # for untagged implicit-fallback aten ops (see #140452); a training
+            # backward must lower the way torch.compile's backward does.
+            is_backward=is_backward,
             boxed_forward_device_index=BoxedDeviceIndex(None),
         )
         artifacts = torch.compiler.save_cache_artifacts()

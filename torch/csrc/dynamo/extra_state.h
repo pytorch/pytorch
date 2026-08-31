@@ -283,33 +283,6 @@ void set_extra_state(PyCodeObject* code, ExtraState* extra_state);
 // the final owner of these references.
 ExtraState* init_and_set_extra_state(PyCodeObject* code);
 
-// Lookup the cache held by extra_state.
-// Ownership contract
-// args
-//  - extra_state: Borrowed
-// return:
-//   - Py_None or PyCodeObject: Borrowed reference.
-//   - Py_None or PyObject: Trace id of the compiled code.
-void lookup(
-    ExtraState* extra_state,
-    FrameLocalsMapping* f_locals,
-    PyObject* backend,
-    int64_t isolate_recompiles_id,
-    PyObject** maybe_cached_code,
-    const char** trace_annotation,
-    bool is_skip_guard_eval_unsafe);
-
-// Try to resolve a cache lookup without materializing frame locals or running
-// guard managers. Returns true when the lookup is complete (hit or miss), and
-// false when the caller must fall back to lookup().
-bool try_lookup_without_guard_eval(
-    ExtraState* extra_state,
-    PyObject* backend,
-    int64_t isolate_recompiles_id,
-    PyObject** maybe_cached_code,
-    const char** trace_annotation,
-    bool is_skip_guard_eval_unsafe);
-
 // Create a new cache entry at extra_state holding on to guarded_code.
 // Ownership contract
 // args
@@ -331,6 +304,40 @@ void enable_precompile_cache_keys();
 #ifdef __cplusplus
 
 } // extern "C"
+
+// Attribute lookup that returns a borrowed reference on success and nullptr
+// when absent, WITHOUT raising; name must be an interned str. Defined in
+// cache_entry.cpp; use this instead of py::hasattr on hot frame paths.
+PyObject* lookup_optional(py::handle handle, PyObject* name);
+
+// Lookup the cache held by extra_state. Only called from C++ (the frame
+// evaluator), so it lives outside the extern "C" block: trace_annotation is
+// copied out under the cache lock into the caller's std::string, because the
+// entry that owns the original may be destroyed as soon as this returns.
+// Ownership contract
+// args
+//  - extra_state: Borrowed
+// return:
+//   - Py_None or PyCodeObject: Borrowed reference.
+void lookup(
+    ExtraState* extra_state,
+    FrameLocalsMapping* f_locals,
+    PyObject* backend,
+    int64_t isolate_recompiles_id,
+    PyObject** maybe_cached_code,
+    std::string* trace_annotation,
+    bool is_skip_guard_eval_unsafe);
+
+// Try to resolve a cache lookup without materializing frame locals or running
+// guard managers. Returns true when the lookup is complete (hit or miss), and
+// false when the caller must fall back to lookup().
+bool try_lookup_without_guard_eval(
+    ExtraState* extra_state,
+    PyObject* backend,
+    int64_t isolate_recompiles_id,
+    PyObject** maybe_cached_code,
+    std::string* trace_annotation,
+    bool is_skip_guard_eval_unsafe);
 
 // Returns the list of CacheEntry corresponding to code_obj.
 // Warning: returns references whose lifetimes are controlled by C++

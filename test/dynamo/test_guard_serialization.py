@@ -703,6 +703,25 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
         self._test_serialization("TENSOR_MATCH", fn, torch.randn(3), foo)
 
+    def test_autocast_object_input(self):
+        # A held autocast object reaches the trace as four specialized values
+        # guarded by TYPE_MATCH + EQUALS_MATCH on its fields (an ID_MATCH here
+        # cannot serialize, so precompile would drop it and a sibling instance
+        # holding a differently-configured object would silently select this
+        # graph). The serialization direction is the motivating case: the
+        # guards must round-trip and still discriminate.
+        def fn(x, ac):
+            with ac:
+                return torch.mm(x, x)
+
+        x = torch.randn(4, 4)
+        ac = torch.autocast("cpu", dtype=torch.bfloat16)
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, x, ac)
+        same = torch.autocast("cpu", dtype=torch.bfloat16)
+        other = torch.autocast("cpu", dtype=torch.bfloat16, enabled=False)
+        self._test_check_fn(ref, loaded, {"x": x, "ac": same}, True)
+        self._test_check_fn(ref, loaded, {"x": x, "ac": other}, False)
+
     def test_guard_rooted_at_module_scope_wrappers_that_reach_themselves(self):
         # Driven through a real capture, not the pickler: two functools.wraps
         # helpers bound at module scope and called from one compiled frame is

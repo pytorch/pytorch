@@ -110,15 +110,16 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        non-strict make_fx trace of a single call; passing more than one entry in
        ``example_inputs`` raises. ``"dynamo"`` analyzes the Python (bytecode) rather than tracing one path and
        inlines the transformed bytecode Dynamo produces into ``python_code``, lowering the
-       compiled subgraph through the same ``backend`` choices; it honors ``mark_unbacked``
-       dynamic shapes (on either backend, though ``mark_unbacked(strict=True)`` raises --
-       Dynamo captures a strict mark as a guardable backed dim), ``decompositions``, and
-       training steps (a ``.backward()`` / ``torch.autograd.grad`` is traced into the graph
-       and the parameter gradients are accumulated onto the runtime model like eager).
+       compiled subgraphs through the same ``backend`` choices; it honors ``mark_unbacked``
+       dynamic shapes (on either backend; ``mark_unbacked(strict=True)`` is read by Dynamo
+       as a guardable backed dynamic dim rather than an unbacked one) and training steps
+       (with ``training=True``: a ``.backward()`` in ``fn`` graph-breaks and re-runs at
+       serve time through the live autograd engine, which accumulates the parameter
+       gradients onto the runtime model like eager); ``decompositions`` is rejected.
        ``make_fx`` requires one full graph; use ``tracer="dynamo"`` when Python
        graph-breaks or when several guarded/recompiled variants must be retained.
-       Unlike ``make_fx``, the dynamo driver
-       does NOT re-validate the
+       The dynamo driver re-evaluates each variant's serialized guards, but unlike
+       ``make_fx`` it does not otherwise re-validate the
        runtime model/inputs, so on the eager backend a drifted model (broken weight tying,
        a retyped/reshaped weight) or a broadcast-compatible input-shape mismatch can
        silently miscompute where ``make_fx`` would raise; pass a model and inputs matching

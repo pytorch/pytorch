@@ -22,9 +22,10 @@ outside it and you get an artifact that computes the wrong thing.
 The ``dynamo`` tracer is an alternative capture front-end that analyzes the Python
 (bytecode) rather than tracing one path. It inlines the TRANSFORMED BYTECODE Dynamo
 produces into ``python_code`` (marshalled, rehydrated at load) and lowers the compiled
-subgraph through the same backends; forward and training computations, ``mark_unbacked``
-dynamic shapes, and a ``decompositions`` table all work with it. See the ``tracer`` note at
-the bottom of Note [precompile programming model].
+subgraphs through the same backends; forward and training computations and
+``mark_unbacked`` dynamic shapes work with it (``decompositions`` does not -- it applies
+only to ``tracer="make_fx"``). See the ``tracer`` note at the bottom of
+Note [precompile programming model].
 
 For a computation with graph breaks, or to retain several guarded/recompiled variants,
 pass ``tracer="dynamo"`` with as many calls as you need. Either tracer returns the same
@@ -254,54 +255,48 @@ it.
 #
 # TRAINING works here too, by a different mechanism than make_fx. make_fx traces THROUGH
 # .backward(), so its artifact is one flat graph of fwd+bwd ATen ops with the grads as
-# extra outputs and a Python-level scatter in the driver (invariant 5). Dynamo instead
-# rewrites the backward into an in-graph torch.autograd.grad plus the .grad updates around
-# it -- so precompile pins trace_autograd_ops (otherwise Dynamo graph-breaks on the
-# backward), runs the artifact under enable_grad (the traced call differentiates a live
-# autograd graph the same call builds; a forward capture keeps no_grad), and lowers with
-# compile_to_python(grad_enabled=True) for the same reason. No grad-scatter metadata is
-# needed: the transformed bytecode does the .grad update itself, on the runtime model.
-# The ONE thing precompile has to correct is that Dynamo's rewrite SPECIALIZES on whether
-# p.grad is None at trace time -- a guarded choice in torch.compile, and this artifact
-# checks no guards -- so precompile always bakes the ACCUMULATING form and the driver
-# materializes a zero .grad where the runtime model has none; see Note [precompile dynamo
-# training grad accumulation]. Only params get a harvested grad, as on the make_fx path
-# (invariant 5): a user input that requires grad is rejected.
+# extra outputs and a Python-level scatter in the driver (invariant 5). The dynamo tracer
+# handles a training step the way torch.compile does: the forward subgraph lowers to a
+# differentiable autograd.Function whose compiled backward AOTAutograd would normally
+# produce lazily on the first .backward() call -- capture forces that lowering eagerly
+# (force_non_lazy_backward_lowering), so the artifact carries the compiled backward and
+# serving never compiles. A .backward() inside the captured fn graph-breaks like any
+# other side effect and re-runs at serve time through the live autograd engine, which is
+# also what accumulates .grad on the runtime model's params: there is no in-graph
+# autograd.grad rewrite and no grad-scatter metadata.
 #
-# Dynamic shapes and decompositions work here too, by different mechanisms than make_fx.
-# Dynamic shapes: mark_unbacked is Dynamo's OWN decorator, so Dynamo captures the marked
-# dim as an UNBACKED symint directly -- unguardable, so a graph that needs to guard on it
-# fails loudly at capture (the same PrecompileError the make_fx tracer raises) instead of
-# baking a size, which is what makes a guard-free artifact sound. Dynamo emits the
-# ShapeEnv's runtime asserts (mark_unbacked's min/max, a shared shape_id's equality) into
-# the subgraph itself, so they hold on BOTH backends -- unlike the make_fx tracer, whose
-# eager backend has no such asserts and therefore rejects dynamic dims outright. The
-# STRICT variant is rejected here: Dynamo reads it as a RelaxedUnspecConstraint, i.e. a
-# BACKED dynamic dim it may guard on, and this artifact does not check guards (see
-# _reject_strict_unbacked_marks); mark_dynamic / specialize_on are rejected as on the
-# make_fx path. Decompositions: Dynamo captures torch-level IR and never consults a
-# decomposition table, so precompile applies it by re-tracing the captured subgraph with
-# make_fx (see _decompose_subgraph) -- the same table shaping the same ATen graph, just
-# applied one step later than the make_fx tracer applies it.
+# Dynamic shapes work here too, by a different mechanism than make_fx: mark_unbacked is
+# Dynamo's OWN decorator, so Dynamo captures the marked dim as an UNBACKED symint
+# directly -- unguardable, so a graph that needs to guard on it fails loudly at capture
+# (the same PrecompileError the make_fx tracer raises) instead of baking a size. Dynamo
+# emits the ShapeEnv's runtime asserts (mark_unbacked's min/max, a shared shape_id's
+# equality) into the subgraph itself, so they hold on BOTH backends -- unlike the make_fx
+# tracer, whose eager backend has no such asserts and therefore rejects dynamic dims
+# outright. The STRICT variant is NOT rejected here: Dynamo reads it as a
+# RelaxedUnspecConstraint -- a BACKED dynamic dim that errors at capture only if the
+# trace specializes it to a constant -- and any guards taken on it ride in the artifact's
+# serialized guard state like every other guard. Decompositions do NOT work here: Dynamo
+# captures torch-level IR and never consults a decomposition table, so passing
+# ``decompositions`` with tracer='dynamo' is rejected up front (ValueError) rather than
+# silently ignored.
 #
-# Scope and differences from make_fx: the source-artifact call needs one transformed
-# bytecode and therefore still requires a single Dynamo graph. A graph-breaking fn raises
-# a PrecompileError pointing at ``example_inputs``, whose execution-driven capture
-# preserves every graph-break continuation, guard, and recompiled variant.
-# The source-artifact path does NOT check Dynamo's guards at
-# runtime, NOR does
-# it reproduce the make_fx drivers' upfront runtime validation (the param/buffer structural
+# Scope and differences from make_fx: the capture is execution-driven and multi-frame --
+# it preserves every graph-break continuation, guard, and recompiled variant of the
+# example calls, one transformed bytecode per captured frame.
+# This path does not
+# reproduce the make_fx drivers' upfront runtime validation (the param/buffer structural
 # check, invariant 2, and the per-input shape/dtype/device checks, invariants 3/6): safety
-# comes from the same specialization contract as make_fx (control flow and unmarked shapes
-# are specialized to the example) plus the captured graph's own asserts -- on the INDUCTOR
-# backend the baked assert_size_stride (which catches a runtime input/weight whose SHAPE or
-# STRIDE differs from the example, but not its DTYPE) and, for a dynamic capture, the
-# ShapeEnv range / equality asserts on both backends -- not from a reconstructed guard
-# manager. So a contract-violating runtime
-# input/model may fail with a raw kernel error rather than a clean PrecompileError, and on
-# the EAGER backend (no assert_size_stride) a broadcast-compatible shape mismatch can
-# silently miscompute -- pass inputs and a model matching the example, as the contract
-# requires. Because Dynamo bakes the trace-time environment (e.g. the current accelerator
+# comes from the SERIALIZED GUARDS the driver rebuilds and evaluates per variant (minus
+# the unserializable ones that were dropped -- see the save() gates), from the same
+# specialization contract as make_fx (control flow and unmarked shapes are specialized to
+# the example), and from the captured graph's own asserts -- on the INDUCTOR backend the
+# baked assert_size_stride (which catches a runtime input/weight whose SHAPE or STRIDE
+# differs from the example, but not its DTYPE) and, for a dynamic capture, the ShapeEnv
+# range / equality asserts on both backends. A call no surviving guard set covers is a
+# loud miss rather than a silent wrong answer, but a contract violation the DROPPED
+# guards would have caught can still reach a raw kernel error, and on the EAGER backend
+# (no assert_size_stride) a broadcast-compatible shape mismatch can silently miscompute
+# -- pass inputs and a model matching the example, as the contract requires. Because Dynamo bakes the trace-time environment (e.g. the current accelerator
 # stream) into the bytecode, the artifact is environment-specialized like the make_fx one.
 # This artifact renders its compiled subgraphs as source like the make_fx tracer does,
 # but it ALSO inlines MARSHALLED CPython bytecode plus a PICKLED guard-state blob (which
@@ -312,13 +307,7 @@ it.
 # PrecompileError). Regenerate per Python version / torch build, or use make_fx for portable
 # source (backend='eager' for torch-build portability -- the default make_fx inductor artifact
 # itself inlines private torch._inductor modules, so it too is torch-build-locked; the
-# Python-version portability holds for either make_fx backend). A tensor closed over by fn (a
-# global, captured local, or DEFAULT ARGUMENT value,
-# including one nested in a container, an nn.Module, a plain/__slots__ object attribute, or
-# a functools.partial / bound method) is rejected (invariant 1) here too -- Dynamo surfaces
-# it as a used-global / closure content / argdef, not a graph get_attr constant, so the
-# check scans those by replaying pickle's own traversal (see _baked_tensors and
-# _reject_baked_tensors).
+# Python-version portability holds for either make_fx backend).
 
 from __future__ import annotations
 
@@ -453,7 +442,11 @@ class _InstalledArtifact:
     first call, for callers whose artifact lifetime is not lexically scoped --
     installs the captured frames, and ``unload``/exit takes them back out. The
     mutation is therefore attributable to a point in the caller's control flow
-    rather than to the act of loading.
+    rather than to the act of loading. After an unload, a bare CALL raises
+    rather than silently re-installing (a stray queued task holding the handle
+    must not re-mutate live code objects with nothing attributable to point
+    at); re-entering the handle as a context manager is the explicit way to
+    install again, and the handle is reusable across such scopes.
     """
 
     def __init__(
@@ -465,6 +458,12 @@ class _InstalledArtifact:
         self._entry_factory = entry_factory
         self._fn: Callable[..., object] | None = None
         self._inner: Any = None
+        # unload() retires the handle for good. Without this flag a call after
+        # unload would silently re-run _serve() -- re-mutating process-global
+        # code objects with no paired unload, exactly the attributable-install
+        # contract this class exists to keep -- and a call racing unload()
+        # could reinstall before unload() returned.
+        self._unloaded = False
         # Serving is documented as multi-thread safe, and installing is a
         # process-global mutation of live code objects: two first calls racing
         # through an unlocked check-then-act would both install, and the
@@ -484,6 +483,12 @@ class _InstalledArtifact:
         inner = self._inner
         if inner is None:
             with self._install_lock:
+                if self._unloaded:
+                    raise PrecompileError(
+                        "precompile: this artifact has been unloaded; enter it "
+                        "as a context manager to install it again, or load() a "
+                        "new handle."
+                    )
                 if self._inner is None:
                     fn = self._entry_factory() if self._fn is None else self._fn
                     self._inner = self._serve(fn)
@@ -494,6 +499,10 @@ class _InstalledArtifact:
         return self._ensure()(*args, **kwargs)
 
     def __enter__(self) -> Self:
+        # Entering IS a point in the caller's control flow, so it explicitly
+        # re-arms a handle a prior unload() retired for bare calls.
+        with self._install_lock:
+            self._unloaded = False
         self._ensure()
         return self
 
@@ -502,6 +511,7 @@ class _InstalledArtifact:
 
     def unload(self) -> None:
         with self._install_lock:
+            self._unloaded = True
             inner, self._inner = self._inner, None
         if inner is not None:
             inner.unload()
@@ -512,7 +522,12 @@ class _InstalledArtifact:
 
 
 class PrecompileSession:
-    r"""Execution-driven multi-graph capture returned by :func:`precompile`."""
+    r"""Execution-driven multi-graph capture session (internal).
+
+    :func:`precompile` drives one of these itself for ``tracer="dynamo"`` -- entering it,
+    running the example calls, and returning the finished ``(python_code, cache)`` -- so
+    callers never receive one.
+    """
 
     def __init__(self, session: Any) -> None:
         self._session = session
@@ -1277,13 +1292,6 @@ class _Capture:
         # The fake_mode (with ShapeEnv) used for a dynamic-shape capture, threaded to the
         # lowering (dynamic_shapes="from_tracing_context"); None for a static capture.
         self.fake_mode = fake_mode
-
-
-_MODE_STACK_HELPERS = frozenset(
-    {"get_torch_function_mode_stack_at", "set_torch_function_mode_stack"}
-)
-
-_ModulePath = tuple[tuple[str, object], ...]
 
 
 _GENERATED_HEADER = """\
@@ -2275,12 +2283,6 @@ class PrecompiledModule:
         self._in_spec: pytree.TreeSpec | None = None
         self._out_spec: pytree.TreeSpec | None = None
         self._gm: torch.fx.GraphModule | None = None
-        # Dynamo tracer (tracer="dynamo"): the transformed bytecode + the names it
-        # references, populated by _compile() when tracer == "dynamo". The bytecode is
-        # marshalled and the state pickled into python_code; the subgraph is lowered like
-        # the make_fx inductor path (backend="inductor", via self._graph_python /
-        # self._artifact_bytes) or inlined as eager graph source (backend="eager",
-        # self._gm). None on the make_fx path and on the load() path.
         # Inductor backend: the composed self-contained graph module (from
         # aot_autograd.compile_to_python, exposing ``call(flat_inputs)``) and the
         # opaque artifact-cache bytes (None if uncacheable), populated by _compile().
@@ -2671,26 +2673,29 @@ class _PrecompileApi:
         - ``"dynamo"``: a Dynamo-based front-end that analyzes the Python (bytecode)
           rather than tracing one path. The TRANSFORMED bytecode Dynamo produces (which
           extracts the model's params/buffers, calls the compiled subgraph, and
-          reassembles the output) is inlined into ``python_code`` (marshalled); the
-          subgraph is lowered through the same ``backend`` choices, and ``mark_unbacked``
-          dynamic shapes and ``decompositions`` are honored (see below). Scoped to
-          TRAINING steps too: a ``.backward()`` / ``torch.autograd.grad`` is traced INTO
-          the graph (precompile pins Dynamo's ``trace_autograd_ops`` so it does not
-          graph-break), and the artifact accumulates the resulting parameter gradients onto
-          the runtime model exactly like eager. This source-artifact path requires one full
-          graph; for graph breaks and multiple guarded/recompiled variants, pass
-          ``example_inputs=[(...,), ...]``.
-          Dynamo's runtime guards are not embedded, and -- UNLIKE the ``make_fx`` tracer --
-          the dynamo driver does NOT re-validate the runtime model/inputs at load: it does
-          not reproduce the ``make_fx`` driver's param/buffer structural check (invariant 2)
-          or per-input shape/dtype/device checks (invariants 3/6). Safety comes from the
-          same specialization contract plus, on the inductor backend, the baked
-          ``assert_size_stride`` (which catches a runtime input/weight whose SHAPE or STRIDE
-          differs, but not its DTYPE); on the EAGER backend nothing is re-checked, so a
-          drifted runtime model (broken weight tying, a retyped/reshaped weight) or a
-          broadcast-compatible input-shape mismatch can SILENTLY miscompute where
-          ``make_fx`` would raise. Pass a model and inputs matching the example, as the
-          contract requires. See the ``tracer`` note in Note [precompile programming model].
+          reassembles the output) is inlined into ``python_code`` (marshalled), one per
+          captured frame -- graph breaks and recompiled variants are preserved, not
+          refused; the subgraphs are lowered through the same ``backend`` choices, and
+          ``mark_unbacked`` dynamic shapes are honored (``decompositions`` is not -- see
+          below). Scoped to TRAINING steps too (``training=True``): the forward lowers to
+          a differentiable ``autograd.Function`` whose compiled backward is produced at
+          capture, a ``.backward()`` in ``fn`` graph-breaks like any other side effect and
+          re-runs at serve time through the live autograd engine, and that engine
+          accumulates the parameter gradients onto the runtime model exactly like eager.
+          Each variant's SERIALIZABLE guards are embedded and re-evaluated by the driver
+          (a call no surviving guard set covers misses loudly), but -- UNLIKE the
+          ``make_fx`` tracer -- the dynamo driver does NOT reproduce the ``make_fx``
+          driver's param/buffer structural check (invariant 2) or per-input
+          shape/dtype/device checks (invariants 3/6), and the guards that could not be
+          serialized were dropped at save (see the ``require_*`` gates). Beyond the
+          surviving guards, safety comes from the same specialization contract plus, on
+          the inductor backend, the baked ``assert_size_stride`` (which catches a runtime
+          input/weight whose SHAPE or STRIDE differs, but not its DTYPE); on the EAGER
+          backend a drift the dropped guards would have caught -- broken weight tying, a
+          retyped weight, a broadcast-compatible input-shape mismatch -- can SILENTLY
+          miscompute where ``make_fx`` would raise. Pass a model and inputs matching the
+          example, as the contract requires. See the ``tracer`` note in
+          Note [precompile programming model].
           The dynamo artifact inlines marshalled bytecode plus a pickled state blob, so it
           is locked to the producing Python version (unlike the portable ``make_fx`` source)
           AND, because its import aliases can reference private ``torch._dynamo`` runtime
@@ -2702,11 +2707,11 @@ class _PrecompileApi:
 
         ``decompositions`` is an optional decomposition table (a dict mapping each
         ``OpOverload`` to a decomposition function) that controls how ATen ops are broken
-        down in the captured graph. Defaults to ``None`` (make_fx's default). The
-        ``make_fx`` tracer forwards it to ``make_fx`` as its ``decomposition_table``
-        during capture; the ``dynamo`` tracer applies the same table by re-tracing
-        Dynamo's captured subgraph with it (Dynamo itself never consults a decomposition
-        table), so the resulting graph is decomposed the same way on either tracer.
+        down in the captured graph. Defaults to ``None`` (make_fx's default). It applies
+        only to ``tracer="make_fx"``, which forwards it to ``make_fx`` as its
+        ``decomposition_table`` during capture; Dynamo captures torch-level IR and never
+        consults a decomposition table, so passing one with ``tracer="dynamo"`` raises a
+        ``ValueError`` rather than being silently ignored.
 
         Dynamic shapes are opt-in via ``torch._dynamo.decorators.mark_unbacked``, NOT a
         precompile kwarg: mark dims on the inputs before calling, e.g.
@@ -2718,8 +2723,11 @@ class _PrecompileApi:
         ``shape_id`` reuse one symbol (equal by construction); ``min``/``max`` become
         runtime asserts. Other dims stay static. With ``tracer="make_fx"`` this requires
         ``backend="inductor"``; with ``tracer="dynamo"`` both backends work (Dynamo emits
-        the runtime asserts into the subgraph itself), and ``mark_unbacked(strict=True)``
-        is rejected there because Dynamo reads it as a BACKED (guardable) dim.
+        the runtime asserts into the subgraph itself). ``mark_unbacked(strict=True)``
+        means something different there: Dynamo reads a strict mark as a BACKED dynamic
+        dim that errors at capture only if the trace specializes it, and any guards taken
+        on it are serialized like other guards -- use the non-strict form for a truly
+        unguardable dim.
 
         One ``tracer="make_fx"`` caveat: dims that MUST be equal at runtime (e.g. two
         inputs combined by a broadcast that requires equal sizes, ``model(a) + model(b)``)
