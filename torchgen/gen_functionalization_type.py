@@ -981,7 +981,7 @@ struct TORCH_API {self.classname} : public ViewMeta {{
         # whole operation and stay quadratic, with no golden to flag it.
         name = str(self.f.func.name)
         if self.is_multi_output and name not in SINGLE_OUTPUT_VIEW_REPLAY:
-            raise AssertionError(f"multi-output view {name} has no cheap replay")
+            raise AssertionError(f"no single-output replay for {name}")
         return SINGLE_OUTPUT_VIEW_REPLAY.get(name)
 
     # The two arms of `forward`, one per value of `reapply_views`.
