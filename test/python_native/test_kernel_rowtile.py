@@ -381,9 +381,12 @@ class TestKernelRowTile(TestCase):
 
     def test_dispatcher_takes_the_narrow_arm(self):
         # The routing change touches EVERY reduction at narrow N, but _try_fast_row had one caller
-        # and no test. Drive it through the dispatcher at a shape the gate admits, and assert the
-        # narrow shape is what served it (a packed launch would still be correct, so check the
-        # gate agrees rather than only the numbers).
+        # and no test. Numbers alone cannot check this: with the narrow arm disabled the one-shot
+        # arm serves the same shape correctly, so a result-only assertion passes either way. What
+        # identifies the arm is the `tpr=1` the dispatcher passes, and what shows the launch made
+        # its own TMA decision is that the gate was consulted on this path at all.
+        from unittest import mock
+
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
@@ -393,11 +396,18 @@ class TestKernelRowTile(TestCase):
         )
 
         m, n = 1 << 20, 32
-        self.assertTrue(rt.narrow_row(n, 4, m))
+        self.assertTrue(rt.narrow_row(n, 4, m), "the gate no longer admits this shape")
         x = torch.randn(m, n, device="cuda")
-        got = kg.reduce_dim(
-            T.SumOps(acc=cutlass.Float32), "disp_narrow", x, -1, torch.float32
-        )
+        real = rt.reduce_row_tile
+        with (
+            mock.patch.object(rt, "reduce_row_tile", wraps=real) as served,
+            mock.patch.object(rt, "tma_ok", wraps=rt.tma_ok) as gate,
+        ):
+            got = kg.reduce_dim(
+                T.SumOps(acc=cutlass.Float32), "disp_narrow", x, -1, torch.float32
+            )
+        self.assertEqual(served.call_args.kwargs.get("tpr"), 1, "not the narrow arm")
+        self.assertTrue(gate.called, "the use_tma auto-derivation never ran")
         self.assertEqual(got, x.double().sum(dim=1).float(), atol=1e-5, rtol=1e-5)
 
     def test_use_tma_rejects_a_non_power_of_two_row(self):
