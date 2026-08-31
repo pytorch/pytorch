@@ -3448,8 +3448,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
-        from .object_protocol import object_generic_getattr
-
         # TODO(anijain2305) - Investigate if we need specialization for more
         # dunder attrs. inspect.getattr_static does not return correct value
         # for them.
@@ -3463,17 +3461,30 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if shortcut is not None:
             return shortcut
 
-        if self._object_has_getattribute:
-            # CPython's _Py_slot_tp_getattr_hook: a user __getattribute__ runs
-            # first and only chains to __getattr__ on AttributeError.  Delegate
-            # to tp_getattribute_impl so that dispatch lives in exactly one place.
-            try:
-                return self.tp_getattribute_impl(tx, name)
-            except ObservedAttributeError:
-                # Pass through to __getattr__ if __getattribute__ fails
-                handle_observed_exception(tx)
+        # Literal translation of CPython's _Py_slot_tp_getattr_hook: run
+        # __getattribute__ (custom or generic), and ONLY on AttributeError chain
+        # to __getattr__ -- never re-walk GenericGetAttr.  When the type defines
+        # no __getattr__ this degenerates to _Py_slot_tp_getattro: a single
+        # __getattribute__ call whose exception propagates untouched.
+        # https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L9635-L9682
+        if self._check_for_getattr() is None:
+            return self.tp_getattribute_impl(tx, name)
 
-        return object_generic_getattr(tx, self, name)
+        try:
+            return self.tp_getattribute_impl(tx, name)
+        except ObservedAttributeError:
+            handle_observed_exception(tx)
+
+        result = self.call_getattr_fallback(tx, name)
+        if result is not None:
+            return result
+
+        raise_observed_exception(
+            AttributeError,
+            tx,
+            args=[f"'{type(self.value).__name__}' object has no attribute '{name}'"],
+            kwargs={"name": variables.ConstantVariable.create(name), "obj": self},
+        )
 
     def tp_getattribute_impl(
         self, tx: "InstructionTranslatorBase", name: str
@@ -3497,7 +3508,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 source=new_source,
             ).call_function(tx, [VariableTracker.build(tx, name)], {})
 
-        return object_generic_getattr(tx, self, name, skip_getattr_fallback=True)
+        return object_generic_getattr(tx, self, name)
 
     def resolve_data_descriptor(
         self,
