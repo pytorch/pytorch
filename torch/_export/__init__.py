@@ -165,17 +165,36 @@ def aot_load(so_path: str, device: str) -> Callable:
         A callable
     """
     aot_compile_warning()
+    _AOTI_RUNNER_REGISTER: dict[str, type] = {
+        "cpu": torch._C._aoti.AOTIModelContainerRunnerCpu,
+        "cuda": torch._C._aoti.AOTIModelContainerRunnerCuda,
+        "xpu": torch._C._aoti.AOTIModelContainerRunnerXpu,
+        "mps": torch._C._aoti.AOTIModelContainerRunnerMps
+    }
 
-    if device == "cpu":
-        runner: AOTIModelContainerRunner = torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)
-    elif device == "cuda" or device.startswith("cuda:"):
-        runner = torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, device)
-    elif device == "xpu" or device.startswith("xpu:"):
-        runner = torch._C._aoti.AOTIModelContainerRunnerXpu(so_path, 1, device)
-    elif device == "mps" or device.startswith("mps:"):
-        runner = torch._C._aoti.AOTIModelContainerRunnerMps(so_path, 1)
-    else:
-        raise RuntimeError("Unsupported device " + device)
+    def _init_aoti_runner_registry() -> None:
+        private_backend = torch._C._get_privateuse1_backend_name()
+        if private_backend != "privateuseone":
+            from torch.utils.backend_registration import _get_custom_mod_func
+            try :
+                runner = _get_custom_mod_func("AOTIModelContainerRunner")
+                if runner is not None:
+                    _AOTI_RUNNER_REGISTER[private_backend] = runner
+            except RuntimeError:
+                pass
+
+    def _get_aoti_runner(device_type: str, so_path: str)
+        _init_aoti_runner_registry()
+        runner_cls = _AOTI_RUNNER_REGISTER.get(device_type)
+        if runner_cls is None:
+            raise RuntimeError(
+                f"AOTI runner not registered for device type '{device_type}'. "
+                f"Registered devices: {list(_AOTI_RUNNER_REGISTER.keys())}. "
+                f"Use register_aoti_runner() to register a custom runner."
+            )
+        return runner_cls(so_path, 1, device_type)
+
+    runner = _get_aoti_runner(device, so_path)
 
     def optimized(*args, **kwargs):
         call_spec = runner.get_call_spec()
