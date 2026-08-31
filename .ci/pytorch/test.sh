@@ -231,6 +231,13 @@ if [[ "$TEST_CONFIG" == 'slow' ]]; then
   export PYTORCH_TEST_SKIP_FAST=1
 fi
 
+if [[ "$TEST_CONFIG" == 'periodic' ]]; then
+  export PYTORCH_TEST_WITH_PERIODIC=1
+  # Allows @periodic tests that are also marked slow (@slowTest or
+  # slow-tests.json) to run.
+  export PYTORCH_TEST_WITH_SLOW=1
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *slow-gradcheck* ]]; then
   export PYTORCH_TEST_WITH_SLOW_GRADCHECK=1
   # TODO: slow gradcheck tests run out of memory a lot recently, so setting this
@@ -476,12 +483,11 @@ test_python_smoke_b200() {
       inductor/test_fp8 \
       nn/attention/test_fa4 \
       nn/attention/test_open_registry \
+      python_native/test_cutedsl_smoketest \
       inductor/test_torchinductor \
       inductor/test_async_compile \
       inductor/test_nv_universal_gemm \
       inductor/test_fused_attention \
-      inductor/test_cutedsl_grouped_mm \
-      inductor/test_cutedsl_template \
       $PYTHON_TEST_EXTRA_OPTION \
       --upload-artifacts-while-running
 
@@ -505,12 +511,6 @@ test_python_smoke_b200() {
     --pytest-xdist-workers 32
 
   time python test/run_test.py --include test_linalg -k "mm or addmv" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
-  # Dynamically discover the DSL override tests so new ones are picked up. This
-  # is the only job with CuTeDSL installed, so they skip everywhere else.
-  # shellcheck disable=SC2046
-  time python test/run_test.py \
-    --include $(find test/python_native -name 'test_*.py' -printf '%P\n' | sed 's|\.py$||; s|^|python_native/|' | sort | tr '\n' ' ') \
-    --verbose $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -549,7 +549,7 @@ _run_fabric_handle_tests() {
   time python test/run_test.py --include distributed/test_symmetric_memory.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_nvshmem.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_shmem_triton.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
-  time python test/run_test.py --include distributed/test_nccl.py -k NCCLSymmetricMemoryTest $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include distributed/test_nccl.py -k "NCCLSymmetricMemoryTest or NCCLSymmMemWatchdogTest" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include inductor/test_symm_mem_registry.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include inductor/test_low_contention_collectives.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
@@ -2573,6 +2573,10 @@ elif [[ "${TEST_CONFIG}" == *dynamo_wrapped* ]]; then
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_aten
   fi
+elif [[ "${TEST_CONFIG}" == periodic ]]; then
+  # Sweeps the default test files; run_test.py selects the @periodic tests.
+  install_torchvision
+  test_python_shard "$SHARD_NUMBER"
 elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
   install_torchvision
   test_python_shard "$SHARD_NUMBER"

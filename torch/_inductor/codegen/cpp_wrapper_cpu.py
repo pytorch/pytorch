@@ -2435,6 +2435,20 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 f'AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan("{name}", {name}));'
             )
 
+    def _codegen_runtime_assert(self, code: IndentedBuffer, stmt: str) -> None:
+        if V.graph.aot_mode:
+            guarded = f"if (_check_aoti_runtime_check_inputs_env()) {{ {stmt} }}"
+            if V.graph.is_dual_wrapper_mode:
+                # The environment gate is AOTI-only. JIT mirrors the Python
+                # wrapper and emits assertions selected by the compile-time
+                # size_asserts/alignment_asserts configuration unconditionally.
+                code.writeline_jit(stmt)
+                code.writeline_aot(guarded)
+            else:
+                code.writeline(guarded)
+        else:
+            code.writeline(stmt)
+
     def _codegen_assert_size_stride(
         self,
         code: IndentedBuffer,
@@ -2450,23 +2464,21 @@ class CppWrapperCpu(PythonWrapperCodegen):
             f', {self.codegen_dtype(dtype)}, "{dtype}"' if dtype is not None else ""
         )
         stmt = f'assert_size_stride({name}, {size}, {stride}, "{op_name}"{dtype_args});'
-        if V.graph.aot_mode:
-            guarded = f"if (_check_aoti_runtime_check_inputs_env()) {{ {stmt} }}"
-            if V.graph.is_dual_wrapper_mode:
-                # _check_aoti_runtime_check_inputs_env() is AOTI-only; the JIT
-                # side gets the plain assert.
-                code.writeline_jit(stmt)
-                code.writeline_aot(guarded)
-            else:
-                code.writeline(guarded)
-        else:
-            code.writeline(stmt)
+        self._codegen_runtime_assert(code, stmt)
 
     def _codegen_assert_size_stride_grouped(
         self, code: IndentedBuffer, asserts: list[tuple[str, str, str]], op_name: str
     ) -> None:
         for name, size, stride in asserts:
             self._codegen_assert_size_stride(code, name, size, stride, op_name)
+
+    def _codegen_assert_alignment(
+        self, code: IndentedBuffer, name: str, alignment: int, op_name: str
+    ) -> None:
+        if V.graph.aot_mode and V.graph.is_const_graph:
+            return
+        stmt = f'assert_alignment({name}, {alignment}, "{op_name}");'
+        self._codegen_runtime_assert(code, stmt)
 
     def codegen_device(self, device):
         if device.type not in DEVICE_TO_ATEN:
