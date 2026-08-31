@@ -53,7 +53,7 @@ class TestFlyDSLTemplate(TestCase):
 
     def _gfx950_device_stub(self, **overrides):
         defaults = {
-            "multi_processor_count": 304,
+            "multi_processor_count": 256,
             "shared_memory_per_multiprocessor": 163840,
             "max_threads_per_multi_processor": 2048,
         }
