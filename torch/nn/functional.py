@@ -3735,10 +3735,10 @@ def linear_cross_entropy(
         linear_weight (Tensor) : linear weight.
         target (Tensor) : Ground truth class indices or class probabilities.
             With ``options != None``, class probabilities use the chunked
-            path for ``reduction`` ``'mean'`` / ``'sum'`` when the target
-            dtype matches the ``input`` dtype and the target does not
-            require grad; other probability-target configurations fall
-            back to the reference implementation with a warning
+            path when the target dtype matches the ``input`` dtype and the
+            target does not require grad; other probability-target
+            configurations fall back to the reference implementation with a
+            warning
             (gradients w.r.t. the target are only available on the
             reference path).
         linear_bias (Tensor, optional): bias added to the linear
@@ -3747,7 +3747,8 @@ def linear_cross_entropy(
             With ``options != None``, K-dimensional bias
             (``out_features != ()``) falls back to the reference
             implementation with a warning; the chunked path supports
-            only ``(C,)``-shaped bias. Default: ``None``.
+            ``(C,)``-shaped bias with both class-index and probability
+            targets. Default: ``None``.
         weight (Tensor, optional): a manual rescaling weight given to each class.
         reduction (str, optional): Specifies the reduction to apply to
             the output: ``'none'`` | ``'mean'`` |
@@ -3890,12 +3891,10 @@ def linear_cross_entropy(
         )
     ignore_index = ignore_index if ignore_index is not None else -100
 
-    # Probability targets chunk on the scalar reductions only; the chunked
-    # op has no gradient slot for the target, so a target requiring grad
-    # falls back to the reference path.
+    # The chunked op has no gradient slot for the target, so a probability
+    # target requiring grad falls back to the reference path.
     chunkable_prob_target = (
         target_contains_probabilities
-        and reduction in {"mean", "sum"}
         and target.dtype == input.dtype
         and not (target.requires_grad and torch.is_grad_enabled())
     )
@@ -3911,9 +3910,8 @@ def linear_cross_entropy(
         warnings.warn(
             "linear_cross_entropy: ``options`` ignored; chunked path needs "
             "reduction in {'mean','sum','none'}, label_smoothing == 0, target.dtype"
-            " == int64 (or a probability target with reduction in {'mean','sum'},"
-            " dtype matching input, and requires_grad == False), out_features"
-            " == (). Got "
+            " == int64 (or a probability target with dtype matching input and"
+            " requires_grad == False), out_features == (). Got "
             f"reduction={reduction!r}, label_smoothing={label_smoothing}, "
             f"target.dtype={target.dtype}, out_features={tuple(out_features)}"
             f", tracing={torch.jit.is_tracing()}"
@@ -5309,6 +5307,20 @@ def interpolate(  # noqa: F811
                 align_corners,
                 scale_factors,
             )
+        # Use two nested guards so TorchScript does not analyze the runtime
+        # deterministic-algorithms query or the dynamic import below.
+        if not torch.jit.is_scripting():
+            # Select the decomposition during forward so autograd records its
+            # deterministic backward. The native CPU backward is deterministic.
+            if not input.is_cpu and torch.are_deterministic_algorithms_enabled():
+                # The decomposition accumulates through deterministic index_put.
+                # Import it lazily: a top-level import creates a cycle, while a
+                # nested import statement is unsupported by TorchScript.
+                return importlib.import_module(
+                    "torch._decomp.decompositions"
+                ).upsample_bicubic2d_vec(
+                    input, output_size, align_corners, scale_factors
+                )
         return torch._C._nn.upsample_bicubic2d(
             input,
             # pyrefly: ignore [bad-argument-type]
@@ -5895,12 +5907,12 @@ Args:
 cosine_similarity = _add_docstr(
     torch.cosine_similarity,
     r"""
-cosine_similarity(x1, x2, dim=1, eps=1e-8, keepdim=False) -> Tensor
+cosine_similarity(x1, x2, dim=1, eps=1e-8) -> Tensor
 
 Returns cosine similarity between ``x1`` and ``x2``, computed along dim. ``x1`` and ``x2`` must be broadcastable
-to a common shape. ``dim`` refers to the dimension in this common shape. By default, dimension ``dim`` of the
-output is squeezed (see :func:`torch.squeeze`), resulting in the output tensor having 1 fewer dimension.
-When ``keepdim`` is ``True``, the output has the same number of dimensions as the inputs with size 1 at ``dim``.
+to a common shape. ``dim`` refers to the dimension in this common shape. Dimension ``dim`` of the output is
+squeezed (see :func:`torch.squeeze`), resulting in the
+output tensor having 1 fewer dimension.
 
 .. math ::
     \text{similarity} = \dfrac{x_1 \cdot x_2}{\max(\Vert x_1 \Vert _2, \epsilon) \cdot \max(\Vert x_2 \Vert _2, \epsilon)}
@@ -5913,7 +5925,6 @@ Args:
     dim (int, optional): Dimension along which cosine similarity is computed. Default: 1
     eps (float, optional): Small value to avoid division by zero.
         Default: 1e-8
-    keepdim (bool, optional): Whether the output tensor retains :attr:`dim`. Default: False
 
 Example::
 
@@ -6471,8 +6482,9 @@ scaled_dot_product_attention = _add_docstr(
         For math backend, all intermediates are kept in torch.float if inputs are in torch.half or torch.bfloat16.
     For more information please see :doc:`/notes/numerical_accuracy`
 
-        Grouped Query Attention (GQA) is an experimental feature. It currently works only for Flash_attention
-        and math kernel on CUDA tensor, and does not support Nested tensor.
+        Grouped Query Attention (GQA) is an experimental feature. It works with FlashAttention,
+        cuDNN attention, and the math kernel on CUDA tensors. Memory-efficient attention also supports
+        GQA on NVIDIA CUDA. GQA does not support Nested tensors.
         Constraints for GQA:
 
             - number_of_heads_query % number_of_heads_key_value == 0 and,
@@ -7146,7 +7158,9 @@ def grouped_mm(
             updates), the trailing dimension of ``mat_a`` and the leading dimension of
             ``mat_b`` are partitioned according to the same ``offs`` tensor. For the
             common forward pass (``out = input @ weight.T``) ``mat_b`` is 3D with
-            shape ``(num_groups, N, K)``.
+            shape ``(num_groups, K, N)``. If expert weights are stored in the standard
+            ``nn.Linear`` layout ``(num_groups, N, K)``, pass
+            ``weight.transpose(-2, -1)`` as ``mat_b``.
         offs: Optional 1D tensor of monotonically increasing ``int32`` offsets that
             delimit the jagged dimension of any 2D operand. ``offs[i]`` marks the end
             of group ``i`` and ``offs[-1]`` must be strictly less than the total

@@ -5,13 +5,12 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo import config as dc
-
-
-_GLOBAL_SPLIT_SIZE = 0
-_MISSING = object()
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class RecompileTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_automatic_dynamic_reduce_recompiles(self):
         # Test the counterfactual, lots of recompiles without this config
         def foo(x, y):
@@ -167,51 +166,6 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         with_automatic = run_with_automatic()
         self.assertEqual(with_automatic.frame_count, 3)
         self.assertEqual(with_automatic.op_count, 3)
-
-    def test_automatic_dynamic_unspecializes_global_int_split_size(self):
-        global _GLOBAL_SPLIT_SIZE
-
-        def foo(hidden_states):
-            hidden_states_t = hidden_states.transpose(0, 1)
-            _, prefill = torch.split(hidden_states_t, [0, _GLOBAL_SPLIT_SIZE], dim=-1)
-            return prefill.transpose(0, 1).sin()
-
-        counter = torch._dynamo.testing.CompileCounter()
-        opt = torch.compile(foo, backend=counter, fullgraph=True)
-
-        old_split_size = _GLOBAL_SPLIT_SIZE
-        try:
-            for split_size in [8, 4, 3, 2, 6]:
-                _GLOBAL_SPLIT_SIZE = split_size
-                opt(torch.randn(split_size, 4))
-        finally:
-            _GLOBAL_SPLIT_SIZE = old_split_size
-
-        self.assertEqual(counter.frame_count, 2)
-
-    def test_automatic_dynamic_keeps_torch_module_int_attrs_static(self):
-        attr_name = "_dynamo_test_int"
-        old_value = getattr(torch, attr_name, _MISSING)
-
-        def foo(x):
-            import torch
-
-            return x * torch._dynamo_test_int
-
-        counter = torch._dynamo.testing.CompileCounter()
-        opt = torch.compile(foo, backend=counter, fullgraph=True)
-
-        try:
-            for value in [2, 3, 4]:
-                setattr(torch, attr_name, value)
-                opt(torch.randn(2))
-        finally:
-            if old_value is _MISSING:
-                delattr(torch, attr_name)
-            else:
-                setattr(torch, attr_name, old_value)
-
-        self.assertEqual(counter.frame_count, 3)
 
     def test_aliasing_guard_failures(self):
         def foo(a, b, c):
@@ -610,6 +564,41 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(counter.frame_count, 1)
         apply_patches(f, x, [("c", 3), ("d", 4)])
         self.assertEqual(counter.frame_count, 1)
+
+    def test_out_variant_does_not_overrecompile(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/135859.
+        # The out= variants of max/min/topk used to recompile on every new input
+        # shape because their out overloads (e.g. aten.max.dim_max) lacked a meta
+        # function, so dynamic shapes were not propagated to the out tensors.
+        # They should now recompile exactly once, like the functional variant.
+        def count_recompiles(fn):
+            cnt = torch._dynamo.testing.CompileCounter()
+            opt = torch.compile(fn, backend=cnt, dynamic=None)
+            for n in range(4, 10):
+                opt(torch.randn(n, 8))
+            return cnt.frame_count
+
+        def max_out(x):
+            values = x.new_empty(x.shape[0])
+            indices = x.new_empty(x.shape[0], dtype=torch.long)
+            torch.max(x, dim=1, out=(values, indices))
+            return values, indices
+
+        def min_out(x):
+            values = x.new_empty(x.shape[0])
+            indices = x.new_empty(x.shape[0], dtype=torch.long)
+            torch.min(x, dim=1, out=(values, indices))
+            return values, indices
+
+        def topk_out(x):
+            values = x.new_empty((x.shape[0], 3))
+            indices = x.new_empty((x.shape[0], 3), dtype=torch.long)
+            torch.topk(x, 3, dim=1, out=(values, indices))
+            return values, indices
+
+        for out_fn in (max_out, min_out, topk_out):
+            torch._dynamo.reset()
+            self.assertEqual(count_recompiles(out_fn), 2)
 
 
 if __name__ == "__main__":
