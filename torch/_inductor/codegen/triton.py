@@ -5580,7 +5580,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 return "value"
             return "index"
 
-        cache_key = (src_dtype, reduction_type, value)
+        cache_key = (
+            src_dtype,
+            reduction_type,
+            value if logical_index is None else (value, logical_index),
+        )
         if cache_key in self.cse.reduction_cache:
             return self.cse.reduction_cache[cache_key]
 
