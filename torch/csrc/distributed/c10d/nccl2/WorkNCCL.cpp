@@ -201,8 +201,10 @@ bool WorkNCCL::State::setTerminalStatus(WorkStatus terminal_status) {
 
     if (terminal_status == WorkStatus::TIMEDOUT) {
       result = WorkResult::TIMEOUT;
-      workException = std::make_exception_ptr(
-          C10_BUILD_ERROR(DistBackendError, "NCCL operation timed out"));
+      workException = std::make_exception_ptr(C10_BUILD_ERROR(
+          DistBackendError,
+          "Watchdog caught collective operation timeout: NCCL operation "
+          "timed out"));
     } else if (terminal_status == WorkStatus::ERROR) {
       result = WorkResult::COMM_ERROR;
       workException = std::make_exception_ptr(
