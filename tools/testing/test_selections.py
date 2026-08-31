@@ -43,13 +43,6 @@ IS_ROCM = torch is not None and torch.version.hip is not None
 NUM_PROCS = 1 if IS_MEM_LEAK_CHECK else 3 if not TEST_CUDA or SM80OrLater else 2
 NUM_PROCS_FOR_SHARDING_CALC = NUM_PROCS if not IS_ROCM or IS_MEM_LEAK_CHECK else 2
 THRESHOLD = 60 * 10  # 10 minutes
-# Last intra-file split count that completed MI300 inductor 1/2 under the
-# 270-minute job cap (~215 min on 2026-07-29). test-times.json records the
-# *sum* of pytest process walls, so collection-heavy files (test_ops, opinfo)
-# grow N = ceil(T/THRESHOLD) without shrinking per-process wall (~10 min).
-# Each process also has a 3*THRESHOLD (30 min) timeout in run_test.py; 11-way
-# stays ~10 min/process, while collapsing to CI shard count (2) can exceed that.
-ROCM_MAX_PYTEST_FILE_SHARDS = 11
 
 # See Note [ROCm parallel CI testing]
 # Special logic for ROCm GHA runners to query number of GPUs available.
@@ -90,33 +83,20 @@ class ShardJob:
         return (self.get_total_time(), self.serial + self.parallel)
 
 
-def _rocm_pytest_file_shard_cap() -> int | None:
-    # BUILD_ENVIRONMENT is set in CI; do not use IS_ROCM here — that would
-    # change calculate_shards() results when unit tests run on a ROCm host.
-    if "rocm" in os.getenv("BUILD_ENVIRONMENT", "").lower():
-        return ROCM_MAX_PYTEST_FILE_SHARDS
-    return None
-
-
 def get_with_pytest_shard(
     tests: Sequence[TestRun],
     test_file_times: dict[str, float],
     test_class_times: dict[str, dict[str, float]] | None,
     *,
     allow_pytest_sharding: bool = True,
-    max_pytest_file_shards: int | None = None,
 ) -> list[ShardedTest]:
     sharded_tests: list[ShardedTest] = []
-    if max_pytest_file_shards is None:
-        max_pytest_file_shards = _rocm_pytest_file_shard_cap()
 
     for test in tests:
         duration = get_duration(test, test_file_times, test_class_times or {})
 
         if allow_pytest_sharding and duration and duration > THRESHOLD:
             num_shards = math.ceil(duration / THRESHOLD)
-            if max_pytest_file_shards is not None:
-                num_shards = min(num_shards, max_pytest_file_shards)
             for i in range(num_shards):
                 sharded_tests.append(
                     ShardedTest(test, i + 1, num_shards, duration / num_shards)
@@ -231,7 +211,6 @@ def calculate_shards(
     must_serial: Callable[[str], bool] | None = None,
     sort_by_time: bool = True,
     allow_pytest_sharding: bool = True,
-    max_pytest_file_shards: int | None = None,
 ) -> list[tuple[float, list[ShardedTest]]]:
     must_serial = must_serial or (lambda x: True)
     test_class_times = test_class_times or {}
@@ -251,7 +230,6 @@ def calculate_shards(
                 test_file_times,
                 test_class_times,
                 allow_pytest_sharding=allow_pytest_sharding,
-                max_pytest_file_shards=max_pytest_file_shards,
             ),
             key=lambda j: j.get_time(),
             reverse=True,
@@ -260,7 +238,6 @@ def calculate_shards(
             test_file_times,
             test_class_times,
             allow_pytest_sharding=allow_pytest_sharding,
-            max_pytest_file_shards=max_pytest_file_shards,
         )
     else:
         pytest_sharded_tests = get_with_pytest_shard(
@@ -268,7 +245,6 @@ def calculate_shards(
             test_file_times,
             test_class_times,
             allow_pytest_sharding=allow_pytest_sharding,
-            max_pytest_file_shards=max_pytest_file_shards,
         )
     del tests
 
