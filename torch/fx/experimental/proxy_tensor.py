@@ -2187,6 +2187,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self._invoke_subgraph_cache: dict[
             torch.fx.GraphModule | FunctionalizeCtxWrapper, str
         ] = {}
+
     @count
     def __torch_dispatch__(
         self,
