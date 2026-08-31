@@ -2000,14 +2000,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> VariableTracker:
         """Polymorphic hook for obj.__getattribute__(name).
 
-        This is a distinct hook (not just a tp_getattro_impl call at the caller)
-        because UDOV overrides it to give the correct __getattribute__
-        semantics: it dispatches to a user-defined __getattribute__ when one
-        exists, and passes skip_getattr_fallback=True so lookup never chains to
-        __getattr__ (only the normal obj.attr path in tp_getattro_impl does
-        that).  UDOV.tp_getattro_impl differs -- it invokes the __getattr__
-        fallback -- so inlining tp_getattro_impl here would break
-        __getattribute__ for UDOVs.
+        This is the analog of CPython's _Py_slot_tp_getattro: __getattribute__
+        alone, with no __getattr__ chain.  UDOV overrides it to dispatch to a
+        user-defined __getattribute__ when one exists, else plain GenericGetAttr;
+        the __getattr__ chain lives one level up, in tp_getattro_impl (the
+        _Py_slot_tp_getattr_hook analog).
 
         The base delegates to tp_getattro_impl.  That is equivalent for VTs whose
         __getattr__ hook (if any) is call_getattr_fallback, which the base
