@@ -6,7 +6,6 @@
 # makes it reusable as the cross-CTA driver's stage 1), with a ROLLED chunk loop so ONE
 # compiled kernel serves every N in a vec class -- tpr and nt are compile-time while N itself
 # arrives as a runtime arg.
-#
 import math
 from typing import NamedTuple
 
@@ -179,7 +178,7 @@ def reduce_row_tile(
             _stream(),
         )
 
-    key = ("rowtile", trait_key, x.dtype, tuple(out_dtypes[:nouts])) + op.cache_sig
+    key = ("rowtile", trait_key, x.dtype, tuple(out_dtypes[:ndst])) + op.cache_sig
     build = lambda: _compile(op, *_wrap())  # noqa: E731
     fn = cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")
     fn(*_wrap())
