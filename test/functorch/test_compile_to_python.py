@@ -22,6 +22,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfTorchDynamo,
     subtest,
     TestCase,
 )
@@ -204,6 +205,9 @@ class TestAOTCompileToPython(TestCase):
                     load_from_python(src, cache)(_flat_inputs(m, x))[0], m(x)
                 )
 
+    @skipIfTorchDynamo(
+        "make_fx of a training closure cannot trace under an outer dynamo"
+    )
     def test_inline_backward_graph_is_not_lowered_as_inference(self):
         # A graph that differentiates INLINE (make_fx tracing through a
         # .backward()) has no joint, so a joint-only check would call it
@@ -234,6 +238,9 @@ class TestAOTCompileToPython(TestCase):
             any("convolution_backward" in str(n.target) for n in traced.graph.nodes)
         )
 
+    @skipIfTorchDynamo(
+        "make_fx of a training closure cannot trace under an outer dynamo"
+    )
     def test_training_graph_composes_forward_and_backward(self):
         # grad_enabled with inputs that require grad makes AOTAutograd emit a
         # JOINT forward+backward: two dense graphs, bridged by an autograd
@@ -266,6 +273,9 @@ class TestAOTCompileToPython(TestCase):
         for name, param in m.named_parameters():
             self.assertEqual(param.grad, expected[name])
 
+    @skipIfTorchDynamo(
+        "make_fx of a training closure cannot trace under an outer dynamo"
+    )
     def test_training_forward_and_backward_do_not_share_names(self):
         # The two inductor modules are spliced into ONE namespace and both define
         # call / Runner / their kernels. A module resolves those as late-bound
@@ -335,6 +345,9 @@ class TestAOTCompileToPython(TestCase):
             _restride_backward_placeholders(gm, [("3*s0", "1")], spec)
 
     @unittest.skipIf(not HAS_GPU, "requires gpu")
+    @skipIfTorchDynamo(
+        "make_fx of a training closure cannot trace under an outer dynamo"
+    )
     def test_training_conv_restride_matches_eager(self):
         # Conv nets are what the backward restride exists for: inductor's
         # layout optimization hands back channels-last saved activations, and
