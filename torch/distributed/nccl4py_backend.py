@@ -35,16 +35,19 @@ class _NcclWork(dist._Work):
     of ProcessGroupNCCL(nccl2)'s coalesceWorks)
     """
 
-    def __init__(self, events, device, wd_handles=None):
+    def __init__(self, events, device, wd_handles=None, is_barrier=False):
         super().__init__()
         self._events = list(events)
         self._device = device
         self._wd_handles = list(wd_handles) if wd_handles else []
+        self._is_barrier = is_barrier
 
     def wait(self, timeout=None):
         current = torch.cuda.current_stream(self._device)
         for event in self._events:
             event.wait(current)
+        if self._is_barrier:
+            current.synchronize()
         self._events = []
         for handle in self._wd_handles:
             handle.cancel()
@@ -144,7 +147,7 @@ class NCCL4PyBackend(C10DBackend):
         for t in tensors:
             t.record_stream(stream)
 
-    def _make_work(self, *streams):
+    def _make_work(self, *streams, is_barrier=False):
         # Inside a coalescing window the kernels are only enqueued at group_end,
         # so a per-op event here would be meaningless. Just record which streams
         # the op used; end_coalescing records the events after group_end.
@@ -159,7 +162,7 @@ class NCCL4PyBackend(C10DBackend):
             with torch.cuda.stream(stream):
                 wd_handles.append(stream_timeout(self._options._timeout))
             events.append(event)
-        return _NcclWork(events, self._device, wd_handles)
+        return _NcclWork(events, self._device, wd_handles, is_barrier=is_barrier)
 
     def _get_nccl_redop(self, reduce_op, tensor):
         """Returns (nccl_op, custom_op_or_None).
@@ -425,7 +428,7 @@ class NCCL4PyBackend(C10DBackend):
         self._comm.allreduce(
             self._barrier_tensor, self._barrier_tensor, nccl.SUM, stream=s
         )
-        return self._make_work(stream)
+        return self._make_work(stream, is_barrier=True)
 
     def split(self, store, ranks, opts):
         ranks_list = list(ranks)
