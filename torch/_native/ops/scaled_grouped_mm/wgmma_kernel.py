@@ -88,6 +88,15 @@ def _make_fake_tensormaps(dtype, num_tensormaps: int, tensormap_stride: int):
 
 
 class _DeepSeekWgmmaBase:
+    # Set by subclasses; read by the scale/accumulate helpers below.
+    a_scale_wide: bool
+    b_scale_wide: bool
+    small_scale_a: bool
+    can_hoist_scale: bool
+    scale_a_stage_rows: int
+    scale_b_stage_cols: int
+    scale_b128_span: int
+
     def __init__(
         self, recipe_a: int, recipe_b: int, tile_m: int, tile_n: int, tile_k: int = 128
     ):
@@ -176,6 +185,7 @@ class _DeepSeekWgmmaBase:
         scale_b_valid_cols = (
             self.scale_b_stage_cols if self.b_scale_wide else self.tile_n
         )
+        col_block0 = Int32(0)
         if cutlass.const_expr(
             self.recipe_b != BLOCKWISE_1X128 and self.scale_b128_span > 1
         ):

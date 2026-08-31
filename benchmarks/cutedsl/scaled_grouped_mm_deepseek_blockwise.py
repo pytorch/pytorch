@@ -575,11 +575,12 @@ def benchmark_deepseek_scaled_grouped_mm(
         for col in df.columns:
             if col not in ("G", "M", "N", "K"):
                 df[col] = df[col].map(
-                    lambda x: f"{x:.3f}" if x is not None and pd.notna(x) else "nan"
+                    lambda x: f"{x:.2f}" if x is not None and pd.notna(x) else "nan"
                 )
         print(
             df.to_markdown(
                 index=False,
+                tablefmt="github",
                 disable_numparse=True,
                 colalign=("right",) * len(df.columns),
             )
