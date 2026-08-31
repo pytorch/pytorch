@@ -10,6 +10,7 @@
 #include <c10/cuda/CUDAGraphMemory.h>
 
 #include <cstddef>
+#include <exception>
 #include <optional>
 
 namespace at::cuda {
@@ -22,6 +23,18 @@ namespace at::cuda {
 static std::mutex _currently_capturing_graphs_mutex;
 static ska::flat_hash_map<CaptureId_t, CUDAGraph*> _currently_capturing_graphs;
 
+template <typename Cleanup>
+static void capture_first_cleanup_error(
+    std::exception_ptr& first_error,
+    Cleanup cleanup) {
+  try {
+    cleanup();
+  } catch (...) {
+    if (!first_error) {
+      first_error = std::current_exception();
+    }
+  }
+}
 
 #if defined(USE_ROCM)
 // Returns true when at least one CUDAGraph capture is currently active in this
@@ -127,7 +140,7 @@ std::function<bool(c10::Stream)> CUDAGraph::create_allocate_filter<c10::Stream>(
 }
 
 void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode capture_mode) {
-  TORCH_CHECK(!has_graph_exec_,
+  TORCH_CHECK(!has_graph_ && !has_graph_exec_,
               "This CUDAGraph instance already owns a captured graph. "
               "To capture a new graph, create a new instance.");
 
@@ -223,12 +236,10 @@ void CUDAGraph::capture_end_pre() {
   // checks cannot observe stale "capture active" state on error paths.
   cudaError_t endCaptureErr = cudaStreamEndCapture(capture_stream_, &graph_);
   if (endCaptureErr == cudaSuccess && graph_ != nullptr) {
-    // Own the returned graph immediately so reset() destroys it if validation
-    // below rejects the capture.
+    // Own the returned graph immediately so reset() destroys it if a later
+    // post-capture validation or cleanup step fails.
     has_graph_ = true;
   }
-  const size_t invalid_capture_free_count =
-      c10::cuda::CUDAGraphMemory::markCaptureEnd(capture_dev_, capture_id_);
   {
     std::unique_lock<std::mutex> lock(_currently_capturing_graphs_mutex);
     TORCH_CHECK(
@@ -242,12 +253,26 @@ void CUDAGraph::capture_end_pre() {
   // (e.g. due to an illegal operation during capture). These calls are
   // safe regardless of whether the capture succeeded — they simply
   // remove the pool routing entry added by beginAllocateToPool.
-  c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
-  at::getHostAllocator(at::kCUDA)->end_allocate_to_pool(mempool_id_);
+  std::exception_ptr cleanup_error;
+  capture_first_cleanup_error(cleanup_error, [&] {
+    c10::cuda::CUDACachingAllocator::endAllocateToPool(
+        capture_dev_, mempool_id_);
+  });
+  capture_first_cleanup_error(cleanup_error, [&] {
+    at::getHostAllocator(at::kCUDA)->end_allocate_to_pool(mempool_id_);
+  });
+  size_t invalid_capture_free_count = 0;
+  capture_first_cleanup_error(cleanup_error, [&] {
+    invalid_capture_free_count =
+        c10::cuda::CUDAGraphMemory::markCaptureEnd(capture_dev_, capture_id_);
+  });
   // Allocation recording has stopped (even if endCaptureErr is a failure), so
   // reset() must not end the pool again.
   capturing_to_pool_ = false;
   AT_CUDA_CHECK(endCaptureErr);
+  if (cleanup_error) {
+    std::rethrow_exception(cleanup_error);
+  }
   TORCH_CHECK(
       invalid_capture_free_count == 0,
       "A CUDA graph allocation was freed from an invalid conditional capture "
@@ -655,14 +680,22 @@ void CUDAGraph::end_capture_to_conditional_node() {
   }
 
   CUDAStream stream = conditional_node_streams_.top().current_stream();
-  AT_CUDA_CHECK(cudaStreamEndCapture(stream.stream(), nullptr));
-  const size_t invalid_capture_free_count =
-      c10::cuda::CUDAGraphMemory::markCaptureEnd(
-          capture_dev_, child_capture_id);
+  const cudaError_t end_capture_error =
+      cudaStreamEndCapture(stream.stream(), nullptr);
 
-  c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
-  at::getHostAllocator(at::kCUDA)->end_allocate_to_pool(mempool_id_);
-
+  std::exception_ptr cleanup_error;
+  capture_first_cleanup_error(cleanup_error, [&] {
+    c10::cuda::CUDACachingAllocator::endAllocateToPool(
+        capture_dev_, mempool_id_);
+  });
+  capture_first_cleanup_error(cleanup_error, [&] {
+    at::getHostAllocator(at::kCUDA)->end_allocate_to_pool(mempool_id_);
+  });
+  size_t invalid_capture_free_count = 0;
+  capture_first_cleanup_error(cleanup_error, [&] {
+    invalid_capture_free_count = c10::cuda::CUDAGraphMemory::markCaptureEnd(
+        capture_dev_, child_capture_id);
+  });
   conditional_node_streams_.pop();
   conditional_graph_capture_ids_.pop();
   conditional_node_handles_.pop();
@@ -671,16 +704,30 @@ void CUDAGraph::end_capture_to_conditional_node() {
   conditional_node_raw_streams_.pop();
 
   if (conditional_graph_capture_ids_.empty()) {
-    c10::cuda::CUDACachingAllocator::beginAllocateToPool(
-        capture_dev_, mempool_id_, create_allocate_filter<cudaStream_t>());
-    at::getHostAllocator(at::kCUDA)->begin_allocate_to_pool(mempool_id_, create_allocate_filter<c10::Stream>());
-  } else {
-    c10::cuda::CUDACachingAllocator::beginAllocateToPool(
-        capture_dev_, mempool_id_, create_child_allocate_filter());
-    auto filter = create_child_allocate_filter();
-    at::getHostAllocator(at::kCUDA)->begin_allocate_to_pool(mempool_id_, [filter](c10::Stream stream) {
-      return filter(CUDAStream(CUDAStream::UNCHECKED, stream));
+    capture_first_cleanup_error(cleanup_error, [&] {
+      c10::cuda::CUDACachingAllocator::beginAllocateToPool(
+          capture_dev_, mempool_id_, create_allocate_filter<cudaStream_t>());
     });
+    capture_first_cleanup_error(cleanup_error, [&] {
+      at::getHostAllocator(at::kCUDA)->begin_allocate_to_pool(
+          mempool_id_, create_allocate_filter<c10::Stream>());
+    });
+  } else {
+    auto filter = create_child_allocate_filter();
+    capture_first_cleanup_error(cleanup_error, [&] {
+      c10::cuda::CUDACachingAllocator::beginAllocateToPool(
+          capture_dev_, mempool_id_, filter);
+    });
+    capture_first_cleanup_error(cleanup_error, [&] {
+      at::getHostAllocator(at::kCUDA)->begin_allocate_to_pool(
+          mempool_id_, [filter](c10::Stream stream) {
+            return filter(CUDAStream(CUDAStream::UNCHECKED, stream));
+          });
+    });
+  }
+  AT_CUDA_CHECK(end_capture_error);
+  if (cleanup_error) {
+    std::rethrow_exception(cleanup_error);
   }
   TORCH_CHECK(
       invalid_capture_free_count == 0,
