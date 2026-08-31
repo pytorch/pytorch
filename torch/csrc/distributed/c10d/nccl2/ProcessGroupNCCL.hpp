@@ -150,6 +150,10 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       std::vector<at::Tensor>& tensors,
       const ::c10d::AllreduceOptions& opts =
           ::c10d::AllreduceOptions()) override;
+  c10::intrusive_ptr<::c10d::Work> allreduce_sparse(
+      std::vector<at::Tensor>& tensors,
+      const ::c10d::AllreduceOptions& opts =
+          ::c10d::AllreduceOptions()) override;
   c10::intrusive_ptr<::c10d::Work> allreduce_coalesced(
       std::vector<at::Tensor>& tensors,
       const ::c10d::AllreduceCoalescedOptions& opts =
