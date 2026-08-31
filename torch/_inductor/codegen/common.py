@@ -325,6 +325,16 @@ device_codegens: dict[str, DeviceCodegen] = {}
 
 
 class DeviceOpOverrides:
+    def uses_gpu_cpp_wrapper(self) -> bool:
+        """Explicitly opt into the CUDA/XPU-style C++ wrapper two-pass path.
+
+        Using, registering, or inheriting from a CppWrapperGpu-style class does
+        not imply this capability. MPS and MTIA use GPU-style wrapper classes
+        but do not require the CUDA/XPU lazy-autotune JIT+AOT path solely for
+        that reason.
+        """
+        return False
+
     def import_get_raw_stream_as(self, name: str) -> str:
         raise NotImplementedError
 
@@ -376,6 +386,9 @@ class DeviceOpOverrides:
 
     def kernel_driver(self) -> str:
         raise NotImplementedError
+
+    def cpp_kernel_launch_supports_pdl(self) -> bool:
+        return False
 
     def cpp_stream_type(self) -> str:
         raise NotImplementedError
@@ -703,6 +716,12 @@ def get_device_op_overrides(device: str) -> DeviceOpOverrides:
         raise AssertionError(type(device))
     _initialize_device_op_overrides()
     return device_op_overrides_dict[device]
+
+
+def _uses_gpu_cpp_wrapper(device: str) -> bool:
+    _initialize_device_op_overrides()
+    overrides = device_op_overrides_dict.get(device)
+    return overrides is not None and overrides.uses_gpu_cpp_wrapper()
 
 
 DTYPE_TO_COMPUTATION_DTYPE: dict[torch.dtype, torch.dtype] = {
@@ -1244,6 +1263,8 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
         is_pure: bool = True,
         pack: int = 1,
         input_dtypes: tuple[torch.dtype, ...] | None = None,
+        output_dtypes: tuple[torch.dtype, ...] | None = None,
+        output_index: int = 0,
     ) -> OpVarT:
         raise NotImplementedError(
             f"{type(self).__name__}: inline_asm_elementwise only implemented for Triton backend"
@@ -1688,7 +1709,7 @@ class KernelArgs:
         )
 
     @staticmethod
-    def _buffer_is_marked_removed(name: Any) -> bool:
+    def _buffer_is_marked_removed(name: object) -> bool:
         # this function is needed by MTIA
         return isinstance(name, RemovedArg)
 
@@ -2292,6 +2313,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         self.cse: CSE[CSEVariableType, Any] = CSE(self.newvar_prefix, self.suffix)
         self.must_keep_buffers: OrderedSet[str] = OrderedSet()
         self.store_buffer_names: OrderedSet[str] = OrderedSet()
+        self.store_buffer_counts: dict[str, int] = {}
         self._load_mask: str | None = None
         self._load_other: None | int | float = None
         # OrderedSet in set_current_node
@@ -2532,7 +2554,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
                     name, fused_node_names
                 )
             ):
-                self.num_store -= 1
+                self.num_store -= self.store_buffer_counts.get(name, 1)
                 names_to_remove.add(name)
 
         for name in names_to_remove:
@@ -3032,6 +3054,9 @@ class CSEProxy(DefaultHandler):
         if name not in V.graph.removed_buffers:
             self.kernel.store(name, index, value, mode=mode)
             self.kernel.num_store += 1
+            self.kernel.store_buffer_counts[name] = (
+                self.kernel.store_buffer_counts.get(name, 0) + 1
+            )
         self.kernel.record_op_trace("store", (name, index, value, mode), {})
 
     def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
@@ -3048,6 +3073,9 @@ class CSEProxy(DefaultHandler):
 
         if name not in V.graph.removed_buffers:
             self.kernel.num_store += 1
+            self.kernel.store_buffer_counts[name] = (
+                self.kernel.store_buffer_counts.get(name, 0) + 1
+            )
             return self.kernel.store_reduction(name, index, value)
 
     def reduction(

@@ -6640,6 +6640,13 @@
     CUDA: _philox_uniform_cuda_
   autogen: _philox_uniform, _philox_uniform.out
 
+- func: _philox_randint_(Tensor(a!) self, Tensor key, int? low=None, int? high=None) -> Tensor(a!)
+  variants: function, method
+  dispatch:
+    CPU: _philox_randint_cpu_
+    CUDA: _philox_randint_cuda_
+  autogen: _philox_randint, _philox_randint.out
+
 - func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total) -> Tensor
   dispatch:
     CPU: _dirichlet_grad_cpu
@@ -14728,7 +14735,7 @@
   python_module: linalg
   structured: True
   dispatch:
-    CPU, CUDA, MPS: linalg_polar_out
+    CPU, CUDA, MPS, XPU: linalg_polar_out
 
 - func: linalg_matrix_power(Tensor self, int n) -> Tensor
   python_module: linalg
@@ -15770,7 +15777,7 @@
 - func: special_laguerre_polynomial_l.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   dispatch:
-    CPU, CUDA, XPU: special_laguerre_polynomial_l_out
+    CPU, CUDA, MPS, XPU: special_laguerre_polynomial_l_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True
