@@ -1786,9 +1786,9 @@ if(USE_XPU)
   target_link_libraries(torch PUBLIC torch_xpu_library)
 endif()
 
-torch_optimize_layout_if_enabled(torch_cpu libtorch_cpu.yaml)
+torch_optimize_layout_if_enabled(torch_cpu)
 if(USE_CUDA)
-  torch_optimize_layout_if_enabled(torch_cuda libtorch_cuda.yaml)
+  torch_optimize_layout_if_enabled(torch_cuda)
 endif()
 
 if(PRINT_CMAKE_DEBUG_INFO)

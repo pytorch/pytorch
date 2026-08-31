@@ -572,7 +572,8 @@ endfunction()
 # When USE_LLVM_BOLT is enabled, original libraries are moved to the
 # prebolt/ subdirectory and bolted libraries are written in their place.
 # Pass the target followed by profile names in priority order:
-# torch_optimize_layout_if_enabled(<target> <profile> [<fallback>...])
+# torch_optimize_layout_if_enabled(<target> [<profile>...])
+# Falls back to lib<target>.yaml if specified profiles don't exist.
 function(torch_optimize_layout_if_enabled tgt)
   if(USE_PRIORITIZED_TEXT_FOR_LD)
     if(CMAKE_LINKER_TYPE STREQUAL "LLD")
@@ -590,7 +591,7 @@ function(torch_optimize_layout_if_enabled tgt)
     target_link_options_if_supported(${tgt} "--emit-relocs")
     find_file(
       _profile
-      NAMES ${ARGN}
+      NAMES ${ARGN} "lib${tgt}.yaml"
       PATHS "${LLVM_BOLT_PROFILES_DIR}"
       NO_DEFAULT_PATH
       NO_CMAKE_FIND_ROOT_PATH
