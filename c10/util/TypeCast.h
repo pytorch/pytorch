@@ -40,12 +40,6 @@ struct maybe_bool {
 };
 
 template <typename dest_t, typename src_t>
-C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline dest_t
-unchecked_cast_to_int(src_t src) {
-  return torch::headeronly::unchecked_cast_to_int<dest_t, src_t>(src);
-}
-
-template <typename dest_t, typename src_t>
 struct static_cast_with_inter_type {
   C10_HOST_DEVICE static inline dest_t apply(src_t src) {
     return torch::headeronly::static_cast_with_inter_type<dest_t, src_t>::apply(
@@ -58,7 +52,8 @@ C10_HOST_DEVICE To convert(From f) {
   return static_cast_with_inter_type<To, From>::apply(f);
 }
 
-[[noreturn]] C10_API void report_overflow(const char* name);
+using torch::headeronly::report_overflow;
+using torch::headeronly::unchecked_cast_to_int;
 
 template <typename To, typename From>
 To checked_convert(From f, const char* name) {
