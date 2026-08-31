@@ -11376,6 +11376,7 @@ foreach_binary_op_db: list[OpInfo] = [
         supports_forward_ad=False,
         supports_autograd=False,
         supports_inplace_autograd=False,
+        dtypesIfXPU=all_types_complex_float8_and(torch.bool, torch.half, torch.bfloat16),
     )
 ]
 
