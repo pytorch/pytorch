@@ -1,0 +1,134 @@
+# Owner(s): ["module: ci"]
+#
+# Runs pull-equivalent shards with TD disabled. Keep the copied matrices in sync
+# with pull.yml. "unstable" is required for CI tooling to treat jobs as non-blocking.
+name: td-holdout-unstable
+
+on:
+  # Capture the initial PR snapshot; synchronize events do not rerun it.
+  pull_request:
+    branches-ignore:
+      - nightly
+    types: [opened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  # Required by repository policy. PR updates do not cancel this run because
+  # `synchronize` is not a trigger for this workflow.
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
+jobs:
+  get-label-type:
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: github.repository_owner == 'pytorch'
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login }}
+      curr_branch: ${{ github.head_ref }}
+      check_experiments: lf
+
+  linux-jammy-py3_10-gcc11-build:
+    name: linux-jammy-py3.10-gcc11
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-jammy-py3.10-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang21
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      ignore-test-config-labels: true
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 2, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 3, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 4, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 5, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 6, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 7, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 8, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 9, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 10, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "distributed", shard: 1, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "distributed", shard: 2, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "distributed", shard: 3, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "distributed", shard: 4, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "distributed", shard: 5, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "distributed", shard: 6, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "distributed", shard: 7, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "distributed", shard: 8, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+        ]}
+      python-version: "3.10"
+      compiler: gcc11
+    secrets: inherit
+
+  linux-jammy-py3_10-gcc11-test:
+    name: linux-jammy-py3.10-gcc11
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-jammy-py3_10-gcc11-build
+    with:
+      build-environment: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.test-matrix }}
+      tests-to-exclude: "inductor/test_torchinductor_opinfo"
+      force-keep-going: true
+      force-no-td: true
+      soft-fail-tests: true
+      python-version: "3.10"
+      compiler: gcc11
+    secrets: inherit
+
+  linux-jammy-py3_10-clang21-build:
+    name: linux-jammy-py3.10-clang21
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-jammy-py3.10-clang21
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang21
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      ignore-test-config-labels: true
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 2, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 3, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 4, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 5, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 6, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 7, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 8, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 9, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 10, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "dynamo_wrapped", shard: 1, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo_wrapped", shard: 2, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo_wrapped", shard: 3, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo_wrapped", shard: 4, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo_wrapped", shard: 5, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo_wrapped", shard: 6, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+        ]}
+      python-version: "3.10"
+      compiler: clang21
+    secrets: inherit
+
+  linux-jammy-py3_10-clang21-test:
+    name: linux-jammy-py3.10-clang21
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-jammy-py3_10-clang21-build
+    with:
+      build-environment: ${{ needs.linux-jammy-py3_10-clang21-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-py3_10-clang21-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3_10-clang21-build.outputs.test-matrix }}
+      tests-to-exclude: "inductor/test_torchinductor_opinfo"
+      force-keep-going: true
+      force-no-td: true
+      soft-fail-tests: true
+      python-version: "3.10"
+      compiler: clang21
+    secrets: inherit
