@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # Owner(s): ["oncall: r2p"]
 
+import functools
 import json
 import os
 import shutil
@@ -47,6 +48,54 @@ def raise_child_failure_error_fn(name, child_error_file=""):
             ErrorHandler().record_exception(SentinelError("foobar"))
     pf = ProcessFailure(local_rank=0, pid=997, exitcode=1, error_file=child_error_file)
     raise ChildFailedError(name, {0: pf})
+
+
+def raise_sentinel_error_fn():
+    raise SentinelError("foobar")
+
+
+def return_ok_fn():
+    return "ok"
+
+
+@record
+def function_for_testing():
+    return None
+
+
+# A functools.partial has no __qualname__. MultiprocessContext._wrap runs
+# record(fn)(*args_) in every spawned worker, and torchrec's elastic_launch
+# passes a partial as fn -- the exact entrypoint shape that regressed in
+# D116228049. `@record` needs a `def`, but `@record` is just `fn = record(fn)`,
+# so wrapping a partial with record() is the faithful decorator equivalent.
+partial_entrypoint_fn = functools.partial(raise_sentinel_error_fn)
+record_wrapped_partial_fn = record(partial_entrypoint_fn)
+
+
+class FnNameCapturingErrorHandler(ErrorHandler):
+    """Captures the entrypoint fn_name that ``@record`` threads via handler state.
+
+    Deliberately overrides ``initialize``/``record_exception`` with the
+    pre-fn_name signatures to prove that old-style subclasses still receive the
+    entrypoint name (through ``self._fn_name``) and are not broken by ``@record``.
+    """
+
+    def __init__(self) -> None:
+        self.initialize_fn_name: str | None = None
+        self.record_exception_fn_name: str | None = None
+        self.record_success_fn_name: str | None = None
+
+    def initialize(self) -> None:
+        self.initialize_fn_name = self._fn_name
+        super().initialize()
+
+    def record_exception(self, e: BaseException) -> None:
+        self.record_exception_fn_name = self._fn_name
+        super().record_exception(e)
+
+    def record_success(self) -> None:
+        self.record_success_fn_name = self._fn_name
+        super().record_success()
 
 
 def read_resource_file(resource_file: str) -> str:
@@ -283,3 +332,132 @@ class ApiTest(unittest.TestCase):
         error_msg = str(ex)
         self.assertIn("(SIGSEGV)", error_msg)
         self.assertIn(f"exitcode  : {-signal.SIGSEGV}", error_msg)
+
+    def test_record_passes_fn_name_to_error_handler(self):
+        # a subclass using the pre-fn_name signatures must still receive the
+        # entrypoint name via handler state and must not raise from @record
+        error_handler = FnNameCapturingErrorHandler()
+        wrapped = record(raise_sentinel_error_fn, error_handler=error_handler)
+
+        with mock.patch.dict(
+            os.environ, {"TORCHELASTIC_ERROR_FILE": self.test_error_file}
+        ):
+            with self.assertRaises(SentinelError):
+                wrapped()
+
+        self.assertEqual("raise_sentinel_error_fn", error_handler.initialize_fn_name)
+        self.assertEqual(
+            "raise_sentinel_error_fn", error_handler.record_exception_fn_name
+        )
+
+    def test_record_partial_entrypoint_without_qualname(self):
+        # Regression test for D116228049: a functools.partial entrypoint has no
+        # __qualname__. Before the fix, @record's f.__qualname__ raised
+        # AttributeError in every spawned worker; getattr(f, "__qualname__",
+        # None) now threads None instead of crashing.
+        self.assertFalse(hasattr(partial_entrypoint_fn, "__qualname__"))
+
+        # real-world path (default handler): only the underlying error surfaces,
+        # not AttributeError from @record.
+        with mock.patch.dict(
+            os.environ, {"TORCHELASTIC_ERROR_FILE": self.test_error_file}
+        ):
+            with self.assertRaises(SentinelError):
+                record_wrapped_partial_fn()
+
+        # the missing __qualname__ is threaded to the handler as None (no fn
+        # attribution), rather than raising. Use a fresh error file: the write
+        # above leaves error.json read-only to preserve the first failure.
+        error_handler = FnNameCapturingErrorHandler()
+        capture_error_file = os.path.join(self.test_dir, "capture_error.json")
+        with mock.patch.dict(
+            os.environ, {"TORCHELASTIC_ERROR_FILE": capture_error_file}
+        ):
+            with self.assertRaises(SentinelError):
+                record(partial_entrypoint_fn, error_handler=error_handler)()
+
+        self.assertIsNone(error_handler.initialize_fn_name)
+        self.assertIsNone(error_handler.record_exception_fn_name)
+
+    def test_record_decorated_fn_threads_qualname(self):
+        # Counterpart to the partial test: a plain @record def HAS __qualname__,
+        # so getattr(f, "__qualname__", None) takes the non-fallback branch and
+        # threads the function's qualified name. Calling the decorated fn also
+        # shows the shared line runs on the normal path without raising.
+        self.assertIsNone(function_for_testing())
+
+        error_handler = FnNameCapturingErrorHandler()
+        result = record(function_for_testing.__wrapped__, error_handler=error_handler)()
+
+        self.assertIsNone(result)
+        self.assertEqual("function_for_testing", error_handler.initialize_fn_name)
+        self.assertEqual("function_for_testing", error_handler.record_success_fn_name)
+
+    def test_record_does_not_write_fn_name_to_error_file(self):
+        # extraInfo is a map<string,string> for downstream consumers, so @record
+        # threads fn_name to the handler but the base handler does not persist it
+        wrapped = record(raise_sentinel_error_fn, error_handler=ErrorHandler())
+
+        with mock.patch.dict(
+            os.environ, {"TORCHELASTIC_ERROR_FILE": self.test_error_file}
+        ):
+            with self.assertRaises(SentinelError):
+                wrapped()
+
+        with open(self.test_error_file) as fp:
+            err = json.load(fp)
+        self.assertNotIn("fn_name", err["message"]["extraInfo"])
+
+    def test_record_calls_record_success_on_success(self):
+        # @record must invoke record_success and return the fn's value on the
+        # no-exception path, without recording an exception or error file
+        error_handler = mock.MagicMock(spec=ErrorHandler)
+        wrapped = record(return_ok_fn, error_handler=error_handler)
+
+        with mock.patch.dict(
+            os.environ, {"TORCHELASTIC_ERROR_FILE": self.test_error_file}
+        ):
+            result = wrapped()
+
+        self.assertEqual("ok", result)
+        error_handler.record_success.assert_called_once()
+        error_handler.record_exception.assert_not_called()
+        self.assertFalse(os.path.isfile(self.test_error_file))
+
+    def test_record_does_not_call_record_success_on_failure(self):
+        error_handler = mock.MagicMock(spec=ErrorHandler)
+        wrapped = record(raise_sentinel_error_fn, error_handler=error_handler)
+
+        with mock.patch.dict(
+            os.environ, {"TORCHELASTIC_ERROR_FILE": self.test_error_file}
+        ):
+            with self.assertRaises(SentinelError):
+                wrapped()
+
+        error_handler.record_success.assert_not_called()
+        error_handler.record_exception.assert_called_once()
+
+    def test_record_success_receives_fn_name(self):
+        # record_success runs while the entrypoint fn_name is still set on the handler
+        error_handler = FnNameCapturingErrorHandler()
+        wrapped = record(return_ok_fn, error_handler=error_handler)
+
+        result = wrapped()
+
+        self.assertEqual("ok", result)
+        self.assertEqual("return_ok_fn", error_handler.record_success_fn_name)
+
+    def test_record_success_error_not_recorded_as_failure(self):
+        # if record_success() raises, it must propagate and NOT be routed through
+        # record_exception (which would misreport a successful run as a failure)
+        error_handler = mock.MagicMock(spec=ErrorHandler)
+        error_handler.record_success.side_effect = RuntimeError("telemetry boom")
+        wrapped = record(return_ok_fn, error_handler=error_handler)
+
+        with mock.patch.dict(
+            os.environ, {"TORCHELASTIC_ERROR_FILE": self.test_error_file}
+        ):
+            with self.assertRaises(RuntimeError):
+                wrapped()
+
+        error_handler.record_exception.assert_not_called()

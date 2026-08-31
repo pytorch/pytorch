@@ -1,10 +1,8 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/export/upgrader.h>
-#include <limits>
 #include <map>
 #include <set>
 #include <sstream>
-#include <stdexcept>
 #include <vector>
 
 namespace torch::_export {
@@ -99,15 +97,12 @@ void registerUpgrader(
   std::string component;
 
   while (std::getline(ss, component, '.')) {
-    if (component.empty()) {
-      throw std::invalid_argument("Empty component in keypath: " + dot_keypath);
-    }
-    keypath_vector.push_back(component);
+    TORCH_CHECK_VALUE(
+        !component.empty(), "Empty component in keypath: ", dot_keypath);
+    keypath_vector.push_back(std::move(component));
   }
 
-  if (keypath_vector.empty()) {
-    throw std::invalid_argument("Empty keypath provided");
-  }
+  TORCH_CHECK_VALUE(!keypath_vector.empty(), "Empty keypath provided");
 
   registerUpgrader(version, std::move(keypath_vector), upgrade_func);
 }
@@ -145,15 +140,12 @@ bool deregisterUpgrader(int version, const std::string& dot_keypath) {
   std::string component;
 
   while (std::getline(ss, component, '.')) {
-    if (component.empty()) {
-      throw std::invalid_argument("Empty component in keypath: " + dot_keypath);
-    }
-    keypath_vector.push_back(component);
+    TORCH_CHECK_VALUE(
+        !component.empty(), "Empty component in keypath: ", dot_keypath);
+    keypath_vector.push_back(std::move(component));
   }
 
-  if (keypath_vector.empty()) {
-    throw std::invalid_argument("Empty keypath provided");
-  }
+  TORCH_CHECK_VALUE(!keypath_vector.empty(), "Empty keypath provided");
 
   return deregisterUpgrader(version, keypath_vector);
 }

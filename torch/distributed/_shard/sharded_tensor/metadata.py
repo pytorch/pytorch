@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import cast
 
 import torch
 from torch.distributed._shard.metadata import ShardMetadata
@@ -84,13 +85,14 @@ class TensorProperties:
 
     @staticmethod
     def create_from_tensor(tensor: torch.Tensor) -> "TensorProperties":
+        stride = getattr(tensor, "stride", None)
         return TensorProperties(
             dtype=tensor.dtype,
             layout=tensor.layout,
             requires_grad=tensor.requires_grad,
             memory_format=torch.contiguous_format,
             pin_memory=tensor.is_pinned(),
-            strides=tensor.stride(),
+            strides=cast(tuple[int, ...], stride()) if callable(stride) else None,
         )
 
 

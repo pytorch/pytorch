@@ -1,6 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/core/DimVector.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/WrapDimUtils.h>
 #include <c10/util/Exception.h>
@@ -89,7 +88,7 @@ Tensor trapezoid(const Tensor& y, const Tensor& x, int64_t dim) {
     if (y.sym_size(dim) == 0) {
         return zeros_like_except(y, dim);
     }
-    TORCH_CHECK(y.scalar_type() != kBool && x.scalar_type() != kBool, "trapezoid: received a bool input for `x` or `y`, but bool is not supported")
+    TORCH_CHECK_NOT_IMPLEMENTED(y.scalar_type() != kBool && x.scalar_type() != kBool, "trapezoid: received a bool input for `x` or `y`, but bool is not supported")
     Tensor x_viewed;
     // Note that we explicitly choose not to broadcast 'x' to match the shape of 'y' here because
     // we want to follow NumPy's behavior of broadcasting 'dx' and 'dy' together after the differences are taken.
@@ -124,7 +123,7 @@ Tensor trapezoid(const Tensor& y, const Scalar& dx, int64_t dim) {
     if (y.sym_size(dim) == 0) {
         return zeros_like_except(y, dim);
     }
-    TORCH_CHECK(y.scalar_type() != kBool, "trapezoid: received a bool input for `y`, but bool is not supported")
+    TORCH_CHECK_NOT_IMPLEMENTED(y.scalar_type() != kBool, "trapezoid: received a bool input for `y`, but bool is not supported")
     TORCH_CHECK(!(dx.isComplex() ||  dx.isBoolean()), "trapezoid: Currently, we only support dx as a real number.");
     return do_trapezoid(y, dx.toDouble(), dim);
 }
@@ -139,7 +138,7 @@ Tensor trapz(const Tensor& y, double dx, int64_t dim) {
 
 Tensor cumulative_trapezoid(const Tensor& y, const Tensor& x, int64_t dim) {
     dim = maybe_wrap_dim(dim, y);
-    TORCH_CHECK(y.scalar_type() != kBool && x.scalar_type() != kBool, "cumulative_trapezoid: received a bool input for `x` or `y`, but bool is not supported")
+    TORCH_CHECK_NOT_IMPLEMENTED(y.scalar_type() != kBool && x.scalar_type() != kBool, "cumulative_trapezoid: received a bool input for `x` or `y`, but bool is not supported")
     Tensor x_viewed;
     if (x.dim() == 1) {
         // See trapezoid for implementation notes
@@ -162,7 +161,7 @@ Tensor cumulative_trapezoid(const Tensor& y, const Tensor& x, int64_t dim) {
 }
 
 Tensor cumulative_trapezoid(const Tensor& y, const Scalar& dx, int64_t dim) {
-    TORCH_CHECK(y.scalar_type() != kBool, "cumulative_trapezoid: received a bool input for `y`, but bool is not supported")
+    TORCH_CHECK_NOT_IMPLEMENTED(y.scalar_type() != kBool, "cumulative_trapezoid: received a bool input for `y`, but bool is not supported")
     TORCH_CHECK(!(dx.isComplex() || dx.isBoolean()), "cumulative_trapezoid: Currently, we only support dx as a real number.");
 
     return do_cumulative_trapezoid(y, dx.toDouble(), dim);
