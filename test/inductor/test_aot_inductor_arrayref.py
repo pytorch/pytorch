@@ -1,6 +1,8 @@
 # Owner(s): ["module: inductor"]
+import os
 import sys
 import unittest
+from unittest.mock import patch
 
 import torch
 from torch._inductor import config
@@ -27,7 +29,12 @@ try:
             check_model_with_multiple_inputs,
             code_check_count,
         )
-        from .test_torchinductor import copy_tests, TestFailure
+        from .test_torchinductor import (
+            copy_tests,
+            define_custom_op_for_test,
+            target_assert_alignment_regex,
+            TestFailure,
+        )
     except ImportError:
         from test_aot_inductor import (  # @manual
             AOTInductorTestsTemplate,
@@ -38,6 +45,8 @@ try:
         )
         from test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
             copy_tests,
+            define_custom_op_for_test,
+            target_assert_alignment_regex,
             TestFailure,
         )
 except (unittest.SkipTest, ImportError):
@@ -374,6 +383,51 @@ if IS_FBCODE:
 
 
 class TestCppWrapperCpuSelection(TestCase):
+    @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
+    def test_fallback_alignment_assert_with_stack_allocation(self):
+        def slice2d(x):
+            return (3 * x)[..., 1:-15]
+
+        def slice2d_meta(x):
+            return torch.empty_like(x)[..., 0:-16]
+
+        op_name = "arrayref_slice2d_incorrect_meta_assert"
+        define_custom_op_for_test(op_name, slice2d, slice2d_meta)
+        op = getattr(torch.ops.test, op_name)
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.cos(op(torch.nn.functional.relu(x)))
+
+        sample = (torch.randn(8, 24),)
+        inductor_configs = {
+            "aot_inductor.allow_stack_allocation": True,
+            "aot_inductor.use_minimal_arrayref_interface": False,
+            "alignment_asserts": True,
+            "fx_graph_cache": False,
+            "implicit_fallbacks": True,
+        }
+        package_path, code = run_and_get_cpp_code(
+            AOTIRunnerUtil.compile,
+            Model(),
+            sample,
+            inductor_configs=inductor_configs,
+        )
+        FileCheck().check_regex(
+            target_assert_alignment_regex(
+                cpp_wrapper=True,
+                op_name=f"torch.ops.test.{op_name}.default",
+            )
+        ).run(code)
+
+        aoti_module = torch._inductor.aoti_load_package(package_path)
+        expected_error = (
+            "Expect the tensor to be 16 bytes aligned. "
+            "Fail due to storage_offset=1 itemsize=4"
+        )
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            aoti_module(*sample)
+
     def test_cpu_cpp_wrapper_follows_current_stack_allocation_config(self):
         # Regression test: the CPU cpp wrapper class (CppWrapperCpu vs
         # CppWrapperCpuArrayRef) must track the current allow_stack_allocation
