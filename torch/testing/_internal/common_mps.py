@@ -561,6 +561,13 @@ if torch.backends.mps.is_available():
     def mps_ops_grad_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
         XFAILLIST_GRAD = {
             # Unimplemented ops
+            # No 5-D bicubic sampler on MPS, so the grad leg fails in its forward
+            # call. The forward entry in UNIMPLEMENTED_XFAILLIST also reaches this
+            # test today, but only because mps_ops_modifier mutates the shared
+            # test_consistency_op_db before the grad db is deep-copied; this line
+            # makes the coverage explicit instead of an ordering accident.
+            # TODO: drop this when MPS has 5-D bicubic.
+            "nn.functional.grid_sample": [torch.float32],
             "sparse.mmreduce": [torch.float32],  # csr not supported
             "linalg.householder_product": None,
             "linalg.lstsq": [torch.float32],
