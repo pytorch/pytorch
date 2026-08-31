@@ -1805,7 +1805,8 @@ class DeviceCachingAllocator {
 
     const bool has_active_captures =
         C10_UNLIKELY(capture_tracker_.hasActiveCaptures());
-    CUDAGraphMemory::AllocationContext allocation_context;
+    CUDAGraphMemory::AllocationContext allocation_context{
+        false, std::nullopt, stream};
     if (has_active_captures) {
       allocation_context = capture_tracker_.allocationContext(stream);
     }
@@ -1822,7 +1823,7 @@ class DeviceCachingAllocator {
     AllocParams params(
         device_id,
         size,
-        stream,
+        allocation_context.block_reuse_stream,
         &pool,
         alloc_size,
         is_expandable_segments_active);
@@ -2106,20 +2107,23 @@ class DeviceCachingAllocator {
     std::unique_lock<std::recursive_mutex> lock(mutex);
     const bool has_active_captures =
         C10_UNLIKELY(capture_tracker_.hasActiveCaptures());
-    CUDAGraphMemory::AllocationContext allocation_context;
+    CUDAGraphMemory::AllocationContext allocation_context{
+        false, std::nullopt, stream};
     if (has_active_captures) {
       allocation_context = capture_tracker_.allocationContext(stream);
     }
     prepare_for_malloc(context, stream, allocation_context.is_capturing);
 
     const size_t size = round_size(orig_size);
+    const cudaStream_t block_reuse_stream =
+        allocation_context.block_reuse_stream;
 
     // The same block pool is used for both prefix block and requested block.
     // Prefix block may have a significantly larger size than requested block
     // when multiple small blocks coalesced into a large prefix block.
     auto& pool = get_pool(size, stream);
     Block* containing_block =
-        get_free_block_containing_address(pool, size, stream, addr);
+        get_free_block_containing_address(pool, size, block_reuse_stream, addr);
     if (!containing_block) {
       return nullptr;
     }
@@ -2151,7 +2155,7 @@ class DeviceCachingAllocator {
       AllocParams prefix_params(
           device_id,
           prefix_size,
-          stream,
+          block_reuse_stream,
           &pool,
           get_allocation_size(prefix_size),
           is_expandable_segments_active);
@@ -2171,7 +2175,7 @@ class DeviceCachingAllocator {
     AllocParams requested_params(
         device_id,
         size,
-        stream,
+        block_reuse_stream,
         &pool,
         get_allocation_size(size),
         is_expandable_segments_active);
