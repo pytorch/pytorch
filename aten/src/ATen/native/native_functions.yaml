@@ -2234,21 +2234,21 @@
   variants: method
 
 - func: divmod.Tensor(Tensor self, Tensor other) -> (Tensor quotient, Tensor remainder)
-  device_check: NoCheck   # TensorIterator
+  device_check: NoCheck   # Composite-only.
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: divmod
   tags: pointwise
 
 - func: divmod.Scalar(Tensor self, Scalar other) -> (Tensor quotient, Tensor remainder)
-  device_check: NoCheck   # TensorIterator
+  device_check: NoCheck   # Composite-only.
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: divmod
   tags: pointwise
 
 - func: divmod.Scalar_Tensor(Scalar self, Tensor other) -> (Tensor quotient, Tensor remainder)
-  device_check: NoCheck   # TensorIterator
+  device_check: NoCheck   # Composite-only.
   variants: function
   dispatch:
     CompositeExplicitAutograd: divmod
