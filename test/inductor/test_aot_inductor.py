@@ -1343,6 +1343,7 @@ class AOTInductorTestsTemplate:
         runner.swap_constant_buffer()
         self.assertEqual(expected, runner.run([test_inputs])[0])
 
+    @requires_gpu
     def test_duplicate_constant_folding(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
