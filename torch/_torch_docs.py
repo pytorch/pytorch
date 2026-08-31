@@ -3637,6 +3637,19 @@ Args:
 )
 
 add_docstr(
+    torch.detach,
+    r"""
+detach(input) -> Tensor
+
+Returns a new Tensor, detached from the current graph.
+See :meth:`~Tensor.detach` for function description.
+
+Args:
+    {input}
+""".format(**common_args),
+)
+
+add_docstr(
     torch.diag,
     r"""
 diag(input, diagonal=0, *, out=None) -> Tensor
@@ -14775,25 +14788,6 @@ add_docstr(
 Performs the same operation as :func:`torch.select`, but all output tensors
 are freshly created instead of aliasing the input.
 """,
-)
-
-add_docstr(
-    torch.detach,
-    r"""
-detach(input) -> Tensor
-
-Returns a copy of :attr:`input` that is detached from the autograd graph.
-
-The result shares the same storage as :attr:`input`. Gradients are not
-tracked through this operation.
-
-.. note::
-
-    This is equivalent to :meth:`Tensor.detach`.
-
-Args:
-    {input}
-""".format(**common_args),
 )
 
 add_docstr(
