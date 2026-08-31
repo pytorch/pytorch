@@ -484,7 +484,9 @@ class TestIterators(torch._dynamo.test_case.TestCase):
             DequeReverseIteratorVariable,
         )
 
-        self.assertFalse(issubclass(DequeReverseIteratorVariable, DequeIteratorVariable))
+        self.assertFalse(
+            issubclass(DequeReverseIteratorVariable, DequeIteratorVariable)
+        )
         self.assertIs(
             DequeReverseIteratorVariable._cpython_type,
             type(reversed(collections.deque())),
