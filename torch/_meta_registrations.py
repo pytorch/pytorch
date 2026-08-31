@@ -1083,7 +1083,8 @@ def meta_max(self):
     return self.new_empty(())
 
 
-@register_meta(aten.max.dim)
+@register_meta([aten.max.dim, aten.max.dim_max])
+@out_wrapper("max", "max_values", exact_dtype=True)
 def meta_max_dim(self, dim, keepdim=False):
     dim = utils.reduction_dims(self.shape, (dim,))
     output_shape = _compute_reduction_shape(self, dim, keepdim)
@@ -1099,7 +1100,8 @@ def meta_min(self):
     return self.new_empty(())
 
 
-@register_meta(aten.min.dim)
+@register_meta([aten.min.dim, aten.min.dim_min])
+@out_wrapper("min", "min_indices", exact_dtype=True)
 def meta_min_dim(self, dim, keepdim=False):
     dim = utils.reduction_dims(self.shape, (dim,))
     output_shape = _compute_reduction_shape(self, dim, keepdim)
@@ -7910,7 +7912,8 @@ def scalar_tensor(s, dtype=None, layout=None, device=None, pin_memory=None):
     )
 
 
-@register_meta(aten.topk.default)
+@register_meta([aten.topk.default, aten.topk.values])
+@out_wrapper("values", "indices", exact_dtype=True)
 def topk_meta(self, k, dim=-1, largest=True, sorted=True):
     # From aten/src/ATen/native/Sorting.cpp
     dim = maybe_wrap_dim(dim, self.dim(), wrap_scalar=True)
