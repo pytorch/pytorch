@@ -2518,13 +2518,19 @@ def is_ai_pending(check: JobCheckState, drci_classifications: Any) -> bool:
 
 
 def is_ai_not_related(check: JobCheckState, drci_classifications: Any) -> bool:
-    """Return True if the AI CI Advisor cleared this failure as unrelated.
+    """Return True if the AI CI Advisor cleared this failure.
 
     Dr.CI is the classification authority: it applies the verdict, confidence,
     run-freshness and job-outcome predicates, and returns whatever survives them
     under ``AI_NOT_RELATED``. It emits the category only when its own feature
     flag is on, so an absent category is the off state and everything keeps
     blocking.
+
+    "Cleared" is broader than the category name suggests: Dr.CI puts a failure
+    here when the advisor judged it not evidence against the PR, which covers a
+    pre-existing unrelated failure, a CI infrastructure fault, and an unusable
+    signal alike. The set lives in test-infra's ``SUPPRESSIBLE_VERDICTS``, and
+    this side deliberately does not re-derive it -- one authority, not two.
 
     Unlike the sibling matchers this one requires the job id and never falls
     back to the name. Two checks can share a name, and the cost of a wrong match
@@ -2999,16 +3005,15 @@ def categorize_checks(
             target.append((checkname, url, job_id))
 
     # A correlated outage can make many independent jobs fail the same way, and
-    # the advisor will judge each of them unrelated on its own merits. Cap how
-    # many gates one merge may skip on that basis, so an outage cannot clear a
-    # whole PR at once. Kept separate from the flaky/broken-trunk budget below:
-    # that one is about noise, this one is about an unreviewed classifier
-    # deciding a merge.
+    # the advisor will clear each of them on its own merits. Cap how many gates
+    # one merge may skip on that basis, so an outage cannot clear a whole PR at
+    # once. Kept separate from the flaky/broken-trunk budget below: that one is
+    # about noise, this one is about an unreviewed classifier deciding a merge.
     ai_not_related = failed_checks_categorization["AI_NOT_RELATED"]
     if len(ai_not_related) > AI_NOT_RELATED_CHECKS_THRESHOLD:
         warn(
-            f"The AI CI Advisor judged {len(ai_not_related)} failed checks "
-            f"unrelated to this PR, more than the threshold of "
+            f"The AI CI Advisor cleared {len(ai_not_related)} failed checks as "
+            f"not evidence against this PR, more than the threshold of "
             f"{AI_NOT_RELATED_CHECKS_THRESHOLD}. That many at once usually means "
             "an outage rather than a coincidence, so they will block the merge: "
             + ", ".join([x[0] for x in ai_not_related])
