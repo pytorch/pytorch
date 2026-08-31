@@ -171,6 +171,23 @@ def _fake_while_loop(cond_fn, body_fn, operands):
     return operands
 
 
+def _skip_cuda_if_unavailable(fn):
+    # Per-parametrization counterpart of requires_cuda for tests parametrized over
+    # device: skips only the cuda instantiations, so the cpu ones still run.
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        device = kwargs.get("device")
+        if (
+            device is not None
+            and torch.device(device).type == "cuda"
+            and not torch.cuda.is_available()
+        ):
+            raise unittest.SkipTest("CUDA is unavailable")
+        return fn(self, *args, **kwargs)
+
+    return wrapper
+
+
 def compile_mode_helper(fct, compile_mode):
     if compile_mode == "compile":
         return torch.compile(fct, fullgraph=True, dynamic=False)
@@ -7068,12 +7085,12 @@ class GraphModule(torch.nn.Module):
         # A dim-sensitive combine_fn (transpose) passes the frontend pointwise gate
         # but is not truly elementwise. The lane must be rank >= 2 so transpose(-1, -2)
         # is valid and the call actually reaches the batch rule (a rank-1 lane would
-        # fail earlier during frontend meta tracing, making this test vacuous). Under
-        # compile the batch rule's fast path calls combine_fn directly on last-axis-
-        # batched args, and the transpose then misaligns the batch axis, so the
-        # pointwise lowering rejects it loudly rather than silently miscomputing.
-        from torch._dynamo.exc import BackendCompilerFailed
-
+        # fail earlier during frontend meta tracing, making this test vacuous). The
+        # batch rule therefore takes the base re-vmap path, whose layout permutes
+        # cannot be traced as a combine subgraph, so this must fail loudly. Which
+        # layer catches it is not the point of the test (the pointwise lowering
+        # rejects the permutes; a backend without that lowering hits the rank
+        # mismatch at graph runtime), only that it never silently miscomputes.
         x = torch.randn(4, 5, 3, 3, device="cuda")
 
         def combine_fn(a, b):
@@ -7085,7 +7102,8 @@ class GraphModule(torch.nn.Module):
 
             return torch.vmap(inner_fn, in_dims=0)(x)
 
-        with self.assertRaises(BackendCompilerFailed):
+        # BackendCompilerFailed derives from RuntimeError, so this covers both layers.
+        with self.assertRaises(RuntimeError):
             torch.compile(fn, fullgraph=True)(x)
 
     @requires_cuda
@@ -7115,10 +7133,11 @@ class GraphModule(torch.nn.Module):
     def test_associative_scan_in_vmap_eager_nonpointwise(self, batch_size):
         # Eager counterpart of the compile nonpointwise test: a dim-sensitive
         # combine_fn passes the frontend pointwise gate but is not elementwise. The
-        # batch rule must NOT take the direct-call fast path in eager (it would parse
-        # the trailing batch axis as data and silently miscompute -- notably when
-        # batch_size equals the lane feature dim). It must fall back to the base
-        # re-vmap path, which vmaps over the true batch axis and stays correct.
+        # batch rule must NOT take the direct-call fast path (it would parse the
+        # trailing batch axis as data and silently miscompute -- notably when
+        # batch_size equals the lane feature dim). It must use the base re-vmap path,
+        # which vmaps over the true batch axis and stays correct. batch_size 3 matches
+        # lane_dim, the case where shapes line up and nothing else can catch the error.
         lane_dim = 3
         x = torch.randn(batch_size, 4, lane_dim, lane_dim)
 

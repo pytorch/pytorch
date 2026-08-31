@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
+import operator
 from collections.abc import Callable
 from typing import Any
 
@@ -32,7 +33,6 @@ from torch._higher_order_ops.utils import (
 from torch._ops import HigherOrderOperator
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
-    get_proxy_mode,
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
@@ -163,9 +163,8 @@ def associative_scan(
 
     .. warning::
 
-        ``torch.associative_scan`` is a prototype feature in PyTorch. Autograd is
-        supported, except for gradients with respect to lifted arguments (freevars)
-        under ``combine_mode="pointwise"``. You may still run into miscompiles.
+        ``torch.associative_scan`` is a prototype feature in PyTorch. It currently
+        does not support autograd and you may run into miscompiles.
         Read more about feature classification at:
         https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
 
@@ -887,38 +886,48 @@ def associative_scan_functionalize(ctx, combine_fn, xs, additional_inputs):
     return ctx.wrap_tensors(ret)
 
 
+def _combine_fn_is_elementwise(combine_fn, xs, additional_inputs) -> bool:
+    """Whether ``combine_fn`` traces to a graph of purely elementwise ops.
+
+    Stricter than dynamo's `combine_mode="pointwise"` check (using `is_pointwise_use`).
+    The direct call instead the trailing batch axis to be inert,
+    which any view (allowed by `is_pointwise_use`) would breaks..
+    """
+    sample_slices = [first_slice_copy(x) for x in xs]
+    try:
+        gm = materialize_as_graph(
+            combine_fn, (*sample_slices, *sample_slices, *additional_inputs)
+        )
+    except Exception:
+        # Fall back to the base re-vmap path, which is correct for any combine_fn,
+        # but slower.
+        return False
+    for node in gm.graph.nodes:
+        if node.op != "call_function" or node.target is operator.getitem:
+            continue
+        if (
+            not isinstance(node.target, torch._ops.OpOverload)
+            or torch.Tag.pointwise not in node.target.tags
+        ):
+            return False
+    return True
+
+
 class _PointwiseVmapCombineFnWrapper(_VmapCombineFnWrapper):
-    """``_VmapCombineFnWrapper`` specialization for ``combine_mode="pointwise"``.
+    """``_VmapCombineFnWrapper`` specialization for a pointwise ``combine_fn``.
 
-    The base wrapper re-vmaps ``combine_fn`` with the batch dim parked on the last
-    axis; that round-trips the batch dim to the front and back, injecting a
-    canceling pair of layout ops around the ``combine_fn`` core. Under compile those
-    ops would survive into the Inductor combine subgraph and force it to elide them,
-    which breaks the pointwise lowering.
-
-    The fast path instead calls ``combine_fn`` directly on the last-axis-batched
-    args, leaving the combine subgraph clean. This is only sound when ``combine_fn``
-    is genuinely elementwise, so that treating the trailing batch axis as an ordinary
-    data axis is a no-op. The frontend pointwise gate does not guarantee that: a
-    dim-sensitive combine (e.g. one calling ``transpose``) still passes the gate but
-    would be silently miscomputed by the direct call. We therefore restrict the fast
-    path to tracing (compile), where a non-elementwise combine fails loudly in the
-    pointwise lowering; in eager we defer to the always-correct base re-vmap path,
-    which vmaps over the real batch axis. The fast path also requires every argument
-    to be batched at the trailing axis; a still-unbatched arg (e.g. an unbatched
-    additional_input in eager) likewise falls back to the base re-vmap path.
+    Calling ``combine_fn`` directly on the last-axis-batched args avoids permutes
+    ``_VmapCombineFnWrapper`` would trigger.
     """
 
     def __call__(self, *args: Any) -> Any:
-        # Only take the fast path under tracing (all args batched at -1). In eager the
-        # base re-vmap path is correct for any combine_fn; the fast path is a
-        # compile-only optimization to keep the Inductor combine subgraph elementwise.
-        if get_proxy_mode() is None or any(bdim is None for bdim in self.in_dims):
+        # A direct call needs the trailing batch axis present on every arg; with a
+        # mix of batched and unbatched args only the base path broadcasts correctly.
+        if any(bdim is None for bdim in self.in_dims):
             return super().__call__(*args)
         outputs = self.combine_fn(*args)
-        # Every input is batched at -1 and, since the fast path only runs under
-        # compile where a non-elementwise combine_fn fails at lowering, combine_fn
-        # is elementwise here -- so every output leaf carries the batch axis at -1.
+        # Every input is batched at -1 and this wrapper is only selected for an
+        # elementwise combine_fn, so every output leaf is batched at -1 too.
         out_dims = tuple(-1 for _ in pytree.tree_leaves(outputs))
         # Mirror the base wrapper's cross-step consistency guard: out_dims must not
         # change between scan steps.
@@ -932,15 +941,11 @@ class _PointwiseVmapCombineFnWrapper(_VmapCombineFnWrapper):
 
 
 # Note [associative_scan vmap coverage]
-# This batch rule is dispatched only when the associative_scan_op HOP is present
-# under a vmap layer. The frontend builds that HOP for combine_mode="pointwise";
-# combine_mode="generic" is a pure-Python decomposition (generic_associative_scan)
-# that never constructs the HOP, so vmap over a generic scan is handled entirely
-# by the batching rules of the individual aten ops and never reaches this rule.
-# Consequently only the pointwise cases in the vmap tests exercise the code below;
-# the generic cases guard the frontend decomposition instead. In eager the HOP
-# dense-decomposes on any device, so pointwise+CPU already covers this rule; the
-# CUDA-only restriction is a property of the lowered pointwise scan, not this rule.
+# Only combine_mode="pointwise" builds the associative_scan_op HOP, so only the
+# pointwise vmap tests reach this rule; combine_mode="generic" decomposes in Python
+# (generic_associative_scan) and is batched by the individual aten ops instead. The
+# rule itself is device-agnostic -- the CUDA-only vmap tests are gated by the lowered
+# pointwise scan, not by anything here.
 @associative_scan_op.py_impl(torch._C._functorch.TransformType.Vmap)
 def associative_scan_batch_rule(interpreter, combine_fn, xs, additional_inputs):
     unbatched_args, in_dims = unwrap_batched(
@@ -969,7 +974,14 @@ def associative_scan_batch_rule(interpreter, combine_fn, xs, additional_inputs):
         xs_run_dims = tuple(-1 for _ in unbatched_xs)
         run_move_dims = (*xs_run_dims, *xs_run_dims, *additional_move_dims)
 
-        wrapper = _PointwiseVmapCombineFnWrapper(
+        wrapper_cls = (
+            _PointwiseVmapCombineFnWrapper
+            if _combine_fn_is_elementwise(
+                combine_fn, reconciled_xs, unbatched_additional_inputs
+            )
+            else _VmapCombineFnWrapper
+        )
+        wrapper = wrapper_cls(
             combine_fn, run_move_dims, batch_size, interpreter.randomness()
         )
         unwrapped_out = associative_scan_op(
