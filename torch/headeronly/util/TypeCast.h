@@ -74,7 +74,7 @@ struct static_cast_with_inter_type {
     auto r = maybe_real<real, src_t>::apply(src);
     if constexpr (
         std::is_integral_v<dest_t> && !std::is_integral_v<decltype(r)>) {
-      return unchecked_cast_to_int<dest_t>(r);
+      return torch::headeronly::unchecked_cast_to_int<dest_t>(r);
     } else {
       return static_cast<dest_t>(r);
     }
@@ -102,7 +102,8 @@ struct static_cast_with_inter_type<uint8_t, src_t> {
     if constexpr (std::is_integral_v<decltype(r)>) {
       return static_cast<uint8_t>(static_cast<int64_t>(r));
     } else {
-      return static_cast<uint8_t>(unchecked_cast_to_int<int64_t>(r));
+      return static_cast<uint8_t>(
+          torch::headeronly::unchecked_cast_to_int<int64_t>(r));
     }
   }
 };
