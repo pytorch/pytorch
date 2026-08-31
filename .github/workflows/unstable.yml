@@ -16,6 +16,10 @@ concurrency:
 permissions:
   id-token: write
   contents: read
+  # _linux-build.yml and _linux-test.yml both request actions: read, and a nested
+  # job cannot be granted more than its caller has. Omitting it here means
+  # actions: none, which fails the whole workflow at startup.
+  actions: read
 
 jobs:
   # There must be at least one job here to satisfy GitHub action workflow syntax
