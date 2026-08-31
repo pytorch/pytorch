@@ -541,7 +541,19 @@ TensorWithFlatten = TraceableWrapperSubclass
 
 
 def _has_traceable_wrapper_subclass_protocol(t: object) -> bool:
-    return hasattr(t, "__tensor_flatten__") and hasattr(t, "__tensor_unflatten__")
+    # Check the protocol on the type, not the instance: every real
+    # __tensor_flatten__/__tensor_unflatten__ is defined on the class (and the
+    # callers below read it off the type as well), whereas an instance-level
+    # ``__getattr__`` that does not raise AttributeError would make hasattr()
+    # on the instance report the protocol methods as present on a bare
+    # subclass that never defined them. That misclassification made Dynamo
+    # call type(t).__tensor_flatten__(t) and crash with a raw AttributeError
+    # instead of tracing the subclass through the normal tensor path.
+    if isinstance(t, type):
+        cls = t
+    else:
+        cls = type(t)
+    return hasattr(cls, "__tensor_flatten__") and hasattr(cls, "__tensor_unflatten__")
 
 
 def is_traceable_wrapper_subclass(t: object) -> TypeIs[TraceableWrapperSubclass]:

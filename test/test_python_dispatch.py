@@ -1288,6 +1288,24 @@ $6: f32[1] = torch._ops.aten.add_.Tensor($1, $5)""",
 
         run_checks()
 
+    def test_traceable_wrapper_protocol_not_faked_by_getattr(self) -> None:
+        # Regression test for #194323: a bare tensor subclass whose
+        # __getattr__ returns a value (instead of raising AttributeError)
+        # must not be classified as a traceable wrapper subclass merely
+        # because hasattr(instance, ...), which consults __getattr__,
+        # reports __tensor_flatten__/__tensor_unflatten__ as present.
+        # The protocol is checked on the type, where such methods must
+        # actually be defined for them to exist.
+        class BareSubclass(torch.Tensor):
+            def __getattr__(self, attr):
+                if attr == "custom_method":
+                    return lambda x: self + x
+                return None
+
+        t = BareSubclass(torch.tensor([1.0, 2.0, 3.0]))
+        self.assertFalse(is_traceable_wrapper_subclass(t))
+        self.assertFalse(is_traceable_wrapper_subclass_type(BareSubclass))
+
     def test_make_fx_with_subclass(self) -> None:
         def f(x, y):
             # Returns (TwoTensor, Tensor)
