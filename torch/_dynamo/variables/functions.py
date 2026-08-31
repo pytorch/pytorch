@@ -30,6 +30,7 @@ import importlib.util
 import inspect
 import itertools
 import logging
+import operator
 import os
 import re
 import sys
@@ -412,7 +413,7 @@ class BaseUserFunctionVariable(VariableTracker):
     # Materialized per-instance once accessed/assigned.
     annotations: "VariableTracker | None" = None
 
-    def richcompare_impl(self, tx, other, op):
+    def tp_richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)
@@ -423,7 +424,7 @@ class BaseUserFunctionVariable(VariableTracker):
     def get_source(self) -> Source | None:
         return self.source
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/funcobject.c
         return VariableTracker.build(tx, repr(self.as_python_constant()))
 
@@ -654,7 +655,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             self.is_constant = False
 
         # TODO putting this here to avoid duplication, because we could hit this
-        # from several paths (e.g., SuperVariable or `getattro_impl`s).
+        # from several paths (e.g., SuperVariable or `tp_getattro_impl`s).
         if not isinstance(fn, (types.FunctionType, torch.jit.ScriptFunction)):
             unimplemented(
                 gb_type="can't handle functions not implemented in python ",
@@ -1277,7 +1278,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def python_type(self) -> type:
         return types.GeneratorType
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         # Generators have no tp_richcompare: identity for ==/!=, TypeError for
@@ -1783,7 +1784,7 @@ class UserMethodVariable(UserFunctionVariable):
         # a `nonstrict_trace`-ed function will be wrapped by
         # `VariableTracker.build` and route to `TorchInGraphFunctionVariable`,
         # but in the case of method, we manually wrap it with `UserMethodVariable`
-        # inside `UserDefinedObjectVariable.getattro_impl`.
+        # inside `UserDefinedObjectVariable.tp_getattro_impl`.
         #
         # We might be able to simplify this away by canonicalizing the
         # function/method wrapping code paths.
@@ -2012,9 +2013,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
     def as_python_constant(self) -> types.FunctionType:
         return self.get_function()
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         try:
-            return super().repr_impl(tx)
+            return super().tp_repr_impl(tx)
         except ClosureConversionError as e:
             unimplemented(
                 gb_type="repr() on nested function with non-constructible closure",
@@ -2353,7 +2354,7 @@ class SkipFunctionVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
-    def __init__(self, value: Any, reason: str | None = None, **kwargs: Any) -> None:
+    def __init__(self, value: object, reason: str | None = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
         self.reason = reason
@@ -2364,14 +2365,12 @@ class SkipFunctionVariable(VariableTracker):
             return None
         return self.value
 
-    def richcompare_impl(self, tx, other, op):
+    def tp_richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)
 
-    # NOTE: rename to tp_getattro_impl when this rebases past #191011, which
-    # renamed the hook; the override is silently dead under the old name.
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         # Resolve the attribute now instead of deferring to a GetAttrVariable:
@@ -2445,8 +2444,9 @@ class SkipFunctionVariable(VariableTracker):
         if self.value in (importlib.util.find_spec, importlib.metadata.version) and all(
             a.is_python_constant() for a in args
         ):
+            fn = cast(Callable[..., Any], self.value)
             return VariableTracker.build(
-                tx, self.value(*(a.as_python_constant() for a in args))
+                tx, fn(*(a.as_python_constant() for a in args))
             )
 
         if (
@@ -2454,7 +2454,8 @@ class SkipFunctionVariable(VariableTracker):
             and all(a.is_python_constant() for a in args)
             and all(v.is_python_constant() for v in kwargs.values())
         ):
-            result = self.value(
+            fold_fn = cast(Callable[..., Any], self.value)
+            result = fold_fn(
                 *(a.as_python_constant() for a in args),
                 **{k: v.as_python_constant() for k, v in kwargs.items()},
             )
@@ -2568,7 +2569,7 @@ class SkipFunctionVariable(VariableTracker):
             module_or = getattr(self.value, "__module__", None)
             module_name = "<unknown module>" if module_or is None else str(module_or)
             try:
-                path = inspect.getfile(self.value)
+                path = inspect.getfile(cast(Callable[..., Any], self.value))
                 explanation = (
                     f"Dynamo developers have intentionally marked that the function `{qualname}` "
                     f"in file `{path}` should not be traced."
@@ -2715,14 +2716,14 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
     def get_code(self) -> types.CodeType:
         return self.get_function().__code__
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name == self.attr_to_trace:
             val = getattr(self.wrapper_obj, self.attr_to_trace)
             source = self.source and AttrSource(self.source, name)
             return VariableTracker.build(tx, val, source)
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
     def get_function(self):
         return getattr(self.wrapper_obj, self.attr_to_trace)
@@ -2881,6 +2882,119 @@ def _traceable_collectives_source(
     return AttrSource(path_source, inner_name)
 
 
+def _fuse_batch_p2p_waits(gm: torch.fx.GraphModule) -> None:
+    from torch.distributed._functional_collectives import wait_tensor
+
+    batch_targets = {
+        torch.ops._c10d_functional.batch_p2p_ops,
+        torch.ops._c10d_functional.batch_p2p_ops.default,
+    }
+    wait_targets = {
+        wait_tensor,
+        torch.ops._c10d_functional.wait_tensor,
+        torch.ops._c10d_functional.wait_tensor.default,
+    }
+    graph = gm.graph
+    changed = False
+
+    for batch in list(graph.nodes):
+        if batch.target not in batch_targets:
+            continue
+
+        outputs: dict[int, torch.fx.Node] = {}
+        for user in batch.users:
+            if (
+                user.target is not operator.getitem
+                or len(user.args) != 2
+                or not isinstance(user.args[1], int)
+            ):
+                outputs.clear()
+                break
+            outputs[user.args[1]] = user
+        if (
+            not outputs
+            or len(outputs) != len(batch.users)
+            or sorted(outputs) != list(range(len(outputs)))
+        ):
+            continue
+
+        waits: list[torch.fx.Node] = []
+        for output in (outputs[i] for i in range(len(outputs))):
+            output_waits = [
+                user for user in output.users if user.target in wait_targets
+            ]
+            if len(output.users) != 1 or len(output_waits) != 1:
+                waits.clear()
+                break
+            wait = output_waits[0]
+            if wait.users:
+                waits.clear()
+                break
+            waits.append(wait)
+        if not waits:
+            continue
+
+        nodes = list(graph.nodes)
+        positions = {node: i for i, node in enumerate(nodes)}
+        first = min(waits, key=positions.__getitem__)
+        last = max(waits, key=positions.__getitem__)
+        between = nodes[positions[first] : positions[last] + 1]
+        if any(node not in waits for node in between):
+            continue
+
+        op_list = batch.args[0]
+        tensors = batch.args[3]
+        has_static_inputs = (
+            isinstance(op_list, (list, tuple))
+            and isinstance(tensors, (list, tuple))
+            and len(op_list) == len(tensors) == len(outputs)
+        )
+        insert_before = first
+        if has_static_inputs:
+            for op, tensor in zip(op_list, tensors):
+                if op != "irecv" or not isinstance(tensor, torch.fx.Node):
+                    continue
+                for user in tensor.users:
+                    if (
+                        user is not batch
+                        and positions[batch]
+                        < positions.get(user, -1)
+                        < positions[insert_before]
+                    ):
+                        insert_before = user
+
+        with graph.inserting_before(insert_before):
+            wait_tensors = graph.call_function(
+                torch.ops._c10d_functional.wait_tensors.default,
+                args=([outputs[i] for i in range(len(outputs))],),
+            )
+
+        if has_static_inputs:
+            for i, (op, tensor) in enumerate(zip(op_list, tensors)):
+                if op != "irecv" or not isinstance(tensor, torch.fx.Node):
+                    continue
+                users = [
+                    user
+                    for user in tensor.users
+                    if user is not batch and positions.get(user, -1) > positions[batch]
+                ]
+                if not users:
+                    continue
+                with graph.inserting_after(wait_tensors):
+                    waited = graph.call_function(
+                        operator.getitem, args=(wait_tensors, i)
+                    )
+                for user in users:
+                    user.replace_input_with(tensor, waited)
+        for wait in waits:
+            graph.erase_node(wait)
+        changed = True
+
+    if changed:
+        graph.lint()
+        gm.recompile()
+
+
 class CollectiveFunctionRewriteVariable(UserFunctionVariable):
     """
     Some of the torch.distributed.* collective APIs are possible to rewrite to 'traceable' collectives.
@@ -2991,7 +3105,7 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
                         "`P2POp` used incorrectly"
                     )
 
-                op_var = item.getattro_impl(tx, "op")
+                op_var = item.tp_getattro_impl(tx, "op")
                 if op_var.is_python_constant():
                     op = op_var.as_python_constant()
                     if op not in (dist.isend, dist.irecv):
@@ -3007,13 +3121,13 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
                     )
 
                 ops.append(op_var)
-                tensors.append(item.getattro_impl(tx, "tensor"))
+                tensors.append(item.tp_getattro_impl(tx, "tensor"))
                 # batch_p2p_ops expects a group-local rank, which is what
                 # P2POp.group_peer provides.
-                peers.append(item.getattro_impl(tx, "group_peer"))
-                tags.append(item.getattro_impl(tx, "tag"))
+                peers.append(item.tp_getattro_impl(tx, "group_peer"))
+                tags.append(item.tp_getattro_impl(tx, "tag"))
                 if group_var is None:
-                    group_var = item.getattro_impl(tx, "group")
+                    group_var = item.tp_getattro_impl(tx, "group")
 
             if group_var is None:
                 raise AssertionError("group_var must be set from P2POp items")
@@ -3025,7 +3139,10 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
                 "tensors": variables.ListVariable(tensors),
                 "group_name": group_var,
             }
-            return self.replacement_var.call_function(tx, new_args, new_kwargs)
+            result = self.replacement_var.call_function(tx, new_args, new_kwargs)
+            if _fuse_batch_p2p_waits not in tx.output.register_finalizer_fns:
+                tx.output.add_graph_finalizer(_fuse_batch_p2p_waits)
+            return result
 
         if self.fn in (dist.isend, dist.irecv):
             if not config.enable_p2p_compilation:
@@ -3044,7 +3161,6 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
             dist.all_reduce,
             dist.reduce_scatter,
             dist.reduce_scatter_single,
-            # pyrefly: ignore [deprecated]
             dist.reduce_scatter_tensor,
             # pyrefly: ignore [deprecated]
             dist._reduce_scatter_base,
@@ -3126,7 +3242,7 @@ class FunctoolsPartialVariable(VariableTracker):
         # Store cache_hash from the original partial for SAC context_fn caching
         self.original_cache_hash = original_cache_hash
 
-    def richcompare_impl(self, tx, other, op):
+    def tp_richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)
@@ -3188,11 +3304,11 @@ class FunctoolsPartialVariable(VariableTracker):
         "keywords": Member(_get_keywords, None),
     }
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         try:
-            return super().getattro_impl(tx, name)
+            return super().tp_getattro_impl(tx, name)
         except NotImplementedError:
             raise_observed_exception(AttributeError, tx, args=[name])
 
@@ -3291,12 +3407,13 @@ class PolyfilledFunctionVariable(VariableTracker):
         if self.can_constant_fold_through() and check_unspec_or_constant_args(
             args, kwargs
         ):
-            result = (
-                self.fn(  # use the original function which is faster than the polyfill
-                    *[x.as_python_constant() for x in args],
-                    **{k: v.as_python_constant() for k, v in kwargs.items()},
-                )
-            )
+            const_args = [x.as_python_constant() for x in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+            try:
+                # use the original function which is faster than the polyfill
+                result = self.fn(*const_args, **const_kwargs)
+            except Exception as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
             return VariableTracker.build(tx, result)
 
         # Special case for sum on tuple/list of ints
@@ -3357,12 +3474,26 @@ class PolyfilledFunctionVariable(VariableTracker):
         polyfilled_method_variable = PolyfilledFunctionVariable(method, **options)
         return polyfilled_method_variable.call_function(tx, args, kwargs)
 
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)
+
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        try:
+            # CPython wrapper_hash
+            return hash(self.as_python_constant()), False
+        except NotImplementedError:
+            return super().hash_impl(tx)
+
     def as_python_constant(self) -> Any:
         return self.fn
 
 
 class SysFunctionVariable(VariableTracker):
-    def __init__(self, value: Any, **kwargs: Any) -> None:
+    def __init__(self, value: object, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
 
@@ -3373,7 +3504,7 @@ class SysFunctionVariable(VariableTracker):
         if len(tx.exn_vt_stack):
             exn = tx.exn_vt_stack[-1]
             typ = exn.exc_type  # type: ignore[union-attr]
-            tb = exn.getattro_impl(tx, "__traceback__")
+            tb = exn.tp_getattro_impl(tx, "__traceback__")
             items = [VariableTracker.build(tx, typ), exn, tb]
         else:
             items = [
@@ -3736,14 +3867,12 @@ class TMADescriptorStableVariable(VariableTracker):
         )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.add_push_null(
-            lambda: codegen.load_import_from(
-                "triton.tools.tensor_descriptor",
-                "TensorDescriptor",
-            )
+        codegen.load_import_from(
+            "triton.tools.tensor_descriptor",
+            "TensorDescriptor",
         )
         codegen.load_method("from_tensor")
-        self.tensor.reconstruct(codegen)
+        codegen(self.tensor)
         codegen(self.block_shape)
         codegen.call_method(2)
 
@@ -3948,7 +4077,7 @@ class SparseTensorCreationSkipVariable(SkipFunctionVariable):
     Skip variable for sparse tensor factory functions with clear messaging regarding lack of support.
     """
 
-    def __init__(self, value: Any, **kwargs: Any) -> None:
+    def __init__(self, value: object, **kwargs: Any) -> None:
         reason = "sparse tensor creation is not supported in torch.compile"
         super().__init__(value, reason=reason, **kwargs)
 
@@ -4027,7 +4156,7 @@ class TritonSetAllocatorVariable(VariableTracker):
     graph so that it executes at the right point at runtime, ordered by
     effect tokens."""
 
-    def __init__(self, value: Any, **kwargs: Any) -> None:
+    def __init__(self, value: object, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
 
@@ -4047,7 +4176,8 @@ class TritonSetAllocatorVariable(VariableTracker):
         alloc_fn = args[0].as_python_constant()
 
         # Emit an invoke_leaf_function node so it runs at runtime.
-        set_allocator = self.value
+        # The builder only produces this VT for triton.set_allocator itself.
+        set_allocator = cast(Callable[..., Any], self.value)
 
         def real_impl():
             set_allocator(alloc_fn)
@@ -4275,9 +4405,12 @@ class MethodWrapperVariable(VariableTracker):
                 # Avoid the generic descriptor path's implicit owner lookup, which
                 # would read __class__ on tensor subclasses during __torch_function__.
                 descriptor = cast(Any, method_wrapper.__self__)
-                return args[0].getattro_impl(tx, descriptor.__name__)
+                return args[0].tp_getattro_impl(tx, descriptor.__name__)
 
-        return self.obj.call_method(tx, self.descriptor.__name__, list(args), kwargs)
+        sd = self.obj.lookup_slotdefs(self.descriptor.__name__)
+        if sd is None:
+            return self.obj.call_method(tx, self.descriptor.__name__, args, kwargs)
+        return sd(self.obj, tx, args, kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.obj)
@@ -4291,7 +4424,7 @@ class MethodWrapperVariable(VariableTracker):
         except NotImplementedError:
             return super().hash_impl(tx)
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
     ) -> "VariableTracker":
         from .object_protocol import python_constant_richcompare_impl
@@ -4428,7 +4561,7 @@ class BoundBuiltinMethodVariable(VariableTracker):
         except AsPythonConstantNotImplementedError:
             return id(self), True
 
-    def richcompare_impl(self, tx, other, op):
+    def tp_richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)
@@ -4752,7 +4885,7 @@ class GetSetDescriptorVariable(VariableTracker):
     def as_python_constant(self) -> types.GetSetDescriptorType:
         return self.descriptor
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
     ) -> "VariableTracker":
         from .object_protocol import python_constant_richcompare_impl
@@ -4770,7 +4903,7 @@ class GetSetDescriptorVariable(VariableTracker):
         attr_name = self.descriptor.__name__
         # Try to eagerly call the C getter when we can obtain the
         # concrete Python object (UDOV.value, or as_python_constant
-        # for classes/constants). Fall back to getattro_impl for
+        # for classes/constants). Fall back to tp_getattro_impl for
         # proxy-based VTs like TensorVariable.
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         obj_value = obj.get_real_python_backed_value()

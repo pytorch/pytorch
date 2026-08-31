@@ -4,6 +4,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/sparse/SparseStubs.h>
 #include <ATen/native/sparse/SparseBinaryOpIntersectionCommon.h>
 
@@ -1017,12 +1018,9 @@ Tensor sparse_sparse_matmul_mps(const Tensor& mat1_, const Tensor& mat2_) {
               "sparse_sparse_matmul_mps: both inputs must be sparse COO tensors");
   TORCH_CHECK(mat1_.is_mps() && mat2_.is_mps(),
               "sparse_sparse_matmul_mps: both inputs must be on MPS device");
-  TORCH_CHECK(mat1_.dim() == 2 && mat2_.dim() == 2,
-              "sparse_sparse_matmul_mps: both inputs must be 2D matrices");
+  check_mm_shapes(mat1_, mat2_, "_sparse_sparse_matmul");
   TORCH_CHECK(mat1_.dense_dim() == 0 && mat2_.dense_dim() == 0,
               "sparse_sparse_matmul_mps: only scalar values supported (dense_dim == 0)");
-  TORCH_CHECK(mat1_.size(1) == mat2_.size(0),
-              "mat1 and mat2 shapes cannot be multiplied (", mat1_.size(0), "x", mat1_.size(1), " and ", mat2_.size(0), "x", mat2_.size(1), ")");
   TORCH_CHECK(mat1_.scalar_type() == mat2_.scalar_type(),
               "sparse_sparse_matmul_mps: mat1 dtype ", mat1_.scalar_type(),
               " does not match mat2 dtype ", mat2_.scalar_type());
