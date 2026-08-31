@@ -145,11 +145,15 @@ bool MPSHeapAllocatorImpl::get_free_buffer(AllocParams& params) {
   // it, and only when cutting it down would not leave a reusable remainder.
   // In-flight reuse is safe for stream-ordered GPU work, but not for a pinned
   // allocation that the CPU can access immediately.
+  // Nor while a MetalGraph capture holds the buffer: the capture re-binds it by
+  // address on replay, so handing the same MTLBuffer to a new tensor would make
+  // the replay read that tensor's data. The pin set is empty unless a capture is
+  // alive, so that is one empty() check in the common case.
   auto stream_it = pool.available_buffers_by_stream.find(getCurrentMPSStream());
   if (stream_it != pool.available_buffers_by_stream.end()) {
     auto it = stream_it->second.lower_bound(&params.search_key);
     if (it != stream_it->second.end() && (*it)->buffer && (*it)->size - alloc_size < pool.min_split &&
-        (params.allow_in_flight_reuse || (*it)->retainCount() == 1)) {
+        (params.allow_in_flight_reuse || (*it)->retainCount() == 1) && !is_capture_pinned((*it)->buffer)) {
       params.buffer_block = split_free_block(params, *it);
     }
   }
@@ -743,6 +747,19 @@ bool MPSHeapAllocatorImpl::wait_for_pending_free_buffers(BufferPool& pool) {
   return !buffers.empty() && waitForEvents(buffers);
 }
 
+void MPSHeapAllocatorImpl::pinBufferForCapture(const void* ptr) {
+  std::lock_guard<std::recursive_mutex> lock(m_mutex);
+  m_capture_pinned[ptr]++;
+}
+
+void MPSHeapAllocatorImpl::unpinBufferForCapture(const void* ptr) {
+  std::lock_guard<std::recursive_mutex> lock(m_mutex);
+  auto it = m_capture_pinned.find(ptr);
+  if (it != m_capture_pinned.end() && --it->second == 0) {
+    m_capture_pinned.erase(it);
+  }
+}
+
 id_t MPSHeapAllocatorImpl::getBufferId(const void* ptr) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
@@ -958,6 +975,12 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
   }
   id_t getBufferId(const void* ptr) const override {
     return _getAllocImpl().getBufferId(ptr);
+  };
+  void pinBufferForCapture(const void* ptr) const override {
+    _getAllocImpl().pinBufferForCapture(ptr);
+  };
+  void unpinBufferForCapture(const void* ptr) const override {
+    _getAllocImpl().unpinBufferForCapture(ptr);
   };
   IntArrayRef getBufferShape(const void* ptr) const override {
     return _getAllocImpl().getBufferShape(ptr);

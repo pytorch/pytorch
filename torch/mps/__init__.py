@@ -6,9 +6,18 @@ performance can be achieved, by running work on the metal GPU(s).
 See https://developer.apple.com/documentation/metalperformanceshaders for more details.
 """
 
+from contextlib import contextmanager
+
 import torch
 from torch import Tensor
 
+from .._utils import _dummy_type
+
+
+if not hasattr(torch._C, "_MetalGraph"):
+    # Built without MPS: keep this module importable, and make MetalGraph() raise
+    # the same "not compiled with" error the rest of the MPS API gives.
+    torch._C.__dict__["_MetalGraph"] = _dummy_type("_MetalGraph")
 
 _is_in_bad_fork = getattr(torch._C, "_mps_is_in_bad_fork", lambda: False)
 _default_mps_generator: torch._C.Generator = None  # type: ignore[assignment]
@@ -236,9 +245,6 @@ def _host_alias_storage(storage: "torch.UntypedStorage") -> "torch.UntypedStorag
     return torch._C._mps_host_alias_storage(storage)
 
 
-from contextlib import contextmanager
-
-
 class MetalGraph:
     r"""Wraps a captured sequence of MPS operations for repeated replay.
 
@@ -252,6 +258,19 @@ class MetalGraph:
     are recorded. :meth:`replay` re-encodes all recorded ops inside a single
     ``dispatch_sync``, collapsing N per-op dispatches into one.
 
+    .. warning::
+
+        This API is in beta and may change in future releases.
+
+    .. note::
+
+        Replay re-binds the exact buffers seen during capture, so the graph keeps
+        every buffer it bound reserved: the allocator will not hand that storage
+        to another tensor until the graph is released. Freeing a captured tensor
+        is therefore safe, but its memory is not reclaimed until then, which is
+        the same trade :class:`torch.cuda.CUDAGraph` makes with its private
+        memory pool. Call :meth:`reset` (or drop the graph) to give it back.
+
     Constraints:
 
     * Tensor shapes must not change between the capture pass and replays.
@@ -261,23 +280,12 @@ class MetalGraph:
       encoded via ``setBytes`` at capture time and are **frozen** on replay.
       Materialize scalars as 1-element tensors to make them buffer-backed if you
       need to vary them across replays.
-    * Do not let ANY MPS tensor go out of scope, anywhere in the process,
-      between capturing a graph and its last replay - not just tensors
-      obviously related to this graph. Unlike :class:`torch.cuda.CUDAGraph`
-      there is no private memory pool behind a capture, so replay re-binds the
-      exact buffers seen during capture by address, not by tensor identity.
-      Even a single multi-op expression like ``x * 2 + 1`` allocates an
-      invisible intermediate that is freed the moment the capture block exits;
-      if any later allocation (including one that has nothing to do with this
-      graph, e.g. a tensor built for comparison in test code) reuses that
-      freed address, every subsequent replay silently overwrites it. The safe
-      rule is not "keep this graph's own tensors alive" but "do not free
-      anything on MPS while any captured graph you intend to replay again is
-      still live" - for example by holding every relevant tensor and graph in
-      one object that outlives the replay loop.
     * Random number generation is not supported inside a capture: the philox seed
       and offset are recorded as fixed bytes, so replays would repeat the capture
       pass's values. Ops that consume the MPS generator raise inside a capture.
+      This is a deliberate divergence from :class:`torch.cuda.CUDAGraph`, which
+      re-seeds captured generators on every replay, so code that graphs cleanly
+      on CUDA can still hard-error here.
     * MPS profiling must be disabled during capture.
     * Ops that encode opaque MPS-framework kernels or fall back to CPU cannot be
       recorded, and raise inside a capture block rather than silently producing a
@@ -338,7 +346,8 @@ def is_current_stream_capturing() -> bool:
 
     Mirrors :func:`torch.cuda.is_current_stream_capturing`. Useful for code that
     must take a capture-safe path, since ops that cannot be recorded raise while
-    a capture is in progress.
+    a capture is in progress. If MPS has not been initialized, returns False
+    without initializing it.
     """
     return torch._C._mps_isCurrentStreamCapturing()
 
@@ -348,7 +357,12 @@ def metal_graph(g: "MetalGraph"):
     r"""Context manager that records everything executed inside it into ``g``.
 
     Mirrors :func:`torch.cuda.graph`. See :class:`MetalGraph` for constraints and
-    a full example.
+    a full example. If the block raises, the partial capture is discarded, so
+    ``g`` is left with nothing captured rather than a replayable prefix.
+
+    .. warning::
+
+        This API is in beta and may change in future releases.
 
     Example::
 
@@ -360,8 +374,16 @@ def metal_graph(g: "MetalGraph"):
     g.capture_begin()
     try:
         yield g
-    finally:
-        g.capture_end()
+    except BaseException:
+        # The block did not finish, so whatever was recorded is a truncated
+        # prefix of the intended graph. Replaying it would silently run partial
+        # work, so drop it: reset() stops the recording and releases the steps,
+        # after which replay() raises the same way it does for a graph that
+        # never captured. torch.cuda.graph reaches the same state by leaving the
+        # graph uninstantiated when cudaStreamEndCapture reports the failure.
+        g.reset()
+        raise
+    g.capture_end()
 
 
 from . import profiler

@@ -495,6 +495,9 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
   // if buffer size is zero in here, it's not a user error. It could be a missing check for
   // tensor.numel() == 0 in our internal implementations of ops.
   TORCH_INTERNAL_ASSERT([srcBuf length] > 0, "Placeholder tensor is empty!");
+  // srcBuf is final here and every branch below wraps it. A capture cannot
+  // recover it from the MPSGraphTensorData afterwards, so register it now.
+  getCurrentMPSStream()->captureNoteBuffer(srcBuf);
   if (dataType == MPSDataTypeInvalid) {
     const auto scalar_type = _tensor.scalar_type();
     dataType = _tensor.dim() == 0 ? getMPSScalarType(scalar_type) : getMPSDataType(scalar_type);
@@ -577,6 +580,7 @@ MPSGraphTensorData* getMPSGraphTensorData(MPSGraph* mpsGraph, MPSStream* mpsStre
   MPSGraphTensorData* result = nil;
   if (tensor.numel() > 0) {
     id<MTLBuffer> buf = getMTLBufferStorage(tensor);
+    mpsStream->captureNoteBuffer(buf);
     result = [[[MPSGraphTensorData alloc] initWithMTLBuffer:buf shape:mpsShape dataType:dataType] autorelease];
   } else {
     // create empty NDArray
@@ -633,6 +637,9 @@ MPSScalar getMPSScalar(const Scalar& scalar, ScalarType type) {
 
 MPSGraphTensorData* getMPSGraphTensorFromScalar(MPSStream* mpsStream, MPSScalar& scalar) {
   scalar.buffer = getIMPSAllocator()->allocScalarBufferWithValue(&scalar.value, scalar.size);
+  // The MPSScalar is a stack local, so this buffer goes back to the scalar pool
+  // the moment the op returns, i.e. still inside the capture block.
+  mpsStream->captureNoteBuffer(scalar.getMTLBuffer());
   return [[[MPSGraphTensorData alloc] initWithMTLBuffer:scalar.getMTLBuffer()
                                                   shape:@[ @1 ]
                                                dataType:getMPSScalarType(scalar.type)] autorelease];

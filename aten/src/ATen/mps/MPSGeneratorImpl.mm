@@ -126,7 +126,9 @@ void MPSGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   memcpy(&input_seed, new_rng_state + states_size, seed_size);
   this->set_current_seed(input_seed);
   memcpy(&input_offset, new_rng_state + states_size + seed_size, offset_size);
-  this->set_offset(input_offset);
+  // Not set_offset(): that carries the capture guard for ops that consume
+  // randomness, and restoring generator state consumes none.
+  engine_.set_offset(input_offset);
   // state.data must be copied after input_seed to not reset the state in set_current_seed()
   memcpy(this->state_data(), new_rng_state, states_size);
 }

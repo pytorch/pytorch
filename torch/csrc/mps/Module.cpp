@@ -573,42 +573,19 @@ void initModule(PyObject* module) {
   // Capture must observe the stream ops actually enqueue on. Every MPS operator
   // dispatches through getCurrentMPSStream(), so capturing against
   // getDefaultMPSStream() would record nothing whenever a non-default stream is
-  // current. These entry points block on that stream's serial queue, so they
-  // release the GIL rather than stall other Python threads.
-  m.def("_mps_metalGraphCaptureBegin", []() {
-    pybind11::gil_scoped_release no_gil;
-    return at::mps::getCurrentMPSStream()->captureBegin();
-  });
-  m.def("_mps_metalGraphCaptureEnd", [](uint64_t handle) {
-    pybind11::gil_scoped_release no_gil;
-    at::mps::getCurrentMPSStream()->captureEnd(handle);
-  });
-  m.def("_mps_metalGraphCaptureFree", [](uint64_t handle) {
-    pybind11::gil_scoped_release no_gil;
-    TORCH_CHECK(
-        at::mps::getCurrentMPSStream()->captureFree(handle),
-        "No such capture handle: ",
-        handle,
-        ". It may have already been freed.");
-  });
-  m.def("_mps_metalGraphCaptureReset", []() {
-    pybind11::gil_scoped_release no_gil;
-    at::mps::getCurrentMPSStream()->captureReset();
-  });
-  m.def("_mps_metalGraphCapturedStepCount", [](uint64_t handle) {
-    pybind11::gil_scoped_release no_gil;
-    return at::mps::getCurrentMPSStream()->capturedStepCount(handle);
-  });
-  m.def("_mps_metalGraphReplay", [](uint64_t handle) {
-    pybind11::gil_scoped_release no_gil;
-    at::mps::getCurrentMPSStream()->replay(handle);
-  });
+  // current.
   m.def("_mps_isCurrentStreamCapturing", []() {
-    return at::mps::getCurrentMPSStream()->captureMode();
+    // Answered without touching a stream when nothing is recording anywhere:
+    // torch.cuda.is_current_stream_capturing() promises to return False without
+    // initializing the context, and library code calls this as a cheap probe.
+    // No stream can be recording unless one already exists.
+    return at::mps::isAnyStreamCapturing() &&
+        at::mps::getCurrentMPSStream()->captureMode();
   });
   // Owning capture handle behind torch.mps.MetalGraph. Python object lifetime
   // drives release, so dropping the object frees the capture the way dropping a
-  // torch.cuda.CUDAGraph does.
+  // torch.cuda.CUDAGraph does. These entry points block on the stream's serial
+  // queue, so they release the GIL rather than stall other Python threads.
   py::class_<at::mps::MPSStream::MetalGraph>(m, "_MetalGraph")
       .def(py::init<>())
       .def(

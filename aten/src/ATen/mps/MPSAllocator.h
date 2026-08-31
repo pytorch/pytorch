@@ -321,6 +321,12 @@ class MPSHeapAllocatorImpl {
   IntArrayRef getBufferShape(const void* ptr);
   // get the unique ID of the buffer
   id_t getBufferId(const void* ptr);
+  // Reserve a buffer for a MetalGraph capture that will re-bind it by address on
+  // replay: while pinned the buffer is never handed to a different allocation,
+  // even after the tensor that owned it is freed. Refcounted, since independent
+  // captures may bind the same buffer.
+  void pinBufferForCapture(const void* ptr);
+  void unpinBufferForCapture(const void* ptr);
   // allocate a buffer from a specialized pool to import CPU scalars into GPU
   id<MTLBuffer> allocScalarBufferWithValue(void* value, size_t size);
   // returns a CPU-mapping of the input buffer and its retainCount,
@@ -399,6 +405,14 @@ class MPSHeapAllocatorImpl {
   std::recursive_mutex m_mutex;
   // allocated buffers by device pointer
   ska::flat_hash_map<const void*, BufferBlock*> m_allocated_buffers;
+  // MTLBuffers reserved by live MetalGraph captures, with the number of captures
+  // holding each. Empty whenever no capture is alive, which is the only state
+  // get_free_buffer has to check in the common case.
+  ska::flat_hash_map<const void*, uint32_t> m_capture_pinned;
+  // callers hold m_mutex
+  bool is_capture_pinned(const id<MTLBuffer> buffer) const {
+    return !m_capture_pinned.empty() && m_capture_pinned.count((__bridge const void*)buffer) != 0;
+  }
   // using a container for pools to simplify iterating them
   ska::flat_hash_map<BufferPool::Kind, std::unique_ptr<BufferPool>> m_pools;
   // total memory allocated by HeapAllocator (including blocks in pools);

@@ -4,7 +4,9 @@
 
 #include <atomic>
 #include <cstdint>
+#include <mutex>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -114,12 +116,15 @@ class TORCH_API MPSStream {
   uint64_t captureBegin();
   // Takes the id so one capture cannot end another's recording.
   void captureEnd(uint64_t captureId);
+  // Stops recording only if `captureId` is the capture currently recording, and
+  // reports whether it was. Lets a destructor tear down a graph dropped
+  // mid-recording without using exceptions to ask "am I the recorder?", which
+  // cannot distinguish that from a genuine failure.
+  bool captureEndIfRecording(uint64_t captureId);
   // Releases the capture identified by `captureId` (retained buffers/executables).
   // Returns false if it was not live, so a destructor can distinguish an
   // already-freed handle from a real failure without a separate lookup.
   bool captureFree(uint64_t captureId);
-  // Releases every live capture and stops any capture currently recording.
-  void captureReset();
   void replay(uint64_t captureId);
 
   // Returns true if a capture is currently being recorded.
@@ -204,7 +209,6 @@ class TORCH_API MPSStream {
       void* buffer; // id<MTLBuffer>
       size_t offset;
       unsigned index;
-      size_t bufferLength; // recorded buffer length for replay validation
     };
     struct BytesBinding {
       std::vector<uint8_t> data;
@@ -233,6 +237,21 @@ class TORCH_API MPSStream {
 
   // Called by MPSRecordingEncoder to push a finalized Metal kernel recording.
   void pushCapturedMetalKernel(std::unique_ptr<CapturedMetalKernel> kernel);
+
+  // Retains an MTLBuffer that the capture currently recording will re-bind on
+  // replay, and holds it for the life of that capture. No-op when nothing is
+  // recording.
+  //
+  // Bindings are recorded by buffer address, so the buffer has to stay both
+  // alive and owned by the tensor it was recorded for. Retaining it covers the
+  // first part; pinning it in the allocator (pinBufferForCapture) covers the
+  // second, by keeping the buffer out of the reuse pool for as long as this
+  // capture is alive. Without that pair, a freed tensor's buffer would be handed
+  // to an unrelated tensor and replay would read its data.
+  //
+  // executeMPSGraph() cannot recover the buffers behind its feeds/results
+  // dictionaries, so ops register them as they wrap them (see OperationUtils.mm).
+  void captureNoteBuffer(MTLBuffer_t buffer);
 
   /// Get the MPS device index that this stream is associated with.
   c10::DeviceIndex device_index() const {
@@ -296,12 +315,35 @@ class TORCH_API MPSStream {
     size_t blitDstOffset = 0;
   };
   std::atomic<uint64_t> _activeCaptureId{0}; // 0 = no capture currently recording
-  std::unordered_map<uint64_t, std::vector<CapturedStep>> _captures;
+
+  // One recorded capture: its steps, plus every MTLBuffer those steps re-bind on
+  // replay, retained for the life of the capture.
+  struct Capture {
+    std::vector<CapturedStep> steps;
+    std::vector<const void*> boundBuffers; // id<MTLBuffer>, retained
+  };
+  std::unordered_map<uint64_t, Capture> _captures;
+  // Buffers registered by captureNoteBuffer() for the capture being recorded.
+  // Ops register from outside the serial queue, so this has its own lock; it is
+  // moved into the Capture at captureEnd(). Recording is exclusive, so one
+  // pending set per stream is enough.
+  std::mutex _notedBuffersMutex;
+  std::unordered_set<const void*> _notedBuffers;
   uint64_t _nextCaptureId = 1; // allocated only inside _serialQueue dispatches
+
+  // Retains and clears the noted-buffer set into `capture`.
+  void takeNotedBuffers(Capture& capture);
+  // Drops the noted-buffer set without handing it to a capture.
+  void discardNotedBuffers();
+  // Releases the buffers a capture retained.
+  static void releaseCaptureBuffers(Capture& capture);
 
   // Release retained Objective-C refs held by a captured step (PSO + bound
   // MTLBuffers for MetalKernel steps, inputs/results arrays for MPSGraph steps).
   static void releaseCapturedStep(CapturedStep& step);
+  // Sets _activeCaptureId, keeping the process-global recording count that
+  // isAnyStreamCapturing() reads in sync. 0 stops recording. Queue-confined.
+  void setActiveCaptureId(uint64_t id);
 #ifdef __OBJC__
   MPSRecordingEncoder* _recordingEncoder = nil;
 #else
@@ -332,6 +374,14 @@ TORCH_API void setCurrentMPSStream(MPSStream* stream);
  * Get the default MPS stream
  */
 TORCH_API MPSStream* getDefaultMPSStream();
+
+/**
+ * True if any MPS stream is currently recording a MetalGraph capture. Reading it
+ * never creates a stream, so unlike `getCurrentMPSStream()->captureMode()` it can
+ * be used as a probe before MPS has been initialized. No stream can be recording
+ * unless one already exists, so a false result is authoritative.
+ */
+TORCH_API bool isAnyStreamCapturing();
 
 /**
  * Get a stream from the pool. There are 32 streams in the pool which live for

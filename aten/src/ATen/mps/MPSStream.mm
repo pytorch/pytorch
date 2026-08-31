@@ -20,6 +20,16 @@ namespace at::mps {
 //  MPSStream
 //-----------------------------------------------------------------
 
+namespace {
+// Number of streams currently recording a capture. Lets isAnyStreamCapturing()
+// answer without touching (and thereby creating) a stream.
+std::atomic<int> recording_stream_count{0};
+} // namespace
+
+bool isAnyStreamCapturing() {
+  return recording_stream_count.load(std::memory_order_acquire) != 0;
+}
+
 MPSStream::MPSStream(Stream stream) : _stream(stream) {
   _commandQueue = [MPSDevice::getInstance()->device() newCommandQueue];
   TORCH_CHECK(_stream.device_type() == DeviceType::MPS);
@@ -43,11 +53,19 @@ MPSStream::MPSStream(Stream stream) : _stream(stream) {
 }
 
 MPSStream::~MPSStream() {
-  for (auto& [id, steps] : _captures) {
-    for (auto& step : steps) {
+  setActiveCaptureId(0);
+  for (auto& [captureId, capture] : _captures) {
+    for (auto& step : capture.steps) {
       MPSStream::releaseCapturedStep(step);
     }
+    // Only the ObjC retains: this runs at process exit, where the allocator
+    // singleton may already be destroyed, so unpinning there would be unsafe.
+    // Its pin table dies with it anyway.
+    for (const void* ptr : capture.boundBuffers) {
+      [(__bridge id<MTLBuffer>)ptr release];
+    }
   }
+  _captures.clear();
   [_commandQueue release];
   _commandQueue = nil;
   [_executionDescriptor release];
@@ -220,7 +238,9 @@ void MPSStream::copy(id<MTLBuffer> srcBuffer,
         step.blitLength = length;
         step.blitSrcOffset = srcOffset;
         step.blitDstOffset = dstOffset;
-        _captures[id].push_back(std::move(step));
+        _captures[id].steps.push_back(std::move(step));
+        captureNoteBuffer(srcBuffer);
+        captureNoteBuffer(dstBuffer);
       }
 
       // profilerId has a value only if copy profiling is enabled
@@ -265,7 +285,7 @@ void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDicti
       // Capture: compile the graph into an MPSGraphExecutable, encode it, and
       // record the step so replay() can re-encode it in a single dispatch. The
       // executable is owned by the CapturedStep and released on
-      // captureFree()/captureReset()/~MPSStream() -- it is scoped to the capture,
+      // captureFree()/~MPSStream() -- it is scoped to the capture,
       // not cached persistently. (Capture rejects profiling in captureBegin(), so
       // the profiler branch never overlaps this path.)
       NSMutableDictionary<MPSGraphTensor*, MPSGraphShapedType*>* feedShapes =
@@ -303,7 +323,7 @@ void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDicti
       step.exe = (__bridge void*)exe; // owned by the step
       step.inputsArray = [inputsArray retain];
       step.resultsArray = [resultsArray retain];
-      _captures[id].push_back(std::move(step));
+      _captures[id].steps.push_back(std::move(step));
       [inputsArray release];
       [resultsArray release];
     } else {
@@ -337,6 +357,64 @@ id<MTLBuffer> MPSStream::getErrorBuffer() {
   return _errorBuffer;
 }
 
+void MPSStream::setActiveCaptureId(uint64_t id) {
+  const bool wasRecording = _activeCaptureId.load(std::memory_order_relaxed) != 0;
+  const bool isRecording = id != 0;
+  // Publish the transition in the order that keeps the count a safe over-
+  // approximation: a reader must never see count == 0 while a stream is still
+  // recording, or it would skip the per-stream check and report "not capturing".
+  if (isRecording && !wasRecording) {
+    recording_stream_count.fetch_add(1, std::memory_order_release);
+  }
+  _activeCaptureId.store(id, std::memory_order_release);
+  if (!isRecording && wasRecording) {
+    recording_stream_count.fetch_sub(1, std::memory_order_release);
+  }
+}
+
+void MPSStream::captureNoteBuffer(id<MTLBuffer> buffer) {
+  if (!buffer || !captureMode()) {
+    return;
+  }
+  const void* ptr = (__bridge const void*)buffer;
+  std::lock_guard<std::mutex> lock(_notedBuffersMutex);
+  // Re-check under the lock: captureEnd() drains this set, and an op may still
+  // be wrapping buffers as the capture block exits.
+  if (!captureMode()) {
+    return;
+  }
+  if (_notedBuffers.insert(ptr).second) {
+    // Retain keeps the MTLBuffer object alive; the pin stops the allocator from
+    // handing that same buffer to a different tensor once this one is freed.
+    [buffer retain];
+    getIMPSAllocator()->pinBufferForCapture(ptr);
+  }
+}
+
+void MPSStream::takeNotedBuffers(Capture& capture) {
+  std::lock_guard<std::mutex> lock(_notedBuffersMutex);
+  capture.boundBuffers.reserve(capture.boundBuffers.size() + _notedBuffers.size());
+  capture.boundBuffers.insert(capture.boundBuffers.end(), _notedBuffers.begin(), _notedBuffers.end());
+  _notedBuffers.clear();
+}
+
+void MPSStream::releaseCaptureBuffers(Capture& capture) {
+  for (const void* ptr : capture.boundBuffers) {
+    getIMPSAllocator()->unpinBufferForCapture(ptr);
+    [(__bridge id<MTLBuffer>)ptr release];
+  }
+  capture.boundBuffers.clear();
+}
+
+void MPSStream::discardNotedBuffers() {
+  std::lock_guard<std::mutex> lock(_notedBuffersMutex);
+  for (const void* ptr : _notedBuffers) {
+    getIMPSAllocator()->unpinBufferForCapture(ptr);
+    [(__bridge id<MTLBuffer>)ptr release];
+  }
+  _notedBuffers.clear();
+}
+
 uint64_t MPSStream::captureBegin() {
   __block uint64_t captureId = 0;
   dispatch_sync_with_rethrow(_serialQueue, ^() {
@@ -349,11 +427,13 @@ uint64_t MPSStream::captureBegin() {
     TORCH_CHECK(_activeCaptureId.load(std::memory_order_relaxed) == 0, "MPS graph capture already in progress");
     captureId = _nextCaptureId++;
     _captures.try_emplace(captureId);
+    // Anything left over from a capture that was torn down mid-recording.
+    discardNotedBuffers();
     // Start on a fresh encoder: encoder bindings are sticky, so recording into
     // one that pre-capture ops already bound would let a captured kernel inherit
     // state that was never recorded and so is absent on replay.
     endKernelCoalescing();
-    _activeCaptureId.store(captureId, std::memory_order_release);
+    setActiveCaptureId(captureId);
   });
   return captureId;
 }
@@ -362,7 +442,7 @@ size_t MPSStream::capturedStepCount(uint64_t captureId) const {
   __block size_t count = 0;
   dispatch_sync(_serialQueue, ^() {
     auto it = _captures.find(captureId);
-    count = it != _captures.end() ? it->second.size() : 0;
+    count = it != _captures.end() ? it->second.steps.size() : 0;
   });
   return count;
 }
@@ -380,11 +460,29 @@ void MPSStream::captureEnd(uint64_t captureId) {
                 " but capture ",
                 active,
                 " is the one currently recording");
-    _activeCaptureId.store(0, std::memory_order_release);
+    setActiveCaptureId(0);
+    // Buffers registered while recording belong to this capture from here on, so
+    // replay() can check them. Drained after clearing the active id, so a late
+    // registration cannot land in the set after it has been moved.
+    takeNotedBuffers(_captures[captureId]);
     // Symmetric with captureBegin(): close the encoder the capture recorded into
     // so post-capture ops do not encode against inherited capture state.
     endKernelCoalescing();
   });
+}
+
+bool MPSStream::captureEndIfRecording(uint64_t captureId) {
+  __block bool ended = false;
+  dispatch_sync(_serialQueue, ^() {
+    if (_activeCaptureId.load(std::memory_order_relaxed) != captureId) {
+      return;
+    }
+    setActiveCaptureId(0);
+    takeNotedBuffers(_captures[captureId]);
+    endKernelCoalescing();
+    ended = true;
+  });
+  return ended;
 }
 
 bool MPSStream::captureFree(uint64_t captureId) {
@@ -397,27 +495,14 @@ bool MPSStream::captureFree(uint64_t captureId) {
     TORCH_CHECK(captureId != _activeCaptureId.load(std::memory_order_acquire),
                 "Cannot free a capture that is still being recorded. Call captureEnd() "
                 "(i.e. exit the torch.mps.metal_graph() block) first.");
-    for (auto& step : it->second) {
+    for (auto& step : it->second.steps) {
       releaseCapturedStep(step);
     }
+    releaseCaptureBuffers(it->second);
     _captures.erase(it);
     freed = true;
   });
   return freed;
-}
-
-void MPSStream::captureReset() {
-  dispatch_sync_with_rethrow(_serialQueue, ^() {
-    _activeCaptureId.store(0, std::memory_order_release);
-    for (auto& [captureId, steps] : _captures) {
-      for (auto& step : steps) {
-        releaseCapturedStep(step);
-      }
-    }
-    _captures.clear();
-    [_recordingEncoder release];
-    _recordingEncoder = nil;
-  });
 }
 
 void MPSStream::releaseCapturedStep(CapturedStep& step) {
@@ -440,12 +525,20 @@ void MPSStream::releaseCapturedStep(CapturedStep& step) {
 }
 
 void MPSStream::pushCapturedMetalKernel(std::unique_ptr<CapturedMetalKernel> kernel) {
+  // Callers reach this from inside a dispatch on _serialQueue (the encoder proxy
+  // is only driven from there), which is what makes the unsynchronized _captures
+  // access below safe. Assert the invariant rather than only documenting it;
+  // dispatching here instead would deadlock on the queue we are already on.
+  dispatch_assert_queue_debug(_serialQueue);
   uint64_t captureId = _activeCaptureId.load(std::memory_order_acquire);
   TORCH_INTERNAL_ASSERT(captureId != 0, "pushCapturedMetalKernel called outside capture mode");
+  for (const auto& b : kernel->buffers) {
+    captureNoteBuffer((__bridge id<MTLBuffer>)b.buffer);
+  }
   CapturedStep step;
   step.kind = CapturedStep::Kind::MetalKernel;
   step.metalKernel = std::move(kernel);
-  _captures[captureId].push_back(std::move(step));
+  _captures[captureId].steps.push_back(std::move(step));
 }
 
 void MPSStream::replay(uint64_t captureId) {
@@ -456,11 +549,11 @@ void MPSStream::replay(uint64_t captureId) {
     TORCH_CHECK(captureId != _activeCaptureId.load(std::memory_order_acquire),
                 "Cannot replay a capture that is still being recorded. Call captureEnd() "
                 "(i.e. exit the torch.mps.metal_graph() block) first.");
-    auto& steps = it->second;
+    auto& capture = it->second;
+    auto& steps = capture.steps;
+    // Replaying a capture that recorded nothing is a no-op, matching an empty
+    // torch.cuda.CUDAGraph.
     if (steps.empty()) {
-      TORCH_WARN(
-          "MetalGraph.replay() called with no captured steps. "
-          "Did the capture block contain any MPS ops?");
       return;
     }
     endKernelCoalescing();
@@ -487,7 +580,7 @@ void MPSStream::replay(uint64_t captureId) {
           dup.exe = (__bridge void*)[exe retain];
           dup.inputsArray = [ins retain];
           dup.resultsArray = [outs retain];
-          _captures[recordInto].push_back(std::move(dup));
+          _captures[recordInto].steps.push_back(std::move(dup));
         }
       } else if (step.kind == CapturedStep::Kind::BlitCopy) {
         endKernelCoalescing(); // End compute encoder before blit encoding
@@ -517,7 +610,9 @@ void MPSStream::replay(uint64_t captureId) {
           dup.blitLength = step.blitLength;
           dup.blitSrcOffset = step.blitSrcOffset;
           dup.blitDstOffset = step.blitDstOffset;
-          _captures[recordInto].push_back(std::move(dup));
+          _captures[recordInto].steps.push_back(std::move(dup));
+          captureNoteBuffer(srcBuffer);
+          captureNoteBuffer(dstBuffer);
         }
       } else {
         auto& mk = *step.metalKernel;
@@ -525,17 +620,7 @@ void MPSStream::replay(uint64_t captureId) {
         id<MTLComputePipelineState> pso = (__bridge id<MTLComputePipelineState>)mk.pso;
         [enc setComputePipelineState:pso];
         for (auto& b : mk.buffers) {
-          auto mtlBuf = (__bridge id<MTLBuffer>)b.buffer;
-          TORCH_CHECK(mtlBuf.length == b.bufferLength,
-                      "Graph replay: buffer at index ",
-                      b.index,
-                      " changed size from ",
-                      b.bufferLength,
-                      " to ",
-                      mtlBuf.length,
-                      ". Tensor storage was reallocated between capture and replay. "
-                      "Use .copy_() to update tensor data in-place.");
-          [enc setBuffer:mtlBuf offset:b.offset atIndex:b.index];
+          [enc setBuffer:(__bridge id<MTLBuffer>)b.buffer offset:b.offset atIndex:b.index];
         }
         for (auto& b : mk.bytes) {
           [enc setBytes:b.data.data() length:b.data.size() atIndex:b.index];
@@ -682,17 +767,13 @@ void MPSStream::MetalGraph::reset() {
   _stream = nullptr;
   // A graph dropped mid-recording must stop recording first: otherwise
   // captureFree refuses, and the stream would be left with an active capture id
-  // that nothing can clear, wedging every later capture on this stream.
-  if (stream->captureMode()) {
-    try {
-      stream->captureEnd(id);
-    } catch (const std::exception&) {
-      // Not the recording capture; nothing to stop.
-    }
-  }
+  // that nothing can clear, wedging every later capture on this stream. Asking
+  // by id rather than by the stream-global captureMode(), so another graph's
+  // recording is left alone.
+  stream->captureEndIfRecording(id);
   // Runs from the destructor, so it must not throw. A handle that is already
-  // gone (released by captureReset()) returns false and needs no action;
-  // anything else is a real bug and is surfaced rather than silently dropped.
+  // gone (released when the stream was torn down) returns false and needs no
+  // action; anything else is a real bug and is surfaced rather than dropped.
   try {
     stream->captureFree(id);
   } catch (const std::exception& e) {
