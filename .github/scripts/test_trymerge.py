@@ -2602,6 +2602,63 @@ class TestAdvisorPending(TestCase):
             classified = get_classifications(1, "pytorch", checks, ["job"])
         self.assertEqual(classified["job"].classification, "IGNORE_CURRENT_CHECK")
 
+    def test_a_cleared_check_is_classified_through_get_classifications(self) -> None:
+        """The happy path through the real entry point, not a hand-built state.
+
+        The sibling tests either call the matcher directly or construct
+        JobCheckState with the classification already set, so none of them
+        notices if the `get_classifications` branch stops firing.
+        """
+        checks = {"job": self._check("job", 7)}
+        drci = {"AI_NOT_RELATED": [{"id": 7, "name": "job"}]}
+        with mock.patch("trymerge.get_drci_classifications", return_value=drci):
+            classified = get_classifications(1, "pytorch", checks, [])
+        self.assertEqual(classified["job"].classification, "AI_NOT_RELATED")
+
+    def test_ignore_current_wins_over_being_cleared(self) -> None:
+        """An explicit --ignore-current must not be counted against the cap.
+
+        merge() builds the ignore list from raw conclusions with no
+        classification step, so a cleared failure lands in it too. Claiming it
+        for AI_NOT_RELATED would put the author's explicit decision under the
+        classifier's budget.
+        """
+        checks = {"job": self._check("job", 7)}
+        drci = {"AI_NOT_RELATED": [{"id": 7, "name": "job"}]}
+        with mock.patch("trymerge.get_drci_classifications", return_value=drci):
+            classified = get_classifications(1, "pytorch", checks, ["job"])
+        self.assertEqual(classified["job"].classification, "IGNORE_CURRENT_CHECK")
+
+    def test_a_merge_i_over_the_cap_is_not_refused(self) -> None:
+        """The regression the guard above prevents, at the boundary that bites.
+
+        More cleared failures than the cap, all named by --ignore-current:
+        without the guard every one classifies AI_NOT_RELATED, the cap trips,
+        and a `merge -i` that succeeds today is refused.
+        """
+        over = IGNORABLE_FAILED_CHECKS_THESHOLD + 1
+        names = [f"job {i}" for i in range(over)]
+        checks = {n: self._check(n, i) for i, n in enumerate(names)}
+        drci = {"AI_NOT_RELATED": [{"id": i, "name": n} for i, n in enumerate(names)]}
+        with mock.patch("trymerge.get_drci_classifications", return_value=drci):
+            classified = get_classifications(1, "pytorch", checks, names)
+        _, failed, _ = categorize_checks(classified, names)
+        self.assertEqual(failed, [])
+
+    def test_a_non_object_check_summary_is_no_classifications(self) -> None:
+        """`null`/list/scalar decode fine; popping them must not end the merge."""
+        for raw in ("null", "[]", "0", "false", '""'):
+            with self.subTest(summary=raw):
+                checks = {
+                    DRCI_CHECKRUN_NAME: JobCheckState(
+                        DRCI_CHECKRUN_NAME, "", "SUCCESS", None, 1, "", raw
+                    ),
+                    "job": self._check("job", 7),
+                }
+                with mock.patch("trymerge.get_drci_classifications", return_value={}):
+                    classified = get_classifications(1, "pytorch", checks, [])
+                self.assertIsNone(classified["job"].classification)
+
     def test_a_stale_check_summary_never_clears_a_gate(self) -> None:
         """The summary lags: Dr.CI skips rewriting it when the comment is unchanged."""
         summary = json.dumps(

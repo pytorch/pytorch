@@ -2579,6 +2579,13 @@ def get_classifications(
         try:
             print(f"From Dr.CI checkrun summary: {drci_summary}")
             drci_classifications = json.loads(str(drci_summary))
+            # `null`, a list or a bare scalar all decode without raising, and
+            # every one of them was falsy before this function started reaching
+            # into the result -- the matchers just read them as "no
+            # classifications". Keep that degradation rather than letting .pop
+            # raise past the JSONDecodeError handler and end the merge.
+            if not isinstance(drci_classifications, dict):
+                drci_classifications = {}
             # The summary is a snapshot, and Dr.CI skips rewriting it whenever
             # the comment body is unchanged, so it can lag the live answer. The
             # other categories only ever excuse a failure the classifier already
@@ -2660,7 +2667,15 @@ def get_classifications(
             )
             continue
 
-        elif is_ai_not_related(check, drci_classifications):
+        # `--ignore-current` is the author saying, explicitly, to ignore this
+        # check. Claiming it for AI_NOT_RELATED instead would put an explicit
+        # human decision under the classifier's cap: the branch below counts
+        # against no budget, this one does, so a `merge -i` over a PR with more
+        # cleared failures than the cap would be refused where it succeeds
+        # today. Defer to the author, same as the AI_PENDING branch above.
+        elif is_ai_not_related(check, drci_classifications) and not (
+            ignore_current_checks is not None and name in ignore_current_checks
+        ):
             checks_with_classifications[name] = JobCheckState(
                 check.name,
                 check.url,
