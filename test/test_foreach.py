@@ -2206,6 +2206,10 @@ class TestForeachMMDevice(_TestForeachMMHelper, TestCase):
     def test_foreach_mm(self, device, dtype, label, shapes):
         self._check(shapes, dtype, device)
 
+instantiate_device_type_tests(TestForeachMMDevice, globals())
+
+
+class TestForeachMMCUDA(_TestForeachMMHelper, TestCase):
     @parametrize(
         "label,a_dtype,b_dtype,K,expected",
         [
@@ -2287,9 +2291,7 @@ class TestForeachMMDevice(_TestForeachMMHelper, TestCase):
         ):
             self.assertEqual(impl._foreach_mm_route(A, B), expected)
 
-    @unittest.skipUnless(
-        torch.cuda.is_available() and SM90OrLater, "requires CUDA SM90+"
-    )
+    @unittest.skipUnless(SM90OrLater, "requires CUDA SM90+")
     @parametrize(
         "label,a_shape,b_shape,a_dtype,b_dtype",
         [
@@ -2310,9 +2312,7 @@ class TestForeachMMDevice(_TestForeachMMHelper, TestCase):
         B = [torch.randn(*b_shape, dtype=b_dtype, device="cuda") for _ in range(2)]
         self.assertFalse(_foreach_mm_cond(A, B))
 
-    @unittest.skipUnless(
-        torch.cuda.is_available() and SM90OrLater, "requires CUDA SM90+"
-    )
+    @unittest.skipUnless(SM90OrLater, "requires CUDA SM90+")
     @parametrize(
         "label,shapes",
         [
@@ -2344,9 +2344,7 @@ class TestForeachMMDevice(_TestForeachMMHelper, TestCase):
             self.assertEqual(o, r)
 
     @skipIfNoNvmath
-    @unittest.skipUnless(
-        torch.cuda.is_available() and SM90OrLater, "requires CUDA SM90+"
-    )
+    @unittest.skipUnless(SM90OrLater, "requires CUDA SM90+")
     @parametrize(
         "label,shapes",
         [
@@ -2380,7 +2378,7 @@ class TestForeachMMDevice(_TestForeachMMHelper, TestCase):
         self._check(shapes, torch.bfloat16, "cuda")
 
 
-instantiate_device_type_tests(TestForeachMMDevice, globals())
+instantiate_parametrized_tests(TestForeachMMCUDA)
 
 
 if __name__ == "__main__":
