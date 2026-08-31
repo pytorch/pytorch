@@ -18,8 +18,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
-    onlyCPU,
-    onlyNativeDeviceTypes,
     ops,
     precisionOverride,
 )
@@ -512,7 +510,6 @@ class TestUnaryUfuncs(TestCase):
             torch.nan_to_num(x, out=out, nan=nan, posinf=posinf, neginf=neginf)
             self.assertEqual(result, out)
 
-    @onlyCPU
     def test_nan_to_num_bfloat16(self, device):
         def test_dtype(fn, input, dtype):
             input = input.detach().clone().to(dtype=dtype).requires_grad_(True)
@@ -713,22 +710,6 @@ class TestUnaryUfuncs(TestCase):
             RuntimeError, r"polygamma\(n, x\) does not support negative n\."
         ):
             torch.polygamma(-1, torch.tensor([1.0, 2.0], device=device))
-
-    # TODO resolve with opinfos
-    @onlyCPU
-    def test_op_invert(self, device):
-        res = 0xFFFF - torch.arange(127, dtype=torch.int8)
-        for dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
-            a = torch.arange(127, dtype=dtype)
-            self.assertEqual(res.to(dtype), ~a)
-
-        self.assertEqual(torch.tensor([True, False]), ~torch.tensor([False, True]))
-
-        # test exceptions
-        for dtype in (torch.half, torch.float, torch.double):
-            a = torch.zeros(10, dtype=dtype)
-            with self.assertRaises(TypeError):
-                ~a
 
     @dtypes(torch.complex64, torch.complex128)
     def test_abs_angle_complex_to_float(self, device, dtype):
@@ -953,7 +934,6 @@ class TestUnaryUfuncs(TestCase):
             )
 
     # TODO: opinfo hardshrink
-    @onlyCPU
     @dtypes(torch.float, torch.double, torch.bfloat16)
     def test_hardshrink(self, device, dtype):
         data = torch.tensor([1, 0.5, 0.3, 0.6], dtype=dtype, device=device).view(2, 2)
@@ -975,7 +955,6 @@ class TestUnaryUfuncs(TestCase):
             data.t().hardshrink(0.3),
         )
 
-    @onlyCPU
     @dtypes(torch.float, torch.double, torch.bfloat16)
     def test_hardshrink_edge_cases(self, device, dtype) -> None:
         def h(values, l_expected):
@@ -1006,7 +985,6 @@ class TestUnaryUfuncs(TestCase):
 
         test_helper(torch.finfo(dtype).tiny, torch.finfo(dtype).max)
 
-    @onlyCPU
     @slowTest
     @dtypes(torch.float)
     @unittest.skipIf(True, "Insufficient memory on linux.(2|4)xlarge")
@@ -1297,20 +1275,6 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(res_tens.real, out_tens.real, atol=0.0, rtol=1e-6)
         self.assertEqual(res_tens.imag, out_tens.imag, atol=0.0, rtol=1e-6)
 
-    # do ops like threshold need a test_unary(_nonufunc) test suite?
-    @onlyCPU
-    @dtypes(*get_all_math_dtypes("cpu"))
-    def test_threshold(self, device, dtype):
-        if dtype != torch.uint8 and dtype != torch.float16 and not dtype.is_complex:
-            # 100 is wide enough to use AVX2 instructions for all types
-            x = (
-                torch.randn(100, dtype=torch.float, device=device)
-                .sign()
-                .to(dtype=dtype)
-            )
-            y = torch.threshold(x, 0, 0)
-            self.assertTrue(y.le(0).any())
-
     def _helper_test_igamma(self, loglo, loghi, device, dtype, torch_fcn, scipy_fcn):
         exp1 = 2.71828182846
         vec1 = torch.logspace(
@@ -1339,7 +1303,6 @@ class TestUnaryUfuncs(TestCase):
     @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
-    @onlyNativeDeviceTypes
     def test_igamma_common(self, device, dtype):
         # test igamma for reasonable range of values
         loglo = -4  # approx 0.018
@@ -1351,7 +1314,6 @@ class TestUnaryUfuncs(TestCase):
     @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
-    @onlyNativeDeviceTypes
     def test_igammac_common(self, device, dtype):
         # test igammac for reasonable range of values
         loglo = -4  # approx 0.018
@@ -1362,7 +1324,6 @@ class TestUnaryUfuncs(TestCase):
 
     @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
-    @onlyNativeDeviceTypes
     def test_igamma_edge_cases(self, device, dtype):
         tkwargs = {"dtype": dtype, "device": device}
         infs = torch.zeros((3,), **tkwargs) + float("inf")
@@ -1391,7 +1352,6 @@ class TestUnaryUfuncs(TestCase):
 
     @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
-    @onlyNativeDeviceTypes
     def test_igammac_edge_cases(self, device, dtype):
         tkwargs = {"dtype": dtype, "device": device}
         infs = torch.zeros((3,), **tkwargs) + float("inf")
@@ -1881,7 +1841,6 @@ class TestUnaryUfuncs(TestCase):
     # test for issue #161871 where mvlgamma_ should handle integer input gracefully
     # with a clear error message on all architectures (not crash with FPE on x86)
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.int32, torch.int64)
     def test_mvlgamma_inplace_integer_error(self, device, dtype):
         tensor = torch.randint(low=1, high=10, size=(5,), device=device, dtype=dtype)
@@ -1892,7 +1851,6 @@ class TestUnaryUfuncs(TestCase):
         ):
             tensor.mvlgamma_(2)
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.int32, torch.int64)
     def test_mvlgamma_integer_promotion(self, device, dtype):
         tensor = torch.tensor([5, 6, 7], device=device, dtype=dtype)
@@ -1901,11 +1859,40 @@ class TestUnaryUfuncs(TestCase):
         self.assertTrue(result.dtype.is_floating_point)
         self.assertTrue(torch.all(torch.isfinite(result)))
 
+
+class TestUnaryUfuncsCpuOnly(TestCase):
+    hw_classification = HardwareClassification.CPU
+
+    def test_op_invert(self, device):
+        res = 0xFFFF - torch.arange(127, dtype=torch.int8)
+        for dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
+            a = torch.arange(127, dtype=dtype)
+            self.assertEqual(res.to(dtype), ~a)
+
+        self.assertEqual(torch.tensor([True, False]), ~torch.tensor([False, True]))
+
+        # test exceptions
+        for dtype in (torch.half, torch.float, torch.double):
+            a = torch.zeros(10, dtype=dtype)
+            with self.assertRaises(TypeError):
+                ~a
+
+    @dtypes(*get_all_math_dtypes("cpu"))
+    def test_threshold(self, device, dtype):
+        if dtype != torch.uint8 and dtype != torch.float16 and not dtype.is_complex:
+            # 100 is wide enough to use AVX2 instructions for all types
+            x = (
+                torch.randn(100, dtype=torch.float, device=device)
+                .sign()
+                .to(dtype=dtype)
+            )
+            y = torch.threshold(x, 0, 0)
+            self.assertTrue(y.le(0).any())
+
     # Regression for https://github.com/pytorch/pytorch/issues/177839:
     # when eps > 0.5 the scalar kernel clamps via `x < eps ? eps : ...` (so
     # the lower bound wins over the upper bound when eps > 1 - eps), and the
     # vectorized kernel must match.
-    @onlyCPU
     @dtypes(torch.float32, torch.float64, torch.float16, torch.bfloat16)
     @parametrize("eps", [0.49, 0.51, 0.6, 0.9])
     @parametrize("shape", [(2, 16), (4, 32), (8, 64)])
@@ -1990,6 +1977,7 @@ class TestUnaryUfuncsCUDADevice(TestCase):
 
 
 instantiate_device_type_tests(TestUnaryUfuncs, globals())
+instantiate_device_type_tests(TestUnaryUfuncsCpuOnly , globals(), only_for="cpu")
 instantiate_device_type_tests(TestUnaryUfuncsCUDADevice, globals(), only_for="cuda")
 
 if __name__ == "__main__":
