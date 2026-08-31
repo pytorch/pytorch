@@ -1314,7 +1314,8 @@ template <
     typename Load,
     typename TI,
     typename TO,
-    uint NCHAINS = SUM_NCHAINS>
+    uint NCHAINS = SUM_NCHAINS,
+    typename TA = TO>
 [[max_total_threads_per_threadgroup(MAX_THREADGROUP_SIZE)]]
 kernel void value_reduction(
     constant TI* input [[buffer(0)]],
@@ -1340,7 +1341,6 @@ kernel void value_reduction(
     }
   }
 
-  using TA = TO;
   using Op = OpFn<TA>;
   const TA identity_val = Op::identity();
   metal::array<TA, NCHAINS> acc;
@@ -1401,7 +1401,7 @@ kernel void value_reduction(
         output_offset += index_in_dim * params.output_strides[dim];
       }
     }
-    output[output_offset] = output_val;
+    output[output_offset] = static_cast<TO>(output_val);
   }
 }
 
@@ -1412,7 +1412,8 @@ template <
     typename Load,
     typename TI,
     typename TO,
-    uint NCHAINS = SUM_NCHAINS>
+    uint NCHAINS = SUM_NCHAINS,
+    typename TA = TO>
 kernel void value_reduction_flat(
     constant TI* input [[buffer(0)]],
     device TO* output [[buffer(1)]],
@@ -1420,7 +1421,6 @@ kernel void value_reduction_flat(
     uint tid [[thread_position_in_threadgroup]],
     uint tptg [[threads_per_threadgroup]],
     uint tgid [[threadgroup_position_in_grid]]) {
-  using TA = TO;
   using Op = OpFn<TA>;
   const uint E = params.y;
   constant TI* in = input + tgid * E;
@@ -1457,7 +1457,7 @@ kernel void value_reduction_flat(
   threadgroup TA shared_outputs[MAX_THREADGROUP_SIZE / simdgroup_size];
   output_val = Op::threadgroup_reduce(shared_outputs, output_val, tid, tptg);
   if (tid == 0) {
-    output[tgid] = output_val;
+    output[tgid] = static_cast<TO>(output_val);
   }
 }
 
@@ -1472,7 +1472,8 @@ template <
     typename TO,
     uint TG_X = OUTER_TG_WIDTH,
     uint TG_Y = OUTER_TG_HEIGHT,
-    uint NCHAINS = SUM_NCHAINS>
+    uint NCHAINS = SUM_NCHAINS,
+    typename TA = TO>
 [[max_total_threads_per_threadgroup(TG_X * TG_Y)]]
 kernel void value_reduction_outer(
     constant TI* input [[buffer(0)]],
@@ -1483,7 +1484,6 @@ kernel void value_reduction_outer(
     constant uint4& strides [[buffer(3)]],
     uint3 tid_tg [[thread_position_in_threadgroup]],
     uint3 tg_pos [[threadgroup_position_in_grid]]) {
-  using TA = TO;
   using Op = OpFn<TA>;
   const uint dim_size = sizes.x;
   const uint inner_size = sizes.y;
@@ -1546,7 +1546,7 @@ kernel void value_reduction_outer(
   if (tid_tg.y == 0) {
     const uint out_idx =
         (num_segs > 1 ? tg_pos.y : tg_pos.z) * inner_size + col;
-    output[out_idx] = shmem[0][tid_tg.x];
+    output[out_idx] = static_cast<TO>(shmem[0][tid_tg.x]);
   }
 }
 
@@ -1557,7 +1557,8 @@ template <
     typename TI,
     typename TO,
     uint TG_SIZE = NARROW_TG_SIZE,
-    uint NCHAINS = SUM_NCHAINS>
+    uint NCHAINS = SUM_NCHAINS,
+    typename TA = TO>
 [[max_total_threads_per_threadgroup(TG_SIZE)]]
 kernel void value_reduction_narrow(
     constant TI* input [[buffer(0)]],
@@ -1566,7 +1567,6 @@ kernel void value_reduction_narrow(
     constant uint4& sizes [[buffer(2)]],
     uint3 tid_tg [[thread_position_in_threadgroup]],
     uint3 tg_pos [[threadgroup_position_in_grid]]) {
-  using TA = TO;
   using Op = OpFn<TA>;
   const uint tid = tid_tg.x;
   const uint dim_size = sizes.x;
@@ -1612,7 +1612,7 @@ kernel void value_reduction_narrow(
     }
     const uint out_idx = (num_segs > 1) ? (tg_pos.y * inner_size + tid)
                                         : (tg_pos.z * inner_size + tid);
-    output[out_idx] = s;
+    output[out_idx] = static_cast<TO>(s);
   }
 }
 
@@ -1625,7 +1625,8 @@ template <
     typename Load,
     typename TI,
     typename TO,
-    uint NCHAINS = SUM_NCHAINS>
+    uint NCHAINS = SUM_NCHAINS,
+    typename TA = TO>
 kernel void value_reduction_inner(
     constant TI* input [[buffer(0)]],
     device TO* output [[buffer(1)]],
@@ -1634,7 +1635,6 @@ kernel void value_reduction_inner(
     uint tgid [[threadgroup_position_in_grid]],
     uint simd_lane_id [[thread_index_in_simdgroup]],
     uint simdgroup_id [[simdgroup_index_in_threadgroup]]) {
-  using TA = TO;
   using Op = OpFn<TA>;
   const uint M = sizes.x;
   const uint N = sizes.y;
@@ -1673,7 +1673,7 @@ kernel void value_reduction_inner(
   val = Op::simd_reduce(val);
 
   if (simd_lane_id == 0) {
-    output[row] = val;
+    output[row] = static_cast<TO>(val);
   }
 }
 
@@ -1681,7 +1681,8 @@ template <
     template <typename> class OpFn,
     typename Load,
     typename TI,
-    typename TO>
+    typename TO,
+    typename TA = TO>
 kernel void value_reduction_inner_chunk(
     constant TI* input [[buffer(0)]],
     device TO* output [[buffer(1)]],
@@ -1690,14 +1691,13 @@ kernel void value_reduction_inner_chunk(
     uint tgid [[threadgroup_position_in_grid]],
     uint simd_lane_id [[thread_index_in_simdgroup]],
     uint simdgroup_id [[simdgroup_index_in_threadgroup]]) {
-  using TA = TO;
   chunk_reduce_impl<ValueChunkOps<OpFn, Load, TA>, TA>(
       input, output, sizes, 0.0f, tptg, tgid, simd_lane_id, simdgroup_id);
 }
 
-#define REGISTER_VALUE_CHUNK_IMPL(TI, TO, NAME, OP, LOAD)            \
+#define REGISTER_VALUE_CHUNK_IMPL(TI, TO, NAME, OP, LOAD, TA)        \
   template [[host_name(NAME "_reduction_inner_chunk_" #TI "_" #TO)]] \
-  kernel void value_reduction_inner_chunk<OP, LOAD, TI, TO>(         \
+  kernel void value_reduction_inner_chunk<OP, LOAD, TI, TO, TA>(     \
       constant TI * input [[buffer(0)]],                             \
       device TO * output [[buffer(1)]],                              \
       constant uint4 & sizes [[buffer(2)]],                          \
@@ -1706,65 +1706,82 @@ kernel void value_reduction_inner_chunk(
       uint simd_lane_id [[thread_index_in_simdgroup]],               \
       uint simdgroup_id [[simdgroup_index_in_threadgroup]]);
 
-#define REGISTER_VALUE_REDUCTION_IMPL(TI, TO, NAME, OP, LOAD)              \
-  REGISTER_VALUE_CHUNK_IMPL(TI, TO, NAME, OP, LOAD)                        \
-  template [[host_name(NAME "_reduction_" #TI "_" #TO)]]                   \
-  kernel void value_reduction<OP, LOAD, TI, TO, SUM_NCHAINS>(              \
-      constant TI * input [[buffer(0)]],                                   \
-      device TO * output [[buffer(1)]],                                    \
-      constant NormParams<> & params [[buffer(2)]],                        \
-      uint tid [[thread_position_in_threadgroup]],                         \
-      uint tptg [[threads_per_threadgroup]],                               \
-      uint tgid [[threadgroup_position_in_grid]]);                         \
-  template [[host_name(NAME "_reduction_outer_" #TI "_" #TO)]]             \
-  kernel void value_reduction_outer<                                       \
-      OP,                                                                  \
-      LOAD,                                                                \
-      TI,                                                                  \
-      TO,                                                                  \
-      OUTER_TG_WIDTH,                                                      \
-      OUTER_TG_HEIGHT,                                                     \
-      SUM_NCHAINS>(                                                        \
-      constant TI * input [[buffer(0)]],                                   \
-      device TO * output [[buffer(1)]],                                    \
-      constant uint4 & sizes [[buffer(2)]],                                \
-      constant uint4 & strides [[buffer(3)]],                              \
-      uint3 tid_tg [[thread_position_in_threadgroup]],                     \
-      uint3 tg_pos [[threadgroup_position_in_grid]]);                      \
-  template [[host_name(NAME "_reduction_outer_small_dim_" #TI "_" #TO)]]   \
-  kernel void                                                              \
-  value_reduction_outer<OP, LOAD, TI, TO, OUTER_TG_WIDTH, 1, SUM_NCHAINS>( \
-      constant TI * input [[buffer(0)]],                                   \
-      device TO * output [[buffer(1)]],                                    \
-      constant uint4 & sizes [[buffer(2)]],                                \
-      constant uint4 & strides [[buffer(3)]],                              \
-      uint3 tid_tg [[thread_position_in_threadgroup]],                     \
-      uint3 tg_pos [[threadgroup_position_in_grid]]);                      \
-  template [[host_name(NAME "_reduction_narrow_" #TI "_" #TO)]]            \
-  kernel void                                                              \
-  value_reduction_narrow<OP, LOAD, TI, TO, NARROW_TG_SIZE, SUM_NCHAINS>(   \
-      constant TI * input [[buffer(0)]],                                   \
-      device TO * output [[buffer(1)]],                                    \
-      constant uint4 & sizes [[buffer(2)]],                                \
-      uint3 tid_tg [[thread_position_in_threadgroup]],                     \
-      uint3 tg_pos [[threadgroup_position_in_grid]]);                      \
-  template [[host_name(NAME "_reduction_inner_" #TI "_" #TO)]]             \
-  kernel void value_reduction_inner<OP, LOAD, TI, TO, SUM_NCHAINS>(        \
-      constant TI * input [[buffer(0)]],                                   \
-      device TO * output [[buffer(1)]],                                    \
-      constant uint2 & sizes [[buffer(2)]],                                \
-      uint tptg [[threads_per_threadgroup]],                               \
-      uint tgid [[threadgroup_position_in_grid]],                          \
-      uint simd_lane_id [[thread_index_in_simdgroup]],                     \
-      uint simdgroup_id [[simdgroup_index_in_threadgroup]]);               \
-  template [[host_name(NAME "_reduction_flat_" #TI "_" #TO)]]              \
-  kernel void value_reduction_flat<OP, LOAD, TI, TO, SUM_NCHAINS>(         \
-      constant TI * input [[buffer(0)]],                                   \
-      device TO * output [[buffer(1)]],                                    \
-      constant uint2 & params [[buffer(2)]],                               \
-      uint tid [[thread_position_in_threadgroup]],                         \
-      uint tptg [[threads_per_threadgroup]],                               \
+#define REGISTER_VALUE_REDUCTION_IMPL_TA(TI, TO, NAME, OP, LOAD, TA)           \
+  REGISTER_VALUE_CHUNK_IMPL(TI, TO, NAME, OP, LOAD, TA)                        \
+  template [[host_name(NAME "_reduction_" #TI "_" #TO)]]                       \
+  kernel void value_reduction<OP, LOAD, TI, TO, SUM_NCHAINS, TA>(              \
+      constant TI * input [[buffer(0)]],                                       \
+      device TO * output [[buffer(1)]],                                        \
+      constant NormParams<> & params [[buffer(2)]],                            \
+      uint tid [[thread_position_in_threadgroup]],                             \
+      uint tptg [[threads_per_threadgroup]],                                   \
+      uint tgid [[threadgroup_position_in_grid]]);                             \
+  template [[host_name(NAME "_reduction_outer_" #TI "_" #TO)]]                 \
+  kernel void value_reduction_outer<                                           \
+      OP,                                                                      \
+      LOAD,                                                                    \
+      TI,                                                                      \
+      TO,                                                                      \
+      OUTER_TG_WIDTH,                                                          \
+      OUTER_TG_HEIGHT,                                                         \
+      SUM_NCHAINS,                                                             \
+      TA>(                                                                     \
+      constant TI * input [[buffer(0)]],                                       \
+      device TO * output [[buffer(1)]],                                        \
+      constant uint4 & sizes [[buffer(2)]],                                    \
+      constant uint4 & strides [[buffer(3)]],                                  \
+      uint3 tid_tg [[thread_position_in_threadgroup]],                         \
+      uint3 tg_pos [[threadgroup_position_in_grid]]);                          \
+  template [[host_name(NAME "_reduction_outer_small_dim_" #TI "_" #TO)]]       \
+  kernel void value_reduction_outer<                                           \
+      OP,                                                                      \
+      LOAD,                                                                    \
+      TI,                                                                      \
+      TO,                                                                      \
+      OUTER_TG_WIDTH,                                                          \
+      1,                                                                       \
+      SUM_NCHAINS,                                                             \
+      TA>(                                                                     \
+      constant TI * input [[buffer(0)]],                                       \
+      device TO * output [[buffer(1)]],                                        \
+      constant uint4 & sizes [[buffer(2)]],                                    \
+      constant uint4 & strides [[buffer(3)]],                                  \
+      uint3 tid_tg [[thread_position_in_threadgroup]],                         \
+      uint3 tg_pos [[threadgroup_position_in_grid]]);                          \
+  template [[host_name(NAME "_reduction_narrow_" #TI "_" #TO)]]                \
+  kernel void value_reduction_narrow<                                          \
+      OP,                                                                      \
+      LOAD,                                                                    \
+      TI,                                                                      \
+      TO,                                                                      \
+      NARROW_TG_SIZE,                                                          \
+      SUM_NCHAINS,                                                             \
+      TA>(                                                                     \
+      constant TI * input [[buffer(0)]],                                       \
+      device TO * output [[buffer(1)]],                                        \
+      constant uint4 & sizes [[buffer(2)]],                                    \
+      uint3 tid_tg [[thread_position_in_threadgroup]],                         \
+      uint3 tg_pos [[threadgroup_position_in_grid]]);                          \
+  template [[host_name(NAME "_reduction_inner_" #TI "_" #TO)]]                 \
+  kernel void value_reduction_inner<OP, LOAD, TI, TO, SUM_NCHAINS, TA>(        \
+      constant TI * input [[buffer(0)]],                                       \
+      device TO * output [[buffer(1)]],                                        \
+      constant uint2 & sizes [[buffer(2)]],                                    \
+      uint tptg [[threads_per_threadgroup]],                                   \
+      uint tgid [[threadgroup_position_in_grid]],                              \
+      uint simd_lane_id [[thread_index_in_simdgroup]],                         \
+      uint simdgroup_id [[simdgroup_index_in_threadgroup]]);                   \
+  template [[host_name(NAME "_reduction_flat_" #TI "_" #TO)]]                  \
+  kernel void value_reduction_flat<OP, LOAD, TI, TO, SUM_NCHAINS, TA>(         \
+      constant TI * input [[buffer(0)]],                                       \
+      device TO * output [[buffer(1)]],                                        \
+      constant uint2 & params [[buffer(2)]],                                   \
+      uint tid [[thread_position_in_threadgroup]],                             \
+      uint tptg [[threads_per_threadgroup]],                                   \
       uint tgid [[threadgroup_position_in_grid]]);
+
+#define REGISTER_VALUE_REDUCTION_IMPL(TI, TO, NAME, OP, LOAD) \
+  REGISTER_VALUE_REDUCTION_IMPL_TA(TI, TO, NAME, OP, LOAD, TO)
 
 #define REGISTER_MAX(T) \
   REGISTER_VALUE_REDUCTION_IMPL(T, T, "max", MaxOp, IdentityLoad)
@@ -1800,6 +1817,30 @@ REGISTER_REDUCTIONS_OPS_FOR_TYPE(uchar);
 REGISTER_PRED_REDUCTIONS_FOR_TYPE(bool);
 REGISTER_PRED_REDUCTIONS_FOR_TYPE(float2);
 REGISTER_PRED_REDUCTIONS_FOR_TYPE(half2);
+
+// Native prod on the shared value_reduction family. Accumulate in
+// opmath_t<TO> so half/bfloat/char products do not overflow in the
+// element type. Mixed TI/TO pairs cover two-pass partials.
+#define REGISTER_PROD(TI, TO) \
+  REGISTER_VALUE_REDUCTION_IMPL_TA(TI, TO, "prod", ProdOp, IdentityLoad, opmath_t<TO>)
+
+REGISTER_PROD(float, float);
+REGISTER_PROD(float, half);
+REGISTER_PROD(float, bfloat);
+REGISTER_PROD(half, half);
+REGISTER_PROD(half, float);
+REGISTER_PROD(bfloat, bfloat);
+REGISTER_PROD(bfloat, float);
+REGISTER_PROD(int, int);
+REGISTER_PROD(int, long);
+REGISTER_PROD(long, long);
+REGISTER_PROD(short, short);
+REGISTER_PROD(short, long);
+REGISTER_PROD(char, char);
+REGISTER_PROD(char, long);
+REGISTER_PROD(uchar, uchar);
+REGISTER_PROD(uchar, long);
+REGISTER_PROD(float2, float2);
 
 // =============================================================================
 // argmax/argmin: per output element find the (linear) index of the max/min

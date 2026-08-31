@@ -1788,6 +1788,34 @@ static void or_kernel_mps(TensorIterator& iter) {
   value_reduction_kernel_mps(iter, "any_");
 }
 
+static void prod_kernel_mps(TensorIterator& iter) {
+  const Tensor& input = iter.input(0);
+  const Tensor& output = iter.output(0);
+  if (input.numel() == 0) {
+    output.fill_(1);
+    return;
+  }
+  if (output.numel() == 0) {
+    return;
+  }
+  const auto in_st = input.scalar_type();
+  const auto out_st = output.scalar_type();
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      in_st != kBool && out_st != kBool && in_st != kComplexHalf && out_st != kComplexHalf,
+      "MPS prod does not support ",
+      in_st,
+      " -> ",
+      out_st);
+  reduction_dispatch_mps(iter,
+                         ReductionDispatch{
+                             .prefix = "prod_",
+                             .input_kernel_dtype = in_st,
+                             .output_kernel_dtype = out_st,
+                             .partial_dtype = at::toOpMathType(out_st),
+                             .pass2_prefix = "prod_",
+                         });
+}
+
 Tensor trace_mps(const Tensor& self) {
   TORCH_CHECK(self.dim() == 2, "trace: expected a matrix, but got tensor with dim ", self.dim());
   // trace is just sum-of-diagonal; route through the Metal sum kernel via
@@ -1797,8 +1825,17 @@ Tensor trace_mps(const Tensor& self) {
 
 TORCH_IMPL_FUNC(prod_out_mps)
 (const Tensor& input_t, int64_t dim, bool keepdim, std::optional<ScalarType> dtype, const Tensor& output_t) {
+  (void)dtype;
   int64_t dims[1] = {dim};
-  reduction_out_mps(input_t, IntArrayRef(dims, 1), keepdim, dtype, output_t, MPSReductionType::PROD, "prod_out_mps");
+  if (input_t.numel() == 0) {
+    output_t.fill_(1);
+    return;
+  }
+  if (output_t.numel() == 0) {
+    return;
+  }
+  auto iter = at::meta::make_reduction(input_t, output_t, IntArrayRef(dims, 1), keepdim, output_t.scalar_type());
+  prod_kernel_mps(iter);
 }
 
 static void aminmax_kernel_mps(const Tensor& self, int64_t dim, bool keepdim, Tensor& min, Tensor& max) {
@@ -1814,15 +1851,14 @@ static void aminmax_allreduce_kernel_mps(const Tensor& self, Tensor& min, Tensor
 }
 
 Tensor prod_mps(const Tensor& self, std::optional<ScalarType> opt_dtype) {
-  std::vector<int64_t> dims(self.dim());
-  std::iota(dims.begin(), dims.end(), 0);
-
   Tensor output_t =
       at::empty({}, get_dtype_from_self(self, opt_dtype, true), std::nullopt, kMPS, std::nullopt, std::nullopt);
-
-  reduction_out_mps(
-      self, IntArrayRef(dims), false, opt_dtype, const_cast<Tensor&>(output_t), MPSReductionType::PROD, "prod_mps");
-
+  if (self.numel() == 0) {
+    output_t.fill_(1);
+    return output_t;
+  }
+  auto iter = at::meta::make_reduction(self, output_t, IntArrayRef{}, /*keepdim=*/false, output_t.scalar_type());
+  prod_kernel_mps(iter);
   return output_t;
 }
 
