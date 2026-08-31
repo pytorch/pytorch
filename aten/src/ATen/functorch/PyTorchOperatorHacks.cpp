@@ -1,8 +1,6 @@
 #include <ATen/functorch/DynamicLayer.h>
 #include <torch/library.h>
 #include <ATen/ATen.h>
-#include <ATen/WrapDimUtils.h>
-#include <ATen/functorch/TensorWrapper.h>
 #include <ATen/functorch/BatchedTensorImpl.h>
 #include <ATen/Dispatch.h>
 #include <c10/util/irange.h>

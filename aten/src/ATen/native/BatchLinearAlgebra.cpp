@@ -2,7 +2,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/Dispatch.h>
-#include <ATen/Parallel.h>
 #include <ATen/TensorMeta.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorSubclassLikeUtils.h>
@@ -10,7 +9,6 @@
 #include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
-#include <ATen/native/cpu/zmath.h>
 
 #include <c10/util/irange.h>
 

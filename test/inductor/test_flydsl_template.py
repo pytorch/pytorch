@@ -1,5 +1,9 @@
 # Owner(s): ["module: inductor"]
 import os
+import threading
+import unittest
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict
 from types import SimpleNamespace
 from unittest import mock
 
@@ -12,6 +16,7 @@ from torch._inductor.codegen.flydsl.flydsl_scheduling import (
 )
 from torch._inductor.codegen.flydsl.flydsl_template import FlyDSLTemplate
 from torch._inductor.ir import Buffer, FixedLayout
+from torch._inductor.runtime.flydsl_cache import run_cached_flydsl
 from torch._inductor.select_algorithm import PartialRender
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import OrderedSet
@@ -20,6 +25,14 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+
+
+class _CacheParam:
+    def __init__(self, key="param"):
+        self.key = key
+
+    def __cache_signature__(self):
+        return (self.key,)
 
 
 @instantiate_parametrized_tests
@@ -294,6 +307,220 @@ class TestFlyDSLTemplate(TestCase):
         self.assertEqual(metadata["precompile_shapes"], {"output": [1]})
         self.assertEqual(metadata["precompile_strides"], {"output": [1]})
         self.assertEqual(metadata["precompile_dtypes"], {"output": "float32"})
+
+    @parametrize(
+        "size,dtype,stride,offset,n",
+        (
+            ([1, 64, 128], torch.float16, [8192, 128, 1], 0, 64),
+            ([64, 128], torch.float32, [128, 1], 0, 64),
+            ([64, 128], torch.float16, [129, 1], 0, 64),
+            ([64, 128], torch.float16, [128, 1], 1, 64),
+            ([64, 128], torch.float16, [128, 1], 0, 63),
+        ),
+    )
+    def test_mm_gate_rejects_invalid_inputs(self, size, dtype, stride, offset, n):
+        from torch._inductor.kernel import mm
+
+        def node(size, stride, offset=0):
+            return SimpleNamespace(
+                get_size=lambda: size,
+                get_stride=lambda: stride,
+                get_dtype=lambda: dtype,
+                get_layout=lambda: SimpleNamespace(offset=offset),
+            )
+
+        mat1 = node(size, stride, offset)
+        mat2 = node([128, n], [1, 128])
+        layout = SimpleNamespace(stride=[n, 1], dtype=dtype, device=torch.device("cpu"))
+        sizevars = SimpleNamespace(
+            statically_known_equals=lambda x, y: x == y,
+            statically_known_multiple_of=lambda x, y: x % y == 0,
+        )
+        with (
+            V.set_graph_handler(SimpleNamespace(sizevars=sizevars)),
+            mock.patch.object(mm, "use_flydsl_gemm_template", return_value=True),
+            mock.patch.object(mm, "is_unaligned", return_value=False),
+        ):
+            result = mm.get_flydsl_mm_template_kwargs(layout, mat1, mat2, True, True)
+            self.assertEqual(result, [])
+
+    def test_compiled_cache_keys_on_device_and_param(self):
+        jit_func = SimpleNamespace()
+        compiled = mock.Mock()
+        compiler = mock.Mock(return_value=compiled)
+
+        def invoke(device_index):
+            dispatch = SimpleNamespace(device=SimpleNamespace(index=device_index))
+            return run_cached_flydsl(
+                jit_func,
+                object(),
+                constexpr_param=_CacheParam(),
+                compiler=compiler,
+                dispatch_args=(dispatch,),
+            )
+
+        first = invoke(0)
+        with mock.patch(
+            "torch._inductor.runtime.flydsl_cache._compiled_cache_lock"
+        ) as cache_lock:
+            second = invoke(0)
+        third = invoke(1)
+
+        self.assertIs(first, compiled)
+        self.assertIs(second, compiled)
+        self.assertIs(third, compiled)
+        cache_lock.__enter__.assert_not_called()
+        self.assertEqual(compiler.call_count, 2)
+        compiled.assert_called_once()
+
+    def test_compiled_cache_serializes_same_param(self):
+        jit_func = SimpleNamespace()
+        compile_started = threading.Event()
+        allow_compile = threading.Event()
+        compiled = mock.Mock()
+        compile_calls = 0
+
+        def compiler(*args):
+            nonlocal compile_calls
+            compile_calls += 1
+            compile_started.set()
+            self.assertTrue(allow_compile.wait(5))
+            return compiled
+
+        def invoke(value):
+            return run_cached_flydsl(
+                jit_func,
+                object(),
+                constexpr_param=_CacheParam(),
+                compiler=compiler,
+                dispatch_args=(value,),
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(invoke, "first")
+            self.assertTrue(compile_started.wait(5))
+            second = pool.submit(invoke, "second")
+            allow_compile.set()
+            self.assertIs(first.result(), compiled)
+            self.assertIs(second.result(), compiled)
+
+        self.assertEqual(compile_calls, 1)
+        compiled.assert_called_once_with("second")
+
+    def _assert_compiled_mm(self, a, b, *, expect_flydsl: bool | None = True):
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(lhs, rhs):
+            return torch.mm(lhs, rhs.t())
+
+        torch._dynamo.reset()
+        result, (code,) = run_and_get_code(torch.compile(fn, backend="inductor"), a, b)
+        if expect_flydsl is not None:
+            assertion = self.assertIn if expect_flydsl else self.assertNotIn
+            assertion("async_compile.flydsl", code)
+        self.assertEqual(result, fn(a, b), atol=3e-2, rtol=3e-2)
+        return code
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @torch._inductor.config.patch(
+        max_autotune_gemm=True,
+        max_autotune_gemm_backends="FLYDSL",
+    )
+    def test_flydsl_gemm_transposed_rhs_e2e(self):
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+        cases = (
+            (torch.bfloat16, 32, 128, 128),
+            (torch.float16, 32, 128, 128),
+            (torch.bfloat16, 32, 256, 128),
+            (torch.bfloat16, 48, 96, 96),
+        )
+        for dtype, m, n, k in cases:
+            with self.subTest(dtype=dtype, m=m, n=n, k=k):
+                a = torch.randn(m, k, device="cuda", dtype=dtype)
+                b = torch.randn(n, k, device="cuda", dtype=dtype)
+                code = self._assert_compiled_mm(a, b)
+                self.assertIn(".mark_layout_dynamic()", code)
+                self.assertIn("mat2.transpose(0, 1)", code)
+                self.assertIn(".run(", code)
+                self.assertIn("TILE_M: fx.Constexpr", code)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @torch._inductor.config.patch(
+        max_autotune_gemm=True,
+        max_autotune_gemm_backends="FLYDSL",
+        flydsl_enable_autotuning=False,
+    )
+    def test_flydsl_gemm_strides_offsets_and_alignment(self):
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+        m = n = 64
+        k = 128
+        dtype = torch.bfloat16
+        a = torch.randn(m, k, device="cuda", dtype=dtype)
+        b = torch.randn(n, k, device="cuda", dtype=dtype)
+        a_storage = torch.randn(m + 1, 160, device="cuda", dtype=dtype)
+        b_storage = torch.randn(n + 1, 192, device="cuda", dtype=dtype)
+        supported = (
+            a_storage[1:, 8 : 8 + k],
+            b_storage[1:, 8 : 8 + k],
+        )
+        bad_stride = torch.empty_strided(
+            (m, k), (k + 1, 1), device="cuda", dtype=dtype
+        ).normal_()
+        bad_offset = torch.as_strided(
+            torch.randn(n * k + 1, device="cuda", dtype=dtype),
+            (n, k),
+            (k, 1),
+            storage_offset=1,
+        )
+
+        with torch._inductor.config.patch(
+            max_autotune_gemm_backends="ATEN,FLYDSL",
+            autotune_in_subproc=False,
+        ):
+            self._assert_compiled_mm(*supported, expect_flydsl=None)
+            self._assert_compiled_mm(bad_stride, b, expect_flydsl=False)
+            self._assert_compiled_mm(a, bad_offset, expect_flydsl=False)
+        self._assert_compiled_mm(*supported)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @torch._inductor.config.patch(
+        max_autotune_gemm=True,
+        max_autotune_gemm_backends="FLYDSL",
+        max_autotune_gemm_search_space="EXHAUSTIVE",
+        flydsl_enable_autotuning=True,
+        autotune_in_subproc=True,
+    )
+    def test_flydsl_autotune_transposed_rhs_uses_view_tensor(self):
+        from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
+
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+        configs = [
+            asdict(config) for config in flydsl_heuristics.get_default_gemm_configs()
+        ]
+        configs = [
+            next(
+                config for config in configs if not config["USE_HALF_TILE_INTERLEAVED"]
+            ),
+            next(config for config in configs if config["USE_HALF_TILE_INTERLEAVED"]),
+        ]
+
+        with mock.patch.object(
+            flydsl_heuristics, "get_gemm_configs", return_value=configs
+        ):
+            for k in (32, 64, 128):
+                with self.subTest(k=k):
+                    a = torch.randn(64, k, device="cuda", dtype=torch.bfloat16)
+                    b = torch.randn(64, k, device="cuda", dtype=torch.bfloat16)
+                    self._assert_compiled_mm(a, b)
 
 
 if __name__ == "__main__":

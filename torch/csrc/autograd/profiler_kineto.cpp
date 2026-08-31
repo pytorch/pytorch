@@ -18,7 +18,6 @@
 #include <torch/csrc/profiler/kineto_metadata.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/orchestration/observer.h>
-#include <torch/csrc/profiler/perf.h>
 #include <torch/csrc/profiler/standalone/itt_observer.h>
 #include <torch/csrc/profiler/standalone/nvtx_observer.h>
 #include <torch/csrc/profiler/standalone/privateuse1_observer.h>
@@ -28,7 +27,6 @@
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
-#include <stdexcept>
 #include <utility>
 
 #ifdef USE_KINETO

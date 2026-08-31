@@ -122,9 +122,11 @@ def annotate_trace(
 ) -> int:
     """Add annotation fields to kernel events matching the annotations dict.
 
-    Each annotation entry is a list (from nested ``mark_kernels`` scopes).
-    Fields from all annotations are merged into the event args; if multiple
-    annotations define the same key, later entries in the list win.
+    Each annotation entry is a one-element list holding the node's merged
+    annotation dict (older pickles hold several entries, from nested
+    ``mark_kernels`` scopes, and a bare dict is accepted as well). Fields from
+    all annotations are merged into the event args; if multiple annotations
+    define the same key, later entries in the list win.
 
     For graphed events (graph_node_id != 0), reassigns ``tid`` and
     ``args["stream"]`` to the stream recorded in annotations, or to
@@ -154,7 +156,10 @@ def annotate_trace(
             continue
         stream_id = None
         if graph_node_id in annotations:
-            for ann in annotations[graph_node_id]:
+            entry = annotations[graph_node_id]
+            # The registry hands out one-element lists; a bare dict is accepted too so a
+            # pickle of the raw store reads back.
+            for ann in entry if isinstance(entry, list) else [entry]:
                 if isinstance(ann, dict):
                     for key, value in ann.items():
                         # Legacy pickles wrapped bare strings as {"str": ...};

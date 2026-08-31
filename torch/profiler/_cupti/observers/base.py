@@ -53,17 +53,17 @@ GraphDependencyResolver = Callable[[int], "list[int] | None"]
 
 
 def default_graph_annotation_resolver(graph_node_id: int) -> Any | None:
-    """Default resolver: map a CUDA-graph node id to its registered annotation, or None when
-    it has none."""
+    """Default resolver: map a CUDA-graph node id to its registered annotation dict, or None
+    when it has none. Reads the registry's in-process accessor rather than the list-wrapped
+    public view, so the exporters spread the annotation's fields instead of re-serializing a
+    list."""
     if graph_node_id == 0:
         return None
     try:
-        from torch.cuda._graph_annotations import get_kernel_annotations
-
-        annotations = get_kernel_annotations()
+        from torch.cuda._graph_annotations import annotation_for
     except Exception:
         return None
-    return annotations.get(graph_node_id)
+    return annotation_for(graph_node_id)
 
 
 @dataclass(frozen=True)

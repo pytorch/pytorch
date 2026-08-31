@@ -319,7 +319,7 @@ static std::vector<Value*> linearGradientForNode(
   auto block = linear->addBlock();
   WithInsertPoint guard(block);
   auto results = GradientHelper(node).gradient(grad_values);
-  return fmap(results, [block, linear](Value* grad) -> Value* {
+  return fmap(std::move(results), [block, linear](Value* grad) -> Value* {
     if (!grad || grad->mustBeNone())
       return nullptr;
     block->registerOutput(grad);
@@ -728,14 +728,14 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
   for (Value* capture_val : reverse_captures) {
     // If it's already an output we don't have to add anything,
     // but register the fact that it needs to be captured.
-    if (orig_primal_outputs_idx.contains(capture_val)) {
-      grad_desc.df_input_captured_outputs.push_back(
-          orig_primal_outputs_idx[capture_val]);
+    if (auto it = orig_primal_outputs_idx.find(capture_val);
+        it != orig_primal_outputs_idx.end()) {
+      grad_desc.df_input_captured_outputs.push_back(it->second);
       // If it's an input, we could add it as an output but in fact it's
       // more efficient to use a special kind of capture.
-    } else if (orig_primal_inputs_idx.contains(capture_val)) {
-      grad_desc.df_input_captured_inputs.push_back(
-          orig_primal_inputs_idx.at(capture_val));
+    } else if (auto it = orig_primal_inputs_idx.find(capture_val);
+               it != orig_primal_inputs_idx.end()) {
+      grad_desc.df_input_captured_inputs.push_back(it->second);
       // Otherwise it's just a regular intermediate value that we need to add as
       // an output
     } else {
@@ -767,11 +767,12 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
     // false positives), while the gradients we will emit for this value can get
     // DCE-d in the optimization pass (because it has no influence on the real
     // f's outputs that we differentiate).
-    if (!rev_info.grad_map.contains(tmp))
+    auto it = rev_info.grad_map.find(tmp);
+    if (it == rev_info.grad_map.end())
       continue;
 
     Value* tmp_vjp_in = reverse_block->addInput()->setType(tmp->type());
-    Value* tmp_vjp_prev = rev_info.grad_map.at(tmp);
+    Value* tmp_vjp_prev = it->second;
     // This is quite weird because we can't first make a sum and then replace
     // all uses of tmp_vjp_prev (that would replace its use in the sum too!), so
     // we create an incorrect sum that doesn't use prev vjp, replace uses, and

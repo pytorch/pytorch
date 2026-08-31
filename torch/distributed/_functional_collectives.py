@@ -217,6 +217,10 @@ def all_gather_single(
     """
     group = _resolve_group(group, tag)
     group_size = c10d._get_group_size_by_name(group)
+    # The can_use_view check and _maybe_view_chunk_cat below assume a
+    # non-negative gather_dim.
+    if gather_dim < 0:
+        gather_dim += self.dim()
     tensor = torch.ops._c10d_functional.all_gather_into_tensor(
         self, group_size, _group_or_group_name(group)
     )

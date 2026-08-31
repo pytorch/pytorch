@@ -19,21 +19,23 @@ namespace {
 using stream_set = ska::flat_hash_set<xpu::XPUStream>;
 
 struct Block;
-typedef bool (*Comparison)(const Block*, const Block*);
-bool BlockComparatorSize(const Block* a, const Block* b);
-bool BlockComparatorAddress(const Block* a, const Block* b);
+
+struct BlockComparatorSize {
+  bool operator()(const Block* a, const Block* b) const;
+};
+
+struct BlockComparatorAddress {
+  bool operator()(const Block* a, const Block* b) const;
+};
 
 struct PrivatePool;
 
 struct BlockPool {
   BlockPool(bool small, PrivatePool* private_pool = nullptr)
-      : blocks(BlockComparatorSize),
-        unmapped(BlockComparatorAddress),
-        is_small(small),
-        owner_PrivatePool(private_pool) {}
+      : is_small(small), owner_PrivatePool(private_pool) {}
 
-  std::set<Block*, Comparison> blocks;
-  std::set<Block*, Comparison> unmapped;
+  std::set<Block*, BlockComparatorSize> blocks;
+  std::set<Block*, BlockComparatorAddress> unmapped;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const bool is_small;
   PrivatePool* owner_PrivatePool;
@@ -101,7 +103,7 @@ struct Block {
   }
 };
 
-bool BlockComparatorSize(const Block* a, const Block* b) {
+bool BlockComparatorSize::operator()(const Block* a, const Block* b) const {
   if (a->queue != b->queue) {
     return reinterpret_cast<uintptr_t>(a->queue) <
         reinterpret_cast<uintptr_t>(b->queue);
@@ -113,7 +115,7 @@ bool BlockComparatorSize(const Block* a, const Block* b) {
       reinterpret_cast<uintptr_t>(b->ptr);
 }
 
-bool BlockComparatorAddress(const Block* a, const Block* b) {
+bool BlockComparatorAddress::operator()(const Block* a, const Block* b) const {
   if (a->queue != b->queue) {
     return reinterpret_cast<uintptr_t>(a->queue) <
         reinterpret_cast<uintptr_t>(b->queue);

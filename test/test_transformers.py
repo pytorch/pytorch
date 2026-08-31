@@ -2966,6 +2966,33 @@ class TestSDPACudaOnly(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
+    def test_cudnn_attention_decode_disabled_on_affected_blackwell(self, device):
+        # See #193893 and #194927 for reasoning
+        # TODO: Remove this test when fixed and disable is no longer needed
+        cudnn_version = torch.backends.cudnn.version() or 0
+        device_capability = torch.cuda.get_device_capability()
+        affected_arch = device_capability[0] in (10, 11)
+        # cuDNN versions 9.19-9.25.0 (except 9.24.1) on SM 10.x and 11.x are disabled
+        # This check also allows possible future 9.24 patch versions without a rewrite
+        if not (affected_arch and (91900 <= cudnn_version <= 92500) and not (92400 < cudnn_version < 92500)):
+            self.skipTest("Requires cuDNN 9.19-9.25.0 (except 9.24.1) on SM 10.x or 11.x")
+
+        query = torch.randn(2, 8, 1, 64, device=device, dtype=torch.float16)
+        key = torch.randn(2, 8, 128, 64, device=device, dtype=torch.float16)
+        value = torch.randn(2, 8, 128, 64, device=device, dtype=torch.float16)
+        params = SDPAParams(query, key, value, None, 0.0, False, False)
+
+        self.assertFalse(torch.backends.cuda.can_use_cudnn_attention(params))
+        with self.assertRaisesRegex(RuntimeError, "cuDNN SDPA decode is disabled"):
+            torch.ops.aten._scaled_dot_product_cudnn_attention.default(
+                query, key, value, None, False, 0.0, False, False
+            )
+        with self.assertRaisesRegex(RuntimeError, "cuDNN SDPA decode is disabled"):
+            torch.ops.aten._cudnn_attention_forward.default(
+                query, key, value, None, None, None, 1, 128, False, 0.0, False, False
+            )
+
     # TODO USED FOR TESTING THE SCORES, e.g. testing ALIBI we don't need this now
     def normalize_flash_attn_S(
         self,
@@ -4866,15 +4893,13 @@ class TestSDPACudaOnly(NNTestCase):
         device_capability = None
         if "cuda" in str(device):
             device_capability = torch.cuda.get_device_capability()
-        prefer_cudnn = os.getenv("TORCH_CUDNN_SDPA_DEPRIORITIZED") != "1"
+        prefer_cudnn = "TORCH_CUDNN_SDPA_PREFERRED" not in os.environ or bool(os.environ["TORCH_CUDNN_SDPA_PREFERRED"])
         # cuDNN prioritization requires cuDNN > 9.15.0 (91500) per sdp_utils.cpp:83
         cudnn_version = torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else 0
-        is_cudnn_preferred_arch = device_capability and (
-            device_capability in [(8, 6), (8, 9)] or device_capability[0] in [9, 10]
-        )
-        prefer_cudnn = prefer_cudnn and is_cudnn_preferred_arch and cudnn_version > 91500
+        is_hopper_or_newer = device_capability and (device_capability[0] == 9 or device_capability[0] == 10)
+        prefer_cudnn = prefer_cudnn and is_hopper_or_newer and cudnn_version > 91500
 
-        # cuDNN is enabled by default on SM 8.6/8.9/9.0/10.0 with cuDNN > 9.15.0 (per #169849)
+        # cuDNN is enabled by default on SM 9.0/10.0 with cuDNN > 9.15.0 (per #169849)
         # For older cuDNN versions or other architectures, Flash Attention is preferred
         if type != "nested" and PLATFORM_SUPPORTS_CUDNN_ATTENTION and prefer_cudnn:
             self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.CUDNN_ATTENTION.value)

@@ -21,7 +21,7 @@ from pathlib import Path
 # prefix ("cp31") would wrongly capture cp315, so match on the version tuple.
 # Keep in sync with .ci/manywheel/build_common.sh.
 NUMPY_PINS: list[tuple[tuple[int, int], str]] = [
-    ((3, 15), "2.5.1"),
+    ((3, 15), "2.5.2"),
     ((3, 14), "2.3.4"),
     ((3, 10), "2.1.0"),
 ]

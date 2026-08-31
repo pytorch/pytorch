@@ -187,7 +187,7 @@ if torch._C._has_mkldnn:
     def _is_valid_grouped_gemm_fusion(computation_nodes):
         """
         Here we check:
-        1. More than 1 GEMM nodes has been found.
+        1. More than 1 GEMM nodes have been found.
         2. All the GEMM nodes share the same activation.
         3. All the GEMM nodes have same weight size but different wgt node.
         """

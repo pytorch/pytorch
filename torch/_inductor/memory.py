@@ -641,7 +641,7 @@ def topological_sort_lpmf(
     https://www.cs.york.ac.uk/rts/docs/DAC-1964-2006/PAPERS/2006/DAC06/PDFFILES/P0689.PDF
 
     The algorithm maintains the max memory so far.
-    At every iteration, for each scheduleable node, it computes:
+    At every iteration, for each schedulable node, it computes:
         - how much memory needs to be allocated for the output buffers of this node;
         - how much memory can be freed as a result of executing this node.
     This gives us two values for each node:

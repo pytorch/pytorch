@@ -518,8 +518,8 @@ error_on_nested_fx_trace = True
 # trace over dynamo-compiled functions. Use with error_on_nested_fx_trace=False.
 force_compile_during_fx_trace = False
 
-# Trace through RNN, GRU, and LSTM modules.
-allow_rnn = True
+# Disables graph breaking on rnn. YMMV with backends.
+allow_rnn = False
 
 # If true, enables feature that captures PyTorch sparsity in the
 # exported FX graph. This flag should become the default eventually

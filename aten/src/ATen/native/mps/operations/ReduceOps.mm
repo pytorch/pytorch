@@ -364,6 +364,14 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
                                       StdVarType stdVarType) {
   TORCH_CHECK_TYPE(input_t.is_floating_point() || input_t.is_complex(),
                    "std and var only support floating point and complex dtypes");
+
+  // Variance of a complex tensor is real: var(z) = var(Re z) + var(Im z).
+  // MPSGraph's varianceOfTensor computes E[(z - mu)^2] (no conjugation), so for
+  // complex input split into real/imaginary parts inside the graph and sum the
+  // two variances. The real dtype is used for the output and Bessel constant.
+  const bool is_complex = input_t.is_complex();
+  const auto out_dtype = c10::toRealValueType(input_t.scalar_type());
+
   using CachedGraph = MPSUnaryCachedGraph;
 
   IntArrayRef input_shape = input_t.sizes();
@@ -477,12 +485,7 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
     }
   }
 
-  Tensor output_t = at::empty(IntArrayRef(output_shape.data(), num_output_dims),
-                              input_t.scalar_type(),
-                              std::nullopt,
-                              kMPS,
-                              std::nullopt,
-                              std::nullopt);
+  Tensor output_t = at::empty(IntArrayRef(output_shape.data(), num_output_dims), input_t.options().dtype(out_dtype));
 
   if (output_t.numel() == 0 || input_t.numel() == 0) {
     output_t.fill_(std::numeric_limits<float>::quiet_NaN());
@@ -504,11 +507,21 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
-      MPSGraphTensor* outputVarTensor = [mpsGraph varianceOfTensor:inputTensor axes:wrappedAxes name:nil];
+      MPSGraphTensor* outputVarTensor;
+      if (is_complex) {
+        MPSGraphTensor* reTensor = [mpsGraph realPartOfTensor:inputTensor name:nil];
+        MPSGraphTensor* imTensor = [mpsGraph imaginaryPartOfTensor:inputTensor name:nil];
+        MPSGraphTensor* varRe = [mpsGraph varianceOfTensor:reTensor axes:wrappedAxes name:nil];
+        MPSGraphTensor* varIm = [mpsGraph varianceOfTensor:imTensor axes:wrappedAxes name:nil];
+        outputVarTensor = [mpsGraph additionWithPrimaryTensor:varRe secondaryTensor:varIm name:nil];
+      } else {
+        outputVarTensor = [mpsGraph varianceOfTensor:inputTensor axes:wrappedAxes name:nil];
+      }
       MPSGraphTensor* outputTensor = nil;
 
       if (use_correction && correction_value) {
-        MPSGraphTensor* besselTensor = [mpsGraph constantWithScalar:bessel_correction dataType:getMPSDataType(input_t)];
+        MPSGraphTensor* besselTensor = [mpsGraph constantWithScalar:bessel_correction
+                                                           dataType:getMPSDataType(out_dtype)];
         MPSGraphTensor* correctedTensor = [mpsGraph multiplicationWithPrimaryTensor:outputVarTensor
                                                                     secondaryTensor:besselTensor
                                                                                name:nil];

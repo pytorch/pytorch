@@ -5310,7 +5310,23 @@ class TestVecISACheckBuild(TestCase):
             ]
             subprocess.run(cmd, check=True)
 
-            env = {k: v for k, v in os.environ.items() if k != "LD_LIBRARY_PATH"}
+            # Keep external runtime libraries (for example, SYCL/MKL/XCCL
+            # libraries required by XPU wheels) visible to the child. Only
+            # remove torch's own library directory so the cold load still
+            # fails for the intended reason: libc10.so is not findable until
+            # ``import torch`` has run.
+            env = os.environ.copy()
+            torch_lib = os.path.realpath(torch_lib)
+            loader_paths = env.get("LD_LIBRARY_PATH", "").split(os.pathsep)
+            loader_paths = [
+                path
+                for path in loader_paths
+                if path and os.path.realpath(path) != torch_lib
+            ]
+            if loader_paths:
+                env["LD_LIBRARY_PATH"] = os.pathsep.join(loader_paths)
+            else:
+                env.pop("LD_LIBRARY_PATH", None)
             cold_load = f'from ctypes import cdll; cdll.LoadLibrary("{lib_path}")'
             cold = subprocess.run(
                 [sys.executable, "-c", cold_load], env=env, stderr=subprocess.DEVNULL

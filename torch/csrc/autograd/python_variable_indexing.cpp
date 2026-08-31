@@ -1,8 +1,6 @@
 #include <torch/csrc/autograd/python_variable_indexing.h>
 
-#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
-#include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/autograd/variable.h>
@@ -11,7 +9,6 @@
 #include <torch/csrc/utils/numpy_stub.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_arg_parser.h>
-#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_symnode.h>
 #include <torch/csrc/utils/tensor_new.h>
@@ -28,7 +25,6 @@
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
-#include <c10/core/Layout.h>
 #include <fmt/format.h>
 
 using namespace at;
@@ -345,7 +341,7 @@ static bool treatSequenceAsTuple(PyObject* index) {
   if (!PySequence_Check(index)) {
     return false;
   }
-  // This uses a heuristics from NumPy for determining whether to treat
+  // This uses a heuristic from NumPy for determining whether to treat
   // non-tuple sequences as if they were a tuple. From the NumPy code comments:
   //
   // "At this point, we're left with a non-tuple, non-array, sequence:

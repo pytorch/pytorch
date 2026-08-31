@@ -10,13 +10,13 @@
 #include <ATen/native/TypeProperties.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/native/Resize.h>
-#include <ATen/TensorOperators.h>
 #include <ATen/TensorIteratorInternal.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
 #include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
 #include <ATen/ops/empty_strided.h>
 #endif
 
@@ -24,7 +24,6 @@
 #include <c10/util/SmallBuffer.h>
 
 #include <array>
-#include <algorithm>
 #include <cmath>
 
 namespace at {
