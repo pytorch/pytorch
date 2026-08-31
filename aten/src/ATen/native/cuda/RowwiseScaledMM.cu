@@ -252,9 +252,14 @@ void f8f8bf16_rowwise_impl(
        reinterpret_cast<DtypeB*>(WQ.data_ptr()),
        stride_b},
       {{{{bias.has_value() ? reinterpret_cast<DtypeBias*>(bias->data_ptr())
-                           : nullptr},
+                           : nullptr},                        // Bias
          {{reinterpret_cast<DtypeScale*>(w_scale.data_ptr())},
-          {{reinterpret_cast<DtypeScale*>(x_scale.data_ptr())}}}}},
+          {{reinterpret_cast<DtypeScale*>(x_scale.data_ptr())},
+           {},                                                // Accum
+           {}},                                               // XScale * Accum
+          {}},                                                // WScale * that
+         {}},                                                 // Bias + that
+        {}},                                                  // Cast to output
        nullptr,
        stride_output,
        reinterpret_cast<DtypeOutput*>(out.data_ptr()),
@@ -445,9 +450,14 @@ void f8f8bf16_rowwise_impl_sm100_sm120(
        reinterpret_cast<DtypeB*>(WQ.data_ptr()),
        stride_b},
       {{{{bias.has_value() ? reinterpret_cast<DtypeBias*>(bias->data_ptr())
-                           : nullptr},
+                           : nullptr},                        // Bias
          {{reinterpret_cast<DtypeScale*>(w_scale.data_ptr())},
-          {{reinterpret_cast<DtypeScale*>(x_scale.data_ptr())}}}}},
+          {{reinterpret_cast<DtypeScale*>(x_scale.data_ptr())},
+           {},                                                // Accum
+           {}},                                               // XScale * Accum
+          {}},                                                // WScale * that
+         {}},                                                 // Bias + that
+        {}},                                                  // Cast to output
        nullptr,
        stride_output,
        reinterpret_cast<DtypeOutput*>(out.data_ptr()),
