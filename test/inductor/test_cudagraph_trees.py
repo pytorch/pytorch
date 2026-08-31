@@ -1484,6 +1484,117 @@ if HAS_CUDA_AND_TRITON:
             self.assertIsNotNone(self.get_manager())
             self.assertEqual(self.get_manager().new_graph_id().id, 1)
 
+        @torch._functorch.config.patch(
+            {
+                "enable_autograd_cache": True,
+                "bundled_autograd_cache": True,
+                "strict_autograd_cache": True,
+            }
+        )
+        @config.patch({"fx_graph_cache": True, "fx_graph_remote_cache": False})
+        def test_cudagraph_backward_override_omitted_when_unset(self):
+            """Verify an unset backward override stays out of the cached FX kwargs."""
+            import pickle
+
+            def fn(x):
+                return torch.sin(x).sum()
+
+            def compiled_backward_fx_kwargs(annotated):
+                torch._dynamo.reset()
+                AOTAutogradCache.clear()
+                FxGraphCache.clear()
+                x = torch.randn(10, 4, device="cuda", requires_grad=True)
+                opt_fn = torch.compile(fn, fullgraph=True)
+                if annotated:
+                    with torch._dynamo.override_cudagraphs(bwd=False):
+                        opt_fn(x).backward()
+                else:
+                    opt_fn(x).backward()
+                entries = []
+                for dirpath, _, filenames in os.walk(AOTAutogradCache._get_tmp_dir()):
+                    for filename in filenames:
+                        with open(os.path.join(dirpath, filename), "rb") as f:
+                            entries.append(pickle.load(f))
+                self.assertEqual(len(entries), 1)
+                return entries[0].compiled_bw.result.fx_kwargs
+
+            # These kwargs are hashed into the FX graph cache key and reread by
+            # post_compile, so an unconditional entry would invalidate every
+            # backward graph that never asked for an override.
+            self.assertNotIn(
+                "cudagraphs_post_compile_override", compiled_backward_fx_kwargs(False)
+            )
+            self.assertIs(
+                compiled_backward_fx_kwargs(True)["cudagraphs_post_compile_override"],
+                False,
+            )
+
+        @dynamo_config.patch("caching_precompile", True)
+        @torch._functorch.config.patch(
+            {
+                "enable_autograd_cache": True,
+                "bundled_autograd_cache": True,
+                "strict_autograd_cache": True,
+            }
+        )
+        @config.patch(
+            {
+                "fx_graph_cache": True,
+                "fx_graph_remote_cache": False,
+                "triton.cudagraphs": True,
+            }
+        )
+        def test_cudagraph_decision_survives_precompile_reload(self):
+            """Verify a precompile reload uses the compiled cudagraph decision."""
+            from torch._dynamo.package import DynamoCache
+            from torch._dynamo.precompile_context import PrecompileContext
+            from torch._inductor.codecache import PyCodeCache
+            from torch._inductor.cudagraph_trees import reset_cudagraph_trees
+            from torch._inductor.utils import clear_caches, fresh_cache
+            from torch.compiler._cache import CacheArtifactManager
+
+            def fn(x):
+                return torch.sin(x) + torch.cos(x)
+
+            x = torch.randn(10, 4, device="cuda")
+            with fresh_cache():
+                AOTAutogradCache.clear()
+                FxGraphCache.clear()
+                CacheArtifactManager.clear()
+                opt_fn = torch.compile(fn, fullgraph=True)
+                for _ in range(3):
+                    result = opt_fn(x)
+                self.assertEqual(result, fn(x))
+                artifacts = torch.compiler.save_cache_artifacts()
+                self.assertIsNotNone(artifacts)
+                artifact_bytes, cache_info = artifacts
+                self.assertEqual(len(cache_info.precompile_artifacts), 1)
+
+                del result
+                torch._dynamo.reset()
+                reset_cudagraph_trees()
+                AOTAutogradCache.clear()
+                DynamoCache.clear()
+                FxGraphCache.clear()
+                PrecompileContext.clear()
+                PyCodeCache.cache_clear(purge=True)
+                CacheArtifactManager.clear()
+                clear_caches()
+                self.assertIsNone(self.get_manager())
+
+                # The reload must use the decision the graph was compiled under,
+                # not the ambient config, which is off here.
+                with config.patch("triton.cudagraphs", False):
+                    torch.compiler.load_cache_artifacts(artifact_bytes)
+                    with torch.compiler.set_stance("fail_on_recompile"):
+                        opt_fn = torch.compile(fn, fullgraph=True)
+                        for _ in range(3):
+                            result = opt_fn(x)
+                    self.assertEqual(result, fn(x))
+                    manager = self.get_manager()
+                    self.assertIsNotNone(manager)
+                    self.assertGreater(len(tuple(manager.get_roots())), 0)
+
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         @torch._functorch.config.patch("enable_autograd_cache", True)
         @torch._inductor.config.patch("fx_graph_cache", True)
