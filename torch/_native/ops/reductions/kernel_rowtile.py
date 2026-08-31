@@ -294,7 +294,7 @@ def reduce_row_tile(
             _stream(),
         )
 
-    key = ("rowtile", trait_key, x.dtype, tuple(out_dtypes[:nouts])) + op.cache_sig
+    key = ("rowtile", trait_key, x.dtype, tuple(out_dtypes[:ndst])) + op.cache_sig
     build = lambda: _compile(op, *_wrap())  # noqa: E731
     fn = cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")
     fn(*_wrap())

@@ -807,6 +807,11 @@ class TileReduce:
             row0 = Int32(by) * q
             left = project_n - row0
             cnt = left if left < q else q  # noqa: FURB136 -- no DSL builtin min
+            # _split_p caps npar, so q * (npar - 1) can exceed the extent and leave the
+            # last blocks with nothing. A negative trip count happens to lower to a
+            # zero-trip loop, which is not a guarantee worth resting a global load on.
+            zero = Int32(0)
+            cnt = cnt if cnt > zero else zero  # noqa: FURB136 -- no DSL builtin max
             accs = fold_cols_rolled(
                 trait,
                 mIns[0],
