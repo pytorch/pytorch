@@ -1456,17 +1456,21 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
 
-    @torch._dynamo.config.patch(enable_trace_unittest=True)
-    @make_dynamo_test
     def test_getset_descriptor_set_readonly_entry(self):
         # deque.maxlen is a readonly GetSet (deque_get_maxlen, no setter); the
         # write must raise AttributeError (getset_set), not fall through to
-        # store_attr. Message format (tp_name vs __objclass__.__name__) is a
-        # separate, currently-open issue -- only the exception type is checked
-        # here.
-        d = collections.deque([1, 2, 3], maxlen=5)
-        with self.assertRaises(AttributeError):
-            collections.deque.__dict__["maxlen"].__set__(d, 7)
+        # store_attr. CPython's getset_set formats the message with tp_name,
+        # which is qualified for a C type outside builtins -- not
+        # __objclass__.__name__.
+        def fn():
+            d = collections.deque([1, 2, 3], maxlen=5)
+            try:
+                collections.deque.__dict__["maxlen"].__set__(d, 7)
+            except AttributeError as e:
+                return str(e)
+            return "no error"
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
 
     @torch._dynamo.config.patch(
         enable_trace_unittest=True, enable_trace_load_build_class=True
