@@ -415,6 +415,20 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 }
             )
 
+        privateuse1_module = getattr(
+            torch, torch._C._get_privateuse1_backend_name(), None
+        )
+        if privateuse1_module is not None:
+            for tensor_type in tensortype_to_dtype:
+                privateuse1_tensor_type = getattr(
+                    privateuse1_module, tensor_type.__name__, None
+                )
+                if (
+                    isinstance(privateuse1_tensor_type, type)
+                    and privateuse1_tensor_type in torch._tensor_classes
+                ):
+                    _in_graph_class_list.add(privateuse1_tensor_type)
+
         for _, device_interface in get_registered_device_interfaces():
             stream_class = getattr(device_interface, "Stream", None)
             if isinstance(stream_class, type) and issubclass(

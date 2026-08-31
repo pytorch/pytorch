@@ -1217,6 +1217,49 @@ class TestUserDefinedSetitem(TestCase):
 
 
 class TestObjectConstruction(TestCase):
+    def test_privateuse1_tensor_types_in_graph_classes(self):
+        from torch._dynamo.variables.user_defined import UserDefinedClassVariable
+
+        class PrivateUse1FloatTensor:
+            pass
+
+        class UnregisteredDoubleTensor:
+            pass
+
+        privateuse1_module = types.SimpleNamespace(
+            FloatTensor=PrivateUse1FloatTensor,
+            DoubleTensor=UnregisteredDoubleTensor,
+        )
+        UserDefinedClassVariable._in_graph_classes.cache_clear()
+        self.addCleanup(UserDefinedClassVariable._in_graph_classes.cache_clear)
+
+        with (
+            unittest.mock.patch.object(
+                torch._C,
+                "_get_privateuse1_backend_name",
+                return_value="stub_privateuse1",
+            ),
+            unittest.mock.patch.object(
+                torch,
+                "stub_privateuse1",
+                privateuse1_module,
+                create=True,
+            ),
+            unittest.mock.patch.object(
+                torch,
+                "_tensor_classes",
+                torch._tensor_classes | {PrivateUse1FloatTensor},
+            ),
+        ):
+            self.assertIn(
+                PrivateUse1FloatTensor,
+                UserDefinedClassVariable._in_graph_classes(),
+            )
+            self.assertNotIn(
+                UnregisteredDoubleTensor,
+                UserDefinedClassVariable._in_graph_classes(),
+            )
+
     @make_dynamo_test
     def test_object_call_identity(self):
         a = object()
