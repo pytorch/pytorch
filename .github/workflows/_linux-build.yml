@@ -173,7 +173,7 @@ jobs:
     steps:
       - name: Setup Linux
         id: setup-linux
-        uses: pytorch/pytorch/.github/actions/setup-linux@main
+        uses: pytorch/pytorch/.github/actions/setup-linux@gh/georgehong/3/head
         with:
           use-arc: true
           python-version: ${{ inputs.python-version }}
@@ -183,7 +183,7 @@ jobs:
 
       - name: Check if can use old whl build
         id: use-old-whl
-        uses: pytorch/pytorch/.github/actions/reuse-old-whl@main
+        uses: pytorch/pytorch/.github/actions/reuse-old-whl@gh/georgehong/3/head
         if: ${{ inputs.allow-reuse-old-whl }}
         with:
           build-environment: ${{ inputs.build-environment }}
@@ -195,7 +195,7 @@ jobs:
       # Apply the filter logic to the build step too if the test-config label is already there
       - name: Select all requested test configurations (if the test matrix is available)
         id: filter
-        uses: pytorch/pytorch/.github/actions/filter-test-configs@main
+        uses: pytorch/pytorch/.github/actions/filter-test-configs@gh/georgehong/3/head
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           test-matrix: ${{ inputs.test-matrix }}
@@ -258,7 +258,7 @@ jobs:
       - name: Build external packages
         id: build-external-packages
         if: inputs.build-external-packages != '' &&  steps.build.outcome != 'skipped'
-        uses: pytorch/pytorch/.github/actions/build-external-packages@main
+        uses: pytorch/pytorch/.github/actions/build-external-packages@gh/georgehong/3/head
         with:
           build-targets: ${{ inputs.build-external-packages }}
           docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ inputs.docker-image-name }}${{ inputs.ci-docker-hash && format('-{0}', inputs.ci-docker-hash) || '' }}
@@ -282,7 +282,7 @@ jobs:
 
       - name: Store build artifacts
         if: inputs.build-generates-artifacts && (steps.build.outcome != 'skipped' || steps.use-old-whl.outputs.reuse == 'true')
-        uses: pytorch/pytorch/.github/actions/upload-build-artifacts@main
+        uses: pytorch/pytorch/.github/actions/upload-build-artifacts@gh/georgehong/3/head
         with:
           name: ${{ inputs.build-environment }}
           s3-bucket: ${{ inputs.s3-bucket }}
@@ -290,7 +290,7 @@ jobs:
 
       - name: Upload sccache stats
         if: steps.build.outcome != 'skipped' && steps.aws-creds.outcome == 'success'
-        uses: pytorch/pytorch/.github/actions/upload-sccache-stats@main
+        uses: pytorch/pytorch/.github/actions/upload-sccache-stats@gh/georgehong/3/head
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           build-time: ${{ steps.build.outputs.build_time }}
