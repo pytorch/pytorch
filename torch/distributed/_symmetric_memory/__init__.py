@@ -780,24 +780,6 @@ def _check_mx_device(operand: torch.Tensor) -> None:
         )
 
 
-def _validated_mx_swizzle(swizzle: list[int] | None, operand: str) -> list[int]:
-    """MXFP8 only has meaning here for the 32x4x4 swizzled layout.
-
-    Everything downstream -- the numel validation, gathering the scale as opaque
-    bytes, slicing it per chunk -- is derived from that layout, and cuBLAS accepts
-    no other one for block scaling. Reject anything else with a clear message
-    instead of letting it fail deeper as a size mismatch.
-    """
-    expected = [SwizzleType.SWIZZLE_32_4_4.value]
-    if swizzle is None or list(swizzle) != expected:
-        raise ValueError(
-            f"MXFP8 requires swizzle_{operand}=[SwizzleType.SWIZZLE_32_4_4] "
-            f"(got {swizzle}). It is not defaulted: the layout cannot be inferred "
-            "from the scale, so it has to be stated the same way the recipe is."
-        )
-    return expected
-
-
 def _check_mx_leading_dim(dim: int, arg_name: str) -> None:
     """MXFP8 requires the gathered/scattered dim to be the leading one.
 
@@ -819,19 +801,20 @@ def _resolve_recipe(
     scale: torch.Tensor | None,
     scale_recipe: list[int] | None,
     swizzle: list[int] | None,
-    operand: str,
 ) -> tuple[list[int], list[int]]:
     """Recipe/swizzle for one operand of `aten::_scaled_mm_v2`.
 
-    An explicit recipe always wins. Otherwise fall back to the tensor-wise /
-    row-wise distinction the v1 op made implicitly, which is unambiguous because
-    those scales are fp32 and differ in numel. Block scaling is never inferred;
-    see `_is_mx_scale`.
+    An explicit recipe always wins, and its swizzle is forwarded as given rather
+    than corrected: block scaling only works with SWIZZLE_32_4_4, and the kernel
+    already says so clearly ("scale_a must be swizzled to SWIZZLE_32_4_4
+    format"), so overriding the caller here would silently grant a request we did
+    not honour. Without a recipe, fall back to the tensor-wise / row-wise
+    distinction the v1 op made implicitly, which is unambiguous because those
+    scales are fp32 and differ in numel. Block scaling is never inferred; see
+    `_is_mx_scale`.
     """
     _reject_unlabelled_block_scale(scale, scale_recipe)
     if scale_recipe is not None:
-        if _is_mx_scale(scale_recipe):
-            return scale_recipe, _validated_mx_swizzle(swizzle, operand)
         return scale_recipe, swizzle or [SwizzleType.NO_SWIZZLE.value]
     if scale is None or scale.numel() == 1:
         return [ScalingType.TensorWise.value], [SwizzleType.NO_SWIZZLE.value]
@@ -1539,8 +1522,8 @@ def _fused_all_gather_scaled_matmul_fallback(
     ) -> torch.Tensor:
         leading_dims = A.shape[:-1]
         if scale_mode == _ScaleMode.MX_BLOCK_WISE_SWIZZLED:
-            recipe_a, sw_a = _resolve_recipe(A_scale, scale_recipe_a, swizzle_a, "a")
-            recipe_b, sw_b = _resolve_recipe(B_scale, scale_recipe_b, swizzle_b, "b")
+            recipe_a, sw_a = _resolve_recipe(A_scale, scale_recipe_a, swizzle_a)
+            recipe_b, sw_b = _resolve_recipe(B_scale, scale_recipe_b, swizzle_b)
             res = scaled_mm(
                 A.flatten(0, -2),
                 B,
@@ -1683,10 +1666,9 @@ def _fused_all_gather_scaled_matmul(
             )
         ]
     else:
-        recipe_a, sw_a = _resolve_recipe(A_scale, scale_recipe_a, swizzle_a, "a")
+        recipe_a, sw_a = _resolve_recipe(A_scale, scale_recipe_a, swizzle_a)
         recipes_b = [
-            _resolve_recipe(B_scale, scale_recipe_b, swizzle_b, "b")
-            for B_scale in B_scales
+            _resolve_recipe(B_scale, scale_recipe_b, swizzle_b) for B_scale in B_scales
         ]
         mm_out_op = torch.ops.aten._scaled_mm_v2.out
         kwargs_list = [
@@ -1978,8 +1960,8 @@ def _fused_scaled_matmul_reduce_scatter(
             "use_fast_accum": use_fast_accum,
         }
     else:
-        recipe_a, sw_a = _resolve_recipe(A_scale, scale_recipe_a, swizzle_a, "a")
-        recipe_b, sw_b = _resolve_recipe(B_scale, scale_recipe_b, swizzle_b, "b")
+        recipe_a, sw_a = _resolve_recipe(A_scale, scale_recipe_a, swizzle_a)
+        recipe_b, sw_b = _resolve_recipe(B_scale, scale_recipe_b, swizzle_b)
         mm_out_op = torch.ops.aten._scaled_mm_v2.out
         mm_kwargs = {
             "recipe_a": recipe_a,
@@ -2057,8 +2039,8 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
             )
 
     if mx_scaling:
-        recipe_a, sw_a = _resolve_recipe(A_scale, scale_recipe_a, swizzle_a, "a")
-        recipe_b, sw_b = _resolve_recipe(B_scale, scale_recipe_b, swizzle_b, "b")
+        recipe_a, sw_a = _resolve_recipe(A_scale, scale_recipe_a, swizzle_a)
+        recipe_b, sw_b = _resolve_recipe(B_scale, scale_recipe_b, swizzle_b)
         C = scaled_mm(
             A_2d,
             B,
@@ -2148,7 +2130,6 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     if mx_scaling:
         if A_scale is None:
             raise AssertionError
-        _check_mx_reduce_scatter(A_2D_with_scatter_dim_0, A_scale, 0, group.size())
         A_scale_shards = [t.contiguous() for t in A_scale.flatten().chunk(group.size())]
 
     # For tensorwise scaling, the scale should be replicated so each shard has a copy.

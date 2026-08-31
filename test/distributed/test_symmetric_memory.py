@@ -1800,9 +1800,11 @@ class AsyncTPTest(MultiProcContinuousTest):
     def test_fused_all_gather_scaled_matmul_mxfp8_rejects_no_swizzle(self) -> None:
         """Only the 32x4x4 swizzled layout is meaningful for these ops.
 
-        The numel validation, gathering the scale as opaque bytes and slicing it
-        per chunk are all derived from that layout, so an unswizzled request must
-        be a clear error rather than a size mismatch deeper down.
+        The swizzle the caller passes is forwarded rather than corrected, so this
+        error comes from the kernel itself. Pinned here because forwarding is a
+        deliberate choice: overriding it would silently grant a request we did not
+        honour, and the numel validation, gathering the scale as opaque bytes and
+        slicing it per chunk are all derived from the swizzled layout.
         """
         self._init_process()
         group = dist.group.WORLD
