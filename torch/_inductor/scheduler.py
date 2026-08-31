@@ -5423,7 +5423,7 @@ class _LoopMutationTracker:
         """Create an inactive rollback scope without walking candidate leaves."""
         return cls(nodes=tuple(OrderedSet(nodes)))
 
-    def __enter__(self) -> _LoopMutationTracker:
+    def __enter__(self) -> typing.Self:
         if self.token is not None:
             raise AssertionError("loop mutation tracker already active")
         active = _active_loop_mutation_trackers.get()
