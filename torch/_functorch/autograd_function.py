@@ -824,6 +824,10 @@ class AutogradFunctionApply(HigherOrderOperator):
 
         class ApplyTemplate(torch.autograd.Function):
             @staticmethod
+            def _compiled_autograd_key(ctx: Any) -> tuple[int]:
+                return (id(bwd),)
+
+            @staticmethod
             def forward(*args: Any, **kwargs: Any) -> Any:
                 nonlocal saved_values
 
