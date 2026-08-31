@@ -23,6 +23,8 @@ from ...kernel.bmm import bmm_template
 from ...kernel.mm import (
     blackwell_ws_persistent_device_tma_main_loop_scaling_template,
     blackwell_ws_persistent_device_tma_mm_template,
+    get_scaling_options,
+    get_tile_size,
     mm_template,
     persistent_mm_template,
     persistent_tma_mm_template,
@@ -3091,18 +3093,6 @@ class ScaledBlackwellTMAMainLoopScalingConfigMixin(
 ):
     """Blackwell TMA configuration for K-dependent blockwise scaling."""
 
-    def _valid(self, kernel_inputs: KernelInputs) -> bool:
-        if not isinstance(kernel_inputs, MMKernelInputs):
-            raise AssertionError("Expect MMKernelInputs for blockwise scaled MM")
-        m, n, k = kernel_inputs.mnk_symbolic()
-        if (
-            V.graph.sizevars.guard_or_false(sympy.Lt(m, 64))
-            or V.graph.sizevars.guard_or_false(sympy.Lt(n, 128))
-            or V.graph.sizevars.guard_or_false(sympy.Lt(k, 128))
-        ):
-            return False
-        return True
-
     # pyrefly: ignore [bad-override]
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         configs = [
@@ -3308,7 +3298,7 @@ class CUDAScaledTMAMainLoopScalingTemplateConfigHeuristic(
 ):
     """
     Scaled TMA template heuristic for CUDA:
-        main loop scaling variants (BlockWise1x128, BlockWise128x128)
+        main loop scaling variants (BlockWise1x128, BlockWise1x32, BlockWise1x16, BlockWise128x128)
     """
 
     def __init__(self) -> None:
@@ -3325,7 +3315,14 @@ class CUDAScaledTMAMainLoopScalingTemplateConfigHeuristic(
         """
         Generate main loop scaling kernel inputs.
         """
-        tile_size = 128
+        mat_a, mat_b, scale_a, scale_b = kernel_inputs._input_nodes
+        scale_a_size, scale_b_size = scale_a.get_size(), scale_b.get_size()
+
+        scale_option_a, scale_option_b = get_scaling_options(
+            mat_a, mat_b, scale_a_size, scale_b_size
+        )
+        tile_size_a = get_tile_size(scale_option_a)
+        tile_size_b = get_tile_size(scale_option_b)
 
         # Get base scaled MM template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
@@ -3339,20 +3336,20 @@ class CUDAScaledTMAMainLoopScalingTemplateConfigHeuristic(
             # In cases in which the block size (BLOCK_*) is smaller than the tile size (128, 32, 16),
             # scales must be broadcasted to BLOCK_* (rather than to a tile_sizextile_size chunk).
 
-            template_kwargs["TILE_SIZE_A"] = tile_size
-            template_kwargs["TILE_SIZE_B"] = tile_size
+            template_kwargs["TILE_SIZE_A"] = tile_size_a
+            template_kwargs["TILE_SIZE_B"] = tile_size_b
 
             template_kwargs["MIN_BLOCK_TILE_AM"] = min(
-                template_kwargs["BLOCK_M"], tile_size
+                template_kwargs["BLOCK_M"], tile_size_a
             )
             template_kwargs["MIN_BLOCK_TILE_AK"] = min(
-                template_kwargs["BLOCK_K"], tile_size
+                template_kwargs["BLOCK_K"], tile_size_a
             )
             template_kwargs["MIN_BLOCK_TILE_BK"] = min(
-                template_kwargs["BLOCK_K"], tile_size
+                template_kwargs["BLOCK_K"], tile_size_b
             )
             template_kwargs["MIN_BLOCK_TILE_BN"] = min(
-                template_kwargs["BLOCK_N"], tile_size
+                template_kwargs["BLOCK_N"], tile_size_b
             )
 
             yield template_kwargs
@@ -3388,6 +3385,7 @@ class CUDAScaledBlackwellTMAMainLoopScalingTemplateConfigHeuristic(
 
     def __init__(self) -> None:
         super().__init__()
+        self.should_scale_configs = False
         self.mm_configs = self.blackwell_scaled_persistent_mm_configs
         self.exhaustive_configs = self._generate_exhaustive_configs()
 

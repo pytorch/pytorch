@@ -1090,6 +1090,18 @@ def is_desired_scaling(
             raise AssertionError(f"Unsupported scaling type {scaling_type}")
 
 
+def get_tile_size(scale_option: ScalingType) -> int:
+    match scale_option:
+        case ScalingType.BlockWise128x128:
+            return 128
+        case ScalingType.BlockWise1x128:
+            return 128
+        case _:
+            raise AssertionError(
+                f"Unsupported scaling type {scale_option} in get_tile_size"
+            )
+
+
 def get_scaling_options(
     mat_a: IRNode,
     mat_b: IRNode,
@@ -1254,8 +1266,16 @@ def tuned_scaled_mm_v2(
         is_main_loop_scaling = use_triton_scaling_template(
             scale_option_a, scale_option_b, main_loop_scaling_types
         )
+        use_blackwell_tma = not bias and use_triton_blackwell_tma_template(
+            mat_a, mat_b, output_layout=layout, add_guards=True
+        )
+        use_blackwell_main_loop = (
+            use_blackwell_tma
+            and is_main_loop_scaling
+            and (scale_option_a, scale_option_b) in scaling_pairs
+        )
         if (
-            is_main_loop_scaling
+            use_blackwell_main_loop
             and layout.device.type == "cuda"
             and torch.version.hip is None
         ):
@@ -1284,33 +1304,24 @@ def tuned_scaled_mm_v2(
                     overriders
                 )
             elif is_main_loop_scaling:
-                overriders["SCALE_A_OUTER_DIM"] = (
-                    0 if scale_option_a == ScalingType.BlockWise1x128 else 1
-                )
-                overriders["SCALE_B_OUTER_DIM"] = (
-                    0 if scale_option_b == ScalingType.BlockWise1x128 else 1
-                )
+                if not use_blackwell_main_loop:
+                    overriders["TILE_SIZE_A"] = get_tile_size(scale_option_a)
+                    overriders["TILE_SIZE_B"] = get_tile_size(scale_option_b)
 
-                templates_to_use.append(scaled_mm_device_tma_main_loop_scaling_template)
-                kwarg_overrides[scaled_mm_device_tma_main_loop_scaling_template.uid] = (
-                    overriders
-                )
+                    templates_to_use.append(
+                        scaled_mm_device_tma_main_loop_scaling_template
+                    )
+                    kwarg_overrides[
+                        scaled_mm_device_tma_main_loop_scaling_template.uid
+                    ] = overriders
             else:
                 raise AssertionError(
                     "Inductor Triton does not support scaling options that are present "
                     + "in both epilogue scaling and main loop scaling"
                 )
 
-        if (
-            use_triton_blackwell_tma_template(
-                mat_a, mat_b, output_layout=layout, add_guards=True
-            )
-            and not bias
-        ):
-            if (
-                is_main_loop_scaling
-                and (scale_option_a, scale_option_b) in scaling_pairs
-            ):
+        if use_blackwell_tma:
+            if use_blackwell_main_loop:
                 blackwell_main_loop_overriders = {
                     **overriders,
                     "SCALE_RECIPE_A": scale_option_a.value,
@@ -1473,6 +1484,15 @@ def tuned_scaled_mm(
             scale_option_a, scale_option_b, main_loop_scaling_types
         )
 
+        use_blackwell_tma = not bias and use_triton_blackwell_tma_template(
+            mat_a, mat_b, output_layout=layout, add_guards=True
+        )
+        use_blackwell_main_loop = (
+            use_blackwell_tma
+            and is_main_loop_scaling
+            and (scale_option_a, scale_option_b) in scaling_pairs
+        )
+
         # TODO (paulzhan): There is no template that exists for bias and TMA
         # Don't run tma template currently if bias exist
         if (
@@ -1488,29 +1508,24 @@ def tuned_scaled_mm(
                     overriders
                 )
             elif is_main_loop_scaling:
-                overriders["SCALE_A_OUTER_DIM"] = 0
-                overriders["SCALE_B_OUTER_DIM"] = 1
+                if not use_blackwell_main_loop:
+                    overriders["TILE_SIZE_A"] = get_tile_size(scale_option_a)
+                    overriders["TILE_SIZE_B"] = get_tile_size(scale_option_b)
 
-                templates_to_use.append(scaled_mm_device_tma_main_loop_scaling_template)
-                kwarg_overrides[scaled_mm_device_tma_main_loop_scaling_template.uid] = (
-                    overriders
-                )
+                    templates_to_use.append(
+                        scaled_mm_device_tma_main_loop_scaling_template
+                    )
+                    kwarg_overrides[
+                        scaled_mm_device_tma_main_loop_scaling_template.uid
+                    ] = overriders
             else:
                 raise AssertionError(
                     "Inductor Triton does not support scaling options that are present "
                     + "in both epilogue scaling and main loop scaling"
                 )
 
-        if (
-            use_triton_blackwell_tma_template(
-                mat_a, mat_b, output_layout=layout, add_guards=True
-            )
-            and not bias
-        ):
-            if (
-                is_main_loop_scaling
-                and (scale_option_a, scale_option_b) in scaling_pairs
-            ):
+        if use_blackwell_tma:
+            if use_blackwell_main_loop:
                 blackwell_main_loop_overriders = {
                     **overriders,
                     "SCALE_RECIPE_A": scale_option_a.value,
