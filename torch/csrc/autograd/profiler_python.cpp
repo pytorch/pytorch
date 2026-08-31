@@ -29,7 +29,6 @@
 #include <torch/csrc/profiler/orchestration/python_tracer.h>
 #include <torch/csrc/profiler/util.h>
 #include <torch/csrc/utils/pybind.h>
-#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <optional>
@@ -802,7 +801,7 @@ static PyObject* c_call_callback(
     PyObject* const* args,
     size_t nargsf,
     PyObject* kwnames) {
-  // The logic of this function is based on sys_defile_call_or_return defined
+  // The logic of this function is based on sys_profile_call_or_return defined
   // in https://github.com/python/cpython/blob/v3.12.5/Python/legacy_tracing.c
 
   PyThreadState* tstate = PyThreadState_GET();
@@ -1033,7 +1032,7 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
     return;
   }
 
-#if defined(Py_GIL_DISABLED) && !defined(IS_PYTHON_3_14_PLUS)
+#if defined(Py_GIL_DISABLED) && !IS_PYTHON_3_14_PLUS
   TORCH_WARN(
       "The PyTorch profiler is not thread-safe on Python 3.13t. "
       "Please use Python 3.14t or later.");
@@ -1496,6 +1495,7 @@ std::vector<std::shared_ptr<Result>> PythonTracer::getEvents(
   std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
     return a->start_time_ns_ < b->start_time_ns_;
   });
+  python_tracer::clampOverrunningPythonEvents(out);
 
   PythonIDVisitor id_visitor;
   for (auto& i : out) {
