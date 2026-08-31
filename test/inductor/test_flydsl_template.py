@@ -639,11 +639,7 @@ class TestFlyDSLTemplate(TestCase):
         self.assertIn(f"TILE_M: fx.Constexpr = {tile_size}", code)
         self.assertIn(f"TILE_N: fx.Constexpr = {tile_size}", code)
         self.assertIn(f"GEMM_N: fx.Constexpr = {n}", code)
-        self.assertIn(
-            "USE_HALF_TILE_INTERLEAVED: fx.Constexpr = "
-            f"{use_half_tile_interleaved}",
-            code,
-        )
+        self.assertIn(f"USE_HALF_TILE_INTERLEAVED: fx.Constexpr = {use_half_tile_interleaved}", code)
         self.assertIn(f"A_IS_TRANSPOSED: fx.Constexpr = {a_is_transposed}", code)
         self.assertIn(f"B_IS_TRANSPOSED: fx.Constexpr = {b_is_transposed}", code)
 
@@ -703,10 +699,7 @@ class TestFlyDSLTemplate(TestCase):
         if not flydsl_utils.runtime_available():
             self.skipTest("FlyDSL runtime unavailable")
 
-        configs = [
-            asdict(config)
-            for config in flydsl_heuristics.get_default_gemm_configs()
-        ]
+        configs = [asdict(config) for config in flydsl_heuristics.get_default_gemm_configs()]
         configs = [
             next(
                 config for config in configs if not config["USE_HALF_TILE_INTERLEAVED"]

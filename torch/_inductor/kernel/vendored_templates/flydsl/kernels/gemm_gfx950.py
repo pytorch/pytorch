@@ -283,9 +283,7 @@ def make_transposed_lds_layout(rows, block_k):
     return base_layout
 
 
-def make_gemm_ab_lds_layouts(
-    rows_a, rows_b, block_k, a_is_transposed, b_is_transposed
-):
+def make_gemm_ab_lds_layouts(rows_a, rows_b, block_k, a_is_transposed, b_is_transposed):
     a_lds_layout = (
         make_transposed_lds_layout(rows_a, block_k)
         if const_expr(a_is_transposed)
@@ -365,9 +363,7 @@ def _elem_dtype(param: GemmGfx950Param):
     return fx.Float16 if const_expr(param.dtype_id == GEMM_DTYPE_FP16) else fx.BFloat16
 
 
-def make_gemm_ab_copies(
-    elem_dtype, tiled_mma, tid, a_is_transposed, b_is_transposed
-):
+def make_gemm_ab_copies(elem_dtype, tiled_mma, tid, a_is_transposed, b_is_transposed):
     uni_copy_atom = fx.make_copy_atom(fx.UniversalCopy128b(), elem_dtype)
     buffer_copy_atom = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), elem_dtype)
 
