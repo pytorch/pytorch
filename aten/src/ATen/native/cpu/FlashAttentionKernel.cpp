@@ -1131,20 +1131,25 @@ void cpu_flash_attention_backward(
   });
 }
 
-#define AT_DISPATCH_MASK_TYPES(TYPE, NAME, ...)            \
-  AT_DISPATCH_SWITCH(                                      \
-      TYPE,                                                \
-      NAME,                                                \
-      AT_PRIVATE_CASE_TYPE_USING_HINT(                     \
-          at::ScalarType::Bool, mask_t, __VA_ARGS__)       \
-      AT_PRIVATE_CASE_TYPE_USING_HINT(                     \
-          at::ScalarType::Float, mask_t, __VA_ARGS__)      \
-      AT_PRIVATE_CASE_TYPE_USING_HINT(                     \
-          at::ScalarType::Double, mask_t, __VA_ARGS__)     \
-      AT_PRIVATE_CASE_TYPE_USING_HINT(                     \
-          at::ScalarType::BFloat16, mask_t, __VA_ARGS__)   \
-      AT_PRIVATE_CASE_TYPE_USING_HINT(                     \
-          at::ScalarType::Half, mask_t, __VA_ARGS__))
+// Only Float or scalar_t masks can reach here: attention.cpp requires one of
+// the two before dispatching, and bool masks are pre-widened to scalar_t by
+// convert_boolean_attn_mask.
+#define AT_DISPATCH_MASK_TYPES(TYPE, NAME, ...)                              \
+  [&] {                                                                      \
+    if ((TYPE) == at::ScalarType::Float) {                                   \
+      using mask_t = float;                                                  \
+      return (__VA_ARGS__)();                                                \
+    }                                                                        \
+    TORCH_CHECK(                                                             \
+        (TYPE) == at::CppTypeToScalarType<scalar_t>::value,                  \
+        NAME,                                                                \
+        ": expected the mask to be Float or ",                               \
+        at::CppTypeToScalarType<scalar_t>::value,                            \
+        ", got ",                                                            \
+        (TYPE));                                                             \
+    using mask_t = scalar_t;                                                 \
+    return (__VA_ARGS__)();                                                  \
+  }()
 
 #define FLASH_ATTENTION_KERNEL(FNAME, PACK, TYPE1, TYPE2, SEQ1, SEQ2, ...)   \
   if (PACK) {                                                      \
