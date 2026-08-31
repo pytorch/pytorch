@@ -446,6 +446,42 @@ class TestCalculateShards(unittest.TestCase):
         self.assertEqual([test.num_shards for test in tests], [1, 1])
         self.assertEqual([test.get_time() for test in tests], list(test_times.values()))
 
+    def test_max_pytest_file_shards_caps_over_sharding(self) -> None:
+        # Inflated test-times.json: ceil(T/THRESHOLD)=19, but cap at 11.
+        test_times = {"test_ops": THRESHOLD * 18.5}
+        shards = calculate_shards(
+            2,
+            [TestRun("test_ops")],
+            test_times,
+            gen_class_times(test_times),
+            max_pytest_file_shards=11,
+        )
+        pieces = [t for _, job in shards for t in job]
+        self.assertEqual(len(pieces), 11)
+        self.assertTrue(all(t.num_shards == 11 for t in pieces))
+        self.assertEqual({t.shard for t in pieces}, set(range(1, 12)))
+
+    def test_rocm_build_environment_applies_default_cap(self) -> None:
+        import os
+
+        old = os.environ.get("BUILD_ENVIRONMENT")
+        os.environ["BUILD_ENVIRONMENT"] = "linux-noble-rocm-py3.12-mi300"
+        try:
+            test_times = {"test_ops": THRESHOLD * 18.5}
+            shards = calculate_shards(
+                2,
+                [TestRun("test_ops")],
+                test_times,
+                gen_class_times(test_times),
+            )
+            pieces = [t for _, job in shards for t in job]
+            self.assertEqual(len(pieces), 11)
+        finally:
+            if old is None:
+                os.environ.pop("BUILD_ENVIRONMENT", None)
+            else:
+                os.environ["BUILD_ENVIRONMENT"] = old
+
     def test_zero_tests(self) -> None:
         self.assertListEqual([(0.0, []), (0.0, [])], calculate_shards(2, [], {}, None))
 
