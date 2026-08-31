@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 """Tests for tp_getattro_impl: unified attribute access protocol in Dynamo."""
 
+import collections
 import inspect
 import types
 import unittest
@@ -8,7 +9,10 @@ import unittest
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    make_dynamo_test,
+)
 from torch.utils._triton import has_triton_package
 
 
@@ -1401,8 +1405,9 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
 
     def test_getset_descriptor_set_explicit(self):
-        # PyGetSetDescr_Type has tp_descr_set (getset_set), but
-        # GetSetDescriptorVariable has no tp_descr_set_impl.
+        # __cause__ is a getset modeled in tp_getset (ExceptionVariable), so
+        # this exercises the entry.setter branch of
+        # GetSetDescriptorVariable.tp_descr_set_impl.
         def fn():
             e = ValueError("x")
             BaseException.__dict__["__cause__"].__set__(e, KeyError("c"))
@@ -1410,9 +1415,64 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
 
+    def test_member_descriptor_set_readonly_entry(self):
+        # SliceVariable models start/stop/step as readonly Members; the write must
+        # raise PyMember_SetOne's wording, not fall through to store_attr.
+        def fn():
+            s = slice(1, 2, 3)
+            try:
+                slice.__dict__["start"].__set__(s, 9)
+            except AttributeError as e:
+                return str(e)
+            return "no error"
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_member_descriptor_set_writable_entry(self):
+        # __suppress_context__ is a writable Member on ExceptionVariable, so this
+        # exercises the entry.setter branch of
+        # MemberDescriptorVariable.tp_descr_set_impl.
+        def fn():
+            e = ValueError("x")
+            BaseException.__dict__["__suppress_context__"].__set__(e, True)
+            return e.__suppress_context__
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    @torch._dynamo.config.patch(enable_trace_unittest=True)
+    @make_dynamo_test
+    def test_getset_descriptor_set_readonly_entry(self):
+        # deque.maxlen is a readonly GetSet (deque_get_maxlen, no setter); the
+        # write must raise AttributeError (getset_set), not fall through to
+        # store_attr. Message format (tp_name vs __objclass__.__name__) is a
+        # separate, currently-open issue -- only the exception type is checked
+        # here.
+        d = collections.deque([1, 2, 3], maxlen=5)
+        with self.assertRaises(AttributeError):
+            collections.deque.__dict__["maxlen"].__set__(d, 7)
+
+    @torch._dynamo.config.patch(
+        enable_trace_unittest=True, enable_trace_load_build_class=True
+    )
+    @make_dynamo_test
+    def test_member_descriptor_set_incompatible_type(self):
+        # descr_setcheck: __set__ on a member descriptor with an obj whose
+        # type isn't a subtype of the descriptor's __objclass__ must raise
+        # TypeError from the set path itself, not silently apply the write.
+        class Alien:
+            __slots__ = ("x",)
+
+        class Borrower:
+            pass
+
+        with self.assertRaises(TypeError):
+            Alien.__dict__["x"].__set__(Borrower(), 1)
+
     def test_getset_descriptor_set_unmodeled_attribute(self):
-        # type.__name__ is a writable getset with no tp_getset entry, so a
-        # missing entry must not be reported as read-only.
+        # type.__name__ is a writable getset with no tp_getset entry on
+        # TypeVariable, so Dynamo cannot tell whether the C setter would
+        # accept the write, reject it as read-only, or reject it by type --
+        # it graph breaks rather than guessing "writable".
         class Target:
             pass
 
@@ -1420,12 +1480,11 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
             type.__dict__["__name__"].__set__(Target, "Renamed")
             return Target.__name__
 
-        try:
-            self.assertEqual(
-                torch.compile(fn, backend="eager", fullgraph=True)(), "Renamed"
-            )
-        finally:
-            Target.__name__ = "Target"
+        self.assertEqual(fn(), "Renamed")
+        Target.__name__ = "Target"
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)()
 
 
 if __name__ == "__main__":

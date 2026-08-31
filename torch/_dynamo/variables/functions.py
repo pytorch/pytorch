@@ -4972,15 +4972,13 @@ class GetSetDescriptorVariable(DescriptorVariable):
         entry = obj.lookup_tp_getset_member(name)
         if entry is None:
             # No model for this getset. Dynamo cannot see whether the C setter
-            # exists, so defer to the ordinary attribute write rather than
-            # claiming the attribute is read-only. Routed through the setattr
-            # builtin, which is what STORE_ATTR/DELETE_ATTR use.
-            name_vt = ConstantVariable.create(name)
-            if value is None:
-                fn, args = delattr, [obj, name_vt]
-            else:
-                fn, args = setattr, [obj, name_vt, value]
-            return VariableTracker.build(tx, fn).call_function(tx, args, {})
+            # accepts the write, rejects it as read-only, or type-checks the
+            # value, so it cannot decide between raising AttributeError and
+            # applying an ordinary attribute write. Graph break rather than
+            # guessing "writable" -- forwarding to the setattr/delattr
+            # builtins here would run type(obj).__setattr__, which getset_set
+            # bypasses, and would silently swallow a read-only rejection.
+            unmodeled_setter(obj, tx, value)
         if entry.setter is readonly_setter:
             # getset_set's message is more specific than readonly_setter's, and
             # only this site knows the attribute name and its defining class.
