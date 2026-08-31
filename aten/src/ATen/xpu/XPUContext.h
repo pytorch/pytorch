@@ -88,7 +88,9 @@ template <auto* KernelFn>
   return *std::min_element(subgroup_sizes.begin(), subgroup_sizes.end());
 }
 
-// Returns the maximum number of workitems that are permitted in a Xe-Core.
+// Returns the maximum number of workitems that can be concurrently resident
+// on an Xe Core, calculated from the maximum subgroup size, the number of EUs
+// per Xe Core, and the number of hardware threads per EU.
 [[nodiscard]] inline size_t getDeviceMaxWorkItemsPerXeCore(
     at::DeviceIndex device = at::xpu::current_device()) {
   const auto* device_prop = at::xpu::getDeviceProperties(device);
@@ -97,15 +99,16 @@ template <auto* KernelFn>
       device_prop->gpu_hw_threads_per_eu;
 }
 
-// Returns the number of Xe-Cores on the given device.
+// Returns the number of Xe Cores on the given device.
 [[nodiscard]] inline size_t getDeviceXeCoreCount(
     at::DeviceIndex device = at::xpu::current_device()) {
   const auto* device_prop = at::xpu::getDeviceProperties(device);
   return device_prop->gpu_eu_count / device_prop->gpu_eu_count_per_subslice;
 }
 
-// Returns the maximum number of workitems that are permitted on the given
-// device.
+// Returns the maximum number of workitems that can be concurrently resident
+// on the device, based on the maximum subgroup size, the total number of EUs,
+// and the number of hardware threads supported per EU.
 [[nodiscard]] inline size_t getDeviceMaxWorkItems(
     at::DeviceIndex device = at::xpu::current_device()) {
   const auto* device_prop = at::xpu::getDeviceProperties(device);
