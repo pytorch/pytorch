@@ -402,6 +402,19 @@ bool CUDAHooks::hasCUDART() const {
 #endif
 }
 
+bool CUDAHooks::supportsFP32MatmulBF16X9() const {
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12090
+  if (!hasCUDA()) {
+    return false;
+  }
+  const auto* properties = at::cuda::getCurrentDeviceProperties();
+  return properties->major == 10 &&
+      (properties->minor == 0 || properties->minor == 3);
+#else
+  return false;
+#endif
+}
+
 std::string CUDAHooks::showConfig() const {
   std::ostringstream oss;
 

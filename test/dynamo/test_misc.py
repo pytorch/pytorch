@@ -80,6 +80,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.nn import functional as F
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
+    BF16X9_SUPPORTED,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     SM80OrLater,
     TEST_CUDA,
@@ -5360,15 +5361,16 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         guards.__setstate__(json.dumps(legacy_json_guards))
         self.assertFalse(guards.check())
 
-        legacy_json_guards["allow_tf32"] = False
-        guards.__setstate__(json.dumps(legacy_json_guards))
-        torch.backends.cuda.matmul.fp32_precision = "bfx9"
-        self.assertFalse(guards.check())
+        if BF16X9_SUPPORTED:
+            legacy_json_guards["allow_tf32"] = False
+            guards.__setstate__(json.dumps(legacy_json_guards))
+            torch.backends.cuda.matmul.fp32_precision = "bfx9"
+            self.assertFalse(guards.check())
 
-        x9_json_guards = json.loads(GlobalStateGuard().__getstate__())
-        self.assertNotIn("allow_tf32", x9_json_guards)
-        guards.__setstate__(json.dumps(x9_json_guards))
-        self.assertTrue(guards.check())
+            x9_json_guards = json.loads(GlobalStateGuard().__getstate__())
+            self.assertNotIn("allow_tf32", x9_json_guards)
+            guards.__setstate__(json.dumps(x9_json_guards))
+            self.assertTrue(guards.check())
 
         # Test on autocast states.
         def _test_autocast(dtype):
@@ -12152,6 +12154,9 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         finally:
             write_state(initial_state)
 
+    @unittest.skipUnless(
+        BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
+    )
     @recover_orig_fp32_precision
     def test_recompile_on_bfx9_precision_change(self):
         counter = CompileCounter()

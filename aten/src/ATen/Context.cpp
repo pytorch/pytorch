@@ -490,10 +490,21 @@ void Context::setFloat32Precision(Float32Backend backend, Float32Op op, Float32P
   TORCH_CHECK(
       !(backend == Float32Backend::CUDA && p == Float32Precision::BF16),
       "backend 'cuda' does not support precision 'bf16'");
-  TORCH_CHECK(
-      p != Float32Precision::BF16X9 ||
-          (backend == Float32Backend::CUDA && op == Float32Op::MATMUL),
-      "precision 'bfx9' is only supported for backend 'cuda' and op 'matmul'");
+  if (p == Float32Precision::BF16X9) {
+    TORCH_CHECK(
+        backend == Float32Backend::CUDA && op == Float32Op::MATMUL,
+        "precision 'bfx9' is only supported for backend 'cuda' and op 'matmul'");
+    const auto& cuda_hooks = detail::getCUDAHooks();
+    TORCH_CHECK(
+        !cuda_hooks.hasROCM(),
+        "bfx9 precision is only supported on NVIDIA CUDA");
+    TORCH_CHECK(
+        cuda_hooks.hasCUDART() && cuda_hooks.versionCUDART() >= 12090,
+        "bfx9 precision requires PyTorch to be built with CUDA 12.9 or later");
+    TORCH_CHECK(
+        cuda_hooks.supportsFP32MatmulBF16X9(),
+        "bfx9 precision requires a CUDA device with compute capability 10.0 or 10.3");
+  }
   TORCH_CHECK(
       p != Float32Precision::DEFAULT,
       "DEFAULT precision is internal and cannot be set explicitly");

@@ -97,9 +97,9 @@ arithmetic is not IEEE-754 compliant and its relative accuracy is
 workload-dependent. `bfx9` requires a PyTorch build with CUDA 12.9 or newer and
 a GPU with compute capability 10.0 or 10.3. It is valid only for
 `torch.backends.cuda.matmul.fp32_precision`; using it for a generic, cuDNN, or
-MKLDNN precision setting raises an error. ATen/cuBLAS GEMM execution on an
-unsupported CUDA build, CUDA device, or ROCm raises an error instead of using
-another computation mode.
+MKLDNN precision setting raises an error. Setting `bfx9` on an unsupported
+CUDA build, CUDA device, or ROCm raises an error instead of selecting another
+computation mode.
 
 As with `tf32`, operations implemented using CUDA GEMM can inherit the matmul
 precision setting, including slow or naive convolution fallbacks. Under

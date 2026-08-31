@@ -135,6 +135,9 @@ class TestMatmulCuda(InductorTestCase):
         torch.backends.cuda.matmul.fp32_precision = self._prev_cuda_matmul_fp32
         super().tearDown()
 
+    @unittest.skipUnless(
+        BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
+    )
     @serialTest()
     def test_bfx9_does_not_affect_non_float32_matmuls(self, device):
         for dtype in (torch.float64, torch.complex64):
@@ -147,6 +150,9 @@ class TestMatmulCuda(InductorTestCase):
 
     @onlyCUDA
     @skipIfRocm
+    @unittest.skipUnless(
+        BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
+    )
     @torch._inductor.config.patch(coordinate_descent_tuning=True)
     @serialTest()
     def test_bfx9_does_not_change_float16_decomposition(self, device):
@@ -177,33 +183,8 @@ class TestMatmulCuda(InductorTestCase):
         self.assertEqual(actual, reference.float(), atol=2e-4, rtol=2e-4)
 
     @unittest.skipIf(BF16X9_SUPPORTED, "requires unsupported BF16x9 hardware")
-    @parametrize(
-        "backend,tunable,op",
-        [
-            ("cublas", True, "mm"),
-            ("cublas", False, "bmm"),
-            ("cublaslt", True, "addmm"),
-            ("cublaslt", False, "grouped_mm"),
-        ]
-        + (
-            [("ck", False, "mm"), ("ck", False, "grouped_mm")]
-            if TEST_WITH_ROCM
-            else []
-        ),
-    )
     @serialTest()
-    def test_bfx9_unsupported(self, device, backend, tunable, op):
-        torch.backends.cuda.matmul.fp32_precision = "bfx9"
-        shape = (2, 128, 128) if op in ("bmm", "grouped_mm") else (128, 128)
-        a = torch.randn(shape, device=device)
-
-        def run_op():
-            if op == "addmm":
-                return torch.addmm(torch.zeros(128, device=device), a, a)
-            if op == "grouped_mm":
-                return torch._grouped_mm(a, a)
-            return getattr(torch, op)(a, a)
-
+    def test_bfx9_unsupported(self, device):
         expected_error = (
             "only supported on NVIDIA CUDA"
             if TEST_WITH_ROCM
@@ -211,21 +192,8 @@ class TestMatmulCuda(InductorTestCase):
             if _get_torch_cuda_version() < (12, 9)
             else "compute capability 10.0 or 10.3"
         )
-        self.addCleanup(torch.cuda.tunable.enable, torch.cuda.tunable.is_enabled())
-        torch.cuda.tunable.enable(tunable)
-        grouped_ck = (
-            rocm_group_gemm_ck_env("1")
-            if backend == "ck" and op == "grouped_mm"
-            else contextlib.nullcontext()
-        )
-        try:
-            with grouped_ck, blas_library_context(backend):
-                with self.assertRaisesRegex(RuntimeError, expected_error):
-                    run_op()
-        except RuntimeError as error:
-            if "Cannot set preferred" in str(error):
-                self.skipTest(str(error))
-            raise
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            torch.backends.cuda.matmul.fp32_precision = "bfx9"
 
     @unittest.skipUnless(
         BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"

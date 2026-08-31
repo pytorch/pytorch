@@ -9,6 +9,7 @@ import torch._inductor.fx_passes.fuse_attention as fuse_attention
 from torch._inductor.utils import run_and_get_code
 from torch._logging import warning_once
 from torch.nn.attention.flex_attention import flex_attention
+from torch.testing._internal.common_cuda import BF16X9_SUPPORTED
 from torch.testing._internal.common_utils import (
     recover_orig_fp32_precision,
     run_tests,
@@ -29,7 +30,9 @@ def _has_cuda_sm80() -> bool:
 
 
 class InductorWarningTests(TestCase):
-    @unittest.skipIf(not _has_cuda_sm80(), "requires CUDA SM80")
+    @unittest.skipUnless(
+        BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
+    )
     @recover_orig_fp32_precision
     @torch._inductor.config.patch(force_disable_caches=True)
     def test_flex_attention_warns_and_uses_ieee_for_bfx9(self):

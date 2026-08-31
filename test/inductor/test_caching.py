@@ -29,6 +29,7 @@ from torch._inductor.runtime.caching import (
     utils,
 )
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_cuda import BF16X9_SUPPORTED
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -2543,13 +2544,14 @@ class ShouldPadMemoizerTest(TestMixin, TestCase):
             mat2 = torch.empty(16, 32, device="cuda")
 
         benchmark_keys = set()
-        for precision in ("ieee", "tf32", "bfx9"):
+        precisions = ("ieee", "tf32") + (("bfx9",) if BF16X9_SUPPORTED else ())
+        for precision in precisions:
             torch.backends.cuda.matmul.fp32_precision = precision
             encoded = encoders.should_pad_params_encoder(mock_match, mat1, mat2, op)
             self.assertEqual(encoded["fp32_precision"], precision)
             benchmark_keys.add(should_pad_bench_key(mock_match, mat1, mat2, op))
 
-        self.assertEqual(len(benchmark_keys), 3)
+        self.assertEqual(len(benchmark_keys), len(precisions))
 
     @patch("torch._prims_common.is_contiguous_or_false", return_value=True)
     @patch_on_disk_cache_base_dir

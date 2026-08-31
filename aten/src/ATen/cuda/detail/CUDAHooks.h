@@ -47,6 +47,7 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   bool supportsBFloat16ConvolutionWithCuDNNv8() const override;
   bool supportsBFloat16RNNWithCuDNN() const override;
   bool hasCUDART() const override;
+  bool supportsFP32MatmulBF16X9() const override;
   long versionCUDART() const override;
   long versionCuDNN() const override;
   long versionRuntimeCuDNN() const override;

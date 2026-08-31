@@ -98,6 +98,10 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
     return false;
   }
 
+  virtual bool supportsFP32MatmulBF16X9() const {
+    return false;
+  }
+
   virtual bool hasMAGMA() const {
     return false;
   }

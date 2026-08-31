@@ -908,7 +908,6 @@ void bgemm<double>(CUDABLAS_BGEMM_ARGTYPES(double)) {
 
 template <>
 void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
-  checkBF16x9Support();
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()
       && bgemm_tunable<float>(CUDABLAS_BGEMM_ARGS(float))) {
@@ -1480,7 +1479,6 @@ void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
 
 template <>
 void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
-  checkBF16x9Support();
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()
       && gemm_tunable<float>(CUDABLAS_GEMM_ARGS(float))) {
