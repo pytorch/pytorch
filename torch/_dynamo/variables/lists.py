@@ -1463,8 +1463,10 @@ class DequeVariable(BaseListVariable):
             )
         self.maxlen = maxlen
         items = list(items)
-        if self.maxlen.as_python_constant() is not None:
-            items = items[-maxlen.as_python_constant() :]
+        maxlen_val = self.maxlen.as_python_constant()
+        if maxlen_val is not None:
+            # maxlen == 0 must empty the deque; items[-0:] would keep everything.
+            items = items[-maxlen_val:] if maxlen_val != 0 else items[:0]
         super().__init__(items, **kwargs)
         # Mirrors CPython deque->state: bumped on every structural mutation so
         # deque iterators can detect mutation during iteration.
@@ -1659,8 +1661,12 @@ class DequeVariable(BaseListVariable):
         # on the left (appendleft/extendleft).
         maxlen = self.maxlen.as_python_constant()
         if maxlen is not None and len(self.items) > maxlen:
+            # side == "right" and maxlen == 0 must empty; items[-0:] keeps all,
+            # so fall through to items[:0] in that case.
             self.items[:] = (
-                self.items[-maxlen:] if side == "right" else self.items[:maxlen]
+                self.items[-maxlen:]
+                if side == "right" and maxlen != 0
+                else self.items[:maxlen]
             )
 
     def append(
@@ -1781,6 +1787,10 @@ class DequeVariable(BaseListVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
+        # list_pop raises the list message ("pop from empty list"); deque uses
+        # its own, so check emptiness here before delegating.
+        if self.is_mutable() and not self.items:
+            raise_observed_exception(IndexError, tx, args=["pop from an empty deque"])
         result = BaseListVariable.list_pop(self, tx, args, kwargs)
         if result is None:
             return None
