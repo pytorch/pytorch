@@ -11,7 +11,6 @@
 #include <c10/util/Gauge.h>
 #include <c10/util/Logging.h>
 #include <c10/util/ScopeExit.h>
-#include <c10/util/SmallVector.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/env.h>
 #include <c10/util/error.h>
@@ -1543,12 +1542,14 @@ class DeviceCachingAllocator {
   // Incremental reverse-traversal state cached per graph.
   // We never re-traverse nodes we've already seen
   struct GraphReuseContext {
-    ska::flat_hash_map<cudaStream_t, ska::flat_hash_set<cudaGraphNode_t>>
-        visited;
+    ska::
+        flat_hash_map<cudaStream_t, CUDAGraphMemory::CaptureDAG::TraversalState>
+            traversal_state;
   };
   ska::flat_hash_map<MempoolId_t, CaptureId_t, MempoolIdHash>
       mempool_to_capture_id;
   ska::flat_hash_map<CaptureId_t, GraphReuseContext> graph_reuse_context;
+  CUDAGraphMemory::CaptureDAG capture_dag_;
 
   // outstanding cuda events
   ska::flat_hash_map<
@@ -2327,148 +2328,21 @@ class DeviceCachingAllocator {
     return block;
   }
 
-  struct CaptureInfo {
-    cudaGraph_t graph{};
-    CaptureId_t capture_id{0};
-    const cudaGraphNode_t* terminals{nullptr};
-    size_t num_terminals{0};
-    cudaStreamCaptureStatus status{cudaStreamCaptureStatusNone};
-  };
-
-  CaptureInfo stream_get_capture_info(cudaStream_t stream) const {
-    CaptureInfo info{};
-#if (defined(CUDA_VERSION) && CUDA_VERSION >= 13000)
-    C10_CUDA_CHECK(cudaStreamGetCaptureInfo(
-        stream,
-        &info.status,
-        &info.capture_id,
-        &info.graph,
-        &info.terminals,
-        nullptr,
-        &info.num_terminals));
-#else
-    C10_CUDA_CHECK(cudaStreamGetCaptureInfo_v2(
-        stream,
-        &info.status,
-        &info.capture_id,
-        &info.graph,
-        &info.terminals,
-        &info.num_terminals));
-#endif
-    return info;
-  }
-
   // Record "free marker" of the CUDA graph for all streams that
   // have used the block, including the allocation stream. These nodes mark the
   // last use of the block in the capture graph. Returns a vector of the
   // inserted nodes, or an empty vector if any stream is not capturing.
   std::vector<cudaGraphNode_t> record_free_markers(Block* block) {
-    // Is is possible to have the same marker recorded multiple times, so we use
-    // a set to avoid duplicates
-    ska::flat_hash_set<cudaGraphNode_t> markers;
-    cudaGraph_t owning_graph = nullptr;
-
-    auto try_record = [&](cudaStream_t s) -> bool {
-      auto info = stream_get_capture_info(s);
-      if (info.status == cudaStreamCaptureStatusNone) {
-        return false; // not capturing on this stream -> must defer
-      }
-
-      if (owning_graph == nullptr) {
-        owning_graph = info.graph;
-      }
-      TORCH_INTERNAL_ASSERT(
-          info.graph == owning_graph,
-          "All streams in the same capture should agree on the graph");
-
-      // Use current terminals as the free markers for the stream
-      for (size_t i = 0; i < info.num_terminals; ++i) {
-        auto terminal = info.terminals[i];
-        markers.insert(terminal);
-      }
-      owning_graph = info.graph; // all streams in the same capture should agree
-      return true;
-    };
-
-    // If any stream is not currently capturing, return an empty node vector.
-    // An empty vector indicates that the block should be deferred for freeing
-    // until after capture.
-
-    // Allocation stream
-    if (!try_record(block->stream)) {
+    CUDAGraphMemory::CaptureDAG::FreeMarkerState marker_state;
+    if (!capture_dag_.recordFreeMarkersForStream(block->stream, marker_state)) {
       return {};
     }
-    // Any extra streams that used this block
     for (const auto& s : block->stream_uses) {
-      if (!try_record(s.stream())) {
+      if (!capture_dag_.recordFreeMarkersForStream(s.stream(), marker_state)) {
         return {};
       }
     }
-    return std::vector<cudaGraphNode_t>(markers.begin(), markers.end());
-  }
-
-  // Returns the set of "reusable" free markers in the current
-  // CUDA graph capture. A free marker is considered reusable if it is a
-  // predecessor of every terminal node.
-  // This ensures that all future captured work will occur after the free
-  // marker, making it safe to reuse.
-  void update_visited(
-      const CaptureInfo& info,
-      ska::flat_hash_set<cudaGraphNode_t>& visited) {
-    // This is the versioned cudaGraphNodeGetDependencies helper function.
-    auto node_get_dependencies =
-        [](cudaGraphNode_t n, cudaGraphNode_t* deps, size_t* count) -> void {
-#if (defined(CUDA_VERSION) && CUDA_VERSION >= 13000)
-      if (deps == nullptr) {
-        C10_CUDA_CHECK(cudaGraphNodeGetDependencies(n, deps, nullptr, count));
-      } else {
-        SmallVector<cudaGraphEdgeData> edgeData;
-        edgeData.resize(*count);
-        C10_CUDA_CHECK(
-            cudaGraphNodeGetDependencies(n, deps, edgeData.data(), count));
-      }
-#else
-      C10_CUDA_CHECK(cudaGraphNodeGetDependencies(n, deps, count));
-#endif
-    };
-
-    // Helper to retrieve all parent nodes (dependencies) of a given node.
-    auto get_parents =
-        [&](cudaGraphNode_t node) -> std::vector<cudaGraphNode_t> {
-      size_t count = 0;
-
-      node_get_dependencies(node, nullptr, &count);
-      std::vector<cudaGraphNode_t> out(count);
-      if (count) {
-        node_get_dependencies(node, out.data(), &count);
-        out.resize(count);
-      }
-      return out;
-    };
-
-    // For each terminal node, perform a reverse DFS to count, for each free
-    // marker, how many terminals it can reach (i.e., for how many terminals it
-    // is a predecessor). A free marker is reusable if it is a predecessor of
-    // all terminal nodes.
-    std::deque<cudaGraphNode_t> dfs;
-    for (size_t i = 0; i < info.num_terminals; ++i) {
-      dfs.push_back(info.terminals[i]);
-    }
-
-    while (!dfs.empty()) {
-      auto v = dfs.back();
-      dfs.pop_back();
-
-      if (visited.count(v)) {
-        continue;
-      }
-      visited.insert(v);
-
-      auto parents = get_parents(v);
-      for (auto p : parents) {
-        dfs.push_back(p);
-      }
-    }
+    return capture_dag_.takeFreeMarkers(std::move(marker_state));
   }
 
   // A block is considered reusable during CUDA graph capture if every free
@@ -2484,7 +2358,7 @@ class DeviceCachingAllocator {
   void free_safe_blocks_in_capture(
       const std::shared_ptr<GatheredContext>& context,
       cudaStream_t stream) {
-    auto info = stream_get_capture_info(stream);
+    auto info = capture_dag_.captureInfo(stream);
 
     // If there are no reusable empty nodes (e.g., not currently capturing),
     // there is nothing to do.
@@ -2512,8 +2386,8 @@ class DeviceCachingAllocator {
           found, "Could not find memory pool id for capture.");
     }
     auto& graph_context = graph_reuse_context[info.capture_id];
-    auto& visited = graph_context.visited[stream];
-    update_visited(info, visited);
+    auto& traversal_state = graph_context.traversal_state[stream];
+    capture_dag_.updateVisited(info, traversal_state);
 
     std::vector<Block*> blocks_to_erase;
     for (auto& [block, markers] : deferred_blocks) {
@@ -2525,15 +2399,7 @@ class DeviceCachingAllocator {
         continue;
       }
 
-      bool is_reusable = true;
-      for (auto m : markers) {
-        if (!visited.count(m)) {
-          is_reusable = false;
-          break;
-        }
-      }
-
-      if (is_reusable) {
+      if (capture_dag_.areMarkersReachable(markers, traversal_state)) {
         // Clear stream uses since the graph ensures proper synchronization.
         // No need to insert events.
         block->stream_uses.clear();
@@ -3270,10 +3136,10 @@ class DeviceCachingAllocator {
       // Remove stream reuse context and mapping for this capture, if present.
       if (!graph_reuse_context.empty()) {
         auto capture_id = mempool_to_capture_id[mempool_id];
-        auto graph_context = graph_reuse_context[capture_id];
-        for (auto& [stream, _] : graph_context.visited) {
+        const auto& graph_context = graph_reuse_context[capture_id];
+        for (const auto& [stream, _] : graph_context.traversal_state) {
           TORCH_INTERNAL_ASSERT(
-              stream_get_capture_info(stream).status ==
+              capture_dag_.captureInfo(stream).status ==
                   cudaStreamCaptureStatusNone,
               "This stream should not be capturing when the capture is ended");
         }
@@ -3803,7 +3669,7 @@ class DeviceCachingAllocator {
       return false;
     }
     cudaStream_t stream = cuda::getCurrentCUDAStream(device_id).stream();
-    return stream_get_capture_info(stream).status !=
+    return capture_dag_.captureInfo(stream).status !=
         cudaStreamCaptureStatusNone;
   }
 
