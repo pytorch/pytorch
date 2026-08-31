@@ -121,7 +121,6 @@ from .base import (
 from .dicts import ConstDictVariable, OrderedDictVariable, pydict_check
 from .hashable import HashableTracker
 from .object_protocol import (
-    _resolve_descriptor_get,
     generic_is_true,
     generic_repr,
     is_nb_not_implemented,
@@ -630,6 +629,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if meta_attr is not NO_SUCH_SUBOBJ:
             metacls_source = TypeSource(self.source) if self.source else None
             metacls_vt = VariableTracker.build(tx, type(self.value), metacls_source)
+            from .functions import _resolve_descriptor_get
+
             result = _resolve_descriptor_get(tx, meta_attr, self, metacls_vt, source)
             if result is not None:
                 return result
@@ -694,40 +695,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return VariableTracker.build(tx, resolved)
         return variables.GetAttrVariable(self, name, type(resolved), source=source)
 
-    def _descriptor_defining_class_vt(
-        self,
-        tx: "InstructionTranslatorBase",
-        descriptor: types.WrapperDescriptorType | types.MethodDescriptorType,
-    ) -> VariableTracker:
-        """VT for the class that actually implements an unbound C descriptor.
-
-        Consider the following example:
-
-            # Metaclass defines __neg__, so `-SomeClass` would call Meta.__neg__(cls).
-            class Meta(type):
-                def __neg__(cls):
-                    return 999
-
-
-            class Base(metaclass=Meta):
-                # Alias int's unary __neg__ slot wrapper into this class's dict under a
-                # different name. __objclass__ == int, __name__ == '__neg__', but looked
-                # up on Base, whose metaclass separately defines __neg__.
-                sneaky = int.__neg__
-
-        This helper function determines the correct owner of the descriptor based on the `__objclass__` attribute.
-
-            class Foo(int):
-                ...
-
-            assert Foo.__neg__ == int.__neg__
-            assert Foo.__neg__.__objclass__ is int
-        """
-        objclass = descriptor.__objclass__
-        if objclass is self.value:
-            return self
-        return VariableTracker.build(tx, objclass)
-
     def resolve_cls_descriptor(
         self,
         tx: "InstructionTranslatorBase",
@@ -736,67 +703,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
         source: Source | None,
     ) -> VariableTracker:
         """Handle descriptors found in cls.__mro__."""
-        if isinstance(cls_attr, staticmethod):
-            # Source points to the descriptor in the class __dict__ via MRO
-            # walk, not via AttrSource(cls, name) which would trigger the
-            # descriptor protocol and skip past the staticmethod wrapper.
-            descriptor_source = (
-                self.get_source_by_walking_mro(tx, name)
-                if self.source is not None
-                else None
-            )
-            sm_vt = variables.StaticMethodVariable(cls_attr, source=descriptor_source)
-            return sm_vt.tp_descr_get_impl(tx, self, self)
-
-        if isinstance(cls_attr, classmethod):
-            if isinstance(cls_attr.__func__, property):
-                fget_vt = VariableTracker.build(tx, cls_attr.__func__.fget)
-                return fget_vt.call_function(tx, [self], {})
-            # Source points to the descriptor in the class __dict__ via MRO
-            # walk, not via AttrSource(cls, name) which would trigger the
-            # descriptor protocol and skip past the classmethod wrapper.
-            descriptor_source = (
-                self.get_source_by_walking_mro(tx, name)
-                if self.source is not None
-                else None
-            )
-            cm_vt = variables.ClassMethodVariable(cls_attr, source=descriptor_source)
-            return cm_vt.tp_descr_get_impl(tx, self, self)
-
-        if isinstance(cls_attr, types.ClassMethodDescriptorType):
-            cmd_vt = variables.ClassMethodDescriptorVariable(cls_attr, source=source)
-            return cmd_vt.tp_descr_get_impl(tx, self, self)
-
-        # property_descr_get with obj=NULL returns self.
-        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1662-L1663
-        if isinstance(cls_attr, property):
-            descriptor_source = (
-                self.get_source_by_walking_mro(tx, name)
-                if self.source is not None
-                else None
-            )
-            return variables.PropertyVariable(cls_attr, source=descriptor_source)
-
-        # member_get with obj=NULL returns self.
-        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L162-L164
-        if isinstance(cls_attr, types.MemberDescriptorType):
-            descriptor_source = (
-                self.get_source_by_walking_mro(tx, name)
-                if self.source is not None
-                else None
-            )
-            return variables.MemberDescriptorVariable(
-                cls_attr, source=descriptor_source
-            )
-
-        if isinstance(cls_attr, _collections._tuplegetter):
-            descriptor_source = (
-                self.get_source_by_walking_mro(tx, name)
-                if self.source is not None
-                else None
-            )
-            tg_vt = variables.TupleGetterVariable(cls_attr, source=descriptor_source)
-            return tg_vt.tp_descr_get_impl(tx, None, self)
+        if isinstance(cls_attr, classmethod) and isinstance(
+            cls_attr.__func__, property
+        ):
+            fget_vt = VariableTracker.build(tx, cls_attr.__func__.fget)
+            return fget_vt.call_function(tx, [self], {})
 
         # TODO(tp_descr_get) - Comparison dunders must be checked before
         # WrapperDescriptor/MethodDescriptor to avoid VT type mismatches in
@@ -808,31 +719,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 self, name, py_type=type(cls_attr), source=source
             )
 
-        # wrapperdescr_get/method_get with obj=NULL returns the
-        # descriptor itself.
-        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L206-L207
-        if (
-            isinstance(cls_attr, types.WrapperDescriptorType)
-            and not is_torch_class(self.value)
-            and name not in ("__get__", "__set__", "__delete__")
-        ):
-            return variables.WrapperDescriptorVariable(
-                cls_attr,
-                owner=self._descriptor_defining_class_vt(tx, cls_attr),
-                source=source,
-            )
+        from .functions import resolve_unbound_class_descriptor
 
-        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L140-L141
-        if (
-            isinstance(cls_attr, types.MethodDescriptorType)
-            and not is_torch_class(self.value)
-            and name not in ("__get__", "__set__", "__delete__")
-        ):
-            return variables.MethodDescriptorVariable(
-                cls_attr,
-                owner=self._descriptor_defining_class_vt(tx, cls_attr),
-                source=source,
-            )
+        result = resolve_unbound_class_descriptor(
+            tx,
+            cls_attr,
+            self,
+            name,
+            source,
+            allow_c_slot_descriptors=not is_torch_class(self.value),
+        )
+        if result is not None:
+            return result
 
         # User-defined descriptor with Python __get__.
         # For torch-internal classes or attributes in the class's own __dict__,
