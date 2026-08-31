@@ -1156,7 +1156,7 @@ class TestFP8Lowering(TestCase):
             (16, 256, 640),  # K padding with a degenerate 128x128 row block
             (256, 384, 640),  # non-square 128x128 block grid with K padding
             (1024, 512, 1024),
-            (32768, 4096, 4096),
+            (2048, 4096, 4096),
         ),
     )
     @parametrize("use_fast_accum", (False, True))

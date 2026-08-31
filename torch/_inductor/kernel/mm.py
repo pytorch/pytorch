@@ -1034,18 +1034,29 @@ def _is_blockwise1xTILESIZE_scaling(
     tile_size: int,
     transpose: bool,
 ) -> bool:
-    # Triton kernel always indexes scale with output dim as rows (dim 0)
-    # and contracting-dim blocks as columns (dim 1): [out_size, k_blocks].
-    # - Non-transposed (A, shape [M,K]): out=M at dim 0, K at dim 1
-    # - Transposed (B, shape [K,N]):     out=N at dim 1, K at dim 0
-    # After normalizing to [out, k_blocks]: sz[0]==out, sz[1]==ceil(K/tile)
-    if transpose:
-        out_dim, k_dim = tensor_sz[1], tensor_sz[0]
-    else:
-        out_dim, k_dim = tensor_sz[0], tensor_sz[1]
-    return V.graph.sizevars.statically_known_equals(
+    # The Triton template reads scale as [out_size, k_blocks] (output dim as rows,
+    # contracting-dim blocks as cols). This predicate runs twice: once on the raw
+    # op input and once on the normalized kernel input, so for scale_b it must
+    # accept both layouts (like _is_blockwise128x128_scaling).
+    # - scale_a (A [M,K], transpose=False): [M, ceil(K/tile)] for both v1 and v2.
+    # - scale_b (B=w.t() [K,N], transpose=True):
+    #     v1 torch._scaled_mm passes [ceil(K/tile), N]; _normalize_blockwise_scale
+    #     transposes it to the template's [N, ceil(K/tile)], which v2 already uses.
+    sizevars = V.graph.sizevars
+    if not transpose:
+        return sizevars.statically_known_equals(
+            sz[0], tensor_sz[0]
+        ) and sizevars.statically_known_equals(sz[1], ceildiv(tensor_sz[1], tile_size))
+    out_dim, k_blocks = tensor_sz[1], ceildiv(tensor_sz[0], tile_size)
+    # Template layout [N, ceil(K/tile)] (v2 raw, and v1 after normalization).
+    normalized = sizevars.statically_known_equals(
         sz[0], out_dim
-    ) and V.graph.sizevars.statically_known_equals(sz[1], ceildiv(k_dim, tile_size))
+    ) and sizevars.statically_known_equals(sz[1], k_blocks)
+    # v1 raw layout [ceil(K/tile), N].
+    v1_raw = sizevars.statically_known_equals(
+        sz[0], k_blocks
+    ) and sizevars.statically_known_equals(sz[1], out_dim)
+    return normalized or v1_raw
 
 
 def _is_blockwise128x128_scaling(
@@ -1112,6 +1123,19 @@ def _uses_cublas_blockwise128x128_layout(
     ) and sizevars.statically_known_equals(scale_stride[1], k_blocks_padded)
 
 
+def _is_v1_blockwise1x128_scale_b_layout(scale: Any, mat: Any) -> bool:
+    # True when scale_b is in torch._scaled_mm (v1) 1x128 layout [ceil(K/128), N]
+    # rather than the template's [N, ceil(K/128)] (v2). mat is B=w.t() [K, N].
+    tensor_sz = mat.get_size()
+    k_blocks = ceildiv(tensor_sz[0], 128)
+    n = tensor_sz[1]
+    sizevars = V.graph.sizevars
+    scale_sz = scale.get_size()
+    return sizevars.statically_known_equals(
+        scale_sz[0], k_blocks
+    ) and sizevars.statically_known_equals(scale_sz[1], n)
+
+
 def _normalize_blockwise_scale(
     scale: Any,
     mat: Any,
@@ -1123,7 +1147,18 @@ def _normalize_blockwise_scale(
     #
     # For BlockWise128x128, cuBLAS produces [k_blocks_padded_to_4, out_blocks]
     # while Triton expects [out_blocks, k_blocks]. We transpose and strip the
-    # K-dim padding. BlockWise1x128 already matches Triton's layout.
+    # K-dim padding.
+    #
+    # For BlockWise1x128, torch._scaled_mm (v1) passes scale_b as
+    # [ceil(K/128), N] while the template reads [N, ceil(K/128)] (the layout
+    # _scaled_mm_v2 already supplies). Transpose the v1 layout without a copy.
+    if (
+        transpose
+        and scale_option == ScalingType.BlockWise1x128
+        and _is_v1_blockwise1x128_scale_b_layout(scale, mat)
+    ):
+        return PermuteView.create(scale, (1, 0))
+
     if not _uses_cublas_blockwise128x128_layout(scale, mat, scale_option, transpose):
         return scale
 

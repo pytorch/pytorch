@@ -155,7 +155,10 @@ def blockwise1xTILESIZE_scaling(
     TILE_SIZE: tl.constexpr,
 ):
     row_offs_scale = pid * BLOCK_lhs + tl.arange(0, BLOCK_lhs)
-    col_offs_scale = ki * tl.cdiv(BLOCK_K, TILE_SIZE) + tl.arange(0, (BLOCK_K + TILE_SIZE - 1) // TILE_SIZE)
+    # Tile ki starts at K column ki * BLOCK_K; the scale block column is that
+    # divided by TILE_SIZE. cdiv would round up for BLOCK_K < TILE_SIZE, advancing
+    # the column every tile instead of every TILE_SIZE/BLOCK_K tiles.
+    col_offs_scale = ki * BLOCK_K // TILE_SIZE + tl.arange(0, (BLOCK_K + TILE_SIZE - 1) // TILE_SIZE)
     ptrs = scale + row_offs_scale[:, None] * scale_stride + col_offs_scale[None, :] * scale_stride_col
     mask = (row_offs_scale[:, None] < lhs_size) & (col_offs_scale[None, :] < k_blocks)
     scale_block = tl.load(ptrs, mask=mask, other=1.0)
@@ -195,10 +198,15 @@ def blockwise128x128_scaling(
     mask = (row_offs_scale[:, None] < lhs_blocks) & (col_offs_scale[None, :] < k_blocks)
     scale_block = tl.load(ptrs, mask=mask, other=1.0)
 
-    scale_expanded = scale_block[:, :, None, None]
+    # Interleave block and intra-block axes as (lhs_block, lhs_tile, k_block,
+    # k_tile) so the row-major reshape keeps each scale over its own 128x128
+    # square. Grouping as (lhs_block, k_block, ...) instead would emit a whole
+    # block's copies contiguously, smearing one scale across a row stripe when a
+    # tile spans multiple K-blocks (e.g. BLOCK_K=256).
+    scale_expanded = scale_block[:, None, :, None]
     scale_expanded = tl.broadcast_to(
         scale_expanded,
-        ((BLOCK_lhs + 128 - 1) // 128, (BLOCK_K + 128 - 1) // 128, MIN_BLOCK_TILE_lhs, MIN_BLOCK_TILE_K)
+        ((BLOCK_lhs + 128 - 1) // 128, MIN_BLOCK_TILE_lhs, (BLOCK_K + 128 - 1) // 128, MIN_BLOCK_TILE_K)
     )
     scale_expanded = scale_expanded.reshape(
         ((BLOCK_lhs + 128 - 1) // 128) * MIN_BLOCK_TILE_lhs,
