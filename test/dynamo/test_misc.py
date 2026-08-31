@@ -312,7 +312,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
         self.assertTrue(same(val4, correct1))
         self.assertEqual(counter.frame_count, 3)
 
-    @unittest.skipIf(not TEST_CUDA, "cuda needed")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "Test requires CUDA or XPU.")
     def test_assume_32_bit_indexing(self):
         @torch.compile(backend="inductor")
         def func(a, b):
@@ -337,8 +337,8 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
             return cumsum.sum()
 
-        a = torch.rand(100, 30, device="cuda")
-        b = torch.rand(100, 30, device="cuda")
+        a = torch.rand(100, 30, device=device_type)
+        b = torch.rand(100, 30, device=device_type)
 
         torch._dynamo.decorators.mark_unbacked(a, 0)
         torch._dynamo.decorators.mark_unbacked(a, 1)
@@ -1218,8 +1218,12 @@ graph():
         self.assertTrue(res.offloading_activation)
 
     @unittest.skipIf(
-        not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0),
-        "requires Hopper+ (SM >= 9.0) for TMA",
+        not TEST_XPU
+        and (
+            not torch.cuda.is_available()
+            or torch.cuda.get_device_capability() < (9, 0)
+        ),
+        "requires Hopper+ (SM >= 9.0) for TMA, or XPU",
     )
     @unittest.skipIf(
         not torch.utils._triton.has_triton()
@@ -1276,7 +1280,7 @@ graph():
             )
             return out
 
-        x = torch.randn(M, N, device="cuda")
+        x = torch.randn(M, N, device=device_type)
 
         from contextlib import contextmanager
 
@@ -1294,7 +1298,7 @@ graph():
         def fn_with_set_allocator(x):
             triton.set_allocator(
                 lambda size, alignment, stream: torch.empty(
-                    size, device="cuda", dtype=torch.int8
+                    size, device=device_type, dtype=torch.int8
                 )
             )
             return run_kernel(x)
@@ -7013,7 +7017,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                 # Make sure sparse clone is successful.
                 self.assertEqual(sparse_input, sparse_copy)
 
-    @unittest.skipIf(not TEST_CUDA, "pinned CPU memory requires CUDA")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "Test requires CUDA or XPU.")
     @unittest.skipIf(
         PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
     )
@@ -7107,7 +7111,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         for x in [torch.contiguous_format, torch.channels_last]:
             self.assertEqual(fn(x), opt_fn(x))
 
-    @unittest.skipIf(not TEST_CUDA, "cuda needed")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "Test requires CUDA or XPU.")
     def test_cuda_tensor_is_pinned_constant_false(self):
         def pinned_memory_of(arg):
             return arg.is_pinned()
@@ -7117,7 +7121,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                 return x + 1
             return x + 2
 
-        x = torch.randn(4, device="cuda")
+        x = torch.randn(4, device=device_type)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
