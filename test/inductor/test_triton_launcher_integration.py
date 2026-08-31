@@ -13,6 +13,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.inductor_utils import GPU_TYPE
 
 
 def _make_mock_launcher(
@@ -36,7 +37,22 @@ def _make_mock_launcher(
     bin_mock.num_warps = num_warps
     bin_mock.shared = shared
     bin_mock.launch_metadata_schema = launch_metadata_schema
-    bin_mock.asm = {"cubin": b"\x00", "ptx": "mock_ptx"}
+    # Populate asm entries for all supported device backends so tests are
+    # device-agnostic (save_gpu_kernel picks bin_type/asm_type based on
+    # device_props.type; on XPU this is XPU_KERNEL_FORMAT which may be
+    # "zebin" or "spv").
+    from torch._inductor.runtime.triton_heuristics import XPU_KERNEL_FORMAT
+
+    asm = {
+        "cubin": b"\x00",
+        "ptx": "mock_ptx",
+        "hsaco": b"\x00",
+        "amdgcn": "mock_amdgcn",
+        "spv": b"\x00",
+        "zebin": b"\x00",
+    }
+    asm[XPU_KERNEL_FORMAT] = b"\x00"
+    bin_mock.asm = asm
     launcher.bin = bin_mock
 
     return launcher
@@ -48,7 +64,7 @@ def _make_mock_autotuner(kernel_name="test_kernel"):
     autotuner.inductor_meta = {"kernel_name": kernel_name}
     autotuner.triton_meta = {"signature": {0: "*fp32"}}
     autotuner.device_props = MagicMock()
-    autotuner.device_props.type = "cuda"
+    autotuner.device_props.type = GPU_TYPE
     return autotuner
 
 
@@ -144,12 +160,12 @@ _HAS_GPU = False
 try:
     import torch
 
-    _HAS_GPU = hasattr(torch, "cuda") and torch.cuda.is_available()
+    _HAS_GPU = hasattr(torch, GPU_TYPE) and getattr(torch, GPU_TYPE).is_available()
 except (ImportError, AttributeError):
     pass
 
 
-@unittest.skipUnless(_HAS_GPU, "requires CUDA GPU")
+@unittest.skipUnless(_HAS_GPU, "requires GPU")
 class SaveGpuKernelAOTIE2ETest(TestCase):
     """E2E tests for 3/N: verify AOTI pipeline uses save_gpu_kernel schema path."""
 
@@ -163,7 +179,7 @@ class SaveGpuKernelAOTIE2ETest(TestCase):
         # NOTE: triton.fb is fbcode-only; OSS CI sets CUDA_HOME via env.
         import os
 
-        if "CUDA_HOME" not in os.environ and "CUDA_PATH" not in os.environ:
+        if GPU_TYPE == 'cuda' and "CUDA_HOME" not in os.environ and "CUDA_PATH" not in os.environ:
             try:
                 from triton.fb.build import build_paths
 
@@ -188,9 +204,9 @@ class SaveGpuKernelAOTIE2ETest(TestCase):
             def forward(self, x, y):
                 return x + y
 
-        model = AddModel().to("cuda")
-        x = torch.randn(1024, device="cuda")
-        y = torch.randn(1024, device="cuda")
+        model = AddModel().to(GPU_TYPE)
+        x = torch.randn(1024, device=GPU_TYPE)
+        y = torch.randn(1024, device=GPU_TYPE)
         expected = model(x, y)
 
         ep = torch.export.export(model, (x, y))
@@ -226,10 +242,10 @@ class SaveGpuKernelAOTIE2ETest(TestCase):
                 def forward(self, x, y, z):
                     return x * y + z
 
-            model = MulAddModel().to("cuda")
-            x = torch.randn(512, device="cuda")
-            y = torch.randn(512, device="cuda")
-            z = torch.randn(512, device="cuda")
+            model = MulAddModel().to(GPU_TYPE)
+            x = torch.randn(512, device=GPU_TYPE)
+            y = torch.randn(512, device=GPU_TYPE)
+            z = torch.randn(512, device=GPU_TYPE)
             expected = model(x, y, z)
 
             ep = torch.export.export(model, (x, y, z))
