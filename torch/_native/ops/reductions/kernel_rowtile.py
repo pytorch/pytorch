@@ -141,8 +141,14 @@ def tma_ok(N: int, itemsize: int, M: int, device=None) -> bool:
         return False
     if not narrow_row(N, itemsize, M):
         return False
-    if device is not None and torch.cuda.get_device_properties(device).major < 9:
-        return False  # TMA is sm_90+
+    if device is not None:
+        # Through the memoized caps, not get_device_properties: reduce_row_tile evaluates
+        # this on EVERY launch of the band this path serves, ahead of the plan-cache
+        # lookup, and the raw query costs ~1.3us (see kernel_xcta's _DEV_SM).
+        from .._cutedsl import hw_caps as _hw
+
+        if _hw.caps(device).cc[0] < 9:
+            return False  # TMA is sm_90+
     return True
 
 
