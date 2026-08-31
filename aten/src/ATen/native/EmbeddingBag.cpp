@@ -912,6 +912,11 @@ void check_arguments(
     TORCH_CHECK(
         offsets.size(0) >= 1,
         "include_last_offset: number of offset should be at least 1");
+    TORCH_CHECK(
+        offsets.size(0) >= 2 || indices.numel() == 0,
+        "embedding_bag: when include_last_offset is True and indices are non-empty, "
+        "offsets must have at least 2 elements to define at least one bag, but got "
+        "offsets of size ", offsets.size(0), " with ", indices.numel(), " indices");
   }
 }
 
