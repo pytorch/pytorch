@@ -22034,6 +22034,11 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
             # Only CPU and CUDA sample 5-D bicubic; mps and xpu refuse it in eager, so the
             # 5-D bicubic samples fail every test that runs the op on all of them. The
             # xfails are strict: each flips to a failure once a backend gains the mode.
+            # test_dtypes stays unmarked on purpose: a raising sample only makes a dtype
+            # "partially supported", which is a printed warning, so it keeps passing there
+            # (vacuously, on those two backends). test_out_warning stays unmarked because
+            # the supports_out=False path returns inside its first iteration, and the
+            # first sample is 4-D bilinear.
             # TODO: drop these when mps / xpu implement 5-D bicubic.
             # MPS TestConsistency carries its own entry in common_mps.py.
             DecorateInfo(unittest.expectedFailure, "TestCommon",
