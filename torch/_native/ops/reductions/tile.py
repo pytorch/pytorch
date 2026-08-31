@@ -100,13 +100,9 @@ def _decode_offset(linear, vals, npairs):
     # out of bounds. The returned offset indexes a flat gmem tensor, which expects a
     # 64-bit offset.
     rem = cutlass.Int64(linear)
-    if npairs == 0:
-        # No runs at all: the operand collapsed to a single element, so every lane maps
-        # to flat offset 0. Reached via a 1-ELEMENT reduce-all (TI coalesces a (1,)
-        # input to zero pairs) -- e.g. torch.histc on a 1-element tensor, which computes
-        # aminmax internally. Without this, `vals[4 * (npairs - 1) + 3]` indexed
-        # `vals[-1]` on an empty list and raised IndexError during kernel build.
-        return cutlass.Int64(0)
+    # npairs is at least 1 here: an empty KEPT list is legal (a full reduction) but the
+    # caller drops the decode entirely for it, and a plan with no REDUCED runs is refused by
+    # ReduceBlock. Zero pairs would index vals[-1] below.
     if npairs == 1:
         return rem * vals[3]
     off = cutlass.Int64(0)
@@ -423,9 +419,10 @@ class TileReduce:
     primitive above. The general axis runs at tpr == nt (every thread of the block on one
     output), which is exactly the row axis's tail -- merge_lanes clamps to a warp and
     block_reduce defaults to one row per block -- so it inherits the lane merge, the warp
-    merge, the projection and the store unchanged. The clamp of dead threads, the projection (which has to happen OUTSIDE the store
-    branch either way, or the DSL rejects the binding) and the store are shared -- both axes
-    write nslots x nouts results and differ only in the index they write to. The col axis pins
+    merge unchanged. What follows it is shared by all three: the clamp of dead threads, the
+    projection (which has to happen OUTSIDE the store branch either way, or the DSL rejects
+    the binding) and the store -- every axis writes nslots x nouts results and they differ
+    only in the index written to. The col axis pins
     `lane = 0`, since its mapping already gives every output group a thread of its own; that
     is what lets one store serve both.
     """
@@ -457,6 +454,13 @@ class TileReduce:
             # Every thread of the block folds the one output, so the tail is the row axis's
             # at tpr == nt.
             tpr = nt
+            if nt % WARP:
+                # _block_merge derives warps_per_row = nt // WARP, so a block that is not a
+                # whole number of warps leaves the last partial warp's accumulator OUT of
+                # the merge -- a silently wrong reduction (measured 12-62% low), not a short
+                # buffer. `block` is caller-settable on reduce_dim / reduce_all, so the row
+                # axis's check below is not enough on its own.
+                raise ValueError(f"a general-axis block must be whole warps, got {nt=}")
         if axis == "row" and tpr != 1 and (tpr % WARP or tpr > nt or nt % tpr):
             raise ValueError(
                 f"tpr must be 1 or a multiple of {WARP} dividing nt: {tpr=} {nt=}"
@@ -859,12 +863,14 @@ class TileReduce:
         # Output indexing comes AFTER the fold: computed before it, these values stay live
         # across the loop and cost registers the fold wants.
         out_base = unit * const_expr(self.nslots)
-        if const_expr(self.axis == "row"):
+        if const_expr(self.axis in ("row", "general")):
+            # The general axis pins gy to 1, so `by` is always 0 and the col arm below would
+            # come out as this anyway -- through a runtime multiply that is always zero.
             part_base = unit
             part_stride = Int32(1)
         else:
-            # (P, C) partials put this chunk's columns in row `by`; (C, P) interleaves them per
-            # column, which is what a block-per-column stage 2 needs (see kernel_coltile).
+            # COL: (P, C) partials put this chunk's columns in row `by`; (C, P) interleaves
+            # them per column, which a block-per-column stage 2 needs (see kernel_coltile).
             part_base = (
                 Int32(by) * (nchunks * const_expr(self.nslots)) + out_base
                 if const_expr(self.pc)
