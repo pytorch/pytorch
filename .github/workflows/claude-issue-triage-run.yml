@@ -128,7 +128,7 @@ jobs:
             /triaging-issues #${{ steps.issue.outputs.number }}
 
             RELEASE CONTEXT (authoritative -- use this and nothing else for the current
-            release train; ignore any version written in the skill files and do not rely
+            release version; ignore any version written in the skill files and do not rely
             on your own knowledge of PyTorch releases):
             - Most recent released minor version: ${{ steps.release.outputs.minor }}
 
