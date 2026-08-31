@@ -15,6 +15,7 @@ import functorch.dim
 import torch
 from functorch.dim import Dim, DimList, dimlists, dims, stack, Tensor
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_LINUX,
     IS_WINDOWS,
     run_tests,
@@ -85,6 +86,8 @@ def gpu_time(lmb, name, r=100):
 
 @skipIfTorchDynamo("Bad interaction")
 class TestMin(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         gc.disable()
@@ -692,6 +695,8 @@ skip_functorch_only = ["test_time_mm_fuse", "test_attn_cuda"]
 
 
 class TestMinFunctorchOnly(TestMin):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         functorch.dim.POINTWISE_OPTIMIZE = False
