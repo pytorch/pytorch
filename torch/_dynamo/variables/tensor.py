@@ -3414,9 +3414,8 @@ class NumpyNdarrayVariable(TensorVariable):
                 gb_type="ndarray.astype(object)",
                 context=f"call_method {self} astype {list(args)} {kwargs}",
                 explanation=(
-                    "`ndarray.astype('O')` or `ndarray.astype(object)` is not supported "
-                    "by torch.compile, as there is no equivalent to object type in torch.Tensor. "
-                    "This will be executed eagerly."
+                    "`ndarray.astype('O')` / `astype(object)` is not supported by "
+                    "torch.compile (no object dtype on torch.Tensor); run eagerly."
                 ),
                 hints=[*graph_break_hints.FUNDAMENTAL],
             )
