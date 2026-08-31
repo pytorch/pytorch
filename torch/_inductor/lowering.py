@@ -5525,7 +5525,7 @@ def inplace_constant_pad_nd(
         return None
 
     npad = padding[1]
-    if npad == 0:
+    if not V.graph.sizevars.statically_known_gt(npad, 0):
         return None
 
     stride0 = strides[0]

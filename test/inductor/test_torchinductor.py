@@ -10701,6 +10701,19 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         y = fn_compiled(x)
         self.assertTrue(y is not x)
 
+    def test_constant_pad_nd_negative_pad_with_mm(self):
+        # https://github.com/pytorch/pytorch/issues/194558
+        def fn(x, w):
+            v = x + 1.0
+            v = aten.constant_pad_nd(v, [0, -2, 0, 0], 0.5)
+            return aten.mm(v, w)
+
+        x = torch.randn([2, 5], device=self.device)
+        w = torch.randn([3, 4], device=self.device)
+        # Inputs are downcast to fp16 by check_model_gpu's lowp check; allow
+        # fp16 mm accumulation noise (observed ~2.4e-4 on MPS).
+        self.common(fn, (x, w), atol=1e-3, rtol=1e-3)
+
     def test_constant_pad_nd_fused_with_split_reduction(self):
         # https://github.com/pytorch/pytorch/issues/<你的issue号>
         # The pad's fill value used to be dropped when the pad was fused with
