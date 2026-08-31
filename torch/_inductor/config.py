@@ -3092,6 +3092,7 @@ _cache_config_ignore_prefix: list[str] = [
     # it has no effect on compiled output, so including it would change the
     # config hash and needlessly invalidate every cache entry
     "compile_worker_watchdog_interval_seconds",
+    "compile_worker_mode",
     # see CustomGraphPass; these are handled specially
     "post_grad_custom_post_pass",
     "post_grad_custom_pre_pass",
