@@ -20,7 +20,7 @@ import torch.nn.functional as F
 import torch.jit
 import torch.backends.mkldnn
 from torch.utils import mkldnn as mkldnn_utils
-from torch.testing._internal.common_utils import TestCase, \
+from torch.testing._internal.common_utils import HardwareClassification, TestCase, \
     run_tests, TemporaryFileName, gradcheck, gradgradcheck, IS_WINDOWS, \
     skipIfTorchDynamo, xfailIfTorchDynamo, recover_orig_fp32_precision
 from torch.testing._internal.common_device_type import (
@@ -39,6 +39,8 @@ types = [torch.float, torch.bfloat16, torch.half]
 # Comment the line below to find out the CI machines having MKL-DNN build disabled
 @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
 class TestMkldnn(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     def test_conversion(self):
         for cpu_tensor in [torch.randn((1, 2, 3, 4),
                                        dtype=torch.float, device=torch.device('cpu')),
