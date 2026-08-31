@@ -295,6 +295,12 @@ class TileReduce:
             raise ValueError(
                 f"TMA stages whole rows: needs row at tpr 1, {axis=} {tpr=}"
             )
+        if use_tma and N & (N - 1):
+            # fold_smem_rotated rotates with `& (N - 1)`, which is a rotation only at a
+            # power-of-two N: at any other N it duplicates some columns and skips others,
+            # so the fold runs over the wrong multiset and returns a plausible number.
+            # tma_ok declines those N, but use_tma is caller-settable and bypasses it.
+            raise ValueError(f"TMA staging needs a power-of-two row length, got {N=}")
         self.trait = trait
         self.dtype = dtype
         self.axis = axis
