@@ -139,6 +139,10 @@ class OptimizerVariable(UserDefinedObjectVariable):
             # install guards correctly.
             return None
 
+    # LOAD_ATTR of _init_group is bound to CallMethodVariable in UDOV so the
+    # call reaches this handler. A GetSet is not needed (and would hide the
+    # method from the type dict). Stock optimizers wrap _init_group with
+    # compiler.disable; inlining that wrapper graph-breaks.
     tp_methods = {"_init_group": Method(_init_group)}
 
     # param_groups only runs setup side effects (static addresses, capturable
