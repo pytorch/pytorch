@@ -13,10 +13,9 @@ miopenDataType_t getMiopenDataType(const at::Tensor& tensor) {
   }  else if (tensor.scalar_type() == at::kBFloat16) {
     return miopenBFloat16;
   }
-  TORCH_CHECK(
-      false,
-      "getMiopenDataType() not supported for ",
-      toString(tensor.scalar_type()));
+  std::string msg("getMiopenDataType() not supported for ");
+  msg += toString(tensor.scalar_type());
+  throw std::runtime_error(msg);
 }
 
 int64_t miopen_version() {
