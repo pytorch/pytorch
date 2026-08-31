@@ -607,13 +607,14 @@ static void handleKernelBackendInfo(
     const RecordFunction& fn) {
   // triton kernel related information are in kwinputs
   const auto& kwinputs = fn.kwinputs();
-  if (kwinputs.contains("kernel_backend")) {
-    fc.kernelBackend = kwinputs.at("kernel_backend").toStringRef();
+  if (auto it = kwinputs.find("kernel_backend"); it != kwinputs.end()) {
+    fc.kernelBackend = it->second.toStringRef();
     if (fc.kernelBackend == "triton") {
-      fc.kernelFile = kwinputs.at("kernel_file").toStringRef();
+      auto kernel_file_it = kwinputs.find("kernel_file");
       TORCH_INTERNAL_ASSERT(
-          kwinputs.find("kernel_file") != kwinputs.end(),
+          kernel_file_it != kwinputs.end(),
           "kernel file is missing in triton kernel");
+      fc.kernelFile = kernel_file_it->second.toStringRef();
       // Remove the path of the file name
       if (fc.kernelFile.find_last_of('/') != std::string::npos) {
         fc.kernelFile =
