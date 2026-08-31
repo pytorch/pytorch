@@ -590,7 +590,7 @@ function(torch_optimize_layout_if_enabled tgt)
     # scope it to bolt optimized targets rather than applying globally.
     target_link_options_if_supported(${tgt} "--emit-relocs")
     find_file(
-      _profile
+      _bolt_profile
       NAMES ${ARGN} "lib${tgt}.yaml"
       PATHS "${LLVM_BOLT_PROFILES_DIR}"
       NO_DEFAULT_PATH
@@ -598,8 +598,8 @@ function(torch_optimize_layout_if_enabled tgt)
       NO_CACHE
       REQUIRED
     )
-    message(STATUS "Using BOLT profile for ${tgt}: ${_profile}")
-    set_property(TARGET ${tgt} APPEND PROPERTY LINK_DEPENDS "${_profile}")
+    message(STATUS "Using BOLT profile for ${tgt}: ${_bolt_profile}")
+    set_property(TARGET ${tgt} APPEND PROPERTY LINK_DEPENDS "${_bolt_profile}")
     set(_logfile "${CMAKE_BINARY_DIR}/logs/llvm-bolt-lib${tgt}.txt")
     set(_prebolt "$<TARGET_FILE_DIR:${tgt}>/prebolt/$<TARGET_FILE_NAME:${tgt}>")
     add_custom_command(
@@ -609,7 +609,7 @@ function(torch_optimize_layout_if_enabled tgt)
       COMMAND "${CMAKE_COMMAND}" -E rename "$<TARGET_FILE:${tgt}>" "${_prebolt}"
       COMMAND "${LLVM_BOLT_EXECUTABLE}" "${_prebolt}"
               -o "$<TARGET_FILE:${tgt}>"
-              "-data=${_profile}" "-log-file=${_logfile}"
+              "-data=${_bolt_profile}" "-log-file=${_logfile}"
               -lite -infer-stale-profile
               -reorder-blocks=ext-tsp -reorder-functions=hfsort
               -split-functions -split-all-cold -split-eh -dyno-stats
