@@ -29,9 +29,11 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
+    onlyCUDA,
     onlyMPS,
     onlyNativeDeviceTypes,
     onlyOn,
+    skipMPS,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.common_dtype import floating_types_and
@@ -437,6 +439,9 @@ class TestPoolingNN(NNTestCase):
         )
         check([[1, 2]], (2, 1, 1, 2, False, False), [[2, 1]])
         check([[1, 2]], (2, 2, 1, 2, False, True), [[2, 2]])
+        # window reaching past the input: used to overflow the ceil division
+        # bounding the output range, and read out of bounds
+        check([[1, 2, 3, 4]], (2, 2**63 - 1, 0, 2147483647, False, True), [[1]])
 
     @parametrize_test("dtype", [torch.float16, torch.float32])
     def test_max_pool_indices_corner_cases(self, dtype):
@@ -1374,6 +1379,137 @@ torch.{device_type}.synchronize()
         helper(10, 512, 31, 31, 3, stride=2)
         helper(1, 129, 8, 8, 3, stride=2)
 
+    @dtypes(torch.float, torch.double)
+    @dtypesIfCUDA(torch.half, torch.bfloat16, torch.float, torch.double)
+    @dtypesIfMPS(torch.float)
+    @parametrize_test(
+        "channels_last",
+        [
+            subtest(False, name="contiguous"),
+            # MPS channels_last avg_pool2d backward is broken (see test_avg_pool2d_nhwc)
+            # for C > 1 but computes the degenerate C == 1 configs correctly, so the
+            # failure is not uniform across the parametrized shapes; skip rather than xfail.
+            subtest(True, name="channels_last", decorators=[skipMPS]),
+        ],
+    )
+    @parametrize_test(
+        "shape,kernel,divisor_override",
+        [
+            subtest(((4, 8, 8, 8), (2, 2), None), name="divisible"),
+            subtest(((4, 8, 9, 7), (2, 2), None), name="dropped_row_col"),
+            subtest(((4, 8, 12, 12), (3, 3), None), name="k3_divisible"),
+            subtest(((4, 8, 10, 10), (3, 3), None), name="k3_dropped"),
+            subtest(((4, 8, 12, 12), (2, 2), 7), name="divisor_override"),
+            subtest(((2, 16, 9, 10), (2, 3), None), name="asymmetric_kernel"),
+            subtest(((1, 1, 6, 6), (2, 2), None), name="single_batch_channel"),
+            subtest(((4, 8, 5, 5), (1, 1), None), name="unit_kernel"),
+        ],
+    )
+    def test_avg_pool2d_backward_nonoverlapping(
+        self, device, dtype, shape, kernel, divisor_override, channels_last
+    ):
+        # Non-overlapping windows (stride == kernel, no padding, no ceil_mode)
+        # take a dedicated backward fast path on CUDA. Validate its gradient
+        # against an independent reference: each output cell spreads over its
+        # kh x kw window with a constant divisor, and rows/cols no window
+        # covers stay zero.
+        n, c, h, w = shape
+        kh, kw = kernel
+        input = torch.randn(shape, dtype=dtype, device=device)
+        if channels_last:
+            input = input.contiguous(memory_format=torch.channels_last)
+        input = input.requires_grad_()
+        ph = (h - kh) // kh + 1
+        pw = (w - kw) // kw + 1
+        grad = torch.randn(n, c, ph, pw, dtype=dtype, device=device)
+        F.avg_pool2d(
+            input, kernel, stride=kernel, divisor_override=divisor_override
+        ).backward(grad)
+
+        div = divisor_override if divisor_override is not None else kh * kw
+        ref = grad.repeat_interleave(kh, dim=-2).repeat_interleave(kw, dim=-1) / div
+        ref_full = input.new_zeros(shape)
+        ref_full[..., : ph * kh, : pw * kw] = ref
+        self.assertEqual(input.grad, ref_full)
+
+    @onlyCUDA
+    @largeTensorTest("18GB", device="cuda")
+    def test_avg_pool2d_backward_nonoverlapping_large(self, device):
+        # Exercise the 64-bit index path (numel > INT_MAX) of the
+        # non-overlapping backward fast path. grad_output all-ones makes the
+        # expected gradient exactly 1 / (kh * kw) on covered elements. Call the
+        # backward op directly to avoid autograd's extra buffers.
+        k = 16
+        input = torch.empty(2, 1, 32785, 32768, device=device, dtype=torch.half)
+        self.assertGreater(input.numel(), torch.iinfo(torch.int32).max)
+        ph = (input.size(-2) - k) // k + 1
+        pw = (input.size(-1) - k) // k + 1
+        grad_output = torch.ones(2, 1, ph, pw, device=device, dtype=torch.half)
+        grad_input = torch.ops.aten.avg_pool2d_backward(
+            grad_output, input, [k, k], [k, k], [0, 0], False, True, None
+        )
+        expected = 1.0 / (k * k)
+        covered = grad_input[..., : ph * k, : pw * k]
+        self.assertEqual(covered.min().item(), expected)
+        self.assertEqual(covered.max().item(), expected)
+        # Everything outside the covered region (the trailing dropped row, since
+        # input height 32785 is not a multiple of 16) must be zero. Check the
+        # trailing slices directly rather than counting nonzeros over the whole
+        # grad_input, which would materialize a full-size int64 mask (OOM).
+        self.assertEqual(grad_input[..., ph * k :, :].count_nonzero().item(), 0)
+        self.assertEqual(grad_input[..., :, pw * k :].count_nonzero().item(), 0)
+
+    @onlyCUDA
+    @parametrize_test("channels_last", [False, True])
+    @parametrize_test(
+        "shape,pool_kwargs",
+        [
+            # uniform_divisor via no padding (overlapping windows)
+            subtest(((4, 8, 32, 32), dict(kernel_size=3, stride=2)), name="overlap"),
+            subtest(
+                ((4, 8, 33, 31), dict(kernel_size=3, stride=2)), name="overlap_odd"
+            ),
+            # uniform_divisor via count_include_pad (padded)
+            subtest(
+                ((4, 8, 32, 32), dict(kernel_size=3, stride=1, padding=1)),
+                name="padded",
+            ),
+            subtest(
+                ((4, 8, 31, 33), dict(kernel_size=2, stride=2, padding=1)),
+                name="padded_odd",
+            ),
+            # full-clamp fallback: count_include_pad=False with padding
+            subtest(
+                (
+                    (4, 8, 32, 32),
+                    dict(kernel_size=3, stride=1, padding=1, count_include_pad=False),
+                ),
+                name="fallback_no_count_include_pad",
+            ),
+            # full-clamp fallback: ceil_mode makes the last window partial
+            subtest(
+                ((4, 8, 31, 31), dict(kernel_size=2, ceil_mode=True)),
+                name="fallback_ceil_mode",
+            ),
+        ],
+    )
+    def test_avg_pool2d_backward_uniform_divisor(
+        self, device, shape, pool_kwargs, channels_last
+    ):
+        # The general CUDA backward kernel hoists the divisor and skips its
+        # per-window bound math when the divisor is uniform across windows
+        # (!ceil_mode and either no padding or count_include_pad). Pin that
+        # branch and the full-clamp fallback against a CPU double oracle.
+        x = torch.randn(shape, dtype=torch.double)
+        ref = x.clone().requires_grad_()
+        xg = x.to(device=device)
+        if channels_last:
+            xg = xg.contiguous(memory_format=torch.channels_last)
+        xg = xg.requires_grad_()
+        F.avg_pool2d(ref, **pool_kwargs).sum().backward()
+        F.avg_pool2d(xg, **pool_kwargs).sum().backward()
+        self.assertEqual(xg.grad, ref.grad)
+
     @gcIfJetson
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
@@ -1794,6 +1930,7 @@ torch.{device_type}.synchronize()
     @onlyAccelerator
     @largeTensorTest("18GB")
     @largeTensorTest("180GB", "cpu")
+    @expectedFailureMPS
     def test_pool3d_large_size_int64(self, device):
         # See https://github.com/pytorch/pytorch/issues/52822
         x = torch.randn(

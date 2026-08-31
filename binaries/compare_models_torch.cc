@@ -19,6 +19,7 @@
 #include <vector>
 
 #include <ATen/ATen.h>
+#include <caffe2/core/timer.h>
 #include <caffe2/utils/string_utils.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/jit/serialization/import.h>

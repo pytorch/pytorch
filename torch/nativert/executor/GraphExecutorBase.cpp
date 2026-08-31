@@ -1,9 +1,8 @@
 #include <ATen/record_function.h>
 #include <torch/nativert/executor/GraphExecutorBase.h>
 
-#include <chrono>
-
 #include <c10/util/Logging.h>
+#include <caffe2/core/timer.h>
 
 namespace torch::nativert {
 
@@ -96,6 +95,7 @@ ProfileMetrics GraphExecutorBase::benchmarkIndividualNodes(
   }
 
   // Execute kernels
+  caffe2::Timer timer;
   executionFrame.withManagedMemory([&](auto) {
     for (uint32_t i = 0; i < mainRuns; i++) {
       for (auto inputs : inputsList) {
@@ -106,12 +106,9 @@ ProfileMetrics GraphExecutorBase::benchmarkIndividualNodes(
           executionFrame.setIValue(inputValues[j]->id(), std::move(inputs[j]));
         }
         for (NodeIndex nodeIdx = 0; nodeIdx < nodeKernels_.size(); ++nodeIdx) {
-          const auto start = std::chrono::high_resolution_clock::now();
+          timer.Start();
           nodeKernels_[nodeIdx]->compute(executionFrame);
-          const float millis =
-              std::chrono::duration<float, std::milli>(
-                  std::chrono::high_resolution_clock::now() - start)
-                  .count();
+          float millis = timer.MilliSeconds();
           results.timePerNode[nodeIdx] += millis;
         }
       }
