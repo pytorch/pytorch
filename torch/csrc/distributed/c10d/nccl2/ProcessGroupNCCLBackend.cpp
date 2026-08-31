@@ -88,9 +88,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     : Backend(rank, size),
       device_(at::kCUDA),
       store_(std::move(store)),
-      event_cache_enabled_(
-          getCvarBool(::c10d::TORCH_NCCL_CUDA_EVENT_CACHE, true)),
-      timing_enabled_(getCvarBool(::c10d::TORCH_NCCL_ENABLE_TIMING, false)),
+      event_pool_(std::make_shared<NCCLEventPool>(
+          getCvarBool(::c10d::TORCH_NCCL_CUDA_EVENT_CACHE, true),
+          getCvarBool(::c10d::TORCH_NCCL_ENABLE_TIMING, false),
+          kDefaultMaxEventPoolSize)),
       async_error_handling_(static_cast<::c10d::ErrorHandlingMode>(getCvarInt(
           ::c10d::TORCH_NCCL_ASYNC_ERROR_HANDLING,
           ::c10d::SkipCleanUp))),
