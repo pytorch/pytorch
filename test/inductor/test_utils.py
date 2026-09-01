@@ -18,7 +18,10 @@ from torch._dynamo.exc import TritonUnavailableError
 from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._dynamo.utils import detect_fake_mode
 from torch._inductor import config as inductor_config
-from torch._inductor.compile_fx import _get_subgraph_names
+from torch._inductor.compile_fx import (
+    _can_reuse_fake_tensor_metadata,
+    _get_subgraph_names,
+)
 from torch._inductor.fx_utils import (
     _is_fake_tensor_same,
     count_flops_fx,
@@ -469,6 +472,24 @@ class TestTritonTypeMapping(TestCase):
 
 
 class TestFakeTensorUpdater(TestCase):
+    def test_reuse_complete_fake_tensor_metadata(self):
+        fake_mode = torch._subclasses.FakeTensorMode()
+        x = fake_mode.from_tensor(torch.randn(3))
+        gm = make_fx(lambda value: value.sin())(x)
+
+        self.assertTrue(_can_reuse_fake_tensor_metadata(gm, [x], fake_mode))
+
+        different_input = fake_mode.from_tensor(torch.randn(3))
+        self.assertFalse(
+            _can_reuse_fake_tensor_metadata(gm, [different_input], fake_mode)
+        )
+
+        sin_node = gm.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.sin.default
+        )[0]
+        del sin_node.meta["val"]
+        self.assertFalse(_can_reuse_fake_tensor_metadata(gm, [x], fake_mode))
+
     @staticmethod
     def _get_faketensormode(
         graph: torch.fx.GraphModule,
