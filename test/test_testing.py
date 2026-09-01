@@ -23,7 +23,8 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
-    TEST_WITH_ROCM, decorateIf, skipIfXpu
+    TEST_WITH_PERIODIC, TEST_WITH_ROCM, decorateIf, periodic, skipIfTorchDynamo, skipIfXpu,
+    TemporaryFileName,
 )
 from torch.testing._internal.common_cuda import has_device_side_assert
 from torch.testing._internal.common_device_type import \
@@ -603,6 +604,172 @@ if __name__ == '__main__':
         env[PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY] = 'cpu'
         _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
         self.assertNotIn('OK', stderr.decode('ascii'))
+
+
+class TestPeriodicDecorator(TestCase):
+    @parametrize("periodic_enabled", [False, True])
+    def test_periodic_gates_on_periodic_mode(self, periodic_enabled):
+        calls = []
+        with unittest.mock.patch(
+            "torch.testing._internal.common_utils.TEST_WITH_PERIODIC",
+            periodic_enabled,
+        ):
+            class TestP(unittest.TestCase):
+                def setUp(self):
+                    calls.append("setUp")
+
+                @periodic
+                def test_p(self):
+                    calls.append("test")
+
+        result = unittest.TestResult()
+        unittest.defaultTestLoader.loadTestsFromTestCase(TestP).run(result)
+
+        marks = {mark.name for mark in getattr(TestP.test_p, "pytestmark", ())}
+        self.assertIn("periodic", marks)
+        self.assertEqual(calls, ["setUp", "test"] if periodic_enabled else [])
+        self.assertEqual(len(result.skipped), 0 if periodic_enabled else 1)
+        self.assertEqual(result.failures, [])
+        self.assertEqual(result.errors, [])
+
+    @parametrize("periodic_enabled", [False, True])
+    def test_periodic_class_gates_setup(self, periodic_enabled):
+        calls = []
+        with unittest.mock.patch(
+            "torch.testing._internal.common_utils.TEST_WITH_PERIODIC",
+            periodic_enabled,
+        ):
+            @periodic
+            class TestP(unittest.TestCase):
+                @classmethod
+                def setUpClass(cls):
+                    calls.append("setUpClass")
+
+                def test_p(self):
+                    calls.append("test")
+
+                @classmethod
+                def tearDownClass(cls):
+                    calls.append("tearDownClass")
+
+        result = unittest.TestResult()
+        unittest.defaultTestLoader.loadTestsFromTestCase(TestP).run(result)
+
+        marks = {mark.name for mark in getattr(TestP, "pytestmark", ())}
+        self.assertIn("periodic", marks)
+        expected_calls = ["setUpClass", "test", "tearDownClass"]
+        self.assertEqual(calls, expected_calls if periodic_enabled else [])
+        self.assertEqual(len(result.skipped), 0 if periodic_enabled else 1)
+        self.assertEqual(result.failures, [])
+        self.assertEqual(result.errors, [])
+
+    @unittest.skipIf(
+        IS_FBCODE, "run_test.py periodic filtering is only exercised by OSS CI"
+    )
+    @skipIfTorchDynamo("subprocess test does not need Dynamo coverage")
+    def test_periodic_config_selects_only_periodic_tests(self):
+        source = """\
+import os
+
+from torch.testing._internal.common_utils import periodic, run_tests, serialTest
+
+def test_plain_pytest():
+    if os.getenv("EXPECT_PERIODIC") == "1":
+        raise AssertionError("plain pytest test ran in periodic mode")
+    print("PLAIN_PYTEST_RAN")
+
+@periodic
+def test_periodic_pytest():
+    if os.getenv("EXPECT_PERIODIC") != "1":
+        raise AssertionError("periodic pytest test ran outside periodic mode")
+    print("PERIODIC_PYTEST_RAN")
+
+@serialTest()
+@periodic
+def test_periodic_serial_pytest():
+    if os.getenv("EXPECT_PERIODIC") != "1":
+        raise AssertionError("periodic serial test ran outside periodic mode")
+    print("PERIODIC_SERIAL_PYTEST_RAN")
+
+if __name__ == "__main__":
+    run_tests()
+"""
+        test_dir = os.path.dirname(os.path.realpath(__file__))
+        with TemporaryFileName(
+            prefix="test_periodic_filter_", suffix=".py", dir=test_dir
+        ) as test_file:
+            with open(test_file, "w") as f:
+                f.write(source)
+
+            env = os.environ.copy()
+            env.pop("CI", None)
+            env.pop("TEST_SHOWLOCALS", None)
+            test_mode_prefixes = ("PYTORCH_TEST_WITH_", "PYTORCH_TEST_SKIP_")
+            for flag in [k for k in env if k.startswith(test_mode_prefixes)]:
+                del env[flag]
+            for flag in (
+                "PYTORCH_TEST_CUDA_MEM_LEAK_CHECK",
+                "PYTORCH_TEST_DO_NOT_USE_PYTEST",
+                "PYTORCH_TEST_RERUN_DISABLED_TESTS",
+                "PYTORCH_TEST_RUN_EVERYTHING_IN_SERIAL",
+                "TESTS_TO_INCLUDE",
+            ):
+                env.pop(flag, None)
+            test_name = os.path.splitext(os.path.basename(test_file))[0]
+
+            def run_test(periodic_mode):
+                test_env = env.copy()
+                test_env["EXPECT_PERIODIC"] = "1" if periodic_mode else "0"
+                if periodic_mode:
+                    test_env["TEST_CONFIG"] = "periodic"
+                    test_env["PYTORCH_TEST_WITH_SLOW"] = "1"
+                else:
+                    test_env.pop("TEST_CONFIG", None)
+                result = subprocess.run(
+                    [sys.executable, "run_test.py", "--include", test_name, "-s"],
+                    cwd=test_dir,
+                    env=test_env,
+                    capture_output=True,
+                    text=True,
+                )
+                output = result.stdout + result.stderr
+                self.assertEqual(result.returncode, 0, msg=output)
+                return output
+
+            periodic_output = run_test(periodic_mode=True)
+            default_output = run_test(periodic_mode=False)
+
+        self.assertIn("PERIODIC_PYTEST_RAN", periodic_output)
+        self.assertIn("PERIODIC_SERIAL_PYTEST_RAN", periodic_output)
+        self.assertNotIn("PLAIN_PYTEST_RAN", periodic_output)
+        self.assertIn("PLAIN_PYTEST_RAN", default_output)
+        self.assertNotIn("PERIODIC_PYTEST_RAN", default_output)
+        self.assertNotIn("PERIODIC_SERIAL_PYTEST_RAN", default_output)
+
+    def test_periodic_does_not_leak_across_parametrized_tests(self):
+        with unittest.mock.patch(
+            "torch.testing._internal.common_utils.TEST_WITH_PERIODIC", True
+        ):
+            class TestP(unittest.TestCase):
+                @parametrize("x", [1, 2])
+                @decorateIf(periodic, lambda params: params["x"] == 1)
+                def test_p(self, x):
+                    pass
+
+            instantiate_parametrized_tests(TestP)
+
+        marked = TestP.test_p_x_1
+        plain = TestP.test_p_x_2
+        self.assertIn("periodic", {mark.name for mark in marked.pytestmark})
+        plain_marks = {mark.name for mark in getattr(plain, "pytestmark", ())}
+        self.assertNotIn("periodic", plain_marks)
+
+    @periodic
+    def test_periodic_smoke(self):
+        self.assertTrue(TEST_WITH_PERIODIC)
+
+
+instantiate_parametrized_tests(TestPeriodicDecorator)
 
 
 class TestEnvironmentDefFlag(TestCase):
@@ -2645,6 +2812,7 @@ class TestImports(TestCase):
                            "torch._inductor.runtime.triton_helpers",  # depends on triton
                            "torch._native.ops.bmm_outer_product.triton_kernels",  # depends on triton
                            "torch._native.ops.foreach_mm",  # depends on nvmath-python, cuda-python
+                           "torch._native.ops.norm.flydsl_rmsnorm_fwd",  # depends on flydsl
                            "torch._native.ops.polar.nvmath_impl",  # depends on nvmath-python, cuda-python
                            "torch._native.ops.reductions.inner_tree_kernel",  # depends on cutlass
                            "torch._native.ops.scatter_add",  # depends on cutlass
@@ -2660,6 +2828,7 @@ class TestImports(TestCase):
                            "torch.csrc",  # files here are devtools, not part of torch
                            "torch.include",  # torch include files after install
                            "torch._inductor.kernel.vendored_templates.cutedsl",  # depends on cutlass
+                           "torch._inductor.kernel.vendored_templates.flydsl",  # depends on flydsl
                            "torch._vendor.quack",  # depends on cutlass / cuda-python
                            "torch.profiler._cupti",  # depends on cupti-python
                            ]
