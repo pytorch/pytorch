@@ -371,21 +371,16 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // Underlying host ncclComm_t as an opaque integer pointer.
   int64_t getCommPtr() const;
   bool collectivesTimingEnabled() const {
-    return timing_enabled_.load();
+    return event_pool_->timingEnabled();
+  }
+  const std::shared_ptr<NCCLEventPool>& getEventPool() const {
+    return event_pool_;
   }
 
   friend class WorkNCCL;
   friend class WindowNCCL;
 
  protected:
-  // Events are pooled per timing mode: an event created with timing disabled
-  // cannot serve a work that needs elapsed_time(), so `timing_enabled` must
-  // describe the work the event is taken for / returned from.
-  [[nodiscard]] std::unique_ptr<at::cuda::CUDAEvent> getEvent(
-      bool timing_enabled);
-  void returnEvent(
-      std::unique_ptr<at::cuda::CUDAEvent> event,
-      bool timing_enabled);
   void waitForNcclOperation(
       ncclResult_t status,
       std::chrono::milliseconds timeout,
@@ -629,7 +624,6 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // NOTE: the rank is stored in the inherited c10d::Backend::rank_ (set in the
   // ctor and refreshed from NCCL in initNcclResources). The ported engine code
   // reads/writes `rank_` directly, which resolves to that protected member.
-  size_t max_event_pool_size_{};
   std::optional<at::cuda::CUDAStream> internal_stream_;
   std::optional<at::cuda::CUDAEvent> dependency_event_;
   at::DataPtr barrier_buffer_;
@@ -647,12 +641,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   std::shared_ptr<NcclApi> nccl_api_;
   std::unique_ptr<at::cuda::MemPool> memPool_;
 
-  std::queue<std::unique_ptr<at::cuda::CUDAEvent>> event_pool_;
-  std::mutex event_pool_mutex_;
-  const bool event_cache_enabled_;
-  // Set by enableCollectivesTiming(); mutated under event_pool_mutex_ so the
-  // pool never holds events whose timing mode disagrees with it.
-  std::atomic<bool> timing_enabled_{false};
+  std::shared_ptr<NCCLEventPool> event_pool_;
 
   WorkNCCLQueue workq_;
 

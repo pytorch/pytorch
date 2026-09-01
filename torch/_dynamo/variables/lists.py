@@ -1787,6 +1787,10 @@ class DequeVariable(BaseListVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
+        # list_pop raises the list message ("pop from empty list"); deque uses
+        # its own, so check emptiness here before delegating.
+        if self.is_mutable() and not self.items:
+            raise_observed_exception(IndexError, tx, args=["pop from an empty deque"])
         result = BaseListVariable.list_pop(self, tx, args, kwargs)
         if result is None:
             return None

@@ -11833,6 +11833,73 @@ class TestNNMPS(NNTestCase):
         bn_mps.load_state_dict(bn.state_dict())
         self.assertEqual(bn(mps_slice.cpu()), bn_mps(mps_slice).cpu())
 
+    @parametrize("channels_last_weight", (False, True))
+    @parametrize("channels_last_grad_out", (False, True))
+    @parametrize("channels_last_input", (False, True))
+    @parametrize("groups", (1, 32))
+    def test_conv2d_backward_input_memory_format(
+        self, channels_last_input, channels_last_grad_out, channels_last_weight, groups
+    ):
+        def make(shape, channels_last):
+            t = torch.randn(shape)
+            return t.to(memory_format=torch.channels_last) if channels_last else t
+
+        grad_out = make((2, 64, 8, 8), channels_last_grad_out)
+        x = make((2, 32, 8, 8), channels_last_input)
+        w = make((64, 32 // groups, 3, 3), channels_last_weight)
+
+        args = ([0], [1, 1], [1, 1], [1, 1], False, [0, 0], groups, [True, True, False])
+        expected = torch.ops.aten.convolution_backward.default(grad_out, x, w, *args)
+        actual = torch.ops.aten.convolution_backward.default(
+            grad_out.to('mps'), x.to('mps'), w.to('mps'), *args
+        )
+
+        # The layout comes from input and weight, never from grad_output.
+        for mps_out, cpu_out in zip(actual[:2], expected[:2]):
+            for fmt in (torch.contiguous_format, torch.channels_last):
+                self.assertEqual(
+                    mps_out.is_contiguous(memory_format=fmt), cpu_out.is_contiguous(memory_format=fmt)
+                )
+        self.assertEqual(expected[0], actual[0].cpu(), rtol=1e-4, atol=1e-4)
+        self.assertEqual(expected[1], actual[1].cpu(), rtol=1e-4, atol=1e-4)
+
+    def test_conv2d_backward_grad_weight_channels_last_weight(self):
+        grad_out = torch.randn(2, 64, 8, 8)
+        x = torch.randn(2, 32, 8, 8)
+        w = torch.randn(64, 32, 3, 3).to(memory_format=torch.channels_last)
+        args = ([0], [1, 1], [1, 1], [1, 1], False, [0, 0], 1, [False, True, False])
+        cpu = torch.ops.aten.convolution_backward.default(grad_out, x, w, *args)
+        mps = torch.ops.aten.convolution_backward.default(
+            grad_out.to('mps'), x.to('mps'), w.to('mps'), *args
+        )
+        self.assertEqual(mps[1].cpu(), cpu[1])
+
+    def test_conv3d_backward_channels_last_3d_input(self):
+        x = torch.randn(2, 16, 8, 8, 8, device='mps').to(
+            memory_format=torch.channels_last_3d
+        ).detach().requires_grad_(True)
+        conv = nn.Conv3d(16, 32, 3, padding=1, device='mps')
+        y = conv(x)
+        y.backward(torch.randn_like(y))
+        self.assertTrue(x.grad.is_contiguous(memory_format=torch.channels_last_3d))
+
+    def test_conv3d_backward_channels_last_3d_grad_output_only(self):
+        x_cpu = torch.randn(2, 16, 8, 8, 8)
+        conv_cpu = nn.Conv3d(16, 32, 3, padding=1)
+        conv_mps = nn.Conv3d(16, 32, 3, padding=1, device='mps')
+        conv_mps.load_state_dict(conv_cpu.state_dict())
+
+        x = x_cpu.clone().requires_grad_(True)
+        x_mps = x_cpu.clone().to('mps').requires_grad_(True)
+        grad_out = torch.randn(2, 32, 8, 8, 8)
+
+        conv_cpu(x).backward(grad_out)
+        conv_mps(x_mps).backward(grad_out.to('mps').contiguous(memory_format=torch.channels_last_3d))
+
+        self.assertTrue(x_mps.grad.is_contiguous())
+        self.assertEqual(x.grad, x_mps.grad)
+        self.assertEqual(conv_cpu.weight.grad, conv_mps.weight.grad, rtol=1e-4, atol=1e-4)
+
     # Regression test for https://github.com/pytorch/pytorch/issues/141471
     def test_conv3d_channels_last_3d(self):
         m_cpu = nn.Conv3d(16, 33, (3, 5, 2), stride=(2, 1, 1), padding=(4, 2, 0), device="cpu")
@@ -14502,6 +14569,33 @@ class TestConvolutionMPS(TestCaseMPS):
 
             # non-square kernels and unequal stride and with padding
             helper(nn.ConvTranspose2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2)).requires_grad_(), mem_format_input)
+
+    @parametrize("channels_last_grad_out", (False, True))
+    @parametrize("channels_last_input", (False, True))
+    def test_conv_transpose2d_backward_memory_format(self, channels_last_input, channels_last_grad_out):
+        torch.manual_seed(0)
+        m_cpu = nn.ConvTranspose2d(8, 4, 3, stride=1, padding=1)
+        x_cpu = torch.randn(2, 8, 8, 8)
+        if channels_last_input:
+            x_cpu = x_cpu.to(memory_format=torch.channels_last)
+        x_cpu = x_cpu.requires_grad_(True)
+
+        m_mps = copy.deepcopy(m_cpu).to("mps")
+        x_mps = x_cpu.detach().clone().to("mps").requires_grad_(True)
+
+        y_cpu = m_cpu(x_cpu)
+        y_mps = m_mps(x_mps)
+
+        grad_out = torch.randn_like(y_cpu)
+        if channels_last_grad_out:
+            grad_out = grad_out.to(memory_format=torch.channels_last)
+        y_cpu.backward(grad_out)
+        y_mps.backward(grad_out.to("mps"))
+
+        for mps_grad, cpu_grad in ((x_mps.grad, x_cpu.grad), (m_mps.weight.grad, m_cpu.weight.grad)):
+            self.assertEqual(cpu_grad, mps_grad.cpu(), atol=1e-4, rtol=1e-4)
+            for fmt in (torch.contiguous_format, torch.channels_last):
+                self.assertEqual(mps_grad.is_contiguous(memory_format=fmt), cpu_grad.is_contiguous(memory_format=fmt))
 
     def test_conv_transpose_2d_specified_output(self):
         input_cpu = torch.randn(1, 16, 12, 12)
@@ -17529,6 +17623,7 @@ instantiate_parametrized_tests(MatmulTest)
 instantiate_parametrized_tests(TestBinaryIteratorConformance)
 instantiate_parametrized_tests(TestLogical)
 instantiate_parametrized_tests(TestMPS)
+instantiate_parametrized_tests(TestNNMPS)
 instantiate_parametrized_tests(TestSDPA)
 instantiate_parametrized_tests(TestSmoothL1Loss)
 instantiate_parametrized_tests(TestMetalLibrary)
