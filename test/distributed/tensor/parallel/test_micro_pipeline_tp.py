@@ -77,6 +77,182 @@ def _fp8_all_gather(
     return torch.cat(chunks, dim=gather_dim).view(tensor.dtype)
 
 
+class MicroPipelineTPPatternTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def setUp(self):
+        super().setUp()
+
+        self.rank = 0
+        self.world_size = 2
+
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+
+    def tearDown(self):
+        dist.destroy_process_group()
+
+    @fresh_cache()
+    def test_find_all_gather_patterns(self):
+        group = dist.group.WORLD
+
+        def func(
+            inp: torch.Tensor,
+        ) -> tuple[
+            torch.Tensor,
+            torch.Tensor,
+            torch.Tensor,
+            torch.Tensor,
+            torch.Tensor,
+            torch.Tensor,
+        ]:
+            a = all_gather_single(inp, gather_dim=0, group=group.group_name)
+            b = all_gather_single(inp, gather_dim=1, group=group.group_name)
+            c = _fp8_all_gather(inp, gather_dim=0, group_name=group.group_name)
+            d = _fp8_all_gather(inp, gather_dim=1, group_name=group.group_name)
+            e_full = all_gather_tensor(inp, gather_dim=0, group=group.group_name)
+            e = torch.cat(
+                [e_full.narrow(0, 0, 64), e_full.narrow(0, 64, 64)],
+                dim=1,
+            )
+            f_full = all_gather_tensor(inp, gather_dim=0, group=group.group_name)
+            f_cat = torch.cat(
+                [f_full.narrow(0, 0, 64), f_full.narrow(0, 64, 64)],
+                dim=1,
+            )
+            f = f_cat.narrow(1, 0, 32)
+            return a, b, c, d, e, f
+
+        inp = torch.rand(64, 32)
+
+        gm = _make_post_grad_fx(func, inp)
+        all_gathers = find_all_gather_patterns(gm.graph)
+        self.assertEqual(len(all_gathers), 6)
+
+        # If this test fails, please update find_all_gather_patterns instead of
+        # modifying the following assertions.
+        for all_gather in all_gathers:
+            self.assertEqual(
+                all_gather.ag_node.target,
+                torch.ops._c10d_functional.all_gather_into_tensor.default,
+            )
+            self.assertEqual(all_gather.group_name, group.group_name)
+
+        self.assertEqual(all_gathers[0].gather_dim, 0)
+        self.assertEqual(
+            all_gathers[0].res_node.target,
+            torch.ops._c10d_functional.wait_tensor.default,
+        )
+
+        self.assertEqual(all_gathers[1].gather_dim, 1)
+        self.assertEqual(
+            all_gathers[1].res_node.target,
+            torch.ops.aten.cat.default,
+        )
+
+        self.assertEqual(all_gathers[2].gather_dim, 0)
+        self.assertEqual(
+            all_gathers[2].res_node.target,
+            torch.ops._c10d_functional.wait_tensor.default,
+        )
+
+        self.assertEqual(all_gathers[3].gather_dim, 1)
+        self.assertEqual(
+            all_gathers[3].res_node.target,
+            torch.ops.aten.view.dtype,
+        )
+
+        self.assertEqual(all_gathers[4].gather_dim, 1)
+        self.assertEqual(
+            all_gathers[4].res_node.target,
+            torch.ops.aten.cat.default,
+        )
+
+        self.assertEqual(all_gathers[5].gather_dim, 1)
+        self.assertEqual(
+            all_gathers[5].res_node.target,
+            torch.ops.aten.slice.Tensor,
+        )
+
+    @fresh_cache()
+    def test_find_reduce_scatter_patterns(self):
+        group = dist.group.WORLD
+
+        def func(
+            inp: torch.Tensor,
+        ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+            a = reduce_scatter_single(inp, "sum", scatter_dim=0, group=group.group_name)
+            b = reduce_scatter_single(inp, "avg", scatter_dim=1, group=group.group_name)
+            c_inp = torch.cat(
+                [inp.narrow(1, 0, 16), inp.narrow(1, 16, 16)],
+                dim=0,
+            )
+            c = reduce_scatter_tensor(
+                c_inp, "avg", scatter_dim=0, group=group.group_name
+            )
+            return a, b, c
+
+        inp = torch.rand(64, 32)
+
+        gm = make_fx(func)(inp)
+        reduce_scatters = find_reduce_scatter_patterns(gm.graph)
+        self.assertEqual(len(reduce_scatters), 3)
+
+        # If this test fails, please update find_reduce_scatter_patterns
+        # instead of modifying the following assertions.
+        for reduce_scatter in reduce_scatters:
+            self.assertEqual(
+                reduce_scatter.input_node.op,
+                "placeholder",
+            )
+            self.assertEqual(
+                reduce_scatter.reduce_scatter_node.target,
+                torch.ops._c10d_functional.reduce_scatter_tensor.default,
+            )
+            self.assertEqual(
+                reduce_scatter.wait_tensor_node.target,
+                torch.ops._c10d_functional.wait_tensor.default,
+            )
+            self.assertEqual(reduce_scatter.group_name, group.group_name)
+
+        self.assertEqual(reduce_scatters[0].reduce_op, "sum")
+        self.assertEqual(reduce_scatters[0].scatter_dim, 0)
+        self.assertEqual(reduce_scatters[2].reduce_op, "avg")
+        self.assertEqual(reduce_scatters[2].scatter_dim, 1)
+
+        self.assertEqual(reduce_scatters[1].reduce_op, "avg")
+        self.assertEqual(reduce_scatters[1].scatter_dim, 1)
+
+    @fresh_cache()
+    def test_get_unexposed_collectives(self):
+        group = dist.group.WORLD
+
+        def func(inp: torch.Tensor) -> torch.Tensor:
+            a = inp @ inp.T
+            # b is unexposed (hidden by a)
+            b = all_gather_single(inp, gather_dim=0, group=group.group_name)
+            c = b @ inp.T
+            # d is unexposed (hidden by c)
+            d = reduce_scatter_single(b, "avg", scatter_dim=0, group=group.group_name)
+            # e is exposed
+            e = all_gather_single(d, gather_dim=0, group=group.group_name)
+            return a, c, e
+
+        inp = torch.rand(64, 32)
+
+        gm = make_fx(func)(inp)
+        overlappable_collectives = _get_unexposed_collectives(gm.graph)
+        self.assertEqual(
+            list(map(str, overlappable_collectives)),
+            ["all_gather_into_tensor", "reduce_scatter_tensor"],
+        )
+
+
 class MicroPipelineTPTest(TestCase):
     hw_classification = HardwareClassification.CUDA
 
@@ -202,164 +378,6 @@ class MicroPipelineTPTest(TestCase):
         self.assertNotIn("fused_scaled_matmul_reduce_scatter", str(gm.graph))
         self.assertIn("reduce_scatter_tensor", str(gm.graph))
 
-
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @fresh_cache()
-    def test_find_all_gather_patterns(self, device):
-        group = dist.group.WORLD
-
-        def func(
-            inp: torch.Tensor,
-        ) -> tuple[
-            torch.Tensor,
-            torch.Tensor,
-            torch.Tensor,
-            torch.Tensor,
-            torch.Tensor,
-            torch.Tensor,
-        ]:
-            a = all_gather_single(inp, gather_dim=0, group=group.group_name)
-            b = all_gather_single(inp, gather_dim=1, group=group.group_name)
-            c = _fp8_all_gather(inp, gather_dim=0, group_name=group.group_name)
-            d = _fp8_all_gather(inp, gather_dim=1, group_name=group.group_name)
-            e_full = all_gather_tensor(inp, gather_dim=0, group=group.group_name)
-            e = torch.cat(
-                [e_full.narrow(0, 0, 64), e_full.narrow(0, 64, 64)],
-                dim=1,
-            )
-            f_full = all_gather_tensor(inp, gather_dim=0, group=group.group_name)
-            f_cat = torch.cat(
-                [f_full.narrow(0, 0, 64), f_full.narrow(0, 64, 64)],
-                dim=1,
-            )
-            f = f_cat.narrow(1, 0, 32)
-            return a, b, c, d, e, f
-
-        inp = torch.rand(64, 32, device=device)
-
-        gm = _make_post_grad_fx(func, inp)
-        all_gathers = find_all_gather_patterns(gm.graph)
-        self.assertEqual(len(all_gathers), 6)
-
-        # If this test fails, please update find_all_gather_patterns instead of
-        # modifying the following assertions.
-        for all_gather in all_gathers:
-            self.assertEqual(
-                all_gather.ag_node.target,
-                torch.ops._c10d_functional.all_gather_into_tensor.default,
-            )
-            self.assertEqual(all_gather.group_name, group.group_name)
-
-        self.assertEqual(all_gathers[0].gather_dim, 0)
-        self.assertEqual(
-            all_gathers[0].res_node.target,
-            torch.ops._c10d_functional.wait_tensor.default,
-        )
-
-        self.assertEqual(all_gathers[1].gather_dim, 1)
-        self.assertEqual(
-            all_gathers[1].res_node.target,
-            torch.ops.aten.cat.default,
-        )
-
-        self.assertEqual(all_gathers[2].gather_dim, 0)
-        self.assertEqual(
-            all_gathers[2].res_node.target,
-            torch.ops._c10d_functional.wait_tensor.default,
-        )
-
-        self.assertEqual(all_gathers[3].gather_dim, 1)
-        self.assertEqual(
-            all_gathers[3].res_node.target,
-            torch.ops.aten.view.dtype,
-        )
-
-        self.assertEqual(all_gathers[4].gather_dim, 1)
-        self.assertEqual(
-            all_gathers[4].res_node.target,
-            torch.ops.aten.cat.default,
-        )
-
-        self.assertEqual(all_gathers[5].gather_dim, 1)
-        self.assertEqual(
-            all_gathers[5].res_node.target,
-            torch.ops.aten.slice.Tensor,
-        )
-
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @fresh_cache()
-    def test_find_reduce_scatter_patterns(self, device):
-        group = dist.group.WORLD
-
-        def func(
-            inp: torch.Tensor,
-        ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-            a = reduce_scatter_single(inp, "sum", scatter_dim=0, group=group.group_name)
-            b = reduce_scatter_single(inp, "avg", scatter_dim=1, group=group.group_name)
-            c_inp = torch.cat(
-                [inp.narrow(1, 0, 16), inp.narrow(1, 16, 16)],
-                dim=0,
-            )
-            c = reduce_scatter_tensor(
-                c_inp, "avg", scatter_dim=0, group=group.group_name
-            )
-            return a, b, c
-
-        inp = torch.rand(64, 32, device=device)
-
-        gm = make_fx(func)(inp)
-        reduce_scatters = find_reduce_scatter_patterns(gm.graph)
-        self.assertEqual(len(reduce_scatters), 3)
-
-        # If this test fails, please update find_reduce_scatter_patterns
-        # instead of modifying the following assertions.
-        for reduce_scatter in reduce_scatters:
-            self.assertEqual(
-                reduce_scatter.input_node.op,
-                "placeholder",
-            )
-            self.assertEqual(
-                reduce_scatter.reduce_scatter_node.target,
-                torch.ops._c10d_functional.reduce_scatter_tensor.default,
-            )
-            self.assertEqual(
-                reduce_scatter.wait_tensor_node.target,
-                torch.ops._c10d_functional.wait_tensor.default,
-            )
-            self.assertEqual(reduce_scatter.group_name, group.group_name)
-
-        self.assertEqual(reduce_scatters[0].reduce_op, "sum")
-        self.assertEqual(reduce_scatters[0].scatter_dim, 0)
-        self.assertEqual(reduce_scatters[2].reduce_op, "avg")
-        self.assertEqual(reduce_scatters[2].scatter_dim, 1)
-
-        self.assertEqual(reduce_scatters[1].reduce_op, "avg")
-        self.assertEqual(reduce_scatters[1].scatter_dim, 1)
-
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @fresh_cache()
-    def test_get_unexposed_collectives(self, device):
-        group = dist.group.WORLD
-
-        def func(inp: torch.Tensor) -> torch.Tensor:
-            a = inp @ inp.T
-            # b is unexposed (hidden by a)
-            b = all_gather_single(inp, gather_dim=0, group=group.group_name)
-            c = b @ inp.T
-            # d is unexposed (hidden by c)
-            d = reduce_scatter_single(b, "avg", scatter_dim=0, group=group.group_name)
-            # e is exposed
-            e = all_gather_single(d, gather_dim=0, group=group.group_name)
-            return a, c, e
-
-        inp = torch.rand(64, 32, device=device)
-
-        gm = make_fx(func)(inp)
-        overlappable_collectives = _get_unexposed_collectives(gm.graph)
-        self.assertEqual(
-            list(map(str, overlappable_collectives)),
-            ["all_gather_into_tensor", "reduce_scatter_tensor"],
-        )
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @parametrize("A_dims", [2, 3])
