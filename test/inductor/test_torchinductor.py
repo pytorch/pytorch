@@ -19993,7 +19993,9 @@ def copy_tests(my_cls, other_cls, suffix, test_failures=None, xfail_prop=None):
 
 class _TemplateDeviceHost:
     def setUp(self):
-        self.device = self.get_primary_device()
+        # copy_tests-style tests expect self.device to be the bare device type
+        # string (e.g. "cuda"), matching the historical GPU_TYPE convention.
+        self.device = self.device_type
         super().setUp()
 
 
@@ -20002,13 +20004,16 @@ def _wrap_template_test(test):
 
     @functools.wraps(test)
     def wrapped(self, *args, device=None, devices=None, **kwargs):
+        # The device framework injects indexed device strings (e.g. "cuda:0").
+        # copy_tests-style tests expect the bare device type on self.device,
+        # so normalize it here and in setUp.
         if devices is not None:
             self.devices = devices
-            self.device = devices[0]
+            self.device = torch.device(devices[0]).type
             if "devices" in source_params:
                 kwargs["devices"] = devices
         elif device is not None:
-            self.device = device
+            self.device = torch.device(device).type
             if "device" in source_params:
                 kwargs["device"] = device
         return test(self, *args, **kwargs)
@@ -20348,306 +20353,303 @@ if RUN_CPU:
             FileCheck().check_not(".abs()").run(code_vec)
 
 
-if RUN_GPU or HAS_MPS:
+@unittest.skipUnless(
+    RUN_GPU or HAS_MPS, f"requires {GPU_TYPE} or MPS to be available and selected"
+)
+class SweepInputsGPUTest(SweepInputs2, TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+    gen = InputGen(10, GPU_TYPE)
 
-    class SweepInputsGPUTest(SweepInputs2, TestCase):
-        hw_classification = HardwareClassification.ACCELERATOR
-        gen = InputGen(10, GPU_TYPE)
 
-    SweepInputsGPUTest.populate()
+SweepInputsGPUTest.populate()
 
-    class GPUTests(TestCase):
-        hw_classification = HardwareClassification.ACCELERATOR
-        common = check_model_gpu
-        device = GPU_TYPE
 
-        @skip_if_not_cuda
-        @skip_if_no_accelerator_triton
-        def test_noncontiguous_reshape_cat_backward(self):
-            # Cross the 1024-element padding threshold with a non-aligned width.
-            width = 342
+class GPUTests(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+    common = check_model_gpu
+    device = GPU_TYPE
 
-            def fn(x, offset, weight):
-                query, key, value = (
-                    part.view(2, 3, 1, width) + offset
-                    for part in (x @ weight.T).chunk(3, -1)
-                )
-                query_sigmoid = torch.sigmoid(query).transpose(1, 2)
-                query_tanh = torch.tanh(query).transpose(1, 2)
-                key_sigmoid = torch.sigmoid(key).transpose(1, 2)
-                key_tanh = torch.tanh(key).transpose(1, 2)
-                scores = (
-                    query_sigmoid @ key_sigmoid.transpose(-2, -1)
-                    + query_tanh @ key_tanh.transpose(-2, -1)
-                    - query_sigmoid @ key_tanh.transpose(-2, -1)
-                )
-                return scores @ value.transpose(1, 2)
+    @skip_if_not_cuda
+    @skip_if_no_accelerator_triton
+    def test_noncontiguous_reshape_cat_backward(self):
+        # Cross the 1024-element padding threshold with a non-aligned width.
+        width = 342
 
-            torch.manual_seed(0xC0FFEE)
-            self.common(
-                fn,
-                (
-                    torch.randn(2, 3, 1, requires_grad=True),
-                    torch.randn(2, 3, 1, width, requires_grad=True),
-                    torch.randn(3 * width, 1, requires_grad=True),
-                ),
-                atol=1e-4,
-                check_gradient=True,
-                check_lowp=False,
-                grad_atol=2e-3,
-                grad_rtol=1e-5,
-                reference_in_float=False,
-                rtol=1e-4,
+        def fn(x, offset, weight):
+            query, key, value = (
+                part.view(2, 3, 1, width) + offset
+                for part in (x @ weight.T).chunk(3, -1)
             )
-
-        @skip_if_not_cuda
-        @skip_if_no_accelerator_triton
-        def test_special_bessel_inf_matches_eager(self):
-            ops = (
-                ("bessel_j0", torch.special.bessel_j0),
-                ("bessel_j1", torch.special.bessel_j1),
-                ("bessel_y0", torch.special.bessel_y0),
-                ("bessel_y1", torch.special.bessel_y1),
+            query_sigmoid = torch.sigmoid(query).transpose(1, 2)
+            query_tanh = torch.tanh(query).transpose(1, 2)
+            key_sigmoid = torch.sigmoid(key).transpose(1, 2)
+            key_tanh = torch.tanh(key).transpose(1, 2)
+            scores = (
+                query_sigmoid @ key_sigmoid.transpose(-2, -1)
+                + query_tanh @ key_tanh.transpose(-2, -1)
+                - query_sigmoid @ key_tanh.transpose(-2, -1)
             )
+            return scores @ value.transpose(1, 2)
 
-            for name, op in ops:
-                for dtype in (torch.float32, torch.float64):
-                    with self.subTest(name=name, dtype=dtype):
-                        x = torch.tensor(
-                            [float("inf"), float("-inf"), float("nan"), 0.5],
-                            device=self.device,
-                            dtype=dtype,
-                        )
+        torch.manual_seed(0xC0FFEE)
+        self.common(
+            fn,
+            (
+                torch.randn(2, 3, 1, requires_grad=True),
+                torch.randn(2, 3, 1, width, requires_grad=True),
+                torch.randn(3 * width, 1, requires_grad=True),
+            ),
+            atol=1e-4,
+            check_gradient=True,
+            check_lowp=False,
+            grad_atol=2e-3,
+            grad_rtol=1e-5,
+            reference_in_float=False,
+            rtol=1e-4,
+        )
 
-                        eager = op(x)
-                        compiled = torch.compile(op, fullgraph=True)(x)
+    @skip_if_not_cuda
+    @skip_if_no_accelerator_triton
+    def test_special_bessel_inf_matches_eager(self):
+        ops = (
+            ("bessel_j0", torch.special.bessel_j0),
+            ("bessel_j1", torch.special.bessel_j1),
+            ("bessel_y0", torch.special.bessel_y0),
+            ("bessel_y1", torch.special.bessel_y1),
+        )
 
-                        torch.testing.assert_close(
-                            eager,
-                            compiled,
-                            equal_nan=True,
-                        )
-                        self.assertTrue(torch.isnan(eager[:3]).all())
-                        self.assertTrue(torch.isnan(compiled[:3]).all())
-
-        @skip_if_not_cuda
-        @skip_if_no_accelerator_triton
-        def test_signbit_negative_zero_cuda(self):
-            def fn(x):
-                return torch.signbit(x)
-
+        for name, op in ops:
             for dtype in (torch.float32, torch.float64):
-                x = torch.tensor(
-                    [[1.0, -0.0, 0.0], [-1.0, -0.0, 2.5]],
-                    device=self.device,
-                    dtype=dtype,
-                )
-                self.common(fn, (x,), check_lowp=False)
+                with self.subTest(name=name, dtype=dtype):
+                    x = torch.tensor(
+                        [float("inf"), float("-inf"), float("nan"), 0.5],
+                        device=self.device,
+                        dtype=dtype,
+                    )
 
-        @skip_if_not_cuda
-        @skip_if_no_accelerator_triton
-        def test_modified_bessel_i_inf_matches_eager(self):
-            ops = (
-                ("i0", torch.special.i0),
-                ("modified_bessel_i0", torch.special.modified_bessel_i0),
-                ("i1", torch.special.i1),
-                ("modified_bessel_i1", torch.special.modified_bessel_i1),
+                    eager = op(x)
+                    compiled = torch.compile(op, fullgraph=True)(x)
+
+                    torch.testing.assert_close(
+                        eager,
+                        compiled,
+                        equal_nan=True,
+                    )
+                    self.assertTrue(torch.isnan(eager[:3]).all())
+                    self.assertTrue(torch.isnan(compiled[:3]).all())
+
+    @skip_if_not_cuda
+    @skip_if_no_accelerator_triton
+    def test_signbit_negative_zero_cuda(self):
+        def fn(x):
+            return torch.signbit(x)
+
+        for dtype in (torch.float32, torch.float64):
+            x = torch.tensor(
+                [[1.0, -0.0, 0.0], [-1.0, -0.0, 2.5]],
+                device=self.device,
+                dtype=dtype,
+            )
+            self.common(fn, (x,), check_lowp=False)
+
+    @skip_if_not_cuda
+    @skip_if_no_accelerator_triton
+    def test_modified_bessel_i_inf_matches_eager(self):
+        ops = (
+            ("i0", torch.special.i0),
+            ("modified_bessel_i0", torch.special.modified_bessel_i0),
+            ("i1", torch.special.i1),
+            ("modified_bessel_i1", torch.special.modified_bessel_i1),
+        )
+
+        for name, op in ops:
+            for dtype in (torch.float32, torch.float64):
+                with self.subTest(name=name, dtype=dtype):
+                    x = torch.tensor(
+                        [float("inf"), float("-inf"), float("nan"), 0.5],
+                        device=self.device,
+                        dtype=dtype,
+                    )
+
+                    def fn(x):
+                        return op(x)
+
+                    actual = torch.compile(fn, fullgraph=True)(x)
+                    expected = fn(x)
+                    torch.testing.assert_close(actual, expected, equal_nan=True)
+                    self.assertTrue(torch.isnan(actual[:3]).all())
+
+    @skip_if_not_cuda
+    @skip_if_no_accelerator_triton
+    def test_complex_view_as_complex_exact_stride_copy_cuda(self):
+        def fn(x):
+            y = x.transpose(1, 2)
+            z = y.reshape(2, 8, 4, -1, 2)
+            return torch.view_as_complex(z)
+
+        x = torch.randn([2, 4, 8, 8], device=self.device, dtype=torch.float32)
+        expected = fn(x)
+        actual = torch.compile(fn, fullgraph=True)(x)
+
+        self.assertEqual(actual, expected, exact_stride=True)
+
+    @skip_if_not_cuda
+    @skip_if_no_accelerator_triton
+    def test_complex_view_as_complex_expanded_exact_stride_copy_cuda(self):
+        def fn(x):
+            y = torch.view_as_complex(x)
+            return y.expand(2, 3, 4)
+
+        x = torch.randn([2, 1, 4, 2], device=self.device, dtype=torch.float32)
+        expected = fn(x)
+        actual = torch.compile(fn, fullgraph=True)(x)
+
+        self.assertEqual(actual, expected, exact_stride=True)
+
+    @skip_if_not_cuda
+    @skip_if_no_accelerator_triton
+    def test_complex_copy_strided_stride_order_copy_cuda(self):
+        def fn(x):
+            y = torch.view_as_complex(x)
+            return torch.ops.prims.copy_strided.default(y, [1, 2])
+
+        x = torch.randn([2, 3, 2], device=self.device, dtype=torch.float32)
+        expected = fn(x)
+        actual = torch.compile(fn, fullgraph=True)(x)
+
+        self.assertEqual(actual, expected, exact_stride=True)
+
+    def test_addmm_beta_zero_mismatched_bias_cuda(self):
+        device_type = torch.device(self.device).type
+        if device_type != "cuda" or not torch.cuda.is_available():
+            self.skipTest("CUDA eager ignores addmm input shape when beta=0")
+
+        def check(fn, args):
+            expected = fn(*args)
+            actual = torch.compile(fn, fullgraph=True)(*args)
+            self.assertEqual(actual, expected)
+
+        bias = torch.zeros(8, device=self.device)
+        x = torch.randn(2, 8, device=self.device)
+        weight = torch.randn(13, 8, device=self.device)
+
+        with config.patch(shape_padding=False):
+            check(
+                lambda bias, x, weight: torch.addmm(
+                    bias, x, weight.t(), beta=0.0, alpha=0.1
+                ),
+                (bias, x, weight),
+            )
+            check(
+                lambda bias, x, weight: torch.relu(
+                    torch.addmm(bias, x, weight.t(), beta=0.0, alpha=0.1)
+                ),
+                (bias, x, weight),
+            )
+            decomp_bias = torch.zeros(3, device=self.device)
+            decomp_x = torch.randn(2, 1, device=self.device)
+            decomp_weight = torch.randn(1, 5, device=self.device)
+            check(
+                lambda bias, x, weight: torch.addmm(
+                    bias, x, weight, beta=0.0, alpha=0.5
+                ),
+                (decomp_bias, decomp_x, decomp_weight),
             )
 
-            for name, op in ops:
-                for dtype in (torch.float32, torch.float64):
-                    with self.subTest(name=name, dtype=dtype):
-                        x = torch.tensor(
-                            [float("inf"), float("-inf"), float("nan"), 0.5],
-                            device=self.device,
-                            dtype=dtype,
-                        )
+            nan_bias = torch.tensor(
+                [float("nan"), float("inf"), -float("inf"), 1.0, -1.0],
+                device=self.device,
+            )
+            check(
+                lambda bias, x, weight: torch.addmm(
+                    bias, x, weight, beta=0.0, alpha=0.5
+                ),
+                (nan_bias, decomp_x, decomp_weight),
+            )
 
-                        def fn(x):
-                            return op(x)
+            zero_bias = torch.full((8,), float("nan"), device=self.device)
+            zero_x = torch.full((2, 8), float("nan"), device=self.device)
+            zero_weight = torch.randn(8, 13, device=self.device)
+            check(
+                lambda bias, x, weight: torch.addmm(
+                    bias, x, weight, beta=0.0, alpha=0.0
+                ),
+                (zero_bias, zero_x, zero_weight),
+            )
+            check(
+                lambda bias, x, weight: torch.relu(
+                    torch.addmm(bias, x, weight, beta=0.0, alpha=0.0)
+                ),
+                (zero_bias, zero_x, zero_weight),
+            )
+            check(
+                lambda bias, x, weight: torch.addmm(
+                    bias, x, weight, beta=0.0, alpha=0.0
+                ),
+                (
+                    torch.full((2, 13), float("nan"), device=self.device),
+                    zero_x,
+                    zero_weight,
+                ),
+            )
 
-                        actual = torch.compile(fn, fullgraph=True)(x)
-                        expected = fn(x)
-                        torch.testing.assert_close(actual, expected, equal_nan=True)
-                        self.assertTrue(torch.isnan(actual[:3]).all())
+        bad_bias = torch.zeros(13, device=self.device, dtype=torch.float16)
+        bad_x = torch.randn(2, 8, device=self.device)
+        bad_weight = torch.randn(8, 13, device=self.device)
 
-        @skip_if_not_cuda
-        @skip_if_no_accelerator_triton
-        def test_complex_view_as_complex_exact_stride_copy_cuda(self):
-            def fn(x):
-                y = x.transpose(1, 2)
-                z = y.reshape(2, 8, 4, -1, 2)
-                return torch.view_as_complex(z)
+        def addmm_dtype_mismatch(bias, x, weight):
+            return torch.addmm(bias, x, weight, beta=0.0)
 
-            x = torch.randn([2, 4, 8, 8], device=self.device, dtype=torch.float32)
-            expected = fn(x)
-            actual = torch.compile(fn, fullgraph=True)(x)
+        with self.assertRaisesRegex(RuntimeError, "must have the same dtype"):
+            addmm_dtype_mismatch(bad_bias, bad_x, bad_weight)
 
-            self.assertEqual(actual, expected, exact_stride=True)
+        bad_decomp_bias = torch.zeros(5, device=self.device, dtype=torch.float16)
+        bad_decomp_x = torch.randn(2, 1, device=self.device)
+        bad_decomp_weight = torch.randn(1, 5, device=self.device)
 
-        @skip_if_not_cuda
-        @skip_if_no_accelerator_triton
-        def test_complex_view_as_complex_expanded_exact_stride_copy_cuda(self):
-            def fn(x):
-                y = torch.view_as_complex(x)
-                return y.expand(2, 3, 4)
+        def addmm_decomp_dtype_mismatch(bias, x, weight):
+            return torch.addmm(bias, x, weight, beta=0.0)
 
-            x = torch.randn([2, 1, 4, 2], device=self.device, dtype=torch.float32)
-            expected = fn(x)
-            actual = torch.compile(fn, fullgraph=True)(x)
-
-            self.assertEqual(actual, expected, exact_stride=True)
-
-        @skip_if_not_cuda
-        @skip_if_no_accelerator_triton
-        def test_complex_copy_strided_stride_order_copy_cuda(self):
-            def fn(x):
-                y = torch.view_as_complex(x)
-                return torch.ops.prims.copy_strided.default(y, [1, 2])
-
-            x = torch.randn([2, 3, 2], device=self.device, dtype=torch.float32)
-            expected = fn(x)
-            actual = torch.compile(fn, fullgraph=True)(x)
-
-            self.assertEqual(actual, expected, exact_stride=True)
-
-        def test_addmm_beta_zero_mismatched_bias_cuda(self):
-            device_type = torch.device(self.device).type
-            if device_type != "cuda" or not torch.cuda.is_available():
-                self.skipTest("CUDA eager ignores addmm input shape when beta=0")
-
-            def check(fn, args):
-                expected = fn(*args)
-                actual = torch.compile(fn, fullgraph=True)(*args)
-                self.assertEqual(actual, expected)
-
-            bias = torch.zeros(8, device=self.device)
-            x = torch.randn(2, 8, device=self.device)
-            weight = torch.randn(13, 8, device=self.device)
-
-            with config.patch(shape_padding=False):
-                check(
-                    lambda bias, x, weight: torch.addmm(
-                        bias, x, weight.t(), beta=0.0, alpha=0.1
-                    ),
-                    (bias, x, weight),
-                )
-                check(
-                    lambda bias, x, weight: torch.relu(
-                        torch.addmm(bias, x, weight.t(), beta=0.0, alpha=0.1)
-                    ),
-                    (bias, x, weight),
-                )
-                decomp_bias = torch.zeros(3, device=self.device)
-                decomp_x = torch.randn(2, 1, device=self.device)
-                decomp_weight = torch.randn(1, 5, device=self.device)
-                check(
-                    lambda bias, x, weight: torch.addmm(
-                        bias, x, weight, beta=0.0, alpha=0.5
-                    ),
-                    (decomp_bias, decomp_x, decomp_weight),
-                )
-
-                nan_bias = torch.tensor(
-                    [float("nan"), float("inf"), -float("inf"), 1.0, -1.0],
-                    device=self.device,
-                )
-                check(
-                    lambda bias, x, weight: torch.addmm(
-                        bias, x, weight, beta=0.0, alpha=0.5
-                    ),
-                    (nan_bias, decomp_x, decomp_weight),
-                )
-
-                zero_bias = torch.full((8,), float("nan"), device=self.device)
-                zero_x = torch.full((2, 8), float("nan"), device=self.device)
-                zero_weight = torch.randn(8, 13, device=self.device)
-                check(
-                    lambda bias, x, weight: torch.addmm(
-                        bias, x, weight, beta=0.0, alpha=0.0
-                    ),
-                    (zero_bias, zero_x, zero_weight),
-                )
-                check(
-                    lambda bias, x, weight: torch.relu(
-                        torch.addmm(bias, x, weight, beta=0.0, alpha=0.0)
-                    ),
-                    (zero_bias, zero_x, zero_weight),
-                )
-                check(
-                    lambda bias, x, weight: torch.addmm(
-                        bias, x, weight, beta=0.0, alpha=0.0
-                    ),
-                    (
-                        torch.full((2, 13), float("nan"), device=self.device),
-                        zero_x,
-                        zero_weight,
-                    ),
-                )
-
-            bad_bias = torch.zeros(13, device=self.device, dtype=torch.float16)
-            bad_x = torch.randn(2, 8, device=self.device)
-            bad_weight = torch.randn(8, 13, device=self.device)
-
-            def addmm_dtype_mismatch(bias, x, weight):
-                return torch.addmm(bias, x, weight, beta=0.0)
-
-            with self.assertRaisesRegex(RuntimeError, "must have the same dtype"):
-                addmm_dtype_mismatch(bad_bias, bad_x, bad_weight)
-
-            bad_decomp_bias = torch.zeros(5, device=self.device, dtype=torch.float16)
-            bad_decomp_x = torch.randn(2, 1, device=self.device)
-            bad_decomp_weight = torch.randn(1, 5, device=self.device)
-
-            def addmm_decomp_dtype_mismatch(bias, x, weight):
-                return torch.addmm(bias, x, weight, beta=0.0)
-
-            with self.assertRaisesRegex(RuntimeError, "must have the same dtype"):
-                addmm_decomp_dtype_mismatch(
+        with self.assertRaisesRegex(RuntimeError, "must have the same dtype"):
+            addmm_decomp_dtype_mismatch(
+                bad_decomp_bias, bad_decomp_x, bad_decomp_weight
+            )
+        with config.patch(shape_padding=False):
+            with self.assertRaisesRegex(Exception, "input dtypes must be the same"):
+                torch.compile(addmm_decomp_dtype_mismatch, fullgraph=True)(
                     bad_decomp_bias, bad_decomp_x, bad_decomp_weight
                 )
-            with config.patch(shape_padding=False):
-                with self.assertRaisesRegex(Exception, "input dtypes must be the same"):
-                    torch.compile(addmm_decomp_dtype_mismatch, fullgraph=True)(
-                        bad_decomp_bias, bad_decomp_x, bad_decomp_weight
-                    )
 
-            with config.patch({"shape_padding": False, "triton.native_matmul": True}):
-                with self.assertRaisesRegex(Exception, "input dtypes must be the same"):
-                    torch.compile(addmm_dtype_mismatch, fullgraph=True)(
-                        bad_bias, bad_x, bad_weight
-                    )
-
-                check(
-                    lambda bias, x, weight: torch.addmm(
-                        bias, x, weight, beta=0.0, alpha=0.0
-                    ),
-                    (zero_bias, zero_x, zero_weight),
+        with config.patch({"shape_padding": False, "triton.native_matmul": True}):
+            with self.assertRaisesRegex(Exception, "input dtypes must be the same"):
+                torch.compile(addmm_dtype_mismatch, fullgraph=True)(
+                    bad_bias, bad_x, bad_weight
                 )
 
-            with config.patch(
-                {
-                    "shape_padding": False,
-                    "max_autotune": True,
-                    "max_autotune_gemm_backends": "TRITON",
-                }
-            ):
-                check(
-                    lambda bias, x, weight: torch.addmm(
-                        bias, x, weight, beta=0.0, alpha=0.0
-                    ),
-                    (
-                        torch.full((2, 13), float("nan"), device=self.device),
-                        zero_x,
-                        zero_weight,
-                    ),
-                )
+            check(
+                lambda bias, x, weight: torch.addmm(
+                    bias, x, weight, beta=0.0, alpha=0.0
+                ),
+                (zero_bias, zero_x, zero_weight),
+            )
 
-else:
-
-    class GPUTests(TestCase):
-        hw_classification = HardwareClassification.ACCELERATOR
-        common = check_model_gpu
+        with config.patch(
+            {
+                "shape_padding": False,
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+            }
+        ):
+            check(
+                lambda bias, x, weight: torch.addmm(
+                    bias, x, weight, beta=0.0, alpha=0.0
+                ),
+                (
+                    torch.full((2, 13), float("nan"), device=self.device),
+                    zero_x,
+                    zero_weight,
+                ),
+            )
 
 
 if RUN_TPU:
