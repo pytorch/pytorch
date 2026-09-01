@@ -434,10 +434,11 @@ def _collect_tensors_with_sources(
     """
     from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-    from .dicts import ConstDictVariable
+    from .dicts import ConstDictVariable, MappingProxyVariable
     from .lazy import LazyVariableTracker
     from .lists import BaseListVariable
     from .tensor import TensorVariable
+    from .user_defined import UserDefinedDictVariable
 
     results: list[tuple[torch.Tensor, str | None]] = []
     if isinstance(var, TensorVariable):
@@ -476,6 +477,16 @@ def _collect_tensors_with_sources(
     elif isinstance(var, ConstDictVariable):
         for item in var.items.values():
             results.extend(_collect_tensors_with_sources(item))
+    elif isinstance(var, UserDefinedDictVariable):
+        if var._base_vt is None:
+            raise AssertionError("UserDefinedDictVariable._base_vt must not be None")
+        # `OrderedDictVariable`, `DefaultDictVariable`, and other dict
+        # subclass wrappers store the mapping in `_base_vt` (a
+        # `ConstDictVariable`); recurse into it.
+        results.extend(_collect_tensors_with_sources(var._base_vt))
+    elif isinstance(var, MappingProxyVariable):
+        # `MappingProxyVariable` proxies a `ConstDictVariable` via `dv_dict`.
+        results.extend(_collect_tensors_with_sources(var.dv_dict))
     else:
         unimplemented(
             gb_type="autograd.grad with unsupported argument type",
@@ -3185,7 +3196,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             from .. import compiled_autograd, config
             from .builder import wrap_fx_proxy
             from .constant import ConstantVariable
-            from .dicts import ConstDictVariable
+            from .dicts import ConstDictVariable, OrderedDictVariable
             from .lists import BaseListVariable
             from .tensor import TensorVariable
 
@@ -3380,6 +3391,18 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # Convert dict inputs to tuple for the FX graph. The engine
             # always operates on flat tuples; we reconstruct the dict after.
             inputs_var = args[1] if len(args) >= 2 else kwargs.get("inputs")
+            # Unwrap dict-like wrappers (e.g. `OrderedDictVariable`,
+            # `DefaultDictVariable`, `MappingProxyVariable`) to expose the
+            # underlying `ConstDictVariable`. Its concrete class preserves the
+            # OrderedDict-vs-dict distinction.
+            if isinstance(inputs_var, variables.UserDefinedDictVariable):
+                if inputs_var._base_vt is None:
+                    raise AssertionError(
+                        "UserDefinedDictVariable._base_vt must not be None"
+                    )
+                inputs_var = inputs_var._base_vt
+            elif isinstance(inputs_var, variables.MappingProxyVariable):
+                inputs_var = inputs_var.dv_dict
             if isinstance(inputs_var, ConstDictVariable):
                 inputs_as_tuple = TupleVariable(list(inputs_var.items.values()))
                 if len(args) >= 2:
@@ -3411,6 +3434,12 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         strict=True,
                     )
                 )
+                # `OrderedDictVariable.reconstruct()` emits
+                # `OrderedDict(...)`, so it round-trips an OrderedDict result.
+                # Wrapping in `OrderedDictVariable` requires a class source we
+                # lack here.
+                if isinstance(inputs_var, OrderedDictVariable):
+                    return OrderedDictVariable(items)
                 return ConstDictVariable(items)
             return result
 
