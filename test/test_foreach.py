@@ -2324,7 +2324,9 @@ class TestForeachMMCUDA(_TestForeachMMHelper, TestCase):
         ],
         name_fn=lambda label, *_: label,
     )
-    def test_foreach_mm_cond_rejects(self, device, label, a_shape, b_shape, a_dtype, b_dtype):
+    def test_foreach_mm_cond_rejects(
+        self, device, label, a_shape, b_shape, a_dtype, b_dtype
+    ):
         from torch._native.ops.foreach_mm.impl import _foreach_mm_cond
 
         A = [torch.randn(*a_shape, dtype=a_dtype, device=device) for _ in range(2)]
