@@ -167,16 +167,16 @@ def _annotation_args(annotation) -> tuple[str | None, int | None, str | None]:
 
     Values are stringified, and ``stream`` is returned rather than rendered: it names the
     lane, which the caller writes into the event's own ``stream`` field. The dict is
-    escaped in one ``json.dumps`` with the braces stripped rather than key by key. A bare
-    string is recorded as ``name``, the same normalization the registry applies, so
-    annotations pickled by an older recorder still read as a name.
+    escaped in one ``json.dumps`` with the braces stripped rather than key by key. Values
+    must be dicts -- ``mark_kernels`` normalizes a bare string to ``{"name": s}`` before it
+    reaches the registry, so nothing else ever gets here; anything that is not a dict is
+    skipped rather than allowed to abort the export.
     """
     stream: int | None = None
     lane_name: str | None = None
     chunks: list[str] = []
     for ann in annotation if isinstance(annotation, list) else [annotation]:
         if not isinstance(ann, dict):
-            chunks.append(f'"name": {_json_escape(str(ann))}')
             continue
         if lane_name is None and _LANE_NAME_KEY in ann:
             lane_name = str(ann[_LANE_NAME_KEY])
@@ -215,19 +215,28 @@ def export_chrome_trace(
     events are written exactly as kineto reported them.
 
     ``graph_lanes`` decides whether graphed events are also moved onto display lanes.
-    With ``"none"`` (default) nothing moves and a recorded ``stream`` is ignored, so the
-    trace keeps the stream layout kineto reported. With ``"all"`` each graphed event moves
-    to the lane its annotation names (what ``mark_stream`` records) and the rest onto
-    ``default_stream`` (7 by convention) -- worth it when a replay is smeared over the
-    hundreds of hardware streams the graph executor picked, and not otherwise, since it
-    piles everything onto one lane when nothing named a stream. A moved event carries its
-    lane in ``tid`` and ``args["stream"]``, and the stream it actually ran on as
-    ``args["original_stream"]``.
+    With ``"none"`` (default) nothing moves, so the trace keeps the stream layout kineto
+    reported; a recorded ``stream`` is then reported as ``args["annotated_stream"]``
+    rather than acted on. With ``"all"`` each graphed event moves to the lane its
+    annotation names (what ``mark_stream`` records) and the rest onto ``default_stream``
+    (7 by convention) -- worth it when a replay is smeared over the hundreds of hardware
+    streams the graph executor picked, and not otherwise, since it piles everything onto
+    one lane when nothing named a stream. A moved event carries its lane in ``tid`` and
+    ``args["stream"]``, and the stream it actually ran on as ``args["original_stream"]``.
+
+    ``"all"`` requires ``annotations``; on its own it would only collapse every graphed
+    event onto one lane, so it raises instead.
 
     Writes ``.json`` or ``.json.gz`` depending on the file extension.
     """
     if graph_lanes not in ("all", "none"):
         raise ValueError(f"graph_lanes must be 'all' or 'none', got {graph_lanes!r}")
+    if graph_lanes == "all" and not annotations:
+        raise ValueError(
+            "graph_lanes='all' needs cuda_graph_annotations: without them every graphed "
+            "event would land on default_stream, which loses the stream layout and names "
+            "nothing in return"
+        )
     activities = kineto_results.trace_activities()
     base_ns = _trimester_base_ns()
     # No annotations to inject means no graph-lane pass at all: an empty mapping reads the
@@ -378,6 +387,11 @@ def export_chrome_trace(
                     # The hardware stream the work ran on is otherwise unrecoverable
                     # once the tid and args.stream both name the lane.
                     annotation_parts.append(f'"original_stream": {rid}')
+                elif stream is not None:
+                    # Not moved, so nothing else records the lane the annotation asked
+                    # for. Keep it under its own key rather than dropping it -- args.stream
+                    # still has to mean the stream the event is on.
+                    annotation_parts.append(f'"annotated_stream": {stream}')
 
             if md:
                 args_parts.append(md)
