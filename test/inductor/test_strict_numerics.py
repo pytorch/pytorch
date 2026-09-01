@@ -2,6 +2,8 @@
 """Tests for strict inner-contiguous reduction ordering."""
 
 import os
+import subprocess
+import sys
 import unittest
 
 
@@ -86,6 +88,38 @@ FUSION_CASES = (
     "multi_output",
 )
 
+STRICT_NUMERICS_CONFIG = {
+    "numerics": "strict",
+    "eager_numerics.use_pytorch_libdevice": True,
+    "eager_numerics.division_rounding": True,
+    "eager_numerics.disable_ftz": True,
+    "emulate_precision_casts": True,
+}
+
+
+class StrictNumericsConfigTest(TestCase):
+    def test_strict_env_enables_eager_numerics(self):
+        env = os.environ.copy()
+        env["TORCHINDUCTOR_NUMERICS"] = "strict"
+        env["TORCHINDUCTOR_EMULATE_DIVISION_ROUNDING"] = "0"
+        env["TORCHINDUCTOR_EMULATE_PRECISION_CASTS"] = "0"
+        output = subprocess.check_output(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "from torch._inductor import config; "
+                    "print(config.eager_numerics.use_pytorch_libdevice, "
+                    "config.eager_numerics.division_rounding, "
+                    "config.eager_numerics.disable_ftz, "
+                    "config.emulate_precision_casts)"
+                ),
+            ],
+            env=env,
+            text=True,
+        )
+        self.assertEqual(output.strip(), "True True True True")
+
 
 @unittest.skipUnless(
     HAS_CUDA_AND_TRITON
@@ -99,7 +133,9 @@ class StrictNumericsTest(TestCase):
         torch.manual_seed(0)
 
     def _run(self, fn, *args, **cfg):
-        with config.patch({"numerics": "strict", "force_disable_caches": True, **cfg}):
+        with config.patch(
+            {**STRICT_NUMERICS_CONFIG, "force_disable_caches": True, **cfg}
+        ):
             torch._dynamo.reset()
             result, codes = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
         return result, "\n".join(codes)
@@ -207,7 +243,9 @@ class StrictNumericsTest(TestCase):
         def fn(z):
             return torch.sum(z, 1)
 
-        with config.patch({"numerics": "strict", "force_disable_caches": True, **cfg}):
+        with config.patch(
+            {**STRICT_NUMERICS_CONFIG, "force_disable_caches": True, **cfg}
+        ):
             torch._dynamo.reset()
             compiled = torch.compile(fn, fullgraph=True, dynamic=True)
             for n in sizes:

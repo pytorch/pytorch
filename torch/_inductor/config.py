@@ -3217,5 +3217,11 @@ emulate_precision_casts_on_saved_tensors: bool = (
     os.environ.get("TORCHINDUCTOR_EMULATE_PRECISION_CASTS_ON_SAVED_TENSORS", "1") == "1"
 )
 
+if numerics == "strict":
+    eager_numerics.use_pytorch_libdevice = True
+    eager_numerics.division_rounding = True
+    eager_numerics.disable_ftz = True
+    emulate_precision_casts = True
+
 # adds patch, save_config, etc
 install_config_module(sys.modules[__name__])
