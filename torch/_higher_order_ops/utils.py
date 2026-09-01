@@ -168,6 +168,17 @@ class _VmapCombineFnWrapper:
         self.op_name = op_name
         self.out_dims: tuple[Any, ...] | None = None
 
+    def _check_out_dims(self, out_dims: tuple[Any, ...]) -> None:
+        if self.expected_out_dims is not None and out_dims != self.expected_out_dims:
+            raise RuntimeError(
+                f"{self.op_name} under vmap requires the combine_fn outputs to keep "
+                "the same batched arguments as its xs inputs, because the outputs are "
+                "fed back as inputs on later scan levels. Here they diverge (e.g. "
+                "batched additional_inputs with unbatched xs, or a pytree where an "
+                "output leaf becomes batched via another leaf): expected output batch "
+                f"dims {self.expected_out_dims} but got {out_dims}."
+            )
+
     def __call__(self, *args: Any) -> Any:
         outputs, per_slice_out_dims = restore_vmap(
             self.combine_fn, self.in_dims, self.batch_size, self.randomness
@@ -178,15 +189,7 @@ class _VmapCombineFnWrapper:
             per_slice_out_dims,
         )
         out_dims = _batch_dims_as_last_for_scan(per_slice_out_dims)
-        if self.expected_out_dims is not None and out_dims != self.expected_out_dims:
-            raise RuntimeError(
-                f"{self.op_name} under vmap requires the combine_fn outputs to keep "
-                "the same batched arguments as its xs inputs, because the outputs are "
-                "fed back as inputs on later scan levels. Here they diverge (e.g. "
-                "batched additional_inputs with unbatched xs, or a pytree where an "
-                "output leaf becomes batched via another leaf): expected output batch "
-                f"dims {self.expected_out_dims} but got {out_dims}."
-            )
+        self._check_out_dims(out_dims)
         if self.out_dims is not None and out_dims != self.out_dims:
             raise AssertionError(
                 "combine_fn produced inconsistent output batch dims across scan "
