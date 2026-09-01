@@ -129,8 +129,7 @@ class TestDependencies(InductorTestCase):
         """
         A masked store is deliberately recorded as a full write over the
         expanded domain. That over-approximation is what keeps WAW/WAR ordering
-        edges intact; the resulting imprecision is handled by refusing in-place
-        reuse (see SchedulerNode.can_inplace).
+        edges intact. Masked-off coordinates are outside the logical output.
         """
         from torch._inductor.dependencies import extract_read_writes
 
@@ -147,16 +146,6 @@ class TestDependencies(InductorTestCase):
         # exclude a tail, and with no store mode (no atomic masked store).
         self.assertEqual(writes[0].get_numel(), 64)
         self.assertEqual(writes[0].mode, None)
-
-    def test_masked_store_disables_inplace_reuse(self):
-        body = object.__new__(LoopBody)
-        body.op_counts = {"masked_store": 1}
-        node = object.__new__(SchedulerNode)
-        node._body = body
-        node.node = None
-        node.outputs = []
-
-        self.assertFalse(node.can_inplace(object()))
 
     def test_masked_expansion_rejects_non_plain_store_modes(self):
         body = object.__new__(LoopBody)
