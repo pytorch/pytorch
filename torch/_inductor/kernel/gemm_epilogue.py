@@ -81,6 +81,32 @@ class GemmReductionGeometry:
 
 
 @dataclasses.dataclass(frozen=True)
+class GemmAssociativeState:
+    """Describe the Float32 planes and scalar projections of a reduction state."""
+
+    planes: int
+    reduction_projections: tuple[str | None, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.planes, int) or self.planes < 1:
+            raise RuntimeError("GEMM associative states require a positive plane count")
+        if (
+            self.reduction_projections
+            and len(self.reduction_projections) != self.planes
+        ):
+            raise RuntimeError(
+                "GEMM associative-state projections must match plane count"
+            )
+
+    def component_for_reduction(self, reduction_type: str) -> int | None:
+        """Return the state plane equivalent to a scalar reduction."""
+        for index, projection in enumerate(self.reduction_projections):
+            if projection == reduction_type:
+                return index
+        return None
+
+
+@dataclasses.dataclass(frozen=True)
 class GemmReductionDescriptor:
     """Backend lowering descriptor for a recognized reduction expression.
 
@@ -252,7 +278,9 @@ class GemmReductionArguments:
 
 @dataclasses.dataclass(frozen=True)
 class NormalizedReduction:
-    """Canonical arguments for a supported FX reduction."""
+    """Canonical arguments for a supported scalar-state FX reduction."""
+
+    associative_state: ClassVar[GemmAssociativeState] = GemmAssociativeState(planes=1)
 
     source: torch.fx.Node
     dim: Any
@@ -263,7 +291,11 @@ class NormalizedReduction:
 
 @dataclasses.dataclass(frozen=True)
 class NormalizedPrepareSoftmax:
-    """Canonical source and dimension for online softmax preparation."""
+    """Canonical source and dimension for online max/sum state preparation."""
+
+    associative_state: ClassVar[GemmAssociativeState] = GemmAssociativeState(
+        planes=2, reduction_projections=("max", None)
+    )
 
     source: torch.fx.Node
     dim: Any
