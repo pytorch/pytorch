@@ -112,21 +112,19 @@ def _cuda_versions() -> dict[str, int]:
     if not torch.cuda.is_available():
         return {}
     versions = {"cuda_runtime_version": torch._C._cuda_getCompiledVersion()}
-    from torch.cuda._utils import _check_cuda_bindings, _HAS_CUDA_BINDINGS
+    from torch.cuda._utils import _check_cuda_bindings, _cuda_bindings_runtime
 
-    # The shared gate also reports the bindings absent on ROCm, where they import but
-    # every call fails -- so ask it rather than making the call and catching.
-    if not _HAS_CUDA_BINDINGS:
+    # The shared gate already did the import, and nulls this out both when the package is
+    # missing and on ROCm, where it imports but every call fails.
+    if _cuda_bindings_runtime is None:
         return versions
     try:
-        from cuda.bindings import (  # pyrefly: ignore[missing-import]
-            runtime as cuda_runtime,
-        )
-
         versions["cuda_driver_version"] = _check_cuda_bindings(
-            cuda_runtime.cudaDriverGetVersion()
+            _cuda_bindings_runtime.cudaDriverGetVersion()
         )
-    except (ImportError, RuntimeError):
+    except RuntimeError:
+        # cuda.bindings drives its own CUDART, not the one torch initialized, so this can
+        # fail where torch is fine. Losing a version key beats aborting the export.
         pass
     return versions
 
