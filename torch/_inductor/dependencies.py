@@ -665,8 +665,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         # for ordering (no WAR/WAW edge is lost) but not for initialization, so
         # SchedulerNode.can_inplace refuses to reuse a buffer written this way
         # -- otherwise the untouched region would silently keep the input's
-        # values. Byte estimates derived from this dep are upper bounds; see
-        # `masked_expansion_bytes` in scheduler.py.
+        # values. Byte estimates derived from this dep are upper bounds.
         self.store(name, index, value)
 
     def store_reduction(self, name: str, index: sympy.Expr, value: str) -> None:

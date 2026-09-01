@@ -16,8 +16,6 @@
 #include <ATen/ops/mul.h>
 #include <ATen/ops/scalar_tensor_native.h>
 #include <ATen/ops/empty.h>
-#include <ATen/ops/addmm.h>
-#include <ATen/ops/resize_as_sparse_native.h>
 #include <ATen/ops/sparse_sampled_addmm_native.h>
 #include <ATen/ops/triangular_solve_native.h>
 #endif

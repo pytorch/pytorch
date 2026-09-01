@@ -47,6 +47,8 @@ MASKED_EXPANSION_BANNED_OPS = (
     "check_bounds",
     "indirect_indexing",
     "device_assert_async",
+    "load_seed",
+    "bucketize",
     "sort",
     "scan",
 )
@@ -77,6 +79,10 @@ class _MaskStoresHandler(WrapperHandler):
 
     def store_reduction(self, name: str, index: sympy.Expr, value: Any) -> None:
         raise AssertionError("masked store expansion does not support store_reduction")
+
+    def masked(self, mask: Any, body: Callable[[], Any], other: Any) -> Any:
+        mask = self._inner.logical_and(self.mask, mask)
+        return self._inner.masked(mask, body, other)
 
     def partial_accumulate(self, *args: Any, **kwargs: Any) -> None:
         raise AssertionError(
@@ -336,10 +342,7 @@ class LoopBody:
         expand_dimension_for_pointwise_node, this does not wrap the expanded
         dimension in `Mod`, so loads, index_exprs and bounds checks all evaluate
         at the raw expanded coordinate; only the writes are masked. The caller
-        must prove the added tail addresses are live (see
-        `_try_reindex_pointwise_for_reduction`, which requires every read to be
-        provably in bounds over the expanded domain or to match a read the
-        reduction already performs) and must reject bodies containing
+        must prove the added tail addresses are live and reject bodies containing
         MASKED_EXPANSION_BANNED_OPS.
         """
         if V.graph.sizevars.statically_known_equals(
