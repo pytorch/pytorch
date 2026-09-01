@@ -14,6 +14,7 @@ from torch.nn.functional import ScalingType, SwizzleType
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MX_GEMM,
+    rocm_mx_swizzle,
     SM90OrLater,
 )
 from torch.torch_version import TorchVersion
@@ -386,15 +387,18 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
             y_hp.contiguous(), block_size=self._MX_BLOCK_SIZE, format=mx_format
         )
 
-        scale_a = to_blocked(scale_a)
-        scale_b = to_blocked(scale_b)
+        swizzle_32_8 = rocm_mx_swizzle(x_lp.dtype)
+        scale_a = to_blocked(scale_a, swizzle_32_8=swizzle_32_8)
+        scale_b = to_blocked(scale_b, swizzle_32_8=swizzle_32_8)
 
-        # HIP requires NO_SWIZZLE, CUDA uses SWIZZLE_32_4_4
-        swizzle_type = (
-            SwizzleType.NO_SWIZZLE
-            if torch.version.hip is not None
-            else SwizzleType.SWIZZLE_32_4_4
-        )
+        # CUDA uses SWIZZLE_32_4_4; HIP takes the 32x8-tiled layout on gfx950
+        # and the unswizzled one everywhere else.
+        if torch.version.hip is None:
+            swizzle_type = SwizzleType.SWIZZLE_32_4_4
+        else:
+            swizzle_type = (
+                SwizzleType.SWIZZLE_32_8 if swizzle_32_8 else SwizzleType.NO_SWIZZLE
+            )
 
         self.inputs = {
             "x": x_lp,

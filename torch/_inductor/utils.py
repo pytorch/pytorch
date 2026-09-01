@@ -5171,18 +5171,25 @@ def _round_up(x: int, y: int) -> int:
 
 
 @functools.lru_cache
+def _prefers_swizzle_32_8_cached(mat_dtype: torch.dtype, hip: str) -> bool:
+    hip_version = tuple(int(x) for x in hip.split("-")[0].split("."))
+    min_version = (7, 13) if mat_dtype == torch.float4_e2m1fn_x2 else (7, 14)
+    return hip_version >= min_version and _rocm_native_device_arch_name(
+        "cuda"
+    ).startswith("gfx950")
+
+
 def _prefers_swizzle_32_8(mat_dtype: torch.dtype) -> bool:
     """
     gfx950 hipBLASLt takes 1x32 block scales in the 32x8-tiled layout: MX FP4
     from ROCm 7.13, MX FP8 from 7.14. Every other arch uses the default layout.
     """
+    # is_available() is not stable across a process lifetime, so it must stay
+    # outside the cache -- a False from before device init would otherwise be
+    # remembered and pick the wrong scale layout for the rest of the run.
     if not torch.version.hip or not torch.cuda.is_available():
         return False
-    hip_version = tuple(int(x) for x in torch.version.hip.split("-")[0].split("."))
-    min_version = (7, 13) if mat_dtype == torch.float4_e2m1fn_x2 else (7, 14)
-    return hip_version >= min_version and _rocm_native_device_arch_name(
-        "cuda"
-    ).startswith("gfx950")
+    return _prefers_swizzle_32_8_cached(mat_dtype, torch.version.hip)
 
 
 def _infer_scale_swizzle_impl(

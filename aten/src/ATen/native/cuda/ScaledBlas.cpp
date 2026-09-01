@@ -161,39 +161,41 @@ bool prefers_swizzle_32_8([[maybe_unused]] const at::Tensor& t) {
 #endif
 }
 
-// The scale layout is dictated by the arch and the ROCm version, so callers of
-// the v2 API must pass the one this device takes.
+// Both layouts are legal on gfx950: NO_SWIZZLE selects hipBLASLt's
+// VEC32_UE8M0, SWIZZLE_32_8 selects BLK32_UE8M0_32_8_EXT, and neither is
+// arch-gated in cublasLtMatmulScaleMode (cuda/detail/CublasLtUtils.h), so gfx950
+// keeps taking the pre-7.14 unswizzled scales. SWIZZLE_32_4_4 has no ROCm
+// equivalent and would silently map to VEC32_UE8M0, so it is rejected. The
+// pair check comes first so a mismatch is not reported as a size error.
 static void check_mx_swizzle(const at::Tensor& t, SwizzleType swizzle_a, SwizzleType swizzle_b) {
-  const bool needs_32_8 = prefers_swizzle_32_8(t);
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      needs_32_8 || (swizzle_a != SwizzleType::SWIZZLE_32_8 && swizzle_b != SwizzleType::SWIZZLE_32_8),
-      "SWIZZLE_32_8 block scales require gfx950 with ROCm 7.13 (MX FP4) or ROCm 7.14 (MX FP8)");
-  const auto required = needs_32_8 ? SwizzleType::SWIZZLE_32_8 : SwizzleType::NO_SWIZZLE;
-  TORCH_CHECK_VALUE(swizzle_a == required && swizzle_b == required,
-      "MX block scales must use ", needs_32_8 ? "SWIZZLE_32_8" : "NO_SWIZZLE", " on this device, got swizzle_a=",
+  TORCH_CHECK_VALUE(swizzle_a == swizzle_b,
+      "For ROCM MX gemm, swizzle_a and swizzle_b must both be NO_SWIZZLE or both be SWIZZLE_32_8, got swizzle_a=",
       static_cast<int>(swizzle_a), " and swizzle_b=", static_cast<int>(swizzle_b));
+  TORCH_CHECK_VALUE(swizzle_a == SwizzleType::NO_SWIZZLE || swizzle_a == SwizzleType::SWIZZLE_32_8,
+      "For ROCM MX gemm, block scales must use NO_SWIZZLE or SWIZZLE_32_8, got ", static_cast<int>(swizzle_a));
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      swizzle_a != SwizzleType::SWIZZLE_32_8 || prefers_swizzle_32_8(t),
+      "SWIZZLE_32_8 block scales require gfx950 with ROCm 7.13 (MX FP4) or ROCm 7.14 (MX FP8)");
 }
 #endif
 
-// Number of 1x32 e8m0 block scales for `t`, in the layout the device takes.
+// Number of 1x32 e8m0 block scales for `t`. v1 `_scaled_mm` has no swizzle
+// argument, so it only ever accepts this one layout. The count alone cannot
+// identify a layout: at shapes where the padding coincides (e.g. M=128, K=256)
+// a 32x8-tiled buffer has exactly this many elements, and v1 will read it as
+// unswizzled and produce wrong numerics. Callers who need the gfx950 32x8
+// layout must use `_scaled_mm_v2` and pass SWIZZLE_32_8 explicitly.
 int64_t blockwise_1x32_numel(const at::Tensor& t, int64_t k_unpacked) {
-#ifdef USE_ROCM
-  if (prefers_swizzle_32_8(t)) {
-    return blockwise_1x32_numel_32_8(t.size(0), k_unpacked);
-  }
-#endif
   return round_up<int64_t>(t.size(0), 128) *
       round_up<int64_t>(ceil_div<int64_t>(k_unpacked, 32), 4);
 }
 
-// 1x32 blocks for microscaled fp8/fp4 data and fp8_e8m0fnu scales. Returns the
-// scale layout, or nullopt if `scale` is not a valid 1x32 blockwise scale for
-// `t`.
+// 1x32 blocks for microscaled fp8/fp4 data and fp8_e8m0fnu scales
 // TODO: We might want to enforce some structure on the shapes of the scale
 // tensors
-std::optional<SwizzleType> blockwise_1x32_swizzle(const at::Tensor& t, const at::Tensor& scale) {
+bool is_blockwise_1x32_scaling(const at::Tensor& t, const at::Tensor& scale) {
   if (scale.scalar_type() != at::kFloat8_e8m0fnu || !scale.is_contiguous()) {
-    return std::nullopt;
+    return false;
   }
 #ifdef USE_ROCM
   const bool is_packed_fp4 = t.scalar_type() == ScalarType::Float4_e2m1fn_x2;
@@ -201,22 +203,10 @@ std::optional<SwizzleType> blockwise_1x32_swizzle(const at::Tensor& t, const at:
   const bool is_packed_fp4 = false;
 #endif
   if (!isFloat8Type(t.scalar_type()) && !is_packed_fp4) {
-    return std::nullopt;
+    return false;
   }
   const int64_t k_unpacked = is_packed_fp4 ? t.size(1) * 2 : t.size(1);
-  if (scale.numel() != blockwise_1x32_numel(t, k_unpacked)) {
-    return std::nullopt;
-  }
-#ifdef USE_ROCM
-  if (prefers_swizzle_32_8(t)) {
-    return SwizzleType::SWIZZLE_32_8;
-  }
-#endif
-  return SwizzleType::NO_SWIZZLE;
-}
-
-bool is_blockwise_1x32_scaling(const at::Tensor& t, const at::Tensor& scale) {
-  return blockwise_1x32_swizzle(t, scale).has_value();
+  return scale.numel() == blockwise_1x32_numel(t, k_unpacked);
 }
 
 bool is_blockwise_1x128_scaling(const at::Tensor& t, const at::Tensor& scale) {
@@ -259,15 +249,7 @@ bool is_desired_scaling(const at::Tensor& t, const at::Tensor& scale, ScalingTyp
   }
 }
 
-// v1 `_scaled_mm` derives both the recipe and the scale layout from the scales.
-struct JointScaling {
-  ScalingType type_a;
-  ScalingType type_b;
-  SwizzleType swizzle_a;
-  SwizzleType swizzle_b;
-};
-
-JointScaling get_joint_scaling(
+std::pair<ScalingType, ScalingType> get_joint_scaling(
     std::initializer_list<std::pair<ScalingType, ScalingType>> options,
     const at::Tensor& a, const at::Tensor& b,
     const at::Tensor& scale_a, const at::Tensor& scale_b) {
@@ -278,13 +260,7 @@ JointScaling get_joint_scaling(
     const at::Tensor& scale_b_check = use_swizzled_scale ? scale_b : scale_b.t();
 
     if (is_desired_scaling(a, scale_a, lhs) && is_desired_scaling(b.t(), scale_b_check, rhs)) {
-      auto swizzle_a = SwizzleType::NO_SWIZZLE;
-      auto swizzle_b = SwizzleType::NO_SWIZZLE;
-      if (lhs == ScalingType::BlockWise1x32) {
-        swizzle_a = blockwise_1x32_swizzle(a, scale_a).value();
-        swizzle_b = blockwise_1x32_swizzle(b.t(), scale_b_check).value();
-      }
-      return {lhs, rhs, swizzle_a, swizzle_b};
+      return {lhs, rhs};
     }
   }
   TORCH_CHECK(
@@ -587,7 +563,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   // List of supported BlockWise pairs for FP8:
   // https://docs.nvidia.com/cuda/cublas/#element-1d-and-128x128-2d-block-scaling-for-fp8-data-types
 
-  auto [scaling_choice_a, scaling_choice_b, swizzle_choice_a, swizzle_choice_b] = get_joint_scaling(
+  auto [scaling_choice_a, scaling_choice_b] = get_joint_scaling(
     {
       std::make_pair(ScalingType::TensorWise, ScalingType::TensorWise),
       std::make_pair(ScalingType::RowWise, ScalingType::RowWise),
@@ -746,7 +722,9 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
 #endif
   }
 
-  return _scaled_gemm(mat1, mat2, scale_a, scale_b, scaling_choice_a, scaling_choice_b, swizzle_choice_a, swizzle_choice_b, bias, use_fast_accum, out, scale_result);
+  // v1 has no swizzle argument, so it can only express the default layout.
+  // Callers wanting the gfx950 32x8-tiled scales must use `_scaled_mm_v2`.
+  return _scaled_gemm(mat1, mat2, scale_a, scale_b, scaling_choice_a, scaling_choice_b, SwizzleType::NO_SWIZZLE, SwizzleType::NO_SWIZZLE, bias, use_fast_accum, out, scale_result);
 }
 
 Tensor
@@ -1143,29 +1121,26 @@ _scaled_mxfp8_mxfp8(
 
 #ifdef USE_ROCM
   check_mx_swizzle(mat_a, swizzle_a, swizzle_b);
+  int64_t scale_a_elems, scale_b_elems;
+  const char* scale_layout;
   if (swizzle_a == SwizzleType::SWIZZLE_32_8) {
-    auto scale_a_elems = blockwise_1x32_numel_32_8(mat_a.size(0), mat_a.size(1));
-    auto scale_b_elems = blockwise_1x32_numel_32_8(mat_b.size(1), mat_b.size(0));
-    TORCH_CHECK_VALUE(scale_a_elems == scale_a.numel(),
-           "For SWIZZLE_32_8 scaling scale_a should have ", scale_a_elems, " elements, got: ", scale_a.numel());
-    TORCH_CHECK_VALUE(scale_b_elems == scale_b.numel(),
-           "For SWIZZLE_32_8 scaling scale_b should have ", scale_b_elems, " elements, got: ", scale_b.numel());
+    scale_a_elems = blockwise_1x32_numel_32_8(mat_a.size(0), mat_a.size(1));
+    scale_b_elems = blockwise_1x32_numel_32_8(mat_b.size(1), mat_b.size(0));
+    scale_layout = "SWIZZLE_32_8";
   } else {
-    auto scale_a_elems = ceil_div<int64_t>(mat_a.size(0), 32) * mat_a.size(1);
-    auto scale_b_elems = ceil_div<int64_t>(mat_b.size(1), 32) * mat_b.size(0);
-    TORCH_CHECK_VALUE(scale_a_elems == scale_a.numel(),
-           "For Blockwise scaling scale_a should have ", scale_a_elems, " elements, got: ", scale_a.numel());
-    TORCH_CHECK_VALUE(scale_b_elems == scale_b.numel(),
-           "For Blockwise scaling scale_b should have ", scale_b_elems, " elements, got: ", scale_b.numel());
+    scale_a_elems = ceil_div<int64_t>(mat_a.size(0), 32) * mat_a.size(1);
+    scale_b_elems = ceil_div<int64_t>(mat_b.size(1), 32) * mat_b.size(0);
+    scale_layout = "NO_SWIZZLE";
   }
 #else
   auto scale_a_elems = round_up<int64_t>(mat_a.size(0), 128) * round_up<int64_t>(ceil_div<int64_t>(mat_a.size(1), 32), 4);
   auto scale_b_elems = round_up<int64_t>(mat_b.size(1), 128) * round_up<int64_t>(ceil_div<int64_t>(mat_b.size(0), 32), 4);
-  TORCH_CHECK_VALUE(scale_a_elems == scale_a.numel(),
-         "For Blockwise scaling scale_a should have ", scale_a_elems, " elements, got: ", scale_a.numel());
-  TORCH_CHECK_VALUE(scale_b_elems == scale_b.numel(),
-         "For Blockwise scaling scale_b should have ", scale_b_elems, " elements, got: ", scale_b.numel());
+  const char* scale_layout = "SWIZZLE_32_4_4";
 #endif
+  TORCH_CHECK_VALUE(scale_a_elems == scale_a.numel(),
+         "For Blockwise scaling with ", scale_layout, " scale_a should have ", scale_a_elems, " elements, got: ", scale_a.numel());
+  TORCH_CHECK_VALUE(scale_b_elems == scale_b.numel(),
+         "For Blockwise scaling with ", scale_layout, " scale_b should have ", scale_b_elems, " elements, got: ", scale_b.numel());
 
 #ifndef USE_ROCM
   TORCH_CHECK_VALUE(swizzle_a == SwizzleType::SWIZZLE_32_4_4, "scale_a must be swizzled to SWIZZLE_32_4_4 format");
@@ -1236,30 +1211,27 @@ _scaled_mxfp4_mxfp4(
 #ifdef USE_ROCM
   // AMD
   check_mx_swizzle(mat_a, swizzle_a, swizzle_b);
+  int64_t scale_a_elems, scale_b_elems;
+  const char* scale_layout;
   if (swizzle_a == SwizzleType::SWIZZLE_32_8) {
-    auto scale_a_elems = blockwise_1x32_numel_32_8(mat_a.size(0), K_multiplier * mat_a.size(1));
-    auto scale_b_elems = blockwise_1x32_numel_32_8(mat_b.size(1), K_multiplier * mat_b.size(0));
-    TORCH_CHECK_VALUE(scale_a_elems == scale_a.numel(),
-           "For SWIZZLE_32_8 scaling scale_a should have ", scale_a_elems, " elements, got: ", scale_a.numel());
-    TORCH_CHECK_VALUE(scale_b_elems == scale_b.numel(),
-           "For SWIZZLE_32_8 scaling scale_b should have ", scale_b_elems, " elements, got: ", scale_b.numel());
+    scale_a_elems = blockwise_1x32_numel_32_8(mat_a.size(0), K_multiplier * mat_a.size(1));
+    scale_b_elems = blockwise_1x32_numel_32_8(mat_b.size(1), K_multiplier * mat_b.size(0));
+    scale_layout = "SWIZZLE_32_8";
   } else {
-    auto scale_a_elems = ceil_div<int64_t>(K_multiplier * mat_a.size(0), 32) * mat_a.size(1);
-    auto scale_b_elems = ceil_div<int64_t>(K_multiplier * mat_b.size(1), 32) * mat_b.size(0);
-    TORCH_CHECK_VALUE(scale_a_elems == scale_a.numel(),
-           "For Blockwise scaling scale_a should have ", scale_a_elems, " elements, got: ", scale_a.numel());
-    TORCH_CHECK_VALUE(scale_b_elems == scale_b.numel(),
-           "For Blockwise scaling scale_b should have ", scale_b_elems, " elements, got: ", scale_b.numel());
+    scale_a_elems = ceil_div<int64_t>(K_multiplier * mat_a.size(0), 32) * mat_a.size(1);
+    scale_b_elems = ceil_div<int64_t>(K_multiplier * mat_b.size(1), 32) * mat_b.size(0);
+    scale_layout = "NO_SWIZZLE";
   }
 #else
   // NVIDIA
   auto scale_a_elems = round_up<int64_t>(mat_a.size(0), 128) * round_up<int64_t>(ceil_div<int64_t>(K_multiplier * mat_a.size(1), 32), 4);
   auto scale_b_elems = round_up<int64_t>(mat_b.size(1), 128) * round_up<int64_t>(ceil_div<int64_t>(K_multiplier * mat_b.size(0), 32), 4);
-  TORCH_CHECK_VALUE(scale_a_elems == scale_a.numel(),
-         "For Blockwise scaling scale_a should have ", scale_a_elems, " elements, got: ", scale_a.numel());
-  TORCH_CHECK_VALUE(scale_b_elems == scale_b.numel(),
-         "For Blockwise scaling scale_b should have ", scale_b_elems, " elements, got: ", scale_b.numel());
+  const char* scale_layout = "SWIZZLE_32_4_4";
 #endif
+  TORCH_CHECK_VALUE(scale_a_elems == scale_a.numel(),
+         "For Blockwise scaling with ", scale_layout, " scale_a should have ", scale_a_elems, " elements, got: ", scale_a.numel());
+  TORCH_CHECK_VALUE(scale_b_elems == scale_b.numel(),
+         "For Blockwise scaling with ", scale_layout, " scale_b should have ", scale_b_elems, " elements, got: ", scale_b.numel());
 
 #ifndef USE_ROCM
   // NVIDIA

@@ -7313,6 +7313,12 @@ def _check_scaled_mm_sizes(
                 expected_a_size = num_k_blocks * m
                 expected_b_size = num_k_blocks * n
             else:
+                # v1 has no swizzle argument, so it accepts only this layout,
+                # matching `blockwise_1x32_numel` in cuda/ScaledBlas.cpp. At
+                # shapes where the padding coincides (e.g. m=128, _k=256) a
+                # gfx950 32x8-tiled buffer has the same element count and is
+                # accepted here but read as unswizzled; such callers must use
+                # `_scaled_mm_v2` with an explicit swizzle.
                 padded_num_k_blocks = ceil_div(num_k_blocks, 4) * 4
 
                 expected_a_size = (
@@ -7322,15 +7328,7 @@ def _check_scaled_mm_sizes(
                     block_size_mn * ceil_div(n, block_size_mn) * padded_num_k_blocks
                 )
 
-            # Which of the two layouts ROCm takes depends on the arch, which meta
-            # cannot query, so accept the 32x8-tiled sizes as well.
-            alt_a_size = alt_b_size = None
-            if torch.version.hip and scale_a.dtype == torch.float8_e8m0fnu:
-                padded_k_blocks_32_8 = ceil_div(num_k_blocks, 8) * 8
-                alt_a_size = ceil_div(m, 32) * 32 * padded_k_blocks_32_8
-                alt_b_size = ceil_div(n, 32) * 32 * padded_k_blocks_32_8
-
-            if (scale_a.numel() == alt_a_size and scale_b.numel() == alt_b_size) or (
+            if (
                 scale_a.numel() == expected_a_size
                 and scale_b.numel() == expected_b_size
             ):
