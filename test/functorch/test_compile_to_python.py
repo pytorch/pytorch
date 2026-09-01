@@ -11,6 +11,7 @@ from torch._functorch._aot_autograd.codegen import GeneratedSource
 from torch._functorch._aot_autograd.to_standalone_python import (
     _compile_to_python_with_state,
     _compose_standalone_module,
+    _compose_training_module,
     _find_effectful_op,
     _known_helper_table,
     _module_level_names,
@@ -1516,6 +1517,16 @@ class TestAOTComposeGuards(TestCase):
             lambda: None,
             origin_id,
         )
+
+    def test_backward_state_training_graph_rejected(self):
+        # A BackwardState-carrying training graph must be rejected up front:
+        # composed into standalone source, its backward hooks would silently
+        # never fire and served gradients would be wrong.
+        import types as _types
+
+        spec = _types.SimpleNamespace(backward_state_indices=[0])
+        with self.assertRaisesRegex(NotImplementedError, "BackwardState"):
+            _compose_training_module("", [], [], spec, None, lambda: None)
 
     def test_backward_wrapper_rejected(self):
         # A backward wrapper is out of scope for forward lowering, so it is rejected up

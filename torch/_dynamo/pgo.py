@@ -1000,6 +1000,13 @@ def get_code_state() -> defaultdict[CodeId, CodeState]:
 
 
 def put_code_state() -> None:
+    if _CODE_STATE_OVERRIDE.get() is not None:
+        # Symmetric with get_code_state: an overridden (capture-session)
+        # compile must not rewrite the process-global profile to the local /
+        # remote caches or emit PGO trace artifacts.
+        log.info("put_code_state: code state overridden, will not write")
+        return
+
     if _CODE_STATE is None:
         log.info("put_code_state: never initialized, will not write")
         return

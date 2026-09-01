@@ -39,7 +39,7 @@ import weakref
 from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
-from typing import Any, cast, NamedTuple, NoReturn, TYPE_CHECKING
+from typing import Any, cast, NamedTuple, TYPE_CHECKING
 from typing_extensions import LiteralString, TypeAliasType, TypeVar
 from weakref import ReferenceType
 
@@ -1022,14 +1022,6 @@ def get_key_index(dct: dict[Any, Any], key: object) -> int:
 
 def get_key_index_source(source: Any, index: Any) -> str:
     return f"list(dict.keys({source}))[{index}]"
-
-
-def raise_local_type_error(obj: object) -> NoReturn:
-    raise TypeError(
-        f"Type {type(obj)} for object {obj} cannot be saved "
-        + "into torch.compile() package since it's defined in local scope. "
-        + "Please define the class at global scope (top level of a module)."
-    )
 
 
 def should_optimize_getattr_on_nn_module(value: object) -> bool:
@@ -4621,7 +4613,7 @@ def pickle_guards_state(
 
     try:
         pickler.dump(state)
-    except AttributeError as e:
+    except (AttributeError, TypeError, pickle.PicklingError) as e:
         raise torch._dynamo.exc.PackageError(str(e)) from e
     return buf.getvalue()
 
@@ -4841,11 +4833,16 @@ class CheckFunctionManager:
                 # NB comment there).
                 formatted_traceback = traceback.format_exc().split("\n")
                 stripped: set[int] = set()
-                link: BaseException | None = e
-                while link is not None and id(link) not in stripped:
+                pending: list[BaseException] = [e]
+                while pending:
+                    link = pending.pop()
+                    if id(link) in stripped:
+                        continue
                     stripped.add(id(link))
                     link.__traceback__ = None
-                    link = link.__cause__ or link.__context__
+                    for nxt in (link.__cause__, link.__context__):
+                        if nxt is not None:
+                            pending.append(nxt)
                 self.guards_serialization_failure = e
                 self.output_graph.bypass_package(
                     f"Guard evaluation failed: {str(e)}",
@@ -4895,7 +4892,13 @@ class CheckFunctionManager:
                 if guard._unserializable:
                     # Only call builder.get again if we know we're going to throw
                     obj = builder.get(guard)
-                    raise_local_type_error(obj)
+                    raise torch._dynamo.exc.GuardSerializationError(
+                        guard_type,
+                        guard.name or "",
+                        f"Type {type(obj)} for object {obj} cannot be saved "
+                        "into torch.compile() package since it's defined in local scope. "
+                        "Please define the class at global scope (top level of a module).",
+                    )
             elif (
                 guard_type in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
             ):

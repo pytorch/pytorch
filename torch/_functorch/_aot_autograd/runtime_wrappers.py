@@ -4286,6 +4286,10 @@ class _AutogradBackwardCompiler:
     pruned_backward_output_indices: dict[int, tuple[int, ...]] = field(
         default_factory=dict
     )
+    # Masks that resolved to the materialize-zero-tangents fallback: they run
+    # the base compiled_bw, so a recurrence must not re-run the whole
+    # specialization ladder (and a fresh backward compile) per backward call.
+    materialize_fallback_masks: set[int] = field(default_factory=set)
     lazy_backward_context_prepared: bool = False
 
     def can_specialize_undefined_grad_outputs(self) -> bool:
@@ -4391,6 +4395,30 @@ class _AutogradBackwardCompiler:
 
         kept_arg_indices: tuple[int, ...] | None = None
 
+        if (
+            specialization_key in self.materialize_fallback_masks
+            and self.compiled_bw is not None
+        ):
+            memo_indices = _bitmask_to_indices(specialization_key)
+            if all(
+                idx < len(grad_output_prototypes)
+                and grad_output_prototypes[idx] is not None
+                for idx in memo_indices
+            ):
+                _materialize_missing_tangent_args(
+                    all_args,
+                    bw_module,
+                    self.fw_metadata,
+                    memo_indices,
+                    grad_output_prototypes,
+                    grad_output_prototype_objects,
+                )
+                return (
+                    self.compiled_bw,
+                    all_args,
+                    self.get_pruned_backward_output_indices(undefined_grad_out_indices),
+                )
+
         if specialization_key:
             specialization_indices = _bitmask_to_indices(specialization_key)
             specialized = None
@@ -4473,7 +4501,16 @@ class _AutogradBackwardCompiler:
                     grad_output_prototypes,
                     grad_output_prototype_objects,
                 )
+                self.materialize_fallback_masks.add(specialization_key)
                 specialization_key = 0
+                if self.compiled_bw is not None:
+                    return (
+                        self.compiled_bw,
+                        all_args,
+                        self.get_pruned_backward_output_indices(
+                            undefined_grad_out_indices
+                        ),
+                    )
             else:
                 bw_module, placeholder_list, kept_arg_indices = specialized
 

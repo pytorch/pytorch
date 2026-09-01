@@ -1408,6 +1408,9 @@ class _DynamoPythonBackend:
         self.is_dynamic = is_dynamic
         self._call = call
         self._compile_state = compile_state
+        # Masks whose deferred backward compile already failed: retrying them
+        # would re-run the same expensive failing compile on every rebuild.
+        self._failed_masks: set[int] = set()
         if compile_state is not None:
             globals_dict = getattr(call, "__globals__", None)
             if not isinstance(globals_dict, dict):
@@ -1431,6 +1434,7 @@ class _DynamoPythonBackend:
         observed = self._observed_masks() | set(extra_masks)
         if self._compile_state is not None:
             observed = {self._compile_state.canonical_mask(mask) for mask in observed}
+        observed -= self._failed_masks
         # Always cover the ordinary all-tangents-defined backward (mask 0): a
         # caller who only ran partial backwards between stateful calls must not
         # regress the rewritten artifact's default path.
@@ -1452,12 +1456,14 @@ class _DynamoPythonBackend:
             except Exception:
                 # A mask whose deferred compile fails must not poison every later
                 # rebuild (it stays in the observed set forever): drop it from
-                # this snapshot with a warning. Serving that pattern then fails
-                # like any unobserved pattern.
+                # this snapshot with a warning and remember the failure so later
+                # rebuilds do not re-run the same failing compile. Serving that
+                # pattern then fails like any unobserved pattern.
                 compiled = set(self._compile_state._observed_variants)
                 usable = tuple(mask for mask in masks if mask in compiled)
                 if set(usable) == set(masks):
                     raise
+                self._failed_masks.update(set(masks) - set(usable))
                 log.warning(
                     "precompile stateful snapshot could not compile tangent "
                     "mask(s) %s; the rewritten artifact covers only %s.",
@@ -2286,11 +2292,18 @@ def _make_dynamo_capture_target(
 
 def _keep_serializable_capture_guards(guards: Sequence[Any]) -> list[bool]:
     from torch._dynamo.guards import CheckFunctionManager
+    from torch._guards import GuardProvenance
 
+    # Drop by typed provenance, not is_global: is_global is true only for
+    # chains rooted at exactly GlobalSource, so ImportSource-rooted guards
+    # (e.g. the ID_MATCH __import__('torch') guard a pytree call installs)
+    # would be kept and then fail serialization, aborting capture for a
+    # supported input pattern. Provenance GLOBAL covers both; the environment
+    # is a declared caller invariant, so these guards may be dropped.
     unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
     return [
         not (
-            guard.is_global
+            guard.provenance is GuardProvenance.GLOBAL
             and (
                 guard.guard_type in unsupported
                 or any(kind in unsupported for kind in guard.derived_guard_types)
@@ -3632,6 +3645,15 @@ class _PrecompileApi:
         if backend not in ("inductor", "eager"):
             raise ValueError(
                 f"precompile backend must be 'inductor' or 'eager', got {backend!r}."
+            )
+        # Equal paths would make the cache write clobber the artifact temp
+        # file mid-rewrite, destroying the previously loadable artifact.
+        import os
+
+        if os.path.realpath(artifact_path) == os.path.realpath(cache_path):
+            raise ValueError(
+                "precompile.stateful requires distinct artifact_path and "
+                f"cache_path, got {artifact_path!r} for both."
             )
         return _precompile_dynamo_stateful(
             fn,

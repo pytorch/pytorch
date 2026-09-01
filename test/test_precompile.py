@@ -49,6 +49,11 @@ def _precompile_dynamo_torch_sin(x):
     return torch.sin(x)
 
 
+def _precompile_dynamo_pytree_sum(x):
+    d = {"a": x, "b": x + 1}
+    return sum(torch.utils._pytree.tree_leaves(d))
+
+
 def _precompile_dynamo_sin_and_passthrough(x):
     return torch.sin(x), x
 
@@ -1532,6 +1537,45 @@ class TestPrecompile(TestCase):
         self.assertEqual(x.grad, x_ref.grad)
         x.grad = None
 
+    def test_tracer_dynamo_eager_backward_supports_higher_order(self):
+        # The eager backend's backward is live autograd, so grad-of-grad works
+        # exactly as in eager: pin the documented "any tangent pattern and
+        # higher-order grad work" half of the backward-order contract.
+        x = torch.randn(4, requires_grad=True)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_torch_sin,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        out = torch.compiler.precompile.load(code, cache)(x)
+        (grad,) = torch.autograd.grad(out.sum(), x, create_graph=True)
+        (grad2,) = torch.autograd.grad(grad.sum(), x)
+        x_ref = x.detach().clone().requires_grad_()
+        ref = _precompile_dynamo_torch_sin(x_ref)
+        (ref_grad,) = torch.autograd.grad(ref.sum(), x_ref, create_graph=True)
+        (ref_grad2,) = torch.autograd.grad(ref_grad.sum(), x_ref)
+        self.assertEqual(grad, ref_grad)
+        self.assertEqual(grad2, ref_grad2)
+
+    def test_tracer_dynamo_inductor_double_backward_raises(self):
+        # The inductor backend precompiles only the first-order backward; the
+        # emitted _DoubleBackward bridge must raise the documented error on a
+        # second-order backward instead of silently producing wrong grads.
+        x = torch.randn(4, requires_grad=True)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_torch_sin,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="inductor",
+        )
+        out = torch.compiler.precompile.load(code, cache)(x)
+        (grad,) = torch.autograd.grad(out.sum(), x, create_graph=True)
+        with self.assertRaisesRegex(
+            RuntimeError, "does not currently support double backward"
+        ):
+            grad.sum().backward()
+
     @parametrize("backend", ["eager", "inductor"])
     def test_tracer_dynamo_serves_eager_semantics_under_no_grad(self, backend):
         # The driver dispatches under the pinned capture-time grad mode (the
@@ -2161,6 +2205,38 @@ class TestPrecompile(TestCase):
             served = loaded(y)
             served.sum().backward()
             self.assertEqual(y.grad, y.detach().cos())
+
+    def test_tracer_dynamo_drops_import_rooted_global_guards(self):
+        # A pytree call installs an ID_MATCH guard rooted at ImportSource
+        # (__import__('torch')): provenance GLOBAL, so capture must drop it
+        # like its GlobalSource-rooted siblings instead of aborting when guard
+        # serialization rejects it.
+        x = torch.randn(4)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_pytree_sum,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(loaded(x), _precompile_dynamo_pytree_sum(x))
+
+    def test_tracer_dynamo_stateful_rejects_equal_paths(self):
+        # Equal paths would make the cache write clobber the artifact temp
+        # file mid-rewrite and destroy the previously loadable artifact.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "f.py")
+            with self.assertRaisesRegex(
+                ValueError, "distinct artifact_path and cache_path"
+            ):
+                torch.compiler.precompile.stateful(
+                    _precompile_dynamo_torch_sin,
+                    example_inputs=[(torch.randn(4),)],
+                    state=None,
+                    backend="eager",
+                    artifact_path=path,
+                    cache_path=path,
+                )
 
     def test_tracer_dynamo_stateful_survives_a_call_that_raised(self):
         # A call that raises has already told the caller; later good calls must

@@ -1068,6 +1068,7 @@ class _CompileToPythonState:
                 specialization_indices = _rw._bitmask_to_indices(mask)
                 result = None
                 attempted_exact_retrace = False
+                retrace_decline_reasons: list[str] = []
                 lazy_info = self.spec.lazy_backward_info
                 if (
                     isinstance(lazy_info, _rw.AutogradLazyBackwardCompileInfo)
@@ -1084,7 +1085,21 @@ class _CompileToPythonState:
                             specialization_indices,
                             self.backward_graph,
                             self.backward_inputs,
+                            decline_reason=retrace_decline_reasons,
                         )
+                if result is None:
+                    # The retrace can decline for reasons unrelated to the ABI
+                    # (e.g. the ambient autocast state differs between forward
+                    # and backward, the standard AMP pattern); structural
+                    # specialization preserves the saved-activation ABI and
+                    # stays available, exactly as on the live runtime path.
+                    result = _rw._specialize_bw_module_for_undefined_grad_outputs(
+                        self.backward_graph,
+                        self.backward_inputs,
+                        self.spec.fw_metadata,
+                        specialization_indices,
+                        list(self.backward_inputs),
+                    )
                 if (
                     result is None
                     and attempted_exact_retrace
@@ -1093,18 +1108,14 @@ class _CompileToPythonState:
                         for meta in self.spec.fw_metadata.subclass_tangent_meta
                     )
                 ):
+                    reasons = (
+                        "; ".join(retrace_decline_reasons)
+                        or "the backward retrace declined"
+                    )
                     raise torch.compiler.PrecompileError(
                         "precompile could not compile an observed undefined-output "
-                        "tangent pattern without changing the forward's saved "
-                        "activation ABI"
-                    )
-                if result is None:
-                    result = _rw._specialize_bw_module_for_undefined_grad_outputs(
-                        self.backward_graph,
-                        self.backward_inputs,
-                        self.spec.fw_metadata,
-                        specialization_indices,
-                        list(self.backward_inputs),
+                        f"tangent pattern: {reasons}; structural specialization "
+                        "did not apply either."
                     )
                 if result is None:
                     pruned = (
