@@ -3,6 +3,7 @@
 """End-to-end nested-reduction behavior and kernel-form tests."""
 
 import re
+from unittest.mock import patch
 
 import torch
 import torch._inductor.config as inductor_config
@@ -24,6 +25,14 @@ from torch.testing._internal.inductor_utils import (
     get_kernel_launch,
     GPU_TYPE,
     HAS_GPU,
+)
+
+
+MXFP4_RECIP_UE8M0_ASM = (
+    "{.reg .pred p_zero; .reg .s32 neg_exp; .reg .f32 neg_exp_f, result; "
+    "setp.eq.u32 p_zero, $1, 0; sub.s32 neg_exp, 127, $1; "
+    "cvt.rn.f32.s32 neg_exp_f, neg_exp; ex2.approx.f32 result, neg_exp_f; "
+    "selp.f32 $0, 0f00000000, result, p_zero;}"
 )
 
 
@@ -54,6 +63,7 @@ class TestBase(TestCase):
         torch._dynamo.utils.clear_compilation_metrics()
         self._nested_reduction_ctx = inductor_config.patch(
             {
+                "split_reductions": False,
                 "triton.nested_reduction": True,
                 "loop_ordering_after_fusion": True,
             }
@@ -72,14 +82,30 @@ class TestBase(TestCase):
         act = torch.compile(f)(*args)
         self.assertEqual(act, ref, atol=tol, rtol=tol)
 
-    def check_nested_matches_unnested(self, f, args, tol=1e-2):
+    def get_unnested_reference(self, f, args, **compile_kwargs):
         with inductor_config.patch("triton.nested_reduction", False):
-            ref = torch.compile(f)(*args)
-
+            ref = torch.compile(f, **compile_kwargs)(*args)
         metrics.reset()
         torch._dynamo.reset()
+        return ref
+
+    def check_nested_matches_unnested(self, f, args, tol=1e-2):
+        ref = self.get_unnested_reference(f, args)
         act = torch.compile(f)(*args)
         self.assertEqual(act, ref, atol=tol, rtol=tol)
+
+    def _check_looped_internal_source(self, f, shape, expected_passes):
+        if self.force_persistent_outer_reduction is not False:
+            self.skipTest("requires a looped reduction")
+
+        x = torch.randn(*shape, device=GPU_TYPE, dtype=torch.bfloat16)
+        expected = self.get_unnested_reference(f, (x,))
+        actual, sources = run_and_get_code(torch.compile(f), x)
+        self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
+        self.check_fusion()
+        FileCheck().check_count(
+            "for r0_offset in tl.range", expected_passes, exactly=True
+        ).run("\n".join(sources))
 
     def check_fusion(self, expected_kernels=1):
         self.assertEqual(metrics.codegen_nested_reduction, 1)
@@ -107,10 +133,125 @@ def _layernorm(x_flat):
     return (x_flat - mean) / torch.sqrt(var + 1e-6)
 
 
+def _mxfp6_pack_four_to_three(values, realize=True):
+    if realize:
+        values = torch.ops._inductor_test.realize(values)
+    values = values.view(*values.shape[:-1], values.shape[-1] // 4, 4)
+    low = values[..., 0] | ((values[..., 1] & 0x03) << 6)
+    middle = ((values[..., 1] >> 2) & 0x0F) | ((values[..., 2] & 0x0F) << 4)
+    high = ((values[..., 2] >> 4) & 0x03) | (values[..., 3] << 2)
+    if realize:
+        low = torch.ops._inductor_test.realize(low)
+        middle = torch.ops._inductor_test.realize(middle)
+        high = torch.ops._inductor_test.realize(high)
+    return torch.stack((low, middle, high), dim=-1).to(torch.uint8)
+
+
+def _mxfp6_four_to_three_quantize(x, group_size=32):
+    B, D = x.shape
+    x = torch.nn.functional.silu(x) * 1.125
+    xg = x.view(B, D // group_size, group_size).float()
+    scale = xg.abs().amax(dim=-1).clamp(min=1e-12) / 7.5
+    values = (xg / scale.unsqueeze(-1)).round().to(torch.int32) & 0x3F
+    return _mxfp6_pack_four_to_three(values).view(B, D // 4, 3), scale
+
+
+def _rmsnorm_factor4_three_output_epilogue(x, weight, group_size=32):
+    B, D = x.shape
+    normalized = torch.nn.functional.rms_norm(x, (D,), weight)
+    groups = normalized.view(B, D // group_size, group_size)
+    scale = groups.abs().amax(dim=-1)
+    lanes = groups.view(B, D // group_size, group_size // 4, 4)
+    outputs = tuple(
+        torch.ops._inductor_test.realize(
+            (lane + 1) * lanes[..., lane] / scale.unsqueeze(-1)
+        )
+        for lane in range(3)
+    )
+    return torch.stack(outputs, dim=-1), scale
+
+
+def _mxfp6_internal_source_full_resolution_fork(x, group_size=32):
+    B, D = x.shape
+    xg = x.view(B, D // group_size, group_size).float()
+    scale = xg.abs().amax(dim=-1).clamp_min(1e-6) / 7.5
+    scaled = torch.ops._inductor_test.realize(xg / scale.unsqueeze(-1))
+    values = torch.ops._inductor_test.realize(scaled.round().to(torch.int32) & 0x3F)
+    sibling = torch.ops._inductor_test.realize(scaled + 1)
+    return _mxfp6_pack_four_to_three(values), scale, sibling
+
+
+def _mxfp6_preshuffled_quantize(x, shifted=False):
+    B, D = x.shape
+    G = 32
+    scale_group = 4
+    subs = 3
+    row_tiles = B // (scale_group * 32)
+    k_tiles = D // (2 * G * subs)
+
+    x = torch.nn.functional.silu(x) * 1.125
+    blocks = x.view(row_tiles, scale_group, 32, k_tiles, subs, 2, G)
+    blocks = blocks.permute(0, 3, 5, 2, 4, 1, 6).reshape(
+        row_tiles, k_tiles, 64, subs, scale_group, G
+    )
+    blocks = blocks.float()
+    max_abs = blocks.abs().amax(dim=-1)
+    scale_exponent = torch.ceil(torch.log2((max_abs / 7.5).clamp(min=2.0**-127)))
+    scale_exponent = torch.where(
+        max_abs == 0, torch.zeros_like(scale_exponent), scale_exponent
+    ).clamp(min=-127.0, max=127.0)
+    values = _float_to_mxfp6_e2m3(blocks / torch.pow(2.0, scale_exponent).unsqueeze(-1))
+    packed = _mxfp6_pack_four_to_three(values.to(torch.int32) & 0x3F, realize=False)
+    packed = packed.reshape(row_tiles, k_tiles, 2, 32, subs, scale_group, G // 4, 3)
+    if shifted:
+        packed = torch.roll(packed, 1, -2)
+    packed = packed.permute(0, 5, 3, 1, 4, 2, 6, 7)
+    return packed.reshape(B, D * 3 // 4), scale_exponent.reshape(-1)
+
+
+def _float_to_mxfp6_e2m3(x):
+    sign = (x < 0).to(torch.int32)
+    absolute = torch.clamp(torch.abs(x), max=7.5)
+    subnormal_mantissa = torch.round(absolute * 8.0).to(torch.int32)
+    subnormal_bits = (sign << 5) | torch.where(
+        subnormal_mantissa >= 8,
+        torch.full_like(subnormal_mantissa, 1 << 3),
+        torch.clamp(subnormal_mantissa, min=0),
+    )
+    exponent = torch.where(
+        absolute < 2.0,
+        torch.ones_like(absolute),
+        torch.where(
+            absolute < 4.0,
+            torch.full_like(absolute, 2.0),
+            torch.full_like(absolute, 3.0),
+        ),
+    )
+    fraction = absolute / torch.pow(2.0, exponent - 1.0) - 1.0
+    mantissa = torch.round(fraction * 8.0).to(torch.int32)
+    exponent = exponent.to(torch.int32)
+    carry = mantissa >= 8
+    exponent = torch.where(carry, exponent + 1, exponent)
+    mantissa = torch.where(carry, torch.zeros_like(mantissa), mantissa)
+    overflow = exponent > 3
+    exponent = torch.where(overflow, torch.full_like(exponent, 3), exponent)
+    mantissa = torch.where(overflow, torch.full_like(mantissa, 7), mantissa)
+    normal_bits = (sign << 5) | (exponent << 3) | mantissa
+    bits = torch.where(absolute < 1.0, subnormal_bits, normal_bits)
+    return torch.where(absolute == 0, torch.zeros_like(bits), bits).to(torch.uint8)
+
+
 def _swizzle_scale(scale):
     rows, cols = scale.shape
     blocks = scale.view(rows // 128, 128, cols // 4, 4).permute(0, 2, 1, 3)
     return blocks.reshape(-1, 4, 32, 4).transpose(1, 2).reshape(rows, cols)
+
+
+def _mxfp6_pack_scale_swizzle(x, group_size=32, shifted=False):
+    packed, scale = _mxfp6_four_to_three_quantize(x, group_size)
+    if shifted:
+        scale = torch.roll(scale, 1, -1)
+    return packed, _swizzle_scale(scale)
 
 
 def _rmsnorm_block_scale_swizzle(x, weight, G):
@@ -259,6 +400,20 @@ class _NestedReductionBase:
     @parametrize("G", [8, 16])
     def test_rmsnorm_block_amax(self, G):
         self._norm_block_reduce(_rmsnorm, "amax", 128, 8192, G)
+
+    def test_multiple_parent_reductions_block_amax(self):
+        B, D, G = 32, 4096, 16
+
+        def f(x):
+            row_sum = x.sum(dim=-1, keepdim=True)
+            row_square_sum = (x * x).sum(dim=-1, keepdim=True)
+            normalized = (x - row_sum / D) * torch.rsqrt(row_square_sum / D + 1e-6)
+            block_amax = normalized.reshape(B, D // G, G).abs().amax(dim=-1)
+            return block_amax, row_sum, row_square_sum
+
+        x = torch.randn(B, D, device=GPU_TYPE)
+        self.check_numeric(f, (x,))
+        self.check_fusion()
 
     @parametrize("reduce_fn", ["sum", "amin"])
     def test_layernorm_block_reduce(self, reduce_fn):
@@ -771,6 +926,580 @@ class _NestedReductionBase:
             self.check_numeric(f, (x, w))
         self.check_fusion(1 if expect_fullres_consumer else None)
 
+    def test_nested_reduction_rejects_shifted_parent_output(self):
+        import torch.nn.functional as F
+
+        B, D, G = 4, 1024, 16
+
+        def f(x):
+            y = F.rms_norm(x, (D,))
+            shifted = torch.roll(y, 1, -1)
+            scale = shifted.view(B, D // G, G).abs().amax(dim=-1)
+            return y, scale
+
+        x = torch.randn(B, D, device=GPU_TYPE)
+        self.check_numeric(f, (x,))
+        self.check_no_fusion()
+
+    # G=2 makes the REDUCED and SUB_PARENT domains share a numel
+    # (outer_rnumel // G == outer_rnumel // 2), so a pair consumer is only
+    # classified correctly if the domain check disambiguates them rather than
+    # matching on numel alone. The values differ -- element 0 of each pair is
+    # not the amax over that pair -- so a misclassification shows up as a
+    # numeric mismatch, not just a lost fusion.
+    @parametrize("D,G", [(1024, 2), (1024, 16), (4608, 16)])
+    @parametrize("benchmark_fusion", [False, True])
+    def test_producer_consumer_rmsnorm_interleaved_pair_epilogue(
+        self, D, G, benchmark_fusion
+    ):
+        import torch.nn.functional as F
+
+        B = 32
+
+        def f(x, weight):
+            y = F.rms_norm(x, (D,), weight)
+            yg = y.view(B, D // G, G)
+            scale = (yg.abs().amax(dim=-1) / 6.0).clamp(min=1e-12, max=448.0)
+            pairs = yg.view(B, D // G, G // 2, 2)
+            packed_surrogate = (pairs[..., 0] + 2 * pairs[..., 1]) / scale.unsqueeze(-1)
+            return packed_surrogate, scale
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        weight = torch.randn(D, device=GPU_TYPE, dtype=torch.bfloat16)
+        with inductor_config.patch("benchmark_fusion", benchmark_fusion):
+            self.check_nested_matches_unnested(f, (x, weight))
+        self.check_fusion(expected_kernels=None if benchmark_fusion else 1)
+
+    def test_nested_reduction_reduced_only_consumer_group_size_two(self):
+        import torch.nn.functional as F
+
+        B, D, G = 32, 1024, 2
+
+        def f(x, weight):
+            y = F.rms_norm(x, (D,), weight)
+            scale = y.view(B, D // G, G).abs().amax(dim=-1)
+            return scale * 2
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        weight = torch.randn(D, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_nested_matches_unnested(f, (x, weight))
+        self.check_fusion()
+
+    def _check_sub_parent_indirect_index_mask(self, f, args):
+        ref = f(*args)
+        act, source_codes = run_and_get_code(torch.compile(f, fullgraph=True), *args)
+        self.assertEqual(act, ref, atol=1e-3, rtol=1e-3)
+        self.check_fusion()
+        FileCheck().check("tl.device_assert").check(
+            "lane2_r0_index_mask & xmask"
+        ).check("tl.load").check("lane2_r0_index_mask & xmask").run(
+            "\n\n".join(source_codes)
+        )
+
+    def test_standalone_sub_parent_preserves_indirect_index_mask(self):
+        B, D = 64, 4608
+
+        def f(x, table):
+            scale = torch.rsqrt(torch.mean(x * x, dim=-1, keepdim=True) + 1e-6)
+            pairs = x.view(B, D // 2, 2)
+            index = (0.01 / (pairs[..., 0].abs() + 1e-11)).long().clamp(min=0)
+            index = torch.where(
+                pairs[..., 0].abs() > 1e-6, torch.zeros_like(index), index
+            )
+            return table[index] * scale + pairs[..., 1] * scale, scale
+
+        x = torch.ones(B, D, device=GPU_TYPE)
+        table = torch.randn(4, device=GPU_TYPE)
+        self._check_sub_parent_indirect_index_mask(f, (x, table))
+
+    @parametrize("G", [2, 16])
+    def test_nested_sub_parent_preserves_indirect_index_mask(self, G):
+        B, D = 64, 4608
+
+        def f(x, table):
+            y = _rmsnorm(x)
+            groups = y.view(B, D // G, G)
+            scale = (groups.abs().amax(dim=-1) / 6.0).clamp(min=1e-12)
+            pairs = groups.view(B, D // G, G // 2, 2)
+            index = (1e-11 / scale).long().unsqueeze(-1).expand_as(pairs[..., 0])
+            return table[index] + pairs[..., 1] / scale.unsqueeze(-1), scale
+
+        x = torch.ones(B, D, device=GPU_TYPE)
+        table = torch.randn(4, device=GPU_TYPE)
+        self._check_sub_parent_indirect_index_mask(f, (x, table))
+
+    @parametrize("scale_first", (False, True))
+    def test_sub_parent_fusion_is_independent_of_nested_append_order(self, scale_first):
+        import torch.nn.functional as F
+
+        B, D, G = 32, 1024, 16
+
+        def f(x, weight):
+            y = F.rms_norm(x, (D,), weight)
+            groups = y.view(B, D // G, G)
+            scale = groups.abs().amax(dim=-1)
+            pairs = groups.view(B, D // G, G // 2, 2)
+            packed = (pairs[..., 0] + 2 * pairs[..., 1]) / scale.unsqueeze(-1)
+            return (scale, packed) if scale_first else (packed, scale)
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        weight = torch.randn(D, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_nested_matches_unnested(f, (x, weight))
+        self.check_fusion()
+
+    @parametrize("dynamic_axis", ["batch", "reduction"])
+    def test_dynamic_sub_parent_epilogue(self, dynamic_axis):
+        import torch.nn.functional as F
+
+        G = 16
+
+        def f(x, weight):
+            batch, dim = x.shape
+            y = F.rms_norm(x, (dim,), weight)
+            yg = y.view(batch, dim // G, G)
+            scale = (yg.abs().amax(dim=-1) / 6.0).clamp(min=1e-12, max=448.0)
+            pairs = yg.view(batch, dim // G, G // 2, 2)
+            return (pairs[..., 0] + 2 * pairs[..., 1]) / scale.unsqueeze(-1)
+
+        shapes = (
+            [(4, 4096), (7, 4096)]
+            if dynamic_axis == "batch"
+            else [(4, 4096), (4, 4608)]
+        )
+        inputs = [
+            (
+                torch.randn(B, D, device=GPU_TYPE),
+                torch.randn(D, device=GPU_TYPE),
+            )
+            for B, D in shapes
+        ]
+        x, weight = inputs[0]
+        if dynamic_axis == "batch":
+            torch._dynamo.mark_dynamic(x, 0)
+        else:
+            torch._dynamo.mark_dynamic(x, 1)
+            torch._dynamo.mark_dynamic(weight, 0)
+        compiled = torch.compile(f, fullgraph=True)
+        for x, weight in inputs:
+            self.assertEqual(compiled(x, weight), f(x, weight), atol=1e-2, rtol=1e-2)
+        self.assertEqual(metrics.codegen_nested_reduction, 1)
+        self.assertEqual(metrics.generated_kernel_count, 1)
+
+    @parametrize("gate", ["max_fusion_size", "no_fuse_buffer"])
+    def test_sub_parent_append_respects_fusion_gate(self, gate):
+        import torch.nn.functional as F
+
+        B, D, G = 32, 1024, 16
+
+        def f(x, weight):
+            y = F.rms_norm(x, (D,), weight)
+            yg = y.view(B, D // G, G)
+            scale = (yg.abs().amax(dim=-1) / 6.0).clamp(min=1e-12, max=448.0)
+            pairs = yg.view(B, D // G, G // 2, 2)
+            return (pairs[..., 0] + 2 * pairs[..., 1]) / scale.unsqueeze(-1)
+
+        def mark_pointwise_outputs_no_fuse(nodes):
+            # comm_lowering uses this barrier to preserve compute/collective overlap.
+            for node in nodes:
+                if not node.is_reduction():
+                    V.graph.no_fuse_buffer_names.update(node.get_buffer_names())
+            return nodes
+
+        patches = {
+            "max_fusion_size": {"max_fusion_size": 2},
+            "no_fuse_buffer": {
+                "_pre_fusion_custom_pass": mark_pointwise_outputs_no_fuse
+            },
+        }
+        patch = patches[gate]
+        patch["fx_graph_cache"] = False
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        weight = torch.randn(D, device=GPU_TYPE, dtype=torch.bfloat16)
+        with inductor_config.patch(patch):
+            self.check_nested_matches_unnested(f, (x, weight))
+        self.assertEqual(metrics.codegen_nested_reduction, 1)
+        self.assertEqual(metrics.generated_kernel_count, 2)
+
+    @parametrize(
+        "B,D,swizzled",
+        ((1, 4096, False), (128, 4096, False), (128, 4608, True)),
+    )
+    @skipIfRocm
+    @skipIfXpu(msg="NVFP4 inline asm requires CUDA")
+    @inductor_config.patch(emulate_precision_casts=True)
+    def test_producer_consumer_rmsnorm_nvfp4_inline_asm(self, B, D, swizzled):
+        if torch.cuda.get_device_capability()[0] < 10:
+            self.skipTest("NVFP4 inline asm requires SM100+")
+
+        def f(x, weight):
+            packed, scale = _rmsnorm_nvfp4(x, weight)
+            return packed, _swizzle_scale(scale) if swizzled else scale
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        w = torch.randn(D, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        # inline_asm_elementwise has no eager implementation.
+        ref = self.get_unnested_reference(f, (x, w), fullgraph=True)
+        act = torch.compile(f, fullgraph=True)(x, w)
+        self.assertEqual(act[0], ref[0])
+        self.assertEqual(act[1].float(), ref[1].float(), atol=1e-2, rtol=1e-2)
+        self.check_fusion()
+
+    @parametrize("B", [1, 128])
+    @skipIfRocm
+    @skipIfXpu(msg="MXFP4 inline asm requires CUDA")
+    def test_producer_consumer_rmsnorm_mxfp4_inline_asm(self, B):
+        if torch.cuda.get_device_capability()[0] < 10:
+            self.skipTest("MXFP4 inline asm requires SM100+")
+
+        D, G = 4096, 32
+
+        def f(x, weight):
+            return _rmsnorm_mxfp4(x, weight, G)
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        weight = torch.randn(D, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        # inline_asm_elementwise has no eager implementation.
+        expected = self.get_unnested_reference(f, (x, weight), fullgraph=True)
+        actual = torch.compile(f, fullgraph=True)(x, weight)
+        self.assertEqual(actual, expected)
+        self.check_fusion()
+
+    def test_producer_consumer_rejects_broadcast_parent_source(self):
+        import torch.nn.functional as F
+
+        B, D, G = 32, 1024, 16
+
+        def f(x, weight):
+            y = F.rms_norm(x, (D,), weight)
+            yg = y.view(B, D // G, G)
+            amax = yg.abs().amax(dim=-1)
+            scale = (amax / 6.0).clamp(min=1e-12, max=448.0)
+            shifted = yg[..., 2].unsqueeze(-1).expand(B, D // G, G // 2)
+            return shifted / scale.unsqueeze(-1), scale
+
+        x = torch.randn(B, D, device=GPU_TYPE)
+        weight = torch.randn(D, device=GPU_TYPE)
+        self.check_nested_matches_unnested(f, (x, weight))
+        self.assertEqual(metrics.codegen_nested_reduction, 1)
+        self.assertGreater(metrics.generated_kernel_count, 1)
+
+    def test_producer_consumer_rejects_conflicting_parent_source_index(self):
+        import torch.nn.functional as F
+
+        B, D, G = 32, 1024, 16
+
+        def f(x, weight):
+            y = F.rms_norm(x, (D,), weight)
+            yg = y.view(B, D // G, G)
+            amax = yg.abs().amax(dim=-1)
+            scale = (amax / 6.0).clamp(min=1e-12, max=448.0)
+            side = yg[..., 2] + scale
+            yg = yg.view(B, D // G, G // 2, 2)
+            even = yg[..., 0] / scale.unsqueeze(-1)
+            odd = yg[..., 1] / scale.unsqueeze(-1)
+            return even, odd, scale, side
+
+        x = torch.randn(B, D, device=GPU_TYPE)
+        weight = torch.randn(D, device=GPU_TYPE)
+        self.check_nested_matches_unnested(f, (x, weight))
+        self.assertEqual(metrics.codegen_nested_reduction, 1)
+        self.assertGreater(metrics.generated_kernel_count, 1)
+
+    def test_producer_consumer_rejects_sub_parent_mutation(self):
+        import torch.nn.functional as F
+
+        B, D, G = 32, 1024, 16
+
+        def f(x, weight, out):
+            y = F.rms_norm(x, (D,), weight)
+            yg = y.view(B, D // G, G)
+            scale = (yg.abs().amax(dim=-1) / 6.0).clamp(min=1e-12, max=448.0)
+            pairs = yg.view(B, D // G, G // 2, 2)
+            out.copy_((pairs[..., 0] + 2 * pairs[..., 1]) / scale.unsqueeze(-1))
+            return scale
+
+        x = torch.randn(B, D, device=GPU_TYPE)
+        weight = torch.randn(D, device=GPU_TYPE)
+        out = torch.empty(B, D // G, G // 2, device=GPU_TYPE)
+        ref_out = torch.empty_like(out)
+        expected = f(x, weight, ref_out)
+        actual = torch.compile(f, fullgraph=True)(x, weight, out)
+        self.assertEqual(actual, expected)
+        self.assertEqual(out, ref_out)
+        self.assertEqual(metrics.codegen_nested_reduction, 1)
+        self.assertEqual(metrics.generated_kernel_count, 2)
+
+    def test_producer_consumer_sub_parent_source_mutated_later(self):
+        B, D, G = 8, 1024, 16
+
+        def f(x):
+            norm = (x.square().mean(-1) + 1e-5).rsqrt()
+            xg = x.view(B, D // G, G)
+            scale = (xg.abs() * norm[:, None, None]).amax(-1).clamp_min(1e-12)
+            pairs = xg.view(B, D // G, G // 2, 2)
+            packed = (pairs[..., 0] + 2 * pairs[..., 1]) / scale.unsqueeze(-1)
+            x.add_(3.0)
+            return packed, scale, x
+
+        x = torch.randn(B, D, device=GPU_TYPE)
+        ref_x = x.clone()
+        expected = f(ref_x)
+        actual = torch.compile(f, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(x, ref_x)
+        self.assertEqual(metrics.codegen_nested_reduction, 1)
+
+    def test_producer_consumer_rejects_sub_parent_grouped_axis_x(self):
+        import torch.nn.functional as F
+
+        B, K, D = 8, 16, 1024
+
+        def f(x, weight):
+            y = F.rms_norm(x, (D,), weight)
+            scale = (y.abs().amax(dim=1) / 6.0).clamp(min=1e-12, max=448.0)
+            pairs = y.view(B, K // 2, 2, D)
+            packed = pairs[:, :, 0] + 2 * pairs[:, :, 1]
+            return packed / scale.unsqueeze(1), scale
+
+        x = torch.randn(B, K, D, device=GPU_TYPE)
+        weight = torch.randn(D, device=GPU_TYPE)
+        self.check_nested_matches_unnested(f, (x, weight))
+        self.assertEqual(metrics.codegen_nested_reduction, 1)
+        self.assertEqual(metrics.generated_kernel_count, 2)
+
+    def test_producer_consumer_rejects_sub_parent_output_reader(self):
+        import torch.nn.functional as F
+
+        B, D, G = 32, 1024, 16
+
+        def f(x, weight):
+            y = F.rms_norm(x, (D,), weight)
+            yg = y.view(B, D // G, G)
+            scale = (yg.abs().amax(dim=-1) / 6.0).clamp(min=1e-12, max=448.0)
+            pairs = yg.view(B, D // G, G // 2, 2)
+            even = pairs[..., 0] / scale.unsqueeze(-1)
+            full = even.repeat_interleave(2, dim=-1).view(B, D)
+            return even, full, scale
+
+        x = torch.randn(B, D, device=GPU_TYPE)
+        weight = torch.randn(D, device=GPU_TYPE)
+        self.check_numeric(f, (x, weight))
+        self.assertEqual(metrics.codegen_nested_reduction, 1)
+        self.check_non_leaf_epilogue_fallback()
+
+    def test_producer_consumer_rejects_shifted_sub_parent_intermediate(self):
+        import torch.nn.functional as F
+
+        B, D, G = 32, 1024, 16
+
+        def f(x, weight):
+            y = F.rms_norm(x, (D,), weight)
+            yg = y.view(B, D // G, G)
+            scale = (yg.abs().amax(dim=-1) / 6.0).clamp(min=1e-12, max=448.0)
+            pairs = yg.view(B, D // G, G // 2, 2)
+            even = torch.ops._inductor_test.realize(pairs[..., 0] / scale.unsqueeze(-1))
+            return even, torch.roll(even, 1, dims=-1), scale
+
+        x = torch.randn(B, D, device=GPU_TYPE)
+        weight = torch.randn(D, device=GPU_TYPE)
+        self.check_nested_matches_unnested(f, (x, weight))
+        self.assertEqual(metrics.codegen_nested_reduction, 1)
+        self.check_non_leaf_epilogue_fallback()
+
+    def test_producer_consumer_rejects_transposed_sub_parent_frame(self):
+        B, D, G = 8, 512, 16
+
+        def f(x):
+            mean = x.float().mean(dim=-1, keepdim=True)
+            var = x.float().var(dim=-1, keepdim=True, correction=0)
+            y = (x.float() - mean) / torch.sqrt(var + 1e-6)
+            yg = y.view(B, D // G, G)
+            scale = (yg.abs().amax(dim=-1) / 6.0).clamp_min(1e-12)
+            pairs = yg.view(B, D // G, G // 2, 2)
+            even = pairs[..., 0] / scale.unsqueeze(-1)
+            transposed = (
+                y.view(B, D // 2, 2)[..., 0].transpose(0, 1).reshape(B, D // G, G // 2)
+            )
+            return even, transposed / scale.unsqueeze(-1), scale
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_nested_matches_unnested(f, (x,))
+        self.assertEqual(metrics.codegen_nested_reduction, 1)
+        self.check_non_leaf_epilogue_fallback()
+
+    def test_producer_consumer_rejects_shifted_reduced_source(self):
+        import torch.nn.functional as F
+
+        B, D, G = 4, 1024, 16
+
+        def f(x):
+            y = F.rms_norm(x, (D,))
+            yg = y.view(B, D // G, G)
+            scale = (yg.abs().amax(dim=-1) / 6.0).clamp(min=1e-12, max=448.0)
+            pairs = yg.view(B, D // G, G // 2, 2)
+            shifted_scale = torch.roll(scale, 1, dims=-1).unsqueeze(-1)
+            return (
+                pairs[..., 0] / shifted_scale,
+                pairs[..., 1] / shifted_scale,
+                scale,
+            )
+
+        x = torch.randn(B, D, device=GPU_TYPE)
+        self.check_nested_matches_unnested(f, (x,))
+        self.assertEqual(metrics.codegen_nested_reduction, 1)
+        self.assertGreater(metrics.generated_kernel_count, 1)
+
+    def test_producer_consumer_sub_parent_intermediate(self):
+        import torch.nn.functional as F
+
+        B, D, G = 32, 1024, 16
+
+        def f(x, weight):
+            y = F.rms_norm(x, (D,), weight)
+            yg = y.view(B, D // G, G)
+            scale = (yg.abs().amax(dim=-1) / 6.0).clamp(min=1e-12, max=448.0)
+            pairs = yg.view(B, D // G, G // 2, 2)
+            even = torch.ops._inductor_test.realize(pairs[..., 0] / scale.unsqueeze(-1))
+            return even + 1, scale
+
+        x = torch.randn(B, D, device=GPU_TYPE)
+        weight = torch.randn(D, device=GPU_TYPE)
+        self.check_nested_matches_unnested(f, (x, weight))
+        self.check_fusion()
+
+    def test_producer_consumer_broadcasts_outer_reduction_output(self):
+        B, D, G = 32, 1024, 16
+
+        def f(x):
+            row_sum = (x.float() * x.float()).sum(dim=-1)
+            rstd = torch.rsqrt(row_sum[:, None] / D + 1e-6)
+            xg = (x.float() * rstd).view(B, D // G, G)
+            scale = xg.abs().amax(dim=-1).clamp(min=1e-12, max=448.0)
+            pairs = xg.view(B, D // G, G // 2, 2)
+            packed = (
+                pairs[..., 0].float()
+                + 2 * pairs[..., 1].float()
+                + row_sum[:, None, None]
+            ) / scale.unsqueeze(-1)
+            return packed, scale, row_sum
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_nested_matches_unnested(f, (x,))
+        self.check_fusion()
+
+    @parametrize("shared_external_source", [False, True])
+    def test_producer_consumer_inlined_parent_full_source(self, shared_external_source):
+        import torch.nn.functional as F
+
+        B, D, G = 32, 1024, 16
+
+        def f(x, weight):
+            y = F.rms_norm(x, (D,), weight)
+            if shared_external_source:
+                z = torch.ops._inductor_test.realize(y + x)
+                scale = z.view(B, D // G, G).abs().amax(dim=-1).clamp_min(1e-12)
+                pairs = x.view(B, D // G, G // 2, 2)
+                packed = (pairs[..., 0] + 2 * pairs[..., 1]) / scale.unsqueeze(-1)
+            else:
+                yg = y.view(B, D // G, G)
+                scale = (yg.abs().amax(dim=-1) / 6.0).clamp(min=1e-12, max=448.0)
+                source = yg + scale.unsqueeze(-1)
+                pairs = source.view(B, D // G, G // 2, 2)
+                packed = pairs[..., 0] + 2 * pairs[..., 1]
+            return packed, scale
+
+        x = torch.randn(B, D, device=GPU_TYPE)
+        weight = torch.randn(D, device=GPU_TYPE)
+        expected = f(x, weight)
+        actual, sources = run_and_get_code(torch.compile(f), x, weight)
+        self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
+        self.check_fusion()
+        expected_splits = 1 if shared_external_source else 2
+        FileCheck().check_count("tl.split(", expected_splits, exactly=True).run(
+            "\n".join(sources)
+        )
+
+    def test_producer_consumer_independent_sub_parent_source(self):
+        import torch.nn.functional as F
+
+        B, D, G = 32, 1024, 16
+
+        def f(x, weight, z):
+            y = F.rms_norm(x, (D,), weight)
+            yg = y.view(B, D // G, G)
+            scale = (yg.abs().amax(dim=-1) / 6.0).clamp(min=1e-12, max=448.0)
+            pairs = yg.view(B, D // G, G // 2, 2)
+            return (pairs[..., 0] + 2 * pairs[..., 1] + z) / scale.unsqueeze(-1)
+
+        x = torch.randn(B, D, device=GPU_TYPE)
+        weight = torch.randn(D, device=GPU_TYPE)
+        z = torch.randn(B, D // G, G // 2, device=GPU_TYPE)
+        self.check_nested_matches_unnested(f, (x, weight, z))
+        self.check_fusion()
+
+    def test_producer_consumer_rejects_shifted_inlined_parent_full_source(self):
+        import torch.nn.functional as F
+
+        B, D, G = 32, 1024, 16
+
+        def f(x, weight):
+            y = F.rms_norm(x, (D,), weight)
+            yg = y.view(B, D // G, G)
+            scale = (yg.abs().amax(dim=-1) / 6.0).clamp(min=1e-12, max=448.0)
+            source = yg + scale.unsqueeze(-1)
+            shifted = source[..., 2].unsqueeze(-1).expand(B, D // G, G // 2)
+            return shifted / scale.unsqueeze(-1), scale
+
+        x = torch.randn(B, D, device=GPU_TYPE)
+        weight = torch.randn(D, device=GPU_TYPE)
+        self.check_nested_matches_unnested(f, (x, weight))
+        self.assertEqual(metrics.codegen_nested_reduction, 1)
+        self.assertGreater(metrics.generated_kernel_count, 1)
+
+    def test_producer_consumer_rejects_sub_parent_output_fullres_reader(self):
+        import torch.nn.functional as F
+
+        B, D, G = 32, 1024, 16
+
+        def f(x, weight):
+            y = F.rms_norm(x, (D,), weight)
+            yg = y.view(B, D // G, G)
+            scale = (yg.abs().amax(dim=-1) / 6.0).clamp(min=1e-12, max=448.0)
+            yg = yg.view(B, D // G, G // 2, 2)
+            even = yg[..., 0] / scale.unsqueeze(-1)
+            odd = yg[..., 1] / scale.unsqueeze(-1)
+            full = torch.stack([even, odd], dim=-1).view(B, D)
+            return even, odd, full, scale
+
+        x = torch.randn(B, D, device=GPU_TYPE)
+        weight = torch.randn(D, device=GPU_TYPE)
+        self.check_nested_matches_unnested(f, (x, weight))
+        self.assertEqual(metrics.codegen_nested_reduction, 1)
+        self.check_non_leaf_epilogue_fallback()
+
+    def test_producer_consumer_rejects_sub_parent_output_reduction_reader(self):
+        import torch.nn.functional as F
+
+        B, D, G = 32, 1024, 16
+
+        def f(x, weight):
+            y = F.rms_norm(x, (D,), weight)
+            yg = y.view(B, D // G, G)
+            scale = (yg.abs().amax(dim=-1) / 6.0).clamp(min=1e-12, max=448.0)
+            yg = yg.view(B, D // G, G // 2, 2)
+            even = yg[..., 0] / scale.unsqueeze(-1)
+            odd = yg[..., 1] / scale.unsqueeze(-1)
+            reduced = even.sum(dim=-1) + odd.sum(dim=-1)
+            return even, odd, reduced, scale
+
+        x = torch.randn(B, D, device=GPU_TYPE)
+        weight = torch.randn(D, device=GPU_TYPE)
+        self.check_nested_matches_unnested(f, (x, weight))
+        self.assertEqual(metrics.codegen_nested_reduction, 1)
+        self.check_non_leaf_epilogue_fallback()
+
     @skipIfRocm
     @skipIfXpu(msg="NVFP4 inline asm requires CUDA")
     def test_standalone_nvfp4_inline_asm(self):
@@ -803,11 +1532,7 @@ class _NestedReductionBase:
 
         x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
 
-        with inductor_config.patch("triton.nested_reduction", False):
-            ref = torch.compile(f, fullgraph=True)(x)
-        torch._dynamo.reset()
-        metrics.reset()
-
+        ref = self.get_unnested_reference(f, (x,), fullgraph=True)
         act = torch.compile(f, fullgraph=True)(x)
         self.assertEqual(act[0], ref[0])
         self.assertEqual(act[1].float(), ref[1].float(), atol=1e-2, rtol=1e-2)
@@ -848,11 +1573,7 @@ class _NestedReductionBase:
             return packed.to(torch.uint8).view(B, D // 2), scale.view(B, D // G), extra
 
         x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
-        with inductor_config.patch("triton.nested_reduction", False):
-            ref = torch.compile(f, fullgraph=True)(x)
-        torch._dynamo.reset()
-        metrics.reset()
-
+        ref = self.get_unnested_reference(f, (x,), fullgraph=True)
         act = torch.compile(f, fullgraph=True)(x)
         self.assertEqual(act[0], ref[0])
         self.assertEqual(act[1].float(), ref[1].float(), atol=1e-2, rtol=1e-2)
@@ -985,14 +1706,6 @@ class _NestedReductionBase:
 
         return f, torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
 
-    @inductor_config.patch("cpp_wrapper", True)
-    @inductor_config.patch("triton.autotune_at_compile_time", True)
-    def test_standalone_sub_parent_cpp_wrapper(self):
-        f, x = self._standalone_sub_parent_graph()
-        with fresh_inductor_cache():
-            self.check_numeric(f, (x,))
-        self.check_fusion()
-
     def test_standalone_sub_parent_has_staged_identity(self):
         from torch._inductor.scheduler import FusedStagedReduction
 
@@ -1042,8 +1755,6 @@ class _NestedReductionBase:
             self.check_numeric(g, (x, z))
         self.assertTrue(saw_staged_reduction)
 
-    # Isolate looped codegen from device-specific split-reduction heuristics.
-    @inductor_config.patch(split_reductions=False)
     def test_looped_standalone_sub_parent_large_group(self):
         if self.force_persistent_outer_reduction is not False:
             self.skipTest("requires a looped reduction")
@@ -1081,6 +1792,279 @@ class _NestedReductionBase:
             act = torch.compile(g, fullgraph=True)(x, z)
         self.assertEqual(act, ref, atol=1e-2, rtol=1e-2)
         self.assertEqual(metrics.codegen_nested_reduction, 1)
+
+    def test_producer_consumer_mxfp6_four_to_three_pack(self):
+        B, D, G = (
+            (8, 16384, 16384)
+            if self.force_persistent_outer_reduction is False
+            else (32, 1024, 32)
+        )
+        values = torch.tensor(
+            [-1.5, -0.75, 0.25, 1.5], device=GPU_TYPE, dtype=torch.bfloat16
+        )
+        x = values.repeat(B, D // values.numel())
+
+        def f(x):
+            return _mxfp6_four_to_three_quantize(x, G)
+
+        self.check_nested_matches_unnested(f, (x,))
+        self.check_fusion()
+
+    @inductor_config.patch(
+        {
+            "fx_graph_cache": False,
+            "loop_ordering_after_fusion": False,
+            "triton.coalesce_tiling_analysis": False,
+        }
+    )
+    def test_rmsnorm_factor4_three_output_epilogue(self):
+        B, D, G = 8, 4096, 32
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        weight = torch.randn(D, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_nested_matches_unnested(
+            _rmsnorm_factor4_three_output_epilogue, (x, weight, G)
+        )
+        self.check_fusion()
+
+    def test_dynamic_batch_mxfp6_four_to_three_pack(self):
+        D = 1024
+
+        def f(x):
+            return _mxfp6_four_to_three_quantize(x, 32)
+
+        inputs = [
+            torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16) for B in (8, 13)
+        ]
+        for x in inputs:
+            torch._dynamo.mark_static(x, 1)
+        with inductor_config.patch("triton.nested_reduction", False):
+            ref_compiled = torch.compile(f, fullgraph=True, dynamic=True)
+            refs = [ref_compiled(x) for x in inputs]
+
+        metrics.reset()
+        torch._dynamo.reset()
+        compiled = torch.compile(f, fullgraph=True, dynamic=True)
+        for x, ref in zip(inputs, refs):
+            self.assertEqual(compiled(x), ref, atol=1e-2, rtol=1e-2)
+        self.check_fusion()
+
+    def test_producer_consumer_mxfp6_four_to_three_pack_exact(self):
+        """Use an exact scale of one to compare eager packing bit-for-bit."""
+        B, D, G = 32, 1024, 32
+
+        def f(x):
+            xg = x.view(B, D // G, G)
+            scale = xg.abs().amax(dim=-1).clamp(min=1e-12) / 8.0
+            values = (xg / scale.unsqueeze(-1)).round().to(torch.int32) & 0x3F
+            return _mxfp6_pack_four_to_three(values).view(B, D // 4, 3), scale
+
+        group = torch.arange(G, device=GPU_TYPE, dtype=torch.float32) % 17 - 8
+        x = group.repeat(B, D // G).view(B, D).contiguous()
+        x[:, ::G] = 8.0  # pin the group max so the scale is exactly 1.0
+
+        expected = f(x)
+        self.assertTrue((expected[1] == 1.0).all())
+        actual = torch.compile(f, fullgraph=True)(x)
+        self.assertEqual(actual[0], expected[0], atol=0, rtol=0)
+        self.assertEqual(actual[1], expected[1], atol=0, rtol=0)
+        self.check_fusion()
+
+    def test_looped_internal_source_uses_second_pass(self):
+        B, D = 8, 16384
+
+        def f(x):
+            source = torch.ops._inductor_test.realize(torch.nn.functional.silu(x))
+            scale = x.float().abs().amax(dim=-1)
+            pairs = source.view(B, D // 2, 2)
+            scale = scale.unsqueeze(-1)
+            return pairs[..., 0] / scale, pairs[..., 1] / scale
+
+        self._check_looped_internal_source(f, (B, D), expected_passes=2)
+
+    def test_looped_internal_source_uses_reduced_output(self):
+        B, D = 8, 16384
+
+        def f(x):
+            source_input = torch.ops._inductor_test.realize(torch.nn.functional.silu(x))
+            scale = x.float().abs().amax(dim=-1)
+            source = torch.ops._inductor_test.realize(
+                source_input + scale.unsqueeze(-1)
+            )
+            pairs = source.view(B, D // 2, 2)
+            return pairs[..., 0] + 1, pairs[..., 1] + 2
+
+        self._check_looped_internal_source(f, (B, D), expected_passes=2)
+
+    def test_looped_internal_source_reuses_final_reduction_pass(self):
+        B, D = 8, 16384
+
+        def f(x):
+            source = torch.ops._inductor_test.realize(torch.nn.functional.silu(x))
+            scale = x.float().abs().amax(dim=-1)
+            post_reduction = torch.ops._inductor_test.realize(
+                x.float() + scale.unsqueeze(-1)
+            )
+            pairs = source.view(B, D // 2, 2)
+            return pairs[..., 0] + 2, pairs[..., 1] + 3, post_reduction
+
+        self._check_looped_internal_source(f, (B, D), expected_passes=2)
+
+    def test_looped_internal_source_closes_final_reduction_pass(self):
+        B, D = 8, 16384
+
+        def f(x):
+            source = torch.ops._inductor_test.realize(torch.nn.functional.silu(x))
+            first_scale = x.float().abs().amax(dim=-1)
+            shifted = torch.ops._inductor_test.realize(
+                x.float() + first_scale.unsqueeze(-1)
+            )
+            scale = shifted.abs().amax(dim=-1).unsqueeze(-1)
+            pairs = source.view(B, D // 2, 2)
+            return pairs[..., 0] / scale, pairs[..., 1] / scale
+
+        self._check_looped_internal_source(f, (B, D), expected_passes=3)
+
+    @parametrize("shifted", [False, True])
+    def test_producer_consumer_mxfp6_preshuffled_four_to_three_pack(self, shifted):
+        B, D = 128, 384
+
+        def f(x):
+            return _mxfp6_preshuffled_quantize(x, shifted)
+
+        x = (torch.arange(B * D, device=GPU_TYPE) % 29 - 14).to(torch.bfloat16).view(
+            B, D
+        ) / 4
+        expected = self.get_unnested_reference(f, (x,))
+        actual = torch.compile(f)(x)
+        self.assertEqual(actual[0], expected[0], atol=0, rtol=0)
+        self.assertEqual(actual[1], expected[1], atol=1e-2, rtol=1e-2)
+        if shifted:
+            unshifted, _scale = _mxfp6_preshuffled_quantize(x, shifted=False)
+            self.assertFalse(torch.equal(expected[0], unshifted))
+            self.check_non_leaf_epilogue_fallback()
+        else:
+            self.check_fusion()
+
+    @parametrize("shifted", [False, True])
+    def test_producer_consumer_mxfp6_pack_scale_swizzle(self, shifted):
+        B, D = 128, 384
+
+        def f(x):
+            return _mxfp6_pack_scale_swizzle(x, shifted=shifted)
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.float16)
+        expected = self.get_unnested_reference(f, (x,))
+        actual = torch.compile(f, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        if shifted:
+            self.check_non_leaf_epilogue_fallback()
+            return
+        self.check_fusion()
+
+    def test_producer_consumer_mxfp6_rejects_shifted_intermediate(self):
+        B, D, G = 32, 1024, 32
+
+        def f(x):
+            xg = torch.nn.functional.silu(x).view(B, D // G, G).float()
+            scale = xg.abs().amax(dim=-1).clamp(min=1e-12) / 7.5
+            base = torch.arange(D, device=x.device).view(1, D // G, G)
+            values = torch.ops._inductor_test.realize(
+                (base + (scale.unsqueeze(-1) > 0).to(torch.int32)) & 0x3F
+            ).view(B, D // 4, 4)
+            low = torch.ops._inductor_test.realize(
+                values[..., 0] | ((values[..., 1] & 0x03) << 6)
+            )
+            middle = torch.ops._inductor_test.realize(
+                ((values[..., 1] >> 2) & 0x0F) | ((values[..., 2] & 0x0F) << 4)
+            )
+            high = torch.ops._inductor_test.realize(
+                ((values[..., 2] >> 4) & 0x03) | (values[..., 3] << 2)
+            )
+            low = torch.roll(low, 1, -1)
+            return torch.stack((low, middle, high), dim=-1).to(torch.uint8), scale
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_nested_matches_unnested(f, (x,))
+        self.check_non_leaf_epilogue_fallback()
+
+    def test_producer_consumer_mxfp6_rejects_nontrailing_output_lane(self):
+        B, D, G = 32, 1024, 32
+
+        def f(x):
+            groups = x.view(B, D // G, G).float()
+            scale = groups.abs().amax(dim=-1).clamp_min(1e-6)
+            values = ((groups / scale.unsqueeze(-1)) * 7).round().to(torch.int32)
+            values = (values & 0x3F).view(B, D // 4, 4)
+            low = values[..., 0] | ((values[..., 1] & 0x03) << 6)
+            middle = ((values[..., 1] >> 2) & 0x0F) | ((values[..., 2] & 0x0F) << 4)
+            high = ((values[..., 2] >> 4) & 0x03) | (values[..., 3] << 2)
+            return torch.stack((low, middle, high), dim=-2).to(torch.uint8), scale
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_nested_matches_unnested(f, (x,))
+        self.check_non_leaf_epilogue_fallback()
+
+    def test_producer_consumer_mxfp6_rejects_source_read_by_reduction(self):
+        B, D, G = 32, 1024, 32
+
+        def f(x):
+            xg = x.view(B, D // G, G).float()
+            scale = xg.abs().amax(dim=-1).clamp_min(1e-6)
+            values = torch.ops._inductor_test.realize(
+                ((xg / scale.unsqueeze(-1)) * 7).round().to(torch.int32) & 0x3F
+            )
+            reduced = values.float().abs().amax(dim=-1) + 1
+            return _mxfp6_pack_four_to_three(values), reduced
+
+        values = torch.tensor(
+            [-1.5, -0.75, 0.25, 1.5], device=GPU_TYPE, dtype=torch.bfloat16
+        )
+        x = values.repeat(B, D // values.numel())
+        self.check_nested_matches_unnested(f, (x,))
+        self.check_no_fusion()
+
+    def test_mxfp6_internal_source_full_resolution_fork(self):
+        x = torch.randn(32, 1024, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_nested_matches_unnested(
+            _mxfp6_internal_source_full_resolution_fork, (x,)
+        )
+        self.check_fusion()
+
+    def test_looped_mxfp6_rejects_source_before_reduction(self):
+        if self.force_persistent_outer_reduction is not False:
+            self.skipTest("requires a looped reduction")
+
+        B, D = 8, 16384
+
+        def f(x):
+            source = torch.ops._inductor_test.realize(
+                (torch.nn.functional.silu(x) * 7).round().to(torch.int32) & 0x3F
+            )
+            reduction_input = torch.ops._inductor_test.realize(source.float() * 2)
+            scale = reduction_input.abs().amax(dim=-1)
+            return _mxfp6_pack_four_to_three(source), scale
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_nested_matches_unnested(f, (x,))
+        self.check_no_fusion()
+
+    def test_looped_mxfp6_rejects_source_chain_used_by_reduction(self):
+        if self.force_persistent_outer_reduction is not False:
+            self.skipTest("requires a looped reduction")
+
+        B, D = 8, 16384
+
+        def f(x):
+            base = torch.ops._inductor_test.realize(torch.nn.functional.silu(x))
+            source = torch.ops._inductor_test.realize(base + 1)
+            scale = x.float().abs().amax(dim=-1)
+            sibling = base.float().abs().amax(dim=-1)
+            pairs = source.view(B, D // 2, 2)
+            return pairs[..., 0], pairs[..., 1], scale, sibling
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_nested_matches_unnested(f, (x,))
+        self.check_no_fusion()
 
     def test_standalone_sub_parent_rejects_output_fullres_reader(self):
         B, D, G = 32, 1024, 16
@@ -1199,6 +2183,21 @@ class _NestedReductionBase:
         self.check_numeric(f, (x,))
         self.check_fusion()
 
+    def test_standalone_sub_parent_masked_group_source_falls_back(self):
+        B, D, G = 2, 48, 16
+
+        def f(x):
+            groups = x.view(B, D // G, G)
+            scale = (groups.float().abs().amax(dim=-1) / 6.0).clamp(min=1e-6)
+            padded_scale = torch.nn.functional.pad(scale[:, :-1], (0, 1), value=7.0)
+            pairs = groups.view(B, D // G, G // 2, 2)
+            return pairs[..., 0].float() / padded_scale.unsqueeze(-1), scale
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_numeric(f, (x,))
+        self.check_no_fusion()
+        self.assertEqual(metrics.generated_kernel_count, 2)
+
     def test_standalone_sub_parent_rejects_same_buffer_scalar(self):
         B, D, G = 32, 1024, 16
 
@@ -1305,6 +2304,24 @@ class _NestedReductionBase:
         self.check_numeric(f, (x,))
         self.check_no_fusion()
         self.assertGreater(metrics.generated_kernel_count, 1)
+
+    def test_standalone_sub_parent_rejects_transposed_sibling_frame(self):
+        B, D, G = 8, 512, 16
+
+        def f(x):
+            xg = x.view(B, D // G, G)
+            scale = (xg.float().abs().amax(dim=-1) / 6.0).clamp(min=1e-12, max=448.0)
+            pairs = xg.view(B, D // G, G // 2, 2)
+            even = pairs[..., 0].float() / scale.unsqueeze(-1)
+            transposed = (
+                x.view(B, D // 2, 2)[..., 0].transpose(0, 1).reshape(B, D // G, G // 2)
+            )
+            return even, transposed.float() / scale.unsqueeze(-1), scale
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_nested_matches_unnested(f, (x,))
+        self.assertEqual(metrics.codegen_nested_reduction, 1)
+        self.check_non_leaf_epilogue_fallback()
 
     def test_standalone_sub_parent_allows_reduced_sibling_source(self):
         B, D, G = 32, 1024, 16
@@ -1798,6 +2815,124 @@ def _capture_rmsnorm_mxfp8_scale_swizzle_sources(
     )
 
 
+def _rmsnorm_nvfp4(x, weight):
+    import torch.nn.functional as F
+
+    B, D = x.shape
+    G = 16
+    x = F.rms_norm(x, (D,), weight)
+    x = x.view(B, D // G, G)
+    amax = x.abs().amax(dim=-1)
+    scale = (amax / 6.0).clamp(min=1e-12, max=448.0).to(torch.float8_e4m3fn)
+    xg = x.view(B, D // G, G // 2, 2)
+    inv_scale = 1.0 / scale.float().unsqueeze(-1)
+    even = xg[..., 0].float() * inv_scale
+    odd = xg[..., 1].float() * inv_scale
+    packed = inline_asm_elementwise(
+        even,
+        odd,
+        asm_str=(
+            "{.reg .b8 t; cvt.rn.satfinite.e2m1x2.f32 t, $2, $1; cvt.u32.u8 $0, t;}"
+        ),
+        constraints="=r,f,f",
+        dtype=torch.int32,
+        is_pure=True,
+        pack=1,
+    )
+    return packed.to(torch.uint8).view(B, D // 2), scale.view(B, D // G)
+
+
+def _capture_nvfp4_kernel_sources(
+    batch_size: int, *, force_persistent_outer_reduction: bool | None = None
+) -> tuple[str, str]:
+    B, D = batch_size, 4096
+
+    x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+    w = torch.randn(D, device=GPU_TYPE, dtype=torch.bfloat16)
+    with inductor_config.patch(emulate_precision_casts=True):
+        return _run_and_capture_sources(
+            _rmsnorm_nvfp4,
+            (x, w),
+            _nested_kernel_signature(force_persistent_outer_reduction),
+            force_persistent_outer_reduction=force_persistent_outer_reduction,
+        )
+
+
+def _capture_nvfp4_scale_swizzle_kernel_sources(
+    batch_size: int,
+    hidden_size: int,
+    *,
+    force_persistent_outer_reduction: bool | None = None,
+) -> tuple[str, str]:
+    B, D = batch_size, hidden_size
+
+    def f(x, weight):
+        packed, scale = _rmsnorm_nvfp4(x, weight)
+        return packed, _swizzle_scale(scale)
+
+    x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+    w = torch.randn(D, device=GPU_TYPE, dtype=torch.bfloat16)
+    with inductor_config.patch(emulate_precision_casts=True):
+        return _run_and_capture_sources(
+            f,
+            (x, w),
+            _nested_kernel_signature(force_persistent_outer_reduction),
+            force_persistent_outer_reduction=force_persistent_outer_reduction,
+        )
+
+
+def _rmsnorm_mxfp4(x, weight, G):
+    import torch.nn.functional as F
+    from torch._inductor import inductor_prims
+
+    B, D = x.shape
+    x = F.rms_norm(x, (D,), weight)
+    x = x.view(B, D // G, G)
+    amax = x.abs().amax(dim=-1)
+    scale = inductor_prims.cvt_e8m0_rceil((amax / 6.0).clamp(min=1e-12)).view(B, D // G)
+    xg = x.view(B, D // G, G // 2, 2)
+    inv_scale = inline_asm_elementwise(
+        scale.to(torch.int32),
+        asm_str=MXFP4_RECIP_UE8M0_ASM,
+        constraints="=f,r",
+        dtype=torch.float32,
+        is_pure=True,
+        pack=1,
+    ).unsqueeze(-1)
+    even = xg[..., 0].float() * inv_scale
+    odd = xg[..., 1].float() * inv_scale
+    packed = inline_asm_elementwise(
+        even,
+        odd,
+        asm_str=(
+            "{.reg .b8 t; cvt.rn.satfinite.e2m1x2.f32 t, $2, $1; cvt.u32.u8 $0, t;}"
+        ),
+        constraints="=r,f,f",
+        dtype=torch.int32,
+        is_pure=True,
+        pack=1,
+    )
+    return packed.to(torch.uint8).view(B, D // 2), scale
+
+
+def _capture_mxfp4_kernel_sources(
+    batch_size: int, *, force_persistent_outer_reduction: bool | None = None
+) -> tuple[str, str]:
+    B, D, G = batch_size, 4096, 32
+
+    def f(x, weight):
+        return _rmsnorm_mxfp4(x, weight, G)
+
+    x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+    w = torch.randn(D, device=GPU_TYPE, dtype=torch.bfloat16)
+    return _run_and_capture_sources(
+        f,
+        (x, w),
+        _nested_kernel_signature(force_persistent_outer_reduction),
+        force_persistent_outer_reduction=force_persistent_outer_reduction,
+    )
+
+
 def _capture_standalone_nvfp4_kernel_sources(
     batch_size: int, *, force_persistent_outer_reduction: bool | None = None
 ) -> tuple[str, str]:
@@ -1827,6 +2962,31 @@ def _capture_standalone_nvfp4_kernel_sources(
     x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
     return _run_and_capture_sources(
         f,
+        (x,),
+        _nested_kernel_signature(force_persistent_outer_reduction),
+        force_persistent_outer_reduction=force_persistent_outer_reduction,
+    )
+
+
+def _capture_mxfp6_four_to_three_pack_sources(
+    batch_size: int, *, force_persistent_outer_reduction: bool | None = None
+) -> tuple[str, str]:
+    B, D = batch_size, 1024
+    x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+    return _run_and_capture_sources(
+        _mxfp6_four_to_three_quantize,
+        (x,),
+        _nested_kernel_signature(force_persistent_outer_reduction),
+        force_persistent_outer_reduction=force_persistent_outer_reduction,
+    )
+
+
+def _capture_mxfp6_internal_source_sources(
+    batch_size: int, *, force_persistent_outer_reduction: bool | None = None
+) -> tuple[str, str]:
+    x = torch.randn(batch_size, 1024, device=GPU_TYPE, dtype=torch.bfloat16)
+    return _run_and_capture_sources(
+        _mxfp6_internal_source_full_resolution_fork,
         (x,),
         _nested_kernel_signature(force_persistent_outer_reduction),
         force_persistent_outer_reduction=force_persistent_outer_reduction,
@@ -1963,6 +3123,7 @@ class _InternalsBase:
         *,
         input_counts: dict[int, int],
         num_outputs: int,
+        num_store_instructions: int | None = None,
     ) -> None:
         load_ids = [int(i) for i in re.findall(r"tl\.load\(in_ptr(\d+)\b", kernel_code)]
         output_load_ids = re.findall(
@@ -1974,15 +3135,17 @@ class _InternalsBase:
         }
         self.assertEqual(actual_input_counts, input_counts)
         self.assertEqual(len(output_load_ids), 0)
-        self.assertEqual(len(store_ids), num_outputs)
+        if num_store_instructions is None:
+            num_store_instructions = num_outputs
+        self.assertEqual(len(store_ids), num_store_instructions)
         self.assertEqual(len(set(store_ids)), num_outputs)
 
     def check_kernel_meta(
-        self, kernel_code: str, *, num_inputs: int, num_outputs: int
+        self, kernel_code: str, *, num_inputs: int, num_stores: int
     ) -> None:
         FileCheck().check_count(
             f"'num_load': {num_inputs}", 1, exactly=True
-        ).check_count(f"'num_store': {num_outputs}", 1, exactly=True).run(kernel_code)
+        ).check_count(f"'num_store': {num_stores}", 1, exactly=True).run(kernel_code)
 
     def check_axis_classification_contract(
         self,
@@ -2010,13 +3173,14 @@ class _InternalsBase:
         *capture_args,
         input_counts: dict[int, int],
         num_outputs: int,
+        num_store_instructions: int | None = None,
         meta_num_load: int | None = None,
         num_allocs: int | None = None,
         num_deallocs: int | None = None,
         min_xblock: int | None = None,
         min_rblock: int | None = None,
         extra_checks: FileCheck | None = None,
-    ) -> None:
+    ) -> str:
         wrapper_code, kernel_code = capture(
             *capture_args,
             force_persistent_outer_reduction=self.force_persistent_outer_reduction,
@@ -2024,7 +3188,10 @@ class _InternalsBase:
         if num_deallocs is None:
             num_deallocs = len(input_counts)
         self.check_kernel_io_counts(
-            kernel_code, input_counts=input_counts, num_outputs=num_outputs
+            kernel_code,
+            input_counts=input_counts,
+            num_outputs=num_outputs,
+            num_store_instructions=num_store_instructions,
         )
         meta_load = (
             meta_num_load if meta_num_load is not None else sum(input_counts.values())
@@ -2032,7 +3199,11 @@ class _InternalsBase:
         self.check_kernel_meta(
             kernel_code,
             num_inputs=meta_load,
-            num_outputs=num_outputs,
+            num_stores=(
+                num_store_instructions
+                if num_store_instructions is not None
+                else num_outputs
+            ),
         )
         if num_allocs is None:
             num_allocs = num_outputs
@@ -2049,6 +3220,7 @@ class _InternalsBase:
         )
         if extra_checks is not None:
             extra_checks.run(kernel_code)
+        return kernel_code
 
     def test_layernorm_block_amax_kernel_form(self):
         self.assert_single_kernel_form(
@@ -2060,6 +3232,11 @@ class _InternalsBase:
             num_outputs=1,
             meta_num_load=self.looped_or_persistent(2, 1),
             min_rblock=16,
+            extra_checks=(
+                FileCheck().check("\n    nested_R0_LOCAL_REDUCTION_SIZE")
+                if self.force_persistent_outer_reduction is False
+                else None
+            ),
         )
 
     def test_weighted_rmsnorm_reduce_k_kernel_form(self):
@@ -2102,7 +3279,7 @@ class _InternalsBase:
 
     def test_nested_kernel_disables_cooperative_reduction(self):
         if self.force_persistent_outer_reduction is False:
-            return
+            self.skipTest("cooperative reduction only applies to persistent kernels")
 
         class _CooperativeChoices(InductorChoices):
             @staticmethod
@@ -2135,6 +3312,18 @@ class _InternalsBase:
             extra_checks=FileCheck().check_not("tl.split("),
         )
 
+    @inductor_config.patch("triton.multi_kernel", True)
+    def test_producer_consumer_amax_multi_kernel_form(self):
+        self.assert_single_kernel_form(
+            _capture_amax_kernel_sources,
+            128,
+            input_counts=self.looped_or_persistent({0: 2, 1: 1}, {0: 1, 1: 1}),
+            num_outputs=1,
+            meta_num_load=self.looped_or_persistent(3, 2),
+            min_rblock=16,
+            extra_checks=FileCheck().check_not("tl.split("),
+        )
+
     def test_producer_consumer_scale_kernel_form(self):
         self.assert_single_kernel_form(
             _capture_producer_scale_kernel_sources,
@@ -2146,15 +3335,21 @@ class _InternalsBase:
         )
 
     def test_fullres_kernel_form(self):
-        self.assert_single_kernel_form(
-            _capture_fullres_kernel_sources,
-            128,
-            input_counts=self.looped_or_persistent({0: 2, 1: 1}, {0: 1, 1: 1}),
-            num_outputs=2,
-            meta_num_load=self.looped_or_persistent(3, 2),
-            min_rblock=128,
-            extra_checks=FileCheck().check_not("tl.split(").check("tl.broadcast_to"),
-        )
+        with patch(
+            "torch._inductor.codegen.simd._SubParentValueResolver",
+            side_effect=AssertionError("unexpected sub-parent resolver"),
+        ):
+            self.assert_single_kernel_form(
+                _capture_fullres_kernel_sources,
+                128,
+                input_counts=self.looped_or_persistent({0: 2, 1: 1}, {0: 1, 1: 1}),
+                num_outputs=2,
+                meta_num_load=self.looped_or_persistent(3, 2),
+                min_rblock=128,
+                extra_checks=FileCheck()
+                .check_not("tl.split(")
+                .check("tl.broadcast_to"),
+            )
 
     def test_rmsnorm_block_scale_swizzle_kernel_form(self):
         self.assert_single_kernel_form(
@@ -2164,9 +3359,76 @@ class _InternalsBase:
             num_outputs=2,
             meta_num_load=self.looped_or_persistent(3, 2),
             min_rblock=32,
-            extra_checks=FileCheck().check(
-                "tl.store(out_ptr3 + (4*(x0 // 32) + 16*((x0 % 32))"
+            extra_checks=FileCheck().check_regex(
+                r"tl\.store\(out_ptr[0-9]+ \+ \(4\*\(x0 // 32\) "
+                r"\+ 16\*\(\(x0 % 32\)\)"
             ),
+        )
+
+    @skipIfRocm
+    @skipIfXpu(msg="NVFP4 inline asm requires CUDA")
+    def test_nvfp4_inline_asm_kernel_form(self):
+        if torch.cuda.get_device_capability()[0] < 10:
+            self.skipTest("NVFP4 inline asm requires SM100+")
+
+        kernel_code = self.assert_single_kernel_form(
+            _capture_nvfp4_kernel_sources,
+            128,
+            input_counts=self.looped_or_persistent({0: 2, 1: 1}, {0: 1, 1: 1}),
+            num_outputs=2,
+            meta_num_load=self.looped_or_persistent(3, 2),
+            min_rblock=16,
+            extra_checks=FileCheck()
+            .check("tl.split(")
+            .check("tl.broadcast_to")
+            .check("tl.inline_asm_elementwise")
+            .check("cvt.rn.satfinite.e2m1x2.f32"),
+        )
+        self.assertEqual(kernel_code.count(".to(tl.float8e4nv)"), 1)
+        self.assertNotIn(".to(tl.uint8, bitcast=True)", kernel_code)
+        self.assertNotIn(").to(tl.float8e4nv, bitcast=True)", kernel_code)
+
+    @skipIfRocm
+    @skipIfXpu(msg="NVFP4 inline asm requires CUDA")
+    def test_nvfp4_scale_swizzle_reuses_group_scale(self):
+        if torch.cuda.get_device_capability()[0] < 10:
+            self.skipTest("NVFP4 inline asm requires SM100+")
+
+        kernel_code = self.assert_single_kernel_form(
+            _capture_nvfp4_scale_swizzle_kernel_sources,
+            128,
+            4608,
+            input_counts=self.looped_or_persistent({0: 2, 1: 1}, {0: 1, 1: 1}),
+            num_outputs=2,
+            meta_num_load=self.looped_or_persistent(3, 2),
+            min_rblock=16,
+            extra_checks=FileCheck().check("4*(x0 // 32) + 16*((x0 % 32))"),
+        )
+        self.assertEqual(kernel_code.count(".to(tl.float8e4nv)"), 1)
+        self.assertRegex(
+            kernel_code[kernel_code.index(".to(tl.float8e4nv)") :],
+            r"tmp[0-9]+ = \(tmp[0-9]+ / tmp[0-9]+\)\n"
+            r"\s+tmp[0-9]+ = tl\.reshape\(tl\.broadcast_to",
+        )
+
+    @skipIfRocm
+    @skipIfXpu(msg="MXFP4 inline asm requires CUDA")
+    def test_mxfp4_inline_asm_kernel_form(self):
+        if torch.cuda.get_device_capability()[0] < 10:
+            self.skipTest("MXFP4 inline asm requires SM100+")
+
+        self.assert_single_kernel_form(
+            _capture_mxfp4_kernel_sources,
+            128,
+            input_counts=self.looped_or_persistent({0: 2, 1: 1}, {0: 1, 1: 1}),
+            num_outputs=2,
+            meta_num_load=self.looped_or_persistent(3, 2),
+            min_rblock=32,
+            extra_checks=FileCheck()
+            .check_count("cvt.rp.satfinite.ue8m0x2.f32", 1, exactly=True)
+            .check_count("ex2.approx.f32", 1, exactly=True)
+            .check_not("libdevice.ldexp")
+            .check_count("cvt.rn.satfinite.e2m1x2.f32", 1, exactly=True),
         )
 
     @skipIfRocm
@@ -2205,7 +3467,7 @@ class _InternalsBase:
         self.check_kernel_meta(
             kernel_code,
             num_inputs=looped_or_persistent(3, 1),
-            num_outputs=2,
+            num_stores=2,
         )
         self.check_code(wrapper_code, num_kernels=1, num_allocs=2, num_deallocs=1)
         self.check_axis_classification_contract(
@@ -2240,6 +3502,34 @@ class _InternalsBase:
 
         self.assert_standalone_nvfp4_inline_asm_kernel_form(None)
 
+    def test_mxfp6_four_to_three_pack_kernel_form(self):
+        self.assert_single_kernel_form(
+            _capture_mxfp6_four_to_three_pack_sources,
+            32,
+            input_counts=self.looped_or_persistent({0: 2}, {0: 1}),
+            num_outputs=2,
+            num_store_instructions=4,
+            num_deallocs=2,
+            meta_num_load=self.looped_or_persistent(2, 1),
+            min_xblock=None,
+            min_rblock=4,
+            extra_checks=FileCheck().check_count("tl.split(", 3, exactly=True),
+        )
+
+    def test_mxfp6_internal_source_kernel_form(self):
+        self.assert_single_kernel_form(
+            _capture_mxfp6_internal_source_sources,
+            32,
+            input_counts=self.looped_or_persistent({0: 2}, {0: 1}),
+            num_outputs=3,
+            num_store_instructions=5,
+            num_deallocs=3,
+            meta_num_load=self.looped_or_persistent(2, 1),
+            min_xblock=None,
+            min_rblock=4,
+            extra_checks=FileCheck().check_count("tl.split(", 3, exactly=True),
+        )
+
     def test_standalone_sub_parent_epilogue_kernel_form(self):
         self.assert_single_kernel_form(
             _capture_standalone_sub_parent_epilogue_sources,
@@ -2256,6 +3546,37 @@ class _InternalsBase:
                 else FileCheck().check_count("tl.split(", 1, exactly=True)
             ),
         )
+
+    @inductor_config.patch("triton.multi_kernel", True)
+    def test_standalone_sub_parent_epilogue_multi_kernel_form(self):
+        self.assert_single_kernel_form(
+            _capture_standalone_sub_parent_epilogue_sources,
+            128,
+            input_counts=self.looped_or_persistent({0: 3}, {0: 1}),
+            num_outputs=3,
+            num_deallocs=2,
+            meta_num_load=self.looped_or_persistent(3, 1),
+            min_xblock=None,
+            min_rblock=2,
+            extra_checks=(
+                FileCheck().check_count("tl.split(", 0, exactly=True)
+                if self.force_persistent_outer_reduction is False
+                else FileCheck().check_count("tl.split(", 1, exactly=True)
+            ),
+        )
+
+    @inductor_config.patch(benchmark_kernel=True)
+    def test_standalone_sub_parent_epilogue_kernel_num_gb(self):
+        B, D, G = 128, 1024, 16
+        _wrapper_code, kernel_code = _capture_standalone_sub_parent_epilogue_sources(
+            B,
+            force_persistent_outer_reduction=self.force_persistent_outer_reduction,
+        )
+        match = re.search(r"'kernel_num_gb': ([\d.eE+-]+)", kernel_code)
+        if match is None:
+            raise AssertionError("staged kernel metadata is missing kernel_num_gb")
+        minimum_bytes = B * D * 2 + 2 * B * (D // 2) * 4 + B * (D // G) * 4
+        self.assertGreaterEqual(float(match.group(1)), minimum_bytes / 1e9)
 
     def test_pointwise_producer_sub_parent_kernel_form(self):
         self.assert_single_kernel_form(
@@ -2320,6 +3641,38 @@ class NestedReductionInternalsPersistentTest(_InternalsBase, TestCase):
 class NestedReductionInternalsNonPersistentTest(_InternalsBase, TestCase):
     __unittest_skip__ = not HAS_GPU
     force_persistent_outer_reduction = False
+
+
+class NestedReductionAOTITest(TestCase):
+    __unittest_skip__ = not HAS_GPU
+
+    def test_rmsnorm_block_amax(self):
+        B, D, G = 8, 1024, 32
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                normalized = _rmsnorm(x)
+                block_amax = normalized.reshape(B, D // G, G).abs().amax(dim=-1)
+                return normalized, block_amax
+
+        model = Model()
+        x = torch.randn(B, D, device=GPU_TYPE)
+        expected = model(x)
+        metrics.reset()
+        with fresh_inductor_cache():
+            exported = torch.export.export(model, (x,))
+            package_path = torch._inductor.aoti_compile_and_package(
+                exported,
+                inductor_configs={
+                    "loop_ordering_after_fusion": True,
+                    "triton.nested_reduction": True,
+                },
+            )
+            compiled = torch._inductor.aoti_load_package(package_path)
+            actual = compiled(x)
+
+        self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
+        self.assertEqual(metrics.codegen_nested_reduction, 1)
 
 
 if __name__ == "__main__":
