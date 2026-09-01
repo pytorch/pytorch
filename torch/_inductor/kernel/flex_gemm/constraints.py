@@ -9,6 +9,8 @@ from torch._inductor.kernel.gemm_epilogue_utils import (
     statically_known,
     statically_known_shape_equal,
 )
+from torch._inductor.utils import _IntLike
+from torch.types import IntLikeType
 
 
 INDEXED_OUTPUT_INDICES_ARG_NAME: Final = "indexed_output_indices"
@@ -99,13 +101,17 @@ LOCAL_REDUCE_OUTPUT_PLAN_NODE_ERROR = "local-reduce output plans require tensor 
 LOCAL_REDUCE_RUNTIME_OUT_ERROR = "compressed local reductions require local_reduce_out"
 
 
-def statically_known_multiple(value: Any, divisor: int) -> bool:
-    """Return whether a symbolic shape value is known divisible without guards."""
+def statically_known_multiple(value: _IntLike | IntLikeType, divisor: _IntLike) -> bool:
+    """Return whether a symbolic shape value is known divisible without guards.
+
+    Inductor sizes arrive as integers or SymPy expressions, while tensor shapes
+    can contain ``torch.SymInt`` values.
+    """
     return statically_known(value % divisor == 0)
 
 
 def is_flex_gemm_partial_reduction_shape(
-    aux_size: Sequence[Any], output_size: Sequence[Any]
+    aux_size: Sequence[_IntLike], output_size: Sequence[_IntLike]
 ) -> bool:
     """Recognize aux shapes that imply a final PyTorch reduction, not local reduce.
 
@@ -160,7 +166,7 @@ def validate_local_reduce_group_axis(group: int, axis: int) -> None:
 
 
 def validate_local_reduce_selected_dim_divisible(
-    shape: Sequence[Any], group: int, axis: int
+    shape: Sequence[IntLikeType], group: int, axis: int
 ) -> None:
     """Reject selected M/N dimensions known not to have an integral compressed shape."""
     validate_local_reduce_group_axis(group, axis)
@@ -209,8 +215,8 @@ def validate_local_reduce_feed_main_capability(axis: int, group: int) -> None:
 
 
 def local_reduce_compressed_shape(
-    shape: Sequence[Any], group: int, axis: int
-) -> tuple[Any, ...]:
+    shape: Sequence[IntLikeType], group: int, axis: int
+) -> tuple[IntLikeType, ...]:
     """Compute the explicit aux shape that mirrors QuACK's grouped store."""
     validate_local_reduce_selected_dim_divisible(shape, group, axis)
     result = list(shape)
