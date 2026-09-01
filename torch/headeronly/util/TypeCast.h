@@ -279,11 +279,11 @@ C10_HOST_DEVICE To convert(From f) {
 
 // Define with C10_NOINLINE to prevent code-size bloat.
 [[noreturn]] C10_NOINLINE inline void report_overflow(const char* name) {
-  STD_TORCH_CHECK(
-      false,
-      "value cannot be converted to type ",
-      name,
-      " without overflow"); // runtime_error rather than domain_error (#33562)
+  std::ostringstream oss;
+  oss << "value cannot be converted to type " << name << " without overflow";
+  // @allow-raw-throw: plain message required; STD_TORCH_CHECK adds prefix
+  throw std::runtime_error(
+      std::move(oss).str()); // runtime_error rather than domain_error (#33562)
 }
 
 template <typename To, typename From>
