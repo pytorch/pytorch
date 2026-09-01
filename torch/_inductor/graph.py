@@ -717,7 +717,7 @@ class GraphLowering(torch.fx.Interpreter):
             return node.get_size()
 
     def get_allocation_storage_size(
-        self, node: ir.TensorBox | ir.Buffer | WorkspaceArg | ir.TorchBindObject
+        self, node: ir.Buffer | WorkspaceArg | ir.TorchBindObject
     ) -> Expr:
         layout = node.get_layout()
         size = self.get_allocation_size(node)  # consider inplace padding

@@ -182,7 +182,7 @@ def get_freeable_input_buf(
     """
 
     def _dep_size_hint(dep: Dep) -> int:
-        graph_input = V.graph.graph_inputs[dep.name]
+        graph_input = V.graph.graph_inputs_original[dep.name]
         return V.graph.sizevars.optimization_hint(
             V.graph.get_allocation_storage_size(graph_input), fallback=0
         ) * get_dtype_size(graph_input.get_dtype())

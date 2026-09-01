@@ -3317,16 +3317,12 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         from torch._inductor import ir, memory as memory_module
         from torch._inductor.graph import GraphLowering
 
-        input_node = ir.TensorBox.create(
-            ir.InputBuffer(
-                name="input",
-                layout=ir.FixedLayout(
-                    torch.device("cpu"), torch.float32, [2, 3], [8, 2]
-                ),
-            )
+        input_buffer = ir.InputBuffer(
+            name="input",
+            layout=ir.FixedLayout(torch.device("cpu"), torch.float32, [2, 3], [8, 2]),
         )
         graph = object.__new__(GraphLowering)
-        graph.graph_inputs = {"input": input_node}
+        graph.graph_inputs_original = {"input": input_buffer}
         graph.buffer_to_padded_size = {}
         graph.sizevars = SimpleNamespace(
             optimization_hint=lambda value, fallback: value
@@ -4703,9 +4699,9 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
                 graph_outputs=set(),
             )
 
-    def test_fusion_memory_update_splices_context(self):
+    def test_fusion_memory_update_splices_state(self):
         from torch._inductor.scheduler import (
-            FusionMemoryContext,
+            FusionMemoryDeviceState,
             FusionMemoryState,
             FusionMemoryUpdate,
             Scheduler,
@@ -4715,7 +4711,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         candidate = _PeakMemFakeNode("candidate")
         fused = _PeakMemFakeNode("fused")
         fused.snodes = [a, b]
-        ctx = FusionMemoryContext(
+        device_state = FusionMemoryDeviceState(
             nodes=[a, b, c],
             tracked_nodes={a, b, c},
             graph_outputs=set(),
@@ -4744,7 +4740,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
 
         scheduler = object.__new__(Scheduler)
         device = torch.device("cpu")
-        state = FusionMemoryState({device: ctx})
+        state = FusionMemoryState({device: device_state})
         scheduler._fusion_memory_state = state
         with patch.object(scheduler, "fuse_two_nodes", return_value=fused):
             self.assertIs(
@@ -4754,15 +4750,15 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
                 fused,
             )
 
-        self.assertEqual(ctx.nodes, [fused, None, c])
-        self.assertEqual(ctx.baseline_live_before, [0, 2, 20, 30])
-        self.assertEqual(ctx.baseline_live_after, [4, 20, 30])
-        self.assertEqual(ctx.baseline_peak, 30)
-        self.assertEqual(ctx.node_to_idx[fused], 0)
-        self.assertEqual(ctx.node_to_idx[a], 0)
-        self.assertEqual(ctx.node_to_idx[b], 0)
-        self.assertEqual(ctx.tracked_nodes, {fused, c})
-        self.assertEqual(ctx.last_use_steps, {1: 0, 3: 4})
+        self.assertEqual(device_state.nodes, [fused, None, c])
+        self.assertEqual(device_state.baseline_live_before, [0, 2, 20, 30])
+        self.assertEqual(device_state.baseline_live_after, [4, 20, 30])
+        self.assertEqual(device_state.baseline_peak, 30)
+        self.assertEqual(device_state.node_to_idx[fused], 0)
+        self.assertEqual(device_state.node_to_idx[a], 0)
+        self.assertEqual(device_state.node_to_idx[b], 0)
+        self.assertEqual(device_state.tracked_nodes, {fused, c})
+        self.assertEqual(device_state.last_use_steps, {1: 0, 3: 4})
 
     def test_fusion_memory_update_filters_internal_candidate_outputs(self):
         from torch._inductor.scheduler import Scheduler
@@ -4780,7 +4776,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
 
         scheduler = object.__new__(Scheduler)
         candidate = Scheduler._make_fusion_memory_candidate(producer, consumer)
-        ctx = SimpleNamespace(
+        device_state = SimpleNamespace(
             storage=SimpleNamespace(
                 materialize=lambda _: SimpleNamespace(
                     lifetime_buffers=(out, graph_out), size_alloc=11
@@ -4790,7 +4786,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         candidate_outputs, candidate_alloc_size = (
             Scheduler._assign_fusion_memory_planning_info(
                 scheduler,
-                ctx,
+                device_state,
                 producer,
                 consumer,
                 candidate,
@@ -4804,13 +4800,13 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
 
     def test_fusion_memory_update_modes(self):
         from torch._inductor.scheduler import (
-            FusionMemoryContext,
+            FusionMemoryDeviceState,
             FusionMemoryState,
             Scheduler,
         )
 
         a, b, peak, far = (_PeakMemFakeNode(n) for n in ("a", "b", "peak", "far"))
-        ctx = FusionMemoryContext(
+        device_state = FusionMemoryDeviceState(
             nodes=[a, b, peak, far],
             tracked_nodes={a, b, peak, far},
             graph_outputs=set(),
@@ -4821,10 +4817,10 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
             peak_limit=100,
             storage=SimpleNamespace(buffer_free_sizes={}),
         )
-        ctx.refresh_peak_positions()
+        device_state.refresh_peak_positions()
         scheduler = object.__new__(Scheduler)
         device = torch.device("cpu")
-        state = FusionMemoryState({device: ctx})
+        state = FusionMemoryState({device: device_state})
         scheduler._fusion_memory_state = state
         fast_update = SimpleNamespace(
             region_start=0,
@@ -4853,19 +4849,27 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
                 (False, {device: fast_update}),
             )
             update_mock.assert_called_once_with(
-                ctx, a, far, return_live_memory=True, peak_limit=ctx.peak_limit
+                device_state,
+                a,
+                far,
+                return_live_memory=True,
+                peak_limit=device_state.peak_limit,
             )
-            self.assertEqual(ctx.decision_cache, {(0, id(a), id(far)): False})
+            self.assertEqual(device_state.decision_cache, {(0, id(a), id(far)): False})
             fused = _PeakMemFakeNode("fused")
             self.assertEqual(
                 scheduler._check_fusion_memory(state, fused, b),
                 (False, None),
             )
             update_mock.assert_called_once_with(
-                ctx, a, far, return_live_memory=True, peak_limit=ctx.peak_limit
+                device_state,
+                a,
+                far,
+                return_live_memory=True,
+                peak_limit=device_state.peak_limit,
             )
 
-            ctx.decision_cache.clear()
+            device_state.decision_cache.clear()
             update_mock.return_value = (True, None)
             self.assertEqual(
                 scheduler._check_fusion_memory(state, a, far),
@@ -4876,7 +4880,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
                 (False, None),
             )
 
-        ctx.decision_cache.clear()
+        device_state.decision_cache.clear()
         exact_update = SimpleNamespace(
             region_start=0,
             region_end=1,
@@ -4899,7 +4903,11 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
                 (False, {device: exact_update}),
             )
             update_mock.assert_called_once_with(
-                ctx, a, b, return_live_memory=True, peak_limit=ctx.peak_limit
+                device_state,
+                a,
+                b,
+                return_live_memory=True,
+                peak_limit=device_state.peak_limit,
             )
 
     def test_fusion_memory_checks_each_device_budget(self):
@@ -4907,13 +4915,13 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
 
         node1, node2 = _PeakMemFakeNode("node1"), _PeakMemFakeNode("node2")
         update = object()
-        cpu_ctx = SimpleNamespace(
+        cpu_state = SimpleNamespace(
             version=0,
             decision_cache={},
             peak_limit=100,
             update_boundaries_match=lambda _: True,
         )
-        cuda_ctx = SimpleNamespace(
+        cuda_state = SimpleNamespace(
             version=0,
             decision_cache={},
             peak_limit=200,
@@ -4921,8 +4929,8 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         )
         state = FusionMemoryState(
             {
-                torch.device("cpu"): cpu_ctx,
-                torch.device("cuda", 0): cuda_ctx,
+                torch.device("cpu"): cpu_state,
+                torch.device("cuda", 0): cuda_state,
             }
         )
         scheduler = object.__new__(Scheduler)
@@ -4953,13 +4961,13 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         from torch._inductor.scheduler import FusionMemoryState, Scheduler
 
         node1, node2 = _PeakMemFakeNode("node1"), _PeakMemFakeNode("node2")
-        ctx = SimpleNamespace(
+        device_state = SimpleNamespace(
             version=0,
             decision_cache={},
             peak_limit=100,
             update_boundaries_match=lambda _: False,
         )
-        state = FusionMemoryState({torch.device("cpu"): ctx})
+        state = FusionMemoryState({torch.device("cpu"): device_state})
         scheduler = object.__new__(Scheduler)
         scheduler._fusion_memory_state = state
 
@@ -4987,10 +4995,10 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         )
 
     def test_fusion_memory_peak_query_does_not_cover_valleys(self):
-        from torch._inductor.scheduler import FusionMemoryContext
+        from torch._inductor.scheduler import FusionMemoryDeviceState
 
         nodes = [_PeakMemFakeNode(str(i)) for i in range(4)]
-        ctx = FusionMemoryContext(
+        state = FusionMemoryDeviceState(
             nodes=nodes,
             tracked_nodes=OrderedSet(nodes),
             graph_outputs=set(),
@@ -5001,21 +5009,21 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
             peak_limit=100,
             storage=SimpleNamespace(buffer_free_sizes={}),
         )
-        ctx.refresh_peak_positions()
+        state.refresh_peak_positions()
 
-        self.assertTrue(ctx.region_contains_peak(0, 1))
-        self.assertFalse(ctx.region_contains_peak(1, 2))
-        self.assertTrue(ctx.region_contains_peak(2, 3))
+        self.assertTrue(state.region_contains_peak(0, 1))
+        self.assertFalse(state.region_contains_peak(1, 2))
+        self.assertTrue(state.region_contains_peak(2, 3))
 
-        ctx.baseline_live_after = [90, 1, 1, 90]
-        ctx.refresh_peak_positions()
-        self.assertEqual(ctx.baseline_peak, 90)
-        self.assertEqual(ctx.peak_limit, 100)
+        state.baseline_live_after = [90, 1, 1, 90]
+        state.refresh_peak_positions()
+        self.assertEqual(state.baseline_peak, 90)
+        self.assertEqual(state.peak_limit, 100)
 
     @parametrize("full_correctness", [False, True])
     def test_fusion_memory_update_mode_runs_real_full_check(self, full_correctness):
         from torch._inductor.scheduler import (
-            FusionMemoryContext,
+            FusionMemoryDeviceState,
             FusionMemoryState,
             Scheduler,
         )
@@ -5023,7 +5031,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         a, b, peak = (_PeakMemFakeNode(n) for n in ("a", "b", "peak"))
         out = _PeakMemFakeBuffer("out", set(), 100, 100)
         b._outputs = [out]
-        ctx = FusionMemoryContext(
+        device_state = FusionMemoryDeviceState(
             nodes=[a, b, peak],
             tracked_nodes={a, b, peak},
             graph_outputs={"out"},
@@ -5042,7 +5050,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
             node_outputs={a: (), b: (out,), peak: ()},
             node_alloc_sizes={a: 0, b: 100, peak: 0},
         )
-        ctx.refresh_peak_positions()
+        device_state.refresh_peak_positions()
 
         class FakeBackend:
             def __init__(self) -> None:
@@ -5057,7 +5065,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         scheduler.get_backend = lambda device: backend
         scheduler.name_to_buf = {}
         scheduler.name_to_fused_node = {}
-        state = FusionMemoryState({torch.device("cpu"): ctx})
+        state = FusionMemoryState({torch.device("cpu"): device_state})
         scheduler._fusion_memory_state = state
 
         with torch._inductor.config.patch(
@@ -5071,7 +5079,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         self.assertEqual(backend.calls, 0)
 
     def test_fusion_memory_update_rejects_over_limit(self):
-        from torch._inductor.scheduler import FusionMemoryContext, Scheduler
+        from torch._inductor.scheduler import FusionMemoryDeviceState, Scheduler
 
         first = _PeakMemFakeNode("first")
         middle = _PeakMemFakeNode("middle")
@@ -5081,7 +5089,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         middle._outputs = [middle_out]
         last._outputs = [graph_out]
 
-        ctx = FusionMemoryContext(
+        state = FusionMemoryDeviceState(
             nodes=[first, middle, last],
             tracked_nodes=OrderedSet([first, middle, last]),
             graph_outputs=OrderedSet(["graph_out"]),
@@ -5112,11 +5120,11 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         scheduler.name_to_fused_node = {}
 
         rejected, update = scheduler._fusion_memory_update(
-            ctx,
+            state,
             first,
             last,
             return_live_memory=True,
-            peak_limit=ctx.peak_limit,
+            peak_limit=state.peak_limit,
         )
         self.assertTrue(rejected)
         self.assertIsNone(update)

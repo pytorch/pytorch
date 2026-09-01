@@ -220,7 +220,7 @@ class ComboKernelMemoryContext:
 
 
 @dataclasses.dataclass(slots=True)
-class FusionMemoryContext:
+class FusionMemoryDeviceState:
     nodes: list[BaseSchedulerNode | None]
     # Fast mode checks tracked pairs whose interval contains an actual peak.
     tracked_nodes: OrderedSet[BaseSchedulerNode]
@@ -310,7 +310,7 @@ class FusionMemoryContext:
 
 @dataclasses.dataclass(slots=True)
 class FusionMemoryState:
-    contexts: dict[torch.device, FusionMemoryContext]
+    device_states: dict[torch.device, FusionMemoryDeviceState]
     valid: bool = True
 
 
@@ -7669,7 +7669,7 @@ class Scheduler:
         fused = self.fuse_two_nodes(node1, node2, fused_nodes)
         if state is not None and memory_updates is not None:
             for device, update in memory_updates.items():
-                state.contexts[device].apply_accepted_fusion(update, fused)
+                state.device_states[device].apply_accepted_fusion(update, fused)
             fused.mpi_node = next(iter(memory_updates.values())).candidate.mpi_node
             fused.mpi_node.size = sum(
                 update.candidate_alloc_size for update in memory_updates.values()
@@ -8806,7 +8806,7 @@ class Scheduler:
                 devices.add(device)
         for name in name_to_freeable:
             devices.add(V.graph.graph_inputs[name].get_device())
-        contexts: dict[torch.device, FusionMemoryContext] = {}
+        device_states: dict[torch.device, FusionMemoryDeviceState] = {}
         for device in devices:
             device_storage = storage.for_device(device)
             device_inputs = {
@@ -8871,7 +8871,7 @@ class Scheduler:
                 peak_limit = baseline_peak + allowed_increase
                 self._fusion_memory_peak_limits[device] = peak_limit
 
-            ctx = FusionMemoryContext(
+            device_state = FusionMemoryDeviceState(
                 nodes=list(nodes),
                 tracked_nodes=OrderedSet(nodes),
                 graph_outputs=device_storage.graph_outputs,
@@ -8885,9 +8885,9 @@ class Scheduler:
                 node_outputs=node_outputs,
                 node_alloc_sizes=node_alloc_sizes,
             )
-            ctx.refresh_peak_positions()
-            contexts[device] = ctx
-        return FusionMemoryState(contexts)
+            device_state.refresh_peak_positions()
+            device_states[device] = device_state
+        return FusionMemoryState(device_states)
 
     @staticmethod
     def fusion_memory_timeline_peak_allowed_increase_bytes() -> int | None:
@@ -8912,13 +8912,15 @@ class Scheduler:
 
     @staticmethod
     def _fusion_node_step(
-        ctx: FusionMemoryContext, node: BaseSchedulerNode | OutputNode
+        state: FusionMemoryDeviceState, node: BaseSchedulerNode | OutputNode
     ) -> int | None:
         if isinstance(node, OutputNode):
             return None
-        if node in ctx.node_to_idx:
-            return ctx.node_to_idx[node]
-        steps = [ctx.node_to_idx[n] for n in node.get_nodes() if n in ctx.node_to_idx]
+        if node in state.node_to_idx:
+            return state.node_to_idx[node]
+        steps = [
+            state.node_to_idx[n] for n in node.get_nodes() if n in state.node_to_idx
+        ]
         return min(steps) if steps else None
 
     @staticmethod
@@ -8954,13 +8956,13 @@ class Scheduler:
 
     def _assign_fusion_memory_planning_info(
         self,
-        ctx: FusionMemoryContext,
+        state: FusionMemoryDeviceState,
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
         candidate: _FusionMemoryCandidate,
     ) -> tuple[Sequence[SchedulerBuffer], int]:
         candidate_buffers = candidate.get_buffer_names()
-        candidate_memory = ctx.storage.materialize(candidate.operation_names)
+        candidate_memory = state.storage.materialize(candidate.operation_names)
         candidate_outputs = candidate_memory.lifetime_buffers
         input_buffers = OrderedSet()
         for node in (node1, node2):
@@ -8985,28 +8987,35 @@ class Scheduler:
             return False, None
         if not state.valid:
             return True, None
-        if not state.contexts:
+        if not state.device_states:
             return False, None
 
         if not config.fusion_memory_timeline_full_correctness:
-            tracked_contexts = [
-                ctx
-                for ctx in state.contexts.values()
-                if node1 in ctx.tracked_nodes and node2 in ctx.tracked_nodes
+            tracked_device_states = [
+                device_state
+                for device_state in state.device_states.values()
+                if node1 in device_state.tracked_nodes
+                and node2 in device_state.tracked_nodes
             ]
-            if not tracked_contexts or not any(
-                ctx.region_contains_peak(
-                    min(ctx.node_to_idx[node1], ctx.node_to_idx[node2]),
-                    max(ctx.node_to_idx[node1], ctx.node_to_idx[node2]),
+            if not tracked_device_states or not any(
+                device_state.region_contains_peak(
+                    min(
+                        device_state.node_to_idx[node1],
+                        device_state.node_to_idx[node2],
+                    ),
+                    max(
+                        device_state.node_to_idx[node1],
+                        device_state.node_to_idx[node2],
+                    ),
                 )
-                for ctx in tracked_contexts
+                for device_state in tracked_device_states
             ):
                 return False, None
 
         updates: dict[torch.device, FusionMemoryUpdate] = {}
-        for device, ctx in state.contexts.items():
+        for device, device_state in state.device_states.items():
             rejected, update = self._fusion_memory_update_cached(
-                ctx,
+                device_state,
                 node1,
                 node2,
                 materialize_update=materialize_update,
@@ -9015,7 +9024,7 @@ class Scheduler:
                 return True, None
             if not materialize_update:
                 continue
-            if update is None or not ctx.update_boundaries_match(update):
+            if update is None or not device_state.update_boundaries_match(update):
                 fusion_log.debug(
                     "memory-timeline fusion rejected %s with %s: "
                     "unable to preserve the %s timeline boundary",
@@ -9038,28 +9047,28 @@ class Scheduler:
 
     def _fusion_memory_update_cached(
         self,
-        ctx: FusionMemoryContext,
+        state: FusionMemoryDeviceState,
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
         *,
         materialize_update: bool,
     ) -> tuple[bool, FusionMemoryUpdate | None]:
-        cache_key = (ctx.version, id(node1), id(node2))
-        if ctx.decision_cache.get(cache_key, False):
+        cache_key = (state.version, id(node1), id(node2))
+        if state.decision_cache.get(cache_key, False):
             return True, None
         rejected, update = self._fusion_memory_update(
-            ctx,
+            state,
             node1,
             node2,
             return_live_memory=materialize_update,
-            peak_limit=ctx.peak_limit,
+            peak_limit=state.peak_limit,
         )
-        ctx.decision_cache[cache_key] = rejected
+        state.decision_cache[cache_key] = rejected
         return rejected, update
 
     def _fusion_memory_update(
         self,
-        ctx: FusionMemoryContext,
+        state: FusionMemoryDeviceState,
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
         *,
@@ -9068,8 +9077,8 @@ class Scheduler:
     ) -> tuple[bool, FusionMemoryUpdate | None]:
         from .memory import estimate_region_peak_memory
 
-        step1 = self._fusion_node_step(ctx, node1)
-        step2 = self._fusion_node_step(ctx, node2)
+        step1 = self._fusion_node_step(state, node1)
+        step2 = self._fusion_node_step(state, node2)
         if step1 is None or step2 is None:
             return False, None
 
@@ -9078,13 +9087,13 @@ class Scheduler:
 
         candidate = self._make_fusion_memory_candidate(node1, node2)
         candidate_outputs, candidate_alloc_size = (
-            self._assign_fusion_memory_planning_info(ctx, node1, node2, candidate)
+            self._assign_fusion_memory_planning_info(state, node1, node2, candidate)
         )
         candidate_node = typing.cast(BaseSchedulerNode, candidate)
 
         local_nodes: list[BaseSchedulerNode] = [candidate_node]
         for idx in range(region_start, region_end + 1):
-            node = ctx.nodes[idx]
+            node = state.nodes[idx]
             if node is None or node is node1 or node is node2:
                 continue
             local_nodes.append(node)
@@ -9093,7 +9102,7 @@ class Scheduler:
             producer = self._fusion_dep_producer(dep)
             if producer is None or producer is node1 or producer is node2:
                 continue
-            producer_step = ctx.node_to_idx.get(producer)
+            producer_step = state.node_to_idx.get(producer)
             if (
                 producer_step is not None
                 and region_start <= producer_step <= region_end
@@ -9127,7 +9136,7 @@ class Scheduler:
         for node in (node1, node2):
             new_step[node] = candidate_step
 
-        node_to_idx = ctx.node_to_idx
+        node_to_idx = state.node_to_idx
         step_cache = {}
 
         def step_of(node: BaseSchedulerNode) -> int:
@@ -9157,24 +9166,26 @@ class Scheduler:
             candidate_last_use_steps[id(buf.mpi_buffer)] = last_step
 
         node_outputs = collections.ChainMap(
-            {candidate_node: candidate_outputs}, ctx.node_outputs
+            {candidate_node: candidate_outputs}, state.node_outputs
         )
         node_alloc_sizes = collections.ChainMap(
-            {candidate_node: candidate_alloc_size}, ctx.node_alloc_sizes
+            {candidate_node: candidate_alloc_size}, state.node_alloc_sizes
         )
         memory_estimate = estimate_region_peak_memory(
             local_nodes,
             region_start=region_start,
             region_end=region_end,
             step_of=step_of,
-            graph_outputs=ctx.graph_outputs,
-            cur_memory=ctx.baseline_live_before[region_start],
+            graph_outputs=state.graph_outputs,
+            cur_memory=state.baseline_live_before[region_start],
             last_use_step_cache=candidate_last_use_steps,
-            known_last_use_steps=ctx.last_use_steps,
+            known_last_use_steps=state.last_use_steps,
             node_outputs=node_outputs,
             node_alloc_sizes=node_alloc_sizes,
-            buffer_free_sizes=ctx.storage.buffer_free_sizes,
-            allocation_operation_by_buffer=(ctx.storage.allocation_operation_by_buffer),
+            buffer_free_sizes=state.storage.buffer_free_sizes,
+            allocation_operation_by_buffer=(
+                state.storage.allocation_operation_by_buffer
+            ),
             max_peak=peak_limit,
             return_live_memory=return_live_memory,
         )
@@ -9190,7 +9201,7 @@ class Scheduler:
                 "memory-timeline fusion rejected %s with %s: estimated peak delta %d bytes",
                 node1.get_name(),
                 node2.get_name(),
-                region_peak - ctx.baseline_peak,
+                region_peak - state.baseline_peak,
             )
             return True, None
         if not return_live_memory:
