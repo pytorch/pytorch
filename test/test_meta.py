@@ -2631,6 +2631,24 @@ class TestMetaKernelRegistrations(TestCase):
             torch.fill(x_meta, value_meta)
 
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_argmax_argmin_reject_bool_and_complex(self):
+        # Ports of check_argmax_argmin in aten/src/ATen/native/ReduceOps.cpp,
+        # which rejects both dtypes. Without them a compiled argmax over a bool
+        # mask silently produced an index instead of raising.
+        for op, name in ((torch.argmax, "argmax"), (torch.argmin, "argmin")):
+            inp = torch.zeros(2, 3, dtype=torch.bool, device="meta")
+            with self.assertRaisesRegex(
+                NotImplementedError, rf"{name}\(\): does not support bool input"
+            ):
+                op(inp, dim=1)
+
+            inp = torch.zeros(2, 3, dtype=torch.complex64, device="meta")
+            with self.assertRaisesRegex(
+                TypeError, rf"{name}\(\): does not support complex input"
+            ):
+                op(inp, dim=1)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_fill_out_of_place_tensor_scalar_ok(self):
         x_cpu = torch.randn(3, 4)
         value_cpu = torch.tensor(1.0)
