@@ -3238,11 +3238,20 @@ class TestShouldRun(unittest.TestCase):
         self.assertFalse(self._run(self.CUDA, {"TORCH_CUDA_ARCH_LIST": "7.5;8.0"}))
 
     def test_multi_exportable_arch_runs(self):
-        # Was fatal while nested per-arch artifacts were walked by neither the
-        # generator nor the CMake globs (a kernel-less wheel, silently). Now
-        # supported end to end: one tree per arch, a per-capability selector,
-        # and link globs at both depths.
-        self.assertTrue(self._run(self.CUDA, {"TORCH_CUDA_ARCH_LIST": "10.0;10.0a"}))
+        # Two DISTINCT capabilities: "10.0;10.0a" collapses to one arch (both spell
+        # the same hardware), so it never reached the path this covers -- one tree
+        # per arch, a per-capability selector, and every object listed in the
+        # emitted CMake. Was fatal while nested per-arch trees were walked by
+        # neither the generator nor the link step (a kernel-less wheel, silently).
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            ran = self._run(self.CUDA, {"TORCH_CUDA_ARCH_LIST": "9.0a;10.0a"})
+        self.assertTrue(ran)
+        # The report is the branch's only observable. On STDERR: this is the one
+        # gate that reports AND proceeds, and --print-verdict's stdout is compared
+        # with == by the CI shells (see build_stage2._report).
+        self.assertIn("multi-arch: sm_90a sm_100a", err.getvalue())
+        self.assertEqual(out.getvalue(), "")
 
     def test_runs_for_a_single_exportable_arch(self):
         self.assertTrue(self._run(self.CUDA, self.ARCH))
@@ -3357,6 +3366,57 @@ class TestBuildInputsFromTheCMakeCache(unittest.TestCase):
             ):
                 yield d
 
+    def _record(self, d, text):
+        """Write what a configure would have recorded, where CMake writes it."""
+        path = os.path.join(d, build_stage2.ARCH_LIST_RECORD)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(text)
+
+    def test_the_recorded_arch_list_outranks_both_env_and_cache(self):
+        # The case that needs the record: -D and the environment disagree, and the
+        # configure resolved the -D one. Read either source alone and stage 2 targets
+        # an arch the build did not compile for.
+        with self._build_dir("TORCH_CUDA_ARCH_LIST:STRING=8.0\n") as d:
+            self._record(d, "9.0a")
+            with mock.patch.dict(os.environ, {"TORCH_CUDA_ARCH_LIST": "10.0a"}):
+                self.assertEqual(build_stage2._arch_list(), "9.0a")
+
+    def test_a_recorded_empty_arch_list_is_not_a_fallback(self):
+        # A CPU build, or a CUDA one with no list: the configure resolved none, which
+        # is an ANSWER. Falling back here would target an arch from a stale cache or
+        # a developer's shell rather than the one this build has.
+        with self._build_dir("TORCH_CUDA_ARCH_LIST:STRING=8.0\n") as d:
+            self._record(d, "")
+            with mock.patch.dict(os.environ, {"TORCH_CUDA_ARCH_LIST": "10.0a"}):
+                self.assertEqual(build_stage2._arch_list(), "")
+
+    def test_a_recorded_list_is_stripped_of_its_newline(self):
+        # file(WRITE) content as CMake leaves it, plus whatever an editor adds:
+        # archs_from_cuda_arch_list would read "10.0a\n" as an unparseable entry.
+        with self._build_dir(None) as d:
+            self._record(d, "9.0a;10.0a\n")
+            self.assertEqual(build_stage2._arch_list(), "9.0a;10.0a")
+
+    def test_the_configure_records_what_this_reads(self):
+        # The WRITER half, pinned by text because this suite cannot run cmake: the
+        # reader only falls back when the file is ABSENT, so a rename on either side
+        # would silently restore the env-then-cache guessing this replaced. It has to
+        # be written after cmake/Dependencies.cmake shadows the cache with the
+        # environment, which is why it lives in a file caffe2/CMakeLists.txt includes
+        # rather than beside the forwarding.
+        with open(os.path.join(REPO, "cmake", "Codegen.cmake")) as f:
+            cmake = f.read()
+        record = build_stage2.ARCH_LIST_RECORD.replace(os.sep, "/")
+        self.assertIn(
+            f'file(WRITE "${{CMAKE_BINARY_DIR}}/{record}" "${{TORCH_CUDA_ARCH_LIST}}")',
+            cmake,
+        )
+        # Unconditional: guarded on CUDA, a previous CUDA configure's list would stay
+        # in place for a CPU one and stage 2 would read that.
+        head = cmake.split(f'file(WRITE "${{CMAKE_BINARY_DIR}}/{record}"')[0]
+        self.assertNotIn("if(USE_CUDA", head.rsplit("if(", 1)[-1])
+
     def test_arch_list_comes_from_the_cache_when_the_env_is_unset(self):
         cache = (
             "//From env\n"
@@ -3419,11 +3479,11 @@ class TestBuildInputsFromTheCMakeCache(unittest.TestCase):
 class TestDslRuntimeArchive(unittest.TestCase):
     """Which dialect runtime the CuTeDSL kernel objects link against.
 
-    4.6.x splits the archive per CUDA major (cu12/lib/, cu13/lib/) and the two
-    really do differ -- identical sizes, different contents -- so taking whichever
-    one is present links a runtime built for another toolkit into libtorch_cuda.
-    Untested until now, while being the one lookup in stage 2 that can fail a
-    build."""
+    4.6.x splits the archive per CUDA major (cu12/lib/, cu13/lib/), so the lookup
+    has to choose by the build's toolkit rather than take whichever directory it
+    finds first. These fixtures are empty files: what is under test is the
+    SELECTION, not the archives' contents. It is the one lookup in stage 2 that can
+    fail a build."""
 
     ARCHIVE = "libcuda_dialect_runtime_static.a"
 
@@ -3461,9 +3521,8 @@ class TestDslRuntimeArchive(unittest.TestCase):
 
     def test_a_wheel_with_no_archive_for_this_major_warns_and_links_one(self):
         # cu12 is a hard dependency and cu13 is behind an extra, so a plain install
-        # on a CUDA 13 build leaves ONLY cu12. Refusing failed the build; the two
-        # 4.6.2 archives are the same objects and a CUDA 13.2 build linked against
-        # cu12 passed the AOT suite, so warn and link it.
+        # on a CUDA 13 build leaves ONLY cu12. Refusing there failed the build, so
+        # the contract is warn-and-link: name the extra, and link what is present.
         with self._wheel(("cu12",), cuda_major="13") as root:
             with contextlib.redirect_stderr(io.StringIO()) as err:
                 got = build_stage2._dsl_runtime_archive()
@@ -4102,13 +4161,13 @@ class TestSourceCommitOrdering(unittest.TestCase):
                 "no native_aot.cmake: its presence marks a finished generation",
             )
 
-    def test_the_old_cmake_is_gone_before_any_source_is_written(self):
+    def test_the_old_cmake_is_invalidated_before_any_source_is_written(self):
         # Sources are individually atomic, but their paths are deterministic and
         # the PREVIOUS file already names them: a run that died between two
         # sources left a NEW source paired with the previous run's OBJECT list, and
         # the main build then failed on undefined symbols -- with stage 2, the only
-        # writer that could repair it, running after that build. Removing the
-        # it first makes that state read as "not generated yet" instead.
+        # writer that could repair it, running after that build. Invalidating it
+        # first makes that state read as "not generated yet" instead.
         order = []
         real = gen_aot_lib._write_atomic
         state = {}
@@ -4121,11 +4180,17 @@ class TestSourceCommitOrdering(unittest.TestCase):
             with open(stale, "w") as f:
                 f.write("ARCH_LIST_ABSENT\nOBJECT=/gone/old.o\n")
 
+            def include_now():
+                if not os.path.exists(stale):
+                    return ""
+                with open(stale) as f:
+                    return f.read()
+
             def spy(path, text):
                 name = os.path.basename(path)
                 order.append(name)
                 if name.startswith("aot_"):
-                    state.setdefault("cmake_existed", os.path.exists(stale))
+                    state.setdefault("cmake_then", include_now())
                 return real(path, text)
 
             with (
@@ -4133,10 +4198,11 @@ class TestSourceCommitOrdering(unittest.TestCase):
                 mock.patch.object(gen_aot_lib, "_write_atomic", spy),
             ):
                 gen_aot_lib.main(["--artifacts-dir", art])
-        self.assertFalse(
-            state["cmake_existed"],
-            "the previous native_aot.cmake must be gone before any source is written",
-        )
+        # The previous CONTENT goes, not the file: unlinking it would drop CMake's
+        # configure dependency and leave the NEXT generation invisible to a plain
+        # `cmake --build` (see gen_aot_lib.write_nothing_to_embed).
+        self.assertNotIn("OBJECT=/gone/old.o", state["cmake_then"])
+        self.assertIn("Nothing to embed", state["cmake_then"])
         # ...and the new one is written LAST, after every source.
         self.assertEqual(order[-1], gen_aot_lib.CMAKE_INCLUDE)
 
@@ -5469,6 +5535,21 @@ class TestEmittedCMake(unittest.TestCase):
         want = f'"${{CMAKE_BINARY_DIR}}/{rel}/{gen_aot_lib.CMAKE_INCLUDE}"'
         with open(os.path.join(REPO, "caffe2", "CMakeLists.txt")) as f:
             self.assertIn(want, f.read())
+
+    def test_a_non_linux_configure_embeds_nothing(self):
+        # The embed is GNU-linker specific and stage 2 refuses to run off Linux, so
+        # the file bails once, up front. It used to guard the two linker blocks
+        # instead, leaving target_sources to embed objects that a non-Linux link
+        # would then neither version-script nor exclude-libs.
+        with tempfile.TemporaryDirectory() as d:
+            emitted = self._emit(d, dsl=os.path.join(d, "libdsl.a"))
+        before, guard, after = emitted.partition("if(NOT UNIX OR APPLE)")
+        self.assertTrue(guard, "no platform guard emitted")
+        # The CALL, not the word: the comment above the guard names it too.
+        self.assertNotIn("target_sources(torch_cuda", before)
+        self.assertIn("return()", after.split("endif()")[0])
+        # ONE exit: no block below re-tests the platform.
+        self.assertNotIn("APPLE", after)
 
     def test_the_linker_options_are_emitted_de_duplication_safe(self):
         # Three hazards, all measured by linking: -Wl, (what LINKER: expands to) is
