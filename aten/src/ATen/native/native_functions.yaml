@@ -13325,8 +13325,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, XPU: logit_backward_out
-    MPS: logit_backward_out_mps
+    CPU, CUDA, MPS, XPU: logit_backward_out
   tags: pointwise
 
 - func: logit_backward(Tensor grad_output, Tensor self, float? eps=None) -> Tensor
@@ -13339,8 +13338,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, MTIA, XPU: tanh_backward_out
-    MPS: tanh_backward_out_mps
+    CPU, CUDA, MPS, MTIA, XPU: tanh_backward_out
   tags: pointwise
 
 - func: tanh_backward(Tensor grad_output, Tensor output) -> Tensor
