@@ -369,7 +369,7 @@ def flex_attention(
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
     if not V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)):
         raise AssertionError(
-            f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+            f"Bq and Bkv must be broadcastable. Got Bq={Bq} and Bkv={Bkv}"
         )
     if not V.graph.sizevars.evaluate_expr(sympy.Gt(seq_len_q, 0)):
         raise AssertionError("Query length must be greater than 0")
@@ -441,9 +441,6 @@ def flex_attention(
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
     SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
 
-    # Note, we don't need to pass in the captured buffers explicitly
-    # because they're implicitly added by the score_mod function
-    # We do need to explicitly pass it in for autotuning though.
     original_kernel_options = kernel_options.copy()
     # Default config for warp specialization
     num_consumer_groups, num_buffers_warp_spec = 0, 0
@@ -571,21 +568,6 @@ def flex_attention(
             SPARSE_KV_BLOCK_SIZE,
         )
 
-    inputs_for_autotuning = (
-        [
-            query,
-            key,
-            value,
-            logsumexp,
-            max_scores,
-            kv_num_blocks,
-            kv_indices,
-            full_kv_num_blocks,
-            full_kv_indices,
-        ]
-        + list(score_mod_other_buffers)
-        + list(mask_mod_other_buffers)
-    )
     input_gen_fns = {
         5: create_num_blocks_fake_generator(kv_indices),
         6: create_indices_fake,
@@ -596,9 +578,8 @@ def flex_attention(
     out, _ = autotune_select_algorithm(
         "flex_attention",
         choices,
-        # Autotuning materializes benchmark tensors. Scalar shape captures stay
-        # in subgraph_inps below for dependency tracking and codegen.
-        [x for x in inputs_for_autotuning if is_tensor_ir_node(x)],
+        # Use generated inputs because codegen can inline capture producers.
+        list(choices[0].input_nodes) if choices else [],
         layout,
         input_gen_fns=input_gen_fns,
     )
@@ -813,7 +794,7 @@ def flex_attention_backward(*args, **kwargs):
 
     if not V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)):
         raise AssertionError(
-            f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+            f"Bq and Bkv must be broadcastable. Got Bq={Bq} and Bkv={Bkv}"
         )
 
     kernel_options, backend = _sanitize_kernel_options_for_triton(kernel_options)

@@ -222,6 +222,14 @@ class TestBuckets(unittest.TestCase):
         self.assertEqual(names(source, JIT_PATH), [])
         self.assertEqual(names(source, "aten/src/ATen/Foo.cpp"), ["raw-throw"])
 
+    def test_unwind_error_is_scoped_to_the_profiler(self) -> None:
+        for expression in ("UnwindError(x)", "unwind::UnwindError(x)"):
+            with self.subTest(expression=expression):
+                source = f"throw {expression};\n"
+                profiler = "torch/csrc/profiler/unwind/unwind.cpp"
+                self.assertEqual(names(source, profiler), [])
+                self.assertEqual(names(source, "aten/src/ATen/Foo.cpp"), ["raw-throw"])
+
     def test_a_qualified_allowed_name_need_not_be_scoped(self) -> None:
         source = "throw py::key_error(x);\n"
         self.assertEqual(names(source, "aten/src/ATen/Foo.cpp"), [])
@@ -416,6 +424,9 @@ class TestReplacementMacro(unittest.TestCase):
             "torch/csrc/stable/foo.h": "STD_TORCH_CHECK",
             "torch/csrc/inductor/aoti_runtime/model.h": "AOTI_RUNTIME_CHECK",
             "torch/csrc/inductor/aoti_torch/foo.cpp": "TORCH_CHECK",
+            # Matched by suffix, not substring: only this one header.
+            "torch/csrc/utils/generated_serialization_types.h": "STD_TORCH_CHECK",
+            "torch/csrc/utils/tensor_new.cpp": "TORCH_CHECK",
         }
         for path, macro in cases.items():
             with self.subTest(path=path):
