@@ -6,6 +6,8 @@ import unittest
 from unittest import mock
 from unittest.mock import MagicMock, patch
 
+import sympy
+
 import torch
 from torch._higher_order_ops import flex_gemm
 from torch._inductor import config
@@ -25,6 +27,7 @@ from torch._inductor.utils import (
     ensure_nvmatmul_heuristics_available,
     run_and_get_code,
 )
+from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     dtype_name,
     instantiate_parametrized_tests,
@@ -894,6 +897,119 @@ class TestNVUniversalGemm(TestCase):
 @instantiate_parametrized_tests
 class TestNVUniversalGemmHeuristics(TestCase):
     """Unit tests for NVUniversalGemmHeuristics without requiring actual libraries."""
+
+    def test_grouped_reduction_affine_index_rejects_offset(self):
+        from torch._inductor.codegen.nv_universal_gemm.epilogue_lowering import (
+            _matches_affine_index,
+        )
+
+        i, j, r = sympy.symbols("i j r", integer=True)
+        strides = (32, 4, 1)
+
+        def known_equals(left, right):
+            return sympy.simplify(left - right) == 0
+
+        self.assertTrue(
+            _matches_affine_index(32 * i + 4 * j + r, (i, j, r), strides, known_equals)
+        )
+        self.assertFalse(
+            _matches_affine_index(
+                32 * i + 4 * j + r + 1, (i, j, r), strides, known_equals
+            )
+        )
+        self.assertTrue(
+            _matches_affine_index(32 * i + 4 * j + r, (), strides, known_equals)
+        )
+        self.assertFalse(
+            _matches_affine_index(32 * i + 4 * j + r + 1, (), strides, known_equals)
+        )
+
+    def test_reduction_source_rejects_different_load_indices(self):
+        from torch._inductor.kernel.loop_ir_cutedsl_codegen import LoopIRCuteDSLCodegen
+        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
+            GemmEpilogueIRExpression as Expr,
+        )
+
+        index = sympy.Symbol("index", integer=True)
+        source = Expr(
+            "mul",
+            (
+                Expr("load", ("gemm", index, None)),
+                Expr("load", ("gemm", index + 1, None)),
+            ),
+        )
+        with self.assertRaisesRegex(NotImplementedError, "one logical element"):
+            LoopIRCuteDSLCodegen.source_from_expression("gemm", source, "source")
+
+    def test_output_scale_rejects_value_changing_cast(self):
+        from torch._inductor.kernel.loop_ir_cutedsl_codegen import LoopIRCuteDSLCodegen
+        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
+            GemmEpilogueIRExpression as Expr,
+        )
+
+        scale = MagicMock()
+        scale.get_dtype.return_value = torch.float32
+        scale.get_size.return_value = (1,)
+        graph = MagicMock(
+            name_to_buffer={},
+            graph_inputs={"scale": scale},
+        )
+        graph.sizevars.statically_known_equals.side_effect = lambda left, right: (
+            left == right
+        )
+        codegen = LoopIRCuteDSLCodegen("gemm", OrderedSet(("gemm",)))
+        accumulator = Expr("load", ("gemm", 0, None))
+        scale_load = Expr("load", ("scale", 0, None))
+        with V.set_graph_handler(graph):
+            self.assertEqual(
+                codegen._output_scale_name(Expr("mul", (accumulator, scale_load))),
+                "scale",
+            )
+            self.assertEqual(
+                codegen._output_scale_name(
+                    Expr(
+                        "mul",
+                        (accumulator, Expr("to_dtype", (scale_load, torch.float32))),
+                    )
+                ),
+                "scale",
+            )
+            self.assertIsNone(
+                codegen._output_scale_name(
+                    Expr(
+                        "mul",
+                        (accumulator, Expr("to_dtype", (scale_load, torch.int32))),
+                    )
+                )
+            )
+
+    def test_grouped_reduction_conversion_contract(self):
+        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
+            GemmEpilogueIRExpression as Expr,
+            GemmEpilogueIRStore,
+            grouped_reduction_pattern_ir,
+        )
+
+        load = Expr("load", ("gemm", 0, None))
+
+        def classify(value):
+            square = Expr("mul", (value, value))
+            reduction = Expr("reduction", (torch.float32, torch.float32, "sum", square))
+            return grouped_reduction_pattern_ir(
+                GemmEpilogueIRStore(0, reduction), "gemm", 4, torch.bfloat16
+            )
+
+        fp32 = Expr("to_dtype", (load, torch.float32))
+        result = classify(fp32)
+        self.assertIsNotNone(result)
+        self.assertEqual(result[0], "sum")
+        self.assertEqual(result[1].op, "mul")
+        fp16_then_fp32 = Expr(
+            "to_dtype", (Expr("to_dtype", (load, torch.float16)), torch.float32)
+        )
+        self.assertIsNone(classify(fp16_then_fp32))
+        bitcast = Expr("to_dtype_bitcast", (load, torch.bfloat16, torch.bfloat16))
+        self.assertIsNone(classify(Expr("to_dtype", (bitcast, torch.float32))))
 
     @parametrize("tuned", (False, True))
     def test_flex_gemm_nvgemm_tuned_config(self, tuned):
