@@ -465,6 +465,65 @@ void CUDAGraph::begin_capture_to_if_node(
 #endif
 }
 
+// Note [Conditional node memory reuse]
+//
+// Conditional capture establishes the ordering needed to safely move inactive
+// segments between the enclosing and child allocation-stream caches:
+//
+//   enclosing prefix -> conditional node and its child graph -> enclosing suffix
+//
+// begin_capture_to_conditional_node builds the first edge by adding the
+// conditional node with the enclosing stream's current capture dependencies.
+// It builds the second edge by replacing that stream's capture frontier with
+// the conditional node. The CUDAStreamGuard then switches capture to the child
+// stream, and restores the enclosing stream only after the child capture ends.
+// Consequently, allocations captured after the paired end method are ordered
+// after the complete conditional node. This remains true when the predicate is
+// false: the child does not touch the reused address, and the suffix still
+// follows evaluation of the conditional node.
+//
+// On entry, transferInactiveSegments moves only segments whose enclosing-prefix
+// allocations have already been freed. The child may reuse their fixed
+// addresses because every captured prefix use precedes the conditional node.
+// On exit, it moves wholly inactive child segments back before user code can
+// capture suffix allocations. Those allocations may reuse the addresses
+// because the suffix follows the conditional node. For a nested conditional,
+// CUDAStreamGuard::original_stream() is the immediate enclosing child stream,
+// so the same argument applies recursively.
+//
+// The allocator additionally requires every block in a transferred segment to
+// be inactive and free of pending events and recorded stream uses. Thus live
+// allocations, escaping outputs, and unfinished side-stream uses stay on their
+// original stream. It transfers whole segments to preserve the invariant that
+// adjacent split blocks share an allocation stream, and excludes expandable
+// segments because they retain a separate synchronization stream.
+//
+// Escaping objects do not create a supported silent-aliasing path. An escaped
+// tensor keeps its block allocated, so its segment is not transferred.
+// Cross-stream tensor use is valid either when record_stream records the
+// additional lifetime or when the user joins that work back to the allocation
+// stream before deallocation; an event may establish that join. Freeing before
+// either condition is normal invalid caching-allocator usage. The conditional
+// child stream itself may be observed during capture, but its raw handle is
+// destroyed when the node closes; later use is invalid CUDA usage and may raise
+// an error or terminate the process. Likewise, accessing a raw pointer after
+// its owning storage is freed is unsupported use-after-free. These invalid uses
+// are outside the correctness guarantee; the guarantee is that supported tensor
+// and stream lifetime mechanisms cannot silently alias transferred storage.
+void CUDAGraph::begin_capture_to_if_node_with_memory_reuse(
+    const at::Tensor& scalar_cuda_pred_tensor) {
+  TORCH_CHECK(
+      c10::cuda::CUDACachingAllocator::supportsInactiveSegmentTransfer(),
+      "The current CUDA allocator does not support conditional-node memory reuse.");
+  begin_capture_to_if_node(scalar_cuda_pred_tensor);
+  try {
+    transfer_inactive_segments_to_conditional_node();
+  } catch (...) {
+    end_capture_to_conditional_node();
+    throw;
+  }
+}
+
 void CUDAGraph::begin_capture_to_while_node(
     const at::Tensor& scalar_cuda_pred_tensor) {
 #if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
@@ -661,6 +720,52 @@ void CUDAGraph::end_capture_to_conditional_node() {
       __func__,
       " CUDA Graphs conditional nodes are not supported for cuda version < 12.4");
 #endif
+}
+
+void CUDAGraph::transfer_inactive_segments_to_conditional_node() {
+#if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
+  // See Note [Conditional node memory reuse].
+  TORCH_CHECK(
+      !conditional_node_streams_.empty(), "No active conditional node.");
+  const auto& guard = conditional_node_streams_.top();
+  c10::cuda::CUDACachingAllocator::transferInactiveSegments(
+      capture_dev_,
+      mempool_id_,
+      guard.original_stream().stream(),
+      guard.current_stream().stream());
+#else
+  AT_ERROR(
+      __func__,
+      " CUDA Graphs conditional nodes are not supported for cuda version < 12.4");
+#endif
+}
+
+void CUDAGraph::transfer_inactive_segments_from_conditional_node() {
+#if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
+  // See Note [Conditional node memory reuse].
+  TORCH_CHECK(
+      !conditional_node_streams_.empty(), "No active conditional node.");
+  const auto& guard = conditional_node_streams_.top();
+  c10::cuda::CUDACachingAllocator::transferInactiveSegments(
+      capture_dev_,
+      mempool_id_,
+      guard.current_stream().stream(),
+      guard.original_stream().stream());
+#else
+  AT_ERROR(
+      __func__,
+      " CUDA Graphs conditional nodes are not supported for cuda version < 12.4");
+#endif
+}
+
+void CUDAGraph::end_capture_to_conditional_node_with_memory_reuse() {
+  try {
+    transfer_inactive_segments_from_conditional_node();
+  } catch (...) {
+    end_capture_to_conditional_node();
+    throw;
+  }
+  end_capture_to_conditional_node();
 }
 
 void CUDAGraph::set_conditional_handle_for_current_node(

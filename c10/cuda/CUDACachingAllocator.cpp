@@ -3320,6 +3320,56 @@ class DeviceCachingAllocator {
         false, "endAllocatePool: not currently recording to mempool_id");
   }
 
+  void transferInactiveSegments(
+      MempoolId_t mempool_id,
+      cudaStream_t from_stream,
+      cudaStream_t to_stream) {
+    if (from_stream == to_stream) {
+      return;
+    }
+
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    PrivatePool* private_pool = get_private_pool(mempool_id);
+    auto heads = get_private_pool_head_blocks(private_pool);
+    for (Block* head : heads) {
+      // ExpandableSegment retains its own synchronization stream, which cannot
+      // be reassigned by changing Block::stream.
+      if (head->expandable_segment_) {
+        continue;
+      }
+      bool transferable = true;
+      for (Block* block = head; block; block = block->next) {
+        // Reassign only a completely inactive segment. In particular, an
+        // escaping allocation or a recorded side-stream use keeps the segment
+        // on its original stream.
+        if (block->stream != from_stream || block->allocated ||
+            block->event_count != 0 || !block->stream_uses.empty()) {
+          transferable = false;
+          break;
+        }
+      }
+      if (!transferable) {
+        continue;
+      }
+
+      for (Block* block = head; block; block = block->next) {
+        if (block->mapped) {
+          TORCH_INTERNAL_ASSERT(block->pool->erase_from_blocks(block) == 1);
+        } else {
+          TORCH_INTERNAL_ASSERT(block->pool->unmapped.erase(block) == 1);
+        }
+      }
+      for (Block* block = head; block; block = block->next) {
+        block->stream = to_stream;
+        if (block->mapped) {
+          TORCH_INTERNAL_ASSERT(block->pool->insert_into_blocks(block).second);
+        } else {
+          TORCH_INTERNAL_ASSERT(block->pool->unmapped.insert(block).second);
+        }
+      }
+    }
+  }
+
   // Called by CUDAGraph after cudaStreamBeginCapture succeeds. Tracks real
   // captures separately from the pool-routing list `allocation_scopes_`, so
   // that allocator paths gated on "is a capture in progress" can distinguish
@@ -5220,6 +5270,20 @@ class NativeCachingAllocator : public CUDAAllocator {
       override {
     assertValidDevice(device);
     device_allocator[device]->endAllocateToPool(mempool_id);
+  }
+
+  void transferInactiveSegments(
+      c10::DeviceIndex device,
+      MempoolId_t mempool_id,
+      cudaStream_t from_stream,
+      cudaStream_t to_stream) override {
+    assertValidDevice(device);
+    device_allocator[device]->transferInactiveSegments(
+        mempool_id, from_stream, to_stream);
+  }
+
+  bool supportsInactiveSegmentTransfer() const override {
+    return true;
   }
 
   void markCaptureBegin(c10::DeviceIndex device) override {
