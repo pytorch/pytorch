@@ -1178,7 +1178,7 @@ def _make_triton_interface(*, available=True, capable=True, raise_exc=None):
 
 class TestHasTriton(TestCase):
     def tearDown(self):
-        triton_utils.has_triton.cache_clear()
+        triton_utils._devices_supporting_triton.cache_clear()
         super().tearDown()
 
     def _run(self, registered, *, has_package=True, detection_disabled=False):
@@ -1192,7 +1192,7 @@ class TestHasTriton(TestCase):
                 return_value=registered,
             ),
         ):
-            triton_utils.has_triton.cache_clear()
+            triton_utils._devices_supporting_triton.cache_clear()
             return triton_utils.has_triton()
 
     def test_no_triton_package(self):

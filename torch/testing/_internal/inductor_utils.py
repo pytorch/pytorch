@@ -11,11 +11,13 @@ from subprocess import CalledProcessError
 
 import torch
 import torch._inductor.config as config
+from torch._inductor.codegen.common import get_custom_backend_config_for_device
 
 from torch._inductor import compile_fx  # noqa: F401
 from torch._inductor.utils import (
     get_gpu_shared_memory,
     get_gpu_type,
+    get_triton_type,
     GPU_TYPES,
     is_big_gpu,
     is_gpu,
@@ -83,6 +85,8 @@ HAS_GPU = HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON or HAS_MTIA_AND_TRITON
 HAS_GPU_AND_TRITON = HAS_GPU
 
 GPU_TYPE = get_gpu_type()
+
+TRITON_TYPE: str | None = get_triton_type()
 
 HAS_MULTIGPU = any(
     getattr(torch, gpu).is_available() and getattr(torch, gpu).device_count() >= 2
@@ -433,7 +437,6 @@ def patch_inductor_backend(
     Patch the inductor backend for a specific device.
     """
     from torch._inductor.codegen.common import (
-        get_custom_backend_config_for_device,
         get_custom_backend_pass_for_device,
         get_scheduling_for_device,
         get_wrapper_codegen_for_device,
@@ -483,6 +486,7 @@ def patch_inductor_backend(
             original_custom_pass,
             original_custom_backend_config,
         )
+
 
 def patch_custom_fallback_pass(predicate: Callable[[torch.fx.Node], bool]) -> contextlib.ContextDecorator:
     """
