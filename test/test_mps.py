@@ -3562,6 +3562,16 @@ class TestMPS(TestCaseMPS):
                         helper((N, C_out, H, W), (C_out, C_in, kH, kW), bias_shape=(C_in), stride=stride,
                                padding=padding, output_padding=output_padding, dilation=dilation)
 
+    def test_conv_transpose_output_padding_validation(self):
+        # MPS accepted an out-of-range output_padding and silently widened the output,
+        # where CPU and CUDA raise. https://github.com/pytorch/pytorch/issues/169236
+        for dims, ctor in ((2, torch.nn.ConvTranspose2d), (3, torch.nn.ConvTranspose3d)):
+            x = torch.randn(1, 1, *([8] * dims))
+            for device in ("cpu", "mps"):
+                m = ctor(1, 1, 3, stride=1, output_padding=2).to(device)
+                with self.assertRaisesRegex(RuntimeError, "output padding must be smaller"):
+                    m(x.to(device))
+
     # Test sigmoid
     def test_sigmoid(self):
         def helper(shape):

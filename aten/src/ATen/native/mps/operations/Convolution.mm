@@ -1226,6 +1226,18 @@ Tensor _mps_convolution_transpose(const Tensor& input_t,
       (input_t.dim() == 5 && (input_t.scalar_type() == kHalf || input_t.scalar_type() == kBFloat16));
   TORCH_CHECK(!is_unsupported_3d_dtype, "ConvTranspose 3D with BF16 or FP16 types is not supported on MPS");
 
+  // conv_input_size() below computes a size from output_padding without checking it, so an
+  // out-of-range value silently widens the output instead of erroring as it does on CPU and CUDA.
+  for (const auto i : c10::irange(output_padding.size())) {
+    TORCH_CHECK(output_padding[i] < stride[i] || output_padding[i] < dilation[i],
+                "output padding must be smaller than either stride or dilation, but got output_padding: ",
+                output_padding,
+                " stride: ",
+                stride,
+                " dilation: ",
+                dilation);
+  }
+
   auto output_t =
       mps_convolution_transpose_forward(input_t, weight_t, padding, output_padding, stride, dilation, groups);
   return output_t;
