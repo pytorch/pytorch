@@ -10551,13 +10551,14 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         else:
             self.assertEqual(res, (a + 1, a - 1))
 
+    @parametrize("nOutputs", [1, 2])
     @parametrize("bdim", [0, 1])
-    def test_cond_vmap_batched_pred(self, bdim):
+    def test_cond_vmap_batched_pred(self, nOutputs, bdim):
         def fn(pred, x):
             return torch.cond(
                 pred=pred,
-                true_fn=lambda x: (x.sin(),),
-                false_fn=lambda x: (x.cos(),),
+                true_fn=lambda x: (x.sin(), x + 1)[:nOutputs],
+                false_fn=lambda x: (x.cos(), x - 1)[:nOutputs],
                 operands=(x,),
             )
 
@@ -10565,10 +10566,11 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         x = torch.rand(4, 3)
         if bdim == 1:
             pred, x = pred.unsqueeze(0), x.movedim(0, 1)
-        expected = torch.stack(
-            [fn(pred.select(bdim, i), x.select(bdim, i))[0] for i in range(4)]
-        )
-        self.assertEqual(torch.vmap(fn, in_dims=(bdim, bdim))(pred, x)[0], expected)
+        expected = [fn(pred.select(bdim, i), x.select(bdim, i)) for i in range(4)]
+        out = torch.vmap(fn, in_dims=(bdim, bdim))(pred, x)
+        self.assertEqual(len(out), nOutputs)
+        for i in range(nOutputs):
+            self.assertEqual(out[i], torch.stack([e[i] for e in expected]))
 
     @parametrize("boolcond", [True, False])
     def test_vmap_vmap(self, boolcond):
