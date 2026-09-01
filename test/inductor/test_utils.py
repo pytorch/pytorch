@@ -41,6 +41,7 @@ from torch._inductor.utils import (
     _gpu_types,
     _infer_scale_swizzle_impl,
     device_need_guard,
+    ensure_nv_universal_gemm_available,
     get_device_dram_gbps,
     get_device_tflops,
     get_gpu_dram_gbps,
@@ -874,8 +875,7 @@ class TestFP4Support(TestCase):
     """Tests for FP4 (float4_e2m1fn_x2) infrastructure support."""
 
     @unittest.skipIf(
-        not torch.cuda.is_available()
-        or importlib.util.find_spec("cutlass.operators") is None,
+        not (torch.cuda.is_available() and ensure_nv_universal_gemm_available()),
         "requires CUDA and cutlass.operators",
     )
     def test_ensure_fp4_dtype_registered(self):
