@@ -8161,6 +8161,52 @@ class TestNNDeviceType(NNTestCase):
 
         self.assertEqual(Y_ref, Y)
 
+    @onlyCUDA
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_rmsnorm_mixed_dtype_weight(self, device, dtype):
+        def rms_norm_reference_fn(i, weight, eps):
+            upcasted_i = i.float()
+            result = upcasted_i * torch.rsqrt(
+                upcasted_i.pow(2).mean(dim=-1, keepdim=True) + eps
+            )
+            return (result * weight).type_as(i)
+
+        eps = 1e-5
+        for M, N in ((4, 256), (2048, 1024), (127, 768)):
+            X = torch.randn(M, N, dtype=dtype, device=device, requires_grad=True)
+            w = torch.randn(N, dtype=torch.float32, device=device, requires_grad=True)
+
+            Y = torch.nn.functional.rms_norm(X, (N,), w, eps)
+            Y_ref = rms_norm_reference_fn(X.detach(), w.detach(), eps)
+            self.assertEqual(Y.dtype, dtype)
+            self.assertEqual(Y, Y_ref, rtol=1e-2, atol=1e-2)
+
+            gO = torch.randn_like(Y)
+            dX, dw = torch.autograd.grad(Y, [X, w], gO)
+
+            X_ref = X.detach().clone().requires_grad_(True)
+            w_ref = w.detach().clone().requires_grad_(True)
+            Y_ref = rms_norm_reference_fn(X_ref, w_ref, eps)
+            dX_ref, dw_ref = torch.autograd.grad(Y_ref, [X_ref, w_ref], gO)
+
+            self.assertEqual(dX.dtype, dtype)
+            self.assertEqual(dw.dtype, torch.float32)
+            self.assertEqual(dX, dX_ref)
+            # dgamma reduces over all M rows; the fused kernel and the reference
+            # accumulate in a different order.
+            self.assertEqual(dw, dw_ref, rtol=1e-3, atol=1e-3)
+
+    @onlyCUDA
+    def test_rmsnorm_mixed_dtype_weight_dispatches_to_fused(self, device):
+        X = torch.randn(64, 256, dtype=torch.bfloat16, device=device)
+        w = torch.randn(256, dtype=torch.float32, device=device)
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")
+            torch.nn.functional.rms_norm(X, (256,), w, 1e-5)
+        self.assertFalse(
+            any("Cannot dispatch to fused" in str(w_.message) for w_ in ws)
+        )
+
     @onlyNativeDeviceTypes
     @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @dtypesIfMPS(torch.float16, torch.bfloat16, torch.float32)

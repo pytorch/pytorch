@@ -342,10 +342,15 @@ Tensor rms_norm_symint(
     return std::get<0>(rms_norm_composite(input, IntArrayRef(reinterpret_cast<const int64_t*>(normalized_shape.data()), normalized_shape.size()), weight_opt, eps));
   }
 
-  if (weight_opt.has_value() && weight_opt.value().defined() && weight_opt.value().dtype() != input.dtype()) {
+  // The CUDA kernels read a mixed-dtype weight at its own type, matching the
+  // composite's numerics; every other backend still falls back.
+  const bool mixed_type = is_mixed_type(input, weight);
+  const bool fused_supports_mixed_type = input.device().type() == DeviceType::CUDA &&
+      at::isReducedFloatingType(input.scalar_type()) && weight.scalar_type() == kFloat;
+  if (mixed_type && !fused_supports_mixed_type) {
     TORCH_WARN_ONCE(
       "Mismatch dtype between input and weight: input dtype = ", input.dtype(),
-      ", weight dtype = ", weight_opt.value().dtype(), ", Cannot dispatch to fused implementation."
+      ", weight dtype = ", weight.dtype(), ", Cannot dispatch to fused implementation."
     );
     return std::get<0>(rms_norm_composite(input, IntArrayRef(reinterpret_cast<const int64_t*>(normalized_shape.data()), normalized_shape.size()), weight_opt, eps));
   }
