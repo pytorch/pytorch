@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
 
+from dataclasses import dataclass
+from typing import Any
+
 import flydsl.compiler as flyc
 import flydsl.expr as fx
 from flydsl._mlir import ir
@@ -40,6 +43,32 @@ class GemmGfx950Param:
     mma_m: fx.Constexpr[int]
     mma_n: fx.Constexpr[int]
     mma_k: fx.Constexpr[int]
+
+
+@dataclass(slots=True, kw_only=True, eq=False)
+class GemmABContext:
+    wave_offset: Any
+    tid: Any
+    k: Any
+    param: GemmGfx950Param
+    uni_copy_atom: Any
+    buffer_copy_atom: Any
+    a_s2r_copy_atom: Any
+    b_s2r_copy_atom: Any
+    a_tiled_copy_atom: Any
+    b_tiled_copy_atom: Any
+
+
+@dataclass(slots=True, kw_only=True, eq=False)
+class AsyncLoadTile:
+    lds_base: Any
+    rsrc: Any
+    lds_layout: Any
+    outer_tile_size: Any
+    outer_bound: Any
+    global_outer_offset: Any
+    leading_stride: Any
+    k_tile: Any
 
 
 def make_gemm_gfx950_param(
@@ -363,11 +392,11 @@ def _elem_dtype(param: GemmGfx950Param):
     return fx.Float16 if const_expr(param.dtype_id == GEMM_DTYPE_FP16) else fx.BFloat16
 
 
-def make_gemm_ab_copies(elem_dtype, tiled_mma, tid, a_is_transposed, b_is_transposed):
+def make_gemm_ab_context(elem_dtype, tid, k, param: GemmGfx950Param):
     uni_copy_atom = fx.make_copy_atom(fx.UniversalCopy128b(), elem_dtype)
     buffer_copy_atom = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), elem_dtype)
 
-    if const_expr(a_is_transposed):
+    if const_expr(param.a_is_transposed):
         a_s2r_copy_atom = fx.make_copy_atom(
             fx.rocdl.cdna4.LDSReadTrans16_64b(), elem_dtype
         )
@@ -375,7 +404,7 @@ def make_gemm_ab_copies(elem_dtype, tiled_mma, tid, a_is_transposed, b_is_transp
     else:
         a_s2r_copy_atom = uni_copy_atom
         a_tiled_copy_atom = buffer_copy_atom
-    if const_expr(not b_is_transposed):
+    if const_expr(not param.b_is_transposed):
         b_s2r_copy_atom = fx.make_copy_atom(
             fx.rocdl.cdna4.LDSReadTrans16_64b(), elem_dtype
         )
@@ -384,83 +413,74 @@ def make_gemm_ab_copies(elem_dtype, tiled_mma, tid, a_is_transposed, b_is_transp
         b_s2r_copy_atom = uni_copy_atom
         b_tiled_copy_atom = buffer_copy_atom
 
-    thr_copy_A = fx.make_tiled_copy_A(a_tiled_copy_atom, tiled_mma).get_slice(tid)
-    thr_copy_B = fx.make_tiled_copy_B(b_tiled_copy_atom, tiled_mma).get_slice(tid)
-    return (
-        uni_copy_atom,
-        buffer_copy_atom,
-        a_s2r_copy_atom,
-        b_s2r_copy_atom,
-        thr_copy_A,
-        thr_copy_B,
+    return GemmABContext(
+        wave_offset=get_wave_lds_offset(tid, param.async_load_bytes),
+        tid=tid,
+        k=k,
+        param=param,
+        uni_copy_atom=uni_copy_atom,
+        buffer_copy_atom=buffer_copy_atom,
+        a_s2r_copy_atom=a_s2r_copy_atom,
+        b_s2r_copy_atom=b_s2r_copy_atom,
+        a_tiled_copy_atom=a_tiled_copy_atom,
+        b_tiled_copy_atom=b_tiled_copy_atom,
     )
 
 
 def async_load_to_lds(
-    lds_base,
-    rsrc,
-    lds_layout,
-    outer_tile_size,
-    outer_bound,
-    global_outer_offset,
-    leading_stride,
+    tile: AsyncLoadTile,
+    context: GemmABContext,
     load_iters,
     is_k_major,
-    k_tile,
-    context,
 ):
-    (
-        wave_offset,
-        tid,
-        block_threads,
-        async_load_vec_size,
-        ldg_x_threads,
-        block_k,
-        k,
-        has_k_tail,
-        in_data_bytes,
-        async_load_bytes,
-    ) = context
-    lds_ptr = make_wave_lds_ptr(lds_base, wave_offset)
+    param = context.param
+    tid = context.tid
+    block_threads = param.block_threads
+    async_load_bytes = param.async_load_bytes
+    async_load_vec_size = async_load_bytes // param.in_data_bytes
+    ldg_x_threads = param.ldg_x_threads
+    block_k = param.block_k
+    k = context.k
+    lds_ptr = make_wave_lds_ptr(tile.lds_base, context.wave_offset)
     for i in range_constexpr(load_iters):
         global_tid = block_threads * i + tid
         if const_expr(is_k_major):
-            outer_x_threads = outer_tile_size // async_load_vec_size
+            outer_x_threads = tile.outer_tile_size // async_load_vec_size
             outer_lds_idx = global_tid % outer_x_threads * async_load_vec_size
             k_local_idx = global_tid // outer_x_threads
             outer_local_idx = transposed_contiguous_idx(
                 outer_lds_idx,
                 k_local_idx,
-                lds_layout,
-                outer_tile_size,
+                tile.lds_layout,
+                tile.outer_tile_size,
             )
-            global_k_idx = k_tile * block_k + k_local_idx
+            global_k_idx = tile.k_tile * block_k + k_local_idx
         else:
             outer_local_idx = global_tid // ldg_x_threads
             k_local_idx = global_tid % ldg_x_threads * async_load_vec_size
-            global_k_idx = k_tile * block_k + swizzled_col_idx(
+            global_k_idx = tile.k_tile * block_k + swizzled_col_idx(
                 outer_local_idx,
                 k_local_idx,
-                lds_layout,
+                tile.lds_layout,
                 block_k,
             )
-        if const_expr(has_k_tail):
+        if const_expr(param.has_k_tail):
             safe_global_k_idx = (global_k_idx < k).select(global_k_idx, 0)
         else:
             safe_global_k_idx = global_k_idx
-        global_outer_idx = global_outer_offset + outer_local_idx
-        safe_global_outer_idx = (global_outer_idx < outer_bound).select(
+        global_outer_idx = tile.global_outer_offset + outer_local_idx
+        safe_global_outer_idx = (global_outer_idx < tile.outer_bound).select(
             global_outer_idx, 0
         )
         if const_expr(is_k_major):
             global_offset = (
-                safe_global_k_idx * leading_stride + safe_global_outer_idx
-            ) * in_data_bytes
+                safe_global_k_idx * tile.leading_stride + safe_global_outer_idx
+            ) * param.in_data_bytes
         else:
             global_offset = (
-                safe_global_outer_idx * leading_stride + safe_global_k_idx
-            ) * in_data_bytes
-        buffer_load_lds_inline(rsrc, lds_ptr, global_offset, async_load_bytes)
+                safe_global_outer_idx * tile.leading_stride + safe_global_k_idx
+            ) * param.in_data_bytes
+        buffer_load_lds_inline(tile.rsrc, lds_ptr, global_offset, async_load_bytes)
         if i < load_iters - 1:
             lds_ptr = lds_ptr + block_threads * async_load_bytes
 
@@ -484,10 +504,6 @@ def gemm_gfx950_kernel(
     block_k = param.block_k
     stages = param.stages
     has_k_tail = param.has_k_tail
-    async_load_bytes = param.async_load_bytes
-    in_data_bytes = param.in_data_bytes
-    async_load_vec_size = async_load_bytes // in_data_bytes
-    ldg_x_threads = param.ldg_x_threads
     block_threads = param.block_threads
     ldg_a_iters = param.ldg_a_iters
     ldg_b_iters = param.ldg_b_iters
@@ -531,20 +547,15 @@ def gemm_gfx950_kernel(
 
     gC = fx.flat_divide(out_buf, (block_m, block_n))[None, None, bid_m, bid_n]
     thr_mma = tiled_mma.thr_slice(tid)
-    (
-        uni_copy_atom,
-        buffer_copy_atom,
-        a_s2r_copy_atom,
-        b_s2r_copy_atom,
-        thr_copy_A,
-        thr_copy_B,
-    ) = make_gemm_ab_copies(
-        elem_dtype,
-        tiled_mma,
-        tid,
-        param.a_is_transposed,
-        param.b_is_transposed,
-    )
+    ab_context = make_gemm_ab_context(elem_dtype, tid, k, param)
+    uni_copy_atom = ab_context.uni_copy_atom
+    buffer_copy_atom = ab_context.buffer_copy_atom
+    a_s2r_copy_atom = ab_context.a_s2r_copy_atom
+    b_s2r_copy_atom = ab_context.b_s2r_copy_atom
+    a_tiled_copy_atom = ab_context.a_tiled_copy_atom
+    b_tiled_copy_atom = ab_context.b_tiled_copy_atom
+    thr_copy_A = fx.make_tiled_copy_A(a_tiled_copy_atom, tiled_mma).get_slice(tid)
+    thr_copy_B = fx.make_tiled_copy_B(b_tiled_copy_atom, tiled_mma).get_slice(tid)
     a_lds_layout, b_lds_layout = make_gemm_ab_lds_layouts(
         block_m,
         block_n,
@@ -613,48 +624,38 @@ def gemm_gfx950_kernel(
             & (col_idx < n)
         )
 
-    wave_offset = get_wave_lds_offset(tid, async_load_bytes)
-    async_load_context = (
-        wave_offset,
-        tid,
-        block_threads,
-        async_load_vec_size,
-        ldg_x_threads,
-        block_k,
-        k,
-        has_k_tail,
-        in_data_bytes,
-        async_load_bytes,
-    )
-
     def async_load_a_to_lds(k_tile, stage):
         async_load_to_lds(
-            smem_a + stage * block_m * block_k,
-            a_rsrc,
-            a_lds_layout,
-            block_m,
-            m,
-            bid_m * block_m,
-            a_leading_stride,
-            ldg_a_iters,
-            param.a_is_transposed,
-            k_tile,
-            async_load_context,
+            tile=AsyncLoadTile(
+                lds_base=smem_a + stage * block_m * block_k,
+                rsrc=a_rsrc,
+                lds_layout=a_lds_layout,
+                outer_tile_size=block_m,
+                outer_bound=m,
+                global_outer_offset=bid_m * block_m,
+                leading_stride=a_leading_stride,
+                k_tile=k_tile,
+            ),
+            context=ab_context,
+            load_iters=ldg_a_iters,
+            is_k_major=param.a_is_transposed,
         )
 
     def async_load_b_to_lds(k_tile, stage):
         async_load_to_lds(
-            smem_b + stage * block_n * block_k,
-            b_rsrc,
-            b_lds_layout,
-            block_n,
-            n,
-            bid_n * block_n,
-            b_leading_stride,
-            ldg_b_iters,
-            not param.b_is_transposed,
-            k_tile,
-            async_load_context,
+            tile=AsyncLoadTile(
+                lds_base=smem_b + stage * block_n * block_k,
+                rsrc=b_rsrc,
+                lds_layout=b_lds_layout,
+                outer_tile_size=block_n,
+                outer_bound=n,
+                global_outer_offset=bid_n * block_n,
+                leading_stride=b_leading_stride,
+                k_tile=k_tile,
+            ),
+            context=ab_context,
+            load_iters=ldg_b_iters,
+            is_k_major=not param.b_is_transposed,
         )
 
     def compute_stage(read_stage, k_tile):
@@ -749,10 +750,6 @@ def gemm_hti_gfx950_kernel(
     half_block_n = block_n // 2
     stages = param.stages
     has_k_tail = param.has_k_tail
-    async_load_bytes = param.async_load_bytes
-    in_data_bytes = param.in_data_bytes
-    async_load_vec_size = async_load_bytes // in_data_bytes
-    ldg_x_threads = param.ldg_x_threads
     block_threads = param.block_threads
     n_waves = param.n_waves
     half_ldg_a_iters = param.ldg_a_iters // 2
@@ -796,20 +793,15 @@ def gemm_hti_gfx950_kernel(
     b_rsrc = fx.rocdl.get_buffer_rsrc(fx.get_iter(b_buf))
 
     thr_mma = tiled_mma.thr_slice(tid)
-    (
-        uni_copy_atom,
-        buffer_copy_atom,
-        a_s2r_copy_atom,
-        b_s2r_copy_atom,
-        thr_copy_A,
-        thr_copy_B,
-    ) = make_gemm_ab_copies(
-        elem_dtype,
-        tiled_mma,
-        tid,
-        param.a_is_transposed,
-        param.b_is_transposed,
-    )
+    ab_context = make_gemm_ab_context(elem_dtype, tid, k, param)
+    uni_copy_atom = ab_context.uni_copy_atom
+    buffer_copy_atom = ab_context.buffer_copy_atom
+    a_s2r_copy_atom = ab_context.a_s2r_copy_atom
+    b_s2r_copy_atom = ab_context.b_s2r_copy_atom
+    a_tiled_copy_atom = ab_context.a_tiled_copy_atom
+    b_tiled_copy_atom = ab_context.b_tiled_copy_atom
+    thr_copy_A = fx.make_tiled_copy_A(a_tiled_copy_atom, tiled_mma).get_slice(tid)
+    thr_copy_B = fx.make_tiled_copy_B(b_tiled_copy_atom, tiled_mma).get_slice(tid)
     a_lds_layout, b_lds_layout = make_gemm_ab_lds_layouts(
         half_block_m,
         half_block_n,
@@ -819,55 +811,44 @@ def gemm_hti_gfx950_kernel(
     )
     c_lds_layout = fx.make_layout((half_block_m, half_block_n), (half_block_n, 1))
 
-    wave_offset = get_wave_lds_offset(tid, async_load_bytes)
-
     def half_a_base(stage, m_part):
         return smem_a + (stage * block_m + m_part * half_block_m) * block_k
 
     def half_b_base(stage, n_part):
         return smem_b + (stage * block_n + n_part * half_block_n) * block_k
 
-    async_load_context = (
-        wave_offset,
-        tid,
-        block_threads,
-        async_load_vec_size,
-        ldg_x_threads,
-        block_k,
-        k,
-        has_k_tail,
-        in_data_bytes,
-        async_load_bytes,
-    )
-
     def async_load_a_to_lds(m_part, k_tile, stage):
         async_load_to_lds(
-            half_a_base(stage, m_part),
-            a_rsrc,
-            a_lds_layout,
-            half_block_m,
-            m,
-            bid_m * block_m + m_part * half_block_m,
-            a_leading_stride,
-            half_ldg_a_iters,
-            param.a_is_transposed,
-            k_tile,
-            async_load_context,
+            tile=AsyncLoadTile(
+                lds_base=half_a_base(stage, m_part),
+                rsrc=a_rsrc,
+                lds_layout=a_lds_layout,
+                outer_tile_size=half_block_m,
+                outer_bound=m,
+                global_outer_offset=bid_m * block_m + m_part * half_block_m,
+                leading_stride=a_leading_stride,
+                k_tile=k_tile,
+            ),
+            context=ab_context,
+            load_iters=half_ldg_a_iters,
+            is_k_major=param.a_is_transposed,
         )
 
     def async_load_b_to_lds(n_part, k_tile, stage):
         async_load_to_lds(
-            half_b_base(stage, n_part),
-            b_rsrc,
-            b_lds_layout,
-            half_block_n,
-            n,
-            bid_n * block_n + n_part * half_block_n,
-            b_leading_stride,
-            half_ldg_b_iters,
-            not param.b_is_transposed,
-            k_tile,
-            async_load_context,
+            tile=AsyncLoadTile(
+                lds_base=half_b_base(stage, n_part),
+                rsrc=b_rsrc,
+                lds_layout=b_lds_layout,
+                outer_tile_size=half_block_n,
+                outer_bound=n,
+                global_outer_offset=bid_n * block_n + n_part * half_block_n,
+                leading_stride=b_leading_stride,
+                k_tile=k_tile,
+            ),
+            context=ab_context,
+            load_iters=half_ldg_b_iters,
+            is_k_major=not param.b_is_transposed,
         )
 
     def make_gC(m_part, n_part):
@@ -1205,6 +1186,8 @@ def make_gemm_param_and_validate(m, n, k, kwargs):
         return None
     async_load_vec_size = GFX950_DMA_BYTES // result.in_data_bytes
     if result.a_is_transposed and m % async_load_vec_size != 0:
+        return None
+    if result.b_is_transposed and k % async_load_vec_size != 0:
         return None
     if result.use_half_tile_interleaved:
         k_tiles = (k + result.block_k - 1) // result.block_k
