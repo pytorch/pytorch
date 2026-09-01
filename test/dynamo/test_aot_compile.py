@@ -4,6 +4,7 @@ import contextlib
 import copy
 import functools
 import inspect
+import io
 import multiprocessing as mp
 import os
 import pickle
@@ -1807,6 +1808,31 @@ from user code:
                     )
         finally:
             c10d.destroy_process_group()
+
+    def test_pickler_rebuilds_a_nested_function_faithfully(self):
+        # The pickler passed __qualname__ where FunctionType wants __name__, so
+        # a reloaded function reported the dotted qualname as its __name__. And
+        # it read cell_contents unguarded, so a free variable only assigned on a
+        # path that did not run raised ValueError out of the pickler.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            def inner():
+                return unset
+
+            inner.__name__ = "renamed"
+            if inner is None:
+                unset = 1  # never runs, so the cell inner closes over stays empty
+            return inner
+
+        fn = outer()
+        self.assertRaises(ValueError, lambda: fn.__closure__[0].cell_contents)
+        buf = io.BytesIO()
+        AOTCompilePickler({}, buf).dump(fn)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertEqual(out.__name__, "renamed")
+        self.assertEqual(out.__qualname__, fn.__qualname__)
+        self.assertRaises(ValueError, lambda: out.__closure__[0].cell_contents)
 
 
 class TestTritonKernelSerialization(torch._inductor.test_case.TestCase):
