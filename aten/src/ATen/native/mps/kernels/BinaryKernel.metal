@@ -327,13 +327,6 @@ struct atan2_functor {
   }
 };
 
-struct pow_functor {
-  template <typename T>
-  inline T operator()(const T a, const T b) {
-    return static_cast<T>(c10::metal::pow(a, b));
-  }
-};
-
 // Complex binary functors
 struct polar_functor {
   template <typename U>
@@ -673,10 +666,6 @@ REGISTER_FLOAT_BINARY_OP(hermite_polynomial_he);
 REGISTER_INT2FLOAT_BINARY_OP(hermite_polynomial_he);
 REGISTER_FLOAT_BINARY_OP(laguerre_polynomial_l);
 REGISTER_INT2FLOAT_BINARY_OP(laguerre_polynomial_l);
-REGISTER_FLOAT_BINARY_OP(pow);
-REGISTER_INTEGER_BINARY_OP(pow);
-REGISTER_BINARY_OP(pow, float2, float2);
-REGISTER_BINARY_OP(pow, half2, half2);
 REGISTER_FLOAT_BINARY_OP(add);
 REGISTER_INTEGER_BINARY_OP(add);
 REGISTER_OPMATH_FLOAT_BINARY_OP(mul);
