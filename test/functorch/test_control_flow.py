@@ -506,6 +506,147 @@ def _while_loop_tests():
 WHILE_LOOP_TESTS = _while_loop_tests()
 
 
+def _while_loop_vmap_tests():
+    def ragged_trip_count(while_loop_op, x):
+        return while_loop_op(lambda c: c.sum() < 10.0, lambda c: (c + 1,), (x,))
+
+    def unbatched_carry(while_loop_op, it, x):
+        def cond_fn(i, c):
+            return c.sum() < 10.0
+
+        def body_fn(i, c):
+            return i + 1, c + i
+
+        return while_loop_op(cond_fn, body_fn, (it, x))
+
+    def unbatched_pred(while_loop_op, x, n):
+        def cond_fn(c, i):
+            return i.sum() > 0
+
+        def body_fn(c, i):
+            return c.sin(), i - 1
+
+        return while_loop_op(cond_fn, body_fn, (x, n))
+
+    def closure(while_loop_op, x, w):
+        def cond_fn(c):
+            return c.sum() < 8.0
+
+        def body_fn(c):
+            return (c * w,)
+
+        return while_loop_op(cond_fn, body_fn, (x,))
+
+    def mixed_ndim_carries(while_loop_op, acc, x):
+        def cond_fn(a, c):
+            return c.sum() < 6.0
+
+        def body_fn(a, c):
+            return a + c.sum(), c + 1
+
+        return while_loop_op(cond_fn, body_fn, (acc, x))
+
+    def pytree_carry(while_loop_op, it, x, y):
+        def cond_fn(i, d):
+            return d["x"].sum() < 12.0
+
+        def body_fn(i, d):
+            return i - 1, {"x": d["x"] + 1, "y": [d["y"][0] * 1.5]}
+
+        return while_loop_op(cond_fn, body_fn, (it, {"x": x, "y": [y]}))
+
+    def nested(while_loop_op, x, y):
+        def inner_cond_fn(a, b):
+            return a.sum() < 5.0
+
+        def inner_body_fn(a, b):
+            return a + 1, b.clone()
+
+        def outer_cond_fn(a, b):
+            return b.sum() < 8.0
+
+        def outer_body_fn(a, b):
+            a, b = while_loop_op(inner_cond_fn, inner_body_fn, (a, b))
+            return a.clone(), b + 1
+
+        return while_loop_op(outer_cond_fn, outer_body_fn, (x, y))
+
+    def cond_in_body(while_loop_op, x):
+        def cond_fn(c):
+            return c.sum() < 12.0
+
+        def body_fn(c):
+            return (cond(c.sum() > 3.0, lambda t: t * 2.0, lambda t: t + 1.0, (c,)),)
+
+        return while_loop_op(cond_fn, body_fn, (x,))
+
+    def scan_in_body(while_loop_op, x, xs):
+        def cond_fn(c):
+            return c.sum() < 30.0
+
+        def body_fn(c):
+            return (scan(lambda a, b: (a + b, a.clone()), c, xs)[0],)
+
+        return while_loop_op(cond_fn, body_fn, (x,))
+
+    def zero_trip_count(while_loop_op, x):
+        return while_loop_op(lambda c: c.sum() < 0.0, lambda c: (c + 1,), (x,))
+
+    x = torch.arange(12.0).reshape(4, 3)
+    return {
+        "ragged_trip_count": (ragged_trip_count, (x,), (0,)),
+        "unbatched_carry": (
+            unbatched_carry,
+            (torch.zeros((), dtype=torch.int64), x),
+            (None, 0),
+        ),
+        "unbatched_pred": (unbatched_pred, (x, torch.tensor(3)), (0, None)),
+        "batched_closure": (
+            closure,
+            (torch.rand(4, 3), torch.rand(4, 3) + 1.2),
+            (0, 0),
+        ),
+        "unbatched_closure": (
+            closure,
+            (torch.rand(4, 3), torch.rand(3) + 1.2),
+            (0, None),
+        ),
+        "nonzero_batch_dims": (
+            closure,
+            (torch.rand(2, 4, 3), torch.rand(2, 3, 4) + 1.2),
+            (1, 2),
+        ),
+        # Moving a size 1 batch dim to the front leaves the strides of the source, so
+        # the carry has to be materialized to keep matching the body output.
+        "size_one_batch_dim": (ragged_trip_count, (torch.rand(3, 1),), (1,)),
+        "mixed_ndim_carries": (mixed_ndim_carries, (torch.zeros(4), x), (0, 0)),
+        "pytree_carry": (
+            pytree_carry,
+            (torch.tensor([1, 2, 3, 4]), x, torch.rand(4, 3)),
+            (0, 0, 0),
+        ),
+        "nested": (nested, (x, torch.zeros(4, 3)), (0, 0)),
+        "cond_in_body": (cond_in_body, (x,), (0,)),
+        "scan_in_body": (scan_in_body, (torch.rand(4, 2), torch.rand(4, 5, 2)), (0, 0)),
+        "zero_trip_count": (zero_trip_count, (x,), (0,)),
+    }
+
+
+WHILE_LOOP_VMAP_TESTS = _while_loop_vmap_tests()
+
+
+def check_while_loop_vmap_autograd(test_case, out, expected, args):
+    # Int carries and trip counters are part of the outputs but carry no gradient.
+    out = [leaf for leaf in out if leaf.is_floating_point()]
+    expected = [leaf for leaf in expected if leaf.is_floating_point()]
+    params = [arg for arg in args if arg.requires_grad]
+    grads = torch.autograd.grad(out, params, [torch.ones_like(el) for el in out])
+    expected_grads = torch.autograd.grad(
+        expected, params, [torch.ones_like(el) for el in expected]
+    )
+    test_case.assertEqual(grads, expected_grads, atol=6e-05, rtol=6e-06)
+
+
 def collect_meta_for_filtered_nodes(
     gm: torch.fx.GraphModule, node_names, meta_field_name
 ):
@@ -10410,6 +10551,25 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         else:
             self.assertEqual(res, (a + 1, a - 1))
 
+    @parametrize("bdim", [0, 1])
+    def test_cond_vmap_batched_pred(self, bdim):
+        def fn(pred, x):
+            return torch.cond(
+                pred=pred,
+                true_fn=lambda x: (x.sin(),),
+                false_fn=lambda x: (x.cos(),),
+                operands=(x,),
+            )
+
+        pred = torch.tensor([True, False, True, False])
+        x = torch.rand(4, 3)
+        if bdim == 1:
+            pred, x = pred.unsqueeze(0), x.movedim(0, 1)
+        expected = torch.stack(
+            [fn(pred.select(bdim, i), x.select(bdim, i))[0] for i in range(4)]
+        )
+        self.assertEqual(torch.vmap(fn, in_dims=(bdim, bdim))(pred, x)[0], expected)
+
     @parametrize("boolcond", [True, False])
     def test_vmap_vmap(self, boolcond):
         def fn(x):
@@ -10964,6 +11124,119 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
 
         self.assertEqual(out, exp)
         self.assertEqual(compile_out, exp)
+
+    # TODO: A scan in the body of a while_loop triggers a stride mismatch in scan.
+    # The same scan under vmap works on its own, so this is
+    # a limitation of the two batching rules combined rather than of either one.
+    @decorateIf(
+        unittest.expectedFailure,
+        lambda params: params["autograd"]
+        and params["while_loop_test"] == "scan_in_body",
+    )
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @parametrize("while_loop_test", list(WHILE_LOOP_VMAP_TESTS.keys()))
+    @parametrize("compile_mode", ["none", "compile"])
+    @parametrize("autograd", [False, True])
+    def test_while_loop_vmap(self, while_loop_test, compile_mode, autograd):
+        fn, args, in_dims = WHILE_LOOP_VMAP_TESTS[while_loop_test]
+        if autograd:
+            args = tuple(
+                arg.detach().clone().requires_grad_()
+                if arg.is_floating_point()
+                else arg
+                for arg in args
+            )
+        batch_size = next(
+            arg.size(dim) for arg, dim in zip(args, in_dims) if dim is not None
+        )
+        per_element = [
+            pytree.tree_leaves(
+                fn(
+                    _fake_while_loop,
+                    *(
+                        arg.select(dim, i).contiguous() if dim is not None else arg
+                        for arg, dim in zip(args, in_dims)
+                    ),
+                )
+            )
+            for i in range(batch_size)
+        ]
+        expected = [torch.stack(leaves) for leaves in zip(*per_element)]
+
+        def vmapped(*args):
+            return torch.vmap(functools.partial(fn, while_loop), in_dims=in_dims)(*args)
+
+        out = pytree.tree_leaves(compile_mode_helper(vmapped, compile_mode)(*args))
+        self.assertEqual(out, expected)
+        if autograd:
+            check_while_loop_vmap_autograd(self, out, expected, args)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @parametrize("compile_mode", ["none", "compile"])
+    def test_while_loop_vmap_of_vmap(self, compile_mode):
+        def cond_fn(c):
+            return c.sum() < 6.0
+
+        def body_fn(c):
+            return (c + 1,)
+
+        def fn(x):
+            return torch.vmap(
+                lambda y: torch.vmap(lambda z: while_loop(cond_fn, body_fn, (z,)))(y)
+            )(x)
+
+        x = torch.arange(24.0).reshape(2, 3, 4) * 0.1
+        expected = torch.stack(
+            [
+                torch.stack([_fake_while_loop(cond_fn, body_fn, (z,))[0] for z in y])
+                for y in x
+            ]
+        )
+        self.assertEqual(compile_mode_helper(fn, compile_mode)(x)[0], expected)
+
+    @skipIfTorchDynamo("a vmap test, not a dynamo test")
+    def test_while_loop_vmap_int_carry_error(self):
+        def fn(it, x):
+            return torch.ops.higher_order.while_loop(
+                lambda i, c: i < 3, lambda i, c: (i + 1, c + 1), (it, x), ()
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError, "only supports tensor carries under vmap"
+        ):
+            torch.vmap(fn, in_dims=(None, 0))(0, torch.rand(4, 3))
+
+    @skipIfTorchDynamo("a vmap test, not a dynamo test")
+    def test_while_loop_vmap_mutated_inputs_error(self):
+        def fn(x):
+            return torch.ops.higher_order.while_loop(
+                lambda c: c.sum() < 10.0,
+                lambda c: (c + 1,),
+                (x,),
+                (),
+                mutated_arg_indices="0",
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError, "doesn't support vmap when cond_fn or body_fn mutates"
+        ):
+            torch.vmap(fn)(torch.rand(4, 3))
+
+    @skipIfTorchDynamo("a vmap test, not a dynamo test")
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_while_loop_vmap_cuda(self):
+        def cond_fn(c):
+            return c.sum() < 10.0
+
+        def body_fn(c):
+            return (c + 1,)
+
+        x = torch.arange(12.0, device="cuda").reshape(4, 3)
+        out = torch.vmap(lambda c: while_loop(cond_fn, body_fn, (c,)))(x)[0]
+        expected = torch.stack(
+            [_fake_while_loop(cond_fn, body_fn, (x[i],))[0] for i in range(4)]
+        ).to("cuda")
+        self.assertEqual(out, expected)
 
     @skipIfTorchDynamo("Skip because we're testing export")
     @parametrize("strict", [True, False])

@@ -24,6 +24,7 @@ from torch._higher_order_ops.utils import (
     get_graph_output_example_values,
     HopInstance,
     materialize_as_graph,
+    move_bdim_to_front,
     reenter_make_fx,
     register_fake,
     save_values_for_backward,
@@ -294,12 +295,7 @@ def _broadcast_to_batch(output, batch_size):
 
     def expand_with_batch(t):
         if isinstance(t, torch.Tensor):
-            # Use contiguous_format to match torch.stack behavior
-            return (
-                t.unsqueeze(0)
-                .expand(batch_size, *t.shape)
-                .clone(memory_format=torch.contiguous_format)
-            )
+            return move_bdim_to_front(t, None, batch_size)
         return t
 
     return pytree.tree_map(expand_with_batch, output)
