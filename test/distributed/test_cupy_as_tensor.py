@@ -118,11 +118,7 @@ class CupyAsTensorTest(MultiProcContinuousTest):
         super().tearDownClass()
 
 
-instantiate_device_type_tests(
-    CupyAsTensorTest,
-    globals(),
-    only_for="cuda"
-)
+instantiate_device_type_tests(CupyAsTensorTest, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     run_tests()
