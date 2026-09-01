@@ -223,6 +223,28 @@ class TestExpandedWeightHelperFunction(TestCase):
         res = sum_over_all_but_batch_and_last_n(input, 4)
         self.assertEqual(res, input)
 
+    def test_device_predicates_match_the_wrapped_weight(self, device):
+        # Tensor.is_<device> is a property, and property access on a subclass is
+        # routed through __torch_function__, so each predicate has to be answered
+        # there or it raises. Only is_cuda used to be, which left every other
+        # backend -- including the is_<name> a PrivateUse1 backend generates --
+        # raising on an attribute a plain tensor answers.
+        weight = torch.randn(3, 4, device=device, requires_grad=True)
+        expanded = ExpandedWeight(weight, 5, loss_reduction="sum")
+
+        device_type = torch.device(device).type
+        for name in sorted(
+            {f"is_{device_type}", "is_cpu", "is_cuda", "is_xpu", "is_mps", "is_mtia"}
+        ):
+            self.assertEqual(getattr(expanded, name), getattr(weight, name), msg=name)
+        self.assertTrue(getattr(expanded, f"is_{device_type}"))
+
+        # Only device predicates are answered; everything else still raises, so
+        # this does not quietly turn ExpandedWeight into a general proxy.
+        for name in ("is_sparse", "is_nested", "is_leaf", "is_quantized"):
+            with self.assertRaisesRegex(RuntimeError, "cannot handle function"):
+                getattr(expanded, name)
+
 
 class TestExpandedWeightFunctional(TestCase):
     def _compare_ew_and_for_loop_per_sample_grads(self, op, sample_input, reduction):
