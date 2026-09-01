@@ -13758,6 +13758,24 @@ def ___make_guard_fn():
         self.assertEqual(compiled[1:], ([], [], 0, 0))
         self.assertEqual(counter.frame_count, 1)
 
+    def test_deque_pop_empty_message(self):
+        # deque.pop() on an empty deque raises IndexError with CPython's "pop
+        # from an empty deque" message, not list's "pop from empty list".
+        def fn(x):
+            try:
+                collections.deque().pop()
+                msg = "no error"
+            except IndexError as e:
+                msg = str(e)
+            return x + 1, msg
+
+        x = torch.randn(3)
+        eager = fn(x)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(eager[0], compiled[0])
+        self.assertEqual(compiled[1], "pop from an empty deque")
+        self.assertEqual(eager[1], compiled[1])
+
     def test_yield_from(self):
         def yield_from_fn(t_list, k):
             def yield_from_gen(l):
