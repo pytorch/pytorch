@@ -2866,7 +2866,6 @@ class _InternalsBase:
         )
 
     @skipIfRocm
-    @skipIfXpu(msg="MXFP8 inline asm requires CUDA")
     def test_rmsnorm_mxfp8_scale_swizzle_kernel_form(self):
         if GPU_TYPE == "cuda":
             if torch.cuda.get_device_capability() < (10, 0):
