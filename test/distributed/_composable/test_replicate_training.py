@@ -364,6 +364,53 @@ class TestReplicate1DTrainingCore(FSDPTest):
             self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
+    def test_non_root_forward_backward(self, device):
+        """
+        Tests running forward/backward through the root and then through a
+        non-root. The non-root needs to synchronize streams/queue the callback.
+        """
+        torch.manual_seed(42)
+        lin_dim = 32
+        model = nn.Sequential(*[MLP(lin_dim, torch.device("cpu")) for _ in range(3)])
+        ref_model = copy.deepcopy(model).to(torch.device(self.device_type))
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+        for mlp in model:
+            replicate(mlp)
+        replicate(model)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=True)
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randn((8, lin_dim), device=self.device_type)
+
+        ref_root_loss = ref_model(inp).sum()
+        ref_root_loss.backward()
+        for param in ref_model.parameters():
+            dist.all_reduce(param.grad)
+            param.grad.detach().div_(self.world_size)
+        ref_optim.step()
+        ref_optim.zero_grad()
+        ref_nonroot_loss = ref_model[0](inp).sum()
+        ref_nonroot_loss.backward()
+        for param in ref_model.parameters():
+            if param.grad is not None:
+                dist.all_reduce(param.grad)
+                param.grad.detach().div_(self.world_size)
+        ref_optim.step()
+
+        root_loss = model(inp).sum()
+        root_loss.backward()
+        torch.get_device_module(self.device_type)._sleep(int(100 * get_cycles_per_ms()))
+        optim.step()
+        optim.zero_grad()
+        nonroot_loss = model[0](inp).sum()
+        nonroot_loss.backward()
+        optim.step()
+
+        self.assertEqual(ref_root_loss, root_loss)
+        self.assertEqual(ref_nonroot_loss, nonroot_loss)
+        self.assertEqual(ref_model(inp).sum(), model(inp).sum())
+
+
+    @skip_if_lt_x_gpu(2)
     def test_explicit_prefetching(self, device):
         torch.manual_seed(42)
         model_args = ModelArgs(n_layers=8, dropout_p=0.0)
@@ -415,7 +462,7 @@ class TestReplicate1DTrainingCore(FSDPTest):
 instantiate_device_type_tests(TestReplicate1DTrainingCore, globals(), except_for="cpu", allow_xpu=True)
 
 
-class TestReplicate1DTrainingCoreSleep(FSDPTest):
+class TestReplicate1DTrainingCoreNoHpu(FSDPTest):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @property
@@ -569,52 +616,6 @@ class TestReplicate1DTrainingCoreSleep(FSDPTest):
                 self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
-    def test_non_root_forward_backward(self, device):
-        """
-        Tests running forward/backward through the root and then through a
-        non-root. The non-root needs to synchronize streams/queue the callback.
-        """
-        torch.manual_seed(42)
-        lin_dim = 32
-        model = nn.Sequential(*[MLP(lin_dim, torch.device("cpu")) for _ in range(3)])
-        ref_model = copy.deepcopy(model).to(torch.device(self.device_type))
-        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
-        for mlp in model:
-            replicate(mlp)
-        replicate(model)
-        optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=True)
-        torch.manual_seed(42 + self.rank)
-        inp = torch.randn((8, lin_dim), device=self.device_type)
-
-        ref_root_loss = ref_model(inp).sum()
-        ref_root_loss.backward()
-        for param in ref_model.parameters():
-            dist.all_reduce(param.grad)
-            param.grad.detach().div_(self.world_size)
-        ref_optim.step()
-        ref_optim.zero_grad()
-        ref_nonroot_loss = ref_model[0](inp).sum()
-        ref_nonroot_loss.backward()
-        for param in ref_model.parameters():
-            if param.grad is not None:
-                dist.all_reduce(param.grad)
-                param.grad.detach().div_(self.world_size)
-        ref_optim.step()
-
-        root_loss = model(inp).sum()
-        root_loss.backward()
-        torch.get_device_module(self.device_type)._sleep(int(100 * get_cycles_per_ms()))
-        optim.step()
-        optim.zero_grad()
-        nonroot_loss = model[0](inp).sum()
-        nonroot_loss.backward()
-        optim.step()
-
-        self.assertEqual(ref_root_loss, root_loss)
-        self.assertEqual(ref_nonroot_loss, nonroot_loss)
-        self.assertEqual(ref_model(inp).sum(), model(inp).sum())
-
-    @skip_if_lt_x_gpu(2)
     def test_post_optim_event(self, device):
         torch.manual_seed(42)
         model_args = ModelArgs(dropout_p=0.0)
@@ -660,7 +661,7 @@ class TestReplicate1DTrainingCoreSleep(FSDPTest):
             self.assertEqual(ref_loss, loss)
 
 
-instantiate_device_type_tests(TestReplicate1DTrainingCoreSleep, globals(), except_for=["cpu", "hpu"], allow_xpu=True)
+instantiate_device_type_tests(TestReplicate1DTrainingCoreNoHpu, globals(), except_for=["cpu", "hpu"], allow_xpu=True)
 
 
 class TestReplicateTrainingCompose(FSDPTest):
