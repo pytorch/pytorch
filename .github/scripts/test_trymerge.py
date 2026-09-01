@@ -2638,8 +2638,12 @@ class TestAdvisorPending(TestCase):
         """
         over = IGNORABLE_FAILED_CHECKS_THESHOLD + 1
         names = [f"job {i}" for i in range(over)]
-        checks = {n: self._check(n, i) for i, n in enumerate(names)}
-        drci = {"AI_NOT_RELATED": [{"id": i, "name": n} for i, n in enumerate(names)]}
+        # Job ids from 1: `is_ai_not_related` requires a truthy id, so a job
+        # numbered 0 silently never matches and the count lands one under the
+        # cap -- which passes this test with the guard removed.
+        ids = list(range(1, over + 1))
+        checks = {n: self._check(n, i) for n, i in zip(names, ids)}
+        drci = {"AI_NOT_RELATED": [{"id": i, "name": n} for n, i in zip(names, ids)]}
         with mock.patch("trymerge.get_drci_classifications", return_value=drci):
             classified = get_classifications(1, "pytorch", checks, names)
         _, failed, _ = categorize_checks(classified, names)
