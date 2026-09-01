@@ -8,8 +8,6 @@ import sympy
 import torch
 from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import (
-    guard_int,
-    has_guarding_hint,
     statically_known_true as fx_statically_known_true,
 )
 
@@ -17,19 +15,6 @@ from torch.fx.experimental.symbolic_shapes import (
 def normalize_shape(shape: object) -> object:
     """Canonicalize sequence-like shapes to tuples."""
     return tuple(shape) if isinstance(shape, (list, tuple, torch.Size)) else shape
-
-
-def guarded_int(value: object) -> int | None:
-    """Return an integer after guarding backed symbolic values."""
-    if isinstance(value, torch.fx.Node):
-        value = value.meta.get("val")
-    if isinstance(value, torch.SymInt):
-        if not has_guarding_hint(value):
-            return None
-        # TODO: Defer speculative guards if they become a meaningful source of
-        # recompilation.
-        return guard_int(value)
-    return value if isinstance(value, int) else None
 
 
 def statically_known(expr: object) -> bool:
