@@ -71,3 +71,14 @@ TEST(TestUndefined, UndefinedTest) {
   ASSERT_FALSE(to_move.defined());
   ASSERT_EQ(to_move.unsafeGetTensorImpl(), UndefinedTensorImpl::singleton());
 }
+
+TEST(TestUndefined, RMSNormUndefinedWeight) {
+  manual_seed(123);
+
+  // A C++ caller forwarding a possibly-undefined weight for `Tensor?` yields an
+  // engaged optional holding an undefined tensor; it must behave like nullopt.
+  Tensor und;
+  auto input = rand({4, 5});
+  ASSERT_TRUE(at::rms_norm(input, {5}, und, 1e-5)
+                  .equal(at::rms_norm(input, {5}, std::nullopt, 1e-5)));
+}

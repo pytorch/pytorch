@@ -300,12 +300,16 @@ std::tuple<Tensor, Tensor> rms_norm_composite(
 
     Tensor upcasted_result = upcasted_input.mul(rqrst_input);
 
-    if (weight_opt.has_value()) {
+    // An engaged optional can still hold an undefined tensor, which is what a
+    // C++ caller passing a possibly-undefined Tensor for `Tensor?` produces.
+    const bool has_weight = weight_opt.has_value() && weight_opt->defined();
+
+    if (has_weight) {
       upcasted_result = upcasted_result.mul(weight_opt.value());
     }
 
     // if nested do not make contiguous
-    if(input.is_nested() || (weight_opt.has_value() && weight_opt.value().is_nested())){
+    if (input.is_nested() || (has_weight && weight_opt.value().is_nested())) {
       return std::make_tuple(std::move(upcasted_result), std::move(rqrst_input));
     }
 
@@ -351,7 +355,8 @@ Tensor rms_norm_symint(
   }
 
   #ifdef USE_MPS
-  if (input.device().type() == DeviceType::MPS && weight_opt.has_value()) {
+  if (input.device().type() == DeviceType::MPS && weight_opt.has_value() &&
+      weight_opt->defined()) {
     const Tensor weight = weight_opt.value();
     const bool any_inputs_require_grad = input.requires_grad() || weight.requires_grad();
 
