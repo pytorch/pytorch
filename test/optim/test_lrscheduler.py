@@ -908,6 +908,9 @@ class TestLRScheduler(TestCase):
             scheduler.step()
         with self.assertRaisesRegex(ValueError, "requires the metric it monitors"):
             scheduler.step(metrics=None)
+        error = r"Did you mean `step\(metrics=\.\.\.\)`\?"
+        with self.assertRaisesRegex(ValueError, error):
+            scheduler.step(1.0)
 
     def test_plateau_lr_initial_step_no_metrics(self):
         # Construction performs an implicit initial step with no metric

@@ -2051,6 +2051,11 @@ class PlateauLR(LRScheduler):
                 monitored, such as a validation loss. Required on every call
                 except the implicit one performed at construction.
         """
+        if epoch is not None and metrics is None:
+            raise ValueError(
+                "`PlateauLR.step` received an `epoch` argument but no "
+                "`metrics` argument. Did you mean `step(metrics=...)`?"
+            )
         if metrics is None and not self._is_initial:
             raise ValueError(
                 "`PlateauLR` requires the metric it monitors to be passed "
