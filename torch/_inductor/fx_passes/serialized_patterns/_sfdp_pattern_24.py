@@ -18,9 +18,7 @@ from torch._inductor.pattern_matcher import (
    CallMethodVarArgs,
    CallModule,
    CallModuleVarArgs,
-   CanonicalDims,
    ExclusiveKeywordArg,
-   GetAttr,
    Ignored,
    KeywordArg,
    ListOf,
@@ -33,15 +31,15 @@ from torch._inductor.pattern_matcher import (
 )
 view_default = CallFunction(aten.view.default, KeywordArg('query'), Ignored())
 view_default_1 = CallFunction(aten.view.default, KeywordArg('key'), Ignored())
-permute_default = CallFunction(aten.permute.default, view_default_1, CanonicalDims([0, 2, 1], 3))
+permute_default = CallFunction(aten.permute.default, view_default_1, Ignored())
 bmm_default = CallFunction(aten.bmm.default, view_default, permute_default)
 view_default_2 = CallFunction(aten.view.default, bmm_default, Ignored())
 add_Tensor = CallFunction(aten.add.Tensor, view_default_2, KeywordArg('attention_mask'))
 view_default_3 = CallFunction(aten.view.default, add_Tensor, Ignored(), _users=2)
-amax_default = CallFunction(aten.amax.default, view_default_3, CanonicalDims([2], 3), True)
+amax_default = CallFunction(aten.amax.default, view_default_3, Ignored(), True)
 sub_Tensor = CallFunction(aten.sub.Tensor, view_default_3, amax_default)
 exp_default = CallFunction(aten.exp.default, sub_Tensor, _users=2)
-sum_dim_IntList = CallFunction(aten.sum.dim_IntList, exp_default, CanonicalDims([2], 3), True)
+sum_dim_IntList = CallFunction(aten.sum.dim_IntList, exp_default, Ignored(), True)
 div_Tensor = CallFunction(aten.div.Tensor, exp_default, sum_dim_IntList)
 view_default_4 = CallFunction(aten.view.default, KeywordArg('value'), Ignored())
 bmm_default_1 = CallFunction(aten.bmm.default, div_Tensor, view_default_4)
@@ -50,15 +48,15 @@ _sfdp_pattern_24_inference = CallFunction(aten.view.default, bmm_default_1, Igno
 
 view_default = CallFunction(aten.view.default, KeywordArg('query'), Ignored())
 view_default_1 = CallFunction(aten.view.default, KeywordArg('key'), Ignored())
-permute_default = CallFunction(aten.permute.default, view_default_1, CanonicalDims([0, 2, 1], 3))
+permute_default = CallFunction(aten.permute.default, view_default_1, Ignored())
 bmm_default = CallFunction(aten.bmm.default, view_default, permute_default)
 view_default_2 = CallFunction(aten.view.default, bmm_default, Ignored())
 add_Tensor = CallFunction(aten.add.Tensor, view_default_2, KeywordArg('attention_mask'))
 view_default_3 = CallFunction(aten.view.default, add_Tensor, Ignored(), _users=2)
-amax_default = CallFunction(aten.amax.default, view_default_3, CanonicalDims([2], 3), True)
+amax_default = CallFunction(aten.amax.default, view_default_3, Ignored(), True)
 sub_Tensor = CallFunction(aten.sub.Tensor, view_default_3, amax_default)
 exp_default = CallFunction(aten.exp.default, sub_Tensor, _users=2)
-sum_dim_IntList = CallFunction(aten.sum.dim_IntList, exp_default, CanonicalDims([2], 3), True)
+sum_dim_IntList = CallFunction(aten.sum.dim_IntList, exp_default, Ignored(), True)
 div_Tensor = CallFunction(aten.div.Tensor, exp_default, sum_dim_IntList)
 convert_element_type_default = CallFunction(prims.convert_element_type.default, div_Tensor, Ignored())
 view_default_4 = CallFunction(aten.view.default, KeywordArg('value'), Ignored())

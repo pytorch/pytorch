@@ -885,6 +885,50 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         # softmax over the last dim spelled positively must still fuse
         self._check_common(positive_dim_dot_prod_attention, args1=make_args())
 
+    def _test_pattern_fails_with_mismatched_view_grouping(self):
+        # The view sizes of _sfdp_pattern_24 are wildcards in the serialized
+        # pattern; grouping the scores heads-major instead of batch-major
+        # before the mask add coarse-matched anyway and crashed while tracing
+        # the replacement (the #195282 failure mode).  The match-time re-trace
+        # must reject it.
+        def dot_prod_attention(query, key, value, attn_mask, heads_major):
+            bs, n_head, seq_len, embed_dim = query.shape
+            q = query.view(bs * n_head, seq_len, embed_dim)
+            k = key.reshape(bs * n_head, seq_len, embed_dim)
+            v = value.reshape(bs * n_head, seq_len, embed_dim)
+            attn_weights = torch.bmm(q, k.transpose(1, 2))
+            grouping = (n_head, bs) if heads_major else (bs, n_head)
+            attn_weights = attn_weights.view(*grouping, seq_len, seq_len) + attn_mask
+            attn_weights = attn_weights.view(bs * n_head, seq_len, seq_len)
+            attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
+            return torch.bmm(attn_weights, v).view(bs, n_head, seq_len, embed_dim)
+
+        bs, n_head, seq_len, embed_dim = 4, 2, 16, 32
+        tensor_shape = (bs, n_head, seq_len, embed_dim)
+
+        def make_args(mask_shape):
+            return [
+                *[torch.randn(tensor_shape, device=self.device) for _ in range(3)],
+                torch.randn(mask_shape, device=self.device),
+            ]
+
+        self._check_common(
+            functools.partial(dot_prod_attention, heads_major=True),
+            args1=make_args((n_head, 1, seq_len, seq_len)),
+            contains=False,
+            has_fuse_pattern=False,
+            has_dropout=False,
+            check_train=False,
+        )
+        self.assertEqual(counters["inductor"]["fuse_attention"], 0)
+        # the batch-major grouping the pattern was traced from must still fuse
+        self._check_common(
+            functools.partial(dot_prod_attention, heads_major=False),
+            args1=make_args((1, 1, seq_len, seq_len)),
+            has_dropout=False,
+            check_train=False,
+        )
+
     def _test_pattern_fuses_with_symint_scale(self):
         # A SymInt scale is a scalar the fused kernel accepts. _check_common
         # only marks dim 0 dynamic, so the scale is taken from that dim.
@@ -2072,6 +2116,7 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
             TestSDPAPatternRewriterTemplate._test_pattern_fails_with_batch_permuted_key
         )
         test_pattern_fails_with_non_last_dim_softmax_gpu = TestSDPAPatternRewriterTemplate._test_pattern_fails_with_non_last_dim_softmax
+        test_pattern_fails_with_mismatched_view_grouping_gpu = TestSDPAPatternRewriterTemplate._test_pattern_fails_with_mismatched_view_grouping
         test_sdpa_rewriter_11_gpu = (
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_11
         )
@@ -2223,6 +2268,7 @@ if HAS_CPU:
             TestSDPAPatternRewriterTemplate._test_pattern_fails_with_batch_permuted_key
         )
         test_pattern_fails_with_non_last_dim_softmax_cpu = TestSDPAPatternRewriterTemplate._test_pattern_fails_with_non_last_dim_softmax
+        test_pattern_fails_with_mismatched_view_grouping_cpu = TestSDPAPatternRewriterTemplate._test_pattern_fails_with_mismatched_view_grouping
         test_sdpa_rewriter_11_cpu = (
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_11
         )

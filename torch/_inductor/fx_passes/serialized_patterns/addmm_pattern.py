@@ -18,9 +18,7 @@ from torch._inductor.pattern_matcher import (
    CallMethodVarArgs,
    CallModule,
    CallModuleVarArgs,
-   CanonicalDims,
    ExclusiveKeywordArg,
-   GetAttr,
    Ignored,
    KeywordArg,
    ListOf,
@@ -33,12 +31,12 @@ from torch._inductor.pattern_matcher import (
 )
 addmm_default = CallFunction(aten.addmm.default, KeywordArg('input'), KeywordArg('mat1'), KeywordArg('mat2'), beta=KeywordArg('beta'), alpha=KeywordArg('alpha'))
 mul_Scalar = CallFunction(aten.mul.Scalar, KeywordArg('tangents_1'), KeywordArg('beta'))
-sum_dim_IntList = CallFunction(aten.sum.dim_IntList, mul_Scalar, CanonicalDims([0], 2), True)
+sum_dim_IntList = CallFunction(aten.sum.dim_IntList, mul_Scalar, Ignored(), True)
 view_default = CallFunction(aten.view.default, sum_dim_IntList, Ignored())
-permute_default = CallFunction(aten.permute.default, KeywordArg('mat2'), CanonicalDims([1, 0], 2))
+permute_default = CallFunction(aten.permute.default, KeywordArg('mat2'), Ignored())
 mm_default = CallFunction(aten.mm.default, KeywordArg('tangents_1'), permute_default)
 mul_Scalar_1 = CallFunction(aten.mul.Scalar, mm_default, KeywordArg('alpha'))
-permute_default_1 = CallFunction(aten.permute.default, KeywordArg('mat1'), CanonicalDims([1, 0], 2))
+permute_default_1 = CallFunction(aten.permute.default, KeywordArg('mat1'), Ignored())
 mm_default_1 = CallFunction(aten.mm.default, permute_default_1, KeywordArg('tangents_1'))
 mul_Scalar_2 = CallFunction(aten.mul.Scalar, mm_default_1, KeywordArg('alpha'))
 addmm_pattern_training = MultiOutputPattern([addmm_default,

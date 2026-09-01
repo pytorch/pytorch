@@ -1013,7 +1013,7 @@ def _sfdp_params_check(match):
 def _sfdp_pattern_13_check(match):
     if not _sfdp_params_check(match):
         return False
-    # The pattern itself matches the permute dims exactly; only reject matches
+    # check_fn's re-trace validates the permute dims; only reject matches
     # that pull in additional permutes (training patterns).
     return len(filter_nodes(match.nodes, aten.permute.default)) == 1
 
