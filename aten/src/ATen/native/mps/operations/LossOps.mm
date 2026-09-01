@@ -363,13 +363,18 @@ static void nllnd_loss_backward_impl(Tensor& grad_input_arg,
                   getMTLBufferStorage(target),
                   getMTLBufferStorage(weight),
                   getMTLBufferStorage(total_weight_cast));
+      // For 1D (no batch dim) input the loss has a single element and only
+      // target[0] is used; dispatching target.numel() threads would read
+      // grad_output (a single element) out of bounds and scatter garbage into
+      // grad_input. See https://github.com/pytorch/pytorch/issues/195391.
+      const int64_t num_outputs = input_arg.dim() == 1 ? 1 : target.numel();
       // Chunk only when the target exceeds Metal's uint32 thread-grid limit.
       constexpr auto max_threads = int64_t{std::numeric_limits<uint32_t>::max()};
       auto dispatch_params = params;
-      for (auto offset = int64_t{0}; offset < target.numel(); offset += max_threads) {
+      for (auto offset = int64_t{0}; offset < num_outputs; offset += max_threads) {
         dispatch_params.tid_offset = offset;
         mtl_setArgs<5>(encoder, dispatch_params, stream->getErrorBuffer());
-        mtl_dispatch1DJob(encoder, pso, std::min(max_threads, target.numel() - offset));
+        mtl_dispatch1DJob(encoder, pso, std::min(max_threads, num_outputs - offset));
       }
     }
   });

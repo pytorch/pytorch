@@ -8660,8 +8660,8 @@ def _meta_grouped_mm_common(
     scaled = scale_a is not None and scale_b is not None
 
     # Implementing all the checks from
-    # _grouped_mm_cuda()/_scaled_grouped_mm_cuda() code in
-    # aten/src/ATen/native/cuda/Blas.cpp.
+    # _grouped_mm_validate_inputs() in aten/src/ATen/native/GroupedMMUtils.h and
+    # _scaled_grouped_mm_cuda() in aten/src/ATen/native/cuda/GroupedBlas.cpp.
 
     if scaled:
         fp8_dtype = torch.float8_e4m3fn
@@ -8675,20 +8675,14 @@ def _meta_grouped_mm_common(
             mat_a.dtype == fp8_dtype and mat_b.dtype == fp8_dtype,
             lambda: f"Expected inputs of E4M3 FP8 type but got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
         )
-    elif mat_a.dtype == torch.bfloat16:
-        torch._check(
-            mat_b.dtype == mat_a.dtype,
-            lambda: f"Expected mat_b dtype to match mat_a dtype, got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
-        )
-    elif mat_a.dtype == torch.float16:
-        torch._check(
-            mat_b.dtype == mat_a.dtype,
-            lambda: f"Expected mat_b dtype to match mat_a dtype, got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
-        )
     else:
         torch._check(
-            False,
-            lambda: f"Expected mat_a to be BFloat16 or supported Float16 matrix, got {mat_a.dtype}.",
+            mat_a.dtype in (torch.bfloat16, torch.float32, torch.float16),
+            lambda: f"Expected mat_a to be Float32, BFloat16 or Float16 matrix, got {mat_a.dtype}.",
+        )
+        torch._check(
+            mat_b.dtype in (torch.bfloat16, torch.float32, torch.float16),
+            lambda: f"Expected mat_b to be Float32, BFloat16 or Float16 matrix, got {mat_b.dtype}.",
         )
 
     torch._check(
@@ -8860,12 +8854,6 @@ def _meta_grouped_mm_common(
             lambda: "Offsets tensor provided, but is not needed for 3D/3D multiplicand layouts.",
         )
 
-    if mat_a.dtype == torch.float16:
-        torch._check(
-            _grouped_mm_fp16_cublaslt_supported(mat_a, mat_b, offs),
-            lambda: "Float16 grouped_mm requires cuBLASLt grouped GEMM support.",
-        )
-
     torch._check(
         bias is None,
         lambda: "Bias tensor provided, but it is not supported yet.",
@@ -8884,32 +8872,6 @@ def _meta_grouped_mm_common(
         )
 
     return _create_grouped_mm_output_tensor(mat_a, mat_b, offs, out_dtype)
-
-
-def _grouped_mm_fp16_cublaslt_supported(
-    mat_a: Tensor, mat_b: Tensor, offs: Tensor | None
-) -> bool:
-    if device_hint(mat_a) != "cuda" or device_hint(mat_b) != "cuda":
-        return False
-    if not torch.cuda.is_available():
-        return False
-    mat_a_is_2d = mat_a.dim() == 2
-    mat_b_is_2d = mat_b.dim() == 2
-    batch_count = (
-        offs.size(0)
-        if offs is not None and (mat_a_is_2d or mat_b_is_2d)
-        else mat_a.size(0)
-    )
-    if batch_count < 1 or batch_count > 1024:
-        return False
-    device_capability = torch.cuda.get_device_capability()
-    cuda_version: tuple[int, int] = (0, 0)
-    if torch.version.cuda:
-        parts = torch.version.cuda.split(".")
-        cuda_version = (int(parts[0]), int(parts[1]))
-    return cuda_version >= (13, 3) and (
-        device_capability[0] >= 9 and device_capability[0] <= 11
-    )
 
 
 @register_meta(aten._grouped_mm)
