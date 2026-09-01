@@ -41,6 +41,7 @@ from torch.distributed._shard.sharding_spec import (
     ShardMetadata,
 )
 from torch.distributed.remote_device import _remote_device
+from torch.testing._internal.common_device_type import onlyAccelerator
 from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
     requires_nccl,
@@ -3515,6 +3516,8 @@ class TestShardMetadata(ShardedTensorTestBase):
 
 
 class TestShardedTensorSubGroupInit(TestCase):
+    device_type = DEVICE_TYPE
+
     @spawn_threads_and_init_comms(world_size=4)
     def test_sub_process_group_sharded_tensor_init(self):
         world_pg = dist.GroupMember.WORLD
@@ -3544,6 +3547,7 @@ class TestShardedTensorSubGroupInit(TestCase):
             process_group=sub_pg,
         )
 
+    @onlyAccelerator
     @spawn_threads_and_init_comms(world_size=4)
     def test_sub_process_group_placement_validation(self):
         world_pg = dist.GroupMember.WORLD
