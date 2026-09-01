@@ -72,6 +72,90 @@ class MemoryPlanningInfoForNode:
     )
 
 
+@dataclasses.dataclass(eq=False, slots=True)
+class MemoryStorageInfo:
+    size: int
+    allocation_buffer: SchedulerBuffer
+    lifetime_buffer: SchedulerBuffer
+    required_defining_ops: frozenset[str]
+    successor_nodes: tuple[BaseSchedulerNode, ...]
+    is_graph_output: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class MaterializedNodeMemory:
+    size_alloc: int
+    lifetime_buffers: tuple[SchedulerBuffer, ...]
+
+
+@dataclasses.dataclass
+class SchedulerMemoryStorage:
+    records: tuple[MemoryStorageInfo, ...]
+    records_by_operation: dict[str, tuple[MemoryStorageInfo, ...]]
+    graph_outputs: OrderedSet[str]
+    buffer_free_sizes: dict[int, int]
+    allocation_operation_by_buffer: dict[int, str] = dataclasses.field(
+        default_factory=dict
+    )
+
+    def for_device(self, device: torch.device) -> SchedulerMemoryStorage:
+        records = tuple(
+            record
+            for record in self.records
+            if record.lifetime_buffer.node.get_device() == device
+        )
+        record_set = OrderedSet(records)
+        buffer_ids = OrderedSet(
+            id(record.lifetime_buffer.mpi_buffer) for record in records
+        )
+        return SchedulerMemoryStorage(
+            records=records,
+            records_by_operation={
+                name: tuple(
+                    record for record in operation_records if record in record_set
+                )
+                for name, operation_records in self.records_by_operation.items()
+            },
+            graph_outputs=self.graph_outputs,
+            buffer_free_sizes={
+                buffer_id: size
+                for buffer_id, size in self.buffer_free_sizes.items()
+                if buffer_id in buffer_ids
+            },
+            allocation_operation_by_buffer={
+                buffer_id: operation
+                for buffer_id, operation in self.allocation_operation_by_buffer.items()
+                if buffer_id in buffer_ids
+            },
+        )
+
+    def materialize(self, operation_names: Iterable[str]) -> MaterializedNodeMemory:
+        operations = frozenset(operation_names)
+        records = OrderedSet[MemoryStorageInfo]()
+        for name in operations:
+            records.update(self.records_by_operation.get(name, ()))
+
+        size_alloc = 0
+        lifetime_buffers: list[SchedulerBuffer] = []
+        for record in records:
+            definitions_inside = record.required_defining_ops.issubset(operations)
+            consumers_inside = all(
+                frozenset(successor.get_operation_names()).issubset(operations)
+                for successor in record.successor_nodes
+            )
+            eliminated = (
+                definitions_inside and consumers_inside and not record.is_graph_output
+            )
+            if eliminated:
+                continue
+            if record.allocation_buffer.defining_op_name() in operations:
+                size_alloc += record.size
+            if record.lifetime_buffer.defining_op_name() in operations:
+                lifetime_buffers.append(record.lifetime_buffer)
+
+        return MaterializedNodeMemory(size_alloc, tuple(lifetime_buffers))
+
+
 @dataclasses.dataclass
 class FreeableInputBuffer:
     name: str
@@ -98,7 +182,10 @@ def get_freeable_input_buf(
     """
 
     def _dep_size_hint(dep: Dep) -> int:
-        return V.graph.get_dep_size_hint(dep)
+        graph_input = V.graph.graph_inputs[dep.name]
+        return V.graph.sizevars.optimization_hint(
+            V.graph.get_allocation_storage_size(graph_input), fallback=0
+        ) * get_dtype_size(graph_input.get_dtype())
 
     # get freeable input buffers' successor nodes for memory lifetime (excludes is_fake WeakDeps)
     # and for ordering (includes all deps)
@@ -206,7 +293,7 @@ def compute_size_for_scheduler_buffer(
             return size_alloc
         else:
             buf_size = V.graph.sizevars.optimization_hint(
-                sched_buf.node.get_numel(), fallback=0
+                V.graph.get_allocation_storage_size(sched_buf.node), fallback=0
             ) * get_dtype_size(sched_buf.node.get_dtype())
             sched_buf_to_size[sched_buf.get_name()] = (
                 0 if user_of_MultiOutputLayout else buf_size,
@@ -221,6 +308,146 @@ def compute_size_for_scheduler_buffer(
             _compute_and_update_buf_size(sched_buf)
 
     return sched_buf_to_size
+
+
+def build_scheduler_memory_storage(
+    name_to_buf: dict[str, SchedulerBuffer],
+    graph_outputs: OrderedSet[str],
+    mutation_real_name: Mapping[str, str],
+    name_to_freeable_input_buf: Mapping[str, FreeableInputBuffer] | None = None,
+) -> SchedulerMemoryStorage:
+    """Build physical-storage records for scheduler memory simulation.
+
+    Each record pairs the operation that allocates storage with the buffer that
+    carries its lifetime. Alias and mutation names resolve to their underlying
+    storage, while MultiOutput allocations are split into independently-live
+    leaf records.
+    """
+    from .ir import MultiOutput
+    from .scheduler import OutputNode
+
+    alias_sources: dict[str, tuple[str, ...]] = {}
+    for buffer in name_to_buf.values():
+        aliases = tuple(buffer.node.get_inputs_that_alias_output())
+        if aliases and not buffer.node.should_allocate():
+            alias_sources[buffer.get_name()] = aliases
+
+    def resolve_storage_names(name: str) -> OrderedSet[str]:
+        seen = OrderedSet[str]()
+        pending = [name]
+        resolved = OrderedSet[str]()
+        while pending:
+            name = pending.pop()
+            if name in seen:
+                continue
+            seen.add(name)
+            if name in mutation_real_name:
+                pending.append(mutation_real_name[name])
+            elif name in alias_sources:
+                pending.extend(alias_sources[name])
+            else:
+                resolved.add(name)
+        return resolved
+
+    resolved_graph_outputs = OrderedSet(
+        resolved for name in graph_outputs for resolved in resolve_storage_names(name)
+    )
+
+    for alias_name, sources in reversed(alias_sources.items()):
+        alias = name_to_buf[alias_name]
+        for source_name in sources:
+            for resolved_name in resolve_storage_names(source_name):
+                source: SchedulerBuffer | FreeableInputBuffer | None = name_to_buf.get(
+                    resolved_name
+                )
+                if source is None and name_to_freeable_input_buf is not None:
+                    source = name_to_freeable_input_buf.get(resolved_name)
+                if source is not None:
+                    source.mpi_buffer.succ_nodes.update(alias.mpi_buffer.succ_nodes)
+                    source.mpi_buffer.succ_nodes_for_ordering.update(
+                        alias.mpi_buffer.succ_nodes_for_ordering
+                    )
+    records: list[MemoryStorageInfo] = []
+
+    def collect(
+        buffer: SchedulerBuffer,
+        allocation_buffer: SchedulerBuffer,
+        required_defining_ops: frozenset[str],
+    ) -> None:
+        if buffer.get_name() in mutation_real_name:
+            return
+        if buffer.get_name() in alias_sources:
+            return
+        if isinstance(buffer.node.layout, NoneLayout):
+            return
+        if isinstance(buffer.node.layout, MultiOutputLayout):
+            for user in buffer.users:
+                if isinstance(user.node, OutputNode):
+                    continue
+                for output in user.node.get_outputs():
+                    if not isinstance(output.node, MultiOutput):
+                        continue
+                    required = required_defining_ops | frozenset(
+                        [output.defining_op_name()]
+                    )
+                    collect(output, allocation_buffer, required)
+            return
+
+        size = buffer.mpi_buffer.size_free
+        if size == 0:
+            return
+        successors = tuple(buffer.mpi_buffer.succ_nodes)
+        storage_names = OrderedSet(
+            [
+                *resolve_storage_names(allocation_buffer.get_name()),
+                *resolve_storage_names(buffer.get_name()),
+            ]
+        )
+        records.append(
+            MemoryStorageInfo(
+                size=size,
+                allocation_buffer=allocation_buffer,
+                lifetime_buffer=buffer,
+                required_defining_ops=required_defining_ops,
+                successor_nodes=successors,
+                is_graph_output=bool(storage_names & resolved_graph_outputs),
+            )
+        )
+
+    for buffer in name_to_buf.values():
+        if not isinstance(buffer.node, MultiOutput):
+            collect(
+                buffer,
+                buffer,
+                frozenset([buffer.defining_op_name()]),
+            )
+
+    records_by_operation: dict[str, list[MemoryStorageInfo]] = collections.defaultdict(
+        list
+    )
+    buffer_free_sizes: dict[int, int] = {}
+    allocation_operation_by_buffer: dict[int, str] = {}
+    for record in records:
+        for operation_name in record.required_defining_ops:
+            records_by_operation[operation_name].append(record)
+        buffer_id = id(record.lifetime_buffer.mpi_buffer)
+        buffer_free_sizes[buffer_id] = buffer_free_sizes.get(buffer_id, 0) + record.size
+        allocation_operation_by_buffer[buffer_id] = (
+            record.allocation_buffer.defining_op_name()
+        )
+        if record.is_graph_output:
+            resolved_graph_outputs.add(record.lifetime_buffer.get_name())
+
+    return SchedulerMemoryStorage(
+        records=tuple(records),
+        records_by_operation={
+            name: tuple(operation_records)
+            for name, operation_records in records_by_operation.items()
+        },
+        graph_outputs=resolved_graph_outputs,
+        buffer_free_sizes=buffer_free_sizes,
+        allocation_operation_by_buffer=allocation_operation_by_buffer,
+    )
 
 
 def assign_memory_planning_info_for_scheduler_buffers(
@@ -515,31 +742,30 @@ def estimate_region_peak_memory(
     last_use_step_cache: dict[int, int | None] | None = None,
     known_last_use_steps: dict[int, int | None] | None = None,
     node_outputs: Mapping[BaseSchedulerNode, Sequence[SchedulerBuffer]] | None = None,
-    node_steps: dict[BaseSchedulerNode, int] | None = None,
+    node_alloc_sizes: Mapping[BaseSchedulerNode, int] | None = None,
+    buffer_free_sizes: Mapping[int, int] | None = None,
+    allocation_operation_by_buffer: Mapping[int, str] | None = None,
     max_peak: int | None = None,
-    return_live_memory: bool = True,
-) -> tuple[int, list[int], list[int]]:
+    return_live_memory: bool = False,
+) -> int | tuple[int, list[int], list[int]]:
     """Peak memory inside `[region_start, region_end]` for the
     hypothetical post-reorder schedule.
 
-    Walks `nodes_in_window` (post-rewrite, in proposed order). For
-    each node: alloc = sum of `size_alloc` over its outputs; free =
-    sum of `size_free` over `pred_buffers` whose proposed last
-    consumer is this node. Then accumulates per step starting from
-    `cur_memory` (live bytes at the window boundary) and returns the maximum
-    live bytes.
+    Walks `nodes_in_window` in proposed order. Allocations come from
+    `node_alloc_sizes` when supplied, otherwise from output buffers. Frees come
+    from lifetime outputs and predecessor buffers at their proposed last use.
+    Memory accumulation starts at `cur_memory`, the live bytes at the window
+    boundary.
 
     Candidate overrides in `last_use_step_cache` take precedence over
     context-wide `known_last_use_steps`. If `max_peak` is exceeded, returns
     immediately with empty live-memory vectors.
 
     If `return_live_memory` is True, also returns live-before/live-after vectors
-    for the simulated region. If False, returns empty live-memory vectors after
-    computing the peak.
+    for the simulated region.
     """
     R = region_end - region_start + 1
-    allocs = [0] * R
-    frees = [0] * R
+    region = [SNodeMemory(0, 0) for _ in range(R)]
     if last_use_step_cache is None:
         last_use_step_cache = {}
 
@@ -558,51 +784,81 @@ def estimate_region_peak_memory(
         return last_use_step_cache[key]
 
     for node in nodes_in_window:
-        step = node_steps[node] if node_steps is not None else step_of(node)
-        slot = step - region_start
+        s = step_of(node)
+        slot = s - region_start
         if not (0 <= slot < R):
             raise AssertionError(f"expected 0 <= slot < {R}, got {slot}")
 
         outputs = node_outputs[node] if node_outputs is not None else node.get_outputs()
+        output_buffer_ids = OrderedSet([id(buf.mpi_buffer) for buf in outputs])
+        if node_alloc_sizes is not None:
+            region[slot].size_alloc += node_alloc_sizes[node]
         for buf in outputs:
             bi = buf.mpi_buffer
-            allocs[slot] += bi.size_alloc
-            if buf.get_name() not in graph_outputs and last_use_step(bi) is None:
-                frees[slot] += bi.size_free
+            if node_alloc_sizes is None:
+                region[slot].size_alloc += bi.size_alloc
+            name = buf.get_name()
+            free_size = (
+                buffer_free_sizes.get(id(bi), 0)
+                if buffer_free_sizes is not None
+                else bi.size_free
+            )
+            last_step = last_use_step(bi)
+            if name not in graph_outputs and (last_step is None or last_step == s):
+                region[slot].size_free += free_size
 
-        for pred_buf in node.mpi_node.pred_buffers:
-            if pred_buf.get_name() in graph_outputs:
+        for pb in node.mpi_node.pred_buffers:
+            name = pb.get_name()
+            if name in graph_outputs:
                 continue
-            last_step = last_use_step(pred_buf.mpi_buffer)
+            pred_mpi = pb.mpi_buffer
+            if buffer_free_sizes is not None and id(pred_mpi) not in buffer_free_sizes:
+                continue
+            if id(pred_mpi) in output_buffer_ids:
+                continue
+            if allocation_operation_by_buffer is not None:
+                allocation_op = allocation_operation_by_buffer.get(id(pred_mpi))
+                if (
+                    allocation_op is not None
+                    and allocation_op in node.get_operation_names()
+                ):
+                    continue
+            last_step = last_use_step(pred_mpi)
             if last_step is None:
                 raise AssertionError("expected non-empty succ_steps")
-            if last_step == step:
-                frees[slot] += pred_buf.mpi_buffer.size_free
+            if last_step == s:
+                region[slot].size_free += (
+                    buffer_free_sizes[id(pred_mpi)]
+                    if buffer_free_sizes is not None
+                    else pred_mpi.size_free
+                )
 
     cur = cur_memory
     peak = cur
     if max_peak is not None and peak > max_peak:
-        return peak, [], []
-    for i in range(R):
-        cur += allocs[i]
+        return (peak, [], []) if return_live_memory else peak
+    for af in region:
+        cur += af.size_alloc
         if cur > peak:
             peak = cur
         if max_peak is not None and peak > max_peak:
-            return peak, [], []
-        cur -= frees[i]
+            return (peak, [], []) if return_live_memory else peak
+        cur -= af.size_free
+        if cur < 0:
+            raise AssertionError(f"estimated live memory became negative: {cur}")
 
     if not return_live_memory:
-        return peak, [], []
+        return peak
 
     cur = cur_memory
     region_live_before = [0] * (R + 1)
     region_live_after = [0] * R
-    for i in range(R):
+    for i, af in enumerate(region):
         region_live_before[i] = cur
-        cur += allocs[i]
+        cur += af.size_alloc
         # Match peak_memory_from_buf_info_list: frees apply at the next step.
         region_live_after[i] = cur
-        cur -= frees[i]
+        cur -= af.size_free
     region_live_before[R] = cur
     return peak, region_live_before, region_live_after
 
@@ -688,7 +944,7 @@ def topological_sort_lpmf(
     https://www.cs.york.ac.uk/rts/docs/DAC-1964-2006/PAPERS/2006/DAC06/PDFFILES/P0689.PDF
 
     The algorithm maintains the max memory so far.
-    At every iteration, for each scheduleable node, it computes:
+    At every iteration, for each schedulable node, it computes:
         - how much memory needs to be allocated for the output buffers of this node;
         - how much memory can be freed as a result of executing this node.
     This gives us two values for each node:

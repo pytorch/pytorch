@@ -9,6 +9,8 @@ set(C10_CUDA_ALL_TEST_FILES
     impl/CUDAAssertionsTest_multiple_writes_from_multiple_blocks.cu
     impl/CUDAAssertionsTest_multiple_writes_from_same_block.cu
     impl/CUDATest.cpp
+    impl/CUDACachingAllocatorReserveTest.cpp
+    impl/CUDACachingAllocatorReserveDeviceTest.cpp
 )
 if(BUILD_TEST)
   foreach(test_src ${C10_CUDA_ALL_TEST_FILES})

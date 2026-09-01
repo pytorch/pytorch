@@ -19,7 +19,7 @@ from torch._higher_order_ops.triton_kernel_wrap import (
     triton_kernel_wrapper_functional,
 )
 from torch._inductor import config, inductor_prims
-from torch._inductor.fx_utils import get_node_storage, get_storage, is_node_realized
+from torch._inductor.fx_utils import get_node_storage, is_node_realized
 from torch._inductor.lowering import (
     inplaceable_foreach_ops as inplaceable_foreach_ops_lowerings,
 )
@@ -160,7 +160,10 @@ def _decompose_scatter_functional(
     view_updated = aten.slice_scatter(view, src, 1, 10, -10)
     inp_updated = aten.slice_scatter(inp, view_updated, 0, 0, 10)
     """
-    assert node.target is _generalized_scatter  # noqa: S101
+    if node.target is not _generalized_scatter:
+        raise AssertionError(
+            f"expected node.target to be _generalized_scatter, got {node.target}"
+        )
     return _decompose_scatter_functional_helper(graph, *node.args)  # type: ignore[arg-type]
 
 
@@ -179,9 +182,11 @@ def _decompose_scatter_mutating(
     slice2.copy_(src)
 
     """
-    assert node.target in (_generalized_scatter, _inplace_generalized_scatter)  # noqa: S101
+    if node.target not in (_generalized_scatter, _inplace_generalized_scatter):
+        raise AssertionError(f"unexpected node.target: {node.target}")
     inp, src, view_ops = node.args
-    assert not node.kwargs  # noqa: S101
+    if node.kwargs:
+        raise AssertionError(f"expected no kwargs, got {node.kwargs}")
 
     if node.target is _generalized_scatter:
         inp = graph_call_function(graph, aten.clone, inp)
@@ -203,18 +208,6 @@ _ALWAYS_MUTATING_SCATTER_OPS = OrderedSet(
     ]
 )
 
-# Reinplacing with an uninitialized factory base does not cost missed fusions
-# or writes to the base during materialization.
-_UNINITIALIZED_FACTORY_OPS = OrderedSet(
-    [
-        aten.empty.memory_format,
-        aten.empty_strided.default,
-        aten.empty_like.default,
-        aten.new_empty.default,
-        aten.new_empty_strided.default,
-    ]
-)
-
 
 def scatter_always_uses_mutation(node: torch.fx.Node) -> bool:
     _, _, view_ops = node.args
@@ -226,60 +219,6 @@ def scatter_always_uses_mutation(node: torch.fx.Node) -> bool:
     )
 
 
-def scatter_has_uninitialized_factory_base(node: torch.fx.Node) -> bool:
-    node = _get_view_base(node)
-    while node.op == "call_function" and node.target in (
-        _generalized_scatter,
-        _inplace_generalized_scatter,
-    ):
-        inp = node.args[0]
-        if not isinstance(inp, torch.fx.Node):
-            return False
-        node = _get_view_base(inp)
-
-    return node.op == "call_function" and node.target in _UNINITIALIZED_FACTORY_OPS
-
-
-def scatter_base_has_no_functional_scatter(node: torch.fx.Node) -> bool:
-    node = _get_view_base(node)
-    while node.op == "call_function" and node.target in (
-        _generalized_scatter,
-        _inplace_generalized_scatter,
-    ):
-        if node.target is _generalized_scatter:
-            return False
-        inp = node.args[0]
-        if not isinstance(inp, torch.fx.Node):
-            return False
-        node = _get_view_base(inp)
-
-    return True
-
-
-def scatter_has_smaller_realized_src(inp: torch.fx.Node, src: torch.fx.Node) -> bool:
-    inp_val = inp.meta.get("val", None)
-    src_val = src.meta.get("val", None)
-    if not isinstance(inp_val, torch.Tensor) or not isinstance(src_val, torch.Tensor):
-        return False
-
-    return statically_known_true(
-        src_val.numel() < inp_val.numel()
-    ) and is_node_realized(_get_view_base(src))
-
-
-def scatter_src_may_alias_input(node: torch.fx.Node) -> bool:
-    inp, src, _view_ops = node.args
-    inp_val = inp.meta.get("val") if isinstance(inp, torch.fx.Node) else inp
-    src_val = src.meta.get("val") if isinstance(src, torch.fx.Node) else src
-    if not isinstance(inp_val, torch.Tensor) or not isinstance(src_val, torch.Tensor):
-        return True
-
-    if not torch._C._has_storage(inp_val) or not torch._C._has_storage(src_val):
-        return True
-
-    return get_storage(inp_val) == get_storage(src_val)
-
-
 def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     """Choose between mutating and functional scatter decompositions
 
@@ -288,55 +227,19 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     input and output would have been realized anyway.
 
     """
-    inp, src, _view_ops = node.args
+    inp, _src, _view_ops = node.args
 
     # Mutating scatter ops unconditionally realize input and output
     if scatter_always_uses_mutation(node):
         return True
 
-    if (
-        isinstance(inp, torch.fx.Node)
-        and scatter_has_uninitialized_factory_base(inp)
-        and not scatter_src_may_alias_input(node)
-    ):
-        # Example:
-        #   out = torch.empty_like(x)
-        #   for start, end in chunks:
-        #       chunk = x[start:end] @ w
-        #       out = aten.slice_scatter.default(out, chunk, 0, start, end)
-        # The accumulator starts from a fresh uninitialized factory, so update it
-        # in place instead of materializing full-size functional scatter outputs.
-        return True
-
-    if (
-        isinstance(inp, torch.fx.Node)
-        and isinstance(src, torch.fx.Node)
-        and scatter_base_has_no_functional_scatter(inp)
-        and scatter_has_smaller_realized_src(inp, src)
-        and not scatter_src_may_alias_input(node)
-    ):
-        # Example:
-        #   out = torch.zeros((x.shape[0], width), device=x.device, dtype=x.dtype)
-        #   src = x[start:end]  # view of a realized placeholder
-        #   out = aten.slice_scatter.default(out, src, 0, start, end)
-        # The source is smaller and its view base is already realized, so copy it
-        # into the destination slice instead of materializing a full-size output.
-        return True
-
-    src_is_realized = isinstance(src, torch.fx.Node) and is_node_realized(src)
-
-    if src_is_realized and is_node_realized(inp) and is_node_realized(node):  # type: ignore[arg-type]
+    if is_node_realized(inp) and is_node_realized(node):  # type: ignore[arg-type]
         return True
 
     # If the output is copied back into the input, this forces both to be
     # realized as the output is a user of the input
-    if (
-        isinstance(inp, torch.fx.Node)
-        and inp.op in ("placeholder", "get_attr")
-        and any(
-            user.target is aten.copy_.default and user.args[0] is inp
-            for user in node.users
-        )
+    if inp.op in ("placeholder", "get_attr") and any(  # type: ignore[union-attr]
+        user.target is aten.copy_.default and user.args[0] is inp for user in node.users
     ):
         return True
 
@@ -482,9 +385,11 @@ inplaceable_ops: dict[Callable[..., Any], InplaceableOp] = {
         extra_check=should_reinplace_scatter,
     ),
     # Stateless Philox RNG: reinplace the functionalized clone onto the dead
-    # output buffer, so out-of-place uniform()/normal() don't pay an extra copy.
+    # output buffer, so out-of-place uniform()/normal()/bits() don't pay an
+    # extra copy.
     aten._philox_uniform.default: InplaceableOp(aten._philox_uniform_.default, 0),
     aten._philox_normal.default: InplaceableOp(aten._philox_normal_.default, 0),
+    aten._philox_randint.default: InplaceableOp(aten._philox_randint_.default, 0),
 }
 
 try:

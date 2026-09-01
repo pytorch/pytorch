@@ -310,6 +310,37 @@ class ImplDetailTest(MockSchedulerTest):
         self.assertIs(snode._body, original_body)
         self.assertIsNone(snode._loop_mutation_listener)
 
+    def test_loop_state_generation_is_not_reused_after_rollback(self):
+        snode = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+        original_generation = snode._loop_state_gen
+        tracker = _LoopMutationTracker.create((snode,))
+        snode.apply_new_loop_order([1, 0])
+        first_trial_generation = snode._loop_state_gen
+        tracker.finish(rollback=True)
+
+        self.assertEqual(snode._loop_state_gen, original_generation)
+        snode.apply_new_loop_order([1, 0])
+        self.assertGreater(snode._loop_state_gen, first_trial_generation)
+
+    def test_fusion_search_rolls_back_successful_probe(self):
+        node1 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+        node2 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+        scheduler = Scheduler.__new__(Scheduler)
+        original_state = node1.snapshot_loop_state()
+
+        def mutate_and_accept(*args, **kwargs):
+            node1.apply_new_loop_order([1, 0])
+            return True
+
+        with mock.patch.object(
+            scheduler, "_can_fuse_impl", side_effect=mutate_and_accept
+        ):
+            self.assertTrue(
+                scheduler._can_fuse_for_search(node1, node2, can_reorder=True)
+            )
+
+        self.assertEqual(node1.snapshot_loop_state(), original_state)
+
     def test_expand_dimension_loop_state_rollback(self):
         snode = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
         original_state = snode.snapshot_loop_state()

@@ -2315,6 +2315,9 @@ class CppKernel(Kernel):
         csevar.update_on_args("load", (self, name, index), {})
         return csevar
 
+    def _use_parallel_atomic_add(self):
+        return config.cpp.dynamic_threads or self.num_threads != 1
+
     def store(self, name, index, value, mode=None):
         if "buf" not in name:
             raise AssertionError('expected "buf" in name')
@@ -2323,7 +2326,7 @@ class CppKernel(Kernel):
         if mode is None:
             line = f"{var}[{cexpr_index(index)}] = {value};"
         elif mode == "atomic_add":
-            if not config.cpp.dynamic_threads and self.num_threads == 1:
+            if not self._use_parallel_atomic_add():
                 line = f"{var}[{cexpr_index(index)}] += {value};"
             else:
                 dtype = V.graph.get_dtype(name)
@@ -2926,7 +2929,7 @@ class CppVecKernel(CppKernel):
         if mask.dtype != torch.bool:
             raise AssertionError(repr(mask))
         num_vectors = self._get_num_vectors(dtype)
-        return f"{mask}.template cast<{DTYPE_TO_CPP[dtype]},{num_vectors}>()"
+        return f"inductor_vec_mask_cast<{DTYPE_TO_CPP[dtype]},{num_vectors}>({mask})"
 
     def _get_vec_load_line(
         self,
@@ -3201,7 +3204,7 @@ class CppVecKernel(CppKernel):
             code = self._get_store_line(value, var, index, dtype)
             self.stores.splice(code.map(lambda x: DeferredLine(name, x)))
         elif mode == "atomic_add":
-            if not config.cpp.dynamic_threads and self.num_threads == 1:
+            if not self._use_parallel_atomic_add():
                 code = self._get_store_line(
                     f"{value}",
                     var,
@@ -3214,6 +3217,8 @@ class CppVecKernel(CppKernel):
                 n_src = self._get_num_vectors(dtype)
                 n_idx = self._get_num_vectors(torch.int64)
                 cdtype = DTYPE_TO_CPP[dtype]
+                # ops.index_expr re-applies subclass index transforms, so a caller
+                # that already transformed must pass the untransformed index
                 index = ops.index_expr(index, torch.int64).value
                 if isinstance(index, CppCSEVariable) and not index.is_vec:
                     index = self.broadcast(index)
@@ -4024,7 +4029,9 @@ class CppTile2DKernel(CppVecKernel):
                 line = f"{value}.store({storebuf});"
             self.stores.writeline(DeferredLine(name, line))
         else:
-            new_index = self.transform_indexing(index)
+            # the parallel atomic_add path re-applies transform_indexing via ops.index_expr
+            vec_atomic_add = mode == "atomic_add" and self._use_parallel_atomic_add()
+            new_index = index if vec_atomic_add else self.transform_indexing(index)
             super().store(name, new_index, value, mode)
 
     def codegen_inner_loops(self, code):
@@ -5232,15 +5239,9 @@ class CppScheduling(BaseScheduling):
         _, (vars2, _) = node2.group
         return vars1 == vars2
 
-    def fuse(
-        self,
-        node1: BaseSchedulerNode,
-        node2: BaseSchedulerNode,
-        *,
-        dry_run: bool = False,
-    ) -> FusedSchedulerNode:
+    def fuse(self, node1, node2):
         if node1.is_foreach() or node2.is_foreach():
-            return ForeachKernelSchedulerNode.fuse(node1, node2, dry_run=dry_run)
+            return ForeachKernelSchedulerNode.fuse(node1, node2)
         elif node1.is_template():
             if node2.is_template():
                 raise AssertionError("expected not node2.is_template()")
@@ -5250,22 +5251,14 @@ class CppScheduling(BaseScheduling):
                 self._why_fuse_nodes(node1, node2)
                 == ReasonFusedNodes.COMPATIBLE_RANGES_NO_REDUCTION
             ):
-                snapshots = []
-                if dry_run:
-                    snapshots = self._snapshot_node_loop_states(node1)
-                    snapshots.extend(self._snapshot_node_loop_states(node2))
-                try:
-                    if not (self._align_compatible_range_nodes(node1, node2)):
-                        raise AssertionError(
-                            (
-                                node1.group,
-                                node2.group,
-                            )
+                if not (self._align_compatible_range_nodes(node1, node2)):
+                    raise AssertionError(
+                        (
+                            node1.group,
+                            node2.group,
                         )
-                    return FusedSchedulerNode.fuse(node1, node2)
-                finally:
-                    for node, state in reversed(snapshots):
-                        node.restore_loop_state(state)
+                    )
+                return FusedSchedulerNode.fuse(node1, node2)
             elif self.can_fuse_vertical_outer_loop(node1, node2):
                 return OuterLoopFusedSchedulerNode.fuse(
                     node1, node2, self._get_outer_loop_fusion_depth(node1, node2)
@@ -6395,7 +6388,12 @@ class LoopNest:
         for loop in self.loops:
             if loop.is_reduction != is_reduction:
                 break
-            num_steps = num_steps * FloorDiv(loop.size, loop.steps)
+            # Trip count of `for (var = 0; var < size; var += steps)`. The bound
+            # is `size` and the increment is `steps`, so a loop with size < steps
+            # (a vectorized loop narrower than the vector width) still runs one
+            # iteration. Use CeilDiv, not FloorDiv, which would count 0 and zero
+            # out the whole product.
+            num_steps = num_steps * CeilDiv(loop.size, loop.steps)
             max_depth += 1
 
         def get_simd_vec_depth(loops):

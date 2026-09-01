@@ -353,6 +353,13 @@ if(USE_CUDA AND (USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION))
   )
 
   set_target_properties(flash_attention PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+  if(FLASH_ATTENTION_MAX_JOBS)
+    set_property(GLOBAL APPEND PROPERTY JOB_POOLS
+      flash_attention_compile=${FLASH_ATTENTION_MAX_JOBS})
+    set_property(TARGET flash_attention PROPERTY JOB_POOL_COMPILE
+      flash_attention_compile)
+  endif()
 endif()
 
 if(USE_FLASH_ATTENTION)
@@ -908,6 +915,10 @@ list(APPEND ATen_CPU_DEPENDENCY_LIBS ATEN_CPU_FILES_GEN_LIB)
 if(USE_CUDA)
   set(ATen_NVRTC_STUB_SRCS ${cuda_nvrtc_stub_cpp})
   list(APPEND ATen_CUDA_DEPENDENCY_LIBS ATEN_CUDA_FILES_GEN_LIB)
+endif()
+
+if(USE_XPU)
+  list(APPEND ATen_XPU_DEPENDENCY_LIBS ATEN_XPU_FILES_GEN_LIB)
 endif()
 
 if(USE_MPS)

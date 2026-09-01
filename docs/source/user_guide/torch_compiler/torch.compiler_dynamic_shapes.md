@@ -273,6 +273,35 @@ f(torch.rand(30))
 f(torch.rand(40))
 ```
 
+(static_sources_allow_list)=
+#### Static Source List (`STATIC_SOURCES`)
+
+The inverse of the dynamic source list: use the environment variable
+`TORCH_COMPILE_STATIC_SOURCES` (or `torch.compiler.config.static_sources`) to pass a
+list of source names that should stay static. This is useful when automatic dynamic
+shapes or PGO makes something dynamic and that dynamism hurts you, for example when
+it produces a worse kernel. It accepts the same exact-name,
+regex and `:N` per-dim syntax as `TORCH_COMPILE_DYNAMIC_SOURCES`, and works for both
+integers and tensor sizes.
+
+Entries override automatic dynamic shapes, PGO and `dynamic=True`. They do not override
+an explicit {func}`torch._dynamo.mark_dynamic`.
+
+Here is an example:
+
+```{code-cell}
+import torch
+
+@torch.compile()
+def g(x):
+     return x * x.size()[0]
+
+with torch.compiler.config.patch(static_sources="L['x']"):
+    g(torch.rand(10))
+    g(torch.rand(20))
+    g(torch.rand(30))
+```
+
 (torch.compiler.set_stance_eager_then_compile)=
 #### `torch.compiler.set_stance ("eager_then_compile")`
 
