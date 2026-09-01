@@ -35,6 +35,7 @@ from torch._higher_order_ops.utils import (
     HopInstance,
     mask_list,
     materialize_as_graph,
+    move_bdim_to_front,
     reenter_make_fx,
     split_into_chunks,
     unique_graph_id,
@@ -1151,22 +1152,38 @@ def scan_functionalize(
 def scan_batch_rule(
     interpreter, combine_fn, init, xs, additional_inputs, mutated_arg_indices=""
 ):
-    unbatched_args, in_dims = unwrap_batched(
-        (init, xs, additional_inputs), interpreter.level()
+    batch_size = interpreter.batch_size()
+    (unbatched_init, unbatched_xs, unbatched_additional_inputs), in_dims = (
+        unwrap_batched((init, xs, additional_inputs), interpreter.level())
     )
-    # move to last dim to not interfere with scan's batching
-    unbatched_init, unbatched_xs, unbatched_additional_inputs = (
-        _move_batch_dims_to_last_for_scan(unbatched_args, in_dims)
+    init_dims, xs_dims, additional_dims = in_dims
+
+    # The carry is front-batched and materialized (broadcast when unbatched), as in
+    # JAX's _scan_batching_rule, so it matches the fresh contiguous carry combine_fn
+    # returns and while_loop's front-batched carry when scan is nested inside one.
+    unbatched_init = tuple(
+        move_bdim_to_front(t, bdim, batch_size)
+        for t, bdim in zip(unbatched_init, init_dims)
     )
-    after_move_dims = _batch_dims_as_last_for_scan(in_dims)
+    # xs and the additional inputs keep their batch dim last, clear of the scan dim.
+    unbatched_xs, unbatched_additional_inputs = _move_batch_dims_to_last_for_scan(
+        (unbatched_xs, unbatched_additional_inputs), (xs_dims, additional_dims)
+    )
+    num_carries = len(unbatched_init)
+    after_move_dims = (
+        (0,) * num_carries
+        + _batch_dims_as_last_for_scan(xs_dims)
+        + _batch_dims_as_last_for_scan(additional_dims)
+    )
 
     with interpreter.lower():
         wrapper = _VmapCombineFnWrapper(
             combine_fn,
             after_move_dims,
-            interpreter.batch_size(),
+            batch_size,
             interpreter.randomness(),
             op_name="scan",
+            num_carries=num_carries,
         )
         op_kwargs = {}
         if mutated_arg_indices:
