@@ -7,9 +7,12 @@ from torch._inductor.codegen.mps import MetalOverrides
 from torch._inductor.codegen.triton import TritonKernelOverrides
 from torch._inductor.ops_handler import list_ops, OP_NAMES, OpsHandler
 from torch._inductor.test_case import TestCase
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class TestOpCompleteness(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def verify_ops_handler_completeness(self, handler):
         for op in OP_NAMES:
             self.assertIsNot(

@@ -52,6 +52,8 @@ justknobs_check._dynamo_marked_constant = True  # type: ignore[attr-defined]
 if TYPE_CHECKING:
     from types import FunctionType
 
+    import sympy
+
     from torch._C._dynamo.eval_frame import (  # noqa: F401
         reset_code,
         set_eval_frame,
@@ -59,6 +61,7 @@ if TYPE_CHECKING:
         set_guard_error_hook,
         unsupported,
     )
+    from torch.utils._sympy.value_ranges import ValueRanges
 
     from .variables import VariableTracker
 else:
@@ -992,7 +995,7 @@ def substitute_in_graph(
                 f"already handled by {polyfill_handlers[original_fn]}"
             )
 
-        # Need to wrap the function because we may cannot assign __torch_dynamo_polyfill__ to a
+        # Need to wrap the function because we may not be able to assign __torch_dynamo_polyfill__ to a
         # C++ function.
         @functools.wraps(traceable_fn)
         def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
@@ -1065,8 +1068,60 @@ class _DimRange:
     """
 
     dim: int
-    min: int
-    max: int
+    min: int | None
+    max: int | None
+
+
+def _set_dim_range(t: Any, dim: int, min: int | None, max: int | None) -> None:
+    """
+    Records the range declared for ``dim`` by mark_dynamic or maybe_mark_dynamic,
+    replacing any range an earlier call declared for that dim. Dims without a
+    declared range get no entry, and the attribute is removed once no dim has one, so
+    that "no range declared" has a single representation.
+
+    The set is rebound rather than mutated: guards hold a reference to it, so mutating
+    in place would let a re-marked tensor compare equal to the graph it was compiled for.
+    """
+    if min is None and max is None and not hasattr(t, "_dynamo_dynamic_range"):
+        return
+
+    ranges = {dr for dr in getattr(t, "_dynamo_dynamic_range", ()) if dr.dim != dim}
+    if min is not None or max is not None:
+        ranges.add(_DimRange(dim, min, max))
+
+    if ranges:
+        t._dynamo_dynamic_range = ranges
+    elif hasattr(t, "_dynamo_dynamic_range"):
+        del t._dynamo_dynamic_range
+
+
+def _get_dim_range(t: Any, dim: int) -> _DimRange | None:
+    """
+    Returns the range declared for ``dim`` by mark_dynamic or maybe_mark_dynamic, or
+    None. A dim can be dynamic without a declared range, for example when dynamism
+    was propagated by AOTAutograd instead of a marking API.
+    """
+    return next(
+        (dr for dr in getattr(t, "_dynamo_dynamic_range", ()) if dr.dim == dim), None
+    )
+
+
+def _dim_range_to_value_ranges(dim_range: _DimRange) -> "ValueRanges[sympy.Expr]":
+    """
+    Converts a _DimRange to a ValueRanges, filling in a bound the user left out with the
+    widest one, since ValueRanges rejects None. The lower default is 0 rather than the 2
+    a backed size ends up with: the constraint must not add a bound the user never
+    declared, otherwise a half open range like max=8 would reject a size 1 input. The
+    shape env still narrows the range to [2, ...] on its own for sizes that specialize
+    0 and 1.
+    """
+    from torch.utils._sympy.numbers import int_oo
+    from torch.utils._sympy.value_ranges import ValueRanges
+
+    return ValueRanges(
+        lower=0 if dim_range.min is None else dim_range.min,
+        upper=int_oo if dim_range.max is None else dim_range.max,
+    )
 
 
 @forbid_in_graph
@@ -1225,7 +1280,20 @@ def mark_dynamic(
     This approach results in one Dynamo trace and two backend compilations. When the input dimension equals 8 or 16
     at runtime, execution will be directed to the specialized compiled region. Performance measurements indicate
     2-8x speedups depending on the specific specialization and model architecture.
+
+    7) Where min or max are given, a later call replaces the range declared by an earlier
+    one, and a call that gives neither declares no range for that dim. This API overrides
+    maybe_mark_dynamic on the same dim: marking a dim that maybe_mark_dynamic already
+    marked takes over, and a later maybe_mark_dynamic on that dim is ignored, so the dim
+    is always enforced with the stronger mark_dynamic semantics.
     """
+    if isinstance(t, torch.fx.Proxy):
+        # FX tracers ignore @forbid_in_graph and pass a Proxy in place of the tensor.
+        # Proxy.__getattr__ answers every name with an Attribute, so the marking
+        # attributes can neither be read (getattr defaults and hasattr are both useless)
+        # nor usefully written: the Proxy is discarded once tracing ends.
+        return
+
     if is_traceable_wrapper_subclass(t):
         # default behavior: mirror mark_dynamic() on all inner tensors with same dim as t
         # TODO: Make this configurable via a supported public API
@@ -1236,8 +1304,6 @@ def mark_dynamic(
     if isinstance(index, int):
         if not hasattr(t, "_dynamo_dynamic_indices"):
             t._dynamo_dynamic_indices = set()
-
-            t._dynamo_dynamic_range = set()
 
             # pyrefly: ignore [implicit-any]
             t._dynamo_hint_overrides = {}
@@ -1250,8 +1316,16 @@ def mark_dynamic(
             t._dynamo_hint_overrides[index] = hint_override
         # TODO(voz): Should we bounds check?
 
+        weak_indices = getattr(t, "_dynamo_weak_dynamic_indices", None)
+        if weak_indices is not None and index in weak_indices:
+            # This API overrides maybe_mark_dynamic, so drop the dim from the weak set:
+            # a dim in both sets would let consumers disagree on which semantics apply,
+            # _automatic_dynamic tests mark_dynamic first while non strict export tests
+            # the weak indices first. Rebound rather than mutated, guards hold a
+            # reference to this set.
+            t._dynamo_weak_dynamic_indices = weak_indices - {index}
         t._dynamo_dynamic_indices.add(index)
-        t._dynamo_dynamic_range.add(_DimRange(index, min, max))  # type: ignore[arg-type]
+        _set_dim_range(t, index, min, max)
         t._has_dynamo_dim_marking = True  # type: ignore[attr-defined]
 
         # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:
@@ -1271,22 +1345,59 @@ def mark_dynamic(
 
 
 @forbid_in_graph
-def maybe_mark_dynamic(t: Any, index: int | list[Any] | tuple[Any]) -> None:
+def maybe_mark_dynamic(
+    t: Any,
+    index: int | list[Any] | tuple[Any],
+    *,
+    min: int | None = None,
+    max: int | None = None,
+) -> None:
     """
-    Mark a tensor as having a dynamic dim, but don't enforce it (i.e., if this
-    dimension ends up getting specialized, don't error).
+    Mark a tensor as having a dynamic dim, but do not enforce it (i.e., if this
+    dimension ends up getting specialized, do not error).
+
+    If min or max are specified, they are used as the initial range for the
+    dimension. The compiler may still narrow this range or specialize the
+    dimension.
+
+    Args:
+        t: The tensor, or traceable wrapper subclass, to mark. Marking a subclass
+            mirrors the marking, bounds included, onto its inner tensors of the same dim.
+        index: The dim to mark, or a list or tuple of dims. Every dim in a list gets the
+            same min and max.
+        min: Lower bound to start the dim at, if any. The hint must satisfy it, an input
+            outside the declared range raises ConstraintViolationError at compile time.
+        max: Upper bound to start the dim at, if any.
+
+    A later call that specifies min or max replaces the range declared by an earlier one,
+    and a call that specifies neither declares no range for that dim. If the dim is
+    already marked with mark_dynamic, this call is ignored: that marking has stronger
+    semantics and a weak one cannot weaken it.
     """
+    if isinstance(t, torch.fx.Proxy):
+        # See the matching guard in mark_dynamic: a Proxy cannot carry dim marking.
+        return
+
     if is_traceable_wrapper_subclass(t):
         # default behavior: mirror maybe_mark_dynamic() on all inner tensors with same dim as t
         # TODO: Make this configurable via a supported public API
-        _apply_func_to_inner_tensors_of_same_dim(maybe_mark_dynamic, t, index)
+        _apply_func_to_inner_tensors_of_same_dim(
+            maybe_mark_dynamic, t, index, min=min, max=max
+        )
 
     if isinstance(index, int):
+        if index in getattr(t, "_dynamo_dynamic_indices", ()):
+            # mark_dynamic already covers this dim with stronger semantics. Ignore the
+            # call rather than recording anything: a weak marking cannot weaken it, and
+            # bounds passed here would otherwise end up enforced by the mark_dynamic
+            # path, which is not what this API promises.
+            return
         if not hasattr(t, "_dynamo_weak_dynamic_indices"):
             t._dynamo_weak_dynamic_indices = set()
         # TODO(voz): Should we bounds check?
 
         t._dynamo_weak_dynamic_indices.add(index)
+        _set_dim_range(t, index, min, max)
         t._has_dynamo_dim_marking = True  # type: ignore[attr-defined]
         return
 
@@ -1295,7 +1406,7 @@ def maybe_mark_dynamic(t: Any, index: int | list[Any] | tuple[Any]) -> None:
             f"Expected index to be int, list, or tuple, got {type(index)}"
         )
     for i in index:
-        maybe_mark_dynamic(t, i)
+        maybe_mark_dynamic(t, i, min=min, max=max)
 
 
 def mark_static(t: Any, index: int | list[Any] | tuple[Any] | None = None) -> None:
@@ -1737,7 +1848,7 @@ def override_cudagraphs(
     return CudagraphOverrideContextManager(fwd=fwd, bwd=bwd)
 
 
-def override_optimization_hint(x: Any, val: int) -> None:
+def override_optimization_hint(x: object, val: int) -> None:
     """Override the optimization hint for a scalar unbacked symbol.
 
     When the compiler or runtime needs a non-guarding integer hint for an
