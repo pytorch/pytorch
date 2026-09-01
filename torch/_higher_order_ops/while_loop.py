@@ -1027,8 +1027,7 @@ class WhileLoopAutogradOp(torch.autograd.Function):
             cur_grad_additional_inputs_tensors = filter_with_masks(
                 cur_grad_additional_inputs, additional_inputs_tensor_masks
             )
-            return (
-                idx + 1,
+            next_grads = (
                 *cur_grad_carries_tensors,
                 *(
                     cur_grad + grad
@@ -1036,6 +1035,13 @@ class WhileLoopAutogradOp(torch.autograd.Function):
                         cur_grad_additional_inputs_tensors, grad_additional_inputs
                     )
                 ),
+            )
+            # Same reason as for init_grad_carries above: the carries need stable metadata
+            # across iterations, and the gradients bw_body_fn returns have whatever layout
+            # the backward of body_fn happens to produce.
+            return (
+                idx + 1,
+                *(t.clone(memory_format=torch.contiguous_format) for t in next_grads),
             )
 
         args_single_step_bw = (

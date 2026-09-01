@@ -127,12 +127,17 @@ class _VmapCombineFnWrapper:
 
     The wrapper re-applies vmap to ``combine_fn`` with the batch dim parked on the
     last axis (the scan-specific convention, see ``_move_batch_dims_to_last_for_scan``) so it
-    cannot collide with the scan dim (0). It is constructed with a fixed ``in_dims``
-    and passed as the combine_fn to the underlying HOP.
+    cannot collide with the scan dim (0). The exception are ``scan``'s carries, which
+    are front-batched instead, see ``num_carries``. It is constructed with a fixed
+    ``in_dims`` and passed as the combine_fn to the underlying HOP.
 
     Contract for callers:
-      - ``in_dims`` are the flat, last-axis batch-dim markers for the combine_fn's
-        positional arguments, and are held fixed for the wrapper's lifetime.
+      - ``in_dims`` are the flat batch-dim markers for the combine_fn's positional
+        arguments, and are held fixed for the wrapper's lifetime.
+      - ``num_carries``: the number of leading outputs that are ``scan`` carries.
+        Those are front-batched and materialized rather than parked last, so that
+        they match the carries ``scan_batch_rule`` feeds in; ``scan`` compares carry
+        metadata and strides between steps. ``associative_scan`` has no carries.
       - ``out_dims`` is ``None`` until ``__call__`` runs at least once, and only then
         holds the flat per-output markers aligned to the op's flat outputs. Because a
         scan HOP may not invoke the combine_fn at all (e.g. scan length < 2), a caller
@@ -159,6 +164,7 @@ class _VmapCombineFnWrapper:
         randomness: str,
         expected_out_dims: tuple[Any, ...] | None = None,
         op_name: str = "associative_scan",
+        num_carries: int = 0,
     ) -> None:
         self.combine_fn = combine_fn
         self.in_dims = in_dims
@@ -166,18 +172,23 @@ class _VmapCombineFnWrapper:
         self.randomness = randomness
         self.expected_out_dims = expected_out_dims
         self.op_name = op_name
+        self.num_carries = num_carries
         self.out_dims: tuple[Any, ...] | None = None
 
     def __call__(self, *args: Any) -> Any:
         outputs, per_slice_out_dims = restore_vmap(
             self.combine_fn, self.in_dims, self.batch_size, self.randomness
         )(*args)
-        outputs = pytree.tree_map(
-            lambda out, bdim: out.movedim(bdim, -1) if bdim is not None else out,
-            outputs,
-            per_slice_out_dims,
+        flat_dims = pytree.tree_leaves(per_slice_out_dims)
+        outputs = [
+            move_bdim_to_front(out, bdim, self.batch_size)
+            if i < self.num_carries
+            else (out.movedim(bdim, -1) if bdim is not None else out)
+            for i, (out, bdim) in enumerate(zip(pytree.tree_leaves(outputs), flat_dims))
+        ]
+        out_dims = (0,) * self.num_carries + _batch_dims_as_last_for_scan(
+            flat_dims[self.num_carries :]
         )
-        out_dims = _batch_dims_as_last_for_scan(per_slice_out_dims)
         if self.expected_out_dims is not None and out_dims != self.expected_out_dims:
             raise RuntimeError(
                 f"{self.op_name} under vmap requires the combine_fn outputs to keep "
