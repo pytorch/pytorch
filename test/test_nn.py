@@ -11752,6 +11752,24 @@ class TestNNDeviceType(NNTestCase):
                                    padding_mode=padding_mode, align_corners=False)
             self.assertEqual(out_3d.squeeze(2), out_2d)
 
+        # The double backward gathers dropped taps from their clamped voxels, so
+        # the mask has to be applied with where(): multiplying after the gather
+        # turns an aliased Inf into NaN. One axis fully out of the volume keeps
+        # the forward a clean zero while every tap aliases onto the Inf plane.
+        if padding_mode == 'zeros' and dtype is torch.double:
+            poisoned = torch.randn(1, 1, 5, 6, 7, device=device, dtype=dtype)
+            poisoned[0, 0, :, 0, :] = float('inf')
+            poisoned.requires_grad_()
+            grid = torch.tensor([[[[[0.1, -2.0, 0.1]]]]], device=device, dtype=dtype,
+                                requires_grad=True)
+            out = F.grid_sample(poisoned, grid, mode='bicubic', padding_mode='zeros',
+                                align_corners=False)
+            gg = torch.autograd.grad(out.sum(), grid, create_graph=True)[0]
+            d_input = torch.autograd.grad(gg.sum(), poisoned, retain_graph=True)[0]
+            d_grid = torch.autograd.grad(gg.sum(), grid)[0]
+            self.assertTrue(bool(d_input.isfinite().all()))
+            self.assertTrue(bool(d_grid.isfinite().all()))
+
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
     @dtypesIfMPS(torch.float, torch.half, torch.bfloat16)
