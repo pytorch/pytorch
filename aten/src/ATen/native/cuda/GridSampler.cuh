@@ -319,6 +319,41 @@ void get_cubic_coefficients_grad(
 }
 
 
+// compute_coordinates with the extent kept in index_t: the tricubic kernels
+// index with index_t, and narrowing the extent to int before the padding would
+// fold a dimension past INT_MAX onto the wrong voxel. The reflection parity is
+// taken with fmod so no float ever converts to an integer type; for every
+// extent an int can carry the arithmetic matches compute_coordinates exactly.
+template <typename scalar_t, typename index_t>
+__forceinline__ __device__
+scalar_t compute_coordinates_sized(scalar_t coord, index_t size,
+                                   GridSamplerPadding padding_mode,
+                                   bool align_corners) {
+  if (padding_mode == GridSamplerPadding::Border) {
+    coord = ::min(static_cast<scalar_t>(size - 1),
+                  ::max(coord, static_cast<scalar_t>(0)));
+  } else if (padding_mode == GridSamplerPadding::Reflection) {
+    const scalar_t twice_low = align_corners ? 0 : -1;
+    const scalar_t twice_high =
+        static_cast<scalar_t>(2) * static_cast<scalar_t>(size) -
+        (align_corners ? 2 : 1);
+    if (twice_low == twice_high) {
+      coord = 0;
+    } else {
+      const scalar_t low = twice_low / 2;
+      const scalar_t span = (twice_high - twice_low) / 2;
+      const scalar_t in = ::fabs(coord - low);
+      const scalar_t extra = ::fmod(in, span);
+      const bool odd = ::fmod(::floor(in / span), static_cast<scalar_t>(2)) != 0;
+      coord = odd ? span - extra + low : extra + low;
+    }
+    coord = ::min(static_cast<scalar_t>(size - 1),
+                  ::max(coord, static_cast<scalar_t>(0)));
+  }
+  coord = safe_downgrade_to_int_range(coord);
+  return coord;
+}
+
 // The device twin of resolve_cubic_taps in ATen/native/GridSampler.cpp.
 template<typename scalar_t, typename index_t>
 __forceinline__ __device__
@@ -339,8 +374,8 @@ void resolve_cubic_taps(
   for (int i = 0; i < 4; ++i) {
     // the comparison decides, not the cast: a coordinate that is not
     // finite fails both sides, where converting it is undefined
-    const scalar_t tap = compute_coordinates(
-        base - 1 + i, static_cast<int>(size), padding_mode, align_corners);
+    const scalar_t tap = compute_coordinates_sized(
+        base - 1 + i, size, padding_mode, align_corners);
     indices[i] = (tap >= 0 && tap < static_cast<scalar_t>(size))
         ? static_cast<index_t>(tap)
         : static_cast<index_t>(-1);
