@@ -4936,6 +4936,52 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     for input_requires_grad in [False, True]:
                         test(N, C, D, H, W, mode, padding_mode, align_corners, input_requires_grad)
 
+    def test_grid_sample_pixel_coords_surface(self):
+        # the pixel route's argument contract: rejections, meta shapes, scripting
+        input = torch.randn(1, 2, 5, 6)
+        grid = torch.rand(1, 3, 3, 2) * 4
+        with self.assertRaisesRegex(ValueError, "4D or 5D"):
+            F.grid_sample(torch.randn(1, 1, 4), torch.rand(1, 2, 1),
+                          align_corners=False, pixel_coords=True)
+        with self.assertRaisesRegex(RuntimeError, "Double"):
+            F.grid_sample(input.double(), grid.float(), align_corners=False, pixel_coords=True)
+        with self.assertRaisesRegex(RuntimeError, "Double"):
+            F.grid_sample(input, grid.half(), align_corners=False, pixel_coords=True)
+        with self.assertRaisesRegex(ValueError, "cubic_coeff_a"):
+            F.grid_sample(input, grid * 0.5 - 1, mode='bicubic', align_corners=False,
+                          cubic_coeff_a=-0.5)
+        with self.assertRaisesRegex(ValueError, "bicubic"):
+            F.grid_sample(input, grid, mode='bilinear', align_corners=False,
+                          pixel_coords=True, cubic_coeff_a=-0.5)
+
+        # the meta kernels agree with the eager shapes
+        for dim in (2, 3):
+            shape = (2, 3, 5, 6) if dim == 2 else (2, 3, 4, 5, 6)
+            gshape = (2, 4, 3, 2) if dim == 2 else (2, 3, 4, 3, 3)
+            m_input = torch.randn(*shape, device='meta')
+            m_grid = torch.empty(*gshape, device='meta')
+            out = F.grid_sample(m_input, m_grid, align_corners=False, pixel_coords=True)
+            self.assertEqual(out.shape, (*shape[:2], *gshape[1:-1]))
+
+        # the functional stays scriptable with the new arguments
+        def scripted_fn(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            return F.grid_sample(a, b, mode='bicubic', padding_mode='border',
+                                 align_corners=False, pixel_coords=True, cubic_coeff_a=-0.5)
+
+        sf = torch.jit.script(scripted_fn)
+        v = torch.randn(1, 1, 5, 6, dtype=torch.double)
+        g = torch.rand(1, 2, 2, 2, dtype=torch.double) * 4
+        self.assertEqual(sf(v, g), scripted_fn(v, g), atol=0, rtol=0)
+
+        # dynamo captures the pixel route and falls back to the op
+        cf = torch.compile(scripted_fn, fullgraph=True)
+        v = v.clone().requires_grad_()
+        g = g.clone().requires_grad_()
+        out = cf(v, g)
+        self.assertEqual(out, scripted_fn(v.detach(), g.detach()), atol=0, rtol=0)
+        out.sum().backward()
+        self.assertTrue(v.grad is not None and g.grad is not None)
+
     def test_grid_sample_nearest_neighbor_rounding_mode_consistency(self):
 
         device_list = ['cpu']
@@ -11799,6 +11845,354 @@ class TestNNDeviceType(NNTestCase):
                 d_input = second_order(dim, 1.0, bad)[0]
                 self.assertTrue(bool(d_input.isfinite().all()))
                 self.assertEqual(d_input, reference[0])
+
+    @parametrize_test("padding_mode", ["zeros", "border", "reflection"])
+    @parametrize_test("mode", ["bilinear", "nearest", "bicubic"])
+    @expectedFailureMPS  # pixel ops are CPU/CUDA only
+    @onlyNativeDeviceTypes
+    def test_grid_sample_pixel_parity(self, device, mode, padding_mode):
+        # In pixel units the grid addresses input pixel centers directly, so the
+        # pixel route must match the normalized route wherever both describe the
+        # same location, including out of range where the padding engages.
+        def to_normalized(grid, sizes, align_corners):
+            out = grid.clone()
+            for i, size in enumerate(sizes):
+                if align_corners:
+                    out[..., i] = out[..., i] * 2 / (size - 1) - 1
+                else:
+                    out[..., i] = (out[..., i] + 0.5) * 2 / size - 1
+            return out
+
+        for dim, align_corners in itertools.product((2, 3), (False, True)):
+            if dim == 2:
+                input = torch.randn(2, 3, 5, 6, dtype=torch.double, device=device)
+                grid = torch.rand(2, 4, 3, 2, dtype=torch.double, device=device)
+                sizes = (6, 5)
+            else:
+                input = torch.randn(2, 3, 4, 5, 6, dtype=torch.double, device=device)
+                grid = torch.rand(2, 3, 4, 3, 3, dtype=torch.double, device=device)
+                sizes = (6, 5, 4)
+            # straddle the volume so the padding mapping engages
+            for i, size in enumerate(sizes):
+                grid[..., i] = grid[..., i] * (size + 2) - 1.5
+            input_pix = input.clone().requires_grad_()
+            grid_pix = grid.clone().requires_grad_()
+            out_pix = F.grid_sample(input_pix, grid_pix, mode=mode, padding_mode=padding_mode,
+                                    align_corners=align_corners, pixel_coords=True)
+            input_ref = input.clone().requires_grad_()
+            grid_ref = to_normalized(grid, sizes, align_corners).requires_grad_()
+            out_ref = F.grid_sample(input_ref, grid_ref, mode=mode, padding_mode=padding_mode,
+                                    align_corners=align_corners)
+            self.assertEqual(out_pix, out_ref, atol=1e-10, rtol=0)
+            if mode != 'nearest':
+                grad_out = torch.randn_like(out_pix)
+                out_pix.backward(grad_out)
+                out_ref.backward(grad_out)
+                self.assertEqual(input_pix.grad, input_ref.grad, atol=1e-10, rtol=0)
+                grad_grid = grid_ref.grad.clone()
+                for i, size in enumerate(sizes):
+                    grad_grid[..., i] *= 2 / (size - 1) if align_corners else 2 / size
+                self.assertEqual(grid_pix.grad, grad_grid, atol=1e-8, rtol=0)
+
+    @expectedFailureMPS  # pixel ops are CPU/CUDA only
+    @onlyNativeDeviceTypes
+    def test_grid_sample_pixel_exactness(self, device):
+        # integer locations reproduce the input exactly, float32 included, for
+        # every coefficient: the [0, 1, 0, 0] identity is taken outright
+        input = torch.randn(1, 2, 5, 6, device=device)
+        iy, ix = torch.meshgrid(torch.arange(5.), torch.arange(6.), indexing='ij')
+        grid = torch.stack([ix, iy], dim=-1).unsqueeze(0).to(device)
+        for mode in ('bilinear', 'nearest', 'bicubic'):
+            out = F.grid_sample(input, grid, mode=mode, padding_mode='zeros',
+                                align_corners=False, pixel_coords=True)
+            self.assertEqual(out, input, atol=0, rtol=0)
+        out = F.grid_sample(input, grid, mode='bicubic', padding_mode='zeros',
+                            align_corners=False, pixel_coords=True, cubic_coeff_a=-0.3)
+        self.assertEqual(out, input, atol=0, rtol=0)
+        input3 = torch.randn(1, 1, 4, 5, 6, device=device)
+        iz, iy, ix = torch.meshgrid(torch.arange(4.), torch.arange(5.), torch.arange(6.),
+                                    indexing='ij')
+        grid3 = torch.stack([ix, iy, iz], dim=-1).unsqueeze(0).to(device)
+        out = F.grid_sample(input3, grid3, mode='bicubic', padding_mode='zeros',
+                            align_corners=False, pixel_coords=True, cubic_coeff_a=-0.3)
+        self.assertEqual(out, input3, atol=0, rtol=0)
+
+        # the double backward takes the same identity: with y exactly integer the
+        # value weights select one row, so the second-order mass on the other
+        # rows is exactly zero, for a non-binary coefficient too
+        input = torch.randn(1, 1, 7, 8, device=device, requires_grad=True)
+        grid = torch.tensor([[[[2.3, 3.0], [4.7, 3.0]]]], device=device, requires_grad=True)
+        out = F.grid_sample(input, grid, mode='bicubic', padding_mode='border',
+                            align_corners=False, pixel_coords=True, cubic_coeff_a=-0.3)
+        gg = torch.autograd.grad(out.sum(), grid, create_graph=True)[0]
+        dgi_x = torch.autograd.grad(gg[..., 0].sum(), input)[0]
+        self.assertEqual(dgi_x[0, 0, [1, 2, 4, 5], :],
+                         torch.zeros_like(dgi_x[0, 0, [1, 2, 4, 5], :]), atol=0, rtol=0)
+
+    @expectedFailureMPS  # pixel ops are CPU/CUDA only
+    @onlyNativeDeviceTypes
+    def test_grid_sample_pixel_keys_coefficient(self, device):
+        # cubic_coeff_a reaches the kernel arithmetic: a row of samples against
+        # the Keys convolution computed directly
+        def keys(t, a):
+            t = abs(t)
+            if t <= 1:
+                return (a + 2) * t ** 3 - (a + 3) * t ** 2 + 1
+            if t < 2:
+                return a * (t ** 3 - 5 * t ** 2 + 8 * t - 4)
+            return 0.0
+
+        row = torch.randn(8, dtype=torch.double, device=device)
+        input = row.expand(4, 8).contiguous()[None, None]
+        xs = [1.3, 2.75, 4.5]
+        grid = torch.tensor([[x, 1.0] for x in xs], dtype=torch.double, device=device)[None, None]
+        for a in (-0.75, -0.5, -1.0):
+            out = F.grid_sample(input, grid, mode='bicubic', align_corners=False,
+                                pixel_coords=True, cubic_coeff_a=a)
+            for j, x in enumerate(xs):
+                x0 = math.floor(x)
+                expected = sum(row[x0 + k].item() * keys(x - (x0 + k), a) for k in (-1, 0, 1, 2))
+                self.assertEqual(out[0, 0, 0, j].item(), expected, atol=1e-12, rtol=0)
+
+    @expectedFailureMPS  # pixel ops are CPU/CUDA only
+    @onlyNativeDeviceTypes
+    def test_grid_sample_pixel_tiling_invariance(self, device):
+        # cropping a window and shifting the grid by the offset is bitwise
+        # invariant: the property that makes the mode usable by tiled and
+        # out-of-core pipelines. Odd sizes and offsets on purpose.
+        for mode in ('bilinear', 'nearest', 'bicubic'):
+            volume = torch.randn(1, 2, 37, 53, device=device)
+            grid = torch.rand(1, 5, 7, 2, device=device)
+            grid[..., 0] = grid[..., 0] * 21 + 17.3   # x in [17.3, 38.3]
+            grid[..., 1] = grid[..., 1] * 13 + 11.7   # y in [11.7, 24.7]
+            full = F.grid_sample(volume, grid, mode=mode, padding_mode='zeros',
+                                 align_corners=False, pixel_coords=True)
+            window = volume[:, :, 9:9 + 19, 15:15 + 27]
+            local = grid.clone()
+            local[..., 0] -= 15
+            local[..., 1] -= 9
+            cropped = F.grid_sample(window, local, mode=mode, padding_mode='zeros',
+                                    align_corners=False, pixel_coords=True)
+            self.assertEqual(full, cropped, atol=0, rtol=0)
+
+        # the volumetric case, 64 taps through the window
+        volume = torch.randn(1, 1, 23, 29, 31, device=device)
+        grid = torch.rand(1, 3, 3, 3, 3, device=device)
+        grid[..., 0] = grid[..., 0] * 9 + 11.3
+        grid[..., 1] = grid[..., 1] * 7 + 9.7
+        grid[..., 2] = grid[..., 2] * 5 + 7.1
+        full = F.grid_sample(volume, grid, mode='bicubic', padding_mode='zeros',
+                             align_corners=False, pixel_coords=True)
+        window = volume[:, :, 5:5 + 11, 7:7 + 13, 9:9 + 15]
+        local = grid.clone()
+        local[..., 0] -= 9
+        local[..., 1] -= 7
+        local[..., 2] -= 5
+        cropped = F.grid_sample(window, local, mode='bicubic', padding_mode='zeros',
+                                align_corners=False, pixel_coords=True)
+        self.assertEqual(full, cropped, atol=0, rtol=0)
+
+    @parametrize_test("padding_mode", ["zeros", "border", "reflection"])
+    @parametrize_test("mode", ["bilinear", "bicubic"])
+    @parametrize_test("dim", [2, 3])
+    @expectedFailureMPS  # pixel ops are CPU/CUDA only
+    @onlyNativeDeviceTypes
+    def test_grid_sample_pixel_grad(self, device, dim, mode, padding_mode):
+        # first and second order, with grids straddling the volume so the
+        # padding gradient engages, and a non-default coefficient for bicubic
+        shape = (1, 2, 4, 5) if dim == 2 else (1, 2, 3, 4, 5)
+        gshape = (1, 3, 2, 2) if dim == 2 else (1, 2, 2, 2, 3)
+        a = -0.5 if mode == 'bicubic' else None
+        input = torch.randn(*shape, dtype=torch.double, device=device, requires_grad=True)
+        grid = (torch.rand(*gshape, dtype=torch.double, device=device) * 6 - 1).requires_grad_()
+        def fn(inp, g):
+            return F.grid_sample(inp, g, mode=mode, padding_mode=padding_mode,
+                                 align_corners=False, pixel_coords=True, cubic_coeff_a=a)
+
+        self.assertTrue(gradcheck(fn, (input, grid), nondet_tol=1e-9))
+        self.assertTrue(gradgradcheck(fn, (input, grid), nondet_tol=1e-9))
+
+    @expectedFailureMPS  # pixel ops are CPU/CUDA only
+    @onlyNativeDeviceTypes
+    def test_grid_sample_pixel_dtypes(self, device):
+        # half payloads execute on their own kernels, same- and double-grid
+        for dt, gdt in ((torch.half, torch.half), (torch.half, torch.double),
+                        (torch.bfloat16, torch.bfloat16)):
+            input = torch.randn(1, 2, 5, 6, dtype=dt, device=device, requires_grad=True)
+            grid = (torch.rand(1, 3, 3, 2, dtype=gdt, device=device) * 4).requires_grad_()
+            out = F.grid_sample(input, grid, mode='bicubic', align_corners=False,
+                                pixel_coords=True)
+            self.assertEqual(out.dtype, dt)
+            out.sum().backward()
+            self.assertEqual(input.grad.dtype, dt)
+            self.assertEqual(grid.grad.dtype, gdt)
+
+    @expectedFailureMPS  # pixel ops are CPU/CUDA only
+    @onlyNativeDeviceTypes
+    def test_grid_sample_pixel_mixed_double_backward(self, device):
+        # the double backward under the mixed dtype contract: float payload,
+        # double grid; payload-side results stay float and match the all-double
+        # reference
+        input = torch.randn(1, 1, 5, 6, device=device, requires_grad=True)
+        grid = (torch.rand(1, 2, 2, 2, dtype=torch.double, device=device) * 4).requires_grad_()
+        out = F.grid_sample(input, grid, mode='bicubic', align_corners=False, pixel_coords=True)
+        gi, gg = torch.autograd.grad(out.sum(), (input, grid), create_graph=True)
+        dgi, dgg = torch.autograd.grad(gg.sum(), (input, grid), allow_unused=True)
+        self.assertEqual(dgi.dtype, torch.float)
+        self.assertIsNotNone(dgg)
+        self.assertEqual(dgg.dtype, torch.double)
+        ref_input = input.detach().double().requires_grad_()
+        out = F.grid_sample(ref_input, grid, mode='bicubic', align_corners=False, pixel_coords=True)
+        _, gg_ref = torch.autograd.grad(out.sum(), (ref_input, grid), create_graph=True)
+        dgi_ref, dgg_ref = torch.autograd.grad(gg_ref.sum(), (ref_input, grid), allow_unused=True)
+        self.assertEqual(dgi.double(), dgi_ref, atol=1e-5, rtol=1e-5)
+        self.assertEqual(dgg, dgg_ref, atol=1e-5, rtol=1e-5)
+
+        # nearest: the grid gradient is exact zeros
+        input = torch.randn(1, 2, 5, 6, device=device, requires_grad=True)
+        grid = (torch.rand(1, 3, 3, 2, device=device) * 4).requires_grad_()
+        out = F.grid_sample(input, grid, mode='nearest', align_corners=False, pixel_coords=True)
+        _, gg = torch.autograd.grad(out.sum(), (input, grid))
+        self.assertEqual(gg, torch.zeros_like(gg), atol=0, rtol=0)
+
+        # the volumetric mixed-dtype route has its own dispatch; run it through
+        # the double backward too
+        input = torch.randn(1, 1, 3, 4, 5, device=device, requires_grad=True)
+        grid = (torch.rand(1, 2, 2, 2, 3, dtype=torch.double, device=device) * 3).requires_grad_()
+        out = F.grid_sample(input, grid, mode='bicubic', align_corners=False, pixel_coords=True)
+        gi, gg = torch.autograd.grad(out.sum(), (input, grid), create_graph=True)
+        dgi, dgg = torch.autograd.grad(gg.sum(), (input, grid), allow_unused=True)
+        self.assertEqual(dgi.dtype, torch.float)
+        self.assertIsNotNone(dgg)
+
+    @expectedFailureMPS  # pixel ops are CPU/CUDA only
+    @onlyNativeDeviceTypes
+    def test_grid_sample_pixel_double_grid_precision(self, device):
+        # and the double grid actually buys the precision it exists for: at
+        # x = 32767.1 the float32 cast alone moves the coordinate by ~3.9e-4
+        # of a voxel (the ULP at 32767 is 2^-9), far above the double route's
+        # own error
+        wide = torch.zeros(1, 1, 1, 1, 32769, device=device)
+        wide[0, 0, 0, 0, 32768] = 1.0
+        grid = torch.tensor([[[[[32767.1, 0.0, 0.0]]]]], dtype=torch.double, device=device)
+        out = F.grid_sample(wide, grid, mode='bilinear', padding_mode='border',
+                            align_corners=False, pixel_coords=True)
+        self.assertEqual(out.item(), 0.1, atol=1e-6, rtol=0)
+        out_f32 = F.grid_sample(wide, grid.float(), mode='bilinear', padding_mode='border',
+                                align_corners=False, pixel_coords=True)
+        self.assertGreater(abs(out_f32.item() - 0.1), 2e-4)
+
+    @expectedFailureMPS  # pixel ops are CPU/CUDA only
+    @onlyNativeDeviceTypes
+    def test_grid_sample_pixel_autocast(self, device):
+        # under autocast the route promotes exactly like grid_sample, with one
+        # exception: a double grid is a precision contract and is preserved,
+        # without dragging the payload up to double
+        if device != 'cpu':
+            with torch.autocast(device):
+                half = torch.randn(1, 1, 5, 6, device=device, dtype=torch.half)
+                out = F.grid_sample(half, torch.rand(1, 2, 2, 2, device=device) * 4,
+                                    align_corners=False, pixel_coords=True)
+                self.assertEqual(out.dtype, torch.float)
+                out = F.grid_sample(half, (torch.rand(1, 2, 2, 2, device=device) * 4).double(),
+                                    align_corners=False, pixel_coords=True)
+                self.assertEqual(out.dtype, torch.half)
+                out = F.grid_sample(half, (torch.rand(1, 2, 2, 2, device=device) * 4).half(),
+                                    align_corners=False, pixel_coords=True)
+                self.assertEqual(out.dtype, torch.half)
+
+    @expectedFailureMPS  # pixel ops are CPU/CUDA only
+    @onlyNativeDeviceTypes
+    def test_grid_sample_pixel_non_contiguous(self, device):
+        # the private ops sit outside the OpInfo battery, so the stride
+        # handling gets its own pin: transposed input, flipped grid
+        for mode in ('bilinear', 'nearest', 'bicubic'):
+            v = torch.randn(2, 3, 6, 7, dtype=torch.double, device=device).transpose(2, 3)
+            g = (torch.rand(2, 4, 6, 2, dtype=torch.double, device=device) * 5)[:, :, ::2]
+            self.assertFalse(g.is_contiguous())
+            self.assertEqual(
+                F.grid_sample(v, g, mode=mode, align_corners=False, pixel_coords=True),
+                F.grid_sample(v.contiguous(), g.contiguous(), mode=mode,
+                              align_corners=False, pixel_coords=True), atol=0, rtol=0)
+            v3 = torch.randn(1, 2, 4, 5, 6, dtype=torch.double, device=device).transpose(2, 4)
+            g3 = (torch.rand(1, 2, 3, 6, 3, dtype=torch.double, device=device) * 3)[:, :, :, ::2]
+            self.assertFalse(g3.is_contiguous())
+            self.assertEqual(
+                F.grid_sample(v3, g3, mode=mode, align_corners=False, pixel_coords=True),
+                F.grid_sample(v3.contiguous(), g3.contiguous(), mode=mode,
+                              align_corners=False, pixel_coords=True), atol=0, rtol=0)
+
+    @expectedFailureMPS  # pixel ops are CPU/CUDA only
+    @onlyNativeDeviceTypes
+    def test_grid_sample_pixel_non_finite(self, device):
+        # a poisoned coordinate never reaches an integer cast: NaN, infinities
+        # and absurd magnitudes sample as out-of-volume, forward and backward
+        for mode in ('bilinear', 'nearest', 'bicubic'):
+            for padding_mode in ('zeros', 'border', 'reflection'):
+                for bad in (float('nan'), float('inf'), -float('inf'), 1e30, -1e30, 1e10, -1e10):
+                    v = torch.randn(1, 1, 5, 6, device=device, requires_grad=True)
+                    g = torch.tensor([[[[bad, 1.0], [2.2, 1.4]]]], device=device,
+                                     requires_grad=True)
+                    out = F.grid_sample(v, g, mode=mode, padding_mode=padding_mode,
+                                        align_corners=False, pixel_coords=True)
+                    self.assertEqual(out.shape, (1, 1, 1, 2))
+                    self.assertTrue(bool(out[0, 0, 0, 1].isfinite()))
+                    gi, gg = torch.autograd.grad(out.sum(), (v, g), allow_unused=True)
+                    self.assertTrue(bool(gi.isfinite().all()))
+                    v3 = torch.randn(1, 1, 4, 5, 6, device=device, requires_grad=True)
+                    g3 = torch.tensor([[[[[bad, 1.0, 1.0], [2.2, 1.4, 1.1]]]]], device=device,
+                                      requires_grad=True)
+                    out = F.grid_sample(v3, g3, mode=mode, padding_mode=padding_mode,
+                                        align_corners=False, pixel_coords=True)
+                    self.assertTrue(bool(out[0, 0, 0, 0, 1].isfinite()))
+                    gi, gg = torch.autograd.grad(out.sum(), (v3, g3), allow_unused=True)
+                    self.assertTrue(bool(gi.isfinite().all()))
+
+        # the padding semantics hold at any magnitude, not just finiteness: a
+        # huge coordinate under border reaches its NEAR edge, and reflection
+        # keeps its phase, matching the reference computed directly
+        row = torch.arange(1., 7., device=device).repeat(4, 1)[None, None]
+        for x, expected in ((1e30, 6.0), (1e10, 6.0), (-1e30, 1.0), (-1e10, 1.0),
+                            (float('inf'), 6.0), (-float('inf'), 1.0)):
+            g = torch.tensor([[[[x, 1.0]]]], device=device)
+            out = F.grid_sample(row, g, mode='bilinear', padding_mode='border',
+                                align_corners=False, pixel_coords=True)
+            self.assertEqual(out.item(), expected)
+
+        def reflect(x, size):
+            low, span = -0.5, float(size)
+            i = abs(x - low)
+            extra = i % span
+            odd = (i // span) % 2 != 0
+            r = span - extra + low if odd else extra + low
+            return min(size - 1, max(r, 0.0))
+
+        # in double, where the fold parity of a large coordinate is exact
+        row_d = row.double()
+        for x in (1e10, 12345.678, -98765.4):
+            g = torch.tensor([[[[x, 1.0]]]], dtype=torch.double, device=device)
+            out = F.grid_sample(row_d, g, mode='bilinear', padding_mode='reflection',
+                                align_corners=False, pixel_coords=True)
+            r = reflect(x, 6)
+            expected = (row_d[0, 0, 1, int(r)] * (1 - r % 1)
+                        + row_d[0, 0, 1, min(int(r) + 1, 5)] * (r % 1))
+            self.assertEqual(out.item(), expected.item(), atol=1e-9, rtol=0)
+
+        # an Inf the padding drops must not poison the second order through the
+        # clamp aliasing of the composite double backward
+        v = torch.randn(1, 1, 5, 6, 7, device=device)
+        v[0, 0, :, 0, :] = float('inf')
+        v.requires_grad_()
+        g = torch.tensor([[[[[3.1, -3.5, 2.1]]]]], device=device, requires_grad=True)
+        out = F.grid_sample(v, g, mode='bicubic', padding_mode='zeros',
+                            align_corners=False, pixel_coords=True)
+        self.assertEqual(out.item(), 0.0)
+        gg = torch.autograd.grad(out.sum(), g, create_graph=True)[0]
+        d_input = torch.autograd.grad(gg.sum(), v, retain_graph=True)[0]
+        d_grid = torch.autograd.grad(gg.sum(), g)[0]
+        self.assertTrue(bool(d_input.isfinite().all()))
+        self.assertTrue(bool(d_grid.isfinite().all()))
+
 
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
