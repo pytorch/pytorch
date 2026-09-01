@@ -8103,11 +8103,16 @@ static std::pair<Tensor, Tensor> gs_compute_coords(
     const Tensor& coord,
     int64_t size,
     GridSamplerPadding padding_mode,
-    bool align_corners) {
-  double unnorm_scale =
-      static_cast<double>(align_corners ? size - 1 : size) / 2.0;
-  Tensor ix = align_corners ? (coord + 1) * unnorm_scale
-                            : (coord + 1) * unnorm_scale - 0.5;
+    bool align_corners,
+    bool pixel_coords = false) {
+  // in pixel units the grid already is the source index, so only the padding
+  // mapping and its gradient apply
+  double unnorm_scale = pixel_coords
+      ? 1.0
+      : static_cast<double>(align_corners ? size - 1 : size) / 2.0;
+  Tensor ix = pixel_coords ? coord
+      : align_corners      ? (coord + 1) * unnorm_scale
+                           : (coord + 1) * unnorm_scale - 0.5;
   Tensor padding_grad;
   if (padding_mode == GridSamplerPadding::Zeros) {
     padding_grad = at::ones_like(ix);
@@ -8143,6 +8148,17 @@ static std::pair<Tensor, Tensor> gs_compute_coords(
     ix = ix_refl.clamp(0, size - 1);
   }
   return {std::move(ix), padding_grad * unnorm_scale};
+}
+
+// The kernels take the [0, 1, 0, 0] identity outright at an integer location,
+// so the value coefficients rebuilt here must too, or the double backward puts
+// mass on taps the backward it differentiates reads with an exact zero. The
+// derivative coefficients stay the polynomials, which are the true derivatives
+// there.
+static Tensor gs_cardinalize_cubic(const Tensor& c, const Tensor& t) {
+  auto identity = at::zeros_like(c);
+  identity.select(-1, 1).fill_(1);
+  return at::where((t == 0).unsqueeze(-1), identity, c);
 }
 
 static Tensor gs_accum_sumprod_k(const Tensor& values, const Tensor& basis) {
@@ -8387,7 +8403,31 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
     int64_t interpolation_mode,
     int64_t padding_mode,
     bool align_corners,
-    std::array<bool, 3> output_mask) {
+    std::array<bool, 3> output_mask,
+    bool pixel_coords,
+    double cubic_coeff_a) {
+  // This composes ATen ops, which promote; over a double grid with a lower
+  // precision payload it runs once in double, and the payload-side results
+  // cast back.
+  if (pixel_coords && grid.scalar_type() != input.scalar_type()) {
+    auto [dgo, di, dg] = grid_sampler_2d_double_backward(
+        ggI.defined() ? ggI.to(grid.scalar_type()) : ggI,
+        ggGrid,
+        grad_output.to(grid.scalar_type()),
+        input.to(grid.scalar_type()),
+        grid,
+        interpolation_mode,
+        padding_mode,
+        align_corners,
+        output_mask,
+        pixel_coords,
+        cubic_coeff_a);
+    const auto payload = input.scalar_type();
+    return {
+        dgo.defined() ? dgo.to(payload) : std::move(dgo),
+        di.defined() ? di.to(payload) : std::move(di),
+        std::move(dg)};
+  }
   Tensor d_grad_output, d_input, d_grid;
   const auto interpolation =
       static_cast<GridSamplerInterpolation>(interpolation_mode);
@@ -8396,19 +8436,37 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
   // ggI -> d_grad_output: gather ggI at grid positions = grid_sampler_2d(ggI,
   // grid)
   if (output_mask[0] && ggI.defined()) {
-    d_grad_output = at::grid_sampler_2d(
-        ggI, grid, interpolation_mode, padding_mode, align_corners);
+    d_grad_output = pixel_coords
+        ? at::_grid_sampler_2d_pixel(
+              ggI,
+              grid,
+              interpolation_mode,
+              padding_mode,
+              align_corners,
+              cubic_coeff_a)
+        : at::grid_sampler_2d(
+              ggI, grid, interpolation_mode, padding_mode, align_corners);
   }
   // ggI -> d_grid: same structure as grad_grid but with ggI as "input"
   if (output_mask[2] && ggI.defined()) {
-    d_grid = std::get<1>(at::grid_sampler_2d_backward(
-        grad_output,
-        ggI,
-        grid,
-        interpolation_mode,
-        padding_mode,
-        align_corners,
-        {false, true}));
+    d_grid = std::get<1>(
+        pixel_coords ? at::_grid_sampler_2d_pixel_backward(
+                           grad_output,
+                           ggI,
+                           grid,
+                           interpolation_mode,
+                           padding_mode,
+                           align_corners,
+                           cubic_coeff_a,
+                           {false, true})
+                     : at::grid_sampler_2d_backward(
+                           grad_output,
+                           ggI,
+                           grid,
+                           interpolation_mode,
+                           padding_mode,
+                           align_corners,
+                           {false, true}));
   }
   // d_input from ggI is 0: grad_input has no dependence on input.
   // For nearest, grad_grid = 0, so all ggGrid contributions vanish.
@@ -8417,10 +8475,11 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
   }
   auto H = input.size(2), W = input.size(3);
 
-  auto [ix, gix_mult] = gs_compute_coords(
-      grid.select(-1, 0), W, padding_mode_enum, align_corners);
-  auto [iy, giy_mult] = gs_compute_coords(
-      grid.select(-1, 1), H, padding_mode_enum, align_corners);
+  Tensor ix, iy, gix_mult, giy_mult;
+  std::tie(ix, gix_mult) = gs_compute_coords(
+      grid.select(-1, 0), W, padding_mode_enum, align_corners, pixel_coords);
+  std::tie(iy, giy_mult) = gs_compute_coords(
+      grid.select(-1, 1), H, padding_mode_enum, align_corners, pixel_coords);
 
   auto x0 = at::floor(ix).to(at::kLong);
   auto y0 = at::floor(iy).to(at::kLong);
@@ -8487,12 +8546,21 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
     // would be wrong: for border/reflection modes it zeroes gix_mult at
     // boundaries, making ggG_x/y = 0 where native still has nonzero
     // sensitivity.
-    auto x_scale = static_cast<double>(align_corners ? W - 1 : W) / 2.0;
-    auto y_scale = static_cast<double>(align_corners ? H - 1 : H) / 2.0;
-    auto x_raw = align_corners ? (grid.select(-1, 0) + 1) * x_scale
-                               : (grid.select(-1, 0) + 1) * x_scale - 0.5;
-    auto y_raw = align_corners ? (grid.select(-1, 1) + 1) * y_scale
-                               : (grid.select(-1, 1) + 1) * y_scale - 0.5;
+    auto x_scale = pixel_coords
+        ? 1.0
+        : static_cast<double>(align_corners ? W - 1 : W) / 2.0;
+    auto y_scale = pixel_coords
+        ? 1.0
+        : static_cast<double>(align_corners ? H - 1 : H) / 2.0;
+    auto raw = [&](int64_t axis, double scale) {
+      if (pixel_coords) {
+        return grid.select(-1, axis);
+      }
+      auto coord = (grid.select(-1, axis) + 1) * scale;
+      return align_corners ? coord : coord - 0.5;
+    };
+    auto x_raw = raw(0, x_scale);
+    auto y_raw = raw(1, y_scale);
     auto x0_bc = at::floor(x_raw).to(at::kLong);
     auto y0_bc = at::floor(y_raw).to(at::kLong);
     auto ggG_x_bc = ggGrid.select(-1, 0) * x_scale;
@@ -8503,28 +8571,32 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
     // Cubic interpolation coefficients and derivatives w.r.t. fractional
     // offset. For t in [0,1], the four corners are at offsets {-1, 0, 1, 2}
     // from base.
-    constexpr double A = -0.75;
+    const double A = cubic_coeff_a;
     auto fx1 = fx + 1.0, fx2 = 1.0 - fx, fx3 = 2.0 - fx;
     auto fy1 = fy + 1.0, fy2 = 1.0 - fy, fy3 = 2.0 - fy;
 
-    auto cx_t = at::stack(
-        {(((A * fx1) - (5 * A)) * fx1 + (8 * A)) * fx1 - (4 * A),
-         (((A + 2) * fx) - (A + 3)) * fx.square() + 1,
-         (((A + 2) * fx2) - (A + 3)) * fx2.square() + 1,
-         (((A * fx3) - (5 * A)) * fx3 + (8 * A)) * fx3 - (4 * A)},
-        -1);
+    auto cx_t = gs_cardinalize_cubic(
+        at::stack(
+            {(((A * fx1) - (5 * A)) * fx1 + (8 * A)) * fx1 - (4 * A),
+             (((A + 2) * fx) - (A + 3)) * fx.square() + 1,
+             (((A + 2) * fx2) - (A + 3)) * fx2.square() + 1,
+             (((A * fx3) - (5 * A)) * fx3 + (8 * A)) * fx3 - (4 * A)},
+            -1),
+        fx);
     auto dcx_t = at::stack(
         {(((3 * A) * fx1) - (10 * A)) * fx1 + (8 * A),
          (((3 * (A + 2)) * fx) - (2 * (A + 3))) * fx,
          -((((3 * (A + 2)) * fx2) - (2 * (A + 3))) * fx2),
          (((-3 * A) * fx3) + (10 * A)) * fx3 - (8 * A)},
         -1);
-    auto cy_t = at::stack(
-        {(((A * fy1) - (5 * A)) * fy1 + (8 * A)) * fy1 - (4 * A),
-         (((A + 2) * fy) - (A + 3)) * fy.square() + 1,
-         (((A + 2) * fy2) - (A + 3)) * fy2.square() + 1,
-         (((A * fy3) - (5 * A)) * fy3 + (8 * A)) * fy3 - (4 * A)},
-        -1);
+    auto cy_t = gs_cardinalize_cubic(
+        at::stack(
+            {(((A * fy1) - (5 * A)) * fy1 + (8 * A)) * fy1 - (4 * A),
+             (((A + 2) * fy) - (A + 3)) * fy.square() + 1,
+             (((A + 2) * fy2) - (A + 3)) * fy2.square() + 1,
+             (((A * fy3) - (5 * A)) * fy3 + (8 * A)) * fy3 - (4 * A)},
+            -1),
+        fy);
     auto dcy_t = at::stack(
         {(((3 * A) * fy1) - (10 * A)) * fy1 + (8 * A),
          (((3 * (A + 2)) * fy) - (2 * (A + 3))) * fy,
@@ -8643,25 +8715,67 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
     int64_t interpolation_mode,
     int64_t padding_mode,
     bool align_corners,
-    std::array<bool, 3> output_mask) {
+    std::array<bool, 3> output_mask,
+    bool pixel_coords,
+    double cubic_coeff_a) {
+  // This composes ATen ops, which promote; over a double grid with a lower
+  // precision payload it runs once in double, and the payload-side results
+  // cast back.
+  if (pixel_coords && grid.scalar_type() != input.scalar_type()) {
+    auto [dgo, di, dg] = grid_sampler_3d_double_backward(
+        ggI.defined() ? ggI.to(grid.scalar_type()) : ggI,
+        ggGrid,
+        grad_output.to(grid.scalar_type()),
+        input.to(grid.scalar_type()),
+        grid,
+        interpolation_mode,
+        padding_mode,
+        align_corners,
+        output_mask,
+        pixel_coords,
+        cubic_coeff_a);
+    const auto payload = input.scalar_type();
+    return {
+        dgo.defined() ? dgo.to(payload) : std::move(dgo),
+        di.defined() ? di.to(payload) : std::move(di),
+        std::move(dg)};
+  }
   Tensor d_grad_output, d_input, d_grid;
   const auto interpolation =
       static_cast<GridSamplerInterpolation>(interpolation_mode);
   const auto padding_mode_enum = static_cast<GridSamplerPadding>(padding_mode);
 
   if (output_mask[0] && ggI.defined()) {
-    d_grad_output = at::grid_sampler_3d(
-        ggI, grid, interpolation_mode, padding_mode, align_corners);
+    d_grad_output = pixel_coords
+        ? at::_grid_sampler_3d_pixel(
+              ggI,
+              grid,
+              interpolation_mode,
+              padding_mode,
+              align_corners,
+              cubic_coeff_a)
+        : at::grid_sampler_3d(
+              ggI, grid, interpolation_mode, padding_mode, align_corners);
   }
   if (output_mask[2] && ggI.defined()) {
-    d_grid = std::get<1>(at::grid_sampler_3d_backward(
-        grad_output,
-        ggI,
-        grid,
-        interpolation_mode,
-        padding_mode,
-        align_corners,
-        {false, true}));
+    d_grid = std::get<1>(
+        pixel_coords ? at::_grid_sampler_3d_pixel_backward(
+                           grad_output,
+                           ggI,
+                           grid,
+                           interpolation_mode,
+                           padding_mode,
+                           align_corners,
+                           cubic_coeff_a,
+                           {false, true})
+                     : at::grid_sampler_3d_backward(
+                           grad_output,
+                           ggI,
+                           grid,
+                           interpolation_mode,
+                           padding_mode,
+                           align_corners,
+                           {false, true}));
   }
   if (!ggGrid.defined() || interpolation == GridSamplerInterpolation::Nearest) {
     return {std::move(d_grad_output), std::move(d_input), std::move(d_grid)};
@@ -8673,10 +8787,19 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
     // scale alone. gs_compute_coords would zero it at a border and lose a
     // sensitivity the kernel still has.
     auto D = input.size(2), H = input.size(3), W = input.size(4);
-    auto x_scale = static_cast<double>(align_corners ? W - 1 : W) / 2.0;
-    auto y_scale = static_cast<double>(align_corners ? H - 1 : H) / 2.0;
-    auto z_scale = static_cast<double>(align_corners ? D - 1 : D) / 2.0;
+    auto x_scale = pixel_coords
+        ? 1.0
+        : static_cast<double>(align_corners ? W - 1 : W) / 2.0;
+    auto y_scale = pixel_coords
+        ? 1.0
+        : static_cast<double>(align_corners ? H - 1 : H) / 2.0;
+    auto z_scale = pixel_coords
+        ? 1.0
+        : static_cast<double>(align_corners ? D - 1 : D) / 2.0;
     auto raw = [&](int64_t axis, double scale) {
+      if (pixel_coords) {
+        return grid.select(-1, axis);
+      }
       auto coord = (grid.select(-1, axis) + 1) * scale;
       return align_corners ? coord : coord - 0.5;
     };
@@ -8694,15 +8817,17 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
 
     // Keys' coefficients and their first two derivatives in the fractional
     // offset, for the four taps at {-1, 0, 1, 2} from the base voxel.
-    constexpr double A = -0.75;
-    auto coeffs = [](const Tensor& t) {
+    const double A = cubic_coeff_a;
+    auto coeffs = [A](const Tensor& t) {
       auto t1 = t + 1.0, t2 = 1.0 - t, t3 = 2.0 - t;
-      auto c = at::stack(
-          {(((A * t1) - (5 * A)) * t1 + (8 * A)) * t1 - (4 * A),
-           (((A + 2) * t) - (A + 3)) * t.square() + 1,
-           (((A + 2) * t2) - (A + 3)) * t2.square() + 1,
-           (((A * t3) - (5 * A)) * t3 + (8 * A)) * t3 - (4 * A)},
-          -1);
+      auto c = gs_cardinalize_cubic(
+          at::stack(
+              {(((A * t1) - (5 * A)) * t1 + (8 * A)) * t1 - (4 * A),
+               (((A + 2) * t) - (A + 3)) * t.square() + 1,
+               (((A + 2) * t2) - (A + 3)) * t2.square() + 1,
+               (((A * t3) - (5 * A)) * t3 + (8 * A)) * t3 - (4 * A)},
+              -1),
+          t);
       auto dc = at::stack(
           {(((3 * A) * t1) - (10 * A)) * t1 + (8 * A),
            (((3 * (A + 2)) * t) - (2 * (A + 3))) * t,
@@ -8712,7 +8837,7 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
       return std::make_pair(std::move(c), std::move(dc));
     };
     // only the ggGrid half needs the second derivative, so it is built there
-    auto second = [](const Tensor& t) {
+    auto second = [A](const Tensor& t) {
       auto t1 = t + 1.0, t2 = 1.0 - t, t3 = 2.0 - t;
       return at::stack(
           {((6 * A) * t1) - (10 * A),
@@ -8842,12 +8967,13 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
   // Bilinear 3D: ggGrid contributions.
   auto D = input.size(2), H = input.size(3), W = input.size(4);
 
-  auto [ix, gix_mult] = gs_compute_coords(
-      grid.select(-1, 0), W, padding_mode_enum, align_corners);
-  auto [iy, giy_mult] = gs_compute_coords(
-      grid.select(-1, 1), H, padding_mode_enum, align_corners);
-  auto [iz, giz_mult] = gs_compute_coords(
-      grid.select(-1, 2), D, padding_mode_enum, align_corners);
+  Tensor ix, iy, iz, gix_mult, giy_mult, giz_mult;
+  std::tie(ix, gix_mult) = gs_compute_coords(
+      grid.select(-1, 0), W, padding_mode_enum, align_corners, pixel_coords);
+  std::tie(iy, giy_mult) = gs_compute_coords(
+      grid.select(-1, 1), H, padding_mode_enum, align_corners, pixel_coords);
+  std::tie(iz, giz_mult) = gs_compute_coords(
+      grid.select(-1, 2), D, padding_mode_enum, align_corners, pixel_coords);
 
   auto x0 = at::floor(ix).to(at::kLong);
   auto y0 = at::floor(iy).to(at::kLong);
@@ -8972,12 +9098,12 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
     auto dot_yz = (grad_output * d2_yz).sum(1);
     auto d_grid_x = ggG_y * dot_xy;
     d_grid_x.addcmul_(ggG_z, dot_xz);
-    d_grid_x.mul_(gix_mult);
     auto d_grid_y = ggG_x * dot_xy;
     d_grid_y.addcmul_(ggG_z, dot_yz);
-    d_grid_y.mul_(giy_mult);
     auto d_grid_z = ggG_x * dot_xz;
     d_grid_z.addcmul_(ggG_y, dot_yz);
+    d_grid_x.mul_(gix_mult);
+    d_grid_y.mul_(giy_mult);
     d_grid_z.mul_(giz_mult);
     auto contrib = at::stack(
         {std::move(d_grid_x), std::move(d_grid_y), std::move(d_grid_z)}, -1);
