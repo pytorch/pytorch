@@ -6960,6 +6960,9 @@ class GraphModule(torch.nn.Module):
             ]
         )
         self.assertEqual(out, exp)
+        # The batch rule does take the fast path here (checked eagerly above), but
+        # pointwise still cannot compile: inductor's associative_scan lowering rejects
+        # a tensor additional_input as an "unsupported lifted argument", vmap or not.
         if combine_mode == "generic":
             self.assertEqual(torch.compile(fn)(x, h), exp)
 
@@ -6984,6 +6987,7 @@ class GraphModule(torch.nn.Module):
         if combine_mode == "generic":
             self.assertEqual(torch.compile(fn)(x), x)
 
+    @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     @parametrize("in_dims", [0, 1])
     @parametrize("combine_fn_name", ["add", "mul"])
@@ -7006,6 +7010,7 @@ class GraphModule(torch.nn.Module):
         )
         self.assertEqual(torch.compile(fn)(x), exp)
 
+    @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     def test_associative_scan_in_vmap_pointwise_compile_pytree(self):
         xs = {
@@ -7037,6 +7042,7 @@ class GraphModule(torch.nn.Module):
         }
         self.assertEqual(torch.compile(fn)(xs["a"], xs["b"]), exp)
 
+    @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     def test_associative_scan_in_vmap_pointwise_compile_nested(self):
         x = torch.randn(2, 3, 4, 2, device="cuda")
@@ -7063,6 +7069,7 @@ class GraphModule(torch.nn.Module):
         )
         self.assertEqual(torch.compile(fn)(x), exp)
 
+    @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     def test_associative_scan_in_vmap_pointwise_compile_nonpointwise(self):
         # A dim-sensitive combine_fn (transpose) passes the frontend pointwise gate
@@ -7070,10 +7077,7 @@ class GraphModule(torch.nn.Module):
         # is valid and the call actually reaches the batch rule (a rank-1 lane would
         # fail earlier during frontend meta tracing, making this test vacuous). The
         # batch rule therefore takes the base re-vmap path, whose layout permutes
-        # cannot be traced as a combine subgraph, so this must fail loudly. Which
-        # layer catches it is not the point of the test (the pointwise lowering
-        # rejects the permutes; a backend without that lowering hits the rank
-        # mismatch at graph runtime), only that it never silently miscomputes.
+        # cannot be lowered as a pointwise combine subgraph, so this must fail loudly.
         x = torch.randn(4, 5, 3, 3, device="cuda")
 
         def combine_fn(a, b):
@@ -7085,8 +7089,10 @@ class GraphModule(torch.nn.Module):
 
             return torch.vmap(inner_fn, in_dims=0)(x)
 
-        # BackendCompilerFailed derives from RuntimeError, so this covers both layers.
-        with self.assertRaises(RuntimeError):
+        # Match the failure reason: a bare RuntimeError would also be satisfied by an
+        # OOM or by the lowering's device-support error. BackendCompilerFailed derives
+        # from RuntimeError, so the layer stays unpinned.
+        with self.assertRaisesRegex(RuntimeError, "LoweringException"):
             torch.compile(fn, fullgraph=True)(x)
 
     @parametrize("batch_size", [2, 3, 5])
@@ -7120,6 +7126,66 @@ class GraphModule(torch.nn.Module):
         )
         self.assertEqual(fn(x), exp)
 
+    @parametrize(
+        "case", ["add", "view", "reduction", "closed_over_tensor", "baked_constant"]
+    )
+    def test_associative_scan_in_vmap_elementwise_predicate(self, case):
+        # The end-to-end tests cannot distinguish "fell back correctly" from "took the
+        # fast path and got lucky", so assert the predicate's verdict directly.
+        from torch._higher_order_ops.associative_scan import _combine_fn_is_elementwise
+
+        closed_over = torch.randn(3, 3)
+        combine_fns = {
+            "add": lambda a, b: a + b,
+            # Reads the trailing batch axis as data.
+            "view": lambda a, b: a + b.transpose(-1, -2),
+            # Shape-compatible and traces cleanly, so only the tag check can reject it.
+            "reduction": lambda a, b: a + b.sum(-1, keepdim=True),
+            # A tensor from outside the arg list; rejected via the tracing fallback.
+            "closed_over_tensor": lambda a, b: a + b + closed_over,
+            # Same, but make_fx bakes it in as a get_attr constant.
+            "baked_constant": lambda a, b: a + b + torch.tensor([1.0, 2.0, 3.0]),
+        }
+        xs = [torch.randn(4, 3, 3)]
+        self.assertEqual(
+            _combine_fn_is_elementwise(combine_fns[case], xs, ()), case == "add"
+        )
+
+    @parametrize("elementwise", [True, False])
+    def test_associative_scan_in_vmap_fast_path_selection(self, elementwise):
+        # Widening the predicate would route a non-elementwise combine_fn to the direct
+        # call, which miscomputes silently, so assert the wrapper actually installed.
+        from torch._higher_order_ops.associative_scan import (
+            _PointwiseVmapCombineFnWrapper,
+        )
+        from torch._higher_order_ops.utils import _VmapCombineFnWrapper
+
+        def combine_fn(a, b):
+            return a + b if elementwise else a + b.transpose(-1, -2)
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(combine_fn, xi, dim=0, combine_mode="pointwise")
+
+            return torch.vmap(inner_fn, in_dims=0)(x)
+
+        selected = []
+        orig_init = _VmapCombineFnWrapper.__init__
+
+        def spy_init(wrapper_self, *args, **kwargs):
+            selected.append(type(wrapper_self))
+            orig_init(wrapper_self, *args, **kwargs)
+
+        # The subclass inherits __init__, so patching the base covers both.
+        with unittest.mock.patch.object(_VmapCombineFnWrapper, "__init__", spy_init):
+            fn(torch.randn(2, 4, 3, 3))
+
+        expected = (
+            _PointwiseVmapCombineFnWrapper if elementwise else _VmapCombineFnWrapper
+        )
+        # The frontend's shape-check pass runs the batch rule too, hence the set.
+        self.assertEqual(set(selected), {expected})
+
     @parametrize("combine_mode", ["generic", "pointwise"])
     @requires_cuda
     def test_associative_scan_in_vmap_nonzero_in_dims(self, combine_mode):
@@ -7144,8 +7210,8 @@ class GraphModule(torch.nn.Module):
             ]
         )
         self.assertEqual(out, exp)
-        if combine_mode == "generic":
-            self.assertEqual(torch.compile(fn)(x), exp)
+        # Fully batched, so pointwise takes the direct-call fast path and compiles.
+        self.assertEqual(torch.compile(fn)(x), exp)
 
     @parametrize("combine_mode", ["generic", "pointwise"])
     @requires_cuda
@@ -7172,8 +7238,8 @@ class GraphModule(torch.nn.Module):
             dim=1,
         )
         self.assertEqual(out, exp)
-        if combine_mode == "generic":
-            self.assertEqual(torch.compile(fn)(x), exp)
+        # Fully batched, so pointwise takes the direct-call fast path and compiles.
+        self.assertEqual(torch.compile(fn)(x), exp)
 
     @parametrize("combine_mode", ["generic", "pointwise"])
     @requires_cuda
@@ -7200,6 +7266,9 @@ class GraphModule(torch.nn.Module):
             ]
         )
         self.assertEqual(out, exp)
+        # in_dims=(0, None) leaves hi unbatched, so the fast path's all-args-batched
+        # precondition fails and pointwise falls back to the base path, which compile
+        # still cannot lower. Unlike the fully batched tests, this guard stays.
         if combine_mode == "generic":
             self.assertEqual(torch.compile(fn)(x, h), exp)
 
@@ -7227,9 +7296,9 @@ class GraphModule(torch.nn.Module):
             [_fake_associative_scan(combine_fn, x[i], dim=1) for i in range(x.shape[0])]
         )
         self.assertEqual(out, exp)
-        # See Note [associative_scan vmap coverage].
-        if combine_mode == "generic":
-            self.assertEqual(torch.compile(fn)(x), exp)
+        # Fully batched: pointwise takes the direct-call fast path. This is where the
+        # frontend's scan-dim movedim and the batch rule's last-axis parking compose.
+        self.assertEqual(torch.compile(fn)(x), exp)
 
     @parametrize("combine_mode", ["generic", "pointwise"])
     @requires_cuda
