@@ -1377,7 +1377,7 @@ class TestCrossPGOverlap(InductorTestCase):
         )
 
 
-instantiate_device_type_tests(TestCrossPGOverlap, globals(), except_for="cpu")
+instantiate_device_type_tests(TestCrossPGOverlap, globals(), except_for="cpu", allow_xpu=True)
 
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
@@ -1549,7 +1549,7 @@ class TestFusibleNodeOverlap(InductorTestCase):
         self.assertEqual(len(scheduler.collective_info), 1)
 
 
-instantiate_device_type_tests(TestFusibleNodeOverlap, globals(), except_for="cpu")
+instantiate_device_type_tests(TestFusibleNodeOverlap, globals(), except_for="cpu", allow_xpu=True)
 
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
@@ -1830,7 +1830,7 @@ class TestOverlapSchedulingFixes(InductorTestCase):
         with fake_mode:
             a = torch.empty(4, 4, device=device)
             b = torch.empty(4, 4, device=device)
-            gen = torch.cuda.default_generators[0].clone_state()
+            gen = torch.get_device_module(torch.device(device).type).default_generators[0].clone_state()
             traced = make_fx(func)(a, b, gen)
 
         def custom_runtime_estimation(
@@ -1867,7 +1867,7 @@ class TestOverlapSchedulingFixes(InductorTestCase):
             graph.run(a, b, gen)
 
 
-instantiate_device_type_tests(TestOverlapSchedulingFixes, globals(), except_for="cpu")
+instantiate_device_type_tests(TestOverlapSchedulingFixes, globals(), except_for="cpu", allow_xpu=True)
 
 
 @requires_accelerator_dist_backend()
@@ -2331,7 +2331,7 @@ class TestCoalescedCollectiveOverlap(InductorTestCase):
         self.assertGreater(size, 0)
 
 
-instantiate_device_type_tests(TestCoalescedCollectiveOverlap, globals(), except_for="cpu")
+instantiate_device_type_tests(TestCoalescedCollectiveOverlap, globals(), except_for="cpu", allow_xpu=True)
 
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
@@ -2423,7 +2423,7 @@ class TestProfileGuidedEstimatorIntegration(InductorTestCase):
             os.unlink(trace_path)
 
 
-instantiate_device_type_tests(TestProfileGuidedEstimatorIntegration, globals(), except_for="cpu")
+instantiate_device_type_tests(TestProfileGuidedEstimatorIntegration, globals(), except_for="cpu", allow_xpu=True)
 
 
 @requires_accelerator_dist_backend()
