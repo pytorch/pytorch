@@ -293,7 +293,7 @@ class TestJoin(MultiProcessTestCase):
                 self.assertEqual(allreducer.post_hook_tensor.item(), AFTER_CONSTANT)
 
     @requires_capabilities(Capability.distributed.backend)
-    @skip_if_lt_x_gpu(WORLD_SIZE)
+    @skip_if_lt_x_gpu(WORLD_SIZE, allow_cpu=True)
     def test_single_joinable_main_hooks(self, device):
         r"""Tests the main hooks of a single :class:`Joinable`."""
         num_joinables = 1
@@ -319,7 +319,7 @@ class TestJoin(MultiProcessTestCase):
         )
 
     @requires_capabilities(Capability.distributed.backend)
-    @skip_if_lt_x_gpu(WORLD_SIZE)
+    @skip_if_lt_x_gpu(WORLD_SIZE, allow_cpu=True)
     def test_single_joinable_post_hooks(self, device):
         r"""Tests the post-hooks of a single :class:`Joinable`."""
         num_joinables = 1
@@ -338,7 +338,7 @@ class TestJoin(MultiProcessTestCase):
         )
 
     @requires_capabilities(Capability.distributed.backend)
-    @skip_if_lt_x_gpu(WORLD_SIZE)
+    @skip_if_lt_x_gpu(WORLD_SIZE, allow_cpu=True)
     def test_single_joinable(self, device):
         r"""
         Tests the main hooks and post-hooks of a single :class:`Joinable`
@@ -368,7 +368,7 @@ class TestJoin(MultiProcessTestCase):
         )
 
     @requires_capabilities(Capability.distributed.backend)
-    @skip_if_lt_x_gpu(WORLD_SIZE)
+    @skip_if_lt_x_gpu(WORLD_SIZE, allow_cpu=True)
     def test_multiple_joinables(self, device):
         r"""
         Tests the main hooks and post-hooks of multiple :class:`Joinable` s
@@ -399,7 +399,7 @@ class TestJoin(MultiProcessTestCase):
         )
 
     @requires_capabilities(Capability.distributed.backend)
-    @skip_if_lt_x_gpu(WORLD_SIZE)
+    @skip_if_lt_x_gpu(WORLD_SIZE, allow_cpu=True)
     def test_single_joinable_disable(self, device):
         r"""Tests ``enable=False`` for a single :class:`Joinable`."""
         num_joinables = 1
@@ -422,7 +422,7 @@ class TestJoin(MultiProcessTestCase):
         )
 
     @requires_capabilities(Capability.distributed.backend)
-    @skip_if_lt_x_gpu(WORLD_SIZE)
+    @skip_if_lt_x_gpu(WORLD_SIZE, allow_cpu=True)
     def test_multiple_joinable_disable(self, device):
         r"""
         Tests ``enable=False`` for multiple :class:`Joinable` s.
@@ -450,7 +450,7 @@ class TestJoin(MultiProcessTestCase):
         )
 
     @requires_capabilities(Capability.distributed.backend)
-    @skip_if_lt_x_gpu(WORLD_SIZE)
+    @skip_if_lt_x_gpu(WORLD_SIZE, allow_cpu=True)
     def test_single_joinable_throw(self, device):
         r"""
         Tests ``throw_on_early_termination=True`` for a single
@@ -473,7 +473,7 @@ class TestJoin(MultiProcessTestCase):
         )
 
     @requires_capabilities(Capability.distributed.backend)
-    @skip_if_lt_x_gpu(WORLD_SIZE)
+    @skip_if_lt_x_gpu(WORLD_SIZE, allow_cpu=True)
     def test_multiple_joinables_throw(self, device):
         r"""
         Tests ``throw_on_early_termination=True`` for multiple
@@ -499,7 +499,7 @@ class TestJoin(MultiProcessTestCase):
         )
 
     @requires_capabilities(Capability.distributed.backend)
-    @skip_if_lt_x_gpu(WORLD_SIZE)
+    @skip_if_lt_x_gpu(WORLD_SIZE, allow_cpu=True)
     def test_join_kwargs(self, device):
         r"""
         Tests passing keyword arguments to the context manager.
@@ -525,7 +525,7 @@ class TestJoin(MultiProcessTestCase):
             device=device,
         )
 
-instantiate_device_type_tests(TestJoin, globals(), except_for="cpu", allow_xpu=True)
+instantiate_device_type_tests(TestJoin, globals(), except_for="hpu")
 
 if __name__ == "__main__":
     run_tests()
