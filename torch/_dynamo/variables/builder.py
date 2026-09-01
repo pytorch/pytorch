@@ -1962,7 +1962,8 @@ class VariableBuilder:
             return MemberDescriptorVariable(value)
         elif type(value) is property:
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            return PropertyVariable(value, source=self.source)
+            result = PropertyVariable(value, source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, types.MethodWrapperType):
             # Method-wrappers are written in C, and they are not guaranteed to
             # return the same object on attribute lookup. Therefore, we cannot
