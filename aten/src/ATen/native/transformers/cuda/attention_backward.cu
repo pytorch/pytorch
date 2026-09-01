@@ -1126,7 +1126,10 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
                            logsumexp_chunk);
     }
 
-    // Allocate full-size outputs in (B,H,M,K) format
+    // Allocate full-size outputs with logical shape (B,H,M,K). The non
+    // chunked path returns transposed views of (B,M,H,K) packed buffers and
+    // the meta registration promises those strides, so allocate in
+    // (B,M,H,K) order and transpose back.
     int64_t B_chunk = query_chunk.size(0);
     int64_t M_q = query_chunk.size(1);
     int64_t M_k = key_chunk.size(1);
@@ -1134,13 +1137,16 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
     int64_t K_v = value_chunk.size(3);
 
     Tensor final_gq = grad_input_mask[0]
-        ? at::empty({B_chunk, h, M_q, K_q}, query_chunk.options())
+        ? at::empty({B_chunk, M_q, h, K_q}, query_chunk.options())
+              .transpose(1, 2)
         : Tensor{};
     Tensor final_gk = grad_input_mask[1]
-        ? at::empty({B_chunk, h, M_k, K_q}, key_chunk.options())
+        ? at::empty({B_chunk, M_k, h, K_q}, key_chunk.options())
+              .transpose(1, 2)
         : Tensor{};
     Tensor final_gv = grad_input_mask[2]
-        ? at::empty({B_chunk, h, M_k, K_v}, value_chunk.options())
+        ? at::empty({B_chunk, M_k, h, K_v}, value_chunk.options())
+              .transpose(1, 2)
         : Tensor{};
     Tensor final_gb;
     if (grad_input_mask[3] && attn_bias_chunk.has_value() &&
@@ -1265,7 +1271,9 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
         final_grad_v.slice(0, start, end).copy_(chunk_grad_v);
       }
       if (grad_input_mask[3] && chunk_grad_bias.defined()) {
-        final_grad_bias.add_(chunk_grad_bias);
+        // The bias gradient has the full batch size, so each batch chunk
+        // fills its own slice, matching the assembly of the other gradients.
+        final_grad_bias.slice(0, start, end).copy_(chunk_grad_bias);
       }
     }
 

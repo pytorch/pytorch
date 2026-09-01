@@ -4586,6 +4586,79 @@ class TestSDPAGridOverflow(NNTestCase):
             out = scaled_dot_product_attention(q, k, v)
         self.assertEqual(out.shape, q.shape)
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+                     "Requires mem-efficient attention support")
+    @onlyCUDA
+    def test_large_batch_with_bias_backward(self, device):
+        """Batch chunking should assemble the bias gradient correctly when the
+        batch size exceeds the grid limit."""
+        batch, num_heads, seq_len, head_dim = 65536, 1, 4, 8
+        q = torch.randn(batch, num_heads, seq_len, head_dim,
+                        device=device, dtype=torch.float32)
+        k = torch.randn_like(q)
+        v = torch.randn_like(q)
+        attn_bias = torch.randn(batch, num_heads, seq_len, seq_len,
+                                device=device, dtype=torch.float32)
+        grad_out = torch.randn_like(q)
+
+        q_eff = q.clone().requires_grad_(True)
+        k_eff = k.clone().requires_grad_(True)
+        v_eff = v.clone().requires_grad_(True)
+        bias_eff = attn_bias.clone().requires_grad_(True)
+        with sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION):
+            out_eff = scaled_dot_product_attention(
+                q_eff, k_eff, v_eff, attn_mask=bias_eff)
+        out_eff.backward(grad_out)
+
+        q_ref = q.clone().requires_grad_(True)
+        k_ref = k.clone().requires_grad_(True)
+        v_ref = v.clone().requires_grad_(True)
+        bias_ref = attn_bias.clone().requires_grad_(True)
+        with sdpa_kernel(SDPBackend.MATH):
+            out_ref = scaled_dot_product_attention(
+                q_ref, k_ref, v_ref, attn_mask=bias_ref)
+        out_ref.backward(grad_out)
+
+        self.assertEqual(q_eff.grad, q_ref.grad, atol=1e-3, rtol=1e-3)
+        self.assertEqual(bias_eff.grad, bias_ref.grad, atol=1e-3, rtol=1e-3)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+                     "Requires mem-efficient attention support")
+    @onlyCUDA
+    def test_large_num_heads_op_contract(self, device):
+        """The head-split path should keep the op's output contract, returning
+        a defined logsumexp when it is not computed and gradient strides that
+        match the meta registration."""
+        def run(dev):
+            batch, num_heads, seq_len, head_dim = 1, 65536, 4, 8
+            q = torch.randn(batch, num_heads, seq_len, head_dim, device=dev)
+            k = torch.randn_like(q)
+            v = torch.randn_like(q)
+            out, lse, seed, offset = (
+                torch.ops.aten._scaled_dot_product_efficient_attention(
+                    q, k, v, None, compute_log_sumexp=True))
+            grad_out = torch.randn_like(q)
+            grads = (
+                torch.ops.aten._scaled_dot_product_efficient_attention_backward(
+                    grad_out, q, k, v, None, out, lse, seed, offset, 0.0,
+                    [True, True, True, False]))
+            return out, list(grads[:3])
+
+        # Without logsumexp the op must still return a defined (B, H, 0)
+        # tensor, as the non chunked path does.
+        q = torch.randn(1, 65536, 4, 8, device=device)
+        out_no_lse = torch.ops.aten._scaled_dot_product_efficient_attention(
+            q, q, q, None, compute_log_sumexp=False)
+        self.assertIsNotNone(out_no_lse[1])
+        self.assertEqual(out_no_lse[1].shape, torch.Size([1, 65536, 0]))
+
+        out_cuda, grads_cuda = run(device)
+        out_meta, grads_meta = run("meta")
+        self.assertEqual(out_cuda.stride(), out_meta.stride())
+        for grad_cuda, grad_meta in zip(grads_cuda, grads_meta):
+            self.assertEqual(grad_cuda.stride(), grad_meta.stride())
+
+
 instantiate_device_type_tests(TestSDPAGridOverflow, globals(), only_for="cuda")
 
 

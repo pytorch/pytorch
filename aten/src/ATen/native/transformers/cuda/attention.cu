@@ -1263,6 +1263,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
             lse_sizes.push_back(lse.size(i));
           }
           final_lse = at::empty(std::move(lse_sizes), lse.options());
+        } else {
+          // Match the non chunked path, which returns a defined (B, H, 0)
+          // tensor when logsumexp is not computed, so callers always see a
+          // defined output.
+          final_lse = at::empty({q.size(0), h, 0}, lse.options());
         }
         seed = std::move(s);
         offset = std::move(o);
