@@ -1092,8 +1092,9 @@ class TestIndexingDevice(TestCase):
 
     @onlyNativeDeviceTypes
     def test_index_put_accumulate_expanded_values(self, device):
-        # checks the issue with cuda: https://github.com/pytorch/pytorch/issues/39227
-        # and verifies consistency with CPU result
+        # Checks the issue (originally found on cuda) on gpu:
+        # https://github.com/pytorch/pytorch/issues/39227, and verifies
+        # consistency with the CPU result.
         t = torch.zeros((5, 2))
         t_dev = t.to(device)
         indices = [torch.tensor([0, 1, 2, 3]), torch.tensor([1])]
