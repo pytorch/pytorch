@@ -158,7 +158,7 @@ inline const char* TypeName(float v) {
     return "tf32";
   }
   if (at::cuda::blas::useBF16x9()) {
-    return "16x9";
+    return "bfx9";
   }
   return "float";
 }

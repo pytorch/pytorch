@@ -315,7 +315,7 @@ CublasLtTypeInfo<T, C_Dtype> getCublasLtTypeInfo() {
     }
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12090
     if (fp32_precision == at::Float32Precision::BF16X9 &&
-        !at::NoTF32Guard::should_disable_tf32()) {
+        !at::NoTF32Guard::should_disable_fp32_reduced_precision()) {
       info.compute_type = CUBLAS_COMPUTE_32F_EMULATED_16BFX9;
     }
 #endif

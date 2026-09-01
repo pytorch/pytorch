@@ -10755,7 +10755,7 @@ class TestLinalgCudaOnly(TestCase):
             signatures = (
                 ("GemmTunableOp_float_NN", "nn_37_37_37_ld_37_37_37"),
                 (
-                    "GemmTunableOp_16x9_NN",
+                    "GemmTunableOp_bfx9_NN",
                     "nn_37_37_37_ld_37_37_37_compute_bf16x9_r",
                 ),
             )

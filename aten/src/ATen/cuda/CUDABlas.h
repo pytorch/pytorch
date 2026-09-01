@@ -23,7 +23,7 @@ namespace at::cuda::blas {
 inline bool useBF16x9() {
   // NoTF32Guard is the existing force-IEEE override for CUDA FP32 matmul, so
   // it must also suppress other non-IEEE modes.
-  return !at::NoTF32Guard::should_disable_tf32() &&
+  return !at::NoTF32Guard::should_disable_fp32_reduced_precision() &&
       at::globalContext().float32Precision(
           at::Float32Backend::CUDA, at::Float32Op::MATMUL) ==
       at::Float32Precision::BF16X9;

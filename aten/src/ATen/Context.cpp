@@ -900,27 +900,28 @@ Allocator* getCPUAllocator() {
   return c10::GetCPUAllocator();
 }
 
-// override_allow_tf32_flag = true
-//    means the allow_tf32 flags are overridden and tf32 is force disabled
-// override_allow_tf32_flag = false
-//    means the original allow_tf32 flags are followed
-thread_local static bool override_allow_tf32_flag = false;
+// True while reduced-precision FP32 matmul modes are force disabled.
+thread_local static bool override_fp32_reduced_precision_flag = false;
 
 NoTF32Guard::NoTF32Guard() {
-  if (!override_allow_tf32_flag) {
+  if (!override_fp32_reduced_precision_flag) {
     changed = true;
-    override_allow_tf32_flag = true;
+    override_fp32_reduced_precision_flag = true;
   }
 }
 
 NoTF32Guard::~NoTF32Guard() {
   if (changed) {
-    override_allow_tf32_flag = false;
+    override_fp32_reduced_precision_flag = false;
   }
 }
 
+bool NoTF32Guard::should_disable_fp32_reduced_precision() {
+  return override_fp32_reduced_precision_flag;
+}
+
 bool NoTF32Guard::should_disable_tf32() {
-  return override_allow_tf32_flag;
+  return should_disable_fp32_reduced_precision();
 }
 
 // Ops can query this flag to know they are in the backward pass.
