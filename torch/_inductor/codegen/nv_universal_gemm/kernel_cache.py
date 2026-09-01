@@ -503,7 +503,7 @@ def ensure_cache_initialized() -> None:
     _get_kernel_cache()
 
 
-_efc_epilogue_cache: dict[tuple[str, str, tuple], Any] = {}
+_efc_epilogue_cache: dict[tuple[str, str, tuple, tuple], Any] = {}
 
 
 def clear_cache() -> None:
@@ -586,6 +586,7 @@ def get_efc_kernel_with_epilogue(
     epilogue_args: Any,
     epilogue_source: str = "",
     base_kernel: Any | None = None,
+    specialization: tuple = (),
 ) -> Any:
     """Get (or create and cache) an EFC kernel bound to a specific epilogue.
 
@@ -602,6 +603,7 @@ def get_efc_kernel_with_epilogue(
         efc_kernel_name,
         epilogue_source,
         _epilogue_args_signature(epilogue_args),
+        specialization,
     )
 
     with _cache_lock:

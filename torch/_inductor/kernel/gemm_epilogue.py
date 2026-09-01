@@ -15,6 +15,19 @@ from torch.utils._ordered_set import OrderedSet
 from .gemm_epilogue_utils import statically_known_shape_equal
 
 
+GEMM_ACCUMULATOR_ARG_NAME = "accum"
+GEMM_REDUCTION_FRAGMENT_WIDTH = 32
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class GemmEpiloguePlan:
+    source: str | None = None
+    is_cutedsl: bool = False
+    reads: tuple[str, ...] = ()
+    writes: tuple[str, ...] = ()
+    renames: dict[str, Any] = dataclasses.field(default_factory=dict)
+
+
 @dataclasses.dataclass(frozen=True)
 class GemmReductionGeometry:
     """Grouped M/N reduction geometry shared by frontend and backend plans.
@@ -93,6 +106,14 @@ class GemmReductionDescriptor:
     kind: str
     parameters: tuple[float, ...] = ()
 
+    PARAMETER_COUNTS: ClassVar[dict[str, int]] = {
+        "mean_linear": 3,
+        "normalize_sum_affine": 4,
+        "normalize_sum_reverse_affine": 4,
+        "sum_mul_affine": 2,
+        "variance_affine": 2,
+    }
+
     @classmethod
     def parse(cls, value: str) -> "GemmReductionDescriptor":
         kind, *parameters = value.split(":")
@@ -106,6 +127,10 @@ class GemmReductionDescriptor:
             + ":"
             + ":".join(format(parameter, ".17g") for parameter in self.parameters)
         )
+
+    @property
+    def has_valid_parameters(self) -> bool:
+        return len(self.parameters) == self.PARAMETER_COUNTS.get(self.kind, 0)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -133,10 +158,6 @@ class GemmReductionConfig:
     def geometry(self) -> GemmReductionGeometry:
         return GemmReductionGeometry(self.group, self.axis)
 
-    @property
-    def contract(self) -> tuple[int, int, str, str]:
-        return self.group, self.axis, self.reduction_type, self.source_type
-
 
 @dataclasses.dataclass(frozen=True)
 class GemmReductionPlan:
@@ -153,6 +174,9 @@ class GemmReductionPlan:
         feed_output: Optional full-shape output consuming the reduction.
         secondary_feed_output: Optional second full-shape reduction consumer.
         secondary_feed_type: Expression implemented by the secondary consumer.
+        finalizer_fn: Optional source for post-reduction scalar finalization.
+        consumer_fn: Optional source for the primary full-shape consumer.
+        secondary_consumer_fn: Optional source for the secondary consumer.
     """
 
     reduction_output: str | None
@@ -165,6 +189,9 @@ class GemmReductionPlan:
     feed_output: str | None = None
     secondary_feed_output: str | None = None
     secondary_feed_type: str | None = None
+    finalizer_fn: str | None = None
+    consumer_fn: str | None = None
+    secondary_consumer_fn: str | None = None
 
     @property
     def geometry(self) -> GemmReductionGeometry:
@@ -185,7 +212,7 @@ class GemmReductionPlan:
         )
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class GemmReductionArguments:
     """Runtime tensors and compile-time parameters for a grouped GEMM reduction.
 
@@ -210,7 +237,15 @@ class GemmReductionArguments:
     reduction_type: str = "sum"
     source_type: str = "identity"
     feeds_main: bool = False
+    finalizer_fn: str | None = None
+    consumer_fn: str | None = None
+    secondary_consumer_fn: str | None = None
 
+    TENSOR_FIELDS: ClassVar[tuple[str, ...]] = (
+        "output",
+        "feed_output",
+        "secondary_feed_output",
+    )
     SPECIALIZATION_FIELDS: ClassVar[tuple[str, ...]] = (
         "group",
         "axis",
@@ -218,16 +253,24 @@ class GemmReductionArguments:
         "source_type",
         "feeds_main",
         "secondary_feed_type",
+        "finalizer_fn",
+        "consumer_fn",
+        "secondary_consumer_fn",
     )
+
+    @classmethod
+    def from_plan(
+        cls, plan: GemmReductionPlan, **tensor_values: Any
+    ) -> "GemmReductionArguments":
+        return cls(
+            **tensor_values,
+            **{field: getattr(plan, field) for field in cls.SPECIALIZATION_FIELDS},
+        )
 
     @property
     def enabled(self) -> bool:
-        return (
-            any(
-                value is not None
-                for value in (self.output, self.feed_output, self.secondary_feed_output)
-            )
-            or self.feeds_main
+        return self.feeds_main or any(
+            value is not None for _, value in self.tensor_items()
         )
 
     @property
@@ -240,14 +283,19 @@ class GemmReductionArguments:
     def descriptor(self) -> GemmReductionDescriptor:
         return GemmReductionDescriptor.parse(self.reduction_type)
 
-    def tensors(self, attr: str) -> tuple[Any | None, Any | None, Any | None]:
-        def tensor(value: Any | None) -> Any | None:
-            return getattr(value, attr) if value is not None else None
+    def tensor_items(self) -> Iterator[tuple[str, Any | None]]:
+        return ((field, getattr(self, field)) for field in self.TENSOR_FIELDS)
 
-        return (
-            tensor(self.output),
-            tensor(self.feed_output),
-            tensor(self.secondary_feed_output),
+    def specialization_items(self) -> Iterator[tuple[str, Any]]:
+        return ((field, getattr(self, field)) for field in self.SPECIALIZATION_FIELDS)
+
+    def map_tensors(self, transform) -> "GemmReductionArguments":
+        return dataclasses.replace(
+            self,
+            **{
+                field: None if value is None else transform(value)
+                for field, value in self.tensor_items()
+            },
         )
 
 
