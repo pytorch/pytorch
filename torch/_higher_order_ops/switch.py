@@ -9,6 +9,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._functorch.utils import exposed_in
+from torch._functorch.vmap import restore_vmap, unwrap_batched, wrap_batched
 from torch._higher_order_ops.utils import (
     _maybe_compile_and_run_fn,
     _maybe_run_with_interpreter,
@@ -17,6 +18,7 @@ from torch._higher_order_ops.utils import (
     create_fn_remove_none,
     fill_none_with_masks,
     materialize_as_graph,
+    move_bdim_to_front,
     reenter_make_fx,
     save_values_for_backward,
     saved_values,
@@ -127,6 +129,12 @@ def switch(
           are also permitted in branch outputs and are merged across branches (an
           unbacked SymInt is introduced when ``int`` leaves differ between branches).
         - Branches cannot have in-place mutations on inputs or global variables.
+
+    .. note::
+
+        Under :func:`torch.vmap`, the ``index`` must not be batched, i.e. all batch
+        elements must take the same branch. The switch is then preserved and only the
+        selected branch runs.
     """
 
     # Flatten operands so the HOP only sees a flat list of tensors.
@@ -422,3 +430,75 @@ def switch_func(ctx, index, branches, inputs):
             unwrapped_index, functional_branches, unwrapped_inputs
         )
         return ctx.wrap_tensors(switch_return)
+
+
+def _vmap_with_front_bdims(fn, in_dims, batch_size, randomness):
+    """Vmaps ``fn`` and returns a callable producing ``(outputs, out_dims)``.
+
+    Tensor outputs are normalized with ``move_bdim_to_front``, so a batched output
+    gets its batch dim moved to 0 and an unbatched one is broadcast along a new
+    leading dim. This makes all branches of a switch agree on which outputs are
+    batched, which they must because the HOP requires matching output metadata, and
+    it materializes the result, which the HOP requires as well since it compares
+    strides and not just sizes. Non-tensor output leaves (``None``, ``int``) are
+    passed through and reported with a ``None`` out dim.
+    """
+
+    def inner(*args):
+        outs, out_bdims = restore_vmap(fn, in_dims, batch_size, randomness)(*args)
+
+        def to_front(out, bdim):
+            if not isinstance(out, torch.Tensor):
+                return out
+            return move_bdim_to_front(out, bdim, batch_size)
+
+        outs = pytree.tree_map(to_front, outs, out_bdims)
+        out_dims = pytree.tree_map(
+            lambda out: 0 if isinstance(out, torch.Tensor) else None, outs
+        )
+        return outs, out_dims
+
+    return inner
+
+
+@switch_op.py_impl(torch._C._functorch.TransformType.Vmap)
+def switch_batch_rule(interpreter, index, branches, operands):
+    level = interpreter.level()
+    batch_size = interpreter.batch_size()
+    randomness = interpreter.randomness()
+    (unwrapped_index, unwrapped_operands), (index_bdim, operand_bdims) = unwrap_batched(
+        (index, operands), level
+    )
+    if index_bdim is not None:
+        raise RuntimeError(
+            "torch.switch does not support a batched index under torch.vmap, because "
+            "running a different branch for every batch element cannot be expressed "
+            "by a single switch. Make the index the same for all batch elements."
+        )
+    operand_in_dims = tuple(operand_bdims)
+    out_dims = None
+
+    with interpreter.lower():
+        # All batch elements take the same branch, so the switch is preserved and
+        # vmap is pushed into the branches. out_dims is recorded from inside the
+        # branches switch_op runs: the selected one when executing and all of them
+        # when tracing, which agree after normalization.
+        def vmap_branch(branch):
+            def wrapper(*args):
+                nonlocal out_dims
+                outs, out_dims = _vmap_with_front_bdims(
+                    branch, operand_in_dims, batch_size, randomness
+                )(*args)
+                return outs
+
+            return wrapper
+
+        unwrapped_out = switch_op(
+            unwrapped_index,
+            [vmap_branch(branch) for branch in branches],
+            unwrapped_operands,
+        )
+        if out_dims is None:
+            raise AssertionError("switch_op did not run any branch")
+
+    return wrap_batched(unwrapped_out, out_dims, level)

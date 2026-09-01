@@ -127,6 +127,13 @@ ep = torch.export.export(
 print(ep)
 ```
 
+## Batching with torch.vmap
+
+`torch.switch` supports `torch.vmap` as long as the index is not batched, i.e. all batch
+elements take the same branch. The switch is then preserved, the batching is pushed into the
+branches and only the selected branch runs. A batched index is not supported, because
+running a different branch for every batch element cannot be expressed by a single switch.
+
 ## Invariants of torch.ops.higher_order.switch
 
 There are several useful invariants for `torch.ops.higher_order.switch`:
