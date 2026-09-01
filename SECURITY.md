@@ -34,6 +34,8 @@ PyTorch is a framework that executes user-provided code, including model definit
 
 - **Local filesystem and cache trust**: PyTorch heavily uses local caching for performance (e.g., compiled kernel artifacts, Triton cache). These cache should be located in local user-only accessible locations and those are trusted by design. If an attacker has write access to the local filesystem, they can already execute arbitrary code — poisoning a PyTorch cache does not grant any additional capability.
 
+- **Malformed de-serialized objects**: While the weight_only unpickler ensures no RCE during the deserialization itself, it doesn't guarantee that all objects are valid. Similar to the first rule above, such objects can lead to crash and out-of-bound access which are regular issues, not security vulnerabilities.
+
 If your security advisory is closed because it falls into one of these categories, please don't be discouraged — these are still valuable reports. We encourage you to re-file them as a [regular issue](https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml) so they can be tracked and fixed as bugs.
 
 ## Using PyTorch Securely
