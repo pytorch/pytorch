@@ -50,6 +50,10 @@ import zipfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.normpath(os.path.join(HERE, "..", ".."))
 BUILD_DIR = os.path.join(REPO, "build")
+# Where the configure records the arch list it resolved, relative to the build
+# directory: a contract with cmake/Codegen.cmake, so the path is spelled once.
+# Joined onto BUILD_DIR at call time, like _cmake_cache_value, so a test can move it.
+ARCH_LIST_RECORD = os.path.join("native_aot", "arch_list.txt")
 # Where caffe2/CMakeLists.txt include()s native_aot.cmake from, spelled there as
 # ${CMAKE_BINARY_DIR}/native_aot: the generator writes the file here, so a change
 # on either side has to move both.
@@ -152,15 +156,27 @@ def _report_probe_failure(expr: str, stderr: str, returncode: int) -> None:
 
 
 def _arch_list() -> str:
-    """The arch list THIS build targets: the environment, else the CMake cache.
+    """The arch list THIS build targets, as the CONFIGURE resolved it.
 
-    The cache half matters because CMake resolves the variable first and the
-    environment only as its default (cmake/Dependencies.cmake), so a
-    -DTORCH_CUDA_ARCH_LIST=... build has no such environment variable and used
-    to export for the local GPU instead."""
-    return os.getenv("TORCH_CUDA_ARCH_LIST") or (
-        _cmake_cache_value("TORCH_CUDA_ARCH_LIST") or ""
-    )
+    Read from the file cmake/Codegen.cmake records, because that is the only place
+    the resolved value exists: EnvVarForwarding forwards the environment into the
+    cache only when the variable is undefined (so -D wins), and Dependencies.cmake
+    then shadows the cache with the environment for the rest of the configure. Either
+    source read alone is therefore wrong for one of the two kinds of build. Reading
+    the record also means a developer who changes the environment without
+    reconfiguring gets the list the build COMPILED for, not the one they now intend.
+
+    Recorded-but-empty is not the same as no record: it means the configure resolved
+    no arch list, and the on-device path takes over. Absent means nothing configured
+    this tree (a hand run, an older build dir), so fall back to the env-then-cache
+    reading the configure itself performs."""
+    try:
+        with open(os.path.join(BUILD_DIR, ARCH_LIST_RECORD)) as f:
+            return f.read().strip()
+    except OSError:
+        return os.getenv("TORCH_CUDA_ARCH_LIST") or (
+            _cmake_cache_value("TORCH_CUDA_ARCH_LIST") or ""
+        )
 
 
 def _cmake_cache_value(name: str) -> str | None:
