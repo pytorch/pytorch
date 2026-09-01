@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
+import logging
 import operator
 from collections.abc import Callable
 from typing import Any
@@ -39,6 +40,7 @@ from torch.fx.experimental.proxy_tensor import (
 
 
 aten = torch._ops.ops.aten
+log = logging.getLogger(__name__)
 
 
 def wrap_combine_fn_flat(*args, combine_fn, spec, num_leaves):
@@ -909,35 +911,52 @@ def associative_scan_functionalize(ctx, combine_fn, xs, additional_inputs):
 def _combine_fn_is_elementwise(combine_fn, xs, additional_inputs) -> bool:
     """Whether ``combine_fn`` traces to a graph of purely elementwise ops.
 
-    Stricter than dynamo's `combine_mode="pointwise"` check (using `is_pointwise_use`).
-    The direct call instead the trailing batch axis to be inert,
-    which any view (allowed by `is_pointwise_use`) would breaks..
+    Gates the direct call in ``_PointwiseVmapCombineFnWrapper``, which is sound
+    because right-aligned broadcasting is invariant under appending one trailing axis
+    to *every* operand. That needs (a) every arg batched, checked by the wrapper, and
+    (b) no tensor operand from outside the arg list, checked here. Hence stricter than
+    the frontend's ``is_pointwise_use`` gate, which admits views: a view reads the
+    trailing batch axis as data.
+
+    ``xs`` arrives already batched, so the traced shapes are exactly those the wrapper
+    calls ``combine_fn`` with: a ``combine_fn`` that is not shape-valid at that rank
+    fails to trace here rather than at runtime.
     """
     sample_slices = [first_slice_copy(x) for x in xs]
     try:
         gm = materialize_as_graph(
             combine_fn, (*sample_slices, *sample_slices, *additional_inputs)
         )
-    except Exception:
-        # Fall back to the base re-vmap path, which is correct for any combine_fn,
-        # but slower.
+    except Exception as e:
+        # Either combine_fn is not shape-valid at the batched rank, or make_fx rejected
+        # a real tensor closed over by it (_allow_non_fake_inputs=False), which is what
+        # enforces (b) for closures. Log the cause: the fallback resurfaces as a
+        # lowering failure on the re-vmap permutes, not as this exception.
+        log.debug("associative_scan vmap: tracing combine_fn failed: %s", e)
         return False
     for node in gm.graph.nodes:
-        if node.op != "call_function" or node.target is operator.getitem:
+        if node.op in ("placeholder", "output") or node.target is operator.getitem:
             continue
-        if (
-            not isinstance(node.target, torch._ops.OpOverload)
-            or torch.Tag.pointwise not in node.target.tags
+        if node.op != "call_function" or not isinstance(
+            node.target, torch._ops.OpOverload
         ):
+            # get_attr is a baked-in tensor constant, exactly the operand (b) rules out.
+            return False
+        if torch.Tag.pointwise not in node.target.tags:
+            return False
+        if torch.Tag.nondeterministic_seeded in node.target.tags:
+            # The direct call bypasses restore_vmap, hence vmap's randomness handling.
             return False
     return True
 
 
 class _PointwiseVmapCombineFnWrapper(_VmapCombineFnWrapper):
-    """``_VmapCombineFnWrapper`` specialization for a pointwise ``combine_fn``.
+    """``_VmapCombineFnWrapper`` specialization for an elementwise ``combine_fn``.
 
-    Calling ``combine_fn`` directly on the last-axis-batched args avoids permutes
-    ``_VmapCombineFnWrapper`` would trigger.
+    Calling ``combine_fn`` directly on the last-axis-batched args avoids the permutes
+    ``restore_vmap`` emits, which the pointwise lowering cannot handle. Sound only
+    under the invariant on ``_combine_fn_is_elementwise``, whose condition (a) is what
+    ``__call__`` checks below.
     """
 
     def __call__(self, *args: Any) -> Any:
@@ -946,11 +965,10 @@ class _PointwiseVmapCombineFnWrapper(_VmapCombineFnWrapper):
         if any(bdim is None for bdim in self.in_dims):
             return super().__call__(*args)
         outputs = self.combine_fn(*args)
-        # Every input is batched at -1 and this wrapper is only selected for an
-        # elementwise combine_fn, so every output leaf is batched at -1 too.
+        # All inputs are batched at -1 and combine_fn is elementwise, so every output
+        # leaf is too.
         out_dims = tuple(-1 for _ in pytree.tree_leaves(outputs))
-        # Mirror the base wrapper's cross-step consistency guard: out_dims must not
-        # change between scan steps.
+        # Mirror the base wrapper's cross-step consistency guard.
         if self.out_dims is not None and out_dims != self.out_dims:
             raise AssertionError(
                 "combine_fn produced inconsistent output batch dims across scan "
@@ -981,12 +999,12 @@ def associative_scan_batch_rule(interpreter, combine_fn, xs, additional_inputs):
     batch_size = interpreter.batch_size()
 
     with interpreter.lower():
-        # generic_associative_scan feeds combine_fn outputs back as the left-hand
-        # args on later scan levels, so every output leaf must carry the same batch
-        # dim as its xs leaf. Thus expand every unbatched xs leaf to the batch size.
-        # The expansion is unconditional and intentional.
-        # Rather than expanding only the leaves whose combine output diverges, it also
-        # expands otherwise-unbatched xs for soundness.
+        # generic_associative_scan feeds combine_fn outputs back as the left-hand args
+        # on later scan levels, so every output leaf must carry the same batch dim as
+        # its xs leaf. Expanding every unbatched leaf is unconditional on purpose:
+        # expanding only the leaves whose combine output diverges needs a fixed-point
+        # analysis to be sound, since batchedness cascades between leaves. This trades a
+        # batch_size-fold view of otherwise-unbatched leaves for a one-pass rule.
         reconciled_xs = [
             x.unsqueeze(-1).expand(*x.shape, batch_size) if xd is None else x
             for x, xd in zip(unbatched_xs, xs_move_dims)
