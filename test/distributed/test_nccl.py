@@ -39,6 +39,7 @@ from torch.testing._internal.common_utils import (
     requires_cuda_p2p_access,
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    skipIfRocmVersionLessThan,
     TEST_WITH_ROCM,
     TestCase,
 )
@@ -251,6 +252,7 @@ class TestNCCL(TestCase):
 
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
+@skipIfRocmVersionLessThan((10, 1))
 @skip_but_pass_in_sandcastle_if(
     TEST_WITH_ROCM and nccl.version() < (2, 30, 4),
     "RCCL host device APIs require RCCL 2.30.4 or newer",
