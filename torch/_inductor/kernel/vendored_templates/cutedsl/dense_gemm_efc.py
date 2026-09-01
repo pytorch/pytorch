@@ -34,12 +34,21 @@ import cuda.bindings.driver as cuda  # pyrefly: ignore [missing-import]
 
 import cutlass
 import cutlass.cute as cute
-import cutlass.operators.providers.cutedsl.evt.common_efc as common_efc
+
+
+try:
+    # `nvidia-cutlass-operators>=0.2.0` has `efc` not `common_efc`
+    import cutlass.operators.providers.cutedsl.evt.efc as common_efc
+except ModuleNotFoundError:
+    import cutlass.operators.providers.cutedsl.evt.common_efc as common_efc
+
 import cutlass.pipeline as pipeline
 import cutlass.utils as utils
 import cutlass.utils.blackwell_helpers as sm100_utils
 from cutlass.cute.nvgpu import cpasync, tcgen05
-from cutlass.operators.providers.cutedsl.evt.common_efc import log
+
+
+log = common_efc.log
 
 from torch._inductor.kernel.gemm_epilogue import GemmReductionDescriptor
 from torch._inductor.kernel.vendored_templates.cutedsl.reduction_utils import (
