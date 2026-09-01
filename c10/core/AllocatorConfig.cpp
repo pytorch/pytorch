@@ -1,7 +1,9 @@
 #include <c10/core/AllocatorConfig.h>
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>
+#include <algorithm>
 #include <array>
+#include <bit>
 #include <limits>
 
 namespace c10::CachingAllocator {
@@ -9,8 +11,10 @@ namespace c10::CachingAllocator {
 namespace {
 constexpr size_t kRoundUpPowerOfTwoIntervals = 16;
 constexpr size_t kMB = 1024 * 1024ul;
-constexpr size_t kRoundUpPowerOfTwoStart = 1 * kMB; // 1MB
-constexpr size_t kRoundUpPowerOfTwoEnd = 64 * 1024ul * kMB; // 64GB
+// uint64_t so these hold their true byte values (up to 64GB) even where
+// size_t is 32 bits; a size_t here would silently wrap the 64GB bound to 0.
+constexpr uint64_t kRoundUpPowerOfTwoStart = 1ull * kMB; // 1MB
+constexpr uint64_t kRoundUpPowerOfTwoEnd = 64ull * 1024 * kMB; // 64GB
 } // anonymous namespace
 
 std::unordered_set<std::string>& AcceleratorAllocatorConfig::getMutableKeys() {
@@ -67,14 +71,12 @@ AcceleratorAllocatorConfig::AcceleratorAllocatorConfig() {
 }
 
 size_t AcceleratorAllocatorConfig::roundup_power2_divisions(size_t size) {
-  size_t log_size = (63 - llvm::countLeadingZeros(size));
+  size_t log_size = std::bit_width(size) - 1;
 
   // Our intervals start at 1MB and end at 64GB
-  const size_t interval_start =
-      63 - llvm::countLeadingZeros(kRoundUpPowerOfTwoStart);
-  const size_t interval_end =
-      63 - llvm::countLeadingZeros(kRoundUpPowerOfTwoEnd);
-  TORCH_CHECK_VALUE(
+  constexpr size_t interval_start = std::bit_width(kRoundUpPowerOfTwoStart) - 1;
+  constexpr size_t interval_end = std::bit_width(kRoundUpPowerOfTwoEnd) - 1;
+  static_assert(
       interval_end - interval_start == kRoundUpPowerOfTwoIntervals,
       "kRoundUpPowerOfTwoIntervals mismatch");
 
@@ -170,7 +172,7 @@ size_t AcceleratorAllocatorConfig::parseRoundUpPower2Divisions(
       tokenizer.checkToken(++i, ":");
       size_t value = tokenizer.toSizeT(++i);
       TORCH_CHECK_VALUE(
-          value == 0 || llvm::isPowerOf2_64(value),
+          value == 0 || std::has_single_bit(value),
           "For roundups, the divisions has to be power of 2 or 0 to disable roundup ");
 
       if (tokenizer[value_index] == ">") {
@@ -184,10 +186,10 @@ size_t AcceleratorAllocatorConfig::parseRoundUpPower2Divisions(
       } else {
         size_t boundary = tokenizer.toSizeT(value_index);
         TORCH_CHECK_VALUE(
-            llvm::isPowerOf2_64(boundary),
+            std::has_single_bit(boundary),
             "For roundups, the intervals have to be power of 2 ");
 
-        size_t index = 63 - llvm::countLeadingZeros(boundary);
+        size_t index = std::bit_width(boundary) - 1;
         index =
             std::clamp(index, size_t{0}, roundup_power2_divisions_.size() - 1);
 
@@ -214,7 +216,7 @@ size_t AcceleratorAllocatorConfig::parseRoundUpPower2Divisions(
   } else { // Keep this for backwards compatibility
     size_t value = tokenizer.toSizeT(i);
     TORCH_CHECK_VALUE(
-        llvm::isPowerOf2_64(value),
+        std::has_single_bit(value),
         "For roundups, the divisions has to be power of 2 ");
     std::fill(
         roundup_power2_divisions_.begin(),

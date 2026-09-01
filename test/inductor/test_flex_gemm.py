@@ -5,6 +5,7 @@ import dataclasses
 import importlib
 import logging
 import math
+import operator
 import struct
 import sys
 import unittest
@@ -277,6 +278,16 @@ class TestFlexGemmRuntimeImport(TestCase):
 
 @instantiate_parametrized_tests
 class TestFlexGemmRuntimeHelpers(TestCase):
+    def test_clamp_codegen_uses_public_cutlass_api(self):
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
+            FlexGemmCuteDSLOpOverrides,
+        )
+
+        self.assertEqual(
+            FlexGemmCuteDSLOpOverrides.clamp("x", "lower", "upper"),
+            "cutlass.min(cutlass.max(x, lower), upper)",
+        )
+
     @parametrize(
         "reduction_type",
         get_args(ReductionType),
@@ -1393,6 +1404,63 @@ class FlexGemmTestCase(TestCase):
         non_swap_keys = [key for key in keys if not dict(key)["swap_ab"]]
         self.assertTrue(swap_keys and non_swap_keys)
         return swap_keys[0], non_swap_keys[0]
+
+    def limitedTunedConfigs(
+        self,
+        device,
+        group,
+        axis,
+        *,
+        output_layout=None,
+        reject_swap_ab=False,
+        reject_cluster_n=False,
+    ):
+        """Keep two valid tuned configs plus configs the tested gates must reject."""
+        from torch._inductor.heuristics.template.flex_gemm import (
+            candidate_gemm_configs_for_device,
+        )
+        from torch._inductor.kernel.flex_gemm.constraints import (
+            FlexGemmLocalReduceGeometry,
+            validate_flex_gemm_local_reduce_config,
+        )
+        from torch._inductor.kernel.flex_gemm.output_layout import (
+            output_layout_supports_config,
+        )
+
+        candidates = candidate_gemm_configs_for_device(device)
+        geometry = FlexGemmLocalReduceGeometry(group, axis)
+
+        def supports_output_layout(config):
+            return output_layout_supports_config(output_layout, config, geometry)
+
+        valid = [
+            config
+            for config in candidates
+            if supports_output_layout(config)
+            and validate_flex_gemm_local_reduce_config(config, group, axis)
+        ]
+        self.assertGreaterEqual(len(valid), 2)
+        configs = [valid[0], valid[-1]]
+        if reject_swap_ab:
+            configs.append(
+                next(
+                    config
+                    for config in candidates
+                    if config.swap_ab
+                    and supports_output_layout(config)
+                    and validate_flex_gemm_local_reduce_config(
+                        config, group, axis, allow_swap_ab=True
+                    )
+                )
+            )
+        if reject_cluster_n:
+            configs.append(
+                next(config for config in candidates if config.cluster_n > 1)
+            )
+        return mock.patch(
+            "torch._inductor.heuristics.template.flex_gemm.candidate_gemm_configs_for_device",
+            return_value=configs,
+        )
 
     def assertMatchesLowPrecisionEager(
         self,
@@ -5552,6 +5620,90 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_inline_asm_three_outputs(self):
+        m = k = n = 64
+
+        def epilogue_fn(acc):
+            first, second, third = inline_asm_elementwise(
+                acc.float(),
+                asm_str=("mov.f32 $0, $3; add.f32 $1, $3, $3; mul.f32 $2, $3, $3;"),
+                constraints="=f,=f,=f,f",
+                dtype=(torch.float32, torch.float32, torch.float32),
+            )
+            return first + second + third
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.ones(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.ones(k, n, device="cuda", dtype=torch.bfloat16)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        expected_input = (a @ b).float()
+        expected = expected_input * 3 + expected_input.square()
+        self.assertEqual(actual, expected)
+        self.assertEqual(code.count("inline_asm_elementwise_intrinsic("), 1)
+
+    @skipIfNoCuteDSL
+    def test_mm_inline_asm_three_outputs_codegen(self):
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
+            analyze_flex_gemm_epilogue,
+            gemm_node,
+            materialize_flex_gemm_epilogue,
+        )
+
+        graph = torch.fx.Graph()
+        a = graph.placeholder("a")
+        b = graph.placeholder("b")
+        a.meta["val"] = torch.empty(4, 8)
+        b.meta["val"] = torch.empty(8, 16)
+        acc = graph.call_function(torch.ops.aten.mm.default, (a, b))
+        acc.meta["val"] = torch.empty(4, 16)
+        asm = graph.call_function(
+            inline_asm_elementwise,
+            (acc,),
+            {
+                "asm_str": ("mov.f32 $0, $3; add.f32 $1, $3, $3; mul.f32 $2, $3, $3;"),
+                "constraints": "=f,=f,=f,f",
+                "dtype": (torch.float32, torch.float32, torch.float32),
+            },
+        )
+        asm.meta["val"] = tuple(torch.empty(4, 16) for _ in range(3))
+        outputs = []
+        for index in range(3):
+            output = graph.call_function(operator.getitem, (asm, index))
+            output.meta["val"] = torch.empty(4, 16)
+            outputs.append(output)
+        first_sum = graph.call_function(
+            torch.ops.aten.add.Tensor, (outputs[0], outputs[1])
+        )
+        first_sum.meta["val"] = torch.empty(4, 16)
+        result = graph.call_function(torch.ops.aten.add.Tensor, (first_sum, outputs[2]))
+        result.meta["val"] = torch.empty(4, 16)
+        graph.output(result)
+        graph_module = torch.fx.GraphModule({}, graph)
+        analysis = analyze_flex_gemm_epilogue(
+            graph_module, gemm_node(graph_module, torch.ops.aten.mm.default)
+        )
+        _, source = materialize_flex_gemm_epilogue(graph_module, analysis)
+
+        self.assertEqual(source.count("inline_asm_elementwise_intrinsic("), 1)
+        FileCheck().check("tmp0, tmp1, tmp2 = inline_asm_elementwise_intrinsic(").check(
+            "result_type=(cutlass.Float32, cutlass.Float32, cutlass.Float32)"
+        ).check("tmp3 = (tmp0 + tmp1)").check("tmp4 = (tmp3 + tmp2)").check(
+            "return tmp4"
+        ).run(source)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_mm_inline_asm_pack2_broadcasts_and_repeats_scalar(self):
         m = k = n = 64
 
@@ -5855,9 +6007,20 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         rows = torch.arange(k, device="cuda")[:, None]
         cols = torch.arange(n, device="cuda")[None, :]
         b = (2.0 ** ((rows % 4) + ((cols // group) % 4))).to(torch.bfloat16)
-        (actual, blocked_scale), (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        from torch._inductor.kernel.flex_gemm.output_layout import (
+            FlexGemmOutputStorageLayout,
         )
+
+        with self.limitedTunedConfigs(
+            a.device,
+            group,
+            1,
+            output_layout=FlexGemmOutputStorageLayout.BLOCKED_128X4,
+            reject_swap_ab=True,
+        ):
+            (actual, blocked_scale), (code,) = run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), a, b
+            )
 
         expected, expected_scale = epilogue_fn(a @ b)
         torch.testing.assert_close(actual, expected)
@@ -5924,6 +6087,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @torch._inductor.config.patch("shape_padding", False)
     def test_mm_tuple_aux_blocked_output_zero_fills_padding(self):
         m, n, k, group = 129, 80, 256, 16
         config = self.localReduceOutputConfig()
@@ -6044,6 +6208,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         ),
         name_fn=lambda case: case[0],
     )
+    @torch._inductor.config.patch("shape_padding", False)
     def test_mm_tuple_aux_blocked_output_supports_swap_ab(self, case):
         _, m, n, group, scale_fn = case
         k = 64
@@ -6442,14 +6607,14 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         )
 
         self.assertTrue(torch.isnan(actual).all())
-        check = FileCheck().check("cutlass_math.")
+        check = FileCheck()
         match case:
             case "clamp":
-                check = check.check("max").check("cutlass_math.min")
+                check = check.check("cutlass.max").check("cutlass.min")
             case "clamp_min":
-                check = check.check("max")
+                check = check.check("cutlass.max")
             case "clamp_max":
-                check = check.check("min")
+                check = check.check("cutlass.min")
         check.check_not("operator.ne").run(code)
 
     @skipIfNoCuteDSL
@@ -6563,7 +6728,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         a = torch.randn(m, 64, device="cuda", dtype=torch.bfloat16)
         b = torch.randn(64, n, device="cuda", dtype=torch.bfloat16)
-        actual, aux = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+        with self.limitedTunedConfigs(a.device, group, 0):
+            actual, aux = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
         self.assertLocalReduceAuxMatches(actual, aux, a, b, epilogue_fn)
 
@@ -6816,9 +6982,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         a = torch.randn(m, 64, device="cuda", dtype=torch.bfloat16)
         b = torch.randn(64, n, device="cuda", dtype=torch.bfloat16)
-        (actual, aux), (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
+        with self.limitedTunedConfigs(a.device, group, 1, reject_cluster_n=True):
+            (actual, aux), (code,) = run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), a, b
+            )
 
         high_precision_acc = a.double() @ b.double()
         self.assertMatchesLowPrecisionEager(
@@ -8068,9 +8235,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         a = torch.randn(m, 64, device="cuda", dtype=torch.bfloat16)
         b = torch.randn(64, n, device="cuda", dtype=torch.bfloat16)
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
+        with self.limitedTunedConfigs(a.device, group, 1, reject_swap_ab=True):
+            actual, (code,) = run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), a, b
+            )
 
         self.assertEqual(actual.dtype, torch.float8_e4m3fn)
         self.assertMatchesLowPrecisionEager(
@@ -8203,9 +8371,15 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         gamma = self.makeTensor(1, n)
         b2 = self.makeTensor(n, p)
 
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b1, gamma, b2
+        config_context = (
+            self.limitedTunedConfigs(a.device, group, 1)
+            if tuned
+            else contextlib.nullcontext()
         )
+        with config_context:
+            actual, (code,) = run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), a, b1, gamma, b2
+            )
 
         acc1 = a @ b1
         h2 = (acc1.float() * gamma).to(torch.bfloat16)
@@ -9765,6 +9939,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
         self.assertIn("FlexGemmLocalReduceCallbacks(", code)
 
     @unittest.skipIf(SM120OrLater, "SM100 config required")
+    @torch._inductor.config.patch("shape_padding", False)
     def test_mm_tuple_aux_local_reduce_swap_ab_rejects_unaligned_n(self, device):
         from torch._vendor.quack.gemm_config import GemmConfig
 
