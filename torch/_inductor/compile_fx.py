@@ -103,6 +103,7 @@ from torch._inductor.utils import (
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class
 from torch._logging import trace_structured
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch._utils_internal import compile_time_strobelight_meta
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExprPrinter
@@ -974,6 +975,62 @@ def fake_tensor_prop(
     return fake_mode
 
 
+def _can_reuse_fake_tensor_metadata(
+    gm: GraphModule,
+    example_inputs: Sequence[InputType],
+    fake_mode: torch._subclasses.FakeTensorMode,
+) -> bool:
+    if any(isinstance(module, GraphModule) for module in list(gm.modules())[1:]):
+        return False
+
+    placeholders = gm.graph.find_nodes(op="placeholder")
+    if len(placeholders) != len(example_inputs):
+        return False
+
+    def same_ints(lhs: Sequence[Any], rhs: Sequence[Any]) -> bool:
+        return len(lhs) == len(rhs) and all(
+            a is b or (type(a) is int and type(b) is int and a == b)
+            for a, b in zip(lhs, rhs)
+        )
+
+    for node, value in zip(placeholders, example_inputs):
+        meta_value = node.meta.get("val")
+        if isinstance(value, torch.Tensor):
+            if not (
+                is_fake_tensor(meta_value)
+                and detect_fake_mode((meta_value,)) is fake_mode
+                and meta_value.layout == value.layout
+                and meta_value.dtype == value.dtype
+                and meta_value.device == value.device
+                and meta_value.requires_grad == value.requires_grad
+                and same_ints(meta_value.shape, value.shape)
+                and same_ints(meta_value.stride(), value.stride())
+                and (
+                    meta_value.storage_offset() is value.storage_offset()
+                    or (
+                        type(meta_value.storage_offset()) is int
+                        and type(value.storage_offset()) is int
+                        and meta_value.storage_offset() == value.storage_offset()
+                    )
+                )
+                and meta_value.untyped_storage()._cdata
+                == value.untyped_storage()._cdata
+            ):
+                return False
+        elif meta_value is not value:
+            return False
+
+    for node in gm.graph.nodes:
+        if node.op == "output":
+            continue
+        if "val" not in node.meta:
+            return False
+        for value in pytree.tree_leaves(node.meta["val"]):
+            if is_fake_tensor(value) and detect_fake_mode((value,)) is not fake_mode:
+                return False
+    return True
+
+
 # pass config dict back to user
 def get_patched_config_dict(
     config_patches: str | dict[str, Any] | None = None,
@@ -1657,7 +1714,11 @@ class _InProcessFxCompile(FxCompile):
                 # of autograd, so there should be no more autograd-related API's in the
                 # graph.
                 with torch.no_grad():
-                    fake_mode = fake_tensor_prop(gm, example_inputs)
+                    fake_mode = detect_fake_mode(example_inputs)
+                    if fake_mode is None or not _can_reuse_fake_tensor_metadata(
+                        gm, example_inputs, fake_mode
+                    ):
+                        fake_mode = fake_tensor_prop(gm, example_inputs)
 
             _recursive_record_original_output_strides(gm)
 
