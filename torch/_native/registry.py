@@ -25,28 +25,24 @@ R = TypeVar("R")
 _OpCondFn = Callable[P, bool]
 _OpImplFn = Callable[P, R]
 
-# Masks unconditional overrides, which the user-facing filters cannot reach.
-# Private: the only supported flip is torch._native._unconditional_masked(),
-# so a test can still compute stock-aten reference values for an op whose
-# override IS the implementation.
+# Masks unconditional overrides, which the user-facing filters cannot reach. The
+# only supported flip is torch._native._unconditional_masked(), which lets a test
+# compute stock-aten reference values for an op whose override IS the implementation.
 _mask_unconditional = False
 
 
 def _unconditional_is_masked() -> bool:
-    """Current value of the private mask. A getter so callers can read it
-    before mutating anything, which is what lets them restore it even if a
-    later step of their setup raises."""
+    """Current value of the private mask. A getter, so a caller can read it before
+    mutating anything and restore it even if a later step of its setup raises."""
     return _mask_unconditional
 
 
 def _set_mask_unconditional(masked: bool) -> bool:
-    """Set the mask and rebuild every router, returning the previous value.
-    Callers must restore it.
+    """Set the mask and rebuild every router, returning the previous value, which the
+    caller must restore.
 
-    The rebuild is the point: check_enabled runs while a graph is being
-    registered, not per call, so flipping the flag alone would leave the
-    already-installed routers untouched and the mask would appear to do
-    nothing."""
+    The rebuild is required because check_enabled runs at graph registration, not per
+    call: flipping the flag alone leaves the installed routers untouched."""
     global _mask_unconditional
     previous = _mask_unconditional
     _mask_unconditional = masked
@@ -975,22 +971,16 @@ def _register_overrides_from_graph(
     # Inductor reuses the default lowering rather than recursing.
     _NO_MATCH = object()  # sentinel; impl return values of None would be valid outputs
 
-    # Calls covered by AOT kernels embedded in the aten implementation
-    # (see torch/_native/ops/<op>/aot.py) must decline the JIT route:
-    # the router's no-match fallback lands in the aten kernel, whose
-    # native-AOT stub serves them. Checked once per call here rather
-    # than per cond -- every override of the op would get the same
-    # answer for the same arguments, and ops with several paths (e.g.
-    # scatter_add's TMA + vec-scatter) would pay covers() N times.
-    # Applies to unconditional overrides too. None when the op has no
-    # AOT declaration, so uncovered ops pay nothing.
+    # Calls served by an AOT kernel embedded in the aten implementation must decline
+    # the JIT route, because the router's no-match fallback lands in that kernel.
+    # Checked here, once per call, rather than per cond; applies to unconditional
+    # overrides too. None when the op has no AOT declaration, so those pay nothing.
     from . import aot_manifest
 
     coverage = aot_manifest.get_coverage(op_symbol, dispatch_key)
 
     def _dispatch(args, kwargs, swallow_cond_exceptions: bool):
-        # covers() degrades covered_axes exceptions to "uncovered", so
-        # this is safe under FakeTensor in the compile router too.
+        # covers() degrades exceptions to "uncovered", so this is safe on FakeTensors.
         if coverage is not None and coverage.covers(args, kwargs):
             return _NO_MATCH
         for cond, impl_name in cond_impl:

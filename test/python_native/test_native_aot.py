@@ -1,27 +1,21 @@
 # Owner(s): ["module: dsl-native-ops"]
 """End-to-end tests for native-AOT kernels on aten::topk @ CUDA.
 
-Three-layer routing under test (see torch/_native/ops/topk/aot.py):
+Three-layer routing under test (declaration: torch/_native/ops/topk/aot.py):
 
-  * declaration-covered calls (fp32/bf16 on the exported grid) -> the AOT
-    kernel embedded in the structured wrapper, reached because the
-    Python JIT layer's conds subtract AOT coverage
-  * uncovered-but-JIT-eligible calls (e.g. off-grid fp32) -> the JIT
-    override
+  * covered calls (fp32/bf16 on the exported grid) -> the AOT kernel in the
+    structured wrapper, because the JIT layer's conds subtract AOT coverage
+  * uncovered but JIT-eligible calls (off-grid fp32) -> the JIT override
   * everything else -> stock aten
 
-Layer isolation uses the process-level switches
-(TORCH_DISABLE_NATIVE_JIT / TORCH_DISABLE_NATIVE_AOT) in
-subprocesses: with the JIT layer off, any RadixSelectTopK kernel in a
-profile can only come from the AOT hook. Values are checked against a
-sort-based reference (an independent aten path, immune to topk
-routing).
+Layers are isolated with the process-level switches TORCH_DISABLE_NATIVE_JIT and
+TORCH_DISABLE_NATIVE_AOT in subprocesses: with the JIT layer off, a RadixSelectTopK
+kernel in a profile can only come from the AOT hook. Values are checked against a
+sort-based reference, which topk routing cannot affect.
 
-Tests that require the AOT kernels skip unless they are embedded in
-this build (stage 2: tools/native_aot/export.py + gen_aot_lib.py, then
-relink); correctness/fallback tests run everywhere -- without
-artifacts, covered calls must still be correct via stock aten
-(null-hook degradation).
+Tests needing the AOT kernels skip unless this build embedded them; the
+correctness tests run everywhere, since covered calls must be correct through stock
+aten when the artifacts are absent.
 """
 
 import json
@@ -53,9 +47,8 @@ GRID_K = (64, 128, 256)
 # Enough rows to pass the full-wave perf gate on any current GPU.
 M = 256
 
-# Subprocess probe: JIT layer disabled, AOT hooks live. For each case,
-# reports whether the DSL kernel ran and whether values matched a
-# sort-based reference (torch.sort is an independent aten path).
+# Subprocess probe with the JIT layer disabled and the AOT hooks live. Reports,
+# per case, whether the DSL kernel ran and whether values matched the reference.
 _PROBE = r"""
 import json, torch
 from torch.profiler import profile, ProfilerActivity
@@ -134,11 +127,8 @@ class TestNativeAotTopK(TestCase):
 
     @skipIfNoAotLib
     def test_deterministic_mode_routes_to_aot_bit_exact(self):
-        # Det-mode is on the grid: the det kernel specialization (stable
-        # prefix-sum gather + lex (ord, -idx) sort) must fire AND match
-        # aten bit-exactly, including tie resolution -- probe values are
-        # torch.randn, so exercise ties separately below via equal-value
-        # inputs in test_deterministic_ties_bit_exact.
+        # Det mode is on the grid, so its kernel must fire and match aten bit-exactly.
+        # Probe values are torch.randn; ties are exercised in the next test.
         cases = [
             {"dtype": "float32", "n": 4096, "k": 64, "det": True},
             {"dtype": "bfloat16", "n": 2048, "k": 128, "det": True},
@@ -151,9 +141,8 @@ class TestNativeAotTopK(TestCase):
 
     @skipIfNoAotLib
     def test_deterministic_ties_bit_exact(self):
-        # Tie-heavy input (low-cardinality integers): det-mode indices
-        # must match aten's EXACTLY. Reference computed under disabled()
-        # (stock aten; see reference-must-be-stock-aten).
+        # Tie-heavy input, so det-mode indices must match aten's exactly. The
+        # reference runs under disabled(), or it would come from the route under test.
         prior = torch.are_deterministic_algorithms_enabled()
         try:
             torch.use_deterministic_algorithms(True)
@@ -192,8 +181,8 @@ class TestNativeAotTopK(TestCase):
 
     @skipIfNoAotLib
     def test_uncovered_fp32_served_by_jit_layer(self):
-        # JIT layer live in this process: off-grid fp32 runs the JIT DSL
-        # kernel (uncovered -> cond not subtracted).
+        # JIT layer live in this process, and off-grid fp32 is uncovered, so the cond
+        # is not subtracted and the JIT DSL kernel runs.
         from torch.profiler import profile, ProfilerActivity
 
         x = torch.randn(M, 3072, device="cuda")
@@ -211,9 +200,8 @@ class TestNativeAotTopK(TestCase):
 
     @skipIfNoAotLib
     def test_disabled_context_masks_aot_in_process(self):
-        # cutedsl.disabled() flips the native-AOT Context switch as well
-        # as the JIT layer: no DSL kernel may run inside the block, and
-        # both restore on exit.
+        # cutedsl.disabled() flips the native-AOT Context switch as well as the JIT
+        # layer, so no DSL kernel may run inside the block.
         from torch import _native
         from torch.profiler import profile, ProfilerActivity
 
@@ -237,8 +225,7 @@ class TestNativeAotTopK(TestCase):
         self.assertTrue(ran_dsl())
 
     def test_covered_call_correct_regardless_of_routing(self):
-        # Whichever layer serves it (AOT, JIT, or stock when the lib is
-        # absent), the result must match the sort-based reference.
+        # Correct whichever layer serves it, including stock aten with no AOT lib.
         torch.manual_seed(2)
         x = torch.randn(M, 4096, device="cuda")
         v, i = torch.topk(x, 64, dim=-1)
@@ -256,8 +243,8 @@ class TestNativeAotTopK(TestCase):
         self.assertTrue(results[0]["values_ok"])
 
     def test_covered_axes_function_directly(self):
-        # The declaration's covered_axes() is plain Python: unit-test it
-        # as a function (loaded by file path; the module is stdlib-only).
+        # covered_axes() is plain Python, loaded by file path since the module is
+        # stdlib-only at import.
         import importlib.util
         import os
 
@@ -279,9 +266,8 @@ class TestNativeAotTopK(TestCase):
         )
 
     def test_manifest_covers_matches_grid(self):
-        # The coverage predicate agrees with the exported grid. CUDA
-        # tensors: coverage now includes the prelude's full-wave M perf
-        # gate (device-dependent), so CPU probes are always uncovered.
+        # CUDA tensors, because coverage includes the prelude's full-wave M gate, so
+        # a CPU probe is always uncovered.
         from torch._native import aot_manifest
 
         for n in GRID_N:

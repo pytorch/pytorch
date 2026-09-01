@@ -1,11 +1,9 @@
 # Owner(s): ["module: dsl-native-ops"]
 name: CI for native-AOT embedded DSL kernels on B200
 
-# Exercises the full native-AOT path: stage 2 of the build exports the
-# DSL kernels for Blackwell (TORCH_CUDA_ARCH_LIST gates export to the
-# supported arch subset; see export.py EXPORTABLE_ARCHES) and
-# embeds them in libtorch_cuda; the test job asserts the wheel carries
-# them and runs the python_native suites on a B200.
+# Exercises the full native-AOT path: stage 2 of the build exports the DSL kernels
+# for Blackwell and embeds them in libtorch_cuda, then the test job asserts the wheel
+# carries them and runs the python_native suites on a B200.
 
 on:
   pull_request:
@@ -17,9 +15,8 @@ on:
       - torchgen/native_aot_decl.py
       - torchgen/native_aot_spec_grid.py
       - test/python_native/**
-      # The build wiring is as much of this path as the tools are: stage 2 is
-      # reached from these shells, included by this CMake, and configured by this
-      # forwarding module.
+      # Stage 2 is reached from these shells, included by this CMake, and
+      # configured by this forwarding module.
       - .ci/pytorch/build.sh
       - .ci/pytorch/test.sh
       - .ci/pytorch/common_utils.sh
@@ -66,12 +63,10 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11
       cuda-arch-list: '10.0a'
       # Never reuse a prebuilt wheel here: reuse_old_whl.ok_changed_file() treats
-      # every torch/**.py outside torch/csrc/ as needing no rebuild, but the DSL
-      # kernel bodies and declarations under torch/_native/ops/ are COMPILE-TIME
-      # inputs to libtorch_cuda now. A kernel-only change would republish the
-      # previous commit's embedded kernels, and the test job's
-      # _native_aot_embedded() assertion would still pass -- green, with the change
-      # under test never compiled.
+      # every torch/**.py outside torch/csrc/ as needing no rebuild, but
+      # torch/_native/ops/ is a compile-time input to libtorch_cuda. A reused wheel
+      # ships the previous commit's kernels and still passes the test job's
+      # _native_aot_embedded() assertion.
       allow-reuse-old-whl: false
       test-matrix: |
         { include: [

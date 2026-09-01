@@ -2,10 +2,8 @@
 """Tests for the topk radix kernel's compile parameters and AOT builder.
 
 The kernel body and its AOT ``build(spec)`` entry point live in
-``cutedsl_kernels.py`` alongside the JIT wrappers (two-stage build:
-the export tool runs with the built torch importable). These tests
-check the builder contract and the dtype/index-width compile
-parameters against stock aten.
+``cutedsl_kernels.py`` alongside the JIT wrappers. These tests check the builder
+contract and the dtype/index-width compile parameters against stock aten.
 """
 
 import unittest
