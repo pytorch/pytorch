@@ -766,6 +766,12 @@ class NVUniversalGemmScheduling(BaseScheduling):
                     )
                 feed_main = plan.feed_main
                 if feed_main is not None:
+                    (feed_scheduler_node,) = epilogue_nodes[0].get_nodes()
+                    feed_buffer = feed_scheduler_node.node
+                    if not isinstance(feed_buffer, ComputedBuffer):
+                        raise AssertionError(
+                            f"expected ComputedBuffer, got {type(feed_buffer)}"
+                        )
                     local_reduce = GemmReductionPlan(
                         reduction_output=None,
                         group=feed_main.group,
@@ -774,6 +780,13 @@ class NVUniversalGemmScheduling(BaseScheduling):
                         source_type=feed_main.source_type,
                         primary_output=feed_main.output_name,
                         feeds_main=True,
+                        consumer_fn=LoopIRCuteDSLCodegen.consumer_from_buffer(
+                            original_buffer_name,
+                            None,
+                            feed_buffer,
+                            "_local_reduce_consumer",
+                            feed_main.group,
+                        ),
                     )
                     epilogue_fn_code = (
                         f"def {EPILOGUE_FN_NAME}(accum):\n    D = accum\n    return D"

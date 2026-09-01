@@ -258,6 +258,63 @@ class TestNVUniversalGemm(TestCase):
         )
         self.assertIsNone(result[0])
 
+    def test_efc_epilogue_cache_separates_reduction_specializations(self):
+        from torch._inductor.codegen.nv_universal_gemm import kernel_cache
+
+        class FakeOperator:
+            def __init__(self, metadata):
+                self.metadata = metadata
+
+        base_metadata = mock.Mock(
+            operands=object(),
+            design=object(),
+            operator_name="test_efc",
+            operator_class=FakeOperator,
+            supported_targets=object(),
+        )
+        base_kernel = FakeOperator(base_metadata)
+        epilogue_args = mock.Mock(tensors={})
+        sum_specialization = (("reduction_type", "sum"),)
+        max_specialization = (("reduction_type", "max"),)
+
+        kernel_cache.clear_cache()
+        try:
+            with (
+                mock.patch.object(
+                    kernel_cache, "_meta_epilogue_metadata", return_value=object()
+                ),
+                mock.patch(
+                    "cutlass.operators.metadata.OperatorMetadata",
+                    side_effect=lambda **kwargs: mock.Mock(**kwargs),
+                ),
+            ):
+                first = kernel_cache.get_efc_kernel_with_epilogue(
+                    "test_efc",
+                    epilogue_args,
+                    epilogue_source="same_epilogue",
+                    base_kernel=base_kernel,
+                    specialization=sum_specialization,
+                )
+                same = kernel_cache.get_efc_kernel_with_epilogue(
+                    "test_efc",
+                    epilogue_args,
+                    epilogue_source="same_epilogue",
+                    base_kernel=base_kernel,
+                    specialization=sum_specialization,
+                )
+                different = kernel_cache.get_efc_kernel_with_epilogue(
+                    "test_efc",
+                    epilogue_args,
+                    epilogue_source="same_epilogue",
+                    base_kernel=base_kernel,
+                    specialization=max_specialization,
+                )
+        finally:
+            kernel_cache.clear_cache()
+
+        self.assertIs(first, same)
+        self.assertIsNot(first, different)
+
     def test_unaligned_base_pointer_rejected(self):
         """Test that matmul with unaligned base pointer is rejected.
 
@@ -492,6 +549,7 @@ class TestNVUniversalGemm(TestCase):
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
             _create_gemm_arguments,
         )
+        from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments
 
         m, n, k = 128, 128, 512
         packed_k = k // 2
@@ -523,9 +581,11 @@ class TestNVUniversalGemm(TestCase):
             swizzle_mode_a=swizzle,
             scale_mode_b=mode,
             swizzle_mode_b=swizzle,
-            local_reduce_out=reduce_out,
-            local_reduce_group=group,
-            local_reduce_axis=1,
+            local_reduce=GemmReductionArguments(
+                output=reduce_out,
+                group=group,
+                axis=1,
+            ),
         )
         kernel = next(
             candidate
@@ -1433,14 +1493,14 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         expected = fn(a, b, scale_a, scale_b)
         self.assertEqual(result[0], expected[0])
         self.assertEqual(result[1], expected[1])
-        self.assertIn("'local_reduce_out'", code)
+        self.assertIn("'local_reduce': GemmReductionArguments", code)
 
         if case == (1, "sum", 32):
             if not has_triton_reduction_ordering():
                 self.skipTest("requires INNER_TREE Triton")
             with config.patch({"numerics": "strict"}):
                 _, strict_code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
-            self.assertNotIn("'local_reduce_out'", strict_code)
+            self.assertNotIn("'local_reduce': GemmReductionArguments", strict_code)
             self.assertIn("ReductionOrdering.INNER_TREE", strict_code)
 
     def test_scaled_mm_grouped_reduce_source_fusion(self):
@@ -1476,7 +1536,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         expected = fn(a, b, scale_a, scale_b)
         self.assertEqual(result[0], expected[0])
         self.assertEqual(result[1], expected[1])
-        self.assertIn("'local_reduce_out'", code)
+        self.assertIn("'local_reduce': GemmReductionArguments", code)
         self.assertIn("'local_reduce_source': 'square'", code)
 
     @config.patch(emulate_precision_casts=True)
@@ -1511,7 +1571,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
         self.assertEqual(result, fn(a, b, scale_a, scale_b))
-        self.assertNotIn("'local_reduce_out'", code)
+        self.assertNotIn("'local_reduce': GemmReductionArguments", code)
 
     def test_scaled_mm_grouped_reduce_feeds_main(self):
         m, n, k, group = 128, 128, 512, 4
@@ -1545,7 +1605,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
         self.assertEqual(result, fn(a, b, scale_a, scale_b))
-        self.assertIn("'local_reduce_feeds_main': True", code)
+        self.assertIn("feeds_main=True", code)
 
     def test_matmul_add_relu_chained(self):
         """Multi-op pointwise chain (a@b + bias → relu) collapses to one
