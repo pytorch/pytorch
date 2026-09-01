@@ -5086,6 +5086,7 @@ def template(
         "num_stages": num_stages,
         "num_warps": num_warps,
     }
+    config_kwargs = {}
 
     # Conditionally add arguments based on HAS_WARP_SPEC
     if HAS_WARP_SPEC:
@@ -5096,13 +5097,18 @@ def template(
             }
         )
 
+    if torch.version.hip:
+        for k in ("matrix_instr_nonkdim", "waves_per_eu", "kpack"):
+            if k in triton_meta:
+                config_kwargs[k] = triton_meta[k]
+
     for k in tlx_only_cuda_options():
         if v := triton_meta.get(k, None):
             config_args[k] = v
 
     return cached_autotune(
         None,
-        [triton.Config({}, **config_args)],
+        [triton.Config(config_kwargs, **config_args)],
         triton_meta=triton_meta,
         inductor_meta=inductor_meta,
         heuristic_type=HeuristicType.TEMPLATE,
