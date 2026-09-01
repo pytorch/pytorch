@@ -49,21 +49,20 @@
   } while (0)
 // clang-format on
 
-// Non-throwing variant of C10_CUDA_DRIVER_CHECK: warns instead of throwing, so
-// it is safe to call from noexcept teardown / unwinding paths. Takes an
-// already-evaluated CUresult (not a call expression) so callers that also
-// need the result -- see C10_CUDA_DRIVER_CHECK_GOTO below -- don't evaluate
-// the driver call twice.
-#define C10_CUDA_DRIVER_WARN(RESULT)                                          \
+// Shared by C10_CUDA_DRIVER_WARN and C10_CUDA_DRIVER_CHECK_GOTO below: given a
+// CUresult already evaluated under an active CUDAErrorLogCapture, warn if it
+// failed. Not usable on its own -- the capture object must be constructed
+// immediately before the driver call runs (its constructor resets the
+// thread-local log buffer that a driver callback appends to during the
+// call), so callers each construct their own and evaluate their own call.
+#define C10_CUDA_DRIVER_WARN_RESULT(RESULT, LOG_CAPTURE)                      \
   do {                                                                        \
-    c10::cuda::CUDAErrorLogCapture __cuda_error_log;                          \
-    CUresult __err = RESULT;                                                  \
-    if (__err != CUDA_SUCCESS) {                                              \
+    if ((RESULT) != CUDA_SUCCESS) {                                           \
       const auto __cuda_error_log_message =                                   \
-          __cuda_error_log.get_error_log_suffix();                            \
+          (LOG_CAPTURE).get_error_log_suffix();                               \
       const char* err_str;                                                    \
       CUresult get_error_str_err [[maybe_unused]] =                           \
-          c10::cuda::DriverAPI::get()->cuGetErrorString_(__err, &err_str);    \
+          c10::cuda::DriverAPI::get()->cuGetErrorString_((RESULT), &err_str); \
       if (get_error_str_err != CUDA_SUCCESS) {                                \
         TORCH_WARN(                                                           \
             "CUDA driver error: unknown error", __cuda_error_log_message);    \
@@ -73,13 +72,23 @@
     }                                                                         \
   } while (0)
 
-#define C10_CUDA_DRIVER_CHECK_GOTO(EXPR, NEXT) \
-  do {                                         \
-    CUresult __err_for_goto = EXPR;            \
-    C10_CUDA_DRIVER_WARN(__err_for_goto);      \
-    if (__err_for_goto != CUDA_SUCCESS) {      \
-      goto NEXT;                               \
-    }                                          \
+// Non-throwing variant of C10_CUDA_DRIVER_CHECK: warns instead of throwing, so
+// it is safe to call from noexcept teardown / unwinding paths.
+#define C10_CUDA_DRIVER_WARN(EXPR)                        \
+  do {                                                    \
+    c10::cuda::CUDAErrorLogCapture __cuda_error_log;      \
+    CUresult __err = EXPR;                                \
+    C10_CUDA_DRIVER_WARN_RESULT(__err, __cuda_error_log); \
+  } while (0)
+
+#define C10_CUDA_DRIVER_CHECK_GOTO(EXPR, NEXT)                              \
+  do {                                                                      \
+    c10::cuda::CUDAErrorLogCapture __cuda_error_log_for_goto;               \
+    CUresult __err_for_goto = EXPR;                                         \
+    C10_CUDA_DRIVER_WARN_RESULT(__err_for_goto, __cuda_error_log_for_goto); \
+    if (__err_for_goto != CUDA_SUCCESS) {                                   \
+      goto NEXT;                                                            \
+    }                                                                       \
   } while (0)
 
 // The integer in the second column specifies the requested CUDA Driver API

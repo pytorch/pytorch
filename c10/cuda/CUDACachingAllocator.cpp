@@ -561,6 +561,13 @@ struct ExpandableSegment {
     if (end > handles_.size()) {
       handles_.resize(end);
     }
+    // On failure (throw or early return), release handles created here but
+    // not yet handed to mapAndSetAccess -- they were never cuMemMap'd, so
+    // unmapHandles (which unconditionally unmaps its whole range) must never
+    // see them as part of an allocated range.
+    size_t created = begin;
+    auto rollback =
+        c10::make_scope_exit([&] { releaseHandles(begin, created); });
     for (auto i : c10::irange(begin, end)) {
       TORCH_INTERNAL_ASSERT(!handles_.at(i).active());
       CUmemGenericAllocationHandle handle = 0;
@@ -619,18 +626,20 @@ struct ExpandableSegment {
         // Unlike the corresponding CUDA Driver API.
         (void)hipGetLastError();
 #endif
-        // Roll back unmapped handles created here; no progress signals OOM.
-        releaseHandles(begin, i);
+        // rollback (scope_exit above) releases handles created so far.
         return rangeFromHandles(begin, begin);
       }
-      // Throws on any other error; a no-op on success.
+      // Throws on any other error; rollback (scope_exit above) releases
+      // handles created so far.
 #ifdef USE_ROCM
       C10_CUDA_CHECK(status);
 #else
       C10_CUDA_DRIVER_CHECK(status);
 #endif
       handles_.at(i) = Handle(handle);
+      created = i + 1;
     }
+    rollback.release();
     mapAndSetAccess(begin, end);
     return rangeFromHandles(begin, end);
   }
