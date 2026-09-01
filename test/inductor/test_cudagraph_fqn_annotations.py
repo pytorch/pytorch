@@ -10,7 +10,7 @@ names to CUDA graph kernel nodes:
      ``register_fqn_annotation_hooks`` (test 3).
 
 Annotations are recorded keyed by the graph node ``tools_id`` and each value is
-a list of ``{"str": "<fqn>"}`` dicts (see ``mark_kernels``).  All tests require
+a list of ``{"name": "<fqn>"}`` dicts (see ``mark_kernels``).  All tests require
 CUDA with ``cudaGraphNodeGetToolsId`` (CUDA >= 13.1) and are skipped otherwise.
 """
 
@@ -418,8 +418,10 @@ class TestCudagraphFqnAnnotations(TestCase):
                 continue
             if gid in annotations:
                 for ann in annotations[gid]:
-                    if isinstance(ann, dict) and "str" in ann:
-                        recovered[gid] = ann["str"]
+                    if isinstance(ann, dict):
+                        fqn = ann.get("str") or ann.get("name")
+                        if fqn:
+                            recovered[gid] = fqn
 
         seen_arg_keys = sorted({k for ke in kernel_events for k in ke.get("args", {})})
         self.assertTrue(
@@ -498,11 +500,12 @@ class TestCudagraphFqnAnnotations(TestCase):
         self.assertGreater(annotated, 0, "no kernel events joined on graph node id")
 
         # The joined result is a (kernel name, graph node id, fqn) table.
+        # annotate_trace writes the FQN under "name" (normalising legacy "str").
         table = [
-            (e.get("name"), e["args"]["graph node id"], e["args"]["str"])
+            (e.get("name"), e["args"]["graph node id"], e["args"]["name"])
             for e in trace["traceEvents"]
             if isinstance(e.get("args"), dict)
-            and "str" in e["args"]
+            and "name" in e["args"]
             and e["args"].get("graph node id")
         ]
         self.assertTrue(table, "join produced no (kernel, graph node id, fqn) rows")
