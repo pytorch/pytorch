@@ -39,7 +39,7 @@ from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestA
 from torch.testing._internal.common_cuda import (
     _create_scaling_case,
     _get_torch_cuda_version,
-    BF16X9_SUPPORTED,
+    BF16X9_API_SUPPORTED,
     blas_library_context,
     has_device_side_assert,
     PLATFORM_SUPPORTS_GREEN_CONTEXT,
@@ -1328,9 +1328,7 @@ print(t.is_pinned())
         torch.set_float32_matmul_precision("medium")
         self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "tf32")
 
-    @unittest.skipUnless(
-        BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
-    )
+    @unittest.skipUnless(BF16X9_API_SUPPORTED, "requires NVIDIA CUDA 12.9+")
     @recover_orig_fp32_precision
     @serialTest()
     def test_bfx9_fp32_precision_get_set(self):

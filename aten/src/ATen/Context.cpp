@@ -501,9 +501,6 @@ void Context::setFloat32Precision(Float32Backend backend, Float32Op op, Float32P
     TORCH_CHECK(
         cuda_hooks.hasCUDART() && cuda_hooks.versionCUDART() >= 12090,
         "bfx9 precision requires PyTorch to be built with CUDA 12.9 or later");
-    TORCH_CHECK(
-        cuda_hooks.supportsFP32MatmulBF16X9(),
-        "bfx9 precision requires a CUDA device with compute capability 10.0 or 10.3");
   }
   TORCH_CHECK(
       p != Float32Precision::DEFAULT,

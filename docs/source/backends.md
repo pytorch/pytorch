@@ -56,10 +56,10 @@ These backends include:
 
     A :class:`str` that controls the internal computation precision of CUDA
     matrix multiplications with FP32 inputs and outputs. Supported values are
-    ``"ieee"``, ``"tf32"``, and ``"bfx9"``. The ``"bfx9"`` value selects
-    cuBLAS BF16x9 and requires a PyTorch build with CUDA 12.9 or newer and an
-    NVIDIA GPU with compute capability 10.0 or 10.3. See
-    :ref:`tf32_on_ampere`.
+    ``"ieee"``, ``"tf32"``, and ``"bfx9"``. The ``"bfx9"`` value allows
+    cuBLAS BF16x9 and requires a PyTorch build with CUDA 12.9 or newer. BF16x9
+    emulation is available on NVIDIA GPUs with compute capability 10.0 or 10.3;
+    cuBLAS uses native FP32 on other architectures. See :ref:`tf32_on_ampere`.
 ```
 
 ```{eval-rst}

@@ -92,10 +92,13 @@ SM89OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_devic
 SM90OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0))
 SM100OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (10, 0))
 SM120OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (12, 0))
-BF16X9_SUPPORTED = LazyVal(
+BF16X9_API_SUPPORTED = LazyVal(
     lambda: TEST_CUDA
     and not TEST_WITH_ROCM
     and _get_torch_cuda_version() >= (12, 9)
+)
+BF16X9_SUPPORTED = LazyVal(
+    lambda: BF16X9_API_SUPPORTED
     and torch.cuda.get_device_capability() in ((10, 0), (10, 3))
 )
 

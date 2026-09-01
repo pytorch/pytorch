@@ -5,6 +5,7 @@ import json
 import math
 import os
 import unittest
+import warnings
 from itertools import product
 from functools import partial
 from collections.abc import Callable
@@ -22,6 +23,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     _get_torch_rocm_version,
     _get_torch_cuda_version,
+    BF16X9_API_SUPPORTED,
     BF16X9_SUPPORTED,
     blas_library_context,
     IS_SM90,
@@ -182,18 +184,43 @@ class TestMatmulCuda(InductorTestCase):
         )
         self.assertEqual(actual, reference.float(), atol=2e-4, rtol=2e-4)
 
-    @unittest.skipIf(BF16X9_SUPPORTED, "requires unsupported BF16x9 hardware")
+    @unittest.skipIf(BF16X9_SUPPORTED, "requires a device without BF16x9 emulation")
     @serialTest()
-    def test_bfx9_unsupported(self, device):
-        expected_error = (
-            "only supported on NVIDIA CUDA"
-            if TEST_WITH_ROCM
-            else "CUDA 12.9 or later"
-            if _get_torch_cuda_version() < (12, 9)
-            else "compute capability 10.0 or 10.3"
+    def test_bfx9_platform_fallback(self, device):
+        if not BF16X9_API_SUPPORTED:
+            expected_error = (
+                "only supported on NVIDIA CUDA"
+                if TEST_WITH_ROCM
+                else "CUDA 12.9 or later"
+            )
+            with self.assertRaisesRegex(RuntimeError, expected_error):
+                torch.backends.cuda.matmul.fp32_precision = "bfx9"
+            return
+
+        torch.manual_seed(1234)
+        a = torch.randn(32, 32, device=device)
+        b = torch.randn(32, 32, device=device)
+        bias = torch.randn(32, device=device)
+        batched_a = a.unsqueeze(0).expand(2, -1, -1).contiguous()
+        batched_b = b.unsqueeze(0).expand(2, -1, -1).contiguous()
+        cases = (
+            ("cublas", "gemm", lambda: torch.mm(a, b)),
+            ("cublas", "strided_batched_gemm", lambda: torch.bmm(batched_a, batched_b)),
+            ("cublaslt", "lt_matmul", lambda: torch.addmm(bias, a, b)),
         )
-        with self.assertRaisesRegex(RuntimeError, expected_error):
-            torch.backends.cuda.matmul.fp32_precision = "bfx9"
+        for backend, api, op in cases:
+            with self.subTest(api=api), blas_library_context(backend):
+                torch.backends.cuda.matmul.fp32_precision = "ieee"
+                expected = op()
+                torch.backends.cuda.matmul.fp32_precision = "bfx9"
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    actual = op()
+                    self.assertEqual(actual, expected, atol=1e-5, rtol=1e-5)
+                self.assertFalse(
+                    any("attempt to recover" in str(w.message) for w in caught),
+                    msg=f"{api} rejected bfx9 and used PyTorch's fallback path",
+                )
 
     @unittest.skipUnless(
         BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
