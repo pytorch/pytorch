@@ -4722,7 +4722,6 @@ class TestVmapOperatorsOpInfoDevice(TestCase):
                 xfail("nn.functional.triplet_margin_loss", ""),
                 xfail("nn.functional.pdist", ""),
                 xfail("nn.functional.max_unpool1d", "grad"),
-                xfail("nn.functional.multi_margin_loss", ""),
                 xfail("nn.functional.multilabel_margin_loss", ""),
                 xfail("nn.functional.max_unpool3d", "grad"),
                 xfail("nn.functional.max_unpool2d", ""),
