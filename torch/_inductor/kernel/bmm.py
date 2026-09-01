@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import itertools
 import logging
 from typing import TYPE_CHECKING
 
@@ -29,6 +30,7 @@ from ..utils import (
 from ..virtualized import ops, V
 from .mm_common import (
     _is_static_problem,
+    acc_type,
     is_batch_stride_largest_or_zero,
     mm_args,
     use_native_matmul,
@@ -54,6 +56,12 @@ def bmm_grid(b, m, n, meta, *, cdiv, max):
     return (tiles, grid_y, grid_z)
 
 
+@SymbolicGridFn
+def bmm_shared_a_grid(b, m, n, meta, *, cdiv, max):
+    tiles = cdiv(m, meta["BLOCK_M"]) * cdiv(n, meta["BLOCK_N"])
+    return (tiles, cdiv(b, meta["BLOCK_Q"]), 1)
+
+
 # We define each template kernel in a separate file which is the name of the input to load_kernel_template
 # (e.g. triton_bmm for templates/triton_bmm.py.jinja).
 # If you are adding a new template, please follow that pattern and add a new file with your implementation in the templates folder.
@@ -63,6 +71,67 @@ bmm_template = TritonTemplate(
     source=load_kernel_template("triton_bmm"),
     cache_codegen_enabled_for_template=True,
 )
+
+# Specialisation for a left operand shared across the batch, i.e. an expanded A
+# whose batch stride is zero. The stock template re-fetches the same A tile once
+# per batch; this one reuses it across BLOCK_Q batches. See the jinja source.
+bmm_shared_a_template = TritonTemplate(
+    name="bmm_shared_a",
+    grid=bmm_shared_a_grid,
+    source=load_kernel_template("triton_bmm_shared_a"),
+)
+
+
+def _use_bmm_shared_a(mat1, mat2, layout) -> bool:
+    """Whether A is one matrix broadcast over the batch.
+
+    Only worth it when there are enough batches to group: with a handful of
+    batches the grouping just costs parallelism.
+    """
+    if not inductor_config.bmm_shared_a:
+        return False
+    sizevars = V.graph.sizevars
+    if not sizevars.statically_known_equals(mat1.get_stride()[0], 0):
+        return False
+    # Batch size only gates profitability, so a hint is enough: requiring it to
+    # be statically known would silently skip every model compiled with a
+    # dynamic batch, which is most of them.
+    batch_hint = sizevars.optimization_hint(mat2.get_size()[0], fallback=1)
+    if batch_hint < 64:
+        log.info("bmm_shared_a: declined, batch hint %s < 64", batch_hint)
+        return False
+    return True
+
+
+def _bmm_shared_a_configs(dtype):
+    """Hand-tuned config space for the shared-A template.
+
+    BLOCK_Q batches share one A tile and are laid side by side in the dot, so
+    BLOCK_N * BLOCK_Q is the real dot width and the accumulator is
+    BLOCK_M x BLOCK_N x BLOCK_Q floats; the bound below keeps that in registers.
+    """
+    acc = acc_type(dtype)
+    allow_tf32 = torch.backends.cuda.matmul.allow_tf32
+
+    for block_m, block_n, block_k, block_q, warps, stages in itertools.product(
+        (64, 128), (32, 64), (32, 64), (2, 4, 8), (4, 8), (1, 2, 3)
+    ):
+        if not 64 <= block_n * block_q <= 256:
+            continue
+        if block_m * block_n * block_q > 64 * 256:
+            continue
+        yield {
+            "BLOCK_M": block_m,
+            "BLOCK_N": block_n,
+            "BLOCK_K": block_k,
+            "BLOCK_Q": block_q,
+            "GROUP_M": 8,
+            "ACC_TYPE": acc,
+            "ALLOW_TF32": allow_tf32,
+            "num_stages": stages,
+            "num_warps": warps,
+        }
+
 
 aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out", op_overload=aten.bmm.out)
 aten_bmm_dtype = ExternKernelChoice(
@@ -239,6 +308,27 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
             kwarg_overrides=kwarg_overrides,
         )
     )
+
+    # The shared-A specialisation carries an extra BLOCK_Q dimension that the
+    # shared mm config heuristics do not know about, so its choices are added
+    # directly here. They autotune against aten and the stock template as usual.
+    if use_triton_template(layout, check_max_autotune=False) and _use_bmm_shared_a(
+        mat1, mat2, layout
+    ):
+        log.info(
+            "bmm_shared_a: offering specialised choices for bmm batch=%s m=%s n=%s k=%s",
+            mat2.get_size()[0],
+            m,
+            n,
+            k,
+        )
+        for config in _bmm_shared_a_configs(mat1.get_dtype()):
+            bmm_shared_a_template.maybe_append_choice(
+                choices,
+                input_nodes=(mat1, mat2),
+                layout=layout,
+                **config,
+            )
     _, is_nonzero = _is_static_problem(layout)
     batch_stride_largest_or_zero = is_batch_stride_largest_or_zero(mat1, mat2, layout)
     if (

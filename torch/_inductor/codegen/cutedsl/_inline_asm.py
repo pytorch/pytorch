@@ -173,8 +173,9 @@ def inline_asm_elementwise_intrinsic(
         sources: Broadcastable TensorSSA fragments or repeated scalar values.
         asm: PTX text using `$N` operand syntax, output first.
         constraints: LLVM constraint list, e.g. `"=h,r"`.
-        result_type: Logical cutlass numeric type of the produced fragment.
-            E8M0 integer results are decoded to Float32 for fused consumers.
+        result_type: Logical cutlass numeric type of the produced fragment, or
+            a tuple of types for multiple results. E8M0 integer results are
+            decoded to Float32 for fused consumers.
         is_pure: Whether the block may be reordered and CSEd.
         pack: Elements consumed per asm invocation. Missing tail elements are
             zero-padded and their corresponding outputs are discarded.
@@ -183,10 +184,14 @@ def inline_asm_elementwise_intrinsic(
     """
     if pack < 1:
         raise ValueError(f"CuteDSL inline asm requires pack >= 1, got pack={pack}")
+    has_multiple_outputs = isinstance(result_type, tuple)
+    result_types = result_type if has_multiple_outputs else (result_type,)
     output_letters, input_letters = split_constraints(constraints)
-    if len(output_letters) != pack:
+    expected_outputs = len(result_types) * pack
+    if len(output_letters) != expected_outputs:
         raise ValueError(
-            f"inline asm pack={pack} requires {pack} output constraints, "
+            f"inline asm pack={pack} with {len(result_types)} result type(s) "
+            f"requires {expected_outputs} output constraints, "
             f"got {len(output_letters)} in {constraints!r}"
         )
     expected_inputs = len(sources) * pack
@@ -250,15 +255,14 @@ def inline_asm_elementwise_intrinsic(
         count = 1
         shape = None
 
-    scalar_integer_result = not fragments and ir.IntegerType.isinstance(
-        result_type.mlir_type
+    scalar_integer_results = tuple(
+        not fragments and ir.IntegerType.isinstance(ty.mlir_type) for ty in result_types
     )
-    compute_type = (
-        cutlass.Float32
-        if result_type == cutlass.Float8E8M0FNU or scalar_integer_result
-        else result_type
+    compute_types = tuple(
+        cutlass.Float32 if ty == cutlass.Float8E8M0FNU or scalar_integer else ty
+        for ty, scalar_integer in zip(result_types, scalar_integer_results)
     )
-    converted = []
+    converted = [[] for _ in result_types]
     for base in range(0, count, pack):
         produced = llvm.inline_asm(
             asm_result_type,
@@ -275,20 +279,28 @@ def inline_asm_elementwise_intrinsic(
                 for index, output_type in enumerate(output_types)
             ]
         valid_outputs = min(pack, count - base)
-        converted.extend(
-            convert_output(
-                output,
-                result_type,
-                scalar_integer=scalar_integer_result,
+        for result_index, (ty, scalar_integer) in enumerate(
+            zip(result_types, scalar_integer_results)
+        ):
+            output_start = result_index * pack
+            converted[result_index].extend(
+                convert_output(output, ty, scalar_integer=scalar_integer)
+                for output in outputs[output_start : output_start + valid_outputs]
             )
-            for output in outputs[:valid_outputs]
-        )
 
-    if pair_template is not None:
-        return rebuild_pair(pair_template, (compute_type(value) for value in converted))
-    if shape is None:
-        return compute_type(converted[0])
-    vector_type = ir.VectorType.get([count], compute_type.mlir_type)
-    return cute.TensorSSA(
-        vector.from_elements(vector_type, converted), shape, compute_type
-    )
+    results = []
+    for values, compute_type in zip(converted, compute_types):
+        if pair_template is not None:
+            results.append(
+                rebuild_pair(pair_template, (compute_type(value) for value in values))
+            )
+        elif shape is None:
+            results.append(compute_type(values[0]))
+        else:
+            vector_type = ir.VectorType.get([count], compute_type.mlir_type)
+            results.append(
+                cute.TensorSSA(
+                    vector.from_elements(vector_type, values), shape, compute_type
+                )
+            )
+    return tuple(results) if has_multiple_outputs else results[0]

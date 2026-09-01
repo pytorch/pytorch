@@ -185,7 +185,7 @@ def grouped_tensor_layout(
     if not isinstance(shape, tuple):
         return None
     if len(shape) == 1 and isinstance(shape[0], (list, tuple, torch.Size)):
-        shape = normalize_shape(shape[0])
+        shape = tuple(shape[0])
     if source_shape is not None:
         source_shape = normalize_shape(source_shape)
         if isinstance(source_shape, tuple) and len(source_shape) == 2:

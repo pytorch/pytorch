@@ -473,7 +473,7 @@ class TestViewOps(TestCase):
     def test_imag_noncomplex(self, device, dtype):
         t = torch.ones((5, 5), dtype=dtype, device=device)
 
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(TypeError):
             torch.imag(t)
 
     @skipLazy
@@ -1105,6 +1105,9 @@ class TestViewOps(TestCase):
             self.assertEqual(result, expected)
             self.assertTrue(result.is_contiguous())
 
+            # The movedim/flatten reference below requires a non-negative dim.
+            gather_dim = gather_dim % x.dim()
+
             # Check that whether result is a view matches the movedim reference implementation
             # Reference: chunks = torch.unflatten(x, 0, [group_size, -1])
             #            ref = torch.flatten(torch.movedim(chunks, 0, gather_dim), gather_dim, gather_dim + 1)
@@ -1137,6 +1140,9 @@ class TestViewOps(TestCase):
         test_config((4, 8, 6, 10), group_size=4, gather_dim=2)  # 4D, gather_dim=2
         test_config((4, 8, 6, 10), group_size=4, gather_dim=3)  # 4D, gather_dim=3
         test_config((8, 4, 6), group_size=8, gather_dim=1)  # group_size=8
+        test_config((4, 16), group_size=4, gather_dim=-1)  # negative dim, view case
+        test_config((4, 2, 8), group_size=4, gather_dim=-1)  # negative dim, cat case
+        test_config((4, 8, 16), group_size=4, gather_dim=-3)  # negative dim, no-op case
 
 
 class TestOldViewOps(TestCase):
