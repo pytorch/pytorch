@@ -8,6 +8,7 @@ import unittest
 import torch
 import torch._dynamo.test_case
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     make_dynamo_test,
     xfailIfPy313AndEarlier,
 )
@@ -122,6 +123,8 @@ class NotReversibleNone:
 
 class TestIterators(torch._dynamo.test_case.TestCase):
     """Test iterator support in Dynamo"""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -444,6 +447,60 @@ class TestIterators(torch._dynamo.test_case.TestCase):
 
         with self.assertRaises(Unsupported):
             cv.tp_iter_impl(None)
+
+    def test_deque_iterator_not_a_list_iterator(self):
+        """deque iterators must not subclass ListIteratorVariable (CPython parity).
+
+        In CPython, _deque_iterator is not a subclass of list_iterator; the VTs
+        mirror that.
+        """
+        from torch._dynamo.variables.lists import (
+            DequeIteratorVariable,
+            ListIteratorVariable,
+        )
+
+        self.assertFalse(issubclass(DequeIteratorVariable, ListIteratorVariable))
+
+    @make_dynamo_test
+    def test_yield_from_deque_iterator(self):
+        """yield from over a deque iterator still traces after the VT split."""
+        import collections
+
+        def gen():
+            yield from iter(collections.deque([1, 2, 3]))
+
+        self.assertEqual(list(gen()), [1, 2, 3])
+
+    def test_tuple_iterator_not_a_list_iterator(self):
+        """tuple iterators must not subclass ListIteratorVariable (CPython parity).
+
+        In CPython, tuple_iterator is not a subclass of list_iterator; the VTs
+        should mirror that.
+        """
+        from torch._dynamo.variables.lists import (
+            ListIteratorVariable,
+            TupleIteratorVariable,
+        )
+
+        self.assertFalse(issubclass(TupleIteratorVariable, ListIteratorVariable))
+        self.assertIs(TupleIteratorVariable._cpython_type, type(iter(())))
+        self.assertIs(ListIteratorVariable._cpython_type, type(iter([])))
+
+    @make_dynamo_test
+    def test_yield_from_tuple_iterator(self):
+        """yield from over a tuple iterator still traces after the VT split."""
+
+        def gen():
+            yield from iter((1, 2, 3))
+
+        self.assertEqual(list(gen()), [1, 2, 3])
+
+    @make_dynamo_test
+    def test_tuple_iterator_python_type(self):
+        """type(iter(tuple)) inside compile must be tuple_iterator, not list_iterator."""
+        it = iter((1, 2, 3))
+        self.assertIs(type(it), type(iter(())))
+        self.assertIsNot(type(it), type(iter([])))
 
     @make_dynamo_test
     def test_comprehensions_with_iterator(self):
@@ -931,6 +988,8 @@ class GeneratorIterIterable:
 class TestCustomIteratorMethods(torch._dynamo.test_case.TestCase):
     """Test custom __iter__ implementations on user-defined subclasses"""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self._u_prev = torch._dynamo.config.enable_trace_unittest
@@ -994,6 +1053,8 @@ class TestIteratorMutationSemantics(torch._dynamo.test_case.TestCase):
     These tests explore whether Dynamo preserves CPython's iterator semantics
     when the underlying container is modified.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -1120,6 +1181,8 @@ class Priority(enum.IntEnum):
 class TestEnumIteration(torch._dynamo.test_case.TestCase):
     """Test iteration over enum classes"""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self._u_prev = torch._dynamo.config.enable_trace_unittest
@@ -1171,6 +1234,8 @@ class TestEnumIteration(torch._dynamo.test_case.TestCase):
 
 class TestIterWithBuiltins(torch._dynamo.test_case.TestCase):
     """Test iter() with builtin iterators like zip, map, filter, reversed"""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -1405,6 +1470,8 @@ class BlockedLen:
 class TestIterErrors(torch._dynamo.test_case.TestCase):
     """Test that iter() raises the correct exceptions"""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self._u_prev = torch._dynamo.config.enable_trace_unittest
@@ -1630,6 +1697,8 @@ class TestSpecialMethodIterLookup(torch._dynamo.test_case.TestCase):
     resolved via MRO-only special lookup with descriptor binding
     (lookup_maybe_method in Objects/typeobject.c)."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self._u_prev = torch._dynamo.config.enable_trace_unittest
@@ -1723,6 +1792,8 @@ class ColorInt(enum.IntEnum):
 class TestSpecialMethodLookupRegressions(torch._dynamo.test_case.TestCase):
     """Regressions for the special-method lookup engine: C-slot dunders must
     never recurse, and error messages must match eager."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
