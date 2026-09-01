@@ -347,8 +347,25 @@ void validate_scaled_mm_v2_inputs(
   const bool is_mx_1x32 = is_single_recipe(
       recipe_a, recipe_b, ScalingType::BlockWise1x32, ScalingType::BlockWise1x32);
   // The 32x8-tiled layout pads differently, so it has its own element count.
-  const bool is_mx_32_8 = is_mx_1x32 && at::globalContext().hasROCM() &&
-      !swizzle_a.empty() && swizzle_a[0] == SwizzleType::SWIZZLE_32_8;
+  // Validate the pair before the sizes below, otherwise a mismatched pair is
+  // reported as a scale-size error for whichever side disagrees with
+  // swizzle_a. The arch/version gate stays in the kernel's `check_mx_swizzle`,
+  // which can query the device. `hasROCM()` is a property of the process, so
+  // exclude XPU tensors explicitly: they take the oneDNN path below, which
+  // accepts an empty swizzle list.
+  const bool is_rocm_mx = is_mx_1x32 && !is_xpu && at::globalContext().hasROCM();
+  if (is_rocm_mx) {
+    TORCH_CHECK_VALUE(
+        swizzle_a.size() == 1 && swizzle_b.size() == 1,
+        "For ROCM MX gemm, swizzle_a and swizzle_b must each have 1 value, got ",
+        swizzle_a.size(), " and ", swizzle_b.size());
+    TORCH_CHECK_VALUE(
+        (swizzle_a[0] == SwizzleType::NO_SWIZZLE || swizzle_a[0] == SwizzleType::SWIZZLE_32_8) &&
+            swizzle_a[0] == swizzle_b[0],
+        "For ROCM MX gemm, swizzle_a and swizzle_b must both be NO_SWIZZLE or both be SWIZZLE_32_8, got swizzle_a=",
+        static_cast<int>(swizzle_a[0]), " and swizzle_b=", static_cast<int>(swizzle_b[0]));
+  }
+  const bool is_mx_32_8 = is_rocm_mx && swizzle_a[0] == SwizzleType::SWIZZLE_32_8;
   const bool is_nv_1x16 = is_single_recipe(
       recipe_a, recipe_b, ScalingType::BlockWise1x16, ScalingType::BlockWise1x16);
   const bool is_nv_2lvl = is_two_level_nvfp4(recipe_a, recipe_b);
@@ -388,6 +405,9 @@ void validate_scaled_mm_v2_inputs(
   } else if (is_mx_1x32) {
     c10::SymInt expected_a_elems;
     c10::SymInt expected_b_elems;
+    // Layout the count belongs to. ROCm accepts two layouts that differ only
+    // in padding, so the count alone is ambiguous without naming one.
+    const char* scale_layout;
     // ROCm and NVIDIA use different blockwise scale shapes; detect at runtime
     // to keep aten-cpu free of GPU-conditional compilation. Formulas mirror
     // _scaled_mxfp8_mxfp8 and _scaled_mxfp4_mxfp4 in cuda/ScaledBlas.cpp.
@@ -397,10 +417,12 @@ void validate_scaled_mm_v2_inputs(
           sym_round_up(sym_ceil_div(K_unpacked, 32), 8);
       expected_b_elems = sym_round_up(N, 32) *
           sym_round_up(sym_ceil_div(K_unpacked, 32), 8);
+      scale_layout = "SWIZZLE_32_8";
     } else if (is_xpu) {
       // XPU: unpadded [M, ceil_div(K, 32)] / [N, ceil_div(K, 32)], NO_SWIZZLE.
       expected_a_elems = M * sym_ceil_div(K_unpacked, 32);
       expected_b_elems = N * sym_ceil_div(K_unpacked, 32);
+      scale_layout = "NO_SWIZZLE";
     } else if (at::globalContext().hasROCM()) {
       // ROCm: K_multiplier=2 doubles M and N (the non-contraction dims) for
       // packed fp4; K (= mat_a.sym_size(1)) is used raw on both sides.
@@ -409,22 +431,24 @@ void validate_scaled_mm_v2_inputs(
       const auto N_eff = both_fp4 ? N * 2 : N;
       expected_a_elems = sym_ceil_div(M_eff, 32) * K;
       expected_b_elems = sym_ceil_div(N_eff, 32) * K;
+      scale_layout = "NO_SWIZZLE";
     } else {
       // NVIDIA: K_unpacked is doubled for packed fp4 (K_multiplier=2).
       expected_a_elems = sym_round_up(M, 128) *
           sym_round_up(sym_ceil_div(K_unpacked, 32), 4);
       expected_b_elems = sym_round_up(N, 128) *
           sym_round_up(sym_ceil_div(K_unpacked, 32), 4);
+      scale_layout = "SWIZZLE_32_4_4";
     }
     TORCH_CHECK_VALUE(
         scale_a.size() == 1 && scale_a[0].sym_numel() == expected_a_elems &&
             scale_a[0].scalar_type() == ScalarType::Float8_e8m0fnu,
-        "For Blockwise scaling scale_a should have ", expected_a_elems,
+        "For Blockwise scaling with ", scale_layout, " scale_a should have ", expected_a_elems,
         " elements, got: ", scale_a.empty() ? c10::SymInt(0) : scale_a[0].sym_numel());
     TORCH_CHECK_VALUE(
         scale_b.size() == 1 && scale_b[0].sym_numel() == expected_b_elems &&
             scale_b[0].scalar_type() == ScalarType::Float8_e8m0fnu,
-        "For Blockwise scaling scale_b should have ", expected_b_elems,
+        "For Blockwise scaling with ", scale_layout, " scale_b should have ", expected_b_elems,
         " elements, got: ", scale_b.empty() ? c10::SymInt(0) : scale_b[0].sym_numel());
   } else if (is_nv_1x16) {
     const auto expected_a_elems = nvfp4_scale_elems(M);
@@ -532,17 +556,9 @@ void validate_scaled_mm_v2_inputs(
       TORCH_CHECK_VALUE(
           swizzle_b[0] == SwizzleType::SWIZZLE_32_4_4,
           "scale_b must be swizzled to SWIZZLE_32_4_4 format");
-    } else if (is_mx_1x32) {
-      // ROCm only supports the MX path (no NVFP4).
-      TORCH_CHECK_VALUE(
-          swizzle_a.size() == 1 && swizzle_b.size() == 1,
-          "For ROCM MX gemm, swizzle_a and swizzle_b must each have 1 value, got ",
-          swizzle_a.size(), " and ", swizzle_b.size());
-      TORCH_CHECK_VALUE(
-          (swizzle_a[0] == SwizzleType::NO_SWIZZLE || swizzle_a[0] == SwizzleType::SWIZZLE_32_8) &&
-              swizzle_a[0] == swizzle_b[0],
-          "For ROCM MX gemm, swizzle_a and swizzle_b must both be NO_SWIZZLE or both be SWIZZLE_32_8");
     }
+    // ROCm's MX swizzle pair was already validated above, ahead of the
+    // per-recipe size checks.
   }
 }
 

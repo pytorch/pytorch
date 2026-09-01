@@ -512,30 +512,27 @@ def from_blocked_format(x_mxfp8, scales_unswizzled, blocksize=32):
     x_f32 = x_mxfp8.to(torch.float) * scales.to(torch.float)
     return x_f32.to(torch.bfloat16)
 
-def to_blocked(input_matrix, mat_dtype=None) -> torch.Tensor:
+def to_blocked(input_matrix, swizzle_32_8: bool = False) -> torch.Tensor:
     """
     Rearrange a large matrix by breaking it into blocks and applying the rearrangement pattern.
 
     See:
         https://docs.nvidia.com/cuda/cublas/index.html#d-block-scaling-factors-layout
 
-    gfx950 tiles 32x8 instead, the layout hipBLASLt calls BLK32_UE8M0_32_8, and
-    the result has 32*ceil_div(H,32) * 8*ceil_div(W,8) elements. MX FP4 takes it
-    from ROCm 7.13 and MX FP8 from 7.14, so callers on ROCm must pass mat_dtype,
-    the dtype of the data these scales belong to. It is ignored elsewhere.
-
     Args:
         input_matrix: Input tensor of shape (H, W)
-        mat_dtype: dtype of the matrix `input_matrix` holds the scales for
+        swizzle_32_8: build the gfx950 32x8-tiled layout that hipBLASLt calls
+            BLK32_UE8M0_32_8 instead of the default one. Pass
+            `rocm_mx_swizzle(mat_dtype)` to follow whichever layout the current
+            device takes for the data these scales belong to.
 
     Returns:
-        Rearranged tensor of shape (32*ceil_div(H,128), 16*ceil_div(W,4))
+        Flattened tensor of 32*ceil_div(H,128) * 16*ceil_div(W,4) elements, or
+        32*ceil_div(H,32) * 8*ceil_div(W,8) when `swizzle_32_8` is set.
     """
-    from torch.testing._internal.common_cuda import rocm_mx_swizzle
-
     rows, cols = input_matrix.shape
 
-    if mat_dtype is not None and rocm_mx_swizzle(mat_dtype):
+    if swizzle_32_8:
         padded_rows = ceil_div(rows, 32) * 32
         padded_cols = ceil_div(cols, 8) * 8
 
