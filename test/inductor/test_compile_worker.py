@@ -1347,6 +1347,55 @@ class TestSubprocessEnv(TestCase):
         self.assertEqual(len(args[1]), 4)
         self.assertEqual(kwargs["output_scale"].shape, (1,))
 
+    def test_generated_nvgemm_precompile_uses_named_output_scale(self):
+        import torch
+        from torch._inductor.codegen.nv_universal_gemm import (
+            nv_universal_gemm_kernel as nvgemm_kernel,
+        )
+
+        names = ["in_ptr0", "in_ptr1", "in_ptr2", "in_ptr3"]
+        shapes = dict.fromkeys(names, (4, 4))
+        strides = dict.fromkeys(names, (4, 1))
+        dtypes = dict.fromkeys(names, "float32")
+        shapes.update(output_scale=(1,), output=(4, 4))
+        strides.update(output_scale=(1,), output=(4, 1))
+        dtypes.update(output_scale="float32", output="float32")
+        artifact = types.SimpleNamespace(compiled_obj=object())
+
+        with (
+            patch.object(torch.cuda, "_is_in_bad_fork", return_value=False),
+            patch.object(
+                nvgemm_kernel, "_create_gemm_cache_key", return_value=("key",)
+            ),
+            patch.object(
+                nvgemm_kernel,
+                "_compile_nvgemm",
+                return_value=(artifact, None, None, True),
+            ) as compile_nvgemm,
+            patch.object(nvgemm_kernel, "_patch_max_active_clusters", return_value=[]),
+            patch.object(nvgemm_kernel, "_restore_max_active_clusters"),
+            patch("torch._inductor.runtime.cutedsl_cache.disk_cache_set"),
+        ):
+            nvgemm_kernel._nvgemm_precompile(
+                shapes,
+                strides,
+                dtypes,
+                variant_name="SCALED_GEMM",
+                kernel_name="kernel",
+                accumulator_type="accumulator",
+                compiled_cache={},
+                disk_fn_cache={},
+                module_path="module",
+                disk_config_key=("config",),
+                input_param_names=names,
+                max_active_clusters=1,
+                output_scale_param_name="output_scale",
+            )
+
+        args, kwargs = compile_nvgemm.call_args
+        self.assertEqual(len(args[1]), 4)
+        self.assertEqual(kwargs["output_scale"].shape, (1,))
+
     def test_worker_compile_triton_clears_libdevice_path(self):
         try:
             from triton import knobs
