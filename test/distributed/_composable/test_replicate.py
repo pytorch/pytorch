@@ -190,7 +190,7 @@ class ReplicateTestNoXPU(MultiProcContinuousTest):
 
         model = MyNet().to(device)
         replicate(model, device_id=torch.accelerator.current_device_index())
-        a, b = torch.randn(2, 2, device=device), torch.randn(2, 2, device=device)
+        a, b = torch.randn(2, 2), torch.randn(2, 2)
         model(a, kwarg=b).sum().backward()
 
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179854")
@@ -201,7 +201,7 @@ class ReplicateTestNoXPU(MultiProcContinuousTest):
         model = Net().to(device)
         replicate(model, ignored_modules=[model.fc1])
         # CPU input ensures that replicate can move input to GPU as DDP does.
-        inp = torch.randn(5, 2, device=device) * (self.rank + 1)
+        inp = torch.randn(5, 2) * (self.rank + 1)
         out = model(inp) * 10
         out.sum().backward()
         # FC1 grads should not be synchronized, FC2 and 3 should be.
@@ -227,7 +227,7 @@ class ReplicateTestNoXPU(MultiProcContinuousTest):
         model = Net().to(device)
         model_cuda = deepcopy(model)
         model_cuda2 = deepcopy(model_cuda)
-        replicate(model, device_id=torch.device(device))
+        replicate(model, device_id=torch.accelerator.current_device_index())
         # DDP instance is attached in first pre forward
         model(torch.randn(2, 2, device=device))
         replicate_ddp_weakref = replicate.state(model)._ddp_weakref()
