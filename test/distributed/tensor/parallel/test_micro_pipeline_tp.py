@@ -66,18 +66,14 @@ def _fp8_all_gather(
     return torch.cat(chunks, dim=gather_dim).view(tensor.dtype)
 
 
-class MicroPipelineTPTest(TestCase):
-    hw_classification = HardwareClassification.CUDA
+class MicroPipelineTPPatternTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
-        torch._inductor.config._micro_pipeline_tp = True
 
         self.rank = 0
         self.world_size = 2
-        torch.get_device_module(type(self).device_type).set_device(
-            type(self).get_primary_device()
-        )
 
         store = FakeStore()
         dist.init_process_group(
@@ -90,9 +86,8 @@ class MicroPipelineTPTest(TestCase):
     def tearDown(self):
         dist.destroy_process_group()
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
-    def test_find_all_gather_patterns(self, device):
+    def test_find_all_gather_patterns(self):
         group = dist.group.WORLD
 
         def func(
@@ -122,7 +117,7 @@ class MicroPipelineTPTest(TestCase):
             f = f_cat.narrow(1, 0, 32)
             return a, b, c, d, e, f
 
-        inp = torch.rand(64, 32, device=device)
+        inp = torch.rand(64, 32)
 
         gm = _make_post_grad_fx(func, inp)
         all_gathers = find_all_gather_patterns(gm.graph)
@@ -173,9 +168,8 @@ class MicroPipelineTPTest(TestCase):
             torch.ops.aten.slice.Tensor,
         )
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
-    def test_find_reduce_scatter_patterns(self, device):
+    def test_find_reduce_scatter_patterns(self):
         group = dist.group.WORLD
 
         def func(
@@ -192,7 +186,7 @@ class MicroPipelineTPTest(TestCase):
             )
             return a, b, c
 
-        inp = torch.rand(64, 32, device=device)
+        inp = torch.rand(64, 32)
 
         gm = make_fx(func)(inp)
         reduce_scatters = find_reduce_scatter_patterns(gm.graph)
@@ -223,9 +217,8 @@ class MicroPipelineTPTest(TestCase):
         self.assertEqual(reduce_scatters[1].reduce_op, "avg")
         self.assertEqual(reduce_scatters[1].scatter_dim, 1)
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
-    def test_get_unexposed_collectives(self, device):
+    def test_get_unexposed_collectives(self):
         group = dist.group.WORLD
 
         def func(inp: torch.Tensor) -> torch.Tensor:
@@ -239,7 +232,7 @@ class MicroPipelineTPTest(TestCase):
             e = all_gather_single(d, gather_dim=0, group=group.group_name)
             return a, c, e
 
-        inp = torch.rand(64, 32, device=device)
+        inp = torch.rand(64, 32)
 
         gm = make_fx(func)(inp)
         overlappable_collectives = _get_unexposed_collectives(gm.graph)
@@ -247,6 +240,31 @@ class MicroPipelineTPTest(TestCase):
             list(map(str, overlappable_collectives)),
             ["all_gather_into_tensor", "reduce_scatter_tensor"],
         )
+
+
+class MicroPipelineTPTest(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def setUp(self):
+        super().setUp()
+        torch._inductor.config._micro_pipeline_tp = True
+
+        self.rank = 0
+        self.world_size = 2
+        torch.get_device_module(type(self).device_type).set_device(
+            type(self).get_primary_device()
+        )
+
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+
+    def tearDown(self):
+        dist.destroy_process_group()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @parametrize("A_dims", [2, 3])
