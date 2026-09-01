@@ -3,11 +3,13 @@
 
 import os
 import tempfile
+from unittest import mock
 
 from model_registry import ExampleCode, ModelWithKwargs, MultiMLP
 
 import torch
 import torch.distributed as dist
+import torch.distributed.pipelining.stage as stage_module
 from torch.distributed.pipelining import (
     build_stage,
     pipeline,
@@ -38,6 +40,27 @@ device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else 
 backend = dist.get_default_backend_for_device(device_type)
 
 torch.manual_seed(0)
+
+
+class PipelineStageBackendWarningTest(TestCase):
+    @parametrize(
+        "backend,should_warn",
+        [("nccl", True), ("nccl2", True), ("nccl-lazy", False), ("gloo", False)],
+    )
+    def test_eager_nccl_warning(self, backend, should_warn):
+        with (
+            mock.patch.object(dist, "get_backend", return_value=backend),
+            mock.patch.object(stage_module, "warning_once") as warning,
+        ):
+            stage_module._warn_if_eager_nccl(None)
+
+        if should_warn:
+            warning.assert_called_once()
+        else:
+            warning.assert_not_called()
+
+
+instantiate_parametrized_tests(PipelineStageBackendWarningTest)
 
 
 class PipelineStageMetadataInferenceTest(TestCase):
