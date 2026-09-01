@@ -120,6 +120,26 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // Cheap early-out for drain_pending_invalidations, so the hot lookup paths
   // do not take pending_invalidation_mutex when nothing is parked.
   std::atomic<bool> has_pending_invalidations{false};
+  // Cache evictions that could not run where they were requested. Two ways
+  // that happens: an owner-scoped uninstall reached from weakref.finalize (a
+  // dead CompilePackage) must never BLOCK on cache_mutex, for exactly the
+  // ABBA reason invalidate() must not; and ANY eviction arriving on a thread
+  // whose own lookup is mid-guard-evaluation -- the recursive cache_mutex
+  // admits it -- must not free or relink nodes that lookup is iterating
+  // (reset_code from Python run BY A GUARD is the same-thread use-after-free
+  // this closes). Guarded by pending_invalidation_mutex; applied by the next
+  // cache_mutex holder whose cache_python_depth is zero.
+  struct PendingEviction {
+    bool clear_all; // when false, an owner reset scoped by the fields below
+    int64_t region_id;
+    py::object owner;
+  };
+  std::vector<PendingEviction> pending_evictions;
+  std::atomic<bool> has_pending_evictions{false};
+  // Nesting count of cache_mutex holders on THIS thread currently running
+  // Python (guard evaluation, backend __eq__, pybind attribute stores).
+  // Guarded by cache_mutex.
+  size_t cache_python_depth{0};
 
   ExtraState(PyCodeObject* orig_code_arg);
   std::list<CacheEntry>& cache_entry_list(int64_t isolate_recompiles_id);
@@ -141,6 +161,16 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // Apply invalidations parked while cache_mutex was contended. Caller must
   // hold cache_mutex (and must NOT hold pending_invalidation_mutex).
   void drain_pending_invalidations();
+  // Park an eviction for the next depth-zero cache_mutex holder.
+  void park_eviction(PendingEviction eviction);
+  // Apply parked evictions, moving the evicted nodes into the caller's
+  // containers, which the caller destroys AFTER cache_mutex releases. No-op
+  // unless cache_python_depth is zero: an in-flight same-thread lookup's
+  // iterators must see its lists untouched until it finishes. Caller must
+  // hold cache_mutex (and must NOT hold pending_invalidation_mutex).
+  void apply_pending_evictions(
+      std::list<PrecompileEntry>& dead_precompile,
+      std::unordered_map<int64_t, std::list<CacheEntry>>& dead_cache);
   // Empty this state back to freshly-constructed contents WITHOUT freeing it.
   // reset_code uses this instead of destroy: destroying while another thread
   // is blocked on cache_mutex (CacheLock releases the GIL while it waits)
