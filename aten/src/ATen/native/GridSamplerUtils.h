@@ -58,6 +58,20 @@ inline void check_grid_sampler_common(
   }
 }
 
+// The _pixel ops read the grid in pixel units and accept it in the input's own
+// dtype or in double, so full precision coordinates can drive a low precision
+// payload. See NOTE [ grid_sampler Native Functions ].
+inline void check_grid_sampler_pixel(
+  const TensorBase& input,
+  const TensorBase& grid
+) {
+  TORCH_CHECK(
+    grid.scalar_type() == input.scalar_type() ||
+      grid.scalar_type() == kDouble,
+    "grid_sampler(): expected grid dtype to match the input's (",
+    input.scalar_type(), ") or to be Double, but got ", grid.scalar_type());
+}
+
 // See NOTE [ grid_sampler Native Functions ].
 inline void check_grid_sampler_2d(
   const TensorBase& input,
