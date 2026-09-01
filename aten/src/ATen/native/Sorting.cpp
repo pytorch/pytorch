@@ -649,7 +649,9 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
   dim = at::maybe_wrap_dim(dim, self.dim());
 
   int64_t size = self.dim() > 0 ? self.size(dim) : 1;
-  zero_numel_check_dims(self, dim, "median()");
+  if (!self.is_floating_point()) {
+    zero_numel_check_dims(self, dim, "median()");
+  }
 
   checkDeviceType("median", {values, indices}, self.device().type());
   checkScalarType("median", {indices, "indices", 1}, kLong);
@@ -666,6 +668,14 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
 
   resize_output(values, out_shape);
   resize_output(indices, out_shape);
+
+  if (self.numel() == 0) {
+    if (self.is_floating_point() && size == 0) {
+      values.fill_(std::numeric_limits<float>::quiet_NaN());
+    }
+    indices.zero_();
+    return std::forward_as_tuple(values, indices);
+  }
 
   // Ensure #dim is the same for all tensors required for dim_apply
   Tensor in = self.dim() > 0 ? self : self.unsqueeze(0);

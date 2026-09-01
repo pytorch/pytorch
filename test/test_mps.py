@@ -6273,12 +6273,20 @@ class TestMPS(TestCaseMPS):
         for x in cases:
             check(x)
 
+        empty = torch.empty(0, 3, dtype=dtype)
+        self.assertEqual(op(empty, dim=1), op(empty.to('mps'), dim=1))
         if dtype.is_floating_point:
-            # empty: NaN global, empty outputs on non-zero dim, raise on zero dim
-            empty = torch.empty(0, 3, dtype=dtype)
+            # empty: NaN global and along a zero-sized reduction dim
             self.assertTrue(op(empty.to('mps')).isnan())
-            self.assertEqual(op(empty, dim=1), op(empty.to('mps'), dim=1))
-            self.assertRaises(IndexError, lambda: op(empty.to('mps'), dim=0))
+            values, indices = op(empty.to('mps'), dim=0)
+            self.assertEqual(values, torch.full((3,), float('nan'), dtype=dtype, device='mps'))
+            self.assertEqual(indices, torch.zeros(3, dtype=torch.long, device='mps'))
+        else:
+            self.assertRaisesRegex(
+                IndexError,
+                "Expected reduction dim",
+                lambda: op(empty.to('mps'), dim=0),
+            )
 
     def test_any(self):
         def helper(shape):
