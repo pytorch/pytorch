@@ -269,12 +269,9 @@ class RegisterDispatchKey:
     # operators into JIT op registry, thus we need to avoid generating code to register into the dispatcher.
     skip_dispatcher_op_registration: bool
 
-    # Manifests of ops with AOT kernels at this dispatch key, keyed by base
-    # name (see torchgen/native_aot.py). The structured wrapper consults the
-    # op's at::native DispatchStub between op.meta() and op.impl(); true
-    # means the AOT kernel filled the outputs and op.impl is skipped. The
-    # stub signature matches the structured impl signature, so the same
-    # translated argument exprs serve both calls.
+    # Ops with AOT kernels at this dispatch key, keyed by base name. The wrapper
+    # consults the op's DispatchStub between op.meta() and op.impl(), and the stub
+    # signature matches the impl signature, so the same argument exprs serve both.
     native_aot_manifests: dict = field(default_factory=dict, kw_only=True)
 
     @staticmethod
@@ -977,10 +974,8 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
                         context, structured.impl_arguments(self.g), method=False
                     )
                 )
-                # Exact overload name wins over base name: a qualified
-                # declaration ("gt.Tensor") hooks only its overload's
-                # wrapper; a base-named one ("topk") hooks the unique
-                # structured group (uniqueness enforced at validation).
+                # Exact overload name wins over base name: "gt.Tensor" hooks only
+                # that overload, "topk" the unique structured group.
                 aot_manifest = self.native_aot_manifests.get(
                     str(self.g.functional.func.name)
                 ) or self.native_aot_manifests.get(
