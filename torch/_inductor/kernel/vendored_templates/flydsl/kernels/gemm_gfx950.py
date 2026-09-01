@@ -46,7 +46,7 @@ class GemmGfx950Param:
 
 
 @dataclass(slots=True, kw_only=True, eq=False)
-class GemmABContext:
+class GemmABLoadContext:
     wave_offset: Any
     tid: Any
     k: Any
@@ -392,7 +392,7 @@ def _elem_dtype(param: GemmGfx950Param):
     return fx.Float16 if const_expr(param.dtype_id == GEMM_DTYPE_FP16) else fx.BFloat16
 
 
-def make_gemm_ab_context(elem_dtype, tid, k, param: GemmGfx950Param):
+def make_gemm_ab_load_context(elem_dtype, tid, k, param: GemmGfx950Param):
     uni_copy_atom = fx.make_copy_atom(fx.UniversalCopy128b(), elem_dtype)
     buffer_copy_atom = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), elem_dtype)
 
@@ -413,7 +413,7 @@ def make_gemm_ab_context(elem_dtype, tid, k, param: GemmGfx950Param):
         b_s2r_copy_atom = uni_copy_atom
         b_tiled_copy_atom = buffer_copy_atom
 
-    return GemmABContext(
+    return GemmABLoadContext(
         wave_offset=get_wave_lds_offset(tid, param.async_load_bytes),
         tid=tid,
         k=k,
@@ -429,7 +429,7 @@ def make_gemm_ab_context(elem_dtype, tid, k, param: GemmGfx950Param):
 
 def async_load_to_lds(
     tile: AsyncLoadTile,
-    context: GemmABContext,
+    context: GemmABLoadContext,
     load_iters,
     is_k_major,
 ):
@@ -547,13 +547,13 @@ def gemm_gfx950_kernel(
 
     gC = fx.flat_divide(out_buf, (block_m, block_n))[None, None, bid_m, bid_n]
     thr_mma = tiled_mma.thr_slice(tid)
-    ab_context = make_gemm_ab_context(elem_dtype, tid, k, param)
-    uni_copy_atom = ab_context.uni_copy_atom
-    buffer_copy_atom = ab_context.buffer_copy_atom
-    a_s2r_copy_atom = ab_context.a_s2r_copy_atom
-    b_s2r_copy_atom = ab_context.b_s2r_copy_atom
-    a_tiled_copy_atom = ab_context.a_tiled_copy_atom
-    b_tiled_copy_atom = ab_context.b_tiled_copy_atom
+    ab_load_context = make_gemm_ab_load_context(elem_dtype, tid, k, param)
+    uni_copy_atom = ab_load_context.uni_copy_atom
+    buffer_copy_atom = ab_load_context.buffer_copy_atom
+    a_s2r_copy_atom = ab_load_context.a_s2r_copy_atom
+    b_s2r_copy_atom = ab_load_context.b_s2r_copy_atom
+    a_tiled_copy_atom = ab_load_context.a_tiled_copy_atom
+    b_tiled_copy_atom = ab_load_context.b_tiled_copy_atom
     thr_copy_A = fx.make_tiled_copy_A(a_tiled_copy_atom, tiled_mma).get_slice(tid)
     thr_copy_B = fx.make_tiled_copy_B(b_tiled_copy_atom, tiled_mma).get_slice(tid)
     a_lds_layout, b_lds_layout = make_gemm_ab_lds_layouts(
@@ -636,7 +636,7 @@ def gemm_gfx950_kernel(
                 leading_stride=a_leading_stride,
                 k_tile=k_tile,
             ),
-            context=ab_context,
+            context=ab_load_context,
             load_iters=ldg_a_iters,
             is_k_major=param.a_is_transposed,
         )
@@ -653,7 +653,7 @@ def gemm_gfx950_kernel(
                 leading_stride=b_leading_stride,
                 k_tile=k_tile,
             ),
-            context=ab_context,
+            context=ab_load_context,
             load_iters=ldg_b_iters,
             is_k_major=not param.b_is_transposed,
         )
@@ -793,13 +793,13 @@ def gemm_hti_gfx950_kernel(
     b_rsrc = fx.rocdl.get_buffer_rsrc(fx.get_iter(b_buf))
 
     thr_mma = tiled_mma.thr_slice(tid)
-    ab_context = make_gemm_ab_context(elem_dtype, tid, k, param)
-    uni_copy_atom = ab_context.uni_copy_atom
-    buffer_copy_atom = ab_context.buffer_copy_atom
-    a_s2r_copy_atom = ab_context.a_s2r_copy_atom
-    b_s2r_copy_atom = ab_context.b_s2r_copy_atom
-    a_tiled_copy_atom = ab_context.a_tiled_copy_atom
-    b_tiled_copy_atom = ab_context.b_tiled_copy_atom
+    ab_load_context = make_gemm_ab_load_context(elem_dtype, tid, k, param)
+    uni_copy_atom = ab_load_context.uni_copy_atom
+    buffer_copy_atom = ab_load_context.buffer_copy_atom
+    a_s2r_copy_atom = ab_load_context.a_s2r_copy_atom
+    b_s2r_copy_atom = ab_load_context.b_s2r_copy_atom
+    a_tiled_copy_atom = ab_load_context.a_tiled_copy_atom
+    b_tiled_copy_atom = ab_load_context.b_tiled_copy_atom
     thr_copy_A = fx.make_tiled_copy_A(a_tiled_copy_atom, tiled_mma).get_slice(tid)
     thr_copy_B = fx.make_tiled_copy_B(b_tiled_copy_atom, tiled_mma).get_slice(tid)
     a_lds_layout, b_lds_layout = make_gemm_ab_lds_layouts(
@@ -829,7 +829,7 @@ def gemm_hti_gfx950_kernel(
                 leading_stride=a_leading_stride,
                 k_tile=k_tile,
             ),
-            context=ab_context,
+            context=ab_load_context,
             load_iters=half_ldg_a_iters,
             is_k_major=param.a_is_transposed,
         )
@@ -846,7 +846,7 @@ def gemm_hti_gfx950_kernel(
                 leading_stride=b_leading_stride,
                 k_tile=k_tile,
             ),
-            context=ab_context,
+            context=ab_load_context,
             load_iters=half_ldg_b_iters,
             is_k_major=not param.b_is_transposed,
         )
