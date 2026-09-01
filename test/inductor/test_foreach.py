@@ -770,6 +770,32 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     @requires_gpu
+    def test_fuse_concat_dynamic_shapes(self):
+        # Horizontal fusion of the cat copies must survive dynamic shapes.
+        #
+        # Two things this test is sensitive to:
+        #  - the number of inputs must exceed config.max_pointwise_cat_inputs, or cat
+        #    is lowered as a single pointwise kernel with masked loads and never
+        #    builds a ConcatKernel, so the foreach grouping is never exercised.
+        #  - check_model_gpu is deliberately not used: it clones the inputs and does a
+        #    second, static compile, whose kernel count would mask the dynamic one.
+        n = config.max_pointwise_cat_inputs + 4
+
+        def fn(*args):
+            return torch.stack(args)
+
+        args = tuple(torch.randn(5, 4).to(GPU_TYPE) for _ in range(n))
+        for arg in args:
+            torch._dynamo.mark_dynamic(arg, 0)
+
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        actual = torch.compile(fn, fullgraph=True)(*args)
+        self.assertEqual(actual, fn(*args))
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_gpu
     def test_zero_elems(self):
         def fn(a0, a1, b0, b1):
             return torch._foreach_add([a0, a1], [b0, b1])
