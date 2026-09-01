@@ -56,7 +56,7 @@ install_rocm() {
 
     # device-all pulls kernels for every supported gfx target (multi-arch wheel);
     # libraries+devel provide the runtime libs + headers/hipcc to compile against ROCm.
-    python3 -m pip install --no-cache-dir --index-url "${THEROCK_INDEX_URL}" "rocm[libraries,devel,device-all]==${rocm_pip_version}"
+    python3 -m pip install --index-url "${THEROCK_INDEX_URL}" "rocm[libraries,devel,device-all]==${rocm_pip_version}"
 
     # Discover the real install root/bin via the rocm-sdk CLI (rocm-sdk-core wheel).
     ROCM_HOME="$(rocm-sdk path --root)"
