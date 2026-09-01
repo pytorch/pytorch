@@ -603,19 +603,15 @@ struct ExpandableSegment {
           size_t device_total = 0;
           const cudaError_t info_status =
               cudaMemGetInfo(&device_free, &device_total);
-          if (info_status == cudaSuccess) {
-            LOG(WARNING)
-                << "expandable_segments: memory mapping failed with OOM on device "
-                << static_cast<int>(device_) << " while trying to map "
-                << segment_size_ << " bytes (free: " << device_free
-                << ", total: " << device_total << ").";
-          } else {
-            LOG(WARNING)
-                << "expandable_segments: memory mapping failed with OOM on device "
-                << static_cast<int>(device_) << " while trying to map "
-                << segment_size_ << " bytes; cudaMemGetInfo failed: "
-                << cudaGetErrorString(info_status) << ".";
-          }
+          const std::string detail = (info_status == cudaSuccess)
+              ? " bytes (free: " + std::to_string(device_free) +
+                  ", total: " + std::to_string(device_total) + ")."
+              : std::string(" bytes; cudaMemGetInfo failed: ") +
+                  cudaGetErrorString(info_status) + ".";
+          LOG(WARNING)
+              << "expandable_segments: memory mapping failed with OOM on device "
+              << static_cast<int>(device_) << " while trying to map "
+              << segment_size_ << detail;
         }
 #ifdef USE_ROCM
         // hipMemCreate above returned hipErrorOutOfMemory and treated it
@@ -633,7 +629,7 @@ struct ExpandableSegment {
 #else
       C10_CUDA_DRIVER_CHECK(status);
 #endif
-      handles_.at(i) = Handle(handle, std::nullopt);
+      handles_.at(i) = Handle(handle);
     }
     mapAndSetAccess(begin, end);
     return rangeFromHandles(begin, end);
@@ -847,8 +843,9 @@ struct ExpandableSegment {
             "}");
 #endif
         LOG(INFO) << "use posix fd to import expandable segments.";
-        // close_myfd (scope_exit above) closes myfd; don't double-close it here.
-        imported.emplace_back(handle, std::nullopt);
+        // close_myfd (scope_exit above) closes myfd; don't double-close it
+        // here.
+        imported.emplace_back(handle);
       }
 #endif // !_WIN32
     } else {
@@ -875,7 +872,7 @@ struct ExpandableSegment {
             get_nvml_fabric_info(device),
             "}");
         LOG(INFO) << "use fabric handle to import expandable segments.";
-        imported.emplace_back(handle, std::nullopt);
+        imported.emplace_back(handle);
       }
 #endif
     }
@@ -1107,10 +1104,7 @@ struct ExpandableSegment {
     std::optional<std::variant<int, CUmemFabricHandle>> shareable_handle;
 
     Handle() = default;
-    Handle(
-        CUmemGenericAllocationHandle h,
-        std::optional<std::variant<int, CUmemFabricHandle>> s)
-        : handle(h), shareable_handle(std::move(s)) {}
+    explicit Handle(CUmemGenericAllocationHandle h) : handle(h) {}
     Handle(const Handle&) = delete;
     Handle& operator=(const Handle&) = delete;
     Handle(Handle&& other) noexcept
