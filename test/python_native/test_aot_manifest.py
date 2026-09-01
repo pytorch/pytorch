@@ -1,14 +1,9 @@
 # Owner(s): ["module: dsl-native-ops"]
-"""Tests for the native-AOT runtime layer in torch/_native:
+"""Tests for the native-AOT runtime layer in torch/_native: coverage checks
+(aot_manifest.covers/get_coverage), the Context switch and its interaction with
+python_native.<dsl>.disabled(), and _native_aot_embedded() with its env opt-out.
 
-  * aot_manifest.covers() / get_coverage(): declaration-driven
-    JIT-coverage checks (the router consults coverage once per call)
-  * the native-AOT Context switch (set_aot_enabled/aot_enabled) and
-    its integration with python_native.<dsl>.disabled()
-  * _native_aot_embedded() detection and the env opt-out
-
-None of these need the AOT kernel library or a GPU; tensors are CPU
-where a tensor is needed at all.
+None of these need the AOT kernel library or a GPU.
 """
 
 import os
@@ -22,9 +17,8 @@ from torch._native import aot_manifest
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-# A minimal declaration module (see tools/native_aot/decl.py for the
-# contract). covered_axes() runs as ordinary Python, so argument
-# defaults, dim normalization etc. are plain code.
+# A minimal declaration module (contract: tools/native_aot/decl.py). covered_axes()
+# runs as ordinary Python, so defaults and dim normalization are plain code.
 DECLARATION = """\
 ATEN_OP = "fakeop"
 DISPATCH_KEY = "CUDA"
@@ -59,8 +53,8 @@ def cpp_launch(spec, launch_fn):
 
 
 class ManifestFixture:
-    """Context manager: a temp ops dir with one fakeop declaration,
-    patched into aot_manifest with its cache cleared on entry/exit."""
+    """Context manager: a temp ops dir holding one fakeop declaration, patched into
+    aot_manifest with its cache cleared on entry and exit."""
 
     def __init__(self, body: str = DECLARATION, op: str = "fakeop"):
         self.body, self.op = body, op
@@ -93,8 +87,7 @@ class TestCovers(TestCase):
             )
 
     def test_defaults_fill_omitted_args(self):
-        # k-only call: dim/largest/sorted come from covered_axes' own
-        # signature defaults.
+        # k-only call: dim/largest/sorted come from covered_axes' own defaults.
         with ManifestFixture():
             x = self._covered_tensor()
             self.assertTrue(aot_manifest.covers("fakeop", "CUDA", (x, 8), {}))
@@ -145,9 +138,7 @@ class TestCovers(TestCase):
             self.assertFalse(aot_manifest.covers("fakeop", "CPU", (x, 8), {}))
 
     def test_bind_failure_is_uncovered(self):
-        # A covered_axes call that raises (attribute missing on the
-        # argument, or arguments that don't match its signature) must
-        # degrade to "uncovered", not propagate.
+        # A covered_axes call that raises must degrade to "uncovered", not propagate.
         with ManifestFixture():
             self.assertFalse(aot_manifest.covers("fakeop", "CUDA", (object(), 8), {}))
             # Too few args to bind at all:
@@ -168,18 +159,15 @@ class TestGetCoverage(TestCase):
             self.assertIsNone(aot_manifest.get_coverage("fakeop", "CPU"))
 
     def test_variant_symbols_share_base_coverage(self):
-        # Overload-qualified and in-place symbols funnel through the same
-        # structured wrapper, so they must resolve to the base declaration.
+        # One structured wrapper serves every variant, so all resolve to the base.
         with ManifestFixture():
             base = aot_manifest.get_coverage("fakeop", "CUDA")
             self.assertIs(aot_manifest.get_coverage("fakeop.values", "CUDA"), base)
             self.assertIs(aot_manifest.get_coverage("fakeop_", "CUDA"), base)
 
     def test_router_declines_covered_calls_once(self):
-        # The router consults coverage ONCE per call ahead of the cond
-        # chain: with two registered override paths, a covered call must
-        # run covered_axes exactly once and no cond at all; an uncovered
-        # call runs the conds.
+        # With two registered override paths, a covered call must run covered_axes
+        # once and no cond at all, while an uncovered call runs the conds.
         from torch._native import registry
 
         with ManifestFixture():
@@ -200,8 +188,8 @@ class TestGetCoverage(TestCase):
             cond_impl = [(probe_cond, "a"), (probe_cond, "b")]
             _NO_MATCH = object()
 
-            # Mirror of _register_overrides_from_graph._dispatch; the
-            # closure itself is not importable, so keep this in sync.
+            # Mirror of _register_overrides_from_graph._dispatch, which is a closure
+            # and so cannot be imported; keep the two in sync.
             def dispatch(args, kwargs):
                 if coverage is not None and coverage.covers(args, kwargs):
                     return _NO_MATCH
@@ -216,8 +204,8 @@ class TestGetCoverage(TestCase):
             dispatch((torch.empty(4, 512), 8), {})
             self.assertEqual(len(cond_calls), 2)
 
-        # And the real router build must reference get_coverage: guard
-        # against the check being dropped from registry._dispatch.
+        # And the real router must reference get_coverage, in case the check above
+        # keeps passing after registry._dispatch drops it.
         import inspect
 
         src = inspect.getsource(registry._register_overrides_from_graph)
@@ -227,9 +215,8 @@ class TestGetCoverage(TestCase):
 
 class TestAotContextSwitch(TestCase):
     def test_masked_switch_restores_jit_coverage(self):
-        # With AOT masked, coverage must report uncovered so covered
-        # calls keep their JIT route (declining into a stub that will
-        # not fire would silently lose BOTH accelerated routes).
+        # With AOT masked, coverage must report uncovered, so covered calls keep
+        # their JIT route instead of declining into a stub that will not fire.
         from torch import _native
 
         with ManifestFixture():
@@ -274,10 +261,8 @@ class TestAotContextSwitch(TestCase):
 
 class TestEmbedDetection(TestCase):
     def test_disable_env_var_flips_context_switch(self):
-        # Subprocess: on an embedded build the opt-out masks the kernels
-        # by flipping the Context switch; gated coverage then declines,
-        # so covered calls keep their JIT route. On a build without
-        # artifacts the switch stays on (nothing to mask).
+        # Subprocess, because the env var is read once at import. On an embedded
+        # build the opt-out flips the Context switch; without artifacts it stays on.
         code = (
             "import torch\n"
             "from torch._native import _native_aot_embedded, aot_enabled\n"

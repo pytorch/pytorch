@@ -74,17 +74,13 @@ with warnings.catch_warnings():
 def _native_aot_embedded() -> bool:
     """True iff this libtorch_cuda was linked with AOT kernel artifacts.
 
-    The artifacts' static initializers registered the stub kernels and
-    the _native_aot covers custom ops at load time (every shipped
-    artifact set registers at least one covers op -- the in-process
-    marker probed here). A build whose stage 2 never ran has no
-    artifacts, no registrations, and the generated wrapper stubs fall
-    through to the stock impls. Nothing here initializes CUDA: kernel
-    cubins load lazily on first use.
+    Probes the _native_aot covers custom op, which every shipped artifact set
+    registers from a static initializer. A build whose stage 2 never ran has no
+    registrations and its wrapper stubs fall through to the stock impls. Nothing
+    here initializes CUDA.
 
-    TORCH_DISABLE_NATIVE_AOT=1 masks the kernels by flipping the
-    Context switch every stub consultation checks; gated coverage then
-    declines, so covered calls keep their JIT route.
+    Note that TORCH_DISABLE_NATIVE_AOT=1 masks the kernels without unlinking them,
+    so this still returns True.
     """
     try:
         embedded = any(
@@ -102,13 +98,13 @@ _native_aot_embedded()
 
 
 def set_aot_enabled(enabled: bool) -> None:
-    """Toggle at::globalContext().allowNativeAot(): the switch every
-    generated stub consultation checks, so False gives stock-aten
-    behavior even with the AOT kernel library loaded.
+    """Toggle at::globalContext().allowNativeAot(), the switch every generated stub
+    consultation checks, so False gives stock-aten behavior even with the AOT kernel
+    library loaded.
 
-    Does NOT reach ops whose declaration is UNCONDITIONAL: their kernels
-    are the implementation rather than a faster route to the same answer.
-    Use _unconditional_masked() if you need stock aten for one of those."""
+    Does NOT reach ops whose declaration is UNCONDITIONAL, whose kernels are the
+    implementation rather than a faster route to the same answer; use
+    _unconditional_masked() for one of those."""
     torch._C._set_native_aot_enabled(enabled)
 
 
@@ -118,23 +114,18 @@ def aot_enabled() -> bool:
 
 @contextlib.contextmanager
 def _unconditional_masked():
-    """PRIVATE, for reference computations only: also mask the overrides and
-    AOT kernels that are exempt from the user-facing switches (declaration
-    UNCONDITIONAL / register_op_override(unconditional_override=True)).
+    """PRIVATE, for reference computations only: also mask the overrides and AOT
+    kernels that are exempt from the user-facing switches (declaration UNCONDITIONAL
+    or register_op_override(unconditional_override=True)).
 
-    Exists because those two mechanisms otherwise have no off state, which
-    would leave a numerics test with no way to obtain stock aten values for
-    the op -- and a reference silently computed through the override under
-    test is worse than no reference. Not a user knob: masking an
-    unconditional override changes what the op computes.
-
-    Combine with python_native.<dsl>.disabled(), which masks everything
-    else; this only lifts the exemptions."""
+    Those two mechanisms otherwise have no off state, leaving a numerics test no way
+    to obtain stock aten values. Not a user knob: masking an unconditional override
+    changes what the op computes. Combine with python_native.<dsl>.disabled(), which
+    masks everything else; this only lifts the exemptions."""
     from torch._native.registry import _set_mask_unconditional, _unconditional_is_masked
 
-    # Read both previous values BEFORE mutating either: setting one and then
-    # failing to read the other would leave the mask latched on for the rest
-    # of the process, silently masking unconditional overrides everywhere.
+    # Read both previous values before mutating either, or a failure between the
+    # two leaves the mask latched on for the rest of the process.
     previous_jit = _unconditional_is_masked()
     previous_aot = torch._C._get_native_aot_unconditional_masked()
     try:
