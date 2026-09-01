@@ -921,6 +921,25 @@ class TestTorchDlPack(TestCase):
         # Verify they're on different devices
         self.assertNotEqual(t0.device, t1.device)
 
+    @skipMeta
+    @onlyOn(["xpu", "cuda"])
+    @skipIfTorchDynamo(
+        "ReadOnlyTensorWrapper is eager-only; __dlpack__ unsupported in dynamo"
+    )
+    def test_read_only_wrapper_export_preserves_cow(self, device):
+        x = make_tensor((8,), device=device, dtype=torch.float32)
+        cow = x._lazy_clone()
+        self.assertTrue(torch._C._is_cow_tensor(cow))
+        addr = cow.const_data_ptr()
+
+        back = from_dlpack(ReadOnlyTensorWrapper(cow))
+
+        self.assertEqual(back.device, x.device)
+        self.assertEqual(back.data_ptr(), addr)
+        self.assertEqual(back, x)
+        self.assertTrue(torch._C._is_cow_tensor(cow))
+        self.assertEqual(cow.const_data_ptr(), addr)
+
 
 instantiate_device_type_tests(
     TestTorchDlPack, globals(), allow_mps=True, allow_xpu=True
