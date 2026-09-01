@@ -2816,7 +2816,9 @@ class TestSourceCommitOrdering(unittest.TestCase):
         # first makes that state read as "not generated yet" instead.
         order = []
         real = gen_aot_lib._write_atomic
-        state = {}
+        # Annotated: pyrefly types an unannotated {} as Unknown, and indexing it gives
+        # `Unknown | None`, which assertIn's `container` parameter refuses.
+        state: dict[str, str] = {}
 
         with tempfile.TemporaryDirectory() as art, tempfile.TemporaryDirectory() as ops:
             self._tree(art, "fakeop", SIDECAR["prefix"])
@@ -3291,6 +3293,24 @@ class TestEmittedCMake(unittest.TestCase):
         )
         with open(path) as f:
             return f.read()
+
+    def test_the_blocks_are_separated_by_one_blank_line(self):
+        # The layout lives in the JOIN, not in the templates: gluing the blocks
+        # together still emits valid CMake, so nothing else here would notice. One
+        # blank line each way -- none reads as a wall of directives, and two drift
+        # apart as blocks are added.
+        with tempfile.TemporaryDirectory() as d:
+            emitted = self._emit(d, dsl=os.path.join(d, "libdsl.a"))
+        for boundary in (
+            "endif()\n\n# Linux only",
+            "endif()\n\n# Re-run configure",
+            'generated source(s)")\n\nset_source_files_properties(',
+            "EXTERNAL_OBJECT TRUE)\n\ntarget_sources(",
+            ")\n\n# whole-archive is NOT needed",
+        ):
+            with self.subTest(boundary=boundary.splitlines()[-1]):
+                self.assertIn(boundary, emitted)
+        self.assertNotIn("\n\n\n", emitted)
 
     def test_a_non_linux_configure_embeds_nothing(self):
         # The embed is GNU-linker specific and stage 2 refuses to run off Linux, so
