@@ -2321,8 +2321,8 @@ class triton:
         == "1"
     )
 
-    # Fuse staged reduction pipelines, including dependent cross-axis reductions
-    # and lane-resolution pointwise epilogues.
+    # Fuse staged reduction pipelines, including block reductions and
+    # lane-resolution pointwise epilogues.
     nested_reduction: bool = Config(
         justknob="pytorch/inductor:nested_reduction",
         env_name_force="TORCHINDUCTOR_NESTED_REDUCTION",
