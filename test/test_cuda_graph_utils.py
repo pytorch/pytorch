@@ -105,9 +105,7 @@ class TestMarkKernels(TestCase):
         # Annotations are enabled per-capture via torch.cuda.graph(..,
         # enable_annotations=True); there is no global toggle.
         clear_kernel_annotations()
-
-    def tearDown(self):
-        clear_kernel_annotations()
+        self.addCleanup(clear_kernel_annotations)
 
     def _count_phases(self, name):
         """Count (forward, backward) annotations recorded under ``name``."""

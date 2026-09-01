@@ -5040,6 +5040,42 @@ exit(2)
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    def test_graph_make_graphed_callables_freed_by_refcount(self):
+        # Dropping a graphed callable must free its CUDAGraphs right there rather than
+        # leaving them for the cyclic collector: freeing one runs cudaGraphDestroy and
+        # releasePool, which are illegal while some unrelated stream is capturing, and
+        # the collector picks its own moment to run.
+        def live_graphs():
+            return sum(
+                1 for o in gc.get_objects() if isinstance(o, torch.cuda.CUDAGraph)
+            )
+
+        def graph_and_drop(as_module):
+            # Everything the callable owns goes out of scope when this returns.
+            module = torch.nn.Linear(8, 8, device="cuda")
+            x = torch.randn(4, 8, device="cuda", requires_grad=True)
+            target = module if as_module else (lambda t: module(t))
+            torch.cuda.make_graphed_callables(target, (x,), num_warmup_iters=3)
+
+        for as_module in (True, False):
+            gc.collect()
+            before = live_graphs()
+            gc.disable()
+            try:
+                graph_and_drop(as_module)
+                self.assertEqual(
+                    live_graphs() - before,
+                    0,
+                    f"graphed callable (as_module={as_module}) left CUDAGraphs "
+                    "reachable only through a reference cycle",
+                )
+            finally:
+                gc.enable()
+                gc.collect()
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     def test_graph_make_graphed_callables_same_pool(self):
         torch.manual_seed(5)
         torch.cuda.manual_seed(5)
