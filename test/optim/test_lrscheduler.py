@@ -83,14 +83,19 @@ class TestLRScheduler(TestCase):
         def step(self, epoch=None):
             super().step(epoch)
 
-    class LegacyUpdateScheduler(LRScheduler):
-        """A third-party scheduler overriding the previous private hook."""
+    class MetricsUpdateScheduler(LRScheduler):
+        """A scheduler using the metrics-aware private update hook."""
+
+        def __init__(self, optimizer):
+            self.metrics = []
+            super().__init__(optimizer)
 
         def get_lr(self):
             return [group["lr"] for group in self.optimizer.param_groups]
 
-        def _update_lr(self, epoch=None):
-            super()._update_lr(epoch)
+        def _update_lr(self, epoch=None, *, metrics=None):
+            self.metrics.append(metrics)
+            super()._update_lr(epoch, metrics=metrics)
 
     exact_dtype = True
 
@@ -747,12 +752,12 @@ class TestLRScheduler(TestCase):
         with self.assertWarnsRegex(FutureWarning, "PlateauLR"):
             ReduceLROnPlateau(self.opt)
 
-    def test_lrscheduler_metrics_supports_legacy_update_hook(self):
-        scheduler = self.LegacyUpdateScheduler(self.opt)
+    def test_lrscheduler_forwards_metrics_to_update_hook(self):
+        scheduler = self.MetricsUpdateScheduler(self.opt)
         self.opt.step()
         scheduler.step(metrics=1.0)
 
-        self.assertEqual(scheduler.last_epoch, 1)
+        self.assertEqual(scheduler.metrics, [None, 1.0])
 
     # PlateauLR is ReduceLROnPlateau's composable replacement (properly
     # implements get_lr(), so it can be used inside SequentialLR/
@@ -1277,16 +1282,14 @@ class TestLRScheduler(TestCase):
         self.opt.step()
         sequential.step(metrics=1.0)
 
-        legacy_update = ChainedScheduler(
-            [self.LegacyUpdateScheduler(self.opt)], optimizer=self.opt
-        )
-        nested_sequential = SequentialLR(
-            self.opt,
-            schedulers=[ConstantLR(self.opt), legacy_update],
-            milestones=[1],
-        )
+    def test_chained_scheduler_forwards_metrics_to_update_hook(self):
+        child = self.MetricsUpdateScheduler(self.opt)
+        scheduler = ChainedScheduler([child], optimizer=self.opt)
+
         self.opt.step()
-        nested_sequential.step(metrics=1.0)
+        scheduler.step(metrics=1.0)
+
+        self.assertEqual(child.metrics, [None, 1.0])
 
     def test_chained_scheduler_supports_duck_typed_children(self):
         class DuckTypedScheduler:

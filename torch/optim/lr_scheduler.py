@@ -3,6 +3,7 @@ r"""Learning Rate Scheduler."""
 
 from __future__ import annotations
 
+import inspect
 import math
 import types
 import warnings
@@ -116,11 +117,6 @@ class LRScheduler:
 
     _get_lr_called_within_step: bool = False
     _is_initial: bool = False
-    # Composite schedulers use this temporary capability marker to preserve
-    # compatibility with third-party schedulers that override step() without
-    # accepting metrics.
-    _requires_metrics: bool = False
-
     def __init__(
         self,
         optimizer: Optimizer,
@@ -255,7 +251,7 @@ class LRScheduler:
             metrics (SupportsFloat, optional): Accepted for signature parity
                 with :class:`PlateauLR` and the composite schedulers
                 (:class:`SequentialLR`, :class:`ChainedScheduler`); ignored
-                unless a subclass sets ``_requires_metrics``.
+                by schedulers that do not use it.
 
         .. note::
             Call this method after calling the optimizer's
@@ -290,10 +286,7 @@ class LRScheduler:
         self._step_count += 1
         if epoch is not None:
             warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning, stacklevel=2)
-        if self._requires_metrics:
-            self._update_lr(epoch, metrics=metrics)
-        else:
-            self._update_lr(epoch)
+        self._update_lr(epoch, metrics=metrics)
 
     def _update_lr(
         self, epoch: int | None = None, *, metrics: SupportsFloat | None = None
@@ -1145,8 +1138,6 @@ class SequentialLR(LRScheduler):
     .. image:: ../scripts/lr_scheduler_images/SequentialLR.png
     """
 
-    _requires_metrics: bool = True
-
     def __init__(
         self,
         optimizer: Optimizer,
@@ -1184,6 +1175,10 @@ class SequentialLR(LRScheduler):
                 f"number of milestones to be equal to {len(milestones)}"
             )
         self._schedulers = schedulers
+        self._schedulers_accept_metrics = [
+            "metrics" in inspect.signature(type(scheduler).step).parameters
+            for scheduler in schedulers
+        ]
         self._milestones = milestones
         self.last_epoch = last_epoch + 1
         self.optimizer = optimizer
@@ -1230,15 +1225,9 @@ class SequentialLR(LRScheduler):
         idx = bisect_right(self._milestones, self.last_epoch)
         scheduler = self._schedulers[idx]
         if idx > 0 and self._milestones[idx - 1] == self.last_epoch:
-            if getattr(scheduler, "_requires_metrics", False):
-                scheduler._update_lr(0, metrics=metrics)
-            else:
-                scheduler._update_lr(0)
+            scheduler._update_lr(0, metrics=metrics)
         else:
-            if getattr(scheduler, "_requires_metrics", False):
-                scheduler._update_lr(epoch, metrics=metrics)
-            else:
-                scheduler._update_lr(epoch)
+            scheduler._update_lr(epoch, metrics=metrics)
 
         self._last_lr = scheduler.get_last_lr()
 
@@ -1247,20 +1236,15 @@ class SequentialLR(LRScheduler):
 
         Args:
             metrics (SupportsFloat, optional): Forwarded to the currently
-                active sub-scheduler when it requires a metric. Only
-                :class:`PlateauLR` among the built-in schedulers makes use of
-                it.
+                active sub-scheduler when its ``step`` method accepts it.
         """
         self.last_epoch += 1
         idx = bisect_right(self._milestones, self.last_epoch)
         scheduler = self._schedulers[idx]
         if idx > 0 and self._milestones[idx - 1] == self.last_epoch:
-            if getattr(scheduler, "_requires_metrics", False):
-                scheduler._update_lr(0, metrics=metrics)
-            else:
-                scheduler._update_lr(0)
+            scheduler._update_lr(0, metrics=metrics)
         else:
-            if getattr(scheduler, "_requires_metrics", False):
+            if self._schedulers_accept_metrics[idx]:
                 scheduler.step(metrics=metrics)
             else:
                 scheduler.step()
@@ -1278,7 +1262,7 @@ class SequentialLR(LRScheduler):
         state_dict = {
             key: value
             for key, value in self.__dict__.items()
-            if key not in ("optimizer", "_schedulers")
+            if key not in ("optimizer", "_schedulers", "_schedulers_accept_metrics")
         }
         state_dict["_schedulers"] = [None] * len(self._schedulers)
 
@@ -1590,8 +1574,6 @@ class ChainedScheduler(LRScheduler):
     .. image:: ../scripts/lr_scheduler_images/ChainedScheduler.png
     """
 
-    _requires_metrics: bool = True
-
     def __init__(
         self, schedulers: Sequence[LRScheduler], optimizer: Optimizer | None = None
     ) -> None:
@@ -1619,6 +1601,10 @@ class ChainedScheduler(LRScheduler):
                     f"which is different from {optimizer.__class__.__name__}."
                 )
         self._schedulers = schedulers
+        self._schedulers_accept_metrics = [
+            "metrics" in inspect.signature(type(scheduler).step).parameters
+            for scheduler in schedulers
+        ]
         self.optimizer = optimizer
         self._last_lr = _param_groups_val_list(self._schedulers[-1].optimizer, "lr")
 
@@ -1640,10 +1626,7 @@ class ChainedScheduler(LRScheduler):
         self, epoch: int | None = None, *, metrics: SupportsFloat | None = None
     ) -> None:
         for scheduler in self._schedulers:
-            if getattr(scheduler, "_requires_metrics", False):
-                scheduler._update_lr(epoch, metrics=metrics)
-            else:
-                scheduler._update_lr(epoch)
+            scheduler._update_lr(epoch, metrics=metrics)
         self._last_lr = _param_groups_val_list(self._schedulers[-1].optimizer, "lr")
 
     def step(self, *, metrics: SupportsFloat | None = None) -> None:
@@ -1651,11 +1634,12 @@ class ChainedScheduler(LRScheduler):
 
         Args:
             metrics (SupportsFloat, optional): Forwarded to every contained
-                scheduler that requires a metric. Only :class:`PlateauLR`
-                among the built-in schedulers makes use of it.
+                scheduler whose ``step`` method accepts it.
         """
-        for scheduler in self._schedulers:
-            if getattr(scheduler, "_requires_metrics", False):
+        for scheduler, accepts_metrics in zip(
+            self._schedulers, self._schedulers_accept_metrics, strict=True
+        ):
+            if accepts_metrics:
                 scheduler.step(metrics=metrics)
             else:
                 scheduler.step()
@@ -1672,7 +1656,7 @@ class ChainedScheduler(LRScheduler):
         state_dict = {
             key: value
             for key, value in self.__dict__.items()
-            if key not in ("optimizer", "_schedulers")
+            if key not in ("optimizer", "_schedulers", "_schedulers_accept_metrics")
         }
         state_dict["_schedulers"] = [None] * len(self._schedulers)
 
@@ -1996,8 +1980,6 @@ class PlateauLR(LRScheduler):
         >>>     val_loss = validate(...)
         >>>     scheduler.step(metrics=val_loss)
     """
-
-    _requires_metrics: bool = True
 
     def __init__(
         self,
