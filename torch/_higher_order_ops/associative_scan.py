@@ -577,7 +577,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         gl_ys        = [gl_ys1, gl_ys2, gl_ys3, gl_ys4]
 
         g_ys is recovered by flipping, scanning left-to-right, and flipping back:
-            leaves_rev = [bwys_aligned.flip([0]), gl_ys.flip([0])]
+            leaves_rev = (bwys_aligned.flip([0]), gl_ys.flip([0]))
             result_rev = associative_scan_op(g_ys_combine_fn_flat, leaves_rev, ())
             g_ys = result_rev[1].flip([0])
 
@@ -634,7 +634,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
 
             5.2) Flip, scan left-to-right, and flip back
 
-                leaves_rev = [bwys_aligned.flip([0]), gl_ys.flip([0])]
+                leaves_rev = (bwys_aligned.flip([0]), gl_ys.flip([0]))
                 result_rev = associative_scan_op(g_ys_combine_fn_flat, leaves_rev, ())
                 g_ys = result_rev[1].flip([0])
 
@@ -824,9 +824,12 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             # 5.2) Flip, scan left-to-right, and flip back to get g_ys. We call the raw
             # associative_scan_op HOP (not generic_associative_scan) so this scan is
             # Triton-lowerable under compiled autograd.
+            # xs is passed as a tuple to match the tuple returned by
+            # g_ys_combine_fn_flat: dynamo requires the treespec of xs and of the
+            # combine_fn output to be identical, and a list does not equal a tuple.
             result_rev = associative_scan_op(
                 g_ys_combine_fn_flat,
-                [bwys_aligned.flip([0]), gl_ys.flip([0])],
+                (bwys_aligned.flip([0]), gl_ys.flip([0])),
                 (),
             )
             g_ys = result_rev[1].flip([0])
