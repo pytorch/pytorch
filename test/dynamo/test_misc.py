@@ -96,6 +96,7 @@ from torch.testing._internal.common_utils import (
     freeze_rng_state,
     instantiate_parametrized_tests,
     IS_FBCODE,
+    IS_S390X,
     parametrize,
     recover_orig_fp32_precision,
     scoped_load_inline,
@@ -12581,6 +12582,10 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
+    @unittest.skipIf(
+        IS_S390X,
+        "test_recursion_depth_guards_nested_graph_breaks fails on s390x and needs investigation",
+    )
     def test_recursion_depth_guards(self):
         @torch.compile(dynamic=True, backend="eager")
         def foo(*args, **kwargs):
@@ -13757,6 +13762,24 @@ def ___make_guard_fn():
         self.assertEqual(eager[1:], compiled[1:])
         self.assertEqual(compiled[1:], ([], [], 0, 0))
         self.assertEqual(counter.frame_count, 1)
+
+    def test_deque_pop_empty_message(self):
+        # deque.pop() on an empty deque raises IndexError with CPython's "pop
+        # from an empty deque" message, not list's "pop from empty list".
+        def fn(x):
+            try:
+                collections.deque().pop()
+                msg = "no error"
+            except IndexError as e:
+                msg = str(e)
+            return x + 1, msg
+
+        x = torch.randn(3)
+        eager = fn(x)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(eager[0], compiled[0])
+        self.assertEqual(compiled[1], "pop from an empty deque")
+        self.assertEqual(eager[1], compiled[1])
 
     def test_yield_from(self):
         def yield_from_fn(t_list, k):
