@@ -6177,10 +6177,6 @@ if HAS_CUDA_AND_TRITON:
                         "def triton_poi_fused_add_", 1, exactly=True
                     ).run(code[0])
 
-        @unittest.skipIf(
-            IS_LINUX or TEST_WITH_SLOW,
-            "https://github.com/pytorch/pytorch/issues/176144",
-        )
         @unittest.skipUnless(
             config.graph_partition, "Test requires graph_partition to be enabled"
         )
@@ -6192,12 +6188,12 @@ if HAS_CUDA_AND_TRITON:
             def foo(x, y):
                 # partition 1
                 output1 = torch.empty_like(x)
-                add_kernel[(4,)](x, y, output1, n_elements=128, BLOCK_SIZE=16)
+                add_kernel[(8,)](x, y, output1, n_elements=128, BLOCK_SIZE=16)
                 output1_cpu = output1.cpu() + 1
                 # partition 2 should reuse the user-defined kernel
                 x2 = output1_cpu.to("cuda")
                 output2 = torch.empty_like(x)
-                add_kernel[(4,)](x2, y, output2, n_elements=128, BLOCK_SIZE=16)
+                add_kernel[(8,)](x2, y, output2, n_elements=128, BLOCK_SIZE=16)
                 return output1, output2
 
             compiled_foo = torch.compile(foo)
