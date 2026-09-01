@@ -30,6 +30,8 @@ class NVGemmReductionCapabilities:
     def supports_contract(
         self, contract: GemmReductionPlan | GemmReductionArguments
     ) -> bool:
+        if contract.reduction_type is None:
+            return False
         if contract.group <= 1 or contract.group & (contract.group - 1):
             return False
         if (

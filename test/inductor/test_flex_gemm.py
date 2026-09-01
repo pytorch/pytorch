@@ -541,7 +541,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             if node.target is inductor_prims.prepare_softmax_online
         )
         self.assertIn(prepare_softmax, analysis.matches)
-        self.assertIsNone(analysis.matches[prepare_softmax].reduction_type)
+        self.assertEqual(analysis.matches[prepare_softmax].reduction_type, "sum")
 
     def test_epilogue_graph_normalizes_selected_fx_nodes(self):
         import operator
@@ -2219,6 +2219,10 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         from torch._inductor.kernel.flex_gemm.template import (
             FlexGemmEpilogueLocalReduceConfig,
         )
+        from torch._inductor.kernel.gemm_epilogue import (
+            GEMM_REDUCTION_IDENTITY_SOURCE,
+            GemmReductionPlan,
+        )
 
         callbacks = FlexGemmLocalReduceCallbacks(
             lambda lhs, rhs: lhs, lambda value: value
@@ -2228,7 +2232,7 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         feed_plan = FlexGemmRuntimeLocalReducePlan(
             geometry, callbacks=callbacks, feeds_main=True
         )
-        shared_plan = FlexGemmRuntimeLocalReducePlan(
+        shared_runtime_plan = FlexGemmRuntimeLocalReducePlan(
             geometry,
             out=out,
             callbacks=callbacks,
@@ -2238,19 +2242,39 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             geometry, out=out, callbacks=callbacks
         )
         self.assertTrue(feed_plan.feeds_main)
-        self.assertTrue(shared_plan.feeds_main)
+        self.assertTrue(shared_runtime_plan.feeds_main)
         self.assertFalse(store_plan.feeds_main)
-        self.assertTrue(
-            FlexGemmEpilogueLocalReduceConfig(geometry, feeds_main=True).feeds_main
+        shared_reduction_plan = GemmReductionPlan(
+            reduction_output="reduced",
+            group=8,
+            axis=0,
+            reduction_type="sum",
+            source_type="identity",
+            source_fn=GEMM_REDUCTION_IDENTITY_SOURCE,
+            primary_output="output",
+            feeds_main=True,
+            feed_output="output",
         )
-        self.assertTrue(
-            FlexGemmEpilogueLocalReduceConfig(
-                geometry, out_index=0, feeds_main=True
-            ).feeds_main
+        feed_template_plan = FlexGemmEpilogueLocalReduceConfig.from_plan(
+            shared_reduction_plan, None
         )
-        self.assertFalse(
-            FlexGemmEpilogueLocalReduceConfig(geometry, out_index=0).feeds_main
+        shared_template_plan = FlexGemmEpilogueLocalReduceConfig.from_plan(
+            shared_reduction_plan, 0
         )
+        store_template_plan = FlexGemmEpilogueLocalReduceConfig.from_plan(
+            dataclasses.replace(
+                shared_reduction_plan, feeds_main=False, feed_output=None
+            ),
+            0,
+        )
+        self.assertIsNotNone(feed_template_plan)
+        self.assertIsNotNone(shared_template_plan)
+        self.assertIsNotNone(store_template_plan)
+        self.assertIsNone(FlexGemmEpilogueLocalReduceConfig.from_plan(None, None))
+        self.assertIs(feed_template_plan.plan, shared_reduction_plan)
+        self.assertTrue(feed_template_plan.plan.feeds_main)
+        self.assertTrue(shared_template_plan.plan.feeds_main)
+        self.assertFalse(store_template_plan.plan.feeds_main)
 
         feed_kwargs = local_reduce_gemm_act_kwargs(
             feed_plan, None, ("combine", "finalize")
@@ -2258,7 +2282,7 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         self.assertTrue(feed_kwargs["local_reduce_feeds_main"])
         self.assertFalse(feed_kwargs["tensor_epilogue_returns_local_reduce"])
         shared_kwargs = local_reduce_gemm_act_kwargs(
-            shared_plan, out, ("combine", "finalize")
+            shared_runtime_plan, out, ("combine", "finalize")
         )
         self.assertTrue(shared_kwargs["local_reduce_feeds_main"])
         self.assertTrue(shared_kwargs["tensor_epilogue_returns_local_reduce"])
@@ -2304,7 +2328,7 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         node = graph.placeholder("x")
         aux = graph.placeholder("aux")
         geometry = FlexGemmLocalReduceGeometry(8, 0)
-        match = FlexGemmLocalReduceMatch(aux, geometry)
+        match = FlexGemmLocalReduceMatch(value_node=aux, geometry=geometry)
         analysis = FlexGemmLocalReduceAnalysis(
             GemmEpilogueGraph(dependencies={}, normalized_nodes={})
         )
@@ -2313,7 +2337,7 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         with self.assertRaisesRegex(RuntimeError, "output nodes"):
             FlexGemmOutputPlan(node, (object(),))
         with self.assertRaisesRegex(RuntimeError, "tensor nodes"):
-            FlexGemmLocalReduceMatch(object(), geometry)
+            FlexGemmLocalReduceMatch(value_node=object(), geometry=geometry)
         with self.assertRaisesRegex(RuntimeError, "output plans"):
             FlexGemmOutputLocalReducePlan(object())
         with self.assertRaisesRegex(RuntimeError, "output plans"):
@@ -2355,14 +2379,17 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             FlexGemmOutputLocalReducePlan,
             FlexGemmOutputPlan,
         )
-        from torch._inductor.kernel.gemm_epilogue import GemmReductionPlan
+        from torch._inductor.kernel.gemm_epilogue import (
+            GEMM_REDUCTION_IDENTITY_SOURCE,
+            GemmReductionPlan,
+        )
 
         graph = torch.fx.Graph()
         output = graph.placeholder("output")
         reduced = graph.placeholder("reduced")
         match = FlexGemmLocalReduceMatch(
-            reduced,
-            FlexGemmLocalReduceGeometry(8, 0),
+            value_node=reduced,
+            geometry=FlexGemmLocalReduceGeometry(8, 0),
             reduction_type="max",
         )
         outputs = FlexGemmOutputPlan(
@@ -2380,16 +2407,32 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         self.assertEqual(
             outputs.reduction_plan,
             GemmReductionPlan(
-                "reduced",
-                8,
-                0,
-                "max",
-                "identity",
-                "output",
+                reduction_output="reduced",
+                group=8,
+                axis=0,
+                reduction_type="max",
+                source_type="identity",
+                source_fn=GEMM_REDUCTION_IDENTITY_SOURCE,
+                primary_output="output",
                 feeds_main=True,
                 feed_output="output",
             ),
         )
+
+        generated = FlexGemmOutputPlan(
+            output,
+            local_reduce=FlexGemmOutputLocalReducePlan(
+                FlexGemmLocalReduceMatch(
+                    value_node=reduced,
+                    geometry=FlexGemmLocalReduceGeometry(8, 0),
+                ),
+                store=FlexGemmLocalReduceStore(node=reduced, aux_index=0),
+            ),
+        )
+        generated_plan = generated.reduction_plan
+        self.assertIsNotNone(generated_plan)
+        self.assertEqual(generated_plan.reduction_type, "sum")
+        self.assertEqual(generated_plan.source_fn, GEMM_REDUCTION_IDENTITY_SOURCE)
 
     def test_ordered_outputs_restore_local_reduce_position(self):
         from torch._inductor.kernel.flex_gemm.lowering import flex_gemm_ordered_outputs
