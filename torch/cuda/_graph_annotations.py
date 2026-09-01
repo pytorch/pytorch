@@ -72,6 +72,12 @@ except ImportError:
     _cuda_driver = None  # type: ignore[assignment]
     _cuda_runtime = None  # type: ignore[assignment]
 
+if not _HAS_CUDA_BINDINGS:
+    # This module imports the bindings itself, so keep it in step with the shared gate,
+    # which also reports them absent on ROCm -- where they import but cannot work.
+    _cuda_driver = None  # type: ignore[assignment]
+    _cuda_runtime = None  # type: ignore[assignment]
+
 
 logger = getLogger(__name__)
 
@@ -220,9 +226,13 @@ def maybe_stamp_capture_root(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
 def _probe_tools_id() -> bool:
     """Probe whether cudaGraphNodeGetToolsId is supported by the driver.
 
-    Calls with a null node: cudaErrorInvalidValue means the API exists
-    in the driver (good), cudaErrorCallRequiresNewerDriver means it
-    does not (bad).
+    Calls with a null node and accepts only the errors that prove the API is
+    really there: cudaErrorInvalidValue, i.e. the driver got as far as rejecting
+    the argument. Every other status means we cannot use it -- an old NVIDIA
+    driver answers cudaErrorCallRequiresNewerDriver, while an environment with no
+    CUDA driver behind the bindings at all (ROCm, where cuda-bindings can still
+    import) answers cudaErrorInsufficientDriver. Allowlisting rather than
+    denylisting keeps a new failure mode from reading as "supported".
     """
     if not hasattr(_cuda_runtime, "cudaGraphNodeGetToolsId"):
         # API is missing from cuda-bindings - likely version too old
@@ -242,12 +252,16 @@ def _probe_tools_id() -> bool:
     )  # pyrefly: ignore[missing-attribute]
     if (
         err
-        == _cuda_runtime.cudaError_t.cudaErrorCallRequiresNewerDriver  # pyrefly: ignore[missing-attribute]
+        not in (
+            _cuda_runtime.cudaError_t.cudaSuccess,  # pyrefly: ignore[missing-attribute]
+            _cuda_runtime.cudaError_t.cudaErrorInvalidValue,  # pyrefly: ignore[missing-attribute]
+        )
     ):
         logger.info(
-            "cudaGraphNodeGetToolsId requires a newer driver "
-            "(missing cuda-compat?); "
-            "CUDA graph kernel annotations will be disabled"
+            "cudaGraphNodeGetToolsId is unusable (%s); it needs a CUDA driver >= 13.1 "
+            "or an equivalent cuda-compat. CUDA graph kernel annotations will be "
+            "disabled",
+            err,
         )
         return False
     return True

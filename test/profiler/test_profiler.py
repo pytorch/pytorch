@@ -4456,6 +4456,12 @@ For a model PR to follow, see: https://github.com/pytorch/pytorch/pull/180100
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+# The exporter recomputes the envelope kineto's C++ writes (device properties, the CUDA
+# driver/runtime versions), and both are NVIDIA-shaped: the driver version comes from
+# cuda-bindings, which cannot work on ROCm, and the property set is the one
+# cudaDeviceProp defines. Nobody has established what equivalence should even mean here,
+# so skip rather than assert something unverified.
+@unittest.skipIf(TEST_WITH_ROCM, "Python chrome-trace export is not validated on ROCm")
 class TestPythonChromeTraceExport(TestCase):
     """Verify that the Python streaming exporter produces traces equivalent
     to the C++ Kineto save() path."""
