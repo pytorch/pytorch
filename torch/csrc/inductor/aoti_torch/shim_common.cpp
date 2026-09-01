@@ -1,6 +1,5 @@
 #include <ATen/native/quantized/cpu/qlinear.h>
 #include <ATen/record_function.h>
-#include <c10/core/DeviceType.h>
 #include <c10/core/DispatchKey.h>
 #include <c10/core/GradMode.h>
 #include <c10/core/Layout.h>
@@ -13,7 +12,6 @@
 #include <torch/csrc/inductor/aoti_torch/mkldnn_tensor.h>
 #include <torch/csrc/inductor/aoti_torch/oss_proxy_executor.h>
 #include <torch/csrc/inductor/aoti_torch/proxy_executor.h>
-#include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/csrc/jit/serialization/pickle.h>

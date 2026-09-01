@@ -165,14 +165,14 @@ TEST_SKIPS = {
     "small_worldsize": TestSkip(73, "Skipped due to small world size."),
     "odd_worldsize": TestSkip(87, "Skipped due to odd world size."),
     "no_cuda": TestSkip(74, "CUDA is not available."),
-    "multi-gpu-1": TestSkip(75, "Need at least 1 CUDA device"),
-    "multi-gpu-2": TestSkip(77, "Need at least 2 CUDA devices"),
-    "multi-gpu-3": TestSkip(80, "Need at least 3 CUDA devices"),
-    "multi-gpu-4": TestSkip(81, "Need at least 4 CUDA devices"),
-    "multi-gpu-5": TestSkip(82, "Need at least 5 CUDA devices"),
-    "multi-gpu-6": TestSkip(83, "Need at least 6 CUDA devices"),
-    "multi-gpu-7": TestSkip(84, "Need at least 7 CUDA devices"),
-    "multi-gpu-8": TestSkip(85, "Need at least 8 CUDA devices"),
+    "multi-device-1": TestSkip(75, "Need at least 1 accelerator device"),
+    "multi-device-2": TestSkip(77, "Need at least 2 accelerator devices"),
+    "multi-device-3": TestSkip(80, "Need at least 3 accelerator devices"),
+    "multi-device-4": TestSkip(81, "Need at least 4 accelerator devices"),
+    "multi-device-5": TestSkip(82, "Need at least 5 accelerator devices"),
+    "multi-device-6": TestSkip(83, "Need at least 6 accelerator devices"),
+    "multi-device-7": TestSkip(84, "Need at least 7 accelerator devices"),
+    "multi-device-8": TestSkip(85, "Need at least 8 accelerator devices"),
     "nccl": TestSkip(76, "c10d not compiled with NCCL support"),
     "skipIfRocm": TestSkip(78, "Test skipped for ROCm"),
     "no_peer_access": TestSkip(79, "Test skipped because no GPU peer access"),
@@ -211,20 +211,16 @@ def requires_ddp_rank(device):
 
 
 def skip_if_no_gpu(func):
-    """Skips if the world size exceeds the number of GPUs, ensuring that if the
-    test is run, each rank has its own GPU via ``torch.cuda.device(rank)``."""
+    """Skips if the world size exceeds the number of devices, ensuring that if the
+    test is run, each rank has its own device via``torch.accelerator.set_device_index(rank)``."""
 
     @wraps(func)
     def wrapper(*args, **kwargs):
-        if not (TEST_CUDA or TEST_HPU or TEST_XPU):
-            sys.exit(TEST_SKIPS["no_cuda"].exit_code)
+        if not torch.accelerator.is_available():
+            sys.exit(TEST_SKIPS["no_accelerator"].exit_code)
         world_size = int(os.environ["WORLD_SIZE"])
-        if TEST_CUDA and torch.cuda.device_count() < world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
-        if TEST_HPU and torch.hpu.device_count() < world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
-        if TEST_XPU and torch.xpu.device_count() < world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
+        if torch.accelerator.device_count() < world_size:
+            sys.exit(TEST_SKIPS[f"multi-device-{world_size}"].exit_code)
 
         return func(*args, **kwargs)
 
@@ -264,7 +260,7 @@ def require_n_gpus_for_nccl_backend(n, backend):
         @wraps(func)
         def wrapper(*args, **kwargs):
             if backend == "nccl" and torch.cuda.device_count() < n:
-                sys.exit(TEST_SKIPS[f"multi-gpu-{n}"].exit_code)
+                sys.exit(TEST_SKIPS[f"multi-device-{n}"].exit_code)
             else:
                 return func(*args, **kwargs)
 
@@ -290,13 +286,7 @@ def import_transformers_or_skip():
 
 
 def at_least_x_gpu(x):
-    if TEST_CUDA and torch.cuda.device_count() >= x:
-        return True
-    if TEST_HPU and torch.hpu.device_count() >= x:
-        return True
-    if TEST_XPU and torch.xpu.device_count() >= x:
-        return True
-    return False
+    return torch.accelerator.is_available() and torch.accelerator.device_count() >= x
 
 
 def _maybe_handle_skip_if_lt_x_gpu(args, msg) -> bool:
@@ -318,15 +308,14 @@ def skip_if_lt_x_gpu(x, *, allow_cpu=False):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            if torch.cuda.is_available() and torch.cuda.device_count() >= x:
+            if (
+                torch.accelerator.is_available()
+                and torch.accelerator.device_count() >= x
+            ):
                 return func(*args, **kwargs)
-            if TEST_HPU and torch.hpu.device_count() >= x:
+            if allow_cpu and not torch.accelerator.is_available():
                 return func(*args, **kwargs)
-            if TEST_XPU and torch.xpu.device_count() >= x:
-                return func(*args, **kwargs)
-            if allow_cpu and not (torch.cuda.is_available() or TEST_HPU or TEST_XPU):
-                return func(*args, **kwargs)
-            test_skip = TEST_SKIPS[f"multi-gpu-{x}"]
+            test_skip = TEST_SKIPS[f"multi-device-{x}"]
             if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
                 sys.exit(test_skip.exit_code)
 
@@ -385,7 +374,7 @@ def nccl_skip_if_lt_x_gpu(backend, x):
                 return func(*args, **kwargs)
             if torch.cuda.is_available() and torch.cuda.device_count() >= x:
                 return func(*args, **kwargs)
-            test_skip = TEST_SKIPS[f"multi-gpu-{x}"]
+            test_skip = TEST_SKIPS[f"multi-device-{x}"]
             if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
                 sys.exit(test_skip.exit_code)
 
@@ -623,15 +612,25 @@ def skip_if_rocm_arch_multiprocess(arch: tuple[str, ...]):
     return decorator
 
 
+def _rocm_version_tuple():
+    """ROCm release version as an int tuple.
+
+    torch.version.hip is the HIP runtime version, which tracks the ROCm release
+    version on shipped ROCm but not on preview builds, so it is only a fallback
+    for builds whose torch/version.py never recorded torch.version.rocm.
+    """
+    rocm_version = str(getattr(torch.version, "rocm", None) or torch.version.hip)
+    rocm_version = rocm_version.split("-", maxsplit=1)[0]  # ignore git sha
+    return tuple(int(x) for x in rocm_version.split("."))
+
+
 def skip_if_rocm_ver_lessthan_multiprocess(version=None):
     """Skips a test for ROCm based on ROCm ver - multiprocess UTs"""
 
     def decorator(func):
         reason = None
         if TEST_WITH_ROCM:
-            rocm_version = str(torch.version.hip)
-            rocm_version = rocm_version.split("-", maxsplit=1)[0]  # ignore git sha
-            rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
+            rocm_version_tuple = _rocm_version_tuple()
             if (
                 rocm_version_tuple is None
                 or version is None
@@ -650,9 +649,7 @@ def skip_if_rocm_ver_atleast_multiprocess(version=None):
     def decorator(func):
         reason = None
         if TEST_WITH_ROCM:
-            rocm_version = str(torch.version.hip)
-            rocm_version = rocm_version.split("-", maxsplit=1)[0]  # ignore git sha
-            rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
+            rocm_version_tuple = _rocm_version_tuple()
             if version is not None and rocm_version_tuple >= tuple(version):
                 reason = f"skip_if_rocm_ver_atleast_multiprocess: known failure on ROCm {rocm_version_tuple} (>= {version})"
 
@@ -807,11 +804,7 @@ def init_multigpu_helper(world_size: int, backend: str):
     On a single node, all visible GPUs are evenly
     divided to subsets, each process only uses a subset.
     """
-    nGPUs = torch.cuda.device_count()
-    if TEST_HPU:
-        nGPUs = torch.hpu.device_count()
-    if TEST_XPU:
-        nGPUs = torch.xpu.device_count()
+    nGPUs = torch.accelerator.device_count()
     visible_devices = range(nGPUs)
 
     # If rank is less than or equal to number of available GPU's
@@ -1312,18 +1305,13 @@ class DistributedTestBase(MultiProcessTestCase):
         else:
             return "gloo"
 
-    def create_pg(self, device, world_size=None):
+    def create_pg(self, device, world_size=None, backend=None):
         if world_size is None:
             world_size = self.world_size
+        backend = backend or self.backend(device)
         num_visible_devices = torch.get_device_module(device).device_count()
         store = torch.distributed.FileStore(self.file_name, num_visible_devices)
-        torch.distributed.init_process_group(
-            backend=self.backend(device),
-            world_size=world_size,
-            rank=self.rank,
-            store=store,
-        )
-        if "nccl" in self.backend(device) or "xccl" in self.backend(device):
+        if "nccl" in backend or "xccl" in backend:
             accelerator = torch.accelerator.current_accelerator()
             if accelerator:
                 device_type = accelerator.type
@@ -1332,9 +1320,15 @@ class DistributedTestBase(MultiProcessTestCase):
                 torch.accelerator.set_device_index(device)
             else:
                 raise RuntimeError(
-                    f"Expected to find an accelerator when initializing process group"
-                    f" with {self.backend(device)} backend, but got None"
+                    "Expected to find an accelerator when initializing process group"
+                    f" with {backend} backend, but got None"
                 )
+        torch.distributed.init_process_group(
+            backend=backend,
+            world_size=world_size,
+            rank=self.rank,
+            store=store,
+        )
         return torch.distributed.distributed_c10d._get_default_group()
 
     def rank_to_device(self, device):
@@ -1928,6 +1922,11 @@ class MultiProcContinuousTest(TestCase):
         cls.world_size = world_size
 
         # Initialize the process group
+        # Some tests override _init_pg and oversubscribe before per-test skips run.
+        backend = cls.backend_str()
+        is_nccl = backend in ("nccl", "nccl2", "nccl-lazy")
+        if is_nccl and world_size > torch.accelerator.device_count():
+            os.environ["NCCL_MULTI_RANK_GPU_ENABLE"] = "1"
         init_skip_reason = None
         try:
             cls._init_pg(rank, world_size, rdvz_file)
@@ -2097,18 +2096,11 @@ class MultiProcContinuousTest(TestCase):
         # Get world_size (handles both class variable and property)
         cls.world_size = cls._get_world_size(device_type)
 
-        # Check if the specified backend is available before spawning processes
+        # Check if the specified backend is available before spawning processes.
+        # is_backend_available covers OOT/third-party backends too.
         backend = cls.backend_str() if callable(cls.backend_str) else cls.backend_str
-        if backend is not None:
-            backend_checks = {
-                "nccl": c10d.is_nccl_available,
-                "gloo": c10d.is_gloo_available,
-                "mpi": c10d.is_mpi_available,
-                "xccl": c10d.is_xccl_available,
-            }
-            check_fn = backend_checks.get(backend)
-            if check_fn is not None and not check_fn():
-                raise unittest.SkipTest(f"Backend '{backend}' is not available")
+        if backend is not None and not c10d.is_backend_available(backend):
+            raise unittest.SkipTest(f"Backend '{backend}' is not available")
 
         logger.info(
             f"Testing class {cls.__name__} on {cls.world_size} {device_type}"  # noqa: G004
