@@ -10,7 +10,7 @@ import dataclasses
 import hashlib
 import math
 import operator
-from typing import Any
+from typing import Any, cast
 
 from sympy import Max, Min
 
@@ -29,8 +29,13 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     FLEX_GEMM_NESTED_TENSORSSA_LANES_ERROR,
     FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR,
     FLEX_GEMM_OUTPUT_TENSOR_ERROR,
+    flex_gemm_packed_transport,
+    FLEX_GEMM_PACKED_TRANSPORT_CAPTURE_ERROR,
+    FLEX_GEMM_PACKED_TRANSPORT_COMPOSITION_ERROR,
+    FLEX_GEMM_PACKED_TRANSPORT_DTYPE_ERROR,
     FlexGemmGroupedMainOutputTransform,
     FlexGemmLocalReduceGeometry,
+    FlexGemmPackedTransport,
     INDEXED_OUTPUT_STORE_ARG_NAME,
     local_reduce_compressed_shape,
     LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR,
@@ -1657,6 +1662,185 @@ def grouped_main_output_match(
 
 
 @dataclasses.dataclass(frozen=True)
+class FlexGemmPackedTransportPlan:
+    """Bind a logical packed capture and main store to one physical transport."""
+
+    transport: FlexGemmPackedTransport
+    capture: torch.fx.Node
+    capture_view: torch.fx.Node
+    lane_selects: dict[torch.fx.Node, int]
+    output_lanes: tuple[torch.fx.Node, ...]
+    output_pack: torch.fx.Node
+    output_view: torch.fx.Node
+    owned_nodes: tuple[torch.fx.Node, ...]
+
+
+def interleaved_main_store_match(
+    output_view: torch.fx.Node,
+    gemm: torch.fx.Node,
+) -> (
+    tuple[
+        FlexGemmPackedTransport,
+        tuple[torch.fx.Node, ...],
+        torch.fx.Node,
+        tuple[torch.fx.Node, ...],
+    ]
+    | None
+):
+    """Match a terminal interleaved main store and its transport descriptor."""
+    view_args = view_or_reshape_args(output_view)
+    if view_args is None:
+        return None
+    output_pack = view_args[0]
+    lane_wrappers: tuple[torch.fx.Node, ...] = ()
+    if output_pack.target is torch.ops.aten.stack.default:
+        values = output_pack.args[0]
+        dim = output_pack.args[1] if len(output_pack.args) > 1 else 0
+        if not isinstance(values, (tuple, list)) or dim not in (-1, 2):
+            return None
+        output_lanes = tuple(values)
+    elif output_pack.target is torch.ops.aten.cat.default:
+        values = output_pack.args[0]
+        dim = output_pack.args[1] if len(output_pack.args) > 1 else 0
+        if (
+            not isinstance(values, (tuple, list))
+            or dim not in (-1, 2)
+            or any(
+                not isinstance(value, torch.fx.Node)
+                or value.target is not torch.ops.aten.unsqueeze.default
+                or value.args[1] not in (-1, 2)
+                or not isinstance(value.args[0], torch.fx.Node)
+                for value in values
+            )
+        ):
+            return None
+        lane_wrappers = tuple(values)
+        if any(tuple(wrapper.users) != (output_pack,) for wrapper in lane_wrappers):
+            raise NotImplementedError(FLEX_GEMM_PACKED_TRANSPORT_COMPOSITION_ERROR)
+        output_lanes = tuple(value.args[0] for value in values)
+    else:
+        return None
+    if not output_lanes or not all(
+        isinstance(value, torch.fx.Node) for value in output_lanes
+    ):
+        return None
+
+    gemm_meta = gemm.meta.get("val")
+    output_meta = output_view.meta.get("val")
+    if (
+        not isinstance(gemm_meta, torch.Tensor)
+        or not isinstance(output_meta, torch.Tensor)
+        or gemm_meta.ndim != 2
+    ):
+        return None
+    transport = flex_gemm_packed_transport(output_meta.dtype, len(output_lanes))
+    if transport is None:
+        if statically_known_shape_equal(
+            output_meta.shape,
+            (gemm_meta.shape[0], len(output_lanes) * gemm_meta.shape[1]),
+        ):
+            raise NotImplementedError(FLEX_GEMM_PACKED_TRANSPORT_DTYPE_ERROR)
+        return None
+    if not statically_known_shape_equal(
+        output_meta.shape,
+        (gemm_meta.shape[0], transport.group * gemm_meta.shape[1]),
+    ):
+        return None
+    if gemm_meta.dtype is not transport.dtype:
+        raise NotImplementedError(FLEX_GEMM_PACKED_TRANSPORT_DTYPE_ERROR)
+    if tuple(output_pack.users) != (output_view,) or any(
+        user.op != "output" for user in output_view.users
+    ):
+        raise NotImplementedError(FLEX_GEMM_PACKED_TRANSPORT_COMPOSITION_ERROR)
+    return transport, output_lanes, output_pack, lane_wrappers
+
+
+def packed_transport_match(
+    outputs: FlexGemmOutputPlan,
+    gemm: torch.fx.Node,
+    local_reduce: FlexGemmLocalReduceAnalysis,
+) -> FlexGemmPackedTransportPlan | None:
+    """Match one descriptor-backed packed capture and interleaved main store."""
+    store = interleaved_main_store_match(outputs.output, gemm)
+    if store is None:
+        return None
+    if (
+        outputs.local_reduce is not None
+        or outputs.indexed_output is not None
+        or outputs.output_storage is not None
+    ):
+        raise NotImplementedError(FLEX_GEMM_PACKED_TRANSPORT_COMPOSITION_ERROR)
+    transport, output_lanes, output_pack, lane_wrappers = store
+    gemm_meta = gemm.meta.get("val")
+    output_meta = outputs.output.meta.get("val")
+    if not isinstance(gemm_meta, torch.Tensor) or not isinstance(
+        output_meta, torch.Tensor
+    ):
+        return None
+
+    candidates: dict[torch.fx.Node, dict[int, torch.fx.Node]] = {}
+    returned_values = (outputs.output, *outputs.aux_outputs)
+    dependencies = frozenset().union(
+        *(local_reduce.graph.dependencies.get(value, ()) for value in returned_values)
+    )
+    for node in dependencies:
+        if (
+            node.target is not torch.ops.aten.select.int
+            or len(node.args) < 3
+            or node.args[1] not in (-1, 2)
+            or not isinstance(node.args[2], int)
+            or not isinstance(node.args[0], torch.fx.Node)
+        ):
+            continue
+        candidates.setdefault(node.args[0], {})[node.args[2]] = node
+
+    matches = []
+    for capture_view, lanes in candidates.items():
+        view_args = view_or_reshape_args(capture_view)
+        if view_args is None or frozenset(lanes) != frozenset(range(transport.group)):
+            continue
+        capture = view_args[0]
+        capture_meta = capture.meta.get("val")
+        capture_view_meta = capture_view.meta.get("val")
+        if (
+            not isinstance(capture, torch.fx.Node)
+            or capture.op != "placeholder"
+            or not isinstance(capture_meta, torch.Tensor)
+            or not isinstance(capture_view_meta, torch.Tensor)
+        ):
+            continue
+        capture_shape_matches = statically_known_shape_equal(
+            capture_meta.shape, output_meta.shape
+        ) and statically_known_shape_equal(
+            capture_view_meta.shape,
+            (gemm_meta.shape[0], gemm_meta.shape[1], transport.group),
+        )
+        if not capture_shape_matches:
+            continue
+        if capture_meta.dtype is not transport.dtype:
+            raise NotImplementedError(FLEX_GEMM_PACKED_TRANSPORT_DTYPE_ERROR)
+        if tuple(capture.users) != (capture_view,) or frozenset(
+            capture_view.users
+        ) != frozenset(lanes.values()):
+            raise NotImplementedError(FLEX_GEMM_PACKED_TRANSPORT_CAPTURE_ERROR)
+        matches.append(
+            FlexGemmPackedTransportPlan(
+                transport,
+                capture,
+                capture_view,
+                {lane: index for index, lane in lanes.items()},
+                output_lanes,
+                output_pack,
+                outputs.output,
+                (*lane_wrappers, output_pack, outputs.output),
+            )
+        )
+    if len(matches) > 1:
+        raise NotImplementedError(FLEX_GEMM_PACKED_TRANSPORT_CAPTURE_ERROR)
+    return matches[0] if matches else None
+
+
+@dataclasses.dataclass(frozen=True)
 class FlexGemmEpilogueAnalysis:
     """Bundle the immutable analysis consumed by FlexGEMM lowering and emission.
 
@@ -1674,6 +1858,7 @@ class FlexGemmEpilogueAnalysis:
     grouped_main_layouts: dict[torch.fx.Node, GroupedTensorSSALayout] = (
         dataclasses.field(default_factory=dict)
     )
+    packed_transport: FlexGemmPackedTransportPlan | None = None
 
     @classmethod
     def from_graph_module(
@@ -1686,6 +1871,15 @@ class FlexGemmEpilogueAnalysis:
         if outputs.indexed_output is not None and outputs.output_storage_nodes:
             raise NotImplementedError(
                 "FlexGEMM indexed outputs do not compose with terminal dtype views"
+            )
+        packed_transport = packed_transport_match(outputs, gemm, local_reduce)
+        if packed_transport is not None:
+            local_reduce.commit_output_guards(outputs)
+            return cls(
+                gemm,
+                outputs,
+                local_reduce,
+                packed_transport=packed_transport,
             )
         grouped_main = grouped_main_output_match(
             outputs.output_storage or outputs.output,
@@ -1703,7 +1897,15 @@ class FlexGemmEpilogueAnalysis:
                 raise NotImplementedError(FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR)
             local_reduce.commit_output_guards(outputs)
             return cls(gemm, outputs, local_reduce)
-        if outputs.aux_outputs or outputs.indexed_output is not None:
+        if outputs.indexed_output is not None or (
+            outputs.aux_outputs
+            and (
+                outputs.aux_outputs != (gemm,)
+                or outputs.local_reduce is not None
+                or grouped_main.transform.group != 2
+                or grouped_main.transform.chunked
+            )
+        ):
             raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR)
         if (
             grouped_main.transform.chunked
@@ -2031,6 +2233,7 @@ class FlexGemmEpiModSource:
     name: str
     source: str
     fragmentwise: bool = False
+    packed_transport: FlexGemmPackedTransport | None = None
     local_reduce_combine: str | None = None
     local_reduce_finalize: str | None = None
     local_reduce_store_finalize: str | None = None
@@ -2442,6 +2645,14 @@ class FlexGemmEpiModEmitter:
         self.analysis = analysis
         self.outputs = analysis.outputs
         self.local_reduce = self.outputs.local_reduce
+        self.packed_transport = analysis.packed_transport
+        if (
+            self.packed_transport is not None
+            and gemm_op is not torch.ops.aten.mm.default
+        ):
+            raise NotImplementedError(
+                "FlexGEMM packed transport currently requires plain aten.mm"
+            )
         self.grouped_select_indices = analysis.grouped_select_indices
         self.terminal_rewrites = self.outputs.terminal_rewrites
         self.local_reduce_spec: FlexGemmEpiModLocalReduceSpec | None = None
@@ -2512,7 +2723,7 @@ class FlexGemmEpiModEmitter:
                 or self.local_reduce.match.physical_span > 1
             )
         )
-        self.fragmentwise = (
+        self.fragmentwise = self.packed_transport is None and (
             fragment_reduced
             or self.local_reduce is None
             or not self.local_reduce.feeds_main
@@ -2552,6 +2763,8 @@ class FlexGemmEpiModEmitter:
         self.mainloop_scale_count = mainloop_scale_count
         self.kernel = GemmEpilogueCuteDSLKernel()
         self.params = ["acc"]
+        if self.packed_transport is not None:
+            self.params.append("c")
         self.base_env = self.initial_env_for_params(self.params)
         if self.local_reduce_prepass is not None or (
             self.local_reduce is not None
@@ -2623,6 +2836,10 @@ class FlexGemmEpiModEmitter:
             else:
                 expr = name
             captures[node] = self.value(expr, dtype)
+        if self.packed_transport is not None:
+            captures[self.packed_transport.capture] = self.value(
+                "c", self.packed_transport.transport.dtype
+            )
         return {
             self.gemm: self.value(gemm_value, torch.float32),
             **captures,
@@ -2733,6 +2950,37 @@ class FlexGemmEpiModEmitter:
                 )
         self.local_reduce_prepass_body = tuple(kernel.body.lines)
         self.local_reduce_prepass_result = flex_gemm_epilogue_arg(source, env)
+
+    def lower_packed_transport_node(self, node: torch.fx.Node) -> bool:
+        """Lower descriptor-backed packed transport outside ordinary FX ops."""
+        plan = self.packed_transport
+        if plan is None:
+            return False
+        if node is plan.capture_view:
+            self.env[node] = self.env[plan.capture]
+            return True
+        if node in plan.lane_selects:
+            self.env[node] = self.value(
+                f"c[{plan.lane_selects[node]}]", plan.transport.dtype
+            )
+            return True
+        if (
+            node in plan.owned_nodes
+            and node is not plan.output_pack
+            and node is not plan.output_view
+        ):
+            source = cast(torch.fx.Node, node.args[0])
+            self.env[node] = self.env[source]
+            return True
+        if node is plan.output_pack:
+            self.env[node] = tuple(
+                flex_gemm_epilogue_arg(value, self.env) for value in plan.output_lanes
+            )
+            return True
+        if node is plan.output_view:
+            self.env[node] = self.env[plan.output_pack]
+            return True
+        return False
 
     def lower_grouped_layout(
         self, node: torch.fx.Node, layout: GroupedTensorSSALayout
@@ -2882,6 +3130,8 @@ class FlexGemmEpiModEmitter:
                     raise NotImplementedError(
                         f"unsupported FlexGEMM EpiMod node: {node.format_node()}"
                     )
+                if self.lower_packed_transport_node(node):
+                    continue
                 if node in self.grouped_layouts:
                     self.lower_grouped_layout(node, self.grouped_layouts[node])
                     continue
@@ -3023,6 +3273,7 @@ class FlexGemmEpiModEmitter:
         key_payload = (
             f"inline_asm={inline_asm_cache_key()}\n"
             f"fragmentwise={self.fragmentwise}\n"
+            f"packed_transport={None if self.packed_transport is None else self.packed_transport.transport!r}\n"
             f"reduce_planes={1 if sink is None else sink.reduce_planes}\n"
             f"fragment_reduced={self.local_reduce_fragment_reduced}\n"
             f"{self.graph_module.code}\n{body}return {{{return_source}}}\n"
@@ -3084,6 +3335,11 @@ class FlexGemmEpiModEmitter:
                 f"{body}    return {{{return_source}}}\n"
             ),
             fragmentwise=self.fragmentwise,
+            packed_transport=(
+                None
+                if self.packed_transport is None
+                else self.packed_transport.transport
+            ),
             local_reduce_combine=(
                 None if sink is None else combine_name or sink.combine
             ),

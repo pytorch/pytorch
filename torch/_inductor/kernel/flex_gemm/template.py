@@ -13,6 +13,7 @@ from torch._inductor.codegen.cutedsl.cutedsl_template import (
 from torch._inductor.kernel.flex_gemm.constraints import (
     FlexGemmGroupedMainOutputTransform,
     FlexGemmLocalReduceGeometry,
+    FlexGemmPackedTransport,
     LOCAL_REDUCE_PREPASS_FN_SUFFIX,
 )
 from torch._inductor.kernel.flex_gemm.output_layout import FlexGemmOutputLayout
@@ -114,6 +115,8 @@ class FlexGemmEpilogueConfig:
     indexed_output: FlexGemmEpilogueIndexedOutputConfig | None
     local_reduce: FlexGemmEpilogueLocalReduceConfig | None
     main_transform: FlexGemmGroupedMainOutputTransform | None
+    packed_transport: FlexGemmPackedTransport | None
+    packed_capture_index: int | None
     fragmentwise: bool
     tuned: bool
 
@@ -161,6 +164,7 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             from torch._inductor.kernel.flex_gemm.constraints import (
                 FlexGemmGroupedMainOutputTransform,
                 FlexGemmLocalReduceGeometry,
+                FlexGemmPackedTransport,
             )
             from torch._inductor.kernel.flex_gemm import (
                 output_layout as flex_gemm_output_layout,
@@ -284,6 +288,15 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             )
         if config.main_transform is not None:
             kwargs.append(f", main_transform={config.main_transform!r}")
+        if (config.packed_transport is None) != (config.packed_capture_index is None):
+            raise RuntimeError(
+                "packed FlexGEMM config requires both transport and capture index"
+            )
+        if config.packed_capture_index is not None:
+            kwargs.append(
+                f", packed_capture={input_args[config.packed_capture_index]}, "
+                f"packed_transport={config.packed_transport!r}"
+            )
         return "".join(kwargs)
 
 
