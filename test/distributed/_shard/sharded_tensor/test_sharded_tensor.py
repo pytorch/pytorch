@@ -3559,9 +3559,11 @@ class TestShardedTensorSubGroupInit(TestCase):
         )
         dist.barrier(sub_pg)
 
+        # A CPU device only accepts index -1 or 0, so keep the index at 0 there.
         for r in sub_pg_ranks:
+            device_index = 0 if DEVICE_TYPE == "cpu" else r % sub_group_sz
             _parse_and_validate_remote_device(
-                sub_pg, _remote_device(f"rank:{r}/{DEVICE_TYPE}:{r % sub_group_sz}")
+                sub_pg, _remote_device(f"rank:{r}/{DEVICE_TYPE}:{device_index}")
             )
 
 
