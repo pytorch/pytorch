@@ -64,11 +64,12 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_mps_impl(
   checkScalarTypes("embedding_bag_mps", offsets_arg, {kLong, kInt});
   checkSameType("embedding_bag_mps", indices_arg, offsets_arg);
   auto weight_arg = TensorArg(weight, "weight", 1);
+  check_arguments(
+      weight, indices, offsets, mode, per_sample_weights_opt, include_last_offset);
 
   int64_t num_indices = indices.size(0);
   int64_t num_bags = offsets.size(0);
   if (include_last_offset) {
-    TORCH_CHECK(num_bags >= 1, "include_last_offset: number of offsets should be at least 1");
     num_bags -= 1;
   }
   int64_t feature_size = weight.size(1);
