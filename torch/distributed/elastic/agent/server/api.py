@@ -462,13 +462,20 @@ class SimpleElasticAgent(ElasticAgent):
     def __init__(
         self,
         spec: WorkerSpec,
-        exit_barrier_timeout: float = 300,
+        exit_barrier_timeout: float | None = None,
         shutdown_timeout: int = 30,
     ):
         self._worker_group = WorkerGroup(spec)
         self._remaining_restarts = self._worker_group.spec.max_restarts
         self._store = None
-        self._exit_barrier_timeout = exit_barrier_timeout
+        # Resolve exit_barrier_timeout: explicit arg wins, then env var, then
+        # the historical default of 300 s.
+        if exit_barrier_timeout is None:
+            self._exit_barrier_timeout = float(
+                os.environ.get("TORCH_ELASTIC_EXIT_BARRIER_TIMEOUT", "300")
+            )
+        else:
+            self._exit_barrier_timeout = exit_barrier_timeout
         self._shutdown_timeout = shutdown_timeout
         self._total_execution_time = 0
         self._in_exit_barrier: bool = False

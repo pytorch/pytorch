@@ -214,7 +214,7 @@ class LocalElasticAgent(SimpleElasticAgent):
         spec: WorkerSpec,
         logs_specs: LogsSpecs,
         start_method="spawn",
-        exit_barrier_timeout: float = 300,
+        exit_barrier_timeout: float | None = None,
         log_line_prefix_template: str | None = None,
         shutdown_timeout: int = 30,
         health_check_server: HealthCheckServer | None = None,

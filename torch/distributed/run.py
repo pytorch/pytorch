@@ -783,6 +783,17 @@ def get_args_parser() -> ArgumentParser:
     )
 
     parser.add_argument(
+        "--exit-barrier-timeout",
+        "--exit_barrier_timeout",
+        action=env,
+        type=float,
+        default=None,
+        help="Time in seconds to wait for all agents to finish before the exit barrier "
+        "is released. If not specified, uses TORCH_ELASTIC_EXIT_BARRIER_TIMEOUT environment "
+        "variable or defaults to 300 seconds.",
+    )
+
+    parser.add_argument(
         "--virtual-local-rank",
         "--virtual_local_rank",
         action=check_env,
@@ -1049,6 +1060,7 @@ def config_from_args(args) -> tuple[LaunchConfig, Callable | str, list[str]]:
         duplicate_stderr_filters=args.duplicate_stderr_filters,
         virtual_local_rank=args.virtual_local_rank,
         shutdown_timeout=args.shutdown_timeout,
+        exit_barrier_timeout=args.exit_barrier_timeout,
     )
 
     with_python = not args.no_python

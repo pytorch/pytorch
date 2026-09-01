@@ -90,6 +90,10 @@ class LaunchConfig:
         shutdown_timeout: Time in seconds to wait for graceful shutdown of workers before
                         sending SIGKILL. Can also be set via TORCH_ELASTIC_SHUTDOWN_TIMEOUT
                         environment variable. Defaults to 30 seconds.
+        exit_barrier_timeout: Time in seconds to wait for all agents to finish before
+                        the exit barrier is released. Can also be set via
+                        TORCH_ELASTIC_EXIT_BARRIER_TIMEOUT environment variable.
+                        Defaults to 300 seconds.
 
 
     .. note::
@@ -121,6 +125,7 @@ class LaunchConfig:
     duplicate_stderr_filters: list[str] | None = None
     virtual_local_rank: bool = False
     shutdown_timeout: int | None = None
+    exit_barrier_timeout: float | None = None
 
     def __post_init__(self):
         default_timeout = 900
@@ -153,6 +158,16 @@ class LaunchConfig:
         elif self.shutdown_timeout < 0:
             raise ValueError(
                 f"shutdown_timeout must be non-negative, got {self.shutdown_timeout}"
+            )
+
+        # Set exit_barrier_timeout from environment variable if not explicitly set
+        if self.exit_barrier_timeout is None:
+            self.exit_barrier_timeout = float(
+                os.environ.get("TORCH_ELASTIC_EXIT_BARRIER_TIMEOUT", "300")
+            )
+        elif self.exit_barrier_timeout < 0:
+            raise ValueError(
+                f"exit_barrier_timeout must be non-negative, got {self.exit_barrier_timeout}"
             )
 
 
@@ -361,6 +376,7 @@ def launch_agent(
         logs_specs=config.logs_specs,  # type: ignore[arg-type]
         start_method=config.start_method,
         log_line_prefix_template=config.log_line_prefix_template,
+        exit_barrier_timeout=config.exit_barrier_timeout,  # type: ignore[arg-type]
         shutdown_timeout=config.shutdown_timeout,  # type: ignore[arg-type]
         health_check_server=health_check_server,
     )
