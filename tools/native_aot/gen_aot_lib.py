@@ -32,6 +32,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import textwrap
 
 
 REPO = os.path.normpath(
@@ -127,7 +128,16 @@ from tools.native_aot import toolchains
 
 
 def indent(code: str, pad: str) -> str:
-    return "\n".join(pad + l if l.strip() else l for l in code.rstrip().splitlines())
+    """Re-indent a declaration-supplied C++ block to pad.
+
+    Dedented first: a hook returns a triple-quoted string, so its lines carry the
+    indentation of the Python source it was written in, which has nothing to do with
+    where it lands in the generated function. Blank edges go for the same reason --
+    a block opens right after the brace that introduced it, and callers that want a
+    separating line emit one.
+    """
+    code = textwrap.dedent(code.strip("\n").rstrip())
+    return "\n".join(pad + l if l.strip() else l for l in code.splitlines())
 
 
 def gen_launcher(sidecar: dict) -> str:
@@ -371,7 +381,8 @@ def gen_op(
     prelude_fn = getattr(d, "cpp_dispatch_prelude", None) or (lambda: "")
     helpers_fn = getattr(d, "cpp_helpers", None) or (lambda: "")
     prelude = prelude_fn() or ""
-    helpers = helpers_fn() or ""
+    # Dedented for the same reason as indent(): these are file-scope definitions.
+    helpers = textwrap.dedent((helpers_fn() or "").rstrip())
     # Only kinds whose exported ABI takes i32 extents need the size gate. ANY
     # narrowing kind among this op's points is enough: any point may be selected.
     narrows = any(
@@ -458,7 +469,7 @@ def gen_op(
         size_gate_helper=SIZE_GATE_HELPER if narrows else "",
         cond=arch_gate
         + (_int32_size_gate(impl_params) if narrows else "")
-        + indent(prelude, "  "),
+        + ("\n" + indent(prelude, "  ") if prelude.strip() else ""),
         guards="\n".join(branches),
     )
 
