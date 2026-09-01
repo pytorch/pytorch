@@ -2009,6 +2009,147 @@ class TestOverlapSchedulingFixes(InductorTestCase):
             graph.run(a, b, gen)
 
 
+class TestManualOverlapSchedulingUnit(TestCase):
+    def test_late_wait_user_repair_is_linear_for_high_fan_in(self):
+        """Ensure reverse-ordered replacement inputs are each visited only once."""
+        from torch._inductor.fx_passes.overlap_manual_scheduling import (
+            _move_wait_users_after_latest_inputs,
+        )
+
+        class CountingInputs(dict[fx.Node, None]):
+            def __init__(self, inputs: dict[fx.Node, None]) -> None:
+                super().__init__(inputs)
+                self.num_visits = 0
+
+            def __iter__(self):
+                for node in super().__iter__():
+                    self.num_visits += 1
+                    yield node
+
+            def __reversed__(self):
+                for node in super().__reversed__():
+                    self.num_visits += 1
+                    yield node
+
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+        old_waits = [graph.call_function(torch.neg, (x,)) for _ in range(32)]
+        user = graph.call_function(torch.cat, (old_waits,))
+        new_waits = [graph.call_function(torch.clone, (x,)) for _ in range(32)]
+        graph.output(user)
+        graph.lint()
+
+        replacements = dict(zip(old_waits, reversed(new_waits), strict=True))
+        for old_wait, new_wait in replacements.items():
+            user.replace_input_with(old_wait, new_wait)
+        counting_inputs = CountingInputs(user._input_nodes)
+        user._input_nodes = counting_inputs
+
+        _move_wait_users_after_latest_inputs(
+            graph,
+            replacements=replacements,
+            replaced_users={old_wait: [user] for old_wait in old_waits},
+        )
+
+        self.assertEqual(counting_inputs.num_visits, len(new_waits))
+        graph.lint()
+
+    def test_late_wait_user_repair_detects_cycle(self):
+        """Ensure replacement-introduced dependency cycles are rejected."""
+        from torch._inductor.fx_passes.overlap_manual_scheduling import (
+            _move_wait_users_after_latest_inputs,
+        )
+
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+        old_wait = graph.call_function(torch.neg, (x,))
+        user = graph.call_function(torch.relu, (old_wait,))
+        new_wait = graph.call_function(torch.clone, (user,))
+        graph.output(new_wait)
+        graph.lint()
+
+        user.replace_input_with(old_wait, new_wait)
+        with self.assertRaisesRegex(AssertionError, "stable topological sort failed"):
+            _move_wait_users_after_latest_inputs(
+                graph,
+                replacements={old_wait: new_wait},
+                replaced_users={old_wait: [user]},
+            )
+
+    def test_late_wait_user_repair_is_stable_and_bounded(self):
+        """Ensure repair preserves stable order without repeated graph scans."""
+        from torch._inductor.fx_passes.overlap_manual_scheduling import (
+            _move_wait_users_after_latest_inputs,
+        )
+
+        class CountingGraph(fx.Graph):
+            def __init__(self):
+                super().__init__()
+                self.num_nodes_accesses = 0
+
+            @property
+            def nodes(self):
+                self.num_nodes_accesses += 1
+                return super().nodes
+
+        graph = CountingGraph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        old_wait = graph.call_function(torch.neg, (x,))
+        other_old_wait = graph.call_function(torch.neg, (y,))
+        first_user = graph.call_function(torch.relu, (old_wait,))
+        last_user = first_user
+        for _ in range(50):
+            last_user = graph.call_function(torch.relu, (last_user,))
+        second_user = graph.call_function(torch.sigmoid, (old_wait,))
+        third_user = graph.call_function(torch.relu, (other_old_wait,))
+        unrelated_before = graph.call_function(torch.sin, (x,))
+        new_wait = graph.call_function(torch.clone, (x,))
+        other_new_wait = graph.call_function(torch.clone, (y,))
+        unrelated_after = graph.call_function(torch.cos, (x,))
+        graph.output(
+            (last_user, second_user, third_user, unrelated_before, unrelated_after)
+        )
+        graph.lint()
+
+        first_user.replace_input_with(old_wait, new_wait)
+        second_user.replace_input_with(old_wait, new_wait)
+        third_user.replace_input_with(other_old_wait, other_new_wait)
+        with self.assertRaisesRegex(RuntimeError, "used before it has been defined"):
+            graph.lint()
+
+        accesses_before_repair = graph.num_nodes_accesses
+        _move_wait_users_after_latest_inputs(
+            graph,
+            replacements={old_wait: new_wait, other_old_wait: other_new_wait},
+            replaced_users={
+                old_wait: [first_user, second_user],
+                other_old_wait: [third_user],
+            },
+        )
+        repair_nodes_accesses = graph.num_nodes_accesses - accesses_before_repair
+
+        graph.lint()
+        node_positions = {node: i for i, node in enumerate(graph.nodes)}
+        self.assertLess(node_positions[new_wait], node_positions[first_user])
+        self.assertLess(node_positions[other_new_wait], node_positions[third_user])
+        self.assertLess(node_positions[last_user], node_positions[second_user])
+        self.assertLess(node_positions[unrelated_before], node_positions[new_wait])
+        self.assertLess(node_positions[third_user], node_positions[unrelated_after])
+        self.assertLess(repair_nodes_accesses, 10)
+
+        repaired_order = list(graph.nodes)
+        _move_wait_users_after_latest_inputs(
+            graph,
+            replacements={old_wait: new_wait, other_old_wait: other_new_wait},
+            replaced_users={
+                old_wait: [first_user, second_user],
+                other_old_wait: [third_user],
+            },
+        )
+        self.assertEqual(list(graph.nodes), repaired_order)
+
+
 class TestForeachGroupsUnit(InductorTestCase):
     """Unit tests for _compute_foreach_groups and _pre_bucket_all_gather foreach optimization."""
 
