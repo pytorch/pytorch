@@ -291,6 +291,31 @@ class TestNVUniversalGemm(TestCase):
             self.assertFalse(design.use_2cta_mma)
             self.assertEqual(design.tile_shape[0], 128)
 
+    @unittest.skipIf(IS_FBCODE, "CUTLASS Operator API is not available in fbcode")
+    def test_vendored_dense_efc_exposes_wide_n_tiles(self):
+        from cutlass import Float32
+
+        from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
+            _args_query_candidates,
+            DENSE_EFC_TILE_NS,
+        )
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            _create_gemm_arguments,
+        )
+
+        m, n, k = 256, 512, 64
+        a = torch.empty((m, k), device="cuda", dtype=torch.bfloat16)
+        b = torch.empty((k, n), device="cuda", dtype=torch.bfloat16)
+        out = torch.empty((m, n), device="cuda", dtype=torch.bfloat16)
+        args = _create_gemm_arguments("GEMM", (a, b), out, Float32)
+        tile_ns = {
+            kernel.metadata.design.tile_shape[1]
+            for kernel in _args_query_candidates(args, 100, efc_only=True)
+            if "VendoredDenseGemmEFCOperator" in kernel.metadata.operator_name
+        }
+
+        self.assertTrue(set(DENSE_EFC_TILE_NS).issubset(tile_ns))
+
     def test_efc_epilogue_lookup_no_deadlock(self):
         """get_efc_kernel_with_epilogue holds _cache_lock and, when the base EFC
         kernel is not pre-resolved and misses the args cache, calls
