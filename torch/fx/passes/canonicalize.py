@@ -109,6 +109,12 @@ def _is_safe_to_reorder(node: fx.Node) -> bool:
         # functorch batch dim ops modify the vmap interpreter stack.
         if name in ("_add_batch_dim", "_remove_batch_dim"):
             return False
+        # HigherOrderOperators are proper operators whose impurity is_impure()
+        # already tracks via the effects system, and graph passes (e.g. Dynamo
+        # graph deduplication) create HOP nodes without example_value/val
+        # meta, so the value heuristic below does not apply to them.
+        if isinstance(node.target, torch._ops.HigherOrderOperator):
+            return True
         # State-changing functions that consume other nodes escape the
         # no-node-arguments heuristic above (e.g. _exit_inference_mode takes
         # the token produced by _enter_inference_mode, _sdpa_kernel takes

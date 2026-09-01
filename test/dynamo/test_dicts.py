@@ -2637,6 +2637,12 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(_is_safe_to_reorder(token_consumer))
         self.assertTrue(_is_safe_to_reorder(pure(token_consumer)))
 
+        # HOPs are exempt from the value heuristic: graph passes (e.g. graph
+        # deduplication) create invoke_subgraph nodes without example_value/val.
+        hop = torch.ops.higher_order.invoke_subgraph
+        hop_node = graph.call_function(hop, (x, "subgraph_0", x))
+        self.assertTrue(_is_safe_to_reorder(hop_node))
+
 
 instantiate_parametrized_tests(DictTests)
 
