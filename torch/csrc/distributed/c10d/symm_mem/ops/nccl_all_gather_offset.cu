@@ -1,3 +1,9 @@
+#ifdef USE_ROCM
+#ifndef __CUDACC_EXTENDED_LAMBDA__
+#define __CUDACC_EXTENDED_LAMBDA__ 1
+#endif
+#endif
+
 #include <c10/cuda/CUDAGuard.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/cuda/MemoryAccess.cuh>
@@ -7,6 +13,16 @@
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
 #include <cstdint>
+
+#if defined(NCCL_DEVICE_HAS_REDUCE_COPY) && defined(USE_ROCM) && \
+    defined(__HIP_NO_HALF_OPERATORS__)
+// ATen disables HIP's half operators, but RCCL instantiates OpSum<__half>.
+__device__ __forceinline__ __half operator+(
+    const __half& a,
+    const __half& b) {
+  return __float2half(__half2float(a) + __half2float(b));
+}
+#endif
 
 // All-gather a rank-local bucket of parameter shards into a "parameter-
 // contiguous" output, fusing the gather with the copy-out reorder that FSDP2

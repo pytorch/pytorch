@@ -99,6 +99,17 @@ class TORCH_API NCCLDevCommManager {
     return it->second;
   }
 
+  // Non-throwing lookup for teardown paths, where the owning process group may
+  // already have removed or replaced its communicator.
+  std::optional<ncclComm_t> find_comm(const std::string& group_name) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = group_to_comm_.find(group_name);
+    if (it == group_to_comm_.end()) {
+      return std::nullopt;
+    }
+    return it->second;
+  }
+
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
   // Register a device communicator for a group. If `key` is not
   // specified, we use the caller function name as the default `key`, to

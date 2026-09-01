@@ -1,3 +1,9 @@
+#ifdef USE_ROCM
+#ifndef __CUDACC_EXTENDED_LAMBDA__
+#define __CUDACC_EXTENDED_LAMBDA__ 1
+#endif
+#endif
+
 #include <c10/cuda/CUDAGuard.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -8,45 +14,15 @@
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
 
-#if defined(NCCL_DEVICE_HAS_REDUCE_COPY) && defined(NCCL_HAS_LSA_PEER_PTR)
-#include <mutex>
-#include <unordered_map>
-// HIP shims required to compile RCCL's device-side reduce/copy API. Must precede
-// <nccl_device.h>.
-//   1. RCCL selects the real (non-static_assert) reduce_copy implementation on
-//      __CUDACC_EXTENDED_LAMBDA__. hipcc does not define it, but HIP supports
-//      extended device lambdas natively, so defining it takes the real branch.
-//   2. RCCL's int8 sum-reduce specialization uses CUDA's __vadd4 per-byte SIMD
-//      intrinsic, which HIP lacks. It is an explicit specialization (compiled
-//      eagerly even though these float/half/bf16 tests never use int8), so a
-//      byte-wise wrapping-add equivalent must be visible.
-#ifndef __CUDACC_EXTENDED_LAMBDA__
-#define __CUDACC_EXTENDED_LAMBDA__ 1
-#endif
-__device__ __forceinline__ unsigned int __vadd4(unsigned int a, unsigned int b) {
-  unsigned int res;
-  auto* r = reinterpret_cast<unsigned char*>(&res);
-  auto* pa = reinterpret_cast<unsigned char*>(&a);
-  auto* pb = reinterpret_cast<unsigned char*>(&b);
-#pragma unroll
-  for (int i = 0; i < 4; ++i) {
-    r[i] = static_cast<unsigned char>(pa[i] + pb[i]);
-  }
-  return res;
-}
-//   3. ATen compiles this TU with __HIP_NO_HALF_OPERATORS__, which strips
-//      __half's native operator+. RCCL's OpSum<__half> needs it: although the
-//      reduction accumulates in float (AccumulateType<OpSum<half>>::Type ==
-//      float), AT_DISPATCH_NV_FLOATS eagerly instantiates the __half kernel.
-//      Provide a convert-to-float add so the instantiation compiles; the runtime
-//      reduction precision is unaffected. bf16 keeps its own operator+.
+#if defined(NCCL_DEVICE_HAS_REDUCE_COPY) && defined(USE_ROCM)
+// ATen disables HIP's half operators, but RCCL instantiates OpSum<__half>.
 #if defined(__HIP_NO_HALF_OPERATORS__)
 __device__ __forceinline__ __half operator+(const __half& a, const __half& b) {
   return __float2half(__half2float(a) + __half2float(b));
 }
 #endif
 #include <nccl_device.h>
-#endif // NCCL_DEVICE_HAS_REDUCE_COPY && NCCL_HAS_LSA_PEER_PTR
+#endif
 
 // Simultaneously reduce N blocks of a 2-D input tensor from a symmetric memory
 // buffer, routing each block to a specific destination rank (dst_ranks[i]).
@@ -147,37 +123,6 @@ __global__ void reduce_scatter_offset_kernel(
   bar.sync(coop, cuda::memory_order_release);
 }
 
-#if defined(NCCL_HAS_LSA_PEER_PTR)
-// File-local ncclDevComm cache for the ROCm path. The shared NCCLDevCommManager
-// stores ncclDevComm only under NCCL_HAS_SYMMEM_DEVICE_SUPPORT (CUDA): its
-// header is included by host-only translation units (init.cpp,
-// ProcessGroupNCCL.cpp) compiled with the plain host compiler, which cannot
-// parse RCCL's <nccl_device.h> (it needs HIP device builtins). Caching the
-// devcomm here keeps the ncclDevComm type confined to hipcc-compiled TUs.
-// Keyed by group_name; devcomm lifetime spans the process (not destroyed), same
-// as the CUDA registry which only tears down in the manager destructor.
-static std::mutex g_rs_devcomm_mutex;
-static std::unordered_map<std::string, ncclDevComm> g_rs_devcomm_cache;
-
-static ncclDevComm& get_or_create_rs_devcomm(
-    ncclComm_t comm,
-    const std::string& group_name,
-    bool use_multimem) {
-  std::lock_guard<std::mutex> lock(g_rs_devcomm_mutex);
-  auto it = g_rs_devcomm_cache.find(group_name);
-  if (it == g_rs_devcomm_cache.end()) {
-    ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
-    reqs.lsaBarrierCount = RS_MAX_CTA_COUNT;
-    reqs.lsaMultimem = use_multimem;
-    ncclDevComm devcomm;
-    C10D_NCCL_CHECK(
-        ncclDevCommCreate(comm, &reqs, &devcomm),
-        "ncclDevCommCreate failed in nccl_reduce_scatter_offset");
-    it = g_rs_devcomm_cache.emplace(group_name, devcomm).first;
-  }
-  return it->second;
-}
-#endif // NCCL_HAS_LSA_PEER_PTR
 
 #endif // NCCL_DEVICE_HAS_REDUCE_COPY
 
@@ -235,11 +180,6 @@ void nccl_reduce_scatter_offset(
   // lsaBarrierCount must cover the maximum number of concurrent CTAs.
   // lsaMultimem is set when the allocation has multicast support, so that
   // devComm.lsaMultimem is valid for ncclMultimemReduceSum in the kernel.
-#if defined(NCCL_HAS_LSA_PEER_PTR)
-  // ROCm: NCCLDevCommManager cannot hold ncclDevComm (see the file-local cache
-  // comment above), so cache it here instead.
-  ncclDevComm& devcomm = get_or_create_rs_devcomm(comm, group_name, use_multimem);
-#else
   static constexpr char const kDevcommKey[] = "nccl_reduce_scatter_offset";
   auto devcomm_opt = manager.get_devcomm(group_name, kDevcommKey);
   if (!devcomm_opt) {
@@ -254,7 +194,6 @@ void nccl_reduce_scatter_offset(
     devcomm_opt = manager.register_devcomm(group_name, devcomm, kDevcommKey);
   }
   ncclDevComm& devcomm = devcomm_opt->get();
-#endif
 
   const int my_rank = devcomm.rank;
   const int group_size = devcomm.nRanks;

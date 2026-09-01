@@ -286,7 +286,12 @@ void ProcessGroupNCCL::initNcclResources() {
   }
 
   attachMemoryHook();
-  publishComm();
+  // Eager initialization can run before ProcessGroup assigns the finalized
+  // group UID. Publishing under the empty UID would make rendezvous for the
+  // eventual name miss this communicator; setGroupUid() publishes it later.
+  if (!getGroupUid().empty()) {
+    publishComm();
+  }
 }
 
 void ProcessGroupNCCL::initFromComm(
@@ -689,6 +694,18 @@ void ProcessGroupNCCL::revokeNcclComm() {
 
 int64_t ProcessGroupNCCL::getCommPtr() const {
   return reinterpret_cast<int64_t>(nccl_comm_);
+}
+
+void ProcessGroupNCCL::setGroupUid(const std::string& pg_uid) {
+  const std::string oldGroupUid = getGroupUid();
+  TORCH_CHECK(
+      oldGroupUid.empty() || oldGroupUid == pg_uid || nccl_comm_ == nullptr,
+      "ProcessGroupNCCL does not support changing a non-empty group UID while "
+      "its NCCL communicator is initialized");
+  Backend::setGroupUid(pg_uid);
+  if (oldGroupUid.empty() && !pg_uid.empty() && nccl_comm_ != nullptr) {
+    publishComm();
+  }
 }
 
 void ProcessGroupNCCL::publishComm() {
