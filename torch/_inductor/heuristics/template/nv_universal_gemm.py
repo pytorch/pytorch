@@ -163,12 +163,16 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             )
 
         matched: list[tuple] = []
+        prefer_prefetch = config.nvgemm_prefetch == "1"
         for key, runtime in config_runtimes.items():
             kernels_for_key = config_to_kernels.get(key)
             if not kernels_for_key:
                 continue
             for kernel in kernels_for_key:
-                if not getattr(kernel.metadata.design, "use_prefetch", False):
+                if (
+                    getattr(kernel.metadata.design, "use_prefetch", False)
+                    == prefer_prefetch
+                ):
                     matched.append((kernel, runtime))
 
         if not matched:
@@ -344,21 +348,23 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             if key in all_kernel_variants_configs:
                 for kernel in key_kernels:
                     if (
-                        not getattr(kernel.metadata.design, "use_prefetch", False)
+                        getattr(kernel.metadata.design, "use_prefetch", False)
+                        == prefer_prefetch
                         and kernel not in result
                     ):
                         result.append(kernel)
             elif key not in selected_keys and key in targeted_configs:
-                non_prefetch = next(
+                preferred = next(
                     (
                         kernel
                         for kernel in key_kernels
-                        if not getattr(kernel.metadata.design, "use_prefetch", False)
+                        if getattr(kernel.metadata.design, "use_prefetch", False)
+                        == prefer_prefetch
                     ),
                     None,
                 )
-                if non_prefetch is not None:
-                    result.append(non_prefetch)
+                if preferred is not None:
+                    result.append(preferred)
             if key in prefetch_configs:
                 prefetch = next(
                     (

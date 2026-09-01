@@ -26,7 +26,7 @@ from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_d
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.utils._ordered_set import OrderedSet
 
-from .. import config, ir, pattern_matcher  # noqa: F401
+from .. import config, inductor_prims, ir, pattern_matcher  # noqa: F401
 from ..codegen.common import custom_backend_passes
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
 from ..lowering import lowerings as L
@@ -2216,7 +2216,7 @@ def _fold_scaled_mm_output_scale(
     out_dtype,
     output_scale,
 ) -> None:
-    """Move a scalar multiply into ``aten._scaled_mm.scale_result``.
+    """Replace a scaled GEMM and scalar multiply with an internal fused op.
 
     Doing this before lowering is important for QKV projections: their scaled
     output is split into multiple consumers, which prevents the scheduler's
@@ -2224,13 +2224,13 @@ def _fold_scaled_mm_output_scale(
     """
 
     def repl(mat_a, mat_b, scale_a, scale_b, out_dtype, output_scale):
-        return aten._scaled_mm.default(
+        return inductor_prims.nvgemm_scaled_mm_output_scale(
             mat_a,
             mat_b,
-            scale_a=scale_a,
-            scale_b=scale_b,
-            scale_result=output_scale,
-            out_dtype=out_dtype,
+            scale_a,
+            scale_b,
+            output_scale,
+            out_dtype,
         )
 
     counters["inductor"]["scaled_mm_output_scale_fused"] += 1

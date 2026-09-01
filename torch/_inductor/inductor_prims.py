@@ -212,6 +212,34 @@ fma = make_prim(
 )
 
 
+def _nvgemm_scaled_mm_output_scale_aten(
+    mat_a: Tensor,
+    mat_b: Tensor,
+    scale_a: Tensor,
+    scale_b: Tensor,
+    output_scale: Tensor,
+    out_dtype: torch.dtype | None = None,
+) -> Tensor:
+    return (
+        torch._scaled_mm(
+            mat_a,
+            mat_b,
+            scale_a=scale_a,
+            scale_b=scale_b,
+            out_dtype=out_dtype,
+        )
+        * output_scale
+    )
+
+
+nvgemm_scaled_mm_output_scale = make_prim(
+    "nvgemm_scaled_mm_output_scale(Tensor mat_a, Tensor mat_b, Tensor scale_a, "
+    "Tensor scale_b, Tensor output_scale, ScalarType? out_dtype=None) -> Tensor",
+    _nvgemm_scaled_mm_output_scale_aten,
+    doc="Scaled matrix multiply with an NVGEMM-native output scale.",
+)
+
+
 def _fma_setup_context(ctx, inputs, output):
     a, b, c = inputs
     ctx.a_shape = a.shape

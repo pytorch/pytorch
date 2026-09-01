@@ -17,8 +17,10 @@ owns traversal, synchronization, and storage.
 
 import dataclasses
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any, cast
+
+import sympy
 
 import torch
 from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
@@ -41,6 +43,22 @@ from ...kernel.loop_ir_epilogue_lowering import (
 )
 from ...scheduler import BaseSchedulerNode
 from ...virtualized import V
+
+
+def _matches_affine_index(
+    index: sympy.Expr,
+    range_vars: Sequence[sympy.Symbol],
+    strides: Sequence[Any],
+    known_equals: Callable[[Any, Any], bool],
+) -> bool:
+    if not range_vars:
+        range_vars = tuple(sorted(index.free_symbols, key=str))
+    if len(range_vars) != len(strides):
+        return False
+    expected = sum(
+        (var * stride for var, stride in zip(range_vars, strides)), sympy.Integer(0)
+    )
+    return known_equals(index, expected)
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -174,6 +192,56 @@ class NVGemmEpilogueProgram:
             geometries[output_name] = match.geometry
         return geometries
 
+    def oriented_reduction_geometries(
+        self, swap_ab: bool
+    ) -> dict[str, GemmReductionGeometry]:
+        geometries = self.generated_reduction_geometries
+        if not swap_ab:
+            return geometries
+        return {name: geometry.transposed() for name, geometry in geometries.items()}
+
+    def oriented_reduction_plan(self, swap_ab: bool) -> GemmReductionPlan | None:
+        plan = self.reduction_plan
+        if not swap_ab:
+            return plan
+        physical_outputs = tuple(
+            name
+            for name, geometry in self.generated_reduction_geometries.items()
+            if geometry.transposed().needs_physical_callbacks
+        )
+        if len(physical_outputs) > 1 or (physical_outputs and plan is None):
+            raise NotImplementedError(
+                "swapped epilogues support one cross-fragment reduction"
+            )
+        if plan is None:
+            return None
+        geometry = plan.geometry.transposed()
+        if not plan.tensor_epilogue_returns_local_reduce:
+            return dataclasses.replace(plan, axis=geometry.axis)
+        if plan.reduction_output is None or self.capture.analysis is None:
+            raise NotImplementedError(
+                "swapped generated reductions require a materialized output"
+            )
+        combine_fn = None
+        finalizer_fn = None
+        if geometry.needs_physical_callbacks:
+            from torch._inductor.kernel.loop_ir_cutedsl_codegen import (
+                LoopIRCuteDSLCodegen,
+            )
+
+            combine_fn, finalizer_fn = LoopIRCuteDSLCodegen.reduction_callbacks(
+                self.capture.gemm.get_name(),
+                self.capture.analysis,
+                plan.reduction_output,
+                geometry,
+            )
+        return dataclasses.replace(
+            plan,
+            axis=geometry.axis,
+            combine_fn=combine_fn,
+            finalizer_fn=finalizer_fn,
+        )
+
     @property
     def supported(self) -> bool:
         """Whether every claimed reduction has a backend lowering contract."""
@@ -225,17 +293,20 @@ class NVGemmEpilogueProgram:
     def feeds_main(self) -> bool:
         return self.reduction_plan is not None and self.reduction_plan.feeds_main
 
-    @property
-    def min_tile_n(self) -> int:
+    def min_tile(self, axis: int) -> int:
         groups = [
             config.group
             for config in self.reduction_partition.configs
-            if config.axis == 1
+            if config.axis == axis
         ]
         plan = self.reduction_plan
-        if plan is not None and plan.feeds_main and plan.axis == 1:
+        if plan is not None and plan.feeds_main and plan.axis == axis:
             groups.append(plan.group)
         return max(groups, default=0)
+
+    @property
+    def min_tile_shape(self) -> tuple[int, int]:
+        return self.min_tile(0), self.min_tile(1)
 
     @property
     def owned_nodes(self) -> tuple[BaseSchedulerNode, ...]:
@@ -511,32 +582,21 @@ class NVGemmEpilogueLowering:
         if isinstance(node.data, Reduction):
             if expected_strides is None:
                 return None
-            reads = list(access_node.read_writes.reads)
+            read_writes = node.get_read_writes()
+            reads = list(read_writes.reads)
             if len(reads) != 1 or reads[0].name != gemm_node.get_name():
                 return None
-            range_vars = access_node.read_writes.range_vars
+            range_vars = read_writes.range_vars
             if range_vars is None:
                 return None
-            if not range_vars:
-                return GemmReductionConfig(
-                    output_name=output_name,
-                    group=group,
-                    axis=axis,
-                    reduction_type=reduction_type,
-                    source_fn=source_fn,
-                    finalizer_fn=finalizer_fn,
-                )
-            strides = V.graph.sizevars.stride_vars(reads[0].index, range_vars)
             expected_stride_options = [expected_strides]
             if axis == 1:
                 expected_stride_options.append([n, 1])
             else:
                 expected_stride_options.append([1, n])
             if not any(
-                len(strides) == len(expected)
-                and all(
-                    known_equals(stride, expected_stride)
-                    for stride, expected_stride in zip(strides, expected)
+                _matches_affine_index(
+                    reads[0].index, range_vars, expected, known_equals
                 )
                 for expected in expected_stride_options
             ):
