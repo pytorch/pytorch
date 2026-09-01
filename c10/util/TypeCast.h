@@ -17,35 +17,20 @@
 
 namespace c10 {
 
-// Thin forwarding templates keep c10 as the customization point so downstream
-// explicit specializations in namespace c10 remain source-compatible.
+// Thin wrappers inherit from torch::headeronly so c10 remains the customization
+// point and downstream explicit specializations in namespace c10 stay valid.
 template <typename dest_t, typename src_t>
-struct needs_real {
-  constexpr static bool value =
-      torch::headeronly::needs_real<dest_t, src_t>::value;
-};
+struct needs_real : torch::headeronly::needs_real<dest_t, src_t> {};
 
 template <bool B, typename src_t>
-struct maybe_real {
-  C10_HOST_DEVICE static inline decltype(auto) apply(src_t src) {
-    return torch::headeronly::maybe_real<B, src_t>::apply(src);
-  }
-};
+struct maybe_real : torch::headeronly::maybe_real<B, src_t> {};
 
 template <bool B, typename src_t>
-struct maybe_bool {
-  C10_HOST_DEVICE static inline decltype(auto) apply(src_t src) {
-    return torch::headeronly::maybe_bool<B, src_t>::apply(src);
-  }
-};
+struct maybe_bool : torch::headeronly::maybe_bool<B, src_t> {};
 
 template <typename dest_t, typename src_t>
-struct static_cast_with_inter_type {
-  C10_HOST_DEVICE static inline dest_t apply(src_t src) {
-    return torch::headeronly::static_cast_with_inter_type<dest_t, src_t>::apply(
-        src);
-  }
-};
+struct static_cast_with_inter_type
+    : torch::headeronly::static_cast_with_inter_type<dest_t, src_t> {};
 
 template <typename To, typename From>
 C10_HOST_DEVICE To convert(From f) {
