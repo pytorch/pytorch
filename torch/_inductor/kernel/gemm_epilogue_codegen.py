@@ -134,13 +134,8 @@ def _mean_finalize(value, group):
 
 
 def canonical_tensorssa_reduction_type(reduction_type: str) -> ReductionType:
-    """Return the associative primitive used by a composed reduction plan."""
-    if reduction_type == "logsumexp":
-        return "max"
-    if reduction_type in (
-        "online_softmax",
-        "direct_bool_gt_zero",
-    ) or reduction_type.startswith(("mean", "normalize_sum", "variance")):
+    """Return the TensorSSA primitive used by a reduction program."""
+    if reduction_type == "mean":
         return "sum"
     return cast(ReductionType, reduction_type)
 
@@ -229,7 +224,7 @@ class GemmReductionCompileConfig:
             args.group,
             args.axis,
             args.reduction_type,
-            args.source_type,
+            args.reduction_algorithm,
             args.feeds_main,
         )
 
@@ -256,7 +251,6 @@ class GemmReductionCompileConfig:
     def constexprs(self, *, include_consumers: bool = True) -> tuple[Any, ...]:
         constexprs = (
             *self._common_constexprs(),
-            self.args.secondary_feed_type,
             *self._primary_callbacks(include_consumer=include_consumers),
         )
         return (

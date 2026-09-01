@@ -4,7 +4,7 @@
 import dataclasses
 import operator
 from collections.abc import Iterator, Sequence
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 import torch
 from torch._inductor import inductor_prims
@@ -17,6 +17,12 @@ from .gemm_epilogue_utils import statically_known_shape_equal
 
 GEMM_ACCUMULATOR_ARG_NAME = "accum"
 GEMM_REDUCTION_FRAGMENT_WIDTH = 32
+
+GemmReductionType = Literal["sum", "mean", "prod", "max", "min"]
+# "default" uses one associative reduction. The other values select physical
+# multi-pass schedules that generated scalar callbacks cannot yet express;
+# source, combine, finalize, and consumer arithmetic is still callback-generated.
+GemmReductionAlgorithm = Literal["default", "logsumexp", "online_softmax", "variance"]
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -95,45 +101,6 @@ class GemmReductionGeometry:
 
 
 @dataclasses.dataclass(frozen=True)
-class GemmReductionDescriptor:
-    """Backend lowering descriptor for a recognized reduction expression.
-
-    Attributes:
-        kind: Canonical reduction or normalized-consumer expression name.
-        parameters: Compile-time scalar parameters encoded by that expression.
-    """
-
-    kind: str
-    parameters: tuple[float, ...] = ()
-
-    PARAMETER_COUNTS: ClassVar[dict[str, int]] = {
-        "mean_linear": 3,
-        "normalize_sum_affine": 4,
-        "normalize_sum_reverse_affine": 4,
-        "sum_mul_affine": 2,
-        "variance_affine": 2,
-    }
-
-    @classmethod
-    def parse(cls, value: str) -> "GemmReductionDescriptor":
-        kind, *parameters = value.split(":")
-        return cls(kind, tuple(float(parameter) for parameter in parameters))
-
-    def serialize(self) -> str:
-        if not self.parameters:
-            return self.kind
-        return (
-            self.kind
-            + ":"
-            + ":".join(format(parameter, ".17g") for parameter in self.parameters)
-        )
-
-    @property
-    def has_valid_parameters(self) -> bool:
-        return len(self.parameters) == self.PARAMETER_COUNTS.get(self.kind, 0)
-
-
-@dataclasses.dataclass(frozen=True)
 class GemmReductionConfig:
     """Reduction recognized from frontend graph or scheduler loop IR.
 
@@ -144,15 +111,19 @@ class GemmReductionConfig:
         output_name: Buffer produced by the recognized reduction.
         group: Number of adjacent GEMM output elements in each reduction group.
         axis: GEMM output axis grouped by the reduction, either M (0) or N (1).
-        reduction_type: Reduction or normalized consumer expression to compute.
+        reduction_type: Associative primitive computed by the kernel.
         source_type: Transformation applied to GEMM accumulator values.
+        reduction_algorithm: Optional multi-stage physical reduction algorithm.
     """
 
     output_name: str
     group: int
     axis: int
-    reduction_type: str
+    reduction_type: GemmReductionType
     source_type: str
+    reduction_algorithm: GemmReductionAlgorithm = "default"
+    finalizer_fn: str | None = None
+    secondary_consumer_fn: str | None = None
 
     @property
     def geometry(self) -> GemmReductionGeometry:
@@ -167,13 +138,13 @@ class GemmReductionPlan:
         reduction_output: Optional compressed reduction output buffer.
         group: Number of adjacent GEMM output elements in each reduction group.
         axis: GEMM output axis grouped by the reduction, either M (0) or N (1).
-        reduction_type: Reduction or normalized consumer expression to compute.
+        reduction_type: Associative primitive computed by the kernel.
         source_type: Transformation applied to GEMM accumulator values.
+        reduction_algorithm: Optional multi-stage physical reduction algorithm.
         primary_output: Buffer receiving the primary GEMM result.
         feeds_main: Whether the reduction participates in the primary output.
         feed_output: Optional full-shape output consuming the reduction.
         secondary_feed_output: Optional second full-shape reduction consumer.
-        secondary_feed_type: Expression implemented by the secondary consumer.
         finalizer_fn: Optional source for post-reduction scalar finalization.
         consumer_fn: Optional source for the primary full-shape consumer.
         secondary_consumer_fn: Optional source for the secondary consumer.
@@ -182,13 +153,13 @@ class GemmReductionPlan:
     reduction_output: str | None
     group: int
     axis: int
-    reduction_type: str
+    reduction_type: GemmReductionType
     source_type: str
     primary_output: str
+    reduction_algorithm: GemmReductionAlgorithm = "default"
     feeds_main: bool = False
     feed_output: str | None = None
     secondary_feed_output: str | None = None
-    secondary_feed_type: str | None = None
     finalizer_fn: str | None = None
     consumer_fn: str | None = None
     secondary_consumer_fn: str | None = None
@@ -220,22 +191,22 @@ class GemmReductionArguments:
         output: Optional tensor receiving the compressed reduction.
         feed_output: Optional full-shape tensor receiving the reduction consumer.
         secondary_feed_output: Optional second full-shape reduction consumer.
-        secondary_feed_type: Expression implemented by ``secondary_feed_output``.
         group: Number of adjacent GEMM output elements in each reduction group.
         axis: GEMM output axis grouped by the reduction, either M (0) or N (1).
-        reduction_type: Reduction or normalized consumer expression to compute.
+        reduction_type: Associative primitive computed by the kernel.
         source_type: Transformation applied to GEMM accumulator values.
+        reduction_algorithm: Optional multi-stage physical reduction algorithm.
         feeds_main: Whether the reduction also produces the primary GEMM output.
     """
 
     output: Any | None = None
     feed_output: Any | None = None
     secondary_feed_output: Any | None = None
-    secondary_feed_type: str | None = None
     group: int = 0
     axis: int = 1
-    reduction_type: str = "sum"
+    reduction_type: GemmReductionType = "sum"
     source_type: str = "identity"
+    reduction_algorithm: GemmReductionAlgorithm = "default"
     feeds_main: bool = False
     finalizer_fn: str | None = None
     consumer_fn: str | None = None
@@ -251,8 +222,8 @@ class GemmReductionArguments:
         "axis",
         "reduction_type",
         "source_type",
+        "reduction_algorithm",
         "feeds_main",
-        "secondary_feed_type",
         "finalizer_fn",
         "consumer_fn",
         "secondary_consumer_fn",
@@ -278,10 +249,6 @@ class GemmReductionArguments:
         return (
             self.output is not None or self.feed_output is not None or self.feeds_main
         )
-
-    @property
-    def descriptor(self) -> GemmReductionDescriptor:
-        return GemmReductionDescriptor.parse(self.reduction_type)
 
     def tensor_items(self) -> Iterator[tuple[str, Any | None]]:
         return ((field, getattr(self, field)) for field in self.TENSOR_FIELDS)
@@ -323,7 +290,7 @@ class NormalizedReduction:
     dim: Any
     keepdim: Any
     dtype: Any
-    reduction_type: str
+    reduction_type: GemmReductionType
 
 
 @dataclasses.dataclass(frozen=True)
@@ -396,7 +363,7 @@ NormalizedNode = (
 )
 
 
-FUNCTION_REDUCTION_TYPES = {
+FUNCTION_REDUCTION_TYPES: dict[Any, tuple[GemmReductionType, bool]] = {
     torch.ops.aten.sum.dim_IntList: ("sum", True),
     torch.ops.aten.mean.dim: ("mean", True),
     torch.ops.aten.prod.dim_int: ("prod", True),

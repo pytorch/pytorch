@@ -30,8 +30,10 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
 )
 from torch._inductor.kernel.gemm_epilogue import (
     GemmEpilogueGraph,
+    GemmReductionAlgorithm,
     GemmReductionGeometry,
     GemmReductionPlan,
+    GemmReductionType,
     iter_fx_node_inputs,
     NormalizedGetItem,
     NormalizedPrepareSoftmax,
@@ -198,7 +200,8 @@ class GemmLocalReduceMatch:
     value_node: torch.fx.Node
     geometry: GemmReductionGeometry
     reduction_node: torch.fx.Node | None = None
-    reduction_type: str | None = None
+    reduction_type: GemmReductionType | None = None
+    reduction_algorithm: GemmReductionAlgorithm = "default"
 
     def __post_init__(self) -> None:
         if not isinstance(self.value_node, torch.fx.Node):
@@ -326,6 +329,7 @@ class GemmOutputPlan:
             reduction_type,
             "identity",
             self.output.name,
+            reduction_algorithm=match.reduction_algorithm,
             feeds_main=local_reduce.feeds_main,
             feed_output=self.output.name if local_reduce.feeds_main else None,
         )
@@ -431,7 +435,8 @@ class GemmLocalReduceAnalysis:
         dim: Any,
         dtype: Any = None,
         *,
-        reduction_type: str | None = None,
+        reduction_type: GemmReductionType | None = None,
+        reduction_algorithm: GemmReductionAlgorithm = "default",
         raise_invalid_dims: bool = True,
     ) -> bool:
         """Match and record a reduction over a grouped TensorSSA layout."""
@@ -452,6 +457,7 @@ class GemmLocalReduceAnalysis:
             layout,
             reduction_node=node,
             reduction_type=reduction_type,
+            reduction_algorithm=reduction_algorithm,
         )
         return True
 
