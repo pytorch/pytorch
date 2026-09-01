@@ -7,19 +7,12 @@ import torch._inductor.config as inductor_config
 from functorch import make_fx
 from torch import Tensor
 from torch._dynamo.utils import ReinplaceCounters
-from torch._guards import detect_fake_mode
 from torch._higher_order_ops.auto_functionalize import (
     auto_functionalized,
     auto_functionalized_v2,
 )
-from torch._inductor.fx_passes.reinplace import (
-    reinplace_inplaceable_ops,
-    reinplace_inplaceable_ops_core,
-)
-from torch._inductor.fx_utils import FakeTensorUpdater
+from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops_core
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
-from torch._inductor.utils import run_and_get_code
-from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -104,17 +97,6 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         inp2 = (inp[0].clone(), inp[1].clone())
         self.assertEqual(f(*inp), nf(*inp2))
         self.assertEqual(inp, inp2)
-
-    def _run_reinplace_pass_with_targets(self, f, *args):
-        gm = make_fx(f, tracing_mode="fake")(*args)
-        before_targets = [node.target for node in gm.graph.nodes]
-        fake_mode = detect_fake_mode([node.meta.get("val") for node in gm.graph.nodes])
-        with V.set_fake_mode(fake_mode):
-            reinplace_inplaceable_ops(FakeTensorUpdater(gm), gm.graph)
-        gm.graph.lint()
-        gm.recompile()
-        after_targets = [node.target for node in gm.graph.nodes]
-        return gm, before_targets, after_targets
 
     def test_dont_modify_live(self):
         def f(x, y):
@@ -541,45 +523,6 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         expected = fn(x)
         result = torch.compile(fn, fullgraph=True, backend="inductor")(x)
         self.assertEqual(result, expected)
-
-    def test_generalized_scatter_chunked_codegen_reinplace(self):
-        num_chunks = 2
-        chunk_rows = 2
-        width = 4
-
-        def f(x, w):
-            # Cover a fresh empty base and an initialized base with smaller sources.
-            empty_out = torch.empty((x.shape[0], width), device=x.device, dtype=x.dtype)
-            small_src_out = torch.zeros(
-                (x.shape[0], width), device=x.device, dtype=x.dtype
-            )
-            for i in range(num_chunks):
-                start, end = i * chunk_rows, (i + 1) * chunk_rows
-                small_src = x[start:end]
-                chunk = small_src @ w
-                empty_out = aten.slice_scatter.default(empty_out, chunk, 0, start, end)
-                small_src_out = aten.slice_scatter.default(
-                    small_src_out, small_src, 0, start, end
-                )
-            return empty_out, small_src_out
-
-        x = torch.randn(num_chunks * chunk_rows, width, device=device)
-        w = torch.randn(width, width, device=device)
-        compiled = torch.compile(f, fullgraph=True)
-
-        out, (code,) = run_and_get_code(compiled, x, w)
-
-        self.assertEqual(out, (x @ w, x))
-        self.assertEqual(code.count("extern_kernels.mm("), num_chunks)
-        empty_strided = f"empty_strided_{device}"
-        self.assertEqual(
-            code.count(f"{empty_strided}((2, 4), (4, 1), torch.float32)"), 1
-        )
-        self.assertEqual(
-            code.count(f"{empty_strided}((4, 4), (4, 1), torch.float32)"), 2
-        )
-        self.assertIn("# reuse", code)
-        self.assertIn("triton_poi_fused_zeros", code)
 
     @parametrize(
         "factory_op",

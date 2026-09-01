@@ -162,8 +162,9 @@ static at::Tensor empty_strided_p2p_persistent(
 
   auto allocator = get_allocator(device.type());
   void* dev_ptr = nullptr;
-  if (alloc_id_to_dev_ptr.find(alloc_id) != alloc_id_to_dev_ptr.end()) {
-    dev_ptr = alloc_id_to_dev_ptr[alloc_id];
+  if (auto it = alloc_id_to_dev_ptr.find(alloc_id);
+      it != alloc_id_to_dev_ptr.end()) {
+    dev_ptr = it->second;
     TORCH_CHECK(
         alloc_size == allocator->get_alloc_size(dev_ptr),
         "SymmetricMemory::empty_strided_p2p_persistent: ",
@@ -384,10 +385,7 @@ static at::Tensor get_buffer_at_byte_offset(
     c10::IntArrayRef sizes,
     c10::ScalarType dtype,
     size_t offset_bytes) {
-  TORCH_CHECK(
-      peer >= 0 && peer < handle->get_world_size(),
-      "Invalid peer rank: ",
-      peer);
+  check_rank(peer, handle->get_world_size());
   auto peer_ptr = handle->get_buffer_ptrs()[peer];
   TORCH_CHECK(
       peer_ptr != nullptr,
@@ -442,6 +440,8 @@ at::Tensor SymmetricMemory::get_signal_pad(
     c10::IntArrayRef sizes,
     std::optional<c10::ScalarType> dtype,
     int64_t storage_offset) {
+  check_rank(rank, get_world_size());
+
   // If the dtype is unspecified, default it to UInt32, as it
   // is the most common type for signaling purposes.
   if (!dtype.has_value()) {
@@ -569,6 +569,8 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
       "nccl_reduce_scatter_offset(Tensor input, Tensor(a!)[] out, str group_name, int dim, int[]? offsets=None, int[]? dst_ranks=None, str red_op='sum') -> ()");
   m.def(
       "nccl_all_to_all_nd(Tensor input, Tensor(a!) out, int scatter_dim, int gather_dim, str group_name) -> ()");
+  m.def(
+      "nccl_all_gather_offset(Tensor input, Tensor(a!) out, str group_name, int[] split_sizes, int[]? split_offsets=None) -> ()");
   m.def(
       "nvshmem_all_to_all(Tensor input, Tensor(a!) out, str group_name) -> Tensor(a!)");
   m.def(
