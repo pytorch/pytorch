@@ -17,6 +17,9 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-float-conversion")
 #if C10_CLANG_HAS_WARNING("-Wfloat-conversion")
 C10_CLANG_DIAGNOSTIC_IGNORE("-Wfloat-conversion")
 #endif
+#if C10_CLANG_HAS_WARNING("-Wdeprecated-literal-operator")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wdeprecated-literal-operator")
+#endif
 
 namespace c10 {
 
