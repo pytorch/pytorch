@@ -554,9 +554,11 @@ class TestGuardSerialization(TestGuardSerializationBase):
             return m(x)
 
         with self.assertRaisesRegex(
-            TypeError, "Please define the class at global scope"
-        ):
+            PackageError, "Please define the class at global scope"
+        ) as cm:
             self._test_serialization("TYPE_MATCH", fn, m, torch.randn(3))
+        self.assertIsInstance(cm.exception, torch._dynamo.exc.GuardSerializationError)
+        self.assertEqual(cm.exception.guard_type, "TYPE_MATCH")
 
         m = GlobalModule()
         ref, loaded = self._test_serialization("TYPE_MATCH", fn, m, torch.randn(3))
@@ -1113,6 +1115,67 @@ class TestGuardSerialization(TestGuardSerializationBase):
             # __traceback__ pins the guard-build frames (GuardBuilder with the
             # user scopes, OutputGraph) on the long-lived CheckFunctionManager,
             # leaking them once per suppressed failure.
+            self.assertIsNone(cause.__traceback__)
+        finally:
+            torch._dynamo.reset()
+
+    @torch._dynamo.config.patch({"strict_precompile": False})
+    def test_nonstrict_local_type_serialization_failure_is_typed(self):
+        # The unserializable TYPE_MATCH branch (local-scope class) must raise
+        # the same typed GuardSerializationError as its siblings, not a bare
+        # TypeError that skips the non-strict swallow and reaches consumers as
+        # InternalTorchDynamoError.
+        from torch._dynamo.package import CompilePackage
+
+        class Local:
+            attr = 1
+
+        def fn(x, o):
+            return x + o.attr
+
+        torch._dynamo.reset()
+        package = CompilePackage(fn)
+        compiled = torch._dynamo.optimize(backend="eager", package=package)(fn)
+        try:
+            with self.assertRaisesRegex(
+                PackageError, "guards_state must not be None"
+            ) as cm:
+                compiled(torch.randn(3), Local())
+            cause = cm.exception.__cause__
+            self.assertIsInstance(
+                cause, torch._dynamo.exc.GuardSerializationError
+            )
+            self.assertEqual(cause.guard_type, "TYPE_MATCH")
+            self.assertTrue(cause.guard_name)
+            self.assertIn("defined in local scope", str(cause))
+        finally:
+            torch._dynamo.reset()
+
+    @torch._dynamo.config.patch({"strict_precompile": False})
+    def test_nonstrict_unpicklable_guard_state_failure_is_typed(self):
+        # Pickling failures other than AttributeError (e.g. TypeError from an
+        # unpicklable guarded value) must also surface as the typed
+        # PackageError chain instead of escaping the non-strict swallow.
+        import threading
+
+        from torch._dynamo.package import CompilePackage
+
+        def fn(x, lk):
+            if lk.locked():
+                return x + 1
+            return x + 2
+
+        torch._dynamo.reset()
+        package = CompilePackage(fn)
+        compiled = torch._dynamo.optimize(backend="eager", package=package)(fn)
+        try:
+            with self.assertRaisesRegex(
+                PackageError, "guards_state must not be None"
+            ) as cm:
+                compiled(torch.randn(3), threading.Lock())
+            cause = cm.exception.__cause__
+            self.assertIsInstance(cause, torch._dynamo.exc.PackageError)
+            self.assertIn("cannot pickle", str(cause))
             self.assertIsNone(cause.__traceback__)
         finally:
             torch._dynamo.reset()
