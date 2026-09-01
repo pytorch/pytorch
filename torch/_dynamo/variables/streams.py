@@ -506,6 +506,10 @@ class StreamVariable(StreamContextVariable):
                 event_has_source=event_var.source is not None,
             )
         else:
+            # The real record_event() runs first because we need the
+            # event object to exist before we can register it.  The
+            # mutation check below is always deferred for sourceless
+            # events, so ordering is safe.
             event = self.value.record_event()
             event_index = register_graph_created_object(
                 event,
@@ -513,8 +517,6 @@ class StreamVariable(StreamContextVariable):
                     TupleVariable([]), ConstDictVariable({})
                 ),
             )
-            # Freshly constructed during tracing: defer the mutation
-            # check to escape analysis.
             tx.output.check_event_record_after_input_mutation(
                 id(self.value), event_value=event, event_has_source=False
             )
