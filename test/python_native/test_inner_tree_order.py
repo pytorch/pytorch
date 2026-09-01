@@ -37,145 +37,163 @@ def _order_on():
             os.environ[rt._INNER_TREE_ENV] = prev
 
 
-# GOLDEN BIT PATTERNS, generated from ATen's inner-tree kernel and pinned here so the bitwise
-# contract OUTLIVES it: matching ATen exactly is a hard requirement, and a differential test
-# cannot state that claim once the kernel it compares against is gone. Upstream pins its own
-# hashes for SUM (test_sum_cutedsl.py::test_bitwise) but not for prod, which would otherwise lose
-# its reference entirely.
+# GOLDEN BIT PATTERNS, pinned so the bitwise contract outlives its reference. The reference is
+# `ops/reductions/inner_tree_kernel.py`. There is no ATen kernel to regenerate against: upstream
+# wrote one (#182986, June 2026) and pinned 54 hashes from it, but that iteration never landed --
+# what landed two months later is the DSL port, carrying 36 of those hashes unchanged into
+# test_sum_cutedsl.py::test_bitwise. Those 36 are the tie back to ATen, for VALUES only: they were
+# generated from exactly-representable data, so they cannot detect a reordering, and upstream's
+# order-sensitive cross-warp hash was generated from the port rather than from ATen. This table
+# exists because the port is a live fallback today but is meant to be deleted once gapped/strided
+# inputs are served natively, and a differential test cannot outlive it.
 #
 # Hardware-independent by construction -- the DAG is fixed by N alone and IEEE add/multiply are
-# exact -- so these travel across GPUs and toolkits. A hash that changes means the ORDER changed.
-# Regenerate ONLY against ATen's kernel, never against our own output.
+# exact -- so these travel across GPUs and toolkits. A hash that changes means the ORDER changed,
+# for every entry test_golden_input_can_detect_a_reorder covers; the narrow dtypes are value
+# checks only, for the reason given there. Regenerate against the reference kernel, never against
+# an unverified change to our own fold.
 _GOLDEN = {
     # --- sum ---
-    ("sum", "float16", 8, 4): "61272142b0a95772",  # multirow
-    ("sum", "float16", 8, 16): "506a22099895a13f",  # multirow
-    ("sum", "float16", 8, 27): "800974ad5e1fb845",  # multirow
-    ("sum", "float16", 8, 33): "be7f6e4fafaae06d",  # multirow
-    ("sum", "float16", 8, 128): "58d0b9b32b9b8107",  # looped
-    ("sum", "float16", 8, 1024): "4805281330714407",  # looped
-    ("sum", "float16", 8, 4096): "64c97a8480e18692",  # looped
-    ("sum", "float16", 8, 4097): "6758d761cd7a8c75",  # looped
-    ("sum", "float16", 8, 6143): "661721bd1a61d55c",  # looped
-    ("sum", "float16", 8, 8192): "288c3adef1083a11",  # looped
-    ("sum", "float16", 8, 20000): "36a2cb78f4f1e1cf",  # looped
-    ("sum", "float16", 8, 40000): "f6e7c62c52a62aa4",  # split
-    ("sum", "float16", 8, 100003): "b5c36ffdfc71a834",  # split
-    ("sum", "float16", 3, 262144): "2eb317127b795ff7",  # split
-    ("sum", "bfloat16", 8, 4): "9b0c04638ff5c68e",  # multirow
-    ("sum", "bfloat16", 8, 16): "6f08bc606b7fa777",  # multirow
-    ("sum", "bfloat16", 8, 27): "b83818ec1a68d6a6",  # multirow
-    ("sum", "bfloat16", 8, 33): "93114919c240553e",  # multirow
-    ("sum", "bfloat16", 8, 128): "4d01fbb712e2cf2a",  # looped
-    ("sum", "bfloat16", 8, 1024): "766e39a13ce5f3f9",  # looped
-    ("sum", "bfloat16", 8, 4096): "f5ba992669996d98",  # looped
-    ("sum", "bfloat16", 8, 4097): "8b1e5bafb09145fc",  # looped
-    ("sum", "bfloat16", 8, 6143): "20950accd1226f4c",  # looped
-    ("sum", "bfloat16", 8, 8192): "504e9089b2e6c669",  # looped
-    ("sum", "bfloat16", 8, 20000): "7913ba4c30b9e218",  # looped
-    ("sum", "bfloat16", 8, 40000): "8d8b3b337d794523",  # split
-    ("sum", "bfloat16", 8, 100003): "d01ff76afddbcf13",  # split
-    ("sum", "bfloat16", 3, 262144): "82d3e4b49f91f2e3",  # split
-    ("sum", "float32", 8, 4): "04416a3c5ae44e4a",  # multirow
-    ("sum", "float32", 8, 16): "f0f60f7a02d80a39",  # multirow
-    ("sum", "float32", 8, 27): "e7766868b0f4393c",  # multirow
-    ("sum", "float32", 8, 33): "dc89a91f83c21b4b",  # looped
-    ("sum", "float32", 8, 128): "5b3d5d83855e8f53",  # looped
-    ("sum", "float32", 8, 1024): "90a45668bf74e957",  # looped
-    ("sum", "float32", 8, 4096): "b28453dc0bb6510e",  # looped
-    ("sum", "float32", 8, 4097): "550222d50e25aa4e",  # looped
-    ("sum", "float32", 8, 6143): "9f688fc91f2760cd",  # looped
-    ("sum", "float32", 8, 8192): "37dd163910d338c7",  # looped
-    ("sum", "float32", 8, 20000): "2fab640262dd3dd0",  # looped
-    ("sum", "float32", 8, 40000): "99ce48e16c66f342",  # split
-    ("sum", "float32", 8, 100003): "0b2520a54297458c",  # split
-    ("sum", "float32", 3, 262144): "6100efb05c63dfc9",  # split
-    ("sum", "float64", 8, 4): "485cbddd6dff5593",  # multirow
-    ("sum", "float64", 8, 16): "da7fa3654d42dcc0",  # multirow
-    ("sum", "float64", 8, 27): "a26a4e702902b904",  # looped
-    ("sum", "float64", 8, 33): "cb038012718be8e2",  # looped
-    ("sum", "float64", 8, 128): "481731f7c1dd555c",  # looped
-    ("sum", "float64", 8, 1024): "26a72b7039e14f8d",  # looped
-    ("sum", "float64", 8, 4096): "9c52321e3db22285",  # looped
-    ("sum", "float64", 8, 4097): "222cf98540d9a7a3",  # looped
-    ("sum", "float64", 8, 6143): "b6f9a349eb87b901",  # looped
-    ("sum", "float64", 8, 8192): "da00b110a8cb2b7b",  # looped
-    ("sum", "float64", 8, 20000): "6868c0df27a6efd3",  # looped
-    ("sum", "float64", 8, 40000): "536c0240a453dae5",  # split
-    ("sum", "float64", 8, 100003): "8739942d77be49ff",  # split
-    ("sum", "float64", 3, 262144): "05280a6d8286f9da",  # split
+    ("sum", "float16", 8, 4): "7069267eff54930e",  # multirow
+    ("sum", "float16", 8, 16): "5c61a5395d0691bb",  # multirow
+    ("sum", "float16", 8, 27): "57a3f67d5fd8f69d",  # multirow
+    ("sum", "float16", 8, 33): "d171b9e87e8a49d3",  # multirow
+    ("sum", "float16", 8, 128): "1f93a9cc8df29f25",  # looped
+    ("sum", "float16", 8, 1024): "78a863f321707ebf",  # looped
+    ("sum", "float16", 8, 4096): "d49189e15dae81ae",  # looped
+    ("sum", "float16", 8, 4097): "0532ce6becb24fef",  # looped
+    ("sum", "float16", 8, 6143): "b997bb02a103b199",  # looped
+    ("sum", "float16", 8, 8192): "20deb1a11722efb0",  # looped
+    ("sum", "float16", 8, 20000): "d4d2445c85161924",  # looped
+    ("sum", "float16", 8, 40000): "efb4882aafbd3e01",  # split
+    ("sum", "float16", 8, 100003): "7ca7afe152551d32",  # split
+    ("sum", "float16", 3, 262144): "bb9d19cc8683c407",  # split
+    ("sum", "bfloat16", 8, 4): "e164d1c48f05e7ec",  # multirow
+    ("sum", "bfloat16", 8, 16): "83b0ea3d6efe1c17",  # multirow
+    ("sum", "bfloat16", 8, 27): "6b35fadfb1131edf",  # multirow
+    ("sum", "bfloat16", 8, 33): "91f77421caea42c2",  # multirow
+    ("sum", "bfloat16", 8, 128): "b88d7c67be9a0a92",  # looped
+    ("sum", "bfloat16", 8, 1024): "e8368cc6128dc8ea",  # looped
+    ("sum", "bfloat16", 8, 4096): "38e1201cfc69c4a8",  # looped
+    ("sum", "bfloat16", 8, 4097): "d82d5a0eec1a9342",  # looped
+    ("sum", "bfloat16", 8, 6143): "9a8d12f94bf3b42e",  # looped
+    ("sum", "bfloat16", 8, 8192): "d5c3f2d40762d1ef",  # looped
+    ("sum", "bfloat16", 8, 20000): "766b771d69e39c78",  # looped
+    ("sum", "bfloat16", 8, 40000): "131d9a1b238a2ec3",  # split
+    ("sum", "bfloat16", 8, 100003): "dd0d994c351ef3d0",  # split
+    ("sum", "bfloat16", 3, 262144): "9cb55f6fe7d7a1d3",  # split
+    ("sum", "float32", 8, 4): "73ad01782c9262c4",  # multirow
+    ("sum", "float32", 8, 16): "88f7e0f77961255e",  # multirow
+    ("sum", "float32", 8, 27): "56b42ce6ec0dd5a2",  # multirow
+    ("sum", "float32", 8, 33): "2a38ee077ed8f5eb",  # looped
+    ("sum", "float32", 8, 128): "1008f735a4f08798",  # looped
+    ("sum", "float32", 8, 1024): "a648cd0f3c75779a",  # looped
+    ("sum", "float32", 8, 4096): "c21308629158fe30",  # looped
+    ("sum", "float32", 8, 4097): "61219bb1c29abdf9",  # looped
+    ("sum", "float32", 8, 6143): "c0695c71817953b3",  # looped
+    ("sum", "float32", 8, 8192): "8928a0edee31a8e6",  # looped
+    ("sum", "float32", 8, 20000): "dd3c69b9b0dd6d1e",  # looped
+    ("sum", "float32", 8, 40000): "00f118660d7a6ecf",  # split
+    ("sum", "float32", 8, 100003): "7c81ed5e86748261",  # split
+    ("sum", "float32", 3, 262144): "43932e982470bb77",  # split
+    ("sum", "float64", 8, 4): "449faee9ab9f0ec5",  # multirow
+    ("sum", "float64", 8, 16): "3cdb33c229796052",  # multirow
+    ("sum", "float64", 8, 27): "684f413c34ebd347",  # looped
+    ("sum", "float64", 8, 33): "6d2f637976c42052",  # looped
+    ("sum", "float64", 8, 128): "4ffced4af7693992",  # looped
+    ("sum", "float64", 8, 1024): "f6d308aea49a3796",  # looped
+    ("sum", "float64", 8, 4096): "4e3500a9305f2e4c",  # looped
+    ("sum", "float64", 8, 4097): "986dedef9c2f194b",  # looped
+    ("sum", "float64", 8, 6143): "f377c8777d302c6a",  # looped
+    ("sum", "float64", 8, 8192): "f09708f4bcc607ad",  # looped
+    ("sum", "float64", 8, 20000): "d3a29d2973b31c7f",  # looped
+    ("sum", "float64", 8, 40000): "5ef3b8011926a87d",  # split
+    ("sum", "float64", 8, 100003): "93bc7250f8575381",  # split
+    ("sum", "float64", 3, 262144): "55d3197971df287a",  # split
     # --- prod ---
-    ("prod", "float16", 8, 4): "b2a848d42279cafd",  # multirow
-    ("prod", "float16", 8, 16): "c439ed5f4b4de5d2",  # multirow
-    ("prod", "float16", 8, 27): "214a4e6b95949847",  # multirow
-    ("prod", "float16", 8, 33): "dc1d1e01bff5293d",  # multirow
-    ("prod", "float16", 8, 128): "819b2bb8159f8283",  # looped
-    ("prod", "float16", 8, 1024): "24c153d62a181453",  # looped
-    ("prod", "float16", 8, 4096): "d93c892726ee23a4",  # looped
-    ("prod", "float16", 8, 4097): "d93c892726ee23a4",  # looped
-    ("prod", "float16", 8, 6143): "850a369516a8ad6f",  # looped
-    ("prod", "float16", 8, 8192): "32a0018763d9bbf7",  # looped
-    ("prod", "float16", 8, 20000): "32a0018763d9bbf7",  # looped
-    ("prod", "float16", 8, 40000): "32a0018763d9bbf7",  # split
-    ("prod", "float16", 8, 100003): "32a0018763d9bbf7",  # split
-    ("prod", "float16", 3, 262144): "d07c8d92e51dcfc0",  # split
-    ("prod", "bfloat16", 8, 4): "a32ce7b5dbc31cae",  # multirow
-    ("prod", "bfloat16", 8, 16): "f44be04d72d07c28",  # multirow
-    ("prod", "bfloat16", 8, 27): "c571fa4ba567d88c",  # multirow
-    ("prod", "bfloat16", 8, 33): "51ccada6c1da3cb4",  # multirow
-    ("prod", "bfloat16", 8, 128): "b6da3e9220e9b0e3",  # looped
-    ("prod", "bfloat16", 8, 1024): "561dd70e7ee5dfbe",  # looped
-    ("prod", "bfloat16", 8, 4096): "561dd70e7ee5dfbe",  # looped
-    ("prod", "bfloat16", 8, 4097): "561dd70e7ee5dfbe",  # looped
-    ("prod", "bfloat16", 8, 6143): "561dd70e7ee5dfbe",  # looped
-    ("prod", "bfloat16", 8, 8192): "561dd70e7ee5dfbe",  # looped
-    ("prod", "bfloat16", 8, 20000): "561dd70e7ee5dfbe",  # looped
-    ("prod", "bfloat16", 8, 40000): "561dd70e7ee5dfbe",  # split
-    ("prod", "bfloat16", 8, 100003): "561dd70e7ee5dfbe",  # split
+    ("prod", "float16", 8, 4): "e9deb19e81484045",  # multirow
+    ("prod", "float16", 8, 16): "3adb69ccc709c602",  # multirow
+    ("prod", "float16", 8, 27): "8e61a4a27e9b9b06",  # multirow
+    ("prod", "float16", 8, 33): "ccbbaccfc0326b14",  # multirow
+    ("prod", "float16", 8, 128): "a3e124a6aa5ffd7c",  # looped
+    ("prod", "float16", 8, 1024): "55502ae564a8df02",  # looped
+    ("prod", "float16", 8, 4096): "7c02b2f7ece60d69",  # looped
+    ("prod", "float16", 8, 4097): "68d56137046f20c2",  # looped
+    ("prod", "float16", 8, 6143): "14da9cdf82d1eff4",  # looped
+    ("prod", "float16", 8, 8192): "b1ae7ed8ec807ba7",  # looped
+    ("prod", "float16", 8, 20000): "897cc9f13b2b6ac1",  # looped
+    ("prod", "float16", 8, 40000): "c508c206b1f7d16f",  # split
+    ("prod", "float16", 8, 100003): "2d52e87b8e56a9c5",  # split
+    ("prod", "float16", 3, 262144): "4e5e130954f943dc",  # split
+    ("prod", "bfloat16", 8, 4): "a2b1b5a6ad32cd81",  # multirow
+    ("prod", "bfloat16", 8, 16): "6e351602c6708f55",  # multirow
+    ("prod", "bfloat16", 8, 27): "1fea08827cc8dd42",  # multirow
+    ("prod", "bfloat16", 8, 33): "402ba8c627529d7a",  # multirow
+    ("prod", "bfloat16", 8, 128): "ed1ac5a5816f7579",  # looped
+    ("prod", "bfloat16", 8, 1024): "04f210cba53a126a",  # looped
+    ("prod", "bfloat16", 8, 4096): "e97e3807c1fe45dd",  # looped
+    ("prod", "bfloat16", 8, 4097): "e5fc6516cb12b36e",  # looped
+    ("prod", "bfloat16", 8, 6143): "f450c3ee36a92d89",  # looped
+    ("prod", "bfloat16", 8, 8192): "0b151fef6d5bb06c",  # looped
+    ("prod", "bfloat16", 8, 20000): "5bd34716574270f5",  # looped
+    ("prod", "bfloat16", 8, 40000): "274312fc1141d249",  # split
+    ("prod", "bfloat16", 8, 100003): "926c2606d521edb0",  # split
     ("prod", "bfloat16", 3, 262144): "dc6a48767bd84de8",  # split
-    ("prod", "float32", 8, 4): "36369589045511a6",  # multirow
-    ("prod", "float32", 8, 16): "b20027bba4596b8a",  # multirow
-    ("prod", "float32", 8, 27): "035110cc00a180ee",  # multirow
-    ("prod", "float32", 8, 33): "06bb3ec8e3a2f4ef",  # looped
-    ("prod", "float32", 8, 128): "943cdde6364fffa9",  # looped
-    ("prod", "float32", 8, 1024): "1bc35283a888a0de",  # looped
-    ("prod", "float32", 8, 4096): "b9c8dfc476668401",  # looped
-    ("prod", "float32", 8, 4097): "565fcfd03899bb99",  # looped
-    ("prod", "float32", 8, 6143): "e3c37d13d1a80937",  # looped
-    ("prod", "float32", 8, 8192): "bee09afa492f8cf5",  # looped
-    ("prod", "float32", 8, 20000): "83862306e03556d2",  # looped
-    ("prod", "float32", 8, 40000): "0976e380378e4e31",  # split
-    ("prod", "float32", 8, 100003): "48e5f8f0e0dcee10",  # split
-    ("prod", "float32", 3, 262144): "f216bab5c5ab01c1",  # split
-    ("prod", "float64", 8, 4): "92c7492236305c5a",  # multirow
-    ("prod", "float64", 8, 16): "b3c4665a1e0a6323",  # multirow
-    ("prod", "float64", 8, 27): "4a47513af7b70c2c",  # looped
-    ("prod", "float64", 8, 33): "a04a8131b892c98a",  # looped
-    ("prod", "float64", 8, 128): "df5ce7b47af04cac",  # looped
-    ("prod", "float64", 8, 1024): "c3c14c286d95d149",  # looped
-    ("prod", "float64", 8, 4096): "654431d4944daed9",  # looped
-    ("prod", "float64", 8, 4097): "982a41024cb9b4b5",  # looped
-    ("prod", "float64", 8, 6143): "b4cad97f1edc3d74",  # looped
-    ("prod", "float64", 8, 8192): "7081e995c4b88c13",  # looped
-    ("prod", "float64", 8, 20000): "c0e264bd0b0ec4e3",  # looped
-    ("prod", "float64", 8, 40000): "d710a2802e7abd0a",  # split
-    ("prod", "float64", 8, 100003): "0c42378ac1a6c877",  # split
-    ("prod", "float64", 3, 262144): "2fd26ff4d111d1b9",  # split
+    ("prod", "float32", 8, 4): "4569bdcd5fb6469c",  # multirow
+    ("prod", "float32", 8, 16): "6890938d89593965",  # multirow
+    ("prod", "float32", 8, 27): "70745d71c15cadd5",  # multirow
+    ("prod", "float32", 8, 33): "819a2332a8ec961c",  # looped
+    ("prod", "float32", 8, 128): "3337dccee47d5479",  # looped
+    ("prod", "float32", 8, 1024): "77f1b0239bc269fb",  # looped
+    ("prod", "float32", 8, 4096): "052d1f11cfe7b81c",  # looped
+    ("prod", "float32", 8, 4097): "a323b3f23861149f",  # looped
+    ("prod", "float32", 8, 6143): "d2536401b9badc4c",  # looped
+    ("prod", "float32", 8, 8192): "2105242844970646",  # looped
+    ("prod", "float32", 8, 20000): "d04a833d3ef3875b",  # looped
+    ("prod", "float32", 8, 40000): "5e68f115d01cb452",  # split
+    ("prod", "float32", 8, 100003): "4cef96575c26539a",  # split
+    ("prod", "float32", 3, 262144): "e575349d6caa43b3",  # split
+    ("prod", "float64", 8, 4): "1b78d386f0595867",  # multirow
+    ("prod", "float64", 8, 16): "7cd73d01fecb15b7",  # multirow
+    ("prod", "float64", 8, 27): "3cb3863da517795f",  # looped
+    ("prod", "float64", 8, 33): "fb3d42e096254897",  # looped
+    ("prod", "float64", 8, 128): "bddb7b94b0a46a5a",  # looped
+    ("prod", "float64", 8, 1024): "502ad976ac0dbc22",  # looped
+    ("prod", "float64", 8, 4096): "1df5b26dcb0e5e81",  # looped
+    ("prod", "float64", 8, 4097): "35f8e0d3a5f71bdc",  # looped
+    ("prod", "float64", 8, 6143): "d3dfdc2fb1351676",  # looped
+    ("prod", "float64", 8, 8192): "2143eeecee209dbf",  # looped
+    ("prod", "float64", 8, 20000): "b7ce5185b397b4d6",  # looped
+    ("prod", "float64", 8, 40000): "a32dd963aad3d9ae",  # split
+    ("prod", "float64", 8, 100003): "de84b76fd6125a71",  # split
+    ("prod", "float64", 3, 262144): "030ca5e848e497ad",  # split
 }
 
 
 def _golden_input(m, n, dtype, prod):
-    """The input the table was generated from, reproduced exactly: alternating +-1 with a per-row
-    shift, so any reassociation moves the low bits."""
-    compute = torch.float64 if dtype is torch.float64 else torch.float32
-    cols = torch.arange(n, device="cuda", dtype=compute)
-    vals = ((cols % 2) * 2 - 1).reshape(1, n)
-    if m > 1:
-        rows = torch.arange(m, device="cuda", dtype=compute).reshape(m, 1)
-        vals = vals + ((rows % 5) - 2) / 4
+    """The input the table was generated from, reproduced exactly.
+
+    The values have to ROUND, or the table pins nothing about the order: an earlier version used
+    alternating +-1 with a per-row shift of (row % 5 - 2)/4 -- every value a multiple of 0.25 and
+    every partial sum under 1.5n, hence EXACT in the fp32 accumulator, so reassociation could not
+    move a bit and both fold orders hashed identically at every shape.
+
+    They also have to be APERIODIC over the largest row here. Fractions over two small moduli sum
+    to zero across each period, so with 29 and 7 alone the result depends only on n mod 203, and
+    1024 and 40000 -- one looped, one split -- hash identically. Hence the third modulus: lcm(29,
+    7, 4093) = 830879 exceeds the largest m*n (786432), so no row completes a period.
+
+    A low-discrepancy sequence is the wrong fix, incidentally: `(v * phi) % 1` keeps partial sums
+    near zero AND leaves only ~33 mantissa bits, so an fp64 sum of it is exact and both orders
+    agree bit for bit. Ratios of primes have full-length binary expansions, which is the property
+    that matters. All deterministic and RNG-free, so the table reproduces anywhere.
+    """
+    v = torch.arange(m * n, device="cuda", dtype=torch.float64).reshape(m, n)
+    vals = ((v % 29) - 14) / 29 + ((v % 7) - 3) / 13 + ((v % 4093) - 2046) / 4093 / 4
     if prod:
-        # Keep a length-n product bounded so it neither overflows nor flushes to zero.
-        vals = 1.0 + vals / n
+        # Keep a length-n product bounded so it neither overflows nor flushes to zero, while
+        # leaving the factors far enough from 1.0 to survive the narrow dtypes' rounding.
+        vals = 1.0 + vals / max(8.0, n**0.5)
     return vals.to(dtype).contiguous()
 
 
@@ -281,20 +299,37 @@ class TestInnerTreeOrder(TestCase):
         from torch._native.ops._cutedsl import traits as T
         from torch._native.ops.reductions import inner_tree_kernel as up
 
+        # PROD as well as sum: the two differ in their identity and in what a ragged tail pads
+        # with, and prod was previously checked in fp32 only -- so the 16-bit tree widths and the
+        # fp64 pair width went unverified for it.
         ikind = {2: torch.int16, 4: torch.int32, 8: torch.int64}
-        for m, n in [(65536, 8), (4096, 100), (512, 4096), (512, 4097), (64, 100000)]:
-            m = max(1, min(m, 2**26 // n))
-            with self.subTest(shape=(m, n)):
-                x = torch.randn(m, n, device="cuda", dtype=dtype)
-                got = self._run(T.SumOps, "itree_sum_dt", x)
-                ref = torch.empty(m, device="cuda", dtype=dtype)
-                up.inner_tree_sum_into(ref, x)
-                torch.cuda.synchronize()
-                ik = ikind[x.element_size()]
-                self.assertTrue(
-                    torch.equal(got.view(ik), ref.view(ik)),
-                    f"{(m, n)} {dtype}: bits differ from upstream",
-                )
+        for op in ("sum", "prod"):
+            trait = T.ProdOps if op == "prod" else T.SumOps
+            into = up.inner_tree_prod_into if op == "prod" else up.inner_tree_sum_into
+            for m, n in [
+                (65536, 8),
+                (4096, 100),
+                (512, 4096),
+                (512, 4097),
+                (64, 100000),
+            ]:
+                m = max(1, min(m, 2**26 // n))
+                with self.subTest(op=op, shape=(m, n)):
+                    x = torch.randn(m, n, device="cuda", dtype=dtype)
+                    if op == "prod":
+                        # Near 1 so a long row neither overflows nor flushes to zero; a row of inf
+                        # or 0 would compare equal under any order.
+                        x = (x * 0.01 + 1.0).contiguous()
+                    got = self._run(trait, f"itree_{op}_dt", x)
+                    ref = torch.empty(m, device="cuda", dtype=dtype)
+                    into(ref, x)
+                    torch.cuda.synchronize()
+                    ik = ikind[x.element_size()]
+                    self.assertEqual(
+                        got.view(ik),
+                        ref.view(ik),
+                        msg=f"{op} {(m, n)} {dtype}: bits differ from upstream",
+                    )
 
     def test_signed_zero_matches_upstream_per_shape(self):
         # The case that catches a stray identity in the fold: `0.0 + -0.0` is `+0.0`, so seeding
@@ -383,6 +418,137 @@ class TestInnerTreeOrder(TestCase):
                 )
                 checked += 1
         self.assertEqual(checked, len(_GOLDEN) // 2)
+
+    def test_golden_input_can_detect_a_reorder(self):
+        # The table is worth nothing if its input cannot tell two orders apart, and the first
+        # version of it could not: values were multiples of 0.25 with partial sums under 1.5n,
+        # hence EXACT in the accumulator, so all 56 sum entries hashed identically under the
+        # launch-shape fold and would have passed with the wrong DAG. Assert the discriminating
+        # power rather than trusting the generator, one shape per plan shape.
+        #
+        # fp32/fp64 only, and N > 4. A narrowing store cannot carry an fp32-accumulator difference
+        # (~1e-7 relative) into 8 or 11 mantissa bits, so the fp16/bf16 entries are value checks at
+        # any input -- consistent with those dtypes sitting outside the bitwise contract (see
+        # cutedsl_impl's dtype note). At N=4 one thread owns the whole row, so there is no
+        # reassociation to detect. Both exclusions are structural, not properties of this data.
+        import cutlass
+
+        from torch._native.ops._cutedsl import traits as T
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        for op in ("sum", "prod"):
+            trait = T.ProdOps if op == "prod" else T.SumOps
+            for dtype in (torch.float32, torch.float64):
+                acc = cutlass.Float64 if dtype is torch.float64 else cutlass.Float32
+                for m, n in [(8, 16), (8, 4097), (8, 100003)]:
+                    with self.subTest(op=op, dtype=dtype, shape=(m, n)):
+                        x = _golden_input(m, n, dtype, op == "prod")
+                        (tree,) = rt.reduce_row_tile(
+                            trait(acc=acc),
+                            f"disc_t_{op}",
+                            x,
+                            [dtype],
+                            order="inner_tree",
+                        )
+                        (launch,) = rt.reduce_row_tile(
+                            trait(acc=acc), f"disc_l_{op}", x, [dtype]
+                        )
+                        torch.cuda.synchronize()
+                        self.assertNotEqual(
+                            _sha(tree),
+                            _sha(launch),
+                            "the golden input cannot distinguish the two fold orders, so the "
+                            "pinned hashes would pass with the wrong DAG",
+                        )
+
+    def test_the_gate_routes_the_dispatcher_through_the_order(self):
+        # What the gate is FOR, asserted through the dispatcher rather than the fold. Two arms had
+        # to be fixed to make this hold, and neither is visible in the numbers because both wrong
+        # paths compute a correct reduction: a narrow row used to arrive with an explicit tpr (which
+        # makes reduce_row_tile decline the order), and a split-shape row used to fall through to
+        # kernel_xcta, whose TileReduce never consults the gate. MEASURED as differing bits at
+        # (524288, 16) and (64, 100000) respectively before those fixes.
+        import cutlass
+
+        from torch._native.ops._cutedsl import traits as T
+        from torch._native.ops.reductions import (
+            kernel_general as kg,
+            kernel_rowtile as rt,
+        )
+
+        for m, n in [(524288, 16), (64, 100000), (8192, 1024)]:
+            with self.subTest(shape=(m, n)):
+                x = torch.randn(m, n, device="cuda")
+                want = self._run(T.SumOps, f"gate_ref_{n}", x)
+                with _order_on():
+                    self.assertTrue(rt.inner_tree_order_enabled())
+                    got = kg.reduce_dim(
+                        T.SumOps(acc=cutlass.Float32),
+                        f"gate_disp_{n}",
+                        x,
+                        [1],
+                        torch.float32,
+                    )
+                torch.cuda.synchronize()
+                self.assertEqual(
+                    _sha(got.reshape(-1)),
+                    _sha(want),
+                    f"({m}, {n}) [{rt.itree_plan(n, m, 4).shape}]: the dispatcher served this "
+                    "with the launch-shape order while the gate was on",
+                )
+
+    def test_multi_field_and_two_output_traits_under_the_order(self):
+        # nfields > 1 gives the fold one smem staging buffer and one split partial buffer PER
+        # FIELD, and nouts == 2 projects two results from one accumulator -- machinery the
+        # single-field value traits never touch. A RAGGED N as well, so the identity padding that
+        # the fold's docstring calls part of the DAG is exercised rather than skipped by a tile
+        # that happens to cover the row exactly.
+        #
+        # Compared against the same trait under the launch-shape fold, not against aten: what is
+        # under test is that the order's own per-field plumbing carries every field, and the two
+        # DAGs associate differently by design, so a tolerance is the right comparison.
+        import cutlass
+
+        from torch._native.ops._cutedsl import traits as T
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        x = torch.randn(64, 4097, device="cuda")
+        cases = [
+            ("welford", T.WelfordOps, {"correction": 1}, 1, [torch.float32]),
+            ("var_mean", T.VarMeanOps, {"correction": 1}, 2, [torch.float32] * 2),
+            ("argmax", T.ArgMaxOps, {}, 1, [torch.int32]),
+            ("argmin", T.ArgMinOps, {}, 1, [torch.int32]),
+            ("max_dim", T.MaxDimOps, {}, 2, [torch.float32, torch.int32]),
+            ("aminmax", T.AMinMaxOps, {}, 2, [torch.float32] * 2),
+        ]
+        for label, trait, kw, nouts, out_dtypes in cases:
+            with self.subTest(trait=label):
+                tree = rt.reduce_row_tile(
+                    trait(acc=cutlass.Float32, **kw),
+                    f"mf_tree_{label}",
+                    x,
+                    out_dtypes,
+                    nouts=nouts,
+                    order="inner_tree",
+                )
+                launch = rt.reduce_row_tile(
+                    trait(acc=cutlass.Float32, **kw),
+                    f"mf_launch_{label}",
+                    x,
+                    out_dtypes,
+                    nouts=nouts,
+                )
+                torch.cuda.synchronize()
+                self.assertEqual(len(tree), nouts)
+                for k, (a, b) in enumerate(zip(tree, launch)):
+                    # An index field must agree EXACTLY: a wrong per-field buffer shows up as the
+                    # wrong argument, which a tolerance would hide.
+                    if a.dtype in (torch.int32, torch.int64):
+                        self.assertEqual(a, b, msg=f"{label} field {k}")
+                    else:
+                        self.assertEqual(
+                            a, b, atol=1e-4, rtol=1e-4, msg=f"{label} field {k}"
+                        )
 
     def test_tree_fold_matches_the_serial_fold_for_every_value_trait(self):
         # THE LAW the trait protocol has to satisfy, and the reason `leaf` exists:
