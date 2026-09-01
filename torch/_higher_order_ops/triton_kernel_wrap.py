@@ -1095,6 +1095,7 @@ def analyze_kernel_access(
     # memory. The remaining arguments are shape/stride/offset metadata and
     # should not be traced during mutation analysis.
     POINTER_ONLY_OPS = {
+        "tt.addptr",
         "tt.make_tensor_ptr",
         "tt.advance",
         "tt.make_tensor_descriptor",

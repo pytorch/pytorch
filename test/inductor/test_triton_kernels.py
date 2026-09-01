@@ -4459,6 +4459,67 @@ class MutationTests(torch._inductor.test_case.TestCase):
             ["out_ptr"],
         )
 
+    def test_store_offset_tensor_is_not_marked_mutated(self):
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            analyze_kernel_access,
+            get_tma_stores,
+            Intermediate,
+            Op,
+            Param,
+        )
+
+        # The offset must come from an op that is not literally named "tt.load",
+        # otherwise skip_loads already truncates the write traversal and the
+        # tt.addptr restriction is not exercised.
+        loaded_offset = Intermediate(idx=0)
+        output_address = Intermediate(idx=1)
+        functions = {
+            "main": {
+                loaded_offset: [
+                    Op("tt.call", "load_offset", [Param(idx=1)], loaded_offset)
+                ],
+                output_address: [
+                    Op(
+                        "tt.addptr",
+                        None,
+                        [Param(idx=0), loaded_offset],
+                        output_address,
+                    )
+                ],
+                Intermediate(idx=-1): [
+                    Op(
+                        "tt.store",
+                        None,
+                        [output_address, loaded_offset],
+                        Intermediate(idx=-1),
+                    )
+                ],
+            },
+            "load_offset": {
+                Intermediate(idx=0): [
+                    Op("tt.load", None, [Param(idx=0)], Intermediate(idx=0))
+                ],
+            },
+        }
+
+        analyze_kernel_access.reset()
+        try:
+            tensor_accesses = analyze_kernel_access(
+                functions,
+                "main",
+                2,
+                ("output_ptr", "offset_ptr"),
+                frozenset({0, 1}),
+            )
+
+            read_names = [dep.name for dep in tensor_accesses.read_writes.reads]
+            write_names = [dep.name for dep in tensor_accesses.read_writes.writes]
+            self.assertListEqual(read_names, ["offset_ptr"])
+            self.assertListEqual(write_names, ["output_ptr"])
+        finally:
+            analyze_kernel_access.reset()
+            get_tma_stores.reset()
+
     def test_get_tma_stores(self):
         from torch._higher_order_ops.triton_kernel_wrap import (
             get_tma_stores,
