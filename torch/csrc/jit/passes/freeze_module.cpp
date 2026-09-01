@@ -395,6 +395,8 @@ class AttributePropagator {
           applyToForkSubgraph(
               n,
               graph,
+              // TODO: Determine if passing `this` by copy is intentional
+              // github.com/pytorch/pytorch/pull/195598#issuecomment-5497079717
               std::bind_front(&AttributePropagator::recordMutableAttrs, *this));
         }
       }
@@ -720,6 +722,8 @@ class AttributePropagator {
           applyToForkSubgraph(
               n,
               graph,
+              // TODO: Determine if passing `this` by copy is intentional
+              // github.com/pytorch/pytorch/pull/195598#issuecomment-5497079717
               std::bind_front(
                   &AttributePropagator::propagateAttributes, *this));
         }
@@ -844,6 +848,8 @@ class AttributePropagator {
           applyToForkSubgraph(
               n,
               graph,
+              // TODO: Determine if passing `this` by copy is intentional
+              // github.com/pytorch/pytorch/pull/195598#issuecomment-5497079717
               std::bind_front(
                   &AttributePropagator::recordReferencedAttrs, *this));
         }
