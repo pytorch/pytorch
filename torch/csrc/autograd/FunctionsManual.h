@@ -765,7 +765,9 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
     int64_t interpolation_mode,
     int64_t padding_mode,
     bool align_corners,
-    std::array<bool, 3> output_mask);
+    std::array<bool, 3> output_mask,
+    bool pixel_coords = false,
+    double cubic_coeff_a = -0.75);
 std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
     const Tensor& ggI,
     const Tensor& ggGrid,
@@ -775,7 +777,9 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
     int64_t interpolation_mode,
     int64_t padding_mode,
     bool align_corners,
-    std::array<bool, 3> output_mask);
+    std::array<bool, 3> output_mask,
+    bool pixel_coords = false,
+    double cubic_coeff_a = -0.75);
 std::tuple<Tensor, Tensor> _euclidean_dist_backward(
     const Tensor& grad,
     const Tensor& x1,
