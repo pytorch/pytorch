@@ -12,8 +12,8 @@ current on scope entry, so that stream must already be participating in
 the capture. ``mark_stream`` handles this by starting ``mark_kernels``
 before switching to the target stream.
 
-The annotations can be pickled and later merged into a Chrome profiler
-trace using ``torch.cuda._annotate_cuda_graph_trace``.
+The annotations are baked into a Chrome profiler trace by
+``prof.export_chrome_trace(path, cuda_graph_annotations=get_kernel_annotations())``.
 
 Requires ``cuda.bindings`` package and a CUDA driver that supports
 ``cudaGraphNodeGetToolsId`` (CUDA >= 13.1 or appropriate cuda-compat).
@@ -69,6 +69,12 @@ try:
         runtime as _cuda_runtime,
     )
 except ImportError:
+    _cuda_driver = None  # type: ignore[assignment]
+    _cuda_runtime = None  # type: ignore[assignment]
+
+if not _HAS_CUDA_BINDINGS:
+    # This module imports the bindings itself, so keep it in step with the shared gate,
+    # which also reports them absent on ROCm -- where they import but cannot work.
     _cuda_driver = None  # type: ignore[assignment]
     _cuda_runtime = None  # type: ignore[assignment]
 
@@ -220,9 +226,13 @@ def maybe_stamp_capture_root(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
 def _probe_tools_id() -> bool:
     """Probe whether cudaGraphNodeGetToolsId is supported by the driver.
 
-    Calls with a null node: cudaErrorInvalidValue means the API exists
-    in the driver (good), cudaErrorCallRequiresNewerDriver means it
-    does not (bad).
+    Calls with a null node and accepts only the errors that prove the API is
+    really there: cudaErrorInvalidValue, i.e. the driver got as far as rejecting
+    the argument. Every other status means we cannot use it -- an old NVIDIA
+    driver answers cudaErrorCallRequiresNewerDriver, while an environment with no
+    CUDA driver behind the bindings at all (ROCm, where cuda-bindings can still
+    import) answers cudaErrorInsufficientDriver. Allowlisting rather than
+    denylisting keeps a new failure mode from reading as "supported".
     """
     if not hasattr(_cuda_runtime, "cudaGraphNodeGetToolsId"):
         # API is missing from cuda-bindings - likely version too old
@@ -242,12 +252,16 @@ def _probe_tools_id() -> bool:
     )  # pyrefly: ignore[missing-attribute]
     if (
         err
-        == _cuda_runtime.cudaError_t.cudaErrorCallRequiresNewerDriver  # pyrefly: ignore[missing-attribute]
+        not in (
+            _cuda_runtime.cudaError_t.cudaSuccess,  # pyrefly: ignore[missing-attribute]
+            _cuda_runtime.cudaError_t.cudaErrorInvalidValue,  # pyrefly: ignore[missing-attribute]
+        )
     ):
         logger.info(
-            "cudaGraphNodeGetToolsId requires a newer driver "
-            "(missing cuda-compat?); "
-            "CUDA graph kernel annotations will be disabled"
+            "cudaGraphNodeGetToolsId is unusable (%s); it needs a CUDA driver >= 13.1 "
+            "or an equivalent cuda-compat. CUDA graph kernel annotations will be "
+            "disabled",
+            err,
         )
         return False
     return True
@@ -1030,9 +1044,9 @@ class _AnnotationsView(Mapping[int, "list[Any]"]):
     one-element list.
 
     The store holds exactly one merged dict per node, but the public mapping has always
-    had list values -- and pickles of it are read back by
-    ``torch.cuda._annotate_cuda_graph_trace`` -- so the shape is kept. Wrapping on read
-    rather than storing lists is what makes "at most one annotation per node" explicit.
+    had list values and pickles of it are read back by out-of-tree consumers, so the
+    shape is kept. Wrapping on read rather than storing lists is what makes "at most one
+    annotation per node" explicit.
     """
 
     def __getitem__(self, tools_id: int) -> list[Any]:
