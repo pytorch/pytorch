@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <mutex>
 #include <vector>
 
@@ -60,6 +61,29 @@ class CacheLock {
 
  private:
   std::unique_lock<std::recursive_mutex> lock_;
+};
+
+// Marks the window in which a cache_mutex holder runs Python (guard
+// evaluation, backend __eq__, pybind attribute stores). cache_mutex is
+// recursive, so that Python can re-enter this state on the same thread --
+// reset_code from a guard, most notably -- and clear_in_place consults the
+// depth to know it must defer node destruction. Caller must hold cache_mutex.
+class CachePythonDepth {
+ public:
+  explicit CachePythonDepth(ExtraState* state) : state_(state) {
+    ++state_->cache_python_depth;
+  }
+  ~CachePythonDepth() {
+    --state_->cache_python_depth;
+  }
+
+  CachePythonDepth(const CachePythonDepth&) = delete;
+  CachePythonDepth& operator=(const CachePythonDepth&) = delete;
+  CachePythonDepth(CachePythonDepth&&) = delete;
+  CachePythonDepth& operator=(CachePythonDepth&&) = delete;
+
+ private:
+  ExtraState* state_;
 };
 } // namespace
 
@@ -148,6 +172,52 @@ void ExtraState::drain_pending_invalidations() {
   }
 }
 
+void ExtraState::park_eviction(PendingEviction eviction) {
+  std::lock_guard<std::mutex> lock(this->pending_invalidation_mutex);
+  this->pending_evictions.push_back(std::move(eviction));
+  this->has_pending_evictions.store(true, std::memory_order_release);
+}
+
+void ExtraState::apply_pending_evictions(
+    std::list<PrecompileEntry>& dead_precompile,
+    std::unordered_map<int64_t, std::list<CacheEntry>>& dead_cache) {
+  if (this->cache_python_depth != 0) {
+    // A lookup below this frame on this thread holds iterators into these
+    // lists; the next depth-zero holder applies the evictions.
+    return;
+  }
+  if (!this->has_pending_evictions.load(std::memory_order_acquire)) {
+    return;
+  }
+  std::vector<PendingEviction> evictions;
+  {
+    std::lock_guard<std::mutex> lock(this->pending_invalidation_mutex);
+    evictions.swap(this->pending_evictions);
+    this->has_pending_evictions.store(false, std::memory_order_release);
+  }
+  for (auto& eviction : evictions) {
+    if (eviction.clear_all) {
+      dead_precompile.splice(dead_precompile.end(), this->precompile_entries);
+      for (auto& [id, entries] : this->cache_entry_map) {
+        auto& dst = dead_cache[id];
+        dst.splice(dst.end(), entries);
+      }
+      this->cache_entry_map.clear();
+      this->total_cache_entry_count = 0;
+    } else {
+      auto& entries = this->precompile_entries;
+      for (auto it = entries.begin(); it != entries.end();) {
+        auto next = std::next(it);
+        if (it->isolate_recompiles_id == eviction.region_id &&
+            it->owner.ptr() == eviction.owner.ptr()) {
+          dead_precompile.splice(dead_precompile.end(), entries, it);
+        }
+        it = next;
+      }
+    }
+  }
+}
+
 void ExtraState::invalidate(
     CacheEntry* cache_entry,
     py::object deleted_guard_manager,
@@ -202,9 +272,20 @@ void ExtraState::clear_in_place() {
   std::unordered_map<int64_t, py::dict> dead_region_frame_state;
   {
     CacheLock lock(this->cache_mutex);
-    dead_precompile_entries.swap(this->precompile_entries);
-    dead_cache_entries.swap(this->cache_entry_map);
-    this->total_cache_entry_count = 0;
+    if (this->cache_python_depth > 0) {
+      // This thread is INSIDE lookup()'s guard evaluation (the recursive
+      // cache_mutex is how we got here, via Python run by a guard reaching
+      // reset_code): that lookup holds live iterators into these lists, so
+      // neither destroying nor even relinking their nodes is safe. Park the
+      // clear; the next depth-zero cache_mutex holder applies it. The clear
+      // landing "just after" the interrupted lookup matches the pre-existing
+      // asynchrony of a reset racing a lookup from another thread.
+      this->park_eviction(PendingEviction{true, -1, py::none()});
+    } else {
+      dead_precompile_entries.swap(this->precompile_entries);
+      dead_cache_entries.swap(this->cache_entry_map);
+      this->total_cache_entry_count = 0;
+    }
   }
   {
     std::lock_guard<std::mutex> lock(this->pending_invalidation_mutex);
@@ -225,7 +306,11 @@ void ExtraState::clear_in_place() {
   {
     std::lock_guard<std::mutex> lock(this->strategy_mutex);
     this->strategy = FrameExecStrategy{DEFAULT, DEFAULT};
-    this->strategy_generation = 0;
+    // A fresh token, NOT zero: zero is what get_exec_strategy_token returns
+    // for a never-written state, so resetting to it would let a holder of
+    // that pre-write token win compare_and_set after an intervening write
+    // plus reset -- exactly the staleness the generation exists to refuse.
+    this->strategy_generation = next_generation();
     this->region_strategy_map.clear();
   }
 }
@@ -236,11 +321,15 @@ CacheEntry* extract_cache_entry(
   if (extra_state == nullptr) {
     return nullptr;
   }
+  // Reaped nodes die AFTER the lock releases (locals declared before it).
+  std::list<PrecompileEntry> reaped_precompile;
+  std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
   CacheLock lock(extra_state->cache_mutex);
+  extra_state->apply_pending_evictions(reaped_precompile, reaped_cache);
   extra_state->drain_pending_invalidations();
   // Search own bucket first, then fall back to default bucket (-1),
   // matching lookup() behavior.
-  int64_t ids_to_search[] = {isolate_recompiles_id, -1};
+  std::array<int64_t, 2> ids_to_search = {isolate_recompiles_id, -1};
   int num_ids = (isolate_recompiles_id >= 0) ? 2 : 1;
 
   for (int i = 0; i < num_ids; i++) {
@@ -517,8 +606,16 @@ void lookup(
     PyObject** maybe_cached_code,
     std::string* trace_annotation,
     bool is_skip_guard_eval_unsafe) {
+  // Reaped nodes die AFTER the lock releases (locals declared before it).
+  std::list<PrecompileEntry> reaped_precompile;
+  std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
   CacheLock lock(extra_state->cache_mutex);
+  extra_state->apply_pending_evictions(reaped_precompile, reaped_cache);
   extra_state->drain_pending_invalidations();
+  // Guard evaluation below runs Python that can re-enter this state on this
+  // thread (reset_code -> clear_in_place); the depth tells clear_in_place to
+  // park dead nodes instead of destroying what this frame is iterating.
+  CachePythonDepth python_depth(extra_state);
   CacheEntry* found = nullptr;
   bool guard_error = false;
 
@@ -544,7 +641,7 @@ void lookup(
   // This lets isolated compiles reuse compilations from non-isolated
   // torch.compile() calls (BC friendly). New entries are still written
   // to the isolated bucket.
-  int64_t ids_to_search[] = {isolate_recompiles_id, -1};
+  std::array<int64_t, 2> ids_to_search = {isolate_recompiles_id, -1};
   int num_ids = (isolate_recompiles_id >= 0) ? 2 : 1;
   std::list<CacheEntry>* found_list = nullptr;
 
@@ -585,10 +682,17 @@ bool try_lookup_without_guard_eval(
     PyObject** maybe_cached_code,
     std::string* trace_annotation,
     bool is_skip_guard_eval_unsafe) {
+  // Reaped nodes die AFTER the lock releases (locals declared before it).
+  std::list<PrecompileEntry> reaped_precompile;
+  std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
   CacheLock lock(extra_state->cache_mutex);
+  extra_state->apply_pending_evictions(reaped_precompile, reaped_cache);
   // A parked invalidation must not keep serving through this no-guard-eval
   // fast path (a guardless entry would never be re-checked otherwise).
   extra_state->drain_pending_invalidations();
+  // backend_match below can run a backend __eq__; same re-entrancy rule as
+  // lookup().
+  CachePythonDepth python_depth(extra_state);
   // Own region only, matching lookup().
   const PrecompileEntry* first_precompile_entry = nullptr;
   for (const auto& entry : extra_state->precompile_entries) {
@@ -597,7 +701,7 @@ bool try_lookup_without_guard_eval(
       break;
     }
   }
-  int64_t ids_to_search[] = {isolate_recompiles_id, -1};
+  std::array<int64_t, 2> ids_to_search = {isolate_recompiles_id, -1};
   int num_ids = (isolate_recompiles_id >= 0) ? 2 : 1;
   if (first_precompile_entry != nullptr) {
     // Only the first precompile entry can be safely fast-pathed: a later
@@ -644,8 +748,15 @@ CacheEntry* create_cache_entry(
     ExtraState* extra_state,
     PyObject* guarded_code,
     PyObject* backend) {
+  // Reaped nodes die AFTER the lock releases (locals declared before it).
+  std::list<PrecompileEntry> reaped_precompile;
+  std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
   CacheLock lock(extra_state->cache_mutex);
+  extra_state->apply_pending_evictions(reaped_precompile, reaped_cache);
   extra_state->drain_pending_invalidations();
+  // The pybind attribute stores below run Python; same re-entrancy rule as
+  // lookup().
+  CachePythonDepth python_depth(extra_state);
   int64_t id = get_current_isolate_recompiles_id();
   auto& entries = extra_state->cache_entry_list(id);
   std::list<CacheEntry>::iterator new_iter;
@@ -850,7 +961,21 @@ void _reset_precompile_entries_for_owner(
     // releases; see _clear_cache_entries_for_region.
     std::list<PrecompileEntry> evicted;
     {
-      CacheLock lock(extra->cache_mutex);
+      std::unique_lock<std::recursive_mutex> lock(
+          extra->cache_mutex, std::try_to_lock);
+      if (!lock.owns_lock() || extra->cache_python_depth > 0) {
+        // Never BLOCK here: a dead CompilePackage reaches this from
+        // weakref.finalize, which GC can fire while another state's
+        // cache_mutex is held -- the same ABBA cycle invalidate() parks to
+        // avoid. And even uncontended, the recursive mutex admits this call
+        // from Python run BY A GUARD of this very state's in-flight lookup,
+        // whose iterators must see its lists untouched. Park it either way.
+        extra->park_eviction(ExtraState::PendingEviction{
+            false,
+            isolate_recompiles_id,
+            py::reinterpret_borrow<py::object>(owner)});
+        return;
+      }
       PyObject* owner_ptr = owner.ptr();
       auto& entries = extra->precompile_entries;
       for (auto it = entries.begin(); it != entries.end();) {
@@ -902,7 +1027,11 @@ py::list _debug_get_precompile_entries(const py::handle& code_obj) {
   ExtraState* extra = get_extra_state(code);
   py::list result;
   if (extra != nullptr) {
+    // Reaped nodes die AFTER the lock releases (locals declared before it).
+    std::list<PrecompileEntry> reaped_precompile;
+    std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
     CacheLock lock(extra->cache_mutex);
+    extra->apply_pending_evictions(reaped_precompile, reaped_cache);
     for (PrecompileEntry& e : extra->precompile_entries) {
       result.append(py::cast(e, py::return_value_policy::reference));
     }
@@ -924,7 +1053,11 @@ bool _has_precompile_entries(
   // coverage for the first. A loaded artifact runs this on every served call,
   // hence no py::list and no Python executed under the lock -- the wait inside
   // CacheLock is the only place the GIL can drop.
+  // Reaped nodes die AFTER the lock releases (locals declared before it).
+  std::list<PrecompileEntry> reaped_precompile;
+  std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
   CacheLock lock(extra->cache_mutex);
+  extra->apply_pending_evictions(reaped_precompile, reaped_cache);
   for (const PrecompileEntry& entry : extra->precompile_entries) {
     if (entry.isolate_recompiles_id == isolate_recompiles_id) {
       return true;
