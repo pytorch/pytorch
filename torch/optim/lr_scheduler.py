@@ -1983,6 +1983,8 @@ class PlateauLR(LRScheduler):
         >>>     train(...)
         >>>     val_loss = validate(...)
         >>>     scheduler.step(metrics=val_loss)
+
+    .. image:: ../scripts/lr_scheduler_images/PlateauLR.png
     """
 
     def __init__(
