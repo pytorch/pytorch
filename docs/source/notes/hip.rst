@@ -77,12 +77,20 @@ which version of PyTorch you are using, refer to this example below::
 TensorFloat-32(TF32) on ROCm
 ----------------------------
 
-TF32 is supported on AMD Instinct MI300 (gfx942, CDNA3) via hipBLASLt. The
-same ``torch.backends.cuda.matmul.fp32_precision`` and
-``torch.backends.cuda.matmul.allow_tf32`` controls used on NVIDIA hardware
-also apply on ROCm. The TF32 path on MI300 has hardware-level numerical
-differences from the NVIDIA implementation; see :ref:`tf32_on_mi300` for
-details.
+TF32 is supported on AMD Instinct MI300 (gfx942, CDNA3) and MI355 (gfx950,
+CDNA4). For matmul, TF32 runs through hipBLASLt and is controlled by the same
+``torch.backends.cuda.matmul.fp32_precision`` and
+``torch.backends.cuda.matmul.allow_tf32`` controls used on NVIDIA hardware.
+
+For convolution, TF32 runs through MIOpen and is controlled by the same
+``torch.backends.cudnn.conv.fp32_precision`` and
+``torch.backends.cudnn.allow_tf32`` controls used for cuDNN on NVIDIA
+hardware. MIOpen TF32 convolution requires MIOpen >= 3.5.2 (ROCm >= 7.14); on
+older builds the controls have no effect and convolutions always run in full
+fp32.
+
+The TF32 path on MI300 has hardware-level numerical differences from the
+NVIDIA implementation; see :ref:`tf32_on_mi300` for details.
 
 .. _rocm-memory-management:
 

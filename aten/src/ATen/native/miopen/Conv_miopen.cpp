@@ -164,6 +164,10 @@ namespace at { namespace native {
 
 // See NOTE [ Convolution design ] in aten/src/ATen/native/cudnn/ConvShared.cpp
 
+static bool allowMiopenTF32() {
+  return at::globalContext().allowTF32CuDNN(at::Float32Op::CONV);
+}
+
 // ---------------------------------------------------------------------
 //
 // Helper classes
@@ -186,6 +190,7 @@ struct ConvolutionParams
   int dilation[max_dim];
   int64_t groups;
   bool deterministic;
+  bool allow_tf32;
   c10::DeviceIndex device_id; //This is needed to distinguish between miopen handles of multiple gpus.
   // NB: transposed purposely omitted: transposed just swaps
   // forward and backward, so you can reuse the benchmark entry,
@@ -201,6 +206,7 @@ void setConvolutionParams(
     IntArrayRef dilation,
     int64_t groups,
     bool deterministic,
+    bool allow_tf32,
     at::MemoryFormat memory_format) {
   miopenDataType_t dataType = getMiopenDataType(input);
   memset(params, 0, sizeof(ConvolutionParams));
@@ -223,6 +229,7 @@ void setConvolutionParams(
   }
   params->groups = groups;
   params->deterministic = deterministic;
+  params->allow_tf32 = allow_tf32;
   params->device_id = at::cuda::current_device();
 }
 
@@ -823,6 +830,7 @@ void raw_miopen_convolution_forward_out_32bit(
     bool depthwise=false) {
   auto dataType = getMiopenDataType(input);
   miopenConvolutionMode_t c_mode = depthwise ? miopenDepthwise : miopenConvolution;
+  bool allow_tf32 = allowMiopenTF32();
 
   ConvolutionArgs args{input, output, weight};
   args.handle = getMiopenHandle();
@@ -837,6 +845,7 @@ void raw_miopen_convolution_forward_out_32bit(
       dilation,
       groups,
       deterministic,
+      allow_tf32,
       memory_format);
   args.idesc.set(input, memory_format);
   args.wdesc.set(weight, memory_format, 0);
@@ -850,7 +859,8 @@ void raw_miopen_convolution_forward_out_32bit(
       args.params.dilation,
       args.params.groups,
       benchmark,
-      deterministic);
+      deterministic,
+      allow_tf32);
 
   if (at::globalContext().immediateMiopen()) {
       uint64_t solution_id;
@@ -1123,6 +1133,7 @@ void raw_miopen_convolution_backward_input_out_32bit(
     bool depthwise=false) {
   auto dataType = getMiopenDataType(grad_output);
   miopenConvolutionMode_t c_mode = depthwise ? miopenDepthwise : miopenConvolution;
+  bool allow_tf32 = allowMiopenTF32();
 
   ConvolutionArgs args{grad_input, grad_output, weight};
   args.handle = getMiopenHandle();
@@ -1138,6 +1149,7 @@ void raw_miopen_convolution_backward_input_out_32bit(
       dilation,
       groups,
       deterministic,
+      allow_tf32,
       memory_format);
   args.idesc.set(grad_input, memory_format);
   args.wdesc.set(weight, memory_format, 0);
@@ -1151,7 +1163,8 @@ void raw_miopen_convolution_backward_input_out_32bit(
       args.params.dilation,
       args.params.groups,
       benchmark,
-      deterministic);
+      deterministic,
+      allow_tf32);
 
   if (at::globalContext().immediateMiopen()) {
       uint64_t solution_id;
@@ -1300,6 +1313,7 @@ void raw_miopen_convolution_backward_weight_out_32bit(
     bool depthwise=false) {
   auto dataType = getMiopenDataType(input);
   miopenConvolutionMode_t c_mode = depthwise ? miopenDepthwise : miopenConvolution;
+  bool allow_tf32 = allowMiopenTF32();
 
   ConvolutionArgs args{input, grad_output, grad_weight};
   args.handle = getMiopenHandle();
@@ -1315,6 +1329,7 @@ void raw_miopen_convolution_backward_weight_out_32bit(
       dilation,
       groups,
       deterministic,
+      allow_tf32,
       memory_format);
   args.idesc.set(input, memory_format);
   args.wdesc.set(grad_weight, memory_format, 0);
@@ -1328,7 +1343,8 @@ void raw_miopen_convolution_backward_weight_out_32bit(
       args.params.dilation,
       args.params.groups,
       benchmark,
-      deterministic);
+      deterministic,
+      allow_tf32);
 
   if (at::globalContext().immediateMiopen()) {
       uint64_t solution_id;
