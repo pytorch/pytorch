@@ -63,10 +63,6 @@ class SessionState {
     return producers_.at(node).fetch_sub(1, std::memory_order_seq_cst) == 1;
   }
 
-  C10_ALWAYS_INLINE void setProducers(const Node* node, uint32_t v = 1) {
-    producers_[node] += v;
-  }
-
  private:
   std::atomic_uint_fast32_t workOutstanding_;
   c10::FastMap<const Node*, copyable_atomic<std::uint_fast32_t>> producers_;
