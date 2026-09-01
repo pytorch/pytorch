@@ -7,7 +7,7 @@ UPSTREAM_URL="https://github.com/Dao-AILab/quack.git"
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../../.." && pwd)
 PIN_FILE="$REPO_ROOT/.github/ci_commit_pins/quack.txt"
-PATCHES_DIR="$SCRIPT_DIR/flex_gemm_patches"
+PATCHES_DIR="$SCRIPT_DIR/external_flex_gemm_patches"
 SERIES_FILE="$PATCHES_DIR/series"
 
 usage() {

@@ -3,10 +3,10 @@
 The pinned upstream commit is recorded in ``__upstream_sha__`` below and is
 sourced from ``PINNED_SHA`` in tools/vendoring/quack/vendor.sh. The
 vendoring script verifies that commit is reachable from Dao-AILab/quack main
-before applying the local PyTorch vendoring patches. Only the modules required
-by torch._native.ops.norm.rmsnorm_impl are vendored. Imports are rewritten to be
-package-relative so this copy is independent of any ``quack`` top-level package
-that may be
+before applying the local FlexGEMM patchset. Only the modules required by
+torch._native.ops.norm.rmsnorm_impl and selected GEMM epilogue implementation
+paths are vendored. Imports are rewritten to be package-relative
+so this copy is independent of any ``quack`` top-level package that may be
 installed via pip. Custom op namespaces are renamed from ``quack::`` to
 ``torch_vendor_quack::`` for the same reason.
 """

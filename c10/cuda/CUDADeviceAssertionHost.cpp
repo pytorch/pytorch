@@ -304,14 +304,9 @@ DeviceAssertionsData* CUDAKernelLaunchRegistry::
   cudaMemLocation cpuDevice;
   cpuDevice.type = cudaMemLocationTypeDevice;
   cpuDevice.id = cudaCpuDeviceId;
-#ifdef USE_ROCM
-  // hipify replaces cudaMemAdvise -> hipMemAdvise, but we want v2
-#define hipMemAdvise hipMemAdvise_v2
-#endif
 #else
-  // might be a ROCm bug that using hipMemAdvise_v2 fails if
-  // hipMemLocationTypeDevice + hipCpuDeviceId, but using the v1 API sets
-  // hipMemLocationTypeHost + hipCpuDeviceId and passes
+  // hipMemAdvise_v2 with hipMemLocationTypeDevice + hipCpuDeviceId fails on
+  // ROCm; the v1 int API maps to Host semantics and works.
   const auto cpuDevice = cudaCpuDeviceId;
 #endif
 

@@ -16,17 +16,20 @@
 #   3. copy whitelisted modules + LICENSE into torch/_vendor/quack/
 #   4. apply tools/vendoring/quack/patches/*.patch
 #          (PyTorch vendoring/runtime patches only)
-#   5. rewrite `quack.*` imports to package-relative
-#   6. verify copyright/license notices still match upstream
-#   7. write a fresh __init__.py recording the SHA and upstream version
+#   5. apply tools/vendoring/quack/flex_gemm_patches/series
+#          (FlexGEMM QuACK feature deltas and runtime support patches)
+#   6. rewrite `quack.*` imports to package-relative
+#   7. verify copyright/license notices still match upstream
+#   8. write a fresh __init__.py recording the SHA and upstream version
 #
 # With --check the subset is rendered into a tempdir and diffed against the
 # committed tree instead of overwriting it; a nonzero exit means a vendored file
 # drifted from what the patches produce (e.g. a hand-edit that bypassed them).
 #
-# If a vendoring patch fails, update only the mechanical PyTorch delta. If
-# notice verification fails, a patch moved or removed an attribution line —
-# fix the patch rather than the check.
+# If a FlexGEMM patch fails, upstream has drifted — inspect the .rej and
+# rebase the patchset. If a vendoring patch fails, update only the mechanical
+# PyTorch delta. If notice verification fails, a patch moved or removed an
+# attribution line — fix the patch rather than the check.
 
 set -euo pipefail
 
@@ -35,6 +38,7 @@ PINNED_SHA="99bd7973bf3dc6db40961e413d4bdfea6c6fee3e"
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../../.." && pwd)
 DEST="$REPO_ROOT/torch/_vendor/quack"
+FLEX_GEMM_PATCHES_DIR="$SCRIPT_DIR/flex_gemm_patches"
 PATCHES_DIR="$SCRIPT_DIR/patches"
 GITATTRIBUTES="$REPO_ROOT/.gitattributes"
 GENERATED_ATTRIBUTE='torch/_vendor/quack/** linguist-generated=true'
@@ -51,31 +55,59 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Modules required transitively by RMSNorm. Everything else upstream ships —
-# including its GEMM implementations — is deliberately excluded.
+# Modules that rmsnorm and the selected GEMM epilogue implementation paths depend
+# on transitively. Everything else upstream ships — softmax, cross-entropy, topk,
+# etc. — is deliberately excluded.
 PYTORCH_ONLY_FILES=(
     cute_dsl_elf_fix.py
     cute_dsl_mlir_threading.py
 )
 
+FLEX_GEMM_CREATED_FILES=()
+
 FILES=(
     _compile_worker.py
+    activation.py
     autotuner.py
     bench/__init__.py
     bench/bench_utils.py
+    blockscaled_gemm_utils.py
     cache/__init__.py
     cache/compile_only.py
     cache/jit.py
     compile_utils.py
     copy_utils.py
     cute_dsl_utils.py
+    epi_composable.py
+    epi_ops.py
+    epi_utils.py
+    fast_math.py
+    gemm_act.py
+    gemm_base.py
+    gemm_blockscaled_interface.py
+    gemm_config.py
+    gemm_default_epi.py
+    gemm_symmetric.py
+    gemm_sm100.py
+    gemm_sm120.py
+    gemm_sm80.py
+    gemm_sm90.py
+    gemm_tvm_ffi_utils.py
     layout_utils.py
+    mx_utils.py
+    pipeline.py
     reduce.py
     reduction_base.py
     rmsnorm.py
     rmsnorm_config.py
     rounding.py
+    sm100_utils.py
+    sm80_utils.py
+    sm90_utils.py
+    tile_scheduler.py
+    trace.py
     utils.py
+    varlen_utils.py
 )
 
 die()   { echo "vendor_quack: $*" >&2; exit 1; }
@@ -134,10 +166,21 @@ pinned_sha() {
     echo "$PINNED_SHA"
 }
 
+is_flex_gemm_created_file() {
+    local f=$1 created
+    for created in "${FLEX_GEMM_CREATED_FILES[@]}"; do
+        [[ "$f" == "$created" ]] && return 0
+    done
+    return 1
+}
+
 copy_pristine() {
     local upstream=$1
     for f in "${FILES[@]}"; do
         mkdir -p "$DEST/$(dirname "$f")"
+        if [[ ! -f "$upstream/quack/$f" ]] && is_flex_gemm_created_file "$f"; then
+            continue
+        fi
         cp "$upstream/quack/$f" "$DEST/$f"
     done
     # Apache-2.0 attribution: quack is redistributed under its upstream
@@ -163,6 +206,35 @@ apply_patch_dir() {
         [[ -e "$p" ]] || continue
         apply_patch_file "$p"
     done
+}
+
+apply_patch_series() {
+    local dir=$1 line patch_name p seen_patches=""
+    local series="$dir/series"
+    [[ -f "$series" ]] || die "missing patch series: $series"
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line=${line%%#*}
+        patch_name=$(printf "%s" "$line" | sed -E "s/^[[:space:]]+//;s/[[:space:]]+$//")
+        [[ -z "$patch_name" ]] && continue
+        [[ "$patch_name" == */* ]] && die "patch series entries must be filenames: $patch_name"
+        [[ "$patch_name" == *.patch ]] || die "patch series entry must end in .patch: $patch_name"
+        [[ -f "$dir/$patch_name" ]] || die "patch listed in $series not found: $patch_name"
+        if printf "%s" "$seen_patches" | grep -Fxq "$patch_name"; then
+            die "duplicate patch in $series: $patch_name"
+        fi
+        seen_patches="${seen_patches}${patch_name}"$'\n'
+        apply_patch_file "$dir/$patch_name"
+    done < "$series"
+    for p in "$dir"/*.patch; do
+        [[ -e "$p" ]] || continue
+        patch_name=$(basename "$p")
+        printf "%s" "$seen_patches" | grep -Fxq "$patch_name" \
+            || die "patch missing from $series: $patch_name"
+    done
+}
+
+apply_flex_gemm_patches() {
+    apply_patch_series "$FLEX_GEMM_PATCHES_DIR"
 }
 
 apply_patches() {
@@ -212,6 +284,9 @@ verify_notices() {
     local upstream=$1
     local pattern='[Cc]opyright|[Ll]icense|SPDX|[Aa]ll [Rr]ights [Rr]eserved'
     for f in "${FILES[@]}"; do
+        if [[ ! -f "$upstream/quack/$f" ]] && is_flex_gemm_created_file "$f"; then
+            continue
+        fi
         if ! diff -u \
                 <(grep -nE "$pattern" "$upstream/quack/$f" || true) \
                 <(grep -nE "$pattern" "$DEST/$f" || true) \
@@ -252,10 +327,10 @@ write_init() {
 The pinned upstream commit is recorded in \`\`__upstream_sha__\`\` below and is
 sourced from \`\`PINNED_SHA\`\` in tools/vendoring/quack/vendor.sh. The
 vendoring script verifies that commit is reachable from Dao-AILab/quack main
-before applying the local PyTorch vendoring patches. Only the modules required
-by torch._native.ops.norm.rmsnorm_impl are vendored. Imports are rewritten to be
-package-relative so this copy is independent of any \`\`quack\`\` top-level package
-that may be
+before applying the local FlexGEMM patchset. Only the modules required by
+torch._native.ops.norm.rmsnorm_impl and selected GEMM epilogue implementation
+paths are vendored. Imports are rewritten to be package-relative
+so this copy is independent of any \`\`quack\`\` top-level package that may be
 installed via pip. Custom op namespaces are renamed from \`\`quack::\`\` to
 \`\`torch_vendor_quack::\`\` for the same reason.
 """
@@ -295,6 +370,7 @@ render() {
     copy_pristine "$upstream"
     copy_pytorch_only
     apply_patches
+    apply_flex_gemm_patches
     rewrite_imports
     verify_notices "$upstream"
     write_init "$sha" "$version"

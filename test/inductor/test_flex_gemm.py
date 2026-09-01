@@ -237,6 +237,16 @@ class TestFlexGemmOutputLayout(TestCase):
 
 @instantiate_parametrized_tests
 class TestFlexGemmRuntimeHelpers(TestCase):
+    def test_tensorssa_clamp_codegen_uses_public_cutlass_api(self):
+        from torch._inductor.kernel.flex_gemm.epilogue import (
+            FlexGemmTensorSSAOpOverrides,
+        )
+
+        self.assertEqual(
+            FlexGemmTensorSSAOpOverrides.clamp("x", "lower", "upper"),
+            "cutlass.min(cutlass.max(x, lower), upper)",
+        )
+
     def test_epimod_division_respects_fast_math(self):
         from torch._inductor.kernel.flex_gemm.epilogue import FlexGemmEpiModOpOverrides
 
@@ -3825,6 +3835,39 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_inline_asm_three_outputs(self):
+        m = k = n = 64
+
+        def epilogue_fn(acc):
+            first, second, third = inline_asm_elementwise(
+                acc.float(),
+                asm_str=("mov.f32 $0, $3; add.f32 $1, $3, $3; mul.f32 $2, $3, $3;"),
+                constraints="=f,=f,=f,f",
+                dtype=(torch.float32, torch.float32, torch.float32),
+            )
+            return first + second + third
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.ones(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.ones(k, n, device="cuda", dtype=torch.bfloat16)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        expected_input = (a @ b).float()
+        self.assertEqual(actual, expected_input * 3 + expected_input.square())
+        self.assertEqual(code.count("inline_asm_elementwise_intrinsic("), 1)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_mm_inline_asm_pack2_broadcasts_and_repeats_scalar(self):
         from torch._higher_order_ops.inline_asm_elementwise import (
             inline_asm_elementwise,
@@ -4298,7 +4341,15 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         )
 
         self.assertTrue(torch.isnan(actual).all())
-        FileCheck().check("propagate_nan=True").check_not("operator.ne").run(code)
+        check = FileCheck()
+        match case:
+            case "clamp":
+                check = check.check("cutlass.max").check("cutlass.min")
+            case "clamp_min":
+                check = check.check("cutlass.max")
+            case "clamp_max":
+                check = check.check("cutlass.min")
+        check.check_not("operator.ne").run(code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
