@@ -5471,6 +5471,45 @@ def forward(self, tangents_1):
         self.assertIn("its dtype             : torch.float32", msg)
         self.assertIn("This slot is case (2) or (3)", msg)
 
+    def test_none_tangent_in_kept_slot_with_subclass_tangents(self):
+        # Same diagnostic, but through the backward prologue's has_subclass
+        # branch, whose chained-generator codegen threads _kept_tangent_info_
+        # into process_runtime_tangent independently of the plain loop branch.
+        # A subclass output forbids output aliasing, so instead of an
+        # intermediate base this uses the sibling-output dedup case: inductor
+        # returns one object for h * 1.0 and h.detach(), so with the dedup
+        # disabled, marking the detach slot marks the kept slot too.
+        import torch._functorch._aot_autograd.runtime_wrappers as rw
+
+        def f(x, z):
+            h = torch.sin(z)
+            return x * 2, h * 1.0, h.detach()
+
+        torch._dynamo.reset()
+        x = TwoTensor(torch.ones(4), torch.ones(4)).requires_grad_(True)
+        z = torch.arange(6, dtype=torch.float32).requires_grad_(True)
+        with patch.object(rw, "_dealias_marked_returns", lambda raw, marked: None):
+            outs = torch.compile(f, backend="inductor")(x, z)
+            # The subclass output is what routes the prologue through the
+            # has_subclass chained-generator branch.
+            self.assertIsInstance(outs[0], TwoTensor)
+            with self.assertRaises(RuntimeError) as cm:
+                outs[0].sum().backward()
+
+        msg = str(cm.exception)
+        self.assertIn("handed a non-Tensor for a tangent it requires", msg)
+        self.assertIn("tangent index         : 1", msg)
+        self.assertIn("received              : None (type NoneType", msg)
+        self.assertIn("TangentAOTInput(output=PlainAOTOutput(idx=1))", msg)
+        self.assertIn("that slot holds       : user forward output 1", msg)
+        self.assertIn("user output index     : 1", msg)
+        self.assertIn("OutputType.non_alias", msg)
+        self.assertIn("its requires_grad     : True", msg)
+        self.assertIn("its dtype             : torch.float32", msg)
+        self.assertIn("This slot is case (2) or (3)", msg)
+        self.assertIn("The forward output was created here:", msg)
+        self.assertIn("return x * 2, h * 1.0, h.detach()", msg)
+
     def test_none_tangent_error_reports_non_differentiable_dtype(self):
         # An integer output never gets a kept tangent slot from metadata, so the
         # dtype arm of the explanation is only reachable when the recorded
