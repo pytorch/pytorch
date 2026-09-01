@@ -19,8 +19,9 @@ from torch._inductor.heuristics.template.triton import (
 from torch._inductor.test_case import run_tests, TestCase
 
 
-# The submodules that existed under torch._inductor.template_heuristics when the move landed. 
-# Modules added to heuristics/template/ afterwards (e.g. flydsl) never had an old import path, so
+# Frozen at the #183275 re-land (1374acc2890): the submodules that existed under
+# torch._inductor.template_heuristics when the move landed. Modules added to
+# heuristics/template/ afterwards (e.g. flydsl) never had an old import path, so
 # aliasing them would create a backward-compatibility obligation that never existed.
 _HISTORICAL_SUBMODULES = (
     "aten",
