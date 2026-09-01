@@ -16417,11 +16417,6 @@ class TestConsistency(TestCaseMPS):
         if dtype == torch.complex64:
             if op.name == "mv":
                 return (2e-5, 1e-5)
-            # Complex pow uses the float32 polar form exp(y*log(x)); its
-            # precise:: transcendentals round differently than CPU libm, and
-            # the phase error is amplified by the result magnitude.
-            if op.name in ("pow", "__rpow__"):
-                return (1e-4, 3e-5)
         return (None, None)
 
     # Used for accept mode only
