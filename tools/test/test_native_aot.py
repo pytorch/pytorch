@@ -19,10 +19,8 @@ from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import Target
 
 
-# A minimal structured op group (out declares the kernel; functional
-# delegates), an unstructured op for validation failures, and a
-# two-overload structured base (embmulti.alpha / embmulti.beta) for the
-# base-name-ambiguity and overload-qualification checks.
+# A minimal structured group (out declares the kernel), an unstructured op for
+# validation failures, and a two-overload structured base (embmulti.alpha/.beta).
 NATIVE_YAML = """\
 - func: embfoo.out(Tensor self, int k, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -109,8 +107,7 @@ class TestDeclarationParsing(unittest.TestCase):
         self.assertEqual(native_aot.parse_native_aot_manifests("/nonexistent"), {})
 
     def test_overload_qualified_op_accepted(self) -> None:
-        # Qualified names target one structured overload (e.g. gt.Tensor
-        # when gt.Scalar has its own group); decl_id sanitizes the dot.
+        # decl_id sanitizes the dot, since it names a directory.
         with tempfile.TemporaryDirectory() as d:
             _write_declaration(d, "embfoo", _MIN_DECL.format(op="embfoo.out"))
             manifests = native_aot.parse_native_aot_manifests(d)
@@ -126,10 +123,8 @@ class TestDeclarationParsing(unittest.TestCase):
                 native_aot.parse_native_aot_manifests(d)
 
     def test_unconditional_defaults_false_and_is_read(self) -> None:
-        # Omitting UNCONDITIONAL must leave the op user-disableable: the
-        # default decides whether set_aot_enabled(False) reaches it, so a
-        # missing attribute reading as True would silently make every op
-        # non-maskable.
+        # The default decides whether set_aot_enabled(False) reaches an op that did
+        # not declare the flag, so reading a missing attribute as True unmasks all.
         with tempfile.TemporaryDirectory() as d:
             _write_declaration(d, "embfoo", _MIN_DECL.format(op="embfoo"))
             (m,) = native_aot.parse_native_aot_manifests(d).values()
@@ -142,8 +137,7 @@ class TestDeclarationParsing(unittest.TestCase):
             self.assertTrue(m.unconditional)
 
     def test_non_bool_unconditional_rejected(self) -> None:
-        # Truthiness would accept "false" or 0/1; this flag decides whether a
-        # user can switch the op off, so a typo has to fail the build.
+        # Truthiness would accept "false" or 0/1 as True.
         with tempfile.TemporaryDirectory() as d:
             _write_declaration(
                 d, "embfoo", _MIN_DECL.format(op="embfoo") + 'UNCONDITIONAL = "yes"\n'
@@ -152,8 +146,7 @@ class TestDeclarationParsing(unittest.TestCase):
                 native_aot.parse_native_aot_manifests(d)
 
     def test_spec_arity_convention_enforced(self) -> None:
-        # cpp_dispatch without a spec parameter violates the per-point
-        # cardinality convention.
+        # cpp_dispatch is called once per spec point, so it must take one.
         bad = _MIN_DECL.format(op="embfoo").replace(
             "def cpp_dispatch(spec):", "def cpp_dispatch():"
         )
@@ -188,8 +181,7 @@ class TestManifestValidation(unittest.TestCase):
             )
 
     def test_ambiguous_base_name_rejected(self) -> None:
-        # embmulti has two structured overloads; a base-named declaration
-        # must be rejected with a hint to qualify.
+        # embmulti has two structured overloads, so the error must say to qualify.
         m = native_aot.NativeAotManifest(op="embmulti", dispatch_key=DispatchKey.CUDA)
         with self.assertRaisesRegex(RuntimeError, "ambiguous.*qualify"):
             native_aot.validate_native_aot_manifests(
@@ -263,8 +255,7 @@ REGISTER_NO_CPU_DISPATCH(embfoo_aot_stub)
 
     def test_wrapper_emits_stub_consultation(self) -> None:
         body = self._wrapper_body(with_manifest=True)
-        # The call site is unreadable without it: nothing in
-        # `stub(device, args...)` says it launches a kernel, and the
+        # Nothing in `stub(device, args...)` says it launches a kernel, and the
         # short-circuit is what makes op.impl the fallback.
         self.assertIn("// native-AOT: the last conjunct is the LAUNCH", body)
         self.assertIn("&& short-circuits", body)
@@ -284,11 +275,8 @@ REGISTER_NO_CPU_DISPATCH(embfoo_aot_stub)
         self.assertIn("op.impl(self, k, op.outputs_[0]);", body)
 
     def test_unconditional_op_gates_on_the_private_mask(self) -> None:
-        # An UNCONDITIONAL declaration's kernels ARE the implementation, so
-        # the user-facing switch must not appear in its gate -- otherwise
-        # set_aot_enabled(False) silently changes what the op computes.
-        # A gate still has to exist (the private mask), or reference
-        # computations would have no way to reach stock aten.
+        # These kernels are the implementation, so set_aot_enabled(False) must not
+        # reach them; the private mask is still needed to reach stock aten.
         self.manifest = native_aot.NativeAotManifest(
             op="embfoo", dispatch_key=DispatchKey.CUDA, unconditional=True
         )
@@ -299,14 +287,11 @@ REGISTER_NO_CPU_DISPATCH(embfoo_aot_stub)
             "if (!(!at::globalContext().maskUnconditionalNativeAot() && at::native::embfoo_aot_stub.is_device_supported(c10::DeviceType::CUDA) && at::native::embfoo_aot_stub(c10::DeviceType::CUDA, self, k, op.outputs_[0]))) { op.impl(self, k, op.outputs_[0]); }",
             body,
         )
-        # Declining still falls back: unconditional constrains who may switch
-        # the path off, not which shapes the grid covers.
+        # Unconditional constrains who may switch the path off, not which shapes
+        # the grid covers, so declining still falls back.
         self.assertIn("op.impl(self, k, op.outputs_[0]);", body)
-        # The emitted prose must not describe the route it just removed. The
-        # shared comment enumerates "switched off, unsupported device, or
-        # declined" -- true for an ordinary op, but for this one there is no
-        # switched-off case, and a comment contradicting its own gate is worse
-        # than none.
+        # The ordinary comment enumerates "switched off, unsupported device, or
+        # declined"; this op has no switched-off case, so it must not claim one.
         self.assertNotIn("switched off", body)
 
     # assertExpectedInline without pulling in torch's expecttest plumbing.
@@ -315,9 +300,8 @@ REGISTER_NO_CPU_DISPATCH(embfoo_aot_stub)
 
 
 class TestNativeAotWorkflow(unittest.TestCase):
-    """The workflow that validates this feature, asserted as text: it is the only
-    job that builds and runs the embedded kernels, so what it triggers on and what
-    it may reuse decide whether a change is tested at all."""
+    """The workflow that validates this feature, asserted as text: it is the only job
+    that builds and runs the embedded kernels."""
 
     REPO = os.path.normpath(
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
@@ -330,16 +314,13 @@ class TestNativeAotWorkflow(unittest.TestCase):
 
     def test_it_never_reuses_a_prebuilt_wheel(self):
         # reuse_old_whl.ok_changed_file() waves through every torch/**.py outside
-        # torch/csrc/, but the kernel bodies and declarations under
-        # torch/_native/ops/ are compile-time inputs to libtorch_cuda. Reusing a
-        # wheel republishes the previous commit's kernels, and the test job's
-        # _native_aot_embedded() assertion still passes: green, with the change
-        # under test never compiled.
+        # torch/csrc/, but torch/_native/ops/ is a compile-time input to
+        # libtorch_cuda: a reused wheel ships the previous commit's kernels and
+        # still passes the job's _native_aot_embedded() assertion.
         self.assertIn("allow-reuse-old-whl: false", self._workflow())
 
     def test_it_triggers_on_the_build_wiring_too(self):
-        # Stage 2 is reached from these shells and configured by this CMake, so a
-        # change to them that breaks the path must not merge unexercised.
+        # Stage 2 is reached from these shells and configured by this CMake.
         wf = self._workflow()
         for path in (
             ".ci/pytorch/build.sh",

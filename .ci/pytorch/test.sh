@@ -571,19 +571,16 @@ test_h100_cutlass_backend() {
 }
 
 test_native_aot() {
-  # These suites exercise the Python JIT route as well as the embedded
-  # kernels, so they need the DSL runtime. Installed here rather than baked
-  # into the image via requirements-ci.txt: that file is shared by every
-  # image, so pinning it there put ~190 MB of CUDA-only tooling into the
-  # CPU, ROCm and XPU images too.
+  # These suites exercise the Python JIT route too, so they need the DSL runtime.
+  # Installed here rather than in requirements-ci.txt, which is shared by every
+  # image and would put ~190 MB of CUDA-only tooling into the CPU, ROCm and XPU
+  # images as well.
   install_cutlass_dsl
 
-  # native-AOT: DSL kernels embedded into libtorch_cuda by stage 2 of the
-  # build (tools/native_aot/build_stage2.py). First assert the wheel under
-  # test actually carries them -- a silently artifact-free wheel would make
-  # every routing test vacuously pass on the JIT/aten fallbacks.
-  # (cd test: from the repo root the source torch/ dir would shadow the
-  # installed wheel, same as the ASAN smoke checks above)
+  # Assert the wheel under test carries the kernels stage 2 embedded: without
+  # them every routing test below passes vacuously on the JIT/aten fallbacks.
+  # cd test, because from the repo root the source torch/ dir shadows the
+  # installed wheel, same as the ASAN smoke checks above.
   (cd test && python -c "
 from torch._native import _native_aot_embedded
 assert _native_aot_embedded(), 'AOT kernels not embedded: stage 2 did not run in the build'

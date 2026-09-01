@@ -1,14 +1,13 @@
 """Native-AOT declaration for aten::topk @ CUDA.
 
-Eligibility is stated three times, deliberately: covered_axes()
-(Python, JIT-coverage subtraction), cpp_covers() (its C++ fast path;
-must decide the same set), and cpp_dispatch_prelude()/cpp_dispatch()
-(the AOT library's dispatch chain). Keep them in sync by hand; drift
-is benign but wasteful (a call all sides decline lands on stock aten).
+Eligibility is stated three times, deliberately: covered_axes() subtracts from JIT
+coverage, cpp_covers() is its C++ fast path and must decide the same set, and
+cpp_dispatch_prelude()/cpp_dispatch() are the AOT library's dispatch chain. Keep them
+in sync by hand; drift is benign but wasteful, since a call all sides decline lands on
+stock aten.
 
-Module scope must stay torch-free (torchgen loads this pre-build;
-torchgen itself is fine to import); torch is imported lazily inside
-covered_axes.
+Module scope must stay torch-free, because torchgen loads this before torch is built;
+torch is imported lazily inside covered_axes.
 """
 
 ATEN_OP = "topk"
@@ -21,10 +20,8 @@ _KS = [64, 128, 256]
 
 
 def kernel_precompile_grid():
-    # fp32 + bf16 radix kernels, both determinism modes (the det
-    # specialization is bit-exact vs aten: stable prefix-sum gather +
-    # lex (ord, -idx) sort). fp16 and off-grid shapes stay
-    # JIT-eligible.
+    # fp32 and bf16 radix kernels in both determinism modes, the deterministic one
+    # bit-exact vs aten. fp16 and off-grid shapes stay JIT-eligible.
     return [
         {"dtype": list(_DTYPES), "N": _NS, "K": _KS, "deterministic": [False, True]},
     ]
@@ -34,16 +31,10 @@ def covered_axes(self, k, dim=-1, largest=True, sorted=True):
     import torch
 
     n = self.shape[-1] if self.dim() >= 1 else 0
-    # Mirror the prelude's full-wave perf gate (M >= SM count). The JIT
-    # cond gates small M identically, so sub-wave calls land on stock
-    # aten either way -- but coverage must still match the stub's
-    # acceptance: an op whose JIT cond DIDN'T gate would silently lose
-    # its JIT route for covered-but-stub-rejected calls, and keeping
-    # the three eligibility statements (coverage, cpp_covers, prelude)
-    # aligned is the declaration contract. Only gate CUDA tensors: the
-    # declaration is CUDA-keyed and the device query would throw on CPU.
-    # (dim/largest/sorted are deliberately NOT axes: they are not grid
-    # fields, and a mismatch declines in the stub to aten by design.)
+    # Mirror the prelude's full-wave perf gate (M >= SM count), so coverage is no
+    # wider than the stub's acceptance. Only gate CUDA tensors, since the device query
+    # would throw on CPU. dim/largest/sorted are not grid fields and so not axes; a
+    # mismatch declines in the stub.
     if n > 0 and self.is_cuda:
         sm = torch.cuda.get_device_properties(self.device).multi_processor_count
         if self.numel() // n < sm:
@@ -52,23 +43,17 @@ def covered_axes(self, k, dim=-1, largest=True, sorted=True):
         "dtype": self.dtype,
         "N": n,
         "K": k,
-        # Coverage-neutral since both modes are on the grid (any value
-        # matches some point); retained because it IS a grid axis --
-        # cpp_dispatch keys each point on it to pick the det kernel.
+        # Coverage-neutral, since both modes are on the grid, but it is a grid axis:
+        # cpp_dispatch keys each point on it to pick the deterministic kernel.
         "deterministic": torch.are_deterministic_algorithms_enabled(),
     }
 
 
 def cpp_covers():
-    # C++ port of covered_axes + grid matching (registered by the AOT
-    # library as torch.ops._native_aot.covers_topk; avoids walking the
-    # 48-point grid in Python on every call). Covered = on-grid
-    # (dtype, N, K) at full-wave M (the prelude's perf gate -- coverage
-    # must be no wider than the stub's acceptance or gated calls lose
-    # their JIT route to stock aten); both determinism modes are on the
-    # grid (the det kernel is bit-exact vs aten);
-    # largest/sorted/dim/layout are NOT part of coverage (matching
-    # covered_axes) -- off-prelude calls decline in the stub by design.
+    # C++ port of covered_axes plus grid matching, registered as
+    # torch.ops._native_aot.covers_topk, so a call does not walk the 48-point grid in
+    # Python. Covered means on-grid (dtype, N, K) at full-wave M, in either
+    # determinism mode; largest/sorted/dim/layout are not part of coverage.
     dtype_accept = " || ".join(f"st == {t}" for t in _DTYPES.values())
     n_accept = " || ".join(f"N == {n}" for n in _NS)
     k_accept = " || ".join(f"k == {kk}" for kk in _KS)

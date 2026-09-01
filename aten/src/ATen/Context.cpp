@@ -972,9 +972,8 @@ bool Context::allowFP16ReductionCPU() const {
   return allow_fp16_reduction_cpu;
 }
 
-// Plain bools, like the ~67 other user-facing toggles on Context
-// (enabled_cudnn, _deterministic_algorithms, allow_tf32_cudnn, ...): set
-// rarely from Python, read per op call, publishing no data of their own.
+// Plain bools, like the other user-facing toggles on Context (enabled_cudnn,
+// _deterministic_algorithms, ...): set rarely, read per op call, publishing no data.
 bool Context::allowNativeAot() const {
   return allow_native_aot;
 }

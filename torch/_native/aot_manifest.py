@@ -1,19 +1,17 @@
 """Native-AOT coverage for the Python JIT override router.
 
-Ops under ``torch/_native/ops/<op>/`` opt into AOT with an ``aot.py``
-declaration module (see tools/native_aot/decl.py for the contract). The
-router checks AOT coverage once per call, ahead of its cond chain, so
-covered calls decline the Python route, fall through the router's aten
-fallback, and reach the embedded kernel inside the aten implementation.
-Everything not covered keeps JIT override eligibility.
+Ops under ``torch/_native/ops/<op>/`` opt into AOT with an ``aot.py`` declaration
+module (contract: tools/native_aot/decl.py). The router checks coverage once per
+call, ahead of its cond chain, so a covered call declines the Python route and
+reaches the embedded kernel through the router's aten fallback. Anything uncovered
+keeps its JIT override eligibility.
 
-A call is covered iff some point of the declaration's
-``kernel_precompile_grid()`` matches every field ``covered_axes()``
-returns (dtypes are matched by canonical torch dtype; grid-only fields
-like block sizes are ignored). ``covered_axes`` exceptions degrade to
-"uncovered". The C++ dispatch chain in the AOT library is the authority
-on what actually launches; drift between it and covered_axes is benign
-(a call both sides decline lands on stock aten).
+A call is covered iff some point of the declaration's ``kernel_precompile_grid()``
+matches every field ``covered_axes()`` returns; dtypes match by canonical torch
+dtype, grid-only fields like block sizes are ignored, and an exception degrades to
+uncovered. The C++ dispatch chain in the AOT library is the authority on what
+actually launches, and drift is benign: a call both sides decline lands on stock
+aten.
 """
 
 import functools
@@ -42,12 +40,10 @@ class _Coverage:
         self._op = op
         self._covered_axes = covered_axes
         self._grid = grid
-        # Fast path: declarations with cpp_covers() get a C++ predicate
-        # compiled into the AOT library and registered as
-        # torch.ops._native_aot.covers_<op>. It answers the same
-        # question as the Python matching below at custom-op call cost
-        # (~1.5us) instead of covered_axes cost (~7-10us). Resolved
-        # lazily: the library loads after coverage is built.
+        # Declarations with cpp_covers() get a C++ predicate in the AOT library,
+        # registered as torch.ops._native_aot.covers_<op>: the same answer as the
+        # Python matching below for ~1.5us instead of ~7-10us. Resolved lazily,
+        # because the library loads after coverage is built.
         self._cpp_covers: Callable[..., bool] | None = None
         self._cpp_probed = False
 
@@ -64,11 +60,9 @@ class _Coverage:
         return self._cpp_covers
 
     def covers(self, args: tuple, kwargs: dict) -> bool:
-        # Gate on the Context switch the stub consultations check: with
-        # AOT masked (set_aot_enabled(False)), a covered call must keep
-        # its JIT route rather than decline into a stub that will not
-        # fire -- otherwise masking silently loses BOTH accelerated
-        # routes. ~0.1us per call.
+        # Gate on the same Context switch the stub consultations read: with AOT
+        # masked, a covered call must keep its JIT route rather than decline into a
+        # stub that will not fire, which would lose both accelerated routes.
         if not torch._C._get_native_aot_enabled():
             return False
         cpp = self._resolve_cpp_covers()
@@ -76,15 +70,13 @@ class _Coverage:
             try:
                 return cpp(*args, **kwargs)
             except Exception:
-                # Arguments the schema can't bind (SymInt sizes, exotic
-                # kwargs): uncovered; the JIT cond decides.
+                # Arguments the schema cannot bind: uncovered, so the cond decides.
                 return False
         try:
             values = self._covered_axes(*args, **kwargs)
         except Exception:
-            # Underspecified call (FakeTensor without the queried
-            # attribute, or arguments that don't bind): uncovered; the
-            # JIT cond decides.
+            # Underspecified call (e.g. a FakeTensor missing the queried attribute):
+            # uncovered, so the cond decides.
             return False
         for point in self._grid:
             if all(
@@ -111,11 +103,9 @@ def _load_coverage() -> dict[tuple[str, str], _Coverage]:
         path = os.path.join(_OPS_DIR, entry, "aot.py")
         if not os.path.exists(path):
             continue
-        # Loaded by file path (not package import) so tests can point
-        # _OPS_DIR at fixture directories. Deliberately skips the
-        # validating loader (load_declarations): the contract is checked
-        # at codegen time, and here we need only the coverage pieces. A
-        # module is either one declaration or a family exporting
+        # Loaded by file path, not package import, so tests can point _OPS_DIR at
+        # fixtures, and without the validating loader, since codegen already checked
+        # the contract. A module is one declaration or a family exporting
         # declarations().
         mod = load_by_path(f"{entry}_aot", path)
         family = getattr(mod, "declarations", None)
@@ -127,9 +117,8 @@ def _load_coverage() -> dict[tuple[str, str], _Coverage]:
 
 
 def _base_name(op_symbol: str) -> str:
-    # Overload-qualified ("topk.values") and in-place ("scatter_add_")
-    # symbols share the base op's declaration: all variants funnel
-    # through the same structured wrapper.
+    # Overload-qualified ("topk.values") and in-place ("scatter_add_") symbols
+    # share the base op's declaration: one structured wrapper serves all variants.
     base = op_symbol.split(".")[0]
     return base.removesuffix("_") if not base.endswith("__") else base
 
@@ -137,15 +126,11 @@ def _base_name(op_symbol: str) -> str:
 def get_coverage(op_symbol: str, dispatch_key: str) -> _Coverage | None:
     """The op's AOT coverage, or None if it has no declaration.
 
-    Lookup order: the exact registration symbol first (declarations may
-    be overload-qualified, e.g. "gt.Tensor"), then the base name (base-
-    named declarations serve every overload of their unique structured
-    group).
-
-    The router checks ``coverage.covers(args, kwargs)`` ONCE per call,
-    ahead of the cond chain -- every override of the op would get the
-    same answer for the same arguments, so per-cond wrapping would pay
-    the check N times on multi-path ops.
+    The exact registration symbol wins over the base name, since a declaration may
+    be overload-qualified ("gt.Tensor") while a base-named one serves every overload
+    of its structured group. The router calls ``covers`` once per call rather than
+    per cond, which would pay the check N times on a multi-path op for the same
+    answer.
     """
     table = _load_coverage()
     c = table.get((op_symbol, dispatch_key))
