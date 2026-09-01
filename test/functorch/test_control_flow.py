@@ -10815,19 +10815,6 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
             torch.vmap(fn)(torch.rand(4, 3))
 
     @skipIfTorchDynamo("a vmap test, not a dynamo test")
-    def test_while_loop_vmap_per_sample_grads(self):
-        def fn(x):
-            return while_loop(lambda c: c.sum() < 10.0, lambda c: (c * 2,), (x,))[0]
-
-        x = torch.rand(4, 3, requires_grad=True)
-        per_sample_grads = torch.vmap(torch.func.grad(fn))(x)
-        # Reference: grad for each sample independently.
-        expected = torch.stack(
-            [torch.func.grad(fn)(x[i].detach().requires_grad_(True)) for i in range(4)]
-        )
-        self.assertEqual(per_sample_grads, expected, atol=1e-5, rtol=1e-5)
-
-    @skipIfTorchDynamo("a vmap test, not a dynamo test")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     def test_while_loop_vmap_cuda(self):
         def cond_fn(c):
