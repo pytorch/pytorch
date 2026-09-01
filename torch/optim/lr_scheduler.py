@@ -1231,7 +1231,7 @@ class SequentialLR(LRScheduler):
 
         self._last_lr = scheduler.get_last_lr()
 
-    def step(self, *, metrics: SupportsFloat | None = None) -> None:
+    def step(self, *, metrics: SupportsFloat | None = None) -> None:  # type: ignore[override]
         """Perform a step.
 
         Args:
@@ -1629,7 +1629,7 @@ class ChainedScheduler(LRScheduler):
             scheduler._update_lr(epoch, metrics=metrics)
         self._last_lr = _param_groups_val_list(self._schedulers[-1].optimizer, "lr")
 
-    def step(self, *, metrics: SupportsFloat | None = None) -> None:
+    def step(self, *, metrics: SupportsFloat | None = None) -> None:  # type: ignore[override]
         """Perform a step.
 
         Args:
