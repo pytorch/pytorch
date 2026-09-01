@@ -300,10 +300,10 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
     @skip_if_lt_x_gpu(2)
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
     def test_reduce_dtype(self, device):
-        self._test_reduce_dtype_fp32_reduce()
-        self._test_reduce_dtype_bf16_reduce()
+        self._test_reduce_dtype_fp32_reduce(device)
+        self._test_reduce_dtype_bf16_reduce(device)
 
-    def _test_reduce_dtype_fp32_reduce(self):
+    def _test_reduce_dtype_fp32_reduce(self, device):
         param_dtype, reduce_dtype = torch.bfloat16, torch.float32
         ref_model, ref_optim, model, optim = self._init_models_and_optims(
             param_dtype=param_dtype,
@@ -319,7 +319,7 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
             reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
         )
         torch.manual_seed(42 + self.rank + 1)
-        inp = torch.randn((4, 16), device=self.device_type, dtype=param_dtype)
+        inp = torch.randn((4, 16), device=device, dtype=param_dtype)
         for iter_idx in range(10):
             optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
             fsdp_loss = model(inp).sum()
@@ -348,9 +348,7 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
             self.assertEqual(fsdp_loss, ref_loss)
             check_sharded_parity(self, ref_model, model)
 
-    def _test_reduce_dtype_bf16_reduce(
-        self,
-    ):
+    def _test_reduce_dtype_bf16_reduce(self, device):
         param_dtype, reduce_dtype = torch.float32, torch.bfloat16
         ref_model, ref_optim, model, optim = self._init_models_and_optims(
             param_dtype=param_dtype,
@@ -366,7 +364,7 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
             reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
         )
         torch.manual_seed(42 + self.rank + 1)
-        inp = torch.randn((4, 16), device=self.device_type, dtype=param_dtype)
+        inp = torch.randn((4, 16), device=device, dtype=param_dtype)
         for iter_idx in range(10):
             optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
             fsdp_loss = model(inp).sum()
@@ -637,7 +635,6 @@ class TestReplicateMixedPrecisionCasts(FSDPTestMultiThread):
         model = nn.Sequential(nn.Conv2d(1, 5, 3), nn.BatchNorm2d(5), nn.Conv2d(5, 4, 3))
         for module in (model[0], model[1], model[2], model):
             replicate(module, mp_policy=mp_policy)
-        acc = torch.accelerator.current_accelerator()
         if TEST_HPU:
             inner(model, torch.randn((3, 1, 9, 9), device=device))
         else:
