@@ -112,12 +112,16 @@ def _cuda_versions() -> dict[str, int]:
     if not torch.cuda.is_available():
         return {}
     versions = {"cuda_runtime_version": torch._C._cuda_getCompiledVersion()}
+    from torch.cuda._utils import _check_cuda_bindings, _HAS_CUDA_BINDINGS
+
+    # The shared gate also reports the bindings absent on ROCm, where they import but
+    # every call fails -- so ask it rather than making the call and catching.
+    if not _HAS_CUDA_BINDINGS:
+        return versions
     try:
         from cuda.bindings import (  # pyrefly: ignore[missing-import]
             runtime as cuda_runtime,
         )
-
-        from torch.cuda._utils import _check_cuda_bindings
 
         versions["cuda_driver_version"] = _check_cuda_bindings(
             cuda_runtime.cudaDriverGetVersion()
