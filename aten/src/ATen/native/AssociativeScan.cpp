@@ -6,6 +6,8 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/associative_scan.h>
+#include <ATen/ops/associative_scan_native.h>
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/flip.h>
 #include <ATen/ops/movedim.h>
