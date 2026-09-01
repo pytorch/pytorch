@@ -247,6 +247,73 @@ MODULE_SCOPE_WRAPPED_A = module_scope_wrapper(_module_scope_base_a)
 MODULE_SCOPE_WRAPPED_B = module_scope_wrapper(_module_scope_base_b)
 
 
+# The pickler refuses a locally-defined class before __reduce__ ever runs, so
+# a value whose __reduce__ is the thing under test has to live at module scope.
+_REDUCE_RAISES: type[BaseException] = AssertionError
+
+
+class _RaisesFromReduce:
+    def __reduce__(self):
+        raise _REDUCE_RAISES("from __reduce__")
+
+
+def _cell_is_full(cell):
+    try:
+        cell.cell_contents
+    except ValueError:
+        return False
+    return True
+
+
+def _dump_through_pickle_guards_state(value):
+    """Run ``value`` through pickle_guards_state's try/except.
+
+    A capture cannot reach that handler with an arbitrary exception -- Dynamo
+    would have to raise it from inside a guarded value's __reduce__ mid-trace
+    -- so the state is assembled directly. Only the fields the function reads
+    are populated; the point is which exceptions cross the handler, not what a
+    real GuardsState contains.
+    """
+    from torch._dynamo.guards import GuardsState, pickle_guards_state
+
+    graph = types.SimpleNamespace(
+        guards=[],
+        local_scope={"value": value},
+        global_scope={},
+        guard_on_key_order=set(),
+    )
+    # Kept, not pruned: an unguarded value is replaced by a _Missing sentinel
+    # and its __reduce__ never runs, so the handler is never reached.
+    builder = types.SimpleNamespace(guard_tree_values={id(value): value})
+    state = GuardsState(output_graph=graph, shape_code_parts=None)
+    return pickle_guards_state(state, builder)
+
+
+def self_referencing_wrapper(func):
+    # The wrapper reads an attribute off ITSELF, so `wrapper` becomes one of
+    # its own free variables and the cell holds the object being reduced. A
+    # counter or a cache on the wrapper is the ordinary way a decorator does
+    # this; functools.wraps then makes it fqn-unreachable, which is exactly
+    # the shape the reducer reconstructs.
+    @functools.wraps(func)
+    def wrapper(x):
+        wrapper.calls += 1
+        if func.__globals__["MODULE_SCOPE_CONST"] == 2:
+            x = x + 1
+        return func(x)
+
+    wrapper.calls = 0
+    wrapper.me = wrapper
+    return wrapper
+
+
+def _self_referencing_base(x):
+    return x * 5
+
+
+SELF_REFERENCING_WRAPPED = self_referencing_wrapper(_self_referencing_base)
+
+
 # --- an empty closure cell -------------------------------------------------
 def keep_name_with_empty_cell(func):
     @functools.wraps(func)
@@ -717,6 +784,98 @@ class TestGuardSerialization(TestGuardSerializationBase):
         x = torch.randn(3)
         ref, loaded = self._test_serialization("EQUALS_MATCH", fn, x)
         self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, True)
+
+    def test_guard_rooted_at_a_wrapper_that_reaches_itself(self):
+        # The globals snapshot moved to reduce STATE, but a kept closure cell,
+        # __dict__ entry or default still travelled in the reduce ARGS. pickle
+        # memoizes an object only AFTER saving its args, so a wrapper holding
+        # itself in any of those re-entered the reducer and recursed until
+        # RecursionError -- a hard capture failure, since aot_compile passes
+        # strict_error=True. Everything that reaches the function now goes in
+        # state too, and __closure__, which is read-only after construction,
+        # is built empty and filled by the state setter.
+        def fn(x):
+            return SELF_REFERENCING_WRAPPED(x)
+
+        x = torch.randn(3)
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, True)
+
+    def test_a_reconstructed_wrapper_still_points_at_itself(self):
+        # Deferring to state is only correct if the reference comes BACK. A
+        # wrapper whose cell or attribute silently lost its self-reference
+        # would raise NameError or AttributeError on the first served call
+        # rather than at load, so assert the identity directly.
+        from torch._dynamo.guards import GuardsStatePickler
+
+        w = SELF_REFERENCING_WRAPPED
+        buf = io.BytesIO()
+        GuardsStatePickler(
+            {id(w): w, id(w.__globals__): w.__globals__}, {}, {}, buf
+        ).dump({"fn": w})
+        got = pickle.loads(buf.getvalue())["fn"]
+        self.assertIs(got.me, got)
+        cells = [
+            cell.cell_contents
+            for cell in (got.__closure__ or ())
+            if _cell_is_full(cell)
+        ]
+        self.assertTrue(any(contents is got for contents in cells))
+
+    def test_a_shared_closure_cell_survives_a_self_reference(self):
+        # The self-reference fix builds a placeholder cell, so it must not cost
+        # the sharing that _reduce_cell passes cells through unchanged to keep:
+        # two functions closing over one variable must still close over ONE
+        # cell after the round trip.
+        from torch._dynamo.guards import GuardsStatePickler
+
+        def pair():
+            shared = [0]
+
+            def f():
+                return shared
+
+            def g():
+                return shared
+
+            return f, g
+
+        f, g = pair()
+        buf = io.BytesIO()
+        GuardsStatePickler(
+            {id(f): f, id(g): g, id(f.__closure__[0]): f.__closure__[0]}, {}, {}, buf
+        ).dump({"f": f, "g": g})
+        out = pickle.loads(buf.getvalue())
+        self.assertIs(out["f"].__closure__[0], out["g"].__closure__[0])
+
+    def test_a_dynamo_control_flow_exception_is_not_a_package_bypass(self):
+        # pickle_guards_state catches Exception so a user assert in a
+        # __reduce__ becomes a bypass rather than a hard compile failure. Every
+        # exception Dynamo steers compilation with -- RestartAnalysis,
+        # SkipFrame, Unsupported -- derives from TorchDynamoException, which
+        # derives from RuntimeError, so the broad catch swallowed those too and
+        # a restart silently became a logged bypass. They must propagate.
+        global _REDUCE_RAISES
+        original = _REDUCE_RAISES
+        try:
+            for exc_type in (
+                torch._dynamo.exc.RestartAnalysis,
+                torch._dynamo.exc.SkipFrame,
+                torch._dynamo.exc.Unsupported,
+            ):
+                _REDUCE_RAISES = exc_type
+                with self.subTest(exc=exc_type.__name__):
+                    with self.assertRaises(exc_type):
+                        _dump_through_pickle_guards_state(_RaisesFromReduce())
+
+            # ... while an ordinary failure inside __reduce__ still becomes one.
+            _REDUCE_RAISES = AssertionError
+            with self.assertRaisesRegex(
+                PackageError, "AssertionError: from __reduce__"
+            ):
+                _dump_through_pickle_guards_state(_RaisesFromReduce())
+        finally:
+            _REDUCE_RAISES = original
 
     def test_reducer_handles_an_empty_cell_reached_directly(self):
         # _reduce_cell only covers cells it builds for a reconstructed
