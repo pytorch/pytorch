@@ -51,7 +51,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import (
     get_func_call,
-    GPU_TYPE,
     HAS_CPU,
     HAS_TRITON,
     requires_block_ptr,
@@ -80,9 +79,6 @@ def _dump_launch_params(value: str):
         finally:
             if value == "1" and os.path.exists(launch_params_file):
                 os.remove(launch_params_file)
-
-
-HAS_GPU_DEVICE = GPU_TYPE != "mps" and getattr(torch, GPU_TYPE).is_available()
 
 
 if HAS_TRITON:
@@ -4964,14 +4960,14 @@ class MutationTestsTritonLauncherFallback(torch._inductor.test_case.TestCase):
     hw_classification = HardwareClassification.CPU
 
     @unittest.skipUnless(
-        not HAS_GPU_DEVICE and HAS_CPU and TRITON_HAS_CPU,
-        "requires the Triton CPU backend without an accelerator backend",
+        HAS_CPU and TRITON_HAS_CPU,
+        "requires the Triton CPU backend",
     )
     def test_custom_tma_descriptor_ops_keep_triton_launcher(self, device):
         _run_custom_tma_descriptor_ops_keep_triton_launcher(self, device)
 
 
-if HAS_GPU_DEVICE and HAS_TRITON:
+if HAS_TRITON:
     t = torch.randn(4)
     tt = torch.randn(4, 1)
     tests = [
