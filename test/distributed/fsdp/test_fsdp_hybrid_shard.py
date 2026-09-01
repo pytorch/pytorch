@@ -547,13 +547,13 @@ class TestHSDPSyncModuleStates(FSDPTestMultiThread):
 instantiate_device_type_tests(
     TestFSDPHybridShard,
     globals(),
-    only_for=("cuda", "hpu", "xpu", "privateuse1"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestHSDPSyncModuleStates,
     globals(),
-    only_for=("cuda", "hpu", "xpu", "privateuse1"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 
