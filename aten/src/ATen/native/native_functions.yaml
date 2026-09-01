@@ -6864,7 +6864,7 @@
 
 - func: frexp.Tensor_out(Tensor self, *, Tensor(a!) mantissa, Tensor(b!) exponent) -> (Tensor(a!) mantissa, Tensor(b!) exponent)
   dispatch:
-    CPU, CUDA, XPU: frexp_out
+    CPU, CUDA, MPS, XPU: frexp_out
   tags: pointwise
 
 # Deprecated (v.1.12)
