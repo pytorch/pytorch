@@ -609,7 +609,7 @@ void test_aoti_user_managed_buffer() {
   size_t initTorchReserved = stats.reserved_bytes[0].current;
   size_t torchReserved = stats.reserved_bytes[0].current;
   if (cudaStatus != cudaSuccess || device_idx == -1) {
-    throw std::runtime_error("cudaGetDevice failed!");
+    TORCH_CHECK(false, "cudaGetDevice failed!");
   }
   // This should contain one set of weight (128MB) loaded from .so
   size_t initMemory = 0;
@@ -617,7 +617,7 @@ void test_aoti_user_managed_buffer() {
   size_t preFreeMemory = 0;
   cudaStatus = cudaMemGetInfo(&preFreeMemory, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
   // At this point, no memory should be consumed since we freed them all.
   runner->swap_constant_buffer();
@@ -625,7 +625,7 @@ void test_aoti_user_managed_buffer() {
   runner->swap_constant_buffer();
   cudaStatus = cudaMemGetInfo(&initMemory, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
   ASSERT_EQ(initMemory - DATASIZE, preFreeMemory);
 
@@ -639,7 +639,7 @@ void test_aoti_user_managed_buffer() {
   size_t updateMemory = 0;
   cudaStatus = cudaMemGetInfo(&updateMemory, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
   ASSERT_EQ(initMemory, updateMemory);
 
@@ -652,7 +652,7 @@ void test_aoti_user_managed_buffer() {
   // consumption.
   cudaStatus = cudaMemGetInfo(&initMemory, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
   runner->update_constant_buffer(
       rand_map,
@@ -661,7 +661,7 @@ void test_aoti_user_managed_buffer() {
       /*user_managed = */ false);
   cudaStatus = cudaMemGetInfo(&updateMemory, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
   ASSERT_EQ(initMemory - DATASIZE, updateMemory);
 
@@ -779,7 +779,7 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   cudaError_t cudaStatus;
   cudaStatus = cudaGetDevice(&device_idx);
   if (cudaStatus != cudaSuccess || device_idx == -1) {
-    throw std::runtime_error("cudaGetDevice failed!");
+    TORCH_CHECK(false, "cudaGetDevice failed!");
   }
   c10::cuda::CUDACachingAllocator::DeviceStats stats =
       c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
@@ -792,7 +792,7 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   size_t totalMemory = 0;
   cudaStatus = cudaMemGetInfo(&initMemory, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
 
   // We update inactive buffer, this should create one copy (128MB) at buffer #2
@@ -800,7 +800,7 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   size_t updateMemory2 = 0;
   cudaStatus = cudaMemGetInfo(&updateMemory2, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
   ASSERT_EQ(initMemory - DATASIZE, updateMemory2);
 
@@ -814,7 +814,7 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
     size_t constFoldMemory = 0;
     cudaStatus = cudaMemGetInfo(&constFoldMemory, &totalMemory);
     if (cudaStatus != cudaSuccess) {
-      throw std::runtime_error("cudaMemGetInfo failed!");
+      TORCH_CHECK(false, "cudaMemGetInfo failed!");
     }
     ASSERT_EQ(
         initMemory - DATASIZE - (torchReserved1 - initTorchReserved),
@@ -835,7 +835,7 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   size_t postFreeMemory = 0;
   cudaStatus = cudaMemGetInfo(&postFreeMemory, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
   // We should only have one set of buffer (#2), available memory should equal
   // initial memory minus the folded constants.
@@ -853,7 +853,7 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   size_t updateMemory1 = 0;
   cudaStatus = cudaMemGetInfo(&updateMemory1, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
   ASSERT_EQ(
       initMemory - DATASIZE - (torchReserved1 - initTorchReserved),
@@ -868,7 +868,7 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   runner->free_inactive_constant_buffer();
   cudaStatus = cudaMemGetInfo(&updateMemory1, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
   stats = c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
   torchActive2 = stats.active_bytes[0].current;
@@ -884,7 +884,7 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   torchActive2 = stats.active_bytes[0].current;
   cudaStatus = cudaMemGetInfo(&updateMemory1, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
   ASSERT_EQ(initMemory - (torchReserved2 - initTorchReserved), updateMemory1);
   ASSERT_EQ(torchActive1 - torchActive2, 0);
@@ -902,7 +902,7 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   torchReserved2 = stats.reserved_bytes[0].current;
   cudaStatus = cudaMemGetInfo(&updateMemory1, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
 
   ASSERT_EQ(
@@ -940,7 +940,7 @@ void test_cuda_alloc_test() {
   cudaError_t cudaStatus;
   cudaStatus = cudaGetDevice(&device_idx);
   if (cudaStatus != cudaSuccess || device_idx == -1) {
-    throw std::runtime_error("cudaGetDevice failed!");
+    TORCH_CHECK(false, "cudaGetDevice failed!");
   }
 
   c10::cuda::CUDACachingAllocator::emptyCache();
