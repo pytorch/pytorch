@@ -1792,7 +1792,7 @@ class TestTorchDeviceType(TestCase):
     def test_nondeterministic_alert_CTCLoss(self, device):
         module = torch.nn.CTCLoss()
         input = torch.randn(50, 3, 15, device=device, requires_grad=True)
-        target = torch.randint(0, 14, (3, 30), device=device)
+        target = torch.randint(1, 14, (3, 30), device=device)
         input_lengths = [50, 50, 50]
         target_lengths = [30, 25, 20]
         res = module(input, target, input_lengths, target_lengths)
