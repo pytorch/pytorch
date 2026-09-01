@@ -1146,13 +1146,24 @@ class TestFP8Lowering(TestCase):
         "Need datacenter Blackwell with device-side TMA support in Triton",
     )
     @onlyCUDA
-    def test_deepseek_blockwise_scaling_sm100(self, device):
+    @parametrize(
+        "shape",
+        (
+            (32, 64, 64),
+            (256, 768, 512),
+            (384, 128, 1280),
+            (512, 512, 512),
+            (256, 128, 256),
+            (256, 256, 128),
+        ),
+    )
+    def test_deepseek_blockwise_scaling_sm100(self, shape, device):
         from torch._inductor.select_algorithm import (
             add_preprocessing_fn,
             clear_preprocessing_fns,
         )
 
-        M, N, K = 32, 64, 64
+        M, N, K = shape
         tile_size = 128
         k_blocks = ceil_div(K, tile_size)
         padded_k_blocks = ceil_div(k_blocks, 4) * 4
