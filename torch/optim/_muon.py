@@ -3,13 +3,16 @@
 """Implementation of the Muon optimizer."""
 
 import math
+from collections import defaultdict
 from collections.abc import MutableMapping
 
 import torch
 from torch import Tensor
 
 from .optimizer import (
+    _default_to_fused_or_foreach,
     _disable_dynamo_if_unsupported,
+    _foreach_doc,
     _params_doc,
     _to_scalar,
     Optimizer,
@@ -70,6 +73,52 @@ def _zeropower_via_newtonschulz(
     return ortho_grad
 
 
+def _zeropower_via_newtonschulz_batched(
+    grads: Tensor,
+    ns_coefficients: tuple[float, float, float],
+    ns_steps: int,
+    eps: float,
+) -> Tensor:
+    """
+    Batched Newton-Schulz iteration.
+
+    ``grads`` is a stack of ``K`` matrices with identical 2D shape, i.e. a tensor
+    of shape ``(K, M, N)``. The same quintic iteration used by
+    :func:`_zeropower_via_newtonschulz` is applied to every matrix in the batch
+    at once via :func:`torch.bmm`, replacing ``K`` serial matmuls with a handful
+    of batched matmuls. This is most beneficial on GPU for transformer-style
+    models with many identically-shaped weight matrices (e.g. per-layer Q/K/V/O
+    projections, or same-dimension MLP matrices).
+    """
+    if ns_steps >= 100:
+        raise ValueError(
+            "Number of steps must be less than 100 for computational efficiency"
+        )
+    if grads.ndim != 3:
+        raise ValueError("Input tensor gradient batch must be a 3D tensor (K, M, N)")
+    if len(ns_coefficients) != 3:
+        raise ValueError("Coefficients must be a tuple of exactly 3 values")
+    a, b, c = ns_coefficients
+    ortho_grad = grads.bfloat16()
+    transpose = ortho_grad.size(-2) > ortho_grad.size(-1)
+    if transpose:
+        ortho_grad = ortho_grad.transpose(-2, -1)
+    # Ensure spectral norm is at most 1, per-matrix Frobenius norm
+    ortho_grad.div_(
+        ortho_grad.norm(dim=(-2, -1), keepdim=True).clamp(min=eps)
+    )
+    for _ in range(ns_steps):
+        gram_matrix = torch.bmm(ortho_grad, ortho_grad.transpose(-2, -1))
+        gram_update = torch.baddbmm(
+            gram_matrix, gram_matrix, gram_matrix, beta=b, alpha=c
+        )
+        ortho_grad = torch.baddbmm(ortho_grad, gram_update, ortho_grad, beta=a)
+
+    if transpose:
+        ortho_grad = ortho_grad.transpose(-2, -1)
+    return ortho_grad
+
+
 def _adjust_lr(lr: float, adjust_lr_fn: str | None, param_shape: torch.Size) -> float:
     """Default learning rate adjustment used by Muon."""
     A, B = param_shape[:2]
@@ -98,6 +147,7 @@ class Muon(Optimizer):
         eps: float = EPS,
         ns_steps: int = DEFAULT_NS_STEPS,
         adjust_lr_fn: str | None = None,
+        foreach: bool | None = None,
     ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
@@ -125,6 +175,7 @@ class Muon(Optimizer):
             "eps": eps,
             "ns_steps": ns_steps,
             "adjust_lr_fn": adjust_lr_fn,
+            "foreach": foreach,
         }
         super().__init__(params, defaults)
 
@@ -200,6 +251,7 @@ class Muon(Optimizer):
                 eps=group["eps"],
                 ns_steps=group["ns_steps"],
                 adjust_lr_fn=group["adjust_lr_fn"],
+                foreach=group["foreach"],
                 has_complex=has_complex,
             )
         return loss
@@ -280,6 +332,12 @@ Muon.__doc__ = (
         ns_steps (int, optional): number of Newton–Schulz iteration steps. (default: {DEFAULT_NS_STEPS})
         adjust_lr_fn (str, optional): function to adjust learning rate. One of "original", "match_rms_adamw", and "spectral_unclamped".
             If not specified, we will default to use "original". (default: None)
+        {_foreach_doc}
+            For Muon, the foreach implementation additionally groups parameters whose
+            gradients share the same 2D shape and orthogonalizes them together with a
+            single batched Newton-Schulz iteration (``torch.bmm``), which is
+            significantly more performant when many identically-shaped weight
+            matrices are optimized together.
 
     Example:
         >>> # xdoctest: +SKIP
@@ -351,6 +409,71 @@ def _single_tensor_muon(
         param.add_(update, alpha=-adjusted_lr)
 
 
+def _multi_tensor_muon(
+    params: list[Tensor],
+    grads: list[Tensor],
+    muon_momentum_bufs: list[Tensor],
+    *,
+    lr: float,
+    weight_decay: float,
+    momentum: float,
+    nesterov: bool,
+    ns_coefficients: tuple[float, float, float],
+    ns_steps: int,
+    eps: float,
+    adjust_lr_fn: str | None,
+    has_complex: bool,
+) -> None:
+    lr = _to_scalar(lr)
+    if has_complex:
+        raise ValueError("Complex parameters are not supported")
+    if len(params) == 0:
+        return
+
+    for grad in grads:
+        if grad.ndim != 2:
+            raise ValueError("Param gradient must be a 2D matrix")
+
+    # ---- 1. Momentum update: elementwise, shape-agnostic, batched via foreach ----
+    torch._foreach_lerp_(muon_momentum_bufs, grads, 1 - momentum)
+    if nesterov:
+        updates = torch._foreach_lerp(grads, muon_momentum_bufs, momentum)
+    else:
+        updates = [buf.clone() for buf in muon_momentum_bufs]
+
+    # ---- 2. Newton-Schulz orthogonalization: group by 2D shape and batch
+    #         identically-shaped matrices through a single bmm. Shapes that
+    #         appear only once fall back to the single-matrix path. ----
+    shape_groups: dict[tuple[int, ...], list[int]] = defaultdict(list)
+    for idx, update in enumerate(updates):
+        shape_groups[tuple(update.shape)].append(idx)
+
+    orthogonalized: list[Tensor] = [torch.empty(0)] * len(params)
+    for _shape, idxs in shape_groups.items():
+        if len(idxs) == 1:
+            i = idxs[0]
+            orthogonalized[i] = _zeropower_via_newtonschulz(
+                updates[i], ns_coefficients, ns_steps, eps
+            )
+        else:
+            stacked = torch.stack([updates[i] for i in idxs], dim=0)
+            batched = _zeropower_via_newtonschulz_batched(
+                stacked, ns_coefficients, ns_steps, eps
+            )
+            for j, i in enumerate(idxs):
+                orthogonalized[i] = batched[j]
+
+    # ---- 3. Weight decay + apply update: fold the per-param adjusted lr into
+    #         the update via a ScalarList foreach_mul_, then a single
+    #         foreach_add_ writes back to the params. ----
+    torch._foreach_mul_(params, 1 - lr * weight_decay)
+    adjusted_lrs = [_adjust_lr(lr, adjust_lr_fn, p.shape) for p in params]
+    # Match dtype of params before the scalar multiply / add.
+    orthogonalized = [o.to(dtype=p.dtype) for o, p in zip(orthogonalized, params)]
+    torch._foreach_mul_(orthogonalized, adjusted_lrs)
+    torch._foreach_add_(params, orthogonalized, alpha=-1.0)
+
+
 @_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_muon)
 def muon(
     params: list[Tensor],
@@ -372,10 +495,21 @@ def muon(
 
     See :class:`~torch.optim.Muon` for details.
     """
-    if foreach is not None and foreach:
-        raise RuntimeError("Foreach is not supported for Muon yet")
+    if foreach is None:
+        # Default to the foreach (batched) implementation on supported devices,
+        # as it batches identically-shaped matrices through a single bmm and is
+        # usually significantly more performant.
+        _, foreach = _default_to_fused_or_foreach(
+            params, differentiable=False, use_fused=False
+        )
 
-    func = _single_tensor_muon
+    if foreach and torch.jit.is_scripting():
+        raise RuntimeError("torch.jit.script not supported with foreach optimizers")
+
+    if foreach and not torch.jit.is_scripting():
+        func = _multi_tensor_muon
+    else:
+        func = _single_tensor_muon
 
     func(
         params,
