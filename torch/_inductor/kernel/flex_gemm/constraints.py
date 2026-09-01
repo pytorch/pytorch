@@ -13,6 +13,8 @@ from torch._inductor.utils import _IntLike
 from torch.types import IntLikeType
 
 
+INDEXED_OUTPUT_INDICES_ARG_NAME: Final = "indexed_output_indices"
+INDEXED_OUTPUT_STORE_ARG_NAME: Final = "indexed_output"
 LOCAL_REDUCE_FEED_MAIN_ARG_NAME: Final = "local_reduce0"
 LOCAL_REDUCE_PREPASS_FN_SUFFIX: Final = "_local_reduce_prepass"
 LOCAL_REDUCE_STORE_ARG_NAME: Final = "local_reduce_store"
