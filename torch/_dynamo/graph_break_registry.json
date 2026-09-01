@@ -3256,6 +3256,26 @@
       ]
     }
   ],
+  "GB9352": [
+    {
+      "Gb_type": "Data-dependent uint64 torch.Size element in torch._C._infer_size",
+      "Context": "torch.uint64 tensor-backed size",
+      "Explanation": "Dynamo cannot safely validate that a data-dependent torch.uint64 value fits in torch.Size's signed int64 range.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9211": [
+    {
+      "Gb_type": "Unhinted data-dependent torch.Size element in torch._C._infer_size",
+      "Context": "symbolic size: {item.sym_num}",
+      "Explanation": "Dynamo cannot safely validate that a data-dependent torch.Size element fits in the signed int64 range.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB8843": [
     {
       "Gb_type": "Opaque object member with method-type USE_REAL returned a reference-type opaque object.",
