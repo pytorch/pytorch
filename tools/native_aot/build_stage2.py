@@ -99,9 +99,8 @@ def _torch_probe(expr: str) -> bool:
         return False
     ok = "PROBE_OK" in probe.stdout
     if not ok and "PROBE_NO" not in probe.stdout:
-        # torch failed to import or crashed. Degrading to a skip is by
-        # design; doing it silently makes an import regression look like
-        # an absent CUDA.
+        # torch failed to import or crashed. Degrading to a skip is deliberate, but
+        # reported: silently, a broken import reads as an absent CUDA.
         _report_probe_failure(expr, probe.stderr, probe.returncode)
     return ok
 
@@ -487,10 +486,10 @@ def require_runtimes() -> None:
     """Fail unless every toolchain that targets this build has its runtime.
 
     Called only once stage 2 is actually running, never from the verdict: every
-    should_run() skip exports nothing, so demanding the wheels there fails builds
-    that never wanted them. A build that WILL export and cannot would instead
-    ship a wheel missing declared kernels, which surfaces as a performance
-    regression rather than an error. TORCH_NATIVE_AOT=0 opts out."""
+    should_run() skip exports nothing, so demanding the wheels there would fail builds
+    that never wanted them. A build that will export and cannot would otherwise ship a
+    wheel missing its declared kernels, which shows up as slowness rather than an
+    error. TORCH_NATIVE_AOT=0 opts out."""
     from tools.native_aot import toolchains
 
     backend = _backend()
@@ -499,9 +498,9 @@ def require_runtimes() -> None:
         k: tc.missing_runtimes() for k, tc in usable.items() if tc.missing_runtimes()
     }
     if gaps:
-        # DISTRIBUTION names, not REQUIRED_RUNTIMES' module names: they differ
-        # (module `cutlass` ships in nvidia-cutlass-dsl), and this text used to
-        # say `pip install cutlass tvm_ffi`, which installs unrelated packages.
+        # Distribution names, not REQUIRED_RUNTIMES' module names: they differ (module
+        # `cutlass` ships in nvidia-cutlass-dsl), and a pip line naming the modules
+        # installs unrelated packages.
         dists = sorted(
             {d for k in gaps for d in toolchains.get_toolchain(k).RUNTIME_DISTS}
         )
