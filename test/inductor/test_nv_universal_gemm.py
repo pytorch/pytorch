@@ -6,6 +6,8 @@ import unittest
 from unittest import mock
 from unittest.mock import MagicMock, patch
 
+import sympy
+
 import torch
 from torch._higher_order_ops import flex_gemm
 from torch._inductor import config
@@ -25,6 +27,7 @@ from torch._inductor.utils import (
     ensure_nvmatmul_heuristics_available,
     run_and_get_code,
 )
+from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     dtype_name,
     instantiate_parametrized_tests,
@@ -287,6 +290,31 @@ class TestNVUniversalGemm(TestCase):
             design = kernel.metadata.design
             self.assertFalse(design.use_2cta_mma)
             self.assertEqual(design.tile_shape[0], 128)
+
+    @unittest.skipIf(IS_FBCODE, "CUTLASS Operator API is not available in fbcode")
+    def test_vendored_dense_efc_exposes_wide_n_tiles(self):
+        from cutlass import Float32
+
+        from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
+            _args_query_candidates,
+            DENSE_EFC_TILE_NS,
+        )
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            _create_gemm_arguments,
+        )
+
+        m, n, k = 256, 512, 64
+        a = torch.empty((m, k), device="cuda", dtype=torch.bfloat16)
+        b = torch.empty((k, n), device="cuda", dtype=torch.bfloat16)
+        out = torch.empty((m, n), device="cuda", dtype=torch.bfloat16)
+        args = _create_gemm_arguments("GEMM", (a, b), out, Float32)
+        tile_ns = {
+            kernel.metadata.design.tile_shape[1]
+            for kernel in _args_query_candidates(args, 100, efc_only=True)
+            if "VendoredDenseGemmEFCOperator" in kernel.metadata.operator_name
+        }
+
+        self.assertTrue(set(DENSE_EFC_TILE_NS).issubset(tile_ns))
 
     def test_efc_epilogue_lookup_no_deadlock(self):
         """get_efc_kernel_with_epilogue holds _cache_lock and, when the base EFC
@@ -896,6 +924,119 @@ class TestNVUniversalGemm(TestCase):
 @instantiate_parametrized_tests
 class TestNVUniversalGemmHeuristics(TestCase):
     """Unit tests for NVUniversalGemmHeuristics without requiring actual libraries."""
+
+    def test_grouped_reduction_affine_index_rejects_offset(self):
+        from torch._inductor.codegen.nv_universal_gemm.epilogue_lowering import (
+            _matches_affine_index,
+        )
+
+        i, j, r = sympy.symbols("i j r", integer=True)
+        strides = (32, 4, 1)
+
+        def known_equals(left, right):
+            return sympy.simplify(left - right) == 0
+
+        self.assertTrue(
+            _matches_affine_index(32 * i + 4 * j + r, (i, j, r), strides, known_equals)
+        )
+        self.assertFalse(
+            _matches_affine_index(
+                32 * i + 4 * j + r + 1, (i, j, r), strides, known_equals
+            )
+        )
+        self.assertTrue(
+            _matches_affine_index(32 * i + 4 * j + r, (), strides, known_equals)
+        )
+        self.assertFalse(
+            _matches_affine_index(32 * i + 4 * j + r + 1, (), strides, known_equals)
+        )
+
+    def test_reduction_source_rejects_different_load_indices(self):
+        from torch._inductor.kernel.loop_ir_cutedsl_codegen import LoopIRCuteDSLCodegen
+        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
+            GemmEpilogueIRExpression as Expr,
+        )
+
+        index = sympy.Symbol("index", integer=True)
+        source = Expr(
+            "mul",
+            (
+                Expr("load", ("gemm", index, None)),
+                Expr("load", ("gemm", index + 1, None)),
+            ),
+        )
+        with self.assertRaisesRegex(NotImplementedError, "one logical element"):
+            LoopIRCuteDSLCodegen.source_from_expression("gemm", source, "source")
+
+    def test_output_scale_rejects_value_changing_cast(self):
+        from torch._inductor.kernel.loop_ir_cutedsl_codegen import LoopIRCuteDSLCodegen
+        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
+            GemmEpilogueIRExpression as Expr,
+        )
+
+        scale = MagicMock()
+        scale.get_dtype.return_value = torch.float32
+        scale.get_size.return_value = (1,)
+        graph = MagicMock(
+            name_to_buffer={},
+            graph_inputs={"scale": scale},
+        )
+        graph.sizevars.statically_known_equals.side_effect = lambda left, right: (
+            left == right
+        )
+        codegen = LoopIRCuteDSLCodegen("gemm", OrderedSet(("gemm",)))
+        accumulator = Expr("load", ("gemm", 0, None))
+        scale_load = Expr("load", ("scale", 0, None))
+        with V.set_graph_handler(graph):
+            self.assertEqual(
+                codegen._output_scale_name(Expr("mul", (accumulator, scale_load))),
+                "scale",
+            )
+            self.assertEqual(
+                codegen._output_scale_name(
+                    Expr(
+                        "mul",
+                        (accumulator, Expr("to_dtype", (scale_load, torch.float32))),
+                    )
+                ),
+                "scale",
+            )
+            self.assertIsNone(
+                codegen._output_scale_name(
+                    Expr(
+                        "mul",
+                        (accumulator, Expr("to_dtype", (scale_load, torch.int32))),
+                    )
+                )
+            )
+
+    def test_grouped_reduction_conversion_contract(self):
+        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
+            GemmEpilogueIRExpression as Expr,
+            GemmEpilogueIRStore,
+            grouped_reduction_pattern_ir,
+        )
+
+        load = Expr("load", ("gemm", 0, None))
+
+        def classify(value):
+            square = Expr("mul", (value, value))
+            reduction = Expr("reduction", (torch.float32, torch.float32, "sum", square))
+            return grouped_reduction_pattern_ir(
+                GemmEpilogueIRStore(0, reduction), "gemm", 4, torch.bfloat16
+            )
+
+        fp32 = Expr("to_dtype", (load, torch.float32))
+        result = classify(fp32)
+        self.assertIsNotNone(result)
+        self.assertEqual(result[0], "sum")
+        self.assertEqual(result[1].op, "mul")
+        fp16_then_fp32 = Expr(
+            "to_dtype", (Expr("to_dtype", (load, torch.float16)), torch.float32)
+        )
+        self.assertIsNone(classify(fp16_then_fp32))
+        bitcast = Expr("to_dtype_bitcast", (load, torch.bfloat16, torch.bfloat16))
+        self.assertIsNone(classify(Expr("to_dtype", (bitcast, torch.float32))))
 
     @parametrize("tuned", (False, True))
     def test_flex_gemm_nvgemm_tuned_config(self, tuned):
@@ -1856,6 +1997,175 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         if axis == 0 or group > 32:
             self.assertIn("_LOCAL_REDUCE_COMBINE_FN_SRC", code)
 
+    @parametrize(
+        "axis_group",
+        ((0, 64), (0, 128), (1, 16), (1, 32), (1, 64), (1, 128)),
+    )
+    def test_bf16_grouped_reduce_epilogue_fusion_swap_ab(self, axis_group):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+            NVUniversalGemmCaller,
+        )
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
+            NVUniversalGemmScheduling,
+        )
+
+        axis, group = axis_group
+        m, n, k = 512, 256, 64
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16) * 0.1
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16) * 0.1
+
+        def fn(a, b):
+            result = a @ b
+            grouped = (
+                result.float().view(-1, group, n)
+                if axis == 0
+                else result.float().view(m, -1, group)
+            )
+            dim = 1 if axis == 0 else -1
+            reduced = (
+                (grouped.abs().amax(dim) + 1.0).sqrt()
+                if axis == 0 and group == 128
+                else grouped.mean(dim)
+            )
+            return torch.relu(result), reduced
+
+        benchmarked_orientations = set()
+
+        def benchmark(caller, *args, **kwargs):
+            benchmarked_orientations.add(caller.swap_ab)
+            is_target = (
+                caller.swap_ab
+                and caller.supports_epilogue_fusion
+                and caller.kernel.metadata.design.tile_shape[:2] == (128, 128)
+            )
+            return 0.1 if is_target else 1.0
+
+        def best_epilogue_choice(ir_node, **kwargs):
+            return next(
+                choice
+                for choice in ir_node._choices
+                if isinstance(choice, NVUniversalGemmCaller)
+                and choice.swap_ab
+                and choice.supports_epilogue_fusion
+                and choice.kernel.metadata.design.tile_shape[:2] == (128, 128)
+            )
+
+        torch._dynamo.reset()
+        with (
+            config.patch(
+                _nvgemm_config(
+                    nvgemm_swap_ab=True,
+                    nvgemm_max_profiling_configs=1,
+                    compile_threads=1,
+                    force_disable_caches=True,
+                )
+            ),
+            mock.patch.object(
+                Scheduler,
+                "benchmark_fused_nodes",
+                return_value=(1.0, ""),
+            ),
+            mock.patch.object(
+                Scheduler,
+                "benchmark_codegened_module",
+                return_value=(0.5, ""),
+            ),
+            mock.patch.object(
+                NVUniversalGemmCaller, "benchmark", autospec=True, side_effect=benchmark
+            ),
+            mock.patch.object(
+                NVUniversalGemmScheduling,
+                "_best_nvgemm_choice",
+                side_effect=best_epilogue_choice,
+            ),
+        ):
+            result, code_list = run_and_get_code(torch.compile(fn), a, b)
+
+        code = "\n".join(code_list)
+        self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
+        self.assertIn("VendoredDenseGemmEFCOperator", code)
+        self.assertIn("swap_ab=True", code)
+        self.assertIn(f"axis={1 - axis}", code)
+        self.assertIn(f"group={group}", code)
+        self.assertEqual(benchmarked_orientations, {False, True})
+        self.assertIn("_LOCAL_REDUCE_COMBINE_FN_SRC", code)
+        if axis == 0 and group == 128:
+            self.assertIn("_LOCAL_REDUCE_FINALIZER_FN_SRC", code)
+
+    @parametrize(
+        "case",
+        (
+            (0, 16, True),
+            (0, 32, False),
+            (0, 64, False),
+            (1, 16, True),
+            (1, 64, True),
+            (1, 128, False),
+        ),
+    )
+    def test_bf16_grouped_reduce_swap_ab_dense_2cta_layouts(self, case):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+            NVUniversalGemmCaller,
+        )
+
+        axis, group, expect_swapped_2cta = case
+        m, n, k = 64, 4096, 512
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16) * 0.1
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16) * 0.1
+
+        def fn(a, b):
+            result = a @ b
+            grouped = (
+                result.float().view(-1, group, n)
+                if axis == 0
+                else result.float().view(m, -1, group)
+            )
+            return torch.relu(result), grouped.mean(1 if axis == 0 else -1)
+
+        def benchmark(caller, *args, **kwargs):
+            physical_axis = 1 - axis
+            is_target = (
+                caller.swap_ab
+                and caller.supports_epilogue_fusion
+                and caller.kernel.metadata.design.use_2cta_mma
+                and caller.kernel.metadata.design.tile_shape[physical_axis] >= group
+            )
+            return 0.1 if is_target else 1.0
+
+        torch._dynamo.reset()
+        with (
+            config.patch(
+                _nvgemm_config(
+                    nvgemm_swap_ab=True,
+                    nvgemm_max_profiling_configs=1,
+                    compile_threads=1,
+                    force_disable_caches=True,
+                )
+            ),
+            mock.patch.object(
+                Scheduler,
+                "benchmark_fused_nodes",
+                return_value=(1.0, ""),
+            ),
+            mock.patch.object(
+                Scheduler,
+                "benchmark_codegened_module",
+                return_value=(0.5, ""),
+            ),
+            mock.patch.object(
+                NVUniversalGemmCaller, "benchmark", autospec=True, side_effect=benchmark
+            ),
+        ):
+            result, code_list = run_and_get_code(torch.compile(fn), a, b)
+
+        code = "\n".join(code_list)
+        self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
+        self.assertIn("VendoredDenseGemmEFCOperator", code)
+        self.assertEqual("2cta" in code and "swap_ab=True" in code, expect_swapped_2cta)
+        selected_axis = 1 - axis if "swap_ab=True" in code else axis
+        self.assertIn(f"axis={selected_axis}", code)
+        self.assertIn(f"group={group}", code)
+
     def test_bf16_grouped_m_reduce_finalizes_after_cross_warp_combine(self):
         m, n, k, group = 128, 128, 64, 64
         a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16) * 0.1
@@ -2331,6 +2641,96 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
                 _, strict_code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
             self.assertNotIn("'local_reduce': GemmReductionArguments", strict_code)
             self.assertIn("ReductionOrdering.INNER_TREE", strict_code)
+
+    @parametrize(
+        "axis_group",
+        ((0, 64), (0, 128), (1, 16), (1, 32), (1, 64), (1, 128)),
+    )
+    def test_scaled_mm_grouped_reduce_fusion_swap_ab(self, axis_group):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+            NVUniversalGemmCaller,
+        )
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
+            NVUniversalGemmScheduling,
+        )
+
+        axis, group = axis_group
+        m, n, k = 512, 256, 512
+        a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
+
+        def fn(a, b, scale_a, scale_b):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            grouped = (
+                result.float().view(-1, group, n)
+                if axis == 0
+                else result.float().view(m, -1, group)
+            )
+            return torch.relu(result), grouped.mean(1 if axis == 0 else -1)
+
+        benchmarked_orientations = set()
+
+        def benchmark(caller, *args, **kwargs):
+            benchmarked_orientations.add(caller.swap_ab)
+            is_target = caller.swap_ab and caller.supports_epilogue_fusion
+            return 0.1 if is_target else 1.0
+
+        def best_epilogue_choice(ir_node, **kwargs):
+            return next(
+                choice
+                for choice in ir_node._choices
+                if isinstance(choice, NVUniversalGemmCaller)
+                and choice.swap_ab
+                and choice.supports_epilogue_fusion
+                and choice.kernel.metadata.design.tile_shape[:2] == (128, 128)
+            )
+
+        torch._dynamo.reset()
+        with (
+            config.patch(
+                _nvgemm_config(
+                    nvgemm_swap_ab=True,
+                    nvgemm_max_profiling_configs=1,
+                    compile_threads=1,
+                    force_disable_caches=True,
+                )
+            ),
+            mock.patch.object(
+                Scheduler,
+                "benchmark_fused_nodes",
+                return_value=(1.0, ""),
+            ),
+            mock.patch.object(
+                Scheduler,
+                "benchmark_codegened_module",
+                return_value=(0.5, ""),
+            ),
+            mock.patch.object(
+                NVUniversalGemmCaller, "benchmark", autospec=True, side_effect=benchmark
+            ),
+            mock.patch.object(
+                NVUniversalGemmScheduling,
+                "_best_nvgemm_choice",
+                side_effect=best_epilogue_choice,
+            ),
+        ):
+            result, code_list = run_and_get_code(
+                torch.compile(fn), a, b, scale_a, scale_b
+            )
+
+        code = "\n".join(code_list)
+        self.assertEqual(result, fn(a, b, scale_a, scale_b), atol=2e-2, rtol=2e-2)
+        self.assertIn("VendoredDenseBlockScaledGemmEFC", code)
+        self.assertIn("swap_ab=True", code)
+        self.assertIn(f"axis={1 - axis}", code)
+        self.assertIn(f"group={group}", code)
+        self.assertEqual(benchmarked_orientations, {False, True})
+        self.assertIn("_LOCAL_REDUCE_COMBINE_FN_SRC", code)
 
     def test_scaled_mm_grouped_reduce_source_fusion(self):
         m, n, k, group = 128, 128, 512, 32
