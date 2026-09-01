@@ -276,7 +276,9 @@ void nccl_all_gather_offset(
   auto out_window = out_hdl->get_window();
   TORCH_CHECK(
       out_window != nullptr, "nccl_all_gather_offset: out window is null");
-  const size_t out_window_base_offset = out_hdl->get_offset();
+  // The window base is the signal pad, so offsets into it must skip the pad;
+  // use get_window_offset() (buffer_offset + get_offset()), not get_offset().
+  const size_t out_window_base_offset = out_hdl->get_window_offset();
   TORCH_CHECK(
       reinterpret_cast<uintptr_t>(input.data_ptr()) % AG_ALIGN == 0,
       "nccl_all_gather_offset: input must be 16-byte aligned");
