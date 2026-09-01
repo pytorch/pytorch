@@ -534,9 +534,10 @@ class TestNVUniversalGemm(TestCase):
         torch._dynamo.reset()
 
         import cutlass.operators
+        from cutlass.operators.workspace import AllocationRequirement
 
         def patched_get_workspace_size(self, args):
-            return 1024
+            return AllocationRequirement(size_bytes=1024, ptr_alignment=1)
 
         with patch.object(
             cutlass.operators.Operator,
@@ -2953,7 +2954,9 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertIsNotNone(loaded, "disk_cache_get returned None")
 
         rewrapped = _rewrap_efc_compiled_obj(loaded, efc_kernel)
-        reloaded_artifact = CompiledArtifact(rewrapped, efc_kernel)
+        reloaded_artifact = CompiledArtifact(
+            rewrapped, efc_kernel, artifact.compiled_for
+        )
 
         # Run with reloaded artifact and verify correctness
         out2 = torch.empty(self.M, self.N, device="cuda", dtype=torch.bfloat16)
@@ -2988,6 +2991,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         every (ms, path) it returns and assert at least one finite-ms result —
         i.e., at least one EFC choice with workspace did get benchmarked."""
         import cutlass.operators
+        from cutlass.operators.workspace import AllocationRequirement
 
         from torch._inductor.codegen.cuda_combined_scheduling import (
             CUDACombinedScheduling,
@@ -3012,7 +3016,9 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             patch.object(
                 cutlass.operators.Operator,
                 "get_workspace_size",
-                lambda self, args: 4096,
+                lambda self, args: AllocationRequirement(
+                    size_bytes=4096, ptr_alignment=1
+                ),
             ),
             mock.patch.object(
                 CUDACombinedScheduling, "_benchmark_nvgemm_module", capturing_bench
