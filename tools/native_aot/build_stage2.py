@@ -29,13 +29,12 @@ Past those gates the DSL runtimes are REQUIRED, and any failure fails the build:
 a wheel missing declared kernels underperforms silently instead of failing.
 TORCH_NATIVE_AOT=0 builds without them.
 
-Assumes the torch it finds installed is the one this tree just built: both CI
-shells install the wheel on the line above, and `spin develop` chains this after
-its own install. Stage 2 VERIFIES that rather than repairing it -- the reconfigure
-has to report embedding before anything is relinked, and the relinked library has
-to report its kernels before this exits -- and a failure past that point says to
-reinstall instead of keeping a restore copy whose own failure modes were worse than
-the case it covered.
+Assumes the torch it finds installed is the one this tree just built: both CI shells
+install the wheel on the line above, and `spin develop` chains this after its own
+install. Stage 2 verifies that rather than repairing it -- the reconfigure must report
+embedding before anything is relinked, and the relinked library must report its
+kernels before this exits -- and a failure past that point says to reinstall rather
+than keeping a restore copy.
 """
 
 import glob
@@ -117,9 +116,8 @@ def _torch_probe(expr: str) -> bool:
         return False
     ok = "PROBE_OK" in probe.stdout
     if not ok and "PROBE_NO" not in probe.stdout:
-        # torch failed to import or crashed. Degrading to a skip is by
-        # design; doing it silently makes an import regression look like
-        # an absent CUDA.
+        # torch failed to import or crashed. Degrading to a skip is deliberate, but
+        # reported: silently, a broken import reads as an absent CUDA.
         _report_probe_failure(expr, probe.stderr, probe.returncode)
     return ok
 
@@ -505,10 +503,10 @@ def require_runtimes() -> None:
     """Fail unless every toolchain that targets this build has its runtime.
 
     Called only once stage 2 is actually running, never from the verdict: every
-    should_run() skip exports nothing, so demanding the wheels there fails builds
-    that never wanted them. A build that WILL export and cannot would instead
-    ship a wheel missing declared kernels, which surfaces as a performance
-    regression rather than an error. TORCH_NATIVE_AOT=0 opts out."""
+    should_run() skip exports nothing, so demanding the wheels there would fail builds
+    that never wanted them. A build that will export and cannot would otherwise ship a
+    wheel missing its declared kernels, which shows up as slowness rather than an
+    error. TORCH_NATIVE_AOT=0 opts out."""
     from tools.native_aot import toolchains
 
     backend = _backend()
@@ -517,9 +515,9 @@ def require_runtimes() -> None:
         k: tc.missing_runtimes() for k, tc in usable.items() if tc.missing_runtimes()
     }
     if gaps:
-        # DISTRIBUTION names, not REQUIRED_RUNTIMES' module names: they differ
-        # (module `cutlass` ships in nvidia-cutlass-dsl), and this text used to
-        # say `pip install cutlass tvm_ffi`, which installs unrelated packages.
+        # Distribution names, not REQUIRED_RUNTIMES' module names: they differ (module
+        # `cutlass` ships in nvidia-cutlass-dsl), and a pip line naming the modules
+        # installs unrelated packages.
         dists = sorted(
             {d for k in gaps for d in toolchains.get_toolchain(k).RUNTIME_DISTS}
         )
@@ -603,11 +601,10 @@ def _copied_member(info: zipfile.ZipInfo) -> zipfile.ZipInfo:
     """A ZipInfo for a member copied into a new archive.
 
     Field by field rather than handing zipfile the source's: `info.extra` is the
-    CENTRAL-DIRECTORY blob, whose ZIP64 field records the header offset in the OLD
-    archive, and zipfile strips that only when it has to write a fresh one. Past its
-    ZIP64_LIMIT (2 GiB, not 4) the copy therefore inherits stale offsets -- an
-    archive pip, unzip and Java read happily and `uv` refuses outright, on the very
-    wheel .github/workflows/_vllm-benchmark.yml installs with uv."""
+    central-directory blob, whose ZIP64 field records the header offset in the source
+    archive, and zipfile strips it only when it writes a fresh one. Past zipfile's
+    ZIP64_LIMIT (2 GiB, not 4) a copy would inherit stale offsets, producing an archive
+    pip and unzip read happily and `uv` refuses."""
     out = zipfile.ZipInfo(info.filename, info.date_time)
     out.compress_type = info.compress_type
     out.external_attr = info.external_attr
@@ -625,10 +622,10 @@ def _copied_member(info: zipfile.ZipInfo) -> zipfile.ZipInfo:
 def _write_hashed(dst: zipfile.ZipFile, info: zipfile.ZipInfo, path: str) -> str:
     """Stream `path` into `dst` as `info`; return its RECORD `sha256=...,size` fields.
 
-    Hashed from the bytes actually archived, in the same pass: a second read to
-    hash the file doubled a ~400 MiB read and left a window in which another writer
-    of build/lib could make the RECORD disagree with the member it describes -- which
-    pip does not verify, and copies into site-packages as it stands."""
+    Hashed from the bytes actually archived, in the same pass: a second read would
+    double a ~400 MiB read and leave a window in which another writer of build/lib
+    could make the RECORD disagree with the member it describes, which pip does not
+    verify."""
     import base64
     import hashlib
 
@@ -671,10 +668,9 @@ def patch_wheel(wheel_path: str, lib_path: str) -> None:
         raise RuntimeError(f"{wheel_path}: RECORD has no entry for {lib_rel}")
 
     # Rebuilt beside the original and renamed over it, so an interrupted rewrite
-    # cannot leave a half-written wheel where a valid one used to be. The PID is in
-    # the name, as in gen_aot_lib._write_atomic: a hand stage-2 run beside `spin
-    # develop` otherwise shares one path, and the loser renamed its half-written
-    # archive over the wheel the winner had just finished.
+    # cannot leave a half-written wheel in place of a valid one. The PID is in the
+    # name, as in gen_aot_lib._write_atomic: two concurrent stage-2 runs would
+    # otherwise share one temporary path.
     tmp_whl = f"{wheel_path}.naot.{os.getpid()}.tmp"
     try:
         with (
@@ -699,10 +695,9 @@ def patch_wheel(wheel_path: str, lib_path: str) -> None:
                 with src.open(info) as s, dst.open(out, "w") as d:
                     shutil.copyfileobj(s, d)
             record_lines[lib_line] = f"{lib_rel},{entry}"
-            # The RECORD keeps its ORIGINAL compression too: writestr() with a plain
-            # name takes the ZipFile default, and dst has none, so it was the one
-            # member stored uncompressed (~630 KiB added to the artifact every test
-            # shard downloads).
+            # The RECORD keeps its original compression: writestr() with a plain name
+            # would take the ZipFile default, which dst has none of, and store this one
+            # member uncompressed.
             dst.writestr(
                 _copied_member(src.getinfo(record_rel)),
                 "\n".join(record_lines) + "\n",
@@ -827,10 +822,10 @@ def main(argv: list[str] | None = None) -> int:
     # line is for anyway -- these bytes scale with declarations x precompile points x
     # arches, and one added arch can grow a wheel by tens of MiB.
     _report(f"embedding kernels from {len(sources)} generated source(s)")
-    # RECONFIGURE before relinking, explicitly: the generated file registers
-    # itself in CMAKE_CONFIGURE_DEPENDS, but only from the reconfigure that first
-    # READS it, and the build.ninja on disk predates this generation. Without it
-    # the relink silently omits the kernels (417 MiB where 423 ships).
+    # Reconfigure before relinking, explicitly: the generated file registers itself in
+    # CMAKE_CONFIGURE_DEPENDS, but only from the reconfigure that first reads it, and
+    # the build.ninja on disk predates this generation. Without it the relink silently
+    # omits the kernels.
     # BEFORE the reconfigure, and keyed on the CACHE, not the directory: `cmake -B`
     # on a directory that does not exist exits 0 and configures FROM SCRATCH -- with
     # none of scikit-build-core's -D flags and none of the cache the shipped libtorch
@@ -849,8 +844,8 @@ def main(argv: list[str] | None = None) -> int:
     # stdout, so DEVNULL left a failing configure with nothing to read; and the STATUS
     # line the generated file emits is the only pre-relink evidence that the build
     # agrees it should embed. Requiring it here keeps every state where the two sides
-    # disagree from reaching the relink -- and therefore from reaching the copy over
-    # the installed torch, which used to happen BEFORE the check that catches it.
+    # disagree from reaching the relink, and therefore from reaching the copy over the
+    # installed torch.
     # --log-level, because the marker below is a message(STATUS): EnvVarForwarding
     # forwards every CMAKE_* environment variable into the cache with FORCE, so
     # CMAKE_MESSAGE_LOG_LEVEL=WARNING (quietening configure output) hides it -- and
@@ -896,7 +891,7 @@ def main(argv: list[str] | None = None) -> int:
     jobs = os.getenv("MAX_JOBS") or os.getenv("CMAKE_BUILD_PARALLEL_LEVEL")
     if jobs and jobs.isdigit():
         relink += ["--parallel", jobs]
-    # Measured across the relink, for the delta reported below.
+    # Taken across the relink, for the size delta reported below.
     built = os.path.join(BUILD_DIR, "lib", "libtorch_cuda.so")
     before = os.path.getsize(built) if os.path.exists(built) else 0
     _run_child(relink, "relinking torch_cuda", cwd=BUILD_DIR)
@@ -937,11 +932,10 @@ def main(argv: list[str] | None = None) -> int:
     # caffe2/CMakeLists.txt include()s, and a mismatch lets the relink succeed
     # while embedding nothing -- a kernel-free wheel with a green build.
     #
-    # VERIFIED, not repaired, and no restore copy is kept: the reconfigure above has
-    # already refused every disagreement a restore could undo, while the restore
-    # itself failed in ways worse than the case it covered -- an os.replace that
-    # raised inside this handler and discarded the real message, and a ~400 MiB
-    # hardlink left in site-packages, in no RECORD, when the swap failed.
+    # Verified, not repaired, and no restore copy is kept: the reconfigure above has
+    # already refused every disagreement a restore could undo, and a restore of its own
+    # can fail inside this handler, discarding the real message or leaving a stray
+    # ~400 MiB library in site-packages that no RECORD lists.
     if not _torch_probe("torch._native._native_aot_embedded()"):
         raise RuntimeError(
             "native-AOT stage 2: relinked libtorch_cuda reports no embedded "
