@@ -625,19 +625,16 @@ instantiate_device_type_tests(
     TestDistributedHFSafetensorsConsolidation,
     globals(),
     except_for=("cpu",),
-    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestDTensorReshardPlacementChange,
     globals(),
     except_for=("cpu",),
-    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestDTensorReshardMeshChange,
     globals(),
     except_for=("cpu",),
-    allow_xpu=True,
 )
 
 
