@@ -117,7 +117,7 @@ PyTorch,asr,asr_M64_N64_K128_cpu_dtype_onetorch.uint8_dtype_twotorch.int32,short
 PyTorch,asr,asr_M64_N64_K128_cpu_dtype_onetorch.uint8_dtype_twotorch.uint8,short,False,48.725395,0.0,16.591325
 PyTorch,lsl,lsl_M1_N1_K1_cpu_dtype_onetorch.int32_dtype_twotorch.int32,short,False,1.574521,0.0,0.007621
 PyTorch,lsl,lsl_M1_N1_K1_cpu_dtype_onetorch.int32_dtype_twotorch.uint8,short,False,2.534437,0.0,0.003551
-PyTorch,lsl,lsl_M1_N1_K1_cpu_dtype_onetorch.uint8_dtype_twotorch.int32,short,False,5.268033,0.0,0.002364
+PyTorch,lsl,lsl_M1_N1_K1_cpu_dtype_onetorch.uint8_dtype_twotorch.int32,short,False,2.537946,0.0,0.002364
 PyTorch,lsl,lsl_M1_N1_K1_cpu_dtype_onetorch.uint8_dtype_twotorch.uint8,short,False,1.58499,0.0,0.001893
 PyTorch,lsl,lsl_M64_N64_K64_cpu_dtype_onetorch.int32_dtype_twotorch.int32,short,False,50.556936,0.0,31.299207
 PyTorch,lsl,lsl_M64_N64_K64_cpu_dtype_onetorch.int32_dtype_twotorch.uint8,short,False,96.45969,0.0,12.235356
@@ -148,7 +148,7 @@ PyTorch,bmm,bmm_B2_M1_N8_K2_cpu_dtypetorch.bfloat16,short,False,1.41468,0.0,0.07
 PyTorch,bmm,bmm_B128_M64_N32_K64_cpu_dtypetorch.float32,short,False,202.34757,0.0,12.502484
 PyTorch,bmm,bmm_B128_M64_N32_K64_cpu_dtypetorch.bfloat16,short,False,225.14841,0.0,6.13893
 PyTorch,baddbmm,baddbmm_B2_M1_N8_K2_cpu_dtypetorch.float32,short,False,1.907932,0.0,0.117405
-PyTorch,baddbmm,baddbmm_B2_M1_N8_K2_cpu_dtypetorch.bfloat16,short,False,4.021657,0.0,0.058672
+PyTorch,baddbmm,baddbmm_B2_M1_N8_K2_cpu_dtypetorch.bfloat16,short,False,1.908911,0.0,0.058672
 PyTorch,baddbmm,baddbmm_B128_M64_N32_K64_cpu_dtypetorch.float32,short,False,262.481902,0.0,13.624093
 PyTorch,baddbmm,baddbmm_B128_M64_N32_K64_cpu_dtypetorch.bfloat16,short,False,298.001394,0.0,6.634338
 PyTorch,all,all_M1_N1_K1_cpu,short,False,4.069331,0.0,0.001151
@@ -169,7 +169,7 @@ PyTorch,channel_shuffle,channel_shuffle_batch_size8_channels_per_group64_height6
 PyTorch,channel_shuffle,channel_shuffle_batch_size8_channels_per_group64_height64_width64_groups8_channel_lastFalse,short,False,743.86493,0.0,180.432929
 PyTorch,channel_shuffle,channel_shuffle_batch_size16_channels_per_group64_height64_width64_groups16_channel_lastTrue,short,False,3823.5502,0.0,140.411629
 PyTorch,channel_shuffle,channel_shuffle_batch_size16_channels_per_group64_height64_width64_groups16_channel_lastFalse,short,False,2797.586735,0.0,191.905011
-PyTorch,chunk,chunk_M8_N8_chunks2_cpu,short,False,4.505586,0.0,0.227874
+PyTorch,chunk,chunk_M8_N8_chunks2_cpu,short,False,2.246856,0.0,0.227874
 PyTorch,chunk,chunk_M256_N512_chunks2_cpu,short,False,2.263962,0.0,463.159742
 PyTorch,chunk,chunk_M512_N512_chunks2_cpu,short,False,2.25767,0.0,928.900858
 PyTorch,Conv1d,Conv1d_IC128_OC256_kernel3_stride1_N1_L64_cpu,short,False,151.645607,0.0,1.952528
