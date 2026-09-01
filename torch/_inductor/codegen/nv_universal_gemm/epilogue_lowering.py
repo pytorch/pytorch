@@ -17,8 +17,10 @@ owns traversal, synchronization, and storage.
 
 import dataclasses
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any, cast
+
+import sympy
 
 import torch
 from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
@@ -42,6 +44,22 @@ from ...virtualized import V
 
 
 GEMM_REDUCTION_IDENTITY_SOURCE = "def _local_reduce_source(value):\n    return value"
+
+
+def _matches_affine_index(
+    index: sympy.Expr,
+    range_vars: Sequence[sympy.Symbol],
+    strides: Sequence[Any],
+    known_equals: Callable[[Any, Any], bool],
+) -> bool:
+    if not range_vars:
+        range_vars = tuple(sorted(index.free_symbols, key=str))
+    if len(range_vars) != len(strides):
+        return False
+    expected = sum(
+        (var * stride for var, stride in zip(range_vars, strides)), sympy.Integer(0)
+    )
+    return known_equals(index, expected)
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -502,26 +520,14 @@ class NVGemmEpilogueLowering:
             range_vars = access_node.read_writes.range_vars
             if range_vars is None:
                 return None
-            if not range_vars:
-                return GemmReductionConfig(
-                    output_name=output_name,
-                    group=group,
-                    axis=axis,
-                    reduction_type=reduction_type,
-                    source_type="identity",
-                    source_fn=source_fn,
-                )
-            strides = V.graph.sizevars.stride_vars(reads[0].index, range_vars)
             expected_stride_options = [expected_strides]
             if axis == 1:
                 expected_stride_options.append([n, 1])
             else:
                 expected_stride_options.append([1, n])
             if not any(
-                len(strides) == len(expected)
-                and all(
-                    known_equals(stride, expected_stride)
-                    for stride, expected_stride in zip(strides, expected)
+                _matches_affine_index(
+                    reads[0].index, range_vars, expected, known_equals
                 )
                 for expected in expected_stride_options
             ):

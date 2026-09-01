@@ -2716,11 +2716,12 @@ class TestMPS(TestCaseMPS):
             res_cpu = torch.linalg.vector_norm(B_cpu, ord=3.5, dim=dim)
             self.assertEqual(res_mps, res_cpu)
 
-    def test_linalg_lu_factor_ex(self):
+    @parametrize("dtype", [torch.float32, torch.complex64])
+    def test_linalg_lu_factor_ex(self, dtype):
         from torch.testing._internal.common_utils import make_fullrank_matrices_with_distinct_singular_values
 
         make_fullrank = make_fullrank_matrices_with_distinct_singular_values
-        make_arg = partial(make_fullrank, device="cpu", dtype=torch.float32)
+        make_arg = partial(make_fullrank, device="cpu", dtype=dtype)
 
         def run_lu_factor_ex_test(size, *batch_dims, check_errors, atol=1e-5, rtol=1e-6):
             input_cpu = make_arg(*batch_dims, size, size)
@@ -2766,6 +2767,37 @@ class TestMPS(TestCaseMPS):
 
         with self.assertRaisesRegex(RuntimeError, "result in a division by zero"):
             torch.linalg.lu_factor(A)
+
+        # complex64 singular matrix (row 2 == 2 * row 1)
+        Ac = torch.tensor(
+            [[1.0 + 1.0j, 2.0 + 2.0j], [2.0 + 2.0j, 4.0 + 4.0j]],
+            device="mps", dtype=torch.complex64,
+        )
+        with self.assertRaisesRegex(RuntimeError, "result in a division by zero"):
+            torch.linalg.lu_factor(Ac)
+        # lu_factor_ex must not raise and must report the zero pivot in info
+        _, _, info = torch.linalg.lu_factor_ex(Ac)
+        self.assertNotEqual(info.item(), 0)
+
+        # exactly-zero pivot landing in a LATER block (col 40 >= the 32-wide
+        # panel): exercises the global 1-based info offset across separately
+        # dispatched panels. A zero column stays exactly zero through row swaps
+        # and rank updates, so CPU and MPS report the same deterministic info.
+        g = torch.Generator().manual_seed(0)
+        A_late = torch.randn(80, 80, dtype=torch.complex64, generator=g)
+        A_late[:, 40] = 0
+        _, _, info_mps = torch.linalg.lu_factor_ex(A_late.to("mps"))
+        _, _, info_cpu = torch.linalg.lu_factor_ex(A_late)
+        self.assertEqual(info_mps.cpu(), info_cpu)
+
+        # two zero columns in different panels: first-wins must report the
+        # earlier one even though the panels run as separate dispatches
+        A_two = torch.randn(80, 80, dtype=torch.complex64, generator=g)
+        A_two[:, 10] = 0
+        A_two[:, 50] = 0
+        _, _, info_mps = torch.linalg.lu_factor_ex(A_two.to("mps"))
+        _, _, info_cpu = torch.linalg.lu_factor_ex(A_two)
+        self.assertEqual(info_mps.cpu(), info_cpu)
 
     def test_linalg_solve(self):
         from torch.testing._internal.common_utils import make_fullrank_matrices_with_distinct_singular_values
@@ -2892,14 +2924,16 @@ class TestMPS(TestCaseMPS):
         check_grad(make_A(2, n, n), torch.randn(n), left=True)  # vector rhs
         check_grad(make_A(2, n, n), torch.randn(1, k, n), left=False)  # left=False
 
-    def test_linalg_lu_solve(self):
+    @parametrize("dtype", [torch.float32, torch.complex64])
+    def test_linalg_lu_solve(self, dtype):
         # Native Metal lu_solve: all (left, adjoint) combinations and batch broadcasting vs CPU.
         from functools import partial
         from torch.testing._internal.common_utils import (
             make_fullrank_matrices_with_distinct_singular_values,
         )
 
-        make_A = partial(make_fullrank_matrices_with_distinct_singular_values, device="cpu", dtype=torch.float32)
+        make_A = partial(make_fullrank_matrices_with_distinct_singular_values, device="cpu", dtype=dtype)
+        make_B = partial(torch.randn, dtype=dtype)
         n, k = 4, 3
 
         def check(A_cpu, B_cpu, left, adjoint):
@@ -2913,16 +2947,48 @@ class TestMPS(TestCaseMPS):
                 for adjoint in [True, False]:
                     A = make_A(*a_batch, n, n)
                     mat = (n, k) if left else (k, n)
-                    check(A, torch.randn(*b_batch, *mat), left, adjoint)
+                    check(A, make_B(*b_batch, *mat), left, adjoint)
 
         # multi-block (n > 32) path
-        check(make_A(2, 40, 40), torch.randn(2, 40, 5), left=True, adjoint=False)
+        check(make_A(2, 40, 40), make_B(2, 40, 5), left=True, adjoint=False)
 
-    def test_linalg_det(self):
+    def test_linalg_lu_backed_complex_backward(self):
+        # complex64 backward for det/slogdet/logdet/solve routes through the
+        # native complex lu_solve; the standard OpInfo grad harnesses only run
+        # float on MPS (MPS_GRAD_DTYPES), so check the grads against CPU here.
+        # Drive backward with a constant grad_output rather than a scalar loss:
+        # make_fullrank produces |det| ~= 1, so a loss like logabsdet.abs() sits
+        # on the kink at 0 where sign() flips on fp noise and doubles the grad.
+        from functools import partial
+        from torch.testing._internal.common_utils import (
+            make_fullrank_matrices_with_distinct_singular_values,
+        )
+
+        make_A = partial(make_fullrank_matrices_with_distinct_singular_values, dtype=torch.complex64)
+
+        def check(fn, *shape, with_rhs=False):
+            A = make_A(*shape, device="cpu")
+            B = torch.randn(*shape[:-1], 2, dtype=torch.complex64) if with_rhs else None
+            grads = {}
+            for dev in ("cpu", "mps"):
+                a = A.detach().clone().to(dev).requires_grad_()
+                out = fn(a, B.to(dev)) if with_rhs else fn(a)
+                out.backward(torch.ones_like(out))
+                grads[dev] = a.grad
+            self.assertEqual(grads["cpu"], grads["mps"])
+
+        for shape in [(5, 5), (3, 6, 6)]:
+            check(lambda a: torch.linalg.det(a), *shape)
+            check(lambda a: torch.linalg.slogdet(a).logabsdet, *shape)
+            check(lambda a: torch.logdet(a), *shape)
+            check(lambda a, b: torch.linalg.solve(a, b), *shape, with_rhs=True)
+
+    @parametrize("dtype", [torch.float32, torch.complex64])
+    def test_linalg_det(self, dtype):
         from torch.testing._internal.common_utils import make_fullrank_matrices_with_distinct_singular_values
 
         make_fullrank = make_fullrank_matrices_with_distinct_singular_values
-        make_arg = partial(make_fullrank, device="cpu", dtype=torch.float32)
+        make_arg = partial(make_fullrank, device="cpu", dtype=dtype)
 
         def run_det_test(size, *batch_dims):
             input_cpu = make_arg(*batch_dims, size, size)
@@ -11767,6 +11833,73 @@ class TestNNMPS(NNTestCase):
         bn_mps.load_state_dict(bn.state_dict())
         self.assertEqual(bn(mps_slice.cpu()), bn_mps(mps_slice).cpu())
 
+    @parametrize("channels_last_weight", (False, True))
+    @parametrize("channels_last_grad_out", (False, True))
+    @parametrize("channels_last_input", (False, True))
+    @parametrize("groups", (1, 32))
+    def test_conv2d_backward_input_memory_format(
+        self, channels_last_input, channels_last_grad_out, channels_last_weight, groups
+    ):
+        def make(shape, channels_last):
+            t = torch.randn(shape)
+            return t.to(memory_format=torch.channels_last) if channels_last else t
+
+        grad_out = make((2, 64, 8, 8), channels_last_grad_out)
+        x = make((2, 32, 8, 8), channels_last_input)
+        w = make((64, 32 // groups, 3, 3), channels_last_weight)
+
+        args = ([0], [1, 1], [1, 1], [1, 1], False, [0, 0], groups, [True, True, False])
+        expected = torch.ops.aten.convolution_backward.default(grad_out, x, w, *args)
+        actual = torch.ops.aten.convolution_backward.default(
+            grad_out.to('mps'), x.to('mps'), w.to('mps'), *args
+        )
+
+        # The layout comes from input and weight, never from grad_output.
+        for mps_out, cpu_out in zip(actual[:2], expected[:2]):
+            for fmt in (torch.contiguous_format, torch.channels_last):
+                self.assertEqual(
+                    mps_out.is_contiguous(memory_format=fmt), cpu_out.is_contiguous(memory_format=fmt)
+                )
+        self.assertEqual(expected[0], actual[0].cpu(), rtol=1e-4, atol=1e-4)
+        self.assertEqual(expected[1], actual[1].cpu(), rtol=1e-4, atol=1e-4)
+
+    def test_conv2d_backward_grad_weight_channels_last_weight(self):
+        grad_out = torch.randn(2, 64, 8, 8)
+        x = torch.randn(2, 32, 8, 8)
+        w = torch.randn(64, 32, 3, 3).to(memory_format=torch.channels_last)
+        args = ([0], [1, 1], [1, 1], [1, 1], False, [0, 0], 1, [False, True, False])
+        cpu = torch.ops.aten.convolution_backward.default(grad_out, x, w, *args)
+        mps = torch.ops.aten.convolution_backward.default(
+            grad_out.to('mps'), x.to('mps'), w.to('mps'), *args
+        )
+        self.assertEqual(mps[1].cpu(), cpu[1])
+
+    def test_conv3d_backward_channels_last_3d_input(self):
+        x = torch.randn(2, 16, 8, 8, 8, device='mps').to(
+            memory_format=torch.channels_last_3d
+        ).detach().requires_grad_(True)
+        conv = nn.Conv3d(16, 32, 3, padding=1, device='mps')
+        y = conv(x)
+        y.backward(torch.randn_like(y))
+        self.assertTrue(x.grad.is_contiguous(memory_format=torch.channels_last_3d))
+
+    def test_conv3d_backward_channels_last_3d_grad_output_only(self):
+        x_cpu = torch.randn(2, 16, 8, 8, 8)
+        conv_cpu = nn.Conv3d(16, 32, 3, padding=1)
+        conv_mps = nn.Conv3d(16, 32, 3, padding=1, device='mps')
+        conv_mps.load_state_dict(conv_cpu.state_dict())
+
+        x = x_cpu.clone().requires_grad_(True)
+        x_mps = x_cpu.clone().to('mps').requires_grad_(True)
+        grad_out = torch.randn(2, 32, 8, 8, 8)
+
+        conv_cpu(x).backward(grad_out)
+        conv_mps(x_mps).backward(grad_out.to('mps').contiguous(memory_format=torch.channels_last_3d))
+
+        self.assertTrue(x_mps.grad.is_contiguous())
+        self.assertEqual(x.grad, x_mps.grad)
+        self.assertEqual(conv_cpu.weight.grad, conv_mps.weight.grad, rtol=1e-4, atol=1e-4)
+
     # Regression test for https://github.com/pytorch/pytorch/issues/141471
     def test_conv3d_channels_last_3d(self):
         m_cpu = nn.Conv3d(16, 33, (3, 5, 2), stride=(2, 1, 1), padding=(4, 2, 0), device="cpu")
@@ -14437,6 +14570,33 @@ class TestConvolutionMPS(TestCaseMPS):
             # non-square kernels and unequal stride and with padding
             helper(nn.ConvTranspose2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2)).requires_grad_(), mem_format_input)
 
+    @parametrize("channels_last_grad_out", (False, True))
+    @parametrize("channels_last_input", (False, True))
+    def test_conv_transpose2d_backward_memory_format(self, channels_last_input, channels_last_grad_out):
+        torch.manual_seed(0)
+        m_cpu = nn.ConvTranspose2d(8, 4, 3, stride=1, padding=1)
+        x_cpu = torch.randn(2, 8, 8, 8)
+        if channels_last_input:
+            x_cpu = x_cpu.to(memory_format=torch.channels_last)
+        x_cpu = x_cpu.requires_grad_(True)
+
+        m_mps = copy.deepcopy(m_cpu).to("mps")
+        x_mps = x_cpu.detach().clone().to("mps").requires_grad_(True)
+
+        y_cpu = m_cpu(x_cpu)
+        y_mps = m_mps(x_mps)
+
+        grad_out = torch.randn_like(y_cpu)
+        if channels_last_grad_out:
+            grad_out = grad_out.to(memory_format=torch.channels_last)
+        y_cpu.backward(grad_out)
+        y_mps.backward(grad_out.to("mps"))
+
+        for mps_grad, cpu_grad in ((x_mps.grad, x_cpu.grad), (m_mps.weight.grad, m_cpu.weight.grad)):
+            self.assertEqual(cpu_grad, mps_grad.cpu(), atol=1e-4, rtol=1e-4)
+            for fmt in (torch.contiguous_format, torch.channels_last):
+                self.assertEqual(mps_grad.is_contiguous(memory_format=fmt), cpu_grad.is_contiguous(memory_format=fmt))
+
     def test_conv_transpose_2d_specified_output(self):
         input_cpu = torch.randn(1, 16, 12, 12)
         input_mps = input_cpu.detach().clone().to("mps")
@@ -16305,7 +16465,7 @@ class TestConsistency(TestCaseMPS):
         for mps_sample in op.sample_inputs(
                 device,
                 dtype,
-                requires_grad=(dtype.is_floating_point or dtype.is_complex),
+                requires_grad=(op.supports_autograd and (dtype.is_floating_point or dtype.is_complex)),
                 include_conjugated_inputs=include_conjugated_inputs,
                 set_seed=True):
 
@@ -16403,7 +16563,7 @@ class TestConsistency(TestCaseMPS):
 
         for mps_sample in op.sample_inputs(
                 device, dtype,
-                requires_grad=(dtype.is_floating_point or dtype.is_complex),
+                requires_grad=(op.supports_autograd and (dtype.is_floating_point or dtype.is_complex)),
                 set_seed=True):
             #
             # Forward check
@@ -17463,6 +17623,7 @@ instantiate_parametrized_tests(MatmulTest)
 instantiate_parametrized_tests(TestBinaryIteratorConformance)
 instantiate_parametrized_tests(TestLogical)
 instantiate_parametrized_tests(TestMPS)
+instantiate_parametrized_tests(TestNNMPS)
 instantiate_parametrized_tests(TestSDPA)
 instantiate_parametrized_tests(TestSmoothL1Loss)
 instantiate_parametrized_tests(TestMetalLibrary)
