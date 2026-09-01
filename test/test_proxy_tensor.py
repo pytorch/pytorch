@@ -48,8 +48,6 @@ from pathlib import Path
 
 aten = torch.ops.aten
 
-HAS_CUDA = torch.cuda.is_available()
-
 
 def strip_end(s, suffix):
     if suffix and s.endswith(suffix):
