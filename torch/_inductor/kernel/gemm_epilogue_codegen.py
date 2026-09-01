@@ -137,6 +137,8 @@ def lower_gemm_epilogue_fx_node(
     }
     with V.set_current_node(node):
         expression = lower_gemm_epilogue_fx_call(node, args, kwargs, context=context)
+    if isinstance(expression, (tuple, list)):
+        return expression
     meta = node.meta.get("val")
     dtype = meta.dtype if isinstance(meta, torch.Tensor) else torch.float32
     return kernel.cse.generate(kernel.body, expression, dtype=dtype, shape=(1,))
@@ -153,17 +155,28 @@ class GemmEpilogueCuteDSLBody:
 class GemmEpilogueCuteDSLCSE:
     def __init__(self) -> None:
         self.index = 0
+        self._cache: dict[str, CuteDSLCSEVariable] = {}
 
-    def generate(self, body, expr, *, bounds=None, dtype=None, shape=None):
+    def newvar(self, *, bounds=None, dtype=None, shape=None) -> CuteDSLCSEVariable:
         name = f"tmp{self.index}"
         self.index += 1
-        body.writeline(f"{name} = {expr}")
         return CuteDSLCSEVariable(
             name,
             ValueRanges.unknown() if bounds is None else bounds,
             dtype=dtype,
             shape=shape,
         )
+
+    def put(self, cache_key: str, value: CuteDSLCSEVariable) -> None:
+        self._cache[cache_key] = value
+
+    def try_get(self, cache_key: str) -> CuteDSLCSEVariable | None:
+        return self._cache.get(cache_key)
+
+    def generate(self, body, expr, *, bounds=None, dtype=None, shape=None):
+        result = self.newvar(bounds=bounds, dtype=dtype, shape=shape)
+        body.writeline(f"{result} = {expr}")
+        return result
 
 
 class GemmEpilogueCuteDSLKernel:

@@ -46,14 +46,14 @@ from __future__ import annotations
 import importlib.metadata
 import threading
 import warnings
-from collections import defaultdict
+from collections.abc import Mapping
 from contextlib import contextmanager
 from logging import getLogger
 from typing import Any, NamedTuple, TYPE_CHECKING, TypeAlias
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Iterable, Iterator
 
 import torch
 from torch.cuda._utils import (
@@ -91,12 +91,47 @@ _tools_id_available: bool | None = None
 # can span threads (e.g. autograd).
 _annotations_enabled: bool = False
 
+# How the active capture discovers which nodes a ``mark_kernels`` scope contains:
+#
+# "edge_walk" -- snapshot the capture frontier on scope entry and walk the dependent
+#   edges added by scope exit. Needs nothing but the CUDA runtime, but only sees nodes
+#   reachable from the snapshotted frontier and rescans a nested scope's nodes once per
+#   enclosing scope.
+# "cupti" -- CUPTI names each node as it is created (see
+#   ``torch.cuda._graph_node_callbacks``), so the scope only has to publish which
+#   annotation is active; ``_active_scopes`` below is that ambient state.
+#
+# Set alongside _annotations_enabled by ``torch.cuda.graph``; only meaningful while
+# annotations are enabled.
+_annotation_backend: str = "edge_walk"
 
-# Id of the top-level capture graph of the active capture. A conditional node's body is
-# captured into a separate cudaGraph_t (see CUDAGraph::begin_capture_to_conditional_node),
-# and its node ids live in that graph's id space, which remap_to_exec_graph never rekeys --
-# so mark_kernels compares against this to detect a scope inside a body.
+# The annotations currently published for nodes as they are created, innermost last: each
+# entry already includes its enclosing scopes, with the inner one winning shared keys, so
+# the innermost entry is what to annotate with. Only the "cupti" backend reads this (at
+# node-creation time); the edge walk derives the same information from graph topology after
+# the fact.
+#
+# Entries are (annotation, region): ``region`` is the TLS region a backward bracket
+# installed alongside its entry, and None for a ``mark_kernels`` scope. A bracket's entry
+# has no guaranteed pop -- the autograd engine skips the posthook when the node raises --
+# and this list is module-global (capture can span threads), so nothing restores it on
+# unwind. What does get restored is the region TLS, via the engine task's
+# ThreadLocalStateGuard, so an entry whose region is no longer current has unwound and is
+# dropped by current_annotation() below. Without that, a backward failure caught inside the
+# capture would leave every later unmarked node wearing the failed node's annotation.
+_active_scopes: list[tuple[dict[str, Any], dict[str, Any] | None]] = []
+
+# Id of the top-level capture graph of the active capture, read once at capture_begin (see
+# maybe_stamp_capture_root) and then used by everyone who needs it: mark_kernels compares
+# against it to detect a scope inside a conditional-node body, the CUPTI backend filters out
+# body nodes the same way, and the graph object is stamped with it for the later remap.
 _capture_root_graph_id: int | None = None
+
+
+def capture_root_graph_id() -> int | None:
+    """The active capture's top-level graph id, or ``None`` outside a capture that recorded
+    one. Not a public API."""
+    return _capture_root_graph_id
 
 
 def _set_annotations_enabled(enabled: bool) -> None:
@@ -106,6 +141,42 @@ def _set_annotations_enabled(enabled: bool) -> None:
     _annotations_enabled = enabled
     if not enabled:
         _capture_root_graph_id = None
+        # A capture that raised mid-scope would otherwise leak its scopes into the next one.
+        _active_scopes.clear()
+
+
+def _set_annotation_backend(backend: str) -> None:
+    """Set how ``mark_kernels`` scopes discover their nodes for this capture.
+
+    Separate from :func:`_set_annotations_enabled` because the two are decided at different
+    points: recording is enabled before ``capture_begin`` (``maybe_stamp_capture_root`` is
+    gated on it), while the backend is only final once the CUPTI callback has actually been
+    armed, which needs the capture live. Not a public API."""
+    global _annotation_backend
+    _annotation_backend = backend
+
+
+def current_annotation() -> dict[str, Any] | None:
+    """The annotation to attribute a node created right now to, or ``None``.
+
+    Entries whose region has been restored out from under them are dropped first: see
+    :data:`_active_scopes`, a backward bracket whose node raised leaves one behind. Not a
+    public API."""
+    while _active_scopes:
+        annotation, region = _active_scopes[-1]
+        if region is None or region is _current_region():
+            return annotation
+        _active_scopes.pop()
+    return None
+
+
+def record_node_annotation(tools_id: int, annotation: dict[str, Any]) -> None:
+    """Attribute one graph node, keyed by its capture-side ``toolsId``.
+
+    The CUPTI backend's entry point into the same store the edge walk fills, so both
+    backends are remapped to exec-graph ids by ``remap_to_exec_graph`` identically. Not a
+    public API."""
+    _merge_annotation(tools_id, annotation)
 
 
 def _graph_id(graph: Any) -> int:
@@ -119,21 +190,31 @@ def _graph_id(graph: Any) -> int:
     )
 
 
-def maybe_stamp_capture_root(stream: Any) -> None:
-    """Record the top-level capture graph of the capture just begun on ``stream``.
+def maybe_stamp_capture_root(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
+    """Record the top-level capture graph of the capture just begun, and stamp it on the
+    graph for the later remap.
 
-    Called by ``torch.cuda.graph`` right after ``capture_begin``, while ``stream`` is
-    still capturing into the top-level graph. Not a public API."""
+    Called by ``torch.cuda.graph`` right after ``capture_begin``, while the current stream is
+    still capturing into the top-level graph. It has to go through the stream because the
+    ``cudaGraph_t`` does not exist until ``capture_end`` -- ``raw_cuda_graph()`` raises before
+    then -- but the template graph keeps that one id for its whole life, so this single read
+    serves every consumer: the conditional-body checks in ``mark_kernels``, the CUPTI
+    backend's body-node filter, and ``remap_to_exec_graph`` via the stamp below. Not a public
+    API."""
     global _capture_root_graph_id
     _capture_root_graph_id = None
     if not _annotations_enabled or _is_tools_id_unavailable():
         return
     stream_handle = _cuda_runtime.cudaStream_t(  # pyrefly: ignore[missing-attribute]
-        init_value=stream.cuda_stream
+        init_value=torch.cuda.current_stream().cuda_stream
     )
     state = _get_capture_state(stream_handle)
-    if state is not None:
-        _capture_root_graph_id = _graph_id(state[0])
+    if state is None:
+        return
+    _capture_root_graph_id = _graph_id(state[0])
+    torch_cuda_graph._capture_graph_id = _capture_root_graph_id
+    # Fresh capture: annotations are keyed by this capture id until remapped.
+    torch_cuda_graph._remapped_exec_id = None
 
 
 def _probe_tools_id() -> bool:
@@ -296,8 +377,36 @@ def _collect_descendants(
     return descendants
 
 
-# toolsId -> list of annotation objects.
-_kernel_annotations: defaultdict[int, list[Any]] = defaultdict(list)
+# toolsId -> the node's merged annotation. Exactly one dict per node: every writer goes
+# through _merge_annotation, and a node is only written more than once when scopes overlap
+# on it, which is precisely what the merge resolves.
+_kernel_annotations: dict[int, dict[str, Any]] = {}
+
+
+def _merge_annotation(tools_id: int, annotation: Any) -> None:
+    """Merge one scope's annotation into a node's entry; the first write wins per key.
+
+    First-wins is what makes nested scopes resolve inner-first: scopes are recorded in
+    completion order, so the innermost scope containing a node reaches it first and keeps
+    the keys it shares with its enclosing scopes, while their extra keys still come
+    through. Non-dict annotations are normalized to ``{"name": ...}``; ``mark_kernels``
+    already does that for strings, but the store is written by other callers too.
+    """
+    incoming = annotation if isinstance(annotation, dict) else {"name": annotation}
+    entry = _kernel_annotations.get(tools_id)
+    if entry is None:
+        _kernel_annotations[tools_id] = dict(incoming)
+        return
+    for key, value in incoming.items():
+        entry.setdefault(key, value)
+
+
+def annotation_for(tools_id: int) -> dict[str, Any] | None:
+    """The merged annotation recorded for one graph node, or ``None``. The in-process
+    accessor behind the profiler's graph annotation resolver, handing out the stored dict
+    rather than the list-wrapped public view. Not a public API."""
+    return _kernel_annotations.get(tools_id)
+
 
 # Node types we annotate (kernels, memcpys, memsets, batch mem ops, event
 # record/wait nodes, and host nodes), as driver node-type enums. Event and host
@@ -305,6 +414,12 @@ _kernel_annotations: defaultdict[int, list[Any]] = defaultdict(list)
 # profiler place their spans on the intended stream lane. Initialized lazily to
 # avoid touching cuda.bindings at import time.
 _ANNOTATABLE_TYPES: set[Any] | None = None
+
+# The same set as raw driver enum values, for callers handed a plain int rather than a
+# CUgraphNodeType (CUPTI reports ``GraphData.node_type`` that way). Derived from
+# _get_annotatable_types so the membership is defined in exactly one place; cached because
+# the CUPTI backend consults it once per node created.
+_ANNOTATABLE_TYPE_VALUES: frozenset[int] | None = None
 
 
 def _get_annotatable_types() -> set[Any]:
@@ -321,6 +436,14 @@ def _get_annotatable_types() -> set[Any]:
             node_types.CU_GRAPH_NODE_TYPE_HOST,
         }
     return _ANNOTATABLE_TYPES
+
+
+def _get_annotatable_type_values() -> frozenset[int]:
+    """:func:`_get_annotatable_types` as raw driver enum values."""
+    global _ANNOTATABLE_TYPE_VALUES
+    if _ANNOTATABLE_TYPE_VALUES is None:
+        _ANNOTATABLE_TYPE_VALUES = frozenset(int(t) for t in _get_annotatable_types())
+    return _ANNOTATABLE_TYPE_VALUES
 
 
 # Node types whose work lives in a separate cudaGraph_t (child graphs, conditional
@@ -514,7 +637,7 @@ class _BracketState(threading.local):
     """
 
     def __init__(self) -> None:
-        # Entries are (scope, prev_region, merged_region) or _SKIPPED.
+        # Entries are (scope, prev_region, tagged_region, published, depth) or _SKIPPED.
         self.stack: list[Any] = []
 
 
@@ -558,11 +681,13 @@ def _attach_backward_hooks(node: Any, frozen: dict[str, Any], generation: int) -
     ``frozen`` is the region that was current when the node was created:
     the annotations of every scope then open, already collapsed inner-wins.
     The pair brackets the node's execution the same way ``mark_kernels``
-    brackets forward work: snapshot the capture frontier before, collect
-    the new nodes after. It runs on the autograd engine thread executing
-    the node, which during a whole-graph capture participates in the
-    capture; when backward runs outside a capture the prehook sees no
-    active capture and the pair is a no-op.
+    brackets forward work, and splits on the backend the same way: under the
+    edge walk it snapshots the capture frontier before and collects the new
+    nodes after, under CUPTI it publishes itself as the ambient annotation
+    for the nodes created while it runs. It runs on the autograd engine
+    thread executing the node, which during a whole-graph capture
+    participates in the capture; when backward runs outside a capture the
+    prehook sees no active capture and the pair is a no-op.
 
     Executing the node is semantically re-entering its frozen region, so
     the prehook merges ``frozen`` over the live region (a ``mark_kernels``
@@ -576,9 +701,12 @@ def _attach_backward_hooks(node: Any, frozen: dict[str, Any], generation: int) -
     enclosing scope. The posthook records the merged region once; scope
     completion order then yields exactly that precedence at resolve.
 
-    The pops are exception-safe without a finally: each engine task runs
+    The TLS pops are exception-safe without a finally: each engine task runs
     under an ``at::ThreadLocalStateGuard`` that restores both the
-    creation-hook TLS and the region slot even when the node throws.
+    creation-hook TLS and the region slot even when the node throws. The
+    ambient-annotation entry the CUPTI path publishes is module-global and so
+    is not restored that way; it is dropped on next read instead (see
+    :data:`_active_scopes`).
 
     ``generation`` is the annotation generation the owning scope was opened
     under; the bracket only records (and only propagates to created nodes)
@@ -598,10 +726,24 @@ def _attach_backward_hooks(node: Any, frozen: dict[str, Any], generation: int) -
         # captured: kernels of nodes created here may be captured by a
         # later (e.g. second-order) annotated capture.
         merged = {**(_current_region() or {}), **frozen}
+        tagged = {**merged, "autograd_phase": "backward"}
         prev = _enter_region(merged)
         torch._C._autograd._push_node_creation_hook(creation_hook)
-        scope = _begin_kernel_scope() if _annotations_enabled else None
-        state.stack.append((scope, prev, merged))
+        # Under CUPTI the nodes this backward creates are attributed as they are created,
+        # so the bracket publishes itself instead of walking edges -- and it has to, since
+        # what CUPTI would otherwise record is the scope lexically open around the
+        # ``backward()`` call, which this outranks. The entry is published with the region
+        # installed above, which is what lets current_annotation() drop it if this node
+        # raises and its posthook never runs; the truncation below covers the same for any
+        # entry left above it.
+        published = _annotations_enabled and _annotation_backend == "cupti"
+        depth = len(_active_scopes)
+        if published:
+            _active_scopes.append((tagged, merged))
+        scope = (
+            _begin_kernel_scope() if _annotations_enabled and not published else None
+        )
+        state.stack.append((scope, prev, tagged, published, depth))
 
     def posthook(_grad_inputs: Any, _grad_outputs: Any) -> None:
         if not state.stack:
@@ -609,18 +751,45 @@ def _attach_backward_hooks(node: Any, frozen: dict[str, Any], generation: int) -
         entry = state.stack.pop()
         if entry is _SKIPPED:
             return
-        scope, prev, merged = entry
+        scope, prev, tagged, published, depth = entry
+        if published:
+            del _active_scopes[depth:]
         torch._C._autograd._pop_node_creation_hook()
         _exit_region(prev)
         if scope is None:
             return
         tools_ids = _end_kernel_scope(scope)
         if tools_ids:
-            tagged = {**merged, "autograd_phase": "backward"}
             _pending_scopes.append((tagged, tools_ids))
 
     node.register_prehook(prehook)
     node.register_hook(posthook)
+
+
+@contextmanager  # type: ignore[arg-type]
+def _annotation_region(annotation: dict[str, Any], backward: bool):
+    """Publish ``annotation`` as the current region for the body, hooking the autograd
+    nodes created in it when ``backward``.
+
+    Backend-independent, and shared by both of ``mark_kernels``' paths. The region is
+    entered even when ``backward`` is False, since it must reflect the full dynamic scope
+    for nodes hooked by a nested ``backward=True`` scope (or by an executing hooked node)
+    to freeze this annotation too.
+    """
+    generation = _annotation_generation
+
+    def creation_hook(node: Any) -> None:
+        _freeze_region_hook(node, generation)
+
+    prev = _enter_region({**(_current_region() or {}), **annotation})
+    try:
+        if backward:
+            with torch.autograd.graph.node_creation_hook(creation_hook):
+                yield
+        else:
+            yield
+    finally:
+        _exit_region(prev)
 
 
 @contextmanager  # type: ignore[arg-type]
@@ -708,6 +877,24 @@ def mark_kernels(annotation: str | dict[str, Any], *, backward: bool = True):
     if isinstance(annotation, str):
         annotation = {"name": annotation}
 
+    if _annotation_backend == "cupti":
+        # Nodes are attributed as CUPTI reports their creation, so the scope only has to
+        # publish itself as the ambient annotation -- no frontier snapshot, and no rescan
+        # per enclosing scope. Merge into the enclosing scope on the way in (inner wins), so
+        # leaving restores the enclosing annotation as it was. Leaving truncates rather than
+        # pops one, to also clear any entry a failed backward left above this one.
+        enclosing = current_annotation()
+        depth = len(_active_scopes)
+        _active_scopes.append(
+            ({**enclosing, **annotation} if enclosing else annotation, None)
+        )
+        try:
+            with _annotation_region(annotation, backward):
+                yield
+        finally:
+            del _active_scopes[depth:]
+        return
+
     scope = _begin_kernel_scope()
     if scope is None:
         yield
@@ -731,53 +918,12 @@ def mark_kernels(annotation: str | dict[str, Any], *, backward: bool = True):
         yield
         return
 
-    generation = _annotation_generation
-
-    def creation_hook(node: Any) -> None:
-        _freeze_region_hook(node, generation)
-
-    # Enter the region even when backward=False: the region must reflect the
-    # full dynamic scope so that nodes hooked by a nested backward=True scope
-    # (or by an executing hooked node) freeze this annotation too.
-    prev = _enter_region({**(_current_region() or {}), **annotation})
-    try:
-        if backward:
-            with torch.autograd.graph.node_creation_hook(creation_hook):
-                yield
-        else:
-            yield
-    finally:
-        _exit_region(prev)
+    with _annotation_region(annotation, backward):
+        yield
 
     tools_ids = _end_kernel_scope(scope)
     if tools_ids:
         _pending_scopes.append((annotation, tools_ids))
-
-
-def maybe_stamp_capture_graph_id(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
-    """Record the captured graph's id on the graph object for later remap.
-
-    Called from ``capture_end`` in the window after capture ends and before the
-    graph is finalized, where the template ``cudaGraph_t`` is live for both
-    ``keep_graph`` modes (and reachable via ``raw_cuda_graph``). ``remap_to_exec_graph``
-    later matches this graph's annotations to its exec id via this stamp, without
-    relying on call ordering. No-op if annotations are disabled or
-    ``cudaGraphNodeGetToolsId`` is unavailable. Harmless when no ``mark_kernels``
-    regions run: the annotation map stays empty so resolve and remap are no-ops.
-    """
-    if not _annotations_enabled or _is_tools_id_unavailable():
-        return
-    # Past the _is_tools_id_unavailable() guard cuda-bindings is present and the
-    # driver supports the toolsId API (same version gate as cudaGraphGetId), so
-    # any error here is unexpected: error-check and let it raise. cudaGraphGetId
-    # accepts the raw cudaGraph_t handle (int) directly.
-    torch_cuda_graph._capture_graph_id = _check_cuda_bindings(
-        _cuda_runtime.cudaGraphGetId(  # pyrefly: ignore[missing-attribute]
-            torch_cuda_graph.raw_cuda_graph()
-        )
-    )
-    # Fresh capture: annotations are keyed by this capture id until remapped.
-    torch_cuda_graph._remapped_exec_id = None
 
 
 def resolve_pending_annotations() -> None:
@@ -786,24 +932,11 @@ def resolve_pending_annotations() -> None:
         return
 
     try:
-        per_tools_id: defaultdict[int, list[Any]] = defaultdict(list)
+        # _pending_scopes is in scope-completion order (innermost first) and
+        # _merge_annotation is first-wins, so this applies the documented precedence.
         for annotation, tools_ids in _pending_scopes:
             for tools_id in tools_ids:
-                per_tools_id[tools_id].append(annotation)
-
-        for tools_id, ann_list in per_tools_id.items():
-            if len(ann_list) == 1:
-                _kernel_annotations[tools_id].append(ann_list[0])
-                continue
-
-            merged: dict[str, Any] = {}
-            for annotation in ann_list:
-                if isinstance(annotation, dict):
-                    for key, value in annotation.items():
-                        merged.setdefault(key, value)
-                else:
-                    merged.setdefault("name", annotation)
-            _kernel_annotations[tools_id].append(merged)
+                _merge_annotation(tools_id, annotation)
     except Exception:
         logger.exception("resolve_pending_annotations failed")
     finally:
@@ -818,7 +951,7 @@ def remap_to_exec_graph(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
     This function rewrites the keys so annotations match the trace.
 
     The graph's capture id is read from the ``_capture_graph_id`` stamped on it
-    by ``maybe_stamp_capture_graph_id`` in the capture_end window, so only the annotations
+    by ``maybe_stamp_capture_root`` at capture_begin, so only the annotations
     belonging to this graph are rekeyed. This is order-independent and correct
     when several graphs are captured in sequence: call once per graph. Graphs
     captured with annotations disabled have no capture id and are skipped.
@@ -858,29 +991,27 @@ def remap_to_exec_graph(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
 
 
 def _rekey_annotations(
-    annotations: dict[int, list[Any]],
+    annotations: dict[int, dict[str, Any]],
     capture_graph_id: int,
     exec_graph_id: int,
-) -> dict[int, list[Any]]:
+) -> dict[int, dict[str, Any]]:
     """Rekey one graph's annotations from its capture id to its exec id.
 
     A toolsId packs the graph id in the upper 32 bits and the node id in the
     lower 32. Only entries whose upper bits match ``capture_graph_id`` are
     rewritten to ``exec_graph_id``; entries from other graphs (already remapped
-    to their own exec ids, or pending their own remap) are kept as-is. When two
-    capture-side ids collide on the same rekeyed id their lists are merged.
+    to their own exec ids, or pending their own remap) are kept as-is. The
+    rewritten keys cannot collide with anything: they share their upper bits and
+    differ in node id, and the driver mints graph and exec ids from one counter
+    that it does not reuse, so no other entry is keyed on a freshly minted exec id.
     """
-    remapped: dict[int, list[Any]] = {}
-    for tools_id, ann_list in annotations.items():
+    remapped: dict[int, dict[str, Any]] = {}
+    for tools_id, annotation in annotations.items():
         if tools_id >> 32 != capture_graph_id:
-            remapped[tools_id] = ann_list
+            remapped[tools_id] = annotation
             continue
         node_id = tools_id & 0xFFFFFFFF
-        new_tools_id = (exec_graph_id << 32) | node_id
-        if new_tools_id in remapped:
-            remapped[new_tools_id].extend(ann_list)
-        else:
-            remapped[new_tools_id] = list(ann_list)
+        remapped[(exec_graph_id << 32) | node_id] = annotation
     return remapped
 
 
@@ -894,22 +1025,49 @@ def resolve_and_remap(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
     remap_to_exec_graph(torch_cuda_graph)
 
 
+class _AnnotationsView(Mapping[int, "list[Any]"]):
+    """Read-only view of the annotation store, presenting each node's annotation as a
+    one-element list.
+
+    The store holds exactly one merged dict per node, but the public mapping has always
+    had list values -- and pickles of it are read back by
+    ``torch.cuda._annotate_cuda_graph_trace`` -- so the shape is kept. Wrapping on read
+    rather than storing lists is what makes "at most one annotation per node" explicit.
+    """
+
+    def __getitem__(self, tools_id: int) -> list[Any]:
+        return [_kernel_annotations[tools_id]]
+
+    def __iter__(self) -> Iterator[int]:
+        return iter(_kernel_annotations)
+
+    def __len__(self) -> int:
+        return len(_kernel_annotations)
+
+    def __repr__(self) -> str:
+        return repr(dict(self))
+
+
+_annotations_view = _AnnotationsView()
+
+
 def get_kernel_annotations() -> Mapping[int, list[Any]]:
     r"""get_kernel_annotations() -> Mapping[int, list]
 
     Return the live registry of recorded kernel annotations.
 
     Keys are opaque integers matching the ``graph node id`` field that
-    CUPTI-based profilers attach to kernel events; values are the lists of
-    annotation dicts recorded for that node. The registry accumulates
-    across captures and is global to the process.
+    CUPTI-based profilers attach to kernel events; values are one-element
+    lists holding the annotation dict recorded for that node -- annotations
+    from overlapping scopes are merged into that single dict. The registry
+    accumulates across captures and is global to the process.
 
     The returned mapping is a **live view**: it is updated in place when a
     graph is instantiated (annotation keys are rekeyed to the executable
     graph's ids), so a reference obtained early stays current. Keys are
     valid for joining against a profiler trace once the corresponding
-    graphs have been instantiated. Treat the mapping as read-only; snapshot
-    it with ``dict(...)`` if isolation is needed.
+    graphs have been instantiated. The mapping is read-only; snapshot it
+    with ``dict(...)`` if isolation is needed.
 
     .. warning::
         This API is in prototype and may change in future releases.
@@ -921,7 +1079,7 @@ def get_kernel_annotations() -> Mapping[int, list[Any]]:
         >>> with open("annotations.pkl", "wb") as f:
         ...     pickle.dump(dict(annotations), f)
     """
-    return _kernel_annotations
+    return _annotations_view
 
 
 def clear_kernel_annotations() -> None:
@@ -1009,7 +1167,11 @@ def mark_stream(stream: torch.cuda.Stream, annotation: str | dict[str, Any]):
         if isinstance(annotation, str):
             annotation = {"name": annotation}
         if isinstance(annotation, dict):
-            annotation["stream"] = _get_stream_id(stream)
+            # Copy rather than write through: the annotation is stored by reference, so an
+            # in-place "stream" would leak back to the caller and, when one dict is reused
+            # across mark_stream calls, retag every region already recorded with it to the
+            # last lane written.
+            annotation = {**annotation, "stream": _get_stream_id(stream)}
         with mark_kernels(annotation):
             with torch.cuda.stream(stream):
                 yield
