@@ -36,6 +36,7 @@ except ImportError:
     raise unittest.SkipTest("requires triton")  # noqa: B904
 
 from torch._inductor import config
+from torch._inductor.ir import Reduction
 from torch._inductor.runtime.hints import (
     AttrsDescriptorWrapper,
     AutotuneHint,
@@ -43,6 +44,7 @@ from torch._inductor.runtime.hints import (
     HeuristicType,
     native_matmul_block_numel,
     native_matmul_persistent_rblock,
+    ReductionHint,
     TRITON_MAX_BLOCK,
     TRITON_MAX_TENSOR_NUMEL,
 )
@@ -209,6 +211,129 @@ class TestTritonHeuristics(TestCase):
         with self.assertRaisesRegex(AssertionError, "exceeds Triton maximum"):
             make_matmul_triton_config({"x": 256, "y": 128, "r": 64}, 8, 1)
 
+    def test_blackwell_outer_no_split_max_autotune_config(self):
+        expected = (64, 128, 16)
+
+        def config_set(*, meta, x=16384, r=8192, major=10):
+            result = _reduction_configs(
+                size_hints={"x": x, "r0_": r},
+                inductor_meta=meta,
+                triton_meta={
+                    "device": self._fake_cuda_device_properties(major=major)
+                },
+            )
+            return {
+                (c.kwargs["XBLOCK"], c.kwargs["R0_BLOCK"], c.num_warps)
+                for c in result
+            }
+
+        outer_meta = {
+            "max_autotune": True,
+            "reduction_hint": ReductionHint.OUTER_NO_SPLIT,
+        }
+        self.assertIn(expected, config_set(meta=outer_meta))
+        self.assertNotIn(
+            expected,
+            config_set(
+                meta={"max_autotune": True, "reduction_hint": ReductionHint.DEFAULT}
+            ),
+        )
+        self.assertNotIn(
+            expected,
+            config_set(
+                meta={
+                    "max_autotune_pointwise": True,
+                    "reduction_hint": ReductionHint.OUTER_NO_SPLIT,
+                }
+            ),
+        )
+        self.assertNotIn(expected, config_set(meta=outer_meta, x=4096))
+        self.assertNotIn(expected, config_set(meta=outer_meta, r=1024))
+        self.assertNotIn(expected, config_set(meta=outer_meta, major=9))
+
+        no_autotune_outer = config_set(
+            meta={"reduction_hint": ReductionHint.OUTER_NO_SPLIT}
+        )
+        no_autotune_default = config_set(
+            meta={"reduction_hint": ReductionHint.DEFAULT}
+        )
+        self.assertEqual(no_autotune_outer, no_autotune_default)
+
+        # Runtime decorator callsites historically use False when no explicit
+        # reduction hint is supplied. Preserve that sentinel behavior.
+        self.assertTrue(
+            config_set(meta={"max_autotune": True, "reduction_hint": False})
+        )
+
+    def test_experimental_large_output_outer_split_factor(self):
+        split = Reduction._experimental_large_output_outer_split_factor
+        self.assertEqual(split(5247, 9472, 148), 56)
+        self.assertEqual(split(5247, 12288, 148), 40)
+        self.assertEqual(split(5247, 16384, 148), 32)
+        self.assertEqual(split(5247, 22528, 148), 16)
+        self.assertEqual(split(5247, 32768, 148), 16)
+        self.assertEqual(split(1023, 8192, 148), 1)
+        self.assertEqual(split(5247, 12288, 74), 16)
+        self.assertEqual(split(5247, 1 << 30, 148), 1)
+
+        should_use = Reduction._should_use_experimental_large_output_outer_plan
+        self.assertTrue(should_use(5247, 9472, 56))
+        self.assertTrue(should_use(5247, 12288, 40))
+        self.assertTrue(should_use(5247, 16384, 32))
+        self.assertTrue(should_use(5247, 22528, 16))
+        self.assertTrue(should_use(5247, 32768, 16))
+        self.assertTrue(should_use(6145, 12288, 40))
+        self.assertTrue(should_use(7169, 12288, 40))
+        self.assertTrue(should_use(8193, 12288, 40))
+        self.assertFalse(should_use(4096, 12288, 40))
+        self.assertFalse(should_use(5248, 12288, 40))
+        self.assertFalse(should_use(6144, 12288, 40))
+        self.assertFalse(should_use(1023, 12288, 40))
+        self.assertFalse(should_use(5247, 9471, 56))
+        self.assertFalse(should_use(5247, 9473, 56))
+        self.assertTrue(should_use(5247, 32896, 16))
+        self.assertTrue(should_use(5246, 12288, 40))
+
+        producer_profitable = (
+            Reduction._is_experimental_large_output_outer_producer_profitable
+        )
+        self.assertTrue(producer_profitable(12, 4, False))
+        self.assertTrue(producer_profitable(11, 3, True))
+        self.assertFalse(producer_profitable(7, 4, True))
+        self.assertFalse(producer_profitable(16, 3, False))
+
+    def test_experimental_large_output_outer_config(self):
+        candidate = (128, 8, 1)
+
+        def config_set(
+            *, enabled=True, deterministic=False, max_autotune=True, major=10, r=256
+        ):
+            with config.patch(
+                "triton.enable_experimental_large_output_outer_reductions", enabled
+            ):
+                result = _reduction_configs(
+                    size_hints={"x": 16384, "r0_": r},
+                    inductor_meta={
+                        "max_autotune": max_autotune,
+                        "reduction_hint": ReductionHint.OUTER,
+                        "deterministic": deterministic,
+                    },
+                    triton_meta={
+                        "device": self._fake_cuda_device_properties(major=major)
+                    },
+                )
+            return {
+                (c.kwargs["XBLOCK"], c.kwargs["R0_BLOCK"], c.num_warps)
+                for c in result
+            }
+
+        self.assertIn(candidate, config_set())
+        self.assertNotIn(candidate, config_set(enabled=False))
+        self.assertNotIn(candidate, config_set(deterministic=True))
+        self.assertNotIn(candidate, config_set(max_autotune=False))
+        self.assertNotIn(candidate, config_set(major=9))
+        self.assertNotIn(candidate, config_set(r=64))
+
     def test_reduction_min_block_preserves_tile_product(self):
         cfg = _enforce_reduction_config_block_minimums(
             [triton.Config({"XBLOCK": 64, "R0_BLOCK": 1024})],
@@ -252,13 +377,13 @@ class TestTritonHeuristics(TestCase):
         self.assertEqual(cfg.kwargs["R0_BLOCK"], 512)
 
     @staticmethod
-    def _fake_cuda_device_properties():
+    def _fake_cuda_device_properties(major=8):
         return DeviceProperties(
             type="cuda",
             index=0,
             multi_processor_count=1,
-            cc=80,
-            major=8,
+            cc=major * 10,
+            major=major,
             regs_per_multiprocessor=65536,
             max_threads_per_multi_processor=2048,
             max_threads_per_block=1024,

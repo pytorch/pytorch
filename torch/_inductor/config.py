@@ -1952,6 +1952,16 @@ class triton:
     Config specific to codegen/triton.py
     """
 
+    # Select a bounded two-stage OUTER plan for large, aligned leading-dimension
+    # reductions on Blackwell. This remains opt-in until Inductor can benchmark
+    # split and unsplit graph plans against one another end to end.
+    enable_experimental_large_output_outer_reductions = (
+        os.environ.get(
+            "TORCHINDUCTOR_ENABLE_EXPERIMENTAL_LARGE_OUTPUT_OUTER_REDUCTIONS", "0"
+        )
+        == "1"
+    )
+
     # torchTLX enablement. None (the default) means TLX is never considered
     # (standard Inductor behavior); "allow" lets TLX compete via autotuning;
     # "force" uses only TLX templates plus forced epilogue fusion. Also a

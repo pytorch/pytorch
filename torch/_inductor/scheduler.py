@@ -200,6 +200,10 @@ class MixOrderReduction:
     """
 
     @staticmethod
+    def supports_contiguous_reduction_hint(hint: ReductionHint) -> bool:
+        return hint == ReductionHint.INNER or hint.is_default_scheduling()
+
+    @staticmethod
     def is_split_reduction(node: BaseSchedulerNode) -> bool:
         return node.is_reduction() and all(
             subnode.node._split_size is not None
@@ -414,10 +418,8 @@ class MixOrderReduction:
 
         # Make sure a persistent reduction will be generated
         if any(
-            subnode.node.data.reduction_hint  # type: ignore[union-attr]
-            not in (
-                ReductionHint.INNER,
-                ReductionHint.DEFAULT,
+            not cls.supports_contiguous_reduction_hint(
+                subnode.node.data.reduction_hint  # type: ignore[union-attr]
             )
             for subnode in contiguous_node.get_nodes()
             if subnode.is_reduction()
