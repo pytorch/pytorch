@@ -151,7 +151,7 @@ PyTorch,baddbmm,baddbmm_B2_M1_N8_K2_cpu_dtypetorch.float32,short,False,1.907932,
 PyTorch,baddbmm,baddbmm_B2_M1_N8_K2_cpu_dtypetorch.bfloat16,short,False,1.908911,0.0,0.058672
 PyTorch,baddbmm,baddbmm_B128_M64_N32_K64_cpu_dtypetorch.float32,short,False,262.481902,0.0,13.624093
 PyTorch,baddbmm,baddbmm_B128_M64_N32_K64_cpu_dtypetorch.bfloat16,short,False,298.001394,0.0,6.634338
-PyTorch,all,all_M1_N1_K1_cpu,short,False,1.738033,0.0,0.001151
+PyTorch,all,all_M1_N1_K1_cpu,short,False,4.069331,0.0,0.001151
 PyTorch,all,all_M64_N64_K64_cpu,short,False,61.335743,0.0,4.512597
 PyTorch,all,all_M64_N64_K128_cpu,short,False,62.705954,0.0,9.143381
 PyTorch,cat,"cat_sizes(1,1,1)_N2_dim0_cpu",short,False,1.45774,0.0,0.010976
@@ -183,7 +183,7 @@ PyTorch,Conv2dPointwise,Conv2dPointwise_IC256_OC256_stride1_N1_H16_W16_G1_pad0_c
 PyTorch,Conv3d,Conv3d_IC64_OC64_kernel3_stride1_N8_D4_H16_W16_cpu_dtypetorch.float32,short,False,2441.683137,0.0,1.368866
 PyTorch,ConvTranspose3d,ConvTranspose3d_IC64_OC64_kernel3_stride1_N8_D4_H16_W16_cpu_dtypetorch.float32,short,False,5677.766858,0.0,1.148485
 PyTorch,diag,diag_dim1_M64_N64_diagonal0_outTrue_cpu,short,False,7.668584,0.0,4.306401
-PyTorch,diag,diag_dim2_M128_N128_diagonal-10_outFalse_cpu,short,False,2.292963,0.0,57.162712
+PyTorch,diag,diag_dim2_M128_N128_diagonal-10_outFalse_cpu,short,False,5.198279,0.0,57.162712
 PyTorch,diag,diag_dim1_M256_N256_diagonal20_outTrue_cpu,short,False,95.923012,0.0,3.230034
 PyTorch,embeddingbag,embeddingbag_embeddingbags10_dim64_modesum_input_size8_offset0_sparseTrue_include_last_offsetTrue_cpu,short,False,16.564664,0.0,0.008693
 PyTorch,embeddingbag,embeddingbag_embeddingbags10_dim64_modesum_input_size8_offset0_sparseTrue_include_last_offsetFalse_cpu,short,False,51.574606,0.0,0.00131
