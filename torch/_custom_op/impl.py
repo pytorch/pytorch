@@ -33,11 +33,6 @@ Please use those APIs instead.
 __all__ = ["custom_op", "CustomOp", "get_ctx"]
 
 
-SUPPORTED_DEVICE_TYPE_TO_KEY = {
-    "cpu": "CPU",
-    "cuda": "CUDA",
-}
-
 # We will not let users register CustomOps with anything that could look like
 # PyTorch internals to avoid confusion.
 RESERVED_NS = {
@@ -537,11 +532,12 @@ def parse_qualname(qualname: str) -> tuple[str, str]:
 
 
 def validate_device_type(device_type: str) -> None:
-    if device_type not in SUPPORTED_DEVICE_TYPE_TO_KEY:
+    try:
+        _C._dispatch_key_for_device(device_type)
+    except RuntimeError as e:
         raise ValueError(
-            f"CustomOp.impl(device_types=[{device_type}, ...]): we only support device_type "
-            f"in {SUPPORTED_DEVICE_TYPE_TO_KEY.keys()}."
-        )
+            f"CustomOp.impl(device_types=[{device_type}, ...]): unsupported device_type. {e}"
+        ) from e
 
 
 def supported_param(param: inspect.Parameter) -> bool:
