@@ -179,14 +179,6 @@ TYPE_OVERRIDES: dict[str, list[Any]] = {
             "group_linear": {"require_fbgemm": True},
         },
     ],
-    "autoheuristic_collect": [
-        {"pad_mm": True},
-        {"pad_mm": False},
-    ],
-    "autoheuristic_use": [
-        {"pad_mm": True},
-        {"pad_mm": False},
-    ],
     "traceable_tensor_subclasses": [OrderedSet()],
     "nontraceable_tensor_subclasses": [OrderedSet()],
 }
