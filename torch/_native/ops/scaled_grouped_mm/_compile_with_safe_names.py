@@ -1,15 +1,4 @@
-import os
-
-
-# Probe for whether the patching below is still needed with the pinned CuTeDSL.
-# Run the suite with TORCH_CUTEDSL_NO_SAFE_NAMES=1; if clean, delete this helper.
-_BYPASS = os.environ.get("TORCH_CUTEDSL_NO_SAFE_NAMES") == "1"
-
-
 def _compile_with_safe_names(compile_fn):
-    if _BYPASS:
-        return compile_fn()
-
     # CuTeDSL pretty-printing can throw on ScaledBasis during
     # compilation-time naming/printing.  Patch temporarily.
     import cutlass.cute.core as cute_core
