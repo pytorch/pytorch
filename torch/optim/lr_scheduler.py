@@ -1224,10 +1224,10 @@ class SequentialLR(LRScheduler):
         self.last_epoch = epoch
         idx = bisect_right(self._milestones, self.last_epoch)
         scheduler = self._schedulers[idx]
-        if idx > 0 and self._milestones[idx - 1] == self.last_epoch:
-            scheduler._update_lr(0, metrics=metrics)
-        else:
-            scheduler._update_lr(epoch, metrics=metrics)
+        child_epoch = self.last_epoch
+        if idx > 0:
+            child_epoch -= self._milestones[idx - 1]
+        scheduler._update_lr(child_epoch, metrics=metrics)
 
         self._last_lr = scheduler.get_last_lr()
 

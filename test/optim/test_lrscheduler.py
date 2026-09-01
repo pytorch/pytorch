@@ -1013,6 +1013,21 @@ class TestLRScheduler(TestCase):
         scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=milestones)
         self._test(scheduler, targets, epochs)
 
+    def test_sequentiallr_update_lr_uses_stage_local_epoch(self):
+        optimizer = SGD([torch.tensor(0.5)], lr=1.0)
+        second_scheduler = ExponentialLR(optimizer, gamma=0.1)
+        scheduler = SequentialLR(
+            optimizer,
+            schedulers=[ConstantLR(optimizer, factor=1.0), second_scheduler],
+            milestones=[3],
+        )
+
+        scheduler._update_lr(5)
+
+        self.assertEqual(scheduler.last_epoch, 5)
+        self.assertEqual(second_scheduler.last_epoch, 2)
+        self.assertEqual(optimizer.param_groups[0]["lr"], 0.1**2)
+
     def test_sequentiallr_no_warnings(self):
         scheduler1 = LinearLR(self.opt, start_factor=0.5, end_factor=0.1, total_iters=5)
         scheduler2 = ExponentialLR(self.opt, gamma=0.9)
