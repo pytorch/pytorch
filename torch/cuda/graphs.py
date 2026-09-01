@@ -8,7 +8,7 @@ import warnings
 import weakref
 from collections import OrderedDict
 from collections.abc import Callable
-from typing import overload, TYPE_CHECKING, TypeAlias, TypeGuard, Union
+from typing import Any, overload, TYPE_CHECKING, TypeAlias, TypeGuard, Union
 from typing_extensions import ParamSpec, Self, TypeVar
 
 import torch
@@ -1618,10 +1618,23 @@ def make_graphed_callables(
         static_grad_outputs: tuple[Tensor | None, ...],
         static_grad_inputs: tuple[Tensor, ...],
     ) -> Callable[..., object]:
+        # Handed to Graphed.apply per call rather than closed over. A class and its
+        # methods' closure cells form a reference cycle, so anything the methods close
+        # over is freed by the cyclic collector rather than by refcount -- and freeing a
+        # CUDAGraph runs cudaGraphDestroy/releasePool, which are illegal while some
+        # unrelated stream is capturing. Passing them in keeps the graphs off the class,
+        # so dropping the graphed callable releases them immediately, while ctx still
+        # holds bwd_graph for as long as a backward can be run.
+        graphs = (fwd_graph, bwd_graph)
+
         class Graphed(torch.autograd.Function):
             @staticmethod
             # pyrefly: ignore [bad-override]
-            def forward(ctx: object, *inputs: Tensor) -> tuple[Tensor, ...]:
+            def forward(
+                ctx: Any, graphs: tuple[CUDAGraph, CUDAGraph], *inputs: Tensor
+            ) -> tuple[Tensor, ...]:
+                fwd_graph, bwd_graph = graphs
+                ctx.bwd_graph = bwd_graph
                 # At this stage, only the user args may (potentially) be new tensors.
                 for i in range(len_user_args):
                     if static_input_surface[i].data_ptr() != inputs[i].data_ptr():
@@ -1636,7 +1649,7 @@ def make_graphed_callables(
             @staticmethod
             @torch.autograd.function.once_differentiable
             # pyrefly: ignore [bad-override]
-            def backward(ctx: object, *grads: Tensor) -> tuple[Tensor, ...]:
+            def backward(ctx: Any, *grads: Tensor) -> tuple[Tensor | None, ...]:
                 if len(grads) != len(static_grad_outputs):
                     raise AssertionError(
                         f"len(grads)={len(grads)} != len(static_grad_outputs)={len(static_grad_outputs)}"
@@ -1647,14 +1660,15 @@ def make_graphed_callables(
                         # incoming grad is already in the right place
                         if g.data_ptr() != grad.data_ptr():
                             g.copy_(grad)
-                bwd_graph.replay()
+                ctx.bwd_graph.replay()
 
                 # Input args that didn't require grad expect a None gradient.
                 if not isinstance(static_grad_inputs, tuple):
                     raise AssertionError(
                         f"static_grad_inputs must be tuple, got {type(static_grad_inputs)}"
                     )
-                return tuple(
+                # Leading None is the gradient for the graphs argument of forward.
+                return (None,) + tuple(
                     # pyrefly: ignore [bad-argument-type]
                     b.detach() if b is not None else b
                     for b in static_grad_inputs
@@ -1665,7 +1679,7 @@ def make_graphed_callables(
             # (explicit user args + module parameters)
             # Assumes module params didn't change since capture.
             flatten_user_args = torch.utils._pytree.arg_tree_leaves(*user_args)
-            out = Graphed.apply(*(tuple(flatten_user_args) + module_params))
+            out = Graphed.apply(graphs, *(tuple(flatten_user_args) + module_params))
             return torch.utils._pytree.tree_unflatten(out, output_unflatten_spec)
 
         return functionalized
@@ -1693,13 +1707,41 @@ def make_graphed_callables(
                 graphed: Callable[_P, _R],
                 orig_fwd: Callable[_P, _R],
             ) -> Callable[_P, _R]:
+                # This closure is installed as func.forward, so closing over func (or over
+                # orig_fwd, which is bound to it) would make the module a reference cycle
+                # and everything it reaches -- including the CUDAGraphs graphed owns --
+                # collectable only by the cyclic GC. That matters because freeing a
+                # CUDAGraph runs cudaGraphDestroy/releasePool, which are illegal while an
+                # unrelated stream is capturing, and the collector picks its own moment.
+                # Hold the module weakly and rebind its original forward per call instead.
+                func_ref = weakref.ref(func)
+                # Exactly one of these ends up in new_fwd's closure. orig_fwd is bound to
+                # func, so keeping it would reinstate the very cycle func_ref avoids;
+                # unbind it and rebind per call. If forward was already an instance
+                # attribute rather than a bound method there is nothing to unbind, and
+                # that (rare) case keeps holding the module.
+                orig_bound_to_func = getattr(orig_fwd, "__self__", None) is func
+                orig_call: Callable[..., _R] = (
+                    orig_fwd.__func__  # type: ignore[attr-defined]
+                    if orig_bound_to_func
+                    else orig_fwd
+                )
+
                 def new_fwd(*user_args: _P.args, **user_kwargs: _P.kwargs) -> _R:
+                    module = func_ref()
+                    if module is None:
+                        raise RuntimeError(
+                            "the graphed module has been freed; its forward cannot be "
+                            "called on its own"
+                        )
                     # If the module's training-or-eval state matches what we graphed,
                     # run the graph, otherwise run the original forward method
-                    if func.training == graph_training_state:
+                    if module.training == graph_training_state:
                         return graphed(*user_args, **user_kwargs)
+                    elif orig_bound_to_func:
+                        return orig_call(module, *user_args, **user_kwargs)
                     else:
-                        return orig_fwd(*user_args, **user_kwargs)
+                        return orig_call(*user_args, **user_kwargs)
 
                 return new_fwd
 
