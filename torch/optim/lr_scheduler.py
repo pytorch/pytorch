@@ -1685,9 +1685,9 @@ class ChainedScheduler(LRScheduler):
 
 
 @deprecated(
-    "`ReduceLROnPlateau` is deprecated. Use `torch.optim.lr_scheduler.PlateauLR` instead. "
-    "The constructor arguments are the same, but call its `step` method with a keyword "
-    "argument: `scheduler.step(metrics=metric)`.",
+    "`ReduceLROnPlateau` is deprecated. Use `torch.optim.lr_scheduler.PlateauLR` "
+    "instead: replace `ReduceLROnPlateau(...)` with `PlateauLR(...)` and call "
+    "`scheduler.step(metrics=metric)`.",
     category=FutureWarning,
 )
 class ReduceLROnPlateau(LRScheduler):
