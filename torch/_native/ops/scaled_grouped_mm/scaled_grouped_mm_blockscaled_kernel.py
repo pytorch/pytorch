@@ -1,4 +1,4 @@
-from inspect import isclass
+from inspect import isclass, signature
 
 import cuda.bindings.driver as cuda
 
@@ -12,6 +12,21 @@ from cutlass.cute.nvgpu import cpasync, tcgen05
 from cutlass.pipeline import pipeline_init_arrive, pipeline_init_wait
 
 from ._clc_scheduler import ClcState, create_clc_pipeline, make_clc_problem_shape
+
+
+# CuTeDSL >= 4.7 added cached_problem_shape_0/1 to the base scheduler; they are
+# unused when use_cached_problem_shapes is False but are positionally required.
+_SCHED_WANTS_CACHED_SHAPES = (
+    "cached_problem_shape_0"
+    in signature(utils.StaticPersistentGroupTileScheduler.__init__).parameters
+)
+_SCHED_NUM_BASE_VALUES = 19 if _SCHED_WANTS_CACHED_SHAPES else 11
+
+
+def _zero_cached_problem_shapes():
+    if not _SCHED_WANTS_CACHED_SHAPES:
+        return []
+    return [tuple(cutlass.Int32(0) for _ in range(4)) for _ in range(2)]
 
 
 class ClcGroupedGemmTileSchedulerHelper(utils.StaticPersistentGroupTileScheduler):
@@ -37,10 +52,11 @@ class ClcGroupedGemmTileSchedulerHelper(utils.StaticPersistentGroupTileScheduler
             utils.create_initial_search_state(),
             group_count,
             problem_shape_mnkl,
+            *_zero_cached_problem_shapes(),
         )
 
     def __new_from_mlir_values__(self, values):
-        if len(values) < 11:
+        if len(values) < _SCHED_NUM_BASE_VALUES:
             raise ValueError("Length of mlir values extracted is incorrect.")
         new_num_persistent_clusters = cutlass.new_from_mlir_values(
             self.num_persistent_clusters, [values[0]]
@@ -58,7 +74,15 @@ class ClcGroupedGemmTileSchedulerHelper(utils.StaticPersistentGroupTileScheduler
         problem_shape_mnkl = cutlass.new_from_mlir_values(
             self.problem_shape_mnkl, [values[10]]
         )
-        params = cutlass.new_from_mlir_values(self.params, values[11:])
+        cached_shapes = []
+        if _SCHED_WANTS_CACHED_SHAPES:
+            cached_shapes = [
+                tuple(cutlass.Int32(v) for v in values[11:15]),
+                tuple(cutlass.Int32(v) for v in values[15:19]),
+            ]
+        params = cutlass.new_from_mlir_values(
+            self.params, values[_SCHED_NUM_BASE_VALUES:]
+        )
 
         return ClcGroupedGemmTileSchedulerHelper(
             params,
@@ -70,6 +94,7 @@ class ClcGroupedGemmTileSchedulerHelper(utils.StaticPersistentGroupTileScheduler
             search_state,
             self.group_count,
             problem_shape_mnkl,
+            *cached_shapes,
         )
 
     def delinearize_z(self, cta_tile_coord, problem_shape_mnkl):

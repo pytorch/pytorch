@@ -4,8 +4,8 @@ from typing import cast, NamedTuple
 
 import torch
 from torch import Tensor
-from torch.nn.functional import ScalingType, SwizzleType
 from torch._native.instrumentation import instrumented_cutedsl_cache
+from torch.nn.functional import ScalingType, SwizzleType
 
 from ._compile_with_safe_names import _compile_with_safe_names
 from .scaled_grouped_mm_prepare_metadata import (
