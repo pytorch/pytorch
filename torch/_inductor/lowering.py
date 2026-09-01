@@ -8213,7 +8213,7 @@ sort_fallback = fallback_handler(aten.sort.stable, add_to_fallback_set=False)
 
 
 @register_lowering(aten.sort.stable, type_promotion_kind=None)
-def sort_stable(x, *, stable=None, dim=-1, descending=False):
+def sort_stable(x, *, stable=None, dim=-1, descending=False, top_k=None):
     if stable is None:
         stable = False
 
@@ -8253,6 +8253,8 @@ def sort_stable(x, *, stable=None, dim=-1, descending=False):
         axis=dim,
         stable=stable,
         descending=descending,
+        top_k=top_k,
+        output_dtypes=((x.dtype, torch.int64) if top_k is not None else None),
     )
     if values is None:
         return sort_fallback(x, stable=stable, dim=dim, descending=descending)
@@ -8426,13 +8428,82 @@ def mode_default(self, dim=-1, keepdim=False):
 
 @register_lowering(aten.topk.default, type_promotion_kind=None)
 def topk(self, k, dim=-1, largest=True, sorted=True):
-    if not config.triton.decompose_sort_ops:
-        return topk_fallback(self, k, dim, largest, sorted)
+    """Lower aten.topk to fusible sort IR when its shape is profitable."""
+
     shape = self.get_size()
     ndim = len(shape)
     if ndim == 0:
         return clone(self), _full(0, self.get_device(), torch.int64, shape)
     dim = canonicalize_dim(ndim, dim)
+
+    # tl.topk computes a partial bitonic selection and remains ordinary loop IR,
+    # allowing input producers to fuse. Keep this eligibility check broader than
+    # the profitability policy so measurements can tune the latter independently.
+    dim_size = shape[dim]
+    device = self.get_device()
+    static_k = int(k) if isinstance(k, (int, sympy.Integer)) else None
+    static_dim_size = (
+        int(dim_size) if isinstance(dim_size, (int, sympy.Integer)) else None
+    )
+    outer_numel = sympy_product(shape[:dim] + shape[dim + 1 :])
+    static_outer_numel = (
+        int(outer_numel) if isinstance(outer_numel, (int, sympy.Integer)) else None
+    )
+
+    def profitable_triton_topk(rows: int, width: int, top_k: int) -> bool:
+        """B200 crossover model for the partial bitonic selection."""
+        rblock = 1 << (width - 1).bit_length()
+        if rows == 0:
+            return False
+        if top_k <= 4:
+            return True
+        if top_k == 8:
+            if rblock <= 16:
+                return True
+            if rblock == 32:
+                return rows >= 32
+            if rblock <= 128:
+                return True
+            # At RBLOCK=256, register pressure loses in the occupancy regime
+            # between a few blocks and full-device saturation.
+            return rows <= 64
+        if top_k == 16:
+            if rblock <= 16:
+                return True
+            # Larger selections need enough rows to amortize launch overhead,
+            # but spill once the input block grows beyond 64 lanes.
+            return rblock <= 64 and rows >= 128
+        return False
+
+    can_use_triton_topk = (
+        config.triton.persistent_reductions
+        and device.type == "cuda"
+        and torch.version.hip is None
+        and torch.cuda.get_device_capability(device) >= (9, 0)
+        and V.graph.has_feature(device, BackendFeature.SORT)
+        and self.dtype in (torch.float16, torch.bfloat16, torch.float32)
+        and dim == ndim - 1
+        and largest
+        and static_k is not None
+        and static_dim_size is not None
+        and static_outer_numel is not None
+        and 2 <= static_k <= 16
+        and static_k & (static_k - 1) == 0
+        and static_k <= static_dim_size <= 256
+        and profitable_triton_topk(static_outer_numel, static_dim_size, static_k)
+    )
+    if can_use_triton_topk:
+        top_values, top_indices = sort_stable(
+            self,
+            stable=False,
+            dim=dim,
+            descending=True,
+            top_k=static_k,
+        )
+        return top_values, top_indices
+
+    if not config.triton.decompose_sort_ops:
+        return topk_fallback(self, k, dim, largest, sorted)
     sorted_vals, sorted_idxs = sort_stable(
         self, stable=True, dim=dim, descending=largest
     )

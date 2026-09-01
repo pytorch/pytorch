@@ -256,6 +256,10 @@ class OpsHandler(Generic[T]):
         """
         raise NotImplementedError
 
+    def set_store_mask(self, value: T, mask: T) -> T:
+        """Attach an additional predicate to the eventual store of ``value``."""
+        raise NotImplementedError
+
     # TODO: Better explain how the "collective" semantics of these ops;
     # remember that the input value is a scalar, you can't reduce on it in the
     # traditional sense!
@@ -306,6 +310,8 @@ class OpsHandler(Generic[T]):
         values: tuple[T, ...],
         stable: bool,
         descending: bool,
+        top_k: int | None = None,
+        output_dtypes: tuple[torch.dtype, ...] | None = None,
     ) -> tuple[T, ...]:
         """
         Sort values along the reduction dimension.
@@ -885,7 +891,9 @@ class NoopHandler(DefaultHandler):
         return (None,) * len(values)
 
     @staticmethod
-    def sort(dtypes, values, stable, descending) -> tuple[None, ...]:
+    def sort(
+        dtypes, values, stable, descending, top_k=None, output_dtypes=None
+    ) -> tuple[None, ...]:
         return (None,) * len(values)
 
     @staticmethod
@@ -999,9 +1007,10 @@ class MockHandler(BasicMathOpsMixin, DefaultHandler):
         )
 
     @staticmethod
-    def sort(dtypes, values, stable, descending):
+    def sort(dtypes, values, stable, descending, top_k=None, output_dtypes=None):
         return tuple(
-            f"ops.sort({dtypes}, {values}, stable={stable}, descending={descending})[{i}]"
+            f"ops.sort({dtypes}, {values}, stable={stable}, descending={descending}, "
+            f"top_k={top_k}, output_dtypes={output_dtypes})[{i}]"
             for i in range(len(values))
         )
 

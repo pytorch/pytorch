@@ -347,6 +347,15 @@ class MixOrderReduction:
             return False
         if not node1.is_reduction() or not node2.is_reduction():
             return False
+        if any(
+            isinstance(subnode.node, ir.ComputedBuffer)
+            and isinstance(subnode.node.data, ir.Sort)
+            and subnode.node.data.top_k is not None
+            for subnode in (*node1.get_nodes(), *node2.get_nodes())
+        ):
+            # Partial sort has a compact output shape but retains the full
+            # reduction range used by tl.topk.
+            return False
         if node1.has_strict_reduction() or node2.has_strict_reduction():
             return False
 

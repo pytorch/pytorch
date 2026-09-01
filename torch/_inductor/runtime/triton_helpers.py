@@ -958,6 +958,61 @@ def sort_with_index(
 
 
 @triton.jit
+def topk_with_index(
+    x,
+    idxs,
+    rnumel,
+    k: tl.constexpr,
+    dim: tl.constexpr = None,
+):
+    """Return the top-k values and distinct source indices in the first k lanes."""
+    x, idxs = tl.broadcast(x, idxs)
+    _dim: tl.constexpr = len(x.shape) - 1 if dim is None else dim
+    tl.static_assert(
+        _dim == len(x.shape) - 1, "only minor dimension is currently supported"
+    )
+
+    if rnumel is None:
+        valid = tl.full(x.shape, True, tl.int1)
+    else:
+        valid = idxs < rnumel
+
+    is_nan = (x != x) & valid
+    ranked_x = tl.where(is_nan, float("inf"), tl.where(valid, x, float("-inf")))
+    top_values = tl.topk(ranked_x, k, dim=_dim)
+
+    lanes = tl.arange(0, x.shape[-1])
+    top_lanes = tl.arange(0, k)
+    used = tl.full(x.shape, False, tl.int1)
+    out_values = tl.full(x.shape, 0.0, x.dtype)
+    out_indices = tl.full(idxs.shape, 0, idxs.dtype)
+
+    # tl.topk currently returns values only. Recover one distinct source index
+    # for each rank; topk does not specify which index wins a tie.
+    for rank in tl.static_range(k):
+        ranked_value = tl.sum(
+            tl.where(top_lanes == rank, top_values, 0.0),
+            axis=_dim,
+            keep_dims=True,
+        )
+        has_nan = tl.sum((is_nan & ~used).to(tl.int32), axis=_dim, keep_dims=True) > 0
+        matches = tl.where(
+            has_nan,
+            is_nan & ~used,
+            valid & (ranked_x == ranked_value) & ~used,
+        )
+        index = tl.argmax(matches.to(tl.int32), axis=_dim, keep_dims=True)
+        selected = lanes == index
+        used |= selected
+        selected_value = select_one(x, selected, dim=_dim, keep_dims=True)
+        selected_index = tl.sum(tl.where(selected, idxs, 0), axis=_dim, keep_dims=True)
+        out_values = tl.where(lanes == rank, selected_value, out_values)
+        out_indices = tl.where(lanes == rank, selected_index, out_indices)
+
+    return out_values, out_indices
+
+
+@triton.jit
 def select_one(x, mask, dim, keep_dims=False):
     idtype = tl.core.get_int_dtype(x.dtype.primitive_bitwidth, signed=False)
     ix = x.to(idtype, bitcast=True)
