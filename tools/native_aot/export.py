@@ -1,55 +1,35 @@
 """AOT-export DSL kernels for native-AOT declarations.
 
-Stage 2 of the two-stage build (build torch -> build the AOT lib): runs
-with the BUILT torch importable, so kernel builder modules are ordinary
-package imports (``torch._native.ops.<op>.<module>``) and may freely
-share code with their JIT wrappers -- the same-kernel property is then
-by construction, not by parallel restatement. Only the aot.py
-DECLARATION modules stay torch-free at module scope (torchgen loads
-those during stage 1, before torch exists).
+Stage 2 of the two-stage build, with the built torch importable, so kernel builder
+modules are ordinary package imports (``torch._native.ops.<op>.<module>``) and share
+code with their JIT wrappers. Only the aot.py DECLARATION modules stay torch-free at
+module scope, since torchgen loads those during stage 1.
 
-For each ``torch/_native/ops/<op>/aot.py``, expands the spec grid (list
-fields cross-multiply) and for every grid point runs the toolchain's
-compile + export into ``<out-dir>/<arch>/<op>/`` -- one tree per arch,
-whatever the arch count -- writing:
+For each ``torch/_native/ops/<op>/aot.py`` this expands the spec grid (list fields
+cross-multiply) and, per grid point, runs the toolchain's compile and export into
+``<out-dir>/<arch>/<op>/`` -- one tree per arch, whatever the arch count -- writing:
 
     <prefix>.h / <prefix>.o    C-ABI header + kernel object
     <prefix>.json              marshalling sidecar {spec, arch, tensor_args}
 
-Prefixes carry their arch (``topk_..._det__sm100a``): every exported C
-symbol derives from the prefix, so two arches sharing one would be
-duplicate definitions once both link into libtorch_cuda.
+Prefixes carry their arch (``topk_..._det__sm100a``): every exported C symbol derives
+from the prefix, so two arches sharing one would collide in libtorch_cuda.
 
-The builder module must expose ``build(spec)`` returning a dict whose
-``kind`` selects the toolchain; see tools/native_aot/toolchains.py for
-the per-toolchain contracts (required keys, emitted artifacts). Builder
-results are validated up front so a malformed one fails with a message
-naming the missing keys.
+The builder module exposes ``build(spec)`` returning a dict whose ``kind`` selects
+the toolchain; tools/native_aot/toolchains.py holds the per-kind contracts. Existing
+artifacts are skipped unless --force.
 
-Idempotent: existing artifacts are skipped unless --force.
+Spec points compile on a forkserver pool, one job per (point, arch), so results do
+not depend on --jobs, which follows the torch build's parallelism (MAX_JOBS, then
+CMAKE_BUILD_PARALLEL_LEVEL, then half the CPU count). Plain fork is unusable: the
+parent may have initialized CUDA, and forked workers inherit a dead context silently.
 
-Spec points compile on a forkserver process pool. Each point is
-independent, so results do not depend on --jobs. --jobs follows the
-torch build's parallelism (MAX_JOBS, then CMAKE_BUILD_PARALLEL_LEVEL,
-then half the CPU count); --jobs 1 forces serial. Plain fork is
-unusable: the parent has initialized CUDA and forked workers inherit a
-dead context, silently -- they report is_initialized() False and cannot
-allocate. forkserver forks from a pre-CUDA server process instead, and
-pays the torch import once there rather than per worker. Only torch is
-preloaded; cutlass or triton would build state in that fork parent.
+With --arch (one or more sm strings) export never touches the CUDA driver, so kernels
+build on GPU-less machines, and the arch is per-compile rather than per-process --
+CuTeDSL takes --gpu-arch, which outranks CUTE_DSL_ARCH. CuTeDSL needs one warmup
+compile per process for that; see tools/native_aot/cutedsl_warmup.py.
 
-With --arch (one or more sm strings) export never touches the CUDA
-driver, so kernels build on GPU-less machines. The arch is per-COMPILE
-state: CuTeDSL takes a --gpu-arch option, which outranks CUTE_DSL_ARCH
-(base_dsl/dsl.py prefers compile_options.gpu_arch over envar.arch), and
-Triton gets a fixed-target driver per export. So a single pool serves
-every (point, arch) job. Every arch nests under <out-dir>/<arch>/ to
-keep each tree independently linkable.
-CuTeDSL needs one warmup compile per process for this to work; see
-tools/native_aot/cutedsl_warmup.py.
-
-Usage (from the repo root, venv with torch built and the DSL wheel
-active):
+Usage (from the repo root, in a venv with torch built and the DSL wheel active):
     python tools/native_aot/export.py [--out-dir build/native_aot]
                                         [--ops topk] [--force] [--jobs 8]
                                         [--arch sm_90a sm_100a]
@@ -65,21 +45,16 @@ import sys
 REPO = os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 )
-# Run as a script (`python tools/native_aot/export.py`), sys.path[0] is this
-# directory, so `tools.native_aot` is importable only when the cwd happens to
-# be the repo root. Put the root on the path explicitly instead of loading
-# siblings by file path, which also keeps the imports legible to type checkers.
+# Run as a script, sys.path[0] is this directory, so `tools.native_aot` imports only
+# when the cwd is the repo root; put the root on the path instead.
 #
-# APPEND, never insert(0): stage 2 runs against the INSTALLED wheel, and the
-# repo root contains a torch/ source tree with no compiled extension. Ahead of
-# site-packages it shadows the real torch, so every worker's `import torch`
-# dies with "loaded the torch/_C folder of the PyTorch repository". Invisible
-# in a `pip install -e .` checkout, where that tree IS the installed torch.
+# APPEND, never insert(0): stage 2 runs against the INSTALLED wheel, and the repo root
+# holds a torch/ source tree with no compiled extension. Ahead of site-packages it
+# shadows the real torch and every worker's `import torch` fails.
 sys.path.append(REPO)
 
-# torchgen is pure Python and imports with no built torch, which this
-# module scope requires: stage-1 codegen and the linter image that runs
-# the tools tests both lack torch.
+# torchgen is pure Python and imports without a built torch, which this module scope
+# needs: stage-1 codegen and the linter image that runs the tools tests both lack it.
 from tools.native_aot import toolchains
 
 from torchgen import native_aot_decl as decl
@@ -88,29 +63,26 @@ from torchgen.native_aot_spec_grid import expand_specs
 
 OPS_DIR = os.path.join(REPO, "torch", "_native", "ops")
 
-# Sidecar schema version. Bump on any change to the sidecar layout or
-# to the launcher-generation contract that reads it; gen_aot_lib refuses
-# mismatched sidecars (re-export rather than debugging a garbled .cpp).
+# Bump on any change to the sidecar layout or to the launcher-generation contract
+# that reads it; gen_aot_lib refuses mismatched sidecars.
 SIDECAR_VERSION = 1
 
-# Pool start method: forkserver, never "fork" (the parent has initialized
-# CUDA, and forked workers inherit a dead context that fails silently).
-# forkserver forks from a pre-CUDA server process, so it is as safe as
-# spawn while paying the torch import once instead of per worker.
-# TODO(native-aot): forkserver does not exist on Windows. Nothing calls
-# this from the build there yet (stage 2 targets libtorch_cuda.so only),
-# so fall back to "spawn" when Windows CUDA builds start exporting.
+# forkserver, never "fork": a fork parent that has initialized CUDA gives workers a
+# dead context, silently. forkserver is as safe as spawn and pays the torch import
+# once rather than per worker.
+# TODO(native-aot): forkserver does not exist on Windows; fall back to "spawn" when
+# Windows CUDA builds start exporting.
 POOL_START_METHOD = "forkserver"
 
-# Preloaded in the forkserver's server process, so every worker inherits
-# it already imported. Only modules that are safe in a fork PARENT belong
-# here: importing torch neither initializes CUDA nor builds any DSL state.
+# Preloaded in the forkserver's server process, so workers inherit it imported. Only
+# modules safe in a fork PARENT belong here: importing torch neither initializes CUDA
+# nor builds DSL state.
 POOL_PRELOAD = ("torch",)
 
 
 def load_builder(op: str, kernel_module: str):
-    # Package import (not file-path load): builders may use relative
-    # imports and torch machinery -- stage 2 runs against built torch.
+    # A package import, not a file-path load: builders may use relative imports and
+    # torch machinery.
     name = f"torch._native.ops.{op}.{kernel_module.removesuffix('.py')}"
     return importlib.import_module(name).build
 
@@ -125,42 +97,34 @@ def _file_hash(path: str) -> str:
         return hashlib.sha256(f.read()).hexdigest()[:16]
 
 
-# Loaded modules whose CONTENTS decide what an exported artifact means, and which
-# the tools/*.py glob below cannot see: torch._native holds the builders,
-# torchgen.native_aot the declaration machinery they are validated against, and
-# torch._vendor the vendored DSL packages -- kernel bodies included. Editing any of
-# them changes what a re-export would produce, so their hashes belong in the closure.
+# Loaded modules whose contents decide what an artifact means, and which the
+# tools/*.py glob below cannot see: torch._native holds the builders,
+# torchgen.native_aot the declaration machinery, torch._vendor the vendored DSL
+# packages and their kernel bodies.
 _CLOSURE_PREFIXES = ("torch._native", "torch._vendor", "torchgen.native_aot")
 
-# Tool sources that cannot change what an artifact MEANS, so hashing them would
-# re-export every kernel for an edit that could not have changed one:
-# gen_aot_lib.py only consumes sidecars, and build_stage2.py only decides whether
-# stage 2 runs -- it passes no kernel-affecting option, the arch list being read
-# here (see main()).
+# Tool sources that cannot change what an artifact means, so hashing them would
+# re-export every kernel for nothing: gen_aot_lib.py only consumes sidecars, and
+# build_stage2.py passes no kernel-affecting option.
 _CLOSURE_EXCLUDED = frozenset({"gen_aot_lib.py", "build_stage2.py"})
 
 
 def source_closure(decl_path: str | None = None) -> dict[str, str]:
-    """{repo-relative path: content hash} for every loaded source file
-    that can change what an artifact MEANS: the builder's import closure,
-    the shared declaration machinery (_CLOSURE_PREFIXES), this tool's own
-    sources (a launcher-template edit in toolchains.py counts), and the
-    op's own aot.py.
+    """{repo-relative path: content hash} for every loaded source that can change
+    what an artifact means: the builder's import closure, the declaration machinery
+    (_CLOSURE_PREFIXES), this tool's own sources, and the op's aot.py.
 
-    Recorded per sidecar; gen_aot_lib re-hashes from disk and refuses to
-    pair edited sources with stale artifacts. Deliberately
-    over-approximates -- staleness must err toward re-export.
+    Recorded per sidecar; gen_aot_lib re-hashes from disk and refuses to pair edited
+    sources with stale artifacts, so this over-approximates on purpose.
 
-    Only IMPORTED modules appear in sys.modules, which is why the tools/
-    sources are globbed from disk instead -- and why decl_path is passed
-    explicitly: declarations are loaded by file path and never enter
-    sys.modules, so KERNEL_MODULE or kernel_precompile_grid() edits would
-    otherwise reuse artifacts built from the old grid."""
+    Only imported modules appear in sys.modules, hence the glob for tools/ sources
+    and the explicit decl_path: declarations load by file path and never enter
+    sys.modules, so a KERNEL_MODULE or grid edit would otherwise go unnoticed."""
     import glob
 
     out = {}
-    # Snapshot: hashing can trigger imports, and mutating sys.modules
-    # mid-iteration raises "dictionary changed size during iteration".
+    # A snapshot, because hashing can trigger imports and mutating sys.modules
+    # mid-iteration raises.
     for name, mod in list(sys.modules.items()):
         if not name.startswith(_CLOSURE_PREFIXES):
             continue
@@ -177,10 +141,9 @@ def source_closure(decl_path: str | None = None) -> dict[str, str]:
 
 
 def _json_normal(value):
-    """The spec as a sidecar reads it back: tuples become lists, since
-    JSON has no tuple type. Skip detection compares a live grid point
-    against a recorded spec, so a tuple-valued field must be converted
-    or it never matches its own sidecar and re-exports on every run."""
+    """The spec as a sidecar reads it back: tuples become lists, JSON having no tuple
+    type. Skip detection compares a live grid point against a recorded spec, so
+    without this a tuple-valued field never matches and re-exports every run."""
     if isinstance(value, (tuple, list)):
         return [_json_normal(v) for v in value]
     if isinstance(value, dict):
@@ -191,10 +154,9 @@ def _json_normal(value):
 def _detected_arch() -> str | None:
     """The local device as an sm string ("sm_100"), or None without CUDA.
 
-    Without this in the sidecar an on-device export's artifacts carry no arch
-    identity, and the generated gate falls back to the declaration's ARCHS --
-    advertising hardware nothing was compiled for (a B200 build offering major 9
-    because ARCHS lists sm_90). Recorded without the "a" suffix: the gate compares
+    Recorded in the sidecar so an on-device export's artifacts carry an arch identity;
+    without one the generated gate would fall back to the declaration's ARCHS and
+    advertise hardware nothing was compiled for. No "a" suffix: the gate compares
     major.minor, which both spellings share."""
     try:
         import torch
@@ -208,10 +170,8 @@ def _detected_arch() -> str | None:
 
 
 def _arch_tag(arch: str) -> str:
-    """Arch as an artifact-name tag: "sm_100a" -> "sm100a".
-
-    Short because it lands in every exported C symbol, and those are already
-    long (cute_dsl_<prefix>_wrapper over a spec-derived prefix)."""
+    """Arch as an artifact-name tag: "sm_100a" -> "sm100a". Short because it lands in
+    every exported C symbol, and those are already long."""
     return arch.replace("_", "", 1)
 
 
@@ -220,27 +180,18 @@ def _effective_arch(arch: str | None) -> str | None:
     given, else whatever a toolchain's own env var selects
     (Toolchain.ARCH_ENV_VAR, e.g. CUTE_DSL_ARCH), else the local device.
 
-    ONE resolver for both the sidecar and the directory name, so a tree can never
-    disagree with its own sidecars -- the runtime gate comes from the sidecar, and
-    a directory saying otherwise would make the layout lie.
+    One resolver for both the sidecar and the directory name, so a tree cannot
+    disagree with its own sidecars -- the runtime gate comes from the sidecar, and a
+    directory saying otherwise would make the layout lie. The skip check recomputes
+    it, so two runs differing only in the environment are told apart.
 
-    Recorded and recomputed by the skip check, so two runs differing only in that
-    variable are told apart; comparing the raw --arch value left both at None and
-    the second skipped every point.
-
-    Takes no toolchain, and that is the invariant rather than an omission: once a
-    kind's arch variable is refused rather than honoured, resolution is --arch or
-    the device, neither of which varies by kind. A resolver that consulted one
-    could answer differently for two kinds in a single export, which is exactly how
-    a tree came to disagree with its own sidecars."""
+    Takes no toolchain by design: with a kind's arch variable refused rather than
+    honoured, resolution is --arch or the device, neither of which varies by kind."""
     if arch:
         return arch
-    # An arch variable with no --arch is REFUSED, not honoured: it is per-kind, so
-    # it answers only for kinds that declare one. With CUTE_DSL_ARCH=sm_90a set, a
-    # tree named sm_90a held a sidecar recording the DETECTED sm_100 for a kind
-    # with no variable -- and generation filters by directory while the shipped
-    # gate comes from the sidecar. Refusing leaves one arch=None path that every
-    # kind answers identically.
+    # A toolchain's arch variable without --arch is refused rather than honoured: it
+    # is per-kind, so it answers only for kinds that declare one, while the tree it
+    # would name holds every kind's artifacts.
     named = {
         k.ARCH_ENV_VAR: os.getenv(k.ARCH_ENV_VAR)
         for k in toolchains.TOOLCHAINS.values()
@@ -270,20 +221,16 @@ def _claimed_spelling(arch: str, claimed: tuple[str, ...]) -> str | None:
 def export_point(
     op_pkg: str, kernel_module: str, point: dict, out_dir: str, arch: str | None = None
 ) -> str:
-    """Compile + export ONE spec point and write its sidecar. Self-
-    contained (module-level function, picklable args) so it runs
-    identically inline and as a pool job. ``arch`` is an explicit sm
-    string, passed through to the toolchain (CuTeDSL takes it as
-    --gpu-arch, Triton as a fixed GPUTarget); no process-global state, so
-    one process may serve any mix of arches.
+    """Compile and export one spec point, and write its sidecar.
 
-    A missing DSL runtime is FATAL here, not a skip: a declaration that
-    reaches this point targets this build's backend (build_stage2 filtered
-    on Toolchain.BACKENDS), so its kernels were asked for, and exporting
-    only some of them would ship a wheel that silently underperforms.
-    Build without the DSL wheels via TORCH_NATIVE_AOT=0 instead. The
-    ImportError arm exists because a builder cannot be asked its kind
-    without importing its runtime -- build() constructs the kernel."""
+    Module-level with picklable arguments, so it runs identically inline and as a pool
+    job, and holds no process-global state, so one process serves any mix of arches.
+
+    A missing DSL runtime is fatal here rather than a skip: a declaration reaching
+    this point targets this build's backend, so its kernels were asked for, and
+    exporting only some of them ships a wheel that silently underperforms. Use
+    TORCH_NATIVE_AOT=0 to build without them. The ImportError arm exists because a
+    builder cannot be asked its kind without importing its runtime."""
     try:
         build = load_builder(op_pkg, kernel_module)
         b = build(point)
@@ -331,17 +278,13 @@ def export_point(
 
 
 def _collect_jobs(ops_filter, out_root: str, archs):
-    """(op_pkg, kernel_module, point, out_dir, arch) per spec point per
-    arch across every declaration; grids expand here (cheap,
-    torch-light), skip detection is _job_needed's sidecar scan.
+    """(op_pkg, kernel_module, point, out_dir, arch) per spec point per arch across
+    every declaration. Grids expand here, which is cheap and torch-light; skip
+    detection is _job_needed's sidecar scan.
 
-    ONE layout whatever the arch count: <out-root>/<arch>/<decl_id>/, so adding
-    an arch is another directory rather than a different shape. A per-count layout
-    left the other shape's tree behind when a build switched between one arch and
-    several, and the same arch then appeared twice for one declaration
-    (gen_aot_lib's duplicate-prefix check stays as a backstop).
-
-    The generated .cpp sits at <out-root>/<decl_id>/, covering all of them."""
+    One layout whatever the arch count, <out-root>/<arch>/<decl_id>/, so adding an
+    arch is another directory rather than a different shape. The generated .cpp sits
+    at <out-root>/<decl_id>/, covering all of them."""
     jobs = []
     # Declarations that matched NO requested arch, reported at the end: an ARCHS
     # of only conditional spellings ships nothing for a release list of plain ones,
@@ -369,21 +312,18 @@ def _collect_jobs(ops_filter, out_root: str, archs):
                         "(e.g. --arch sm_100a), which also lets export run on "
                         "a machine without a GPU."
                     )
-                # TWO paths, because this name is also what generation filters
-                # trees by (--archs, from the same list stage 2 passed here):
+                # Two paths, because this name is also what generation filters trees
+                # by (--archs, from the same list stage 2 passed here):
                 #
                 #   * an EXPLICIT arch is used verbatim, and a declaration not
-                #     claiming it is skipped. Resolving it to another spelling
-                #     named the tree something generation was never told about, so
-                #     it embedded nothing -- silently, since no sources reads as
-                #     "no declaration ships kernels". Every plain spelling in a
-                #     release arch list hit this.
+                #     claiming it is skipped. Resolving it to another spelling would
+                #     name the tree something generation was never told about, and
+                #     nothing would be embedded.
                 #   * an ON-DEVICE arch adopts the spelling the declaration claims
-                #     for the detected capability, as the generator's tie-break
-                #     does. It passes no --archs, so it cannot desynchronize, and
-                #     it is the path that needed resolving: the device reports the
-                #     plain spelling, so a declaration pinning ('sm_100a',) got a
-                #     tree it disowned.
+                #     for the detected capability, matching the generator's
+                #     tie-break. It passes no --archs, so it cannot desynchronize,
+                #     and it needs resolving because the device reports the plain
+                #     spelling while a declaration may pin the conditional one.
                 if arch is not None:
                     # main() has already refused an --arch outside KNOWN_ARCHES, so
                     # the string comparison below is against a spelling that parses.
@@ -438,10 +378,9 @@ def _collect_jobs(ops_filter, out_root: str, archs):
     return jobs
 
 
-# Every "this tree is inconsistent" error ends the same way. `spin clean`
-# does clear the default --out-dir (build/ sits above .gitignore's
-# NOT-CLEAN-FILES marker), but it takes the whole build tree with it, so
-# name the surgical command first.
+# Every "this tree is inconsistent" error ends the same way. `spin clean` clears the
+# default --out-dir too, but takes the whole build tree with it, so name the surgical
+# command first.
 _CLEAN_HINT = (
     "run `rm -rf {d}` and re-export (`spin clean` also clears it, "
     "along with the rest of the build tree)"
@@ -451,12 +390,10 @@ _CLEAN_HINT = (
 def _read_sidecar(path: str) -> dict:
     """A sidecar's JSON. Unreadable sidecars are fatal.
 
-    The sidecar is written LAST, so its presence marks a completed
-    export. One that exists but will not parse means the tree is
-    corrupted and the .o/.h beside it are of unknown provenance.
-    Re-exporting would just make the directory look consistent again.
-    Reached even under --force, via the orphan scan in _collect_jobs, so
-    gen_aot_lib never links artifacts nothing validated.
+    The sidecar is written last, so its presence marks a completed export; one that
+    exists but will not parse means the .o/.h beside it are of unknown provenance.
+    Reached even under --force, via the orphan scan, so generation never links
+    artifacts nothing validated.
     """
     try:
         with open(path) as f:
@@ -472,11 +409,11 @@ def _read_sidecar(path: str) -> dict:
 def _invalidate_generation(out_dir: str) -> None:
     """Drop the previous generation, so the tree reads as not-generated-yet.
 
-    OVERWRITTEN with the nothing-to-embed include rather than deleted: CMake keeps
-    a configure dependency on an include()d file only if it existed at configure
-    time, so unlinking it left a later generation invisible to `cmake --build` --
-    which then relinked without the kernels and said nothing, however often the
-    tree was regenerated. See gen_aot_lib.write_nothing_to_embed."""
+    Overwritten with the nothing-to-embed include rather than deleted: CMake keeps a
+    configure dependency on an include()d file only if it existed at configure time,
+    so unlinking it makes a later generation invisible to a plain `cmake --build`,
+    which relinks without the kernels and reports success. See
+    gen_aot_lib.write_nothing_to_embed."""
     from tools.native_aot.gen_aot_lib import CMAKE_INCLUDE, write_nothing_to_embed
 
     stale = os.path.join(out_dir, CMAKE_INCLUDE)
@@ -488,28 +425,18 @@ def _invalidate_generation(out_dir: str) -> None:
 def _check_no_orphan_artifacts(out_dir: str, specs) -> None:
     """Report or refuse kernel artifacts no current grid point claims.
 
-    Two ways that happens, and they differ in how recoverable they are.
+    Artifacts NO SIDECAR CLAIMS are reported, not fatal: they come from an export
+    interrupted between writing them and writing its sidecar, nothing links an
+    artifact no sidecar names, and re-exporting that point overwrites it. Reported
+    whether or not another point in the directory committed, so the first export of a
+    tree is not a special case.
 
-    Artifacts NO SIDECAR CLAIMS, beside points that did commit: an export that
-    died between writing them and writing its sidecar (a Ctrl-C, an OOM-killed
-    worker, a compile failure -- the DSL writes the .h before the .o, so even the
-    last of those strands one). REPORTED, not fatal: nothing links an artifact no
-    sidecar names, so the cost is disk, and a re-export of that point overwrites
-    it. As a refusal it turned every transient failure in a 48-point grid into a
-    hand-delete of the directory, which --force could not clear either -- this scan
-    runs before that flag is read.
+    Artifacts whose sidecar records a spec no longer in the grid are fatal: dropping a
+    point from kernel_precompile_grid() generates no job for it and nothing prunes it,
+    while the sidecar still makes it look exported.
 
-    Reported whether or not anything else in the directory committed: keying it on
-    "did some point commit" left the FIRST export of a tree fatal, which is the
-    shape every interrupted new arch has, and diagnosed it as a partial copy.
-
-    Artifacts whose sidecar records a spec no longer in the grid: dropping a point
-    from kernel_precompile_grid() generates no job for it and nothing prunes it.
-    Fatal, because the sidecar makes it look exported.
-
-    An EMPTY directory is fine (clean build, or a new spec point).
-
-    ``specs`` is the expanded grid for this (declaration, arch).
+    An empty directory is fine. ``specs`` is the expanded grid for this
+    (declaration, arch).
     """
     exts = toolchains.all_artifact_exts()
     names = os.listdir(out_dir)
@@ -557,8 +484,8 @@ def runtime_versions(kind: str) -> dict[str, str]:
     """{distribution: version} for the runtimes that COMPILE this kind.
 
     Metadata only, no import of the DSL itself. An uninstalled distribution is
-    recorded as absent rather than omitted, so "compiled where the wheel was
-    missing" differs from "compiled before this was recorded"."""
+    recorded as absent rather than omitted, so a sidecar compiled without the wheel is
+    distinguishable from one predating this record."""
     import importlib.metadata as md
 
     out = {}
@@ -575,16 +502,14 @@ def runtimes_current(sidecar: dict) -> bool:
 
     The compiler is not in the source closure -- no file on disk changes when the
     wheel is upgraded -- so without this an upgrade re-exports nothing and the tree
-    mixes artifacts from two compilers while the build reports one. A sidecar
-    predating this record counts as stale.
+    mixes artifacts from two compilers. A sidecar predating this record counts stale.
 
-    Ignorance is not staleness: with none of the kind's distributions installed
-    this returns True, which is the generation-only run on a machine without the
-    DSL wheels, where re-exporting is impossible anyway."""
-    # sidecar["kind"], not a default: both callers reach here past a schema check
-    # that proves the field (export._job_needed's guard, gen_aot_lib's sidecar
-    # validation), and guessing would judge one toolchain's artifact by another's
-    # compiler versions.
+    Ignorance is not staleness: with none of the kind's distributions installed this
+    returns True, which is the generation-only run on a machine without the DSL
+    wheels, where re-exporting is impossible anyway."""
+    # sidecar["kind"] rather than a default: both callers reach here past a schema
+    # check that proves the field, and guessing would judge one toolchain's artifact
+    # by another's compiler versions.
     tc = toolchains.get_toolchain(sidecar["kind"])
     current = runtime_versions(tc.kind)
     # all() over an empty dict is True, so a kind with no RUNTIME_DISTS takes
@@ -611,16 +536,14 @@ def sources_current(sidecar: dict) -> bool:
 
 
 def _job_needed(job, force: bool) -> bool:
-    """Cheap skip check without compiling: skip only when the sidecar's spec, its
-    arch and every file in its source closure all still match, so an edited kernel
-    module re-exports without --force.
+    """Cheap skip check without compiling: skip only when the sidecar's spec, its arch
+    and every file in its source closure still match, so an edited kernel module
+    re-exports without --force.
 
-    Per-arch directories stop two arches colliding in one tree, so the arch
-    comparison guards the cases where the RECORDED arch differs from what this run
-    resolves to: artifacts predating arch identity, and a tree carried between
-    machines. Both must re-export, since the recorded arch is what the runtime gate
-    is built from. Compared through _effective_arch, so the recorded value and this
-    run's are resolved the same way -- --arch, else the local device."""
+    The arch comparison covers a recorded arch differing from what this run resolves
+    to -- artifacts predating arch identity, or a tree carried between machines. Both
+    must re-export, since the recorded arch is what the runtime gate is built from.
+    Compared through _effective_arch, so both sides resolve the same way."""
     if force:
         return True
     _, _, point, out_dir, arch = job
@@ -629,9 +552,9 @@ def _job_needed(job, force: bool) -> bool:
         if not fn.endswith(".json"):
             continue
         sc = _read_sidecar(os.path.join(out_dir, fn))
-        # SCHEMA FIRST: every field below is read by name. A version dropping or
-        # renaming "kind" used to raise a bare KeyError naming no file and no
-        # remedy, where the version field exists so the point re-exports.
+        # Schema first, because every field below is read by name: a sidecar written
+        # by another version re-exports here rather than raising a KeyError that names
+        # neither the file nor a remedy.
         if sc.get("version") != SIDECAR_VERSION or "kind" not in sc:
             return True
         tc = toolchains.get_toolchain(sc["kind"])
@@ -656,20 +579,17 @@ def _run_job(job) -> str:
 
 
 def archs_from_cuda_arch_list(arch_list: str) -> list[str]:
-    """TORCH_CUDA_ARCH_LIST -> the sm strings from it that are
-    EXPORTABLE_ARCHES, order-preserving and deduplicated.
+    """TORCH_CUDA_ARCH_LIST -> the sm strings in it that are EXPORTABLE_ARCHES,
+    order-preserving and deduplicated. "9.0a;10.0a" (or space-separated) ->
+    ["sm_90a", "sm_100a"].
 
-    "9.0a;10.0a" (or space-separated) -> ["sm_100a"]. A +PTX suffix is stripped;
-    named entries ("Hopper") are not translated, and CI passes numeric lists.
-    Dedup matters because "10.0;10.0+PTX" names one arch twice, which would read
-    as multi-arch downstream.
+    A +PTX suffix is stripped and named entries ("Hopper") are not translated; CI
+    passes numeric lists. Deduplicated because "10.0;10.0+PTX" names one arch twice,
+    which would read as multi-arch downstream.
 
-    ONE arch per compute capability, preferring the arch-conditional spelling:
-    "10.0;10.0a" is one piece of hardware, and exporting both builds two full sets
-    of which generation uses one (_by_arch prefers the conditional, what the
-    kernels were written against). The loser is more than wasted compile time --
-    it used to ship inside libtorch_cuda with no launcher (54 objects / 3.5 MiB
-    measured). CUDA 13.x manywheel lists reach here, so this is the common case."""
+    One arch per compute capability, preferring the arch-conditional spelling:
+    "10.0;10.0a" is one piece of hardware, and exporting both would build two full
+    sets of kernels for it, of which generation links one."""
     out = []
     for entry in arch_list.replace(";", " ").split():
         major, _, minor = entry.removesuffix("+PTX").partition(".")
@@ -723,14 +643,11 @@ def main(argv: list[str] | None = None) -> None:
         "explicit GPUTarget). Default: detect from the local device.",
     )
     args = parser.parse_args(argv)
-    # An explicit --arch is checked HERE, before anything reads the disk. The same
-    # check used to sit three loops deep (inside the per-declaration, per-arch walk),
-    # where a tree with no declaration never reached it: `--arch sm100a` then matched
-    # nothing and exited 0, the typo-that-looks-like-success this refuses.
+    # Checked before anything reads the disk, so a typo (`--arch sm100a`) is refused
+    # rather than matching no declaration and exiting 0.
     #
-    # TORCH_CUDA_ARCH_LIST is FILTERED a few lines below rather than refused, because
-    # a release list names arches AOT does not ship (7.5, 8.6) and must not fail the
-    # build for naming them.
+    # TORCH_CUDA_ARCH_LIST is filtered below rather than refused: a release list names
+    # arches AOT does not ship (7.5, 8.6) and must not fail the build for it.
     for named_arch in args.arch or ():
         if named_arch not in decl.KNOWN_ARCHES:
             raise RuntimeError(
@@ -769,15 +686,12 @@ def main(argv: list[str] | None = None) -> None:
     if len(todo) < len(jobs):
         print(f"{len(jobs) - len(todo)} points already exported, skipped")
     if todo:
-        # INVALIDATE the previous generation before touching a single artifact, the
-        # same rule gen_aot_lib.main() follows and for the same reason -- except the
-        # window here is wider. The artifacts are DIRECT link inputs in build.ninja
-        # while generation is not a build step, so an export that is interrupted (a
-        # Ctrl-C among a hundred compiles, an OOM-killed worker, one op failing) and
-        # then an ordinary `cmake --build` relinks a library mixing objects from two
-        # source revisions, described by launchers generated for the older ones.
-        # Removing it makes that state read as "not generated yet" instead. Stage 2
-        # and the by-hand flow are unaffected: generation rewrites it.
+        # Invalidate the previous generation before touching any artifact. Artifacts
+        # are direct link inputs in build.ninja while generation is not a build step,
+        # so an interrupted export followed by a plain `cmake --build` would relink a
+        # library mixing objects from two revisions, described by launchers generated
+        # for the older ones. Stage 2 and the by-hand flow are unaffected: generation
+        # rewrites it.
         _invalidate_generation(args.out_dir)
 
     total = 0
