@@ -155,8 +155,10 @@ class AOTInductorModelContainer {
   }
 
   // Construct with externally-provided weights (e.g. from CUDA IPC).
-  // Skips load_constants entirely — no GPU allocation for weights.
-  // The caller retains ownership of the provided tensor handles.
+  // Skips load_constants entirely — no GPU allocation for weights. The caller
+  // retains ownership of the provided handles, while the container owns shallow
+  // handles to the same tensor storage until they are replaced or the container
+  // is deleted.
   AOTInductorModelContainer(
       size_t num_models,
       const std::string& device_str,
@@ -612,10 +614,13 @@ class AOTInductorModelContainer {
 
   // This function updates the buffer for storing constants.
   // It will update the buffer, the mapping and the array mapping.
-  // When allow_h2d_copy is true, CPU input tensors are silently copied to the
+  // With user_managed, the caller retains the incoming handles and the
+  // container owns shallow handles to the same tensor storage without copying
+  // its data. The container releases a retained handle when its entry is
+  // replaced or the container is deleted. When
+  // allow_h2d_copy is true, CPU input tensors are silently copied to the
   // model's device (via the same memcpy path used for same-device copies).
-  // Note: allow_h2d_copy is incompatible with user_managed, since user_managed
-  // mode stores the tensor pointer directly rather than copying.
+  // Note: allow_h2d_copy is incompatible with user_managed.
   void update_constant_buffer(
       const std::unordered_map<std::string, AtenTensorHandle>& constants_map,
       bool use_inactive,
@@ -718,11 +723,13 @@ class AOTInductorModelContainer {
       }
 
       if (user_managed) {
-        // If user managed, we pass in the pointer directly, and skip the
-        // copy.
+        // Retain the tensor without copying its data. The caller owns the
+        // incoming handle; the constant map owns this shallow handle copy.
+        AtenTensorHandle retained_handle = nullptr;
+        AOTI_TORCH_ERROR_CODE_CHECK(
+            aoti_torch_new_tensor_handle(tensor, &retained_handle));
         target.map->insert_or_assign(
-            constant_name,
-            MaybeOwningAtenTensorHandle(tensor, /* user_managed = */ true));
+            constant_name, RAIIAtenTensorHandle(retained_handle));
         continue;
       }
 
