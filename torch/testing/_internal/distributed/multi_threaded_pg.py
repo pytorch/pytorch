@@ -54,17 +54,22 @@ def ret_work(ret):
 # thread-local, so whenever a rank issues a collective from a side stream (FSDP2
 # does this for all-gather/reduce-scatter), rank 0's copies are unordered w.r.t.
 # that rank's producing and consuming kernels. Events restore the ordering that
-# a real backend would provide.
-def _record_current_stream_events(data):
-    """Record an event on the current stream of every accelerator device in ``data``."""
+# a real backend would provide. Rank 0 records no input event of its own: its
+# copies already run on the stream that produced its data.
+def _accelerator_devices(data):
+    """Devices of the accelerator tensors in ``data``."""
     accelerator = torch.accelerator.current_accelerator()
     if accelerator is None:
-        return ()
-    devices = {
+        return set()
+    return {
         t.device
         for t in flatten_list(data)
         if isinstance(t, torch.Tensor) and t.device.type == accelerator.type
     }
+
+
+def _record_current_stream_events(devices):
+    """Record an event on the current stream of every device in ``devices``."""
     events = []
     for device in devices:
         event = torch.Event(device.type)
@@ -366,16 +371,21 @@ class Collective:
         self._done = False
 
         # See Note [Threaded PG cross-stream synchronization]
-        self._input_events = [()] * world_size
-        self._work_events = ()
+        self._devices = [set() for _ in range(world_size)]
+        self._input_events = [[] for _ in range(world_size)]
+        self._work_events = []
 
         self._pg = pg
 
     def join(self, rank, data):
         with self._start_cond:
             self._data[rank] = data
+            # See Note [Threaded PG cross-stream synchronization]
+            self._devices[rank] = _accelerator_devices(data)
             if rank > 0:
-                self._input_events[rank] = _record_current_stream_events(data)
+                self._input_events[rank] = _record_current_stream_events(
+                    self._devices[rank]
+                )
             self._count += 1
 
             # notify rank 0
@@ -408,7 +418,9 @@ class Collective:
                 for events in self._input_events:
                     _wait_current_stream_events(events)
                 self._collective.work(self._data)
-                self._work_events = _record_current_stream_events(self._data)
+                self._work_events = _record_current_stream_events(
+                    set().union(*self._devices)
+                )
                 self._done = True
                 self._done_cond.notify_all()
         return ret_work(data)
