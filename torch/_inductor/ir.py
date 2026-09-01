@@ -8139,37 +8139,46 @@ class ExternKernel(InputsKernel):
             )
         )
 
+    def get_assert_name(self) -> str:
+        name = self.get_name()
+        if V.graph.cpp_wrapper and self.is_inplace_view():
+            # inplace_view ops (e.g. set_.source_Tensor) don't declare an
+            # output variable; assert on the mutated input instead.
+            if not isinstance(self.inputs[0], IRNode):
+                raise AssertionError("Expected isinstance(self.inputs[0], IRNode)")
+            name = self.inputs[0].get_name()
+        return name
+
     def codegen_size_asserts(self, wrapper: PythonWrapperCodegen) -> None:
         if not config.size_asserts:
             return
         if self.is_inplace_view() and not V.graph.cpp_wrapper:
             return
         op_name = self.get_op_name()
-        name = self.get_name()
-        if V.graph.cpp_wrapper:
-            # inplace_view ops (e.g. set_.source_Tensor) don't declare an
-            # output variable; assert on the mutated input instead.
-            if self.is_inplace_view():
-                if not isinstance(self.inputs[0], IRNode):
-                    raise AssertionError("Expected isinstance(self.inputs[0], IRNode)")
-                name = self.inputs[0].get_name()
+        name = self.get_assert_name()
         size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
         stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
         dtype = self.get_dtype() if self.should_assert_dtype(op_name) else None
         wrapper.write_assert_size_stride(name, size, stride, op_name, dtype)
 
     def codegen_alignment_asserts(self, wrapper: PythonWrapperCodegen) -> None:
-        if config.alignment_asserts and not V.graph.cpp_wrapper:
-            name = self.get_name()
-            aligned = name not in V.graph.unaligned_buffers
+        # Preserve the existing Python-wrapper behavior for inplace-view
+        # results. Only cpp_wrapper needs get_assert_name() to spell the check
+        # with the mutated input handle because its shim declares no output.
+        if config.alignment_asserts:
+            name = self.get_assert_name()
+            # For cpp_wrapper inplace-view ops, `name` is the mutated input
+            # variable used to spell the runtime check, while self.get_name()
+            # describes the post-mutation result whose layout was classified.
+            # Keep the alignment decision tied to that result layout.
+            aligned = self.get_name() not in V.graph.unaligned_buffers
             op_name = self.get_op_name()
             if aligned:
-                wrapper.writeline(
-                    f"assert_alignment({name}, {GPU_ALIGN_BYTES}, {op_name!r})"
-                )
+                wrapper.write_assert_alignment(name, GPU_ALIGN_BYTES, op_name)
             else:
-                wrapper.writeline(
-                    f"# buffer {name} (op: {op_name}) is assumed to be not aligned"
+                wrapper.make_comment(
+                    f"{wrapper.comment} buffer {name} (op: {op_name}) "
+                    "is assumed to be not aligned"
                 )
 
     def codegen_memory_tracking(self, wrapper: PythonWrapperCodegen) -> None:
