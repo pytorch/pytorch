@@ -343,6 +343,24 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         torch._dynamo.reset()
         torch._inductor.codecache.PyCodeCache.cache_clear(purge=True)
 
+    def test_optional_cudagraph_kwargs_omitted_when_unset(self):
+        # create_fx_config builds a second copy of these kwargs for the
+        # AOTAutograd key, separate from the ones serialized onto the graph in
+        # test_cudagraph_backward_override_omitted_when_unset. An unconditional entry
+        # here would invalidate every key that never asked for an override.
+        gm = torch.fx.symbolic_trace(lambda tangents_1: (tangents_1,))
+        compiler_config_extra = compile_fx.create_compiler_config_extra(gm)
+        self.assertNotIn(
+            "cudagraphs_post_compile_override",
+            autograd_cache.create_fx_config(compiler_config_extra),
+        )
+
+        compiler_config_extra = dataclasses.replace(
+            compiler_config_extra, cudagraphs_bwd_override=False
+        )
+        fx_config = autograd_cache.create_fx_config(compiler_config_extra)
+        self.assertIs(fx_config["cudagraphs_post_compile_override"], False)
+
     @functorch_config.patch({"enable_autograd_cache": True})
     @inductor_config.patch(
         {
