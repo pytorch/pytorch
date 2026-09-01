@@ -234,8 +234,7 @@ jobs:
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           BUILD_ADDITIONAL_PACKAGES: ${{ inputs.build-additional-packages }}
           RUNNER: ${{ inputs.runner }}
-          # XPU builds should initialize sccache like the default Linux build path.
-          SKIP_SCCACHE_INITIALIZATION: ${{ contains(inputs.build-environment, 'xpu') && '' || '1' }}
+          SKIP_SCCACHE_INITIALIZATION: 1
         shell: bash
         run: |
           START_TIME=$(date +%s)
