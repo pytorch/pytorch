@@ -2171,7 +2171,7 @@ class FakeTensorMode(TorchDispatchMode):
             view_idx = idxs[0]
 
         metadata = extract_tensor_metadata(output)
-        shape = metadata.shape
+        shape = output.shape
         stride = metadata.stride
         storage_offset = metadata.storage_offset
         metadata.shape = tuple(state.convert_output(v) for v in shape)
