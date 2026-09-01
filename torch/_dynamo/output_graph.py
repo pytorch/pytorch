@@ -1418,9 +1418,6 @@ class OutputGraph(OutputGraphCommon):
         """
         if not self._pending_event_record_violations:
             return
-        from .variables.dicts import ConstDictVariable
-        from .variables.hashable import HashableTracker
-        from .variables.sets import BaseSetVariable
         from .variables.streams import EventVariable
 
         pending_ids = {id(value) for value, _ in self._pending_event_record_violations}
@@ -1436,30 +1433,19 @@ class OutputGraph(OutputGraphCommon):
         # pending event reachable from either is observable outside.
         roots.extend(self.side_effects.store_attr_mutations.keys())
         roots.extend(self.side_effects._get_modified_vars())
-        # Match the root set used by prune_dead_object_new so anything
-        # the prune keeps alive is also visible to the escape scan.
+        # These additional roots can keep objects alive across the
+        # subgraph boundary; include them so the escape scan sees any
+        # event reachable from them.
         roots.append(self.backward_state)
         roots.append(self.side_effects.tensor_hooks)
         for gen in self.local_generators:
             roots.extend([gen.inline_tracer.stack, gen.inline_tracer.symbolic_locals])
-        VariableTracker.visit(_check, roots, side_effects=self.side_effects)
-
-        # VariableTracker.visit walks dicts via .values() only, so
-        # events stored as set elements or dict keys (wrapped in
-        # HashableTracker) are invisible to the walk above.  Check
-        # those explicitly.
-        for var in roots:
-            if not isinstance(var, VariableTracker):
-                continue
-            items = None
-            if isinstance(var, BaseSetVariable):
-                items = var.items
-            elif isinstance(var, ConstDictVariable):
-                items = var.items
-            if items is not None:
-                for key in items:
-                    if isinstance(key, HashableTracker):
-                        _check(key.vt)
+        # visit_keys=True so events stored as set elements or dict
+        # keys (wrapped in HashableTracker) are reached — the default
+        # visit walks dicts via .values() only.
+        VariableTracker.visit(
+            _check, roots, side_effects=self.side_effects, visit_keys=True
+        )
 
         for value, msg in self._pending_event_record_violations:
             if id(value) in escaped:

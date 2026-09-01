@@ -2189,6 +2189,24 @@ class GraphModule(torch.nn.Module):
                 torch.ones(2, 2, device=device), set()
             )
 
+    def test_event_record_after_input_mutation_escapes_via_return_set(self, device):
+        # The event is inside a newly-built set returned from the
+        # compiled region.  The set is not in id_to_variable, so the
+        # event is reachable only through all_stack_values -- and only
+        # if the traversal follows HashableTracker dict keys.
+        def fn(x):
+            s = torch.Stream(device=device)
+            e = torch.Event(device=device)
+            with s:
+                x.add_(1)
+                e.record()
+            return {e}
+
+        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, 2, device=device)
+            )
+
     def test_event_record_event_after_input_mutation_non_escaping_no_error(
         self, device
     ):
