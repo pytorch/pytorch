@@ -3243,15 +3243,32 @@ class TestShouldRun(unittest.TestCase):
         # per arch, a per-capability selector, and every object listed in the
         # emitted CMake. Was fatal while nested per-arch trees were walked by
         # neither the generator nor the link step (a kernel-less wheel, silently).
+        # The REAL list: .ci/manywheel/build_env_setup.py builds x86_64 CUDA 13.x
+        # with these, and they resolve to two arches, so every release wheel takes
+        # this path. "10.0;10.0a" was here before and resolves to ONE arch (both
+        # spellings are the same hardware), so it never reached this branch.
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            ran = self._run(self.CUDA, {"TORCH_CUDA_ARCH_LIST": "9.0a;10.0a"})
+            ran = self._run(
+                self.CUDA, {"TORCH_CUDA_ARCH_LIST": "7.5;8.0;8.6;9.0;10.0;12.0"}
+            )
         self.assertTrue(ran)
         # The report is the branch's only observable. On STDERR: this is the one
         # gate that reports AND proceeds, and --print-verdict's stdout is compared
         # with == by the CI shells (see build_stage2._report).
-        self.assertIn("multi-arch: sm_90a sm_100a", err.getvalue())
+        self.assertIn("multi-arch: sm_90 sm_100", err.getvalue())
         self.assertEqual(out.getvalue(), "")
+
+    def test_both_spellings_of_one_capability_run_as_one_arch(self):
+        # The list a builder writes when it wants the arch-conditional kernels and
+        # names the plain arch too. It must RUN -- and as ONE arch, so it must not
+        # report multi-arch, which is what would double the embedded bytes for
+        # hardware that only ever loads one of the two.
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            ran = self._run(self.CUDA, {"TORCH_CUDA_ARCH_LIST": "10.0;10.0a"})
+        self.assertTrue(ran)
+        self.assertNotIn("multi-arch", err.getvalue())
 
     def test_runs_for_a_single_exportable_arch(self):
         self.assertTrue(self._run(self.CUDA, self.ARCH))
@@ -3393,7 +3410,7 @@ class TestBuildInputsFromTheCMakeCache(unittest.TestCase):
 
     def test_a_recorded_list_is_stripped_of_its_newline(self):
         # file(WRITE) content as CMake leaves it, plus whatever an editor adds:
-        # archs_from_cuda_arch_list would read "10.0a\n" as an unparseable entry.
+        # archs_from_cuda_arch_list would read "10.0a\n" as an unparsable entry.
         with self._build_dir(None) as d:
             self._record(d, "9.0a;10.0a\n")
             self.assertEqual(build_stage2._arch_list(), "9.0a;10.0a")
@@ -4170,7 +4187,9 @@ class TestSourceCommitOrdering(unittest.TestCase):
         # first makes that state read as "not generated yet" instead.
         order = []
         real = gen_aot_lib._write_atomic
-        state = {}
+        # Annotated: pyrefly types an unannotated {} as Unknown, and indexing it gives
+        # `Unknown | None`, which assertIn's `container` parameter refuses.
+        state: dict[str, str] = {}
 
         with tempfile.TemporaryDirectory() as art, tempfile.TemporaryDirectory() as ops:
             self._tree(art, "fakeop", SIDECAR["prefix"])
@@ -4901,6 +4920,12 @@ class TestStageTwoArgvContract(unittest.TestCase):
             "10.0a",
             "9.0",
             "9.0a;10.0",
+            # Both spellings of ONE capability: they collapse to a single arch, so
+            # the two sides have to agree on WHICH spelling survives -- export
+            # nesting sm_100a/ while generation filters on sm_100 is this
+            # invariant's original failure, reachable from a list a builder can
+            # plausibly set.
+            "10.0;10.0a",
         ):
             with self.subTest(arch_list=arch_list):
                 with self._run_main(arch_list) as calls:
@@ -5535,6 +5560,24 @@ class TestEmittedCMake(unittest.TestCase):
         want = f'"${{CMAKE_BINARY_DIR}}/{rel}/{gen_aot_lib.CMAKE_INCLUDE}"'
         with open(os.path.join(REPO, "caffe2", "CMakeLists.txt")) as f:
             self.assertIn(want, f.read())
+
+    def test_the_blocks_are_separated_by_one_blank_line(self):
+        # The layout lives in the JOIN, not in the templates: gluing the blocks
+        # together still emits valid CMake, so nothing else here would notice. One
+        # blank line each way -- none reads as a wall of directives, and two drift
+        # apart as blocks are added.
+        with tempfile.TemporaryDirectory() as d:
+            emitted = self._emit(d, dsl=os.path.join(d, "libdsl.a"))
+        for boundary in (
+            "endif()\n\n# Linux only",
+            "endif()\n\n# Re-run configure",
+            'generated source(s)")\n\nset_source_files_properties(',
+            "EXTERNAL_OBJECT TRUE)\n\ntarget_sources(",
+            ")\n\n# whole-archive is NOT needed",
+        ):
+            with self.subTest(boundary=boundary.splitlines()[-1]):
+                self.assertIn(boundary, emitted)
+        self.assertNotIn("\n\n\n", emitted)
 
     def test_a_non_linux_configure_embeds_nothing(self):
         # The embed is GNU-linker specific and stage 2 refuses to run off Linux, so
