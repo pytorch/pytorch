@@ -6,10 +6,8 @@ import os
 import tempfile
 import unittest
 
-# Ordinary package imports, like every other tools test (CI runs
-# `PYTHONPATH=$(pwd) pytest tools/test`). These modules keep their module
-# scope torch-free precisely so this works: the Test tools job runs in the
-# linter image, which has no built torch.
+# Ordinary package imports: these modules keep their scope torch-free so the
+# Test tools job, which runs in the linter image, can import them without torch.
 from tools.native_aot import export, toolchains
 
 from torchgen import native_aot_decl
@@ -20,9 +18,8 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(_TOOLS_FILE)))
 
 SIDECAR = {
     "prefix": "fakeop_f32_n1024_k8",
-    # Every sidecar records the arch it was compiled for and the kind that
-    # built it; generation reads both rather than defaulting either, so a
-    # fixture missing them is not a sidecar export could have written.
+    # Generation reads arch and kind rather than defaulting either, so a fixture
+    # missing them is not a sidecar export could have written.
     "arch": "sm_100a",
     "kind": "cutedsl",
     "spec": {"dtype": "float32", "N": 1024, "K": 8, "deterministic": False},
@@ -58,9 +55,7 @@ def _touch_artifacts(out_dir, prefix, exts=(".o", ".h")):
 
 class TestExportJobs(unittest.TestCase):
     def test_job_skip_matches_on_spec(self):
-        # Skip detection matches the sidecar's recorded spec AND a
-        # current source closure; a spec match alone (no/mismatched
-        # sources) re-exports.
+        # A spec match alone re-exports: the source closure must match too.
         import json as _json
         import tempfile
 
@@ -90,10 +85,8 @@ class TestExportJobs(unittest.TestCase):
             self.assertTrue(export._job_needed(other, force=False))
 
     def test_job_skip_survives_json_round_trip(self):
-        # Tuple-valued grid fields read back from the sidecar as lists;
-        # skip detection must normalize both sides or such points
-        # re-export on every run (the pointwise family's in_dtypes hit
-        # this).
+        # Tuple-valued grid fields read back as lists, so both sides must be
+        # normalized or such points re-export on every run.
         import json as _json
         import tempfile
 
@@ -118,28 +111,19 @@ class TestExportJobs(unittest.TestCase):
             self.assertFalse(export._job_needed(job, force=False))
 
     def test_run_job_is_module_level(self):
-        # The pool pickles the job function by qualified name; a closure
-        # or nested function would break only at --jobs > 1.
-        # (A real pickle round-trip needs export importable by module
-        # name, which this by-path test harness can't provide.)
+        # The pool pickles the job function by qualified name, so a closure would
+        # break only at --jobs > 1.
         self.assertEqual(export._run_job.__qualname__, "_run_job")
         self.assertEqual(export.export_point.__qualname__, "export_point")
 
     def test_pool_never_forks_after_cuda_init(self):
-        # Plain "fork" gives workers a dead CUDA context (measured:
-        # is_initialized() False, allocation fails, no exception) because
-        # the parent initializes CUDA before the pool starts.
-        # Pinned to forkserver, not just "not fork": main() calls
-        # set_forkserver_preload unconditionally, which a spawn context
-        # would silently ignore.
+        # A fork parent that has initialized CUDA gives workers a dead context,
+        # silently. forkserver specifically: main() calls set_forkserver_preload.
         self.assertEqual(export.POOL_START_METHOD, "forkserver")
 
     def test_cutedsl_export_passes_gpu_arch(self):
-        # The arch must reach the compiler as a --gpu-arch OPTION, not as
-        # process state: that is what lets one worker serve several
-        # arches. Appended to any builder-supplied options, never
-        # replacing them. Stubs cute.compile/export_to_c because this
-        # suite runs in the linter image, which has no DSL installed.
+        # A --gpu-arch option rather than process state, which is what lets one
+        # worker serve several arches, appended to any builder-supplied options.
         import sys
         import types
         import unittest.mock as mock
@@ -181,10 +165,8 @@ class TestExportJobs(unittest.TestCase):
             self.assertIsNone(seen["options"])
 
     def test_toolchains_declare_their_backend(self):
-        # Which build backends a kind can emit for is DATA, not a platform
-        # check buried in the gate: that is what lets a ROCm build skip
-        # cleanly today and what makes a future ROCm DSL a new class with
-        # BACKENDS = ("rocm",) rather than an edit to build_stage2.
+        # Backends are data, not a platform check in the gate, so a future ROCm DSL
+        # is a new class rather than an edit to build_stage2.
         for kind, tc in toolchains.TOOLCHAINS.items():
             self.assertTrue(tc.BACKENDS, f"{kind} declares no BACKENDS")
         self.assertEqual(sorted(toolchains.for_backend("rocm")), [])
@@ -222,17 +204,13 @@ class TestExportJobs(unittest.TestCase):
                     export.export_point("fakeop", "aot_kernel.py", {}, "/tmp")
 
     def test_pool_preload_stays_fork_safe(self):
-        # The forkserver's server process is the fork PARENT for every
-        # worker, so only modules that are inert in a fork parent may be
-        # preloaded. Importing torch initializes no CUDA state; cutlass
-        # and triton would build DSL/driver state in the parent that every
-        # worker then inherits, which is what this pins down.
+        # The forkserver's server process is the fork parent, so only modules inert
+        # there may be preloaded: cutlass or triton would build state workers inherit.
         self.assertEqual(export.POOL_PRELOAD, ("torch",))
 
     def test_json_normal_matches_sidecar_round_trip(self):
-        # _json_normal replaces a json.dumps/loads pair, so it must agree
-        # with one exactly: any divergence makes a spec mismatch its own
-        # sidecar and re-export forever.
+        # It stands in for a json.dumps/loads pair, so any divergence makes a spec
+        # mismatch its own sidecar and re-export forever.
         point = {
             "dtype": "float32",
             "in_dtypes": ("float32", "bfloat16"),
@@ -298,10 +276,8 @@ class TestArch(unittest.TestCase):
                 self.assertTrue(export._job_needed(job, force=False))
 
     def test_job_skip_rejects_arch_less_sidecar_when_env_set(self):
-        # The reported case, from the other side: a sidecar that recorded no
-        # arch at all (an on-device export) must NOT satisfy a run whose
-        # CUTE_DSL_ARCH names a target, or the env-var run silently inherits
-        # objects built for whatever the builder's GPU was.
+        # A sidecar recording no arch must not satisfy a run whose CUTE_DSL_ARCH
+        # names one, or that run inherits objects built for the builder's own GPU.
         import unittest.mock as mock
 
         rel = os.path.relpath(
@@ -332,10 +308,8 @@ class TestArch(unittest.TestCase):
                 self.assertFalse(export._job_needed(job, force=False))
 
     def test_cc_of_reads_the_capability_both_spellings_name(self):
-        # The exporter matches a declaration's ARCHS by STRING while the generator
-        # groups sidecars by capability, so the two spellings of one piece of
-        # hardware have to parse EQUAL -- a declaration pinning ('sm_100a',)
-        # disowned the 'sm_100' its own on-device export produced.
+        # The exporter matches ARCHS by string while the generator groups by
+        # capability, so both spellings of one piece of hardware must parse equal.
         self.assertEqual(native_aot_decl.cc_of("sm_90"), (9, 0))
         self.assertEqual(native_aot_decl.cc_of("sm_103a"), (10, 3))
         self.assertEqual(
@@ -343,18 +317,8 @@ class TestArch(unittest.TestCase):
         )
 
     def test_cc_of_refuses_what_it_cannot_read(self):
-        # Each would otherwise compute a plausible capability and emit a gate no
-        # device satisfies ("sm_9" -> (0, 9), "sm_1000" -> (100, 0)), so the op
-        # ships, links and declines every call unreported.
-        #
-        # assertRaisesRegex, not assertRaises: cc_of raises two different
-        # RuntimeErrors, so a bare check passed with the digit-length guard
-        # removed -- "sm_9" then tripped the RANGE error instead.
-        #
-        # The last four are what str.isdigit() let through: full-width digits,
-        # Arabic-Indic digits and a leading zero each parsed as capability 9.0,
-        # and the superscript reached int(), whose ValueError the loader's
-        # `except RuntimeError` could not wrap.
+        # Each would otherwise compute a plausible capability ("sm_9" -> (0, 9)) and
+        # emit a gate no device satisfies. The last four are what str.isdigit() accepts.
         for bad in (
             "sm_9",
             "sm_1000",
@@ -508,15 +472,9 @@ class TestArch(unittest.TestCase):
 
 class TestSourceStaleness(unittest.TestCase):
     def test_closure_covers_shared_declaration_machinery(self):
-        # The grid expander and the validating loader decide which spec
-        # points exist and what a declaration means, so editing them
-        # changes what an artifact MEANS. They live in torchgen (outside
-        # the tools/*.py glob) and arrive by ordinary import, so only the
-        # sys.modules half of the closure can catch them -- which used to
-        # filter on "torch._native" alone and silently missed them.
-        # Compared by basename: an editable install can resolve torchgen
-        # to a different checkout than REPO, and relpath then yields a
-        # ../.. traversal rather than the tidy repo-relative path.
+        # The grid expander and the loader decide what a declaration means, and arrive
+        # by ordinary import, so only the sys.modules half of the closure catches them.
+        # By basename, because an editable install can resolve torchgen elsewhere.
         names = {os.path.basename(p) for p in export.source_closure()}
         for want in (
             "native_aot_spec_grid.py",
@@ -526,11 +484,8 @@ class TestSourceStaleness(unittest.TestCase):
             self.assertIn(want, names, f"{want} must invalidate artifacts")
 
     def test_closure_survives_sys_modules_mutation(self):
-        # source_closure hashes files while walking sys.modules, and
-        # hashing imports hashlib lazily -- so on a cold interpreter the
-        # walk mutates the dict it is iterating and raises "dictionary
-        # changed size during iteration". Force that ordering by having
-        # the hash step import a module that is definitely not loaded yet.
+        # Hashing imports hashlib lazily, so on a cold interpreter the walk mutates the
+        # dict it is iterating. Forced by hashing a module that is not loaded yet.
         import sys
         import unittest.mock as mock
 
@@ -655,9 +610,8 @@ class TestAbiValidation(unittest.TestCase):
         return "typedef struct {\n" + "\n".join(fields) + f"\n}} {p}_Tensor_{name}_t;\n"
 
     def _header(self, mx=None, mout=None):
-        # Defaults match SIDECAR's claims: mX one shape + one stride, mOut two
-        # shapes + one stride. A fixture that does NOT match them describes an ABI
-        # no export could produce.
+        # Defaults match SIDECAR's claims (mX one shape and one stride, mOut two and
+        # one); anything else describes an ABI no export could produce.
         return (
             "#pragma once\n#include <stdint.h>\n"
             + (mx if mx is not None else self._struct("mX", shapes=1, strides=1))
@@ -705,20 +659,16 @@ class TestAbiValidation(unittest.TestCase):
         )
 
     def test_the_width_is_checked_per_argument(self):
-        # use_32bit_stride is a per-argument kwarg of the DSL's fake-tensor
-        # constructor, so a whole-file search for one "int64_t dynamic_strides"
-        # passed a header declaring int64 for mX and int32 for mOut, and the
-        # launcher then narrowed mOut's stride.
+        # use_32bit_stride is per argument, so a whole-file search for one
+        # "int64_t dynamic_strides" accepts a header that narrows another tensor's.
         self._refuses(
             self._header(mout=self._struct("mOut", shapes=2, stride_t="int32_t")),
             "mOut",
         )
 
     def test_a_longer_argument_name_does_not_shadow_a_shorter_one(self):
-        # header.find("<prefix>_Tensor_mX_t") also matched inside
-        # "<prefix>_Tensor_mX_tile_t", so with the longer name declared FIRST the
-        # check read the wrong tensor's struct -- accepting a truncating stride
-        # and an out-of-bounds store, depending only on argument order.
+        # A find() of "<prefix>_Tensor_mX_t" also matches inside "..._mX_tile_t", so
+        # argument order alone would decide which tensor's struct is read.
         for label, header in (
             (
                 "longer first",
@@ -735,12 +685,8 @@ class TestAbiValidation(unittest.TestCase):
                 self._refuses(header, "mX's dynamic_strides|must be declared")
 
     def test_a_slot_count_must_match_exactly(self):
-        # The bound and the sidecar list are independent statements about one
-        # number -- the bound from the DSL's fake args, the list hand-written in
-        # the builder -- and the launcher fills exactly the slots the sidecar
-        # lists, into an UNINITIALIZED local. Over-claiming stores past the end;
-        # under-claiming leaves the kernel reading an indeterminate value. Only
-        # the over-claim was checked, so the silent one got through.
+        # Two independent statements about one number. Over-claiming stores past the end
+        # of an uninitialized local; under-claiming leaves slots unwritten.
         for label, header in (
             (
                 "header declares more",
@@ -753,9 +699,7 @@ class TestAbiValidation(unittest.TestCase):
         ):
             with self.subTest(case=label):
                 # Each side named as its own: the sidecar's key and the header's
-                # member differ (dynamic_sizes against dynamic_shapes), and one
-                # message using a single name for both is what sent a reader looking
-                # for a sidecar key that does not exist.
+                # member differ (dynamic_sizes against dynamic_shapes).
                 self._refuses(
                     header, r"sidecar's dynamic_(sizes|strides) claims \d+ slot"
                 )
@@ -774,10 +718,8 @@ class TestAbiValidation(unittest.TestCase):
         )
 
     def test_whitespace_variants_are_accepted(self):
-        # `int64_t  dynamic_strides [ 1 ]` is the same declaration. Exact
-        # single-space matching refused a perfect export -- and the DSL's own
-        # C-type table stores these spellings WITH a trailing space, so one
-        # upstream refactor would have failed every build.
+        # `int64_t  dynamic_strides [ 1 ]` is the same declaration, and the DSL's own
+        # C-type table stores some spellings with a trailing space.
         for label, decl in (
             ("two spaces", "int64_t  dynamic_strides[1];"),
             ("space before bracket", "int64_t dynamic_strides [1];"),
@@ -804,10 +746,8 @@ class TestAbiValidation(unittest.TestCase):
         )
 
     def test_an_unparsable_header_is_refused_not_skipped(self):
-        # Fails CLOSED on a layout this code cannot read. Skipping there is how the
-        # guard would switch off silently after an upstream header change. The
-        # anchored parse also means a mere MENTION of the type name (a banner
-        # comment naming the wrapper signature) is no longer mistaken for it.
+        # Fails closed on a layout this code cannot read, so an upstream header change
+        # cannot switch the guard off silently.
         self._refuses(
             "struct x { int64_t dynamic_strides[1]; };\n", "no `typedef struct"
         )
@@ -817,7 +757,8 @@ class TestAbiValidation(unittest.TestCase):
         )
 
     def test_a_malformed_sidecar_is_refused_with_a_useful_message(self):
-        # These used to surface as a bare KeyError/TypeError out of a build step.
+        # Each of these must name the file and the fix, not raise a bare
+        # KeyError/TypeError out of a build step.
         self._refuses(
             self._header(), "names no tensor", tensor_args=[{"dynamic_strides": [0]}]
         )
@@ -839,11 +780,8 @@ class TestAbiValidation(unittest.TestCase):
         )
 
     def test_a_comment_is_not_read_as_the_declaration(self):
-        # re.search over the raw body took the FIRST textual match, so a
-        # commented-out declaration above the real one was read instead: the
-        # int32 case then shipped a narrowing assignment, and the over-claim case
-        # ASan-faulted where the compiler said nothing. Members are parsed whole,
-        # between semicolons, with comments stripped first.
+        # A search over the raw body takes the first textual match, so a commented-out
+        # declaration above the real one wins.
         p = SIDECAR["prefix"]
 
         def hdr(comment, member):
@@ -888,10 +826,8 @@ class TestAbiValidation(unittest.TestCase):
     def test_a_terminator_this_parser_cannot_read_does_not_swallow_the_next_struct(
         self,
     ):
-        # `} *Ptr_t;` is ordinary C, and the body regex used to run past it into
-        # the NEXT struct -- so tensor B was checked against tensor A's
-        # declarations. A brace-free body cannot reach beyond its own closing
-        # brace, so the unreadable declaration is simply not registered.
+        # `} *Ptr_t;` is ordinary C, and a body regex running past it would check one
+        # tensor against another's declarations.
         p = SIDECAR["prefix"]
         self._refuses(
             "#pragma once\n#include <stdint.h>\n"
@@ -905,26 +841,21 @@ class TestAbiValidation(unittest.TestCase):
         )
 
     def test_an_unreadable_struct_is_refused_even_when_nothing_is_claimed(self):
-        # The "claims nothing, so nothing to check" escape kept the under-claim
-        # direction open: claiming nothing is exactly the state that leaves every
-        # slot the header DOES declare unwritten in an uninitialized local. Proved
-        # by running the generated launcher: the unfilled stride read as
-        # 140461696592624.
+        # "Claims nothing, so nothing to check" is exactly the state that leaves every
+        # slot the header does declare unwritten in an uninitialized local.
         p = SIDECAR["prefix"]
         self._refuses(
             "#pragma once\n#include <stdint.h>\n"
             f"typedef struct {p}_Tensor_mX_s {{\n  void* data;\n"
             "  int32_t dynamic_shapes[2];\n  int64_t dynamic_strides[2];\n"
             f"}} {p}_Tensor_mX_t;\n" + self._struct("mOut", shapes=2, strides=1),
-            # The tag form IS readable now, so this refuses on the real problem --
-            # the header declares slots the sidecar claims none of, named as the
-            # SIDECAR's key (the header's own spelling is checked beside it).
+            # The tag form is readable, so this refuses on the real problem: the
+            # header declares slots the sidecar claims none of.
             r"sidecar's dynamic_\w+ claims 0 slot",
             tensor_args=_MX_NO_SLOTS,
         )
-        # ...and where the declaration genuinely cannot be parsed, a zero claim is
-        # refused too, rather than skipped: that is the state which leaves every
-        # declared slot unwritten.
+        # ...and where the declaration cannot be parsed at all, a zero claim is
+        # refused rather than skipped.
         self._refuses(
             "#pragma once\n#include <stdint.h>\n"
             "typedef struct {\n  void* data;\n  int64_t dynamic_strides[2];\n"
@@ -934,14 +865,8 @@ class TestAbiValidation(unittest.TestCase):
         )
 
     def test_an_unreadable_MEMBER_is_refused_even_when_nothing_is_claimed(self):
-        # The struct-level escape above was closed while the MEMBER-level one stayed
-        # open: a declaration this parser cannot classify never entered `declared`,
-        # and the absent-member arm read that as zero slots -- so a sidecar claiming
-        # zero passed against a struct that declares some, which is the state that
-        # leaves every declared slot of an uninitialized local unwritten.
-        #
-        # Both spellings below are ordinary C, and both were ACCEPTED against the
-        # real exported scatter_add header before the fix.
+        # A declaration this parser cannot classify never enters `declared`, and the
+        # absent-member arm would read that as zero slots. Both spellings are ordinary C.
         for label, member in (
             ("comma-separated declarator", "int64_t reserved[1], dynamic_strides[1];"),
             (
@@ -957,9 +882,8 @@ class TestAbiValidation(unittest.TestCase):
                 )
 
     def test_an_octal_bound_is_not_read_as_decimal(self):
-        # C reads [010] as 8; int("010") is 10. Comparing the sidecar's count with
-        # the header's is this check's entire job, so a bound whose value differs
-        # between the two languages is refused rather than parsed.
+        # C reads [010] as 8 where int("010") is 10, and comparing those counts is this
+        # check's whole job, so such a bound is refused rather than parsed.
         self._refuses(
             self._mx_header("int64_t dynamic_strides[010];"),
             "has a leading zero, which C reads as octal",
@@ -974,11 +898,8 @@ class TestAbiValidation(unittest.TestCase):
         )
 
     def test_ordinary_c_spellings_of_the_same_declaration_are_accepted(self):
-        # None of these comes out of today's wheel (the generator uses literals),
-        # but each is what an upstream refactor would emit, and refusing one fails
-        # every build. The type is an allowlist rather than "not int32_t": an
-        # unknown spelling is refused loudly, since treating it as 64-bit would
-        # restore the silent truncation.
+        # Each is what an upstream refactor would emit, and refusing one fails every
+        # build. An allowlist, since assuming 64-bit restores the silent truncation.
         p = SIDECAR["prefix"]
         for label, decl in (
             ("long long", "long long dynamic_strides[1];"),
@@ -1012,10 +933,8 @@ class TestAbiValidation(unittest.TestCase):
                 )
 
     def test_an_unrelated_pointer_typedef_does_not_disturb_the_parse(self):
-        # `typedef struct {...} *Ptr_t;` is ordinary C. A body that could run past
-        # its own closing brace merged it into the NEXT struct, which now reads as
-        # two declarations of one member and is refused -- so this legitimate
-        # header would fail to build. A brace-free body keeps them separate.
+        # `typedef struct {...} *Ptr_t;` is ordinary C, and a body running past its
+        # closing brace would merge it into the next struct.
         p = SIDECAR["prefix"]
         self._accepts(
             "#pragma once\n#include <stdint.h>\n"
@@ -1024,9 +943,8 @@ class TestAbiValidation(unittest.TestCase):
         )
 
     def test_an_unknown_stride_spelling_is_refused(self):
-        # The width check is an ALLOWLIST of 64-bit spellings, not a refusal of
-        # int32_t: an unrecognized type could be any width, and treating it as
-        # 64-bit restores the silent truncation. The message says how to extend it.
+        # An allowlist of 64-bit spellings, not a refusal of int32_t: an unrecognized
+        # type could be any width. The message says how to extend it.
         for spelling in ("int32_t", "int", "short", "cute_i64", "uint64_t", "float"):
             with self.subTest(type=spelling):
                 self._refuses(
@@ -1050,26 +968,20 @@ class TestAbiValidation(unittest.TestCase):
                 )
 
     def test_a_non_ascii_header_is_read_not_a_decode_error(self):
-        # open() used the ambient locale encoding, so a valid UTF-8 header raised
-        # UnicodeDecodeError under LC_ALL=C -- neither the documented skip nor a
-        # diagnosis.
+        # A plain open() uses the ambient locale, so a valid UTF-8 header raises
+        # UnicodeDecodeError under LC_ALL=C.
         tc = toolchains.CuteDslToolchain()
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, SIDECAR["prefix"] + ".h")
-            # Invalid UTF-8 (a lone 0xFF), not merely non-ASCII: that raises for
-            # a plain open() whatever the runner's locale is, where a valid UTF-8
-            # header only fails under LC_ALL=C and the test would pass here while
-            # the build broke in a container.
+            # Invalid UTF-8 (a lone 0xFF), not merely non-ASCII: valid UTF-8 fails
+            # only under LC_ALL=C, passing locally and breaking in a container.
             with open(path, "wb") as f:
                 f.write(b"/* \xff */\n" + self._header().encode("utf-8"))
             tc.validate_abi(dict(SIDECAR, _dir=d))
 
     def test_a_header_that_cannot_be_read_is_not_silently_skipped(self):
-        # Only ABSENT means "nothing to check". A header that exists but cannot be
-        # read used to take the same path, so the ABI went unvalidated and the
-        # launcher shipped anyway -- and generation's own check is os.path.exists,
-        # which is true for this. A directory stands in for the unreadable file
-        # because mode 000 is still readable by root, which CI runs as.
+        # Only ABSENT means "nothing to check", or the ABI goes unvalidated. A directory
+        # stands in for the unreadable file, mode 000 being readable by root.
         with tempfile.TemporaryDirectory() as d:
             os.mkdir(os.path.join(d, SIDECAR["prefix"] + ".h"))
             with self.assertRaises(OSError):
@@ -1096,10 +1008,8 @@ class TestToolchainRegistry(unittest.TestCase):
 
 class TestDeclarationArchs(unittest.TestCase):
     def test_a_malformed_archs_entry_is_refused_at_load(self):
-        # _SM_RE accepts "sm_9" and "sm_1000", which name no capability. Refused by
-        # the LOADER, which is the only place that knows which file to name -- and
-        # because export compares ARCHS by string, a typo there silently matched
-        # nothing, so the op was absent from the build with no diagnostic.
+        # _SM_RE accepts "sm_9" and "sm_1000", which name no capability. Refused by the
+        # loader, the only place that knows which file to name.
         for bad in ("sm_9", "sm_1000"):
             with self.subTest(archs=bad):
                 with tempfile.TemporaryDirectory() as ops:
@@ -1117,9 +1027,8 @@ class TestDeclarationArchs(unittest.TestCase):
 
 class TestDeclarationStaleness(unittest.TestCase):
     def test_source_closure_includes_the_declaration(self):
-        # Declarations load by file path and never enter sys.modules, so
-        # without this a kernel_precompile_grid() edit reuses artifacts
-        # built from the old grid.
+        # Declarations load by file path and never enter sys.modules, so without this a
+        # grid edit reuses artifacts built from the previous one.
         with tempfile.TemporaryDirectory() as tmpdir:
             decl_path = os.path.join(tmpdir, "aot.py")
             with open(decl_path, "w") as f:
@@ -1158,11 +1067,8 @@ class TestStaleGridPointArtifacts(unittest.TestCase):
 
 class TestRegistryConsistency(unittest.TestCase):
     def test_link_exts_must_be_a_subset_of_artifact_exts(self):
-        # Generation iterates artifact_exts and links `if ext in link_exts`, so a
-        # kind whose link_exts names something artifact_exts does not contributes
-        # NO objects: nothing is listed to link, nothing passes
-        # --no-undefined, torch_cuda links green, and the first call of the op
-        # fails on an undefined symbol.
+        # Generation links `if ext in link_exts`, so an ext the kind cannot produce
+        # contributes nothing: a green link, then an undefined symbol at first call.
         class _Bad(toolchains.Toolchain):
             kind = "bad"
             artifact_exts = (".cubin", ".h")
@@ -1172,9 +1078,8 @@ class TestRegistryConsistency(unittest.TestCase):
             toolchains._assert_link_exts_are_exportable({"bad": _Bad()})
 
     def test_link_exts_must_be_declared(self):
-        # The realistic mistake is forgetting the attribute, and that direction is a
-        # subset of everything, so the subset rule alone accepted a kind that links
-        # nothing -- which is the silence this check exists to prevent.
+        # The realistic mistake is forgetting the attribute, which is a subset of
+        # everything, so the subset rule alone would accept a kind that links nothing.
         class _Forgot(toolchains.Toolchain):
             kind = "forgot"
             artifact_exts = (".o", ".h")
