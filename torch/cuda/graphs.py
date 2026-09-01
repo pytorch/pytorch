@@ -1279,15 +1279,30 @@ class graph:
         # capture_end). One read serves everything downstream: mark_kernels telling a
         # conditional-node body apart from this graph, the CUPTI backend's body-node filter,
         # and the stamp remap_to_exec_graph later rekeys from.
-        maybe_stamp_capture_root(self.cuda_graph)
+        # Everything from here on runs with the stream already capturing, so a failure
+        # would return from __enter__ without __exit__ ever running and leave it that way
+        # -- after which every CUDA call in the process fails with "operation not
+        # permitted when stream is capturing". End the capture before propagating.
+        try:
+            maybe_stamp_capture_root(self.cuda_graph)
 
-        # Arming needs the capture live. If it does not work out, settle on the edge walk
-        # before any mark_kernels scope runs rather than recording keys that would match
-        # nothing -- which is why the backend is published only now.
-        if backend == "cupti" and not _graph_node_callbacks.arm():
+            # Arming needs the capture live. If it does not work out, settle on the edge
+            # walk before any mark_kernels scope runs rather than recording keys that
+            # would match nothing -- which is why the backend is published only now.
+            if backend == "cupti" and not _graph_node_callbacks.arm():
+                _graph_node_callbacks.disarm()
+                backend = "edge_walk"
+            _set_annotation_backend(backend)
+        except BaseException:
             _graph_node_callbacks.disarm()
-            backend = "edge_walk"
-        _set_annotation_backend(backend)
+            _set_annotations_enabled(False)
+            try:
+                self.cuda_graph.capture_end_pre()
+            except Exception:
+                # Already unusable; the original error is the one worth reporting.
+                pass
+            self.stream_ctx.__exit__(None, None, None)
+            raise
 
     def __exit__(self, *args: object) -> None:
         from torch.cuda import _graph_node_callbacks
