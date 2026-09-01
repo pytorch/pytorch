@@ -10,6 +10,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import same
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 try:
@@ -52,6 +53,8 @@ def reset_name():
 
 
 class TestGlobals(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_store_global_1(self):
         def fn(x):
             global g_counter
