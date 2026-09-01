@@ -72,11 +72,17 @@ static Tensor& pad_out_template(Tensor& output,
   int dim_slices = 0;
 
   if (!is_backward_pass && ndims > padding_dim) {
-    bool valid_dims = input_.size(1) != 0 && input_.size(padding_dim) != 0;
-    TORCH_CHECK((ndims == 1 + padding_dim && valid_dims) ||
-                    (ndims == 2 + padding_dim && valid_dims && input_.size(1 + padding_dim) != 0),
-                "3D or 4D (batch mode) tensor expected for input, but got: ",
-                input_);
+    // allow empty batch size but not other dimensions
+    const bool batch_mode = ndims == 2 + padding_dim;
+    const auto non_batch_sizes = input_.sizes().slice(batch_mode ? 1 : 0);
+    TORCH_CHECK((batch_mode || ndims == 1 + padding_dim) &&
+                    std::ranges::all_of(non_batch_sizes, [](int64_t size) { return size != 0; }),
+                "Expected ",
+                1 + padding_dim,
+                "D or ",
+                2 + padding_dim,
+                "D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
+                input_.sizes());
   }
 
   if (ndims == padding_dim) {
