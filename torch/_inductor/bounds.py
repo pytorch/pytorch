@@ -31,7 +31,7 @@ class BoundVars:
     It exposes the ranges of the nodes in the `bounds` variable
 
     Note. A current limitation of this analysis is that it just works on a per-loop basis.
-    We should be able to propagate the bounds between across the whole graph. This may benefit
+    We should be able to propagate the bounds across the whole graph. This may benefit
     the case a bounded variable is returned by a kernel and fed into another.
     """
 

@@ -37,12 +37,29 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 
+# Ops a body must not contain to be legal for masked expansion. Writes other
+# than a plain store would bypass the mask; the assert/indirect ops evaluate at
+# the raw expanded coordinate, so they can fire or read out of bounds in the
+# tail whose result is discarded.
+MASKED_EXPANSION_BANNED_OPS = (
+    "store_reduction",
+    "partial_accumulate",
+    "check_bounds",
+    "indirect_indexing",
+    "device_assert_async",
+    "load_seed",
+    "bucketize",
+    "sort",
+    "scan",
+)
+
+
 class _MaskStoresHandler(WrapperHandler):
     """
     Rewrite every store in a body into a masked_store. Ops that write memory by
     another route would pass through unmasked and clobber the expanded tail, so
-    they are rejected; the scheduler screens for them before mutating anything,
-    and these are the backstop.
+    they are rejected; callers screen for them via MASKED_EXPANSION_BANNED_OPS
+    before mutating anything, and these are the backstop.
     """
 
     def __init__(self, inner: OpsHandler[Any], mask: Any) -> None:
@@ -326,9 +343,9 @@ class LoopBody:
         dimension in `Mod`, so loads, index_exprs and bounds checks all evaluate
         at the raw expanded coordinate; only the writes are masked. The caller
         must prove the added tail addresses are live (see
-        `_try_reindex_pointwise_for_reduction`, which requires every read to be
-        provably in bounds over the expanded domain or safely tail-masked) and
-        must reject side-effecting bodies.
+        `_try_masked_reindex_reduction_consumer`, which requires every read to
+        match an access already made by the reduction) and must reject bodies
+        containing MASKED_EXPANSION_BANNED_OPS.
         """
         if V.graph.sizevars.statically_known_equals(
             self.sizes[0][dimension], new_range

@@ -40,6 +40,7 @@ aspects of contributing to PyTorch.
 - [Managing multiple build trees](#managing-multiple-build-trees)
 - [C++ development tips](#c-development-tips)
   - [Build only what you need](#build-only-what-you-need)
+  - [Profile build time](#profile-build-time)
   - [Code completion and IDE support](#code-completion-and-ide-support)
   - [Make no-op build fast](#make-no-op-build-fast)
     - [Use Ninja](#use-ninja)
@@ -824,6 +825,18 @@ For subsequent builds (i.e., when `build/CMakeCache.txt` exists), the build
 options passed for the first time will persist; please run `ccmake build/`, run
 `cmake-gui build/`, or directly edit `build/CMakeCache.txt` to adapt build
 options.
+
+### Profile build time
+
+With CMake 4.3 or newer, you can collect timing information for compile, link,
+and custom build commands by enabling CMake instrumentation:
+
+```bash
+USE_CMAKE_INSTRUMENTATION=1 pip install --no-build-isolation -v -e .
+```
+
+The build prints a timing summary and the path to a trace that can be loaded in
+[Perfetto](https://ui.perfetto.dev/) for further analysis.
 
 ### Code completion and IDE support
 

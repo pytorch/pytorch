@@ -1,6 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import torch
 from torch._inductor.codegen.cpp_utils import CppCSEVariable
@@ -13,7 +13,7 @@ from torch._inductor.ir import (
     Pointwise,
     ShapeAsConstantBuffer,
 )
-from torch._inductor.loop_body import LoopBody
+from torch._inductor.loop_body import _MaskStoresHandler, LoopBody
 from torch._inductor.scheduler import SchedulerNode
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import sympy_index_symbol
@@ -129,7 +129,8 @@ class TestDependencies(InductorTestCase):
         """
         A masked store is deliberately recorded as a full write over the
         expanded domain. That over-approximation is what keeps WAW/WAR ordering
-        edges intact. Masked-off coordinates are outside the logical output.
+        edges intact; the resulting imprecision is handled by refusing in-place
+        reuse (see SchedulerNode.can_inplace).
         """
         from torch._inductor.dependencies import extract_read_writes
 
@@ -147,21 +148,25 @@ class TestDependencies(InductorTestCase):
         self.assertEqual(writes[0].get_numel(), 64)
         self.assertEqual(writes[0].mode, None)
 
-    def test_masked_expansion_rejects_non_plain_store_modes(self):
+    def test_masked_store_disables_inplace_reuse(self):
         body = object.__new__(LoopBody)
+        body.op_counts = {"masked_store": 1}
         node = object.__new__(SchedulerNode)
         node._body = body
-        store = Mock(
-            op="call_method",
-            target="store",
-            kwargs={"name": "buf0", "mode": "atomic_max"},
-            args=(),
-        )
+        node.node = None
+        node.outputs = []
 
-        with patch.object(LoopBody, "get_nodes", return_value=[store]):
-            buffers = node._get_non_plain_store_buffers()
+        self.assertFalse(node.can_inplace(object()))
 
-        self.assertEqual(set(buffers), {"buf0"})
+    def test_masked_expansion_combines_nested_mask(self):
+        inner = Mock()
+        inner.logical_and.return_value = "combined"
+        body = Mock()
+
+        _MaskStoresHandler(inner, "outer").masked("inner", body, "other")
+
+        inner.logical_and.assert_called_once_with("outer", "inner")
+        inner.masked.assert_called_once_with("combined", body, "other")
 
     def test_get_offset(self):
         x = sympy_index_symbol("x")
