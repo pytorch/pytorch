@@ -1,4 +1,5 @@
 import dataclasses
+import functools
 import importlib
 import inspect
 import io
@@ -54,7 +55,14 @@ class CompileArtifacts:
     source_info: "SourceInfo"
     device_type: str
     backend_name: str
-    system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
+    # Probe-free on purpose: this default is what CompileArtifacts(**state)
+    # reaches for a pickle written before the field existed, and running the
+    # C++ toolchain there is seconds on a cold cache and a hard error on a
+    # host with no compiler. Every site that compares the target passes
+    # cpu_codegen= explicitly.
+    system_info: SystemInfo = dataclasses.field(
+        default_factory=functools.partial(SystemInfo.current, cpu_codegen=False)
+    )
 
     @property
     def emits_native_code(self) -> bool:
@@ -558,12 +566,15 @@ class AOTCompiledModel:
             if result.guard_check(self.model, *args, **kwargs):
                 return result(self.model, *args, **kwargs)
         # disable_guard_check() is the escape hatch for an artifact whose guards
-        # fail on the serving machine for a reason the caller judges benign. A
-        # result that opted out accepts anything, but only after a real match has
-        # been looked for, so dispatch is unchanged when nobody opted out.
-        for result in self.compiled_results:
-            if not result._guard_check_enabled:
-                return result(self.model, *args, **kwargs)
+        # fail on the serving machine for a reason the caller judges benign. It
+        # is honoured only when that artifact is the ONLY candidate: with two
+        # loaded, serving an opted-out result for a call the other was compiled
+        # for is the silent-wrong-numbers case this dispatch exists to prevent,
+        # and the opt-out says nothing about which graph the call belongs to.
+        if len(self.compiled_results) == 1 and not (
+            self.compiled_results[0]._guard_check_enabled
+        ):
+            return self.compiled_results[0](self.model, *args, **kwargs)
         raise RuntimeError(self._no_match_message(*args, **kwargs))
 
     def _no_match_message(self, *args: Any, **kwargs: Any) -> str:
