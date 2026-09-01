@@ -486,6 +486,14 @@ def store_attr_mutation(
     """Store an attribute mutation in the side effects tracker."""
     se = tx.output.side_effects
     if not se.is_attribute_mutation(item):
+        if item.source is not None:
+            raise AssertionError(
+                f"{item} has a source but was never registered via "
+                "track_object_existing (usually missing at its VariableBuilder "
+                "construction site) -- writes to its writable Member/GetSet "
+                "entries would otherwise be silently dropped instead of "
+                "raising here."
+            )
         se.track_attribute_mutation_new(item)
     value_to_store = variables.DeletedVariable() if value is None else value
     se.store_attr(item, name, value_to_store)
@@ -884,7 +892,11 @@ def _wrap_descr_set(
         raise_type_error(tx, "this method takes no keyword arguments")
     if len(args) != 2:
         raise_type_error(tx, f"expected 2 arguments, got {len(args)}")
-    return func(self, tx, args[0], args[1])
+    # Realize obj before it is used as a mutation-tracking key (store_attr_mutation
+    # etc. key by VT identity): a still-lazy wrapper here would be tracked under a
+    # different identity than the one later LOAD_ATTR reads resolve to once the
+    # same local is realized elsewhere, silently hiding the mutation from them.
+    return func(self, tx, args[0].realize(), args[1])
 
 
 def _wrap_descr_delete(
@@ -900,7 +912,8 @@ def _wrap_descr_delete(
         raise_type_error(tx, "this method takes no keyword arguments")
     if len(args) != 1:
         raise_type_error(tx, f"expected 1 argument, got {len(args)}")
-    return func(self, tx, args[0], None)
+    # See _wrap_descr_set: realize before using obj as a mutation-tracking key.
+    return func(self, tx, args[0].realize(), None)
 
 
 class SlotGroup(Enum):
