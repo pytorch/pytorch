@@ -3269,8 +3269,11 @@ def sample_inputs_histogram(op_info, device, dtype, requires_grad, **kwargs):
     above = torch.nextafter(torch.tensor(3., dtype=dtype),
                             torch.tensor(9., dtype=dtype)).to(device)
     mid = torch.tensor(1.5, dtype=dtype, device=device)
-    yield SampleInput(torch.stack([mid, below, edges[0],
-                                   above, edges[2], mid]), edges)
+    boundary = torch.stack([mid, below, edges[0], above, edges[2], mid])
+    # An explicit edge tensor selects a binary search over the edges, while an
+    # explicit range selects linear interpolation with a local search.
+    yield SampleInput(boundary, edges)
+    yield SampleInput(boundary, 2, range=(1., 3.))
 
 def sample_inputs_histogramdd(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -3315,6 +3318,20 @@ def sample_inputs_histc(op_info, device, dtype, requires_grad, **kwargs):
         # construct sample inputs with a few different bins values
         for bins in [1, 3, 10]:
             yield SampleInput(make_arg(size), bins=bins, min=min, max=max)
+
+    if dtype.is_floating_point:
+        # Elements one ulp outside the explicit min and max are out of range and
+        # must not be counted. The out of range elements are not first, so that
+        # an invalid bin index cannot be hidden by a write past the histogram.
+        below = torch.nextafter(torch.tensor(1., dtype=dtype),
+                                torch.tensor(0., dtype=dtype)).to(device)
+        above = torch.nextafter(torch.tensor(3., dtype=dtype),
+                                torch.tensor(9., dtype=dtype)).to(device)
+        mid = torch.tensor(1.5, dtype=dtype, device=device)
+        lo = torch.tensor(1., dtype=dtype, device=device)
+        hi = torch.tensor(3., dtype=dtype, device=device)
+        yield SampleInput(torch.stack([mid, below, lo, above, hi, mid]),
+                          bins=2, min=1., max=3.)
 
 def sample_inputs_bincount(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
