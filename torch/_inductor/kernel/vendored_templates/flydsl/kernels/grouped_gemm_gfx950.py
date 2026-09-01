@@ -34,9 +34,6 @@ def _grouped_swizzle_tile(param, num_pid_m, num_pid_n, local_tile, grid, tiles_b
     # tiles_before are NUM_XCDS-aligned. Otherwise fall back to N-major tile
     # order so concurrent CTAs share bid_n and reuse the same B tile.
     xcd_aligned = ((grid % num_xcds) == 0) & ((tiles_before % num_xcds) == 0)
-    if const_expr(isinstance(xcd_aligned, bool)):
-        if not xcd_aligned:
-            return bid_m, bid_n
     block_swizzle = BlockSwizzle(
         NUM_XCDS=num_xcds,
         NUM_PIDS_THRESHOLD=256,
@@ -44,8 +41,6 @@ def _grouped_swizzle_tile(param, num_pid_m, num_pid_n, local_tile, grid, tiles_b
         N_MAJOR_FALLBACK=True,
     )
     swizzled_m, swizzled_n = block_swizzle.swizzle(num_pid_m, num_pid_n, local_tile)
-    if const_expr(isinstance(xcd_aligned, bool)):
-        return swizzled_m, swizzled_n
     return (
         xcd_aligned.select(swizzled_m, bid_m),
         xcd_aligned.select(swizzled_n, bid_n),

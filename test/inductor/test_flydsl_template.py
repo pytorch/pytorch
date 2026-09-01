@@ -669,15 +669,14 @@ class TestFlyDSLTemplate(TestCase):
         )
         self.assertEqual(grid_size, expected)
 
-    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
-    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
     def test_grouped_mm_fp16_rocm_meta_shape_inference(self):
         from torch._meta_registrations import meta_grouped_mm
 
         mat_a = torch.empty(96, 128, device="meta", dtype=torch.float16)
         mat_b = torch.empty(2, 128, 128, device="meta", dtype=torch.float16)
         offs = torch.empty(2, device="meta", dtype=torch.int32)
-        out = meta_grouped_mm(mat_a, mat_b, offs)
+        with mock.patch.object(torch.version, "hip", "7.0"):
+            out = meta_grouped_mm(mat_a, mat_b, offs)
         self.assertEqual(out.dtype, torch.float16)
         self.assertEqual(out.shape, (96, 128))
 

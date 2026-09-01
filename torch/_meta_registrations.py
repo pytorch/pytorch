@@ -8803,7 +8803,7 @@ def _meta_grouped_mm_common(
     # Match FP16 paths implemented by CUDA cuBLASLt and the ROCm ATen fallback.
     if mat_a.dtype == torch.float16:
         torch._check(
-            _grouped_mm_fp16_rocm_supported(mat_a, mat_b, offs)
+            _grouped_mm_fp16_rocm_supported()
             or _grouped_mm_fp16_cublaslt_supported(mat_a, mat_b, offs),
             lambda: "Float16 grouped_mm requires cuBLASLt grouped GEMM or ROCm support.",
         )
@@ -8828,16 +8828,10 @@ def _meta_grouped_mm_common(
     return _create_grouped_mm_output_tensor(mat_a, mat_b, offs, out_dtype)
 
 
-def _grouped_mm_fp16_rocm_supported(
-    mat_a: Tensor, mat_b: Tensor, offs: Tensor | None
-) -> bool:
-    if not torch.version.hip or not torch.cuda.is_available():
-        return False
-    if device_hint(mat_a) != "cuda" or device_hint(mat_b) != "cuda":
-        return False
-    if mat_a.device != mat_b.device:
-        return False
-    return offs is None or (device_hint(offs) == "cuda" and mat_a.device == offs.device)
+def _grouped_mm_fp16_rocm_supported() -> bool:
+    # ROCm eager uses CK when enabled and supported, and otherwise falls back
+    # to per-group mm/bmm. Both paths support FP16 without an architecture gate.
+    return torch.version.hip is not None
 
 
 def _grouped_mm_fp16_cublaslt_supported(

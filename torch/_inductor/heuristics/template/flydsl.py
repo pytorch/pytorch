@@ -328,7 +328,9 @@ def is_grouped_gemm_config_valid_for_shape(
     k_tiles = (k + tile_k - 1) // tile_k
     # The staged kernel prefetches stages-1 K tiles before the main loop.
     has_enough_k = use_half_tile_interleaved or k_tiles >= stages - 1
-    # Partial N tiles issue unguarded vector B loads past row boundaries.
+    # B uses a max-size buffer descriptor, so partial N tiles can issue
+    # unguarded vector loads past the allocation. Predicated C stores do not
+    # make those reads safe.
     return (
         tile_m <= max(128, m)
         and n >= tile_n

@@ -217,8 +217,8 @@ def use_flydsl_grouped_mm_template(
         (g_static, k_static * n_static, k_static * n_static),
         (m_static, n_static, n_static),
     )
-    return not any(
-        not _fits_int32_buffer_span(rows, stride, cols, itemsize)
+    return all(
+        _fits_int32_buffer_span(rows, stride, cols, itemsize)
         for rows, stride, cols in tensor_spans
     )
 
