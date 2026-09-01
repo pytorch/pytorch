@@ -1140,7 +1140,7 @@ void cpu_flash_attention_backward(
       using mask_t = float;                                                  \
       return (__VA_ARGS__)();                                                \
     }                                                                        \
-    TORCH_CHECK(                                                             \
+    TORCH_CHECK_VALUE(                                                       \
         (TYPE) == at::CppTypeToScalarType<scalar_t>::value,                  \
         NAME,                                                                \
         ": expected the mask to be Float or ",                               \
