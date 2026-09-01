@@ -1174,6 +1174,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
 
 @requires_cuda_p2p_access()
+@skipIfRocmVersionLessThan((10, 1))
 class NCCLSymmetricMemoryNccl2Test(MultiProcContinuousTest):
     """NCCL symmetric memory over an nccl2-backed process group.
 
@@ -1239,6 +1240,7 @@ class NCCLSymmetricMemoryNccl2Test(MultiProcContinuousTest):
         )
 
 
+@skipIfRocmVersionLessThan((10, 1))
 class NCCLSymmetricMemoryNcclLazyTest(NCCLSymmetricMemoryNccl2Test):
     backend_name = "nccl-lazy"
 
@@ -1407,6 +1409,7 @@ class SymmMemCftHandleTest(MultiProcessTestCase):
 
 
 @requires_cuda_p2p_access()
+@skipIfRocmVersionLessThan((10, 1))
 @skip_but_pass_in_sandcastle_if(
     not TEST_WITH_ROCM, "ROCm-specific symmetric-memory process-group restart test"
 )
