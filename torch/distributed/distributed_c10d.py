@@ -362,8 +362,8 @@ except ImportError:
     _NCCL_AVAILABLE = False
 
 try:
-    # In-tree NCCL backend built on the torchcomms engine (selected via the
-    # "nccl2" backend / entry point). Available whenever NCCL is built.
+    # In-tree NCCL backend built on the torchcomms engine (the default "nccl"
+    # implementation, also available explicitly as "nccl2").
     from torch._C._distributed_c10d import ProcessGroupNCCL2
 
     ProcessGroupNCCL2.__module__ = "torch.distributed.distributed_c10d"
@@ -743,14 +743,13 @@ def _nccl2_device(
     if device is not None:
         return device
 
-    if torch.cuda.is_initialized():
-        device_index = torch.cuda.current_device()
-    elif "LOCAL_RANK" in os.environ:
-        device_index = get_node_local_rank()
+    device_count = torch.cuda.device_count()
+    if device_count == 0:
+        raise RuntimeError("nccl2 requires at least one CUDA device")
+
+    if "LOCAL_RANK" in os.environ:
+        device_index = get_node_local_rank() % device_count
     else:
-        device_count = torch.cuda.device_count()
-        if device_count == 0:
-            raise RuntimeError("nccl2 requires at least one CUDA device")
         global_rank = (
             opts.global_ranks_in_group[opts.group_rank]
             if opts.global_ranks_in_group
@@ -876,9 +875,9 @@ def _register_builtin_gloo_backend() -> None:
 
 def _register_builtin_nccl_backend() -> None:
     creator_fn = (
-        _create_nccl2_process_group
-        if os.environ.get("TORCH_DIST_USE_NCCL2") == "1"
-        else _create_nccl_process_group
+        _create_nccl_process_group
+        if os.environ.get("TORCH_DIST_USE_NCCL2") == "0"
+        else _create_nccl2_process_group
     )
     # Record what "nccl" actually resolved to for _maybe_attach_flight_recorder,
     # which must skip a group only if every one of its backends feeds a
@@ -1467,7 +1466,7 @@ class GroupMember(metaclass=_WorldMeta):
 
 def _get_default_timeout(backend: str) -> timedelta:
     # see note on nccl vs other backend timeout (constants.py)
-    if backend == Backend.NCCL:
+    if backend in (Backend.NCCL, "nccl-legacy", "nccl2", "nccl-lazy"):
         if not isinstance(default_pg_nccl_timeout, timedelta):
             # TODO moco benchmark on CPU initializes pgnccl backend today, triggered this assert in CI before it was
             # changed to be a warning.  We should fix the moco model.
