@@ -56,6 +56,7 @@ def _get_template_filtered_operators(
 
     # Filter operators based on allowed_ops
     filtered_ops = {}
+    allowed_ops_set = set(allowed_ops)
 
     for op_name, operator in all_operators.items():
         # Always include operations that don't have a specific torch operation
@@ -68,18 +69,10 @@ def _get_template_filtered_operators(
             filtered_ops[op_name] = operator
             continue
 
-        # Check if the operator supports any of the allowed operations
-        should_include = False
-        for supported_op in allowed_ops:
-            # Direct torch operation matching
-            if torch_op == supported_op:
-                should_include = True
-                break
-
-            # Direct name matching as fallback
-            if supported_op in op_name or op_name in supported_op:
-                should_include = True
-                break
+        # Accept either the fully qualified torch operation or the exact
+        # registry key. Substring matching makes similarly named operators
+        # indistinguishable, such as exp/expand and squeeze/unsqueeze.
+        should_include = torch_op in allowed_ops_set or op_name in allowed_ops_set
 
         if should_include:
             # Set template on operators that support it

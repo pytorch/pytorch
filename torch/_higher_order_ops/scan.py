@@ -10,7 +10,7 @@ import torch
 import torch._prims_common as utils
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._functorch.vmap import restore_vmap, unwrap_batched, wrap_batched
+from torch._functorch.vmap import unwrap_batched, wrap_batched
 from torch._guards import detect_fake_mode
 from torch._higher_order_ops.auto_functionalize import (
     can_auto_functionalize,
@@ -22,7 +22,10 @@ from torch._higher_order_ops.partitioner import (
     HopPartitionedGraph,
 )
 from torch._higher_order_ops.utils import (
+    _batch_dims_as_last_for_scan,
     _maybe_compile_and_run_fn,
+    _move_batch_dims_to_last_for_scan,
+    _VmapCombineFnWrapper,
     check_meta_consistency,
     fill_none_with_masks,
     filter_with_masks,
@@ -1155,58 +1158,33 @@ def scan_batch_rule(
     )
     init_dims, xs_dims, additional_dims = in_dims
 
-    # Prepare the batched carry.
+    # The carry is front-batched and materialized (broadcast when unbatched), as in
+    # JAX's _scan_batching_rule, so it matches the fresh contiguous carry combine_fn
+    # returns and while_loop's front-batched carry when scan is nested inside one.
     unbatched_init = tuple(
         move_bdim_to_front(t, bdim, batch_size)
         for t, bdim in zip(unbatched_init, init_dims)
     )
-    # move to last dim to not interfere with scan's batching
-    unbatched_xs = tuple(
-        t.movedim(bdim, -1) if bdim is not None else t
-        for t, bdim in zip(unbatched_xs, xs_dims)
-    )
-    unbatched_additional_inputs = tuple(
-        t.movedim(bdim, -1) if bdim is not None else t
-        for t, bdim in zip(unbatched_additional_inputs, additional_dims)
+    # xs and the additional inputs keep their batch dim last, clear of the scan dim.
+    unbatched_xs, unbatched_additional_inputs = _move_batch_dims_to_last_for_scan(
+        (unbatched_xs, unbatched_additional_inputs), (xs_dims, additional_dims)
     )
     num_carries = len(unbatched_init)
-    after_move_dims = tuple(
-        [0] * len(init_dims)
-        + [-1 if bdim is not None else None for bdim in xs_dims]
-        + [-1 if bdim is not None else None for bdim in additional_dims]
+    after_move_dims = (
+        (0,) * num_carries
+        + _batch_dims_as_last_for_scan(xs_dims)
+        + _batch_dims_as_last_for_scan(additional_dims)
     )
 
     with interpreter.lower():
-        out_dims = None
-
-        def wrapper(*args):
-            nonlocal out_dims
-            outputs, per_slice_out_dims = restore_vmap(
-                combine_fn,
-                after_move_dims,
-                batch_size,
-                interpreter.randomness(),
-            )(*args)
-            # Note: outputs are not batched, we just place the batch dim where scan's
-            # batching does not interfere with it: at the front for the carries and at the end for the ys.
-            carries, ys = _extract_carry_and_out(list(outputs), num_carries)
-            carry_dims, y_dims = _extract_carry_and_out(
-                list(per_slice_out_dims), num_carries
-            )
-            carries = [
-                move_bdim_to_front(out, bdim, batch_size)
-                for out, bdim in zip(carries, carry_dims)
-            ]
-            ys = [
-                out.movedim(bdim, -1) if bdim is not None else out
-                for out, bdim in zip(ys, y_dims)
-            ]
-            out_dims = tuple(
-                [0] * len(carry_dims)
-                + [-1 if bdim is not None else None for bdim in y_dims]
-            )
-            return tuple(carries + ys)
-
+        wrapper = _VmapCombineFnWrapper(
+            combine_fn,
+            after_move_dims,
+            batch_size,
+            interpreter.randomness(),
+            op_name="scan",
+            num_carries=num_carries,
+        )
         op_kwargs = {}
         if mutated_arg_indices:
             op_kwargs["mutated_arg_indices"] = mutated_arg_indices
@@ -1218,9 +1196,13 @@ def scan_batch_rule(
             **op_kwargs,
         )
 
-    if out_dims is None:
+    if wrapper.out_dims is None:
         raise AssertionError("out_dims must not be None after scan_op")
-    batched_out = wrap_batched(unwrapped_out, out_dims, interpreter.level())
+    # wrap_batched matches bdims against the output container; normalize to a
+    # tuple to align with the tuple out_dims (as in associative_scan_batch_rule).
+    batched_out = wrap_batched(
+        tuple(unwrapped_out), wrapper.out_dims, interpreter.level()
+    )
     return batched_out
 
 

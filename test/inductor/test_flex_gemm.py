@@ -5,6 +5,7 @@ import dataclasses
 import importlib
 import logging
 import math
+import operator
 import struct
 import sys
 import unittest
@@ -329,6 +330,51 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         )
 
     @parametrize(
+        "reduction_type,op_name,init_val",
+        (
+            ("sum", "ADD", 0.0),
+            ("prod", "MUL", 1.0),
+            ("max", "MAX", float("-inf")),
+            ("min", "MIN", float("inf")),
+        ),
+    )
+    def test_materialize_tensorssa_reduction_reuses_descriptor(
+        self, reduction_type, op_name, init_val
+    ):
+        from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
+            tensorssa_reduction,
+        )
+        from torch._inductor.kernel import gemm_epilogue_codegen
+
+        descriptor = tensorssa_reduction(reduction_type)
+        reduction_ops = SimpleNamespace(
+            ADD=object(), MUL=object(), MAX=object(), MIN=object()
+        )
+        cute = SimpleNamespace(ReductionOp=reduction_ops)
+        combine = object()
+        with mock.patch.object(
+            gemm_epilogue_codegen,
+            "materialize_epilogue_function",
+            side_effect=(combine, lambda: init_val),
+        ) as materialize:
+            reduction = gemm_epilogue_codegen.materialize_tensorssa_reduction(
+                reduction_type, cute
+            )
+
+        self.assertIs(reduction.reduce_op, getattr(reduction_ops, op_name))
+        self.assertEqual(reduction.init_val, init_val)
+        self.assertIs(reduction.combine, combine)
+        self.assertEqual(
+            [call.args[0] for call in materialize.call_args_list],
+            [
+                f"def combine(lhs, rhs):\n    return {descriptor.combine_expr}",
+                f"def init():\n    return {descriptor.init_val}",
+            ],
+        )
+        for call in materialize.call_args_list:
+            self.assertIs(call.args[1], cute)
+
+    @parametrize(
         "case",
         (
             (
@@ -495,7 +541,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             if node.target is inductor_prims.prepare_softmax_online
         )
         self.assertIn(prepare_softmax, analysis.matches)
-        self.assertIsNone(analysis.matches[prepare_softmax].reduction_type)
+        self.assertEqual(analysis.matches[prepare_softmax].reduction_type, "sum")
 
     def test_epilogue_graph_normalizes_selected_fx_nodes(self):
         import operator
@@ -2173,6 +2219,10 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         from torch._inductor.kernel.flex_gemm.template import (
             FlexGemmEpilogueLocalReduceConfig,
         )
+        from torch._inductor.kernel.gemm_epilogue import (
+            GEMM_REDUCTION_IDENTITY_SOURCE,
+            GemmReductionPlan,
+        )
 
         callbacks = FlexGemmLocalReduceCallbacks(
             lambda lhs, rhs: lhs, lambda value: value
@@ -2182,7 +2232,7 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         feed_plan = FlexGemmRuntimeLocalReducePlan(
             geometry, callbacks=callbacks, feeds_main=True
         )
-        shared_plan = FlexGemmRuntimeLocalReducePlan(
+        shared_runtime_plan = FlexGemmRuntimeLocalReducePlan(
             geometry,
             out=out,
             callbacks=callbacks,
@@ -2192,19 +2242,39 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             geometry, out=out, callbacks=callbacks
         )
         self.assertTrue(feed_plan.feeds_main)
-        self.assertTrue(shared_plan.feeds_main)
+        self.assertTrue(shared_runtime_plan.feeds_main)
         self.assertFalse(store_plan.feeds_main)
-        self.assertTrue(
-            FlexGemmEpilogueLocalReduceConfig(geometry, feeds_main=True).feeds_main
+        shared_reduction_plan = GemmReductionPlan(
+            reduction_output="reduced",
+            group=8,
+            axis=0,
+            reduction_type="sum",
+            source_type="identity",
+            source_fn=GEMM_REDUCTION_IDENTITY_SOURCE,
+            primary_output="output",
+            feeds_main=True,
+            feed_output="output",
         )
-        self.assertTrue(
-            FlexGemmEpilogueLocalReduceConfig(
-                geometry, out_index=0, feeds_main=True
-            ).feeds_main
+        feed_template_plan = FlexGemmEpilogueLocalReduceConfig.from_plan(
+            shared_reduction_plan, None
         )
-        self.assertFalse(
-            FlexGemmEpilogueLocalReduceConfig(geometry, out_index=0).feeds_main
+        shared_template_plan = FlexGemmEpilogueLocalReduceConfig.from_plan(
+            shared_reduction_plan, 0
         )
+        store_template_plan = FlexGemmEpilogueLocalReduceConfig.from_plan(
+            dataclasses.replace(
+                shared_reduction_plan, feeds_main=False, feed_output=None
+            ),
+            0,
+        )
+        self.assertIsNotNone(feed_template_plan)
+        self.assertIsNotNone(shared_template_plan)
+        self.assertIsNotNone(store_template_plan)
+        self.assertIsNone(FlexGemmEpilogueLocalReduceConfig.from_plan(None, None))
+        self.assertIs(feed_template_plan.plan, shared_reduction_plan)
+        self.assertTrue(feed_template_plan.plan.feeds_main)
+        self.assertTrue(shared_template_plan.plan.feeds_main)
+        self.assertFalse(store_template_plan.plan.feeds_main)
 
         feed_kwargs = local_reduce_gemm_act_kwargs(
             feed_plan, None, ("combine", "finalize")
@@ -2212,7 +2282,7 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         self.assertTrue(feed_kwargs["local_reduce_feeds_main"])
         self.assertFalse(feed_kwargs["tensor_epilogue_returns_local_reduce"])
         shared_kwargs = local_reduce_gemm_act_kwargs(
-            shared_plan, out, ("combine", "finalize")
+            shared_runtime_plan, out, ("combine", "finalize")
         )
         self.assertTrue(shared_kwargs["local_reduce_feeds_main"])
         self.assertTrue(shared_kwargs["tensor_epilogue_returns_local_reduce"])
@@ -2258,7 +2328,7 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         node = graph.placeholder("x")
         aux = graph.placeholder("aux")
         geometry = FlexGemmLocalReduceGeometry(8, 0)
-        match = FlexGemmLocalReduceMatch(aux, geometry)
+        match = FlexGemmLocalReduceMatch(value_node=aux, geometry=geometry)
         analysis = FlexGemmLocalReduceAnalysis(
             GemmEpilogueGraph(dependencies={}, normalized_nodes={})
         )
@@ -2267,7 +2337,7 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         with self.assertRaisesRegex(RuntimeError, "output nodes"):
             FlexGemmOutputPlan(node, (object(),))
         with self.assertRaisesRegex(RuntimeError, "tensor nodes"):
-            FlexGemmLocalReduceMatch(object(), geometry)
+            FlexGemmLocalReduceMatch(value_node=object(), geometry=geometry)
         with self.assertRaisesRegex(RuntimeError, "output plans"):
             FlexGemmOutputLocalReducePlan(object())
         with self.assertRaisesRegex(RuntimeError, "output plans"):
@@ -2309,14 +2379,17 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             FlexGemmOutputLocalReducePlan,
             FlexGemmOutputPlan,
         )
-        from torch._inductor.kernel.gemm_epilogue import GemmReductionPlan
+        from torch._inductor.kernel.gemm_epilogue import (
+            GEMM_REDUCTION_IDENTITY_SOURCE,
+            GemmReductionPlan,
+        )
 
         graph = torch.fx.Graph()
         output = graph.placeholder("output")
         reduced = graph.placeholder("reduced")
         match = FlexGemmLocalReduceMatch(
-            reduced,
-            FlexGemmLocalReduceGeometry(8, 0),
+            value_node=reduced,
+            geometry=FlexGemmLocalReduceGeometry(8, 0),
             reduction_type="max",
         )
         outputs = FlexGemmOutputPlan(
@@ -2334,16 +2407,32 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         self.assertEqual(
             outputs.reduction_plan,
             GemmReductionPlan(
-                "reduced",
-                8,
-                0,
-                "max",
-                "identity",
-                "output",
+                reduction_output="reduced",
+                group=8,
+                axis=0,
+                reduction_type="max",
+                source_type="identity",
+                source_fn=GEMM_REDUCTION_IDENTITY_SOURCE,
+                primary_output="output",
                 feeds_main=True,
                 feed_output="output",
             ),
         )
+
+        generated = FlexGemmOutputPlan(
+            output,
+            local_reduce=FlexGemmOutputLocalReducePlan(
+                FlexGemmLocalReduceMatch(
+                    value_node=reduced,
+                    geometry=FlexGemmLocalReduceGeometry(8, 0),
+                ),
+                store=FlexGemmLocalReduceStore(node=reduced, aux_index=0),
+            ),
+        )
+        generated_plan = generated.reduction_plan
+        self.assertIsNotNone(generated_plan)
+        self.assertEqual(generated_plan.reduction_type, "sum")
+        self.assertEqual(generated_plan.source_fn, GEMM_REDUCTION_IDENTITY_SOURCE)
 
     def test_ordered_outputs_restore_local_reduce_position(self):
         from torch._inductor.kernel.flex_gemm.lowering import flex_gemm_ordered_outputs
@@ -5615,6 +5704,90 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             "local_reduce_finalize_fn"
         ).run(code)
         self.assertLocalReduceAuxCode(code, group)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_inline_asm_three_outputs(self):
+        m = k = n = 64
+
+        def epilogue_fn(acc):
+            first, second, third = inline_asm_elementwise(
+                acc.float(),
+                asm_str=("mov.f32 $0, $3; add.f32 $1, $3, $3; mul.f32 $2, $3, $3;"),
+                constraints="=f,=f,=f,f",
+                dtype=(torch.float32, torch.float32, torch.float32),
+            )
+            return first + second + third
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.ones(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.ones(k, n, device="cuda", dtype=torch.bfloat16)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        expected_input = (a @ b).float()
+        expected = expected_input * 3 + expected_input.square()
+        self.assertEqual(actual, expected)
+        self.assertEqual(code.count("inline_asm_elementwise_intrinsic("), 1)
+
+    @skipIfNoCuteDSL
+    def test_mm_inline_asm_three_outputs_codegen(self):
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
+            analyze_flex_gemm_epilogue,
+            gemm_node,
+            materialize_flex_gemm_epilogue,
+        )
+
+        graph = torch.fx.Graph()
+        a = graph.placeholder("a")
+        b = graph.placeholder("b")
+        a.meta["val"] = torch.empty(4, 8)
+        b.meta["val"] = torch.empty(8, 16)
+        acc = graph.call_function(torch.ops.aten.mm.default, (a, b))
+        acc.meta["val"] = torch.empty(4, 16)
+        asm = graph.call_function(
+            inline_asm_elementwise,
+            (acc,),
+            {
+                "asm_str": ("mov.f32 $0, $3; add.f32 $1, $3, $3; mul.f32 $2, $3, $3;"),
+                "constraints": "=f,=f,=f,f",
+                "dtype": (torch.float32, torch.float32, torch.float32),
+            },
+        )
+        asm.meta["val"] = tuple(torch.empty(4, 16) for _ in range(3))
+        outputs = []
+        for index in range(3):
+            output = graph.call_function(operator.getitem, (asm, index))
+            output.meta["val"] = torch.empty(4, 16)
+            outputs.append(output)
+        first_sum = graph.call_function(
+            torch.ops.aten.add.Tensor, (outputs[0], outputs[1])
+        )
+        first_sum.meta["val"] = torch.empty(4, 16)
+        result = graph.call_function(torch.ops.aten.add.Tensor, (first_sum, outputs[2]))
+        result.meta["val"] = torch.empty(4, 16)
+        graph.output(result)
+        graph_module = torch.fx.GraphModule({}, graph)
+        analysis = analyze_flex_gemm_epilogue(
+            graph_module, gemm_node(graph_module, torch.ops.aten.mm.default)
+        )
+        _, source = materialize_flex_gemm_epilogue(graph_module, analysis)
+
+        self.assertEqual(source.count("inline_asm_elementwise_intrinsic("), 1)
+        FileCheck().check("tmp0, tmp1, tmp2 = inline_asm_elementwise_intrinsic(").check(
+            "result_type=(cutlass.Float32, cutlass.Float32, cutlass.Float32)"
+        ).check("tmp3 = (tmp0 + tmp1)").check("tmp4 = (tmp3 + tmp2)").check(
+            "return tmp4"
+        ).run(source)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")

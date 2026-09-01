@@ -311,7 +311,7 @@ def check_node_safe(node: Node) -> None:
         if node.meta and node.meta.get("is_wrapped", False):
             # This is fx.wrap function
             # By default we BypassAOTAutogradCache for unknown functions,
-            # But if user explicitly specified cache hash - allow to cache it.
+            # But if user explicitly specified cache hash - allow caching it.
             if node.meta.get("user_cache_hash", None):
                 return
         if isinstance(node.target, str):
@@ -333,17 +333,23 @@ def check_node_safe(node: Node) -> None:
                 f"expected method_target to be Node, got {type(method_target)}"
             )
         if not is_tensor(method_target):
-            module = getattr(method_target, "__module__", None)
-            name = getattr(method_target, "__name__", None)
+            # Node.__str__ is just the node name, so name the method separately.
+            try:
+                receiver = method_target.format_node()
+            except Exception:
+                # Formatting is best-effort; preserve the cache bypass on failure.
+                receiver = f"%{method_target.name} : {method_target.op}"
             raise BypassAOTAutogradCache(
-                f"Unsupported call_method target {method_target}. \nMethod module: {module}, \nMethod name: {name}"
+                f"Unsupported call_method {method_name!r} on receiver "
+                f"{receiver}, "
+                f"which has no example_value and so is not known to be a Tensor"
             )
         if (
             type(method_name) is not str
             and type(method_name).__name__ != "method_descriptor"
         ):
             raise BypassAOTAutogradCache(
-                f"Unsupported call_method method {node.target}: {method_name}"
+                f"Unsupported call_method method {method_name}"
             )
     # Cache safe
     elif node.op in ("placeholder", "get_attr", "call_module", "output"):
