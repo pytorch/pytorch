@@ -14858,13 +14858,6 @@ op_db: list[OpInfo] = [
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32, torch.int8, torch.bool),
                     supports_autograd=False,
                     always_returns_bool=True,
-                    skips=(
-                        # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
-                        # AssertionError: RuntimeError not raised : Expected RuntimeError when calling with
-                        # input.device=mps:0 and out.device=cpu.
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
-                    ),
                     supports_rhs_python_scalar=False),
     BinaryUfuncInfo('logical_or',
                     ref=np.logical_or,
@@ -14872,13 +14865,6 @@ op_db: list[OpInfo] = [
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int8, torch.bool),
                     supports_autograd=False,
                     always_returns_bool=True,
-                    skips=(
-                        # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
-                        # AssertionError: RuntimeError not raised : Expected RuntimeError when calling with
-                        # input.device=mps:0 and out.device=cpu.
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
-                    ),
                     supports_rhs_python_scalar=False),
     BinaryUfuncInfo('logical_xor',
                     ref=np.logical_xor,
@@ -14886,14 +14872,7 @@ op_db: list[OpInfo] = [
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int8, torch.bool),
                     supports_autograd=False,
                     always_returns_bool=True,
-                    supports_rhs_python_scalar=False,
-                    skips=(
-                        # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
-                        # AssertionError: RuntimeError not raised : Expected RuntimeError when calling with
-                        # input.device=mps:0 and out.device=cpu.
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
-                    )),
+                    supports_rhs_python_scalar=False),
     BinaryUfuncInfo('bitwise_and',
                     ref=np.bitwise_and,
                     dtypes=integral_types_and(torch.bool),
