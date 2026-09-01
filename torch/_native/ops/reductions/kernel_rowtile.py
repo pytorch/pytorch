@@ -641,7 +641,7 @@ def single_row_config(N: int, dtype_width: int, nfields: int = 1, hw=None):
     return _RowConfig(tpr=rungs[-1], nt=rungs[-1])
 
 
-def _launch_itree(trait, trait_key, plan, dt, wrap, N, tag, nouts=1):
+def _launch_itree(trait, trait_key, plan, dt, wrap, N, tag, nouts=1, dsts=()):
     """Compile-or-fetch and launch one stage of the order. `wrap` rewraps per call."""
     op = tile.TileReduce(
         trait,
@@ -673,7 +673,10 @@ def _launch_itree(trait, trait_key, plan, dt, wrap, N, tag, nouts=1):
             _stream(),
         )
 
-    key = (tag, trait_key, dt) + op.cache_sig
+    # dsts: the kernel bakes each destination's element type, so two calls differing only in an
+    # output dtype are different kernels. Every sibling driver keys on them; without it the second
+    # call fetches the first's plan and the launch fails on a mismatched tensor.
+    key = (tag, trait_key, dt, tuple(dsts)) + op.cache_sig
     build = lambda: _compile(op, *_args())  # noqa: E731
     cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")(*_args())
 
@@ -698,7 +701,17 @@ def _run_itree(trait, trait_key, x, out_dtypes, itree, nouts=1):
             [wrap_in()],
             [_L.cute_tensor_dynM(o, ndim=1) for o in outs],
         )
-        _launch_itree(trait, trait_key, itree, dt, wrap, N, "rowitree", nouts)
+        _launch_itree(
+            trait,
+            trait_key,
+            itree,
+            dt,
+            wrap,
+            N,
+            "rowitree",
+            nouts,
+            tuple(o.dtype for o in outs),
+        )
         return tuple(outs)
     # The split shape cannot bake its batch count, so it writes one partial per (row, batch) and
     # a second stage folds each row's partials LINEARLY -- both halves of upstream's two-kernel
@@ -712,14 +725,32 @@ def _run_itree(trait, trait_key, x, out_dtypes, itree, nouts=1):
         [wrap_in()],
         [_L.cute_tensor_dynM(p, ndim=1) for p in parts],
     )
-    _launch_itree(trait, trait_key, itree, dt, wrap1, N, "rowitree1", nouts)
+    _launch_itree(
+        trait,
+        trait_key,
+        itree,
+        dt,
+        wrap1,
+        N,
+        "rowitree1",
+        nouts,
+        tuple(p.dtype for p in parts),
+    )
     outs = [torch.empty(M, device=x.device, dtype=d) for d in out_dtypes[:nouts]]
     wrap2 = lambda: (  # noqa: E731
         [_L.cute_tensor_dynM(p, ndim=1, read_only=True) for p in parts],
         [_L.cute_tensor_dynM(o, ndim=1) for o in outs],
     )
     _launch_itree(
-        trait, trait_key, itree_combine_plan(itree), dt, wrap2, N, "rowitree2", nouts
+        trait,
+        trait_key,
+        itree_combine_plan(itree),
+        dt,
+        wrap2,
+        N,
+        "rowitree2",
+        nouts,
+        tuple(o.dtype for o in outs),
     )
     return tuple(outs)
 
@@ -752,11 +783,21 @@ def reduce_row_tile(
     # serve -- a raw stage-1 partial pass (`final=False`), whose consumer imposes its own layout,
     # and an explicit tpr, which is a launch-shape request a fixed DAG cannot honour. Those keep
     # the default order; neither falls back to aten.
+    if order not in (None, "linear", "inner_tree"):
+        raise ValueError(f"order must be None, 'linear' or 'inner_tree', got {order!r}")
     itree = None
     if (order == "inner_tree" or (order is None and inner_tree_order_enabled())) and (
         final and tpr is None
     ):
         itree = itree_plan(N, M, x.element_size())
+    if order == "inner_tree" and itree is None:
+        # An EXPLICIT request for a reproducible DAG must not be served with another one. Only
+        # order=None (the env gate) may fall back to the default order, since that reads as "use
+        # the order where it applies" rather than as a demand.
+        raise ValueError(
+            f"order='inner_tree' cannot be honoured here: {final=} {tpr=} "
+            f"plan={itree_plan(N, M, x.element_size()) is not None}"
+        )
     if itree is not None:
         return _run_itree(trait, trait_key, x, out_dtypes, itree, nouts)
     cfg = row_config(N, x.element_size() * 8, trait.nfields)
