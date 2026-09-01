@@ -350,8 +350,8 @@ generated AOT kernel functions do not exist yet. A torch built and stopped here
 is fully functional and exercises zero AOT kernels. Note where the two halves
 land: `NativeAotStubs.cpp` compiles into **torch_cpu** (that is where
 `<op>_aot_stub` is defined) while the consultation lines live in the CUDA
-register files in **torch_cuda**, which is why adding a declaration needs a
-stage-1 build and not just stage 2's torch_cuda relink. Declarations are wired in
+register files in **torch_cuda**, so adding a declaration needs a stage-1 build,
+not just stage 2's torch_cuda relink. Declarations are wired in
 as codegen inputs, so editing one re-runs torchgen:
 
 ```cmake
@@ -443,8 +443,8 @@ A DSL is embeddable if it can produce one of three artifact shapes (the design
 doc's taxonomy, for CUDA): (1) a **.o** with a known call signature we link
 directly; (2) **source** (`.cpp`/`.cu` plus a header) we compile into the
 library; (3) a **cubin** we embed and launch ourselves. The three registered
-kinds are one of each, which is why the abstraction is `artifact_exts` plus
-`link_source_globs` plus `gen_launcher`. Of the DSLs the doc considered: CuTeDSL
+kinds are one of each, hence the `artifact_exts` plus `link_source_globs` plus
+`gen_launcher` abstraction. Of the DSLs the doc considered: CuTeDSL
 takes path 1 (or 3), Triton path 2, cuTile path 3, and Helion emits another DSL,
 so it inherits whichever path its backend takes.
 
@@ -582,8 +582,8 @@ module docstring if this section and the code ever disagree.
 **Module scope must import with stdlib alone.** torchgen loads the file by path,
 before torch exists and without package context. Import torch lazily inside
 function bodies. The kernel builder module (`KERNEL_MODULE`) has no such
-restriction: it is package-imported in stage 2 with the built torch available,
-which is why the AOT and JIT routes can share one kernel body by construction.
+restriction: it is package-imported in stage 2 with the built torch available, so
+the AOT and JIT routes can share one kernel body by construction.
 
 A module declares either **one op** (module-level exports) or a **family**
 (exports `declarations() -> list` of objects carrying the same exports as
