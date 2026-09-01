@@ -17895,10 +17895,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         _, codes = run_fw_bw_and_get_code(lambda: opt_fn(x))
         self.assertEqual(len(codes), 2)
 
-    @unittest.skipIf(
-        config.cpp_wrapper,
-        "codegen invoke_subgraph is not implemented for cpp wrapper",
-    )
     def test_lite_regional_compile_invoke_subgraph(self):
         # Checks that get_attr nodes custom metadata is propagated
         @torch.compiler.nested_compile_region
