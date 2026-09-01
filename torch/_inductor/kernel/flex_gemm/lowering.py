@@ -677,8 +677,8 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         ),
         lowering_name=subgraph.name,
     )
-    template_local_reduce = FlexGemmEpilogueLocalReduceConfig.from_output_plan(
-        outputs.local_reduce,
+    template_local_reduce = FlexGemmEpilogueLocalReduceConfig.from_plan(
+        epilogue_analysis.reduction_plan,
         local_reduce_out_index,
         output_layout=local_reduce_layout,
         swap_ab=explicit_swap_ab,
@@ -800,11 +800,28 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     """Dispatch FlexGEMM to ordinary Inductor lowering or the QUACK template."""
     backend = kernel_options.get("backend", "TRITON")
     if backend == "NVGEMM":
+        unsupported_options = OrderedSet(kernel_options) - OrderedSet(
+            ("backend", "tuned")
+        )
+        if unsupported_options:
+            raise NotImplementedError(
+                f"Unsupported NVGEMM FlexGEMM options: {unsupported_options}"
+            )
+        tuned = kernel_options.get("tuned", False)
+        if not isinstance(tuned, bool):
+            raise NotImplementedError("NVGEMM FlexGEMM tuned must be a bool")
         decompose_nvgemm_additive_gemm(subgraph.graph_module)
-        with config.patch(
-            max_autotune=True,
-            max_autotune_gemm_backends="NVGEMM",
-        ):
+        nvgemm_config: dict[str, Any] = {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "NVGEMM",
+        }
+        if tuned:
+            nvgemm_config.update(
+                nvgemm_max_profiling_configs=None,
+                nvgemm_supplement_configs=True,
+                nvgemm_swap_ab=True,
+            )
+        with config.patch(nvgemm_config):
             return process_subgraph_nodes(subgraph.graph_module, list(args))
     if backend == "QUACK":
         return lower_quack_flex_gemm(
