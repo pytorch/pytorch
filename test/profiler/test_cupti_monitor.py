@@ -3692,6 +3692,10 @@ _cupti_monitor.enable_hes_early()
         self.assertEqual(stats["buffers_pending"], 0)
         self.assertGreater(len(start), 0)
 
+        # obs.close() unregistered the last observer, stopping the monitor. The pool
+        # must survive that: CUPTI can still own buffers it never returned.
+        self.assertGreater(torch._C._profiler._cupti_monitor.allocated_buffers(), 0)
+
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     @_isolated
     def test_graph_host_node_collected_on_device(self):
