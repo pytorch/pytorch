@@ -319,11 +319,43 @@ void get_cubic_coefficients_grad(
 }
 
 
+// grid_sampler_unnormalize with the extent kept in index_t, for the kernels
+// that index with int64_t; bit-identical to the int-taking one for every
+// extent an int can carry.
+template <typename scalar_t, typename index_t>
+__forceinline__ __device__
+scalar_t grid_sampler_unnormalize_sized(scalar_t coord, index_t size,
+                                        bool align_corners) {
+  const scalar_t extent = static_cast<scalar_t>(size);
+  if (align_corners) {
+    return ((coord + 1) / 2) * (extent - 1);
+  } else {
+    return ((coord + 1) * extent - 1) / 2;
+  }
+}
+
+template <typename scalar_t, typename index_t>
+__forceinline__ __device__
+scalar_t grid_sampler_unnormalize_set_grad_sized(scalar_t coord, index_t size,
+                                                 bool align_corners,
+                                                 scalar_t* grad_in) {
+  const scalar_t extent = static_cast<scalar_t>(size);
+  if (align_corners) {
+    *grad_in = (extent - 1) / 2;
+    return ((coord + 1) / 2) * (extent - 1);
+  } else {
+    *grad_in = extent / 2;
+    return ((coord + 1) * extent - 1) / 2;
+  }
+}
+
 // compute_coordinates with the extent kept in index_t: the tricubic kernels
 // index with index_t, and narrowing the extent to int before the padding would
 // fold a dimension past INT_MAX onto the wrong voxel. The reflection parity is
-// taken with fmod so no float ever converts to an integer type; for every
-// extent an int can carry the arithmetic matches compute_coordinates exactly.
+// taken with fmod so no float ever converts to an integer type, and no
+// downgrade clips a valid position past INT_MAX: the caller's comparison gate
+// decides before any cast. For every extent an int can carry the arithmetic
+// matches compute_coordinates exactly.
 template <typename scalar_t, typename index_t>
 __forceinline__ __device__
 scalar_t compute_coordinates_sized(scalar_t coord, index_t size,
@@ -350,7 +382,6 @@ scalar_t compute_coordinates_sized(scalar_t coord, index_t size,
     coord = ::min(static_cast<scalar_t>(size - 1),
                   ::max(coord, static_cast<scalar_t>(0)));
   }
-  coord = safe_downgrade_to_int_range(coord);
   return coord;
 }
 

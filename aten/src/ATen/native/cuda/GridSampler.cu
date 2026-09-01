@@ -353,11 +353,11 @@ namespace {
       // x, y, z rather than at the clipped ix, iy, iz above.
       opmath_t x_coeffs[4], y_coeffs[4], z_coeffs[4];
       index_t x_taps[4], y_taps[4], z_taps[4];
-      resolve_cubic_taps(grid_sampler_unnormalize(x, inp_W, align_corners), inp_W, padding_mode,
+      resolve_cubic_taps(grid_sampler_unnormalize_sized(x, inp_W, align_corners), inp_W, padding_mode,
                          align_corners, x_coeffs, static_cast<opmath_t*>(nullptr), x_taps);
-      resolve_cubic_taps(grid_sampler_unnormalize(y, inp_H, align_corners), inp_H, padding_mode,
+      resolve_cubic_taps(grid_sampler_unnormalize_sized(y, inp_H, align_corners), inp_H, padding_mode,
                          align_corners, y_coeffs, static_cast<opmath_t*>(nullptr), y_taps);
-      resolve_cubic_taps(grid_sampler_unnormalize(z, inp_D, align_corners), inp_D, padding_mode,
+      resolve_cubic_taps(grid_sampler_unnormalize_sized(z, inp_D, align_corners), inp_D, padding_mode,
                          align_corners, z_coeffs, static_cast<opmath_t*>(nullptr), z_taps);
 
       auto inp_ptr_NC = input.data + n * inp_sN;
@@ -463,11 +463,11 @@ namespace {
       opmath_t x_coeffs_grad[4], y_coeffs_grad[4], z_coeffs_grad[4];
       index_t x_taps[4], y_taps[4], z_taps[4];
       opmath_t x_mult, y_mult, z_mult;
-      resolve_cubic_taps(grid_sampler_unnormalize_set_grad(static_cast<opmath_t>(x), inp_W, align_corners, &x_mult),
+      resolve_cubic_taps(grid_sampler_unnormalize_set_grad_sized(static_cast<opmath_t>(x), inp_W, align_corners, &x_mult),
                          inp_W, padding_mode, align_corners, x_coeffs, x_coeffs_grad, x_taps);
-      resolve_cubic_taps(grid_sampler_unnormalize_set_grad(static_cast<opmath_t>(y), inp_H, align_corners, &y_mult),
+      resolve_cubic_taps(grid_sampler_unnormalize_set_grad_sized(static_cast<opmath_t>(y), inp_H, align_corners, &y_mult),
                          inp_H, padding_mode, align_corners, y_coeffs, y_coeffs_grad, y_taps);
-      resolve_cubic_taps(grid_sampler_unnormalize_set_grad(static_cast<opmath_t>(z), inp_D, align_corners, &z_mult),
+      resolve_cubic_taps(grid_sampler_unnormalize_set_grad_sized(static_cast<opmath_t>(z), inp_D, align_corners, &z_mult),
                          inp_D, padding_mode, align_corners, z_coeffs, z_coeffs_grad, z_taps);
 
       opmath_t gix = static_cast<opmath_t>(0);
