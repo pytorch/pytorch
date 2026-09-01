@@ -140,6 +140,15 @@ class PrivateUse1BackendTest(TestCase):
         # Assert this don't throw:
         _ = a_cpu.is_pinned()
 
+    def test_new_stream_raises_without_python_impl(self):
+        # This backend's device guard does not define `get_new_stream`, so
+        # asking for a stream must raise rather than silently returning the
+        # default stream. See https://github.com/pytorch/pytorch/issues/195458
+        with self.assertRaisesRegex(
+            RuntimeError, "Backend doesn't support create a new Stream"
+        ):
+            torch.Stream(device="npy")
+
     @unittest.skip(
         "Disabled due to CI failures; see "
         "https://github.com/pytorch/pytorch/issues/190232"
