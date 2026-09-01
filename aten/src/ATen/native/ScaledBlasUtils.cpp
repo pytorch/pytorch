@@ -177,11 +177,14 @@ bool check_deepseek_recipe(
     return false;
   }
 
-  // Need {Blockwise_1x128, float} for A, {Blockwise_128x128, float} for B
+  // Need expected recipe with float or e8m0fnu scales (both must match)
   if (recipe_a[0] != expected_recipe_a) return false;
-  if (scales_a[0].scalar_type() != ScalarType::Float) return false;
   if (recipe_b[0] != expected_recipe_b) return false;
-  if (scales_b[0].scalar_type() != ScalarType::Float) return false;
+  auto scale_dtype_a = scales_a[0].scalar_type();
+  auto scale_dtype_b = scales_b[0].scalar_type();
+  if (scale_dtype_a != ScalarType::Float && scale_dtype_a != ScalarType::Float8_e8m0fnu) return false;
+  if (scale_dtype_b != ScalarType::Float && scale_dtype_b != ScalarType::Float8_e8m0fnu) return false;
+  if (scale_dtype_a != scale_dtype_b) return false;
 
   return true;
 }

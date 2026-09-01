@@ -120,14 +120,16 @@ bool is_blockwise_scaling(
 
 bool is_blockwise_1x128_scaling(const at::Tensor& t, const at::Tensor& scale) {
   return at::isFloat8Type(t.scalar_type()) &&
-      is_blockwise_scaling(t, scale, at::kFloat, 1, 128);
+      (is_blockwise_scaling(t, scale, at::kFloat, 1, 128) ||
+       is_blockwise_scaling(t, scale, at::kFloat8_e8m0fnu, 1, 128));
 }
 
 bool is_blockwise_128x128_scaling(
     const at::Tensor& t,
     const at::Tensor& scale) {
   return at::isFloat8Type(t.scalar_type()) &&
-      is_blockwise_scaling(t, scale, at::kFloat, 128, 128);
+      (is_blockwise_scaling(t, scale, at::kFloat, 128, 128) ||
+       is_blockwise_scaling(t, scale, at::kFloat8_e8m0fnu, 128, 128));
 }
 
 // 1x32 blocks for microscaled fp8 or packed fp4 data and fp8_e8m0fnu scales
@@ -705,22 +707,22 @@ Tensor& _scaled_block1x128_block1x128(
 
   TORCH_CHECK_VALUE(
       scale_a.size(0) == M && scale_a.size(1) == ceil_div<int64_t>(K, 128) &&
-          scale_a.scalar_type() == kFloat,
+          (scale_a.scalar_type() == kFloat || scale_a.scalar_type() == kFloat8_e8m0fnu),
       "scale_a must have shape ",
       M,
       " x ",
       ceil_div<int64_t>(K, 128),
-      " Float elements, got ",
+      " Float or Float8_e8m0fnu elements, got ",
       scale_a.sizes());
 
   TORCH_CHECK_VALUE(
       scale_b.size(0) == N && scale_b.size(1) == ceil_div<int64_t>(K, 128) &&
-          scale_b.scalar_type() == kFloat,
+          (scale_b.scalar_type() == kFloat || scale_b.scalar_type() == kFloat8_e8m0fnu),
       "scale_b must have shape ",
       N,
       " x ",
       ceil_div<int64_t>(K, 128),
-      " Float elements, got ",
+      " Float or Float8_e8m0fnu elements, got ",
       scale_b.sizes());
 
   // Convert to oneDNN row-major layout:
@@ -772,22 +774,22 @@ Tensor& _scaled_block128x128_block1x128(
   TORCH_CHECK_VALUE(
       scale_a.size(0) == ceil_div<int64_t>(K, 128) &&
           scale_a.size(1) == ceil_div<int64_t>(M, 128) &&
-          scale_a.scalar_type() == kFloat,
+          (scale_a.scalar_type() == kFloat || scale_a.scalar_type() == kFloat8_e8m0fnu),
       "scale_a must have shape ",
       ceil_div<int64_t>(K, 128),
       " x ",
       ceil_div<int64_t>(M, 128),
-      " Float elements, got ",
+      " Float or Float8_e8m0fnu elements, got ",
       scale_a.sizes());
 
   TORCH_CHECK_VALUE(
       scale_b.size(0) == N && scale_b.size(1) == ceil_div<int64_t>(K, 128) &&
-          scale_b.scalar_type() == kFloat,
+          (scale_b.scalar_type() == kFloat || scale_b.scalar_type() == kFloat8_e8m0fnu),
       "scale_b must have shape ",
       N,
       " x ",
       ceil_div<int64_t>(K, 128),
-      " Float elements, got ",
+      " Float or Float8_e8m0fnu elements, got ",
       scale_b.sizes());
 
   // Convert to oneDNN row-major layout:
@@ -839,23 +841,23 @@ Tensor& _scaled_block1x128_block128x128(
 
   TORCH_CHECK_VALUE(
       scale_a.size(0) == M && scale_a.size(1) == ceil_div<int64_t>(K, 128) &&
-          scale_a.scalar_type() == kFloat,
+          (scale_a.scalar_type() == kFloat || scale_a.scalar_type() == kFloat8_e8m0fnu),
       "scale_a must have shape ",
       M,
       " x ",
       ceil_div<int64_t>(K, 128),
-      " Float elements, got ",
+      " Float or Float8_e8m0fnu elements, got ",
       scale_a.sizes());
 
   TORCH_CHECK_VALUE(
       scale_b.size(0) == ceil_div<int64_t>(K, 128) &&
           scale_b.size(1) == ceil_div<int64_t>(N, 128) &&
-          scale_b.scalar_type() == kFloat,
+          (scale_b.scalar_type() == kFloat || scale_b.scalar_type() == kFloat8_e8m0fnu),
       "scale_b must have shape ",
       ceil_div<int64_t>(K, 128),
       " x ",
       ceil_div<int64_t>(N, 128),
-      " Float elements, got ",
+      " Float or Float8_e8m0fnu elements, got ",
       scale_b.sizes());
 
   // Convert to oneDNN row-major layout:

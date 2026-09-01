@@ -7273,15 +7273,24 @@ def _check_scaled_mm_sizes(
         n = mat2.size(1)
 
         is_blockwise_scaling = (
-            (
-                scale_a.dtype == torch.float8_e8m0fnu
-                and scale_b.dtype == torch.float8_e8m0fnu
-            )
-            or (
-                scale_a.dtype == torch.float8_e4m3fn
-                and scale_b.dtype == torch.float8_e4m3fn
-            )
-        )  # note: this applies to blockwise scaling for non-FP8 types (FP8 accepts FP32 scales)
+            scale_a.dtype == torch.float8_e4m3fn
+            and scale_b.dtype == torch.float8_e4m3fn
+        )  # note: this applies to NVFP4 blockwise scaling (1x16 blocks)
+
+        # e8m0fnu could be MXFP8 (1x32 blocks) or DeepSeek-style (1x128/128x128 blocks).
+        # Only treat as MXFP8-style blockwise if numel matches the 1x32 pattern.
+        if (
+            scale_a.dtype == torch.float8_e8m0fnu
+            and scale_b.dtype == torch.float8_e8m0fnu
+        ):
+            _k_check = _k * 2 if self.dtype == torch.float4_e2m1fn_x2 else _k
+            expected_mxfp_a = m * ceil_div(_k_check, 32)
+            expected_mxfp_b = n * ceil_div(_k_check, 32)
+            if (
+                scale_a.numel() == expected_mxfp_a
+                and scale_b.numel() == expected_mxfp_b
+            ):
+                is_blockwise_scaling = True
 
         if scale_a.numel() == 1 and scale_b.numel() == 1:
             # tensorwise scaling
@@ -7355,9 +7364,14 @@ def _check_scaled_mm_sizes(
                 )
         else:
             torch._check(
-                scale_a.dtype == torch.float32 and scale_b.dtype == torch.float32,
-                lambda: "For rowwise scaling, both scale_a and scale_b must be float (fp32) tensors.",
+                (scale_a.dtype == torch.float32 and scale_b.dtype == torch.float32)
+                or (
+                    scale_a.dtype == torch.float8_e8m0fnu
+                    and scale_b.dtype == torch.float8_e8m0fnu
+                ),
+                lambda: "For rowwise scaling, both scales must be float32. For blockwise scaling, both scales must be float32 or float8_e8m0fnu.",
             )
+            is_e8m0fnu_scale = scale_a.dtype == torch.float8_e8m0fnu
             # for rowwise scaling, enforce 2D input tensors
             torch._check(
                 scale_a.dim() == 2 and scale_b.dim() == 2,
@@ -7365,12 +7379,13 @@ def _check_scaled_mm_sizes(
             )
 
             if (
-                scale_a.size(0) == m
+                not is_e8m0fnu_scale
+                and scale_a.size(0) == m
                 and scale_a.size(1) == 1
                 and scale_b.size(0) == 1
                 and scale_b.size(1) == n
             ):
-                # rowwise scaling
+                # rowwise scaling (fp32 only, e8m0fnu not supported)
                 torch._check(
                     scale_a.is_contiguous() and scale_b.is_contiguous(),
                     lambda: "Both scale_a and scale_b must be contiguous for rowwise scaling.",
