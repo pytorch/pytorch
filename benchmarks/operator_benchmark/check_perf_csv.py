@@ -13,7 +13,7 @@ SKIP_TEST_LISTS = [
     "interpolate_input_size(1,3,600,400)_output_size(240,240)_channels_lastTrue_modelinear",
     "original_kernel_tensor_N1_C3_H512_W512_zero_point_dtypetorch.int32_nbits4_cpu",
     "original_kernel_tensor_N1_C3_H512_W512_zero_point_dtypetorch.int32_nbits8_cpu",
-    # aarch64 matmul trans_b ~24–28× vs baseline; do not rebaseline
+    # https://github.com/pytorch/pytorch/issues/195629
     "matmul_M256_N256_K256_trans_aFalse_trans_bTrue_cpu",
 ]
 
