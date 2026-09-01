@@ -26,6 +26,7 @@ import shutil
 import sys
 import types
 import uuid
+import weakref
 from collections.abc import Callable, Generator, Iterable, Iterator
 from contextlib import nullcontext
 from typing import Any, NewType, Optional, TYPE_CHECKING, Union
@@ -796,6 +797,28 @@ def _compile_frame_context(
     return _ctx()
 
 
+def _uninstall_abandoned_package(
+    installed_globals: dict[types.ModuleType, dict[str, object]],
+    precompile_codes: list[types.CodeType],
+    region_id: int,
+    owner: object,
+) -> None:
+    # weakref.finalize callback for a CompilePackage that died while still
+    # installed. A global is only popped while it still holds OUR value: a
+    # later load of the same artifact reuses the artifact's names, and its
+    # overwrite must survive us. Entry teardown fires from GC, which can run
+    # mid-guard-evaluation, so _reset_precompile_entries_for_owner never
+    # blocks (it parks the reset when the cache lock is unavailable).
+    from torch._C._dynamo.eval_frame import _reset_precompile_entries_for_owner
+
+    for module, values_by_name in installed_globals.items():
+        for name, value in values_by_name.items():
+            if module.__dict__.get(name) is value:
+                del module.__dict__[name]
+    for code in precompile_codes:
+        _reset_precompile_entries_for_owner(code, region_id, owner)
+
+
 class CompilePackage:
     """
     CompilePackage is considered a low level component and should not be directly exposed to
@@ -820,7 +843,10 @@ class CompilePackage:
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
 
         self._current_entry: _DynamoCodeCacheEntry | None = None
-        self._installed_globals: dict[types.ModuleType, list[str]] = {}
+        # name -> installed value, so teardown can tell its own binding from
+        # one a later package overwrote (two loads of one artifact reuse the
+        # artifact's global names).
+        self._installed_globals: dict[types.ModuleType, dict[str, object]] = {}
         # Code objects holding this package's region state, so uninstall() can
         # clear all of them -- and only them. Clearing the code object wholesale
         # would take every OTHER region's entries with it, and since lookup() is
@@ -831,6 +857,10 @@ class CompilePackage:
         # installs, so uninstall() can remove its own and leave a neighbour
         # package's entries on a shared code object alone.
         self._install_owner = object()
+        # Uninstalls an installed package that dies without uninstall(),
+        # so repeated loads of one artifact cannot grow the frame cache and
+        # module globals without bound. Registered by install().
+        self._uninstall_finalizer: weakref.finalize | None = None
         # Every device type the compiled graphs target. Empty means nothing
         # named a device, which cache_entry records as plain cpu.
         self._device_types: set[str] = set()
@@ -1080,13 +1110,16 @@ class CompilePackage:
         # so that hook must not delete it once its code object is collected.
         CleanupHook.disown(module.__dict__, name)
         module.__dict__[name] = value
-        self._installed_globals.setdefault(module, []).append(name)
+        self._installed_globals.setdefault(module, {})[name] = value
 
     def uninstall(self) -> None:
         from torch._C._dynamo.eval_frame import _reset_precompile_entries_for_owner
 
         if self._innermost_fn is None:
             raise AssertionError("_innermost_fn is not set in uninstall")
+        if self._uninstall_finalizer is not None:
+            self._uninstall_finalizer.detach()
+            self._uninstall_finalizer = None
         for module, names in self._installed_globals.items():
             for name in names:
                 module.__dict__.pop(name, None)
@@ -1248,6 +1281,18 @@ class CompilePackage:
                         self._installed_precompile_region_id,
                         self._install_owner,
                     )
+        # The callback must not capture self (it would never fire); it works
+        # off the very containers install() just populated, which uninstall()
+        # rebinds rather than mutates, so an explicit uninstall + reinstall
+        # cannot be undone by a stale finalizer.
+        self._uninstall_finalizer = weakref.finalize(
+            self,
+            _uninstall_abandoned_package,
+            self._installed_globals,
+            self._installed_precompile_codes,
+            self._installed_precompile_region_id,
+            self._install_owner,
+        )
 
     def cache_entry(self) -> _DynamoCacheEntry:
         self.validate()
