@@ -769,6 +769,16 @@ def write_cmake_include(
         "  return()",
         "endif()",
         "",
+        "# Linux only, deliberately: everything below is written for the GNU linker",
+        "# (--version-script, --exclude-libs), and build_stage2.should_run() refuses to",
+        "# run anywhere else. One exit rather than a guard per linker block, which had",
+        "# target_sources embedding objects a non-Linux link would then not version-",
+        "# script or exclude-libs.",
+        "if(NOT UNIX OR APPLE)",
+        '  message(STATUS "native-AOT: not Linux, not embedding kernels")',
+        "  return()",
+        "endif()",
+        "",
         "# Re-run configure when this file changes, so a later export + relink picks the",
         "# new kernels up even without stage 2 asking for a reconfigure.",
         # No DIRECTORY argument: in an included file CMAKE_CURRENT_LIST_DIR is the
@@ -797,19 +807,17 @@ def write_cmake_include(
         *[f"    {_cmake_str(p)}" for p in srcs + objs],
         ")",
         "",
-        "if(UNIX AND NOT APPLE)",
-        "  set_target_properties(torch_cuda PROPERTIES BUILD_WITH_INSTALL_RPATH TRUE)",
-        "  target_link_options(torch_cuda PRIVATE",
+        "set_target_properties(torch_cuda PROPERTIES BUILD_WITH_INSTALL_RPATH TRUE)",
+        "target_link_options(torch_cuda PRIVATE",
         # _cmake_escape, not the raw path: this argument is quoted by hand, so a
         # ${...} or $ENV{...} in the path was expanded away and the link then failed
         # on a file that never existed (a plain $ was fine, which is why the escaping
         # everywhere else hid it).
-        f'      "SHELL:-Xlinker --version-script -Xlinker \\"{_cmake_escape(os.path.abspath(version_script))}\\"")',
-        "  # LINK_DEPENDS as well as the option: without it ninja does not relink when",
-        "  # only the script changes, so new entry points would stay public.",
-        "  set_property(TARGET torch_cuda APPEND PROPERTY",
-        f"      LINK_DEPENDS {_cmake_str(os.path.abspath(version_script))})",
-        "endif()",
+        f'    "SHELL:-Xlinker --version-script -Xlinker \\"{_cmake_escape(os.path.abspath(version_script))}\\"")',
+        "# LINK_DEPENDS as well as the option: without it ninja does not relink when",
+        "# only the script changes, so new entry points would stay public.",
+        "set_property(TARGET torch_cuda APPEND PROPERTY",
+        f"    LINK_DEPENDS {_cmake_str(os.path.abspath(version_script))})",
     ]
     if dsl_runtime:
         name = os.path.basename(dsl_runtime)
@@ -818,10 +826,8 @@ def write_cmake_include(
             "# whole-archive is NOT needed (the kernels reference it directly); exclude-libs",
             "# keeps its symbols out of torch_cuda's export table.",
             f"target_link_libraries(torch_cuda PRIVATE {_cmake_str(os.path.abspath(dsl_runtime))})",
-            "if(UNIX AND NOT APPLE)",
-            "  target_link_options(torch_cuda PRIVATE",
-            f'      "SHELL:-Xlinker --exclude-libs -Xlinker \\"{_cmake_escape(name)}\\"")',
-            "endif()",
+            "target_link_options(torch_cuda PRIVATE",
+            f'    "SHELL:-Xlinker --exclude-libs -Xlinker \\"{_cmake_escape(name)}\\"")',
         ]
     return _write_atomic(
         os.path.join(artifacts_dir, CMAKE_INCLUDE), "\n".join(out) + "\n"
@@ -911,19 +917,20 @@ def main(argv: list[str] | None = None) -> None:
         print(f"{args.artifacts_dir}: no artifacts, nothing to generate")
         return
 
-    # INVALIDATE FIRST, before anything below can delete a source or refuse.
+    # INVALIDATE FIRST, before anything below can delete a source or refuse: the
+    # orphan and no-sidecar sweeps DELETE generated sources, so a refusal after one
+    # of them left the previous file still naming a source that no longer exists --
+    # and CMake then failed at generate with "Cannot find source file", naming
+    # neither native-AOT nor a remedy, on every subsequent main build. Stage 2, the
+    # only writer that could repair it, runs after that build.
     #
-    # Its absence is what makes every later failure read as "not generated yet".
-    # Removing it at the commit step instead left a window with teeth: the orphan
-    # and no-sidecar sweeps below DELETE generated sources, so a refusal after one
-    # of them (a stale artifact in a later declaration) left the previous file
-    # still naming a source that no longer exists -- and CMake then fails at
-    # generate with "Cannot find source file", naming neither native-AOT nor a
-    # remedy, on every subsequent main build. Stage 2, the only writer that could
-    # repair it, runs after that build.
-    stale = os.path.join(args.artifacts_dir, CMAKE_INCLUDE)
-    if os.path.exists(stale):
-        os.remove(stale)
+    # OVERWRITTEN where one exists, never unlinked and never created: the rule
+    # write_nothing_to_embed states, and what export._invalidate_generation and
+    # build_stage2._invalidate_stale_include do. The nothing-to-embed form names no
+    # sources, so it invalidates as completely as unlinking without dropping
+    # CMake's configure dependency on the file.
+    if os.path.exists(os.path.join(args.artifacts_dir, CMAKE_INCLUDE)):
+        write_nothing_to_embed(args.artifacts_dir)
 
     # decl_id -> its arch dirs, so one declaration generates once however many
     # arches it shipped for: per-arch would emit one .cpp each, all registering
@@ -953,10 +960,10 @@ def main(argv: list[str] | None = None) -> None:
 
     # A generated source whose artifacts are all gone -- an arch tree deleted by
     # hand, or every tree it had skipped by --archs -- is deleted here. It is not
-    # not reached by the loop below (which walks decl_ids that still HAVE
-    # artifacts). Left behind, its #include "../<arch>/<id>/..." no longer
-    # resolves: a compile error naming a generated file, pointing at nothing.
-    # Regenerating a source is free; artifacts never are.
+    # reached by the loop below (which walks decl_ids that still HAVE artifacts).
+    # Left behind, its #include "../<arch>/<id>/..." no longer resolves: a compile
+    # error naming a generated file, pointing at nothing. Regenerating a source is
+    # free; artifacts never are.
     for entry in sorted(os.listdir(args.artifacts_dir)):
         if entry not in dirs_by_id:
             _delete_generated(args.artifacts_dir, entry, "no artifacts remain")
