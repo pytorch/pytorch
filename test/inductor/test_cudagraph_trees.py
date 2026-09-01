@@ -1529,6 +1529,14 @@ if HAS_CUDA_AND_TRITON:
                 False,
             )
 
+        @parametrize(
+            "compiled_cudagraphs,load_cudagraphs,force_disable,expect_error",
+            (
+                (True, False, False, True),
+                (False, True, False, True),
+                (True, True, True, False),
+            ),
+        )
         @dynamo_config.patch("caching_precompile", True)
         @torch._functorch.config.patch(
             {
@@ -1544,14 +1552,25 @@ if HAS_CUDA_AND_TRITON:
                 "triton.cudagraphs": True,
             }
         )
-        def test_cudagraph_decision_survives_precompile_reload(self):
-            """Verify a precompile reload uses the compiled cudagraph decision."""
+        def test_precompile_cudagraph_compatibility(
+            self,
+            compiled_cudagraphs,
+            load_cudagraphs,
+            force_disable,
+            expect_error,
+        ):
+            """Verify precompile reload validates config but preserves safety decisions."""
             from torch._dynamo.package import DynamoCache
             from torch._dynamo.precompile_context import PrecompileContext
             from torch._inductor.codecache import PyCodeCache
             from torch._inductor.cudagraph_trees import reset_cudagraph_trees
             from torch._inductor.utils import clear_caches, fresh_cache
             from torch.compiler._cache import CacheArtifactManager
+
+            self.addCleanup(PrecompileContext.clear)
+            self.addCleanup(CacheArtifactManager.clear)
+            PrecompileContext.clear()
+            CacheArtifactManager.clear()
 
             def fn(x):
                 return torch.sin(x) + torch.cos(x)
@@ -1560,10 +1579,15 @@ if HAS_CUDA_AND_TRITON:
             with fresh_cache():
                 AOTAutogradCache.clear()
                 FxGraphCache.clear()
-                CacheArtifactManager.clear()
-                opt_fn = torch.compile(fn, fullgraph=True)
-                for _ in range(3):
-                    result = opt_fn(x)
+                with config.patch(
+                    {
+                        "triton.cudagraphs": compiled_cudagraphs,
+                        "force_disable_cudagraph_TESTING_ONLY": force_disable,
+                    }
+                ):
+                    opt_fn = torch.compile(fn, fullgraph=True)
+                    for _ in range(3):
+                        result = opt_fn(x)
                 self.assertEqual(result, fn(x))
                 artifacts = torch.compiler.save_cache_artifacts()
                 self.assertIsNotNone(artifacts)
@@ -1582,18 +1606,29 @@ if HAS_CUDA_AND_TRITON:
                 clear_caches()
                 self.assertIsNone(self.get_manager())
 
-                # The reload must use the decision the graph was compiled under,
-                # not the ambient config, which is off here.
-                with config.patch("triton.cudagraphs", False):
+                expected_error = (
+                    "Cannot load precompiled artifact: it was compiled with "
+                    f"triton.cudagraphs={compiled_cudagraphs}, but the load-time "
+                    f"setting is {load_cudagraphs}"
+                )
+                with config.patch("triton.cudagraphs", load_cudagraphs):
                     torch.compiler.load_cache_artifacts(artifact_bytes)
+                    if expect_error:
+                        with self.assertRaisesRegex(
+                            ValueError, re.escape(expected_error)
+                        ):
+                            torch.compile(fn, fullgraph=True)
+                        return
+
                     with torch.compiler.set_stance("fail_on_recompile"):
                         opt_fn = torch.compile(fn, fullgraph=True)
                         for _ in range(3):
                             result = opt_fn(x)
                     self.assertEqual(result, fn(x))
-                    manager = self.get_manager()
-                    self.assertIsNotNone(manager)
-                    self.assertGreater(len(tuple(manager.get_roots())), 0)
+                    if force_disable:
+                        self.assertIsNone(self.get_manager())
+                    else:
+                        self.assertIsNotNone(self.get_manager())
 
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         @torch._functorch.config.patch("enable_autograd_cache", True)

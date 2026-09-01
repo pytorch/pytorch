@@ -556,6 +556,7 @@ class CompiledFxGraph(OutputCode):
     partition_maps: list[GraphPartitionMap] | None
     compile_region_name: str | None
     fx_kwargs: _CompileFxKwargs
+    cudagraphs_compile_time: bool
     inputs_to_check: Sequence[int]
 
     _boxed_call: bool | None = None
@@ -592,6 +593,7 @@ class CompiledFxGraph(OutputCode):
         inductor_provenance_mapping_str: str | None = None,
         inductor_provenance_stack_traces_str: str | None = None,
     ) -> None:
+        self.cudagraphs_compile_time = cudagraphs.value
         self.current_callable = current_callable
         self.compiled_fn_runner = compiled_fn_runner
         self.recursively_apply_fns = (
