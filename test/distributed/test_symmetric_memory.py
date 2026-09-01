@@ -7,7 +7,7 @@ import random
 import re
 import tempfile
 from contextlib import contextmanager, nullcontext
-from unittest import skipIf, skipUnless
+from unittest import skipIf, SkipTest, skipUnless
 from unittest.mock import MagicMock, patch
 
 import torch
@@ -19,6 +19,7 @@ from torch._C._distributed_c10d import _SymmetricMemory
 from torch._inductor.utils import (
     fresh_cache,
     fresh_inductor_cache,
+    infer_scale_swizzle,
     run_and_get_triton_code,
 )
 from torch._prims_common import make_contiguous_strides_for
@@ -27,6 +28,7 @@ from torch.distributed._symmetric_memory import (
     _fused_all_gather_matmul_fallback,
     _fused_all_gather_scaled_matmul_fallback,
     _fused_matmul_reduce_scatter_fallback,
+    _fused_scaled_matmul_reduce_scatter_fallback,
     _test_mode,
     restride_A_for_fused_matmul_reduce_scatter,
     restride_A_shard_for_fused_all_gather_matmul,
@@ -36,6 +38,7 @@ from torch.distributed._symmetric_memory._nccl import (
     register_external_nccl_comm,
 )
 from torch.distributed.distributed_c10d import _TORCHCOMM_AVAILABLE
+from torch.nn.functional import scaled_mm, ScalingType, SwizzleType
 from torch.testing._internal.common_cuda import SM100OrLater, SM89OrLater, SM90OrLater
 from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_distributed import (
@@ -50,6 +53,11 @@ from torch.testing._internal.common_distributed import (
     skip_if_rocm_ver_atleast_multiprocess,
     skip_if_rocm_ver_lessthan_multiprocess,
 )
+from torch.testing._internal.common_quantized import (
+    from_blocked_format,
+    to_blocked,
+    to_mxfp,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -63,6 +71,18 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 test_contexts = [nullcontext, _test_mode]
+
+
+# Every MXFP8 call takes the same pair; spelling them out at each call site
+# buries the argument that actually varies.
+_MX_RECIPE = [ScalingType.BlockWise1x32.value]
+_MX_SWIZZLE = [SwizzleType.SWIZZLE_32_4_4.value]
+
+
+def _mxfp8_quantize(t: torch.Tensor):
+    """-> (bf16 reconstruction, fp8e4m3 data, e8m0 scales in swizzled 32x4x4 layout)"""
+    scale, q = to_mxfp(t, format="mxfp8")
+    return from_blocked_format(q, scale, blocksize=32), q, to_blocked(scale)
 
 
 @contextmanager
@@ -1196,6 +1216,832 @@ class AsyncTPTest(MultiProcContinuousTest):
                 f"Expected strides to match: {outputs[0].stride()} vs {outputs[1].stride()}"
             )
         self.assertEqual(outputs[0], outputs[1])
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skipUnless(SM100OrLater, "MXFP8 requires compute capability >= 10.0")
+    def test_fused_all_gather_scaled_matmul_mxfp8(self) -> None:
+        """MXFP8 all-gather + matmul against the fallback and a bf16 reference.
+
+        The scales are e8m0 block scales in the swizzled 32x4x4 layout. They are
+        gathered alongside the data as opaque bytes, which is only sound because
+        `to_blocked` orders tiles row-block-major and each shard is 128-row
+        aligned -- so concatenating per-rank swizzled scales equals swizzling the
+        gathered scales. `infer_scale_swizzle` below asserts the gathered buffer
+        is still recognized as a swizzled block scale at the full size.
+        """
+        self._init_process()
+        group = dist.group.WORLD
+        rank, world = self.rank, self.world_size
+
+        M, K, N = 256 * world, 128, 64
+        torch.manual_seed(42)
+        A_full = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
+        B = torch.randn(N, K, device="cuda", dtype=torch.bfloat16)
+        A_shard_hp = A_full.chunk(world, dim=0)[rank].contiguous()
+
+        A_hp, A_q, A_sb = _mxfp8_quantize(A_shard_hp)
+
+        # more than one B, so the per-B recipe list and the consumer's loop over
+        # Bs are exercised at length > 1
+        Bs_hp, Bs_q, Bs_sb = [], [], []
+        for i in range(3):
+            b_hp, b_q, b_sb = _mxfp8_quantize(B * (i + 1))
+            Bs_hp.append(b_hp)
+            Bs_q.append(b_q.t())
+            Bs_sb.append(b_sb)
+
+        args = (
+            A_q,
+            Bs_q,
+            A_sb,
+            Bs_sb,
+            0,
+            group.group_name,
+            [None] * 3,
+            [None] * 3,
+            [torch.bfloat16] * 3,
+            [False] * 3,
+            _MX_RECIPE,
+            _MX_SWIZZLE,
+            _MX_RECIPE,
+            _MX_SWIZZLE,
+        )
+        outputs = []
+        for context in test_contexts:
+            with context():
+                outputs.append(torch.ops.symm_mem.fused_all_gather_scaled_matmul(*args))
+        ag_target, mm_target = outputs[0]
+        ag_baseline, mm_baseline = outputs[1]
+        self.assertEqual(ag_target, ag_baseline)
+        for target, baseline in zip(mm_target, mm_baseline):
+            self.assertEqual(target, baseline)
+
+        # the gathered scales must still describe a swizzled block scale
+        scale_type, swizzle = infer_scale_swizzle(
+            torch.empty(M, K, device="cuda", dtype=A_q.dtype),
+            torch.cat([A_sb] * world),
+        )
+        self.assertEqual(scale_type, ScalingType.BlockWise1x32)
+        self.assertEqual(swizzle, SwizzleType.SWIZZLE_32_4_4)
+
+        # numerics against the dequantized operands
+        A_hp_gathered = torch.empty(M, K, device="cuda", dtype=torch.bfloat16)
+        dist.all_gather_into_tensor(A_hp_gathered, A_hp)
+        for out, b_hp in zip(mm_target, Bs_hp):
+            torch.testing.assert_close(
+                out, A_hp_gathered @ b_hp.t(), rtol=1e-2, atol=1e-2
+            )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skipUnless(SM100OrLater, "MXFP8 requires compute capability >= 10.0")
+    def test_fused_all_gather_scaled_matmul_mxfp8_unaligned_shard(self) -> None:
+        """A shard whose gathered dim is not 128-aligned must be rejected.
+
+        Concatenating swizzled scales from such shards interleaves each shard's
+        padding, so the result is not the gathered scale -- and is the wrong size
+        besides. Fail loudly rather than compute garbage.
+        """
+        self._init_process()
+        group = dist.group.WORLD
+
+        A = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
+        B = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
+        _, A_q, A_sb = _mxfp8_quantize(A)
+        _, B_q, B_sb = _mxfp8_quantize(B)
+
+        with self.assertRaisesRegex(ValueError, "multiple of 128"):
+            torch.ops.symm_mem.fused_all_gather_scaled_matmul(
+                A_q,
+                [B_q.t()],
+                A_sb,
+                [B_sb],
+                0,
+                group.group_name,
+                [None],
+                [None],
+                [torch.bfloat16],
+                [False],
+                _MX_RECIPE,
+                _MX_SWIZZLE,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
+            )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skipUnless(SM100OrLater, "MXFP8 requires compute capability >= 10.0")
+    def test_fused_all_gather_scaled_matmul_mxfp8_requires_recipe(self) -> None:
+        """An e8m0 scale must come with an explicit recipe, never be inferred.
+
+        A swizzled scale and an unswizzled one have the same numel at every
+        128-aligned shape, so guessing from the scale alone silently produces
+        wrong numerics.
+        """
+        self._init_process()
+        group = dist.group.WORLD
+
+        A = torch.randn(256, 128, device="cuda", dtype=torch.bfloat16)
+        B = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
+        _, A_q, A_sb = _mxfp8_quantize(A)
+        _, B_q, B_sb = _mxfp8_quantize(B)
+
+        with self.assertRaisesRegex(ValueError, "without `scale_recipe`"):
+            torch.ops.symm_mem.fused_all_gather_scaled_matmul(
+                A_q,
+                [B_q.t()],
+                A_sb,
+                [B_sb],
+                0,
+                group.group_name,
+                [None],
+                [None],
+                [torch.bfloat16],
+                [False],
+            )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skipUnless(SM100OrLater, "MXFP8 requires compute capability >= 10.0")
+    @parametrize("out_dtype", [torch.bfloat16, torch.float32])
+    @parametrize("with_bias", [False, True])
+    def test_fused_all_gather_scaled_matmul_mxfp8_kwargs(
+        self, out_dtype: torch.dtype, with_bias: bool
+    ) -> None:
+        """bias and a non-default out_dtype must agree between op and fallback.
+
+        `use_fast_accum` is deliberately not swept: `_scaled_mxfp8_mxfp8` hardcodes
+        it to false, so both values give bit-identical results (verified) and a
+        parametrization over it would assert nothing.
+        """
+        if with_bias and out_dtype == torch.float32:
+            # scaled_mm itself rejects this pair, independently of async-TP
+            raise SkipTest("bias is unsupported with a float32 output")
+
+        self._init_process()
+        group = dist.group.WORLD
+        rank, world = self.rank, self.world_size
+
+        M, K, N = 256 * world, 128, 64
+        torch.manual_seed(42)
+        A_full = torch.randn(M, K, device="cuda", dtype=torch.bfloat16) / 8
+        B = torch.randn(N, K, device="cuda", dtype=torch.bfloat16) / 8
+        _, A_q, A_sb = _mxfp8_quantize(A_full.chunk(world, dim=0)[rank].contiguous())
+        _, B_q, B_sb = _mxfp8_quantize(B)
+        bias = (
+            torch.randn(N, device="cuda", dtype=torch.bfloat16) if with_bias else None
+        )
+
+        args = (
+            A_q,
+            [B_q.t()],
+            A_sb,
+            [B_sb],
+            0,
+            group.group_name,
+            [bias],
+            [None],
+            [out_dtype],
+            [False],
+            _MX_RECIPE,
+            _MX_SWIZZLE,
+            _MX_RECIPE,
+            _MX_SWIZZLE,
+        )
+        outputs = []
+        for context in test_contexts:
+            with context():
+                outputs.append(torch.ops.symm_mem.fused_all_gather_scaled_matmul(*args))
+
+        self.assertEqual(outputs[0][1][0].dtype, out_dtype)
+        self.assertEqual(outputs[0][1][0], outputs[1][1][0])
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skipUnless(SM100OrLater, "MXFP8 requires compute capability >= 10.0")
+    def test_fused_scaled_matmul_mxfp8_rejections(self) -> None:
+        """The MXFP8 rejection paths that the happy-path tests cannot reach.
+
+        Covers a wrong-sized swizzled scale on a 128-aligned shard (the alignment
+        check fires first for a short shard, so this is the only way in), a
+        reduce-scatter chunk that is not 128-aligned, and `result_scale` on both
+        ops -- which cannot be expressed at all, since block scaling requires v2
+        and v2 has no scale_result argument.
+        """
+        self._init_process()
+        group = dist.group.WORLD
+        world = self.world_size
+
+        K, N = 128, 64
+        B = torch.randn(N, K, device="cuda", dtype=torch.bfloat16)
+        _, B_q, B_sb = _mxfp8_quantize(B)
+        A = torch.randn(256, K, device="cuda", dtype=torch.bfloat16)
+        _, A_q, A_sb = _mxfp8_quantize(A)
+
+        # 128-aligned shard, but the scale is sized for a different operand
+        with self.assertRaisesRegex(ValueError, r"scale has \d+ elements, expected"):
+            torch.ops.symm_mem.fused_all_gather_scaled_matmul(
+                A_q,
+                [B_q.t()],
+                A_sb[: A_sb.numel() // 2],
+                [B_sb],
+                0,
+                group.group_name,
+                [None],
+                [None],
+                [torch.bfloat16],
+                [False],
+                _MX_RECIPE,
+                _MX_SWIZZLE,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
+            )
+
+        # reduce-scatter chunk not 128-aligned: 64 rows per rank
+        A_rs = torch.randn(64 * world, K, device="cuda", dtype=torch.bfloat16)
+        _, Ars_q, Ars_sb = _mxfp8_quantize(A_rs)
+        with self.assertRaisesRegex(ValueError, "multiple of 128"):
+            torch.ops.symm_mem.fused_scaled_matmul_reduce_scatter(
+                Ars_q,
+                B_q.t(),
+                Ars_sb,
+                B_sb,
+                "sum",
+                0,
+                0,
+                group.group_name,
+                [64, N],
+                None,
+                None,
+                torch.bfloat16,
+                False,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
+            )
+
+        # result_scale cannot be expressed on v2, which block scaling requires
+        rs = torch.tensor(1.0, device="cuda")
+        with self.assertRaisesRegex(ValueError, "result_scale"):
+            torch.ops.symm_mem.fused_all_gather_scaled_matmul(
+                A_q,
+                [B_q.t()],
+                A_sb,
+                [B_sb],
+                0,
+                group.group_name,
+                [None],
+                [rs],
+                [torch.bfloat16],
+                [False],
+                _MX_RECIPE,
+                _MX_SWIZZLE,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
+            )
+        with self.assertRaisesRegex(ValueError, "result_scale"):
+            torch.ops.symm_mem.fused_scaled_matmul_reduce_scatter(
+                A_q,
+                B_q.t(),
+                A_sb,
+                B_sb,
+                "sum",
+                0,
+                0,
+                group.group_name,
+                [256 // world, N],
+                None,
+                rs,
+                torch.bfloat16,
+                False,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
+            )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skipUnless(SM100OrLater, "MXFP8 requires compute capability >= 10.0")
+    def test_fused_all_gather_scaled_matmul_mxfp8_meta(self) -> None:
+        """MXFP8 must still be traceable: meta tensors carry no real device.
+
+        The device guard cannot be evaluated at trace time, so it has to be
+        skipped there rather than rejecting the trace outright -- while the
+        shape-based preconditions, which do hold on meta, must still fire.
+        """
+        self._init_process()
+        group = dist.group.WORLD
+
+        def meta(*shape, dtype=torch.float8_e4m3fn):
+            return torch.empty(*shape, device="meta", dtype=dtype)
+
+        e8m0 = torch.float8_e8m0fnu
+        A, B = meta(256, 128), meta(64, 128)
+        A_sb, B_sb = meta(1024, dtype=e8m0), meta(512, dtype=e8m0)
+
+        out = _fused_all_gather_scaled_matmul_fallback(
+            A,
+            [B.t()],
+            A_sb,
+            [B_sb],
+            0,
+            group.group_name,
+            [None],
+            [None],
+            [torch.bfloat16],
+            [False],
+            _MX_RECIPE,
+            _MX_SWIZZLE,
+            _MX_RECIPE,
+            _MX_SWIZZLE,
+        )
+        self.assertEqual(out[1][0].dtype, torch.bfloat16)
+        self.assertEqual(out[1][0].device.type, "meta")
+
+        # shape-based preconditions still apply on the meta path
+        A3 = meta(2, 128, 128)
+        with self.assertRaisesRegex(ValueError, "MXFP8 requires gather_dim=0"):
+            _fused_all_gather_scaled_matmul_fallback(
+                A3,
+                [B.t()],
+                A_sb,
+                [B_sb],
+                1,
+                group.group_name,
+                [None],
+                [None],
+                [torch.bfloat16],
+                [False],
+                _MX_RECIPE,
+                _MX_SWIZZLE,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
+            )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skipUnless(SM100OrLater, "MXFP8 requires compute capability >= 10.0")
+    def test_fused_scaled_matmul_mxfp8_fallback_validates(self) -> None:
+        """The fallbacks are the registered Meta kernels, so they must validate too.
+
+        A trace under torch.compile/export dispatches to them directly, never
+        through the CUDA wrapper. Without their own checks a bad configuration
+        traces clean and only fails at runtime -- or worse, the all-gather
+        fallback permutes rows for gather_dim=1 while concatenating the scale
+        unpermuted, which is silently wrong rather than an error.
+        """
+        self._init_process()
+        group = dist.group.WORLD
+        world = self.world_size
+
+        K, N = 128, 64
+        B = torch.randn(N, K, device="cuda", dtype=torch.bfloat16)
+        _, B_q, B_sb = _mxfp8_quantize(B)
+
+        A3 = torch.randn(2, 128, K, device="cuda", dtype=torch.bfloat16)
+        _, A3_q, A3_sb = _mxfp8_quantize(A3.flatten(0, -2))
+        A3_q = A3_q.view(2, 128, K)
+
+        with self.assertRaisesRegex(ValueError, "MXFP8 requires gather_dim=0"):
+            _fused_all_gather_scaled_matmul_fallback(
+                A3_q,
+                [B_q.t()],
+                A3_sb,
+                [B_sb],
+                1,
+                group.group_name,
+                [None],
+                [None],
+                [torch.bfloat16],
+                [False],
+                _MX_RECIPE,
+                _MX_SWIZZLE,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
+            )
+
+        A_rs = torch.randn(64 * world, K, device="cuda", dtype=torch.bfloat16)
+        _, Ars_q, Ars_sb = _mxfp8_quantize(A_rs)
+        with self.assertRaisesRegex(ValueError, "multiple of 128"):
+            _fused_scaled_matmul_reduce_scatter_fallback(
+                Ars_q,
+                B_q.t(),
+                Ars_sb,
+                B_sb,
+                "sum",
+                0,
+                0,
+                group.group_name,
+                [64, N],
+                None,
+                None,
+                torch.bfloat16,
+                False,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
+            )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skipUnless(SM100OrLater, "MXFP8 requires compute capability >= 10.0")
+    def test_fused_all_gather_scaled_matmul_mxfp8_3d(self) -> None:
+        """A 3-D operand gathers on dim 0 when its flattened row count is aligned.
+
+        The alignment requirement is on `prod(shape[:-1])`, which is what the
+        swizzled layout tiles -- not on the leading dim. A (2, 128, K) shard has
+        256 rows and is valid even though its leading dim is 2.
+        """
+        self._init_process()
+        group = dist.group.WORLD
+        rank, world = self.rank, self.world_size
+
+        b, m, K, N = 2, 128, 128, 64
+        torch.manual_seed(42)
+        A_full = torch.randn(world, b, m, K, device="cuda", dtype=torch.bfloat16)
+        B = torch.randn(N, K, device="cuda", dtype=torch.bfloat16)
+        A_shard_hp = A_full[rank].contiguous()
+
+        A_hp, A_q, A_sb = _mxfp8_quantize(A_shard_hp.flatten(0, -2))
+        A_q = A_q.view(b, m, K)
+        B_hp, B_q, B_sb = _mxfp8_quantize(B)
+
+        args = (
+            A_q,
+            [B_q.t()],
+            A_sb,
+            [B_sb],
+            0,
+            group.group_name,
+            [None],
+            [None],
+            [torch.bfloat16],
+            [False],
+            _MX_RECIPE,
+            _MX_SWIZZLE,
+            _MX_RECIPE,
+            _MX_SWIZZLE,
+        )
+        outputs = []
+        for context in test_contexts:
+            with context():
+                outputs.append(torch.ops.symm_mem.fused_all_gather_scaled_matmul(*args))
+
+        self.assertEqual(outputs[0][1][0], outputs[1][1][0])
+        self.assertEqual(outputs[0][1][0].shape, torch.Size([b * world, m, N]))
+
+        A_hp_gathered = torch.empty(
+            world * b * m, K, device="cuda", dtype=torch.bfloat16
+        )
+        dist.all_gather_into_tensor(A_hp_gathered, A_hp)
+        torch.testing.assert_close(
+            outputs[0][1][0].flatten(0, -2),
+            A_hp_gathered @ B_hp.t(),
+            rtol=1e-2,
+            atol=1e-2,
+        )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skipUnless(SM100OrLater, "MXFP8 requires compute capability >= 10.0")
+    def test_fused_scaled_matmul_mxfp8_rejects_non_leading_dim(self) -> None:
+        """MXFP8 requires the gathered/scattered dim to be dim 0.
+
+        Both impls reduce A to 2-D with `movedim(dim, 0).flatten(0, -2)`, which
+        permutes rows when dim != 0. The swizzled scale is an opaque flat buffer
+        that cannot be permuted to match, and the numel check cannot see the
+        difference because `prod(shape[:-1])` is invariant under that movedim -- so
+        without this rejection the op returns silently wrong numerics.
+        """
+        self._init_process()
+        group = dist.group.WORLD
+        world = self.world_size
+
+        K, N = 128, 64
+        B = torch.randn(N, K, device="cuda", dtype=torch.bfloat16)
+        _, B_q, B_sb = _mxfp8_quantize(B)
+
+        A3 = torch.randn(2, 128, K, device="cuda", dtype=torch.bfloat16)
+        _, A3_q, A3_sb = _mxfp8_quantize(A3.flatten(0, -2))
+        A3_q = A3_q.view(2, 128, K)
+
+        with self.assertRaisesRegex(ValueError, "MXFP8 requires gather_dim=0"):
+            torch.ops.symm_mem.fused_all_gather_scaled_matmul(
+                A3_q,
+                [B_q.t()],
+                A3_sb,
+                [B_sb],
+                1,
+                group.group_name,
+                [None],
+                [None],
+                [torch.bfloat16],
+                [False],
+                _MX_RECIPE,
+                _MX_SWIZZLE,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
+            )
+
+        A_rs = torch.randn(2, 256 * world, K, device="cuda", dtype=torch.bfloat16)
+        _, Ars_q, Ars_sb = _mxfp8_quantize(A_rs.flatten(0, -2))
+        Ars_q = Ars_q.view(2, 256 * world, K)
+
+        with self.assertRaisesRegex(
+            ValueError, "MXFP8 requires scatter_dim_after_maybe_reshape=0"
+        ):
+            torch.ops.symm_mem.fused_scaled_matmul_reduce_scatter(
+                Ars_q,
+                B_q.t(),
+                Ars_sb,
+                B_sb,
+                "sum",
+                1,
+                1,
+                group.group_name,
+                [2, 256, N],
+                None,
+                None,
+                torch.bfloat16,
+                False,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
+                _MX_RECIPE,
+                _MX_SWIZZLE,
+            )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skipUnless(SM100OrLater, "MXFP8 requires compute capability >= 10.0")
+    def test_fused_all_gather_scaled_matmul_mxfp8_rejects_no_swizzle(self) -> None:
+        """Only the 32x4x4 swizzled layout is meaningful for these ops.
+
+        The swizzle the caller passes is forwarded rather than corrected, so this
+        error comes from the kernel itself. Pinned here because forwarding is a
+        deliberate choice: overriding it would silently grant a request we did not
+        honour, and the numel validation, gathering the scale as opaque bytes and
+        slicing it per chunk are all derived from the swizzled layout.
+        """
+        self._init_process()
+        group = dist.group.WORLD
+
+        A = torch.randn(256, 128, device="cuda", dtype=torch.bfloat16)
+        B = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
+        _, A_q, A_sb = _mxfp8_quantize(A)
+        _, B_q, B_sb = _mxfp8_quantize(B)
+
+        with self.assertRaisesRegex(ValueError, "SWIZZLE_32_4_4"):
+            torch.ops.symm_mem.fused_all_gather_scaled_matmul(
+                A_q,
+                [B_q.t()],
+                A_sb,
+                [B_sb],
+                0,
+                group.group_name,
+                [None],
+                [None],
+                [torch.bfloat16],
+                [False],
+                _MX_RECIPE,
+                [SwizzleType.NO_SWIZZLE.value],
+                _MX_RECIPE,
+                [SwizzleType.NO_SWIZZLE.value],
+            )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skipUnless(SM100OrLater, "MXFP8 requires compute capability >= 10.0")
+    def test_fused_all_gather_scaled_matmul_mxfp8_default_out_dtype(self) -> None:
+        """out_dtype=None must mean the same thing to the op and the fallback.
+
+        The generic path derives the output dtype from the operand, which for an
+        fp8 operand is not a usable block-scaled output dtype -- cuBLAS fails in
+        the algorithm heuristic. Both paths default to bf16 instead.
+        """
+        self._init_process()
+        group = dist.group.WORLD
+        rank, world = self.rank, self.world_size
+
+        M, K, N = 256 * world, 128, 64
+        torch.manual_seed(42)
+        A_full = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
+        B = torch.randn(N, K, device="cuda", dtype=torch.bfloat16)
+        _, A_q, A_sb = _mxfp8_quantize(A_full.chunk(world, dim=0)[rank].contiguous())
+        _, B_q, B_sb = _mxfp8_quantize(B)
+
+        args = (
+            A_q,
+            [B_q.t()],
+            A_sb,
+            [B_sb],
+            0,
+            group.group_name,
+            [None],
+            [None],
+            [None],
+            [False],
+            _MX_RECIPE,
+            _MX_SWIZZLE,
+            _MX_RECIPE,
+            _MX_SWIZZLE,
+        )
+        outputs = []
+        for context in test_contexts:
+            with context():
+                outputs.append(torch.ops.symm_mem.fused_all_gather_scaled_matmul(*args))
+
+        self.assertEqual(outputs[0][1][0].dtype, torch.bfloat16)
+        self.assertEqual(outputs[1][1][0].dtype, torch.bfloat16)
+        self.assertEqual(outputs[0][1][0], outputs[1][1][0])
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skipUnless(SM100OrLater, "MXFP8 requires compute capability >= 10.0")
+    def test_fused_scaled_matmul_reduce_scatter_mxfp8(self) -> None:
+        """MXFP8 matmul + reduce-scatter against the fallback and a bf16 reference.
+
+        Unlike the all-gather case no scales cross the wire here -- only the bf16
+        partials do -- so the swizzled scale is merely sliced per chunk, which
+        still needs each chunk to be 128-row aligned.
+        """
+        self._init_process()
+        group = dist.group.WORLD
+        rank, world = self.rank, self.world_size
+
+        M, K, N = 256 * world, 128, 64
+        torch.manual_seed(42 + rank)
+        # scaled down so the reduction stays in a range where bf16 resolves it;
+        # the point of the test is the plumbing, not accumulation headroom
+        A = torch.randn(M, K, device="cuda", dtype=torch.bfloat16) / 8
+        B = torch.randn(N, K, device="cuda", dtype=torch.bfloat16) / 8
+        A_hp, A_q, A_sb = _mxfp8_quantize(A)
+        B_hp, B_q, B_sb = _mxfp8_quantize(B)
+
+        args = (
+            A_q,
+            B_q.t(),
+            A_sb,
+            B_sb,
+            "sum",
+            0,
+            0,
+            group.group_name,
+            [M, N],
+            None,
+            None,
+            torch.bfloat16,
+            False,
+            _MX_RECIPE,
+            _MX_SWIZZLE,
+            _MX_RECIPE,
+            _MX_SWIZZLE,
+        )
+        outputs = []
+        for context in test_contexts:
+            with context():
+                outputs.append(
+                    torch.ops.symm_mem.fused_scaled_matmul_reduce_scatter(*args)
+                )
+
+        # Each implementation is checked against the dequantized reference rather
+        # than against the other: the op accumulates the rank partials in fp32 and
+        # rounds once (reduce_partials), while the fallback reduces through NCCL in
+        # bf16. They therefore differ by a rounding step that grows with the number
+        # of partials, and the op is the more accurate of the two.
+        ref = torch.empty(M // world, N, device="cuda", dtype=torch.bfloat16)
+        dist.reduce_scatter_tensor(ref, (A_hp @ B_hp.t()).contiguous())
+        for out in outputs:
+            torch.testing.assert_close(out, ref, rtol=2e-2, atol=5e-2)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skipUnless(SM100OrLater, "MXFP8 requires compute capability >= 10.0")
+    @parametrize("k_shard", [128, 64])
+    def test_mxfp8_colwise_all_gather_scales(self, k_shard: int) -> None:
+        """Pins the upstream layout invariant the fused ops rely on.
+
+        This deliberately uses no symm_mem op: it exercises `to_blocked` and
+        `F.scaled_mm` directly to assert that concatenating per-shard swizzled
+        scales equals swizzling the concatenation when each shard is 128-aligned,
+        and that it does *not* when the shard is 64. That property is the premise
+        for gathering scales as opaque bytes, so it is worth failing loudly here
+        if a future layout change breaks it -- but it guards the invariant rather
+        than this PR's code.
+
+        Gathering colwise-quantized activations, which wgrad needs.
+
+        This path is a standalone all-gather rather than a fused op: wgrad wants
+        dY.T @ X with X colwise-quantized, so the caller gathers X itself. The
+        test pins which layouts survive that gather.
+
+        Colwise means blocking along M, so the operand is X.T [K, M] with scales
+        [K, M / 32] and the gather runs along K. The alignment constraint therefore
+        lands on K / world_size, which is much smaller than the M / world_size the
+        forward's rowwise gather has to satisfy -- k_shard=64 is the case that
+        breaks, and it is reachable at real shapes (K=512 at TP=8).
+
+        Two things hold regardless of alignment: the qdata concatenates, and so do
+        the *unswizzled* scales. Only concatenating already-swizzled scales needs
+        the 128 alignment, because `to_blocked` pads each shard's tail to a
+        128-row tile. Gathering unswizzled and swizzling once afterwards is the
+        general recipe.
+        """
+        self._init_process()
+        world = self.world_size
+        M, N = 256, 64
+        K = k_shard * world
+
+        torch.manual_seed(42)
+        X_full = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
+        X_shard = X_full.chunk(world, dim=1)[self.rank].contiguous()
+
+        def colwise(x):
+            # blocks along M, i.e. quantize the transpose: [K, M] and [K, M // 32]
+            scale, q = to_mxfp(x.t().contiguous(), format="mxfp8")
+            return q, scale
+
+        q_shard, s_shard = colwise(X_shard)
+        q_ref, s_ref = colwise(X_full)
+
+        # 1. qdata gathers by plain concatenation at any alignment
+        q_gathered = torch.empty_like(q_ref)
+        dist.all_gather_into_tensor(
+            q_gathered.view(torch.uint8), q_shard.view(torch.uint8)
+        )
+        self.assertEqual(q_gathered.view(torch.uint8), q_ref.view(torch.uint8))
+
+        # 2. so do the unswizzled scales; swizzling the gathered result then
+        #    matches swizzling the reference, whatever k_shard is
+        s_gathered = torch.empty_like(s_ref)
+        dist.all_gather_into_tensor(
+            s_gathered.view(torch.uint8), s_shard.contiguous().view(torch.uint8)
+        )
+        self.assertEqual(s_gathered.view(torch.uint8), s_ref.view(torch.uint8))
+        self.assertEqual(
+            to_blocked(s_gathered).view(torch.uint8),
+            to_blocked(s_ref).view(torch.uint8),
+        )
+
+        # 3. concatenating already-swizzled scales only works when 128-aligned
+        cat_swizzled = torch.cat([to_blocked(s_shard)] * world)
+        ref_swizzled = to_blocked(s_ref)
+        if k_shard % 128 == 0:
+            self.assertEqual(cat_swizzled.numel(), ref_swizzled.numel())
+        else:
+            # each shard pads its own tail, so the buffer is the wrong size --
+            # the failure is structural, not a silent numerical error
+            self.assertNotEqual(cat_swizzled.numel(), ref_swizzled.numel())
+
+        # 4. the gathered scales are consumable by scaled_mm
+        dY = torch.randn(M, N, device="cuda", dtype=torch.bfloat16)
+        dY_scale, dY_q = to_mxfp(dY.t().contiguous(), format="mxfp8")
+        wgrad = scaled_mm(
+            q_gathered,
+            dY_q.t(),
+            to_blocked(s_gathered),
+            ScalingType.BlockWise1x32,
+            to_blocked(dY_scale),
+            ScalingType.BlockWise1x32,
+            swizzle_a=SwizzleType.SWIZZLE_32_4_4,
+            swizzle_b=SwizzleType.SWIZZLE_32_4_4,
+            output_dtype=torch.bfloat16,
+        )
+        self.assertEqual(wgrad.shape, torch.Size([K, N]))
+        ref = (
+            from_blocked_format(q_ref, s_ref, blocksize=32)
+            @ from_blocked_format(dY_q, dY_scale, blocksize=32).t()
+        )
+        torch.testing.assert_close(wgrad, ref, rtol=2e-2, atol=5e-2)
 
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
