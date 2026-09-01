@@ -47,6 +47,7 @@ import importlib.metadata
 import pickle
 import threading
 import warnings
+from collections import defaultdict
 from collections.abc import Mapping
 from contextlib import contextmanager
 from logging import getLogger
