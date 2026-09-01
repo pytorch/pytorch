@@ -366,7 +366,8 @@ class TestLinalg(TestCase):
                 import scipy.linalg
 
                 def scipy_ref(a, b):
-                    return scipy.linalg.lstsq(a, b, lapack_driver=driver, cond=cond)
+                    scipy_cond = None if cond is not None and cond < 0 else cond
+                    return scipy.linalg.lstsq(a, b, lapack_driver=driver, cond=scipy_cond)
                 check_correctness_ref(a, b, res, scipy_ref, driver=driver)
 
         def check_correctness_numpy(a, b, res, driver, rcond):
