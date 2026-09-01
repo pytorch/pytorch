@@ -1180,8 +1180,6 @@ def scan_batch_rule(
         out_dims = None
 
         def wrapper(*args):
-            # out_dims is written here and read by wrap_batched below after scan_op
-            # completes; nonlocal is the mechanism to communicate it out.
             nonlocal out_dims
             outputs, per_slice_out_dims = restore_vmap(
                 combine_fn,
