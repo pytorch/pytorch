@@ -568,13 +568,24 @@ def load(
     to treat as identity.
     """
     hi = Int32(const_expr(tm.N)) if bound is None else bound
+    # `tm.exact` justifies an UNPREDICATED wide load, but it only says vec*loads*tpr == tm.N -- a
+    # statement about a tile based at column 0 covering its whole row. A narrower `bound` (the split
+    # shape's chunk end, whose entire job is to stop a short chunk reading the NEXT chunk's
+    # elements) or a shifted `base_col` each invalidate it, and the fast path consults neither. So
+    # require them absent instead of assuming it. Both tests are compile-time, and no plan
+    # `itree_plan` builds pairs an exact tile with either -- 0 of 35,376 enumerated, per batch -- so
+    # this changes nothing generated today and stops the fast path being silently wrong if a later
+    # caller combines them.
+    whole_row = const_expr(
+        tm.exact and bound is None and isinstance(base_col, int) and base_col == 0
+    )
     rowv = mX[Int64(r), None]
     for l in cutlass.range_constexpr(tm.loads):
         # base_col may be a python int (0, or a baked batch offset) or a DYNAMIC value
         # (the two-kernel stage 1 derives it from the block index); a plain add keeps a
         # static base static and promotes only when it has to.
         base = tm.col_base(lane, w, l, warp_stride) + base_col
-        if const_expr(tm.exact and tm.wide_ok):
+        if const_expr(whole_row and tm.wide_ok):
             _wide(rowv, base, tm.vec, frag[None, l])
         elif const_expr(not tm.wide_ok):
             for i in cutlass.range_constexpr(tm.vec):
