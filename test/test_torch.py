@@ -11361,6 +11361,28 @@ class TestViewOps(TestCase):
 class TestTensorDeviceOps(TestCase):
     pass
 
+
+class TestCrossDeviceCopy(TestCase):
+    exact_dtype = True
+
+    # Regression test for https://github.com/pytorch/pytorch/issues/194344
+    # A dtype-converting device-to-host copy read from the wrong source
+    # address when the source was a view with a nonzero storage offset.
+    def test_copy_cast_source_offset(self, device):
+        for src_dtype, dst_dtype in (
+            (torch.half, torch.float),
+            (torch.bfloat16, torch.float),
+            (torch.float, torch.half),
+            (torch.short, torch.int),
+        ):
+            input_cpu = torch.randn(1 << 20).to(src_dtype)
+            input_device = input_cpu.to(device)
+            for src_offset in (1, 2, 64, 256, 4096, 65536):
+                expected = input_cpu[src_offset:src_offset + 64].to(dst_dtype)
+                fused = input_device[src_offset:src_offset + 64].to("cpu", dst_dtype)
+                self.assertEqual(fused, expected)
+            self.assertEqual(input_device.cpu(), input_cpu)
+
 # Generates tests
 # Note: test generation must be done at file scope, not within main, or
 # pytest will fail.
@@ -11369,6 +11391,9 @@ instantiate_device_type_tests(TestViewOps, globals())
 instantiate_device_type_tests(TestTensorDeviceOps, globals())
 instantiate_device_type_tests(TestTorchDeviceType, globals())
 instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu')
+instantiate_device_type_tests(
+    TestCrossDeviceCopy, globals(), except_for='cpu', allow_mps=True, allow_xpu=True
+)
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True
