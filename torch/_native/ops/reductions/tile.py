@@ -124,7 +124,10 @@ def _decode_offset(linear, vals, npairs):
 
 
 def _ilog2(n: int) -> int:
-    return max(1, n.bit_length() - 1)
+    # No clamp: both callers pass >= 2 by construction (Es // vec is 4, 8 or 16, and the other
+    # site passes max(ntiles, 2)), and clamping to 1 would make this return the wrong answer for
+    # n == 1 rather than protect anything.
+    return n.bit_length() - 1
 
 
 def _off(base, i: int):
@@ -1086,9 +1089,11 @@ class TileReduce:
         `T = stage_e * WARP` is the knob: T = span is one butterfly and smem the whole batch, while
         a smaller T trades butterflies back for a smem footprint that no longer grows with N.
 
-        PIPELINED at `_ITREE_STAGE_DEPTH` buffers: at depth 2 the next tile's transfer is issued
-        BEFORE the current tile is folded, so the copy overlaps the arithmetic instead of the warp
-        stalling on `cp_async_wait_group(0)` between them. Costs one more tile of smem.
+        ONE BUFFER, stage-then-fold: wait for this tile, fold it, then refill for the next. The
+        refill CANNOT move ahead of the fold -- that is a write-after-read race on the buffer being
+        read, and it stays invisible until M is large enough for the transfer to land mid-fold. So
+        there is no copy/arithmetic overlap here by construction; see `_ITREE_STAGE_DEPTH` for the
+        measurements that rejected the two-buffer version that would have provided it.
 
         SMEM LAYOUT is (stage_e, WARP) per buffer with the lane stride padded by `vec`, i.e. tile
         column c at `c + vec * (c // stage_e)`. The padding is what makes both directions
