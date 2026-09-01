@@ -4882,14 +4882,23 @@ class TestChromeTraceInlineAnnotations(TestCase):
         with self.assertRaisesRegex(ValueError, "graph_lanes"):
             self._export([], annotations={1: [{"name": "x"}]}, graph_lanes="lanes")
 
-    def test_bare_string_annotation_reads_as_name(self):
-        # What an older recorder pickled; the registry normalizes these to "name" too.
+    def test_graph_lanes_all_without_annotations_rejected(self):
+        # Standalone it would only collapse every graphed event onto default_stream.
+        with self.assertRaisesRegex(ValueError, "needs cuda_graph_annotations"):
+            self._export([], graph_lanes="all")
+
+    def test_recorded_stream_reported_when_lanes_off(self):
+        # graph_lanes="none" must not act on the recorded lane, but must not lose it
+        # either: args.stream still names the stream the event actually ran on.
         trace = self._export(
             [_StubActivity("kernel", "k", rid=3, metadata_json=self._metadata(42))],
-            annotations={42: ["phase_a"]},
+            annotations={42: [{"name": "phase_a", "stream": 61}]},
         )
         [kernel] = self._kernels(trace)
-        self.assertEqual(kernel["args"]["name"], "phase_a")
+        self.assertEqual(kernel["tid"], 3)
+        self.assertEqual(kernel["args"]["stream"], 3)
+        self.assertEqual(kernel["args"]["annotated_stream"], 61)
+        self.assertNotIn("original_stream", kernel["args"])
 
     def test_without_annotations_nothing_changes(self):
         activities = [
