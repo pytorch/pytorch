@@ -720,7 +720,8 @@ class AttributePropagator {
           applyToForkSubgraph(
               n,
               graph,
-              std::bind_front(&AttributePropagator::propagateAttributes, *this));
+              std::bind_front(
+                  &AttributePropagator::propagateAttributes, *this));
         }
       }
     }
@@ -843,7 +844,8 @@ class AttributePropagator {
           applyToForkSubgraph(
               n,
               graph,
-              std::bind_front(&AttributePropagator::recordReferencedAttrs, *this));
+              std::bind_front(
+                  &AttributePropagator::recordReferencedAttrs, *this));
         }
       }
     }
