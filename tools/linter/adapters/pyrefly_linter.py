@@ -18,7 +18,7 @@
 #   "filelock==3.18.0",
 #   "junitparser==2.1.1",
 #   "rich==14.1.0",
-#   "optree==0.17.0",
+#   "optree==0.20.0",
 #   "types-openpyxl==3.1.5.20250919",
 #   "types-python-dateutil==2.9.0.20251008",
 #   "packaging",
