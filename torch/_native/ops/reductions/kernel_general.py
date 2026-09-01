@@ -430,6 +430,16 @@ def _try_fast_row(trait, trait_key, x, out_dtypes, nouts):
         return rt.reduce_row_tile(trait, trait_key, x, out_dtypes, nouts=nouts, tpr=1)
     if _oneshot_ok(x):
         return rt.reduce_row_tile(trait, trait_key, x, out_dtypes, nouts=nouts)
+    # Same rule one branch lower, and for the same reason: kernel_xcta builds its OWN TileReduce
+    # at the default order and never consults the gate, so every shape past the one-shot came back
+    # with the launch-shape order while the gate claimed otherwise -- MEASURED as differing bits at
+    # (64, 100000), (8, 200000) and (8, 1000000). The order has a plan for all of them, so route
+    # there; the `is not None` test predicts exactly what reduce_row_tile's own gate will honour,
+    # so this cannot silently downgrade.
+    if rt.inner_tree_order_enabled() and (
+        rt.itree_plan(N, x.shape[0], x.element_size()) is not None
+    ):
+        return rt.reduce_row_tile(trait, trait_key, x, out_dtypes, nouts=nouts)
     from . import kernel_xcta as xc
 
     if nouts == 2:
