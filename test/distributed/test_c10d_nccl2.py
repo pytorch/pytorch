@@ -3,6 +3,7 @@
 # Tests specific to the in-tree torchcomms NCCL backends.
 
 import ctypes
+import gc
 import json
 import os
 import pickle
@@ -20,6 +21,7 @@ import torch.distributed as dist
 from torch._C._distributed_c10d import ErrorType, ReconfigureOptions
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
+    MultiProcessTestCase,
     requires_nccl,
     requires_nccl_version,
     skip_if_lt_x_gpu,
@@ -204,6 +206,46 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
             work.wait()
             time.sleep(0.1)
         self.fail("ephemeral timeout was not reset after collective completion")
+
+
+class ProcessGroupNCCL2WorkLifetimeTest(MultiProcessTestCase):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @property
+    def destroy_pg_upon_exit(self) -> bool:
+        return False
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_processes()
+
+    def tearDown(self) -> None:
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_work_outlives_process_group(self) -> None:
+        device = torch.device("cuda", self.rank)
+        torch.cuda.set_device(device)
+        dist.init_process_group(
+            "nccl2",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=dist.FileStore(self.file_name, self.world_size),
+            device_id=device,
+        )
+        work = dist.all_reduce(torch.ones(4, device=device), async_op=True)
+        work.wait()
+
+        dist.destroy_process_group()
+        del work
+        gc.collect()
 
 
 class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):
