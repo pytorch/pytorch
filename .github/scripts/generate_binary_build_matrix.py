@@ -137,7 +137,10 @@ def _rocm_channel(arch: str, separator: str = "") -> str:
 ROCM_NIGHTLY_SOURCE_MATRIX = {
     _rocm_channel(arch, "-"): dict(
         name=_rocm_channel(arch, "-"),
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/{_rocm_channel(arch)}",
+        index_url=(
+            f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/"
+            f"{_rocm_channel(arch, '-' if arch == 'preview' else '')}"
+        ),
         supported_platforms=["Linux"],
         accelerator="rocm",
     )
