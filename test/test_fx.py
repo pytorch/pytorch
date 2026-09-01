@@ -5855,7 +5855,7 @@ class TestFunctionalTracing(JitTestCase):
 TestFunctionalTracing.generate_tests()
 
 
-instantiate_device_type_tests(TestOperatorSignatures, globals())
+instantiate_device_type_tests(TestOperatorSignatures, globals(), allow_xpu=True)
 
 
 @skipIfTorchDynamo("too slow")

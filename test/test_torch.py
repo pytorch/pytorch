@@ -11340,7 +11340,7 @@ add_neg_dim_tests()
 instantiate_device_type_tests(TestViewOps, globals())
 instantiate_device_type_tests(TestTensorDeviceOps, globals())
 instantiate_device_type_tests(TestTorchDeviceType, globals())
-instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu')
+instantiate_device_type_tests(TestDevicePrecision, globals(), allow_xpu=True, except_for='cpu')
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True

@@ -1373,7 +1373,7 @@ class TestMixedDtypesLinearCuda(TestCase):
             )
 
 instantiate_device_type_tests(TestMatmulCuda, globals(), except_for="cpu")
-instantiate_device_type_tests(TestMixedDtypesLinearCuda, globals(), except_for="cpu")
+instantiate_device_type_tests(TestMixedDtypesLinearCuda, globals(), allow_xpu=True, except_for="cpu")
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True
