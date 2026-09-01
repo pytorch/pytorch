@@ -2020,7 +2020,7 @@ class TestSDPAFailureModes(NNTestCase):
         key = torch.rand([2**16, 2, 2, 8], device='cuda', dtype=torch.float16)
         value = torch.rand([2**16, 2, 2, 8], device='cuda', dtype=torch.float16)
         error_str = (r"Efficient attention cannot produce valid seed and offset outputs when "
-                     r"the batch size exceeds \(65535\)\.")
+                     r"the batch size or number of heads exceeds \(65535\)\.")
         with self.assertRaisesRegex(RuntimeError, error_str):
             torch._scaled_dot_product_efficient_attention(query, key, value,
                                                           attn_bias=None, compute_log_sumexp=True,
@@ -4501,43 +4501,34 @@ class TestSDPAGridOverflow(NNTestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
                      "Requires mem-efficient attention support")
     @onlyCUDA
-    @parametrize("num_heads", [65534, 65535, 65536])
+    @parametrize("num_heads", [65534, 65535, 65536, 196606])
     @parametrize("with_bias", [False, True])
-    def test_large_num_heads_forward(self, device, num_heads, with_bias):
-        """Forward pass should handle num_heads at and beyond the grid limit."""
+    @parametrize("dtype", [torch.float32, torch.bfloat16])
+    def test_large_num_heads(self, device, num_heads, with_bias, dtype):
+        """Forward outputs and backward gradients should match the MATH
+        reference for num_heads at and beyond the grid limit.
+
+        The head counts sit either side of the limit, with 65534 and 65535 below
+        or at it, 65536 one past it so head-splitting produces a single full
+        chunk and a one head remainder, and 196606 far enough past it to need
+        four chunks, which covers more than one iteration of the splitting loop.
+        The half precision case matters because the backward kernel computes
+        delta in the kernel for those dtypes, a path float32 never reaches, and
+        that computation depends on the memory layout of the sliced tensors.
+        The MATH reference runs in float32 either way to keep a stable baseline.
+        """
         # head_dim must be divisible by 8 for the mem-efficient kernel.
         batch, seq_len, head_dim = 1, 4, 8
+        tol = {torch.float32: {"atol": 1e-3, "rtol": 1e-3},
+               torch.bfloat16: {"atol": 5e-2, "rtol": 5e-2}}[dtype]
         q = torch.randn(batch, num_heads, seq_len, head_dim,
-                        device=device, dtype=torch.float32)
+                        device=device, dtype=dtype)
         k = torch.randn_like(q)
         v = torch.randn_like(q)
         attn_bias = torch.randn(batch, num_heads, seq_len, seq_len,
-                                device=device, dtype=torch.float32) if with_bias else None
-
-        with sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION):
-            out = scaled_dot_product_attention(q, k, v, attn_mask=attn_bias)
-        self.assertEqual(out.shape, q.shape)
-
-        with sdpa_kernel(SDPBackend.MATH):
-            ref = scaled_dot_product_attention(q, k, v, attn_mask=attn_bias)
-        torch.testing.assert_close(out, ref, atol=1e-3, rtol=1e-3)
-
-    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-                     "Requires mem-efficient attention support")
-    @onlyCUDA
-    @parametrize("num_heads", [65535, 65536])
-    @parametrize("with_bias", [False, True])
-    def test_large_num_heads_backward(self, device, num_heads, with_bias):
-        """Backward gradients should match the MATH reference."""
-        batch, seq_len, head_dim = 1, 4, 8
-        q = torch.randn(batch, num_heads, seq_len, head_dim,
-                        device=device, dtype=torch.float32)
-        k = torch.randn_like(q)
-        v = torch.randn_like(q)
-        attn_bias = torch.randn(batch, num_heads, seq_len, seq_len,
-                                device=device, dtype=torch.float32) if with_bias else None
+                                device=device, dtype=dtype) if with_bias else None
         grad_out = torch.randn(batch, num_heads, seq_len, head_dim,
-                               device=device, dtype=torch.float32)
+                               device=device, dtype=dtype)
 
         q_eff = q.clone().requires_grad_(True)
         k_eff = k.clone().requires_grad_(True)
@@ -4548,25 +4539,28 @@ class TestSDPAGridOverflow(NNTestCase):
         with sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION):
             out_eff = scaled_dot_product_attention(
                 q_eff, k_eff, v_eff, attn_mask=bias_eff)
-        out_eff.backward(grad_out)
 
-        q_ref = q.clone().requires_grad_(True)
-        k_ref = k.clone().requires_grad_(True)
-        v_ref = v.clone().requires_grad_(True)
-        bias_ref = attn_bias.clone().requires_grad_(True) if with_bias else None
+        q_ref = q.float().requires_grad_(True)
+        k_ref = k.float().requires_grad_(True)
+        v_ref = v.float().requires_grad_(True)
+        bias_ref = attn_bias.float().requires_grad_(True) if with_bias else None
         with sdpa_kernel(SDPBackend.MATH):
             out_ref = scaled_dot_product_attention(
                 q_ref, k_ref, v_ref, attn_mask=bias_ref)
-        out_ref.backward(grad_out)
 
-        torch.testing.assert_close(q_eff.grad, q_ref.grad, atol=1e-3, rtol=1e-3)
-        torch.testing.assert_close(k_eff.grad, k_ref.grad, atol=1e-3, rtol=1e-3)
-        torch.testing.assert_close(v_eff.grad, v_ref.grad, atol=1e-3, rtol=1e-3)
+        self.assertEqual(out_eff.shape, q.shape)
+        self.assertEqual(out_eff.float(), out_ref, **tol)
+
+        out_eff.backward(grad_out)
+        out_ref.backward(grad_out.float())
+
+        self.assertEqual(q_eff.grad.float(), q_ref.grad, **tol)
+        self.assertEqual(k_eff.grad.float(), k_ref.grad, **tol)
+        self.assertEqual(v_eff.grad.float(), v_ref.grad, **tol)
         # The bias gradient is reassembled per head-chunk under head-splitting,
         # so verify it explicitly against the MATH reference.
         if with_bias:
-            torch.testing.assert_close(
-                bias_eff.grad, bias_ref.grad, atol=1e-3, rtol=1e-3)
+            self.assertEqual(bias_eff.grad.float(), bias_ref.grad, **tol)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
                      "Requires mem-efficient attention support")

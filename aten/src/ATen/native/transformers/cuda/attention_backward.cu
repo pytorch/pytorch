@@ -1161,15 +1161,22 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
       Tensor q_h = query_chunk.slice(2, h_start, h_end);
       Tensor k_h = key_chunk.slice(2, h_start, h_end);
       Tensor v_h = value_chunk.slice(2, h_start, h_end);
-      Tensor out_h = out_chunk.slice(2, h_start, h_end);
+      // kernel_backward.h computes o_strideM() from num_heads and head_dim
+      // rather than reading the tensor's stride, so the head slice of out,
+      // whose M stride still reflects the full head count, must be repacked
+      // before the per chunk head count makes that derivation valid.
+      Tensor out_h = out_chunk.slice(2, h_start, h_end).contiguous();
 
       // Slice non-transposed tensors on dim 1 (heads)
       std::optional<Tensor> bias_h;
       if (attn_bias_chunk.has_value() && attn_bias_chunk.value().defined()) {
         bias_h = attn_bias_chunk.value().slice(1, h_start, h_end);
       }
+      // The ROCm branch of _efficient_attention_backward views logsumexp as
+      // a 2D tensor, which fails on a non-contiguous slice whenever the
+      // batch dimension holds more than one element.
       Tensor lse_h = logsumexp_chunk.numel() > 0
-          ? logsumexp_chunk.slice(1, h_start, h_end)
+          ? logsumexp_chunk.slice(1, h_start, h_end).contiguous()
           : logsumexp_chunk;
 
       auto [gq, gk, gv, gb] = process_chunk(
