@@ -85,27 +85,49 @@ class GuardProvenanceTests(torch._dynamo.test_case.TestCase):
         from torch._guards import ChainedSource, GuardProvenance, Source
 
         roots = []
+        chained = []
 
         def walk(cls):
             for sub in cls.__subclasses__():
-                if not issubclass(sub, ChainedSource) and sub is not ChainedSource:
+                if issubclass(sub, ChainedSource):
+                    chained.append(sub)
+                elif sub is not ChainedSource:
                     roots.append(sub)
                 walk(sub)
 
         walk(Source)
+
+        def is_torch_own(cls):
+            # Test fixtures (e.g. the fail-closed test below) linger in
+            # __subclasses__ until cyclic GC runs, so a same-process test
+            # ordering must not flip this walk's verdict; only torch's own
+            # sources are enforced. Match "torch" and "torch.*" exactly, not
+            # torch*-prefixed third-party packages (torchvision, torch_xla).
+            mod = cls.__module__
+            return mod == "torch" or mod.startswith("torch.")
+
         self.assertGreater(len(roots), 10)  # sanity: the walk found the roots
         for cls in roots:
-            if not cls.__module__.startswith("torch"):
-                # Test fixtures (e.g. the fail-closed test below) linger in
-                # __subclasses__ until cyclic GC runs, so a same-process test
-                # ordering must not flip this walk's verdict; only torch's own
-                # sources are enforced.
+            if not is_torch_own(cls):
                 continue
             self.assertIsInstance(
                 cls._provenance,
                 GuardProvenance,
                 f"{cls.__module__}.{cls.__name__} must declare _provenance "
                 "(see Note [Guard provenance] in torch/_guards.py)",
+            )
+        for cls in chained:
+            if not is_torch_own(cls):
+                continue
+            # ChainedSource.provenance delegates to the root unconditionally,
+            # so a _provenance declared on a chained class is silently ignored;
+            # reject the ambiguous declaration instead.
+            self.assertNotIn(
+                "_provenance",
+                vars(cls),
+                f"{cls.__module__}.{cls.__name__} is a ChainedSource and must "
+                "not declare _provenance; classification always follows the "
+                "root source (see Note [Guard provenance] in torch/_guards.py)",
             )
 
     def test_provenance_classifies_by_root(self):

@@ -437,11 +437,14 @@ class GuardSerializationError(PackageError):
     text.
     """
 
-    def __init__(self, guard_type: str, guard_name: str) -> None:
+    def __init__(self, guard_type: str, guard_name: str, detail: str = "") -> None:
         self.guard_type = guard_type
         self.guard_name = guard_name
-        detail = f" (guard on {guard_name})" if guard_name else ""
-        super().__init__(f"{guard_type} guard cannot be serialized.{detail}")
+        name_part = f" (guard on {guard_name})" if guard_name else ""
+        msg = f"{guard_type} guard cannot be serialized.{name_part}"
+        if detail:
+            msg = f"{msg} {detail}"
+        super().__init__(msg)
 
 
 class ObservedException(TorchDynamoException):
