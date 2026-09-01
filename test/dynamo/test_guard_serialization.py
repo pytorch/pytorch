@@ -1142,9 +1142,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ) as cm:
                 compiled(torch.randn(3), Local())
             cause = cm.exception.__cause__
-            self.assertIsInstance(
-                cause, torch._dynamo.exc.GuardSerializationError
-            )
+            self.assertIsInstance(cause, torch._dynamo.exc.GuardSerializationError)
             self.assertEqual(cause.guard_type, "TYPE_MATCH")
             self.assertTrue(cause.guard_name)
             self.assertIn("defined in local scope", str(cause))
