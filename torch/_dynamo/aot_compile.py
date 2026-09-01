@@ -134,6 +134,10 @@ class AOTCompilePickler(pickle.Pickler):
         return SerializedCode.to_code_object(serialized_code)
 
     @classmethod
+    def _unpickle_empty_cell(cls) -> types.CellType:
+        return types.CellType()
+
+    @classmethod
     def _unpickle_nested_function(
         cls,
         code: types.CodeType,
@@ -141,14 +145,24 @@ class AOTCompilePickler(pickle.Pickler):
         qualname: str,
         argdefs: tuple[object, ...] | None,
         closure: tuple[types.CellType, ...] | None,
+        name: str,
     ) -> types.FunctionType:
         f_globals = importlib.import_module(module).__dict__
-        return types.FunctionType(code, f_globals, qualname, argdefs, closure)
+        fn = types.FunctionType(code, f_globals, name, argdefs, closure)
+        fn.__qualname__ = qualname
+        return fn
 
     # pyrefly: ignore [bad-override]
     def reducer_override(self, obj: Any) -> Any:
         if isinstance(obj, type((lambda x: lambda: x)(0).__closure__[0])):  # type: ignore[index] # noqa: PLC3002
-            return type(self)._unpickle_cell, (obj.cell_contents,)
+            # An empty cell -- a free variable only assigned on a path that did
+            # not run -- has nothing to read, so rebuild it empty instead of
+            # letting the ValueError out of the pickler.
+            try:
+                contents = obj.cell_contents
+            except ValueError:
+                return type(self)._unpickle_empty_cell, ()
+            return type(self)._unpickle_cell, (contents,)
         elif inspect.iscode(obj):
             from torch._dynamo.package import SerializedCode
 
@@ -178,6 +192,7 @@ class AOTCompilePickler(pickle.Pickler):
                     obj.__qualname__,
                     obj.__defaults__,
                     obj.__closure__,
+                    obj.__name__,
                 )
 
         return NotImplemented

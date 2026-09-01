@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import faulthandler
+import gc
 import operator
 import queue
 import sys
@@ -615,6 +616,130 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             raised.append(errors.get_nowait())
         self.assertEqual(raised, [])
         self.assertEqual(opt(args[0]), f(args[0]))
+
+    def test_reset_code_from_python_run_by_lookup_is_safe(self):
+        """lookup() holds the recursive cache lock across guard evaluation
+        and backend comparison, both of which run Python -- which can call
+        torch._dynamo back in on the SAME thread. reset_code arriving there
+        used to free the very list nodes the interrupted lookup was walking
+        (a same-thread use-after-free); it must instead land as if it ran
+        just after that lookup."""
+        from torch._C._dynamo.eval_frame import reset_code
+
+        def f(x):
+            return x.sin() + x.cos()
+
+        code = f.__code__
+        resets = []
+
+        class ResettingBackend:
+            def __call__(self, gm, example_inputs):
+                return gm.forward
+
+            def __eq__(self, other):
+                if isinstance(other, ResettingBackend):
+                    resets.append(True)
+                    reset_code(code)
+                    return True
+                return NotImplemented
+
+            def __hash__(self):
+                return 0
+
+        x = torch.randn(8)
+        first, second = ResettingBackend(), ResettingBackend()
+        opt1 = torch._dynamo.optimize(backend=first, dynamic=False)(f)
+        self.assertEqual(opt1(x), f(x))
+        self.assertEqual(_get_total_cache_entry_count(code), 1)
+        # A second-but-equal backend makes lookup compare it against the
+        # saved one, and that __eq__ resets this very code object mid-lookup.
+        opt2 = torch._dynamo.optimize(backend=second, dynamic=False)(f)
+        self.assertEqual(opt2(x), f(x))
+        self.assertGreater(len(resets), 0)
+        # The parked reset lands at the next cache operation: the stale entry
+        # is gone and this call compiles fresh.
+        self.assertEqual(opt2(x), f(x))
+        self.assertEqual(_get_total_cache_entry_count(code), 1)
+
+    def test_invalidation_racing_a_held_cache_lock_parks_and_drains(self):
+        """invalidate() reached from weakref.finalize must never block on
+        cache_mutex (GC can fire it while ANOTHER state's lock is held; two
+        threads doing that against each other's states deadlock ABBA-style).
+        This pins the contended path itself: the very call finalize runs,
+        arriving while a lookup holds the lock, must return promptly
+        (parked), and the parked invalidation must be applied by a later
+        lock holder rather than serve forever."""
+        from torch._dynamo.guards import DeletedGuardManagerWrapper
+
+        def f(x):
+            return x.sin() + x.cos()
+
+        code = f.__code__
+        in_eq = threading.Event()
+        release_eq = threading.Event()
+
+        class BlockingBackend:
+            def __call__(self, gm, example_inputs):
+                return gm.forward
+
+            def __eq__(self, other):
+                if isinstance(other, BlockingBackend):
+                    in_eq.set()
+                    release_eq.wait(timeout=120)
+                    return True
+                return NotImplemented
+
+            def __hash__(self):
+                return 0
+
+        first, second = BlockingBackend(), BlockingBackend()
+        x = torch.randn(8)
+        opt1 = torch._dynamo.optimize(backend=first, dynamic=False)(f)
+        self.assertEqual(opt1(x), f(x))
+        wrapper = _get_cache_entries_for_region(code, -1)[0].guard_manager
+
+        errors = queue.SimpleQueue()
+
+        def caller():
+            try:
+                opt2 = torch._dynamo.optimize(backend=second, dynamic=False)(f)
+                opt2(x)
+            except BaseException as e:
+                errors.put(e)
+
+        thread = threading.Thread(target=caller, daemon=True)
+        thread.start()
+        try:
+            self.assertTrue(in_eq.wait(timeout=120))
+            # The caller thread is inside lookup, holding the cache lock.
+            # This is exactly what a guarded object's weakref.finalize runs;
+            # it must park rather than block behind that lock.
+            invalidator_done = threading.Event()
+
+            def invalidator():
+                wrapper.extra_state.invalidate(
+                    wrapper.cache_entry,
+                    DeletedGuardManagerWrapper("test object"),
+                    wrapper,
+                )
+                invalidator_done.set()
+
+            inv_thread = threading.Thread(target=invalidator, daemon=True)
+            inv_thread.start()
+            self.assertTrue(invalidator_done.wait(timeout=60))
+        finally:
+            release_eq.set()
+        thread.join(timeout=120)
+        self.assertFalse(thread.is_alive())
+        raised = []
+        while not errors.empty():
+            raised.append(errors.get_nowait())
+        self.assertEqual(raised, [])
+        # A later lock holder drains the parked request: the entry reports
+        # itself invalidated and a fresh compile serves the next call.
+        self.assertEqual(opt1(x), f(x))
+        entries = _get_cache_entries_for_region(code, -1)
+        self.assertTrue(any(e.trace_annotation == "Invalidated" for e in entries))
 
     @torch._dynamo.config.patch(
         recompile_limit=1,
@@ -1743,7 +1868,6 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         """When an isolated compile wrapper is GC'd, orphaned cache entries
         remain. A new torch.compile gets a fresh region and compiles
         independently. reset() clears everything including orphans."""
-        import gc
 
         cnt = torch._dynamo.testing.CompileCounter()
 
@@ -1968,6 +2092,26 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.DEFAULT)
         self.assertFalse(compare_and_set_code_exec_strategy(code, new_token, skip))
         self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.DEFAULT)
+
+        # Zero must not be a resurrection token either. A state created by a
+        # region write hands out generation 0 before any global write; that
+        # token must lose after a global write plus a reset, so the reset may
+        # not put the generation back to 0.
+        from torch._C._dynamo.eval_frame import set_code_region_exec_strategy
+
+        def g(x):
+            return x + 2
+
+        code2 = g.__code__
+        set_code_region_exec_strategy(
+            code2, 3, FrameExecStrategy(FrameAction.RUN_ONLY, FrameAction.DEFAULT)
+        )
+        strategy, zero_token = get_code_exec_strategy_token(code2)
+        self.assertEqual(zero_token, 0)
+        set_code_exec_strategy_with_token(code2, skip)
+        reset_code(code2)
+        self.assertFalse(compare_and_set_code_exec_strategy(code2, zero_token, skip))
+        self.assertEqual(get_code_exec_strategy(code2).cur_action, FrameAction.DEFAULT)
 
     def test_region_exec_strategy_inherits_skip_but_not_run_only(self):
         from torch._C._dynamo.eval_frame import (
