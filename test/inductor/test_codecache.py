@@ -5272,6 +5272,74 @@ class TestVecISACheckBuild(TestCase):
             msg=lambda msg: f"{msg}\nLD_LIBRARY_PATH should be prepended with {torch_lib!r}, got {value!r}",
         )
 
+    @unittest.skipUnless(sys.platform == "linux", "Linux loader semantics")
+    def test_avx_py_load_falls_back_to_import_torch(self):
+        # Wheels whose native deps only resolve once `import torch` has run
+        # (e.g. ROCm wheels with DT_NEEDED refs on sonames that exist only as
+        # already-loaded renamed bundles, see #189194) fail the cold dlopen,
+        # so the probe child must retry after importing torch. Simulate that:
+        # a probe .so that DT_NEEDEDs libc10.so with no rpath and no
+        # LD_LIBRARY_PATH fails to load cold, and resolves only once
+        # `import torch` maps libc10 into the child process.
+        from torch._inductor import cpu_vec_isa
+
+        compiler = shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
+        if compiler is None:
+            raise unittest.SkipTest("no C compiler available")
+        torch_lib = os.path.join(os.path.dirname(torch.__file__), "lib")
+        if not os.path.isfile(os.path.join(torch_lib, "libc10.so")):
+            raise unittest.SkipTest("libc10.so not found in torch lib dir")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            src = os.path.join(tmp, "probe.c")
+            with open(src, "w") as f:
+                f.write("void __vec_isa_probe_dummy(void) {}\n")
+            lib_path = os.path.join(tmp, "libvec_isa_probe_needs_c10.so")
+            # --no-as-needed: the probe references no c10 symbol, so without it
+            # the linker would drop the DT_NEEDED entry this test relies on
+            cmd = [
+                compiler,
+                "-shared",
+                "-fPIC",
+                src,
+                "-o",
+                lib_path,
+                "-Wl,--no-as-needed",
+                f"-L{torch_lib}",
+                "-lc10",
+            ]
+            subprocess.run(cmd, check=True)
+
+            # Keep external runtime libraries (for example, SYCL/MKL/XCCL
+            # libraries required by XPU wheels) visible to the child. Only
+            # remove torch's own library directory so the cold load still
+            # fails for the intended reason: libc10.so is not findable until
+            # ``import torch`` has run.
+            env = os.environ.copy()
+            torch_lib = os.path.realpath(torch_lib)
+            loader_paths = env.get("LD_LIBRARY_PATH", "").split(os.pathsep)
+            loader_paths = [
+                path
+                for path in loader_paths
+                if path and os.path.realpath(path) != torch_lib
+            ]
+            if loader_paths:
+                env["LD_LIBRARY_PATH"] = os.pathsep.join(loader_paths)
+            else:
+                env.pop("LD_LIBRARY_PATH", None)
+            cold_load = f'from ctypes import cdll; cdll.LoadLibrary("{lib_path}")'
+            cold = subprocess.run(
+                [sys.executable, "-c", cold_load], env=env, stderr=subprocess.DEVNULL
+            )
+            if cold.returncode == 0:
+                raise unittest.SkipTest("loader resolves libc10.so without torch")
+
+            script = cpu_vec_isa.VecISA._avx_py_load.replace("__lib_path__", lib_path)
+            probe = subprocess.run(
+                [sys.executable, "-c", script], env=env, stderr=subprocess.PIPE
+            )
+            self.assertEqual(probe.returncode, 0, msg=probe.stderr.decode())
+
 
 class TestCompilationEventLogging(TestCase):
     def reset(self):
