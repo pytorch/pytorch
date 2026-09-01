@@ -10261,7 +10261,8 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, MPS, XPU: pow_Tensor_Tensor_out
+    CPU, CUDA, XPU: pow_Tensor_Tensor_out
+    MPS: pow_tensor_tensor_out_mps
   tags: pointwise
 
 - func: pow.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor
