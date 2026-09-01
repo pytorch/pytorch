@@ -72,6 +72,8 @@ class FlexGemmEpilogueConfig:
         gemm_op: Original aten GEMM op spec used to map inputs into QuACK.
         alpha: Static alpha multiplier for addmm/baddbmm inputs.
         beta: Static beta multiplier for addmm/baddbmm bias inputs.
+        blockscaled_format: Optional shared QuACK A/B format name.
+        blockscaled_scale_indices: Template input indices for the two block scales.
         quack_config_constraints: Optional native QuACK config field constraints.
         epilogue_arg_indices: Template input indices for read-only epilogue captures.
         epilogue_arg_kinds: Broadcast kind for each captured epilogue tensor.
@@ -86,6 +88,8 @@ class FlexGemmEpilogueConfig:
     gemm_op: FlexGemmOpSpec
     alpha: float
     beta: float
+    blockscaled_format: str | None
+    blockscaled_scale_indices: tuple[int, int] | None
     quack_config_constraints: tuple[tuple[str, Any], ...]
     epilogue_arg_indices: tuple[int, ...]
     epilogue_arg_kinds: tuple[str, ...]
@@ -220,6 +224,17 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         ]
         if config.quack_config_constraints:
             kwargs.append(f", config_constraints={config.quack_config_constraints!r}")
+        if config.blockscaled_format is not None:
+            if config.blockscaled_scale_indices is None:
+                raise RuntimeError(
+                    "block-scaled FlexGEMM config requires scale indices"
+                )
+            scale_a_index, scale_b_index = config.blockscaled_scale_indices
+            kwargs.append(
+                f", SFA={input_args[scale_a_index]}, SFB={input_args[scale_b_index]}, "
+                f"bs_format_a={config.blockscaled_format!r}, "
+                f"bs_format_b={config.blockscaled_format!r}"
+            )
         if epilogue_args:
             kwargs.append(
                 f", epilogue_args=({', '.join(epilogue_args)},), "
