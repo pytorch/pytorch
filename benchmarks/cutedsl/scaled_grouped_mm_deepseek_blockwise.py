@@ -134,10 +134,17 @@ def _to_ref_scale_1x128(scale_natural: torch.Tensor) -> torch.Tensor:
 
 
 def _to_op_scale_128x128(scale_natural: torch.Tensor, k: int) -> torch.Tensor:
-    pad = _pad_up(k // 128, 4) - k // 128
-    if pad:
-        scale_natural = torch.nn.functional.pad(scale_natural, (0, pad))
-    return scale_natural.t()
+    # A (1, kb) slice counts as contiguous whatever its strides, so
+    # pad/contiguous can no-op and leave a view.
+    kb = k // 128
+    padded = torch.zeros(
+        scale_natural.shape[0],
+        _pad_up(kb, 4),
+        device=scale_natural.device,
+        dtype=scale_natural.dtype,
+    )
+    padded[:, :kb] = scale_natural[:, :kb]
+    return padded.t()
 
 
 def _make_grouped_scale_b(scales: list[torch.Tensor], K: int, N: int, rhs_block: int):
@@ -197,6 +204,63 @@ def _build_inputs(
     mat2 = torch.stack(b_fp8_groups, dim=0).transpose(-2, -1)
     scale_b = _make_grouped_scale_b(b_scale_op_groups, K, N, rhs_block)
     return a_fp8, a_scale, mat2, scale_b, b_fp8_groups, offs
+
+
+def _build_inputs_2d2d(M, g, K, N, lhs_block, rhs_block, device, grouping="balanced"):
+    offs = _generate_offsets(K, g, device, mode=grouping, align=128)
+    a = torch.randn(M, K, device=device, dtype=torch.bfloat16)
+    a_fp8, a_scale_nat = _quantize_block(a, block_outer=lhs_block)
+    b = torch.randn(N, K, device=device, dtype=torch.bfloat16)
+    b_fp8, b_scale_nat = _quantize_block(b, block_outer=rhs_block)
+
+    def op_layout(nat, block, k):
+        return _to_ref_scale_1x128(nat) if block == 1 else _to_op_scale_128x128(nat, k)
+
+    a_scale = op_layout(a_scale_nat, lhs_block, K)
+    scale_b = op_layout(b_scale_nat, rhs_block, K)
+    return a_fp8, a_scale, b_fp8.t(), scale_b, (a_scale_nat, b_scale_nat, b_fp8), offs
+
+
+def _make_reference_2d2d(
+    a_fp8, nats, lhs_recipe, lhs_block, rhs_recipe, rhs_block, M, N, offs
+):
+    a_scale_nat, b_scale_nat, b_fp8 = nats
+    ends = offs.tolist()
+
+    def op_layout(nat, block, k):
+        return _to_ref_scale_1x128(nat) if block == 1 else _to_op_scale_128x128(nat, k)
+
+    slices = []
+    start = 0
+    for end in ends:
+        kb0, kb1 = start // 128, end // 128
+        slices.append(
+            (
+                start,
+                end,
+                op_layout(a_scale_nat[:, kb0:kb1], lhs_block, end - start),
+                op_layout(b_scale_nat[:, kb0:kb1], rhs_block, end - start),
+            )
+        )
+        start = end
+
+    def reference():
+        out = torch.zeros(len(ends), M, N, device=a_fp8.device, dtype=torch.bfloat16)
+        for i, (ks, ke, a_s, b_s) in enumerate(slices):
+            if ke == ks:
+                continue
+            out[i] = scaled_mm(
+                a_fp8[:, ks:ke],
+                b_fp8[:, ks:ke].t(),
+                a_s,
+                lhs_recipe,
+                b_s,
+                rhs_recipe,
+                output_dtype=torch.bfloat16,
+            )
+        return out
+
+    return reference
 
 
 def _percentile(sorted_samples: list[float], percentile: float) -> float:
@@ -290,7 +354,9 @@ def _make_grouped_op(a_fp8, mat2, a_scale, scale_b, lhs_recipe, rhs_recipe, offs
     lhs_recipe_int = lhs_recipe.value if hasattr(lhs_recipe, "value") else lhs_recipe
     rhs_recipe_int = rhs_recipe.value if hasattr(rhs_recipe, "value") else rhs_recipe
     swizzle_int = SwizzleType.NO_SWIZZLE.value
-    out_size, out_stride = expected_out_size_stride(a_fp8, mat2, torch.bfloat16)
+    out_size, out_stride = expected_out_size_stride(
+        a_fp8, mat2, torch.bfloat16, offs.numel() if mat2.dim() == 2 else None
+    )
     out = torch.empty_strided(
         out_size, out_stride, device=a_fp8.device, dtype=torch.bfloat16
     )
@@ -404,7 +470,9 @@ def _make_reference(
     return reference
 
 
-def _make_case_fns(total_m, g, K, N, lhs_block, rhs_block, grouping="balanced"):
+def _make_case_fns(
+    total_m, g, K, N, lhs_block, rhs_block, grouping="balanced", layout="2d_3d"
+):
     device = "cuda"
     lhs_recipe = (
         ScalingType.BlockWise1x128 if lhs_block == 1 else ScalingType.BlockWise128x128
@@ -412,6 +480,26 @@ def _make_case_fns(total_m, g, K, N, lhs_block, rhs_block, grouping="balanced"):
     rhs_recipe = (
         ScalingType.BlockWise1x128 if rhs_block == 1 else ScalingType.BlockWise128x128
     )
+    if layout == "2d_2d":
+        a_fp8, a_scale, mat2, scale_b, nats, offs = _build_inputs_2d2d(
+            total_m, g, K, N, lhs_block, rhs_block, device, grouping=grouping
+        )
+        return (
+            _make_grouped_op(
+                a_fp8, mat2, a_scale, scale_b, lhs_recipe, rhs_recipe, offs
+            ),
+            _make_reference_2d2d(
+                a_fp8,
+                nats,
+                lhs_recipe,
+                lhs_block,
+                rhs_recipe,
+                rhs_block,
+                total_m,
+                N,
+                offs,
+            ),
+        )
     a_fp8, a_scale, mat2, scale_b, b_fp8_groups, offs = _build_inputs(
         total_m, g, K, N, lhs_block, rhs_block, device, grouping=grouping
     )
@@ -448,6 +536,7 @@ def benchmark_deepseek_scaled_grouped_mm(
     emit_us_only=False,
     use_cuda_graphs=False,
     stat="median",
+    layout="2d_3d",
 ):
     if backend not in ("both", "reference", "cute"):
         raise ValueError(f"backend must be one of both/reference/cute, got {backend}")
@@ -487,7 +576,7 @@ def benchmark_deepseek_scaled_grouped_mm(
             )
 
         fn_cute, fn_ref = _make_case_fns(
-            m, g, k, n, lhs_block, rhs_block, grouping=grouping
+            m, g, k, n, lhs_block, rhs_block, grouping=grouping, layout=layout
         )
         bench_ref = (
             _maybe_wrap_cuda_graph(fn_ref, "reference", use_cuda_graphs)
@@ -660,6 +749,12 @@ if __name__ == "__main__":
         help=argparse.SUPPRESS,
     )
     parser.add_argument("--stat", choices=_STAT_CHOICES, default="median")
+    parser.add_argument(
+        "--layout",
+        choices=["2d_3d", "2d_2d"],
+        default="2d_3d",
+        help="2d_3d: offs splits M, B is (G,K,N). 2d_2d: offs splits K, B is (K,N).",
+    )
     args = parser.parse_args()
 
     benchmark_deepseek_scaled_grouped_mm(
@@ -676,4 +771,5 @@ if __name__ == "__main__":
         emit_us_only=args.emit_us_only,
         use_cuda_graphs=args.use_cuda_graphs,
         stat=args.stat,
+        layout=args.layout,
     )

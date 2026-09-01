@@ -39,6 +39,18 @@ def _make_fake_matmul_operand(dtype, dim0, dim1):
     )
 
 
+def _make_fake_out_tensor(dtype, m, n, groups_split_k):
+    if not groups_split_k:
+        return _make_fake_matmul_operand(dtype, m, n)
+    # Own symbol: mat_b's leading dim is 1 here.
+    return cute.runtime.make_fake_tensor(
+        dtype,
+        (cute.sym_int(), m, n),
+        stride=(cute.sym_int64(divisibility=16), cute.sym_int64(divisibility=16), 1),
+        assumed_align=16,
+    )
+
+
 def _make_fake_mat_b_tensor(dtype, g, k, n):
     return cute.runtime.make_fake_tensor(
         dtype,
@@ -289,6 +301,7 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
         epi_stage: int = 4,
         scale_k_aligned: bool = False,
         small_scale_a: bool = False,
+        groups_split_k: bool = False,
     ):
         super().__init__(recipe_a, recipe_b, tile_m, tile_n, tile_k)
         self.a_scale_wide = a_scale_wide
@@ -297,6 +310,8 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
         # cp.async.bulk has no bounds check, so a short scale_a is read from
         # global per thread instead of staged.
         self.small_scale_a = small_scale_a
+        # offs splits K: A/B/C descriptors stay static, only coordinates move.
+        self.groups_split_k = groups_split_k
         if cluster_m != 1:
             raise ValueError(
                 "cluster_m must be 1 (only N-direction clustering is implemented)"
@@ -912,9 +927,10 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
         tile = bidx
         chunks = k // self.tile_k
         if warp_idx == self.load_warp_id:
-            tensormap_manager.init_tensormap_from_atom(
-                tma_atom_a, tensormap_a_smem_ptr, self.load_warp_id
-            )
+            if cutlass.const_expr(not self.groups_split_k):
+                tensormap_manager.init_tensormap_from_atom(
+                    tma_atom_a, tensormap_a_smem_ptr, self.load_warp_id
+                )
             producer_state = pipeline.make_pipeline_state(
                 pipeline.PipelineUserType.Producer, self.ab_stage
             )
@@ -925,7 +941,7 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
                     tile, offs, tile_offsets, problem_sizes
                 )
                 is_group_changed = group != last_group_idx
-                if is_group_changed:
+                if is_group_changed and cutlass.const_expr(not self.groups_split_k):
                     real_tensor_a = self._make_tensor_for_tensormap_update(
                         ptrs_abc[group, 0],
                         Float8E4M3FN,
@@ -942,9 +958,22 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
                         (tensormap_a_smem_ptr,),
                     )
                     tensormap_manager.fence_tensormap_update(tensormap_a_gmem_ptr)
+                if is_group_changed:
                     last_group_idx = group
+                group_chunks = chunks
+                k_base = Int32(0)
+                b_l = group
+                a_scale_row_base = group_start
+                if cutlass.const_expr(self.groups_split_k):
+                    group_chunks = problem_sizes[group, 2] // self.tile_k
+                    k_base = problem_sizes[group, 3] // self.tile_k
+                    b_l = Int32(0)
+                    a_scale_row_base = Int32(0)
                 producer_state.reset_count()
-                for k_tile in cutlass.range(chunks):
+                for k_tile in cutlass.range(group_chunks):
+                    k_coord = k_tile
+                    if cutlass.const_expr(self.groups_split_k):
+                        k_coord = k_base + k_tile
                     self._barrier_wait(
                         mainloop_pipeline.sync_object_empty, producer_state
                     )
@@ -953,17 +982,21 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
                     )
                     cute.copy(
                         tma_atom_a,
-                        tAgA[(None, m_tile, k_tile, 0)],
+                        tAgA[(None, m_tile, k_coord, 0)],
                         tAsA[(None, producer_state.index)],
                         tma_bar_ptr=mainloop_pipeline.producer_get_barrier(
                             producer_state
                         ),
-                        tma_desc_ptr=tma_desc_a,
+                        tma_desc_ptr=(
+                            None
+                            if cutlass.const_expr(self.groups_split_k)
+                            else tma_desc_a
+                        ),
                         mcast_mask=a_mcast_mask,
                     )
                     cute.copy(
                         tma_atom_b,
-                        tBgB[(None, n_tile, k_tile, group)],
+                        tBgB[(None, n_tile, k_coord, b_l)],
                         tBsB[(None, producer_state.index)],
                         tma_bar_ptr=mainloop_pipeline.producer_get_barrier(
                             producer_state
@@ -973,18 +1006,18 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
                     if cutlass.const_expr(
                         self.recipe_a == BLOCKWISE_1X128 and not self.small_scale_a
                     ):
-                        row_start_raw = group_start + m_tile * self.tile_m
+                        row_start_raw = a_scale_row_base + m_tile * self.tile_m
                         if cutlass.const_expr(self.a_scale_wide):
                             row_start, _ = self._clamp_tile_start(
                                 row_start_raw,
                                 self.scale_a_stage_rows,
                                 cute.size(scale_a, mode=[0]),
-                                k_tile * scale_a.stride[1],
+                                k_coord * scale_a.stride[1],
                                 _SCALE_ALIGN,
                             )
                             sfa_iter = scale_a.iterator + (
                                 row_start * scale_a.stride[0]
-                                + k_tile * scale_a.stride[1]
+                                + k_coord * scale_a.stride[1]
                             )
                             sfa_src = cute.make_tensor(
                                 sfa_iter,
@@ -1006,12 +1039,12 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
                                 row_start_raw,
                                 self.tile_m,
                                 cute.size(scale_a, mode=[0]),
-                                k_tile * scale_a.stride[1],
+                                k_coord * scale_a.stride[1],
                                 _SCALE_ALIGN,
                             )
                             sfa_iter = scale_a.iterator + (
                                 row_start * scale_a.stride[0]
-                                + k_tile * scale_a.stride[1]
+                                + k_coord * scale_a.stride[1]
                             )
                             sfa_src = cute.make_tensor(
                                 sfa_iter,
@@ -1034,13 +1067,13 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
                                 col_start_raw,
                                 self.scale_b_stage_cols,
                                 cute.size(scale_b, mode=[1]),
-                                group * scale_b.stride[0] + k_tile * scale_b.stride[2],
+                                b_l * scale_b.stride[0] + k_coord * scale_b.stride[2],
                                 _SCALE_ALIGN,
                             )
                             sfb_iter = scale_b.iterator + (
-                                group * scale_b.stride[0]
+                                b_l * scale_b.stride[0]
                                 + col_start * scale_b.stride[1]
-                                + k_tile * scale_b.stride[2]
+                                + k_coord * scale_b.stride[2]
                             )
                             sfb_src = cute.make_tensor(
                                 sfb_iter,
@@ -1062,13 +1095,13 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
                                 col_start_raw,
                                 self.tile_n,
                                 cute.size(scale_b, mode=[1]),
-                                group * scale_b.stride[0] + k_tile * scale_b.stride[2],
+                                b_l * scale_b.stride[0] + k_coord * scale_b.stride[2],
                                 _SCALE_ALIGN,
                             )
                             sfb_iter = scale_b.iterator + (
-                                group * scale_b.stride[0]
+                                b_l * scale_b.stride[0]
                                 + col_start * scale_b.stride[1]
-                                + k_tile * scale_b.stride[2]
+                                + k_coord * scale_b.stride[2]
                             )
                             sfb_src = cute.make_tensor(
                                 sfb_iter,
@@ -1135,7 +1168,9 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
             tiles_executed = Int32(0)
             did_work = tile < total_tiles[0]
             last_group_idx = Int32(-1)
-            if warp_idx == self.epi_store_warp_id:
+            if warp_idx == self.epi_store_warp_id and cutlass.const_expr(
+                not self.groups_split_k
+            ):
                 tensormap_manager.init_tensormap_from_atom(
                     tma_atom_c, tensormap_c_smem_ptr, self.epi_store_warp_id
                 )
@@ -1145,7 +1180,7 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
                 )
                 group_n = problem_sizes[group, 1]
                 is_group_changed = group != last_group_idx
-                if is_group_changed:
+                if is_group_changed and cutlass.const_expr(not self.groups_split_k):
                     if warp_idx == self.epi_store_warp_id:
                         real_tensor_c = self._make_tensor_for_tensormap_update(
                             ptrs_abc[group, 2],
@@ -1164,11 +1199,26 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
                         )
                         tensormap_manager.fence_tensormap_update(tensormap_c_gmem_ptr)
                     self.epilog_sync_barrier.arrive_and_wait()
+                if is_group_changed:
                     last_group_idx = group
+                group_chunks = chunks
+                k_base = Int32(0)
+                c_l = Int32(0)
+                b_l = group
+                a_scale_row_base = group_start
+                if cutlass.const_expr(self.groups_split_k):
+                    group_chunks = problem_sizes[group, 2] // self.tile_k
+                    k_base = problem_sizes[group, 3] // self.tile_k
+                    c_l = group
+                    b_l = Int32(0)
+                    a_scale_row_base = Int32(0)
                 acc.fill(0.0)
                 read_state.reset_count()
                 release_state.reset_count()
-                for k_tile in cutlass.range(chunks):
+                for k_tile in cutlass.range(group_chunks):
+                    k_coord = k_tile
+                    if cutlass.const_expr(self.groups_split_k):
+                        k_coord = k_base + k_tile
                     self._barrier_wait(mainloop_pipeline.sync_object_full, read_state)
                     self._issue_wgmma(
                         tiled_mma,
@@ -1180,9 +1230,9 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
                     )
                     scale_a128_val, scale_a_row_shift, scale_b_col_shift = (
                         self._compute_scale_indices(
-                            k_tile,
-                            group,
-                            group_start,
+                            k_coord,
+                            b_l,
+                            a_scale_row_base,
                             m_tile,
                             n_tile,
                             scale_a,
@@ -1206,18 +1256,18 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
                         epi_tile_layout,
                         acc_row_base,
                         scale_a,
-                        group_start + m_tile * self.tile_m,
-                        k_tile,
+                        a_scale_row_base + m_tile * self.tile_m,
+                        k_coord,
                     )
                     mainloop_pipeline.consumer_release(release_state)
                     read_state.advance()
                     release_state.advance()
                 self.epilogue_persistent(
                     acc,
-                    gC[(None, None, m_tile, n_tile, 0)],
+                    gC[(None, None, m_tile, n_tile, c_l)],
                     sC,
                     tma_atom_c,
-                    tma_desc_c,
+                    None if cutlass.const_expr(self.groups_split_k) else tma_desc_c,
                     tiled_copy_r2s,
                     mma_tidx,
                     warp_idx,
@@ -1305,12 +1355,14 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
     ab_stage,
     epi_stage,
     scale_k_aligned,
-    small_scale_a: (
+    small_scale_a,
+    groups_split_k: (
         f"deepseek_persistent_wgmma a={recipe_a} b={recipe_b} "
         f"tile={tile_m}x{tile_n}x{tile_k} cluster={cluster_m}x{cluster_n} "
         f"a_scale_wide={a_scale_wide} b_scale_wide={b_scale_wide} "
         f"ab_stage={ab_stage} epi_stage={epi_stage} "
-        f"scale_k_aligned={scale_k_aligned} small_scale_a={small_scale_a}"
+        f"scale_k_aligned={scale_k_aligned} small_scale_a={small_scale_a} "
+        f"groups_split_k={groups_split_k}"
     ),
 )
 def _compile_deepseek_persistent_wgmma(
@@ -1327,6 +1379,7 @@ def _compile_deepseek_persistent_wgmma(
     epi_stage: int = 4,
     scale_k_aligned: bool = False,
     small_scale_a: bool = False,
+    groups_split_k: bool = False,
 ):
     kernel = _DeepSeekPersistentWgmma(
         recipe_a,
@@ -1342,6 +1395,7 @@ def _compile_deepseek_persistent_wgmma(
         epi_stage=epi_stage,
         scale_k_aligned=scale_k_aligned,
         small_scale_a=small_scale_a,
+        groups_split_k=groups_split_k,
     )
     zero_i32 = Int32(0)
 
@@ -1366,7 +1420,7 @@ def _compile_deepseek_persistent_wgmma(
             _DeepSeekPersistentWgmma.num_tensormaps,
             _DeepSeekPersistentWgmma.bytes_per_tensormap // 8,
         ),
-        _make_fake_matmul_operand(BFloat16, m, n),
+        _make_fake_out_tensor(BFloat16, m, n, groups_split_k),
         zero_i32,
         zero_i32,
         zero_i32,
@@ -1428,21 +1482,28 @@ def launch_deepseek_grouped_wgmma(
     if cluster_n > 1:
         num_blocks = (num_blocks // cluster_n) * cluster_n
     tensormaps = _get_tensormaps(num_blocks, mat_a.device)
+    groups_split_k = mat_b.dim() == 2
     # A scale_a shorter than one staged tile cannot be bulk-copied at all.
     small_scale_a = recipe_a == BLOCKWISE_1X128 and scale_a.size(0) < (
         fp32_scale_stage_size(tile_m) if a_scale_wide else tile_m
     )
     # Every stride feeding a bulk-copy offset must be align-multiple, else the
     # address alignment depends on k_tile and needs the full clamp chain.
-    scale_k_aligned = (
-        recipe_a != BLOCKWISE_1X128 or scale_a.stride(1) % _SCALE_ALIGN == 0
-    ) and (
-        recipe_b != BLOCKWISE_1X128
-        or (
+    if recipe_a == BLOCKWISE_1X128 and scale_a.stride(1) % _SCALE_ALIGN != 0:
+        scale_k_aligned = False
+    elif recipe_b != BLOCKWISE_1X128:
+        scale_k_aligned = True
+    elif groups_split_k:
+        scale_k_aligned = scale_b.stride(1) % _SCALE_ALIGN == 0
+    else:
+        scale_k_aligned = (
             scale_b.stride(0) % _SCALE_ALIGN == 0
             and scale_b.stride(2) % _SCALE_ALIGN == 0
         )
-    )
+    if groups_split_k:
+        # Length-1 L axis, indexed with 0; only the rank has to match.
+        mat_b = mat_b.unsqueeze(0)
+        scale_b = scale_b.unsqueeze(0)
     _compile_deepseek_persistent_wgmma(
         recipe_a,
         recipe_b,
@@ -1457,6 +1518,7 @@ def launch_deepseek_grouped_wgmma(
         epi_stage,
         scale_k_aligned,
         small_scale_a,
+        groups_split_k,
     )(
         read_only(mat_a),
         read_only(mat_b),

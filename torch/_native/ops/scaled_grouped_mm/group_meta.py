@@ -30,22 +30,28 @@ def _get_launch_build_group_metadata():
 
 
 def expected_out_size_stride(
-    mat_a: torch.Tensor, mat_b: torch.Tensor, out_dtype: torch.dtype
+    mat_a: torch.Tensor,
+    mat_b: torch.Tensor,
+    out_dtype: torch.dtype,
+    group_count: int | None = None,
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
-    total_m = mat_a.size(0)
+    m = mat_a.size(0)
     n = mat_b.size(-1)
     elem_size = torch.empty((), dtype=out_dtype).element_size()
     alignment = max(16 // elem_size, 1)
     padded_n = -(-n // alignment) * alignment
-    return (total_m, n), (padded_n, 1)
+    if mat_b.dim() == 2:
+        return (group_count, m, n), (m * padded_n, padded_n, 1)
+    return (m, n), (padded_n, 1)
 
 
 def allocate_output(
     mat_a: torch.Tensor,
     mat_b: torch.Tensor,
     out_dtype: torch.dtype,
+    group_count: int | None = None,
 ) -> torch.Tensor:
-    size, stride = expected_out_size_stride(mat_a, mat_b, out_dtype)
+    size, stride = expected_out_size_stride(mat_a, mat_b, out_dtype, group_count)
     return torch.empty_strided(size, stride, dtype=out_dtype, device=mat_a.device)
 
 
@@ -87,7 +93,8 @@ def build_group_metadata(
     out: torch.Tensor,
     config: HopperDeepSeekConfig | None = None,
 ) -> GroupMetadata:
-    group_count = mat_b.size(0)
+    # mat_b.size(0) is K when offs splits K.
+    group_count = offs.numel()
     device_index = mat_a.device.index
     if device_index is None:
         device_index = torch.cuda.current_device()
@@ -103,6 +110,7 @@ def build_group_metadata(
             n=mat_b.size(-1),
             k=mat_a.size(-1),
             group_count=group_count,
+            groups_split_k=mat_b.dim() == 2,
         )
     if config.cluster_n > 1:
         tiles_n = -(-mat_b.size(-1) // config.tile_n)
@@ -113,10 +121,17 @@ def build_group_metadata(
                 f"divisible by cluster_n"
             )
 
-    scale_a_rows_per_block = 1 if recipe_a == BLOCKWISE_1X128 else 128
-    scale_a_group_stride = (
-        scale_a.stride(0) if recipe_a == BLOCKWISE_1X128 else scale_a.stride(1)
-    )
+    groups_split_k = mat_b.dim() == 2
+    if groups_split_k:
+        scale_a_rows_per_block = 128
+        scale_a_group_stride = scale_a.stride(1)
+        scale_b_group_stride = scale_b.stride(0)
+    else:
+        scale_a_rows_per_block = 1 if recipe_a == BLOCKWISE_1X128 else 128
+        scale_a_group_stride = (
+            scale_a.stride(0) if recipe_a == BLOCKWISE_1X128 else scale_a.stride(1)
+        )
+        scale_b_group_stride = scale_b.stride(0)
 
     _get_launch_build_group_metadata()(
         offs,
@@ -129,7 +144,7 @@ def build_group_metadata(
         mat_b.stride(0),
         out.stride(0),
         scale_a_group_stride,
-        scale_b.stride(0),
+        scale_b_group_stride,
         scale_a_rows_per_block,
         config.tile_m,
         config.tile_n,
@@ -145,5 +160,6 @@ def build_group_metadata(
         mat_a.element_size(),
         scale_a.element_size(),
         out.element_size(),
+        groups_split_k,
     )
     return meta

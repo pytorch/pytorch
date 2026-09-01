@@ -79,11 +79,17 @@ def _out_cond(
     if out.dtype != want_dtype:
         return False
     n = mat2.size(-1)
-    if out.dim() != 2 or out.size(0) != self.size(0) or out.size(1) != n:
-        return False
     elem_size = 2
     alignment = max(16 // elem_size, 1)
     padded_n = -(-n // alignment) * alignment
+    m = self.size(0)
+    if mat2.dim() == 2:
+        groups = offs.size(0) if offs is not None else 0
+        if out.shape != (groups, m, n):
+            return False
+        return out.stride() == (m * padded_n, padded_n, 1)
+    if out.dim() != 2 or out.size(0) != m or out.size(1) != n:
+        return False
     return out.stride() == (padded_n, 1)
 
 
@@ -100,7 +106,10 @@ def _run(
 ) -> torch.Tensor:
     if out is None:
         out = allocate_output(
-            self, mat2, out_dtype if out_dtype is not None else torch.bfloat16
+            self,
+            mat2,
+            out_dtype if out_dtype is not None else torch.bfloat16,
+            offs.size(0) if mat2.dim() == 2 else None,
         )
     with torch.cuda.device(self.get_device()):
         return run_deepseek_grouped_gemm(

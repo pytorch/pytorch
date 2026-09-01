@@ -21,11 +21,13 @@ def _sm90_only(device: int) -> bool:
 
 
 def _expected_scale_b_shape(
-    recipe_b: int, group_count: int, k: int, n: int
-) -> tuple[int, int, int]:
+    recipe_b: int, group_count: int, k: int, n: int, b_is_2d: bool = False
+) -> tuple[int, ...]:
     if recipe_b == BLOCKWISE_1X128:
-        return (group_count, n, ceil_div(k, 128))
-    return (group_count, round_up(ceil_div(k, 128), 4), ceil_div(n, 128))
+        inner: tuple[int, ...] = (n, ceil_div(k, 128))
+    else:
+        inner = (round_up(ceil_div(k, 128), 4), ceil_div(n, 128))
+    return inner if b_is_2d else (group_count, *inner)
 
 
 def _expected_scale_a_shape(recipe_a: int, total_m: int, k: int) -> tuple[int, int]:
@@ -65,7 +67,7 @@ def _should_use_cutedsl_scaled_grouped_mm_deepseek(
         return False
     if self.dtype != torch.float8_e4m3fn or mat2.dtype != torch.float8_e4m3fn:
         return False
-    if self.dim() != 2 or mat2.dim() != 3:
+    if self.dim() != 2 or mat2.dim() not in (2, 3):
         return False
     if bias is not None:
         return False
@@ -114,22 +116,37 @@ def _should_use_cutedsl_scaled_grouped_mm_deepseek(
         return False
 
     total_m, k = self.shape
-    group_count, k2, n = mat2.shape
-    if k2 != k or group_count != offs.shape[0]:
+    b_is_2d = mat2.dim() == 2
+    group_count = offs.shape[0]
+    if b_is_2d:
+        k2, n = mat2.shape
+    else:
+        b_groups, k2, n = mat2.shape
+        if b_groups != group_count:
+            return False
+    if k2 != k:
         return False
     if k % 128 != 0:
         return False
     self_stride0 = self.stride(0)
     if self.stride(1) != 1 or self_stride0 < max(1, k) or self_stride0 % 16 != 0:
         return False
-    mat2_stride0, mat2_stride2 = mat2.stride(0), mat2.stride(2)
-    if (
-        mat2.stride(1) != 1
-        or mat2_stride2 < max(1, k)
-        or mat2_stride0 % 16 != 0
-        or mat2_stride2 % 16 != 0
-    ):
-        return False
+    if b_is_2d:
+        if (
+            mat2.stride(0) != 1
+            or mat2.stride(1) < max(1, k)
+            or mat2.stride(1) % 16 != 0
+        ):
+            return False
+    else:
+        mat2_stride0, mat2_stride2 = mat2.stride(0), mat2.stride(2)
+        if (
+            mat2.stride(1) != 1
+            or mat2_stride2 < max(1, k)
+            or mat2_stride0 % 16 != 0
+            or mat2_stride2 % 16 != 0
+        ):
+            return False
     if scale_a0.shape != _expected_scale_a_shape(recipe_a0, total_m, k):
         return False
     expected_a_outer_stride = (
@@ -138,19 +155,33 @@ def _should_use_cutedsl_scaled_grouped_mm_deepseek(
     if not _valid_blockwise_scale_strides(scale_a0, 0, 1, expected_a_outer_stride):
         return False
     # At offset 0 alignment rounding can only move forward, so row/col 0 is
-    # only covered if these strides are already 4-aligned.
-    if recipe_a0 == BLOCKWISE_1X128 and scale_a0.stride(1) % 4 != 0:
+    # only covered if these strides are already 4-aligned. A single k-block
+    # never multiplies the stride, so it is exempt.
+    if (
+        recipe_a0 == BLOCKWISE_1X128
+        and scale_a0.size(1) > 1
+        and scale_a0.stride(1) % 4 != 0
+    ):
         return False
     if recipe_a0 == BLOCKWISE_1X128 and scale_a0.data_ptr() % 16 != 0:
         return False
-    if scale_b0.shape != _expected_scale_b_shape(recipe_b0, group_count, k, n):
+    if scale_b0.shape != _expected_scale_b_shape(recipe_b0, group_count, k, n, b_is_2d):
         return False
-    expected_b_outer_stride = n if recipe_b0 == BLOCKWISE_1X128 else scale_b0.size(1)
-    if not _valid_blockwise_scale_strides(scale_b0, 1, 2, expected_b_outer_stride):
-        return False
-    if recipe_b0 == BLOCKWISE_1X128 and (
-        scale_b0.stride(2) % 4 != 0 or scale_b0.stride(0) % 4 != 0
+    b_unit_dim = 0 if b_is_2d else 1
+    expected_b_outer_stride = (
+        n if recipe_b0 == BLOCKWISE_1X128 else scale_b0.size(b_unit_dim)
+    )
+    if not _valid_blockwise_scale_strides(
+        scale_b0, b_unit_dim, b_unit_dim + 1, expected_b_outer_stride
     ):
+        return False
+    if (
+        recipe_b0 == BLOCKWISE_1X128
+        and scale_b0.size(b_unit_dim + 1) > 1
+        and scale_b0.stride(b_unit_dim + 1) % 4 != 0
+    ):
+        return False
+    if recipe_b0 == BLOCKWISE_1X128 and not b_is_2d and scale_b0.stride(0) % 4 != 0:
         return False
     if recipe_b0 == BLOCKWISE_1X128 and scale_b0.data_ptr() % 16 != 0:
         return False

@@ -2980,6 +2980,98 @@ class TestFP8Matmul(TestCase):
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
+    @skipCUDAIf(not IS_SM90, "DeepSeek style grouped scaling requires SM90 (Hopper)")
+    @skipIfNoCuteDSL
+    @parametrize("out_overload", [False, True])
+    @parametrize(
+        "lhs_block,rhs_block,group_ks,M,N",
+        [
+            (1, 128, (256, 256), 128, 256),
+            (1, 1, (256, 256), 128, 256),
+            (128, 1, (256, 256), 128, 256),
+            (1, 128, (128, 256, 512), 256, 128),
+            (1, 128, (256,), 64, 256),
+            (1, 128, (256, 0, 256), 128, 256),
+        ],
+    )
+    def test_scaled_grouped_mm_deepseek_blockwise_2d_2d(
+        self, out_overload, lhs_block, rhs_block, group_ks, M, N, device
+    ):
+        """offs splits K: A is (M, K), B is (K, N), out is (G, M, N)."""
+        from torch._native import registry
+
+        self.assertIn("_scaled_grouped_mm_v2", registry.get_dsl_operations("cutedsl"))
+
+        torch.manual_seed(42)
+        K = sum(group_ks)
+        G = len(group_ks)
+        offs = torch.tensor(
+            list(itertools.accumulate(group_ks)), device=device, dtype=torch.int32
+        )
+        lhs_recipe = ScalingType.BlockWise1x128 if lhs_block == 1 else ScalingType.BlockWise128x128
+        rhs_recipe = ScalingType.BlockWise1x128 if rhs_block == 1 else ScalingType.BlockWise128x128
+
+        a = torch.randn(M, K, device=device, dtype=torch.bfloat16)
+        a_fp8, a_scale_quant = tensor_to_scale_block(a, e4m3_type, lhs_block, 128)
+        a_scale_nat = a_scale_quant.reciprocal()
+        b = torch.randn(N, K, device=device, dtype=torch.bfloat16)
+        b_fp8, b_scale_quant = tensor_to_scale_block(b, e4m3_type, rhs_block, 128)
+        b_scale_nat = b_scale_quant.reciprocal()
+
+        def _op_layout(nat, block):
+            if block == 1:
+                return nat.t().contiguous().t()
+            # A (1, kb) slice counts as contiguous whatever its strides,
+            # so pad/contiguous can no-op.
+            kb = nat.shape[-1]
+            padded = torch.zeros(
+                nat.shape[0], round_up(kb, 4), device=nat.device, dtype=nat.dtype
+            )
+            padded[:, :kb] = nat
+            return padded.t()
+
+        a_scale = _op_layout(a_scale_nat, lhs_block)
+        scale_b = _op_layout(b_scale_nat, rhs_block)
+        mat2 = b_fp8.t()
+
+        # An empty group contributes no tokens, so its dW slice stays zero.
+        out_ref = torch.zeros(G, M, N, device=device, dtype=torch.bfloat16)
+        start = 0
+        for g, end in enumerate(offs.tolist()):
+            if end == start:
+                continue
+            kb0, kb1 = start // 128, end // 128
+            a_ref = _op_layout(a_scale_nat[:, kb0:kb1], lhs_block)
+            b_ref = _op_layout(b_scale_nat[:, kb0:kb1], rhs_block)
+            out_ref[g] = scaled_mm_wrap(
+                a_fp8[:, start:end], b_fp8[:, start:end].t(),
+                scale_a=a_ref, scale_recipe_a=lhs_recipe,
+                scale_b=b_ref, scale_recipe_b=rhs_recipe,
+                out_dtype=torch.bfloat16,
+            )
+            start = end
+
+        kwargs = {"offs": offs, "out_dtype": torch.bfloat16}
+        if out_overload:
+            padded_n = round_up(N, 8)
+            out = torch.empty_strided(
+                (G, M, N), (M * padded_n, padded_n, 1),
+                device=device, dtype=torch.bfloat16,
+            )
+            actual = scaled_grouped_mm_wrap(
+                a_fp8, mat2, [a_scale], [scale_b],
+                [lhs_recipe], [rhs_recipe], out=out, **kwargs,
+            )
+        else:
+            actual = scaled_grouped_mm_wrap(
+                a_fp8, mat2, a_scale, scale_b,
+                lhs_recipe, rhs_recipe, **kwargs,
+            )
+
+        self.assertEqual(actual, out_ref, atol=6e-1, rtol=7e-2)
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @skipCUDAIf(not IS_SM90, "DeepSeek grouped eligibility requires SM90")
     @skipIfNoCuteDSL
     def test_scaled_grouped_mm_deepseek_eligibility(self, device):

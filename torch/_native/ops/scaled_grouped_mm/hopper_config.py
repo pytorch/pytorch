@@ -64,6 +64,7 @@ def select_kernel_config(
     k: int | None = None,
     group_count: int | None = None,
     num_sms: int | None = None,
+    groups_split_k: bool = False,
 ) -> HopperDeepSeekConfig:
     del k
     if not total_m or not n or not group_count:
@@ -71,7 +72,11 @@ def select_kernel_config(
     if not num_sms:
         num_sms = _DEFAULT_NUM_SMS
 
-    avg_group_m = max(1, total_m // group_count)
+    # Splitting K leaves every group spanning all of total_m.
+    if groups_split_k:
+        avg_group_m = total_m
+    else:
+        avg_group_m = max(1, total_m // group_count)
     best_rank = None
     best_tile = None
     for tile_m in _TILE_MS:
@@ -87,20 +92,27 @@ def select_kernel_config(
     cluster_n = 1
     tiles_n = -(-n // tile_n)
     tiny_single_group = (
-        group_count == 1 and total_m < tile_m and tiles_n >= _CLUSTER_N_MIN_TILES_N
+        group_count == 1
+        and not groups_split_k
+        and total_m < tile_m
+        and tiles_n >= _CLUSTER_N_MIN_TILES_N
     )
     cluster_n_eligible = total_m >= _CLUSTER_N_MIN_TOTAL_M or tiny_single_group
     if cluster_n_eligible and tiles_n % 2 == 0:
         cluster_n = 2
-    # Only a single group has a known (zero) start, so only it can skip the
-    # widened A-scale copy; per-group starts need a sync to rule out.
+    # The narrow A-scale copy needs an aligned M start: splitting K keeps it at
+    # m_tile * tile_m, splitting M does not.
+    if groups_split_k:
+        a_scale_wide = total_m % tile_m != 0
+    else:
+        a_scale_wide = not (group_count == 1 and total_m % tile_m == 0)
     return _validate_config(
         HopperDeepSeekConfig(
             tile_m=tile_m,
             tile_n=tile_n,
             cluster_m=1,
             cluster_n=cluster_n,
-            a_scale_wide=not (group_count == 1 and total_m % tile_m == 0),
+            a_scale_wide=a_scale_wide,
             b_scale_wide=n % tile_n != 0,
         )
     )

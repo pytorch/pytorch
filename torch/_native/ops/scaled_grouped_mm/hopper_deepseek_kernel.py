@@ -44,13 +44,14 @@ def run_deepseek_grouped_gemm(
     num_sms = _num_sms(device_index)
     total_m = mat_a.size(0)
     n = mat_b.size(-1)
-    group_count = mat_b.size(0)
+    group_count = offs.numel()
     config = select_kernel_config(
         total_m=total_m,
         n=n,
         k=mat_a.size(1),
         group_count=group_count,
         num_sms=num_sms,
+        groups_split_k=mat_b.dim() == 2,
     )
     torch._check(
         n >= config.tile_n,

@@ -10,10 +10,8 @@ NO_SWIZZLE = SwizzleType.NO_SWIZZLE.value
 
 
 def read_only(tensor: torch.Tensor) -> torch.Tensor:
-    """Export-const view for a CuTeDSL kernel input; COW is not materialized.
-
-    Wrap only at the call: the wrapper raises on non-DLPack torch ops.
-    """
+    """Export-const view; COW is not materialized. Wrap only at the call
+    site: the wrapper raises on non-DLPack torch ops."""
     from torch.utils.dlpack import ReadOnlyTensorWrapper
 
     return ReadOnlyTensorWrapper(tensor)
