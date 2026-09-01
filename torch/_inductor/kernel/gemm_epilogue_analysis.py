@@ -8,11 +8,9 @@ from typing import Any
 import torch
 from torch._inductor.kernel.flex_gemm.constraints import (
     FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR,
-    local_reduce_compressed_shape,
     LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR,
     LOCAL_REDUCE_FEED_MAIN_AXIS1_FRAGMENT_ERROR,
     LOCAL_REDUCE_FEED_MAIN_MIXED_MATCH_ERROR,
-    LOCAL_REDUCE_FRAGMENT_WIDTH,
     LOCAL_REDUCE_GROUPED_RESHAPE_ERROR,
     LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR,
     LOCAL_REDUCE_MATCH_NODE_ERROR,
@@ -30,9 +28,11 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
     tensor_meta_shape,
 )
 from torch._inductor.kernel.gemm_epilogue import (
+    GEMM_REDUCTION_IDENTITY_SOURCE,
     GemmEpilogueGraph,
     GemmReductionGeometry,
     GemmReductionPlan,
+    GemmReductionType,
     iter_fx_node_inputs,
     NormalizedGetItem,
     NormalizedPrepareSoftmax,
@@ -50,12 +50,12 @@ from torch._inductor.kernel.gemm_epilogue_utils import (
 from torch.utils._ordered_set import OrderedSet
 
 
-def _is_inferred_reshape_dim(value: Any) -> bool:
+def _is_inferred_reshape_dim(value: object) -> bool:
     """Return whether a reshape dimension is the literal inferred-size marker."""
     return isinstance(value, int) and value == -1
 
 
-def _kept_dim_matches_source(kept_size: Any, source_size: Any) -> bool:
+def _kept_dim_matches_source(kept_size: object, source_size: object) -> bool:
     return _is_inferred_reshape_dim(kept_size) or statically_known_equal(
         kept_size, source_size
     )
@@ -146,14 +146,14 @@ def _grouped_layout_matches_source_shape(
 
 
 def grouped_tensor_layout(
-    shape: Any, source_shape: Any | None = None
+    shape: object, source_shape: object | None = None
 ) -> GemmReductionGeometry | None:
     """Recognize grouped M/N geometry, specializing backed group dimensions."""
     shape = normalize_shape(shape)
     if not isinstance(shape, tuple):
         return None
     if len(shape) == 1 and isinstance(shape[0], (list, tuple, torch.Size)):
-        shape = normalize_shape(shape[0])
+        shape = tuple(shape[0])
     if source_shape is not None:
         source_shape = normalize_shape(source_shape)
         if isinstance(source_shape, tuple) and len(source_shape) == 2:
@@ -187,19 +187,20 @@ FEED_MAIN_BINARY_FUNCTIONS = frozenset(
 )
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class GemmLocalReduceMatch:
     """Describe a supported grouped local-reduction value found in the FX graph.
 
     Attributes:
         value_node: FX node that produces the matched local-reduction value.
         geometry: Group size and GEMM output axis reduced by the value.
+        reduction_type: Primitive reduction represented by the generated epilogue.
     """
 
     value_node: torch.fx.Node
     geometry: GemmReductionGeometry
     reduction_node: torch.fx.Node | None = None
-    reduction_type: str | None = None
+    reduction_type: GemmReductionType = "sum"
 
     def __post_init__(self) -> None:
         if not isinstance(self.value_node, torch.fx.Node):
@@ -314,19 +315,17 @@ class GemmOutputPlan:
         if local_reduce is None:
             return None
         match = local_reduce.match
-        reduction_type = match.reduction_type
-        if reduction_type is None:
-            return None
         reduction_output = (
             local_reduce.store.node.name if local_reduce.store is not None else None
         )
         return GemmReductionPlan(
-            reduction_output,
-            match.geometry.group,
-            match.geometry.axis,
-            reduction_type,
-            "identity",
-            self.output.name,
+            reduction_output=reduction_output,
+            group=match.geometry.group,
+            axis=match.geometry.axis,
+            reduction_type=match.reduction_type,
+            source_type="identity",
+            source_fn=GEMM_REDUCTION_IDENTITY_SOURCE,
+            primary_output=self.output.name,
             feeds_main=local_reduce.feeds_main,
             feed_output=self.output.name if local_reduce.feeds_main else None,
         )
@@ -432,7 +431,7 @@ class GemmLocalReduceAnalysis:
         dim: Any,
         dtype: Any = None,
         *,
-        reduction_type: str | None = None,
+        reduction_type: GemmReductionType = "sum",
         raise_invalid_dims: bool = True,
     ) -> bool:
         """Match and record a reduction over a grouped TensorSSA layout."""
@@ -449,8 +448,8 @@ class GemmLocalReduceAnalysis:
                 return False
             raise NotImplementedError(LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR)
         self.matches[node] = GemmLocalReduceMatch(
-            node,
-            layout,
+            value_node=node,
+            geometry=layout,
             reduction_node=node,
             reduction_type=reduction_type,
         )
@@ -524,8 +523,8 @@ class GemmLocalReduceAnalysis:
             ):
                 raise NotImplementedError(LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR)
             return GemmLocalReduceMatch(
-                value,
-                layout,
+                value_node=value,
+                geometry=layout,
                 reduction_node=value,
                 reduction_type=normalized.reduction_type,
             )
@@ -663,7 +662,7 @@ class GemmLocalReduceAnalysis:
         if layout.axis != 0:
             if not self.feed_main_grouped_reduction(value, grouped_source, layout):
                 return None
-            if layout.group <= LOCAL_REDUCE_FRAGMENT_WIDTH:
+            if not layout.needs_physical_callbacks:
                 # Intentional fallthrough: axis-1 feeds within one TensorSSA
                 # fragment lower as plain generated TensorSSA without a feed plan.
                 return None
@@ -772,29 +771,6 @@ class GemmLocalReduceAnalysis:
         ):
             return None
         return matches[0]
-
-    def compressed_aux_plan(
-        self,
-        output: Any,
-        aux: torch.fx.Node,
-        aux_index: int,
-    ) -> GemmOutputLocalReducePlan | None:
-        """Plan a matched local reduction returned in compressed output shape."""
-        match = self.matches.get(aux)
-        output_meta = (
-            output.meta.get("val") if isinstance(output, torch.fx.Node) else None
-        )
-        aux_meta = aux.meta.get("val")
-        if match is None or aux_meta is None or output_meta is None:
-            return None
-        expected_aux_shape = local_reduce_compressed_shape(
-            output_meta.shape, match.geometry.group, match.geometry.axis
-        )
-        if not statically_known_shape_equal(expected_aux_shape, aux_meta.shape):
-            return None
-        return match.to_plan(
-            store=GemmLocalReduceStore(aux, aux_index), feeds_main=False
-        )
 
     def feed_main_output_plan(
         self,

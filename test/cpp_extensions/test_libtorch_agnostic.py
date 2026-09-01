@@ -2227,7 +2227,7 @@ except RuntimeError as e:
         out = torch.ops.libtorch_agn_2_13.identity_with_fake_module.default(t)
         self.assertEqual(out, t)
 
-    @skipIfTorchVersionLessThan(2, 12)
+    @skipIfTorchVersionLessThan(2, 13)
     def test_my_exception_what(self, device):
         """Test exception what() handling."""
         import libtorch_agn_2_13 as libtorch_agnostic
@@ -2345,6 +2345,68 @@ except RuntimeError as e:
                 r"API call failed at .*my_stable_error_check\.cpp, line \d+\)$",
             )
 
+
+@unittest.skipIf(
+    sysconfig.get_config_var("Py_GIL_DISABLED") == 1,
+    "Cpython limited API not available, see https://github.com/python/cpython/issues/111506",
+)
+@skipIfTorchVersionLessThan(2, 14)
+class TestLibtorchAgnosticMetal(TestCase):
+    """MPS tests for versioned libtorch_agnostic extensions."""
+
+    @classmethod
+    def setUpClass(cls):
+        base_dir = Path(__file__).parent
+
+        try:
+            import libtorch_agn_2_14  # noqa: F401
+        except Exception:
+            install_cpp_extension(
+                extension_root=base_dir / "libtorch_agn_2_14_extension"
+            )
+
+    @parametrize("scale,negate", [(0.5, False), (2.0, True)])
+    def test_mps_set_arg_bytes(self, device, scale, negate):
+        import libtorch_agn_2_14 as libtorch_agnostic
+
+        x = torch.randn(1000, device=device, dtype=torch.float32)
+        low, high = -0.25, 0.9
+        out = libtorch_agnostic.ops.my_mps_scale_negate_clamp(
+            x, scale, negate, low, high
+        )
+        expected = (x * scale * (-1.0 if negate else 1.0)).clamp(low, high)
+        self.assertEqual(out, expected)
+
+    @parametrize(
+        "size,null_ptr,error",
+        [
+            (4, True, "Pointer is null"),
+            (0, False, r"size must be in \(0, 4096\]"),
+            (4096, False, None),
+            (4097, False, r"size must be in \(0, 4096\]"),
+        ],
+    )
+    def test_mps_set_arg_bytes_validation(self, device, size, null_ptr, error):
+        import libtorch_agn_2_14 as libtorch_agnostic
+
+        x = torch.randn(8, device=device, dtype=torch.float32)
+        if error is None:
+            libtorch_agnostic.ops.my_mps_set_arg_bytes_raw(x, size, null_ptr)
+        else:
+            with self.assertRaisesRegex(RuntimeError, error):
+                libtorch_agnostic.ops.my_mps_set_arg_bytes_raw(x, size, null_ptr)
+
+    def test_mps_set_arg_bytes_lifetime(self, device):
+        import libtorch_agn_2_14 as libtorch_agnostic
+
+        x = torch.randn(1000, device=device, dtype=torch.float32)
+        out = libtorch_agnostic.ops.my_mps_set_arg_bytes_lifetime(x)
+        self.assertEqual(out, x * 3.0)
+
+
+instantiate_device_type_tests(
+    TestLibtorchAgnosticMetal, globals(), allow_mps=True, only_for="mps"
+)
 
 instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 

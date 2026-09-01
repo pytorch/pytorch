@@ -27,7 +27,11 @@ from ...ir import (
     Pointwise,
     Reduction,
 )
-from ...kernel.gemm_epilogue import GemmReductionConfig, GemmReductionPlan
+from ...kernel.gemm_epilogue import (
+    GEMM_ACCUMULATOR_ARG_NAME,
+    GemmReductionConfig,
+    GemmReductionPlan,
+)
 from ...kernel.loop_ir_cutedsl_codegen import LoopIRCuteDSLCodegen
 from ...kernel.loop_ir_epilogue_lowering import (
     centered_mean_consumer_type_unrolled_ir,
@@ -43,7 +47,7 @@ from ...scheduler import (
 )
 from ...virtualized import V
 from ..common import BackendFeature, IndentedBuffer
-from ..cutlass.python_evt import _ACCUMULATOR_ARG_NAME, CutlassEVTCodegen
+from ..cutlass.python_evt import CutlassEVTCodegen
 from .nv_universal_gemm import NVUniversalGemmCaller
 
 
@@ -139,7 +143,8 @@ class NVUniversalGemmScheduling(BaseScheduling):
         node: BaseSchedulerNode, require_epilogue_fusion: bool = False
     ) -> NVUniversalGemmBuffer:
         """Extract NVUniversalGemmBuffer from node (direct or via MultiTemplateBuffer)."""
-        assert isinstance(node, SchedulerNode)  # noqa: S101
+        if not isinstance(node, SchedulerNode):
+            raise AssertionError(f"expected SchedulerNode, got {type(node)}")
         ir_node = node.node
 
         if isinstance(ir_node, NVUniversalGemmBuffer):
@@ -368,13 +373,9 @@ class NVUniversalGemmScheduling(BaseScheduling):
         if group <= 1 or group > 4:
             return None
         store = GemmEpilogueIRAnalysis.store_from_buffer(node)
-        if (
-            store is None
-            or centered_mean_consumer_type_unrolled_ir(
-                store, gemm_node.get_name(), group
-            )
-            != "mean_linear:1:-1:0"
-        ):
+        if store is None or centered_mean_consumer_type_unrolled_ir(
+            store, gemm_node.get_name(), group
+        ) != (1.0, -1.0, 0.0):
             return None
         if any(read.name != gemm_node.get_name() for read in reads):
             return None
@@ -608,13 +609,13 @@ class NVUniversalGemmScheduling(BaseScheduling):
             if feed_main is not None:
                 evt_nodes = []
             if evt_nodes:
-                trial_reads, trial_writes, _, _ = (
-                    CutlassEVTCodegen.ir_to_evt_python_code(
-                        ir_node.get_name(),
-                        evt_nodes,
-                        trial_removed_buffers,
-                    )
+                trial_epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
+                    ir_node.get_name(),
+                    evt_nodes,
+                    trial_removed_buffers,
                 )
+                trial_reads = list(trial_epilogue.reads)
+                trial_writes = list(trial_epilogue.writes)
             if scaled_epilogue:
                 if len(trial_reads) > 4 or len(trial_writes) > 4:
                     return False
@@ -718,18 +719,21 @@ class NVUniversalGemmScheduling(BaseScheduling):
             [n.get_name() for n in epilogue_nodes] if epilogue_nodes else [],
             [n.get_name() for n in prologue_nodes] if prologue_nodes else [],
         )
-        assert self.is_nv_universal_gemm_template(template_node), (  # noqa: S101
-            "Template node passed to NVUniversalGemmScheduling.codegen_template must be a "
-            "SchedulerNode that wraps a NVUniversalGemmBuffer or MultiTemplateBuffer with NVGEMM choice"
-        )
-        assert not prologue_nodes, (  # noqa: S101
-            "NVIDIA Universal GEMM doesn't support prologue fusion yet"
-        )
+        if not self.is_nv_universal_gemm_template(template_node):
+            raise AssertionError(
+                "Template node passed to NVUniversalGemmScheduling.codegen_template must be a "
+                "SchedulerNode that wraps a NVUniversalGemmBuffer or MultiTemplateBuffer with NVGEMM choice"
+            )
+        if prologue_nodes:
+            raise AssertionError(
+                "NVIDIA Universal GEMM doesn't support prologue fusion yet"
+            )
 
         template_node = cast(SchedulerNode, template_node)
 
         original_ir_node = template_node.node
-        assert isinstance(original_ir_node, Buffer)  # noqa: S101
+        if not isinstance(original_ir_node, Buffer):
+            raise AssertionError(f"expected Buffer, got {type(original_ir_node)}")
         original_buffer_name = original_ir_node.get_name()
 
         ctb: NVUniversalGemmBuffer = self.get_nv_gemm_buffer_from_node(
@@ -737,6 +741,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
         )
 
         epilogue_fn_code: str | None = None
+        epilogue_is_cutedsl = False
         epilogue_reads: list[str] = []
         epilogue_writes: list[str] = []
         epilogue_var_renames: dict[str, Any] = {}
@@ -759,9 +764,17 @@ class NVUniversalGemmScheduling(BaseScheduling):
                         reduction_type=reduction.reduction_type,
                         source_type=reduction.source_type,
                         primary_output=original_buffer_name,
+                        reduction_algorithm=reduction.reduction_algorithm,
+                        finalizer_fn=reduction.finalizer_fn,
                     )
                 feed_main = plan.feed_main
                 if feed_main is not None:
+                    (feed_scheduler_node,) = epilogue_nodes[0].get_nodes()
+                    feed_buffer = feed_scheduler_node.node
+                    if not isinstance(feed_buffer, ComputedBuffer):
+                        raise AssertionError(
+                            f"expected ComputedBuffer, got {type(feed_buffer)}"
+                        )
                     local_reduce = GemmReductionPlan(
                         reduction_output=None,
                         group=feed_main.group,
@@ -769,14 +782,23 @@ class NVUniversalGemmScheduling(BaseScheduling):
                         reduction_type=feed_main.reduction_type,
                         source_type=feed_main.source_type,
                         primary_output=feed_main.output_name,
+                        reduction_algorithm=feed_main.reduction_algorithm,
+                        finalizer_fn=feed_main.finalizer_fn,
                         feeds_main=True,
+                        consumer_fn=LoopIRCuteDSLCodegen.consumer_from_buffer(
+                            original_buffer_name,
+                            None,
+                            feed_buffer,
+                            "_local_reduce_consumer",
+                            feed_main.group,
+                        ),
                     )
                     epilogue_fn_code = (
                         f"def {EPILOGUE_FN_NAME}(accum):\n    D = accum\n    return D"
                     )
                     epilogue_writes = [feed_main.output_name]
                     epilogue_var_renames = {
-                        _ACCUMULATOR_ARG_NAME: original_buffer_name,
+                        GEMM_ACCUMULATOR_ARG_NAME: original_buffer_name,
                         "D": feed_main.output_name,
                     }
                 evt_nodes = [] if feed_main is not None else plan.evt_nodes
@@ -796,29 +818,37 @@ class NVUniversalGemmScheduling(BaseScheduling):
                         for node in evt_nodes
                         if isinstance(node.node, ComputedBuffer)
                     ]
-                    try:
-                        reads, writes, var_renames, evt_code = (
-                            LoopIRCuteDSLCodegen.from_buffers(
+                    from .nv_universal_gemm import GemmVariant
+
+                    if ctb.variant == GemmVariant.SCALED_GEMM:
+                        try:
+                            lowered_epilogue = LoopIRCuteDSLCodegen.from_buffers(
                                 original_buffer_name,
                                 evt_buffers,
                                 removed_buffers_with_gemm,
                                 EPILOGUE_FN_NAME,
                             )
-                        )
-                    except NotImplementedError:
-                        reads, writes, var_renames, evt_code = (
-                            CutlassEVTCodegen.ir_to_evt_python_code(
+                        except NotImplementedError:
+                            lowered_epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
                                 original_buffer_name,
                                 list(evt_nodes),
                                 removed_buffers_with_gemm,
                                 fn_name=EPILOGUE_FN_NAME,
                                 as_standalone_function=True,
                             )
+                    else:
+                        lowered_epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
+                            original_buffer_name,
+                            list(evt_nodes),
+                            removed_buffers_with_gemm,
+                            fn_name=EPILOGUE_FN_NAME,
+                            as_standalone_function=True,
                         )
-                    epilogue_fn_code = evt_code
-                    epilogue_reads = reads
-                    epilogue_writes = writes
-                    epilogue_var_renames = var_renames
+                    epilogue_fn_code = lowered_epilogue.source
+                    epilogue_is_cutedsl = lowered_epilogue.is_cutedsl
+                    epilogue_reads = list(lowered_epilogue.reads)
+                    epilogue_writes = list(lowered_epilogue.writes)
+                    epilogue_var_renames = lowered_epilogue.renames
 
                 if not only_gen_src_code:
                     write_bufs = OrderedSet(epilogue_writes)
@@ -853,10 +883,12 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 log.warning("NVGEMM epilogue codegen failed unexpectedly: %s", e)
                 raise
 
-        assert ctb.make_kernel_render is not None  # noqa: S101 # noqa: S101
+        if ctb.make_kernel_render is None:
+            raise AssertionError("expected ctb.make_kernel_render to be not None")
         kernel, render = ctb.make_kernel_render(
             ctb,
             epilogue_fn_code=epilogue_fn_code,
+            epilogue_is_cutedsl=epilogue_is_cutedsl,
             epilogue_reads=epilogue_reads,
             epilogue_writes=epilogue_writes,
             epilogue_var_renames=epilogue_var_renames,
@@ -982,7 +1014,8 @@ class NVUniversalGemmScheduling(BaseScheduling):
         output_bufs: list[str] = []
         if epilogue:
             template_sn = cast(SchedulerNode, template)
-            assert isinstance(template_sn.node, Buffer)  # noqa: S101
+            if not isinstance(template_sn.node, Buffer):
+                raise AssertionError(f"expected Buffer, got {type(template_sn.node)}")
             original_buffer_name = template_sn.node.get_name()
             plan = self._epilogue_plan(template_sn.node, epilogue)
             evt_nodes = [] if plan.feed_main is not None else plan.evt_nodes
@@ -991,17 +1024,15 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 removed_buffers_with_gemm.add(original_buffer_name)
             try:
                 if evt_nodes:
-                    reads, writes, var_renames, _ = (
-                        CutlassEVTCodegen.ir_to_evt_python_code(
-                            original_buffer_name,
-                            evt_nodes,
-                            removed_buffers_with_gemm,
-                        )
+                    lowered_epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
+                        original_buffer_name,
+                        evt_nodes,
+                        removed_buffers_with_gemm,
                     )
-                    epilogue_reads = reads
-                    d_buf = var_renames.get("D")
+                    epilogue_reads = list(lowered_epilogue.reads)
+                    d_buf = lowered_epilogue.renames.get("D")
                     output_bufs = ([d_buf] if d_buf else []) + [
-                        w for w in writes if w != d_buf
+                        w for w in lowered_epilogue.writes if w != d_buf
                     ]
                 if plan.reductions:
                     output_bufs = [
@@ -1022,7 +1053,8 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 only_gen_src_code=True,
             )
 
-        assert src_code is not None  # noqa: S101 # noqa: S101
+        if src_code is None:
+            raise AssertionError("expected src_code to be not None")
         src_code = src_code.replace(
             str(Placeholder.KERNEL_NAME), _BENCHMARK_KERNEL_PREFIX
         )

@@ -224,11 +224,11 @@ ProcessGroupNCCL::RedOpRAII ProcessGroupNCCL::getNcclReduceOp(
     case ::c10d::ReduceOp::MAX:
       return ncclMax;
     case ::c10d::ReduceOp::BAND:
-      TORCH_CHECK(false, "Cannot use ReduceOp.BAND with NCCL");
+      C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BAND with NCCL");
     case ::c10d::ReduceOp::BOR:
-      TORCH_CHECK(false, "Cannot use ReduceOp.BOR with NCCL");
+      C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BOR with NCCL");
     case ::c10d::ReduceOp::BXOR:
-      TORCH_CHECK(false, "Cannot use ReduceOp.BXOR with NCCL");
+      C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BXOR with NCCL");
     case ::c10d::ReduceOp::PREMUL_SUM:
       return RedOpRAII(op, comm, getNcclDataType(tensor), nccl_api_);
     case ::c10d::ReduceOp::AVG:
@@ -241,12 +241,23 @@ ProcessGroupNCCL::RedOpRAII ProcessGroupNCCL::getNcclReduceOp(
 void ProcessGroupNCCL::checkWorkQueue() {
   WorkNCCL::WorkStatus status = workq_.garbageCollect();
 
+  // Abort hooks run where a failure is DETECTED, not only where the process is
+  // torn down, because the teardown paths run no hook at all in the
+  // configurations where the process survives the failure and a post-mortem is
+  // worth the most: abortProcess() returns early when
+  // abort_process_on_timeout_or_error_ is off or reconfigure is on. So despite
+  // the name, a hook may run here with no abort following it. That matches what
+  // the hooks are for (capture debug info about the failure, e.g.
+  // c10d::FlightRecorderHook writes its trace) and callers must tolerate being
+  // called more than once per failure, since the teardown paths still fire.
   switch (status) {
     case WorkNCCL::WorkStatus::TIMEDOUT:
       comm_state_ = CommState::TIMEOUT;
+      runAbortHooks();
       break;
     case WorkNCCL::WorkStatus::ERROR:
       comm_state_ = CommState::ERROR;
+      runAbortHooks();
       break;
     default:
       // For COMPLETED, NOT_STARTED, and INPROGRESS, no state change needed
@@ -293,12 +304,8 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
       if (shutdown_) {
         break;
       }
-      // With abort_process_on_timeout_or_error disabled this is a no-op and
-      // the loop keeps running: comm_state_ stays TIMEOUT/ERROR so getError()
-      // reports it, and the next collective throws from
-      // checkAndAbortIfTimedOutOrError().
       if (comm_state_ != CommState::NORMAL) {
-        abortProcess(
+        handleWatchdogFailure(
             comm_state_ == CommState::TIMEOUT
                 ? "timeout - timeout watchdog detected operation timeout"
                 : "error - timeout watchdog detected operation error");
@@ -315,41 +322,23 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
             "failed to get async error");
         if (asyncErr != ncclSuccess && asyncErr != ncclInProgress) {
           comm_state_ = CommState::ERROR;
+          // Detected here rather than through the work queue, so this needs its
+          // own notification; see checkWorkQueue() for why detection and not
+          // just teardown.
+          runAbortHooks();
           if (!options_c10d_->enable_reconfigure) {
             TC_LOG(ERROR, this) << "nccl hit async error on rank " << rank_
                                 << ": " << ncclGetErrorString(asyncErr);
-            // abort() only tears the communicator down; abortProcess() runs
-            // the abort hooks and terminates if the mode allows it.
-            abort();
-            abortProcess(
-                std::string("error - nccl hit async error: ") +
-                ncclGetErrorString(asyncErr));
           } else {
             // Revoked below by the reconfigurable-mode handler.
             TC_LOG(ERROR, this)
                 << "Async error on rank " << rank_ << ": "
                 << ncclGetErrorString(asyncErr) << " (reconfigurable mode)";
           }
+          handleWatchdogFailure(
+              std::string("error - nccl hit async error: ") +
+              ncclGetErrorString(asyncErr));
         }
-      }
-
-      // In reconfigurable mode, gracefully revoke the communicator on any
-      // failure
-      // -- timeout or error, whether surfaced by the work queue or an async
-      // comm error -- so in-flight operations are stopped and the comm can
-      // later be reconfigured. This is the only revoke path under CUDA graph
-      // replay, where no synchronous collective reaches
-      // checkAndAbortIfTimedOutOrError(); isAborted() then reports the revoked
-      // state to the caller. revokeNcclComm() is idempotent and the revoked_
-      // check keeps the watchdog from logging every iteration.
-      if (comm_state_ != CommState::NORMAL &&
-          options_c10d_->enable_reconfigure && !revoked_.load()) {
-        TC_LOG(ERROR, this)
-            << "Revoking communicator on rank " << rank_
-            << " - watchdog detected "
-            << (comm_state_ == CommState::TIMEOUT ? "timeout" : "error")
-            << " (reconfigurable mode)";
-        revokeNcclComm();
       }
     }
   } catch (const std::exception& e) {
@@ -362,9 +351,12 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
 }
 
 void ProcessGroupNCCL::checkInitialized() const {
-  if (init_state_ != InitializationState::INITIALIZED) {
-    throw std::runtime_error("ProcessGroupNCCL not initialized");
-  }
+  TORCH_CHECK(
+      init_state_ == InitializationState::INITIALIZED,
+      options_c10d_->enable_reconfigure
+          ? "ProcessGroupNCCL has not been initialized. Call reconfigure() "
+            "before issuing operations when enable_reconfigure=True."
+          : "ProcessGroupNCCL not initialized");
 }
 
 void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
@@ -381,14 +373,12 @@ void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
       revokeNcclComm();
       throw std::runtime_error("NCCL operation timed out");
     } else {
-      abortNcclComm();
-      abortProcess("timeout - collective operation timed out");
+      handleWatchdogFailure("timeout - collective operation timed out");
       throw std::runtime_error("NCCL operation timed out");
     }
   } else if (comm_state_ == CommState::ERROR) {
-    // With abort_process_on_timeout_or_error disabled the watchdog aborts the
-    // communicator on an async error and lets the process live, so a later
-    // collective can reach here with no communicator left to query.
+    // CleanUpOnly may have already removed the communicator on the watchdog
+    // thread, so a later collective cannot query the original NCCL error.
     if (!nccl_comm_) {
       throw std::runtime_error(
           "NCCL communicator was aborted after a previous error");
@@ -407,8 +397,7 @@ void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
       revokeNcclComm();
       throw std::move(ncclException);
     }
-    abortNcclComm();
-    abortProcess(std::string("error - ") + ncclException.what());
+    handleWatchdogFailure(std::string("error - ") + ncclException.what());
     throw std::move(ncclException);
   }
 }
@@ -467,10 +456,10 @@ void ProcessGroupNCCL::addEphemeralTimeout(
 }
 
 void ProcessGroupNCCL::enqueueWork(
-    c10::intrusive_ptr<WorkNCCL> work,
+    const c10::intrusive_ptr<WorkNCCL>& work,
     cudaStream_t stream) {
-  // In graph capture mode, keep a reference to the work object to prevent
-  // premature destruction until the graph gets destroyed, organized per graph
+  // In graph capture mode, keep the completion state and events alive until
+  // the graph gets destroyed, organized per graph.
   if (getGraphCaptureMode()) {
     auto capture_info = c10::cuda::captureInfoMayInitCtx(stream);
     if (capture_info.status == c10::cuda::CaptureStatus::Active) {
@@ -479,8 +468,7 @@ void ProcessGroupNCCL::enqueueWork(
       // Check if this is the first work object for this graph
       bool is_first_work = graph_capture_work_refs_[capture_info.id].empty();
 
-      // Add work reference to the per-graph container
-      graph_capture_work_refs_[capture_info.id].push_back(work);
+      graph_capture_work_refs_[capture_info.id].push_back(work->state_);
 
       // If this is the first work object for this graph, set up automatic
       // cleanup
@@ -493,7 +481,7 @@ void ProcessGroupNCCL::enqueueWork(
     }
   } else {
     // Add work to stream's queue after events have been recorded
-    workq_.enqueueWork(std::move(work), stream);
+    workq_.enqueueWork(work, stream);
   }
 }
 
@@ -554,40 +542,8 @@ void ProcessGroupNCCL::checkTensorsDevice(
   }
 }
 
-// Protected methods (not in the private section of the header)
-std::unique_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::getEvent(
-    bool timing_enabled) {
-  std::lock_guard<std::mutex> lock(event_pool_mutex_);
-
-  if (timing_enabled == timing_enabled_.load() && !event_pool_.empty()) {
-    auto event = std::move(event_pool_.front());
-    event_pool_.pop();
-    return event;
-  }
-
-  return std::make_unique<at::cuda::CUDAEvent>(
-      timing_enabled ? cudaEventDefault : cudaEventDisableTiming);
-}
-
-void ProcessGroupNCCL::returnEvent(
-    std::unique_ptr<at::cuda::CUDAEvent> event,
-    bool timing_enabled) {
-  std::lock_guard<std::mutex> lock(event_pool_mutex_);
-
-  if (timing_enabled == timing_enabled_.load() &&
-      event_pool_.size() < max_event_pool_size_) {
-    event_pool_.push(std::move(event));
-  }
-}
-
 void ProcessGroupNCCL::enableCollectivesTiming() {
-  std::lock_guard<std::mutex> lock(event_pool_mutex_);
-  if (timing_enabled_.exchange(true)) {
-    return;
-  }
-  // Pooled events were created with timing disabled and cannot serve
-  // getDuration(); drop them so later works get timing-capable events.
-  std::queue<std::unique_ptr<at::cuda::CUDAEvent>>().swap(event_pool_);
+  event_pool_->enableTiming();
 }
 
 void ProcessGroupNCCL::attachMemoryHook() {
@@ -700,6 +656,17 @@ ncclResult_t ProcessGroupNCCL::ensureSegmentWindow(const void* ptr) {
   ncclWindow_t win = nullptr;
   auto rc = nccl_api_->commWindowRegister(
       nccl_comm_, it->first, it->second.len, &win, NCCL_WIN_COLL_SYMMETRIC);
+  if (rc == ncclInProgress) {
+    // NCCL retains &win in its async registration task, so keep this stack
+    // frame alive until the task has populated the handle.
+    waitForNcclCompletion(
+        *nccl_api_,
+        nccl_comm_,
+        rc,
+        options_c10d_->timeout,
+        "NCCL symmetric window registration failed");
+    rc = ncclSuccess;
+  }
   if (rc != ncclSuccess) {
     return rc;
   }
