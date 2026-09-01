@@ -734,6 +734,7 @@
 /torch/_subclasses/fake_tensor.py @aorenste
 /torch/_subclasses/fake_utils.py @aorenste
 /torch/utils/hipify/ @jeffdaily @jithunnair-amd
+/torch/utils/pytree/ @XuehaiPan
 /torch/utils/_pytree.py @XuehaiPan
 /torch/utils/_cxx_pytree.py @XuehaiPan
 /torch/_vendor/quack/ @slayton58 @drisspg
