@@ -411,6 +411,10 @@ class DtypePropagationOpsHandler:
         return promote_types([x])
 
     @staticmethod
+    def set_store_mask(value: DTypeArg, mask: DTypeArg) -> torch.dtype:
+        return promote_types([value])
+
+    @staticmethod
     def frexp(x: DTypeArg) -> tuple[torch.dtype, torch.dtype]:
         # TODO - need to handle multiple outputs
         return (promote_types([x]), torch.int32)
@@ -421,8 +425,10 @@ class DtypePropagationOpsHandler:
         values: tuple[T, ...],
         stable: bool,
         descending: bool,
+        top_k: int | None = None,
+        output_dtypes: tuple[torch.dtype, ...] | None = None,
     ) -> tuple[torch.dtype, ...]:
-        return dtypes
+        return output_dtypes or dtypes
 
     @staticmethod
     def trunc(x: DTypeArg) -> torch.dtype:

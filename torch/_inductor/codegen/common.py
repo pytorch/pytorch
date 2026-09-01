@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import atexit
 import contextlib
+import copy
 import dataclasses
 import enum
 import functools
@@ -1206,6 +1207,8 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
         values: tuple[OpVarT, ...],
         stable: bool,
         descending: bool,
+        top_k: int | None = None,
+        output_dtypes: tuple[torch.dtype, ...] | None = None,
     ) -> tuple[OpVarT, ...]:
         raise NotImplementedError(
             f"{type(self).__name__}: sort should be handled by CSEProxy"
@@ -2426,6 +2429,8 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         values: tuple[CSEVariable, ...],
         stable: bool,
         descending: bool,
+        top_k: int | None = None,
+        output_dtypes: tuple[torch.dtype, ...] | None = None,
     ) -> tuple[CSEVariable, ...]:
         raise NotImplementedError
 
@@ -2997,6 +3002,11 @@ class CSEProxy(DefaultHandler):
     ) -> None:
         return self.kernel.check_bounds(expr, size, lower, upper)
 
+    def set_store_mask(self, value: CSEVariable, mask: CSEVariable) -> CSEVariable:
+        masked_value = copy.copy(value)
+        masked_value.store_mask = str(mask)  # type: ignore[attr-defined]
+        return masked_value
+
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:
         if name in self.kernel.cse.invalidated_stores:
             # A load from an invalidated store requires us to
@@ -3077,8 +3087,17 @@ class CSEProxy(DefaultHandler):
         values: tuple[CSEVariable, ...],
         stable: bool,
         descending: bool,
+        top_k: int | None = None,
+        output_dtypes: tuple[torch.dtype, ...] | None = None,
     ) -> tuple[CSEVariable, ...]:
-        return self.kernel.sort(dtypes, values, stable, descending)
+        return self.kernel.sort(
+            dtypes,
+            values,
+            stable,
+            descending,
+            top_k=top_k,
+            output_dtypes=output_dtypes,
+        )
 
     def bucketize(
         self,
