@@ -137,7 +137,9 @@ class LocalElasticAgent(SimpleElasticAgent):
     workers finish at different times, to prevent agents from viewing workers
     that finished early as a scale-down event. It is strongly advised that the
     user code deal with ensuring that workers are terminated in a synchronous
-    manner rather than relying on the exit_barrier_timeout.
+    manner rather than relying on the exit_barrier_timeout. The default value of
+    300 seconds can be overridden via the ``TORCH_ELASTIC_EXIT_BARRIER_TIMEOUT``
+    environment variable or by passing ``exit_barrier_timeout`` explicitly.
 
     A named pipe based watchdog can be enabled in ```LocalElasticAgent``` if an
     environment variable ``TORCHELASTIC_ENABLE_FILE_TIMER`` with value 1 has
