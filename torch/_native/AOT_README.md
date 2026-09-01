@@ -527,25 +527,29 @@ void launch_topk_radix_bf16_n2048_k128_det(const at::Tensor& mX, const at::Tenso
 
 // the stub kernel: signature == the structured impl signature
 bool topk_cuda_aot_kernel(const at::Tensor & self, int64_t k, int64_t dim, bool largest, bool sorted, const at::Tensor & values, const at::Tensor & indices) {
-  // Device gate: declaration ARCHS x shipped artifacts = sm_100a
-  if (!(at::cuda::getCurrentDeviceProperties()->major == 10)) return false;
+  // Device gate: one branch per shipped capability (10.0)
+  // Read once into a local: this gate and every branch below ask
+  // the same question, and the accessor is a call per read.
+  const auto* _naot_props = at::cuda::getCurrentDeviceProperties();
+  if (!((_naot_props->major == 10 && _naot_props->minor == 0))) return false;
   // Size gate: the DSL's exported ABI carries int32_t shape slots
   // (see _int32_size_gate); a bigger dim would truncate silently.
-  if (C10_UNLIKELY(self.sizes().end() != std::find_if(self.sizes().begin(), self.sizes().end(), _naot_dim_too_big))) return false;
+  if (C10_UNLIKELY(self.sizes().end() != std::find_if(self.sizes().begin(), self.sizes().end(), _naot_dim_too_big) || /* values, indices likewise */)) return false;
 
-        if (self.scalar_type() != at::kFloat && self.scalar_type() != at::kBFloat16) return false;
-        // ... the rest of cpp_dispatch_prelude(), verbatim ...
-        const int64_t M = self.numel() / N;
-        if (M < at::cuda::getCurrentDeviceProperties()->multiProcessorCount) return false;
-  if (self.scalar_type() == at::kBFloat16 && N == 16384 && k == 128 && det) {
-
-          auto self_2d = self.view({M, N});
-          auto values_2d = values.view({M, k});
-          auto indices_2d = indices.view({M, k});
-          launch_topk_radix_bf16_n16384_k128_det(self_2d, values_2d, indices_2d, at::cuda::getCurrentCUDAStream());
-    return true;
+  if (self.scalar_type() != at::kFloat && self.scalar_type() != at::kBFloat16) return false;
+  // ... the rest of cpp_dispatch_prelude(), re-indented to this scope ...
+  const int64_t M = self.numel() / N;
+  if (M < at::cuda::getCurrentDeviceProperties()->multiProcessorCount) return false;
+  if (_naot_props->major == 10 && _naot_props->minor == 0) {
+    if (self.scalar_type() == at::kBFloat16 && N == 16384 && k == 128 && det) {
+      auto self_2d = self.view({M, N});
+      auto values_2d = values.view({M, k});
+      auto indices_2d = indices.view({M, k});
+      launch_topk_radix_bf16_n16384_k128_det(self_2d, values_2d, indices_2d, at::cuda::getCurrentCUDAStream());
+      return true;
+    }
+    // ... 47 more branches ...
   }
-  // ... 47 more branches ...
   return false;
 }
 
@@ -1015,8 +1019,9 @@ Two more things the by-hand path assumes:
   `--ops`.
 
 Read the generated `build/native_aot/<decl_id>/aot_<decl_id>_cuda.cpp`. It is
-the single best debugging artifact: the arch gate, your prelude verbatim, the
-branch list, and (if any) the covers body, with the precompute note at the top.
+the single best debugging artifact: the arch gate, your prelude (re-indented to
+the generated scope, otherwise as written), the branch list, and (if any) the
+covers body, with the precompute note at the top.
 
 ### Step 4: verify routing
 
