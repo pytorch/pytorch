@@ -10,6 +10,7 @@ from torch import Tensor
 
 from .optimizer import (
     _disable_dynamo_if_unsupported,
+    _functional_api_doc,
     _params_doc,
     _to_scalar,
     Optimizer,
@@ -17,7 +18,7 @@ from .optimizer import (
 )
 
 
-__all__ = ["Muon"]
+__all__ = ["Muon", "muon"]
 
 # Constants from Keller Jordan's Muon post: https://kellerjordan.github.io/posts/muon/
 # github permlink: https://github.com/KellerJordan/Muon/blob/f90a42b28e00b8d9d2d05865fe90d9f39abcbcbd/muon.py#L16
@@ -368,10 +369,6 @@ def muon(
     adjust_lr_fn: str | None,
     has_complex: bool,
 ) -> None:
-    r"""Functional API that performs Muon algorithm computation.
-
-    See :class:`~torch.optim.Muon` for details.
-    """
     if foreach is not None and foreach:
         raise RuntimeError("Foreach is not supported for Muon yet")
 
@@ -391,3 +388,6 @@ def muon(
         adjust_lr_fn=adjust_lr_fn,
         has_complex=has_complex,
     )
+
+
+muon.__doc__ = _functional_api_doc.format(optimizer="Muon")
