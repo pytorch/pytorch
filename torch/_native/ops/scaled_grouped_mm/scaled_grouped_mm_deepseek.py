@@ -4,14 +4,7 @@ import functools
 
 import torch
 
-from ._common import (
-    any_cow,
-    BLOCKWISE_128X128,
-    BLOCKWISE_1X128,
-    ceil_div,
-    NO_SWIZZLE,
-    round_up,
-)
+from ._common import BLOCKWISE_128X128, BLOCKWISE_1X128, ceil_div, NO_SWIZZLE, round_up
 
 
 _DEEPSEEK_RECIPES = {
@@ -117,8 +110,6 @@ def _should_use_cutedsl_scaled_grouped_mm_deepseek(
         or scale_b0.device != self.device
     ):
         return False
-    if any_cow(self, mat2, scale_a0, scale_b0):
-        return False
     if self.data_ptr() % 16 != 0 or mat2.data_ptr() % 16 != 0:
         return False
 
@@ -146,9 +137,8 @@ def _should_use_cutedsl_scaled_grouped_mm_deepseek(
     )
     if not _valid_blockwise_scale_strides(scale_a0, 0, 1, expected_a_outer_stride):
         return False
-    # At offset 0 (first tile of first group for A, any group's first
-    # n_tile for B), alignment rounding can only move forward, so it can
-    # never cover row/col 0 unless these strides are already 4-aligned.
+    # At offset 0 alignment rounding can only move forward, so row/col 0 is
+    # only covered if these strides are already 4-aligned.
     if recipe_a0 == BLOCKWISE_1X128 and scale_a0.stride(1) % 4 != 0:
         return False
     if recipe_a0 == BLOCKWISE_1X128 and scale_a0.data_ptr() % 16 != 0:

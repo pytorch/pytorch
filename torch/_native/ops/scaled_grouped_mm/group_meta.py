@@ -1,11 +1,20 @@
 """Output and group metadata helpers for DeepSeek grouped mm."""
 
 import functools
+from typing import NamedTuple
 
 import torch
 
 from ._common import BLOCKWISE_1X128
 from .hopper_config import HopperDeepSeekConfig, select_kernel_config
+
+
+class GroupMetadata(NamedTuple):
+    problem_sizes: torch.Tensor
+    ptrs_abc: torch.Tensor
+    ptrs_scale: torch.Tensor
+    tile_offsets: torch.Tensor
+    total_tiles: torch.Tensor
 
 
 _launch_build_group_metadata = None
@@ -43,29 +52,28 @@ def allocate_output(
 @functools.lru_cache(maxsize=32)
 def _alloc_group_metadata(
     device_index: int, cap: int, stream_ptr: int
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> GroupMetadata:
     device = torch.device("cuda", device_index)
     problem_sizes = torch.empty((cap, 4), device=device, dtype=torch.int32)
     ptrs_abc = torch.empty((cap, 3), device=device, dtype=torch.int64)
     ptrs_scale = torch.empty((cap, 2), device=device, dtype=torch.int64)
     tile_offsets = torch.empty((cap + 1,), device=device, dtype=torch.int32)
     total_tiles = torch.empty((1,), device=device, dtype=torch.int32)
-    return problem_sizes, ptrs_abc, ptrs_scale, tile_offsets, total_tiles
+    return GroupMetadata(problem_sizes, ptrs_abc, ptrs_scale, tile_offsets, total_tiles)
 
 
 @functools.lru_cache(maxsize=32)
 def _get_group_metadata_tensors(
     group_count: int, device_index: int, stream_ptr: int
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> GroupMetadata:
     cap = max(64, 1 << (group_count - 1).bit_length())
-    tensors = _alloc_group_metadata(device_index, cap, stream_ptr)
-    problem_sizes, ptrs_abc, ptrs_scale, tile_offsets, total_tiles = tensors
-    return (
-        problem_sizes[:group_count],
-        ptrs_abc[:group_count],
-        ptrs_scale[:group_count],
-        tile_offsets[: group_count + 1],
-        total_tiles,
+    m = _alloc_group_metadata(device_index, cap, stream_ptr)
+    return GroupMetadata(
+        m.problem_sizes[:group_count],
+        m.ptrs_abc[:group_count],
+        m.ptrs_scale[:group_count],
+        m.tile_offsets[: group_count + 1],
+        m.total_tiles,
     )
 
 
@@ -78,18 +86,17 @@ def build_group_metadata(
     offs: torch.Tensor,
     out: torch.Tensor,
     config: HopperDeepSeekConfig | None = None,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> GroupMetadata:
     group_count = mat_b.size(0)
     device_index = mat_a.device.index
     if device_index is None:
         device_index = torch.cuda.current_device()
     stream_ptr = torch.cuda.current_stream(device_index).cuda_stream
-    metadata = _get_group_metadata_tensors(group_count, device_index, stream_ptr)
-    problem_sizes, ptrs_abc, ptrs_scale, tile_offsets, total_tiles = metadata
+    meta = _get_group_metadata_tensors(group_count, device_index, stream_ptr)
     if group_count == 0:
-        tile_offsets.zero_()
-        total_tiles.zero_()
-        return problem_sizes, ptrs_abc, ptrs_scale, tile_offsets, total_tiles
+        meta.tile_offsets.zero_()
+        meta.total_tiles.zero_()
+        return meta
     if config is None:
         config = select_kernel_config(
             total_m=mat_a.size(0),
@@ -130,13 +137,13 @@ def build_group_metadata(
         mat_a.size(0),
         mat_b.size(-1),
         mat_a.size(-1),
-        problem_sizes,
-        ptrs_abc,
-        ptrs_scale,
-        tile_offsets,
-        total_tiles,
+        meta.problem_sizes,
+        meta.ptrs_abc,
+        meta.ptrs_scale,
+        meta.tile_offsets,
+        meta.total_tiles,
         mat_a.element_size(),
         scale_a.element_size(),
         out.element_size(),
     )
-    return problem_sizes, ptrs_abc, ptrs_scale, tile_offsets, total_tiles
+    return meta

@@ -21,8 +21,9 @@ from torch._native.instrumentation import instrumented_cutedsl_cache
 from ._common import (
     _make_fake_1d_tensor,
     BLOCKWISE_1X128,
-    SCALE_BULK_COPY_ALIGN as _SCALE_BULK_COPY_ALIGN,
-    scale_stage_size,
+    FP32_SCALE_COPY_ALIGN_ELEMS as _SCALE_ALIGN,
+    fp32_scale_stage_size,
+    read_only,
 )
 
 
@@ -293,8 +294,8 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
         self.a_scale_wide = a_scale_wide
         self.b_scale_wide = b_scale_wide
         self.scale_k_aligned = scale_k_aligned
-        # total_m smaller than the bulk-copy width: cp.async.bulk has no bounds
-        # check, so the A scales are read from global per thread instead.
+        # cp.async.bulk has no bounds check, so a short scale_a is read from
+        # global per thread instead of staged.
         self.small_scale_a = small_scale_a
         if cluster_m != 1:
             raise ValueError(
@@ -304,10 +305,8 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
             raise ValueError("cluster_n must be 1 or 2")
         self.cluster_m = cluster_m
         self.cluster_n = cluster_n
-        # The grid is 2D: x indexes independent CTAs/clusters, y indexes a
-        # CTA's rank within its cluster (clusterDim=(cluster_m,cluster_n,1)
-        # puts the clustered axis on y), matching grouped_gemm.py's own
-        # convention -- see persistent_kernel for the block-index handling.
+        # 2D grid: x indexes CTAs/clusters, y a CTA's rank within its cluster
+        # (clusterDim puts the clustered axis on y).
         self.num_mcast_ctas_a = cluster_n
         self.num_mcast_ctas_b = cluster_m
         self.is_a_mcast = cluster_n > 1
@@ -347,8 +346,8 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
         self.load_register_requirement = 40
         self.mma_register_requirement = 232
         self.scale_b128_span = (self.tile_n + 127) // 128
-        self.scale_a_stage_rows = scale_stage_size(self.tile_m)
-        self.scale_b_stage_cols = scale_stage_size(self.tile_n)
+        self.scale_a_stage_rows = fp32_scale_stage_size(self.tile_m)
+        self.scale_b_stage_cols = fp32_scale_stage_size(self.tile_n)
         self.epi_stage = epi_stage
         self.epi_store_warp_id = (
             self.num_dma_warp_groups * self.num_warps_per_warp_group
@@ -388,11 +387,8 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
         floor_combined = combined - residue
         aligned_combined = floor_combined
         if residue != 0:
-            # Rounding down (the usual case) can't be used when it would
-            # push the start negative -- e.g. safe_start==0 at the very
-            # first tile of the whole array leaves no room to shift back.
-            # Round up instead; this is always representable (>=0) since
-            # safe_start>=0 and the increase is <=align.
+            # Rounding down would push the start negative when safe_start==0.
+            # Round up instead: always >=0 since the increase is <=align.
             floor_start = (floor_combined - extra_offset).to(Int32)
             if floor_start < 0:
                 aligned_combined = floor_combined + align
@@ -460,7 +456,7 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
                     self.scale_a_stage_rows,
                     cute.size(scale_a, mode=[0]),
                     k_tile * scale_a.stride[1],
-                    _SCALE_BULK_COPY_ALIGN,
+                    _SCALE_ALIGN,
                 )
             else:
                 _, scale_a_row_shift = self._clamp_tile_start(
@@ -468,7 +464,7 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
                     self.tile_m,
                     cute.size(scale_a, mode=[0]),
                     k_tile * scale_a.stride[1],
-                    _SCALE_BULK_COPY_ALIGN,
+                    _SCALE_ALIGN,
                 )
         scale_b_col_shift = Int32(0)
         if cutlass.const_expr(self.recipe_b != BLOCKWISE_1X128):
@@ -483,7 +479,7 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
                     self.scale_b_stage_cols,
                     cute.size(scale_b, mode=[1]),
                     group * scale_b.stride[0] + k_tile * scale_b.stride[2],
-                    _SCALE_BULK_COPY_ALIGN,
+                    _SCALE_ALIGN,
                 )
             else:
                 _, scale_b_col_shift = self._clamp_tile_start(
@@ -491,15 +487,14 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
                     self.tile_n,
                     cute.size(scale_b, mode=[1]),
                     group * scale_b.stride[0] + k_tile * scale_b.stride[2],
-                    _SCALE_BULK_COPY_ALIGN,
+                    _SCALE_ALIGN,
                 )
         return scale_a128_val, scale_a_row_shift, scale_b_col_shift
 
     @cute.jit
     def _barrier_wait(self, sync_object, state):
-        # Spinning beats try_wait/suspend here by ~6%, at every timeout hint
-        # from 2k to 200k ticks -- suspend/resume latency is the cost, not the
-        # library's 10ms default.
+        # Spinning beats try_wait/suspend by ~6% at every timeout hint from 2k
+        # to 200k ticks: suspend/resume latency is the cost, not the timeout.
         bar = sync_object.get_barrier(state.index)
         done = cute.arch.mbarrier_try_wait(bar, state.phase)
         while done == 0:
@@ -833,9 +828,6 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
         sA_stage = cute.slice_(sA_layout, (None, None, 0))
         sB_stage = cute.slice_(sB_layout, (None, None, 0))
         scale_bytes = 0
-        # a_scale_wide/b_scale_wide are compile-time choices (set by the
-        # caller from total_m/N) since tx_count below must be a Python
-        # value, not runtime.
         if cutlass.const_expr(
             self.recipe_a == BLOCKWISE_1X128 and not self.small_scale_a
         ):
@@ -988,7 +980,7 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
                                 self.scale_a_stage_rows,
                                 cute.size(scale_a, mode=[0]),
                                 k_tile * scale_a.stride[1],
-                                _SCALE_BULK_COPY_ALIGN,
+                                _SCALE_ALIGN,
                             )
                             sfa_iter = scale_a.iterator + (
                                 row_start * scale_a.stride[0]
@@ -1015,7 +1007,7 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
                                 self.tile_m,
                                 cute.size(scale_a, mode=[0]),
                                 k_tile * scale_a.stride[1],
-                                _SCALE_BULK_COPY_ALIGN,
+                                _SCALE_ALIGN,
                             )
                             sfa_iter = scale_a.iterator + (
                                 row_start * scale_a.stride[0]
@@ -1043,7 +1035,7 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
                                 self.scale_b_stage_cols,
                                 cute.size(scale_b, mode=[1]),
                                 group * scale_b.stride[0] + k_tile * scale_b.stride[2],
-                                _SCALE_BULK_COPY_ALIGN,
+                                _SCALE_ALIGN,
                             )
                             sfb_iter = scale_b.iterator + (
                                 group * scale_b.stride[0]
@@ -1071,7 +1063,7 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
                                 self.tile_n,
                                 cute.size(scale_b, mode=[1]),
                                 group * scale_b.stride[0] + k_tile * scale_b.stride[2],
-                                _SCALE_BULK_COPY_ALIGN,
+                                _SCALE_ALIGN,
                             )
                             sfb_iter = scale_b.iterator + (
                                 group * scale_b.stride[0]
@@ -1336,8 +1328,6 @@ def _compile_deepseek_persistent_wgmma(
     scale_k_aligned: bool = False,
     small_scale_a: bool = False,
 ):
-    from ._compile_with_safe_names import _compile_with_safe_names
-
     kernel = _DeepSeekPersistentWgmma(
         recipe_a,
         recipe_b,
@@ -1360,31 +1350,29 @@ def _compile_deepseek_persistent_wgmma(
     g = cute.sym_int()
     n = cute.sym_int()
 
-    return _compile_with_safe_names(
-        lambda: cute.compile(
-            kernel,
-            _make_fake_matmul_operand(Float8E4M3FN, m, k),
-            _make_fake_mat_b_tensor(Float8E4M3FN, g, k, n),
-            _make_fake_scale_a_tensor(Float32, recipe_a, m),
-            _make_fake_scale_b_tensor(Float32, recipe_b, g, n),
-            _make_fake_1d_tensor(Int32),
-            _make_fake_compact_2d_tensor(Int32, 4),
-            _make_fake_1d_tensor(Int32),
-            _make_fake_1d_tensor(Int32),
-            _make_fake_compact_2d_tensor(cutlass.Int64, 3),
-            _make_fake_tensormaps(
-                cutlass.Int64,
-                _DeepSeekPersistentWgmma.num_tensormaps,
-                _DeepSeekPersistentWgmma.bytes_per_tensormap // 8,
-            ),
-            _make_fake_matmul_operand(BFloat16, m, n),
-            zero_i32,
-            zero_i32,
-            zero_i32,
-            kernel.threads_per_cta,
-            cute.runtime.make_fake_stream(use_tvm_ffi_env_stream=True),
-            options="--enable-tvm-ffi",
-        )
+    return cute.compile(
+        kernel,
+        _make_fake_matmul_operand(Float8E4M3FN, m, k),
+        _make_fake_mat_b_tensor(Float8E4M3FN, g, k, n),
+        _make_fake_scale_a_tensor(Float32, recipe_a, m),
+        _make_fake_scale_b_tensor(Float32, recipe_b, g, n),
+        _make_fake_1d_tensor(Int32),
+        _make_fake_compact_2d_tensor(Int32, 4),
+        _make_fake_1d_tensor(Int32),
+        _make_fake_1d_tensor(Int32),
+        _make_fake_compact_2d_tensor(cutlass.Int64, 3),
+        _make_fake_tensormaps(
+            cutlass.Int64,
+            _DeepSeekPersistentWgmma.num_tensormaps,
+            _DeepSeekPersistentWgmma.bytes_per_tensormap // 8,
+        ),
+        _make_fake_matmul_operand(BFloat16, m, n),
+        zero_i32,
+        zero_i32,
+        zero_i32,
+        kernel.threads_per_cta,
+        cute.runtime.make_fake_stream(use_tvm_ffi_env_stream=True),
+        options="--enable-tvm-ffi",
     )
 
 
@@ -1440,21 +1428,19 @@ def launch_deepseek_grouped_wgmma(
     if cluster_n > 1:
         num_blocks = (num_blocks // cluster_n) * cluster_n
     tensormaps = _get_tensormaps(num_blocks, mat_a.device)
-    # cp.async.bulk has a compile-time width and no bounds check, so a scale_a
-    # shorter than one staged tile can't be staged at all -- read it from
-    # global instead.
+    # A scale_a shorter than one staged tile cannot be bulk-copied at all.
     small_scale_a = recipe_a == BLOCKWISE_1X128 and scale_a.size(0) < (
-        scale_stage_size(tile_m) if a_scale_wide else tile_m
+        fp32_scale_stage_size(tile_m) if a_scale_wide else tile_m
     )
     # Every stride feeding a bulk-copy offset must be align-multiple, else the
     # address alignment depends on k_tile and needs the full clamp chain.
     scale_k_aligned = (
-        recipe_a != BLOCKWISE_1X128 or scale_a.stride(1) % _SCALE_BULK_COPY_ALIGN == 0
+        recipe_a != BLOCKWISE_1X128 or scale_a.stride(1) % _SCALE_ALIGN == 0
     ) and (
         recipe_b != BLOCKWISE_1X128
         or (
-            scale_b.stride(0) % _SCALE_BULK_COPY_ALIGN == 0
-            and scale_b.stride(2) % _SCALE_BULK_COPY_ALIGN == 0
+            scale_b.stride(0) % _SCALE_ALIGN == 0
+            and scale_b.stride(2) % _SCALE_ALIGN == 0
         )
     )
     _compile_deepseek_persistent_wgmma(
@@ -1472,11 +1458,11 @@ def launch_deepseek_grouped_wgmma(
         scale_k_aligned,
         small_scale_a,
     )(
-        mat_a,
-        mat_b,
-        scale_a,
-        scale_b,
-        offs,
+        read_only(mat_a),
+        read_only(mat_b),
+        read_only(scale_a),
+        read_only(scale_b),
+        read_only(offs),
         problem_sizes,
         tile_offsets,
         total_tiles,

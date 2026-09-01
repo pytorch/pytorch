@@ -2889,9 +2889,7 @@ class TestFP8Matmul(TestCase):
             select_kernel_config,
         )
 
-        has_override = "_scaled_grouped_mm_v2" in registry.get_dsl_operations("cutedsl")
-        if not has_override:
-            raise unittest.SkipTest("CuTeDSL scaled_grouped_mm override not registered")
+        self.assertIn("_scaled_grouped_mm_v2", registry.get_dsl_operations("cutedsl"))
 
         torch.manual_seed(42)
         total_m = sum(group_sizes)

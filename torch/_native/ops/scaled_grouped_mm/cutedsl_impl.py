@@ -3,7 +3,6 @@
 import torch
 
 from ... import cutedsl_utils as cu
-from ._common import any_cow
 from .group_meta import allocate_output
 from .hopper_deepseek_kernel import run_deepseek_grouped_gemm
 from .scaled_grouped_mm_deepseek import _should_use_cutedsl_scaled_grouped_mm_deepseek
@@ -74,8 +73,6 @@ def _out_cond(
         use_fast_accum,
     ):
         return False
-    if any_cow(out):
-        return False
     if out.device != self.device or out.data_ptr() % 16 != 0:
         return False
     want_dtype = out_dtype if out_dtype is not None else torch.bfloat16
@@ -105,12 +102,7 @@ def _run(
         out = allocate_output(
             self, mat2, out_dtype if out_dtype is not None else torch.bfloat16
         )
-    device = self.get_device()
-    if device == torch.cuda.current_device():
-        return run_deepseek_grouped_gemm(
-            self, mat2, scale_a, scale_b, recipe_a, recipe_b, offs, out
-        )
-    with torch.cuda.device(device):
+    with torch.cuda.device(self.get_device()):
         return run_deepseek_grouped_gemm(
             self, mat2, scale_a, scale_b, recipe_a, recipe_b, offs, out
         )

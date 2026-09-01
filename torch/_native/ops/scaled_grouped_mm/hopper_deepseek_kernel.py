@@ -4,7 +4,7 @@ import functools
 
 import torch
 
-from ._common import BLOCKWISE_1X128, scale_stage_size
+from ._common import BLOCKWISE_1X128, fp32_scale_stage_size
 from .group_meta import build_group_metadata
 from .hopper_config import select_kernel_config
 
@@ -52,28 +52,19 @@ def run_deepseek_grouped_gemm(
         group_count=group_count,
         num_sms=num_sms,
     )
-    # Compile-time choice (see b_scale_wide below). With a single group,
-    # group_start is always 0, so an exact multiple of tile_m is safe on
-    # the plain copy just like N%tile_n==0 is for B; multiple groups have
-    # arbitrary per-group starts that can't be ruled out without a sync.
-    a_scale_wide = not (group_count == 1 and total_m % config.tile_m == 0)
     torch._check(
         n >= config.tile_n,
         lambda: f"DeepSeek grouped mm requires n ({n}) >= tile_n ({config.tile_n})",
     )
-    # Compile-time choice: wgmma_kernel.py's tx_count must be a Python
-    # value, so this is picked here from N rather than branched at runtime.
-    b_scale_wide = n % config.tile_n != 0
-    if recipe_b == BLOCKWISE_1X128 and b_scale_wide:
-        scale_b_cols = scale_stage_size(config.tile_n)
+    if recipe_b == BLOCKWISE_1X128 and config.b_scale_wide:
+        scale_b_cols = fp32_scale_stage_size(config.tile_n)
         torch._check(
             n >= scale_b_cols,
             lambda: f"DeepSeek grouped mm requires n ({n}) >= scale B cols ({scale_b_cols})",
         )
     if recipe_a != BLOCKWISE_1X128 and offs.numel() > 1:
-        # group_start // 128 truncation (accumulate_scaled) needs 128-
-        # aligned boundaries; no ATen fallback exists for this recipe pair,
-        # so kept as a hard check here rather than in the sync-free _cond.
+        # group_start // 128 truncation (accumulate_scaled) needs 128-aligned
+        # boundaries. Checked here, not in _cond, because it needs a sync.
         torch._check(
             bool((offs[:-1] % 128 == 0).all()),
             lambda: "DeepSeek grouped mm with a BlockWise128x128 A-scale "
@@ -101,7 +92,7 @@ def run_deepseek_grouped_gemm(
         config.cluster_m,
         config.cluster_n,
         num_sms,
-        a_scale_wide,
-        b_scale_wide,
+        config.a_scale_wide,
+        config.b_scale_wide,
     )
     return out
