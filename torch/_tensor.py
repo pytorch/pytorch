@@ -1615,15 +1615,17 @@ class Tensor(torch._C.TensorBase):
             raise BufferError(
                 "Can't export tensors with layout other than torch.strided"
             )
-
+            
+        current_accel = torch.accelerator.current_accelerator()
         if (
-            self.device.type == "cuda"
-            and self.device.index != torch.cuda.current_device()
+            current_accel is not None
+            and self.device.type == current_accel.type
+            and self.device.index != torch.accelerator.current_device_index()
         ):
             raise BufferError(
                 "Can't export tensors on a different CUDA device index. "
                 f"Expected: {self.device.index}. "
-                f"Current device: {torch.cuda.current_device()}."
+                f"Current device: {torch.accelerator.current_device_index()}."
             )
 
         if stream is not None and type(stream) is not int:
