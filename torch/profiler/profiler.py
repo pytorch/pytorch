@@ -139,17 +139,30 @@ class PerformanceMetricsConfig(_ProfilerExtensionConfig):
 
     Args:
         metric_names (list[str]): Backend-specific hardware metric names to collect.
-        device_id (int, optional): CUDA only. Device on which to collect
-            CUPTI PM samples.
+        sampling_interval_ms (float, optional): CUDA CUPTI-monitor sampling
+            interval in milliseconds. Defaults to 1 millisecond.
+        lookback_window_ms (float, optional): CUDA CUPTI-monitor look-back
+            window in milliseconds. This bounds the recent sample history
+            retained for decoding; the capacity is the look-back window divided
+            by the sampling interval. Defaults to 10 seconds.
+
+    CUDA PM sampling uses the current CUDA device.
     """
 
     metric_names: list[str]
-    device_id: int | None = None
+    sampling_interval_ms: float | None = None
+    lookback_window_ms: float | None = None
 
     def _to_config_entries(self) -> dict[str, str]:
         config = {"PERFORMANCE_METRICS": ",".join(self.metric_names)}
-        if self.device_id is not None:
-            config["PERFORMANCE_METRICS_DEVICE_ID"] = str(self.device_id)
+        if self.sampling_interval_ms is not None:
+            config["PERFORMANCE_METRICS_SAMPLING_INTERVAL_MS"] = str(
+                self.sampling_interval_ms
+            )
+        if self.lookback_window_ms is not None:
+            config["PERFORMANCE_METRICS_LOOKBACK_WINDOW_MS"] = str(
+                self.lookback_window_ms
+            )
         return config
 
 

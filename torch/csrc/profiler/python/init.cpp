@@ -315,7 +315,7 @@ PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
     if (it != kwargs.end()) {
       auto value = it->second;
       if (value.isString()) {
-        auto value_str = value.toStringRef();
+        const auto& value_str = value.toStringRef();
         if (value_str == "user_scope") {
           scope = at::RecordScope::USER_SCOPE;
         }
@@ -415,9 +415,9 @@ void initPythonBindings(PyObject* module) {
           "``PerformanceMetricsConfig`` in the activity dict, e.g. "
           "``{ProfilerActivity.CUDA: ProfilerActivityConfig("
           "profiler_configs=[PerformanceMetricsConfig("
-          "metric_names=[\"sm__cycles_active.avg\"], device_id=0)])}``. "
+          "metric_names=[\"sm__cycles_active.avg\"])])}``. "
           "Metric names are CUPTI PM sampling metrics supported by the "
-          "selected CUDA device. Hardware counter collection requires a "
+          "current CUDA device. Hardware counter collection requires a "
           "Kineto build with CUPTI PM sampling support.")
       .value("HPU", ActivityType::HPU, "HPU device activity.")
       .value(

@@ -2144,7 +2144,8 @@ class TestProfiler(TestCase):
     def test_profiler_activity_config(self):
         performance_metrics = PerformanceMetricsConfig(
             metric_names=["metric_a", "metric_b"],
-            device_id=1,
+            sampling_interval_ms=0.5,
+            lookback_window_ms=2000,
         )
         config = ProfilerActivityConfig(
             activity_types=["CUDA_RUNTIME"],
@@ -2157,7 +2158,8 @@ class TestProfiler(TestCase):
             _get_profiler_extensions(config),
             {
                 "PERFORMANCE_METRICS": "metric_a,metric_b",
-                "PERFORMANCE_METRICS_DEVICE_ID": "1",
+                "PERFORMANCE_METRICS_SAMPLING_INTERVAL_MS": "0.5",
+                "PERFORMANCE_METRICS_LOOKBACK_WINDOW_MS": "2000",
             },
         )
         self.assertEqual(
