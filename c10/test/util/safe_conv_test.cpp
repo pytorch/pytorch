@@ -68,7 +68,8 @@ TEST(safeConvTest, UnsafeWrappingConvertPreservesWrap) {
       unsafe_wrapping_convert<uint32_t>(int64_t{-1}, "uint32_t"), 4294967295u);
   // Wrap applies only to unsigned targets; signed targets still range-check.
   constexpr int64_t tooBig = int64_t{std::numeric_limits<int32_t>::max()} + 1;
-  EXPECT_THROW(unsafe_wrapping_convert<int32_t>(tooBig, "int32_t"), c10::Error);
+  EXPECT_THROW(
+      unsafe_wrapping_convert<int32_t>(tooBig, "int32_t"), std::runtime_error);
 }
 
 } // namespace
