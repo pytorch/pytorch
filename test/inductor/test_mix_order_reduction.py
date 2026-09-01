@@ -11,7 +11,7 @@ from torch import nn
 from torch._dynamo.utils import same
 from torch._inductor import metrics, utils
 from torch._inductor.codegen.triton import TritonKernel
-from torch._inductor.runtime.hints import DeviceProperties
+from torch._inductor.runtime.hints import DeviceProperties, ReductionHint
 from torch._inductor.runtime.triton_heuristics import persistent_reduction
 from torch._inductor.scheduler import MixOrderReduction
 from torch._inductor.test_case import run_tests, TestCase
@@ -1487,6 +1487,19 @@ class MixOrderReductionHeuristicTest(TestBase):
     heuristic. These exercise the config generation logic directly (via
     ``return_configs=True``) without needing a GPU.
     """
+
+    def test_contiguous_reduction_hint_allowlist(self):
+        for hint in (
+            ReductionHint.INNER,
+            ReductionHint.DEFAULT,
+            ReductionHint.OUTER_NO_SPLIT,
+        ):
+            self.assertTrue(
+                MixOrderReduction.supports_contiguous_reduction_hint(hint)
+            )
+        self.assertFalse(
+            MixOrderReduction.supports_contiguous_reduction_hint(ReductionHint.OUTER)
+        )
 
     def test_uses_tma_tracks_emitted_descriptors(self):
         for source in (None, "host", "device"):

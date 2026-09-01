@@ -19098,6 +19098,88 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue("ReductionHint.OUTER" in code)
         self.assertFalse("ReductionHint.INNER" in code)
 
+    @config.patch(
+        {
+            "max_autotune": True,
+            "compile_threads": 1,
+            "force_disable_caches": True,
+        }
+    )
+    @skipIfRocm
+    @skipIfXpu
+    @xfail_if_mps
+    def test_large_outer_reduction_preserves_unsplit_hint(self):
+        if self.device == "cpu":
+            self.skipTest("Skip for CPU device")
+        if torch.cuda.get_device_capability()[0] < 10:
+            self.skipTest("OUTER_NO_SPLIT is currently restricted to SM100+")
+
+        x = torch.randn(2049, 32768, device=self.device, dtype=torch.bfloat16)
+
+        def f(x):
+            return x.float().sum(dim=0)
+
+        expected = f(x)
+        actual, source_codes = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        self.assertEqual(expected, actual, atol=0.125, rtol=0.01)
+        code = source_codes[0]
+        self.assertIn("ReductionHint.OUTER_NO_SPLIT", code)
+        self.assertEqual(code.count("@triton_heuristics.reduction("), 1)
+
+    @config.patch(
+        {
+            "max_autotune": True,
+            "compile_threads": 1,
+            "force_disable_caches": True,
+            "triton.enable_experimental_large_output_outer_reductions": True,
+        }
+    )
+    @skipIfRocm
+    @skipIfXpu
+    @xfail_if_mps
+    def test_experimental_large_outer_reduction_plan(self):
+        if self.device == "cpu":
+            self.skipTest("Skip for CPU device")
+        if torch.cuda.get_device_capability()[0] < 10:
+            self.skipTest("experimental large OUTER plan is restricted to SM100+")
+
+        x = torch.randn(
+            5247, 96, 128, device=self.device, dtype=torch.bfloat16
+        )
+        y = torch.randn(
+            5247, 96, 128, device=self.device, dtype=torch.bfloat16
+        )
+        stats = torch.rand(5247, 96, 1, device=self.device, dtype=torch.float32)
+
+        def f(x, y, stats):
+            return (x.float() * y.float() * torch.rsqrt(stats + 1e-5)).sum(dim=0)
+
+        expected = f(x, y, stats)
+        actual, source_codes = run_and_get_code(
+            torch.compile(f, fullgraph=True), x, y, stats
+        )
+        self.assertEqual(expected, actual, atol=0.125, rtol=0.01)
+        code = source_codes[0]
+        self.assertNotIn("ReductionHint.OUTER_NO_SPLIT", code)
+        self.assertGreaterEqual(code.count("ReductionHint.OUTER"), 2)
+        # The first stage may preserve the logical output as a 2D tile rather
+        # than flattening it.  Check the split reduction extents instead of a
+        # wrapper allocation's exact textual shape.
+        self.assertIn("r0_numel = 132", code)
+        self.assertIn("r0_numel = 40", code)
+
+        def simple(x):
+            return x.float().sum(dim=0)
+
+        expected_simple = simple(x)
+        actual_simple, simple_source_codes = run_and_get_code(
+            torch.compile(simple, fullgraph=True), x
+        )
+        self.assertEqual(expected_simple, actual_simple, atol=0.125, rtol=0.01)
+        simple_code = simple_source_codes[0]
+        self.assertIn("ReductionHint.OUTER_NO_SPLIT", simple_code)
+        self.assertEqual(simple_code.count("@triton_heuristics.reduction("), 1)
+
     @config.patch(force_disable_caches=True)
     @xfail_if_mps  # MPS codegen does not emit ReductionHint.OUTER
     def test_broadcasted_inner_reduction_detection(self):

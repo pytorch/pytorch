@@ -52,6 +52,13 @@ class ReductionHint(Enum):
     OUTER = 1
     OUTER_TINY = 2
     DEFAULT = 3
+    # The reduction dimension is outer-strided, but the IR deliberately kept
+    # the reduction as a single-stage plan. Scheduling otherwise treats this
+    # like DEFAULT.
+    OUTER_NO_SPLIT = 4
+
+    def is_default_scheduling(self) -> bool:
+        return self in (ReductionHint.DEFAULT, ReductionHint.OUTER_NO_SPLIT)
 
 
 class TileHint(Enum):
