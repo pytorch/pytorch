@@ -4624,8 +4624,8 @@ class TestPythonChromeTraceExport(TestCase):
     def test_cuda_graph_annotations_reach_the_trace(self):
         """End to end: annotations recorded at capture are baked into a replay's
         kernel events by export_chrome_trace(cuda_graph_annotations=...)."""
+        from torch.cuda._graph_annotations import _reset_kernel_annotations
         from torch.cuda.graph_annotations import (
-            clear_kernel_annotations,
             get_kernel_annotations,
             is_available,
             mark_kernels,
@@ -4634,8 +4634,8 @@ class TestPythonChromeTraceExport(TestCase):
         if not is_available():
             self.skipTest("CUDA graph annotations are unavailable")
 
-        clear_kernel_annotations()
-        self.addCleanup(clear_kernel_annotations)
+        _reset_kernel_annotations()
+        self.addCleanup(_reset_kernel_annotations)
         x = torch.randn(64, 64, device="cuda")
         graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(graph, enable_annotations=True):

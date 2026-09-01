@@ -12,6 +12,7 @@ from torch.cuda._graph_annotations import (
     _get_stream_id,
     _is_tools_id_unavailable,
     _rekey_annotations,
+    _reset_kernel_annotations,
     mark_stream,
     resolve_and_remap,
     resolve_pending_annotations,
@@ -104,8 +105,8 @@ class TestMarkKernels(TestCase):
         super().setUp()
         # Annotations are enabled per-capture via torch.cuda.graph(..,
         # enable_annotations=True); there is no global toggle.
-        clear_kernel_annotations()
-        self.addCleanup(clear_kernel_annotations)
+        _reset_kernel_annotations()
+        self.addCleanup(_reset_kernel_annotations)
 
     def _count_phases(self, name):
         """Count (forward, backward) annotations recorded under ``name``."""
@@ -257,6 +258,7 @@ class TestMarkKernels(TestCase):
         self.assertAnnotations(annotation)
 
     def test_clear_resets_state(self):
+        """The deprecated public entry point still clears, and warns while doing it."""
         graph = torch.cuda.CUDAGraph()
         x = torch.randn(8, device="cuda")
 
@@ -265,8 +267,31 @@ class TestMarkKernels(TestCase):
                 _ = x + 1
 
         self.assertGreater(len(get_kernel_annotations()), 0)
-        clear_kernel_annotations()
+        with self.assertWarnsRegex(FutureWarning, "clear_kernel_annotations"):
+            clear_kernel_annotations()
         self.assertEqual(len(get_kernel_annotations()), 0)
+
+    def test_failed_capture_end_discards_annotations(self):
+        """A completed scope plus a failing capture_end used to strand entries keyed by
+        the capture graph id. Nothing remaps them (that happens in instantiate) and
+        remove_kernel_annotations matches exec ids, so they outlived the process."""
+        x = torch.randn(8, device="cuda")
+        graph = torch.cuda.CUDAGraph()
+        side = torch.cuda.Stream()
+        entry_stream = torch.cuda.current_stream()
+        with self.assertRaises(Exception):
+            with torch.cuda.graph(graph, enable_annotations=True):
+                with mark_kernels("completed_scope"):
+                    _ = x + 1
+                side.wait_event(entry_stream.record_event())
+                # Forked and never joined, so cudaStreamEndCapture fails.
+                with torch.cuda.stream(side):
+                    _ = x * 3
+
+        self.assertEqual(len(get_kernel_annotations()), 0)
+        # A failed capture_end must still unwind the stream context, or the graph's
+        # private stream stays current and every later test inherits it.
+        self.assertEqual(torch.cuda.current_stream(), entry_stream)
 
     def test_resolve_without_scopes_is_noop(self):
         resolve_pending_annotations()
@@ -391,8 +416,6 @@ class TestMarkKernels(TestCase):
 
     def test_enable_annotations_kwarg(self):
         """enable_annotations=True on torch.cuda.graph records and auto-resolves."""
-        clear_kernel_annotations()
-
         graph = torch.cuda.CUDAGraph()
         x = torch.randn(8, device="cuda")
 
@@ -404,8 +427,6 @@ class TestMarkKernels(TestCase):
 
     def test_enable_annotations_does_not_clear(self):
         """Annotations from a previous graph survive a second capture."""
-        clear_kernel_annotations()
-
         graph1 = torch.cuda.CUDAGraph()
         x = torch.randn(8, device="cuda")
 
@@ -426,8 +447,6 @@ class TestMarkKernels(TestCase):
     def test_enable_annotations_remaps_to_exec_graph(self):
         """enable_annotations=True must remap toolsIds to the exec graph ID."""
         from cuda.bindings import runtime as cuda_runtime
-
-        clear_kernel_annotations()
 
         graph = torch.cuda.CUDAGraph()
         x = torch.randn(8, device="cuda")
@@ -589,7 +608,6 @@ class TestMarkKernels(TestCase):
         deferred until the graph is instantiated -- whether that happens via an
         explicit instantiate() or implicitly on the first replay().
         """
-        clear_kernel_annotations()
         graph = torch.cuda.CUDAGraph(keep_graph=True)
         x = torch.randn(8, device="cuda")
 
@@ -616,7 +634,6 @@ class TestMarkKernels(TestCase):
         be rekeyed from the previous exec id to the new one on re-instantiation,
         while a plain replay() (no new exec graph) leaves them unchanged.
         """
-        clear_kernel_annotations()
         graph = torch.cuda.CUDAGraph(keep_graph=True)
         x = torch.randn(8, device="cuda")
 
@@ -848,7 +865,7 @@ class TestMarkKernels(TestCase):
         appending an unmarked op must not change the scope's tag counts."""
         counts = {}
         for with_unmarked in (False, True):
-            clear_kernel_annotations()
+            _reset_kernel_annotations()
             graph = torch.cuda.CUDAGraph()
             x = torch.randn(8, device="cuda", requires_grad=True)
 
@@ -868,53 +885,13 @@ class TestMarkKernels(TestCase):
         self.assertEqual(fwd, 1)
         self.assertGreaterEqual(bwd, 1)
 
-    def test_backward_clear_then_retained_backward(self):
-        """clear_kernel_annotations revokes recording from scopes opened
-        before the clear: hooks on a retained graph become inert, so a
-        backward captured after the clear records nothing."""
-        graph_fwd = torch.cuda.CUDAGraph()
-        x = torch.randn(8, device="cuda", requires_grad=True)
-        with torch.cuda.graph(graph_fwd, enable_annotations=True):
-            with mark_kernels("scope"):
-                y = (x * 2).sin()
-
-        clear_kernel_annotations()
-        self.assertEqual(len(get_kernel_annotations()), 0)
-
-        graph_bwd = torch.cuda.CUDAGraph()
-        grad_out = torch.ones_like(y)
-        with torch.cuda.graph(graph_bwd, enable_annotations=True):
-            _ = torch.autograd.grad(y, x, grad_outputs=grad_out, retain_graph=True)
-
-        self.assertEqual(len(get_kernel_annotations()), 0)
-
-    def test_backward_scope_after_clear_records(self):
-        """A scope opened after a clear records normally (fresh generation),
-        including backward of nodes created under it."""
-        graph1 = torch.cuda.CUDAGraph()
-        x = torch.randn(8, device="cuda", requires_grad=True)
-        with torch.cuda.graph(graph1, enable_annotations=True):
-            with mark_kernels("old"):
-                _ = (x * 2).sin()
-
-        clear_kernel_annotations()
-
-        graph2 = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(graph2, enable_annotations=True):
-            with mark_kernels("new"):
-                y = (x * 3).cos()
-            _ = torch.autograd.grad(y.sum(), x)
-
-        ann = {"name": "new"}
-        self.assertAnnotations(ann, self._bwd(ann))
-
     def test_backward_accumulate_grad_excluded(self):
         """AccumulateGrad work is never tagged: a .backward() run (which
         executes AccumulateGrad) tags exactly as many backward kernels as an
         autograd.grad run (which has no AccumulateGrad) of the same graph."""
         bwd_counts = {}
         for mode in ("grad", "backward"):
-            clear_kernel_annotations()
+            _reset_kernel_annotations()
             graph = torch.cuda.CUDAGraph()
             x = torch.randn(8, device="cuda", requires_grad=True)
             x.grad = torch.zeros_like(x)
@@ -941,7 +918,7 @@ class TestMarkKernels(TestCase):
         region's counts match the single-consumer baseline."""
         counts = {}
         for consumers in (1, 2):
-            clear_kernel_annotations()
+            _reset_kernel_annotations()
             graph = torch.cuda.CUDAGraph()
             x = torch.randn(8, device="cuda", requires_grad=True)
 
@@ -1741,17 +1718,17 @@ class TestRemoveKernelAnnotations(TestCase):
     def _tools_id(graph_id, node_id):
         return (graph_id << 32) | node_id
 
-    def tearDown(self):
+    def setUp(self):
         import torch.cuda._graph_annotations as ga
 
-        ga.clear_kernel_annotations()
-        super().tearDown()
+        super().setUp()
+        ga._reset_kernel_annotations()
+        self.addCleanup(ga._reset_kernel_annotations)
 
     def test_removes_only_requested_exec_id(self):
         import torch.cuda._graph_annotations as ga
 
         exec_a, exec_b = 1, 2
-        ga.clear_kernel_annotations()
         ga.record_node_annotation(self._tools_id(exec_a, 10), {"name": "a"})
         ga.record_node_annotation(self._tools_id(exec_b, 10), {"name": "b"})
 
@@ -1765,7 +1742,6 @@ class TestRemoveKernelAnnotations(TestCase):
     def test_missing_and_empty_ids_are_noops(self):
         import torch.cuda._graph_annotations as ga
 
-        ga.clear_kernel_annotations()
         ga.record_node_annotation(self._tools_id(2, 10), {"name": "b"})
         ga.remove_kernel_annotations([])  # empty: no-op
         ga.remove_kernel_annotations([99])  # unknown exec id: no-op
@@ -1777,16 +1753,16 @@ class TestRemoveKernelAnnotations(TestCase):
 # Pure registry logic, no CUDA needed: the store keeps one merged annotation per node,
 # which the public mapping wraps in a one-element list.
 class TestAnnotationStore(TestCase):
-    def tearDown(self):
+    def setUp(self):
         import torch.cuda._graph_annotations as ga
 
-        ga.clear_kernel_annotations()
-        super().tearDown()
+        super().setUp()
+        ga._reset_kernel_annotations()
+        self.addCleanup(ga._reset_kernel_annotations)
 
     def test_writes_to_one_node_merge_first_wins(self):
         import torch.cuda._graph_annotations as ga
 
-        ga.clear_kernel_annotations()
         # Scopes reach a node innermost first, so the first write keeps the shared keys.
         ga.record_node_annotation(7, {"name": "inner", "only_inner": 1})
         ga.record_node_annotation(7, {"name": "outer", "only_outer": 2})
@@ -1797,7 +1773,6 @@ class TestAnnotationStore(TestCase):
     def test_view_is_live_and_read_only(self):
         import torch.cuda._graph_annotations as ga
 
-        ga.clear_kernel_annotations()
         view = ga.get_kernel_annotations()
         self.assertEqual(len(view), 0)
         ga.record_node_annotation(7, {"name": "a"})
@@ -1994,8 +1969,8 @@ class TestCuptiAnnotationBackend(TestCase):
     rather than by walking the capture graph's dependent edges."""
 
     def setUp(self):
-        clear_kernel_annotations()
-        self.addCleanup(clear_kernel_annotations)
+        _reset_kernel_annotations()
+        self.addCleanup(_reset_kernel_annotations)
         # Attributing a node needs the mark_kernels scope open on the creating thread.
         ctx = torch.autograd.grad_mode.set_multithreading_enabled(False)
         ctx.__enter__()
@@ -2042,7 +2017,7 @@ class TestCuptiAnnotationBackend(TestCase):
 
         by_backend = {}
         for backend in ("edge_walk", "cupti"):
-            clear_kernel_annotations()
+            _reset_kernel_annotations()
             x = torch.randn(64, 64, device="cuda", requires_grad=True)
             warm(x)
             g = torch.cuda.CUDAGraph()
@@ -2080,7 +2055,7 @@ class TestCuptiAnnotationBackend(TestCase):
         # even though work inside it is captured. CUPTI reports each node as it is created,
         # so it is unaffected.
         def run(backend):
-            clear_kernel_annotations()
+            _reset_kernel_annotations()
             x = self._warm(torch.randn(64, 64, device="cuda"))
             g = torch.cuda.CUDAGraph()
             side = torch.cuda.Stream()
@@ -2200,7 +2175,7 @@ class TestCuptiAnnotationBackend(TestCase):
                     x = x + 1
                     raise RuntimeError("boom")
 
-        clear_kernel_annotations()
+        _reset_kernel_annotations()
         g2 = torch.cuda.CUDAGraph()
         y = self._warm(torch.randn(64, 64, device="cuda"))
         with torch.cuda.graph(
