@@ -3886,6 +3886,24 @@ def error_inputs_max_pool1d(op_info, device, **kwargs):
                                      kwargs={'kernel_size': 5, 'stride': 1, 'padding': 0, 'dilation': 1}),
                          error_regex=error_msg)
 
+        # error inputs for invalid output size, with a kernel past INT32_MAX:
+        # div_rtn() used to floor-divide in `int`, wrapping the negative output
+        # size positive and letting the kernel read out of bounds.
+        for kernel_size in (2 ** 31 - 1, 2 ** 31, 2147483697):
+            yield ErrorInput(SampleInput(make_arg((2, 10, 4)),
+                                         kwargs={'kernel_size': kernel_size, 'stride': kernel_size,
+                                                 'padding': 0, 'dilation': kernel_size, 'ceil_mode': True}),
+                             error_regex='Invalid computed output size: -')
+        yield ErrorInput(SampleInput(make_arg((2, 10, 4)),
+                                     kwargs={'kernel_size': 2 ** 63 - 1, 'stride': 2 ** 63 - 1}),
+                         error_regex='Invalid computed output size: 0')
+
+        # error inputs when dilation * (kernel_size - 1) + 1 overflows int64
+        yield ErrorInput(SampleInput(make_arg((1, 2, 3)),
+                                     kwargs={'kernel_size': 8608480567731124087, 'padding': 1250999896764,
+                                             'dilation': 1250999896764, 'ceil_mode': True}),
+                         error_regex='effective kernel size overflows')
+
         # error inputs when kernel_size=0
         error_msg = 'kernel_size must be greater than zero'
         yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 0}),
@@ -4949,6 +4967,23 @@ def sample_inputs_linear(self, device, dtype, requires_grad, include_empty=True,
     if include_empty:
         yield SampleInput(create_tensor(3, 4, 0), create_tensor(5, 0))
         yield SampleInput(create_tensor(3, 4, 0), create_tensor(5, 0), create_tensor(5))
+
+    # 1D weight contracts away the last input dim (out_features == 1 with the
+    # trailing output dim squeezed); its backward used to SIGABRT on MPS, see
+    # https://github.com/pytorch/pytorch/issues/187988. No bias samples: a 1D
+    # weight only takes a scalar bias, which functorch transforms reject, see
+    # https://github.com/pytorch/pytorch/issues/188891.
+    # Skipped on ROCm: the decomposed matmul reduces in a different order than
+    # eager, so test_eager_equivalence (which runs at ~1 ULP tolerance) fails.
+    if torch.version.hip is None:
+        yield SampleInput(create_tensor(8, 3), create_tensor(3))
+        yield SampleInput(create_tensor(2, 3, 4), create_tensor(4))
+        yield SampleInput(create_tensor(2, 1, 2, 1, 2), create_tensor(2))
+        if include_empty:
+            # An empty reduction dim and an empty batch, where the shortcuts taken for
+            # zero-element tensors still have to drop the 1D weight's output dim.
+            yield SampleInput(create_tensor(3, 4, 0), create_tensor(0))
+            yield SampleInput(create_tensor(0, 8), create_tensor(8))
 
 def sample_inputs_bilinear(self, device, dtype, requires_grad, **kwargs):
     features_options = [[3, 4, 5], [8, 8, 8]]
@@ -7174,6 +7209,10 @@ def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, *,
                 # skip samples with linear bias as unsupported
                 continue
 
+            if linear_weight.dim() == 1:
+                # linear_cross_entropy requires a linear weight of rank >= 2
+                continue
+
             num_classes = linear_weight.shape[0]
             num_batches = linear_input.shape[:-1]
             input_shape = (*num_batches, num_classes)
@@ -7304,6 +7343,36 @@ def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_arg(()), 0.2)
     # eps > 0.5 exercises the branch where lo > hi; see issue #177839.
     yield SampleInput(make_arg((S, S, S)), 0.6)
+
+def sample_inputs_frexp(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_elementwise_unary(op_info, device, dtype, requires_grad, **kwargs)
+
+    # Subnormals and signed zero. A frexp built on a float-valued library call
+    # loses these wherever the backend flushes subnormals to zero, which the
+    # generated samples never exercise. float64 is left out because gradcheck
+    # runs there and would fail: the derivative at a subnormal is 1/2**exponent,
+    # which overflows to inf while the numerical estimate stays finite. The same
+    # overflow happens at float32 and float16, but nothing gradchecks those, so
+    # the only grad comparison these samples feed is inf against inf.
+    bits_dtype = {
+        torch.float32: torch.int32,
+        torch.float16: torch.int16,
+        torch.bfloat16: torch.int16,
+    }.get(dtype)
+    if bits_dtype is None:
+        return
+    # every value below is subnormal in all three formats. CUDA is skipped
+    # because inductor's frexp returns 0 for float32 subnormals there:
+    # https://github.com/pytorch/pytorch/issues/195007
+    if torch.device(device).type != 'cuda':
+        subnormals = torch.tensor([1, 2, 3, 7, 127], dtype=bits_dtype, device=device).view(dtype)
+        yield SampleInput(subnormals.detach().requires_grad_(requires_grad))
+
+    # NaN is omitted: check_alias_annotation deep-compares inputs by value to
+    # prove the op did not mutate them, and NaN never equals itself.
+    specials = torch.tensor([0.0, -0.0, float('inf'), float('-inf')], dtype=dtype, device=device)
+    yield SampleInput(specials.detach().requires_grad_(requires_grad))
+
 
 def sample_inputs_isin(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -9029,6 +9098,10 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
 
     target = torch.tensor([-1, 2], device=device, dtype=torch.long)
     yield SampleInput(make_input(shape), args=(target,), kwargs={'ignore_index': -1})
+
+    # Noncontiguous target
+    target = torch.randint(num_classes, (2 * shape[0],), device=device)[::2]
+    yield SampleInput(make_input(shape), args=(target,))
 
 
 def sample_inputs_binary_cross_entropy_with_logits(
@@ -13985,6 +14058,7 @@ op_db: list[OpInfo] = [
     UnaryUfuncInfo('frexp',
                    op=torch.frexp,
                    ref=np.frexp,
+                   sample_inputs_func=sample_inputs_frexp,
                    dtypes=floating_types_and(torch.half, torch.bfloat16),
                    dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
                    # skip testing torch.frexp as it is not supported by ROCm platform yet
@@ -14010,8 +14084,6 @@ op_db: list[OpInfo] = [
                                     active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     active_if=IS_WINDOWS),
-                       # Error: The operator 'aten::frexp.Tensor_out' is not currently implemented for the MPS device
-                       DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
                    )),
     UnaryUfuncInfo('log1p',
                    ref=np.log1p,
@@ -14390,14 +14462,14 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            skips=(
                skipCPUIfNoLapack,
-               # RuntimeError: linalg.lu_factor(): MPS doesn't support complex types.
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
            ),
            sample_inputs_func=sample_inputs_lu_unpack),
     OpInfo('lu',
            op=torch.lu,
            dtypes=floating_and_complex_types(),
+           # complex64 backward needs solve_triangular, which is float32-only on
+           # MPS, so only the float forward+backward runs there.
+           backward_dtypesIfMPS=floating_types(),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
@@ -14419,13 +14491,12 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-               # Exception: linalg.lu_factor(): MPS doesn't support complex types.
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
            )),
     OpInfo('lu_solve',
            op=torch.lu_solve,
            dtypes=floating_and_complex_types(),
+           # complex64 backward needs solve_triangular, which is float32-only on MPS.
+           backward_dtypesIfMPS=floating_types(),
            supports_forward_ad=True,
            # See https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
@@ -14438,8 +14509,6 @@ op_db: list[OpInfo] = [
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
                             device_type='mps', dtypes=[torch.float32]),
-               # Exception: linalg.solve.triangular(); Only float is supported!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
                DecorateInfo(unittest.skip("Tests different backward paths"),
                             "TestCommon", "test_floating_inputs_are_differentiable"),),
            decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoLinalgsolver]),
@@ -19940,7 +20009,6 @@ op_db: list[OpInfo] = [
            )),
     OpInfo('randint',
            dtypes=all_types_and(torch.half, torch.bfloat16, torch.bool),
-           dtypesIfMPS=all_types_and(torch.half, torch.bfloat16, torch.complex64, torch.bool),
            op=lambda *args, **kwargs:
                wrapper_set_seed(torch.randint, *args, **kwargs),
            supports_out=False,
@@ -21315,11 +21383,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_linalg_det_logdet_slogdet,
-        skips=(
-            # Exception: linalg.lu_factor(): MPS doesn't support complex types.
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
-        ),
         decorators=[skipCUDAIfNoMagmaAndNoLinalgsolver, skipCPUIfNoLapack]),
     # `log_softmax` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
@@ -21700,7 +21763,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         "nn.functional.dropout",
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.dropout, input, *args, **kwargs),
-        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16, torch.complex64),
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
@@ -21751,7 +21814,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         "nn.functional.dropout2d",
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.dropout2d, input, *args, **kwargs),
-        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16, torch.complex64),
         skips=(
             # lambda impl
@@ -21770,7 +21833,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         "nn.functional.dropout3d",
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.dropout3d, input, *args, **kwargs),
-        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16, torch.complex64),
         skips=(
             # lambda impl
@@ -21789,7 +21852,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         "nn.functional.alpha_dropout",
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.alpha_dropout, input, *args, **kwargs),
-        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16, torch.complex64),
         gradcheck_wrapper=wrapper_set_seed,
         supports_forward_ad=True,
@@ -21806,14 +21869,14 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
             # Fails in cuda11.7 and xpu
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu', device_type=('cuda', 'xpu')),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),),),
-    # In training mode, feature_alpha_dropout currently doesn't support inputs of complex dtype
-    # unlike when `train=False`, it supports complex inputs, hence 2 OpInfos to cover all cases
+    # feature_alpha_dropout has two OpInfos to cover train=True and train=False,
+    # whose sample inputs differ; both support complex inputs.
     OpInfo(
         "nn.functional.feature_alpha_dropout",
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.feature_alpha_dropout, input, *args, **kwargs),
         variant_test_name="with_train",
-        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16, torch.complex64),
         skips=(
             # lambda impl
@@ -22296,16 +22359,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                 unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
                 device_type='xpu',
                 dtypes=[torch.float64]),
-            # MPS: std does not support automatic differentiation for outputs with complex dtype
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager',
-                device_type='mps', dtypes=(torch.complex64,)
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                device_type='mps', dtypes=(torch.complex64,)
-            ),
             # The operator 'aten::std.correction_out' is not currently implemented for the MPS device
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
@@ -22329,16 +22382,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
             # FIXME: dim=[] reduces all dimensions
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
-            # MPS: std does not support automatic differentiation for outputs with complex dtype
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager',
-                device_type='mps', dtypes=(torch.complex64,)
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                device_type='mps', dtypes=(torch.complex64,)
-            ),
         ),
     ),
     ReductionOpInfo(
@@ -22367,16 +22410,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values'),
             # NumPy is giving NaN for this
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_large_input'),
-            # RuntimeError: var does not support automatic differentiation for outputs with complex dtype.
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager',
-                device_type='mps', dtypes=(torch.complex64,)
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                device_type='mps', dtypes=(torch.complex64,)
-            ),
             # NotImplementedError: The operator 'aten::var.correction_out' is not currently implemented for the MPS device
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
@@ -22400,9 +22433,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
             # FIXME: dim=[] reduces all dimensions
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
-            # RuntimeError: var does not support automatic differentiation for outputs with complex dtype.
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
         ),
     ),
     ReductionOpInfo(
@@ -22602,8 +22632,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                 "test_cow_input",
                 device_type=('cuda', 'xpu'),
             ),
-            DecorateInfo(unittest.skip("FP16 nll_loss cases have not been enabled on MPS yet"),
-                         dtypes=(torch.half,), device_type="mps"),
         ),
     ),
     OpInfo(
@@ -24044,8 +24072,6 @@ python_ref_db = [
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                          active_if=IS_WINDOWS),
-            # The operator 'aten::frexp.Tensor_out' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
         ),
     ),
     ElementwiseUnaryPythonRefInfo(
@@ -24550,10 +24576,17 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Expected: dropout is not comparable"),
                          'TestCommon',
                          'test_python_ref_executor', device_type=('cuda', 'xpu')),
-            # AssertionError: Tensor-likes are not close!
+            # AssertionError: Tensor-likes are not close! (dropout draws a fresh
+            # mask per call, so conj/neg-view invariance does not hold)
             DecorateInfo(unittest.skip("Expected: dropout is not comparable"),
                          'TestMathBits',
                          'test_neg_view'),
+            DecorateInfo(unittest.skip("Expected: dropout is not comparable"),
+                         'TestMathBits',
+                         'test_conj_view'),
+            DecorateInfo(unittest.skip("Expected: dropout is not comparable"),
+                         'TestMathBits',
+                         'test_neg_conj_view'),
             # AssertionError: Tensor-likes are not close!
             DecorateInfo(unittest.skip("Expected: dropout is not comparable"),
                          'TestCommon',
@@ -24613,7 +24646,13 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Expected: dropout is not comparable"),
                          'TestMathBits',
                          'test_neg_view'),
-            # dropout is not comparable
+            # dropout is not comparable. On CUDA/ROCm the aten-executor result
+            # for complex happens to match eager (unexpected success vs the xfail
+            # below), unlike MPS where it stays non-comparable, so skip complex
+            # there rather than xfail.
+            DecorateInfo(unittest.skip("dropout is not comparable"), 'TestCommon',
+                         'test_python_ref_executor', device_type='cuda',
+                         dtypes=(torch.complex64, torch.complex128)),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
             DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
         )
@@ -26298,27 +26337,12 @@ python_ref_db = [
                 unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
                 device_type='xpu',
                 dtypes=[torch.float64]),
-            # Exception: Dtypes torch.float32 and torch.complex64 are not equal!
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps', dtypes=(torch.complex64,)),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                device_type='mps', dtypes=(torch.complex64,)
-            ),
         ),
     ),
     # std_mean and var_mean are not ReductionInfos
     PythonRefInfo(
         "_refs.std_mean",
         torch_opinfo_name="std_mean",
-        skips=(
-            # Exception: Dtypes torch.float32 and torch.complex64 are not equal!
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps', dtypes=(torch.complex64,)),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                device_type='mps', dtypes=(torch.complex64,)
-            ),
-        ),
     ),
     ReductionPythonRefInfo(
         "_refs.sum",
@@ -26412,26 +26436,12 @@ python_ref_db = [
                 unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input'),
             DecorateInfo(
                 unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values'),
-            # torch._subclasses.fake_tensor.MetadataMismatchError: Dtypes torch.float32 and torch.complex64 are not equal!
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps', dtypes=(torch.complex64,)),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                device_type='mps', dtypes=(torch.complex64,)
-            ),
         ),
     ),
     PythonRefInfo(
         "_refs.var_mean",
         torch_opinfo_name="var_mean",
         validate_view_consistency=False,
-        skips=(
-            # torch._subclasses.fake_tensor.MetadataMismatchError: Dtypes torch.float32 and torch.complex64 are not equal!
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps', dtypes=(torch.complex64,)),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                device_type='mps', dtypes=(torch.complex64,)
-            ),
-        ),
     ),
     #
     # Linear Algebra Operators
