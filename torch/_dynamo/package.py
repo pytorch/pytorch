@@ -575,7 +575,14 @@ class _DynamoCacheEntry:
     codes: list[_DynamoCodeCacheEntry]
     source_info: SourceInfo
     device_type: str
-    system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
+    # Probe-free on purpose: this default is what CompileArtifacts(**state)
+    # reaches for a pickle written before the field existed, and running the
+    # C++ toolchain there is seconds on a cold cache and a hard error on a
+    # host with no compiler. Every site that compares the target passes
+    # cpu_codegen= explicitly.
+    system_info: SystemInfo = dataclasses.field(
+        default_factory=functools.partial(SystemInfo.current, cpu_codegen=False)
+    )
     requires_native_backend_compatibility: bool = True
     fn_name: str | None = None
     fn_first_lineno: str | None = None
