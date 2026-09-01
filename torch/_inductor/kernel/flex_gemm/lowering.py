@@ -677,8 +677,8 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         ),
         lowering_name=subgraph.name,
     )
-    template_local_reduce = FlexGemmEpilogueLocalReduceConfig.from_output_plan(
-        outputs.local_reduce,
+    template_local_reduce = FlexGemmEpilogueLocalReduceConfig.from_plan(
+        epilogue_analysis.reduction_plan,
         local_reduce_out_index,
         output_layout=local_reduce_layout,
         swap_ab=explicit_swap_ab,
