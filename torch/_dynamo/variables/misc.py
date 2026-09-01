@@ -1482,6 +1482,8 @@ class AutogradFunctionVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        # apply is a C method and backward is a @staticmethod, so they would
+        # not reach the Method handlers through the branches below.
         if name in self.tp_methods:
             return super().call_method(tx, name, args, kwargs)
 
