@@ -3615,6 +3615,26 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         gradcheck(func, [v])
         gradgradcheck(func, [v])
 
+    def test_hardtanh_inplace_no_input_save(self):
+        x = torch.randn(128, 100, requires_grad=True)
+        cloned = x.clone()
+        F.hardtanh(cloned, inplace=True)
+        saved = [t for t in cloned.grad_fn.saved_tensors]
+        for t in saved:
+            self.assertTrue(
+                t.data_ptr() == cloned.data_ptr(),
+                "Inplace hardtanh should save result, not a copy of input",
+            )
+
+    def test_hardtanh_inplace_correctness(self):
+        x = torch.tensor([-2.0, -1.0, -0.5, 0.0, 0.5, 1.0, 2.0], requires_grad=True)
+        x_ref = x.detach().clone().requires_grad_(True)
+        y = F.hardtanh(x.clone(), inplace=True)
+        y_ref = F.hardtanh(x_ref)
+        y.sum().backward()
+        y_ref.sum().backward()
+        self.assertEqual(x.grad, x_ref.grad)
+
     # test hardtanh backward for large tensor
     def test_hardtanh_backward(self):
         x = torch.randn(128, 10000, requires_grad=True)
