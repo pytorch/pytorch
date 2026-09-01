@@ -488,12 +488,15 @@ class _KinetoProfile:
         backend does its own injection and ignores this argument).
 
         ``graph_lanes`` decides whether graphed events are moved onto display lanes.
-        ``"none"`` (default) leaves the trace's stream layout alone. ``"all"`` moves each
+        ``"none"`` (default) leaves the trace's stream layout alone, reporting a recorded
+        lane as ``args["annotated_stream"]`` instead of acting on it. ``"all"`` moves each
         graphed event to the lane its annotation names (as
         :func:`~torch.cuda.graph_annotations.mark_stream` records) and the rest onto
         ``default_stream`` -- what a replay scattered over many hardware streams needs,
         at the cost of piling everything onto one lane when no annotation names a stream.
-        A moved event keeps the stream it ran on as ``args["original_stream"]``.
+        A moved event keeps the stream it ran on as ``args["original_stream"]``. ``"all"``
+        requires ``cuda_graph_annotations`` and raises without them, since on its own it
+        would only do the collapsing half.
         """
         if self.profiler is None:
             raise AssertionError(
@@ -534,7 +537,10 @@ class _KinetoProfile:
                 self._cupti_profiler_observer = None
                 self._monitor_window_id = None
             return
-        if use_python_export or cuda_graph_annotations:
+        # graph_lanes moves events on its own (it only needs each event's graph node id,
+        # which kineto already reports), so anything but the "none" default has to reach
+        # the Python exporter -- including an invalid value, which it rejects.
+        if use_python_export or cuda_graph_annotations or graph_lanes != "none":
             self.profiler.export_chrome_trace(
                 path,
                 self._trace_metadata,
