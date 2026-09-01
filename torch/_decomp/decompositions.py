@@ -2820,12 +2820,12 @@ def adaptive_avg_pool2d(input: Tensor, output_size: tuple[int, int]):
     device = input.device
     shape = input.shape
     ndim = len(shape)
-    torch._check(
+    torch._check_value(
         ndim in (3, 4),
         lambda: f"adaptive_avg_pool2d(): Expected 3D or 4D tensor, but got {ndim}",
     )
     for d in input.shape[-2:]:
-        torch._check(
+        torch._check_value(
             d != 0,
             lambda: "adaptive_avg_pool2d(): Expected input to have non-zero size for "
             f"non-batch dimensions, but input has shape {tuple(shape)}.",
