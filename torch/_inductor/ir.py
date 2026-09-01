@@ -3128,7 +3128,7 @@ class Scan(Loops):
             )
             supports_split = (
                 triton_supports_split
-                and len(dtypes) == 1
+                and len(dtypes) <= 2
                 and not torch.are_deterministic_algorithms_enabled()
             )
             if not supports_split:
@@ -3185,11 +3185,14 @@ class Scan(Loops):
         combine_fn: Callable[[tuple[Any, ...], tuple[Any, ...]], tuple[Any, ...]],
         scan_numel: Expr,
     ) -> tuple[ReductionHint, _IntLike]:
-        # TODO: custom splitting heuristic for scan
         def wrapper_fn(idx: Sequence[Expr], reduction_idx: Sequence[Expr]) -> OpsValue:
             return inner_fn([*idx[:axis], *reduction_idx, *idx[axis:]])
 
-        return Reduction.num_splits(
+        # Reuse the reduction analysis for the ReductionHint (drives INNER/OUTER
+        # tiling in codegen), but override the split count below: the reduction
+        # heuristic assumes split pieces are independent partials, which is wrong
+        # for a scan.
+        hint, reduction_splits = Reduction.num_splits(
             device=device,
             dst_dtype=dtype,
             src_dtype=dtype,
@@ -3199,6 +3202,30 @@ class Scan(Loops):
             reduction_type="scan",
             reduction_numel=scan_numel,
         )
+
+        # A scan split is a serial decoupled-look-back chain, not free parallel
+        # work: split i waits on splits 0..i-1 through global memory. The only
+        # payoff is filling otherwise-idle SMs. But the unsplit scan already
+        # saturates DRAM bandwidth once its rows cover roughly half the SMs (long
+        # streams give high memory-level parallelism per block), and past that
+        # point the look-back overhead makes a split scan a net loss regardless
+        # of scan length. Empirically the split only wins across all lengths when
+        # rows leave well over half of that saturation point idle, i.e. cover
+        # less than about a quarter of the SMs; beyond that, keep the unsplit
+        # scan. When splitting, cover the machine once -- more splits only
+        # lengthen the serial chain.
+        numel = sympy_product(pointwise_ranges)
+        if not V.graph.sizevars.all_unbacked_explicitly_hinted([scan_numel, numel]):
+            return hint, reduction_splits
+        num_rows = V.graph.sizevars.optimization_hint(numel)
+        scan_len = V.graph.sizevars.optimization_hint(scan_numel)
+        num_sm = DeviceProperties.create(device).multi_processor_count
+        min_rblock = config.triton.min_split_scan_rblock
+        if num_rows * 4 >= num_sm or scan_len < 2 * min_rblock:
+            return hint, 1
+        fill = max(1, round(num_sm / num_rows))
+        work_cap = max(1, scan_len // min_rblock)
+        return hint, max(1, min(fill, work_cap))
 
 
 # This signifies a scan op that should go through TritonSplitScanKernel codegen on CUDA.
