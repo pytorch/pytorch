@@ -7985,8 +7985,11 @@ def _associative_scan_lowering(x, combine_mode, dim, reverse):
     kwargs = _make_scan_inner(x, axis=dim, dtype=None)
     (result,) = ir.Scan.create(**kwargs, combine_fn=combine_fn)
     if result is None:
-        # x is already flipped for reverse; scan it forward.
-        return fallback_associative_scan(x, combine_mode, dim, False)
+        # x is already flipped for reverse; scan it forward, then flip back.
+        result = fallback_associative_scan(x, combine_mode, dim, False)
+        if reverse:
+            result = fallback_flip(result, [dim])
+        return result
     if reverse:
         result = fallback_flip(result, [dim])
     return result
@@ -8020,7 +8023,10 @@ def associative_scan_tensor_list_lowering(xs, combine_mode, dim=0, reverse=False
     kwargs["inner_fns"] = (a.make_loader(), b.make_loader())
     result = ir.Scan.create(**kwargs, combine_fn=combine_fn)
     if result is None or any(r is None for r in result):
-        return fallback_associative_scan_tensor_list((a, b), combine_mode, dim, False)
+        result = fallback_associative_scan_tensor_list((a, b), combine_mode, dim, False)
+        if reverse:
+            result = [fallback_flip(r, [dim]) for r in result]
+        return result
     result = list(result)
     if reverse:
         result = [fallback_flip(r, [dim]) for r in result]

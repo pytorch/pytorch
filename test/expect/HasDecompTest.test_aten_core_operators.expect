@@ -77,6 +77,8 @@ aten::asin_
 aten::asinh
 aten::asinh.out
 aten::asinh_
+aten::associative_scan
+aten::associative_scan.TensorList
 aten::atan
 aten::atan.out
 aten::atan2

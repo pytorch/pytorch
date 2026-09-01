@@ -29,6 +29,18 @@ struct ScanPointers {
   scalar_t* result[L];
 };
 
+// Warp shuffle up. CUDA requires an explicit 32-lane sync mask; HIP (ROCm)
+// uses a 64-bit mask on gfx9 (or rejects the 32-bit one), so use the maskless
+// intrinsic there.
+template <typename T>
+__device__ inline T shfl_up_val(T val, uint32_t delta) {
+#if defined(USE_ROCM)
+  return __shfl_up(val, delta);
+#else
+  return __shfl_up_sync(0xffffffffu, val, delta);
+#endif
+}
+
 template <typename scalar_t, int L>
 __device__ inline ScanVec<scalar_t, L> shfl_up(
     ScanVec<scalar_t, L> val,
@@ -38,23 +50,19 @@ __device__ inline ScanVec<scalar_t, L> shfl_up(
   for (int i = 0; i < L; ++i) {
     if constexpr (std::is_same_v<scalar_t, c10::Half>) {
       res.v[i] = c10::Half(
-          static_cast<uint16_t>(
-              __shfl_up_sync(0xffffffffu, val.v[i].x, delta)),
+          static_cast<uint16_t>(shfl_up_val(val.v[i].x, delta)),
           c10::Half::from_bits());
     } else if constexpr (std::is_same_v<scalar_t, c10::BFloat16>) {
       res.v[i] = c10::BFloat16(
-          static_cast<uint16_t>(
-              __shfl_up_sync(0xffffffffu, val.v[i].x, delta)),
+          static_cast<uint16_t>(shfl_up_val(val.v[i].x, delta)),
           c10::BFloat16::from_bits());
     } else if constexpr (c10::is_complex<scalar_t>::value) {
       using comp_t = typename scalar_t::value_type;
       res.v[i] = scalar_t(
-          __shfl_up_sync(
-              0xffffffffu, static_cast<comp_t>(val.v[i].real()), delta),
-          __shfl_up_sync(
-              0xffffffffu, static_cast<comp_t>(val.v[i].imag()), delta));
+          shfl_up_val(static_cast<comp_t>(val.v[i].real()), delta),
+          shfl_up_val(static_cast<comp_t>(val.v[i].imag()), delta));
     } else {
-      res.v[i] = __shfl_up_sync(0xffffffffu, val.v[i], delta);
+      res.v[i] = shfl_up_val(val.v[i], delta);
     }
   }
   return res;
@@ -68,7 +76,7 @@ __device__ inline ScanVec<scalar_t, L> warp_inclusive_scan(
     ScanVec<scalar_t, L> val,
     uint32_t lane) {
 #pragma unroll
-  for (uint32_t d = 1; d < 32; d <<= 1) {
+  for (uint32_t d = 1; d < C10_WARP_SIZE; d <<= 1) {
     ScanVec<scalar_t, L> t = shfl_up<scalar_t, L>(val, d);
     if (lane >= d) {
       val = Combine::combine(t, val);
@@ -93,9 +101,9 @@ __global__ void associative_scan_cuda_kernel(
   // One entry per warp per row: the inclusive scan of the warp totals.
   ScanVec<scalar_t, L>* warp_totals =
       reinterpret_cast<ScanVec<scalar_t, L>*>(smem);
-  constexpr int kNumWarps = kBlockDimX / 32;
-  const uint32_t lane = threadIdx.x & 31u;
-  const uint32_t warp_id = threadIdx.x >> 5;
+  constexpr int kNumWarps = kBlockDimX / C10_WARP_SIZE;
+  const uint32_t lane = threadIdx.x % C10_WARP_SIZE;
+  const uint32_t warp_id = threadIdx.x / C10_WARP_SIZE;
 
   for (int64_t row = blockIdx.x * kRowsPerBlock + threadIdx.y;
        row < M;
@@ -115,7 +123,7 @@ __global__ void associative_scan_cuda_kernel(
 
       val = warp_inclusive_scan<scalar_t, L, Combine>(val, lane);
 
-      if (lane == 31) {
+      if (lane == C10_WARP_SIZE - 1) {
         wt[warp_id] = val;
       }
       __syncthreads();
@@ -163,8 +171,8 @@ void launch_associative_scan(
   int64_t blocks = (M + kRowsPerBlock - 1) / kRowsPerBlock;
   blocks = std::min<int64_t>(
       blocks, at::cuda::getCurrentDeviceProperties()->maxGridSize[0]);
-  constexpr int kNumWarps = kBlockDimX / 32;
-  size_t smem_bytes = kRowsPerBlock * kNumWarps * sizeof(ScanVec<scalar_t, L>);
+  const int num_warps = kBlockDimX / C10_WARP_SIZE;
+  size_t smem_bytes = kRowsPerBlock * num_warps * sizeof(ScanVec<scalar_t, L>);
   associative_scan_cuda_kernel<scalar_t, L, Combine>
       <<<static_cast<uint32_t>(blocks), threads, smem_bytes,
          at::cuda::getCurrentCUDAStream()>>>(ptrs, N, M);

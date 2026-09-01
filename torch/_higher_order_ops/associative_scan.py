@@ -160,7 +160,13 @@ _NATIVE_COMBINE_MODES = {
 def _classify_native_combine(combine_fn, leaves_xs):
     """Return a native combine_mode if combine_fn is a single-elementwise
     builtin over a single leaf (e.g. ``lambda x, y: x + y``), else None."""
-    if torch.compiler.is_dynamo_compiling():
+    if (
+        torch.compiler.is_compiling()
+        or torch.compiler.is_exporting()
+        or torch.compiler.is_dynamo_compiling()
+        or torch._guards.TracingContext.try_get() is not None
+        or torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY) is not None
+    ):
         return None
     if len(leaves_xs) != 1:
         return None
