@@ -525,7 +525,8 @@ class FakeTensorUpdater:
             node: torch.fx.Node, *args: Any, **kwargs: Any
         ) -> bool:
             return (
-                node.op == "call_function"
+                bool(self.subgraph_updaters)
+                and node.op == "call_function"
                 and node.target
                 not in (
                     # auto_functionalized doesn't call a subgraph, but the pytree call
