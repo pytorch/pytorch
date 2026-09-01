@@ -8,7 +8,6 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import timedelta
 from enum import Enum
-from functools import partial
 from typing import Any, Literal
 from typing_extensions import deprecated
 
@@ -16,8 +15,66 @@ import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
 from torch._C._autograd import DeviceType
-from torch._C._distributed_c10d import _SymmetricMemory, Work as _Work
+from torch._C._distributed_c10d import (
+    _is_process_group_registered,
+    _SymmetricMemory,
+    Work as _Work,
+)
 from torch._prims_common import make_contiguous_strides_for
+from torch.utils._triton import has_triton
+
+
+_watchdog_timeout: float | timedelta | None = timedelta(minutes=10)
+
+
+def set_watchdog_timeout(timeout: float | timedelta | None) -> None:
+    """
+    Set the watchdog timeout for symmetric memory operations. This is a global
+    setting. When set, blocking operations (e.g. rendezvous) are guarded by a
+    CPU watchdog timer that fires if the operation exceeds the configured
+    duration. Stream operations (e.g. put_signal, wait_signal) are guarded by
+    a stream watchdog timer.
+
+    The stream watchdog is skipped during CUDA graph capture: its deadline
+    would be anchored at capture time rather than replay time, and the recorded
+    event would be baked into the graph. The CPU watchdog is unaffected.
+
+    Pass ``None`` to disable the watchdog.
+
+    Args:
+        timeout (float | timedelta | None): timeout in seconds (float) or as a
+            timedelta. ``None`` disables the watchdog.
+    """
+    global _watchdog_timeout
+    _watchdog_timeout = timeout
+
+
+def get_watchdog_timeout() -> float | timedelta | None:
+    """
+    Return the current watchdog timeout for symmetric memory operations, or
+    ``None`` if no watchdog is configured.
+    """
+    return _watchdog_timeout
+
+
+def _resolve_watchdog_timeout(
+    timeout: float | timedelta | None,
+) -> float | timedelta | None:
+    # A per-op ``timeout`` overrides the global default from
+    # ``set_watchdog_timeout``; ``None`` falls back to that default.
+    return timeout if timeout is not None else _watchdog_timeout
+
+
+def _stream_is_capturing() -> bool:
+    # The stream watchdog is not supported under CUDA graph capture: its
+    # deadline is anchored when it is registered (capture time), not when the
+    # captured op actually runs (replay time), so it would false-fire, and the
+    # recorded event would be baked into the graph. Skip registration while
+    # capturing.
+    return (
+        torch.accelerator.is_available()
+        and torch.accelerator.current_stream().is_capturing()
+    )
 
 
 _group_name_to_store: dict[str, c10d.Store] = {}
@@ -81,21 +138,31 @@ def _test_mode(group_names: set[str] | None = None) -> Generator[None, None, Non
 
 def is_symm_mem_enabled_for_group(group_name: c10d.GroupName) -> bool:
     """
-    Check if symmetric memory is enabled for a process group.
+    Check if symmetric memory can be used with a process group.
+
+    Symmetric memory no longer requires explicit enablement via
+    ``enable_symm_mem_for_group``. This returns ``True`` if the group is
+    resolvable and a symmetric memory allocator is registered for the current
+    accelerator.
 
     Args:
         group_name (str): the name of the process group.
     """
     if _is_test_mode:
         return _mocked_group_names is None or group_name in _mocked_group_names
-    return group_name in _group_name_to_store
+    device = torch.accelerator.current_accelerator(check_available=True)
+    if device is None or _SymmetricMemory.get_backend(device) is None:
+        return False
+    return _is_process_group_registered(group_name)
 
 
 _group_name_to_workspace_tensor: dict[str, torch.Tensor | None] = {}
 
 
 def get_symm_mem_workspace(
-    group_name: c10d.GroupName, min_size: int
+    group_name: c10d.GroupName,
+    min_size: int,
+    timeout: float | timedelta | None = None,
 ) -> _SymmetricMemory:
     """
     Get the symmetric memory workspace associated with the process group. If
@@ -105,6 +172,9 @@ def get_symm_mem_workspace(
     Args:
         group_name (str): the name of the process group.
         min_size (int): the size requirement for the workspace in bytes.
+        timeout (float | timedelta | None): per-op CPU watchdog timeout override.
+            Falls back to the global default from :func:`set_watchdog_timeout`
+            when ``None``.
 
     Returns:
         _SymmetricMemory: the symmetric memory workspace associated with the
@@ -135,6 +205,15 @@ def get_symm_mem_workspace(
             group_name,
         )
         _group_name_to_workspace_tensor[group_name] = tensor
+    effective_timeout = _resolve_watchdog_timeout(timeout)
+    if effective_timeout is not None:
+        from torch.distributed._watchdog import cpu_timeout
+
+        handle = cpu_timeout(effective_timeout)
+        try:
+            return _SymmetricMemory.rendezvous(tensor)
+        finally:
+            handle.cancel()
     return _SymmetricMemory.rendezvous(tensor)
 
 
@@ -442,6 +521,78 @@ def _pipelined_produce_and_all2all(
     chunk_producer(rank, out_chunks[rank])
     torch.accelerator.current_stream().wait_stream(backend_stream)
     symm_mem.barrier(channel=0)
+
+
+def reduce_partials(
+    partials: torch.Tensor,
+    *,
+    dim: int,
+    reduce_op: str,
+    output_dtype: torch.dtype,
+    group_size: int,
+) -> torch.Tensor:
+    if output_dtype in (torch.float16, torch.bfloat16):
+        normalized_dim = dim if dim >= 0 else dim + partials.dim()
+        # The common RS layout is [rank, local_M, N]. Fuse the final rank
+        # reduction into one kernel so low-precision partials accumulate in fp32
+        # and round only once when written to the output dtype.
+        if normalized_dim == 0:
+            reduced = triton_reduce_partials_first_dim(
+                partials,
+                reduce_op=reduce_op,
+                output_dtype=output_dtype,
+                group_size=group_size,
+            )
+            if reduced is not None:
+                return reduced
+        if reduce_op == "sum":
+            return torch.sum(partials, dim=dim)
+        if reduce_op == "avg":
+            return torch.mean(partials, dim=dim)
+    if reduce_op == "sum":
+        return torch.sum(partials, dim=dim)
+    if reduce_op == "avg":
+        return torch.mean(partials, dim=dim)
+    raise ValueError("reduce_op must be sum or avg")
+
+
+def triton_reduce_partials_first_dim(
+    partials: torch.Tensor,
+    *,
+    reduce_op: str,
+    output_dtype: torch.dtype,
+    group_size: int,
+) -> torch.Tensor | None:
+    if (
+        partials.device.type != "cuda"
+        or not has_triton()
+        or not partials.is_contiguous()
+        or partials.dim() < 2
+        or partials.shape[0] != group_size
+        or output_dtype not in (torch.float16, torch.bfloat16)
+        or partials.dtype not in (torch.float16, torch.bfloat16)
+    ):
+        return None
+
+    out = partials.new_empty(partials.shape[1:], dtype=output_dtype)
+    shard_elems = out.numel()
+    block = 1024
+    import triton
+
+    from torch.distributed._symmetric_memory._triton_kernels import (
+        reduce_partials_first_dim_kernel,
+    )
+
+    grid = (triton.cdiv(shard_elems, block),)
+    reduce_partials_first_dim_kernel[grid](
+        partials,
+        out,
+        shard_elems,
+        group_size,
+        reduce_op == "avg",
+        BLOCK=block,
+    )
+    return out
 
 
 lib = torch.library.Library("symm_mem", "DEF")
@@ -1286,15 +1437,12 @@ def _fused_matmul_reduce_scatter_impl(
         raise ValueError("Invalid gather_dim")
     if B.dim() != 2:
         raise ValueError("B must be a matrix")
-    if reduce_op == "sum":
-        reduce_fn = partial(torch.sum, dim=0)
-    elif reduce_op == "avg":
-        reduce_fn = partial(torch.mean, dim=0)
-    else:
+    if reduce_op not in ("sum", "avg"):
         raise ValueError("reduce_op must be sum or avg")
     group = c10d._resolve_process_group(group_name)
     out_shape = [*A.shape[:-1], B.shape[1]]
     out_shape[scatter_dim] //= group.size()
+    output_dtype = out_dtype or A.dtype
 
     if scatter_dim == A.ndim - 1:
         B_shards = B.chunk(group.size(), dim=B.ndim - 1)
@@ -1321,9 +1469,12 @@ def _fused_matmul_reduce_scatter_impl(
         stacked_partials_view = stacked_partials.reshape(
             *leading_dims, group.size(), -1
         )
-        return reduce_fn(
+        return reduce_partials(
             stacked_partials_view,
             dim=-2,
+            reduce_op=reduce_op,
+            output_dtype=output_dtype,
+            group_size=group.size(),
         )
 
     # Move the scatter_dim to the front and flatten the tensor into a 2D matrix
@@ -1337,7 +1488,7 @@ def _fused_matmul_reduce_scatter_impl(
     def chunk_producer(rank: int, out: torch.Tensor) -> None:
         mm_out_op(A_shards[rank], B, **kwargs, out=out)
 
-    stacked_partials = x.new_empty(x.shape[0], B.shape[1], dtype=out_dtype or A.dtype)
+    stacked_partials = x.new_empty(x.shape[0], B.shape[1], dtype=output_dtype)
 
     _pipelined_produce_and_all2all(
         chunk_producer,
@@ -1347,11 +1498,14 @@ def _fused_matmul_reduce_scatter_impl(
 
     # Ensures that the transpose and reduction produce contiguous result
     # in a single reduction kernel.
-    return reduce_fn(
+    return reduce_partials(
         stacked_partials.view(*leading_dims, -1)
         .movedim(1, scatter_dim + 1)
         .movedim(0, scatter_dim),
         dim=scatter_dim,
+        reduce_op=reduce_op,
+        output_dtype=output_dtype,
+        group_size=group.size(),
     )
 
 
@@ -1485,12 +1639,9 @@ def _fused_scaled_matmul_reduce_scatter_impl(
         raise ValueError("Invalid scatter dim for 3D+ output tensor")
     if B.dim() != 2:
         raise ValueError("B must be a matrix")
-    if reduce_op == "sum":
-        reduce_fn = partial(torch.sum, dim=0)
-    elif reduce_op == "avg":
-        reduce_fn = partial(torch.mean, dim=0)
-    else:
+    if reduce_op not in ("sum", "avg"):
         raise ValueError("reduce_op must be sum or avg")
+    output_dtype = out_dtype or A.dtype
 
     group = c10d._resolve_process_group(group_name)
 
@@ -1545,7 +1696,7 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     # have the shape (A_with_scatter_dim_0_tensor.shape[0], B.shape[1]) to align with the formula:
     # (a*b,c) @ (c,d) = (a*b,d)
     stacked_partials = A_with_scatter_dim_0.new_empty(
-        A_2D_with_scatter_dim_0.shape[0], B.shape[1], dtype=out_dtype or A.dtype
+        A_2D_with_scatter_dim_0.shape[0], B.shape[1], dtype=output_dtype
     )
 
     # Execute the pipelined mm/scaled_mm.
@@ -1577,7 +1728,7 @@ def _fused_scaled_matmul_reduce_scatter_impl(
 
     # Ensures that the transpose and reduction produce contiguous result
     # in a single reduction kernel.
-    reduced_out = reduce_fn(
+    reduced_out = reduce_partials(
         # View 2D stacked partials as 3D+ tensor of shape (`group_size`, ...)
         stacked_partials.view(*stacked_partials_3D_leading_dims, -1)
         # We originally swapped 0<=>scatter_dim_after_maybe_reshape. Now after
@@ -1586,6 +1737,9 @@ def _fused_scaled_matmul_reduce_scatter_impl(
         .movedim(1, scatter_dim_after_maybe_reshape + 1),
         # Reduce along the `group_size` dim (0).
         dim=0,
+        reduce_op=reduce_op,
+        output_dtype=output_dtype,
+        group_size=group.size(),
     )
 
     # Output shape must be scattered along original scatter dim as well.
@@ -2121,7 +2275,8 @@ def empty(  # type: ignore[misc]
         device (:class:`torch.device`, optional): the desired device of returned tensor.
             Default: if ``None``, uses the current device for the default tensor type
             (see :func:`torch.set_default_device`). :attr:`device` will be the CPU
-            for CPU tensor types and the current CUDA device for CUDA tensor types.
+            for CPU tensor types, the current CUDA device for CUDA tensor types,
+            and the current XPU device for XPU tensor types.
     """
     if len(size) == 1 and isinstance(size[0], Sequence):
         size = tuple(size[0])
@@ -2160,10 +2315,12 @@ def _resolve_group_name(group: c10d.GroupName | ProcessGroup) -> c10d.GroupName:
 
 
 def rendezvous(
-    tensor: torch.Tensor, group: c10d.GroupName | ProcessGroup
+    tensor: torch.Tensor,
+    group: c10d.GroupName | ProcessGroup,
+    timeout: float | timedelta | None = None,
 ) -> _SymmetricMemory:
     r"""
-    rendezvous(tensor, group) -> _SymmetricMemory
+    rendezvous(tensor, group, timeout=None) -> _SymmetricMemory
 
     Establish a symmetric memory tensor among participating processes. This is
     a collective operation.
@@ -2182,8 +2339,20 @@ def rendezvous(
             dtype, and device type must be identical across all participating processes.
         group (Union[str, :class:`torch.distributed.ProcessGroup`]): The group identifying the
             participating processes. This can be either a group name or a process group object.
+        timeout (float | timedelta | None): per-op CPU watchdog timeout override.
+            Falls back to the global default from :func:`set_watchdog_timeout`
+            when ``None``.
     """
     group_name = _resolve_group_name(group)
+    effective_timeout = _resolve_watchdog_timeout(timeout)
+    if effective_timeout is not None:
+        from torch.distributed._watchdog import cpu_timeout
+
+        handle = cpu_timeout(effective_timeout)
+        try:
+            return _SymmetricMemory.rendezvous(tensor, group_name)
+        finally:
+            handle.cancel()
     return _SymmetricMemory.rendezvous(tensor, group_name)
 
 
@@ -2409,9 +2578,14 @@ def get(
         raise ValueError(f"get: unsupported backend: {backend}")
 
 
-def put_signal(src: torch.Tensor, hdl: _SymmetricMemory, peer: int) -> None:
+def put_signal(
+    src: torch.Tensor,
+    hdl: _SymmetricMemory,
+    peer: int,
+    timeout: float | timedelta | None = None,
+) -> None:
     r"""
-    put_signal(src, hdl, peer) -> None
+    put_signal(src, hdl, peer, timeout=None) -> None
 
     Put data to a peer's symmetric memory and signal the peer.
 
@@ -2419,6 +2593,9 @@ def put_signal(src: torch.Tensor, hdl: _SymmetricMemory, peer: int) -> None:
         src (torch.Tensor): the source tensor to read data from.
         hdl (SymmetricMemory): the symmetric memory to put data to.
         peer (int): the peer to put data to.
+        timeout (float | timedelta | None): per-op stream watchdog timeout
+            override. Falls back to the global default from
+            :func:`set_watchdog_timeout` when ``None``.
     """
     backend = get_backend(src.device)
     # `hdl` is a pybind `_SymmetricMemory` object. Dispatcher expects the
@@ -2430,17 +2607,27 @@ def put_signal(src: torch.Tensor, hdl: _SymmetricMemory, peer: int) -> None:
     # TODO: other backends' dispatch goes here
     else:
         raise ValueError(f"put_signal: unsupported backend: {backend}")
+    effective_timeout = _resolve_watchdog_timeout(timeout)
+    if effective_timeout is not None and not _stream_is_capturing():
+        from torch.distributed._watchdog import stream_timeout
+
+        stream_timeout(effective_timeout)
 
 
-def wait_signal(hdl: _SymmetricMemory, peer: int) -> None:
+def wait_signal(
+    hdl: _SymmetricMemory, peer: int, timeout: float | timedelta | None = None
+) -> None:
     r"""
-    wait_signal(hdl, peer) -> None
+    wait_signal(hdl, peer, timeout=None) -> None
 
     Wait for a signal from a peer.
 
     Args:
         hdl (SymmetricMemory): the symmetric memory handle on which to wait for a signal.
         peer (int): the peer to wait for a signal from.
+        timeout (float | timedelta | None): per-op stream watchdog timeout
+            override. Falls back to the global default from
+            :func:`set_watchdog_timeout` when ``None``.
     """
     backend = get_backend(hdl.device)
     # See note in `put_signal` about `_SymmetricMemory` vs TorchBind type.
@@ -2450,6 +2637,11 @@ def wait_signal(hdl: _SymmetricMemory, peer: int) -> None:
     # TODO: other backends' dispatch goes here
     else:
         raise ValueError(f"wait_signal: unsupported backend: {backend}")
+    effective_timeout = _resolve_watchdog_timeout(timeout)
+    if effective_timeout is not None and not _stream_is_capturing():
+        from torch.distributed._watchdog import stream_timeout
+
+        stream_timeout(effective_timeout)
 
 
 def reduce_scatter_offset(
@@ -2525,6 +2717,75 @@ def reduce_scatter_offset(
         raise NotImplementedError(
             f"reduce_scatter_offset: unsupported backend: {backend}"
         )
+
+
+def all_gather_offset(
+    input: torch.Tensor,
+    out: torch.Tensor,
+    group: str,
+    split_sizes: list[int],
+    split_offsets: list[int] | None = None,
+) -> None:
+    r"""
+    all_gather_offset(input, out, group, split_sizes, split_offsets=None) -> None
+
+    All-gather a rank-local bucket of parameter shards held in a symmetric
+    memory buffer into a *parameter-contiguous* output, fusing the gather with
+    the copy-out reorder that FSDP2 would otherwise perform with
+    ``split_with_sizes_copy``.
+
+    ``input`` is a 1-D symmetric tensor holding this rank's shards of ``N``
+    parameters laid out back-to-back: parameter ``i`` occupies
+    ``input[split_offsets[i] : split_offsets[i] + split_sizes[i]]``.
+
+    In the output, each parameter is stored contiguously across ranks (rather
+    than the standard rank-major all-gather layout).  For parameter ``i`` and
+    source rank ``r``, the gathered region is::
+
+        out[off * W + r * size : off * W + (r + 1) * size]
+
+    where ``off = split_offsets[i]``, ``size = split_sizes[i]`` and ``W`` is the
+    group size.  Every rank produces the full output (standard all-gather
+    semantics).
+
+    ``out`` must be a symmetric-memory tensor: each rank writes its own shard
+    into ``out`` on every rank.  When ``out`` has multicast support, the write
+    uses NVLink SHARP (multimem) -- each shard is written once and the switch
+    replicates it to every rank; otherwise each rank pushes its shard directly
+    into every peer's ``out`` over LSA.  ``input`` is read locally and need not
+    be a symmetric-memory tensor.
+
+    All per-parameter offsets and shard sizes must be 16-byte aligned.
+
+    Args:
+        input (Tensor): 1-D contiguous tensor holding this rank's shards.
+        out (Tensor): 1-D contiguous output tensor of numel
+            ``sum(split_sizes) * world_size``, with the same dtype as ``input``,
+            allocated via symmetric memory.
+        group (str): The name of the ``ProcessGroup`` to perform the operation on.
+        split_sizes (list[int]): Per-rank shard size of each parameter, length N.
+        split_offsets (list[int] | None): Start offset of each parameter within
+            ``input``, length N.  If not provided, defaults to the exclusive
+            prefix sum of ``split_sizes`` (a packed bucket).
+
+    Example::
+
+        >>> # doctest: +SKIP
+        >>> # Each rank holds its shards of two parameters in a packed bucket.
+        >>> split_sizes = [s0, s1]
+        >>> inp = symm_mem.empty(s0 + s1, dtype=torch.bfloat16, device="cuda")
+        >>> symm_mem.rendezvous(inp, group=group_name)
+        >>> out = symm_mem.empty((s0 + s1) * world_size, dtype=torch.bfloat16, device="cuda")
+        >>> symm_mem.rendezvous(out, group=group_name)
+        >>> symm_mem.all_gather_offset(inp, out, group_name, split_sizes)
+    """
+    backend = get_backend(input.device)
+    if backend == "NCCL":
+        torch.ops.symm_mem.nccl_all_gather_offset(
+            input, out, group, split_sizes, split_offsets
+        )
+    else:
+        raise NotImplementedError(f"all_gather_offset: unsupported backend: {backend}")
 
 
 def is_symm_mem_tensor(tensor: torch.Tensor) -> bool:
@@ -2604,4 +2865,5 @@ __all__ = [
     "get_mem_pool",
     "reduce_scatter_offset",
     "all_to_all_nd",
+    "all_gather_offset",
 ]

@@ -953,8 +953,7 @@ class TestFP8Matmul(TestCase):
     def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K, format, use_out, device):
         from torch._native import registry
 
-        if "_scaled_grouped_mm_v2" not in registry.get_dsl_operations("cutedsl"):
-            raise unittest.SkipTest("CuTeDSL scaled_grouped_mm override not registered")
+        self.assertIn("_scaled_grouped_mm_v2", registry.get_dsl_operations("cutedsl"))
 
         torch.manual_seed(42)
 

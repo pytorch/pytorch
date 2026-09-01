@@ -146,6 +146,7 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten._foreach_addcdiv_,
     aten.lerp,
     aten.lerp_,
+    aten.special_log_ndtr,  # inductor re-registers with copysign wrapper (#187336)
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
@@ -158,6 +159,22 @@ def register_decomposition(
         if op in decompositions:
             log.warning("duplicate decomp: %s", ops)
     return decomp.register_decomposition(ops, decompositions)
+
+
+@register_decomposition([aten.special_log_ndtr])
+def special_log_ndtr(a: torch.Tensor) -> torch.Tensor:
+    # Inductor's C++ codegen compiles with -fno-signed-zeros, which causes the
+    # compiler to optimize away the -0.0 signbit in log_ndtr results (#187336).
+    # We wrap the base decomposition result with copysign to force the sign bit,
+    # since log_ndtr is always non-positive.
+    M_SQRT1_2 = 0.707106781186547524400844362104849039
+    t = a * M_SQRT1_2
+    res = torch.where(
+        a < 1.0,
+        torch.log(torch.special.erfcx(-t) / 2) - t * t,
+        torch.log1p(-torch.erfc(t) / 2),
+    )
+    return torch.copysign(res, -1.0)
 
 
 if torch.distributed.is_available():
@@ -345,13 +362,18 @@ def index_add(
     *,
     alpha: torch.types.Number = 1,
 ) -> torch.Tensor:
-    # If we are not in fbcode and dtype is bfloat16
-    # fallback to index_add kernel
-    # see https://github.com/pytorch/pytorch/issues/137425 for details
     if not is_fbcode() and x.dtype == torch.bfloat16:
-        return NotImplemented
-    else:
-        return _index_add(x, dim, index, tensor, inplace=False, alpha=alpha)
+        # Triton supports BF16 atomic add on ROCm and NVIDIA SM90 and newer.
+        if x.device.type != "cuda" or (
+            torch.version.hip is None
+            and torch.cuda.get_device_capability(x.device) < (9, 0)
+        ):
+            return NotImplemented
+    # The index_put lowering expects tensor indices to have at least one
+    # dimension. Normalizing a scalar index preserves index_add semantics.
+    if index.ndim == 0:
+        index = index.unsqueeze(0)
+    return _index_add(x, dim, index, tensor, inplace=False, alpha=alpha)
 
 
 # Not really sure how to put this into the main library.  PrimTorch wants
