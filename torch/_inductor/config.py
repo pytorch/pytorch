@@ -991,7 +991,8 @@ loop_reindexing_after_fusion: bool = (
 # wasted work; set the ratio to 0 to disable the masked path entirely. The
 # defaults are conservative and were chosen so the transform fires on
 # near-sized epilogues (e.g. a 1001-wide reduction sliced to 1000) without
-# reaching small shared reads. Sizes only known symbolically fail closed.
+# reaching small shared reads. Backed symbolic ratios install a runtime guard;
+# ratios without a usable hint fail closed.
 #
 # Max expansion of the pointwise iteration domain, as a fraction.
 masked_expansion_max_ratio: float = 0.1

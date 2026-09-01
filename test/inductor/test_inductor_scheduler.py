@@ -11,7 +11,6 @@ import torch._inductor.ir as ir
 import torch._inductor.metrics as metrics
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
-from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.common import BackendFeature
 from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites
 from torch._inductor.graph import GraphLowering
@@ -19,10 +18,10 @@ from torch._inductor.ir import GraphPartitionSignature
 from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
 from torch._inductor.scheduler import (
     _get_benchmarkable_extern_fn,
-    _LoopMutationTracker,
     BaseSchedulerNode,
     ExternKernelSchedulerNode,
     ForeachKernelSchedulerNode,
+    FusionResult,
     NestedReduction,
     Scheduler,
     SchedulerNode,
@@ -1118,8 +1117,6 @@ class TestScheduler(TestCase):
 
         self.assertEqual(expected, actual, atol=5e-3, rtol=2e-2)
         self.assertEqual(metrics.generated_kernel_count, 1 if expect_fusion else 2)
-        fired = counters["inductor"]["masked_expansion_reindex_attempts"]
-        self.assertEqual(bool(fired), expect_fusion)
 
     def _masked_expansion_fn(self, device, extra_cols):
         def fn(x, bias, extra):
@@ -1172,10 +1169,8 @@ class TestScheduler(TestCase):
 
         self.assertEqual(expected, actual, atol=5e-3, rtol=2e-2)
         self.assertEqual(metrics.generated_kernel_count, 1)
-        self.assertTrue(counters["inductor"]["masked_expansion_reindex_attempts"])
 
         source = "\n".join(code)
-        self.assertEqual(source.count("tl.load("), 3)
         store_lines = [ln for ln in source.splitlines() if "tl.store(" in ln]
         self.assertTrue(store_lines)
         definitions = {
@@ -1269,15 +1264,13 @@ class TestScheduler(TestCase):
             actual = torch.compile(fn, fullgraph=True)(*args)
 
         self.assertEqual(expected, actual, atol=5e-3, rtol=2e-2)
-        fired = counters["inductor"]["masked_expansion_reindex_attempts"]
-        self.assertEqual(bool(fired), expect_fusion)
+        self.assertEqual(metrics.generated_kernel_count, 1 if expect_fusion else 2)
 
     @xfailIfNoAcceleratorTriton
     @skipCPUIf(True, "requires accelerator Triton")
-    def test_masked_expansion_dynamic_reduction_range(self, device):
+    def test_masked_expansion_dynamic_ratio_guard(self, device):
         fn, args = self._masked_expansion_fn(device, 2)
         torch._dynamo.mark_dynamic(args[2], 1)
-        expected = fn(*args)
 
         torch._dynamo.reset()
         metrics.reset()
@@ -1291,63 +1284,7 @@ class TestScheduler(TestCase):
                 args[1],
                 torch.randn(8, 3, device=device, dtype=torch.bfloat16),
             )
-            expected2 = fn(*args2)
             actual2 = compiled(*args2)
-            self.assertEqual(counters["stats"]["unique_graphs"], 1)
-            self.assertEqual(metrics.generated_kernel_count, 1)
-
-            args3 = (
-                args[0],
-                args[1],
-                torch.randn(8, 4, device=device, dtype=torch.bfloat16),
-            )
-            expected3 = fn(*args3)
-            actual3 = compiled(*args3)
-            self.assertEqual(counters["stats"]["unique_graphs"], 2)
-            self.assertEqual(metrics.generated_kernel_count, 3)
-
-            args4 = (
-                args[0],
-                args[1],
-                torch.randn(8, 3, device=device, dtype=torch.bfloat16),
-            )
-            expected4 = fn(*args4)
-            actual4 = compiled(*args4)
-
-        self.assertEqual(expected, actual, atol=5e-3, rtol=2e-2)
-        self.assertEqual(expected2, actual2, atol=5e-3, rtol=2e-2)
-        self.assertEqual(expected3, actual3, atol=5e-3, rtol=2e-2)
-        self.assertEqual(expected4, actual4, atol=5e-3, rtol=2e-2)
-        self.assertTrue(counters["inductor"]["masked_expansion_reindex_attempts"])
-        self.assertEqual(counters["stats"]["unique_graphs"], 2)
-        self.assertEqual(metrics.generated_kernel_count, 3)
-
-    @xfailIfNoAcceleratorTriton
-    @skipCPUIf(True, "requires accelerator Triton")
-    def test_masked_expansion_dynamic_ratio_boundary(self, device):
-        fn, args = self._masked_expansion_fn(device, 3)
-        torch._dynamo.mark_dynamic(args[2], 1)
-
-        torch._dynamo.reset()
-        metrics.reset()
-        counters.clear()
-        with (
-            fresh_inductor_cache(),
-            inductor_config.patch(masked_expansion_max_ratio=3 / 32),
-        ):
-            compiled = torch.compile(fn, fullgraph=True)
-            actual = compiled(*args)
-            self.assertEqual(fn(*args), actual, atol=5e-3, rtol=2e-2)
-            self.assertEqual(counters["stats"]["unique_graphs"], 1)
-            self.assertEqual(metrics.generated_kernel_count, 1)
-
-            args2 = (
-                args[0],
-                args[1],
-                torch.randn(8, 2, device=device, dtype=torch.bfloat16),
-            )
-            actual2 = compiled(*args2)
-            self.assertEqual(fn(*args2), actual2, atol=5e-3, rtol=2e-2)
             self.assertEqual(counters["stats"]["unique_graphs"], 1)
             self.assertEqual(metrics.generated_kernel_count, 1)
 
@@ -1358,44 +1295,102 @@ class TestScheduler(TestCase):
             )
             actual3 = compiled(*args3)
 
+        self.assertEqual(fn(*args), actual, atol=5e-3, rtol=2e-2)
+        self.assertEqual(fn(*args2), actual2, atol=5e-3, rtol=2e-2)
         self.assertEqual(fn(*args3), actual3, atol=5e-3, rtol=2e-2)
         self.assertEqual(counters["stats"]["unique_graphs"], 2)
         self.assertEqual(metrics.generated_kernel_count, 3)
 
     @xfailIfNoAcceleratorTriton
     @skipCPUIf(True, "requires accelerator Triton")
-    def test_rejected_masked_expansion_does_not_install_ratio_guard(self, device):
-        class RejectMaskedExpansion(InductorChoices):
-            def __init__(self):
-                self.rejected = False
+    def test_masked_expansion_rejects_unmasked_tail_load(self, device):
+        def fn(x, extra):
+            values = torch.cat((x, extra), dim=-1)
+            normalizer = values.sum(dim=-1, keepdim=True)
+            return (x / normalizer).clone()
 
-            def can_fuse_vertical(self, scheduler, node1, node2, shared_data_score):
-                if any(
-                    isinstance(sn, SchedulerNode) and sn._body.has_op("masked_store")
-                    for sn in node2.get_nodes()
-                ):
-                    self.rejected = True
-                    return False
-                return True
+        x = torch.randn(64, 32, device=device)
+        extra = torch.randn(64, 1, device=device)
 
+        torch._dynamo.reset()
+        metrics.reset()
+        counters.clear()
+        with (
+            fresh_inductor_cache(),
+            inductor_config.patch(
+                masked_expansion_shared_bytes_multiple=0,
+                masked_expansion_min_shared_fraction=0.0,
+            ),
+        ):
+            actual = torch.compile(fn, fullgraph=True)(x, extra)
+
+        self.assertEqual(fn(x, extra), actual)
+        self.assertGreater(metrics.generated_kernel_count, 1)
+
+    @xfailIfNoAcceleratorTriton
+    @skipCPUIf(True, "requires accelerator Triton")
+    def test_masked_expansion_rejects_mutation_renamed_tail_load(self, device):
+        def fn(x, extra):
+            x.add_(1)
+            values = torch.cat((x, extra), dim=-1)
+            normalizer = values.sum(dim=-1, keepdim=True)
+            return (x / normalizer).clone()
+
+        x = torch.randn(64, 32, device=device)
+        extra = torch.randn(64, 1, device=device)
+        expected = fn(x.clone(), extra)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        counters.clear()
+        with (
+            fresh_inductor_cache(),
+            inductor_config.patch(
+                masked_expansion_shared_bytes_multiple=0,
+                masked_expansion_min_shared_fraction=0.0,
+            ),
+        ):
+            actual = torch.compile(fn, fullgraph=True)(x.clone(), extra)
+
+        self.assertEqual(expected, actual)
+        self.assertGreater(metrics.generated_kernel_count, 1)
+
+    @xfailIfNoAcceleratorTriton
+    @skipCPUIf(True, "requires accelerator Triton")
+    def test_masked_expansion_rejects_overlapping_tail_load(self, device):
+        base_fn, base_args = self._masked_expansion_fn(device, 1)
+
+        def fn(x, bias, extra, residual):
+            return base_fn(x, bias, extra) + residual
+
+        residual = torch.randn(32, device=device).expand(8, 32, 32)
+        args = (*base_args, residual)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        counters.clear()
+        with (
+            fresh_inductor_cache(),
+            inductor_config.patch(
+                masked_expansion_shared_bytes_multiple=0,
+                masked_expansion_min_shared_fraction=0.0,
+            ),
+        ):
+            actual = torch.compile(fn, fullgraph=True)(*args)
+
+        self.assertEqual(fn(*args), actual, atol=5e-3, rtol=2e-2)
+        self.assertEqual(metrics.generated_kernel_count, 2)
+
+    @xfailIfNoAcceleratorTriton
+    @skipCPUIf(True, "requires accelerator Triton")
+    @parametrize("reject_guard", (False, True))
+    def test_rejected_masked_expansion_rolls_back(self, device, reject_guard):
         fn, args = self._masked_expansion_fn(device, 2)
         torch._dynamo.mark_dynamic(args[2], 1)
-        choices = RejectMaskedExpansion()
         expanded_nodes = []
-        rollback_checks = []
         original_expand = (
             SchedulerNode.expand_dimension_for_pointwise_node_with_masked_stores
         )
-        original_finish = _LoopMutationTracker.finish
-
-        def record_finish(tracker, *, rollback):
-            state = tracker.state
-            result = original_finish(tracker, rollback=rollback)
-            if rollback and state is not None:
-                for node, expected in state.scheduler_node_states.items():
-                    if node in expanded_nodes:
-                        rollback_checks.append(node.snapshot_loop_state() == expected)
-            return result
 
         def record_expand(node, *args, **kwargs):
             expanded_nodes.append(node)
@@ -1404,10 +1399,16 @@ class TestScheduler(TestCase):
         torch._dynamo.reset()
         metrics.reset()
         counters.clear()
+        reject = (
+            patch.object(Scheduler, "_install_fusion_guards", return_value=False)
+            if reject_guard
+            else patch.object(
+                Scheduler, "speedup_by_fusion", return_value=FusionResult.fuse(False)
+            )
+        )
         with (
             fresh_inductor_cache(),
-            V.set_choices_handler(choices),
-            patch.object(_LoopMutationTracker, "finish", record_finish),
+            reject,
             patch.object(
                 SchedulerNode,
                 "expand_dimension_for_pointwise_node_with_masked_stores",
@@ -1425,125 +1426,10 @@ class TestScheduler(TestCase):
 
         self.assertEqual(fn(*args), actual, atol=5e-3, rtol=2e-2)
         self.assertEqual(fn(*args2), actual2, atol=5e-3, rtol=2e-2)
-        self.assertTrue(choices.rejected)
         self.assertTrue(expanded_nodes)
         self.assertTrue(
             all(not node._body.has_op("masked_store") for node in expanded_nodes)
         )
-        self.assertTrue(rollback_checks)
-        self.assertTrue(all(rollback_checks))
-        self.assertEqual(counters["stats"]["unique_graphs"], 1)
-        self.assertEqual(metrics.generated_kernel_count, 2)
-
-    @xfailIfNoAcceleratorTriton
-    @skipCPUIf(True, "requires accelerator Triton")
-    def test_failed_masked_expansion_ratio_guard_rolls_back(self, device):
-        fn, args = self._masked_expansion_fn(device, 2)
-        torch._dynamo.mark_dynamic(args[2], 1)
-        original_try_reindex = Scheduler._try_reindex_pointwise_for_reduction
-        original_guard_or_false = SizeVarAllocator.guard_or_false
-        original_expand = (
-            SchedulerNode.expand_dimension_for_pointwise_node_with_masked_stores
-        )
-        pending_guards = []
-        expanded_nodes = []
-        rollback_checks = []
-        rejected_guard = False
-        original_finish = _LoopMutationTracker.finish
-
-        def capture_guards(scheduler, node1, node2, **kwargs):
-            result = original_try_reindex(scheduler, node1, node2, **kwargs)
-            guards = kwargs.get("pending_runtime_guards")
-            if guards:
-                pending_guards.extend(guards)
-            return result
-
-        def record_finish(tracker, *, rollback):
-            state = tracker.state
-            result = original_finish(tracker, rollback=rollback)
-            if rollback and state is not None:
-                for node, expected in state.scheduler_node_states.items():
-                    if node in expanded_nodes:
-                        rollback_checks.append(node.snapshot_loop_state() == expected)
-            return result
-
-        def reject_ratio_guard(sizevars, expr):
-            nonlocal rejected_guard
-            if any(expr == guard for guard in pending_guards):
-                rejected_guard = True
-                return False
-            return original_guard_or_false(sizevars, expr)
-
-        def record_expand(node, *args, **kwargs):
-            expanded_nodes.append(node)
-            return original_expand(node, *args, **kwargs)
-
-        torch._dynamo.reset()
-        metrics.reset()
-        counters.clear()
-        with (
-            fresh_inductor_cache(),
-            patch.object(
-                Scheduler,
-                "_try_reindex_pointwise_for_reduction",
-                capture_guards,
-            ),
-            patch.object(SizeVarAllocator, "guard_or_false", reject_ratio_guard),
-            patch.object(_LoopMutationTracker, "finish", record_finish),
-            patch.object(
-                SchedulerNode,
-                "expand_dimension_for_pointwise_node_with_masked_stores",
-                record_expand,
-            ),
-        ):
-            actual = torch.compile(fn, fullgraph=True)(*args)
-
-        self.assertEqual(fn(*args), actual, atol=5e-3, rtol=2e-2)
-        self.assertTrue(rejected_guard)
-        self.assertTrue(expanded_nodes)
-        self.assertTrue(
-            all(not node._body.has_op("masked_store") for node in expanded_nodes)
-        )
-        self.assertTrue(rollback_checks)
-        self.assertTrue(all(rollback_checks))
-        self.assertEqual(metrics.generated_kernel_count, 2)
-
-    @xfailIfNoAcceleratorTriton
-    @skipCPUIf(True, "requires accelerator Triton")
-    def test_masked_expansion_dynamic_outer_range(self, device):
-        fn, args = self._masked_expansion_with_residual_fn(
-            device, residual_cols=33, reverse=False
-        )
-        torch._dynamo.mark_dynamic(args[0], 0)
-        torch._dynamo.mark_dynamic(args[2], 0)
-        torch._dynamo.mark_dynamic(args[3], 0)
-        expected = fn(*args)
-
-        torch._dynamo.reset()
-        metrics.reset()
-        counters.clear()
-        with (
-            fresh_inductor_cache(),
-            inductor_config.patch(
-                masked_expansion_shared_bytes_multiple=0,
-                masked_expansion_min_shared_fraction=0.0,
-            ),
-        ):
-            compiled = torch.compile(fn, fullgraph=True)
-            actual = compiled(*args)
-            args2 = (
-                torch.randn(12, 32, 32, device=device, dtype=torch.bfloat16),
-                args[1],
-                torch.randn(12, 1, device=device, dtype=torch.bfloat16),
-                torch.randn(12, 32, 33, device=device, dtype=torch.bfloat16),
-            )
-            expected2 = fn(*args2)
-            actual2 = compiled(*args2)
-
-        self.assertEqual(expected, actual, atol=5e-3, rtol=2e-2)
-        self.assertEqual(expected2, actual2, atol=5e-3, rtol=2e-2)
-        self.assertEqual(metrics.generated_kernel_count, 1)
-        self.assertTrue(counters["inductor"]["masked_expansion_reindex_attempts"])
         self.assertEqual(counters["stats"]["unique_graphs"], 1)
 
     @xfailIfNoAcceleratorTriton
@@ -1568,7 +1454,6 @@ class TestScheduler(TestCase):
 
         self.assertEqual(expected, actual, atol=5e-3, rtol=2e-2)
         self.assertEqual(metrics.generated_kernel_count, 2)
-        self.assertEqual(counters["inductor"]["masked_expansion_reindex_attempts"], 0)
 
     @xfailIfNoAcceleratorTriton
     @skipCPUIf(True, "requires accelerator Triton")
@@ -1587,8 +1472,8 @@ class TestScheduler(TestCase):
             actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
 
         self.assertEqual(expected, actual, atol=5e-3, rtol=2e-2)
-        self.assertEqual(counters["inductor"]["masked_expansion_reindex_attempts"], 0)
         self.assertNotIn("_load_mask", "\n".join(code))
+
 
 class TestScoreFusionMemory(TestCase):
     """

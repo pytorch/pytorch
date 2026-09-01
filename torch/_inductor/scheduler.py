@@ -27,7 +27,7 @@ from .ir import ComputedBuffer, Pointwise
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Iterator, Sequence
+    from collections.abc import Callable, Collection, Iterable, Iterator, Sequence
     from types import ModuleType
 
     from torch._inductor.codegen.wrapper import EnterCudaStreamContextLine
@@ -70,7 +70,7 @@ from .ir import (
     MultiOutputLayout,
     NoneLayout,
 )
-from .loop_body import LoopBody, MASKED_EXPANSION_BANNED_OPS
+from .loop_body import LoopBody
 from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
 from .runtime.hints import DeviceProperties, ReductionHint
 from .runtime.runtime_utils import green_text, is_power_of_2, red_text
@@ -122,6 +122,16 @@ _T = TypeVar("_T")
 _P = ParamSpec("_P")
 _FLATTENED_READ_VAR = sympy.Dummy("flattened_read", integer=True, nonnegative=True)
 _REINDEXING_FUSION_LAUNCH_OVERHEAD_NS = 1_000
+_MASKED_EXPANSION_BANNED_OPS = (
+    "masked_store",
+    "store_reduction",
+    "partial_accumulate",
+    "check_bounds",
+    "indirect_indexing",
+    "device_assert_async",
+    "sort",
+    "scan",
+)
 
 
 @dataclasses.dataclass
@@ -153,6 +163,7 @@ class PendingFusion:
     node1: BaseSchedulerNode
     node2: BaseSchedulerNode
     future: LambdaFuture | None = None
+    can_reorder: bool = False
 
     def get_fusion_nodes(self) -> tuple[BaseSchedulerNode, BaseSchedulerNode]:
         return (self.node1, self.node2)
@@ -1721,6 +1732,9 @@ class BaseSchedulerNode:
     def clear_read_writes_dependent_caches(self) -> None:
         self.get_coalesce_analysis.clear_cache(self)
         typing.cast(Any, self.get_tiling).clear_cache(self)
+        typing.cast(Any, self.get_read_write_buffers_sizes).clear_cache(self)
+        typing.cast(Any, self.get_read_buffer_sizes).clear_cache(self)
+        typing.cast(Any, self.get_write_buffer_sizes).clear_cache(self)
 
     @cache_on_self
     def get_coalesce_analysis(self) -> CoalesceVarAnalysis | None:
@@ -3033,10 +3047,6 @@ class SchedulerNode(BaseSchedulerNode):
         if self.is_template():
             return False
         if any(out.get_aliases() for out in self.get_outputs()):
-            return False
-        # A masked store only partially defines its buffer, so reusing the input
-        # would leave the input's values in the masked-off region.
-        if isinstance(self._body, LoopBody) and self._body.has_op("masked_store"):
             return False
         if len(self.read_writes.writes) == 1 and isinstance(
             read_dep, dependencies.MemoryDep
@@ -6683,22 +6693,44 @@ class Scheduler:
 
         return node3
 
+    @staticmethod
+    def _install_fusion_guards(
+        guards: Sequence[sympy.logic.boolalg.Boolean],
+    ) -> bool:
+        if len(guards) > 1:
+            raise AssertionError("expected at most one deferred fusion guard")
+        return not guards or V.graph.sizevars.guard_or_false(guards[0])
+
     def fuse_if_speedup(
         self,
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
         speedup_fn: Callable[[], bool],
         fused_nodes: OrderedSet[BaseSchedulerNode],
+        can_reorder: bool = False,
     ):
-        if (
-            self.can_fuse(node1, node2)
-            and not self.will_fusion_create_cycle(node1, node2)
-            and speedup_fn()
-        ):
-            self.fuse_two_nodes(node1, node2, fused_nodes)
-            return True
+        tracker = _LoopMutationTracker.create((node1, node2))
+        pending_runtime_guards: list[sympy.logic.boolalg.Boolean] = []
+        fused = False
+        try:
+            if (
+                self._can_fuse_impl(
+                    node1,
+                    node2,
+                    can_reorder=can_reorder,
+                    pending_runtime_guards=pending_runtime_guards,
+                )
+                and not self.will_fusion_create_cycle(node1, node2)
+                and speedup_fn()
+                and self._install_fusion_guards(pending_runtime_guards)
+            ):
+                self.fuse_two_nodes(node1, node2, fused_nodes)
+                fused = True
+                return True
 
-        return False
+            return False
+        finally:
+            tracker.finish(rollback=not fused)
 
     def _evaluate_pending_template_fusions(
         self,
@@ -6763,7 +6795,11 @@ class Scheduler:
                 else:
                     # Non AsyncCompile path, perform fusion
                     if self.fuse_if_speedup(
-                        node1, node2, pending_fusion.callable_fn, fused_nodes
+                        node1,
+                        node2,
+                        pending_fusion.callable_fn,
+                        fused_nodes,
+                        pending_fusion.can_reorder,
                     ):
                         fusions_to_remove.add(candidate)
 
@@ -6775,6 +6811,7 @@ class Scheduler:
                     self.get_fused_node(pending_fusion.node2),
                     pending_fusion.callable_fn,
                     fused_nodes,
+                    pending_fusion.can_reorder,
                 ):
                     fusions_to_remove.add(cand)
 
@@ -6815,10 +6852,26 @@ class Scheduler:
                 if self.get_fused_node(node_key2) is not node_key2:
                     raise AssertionError("expected node_key2 to be its own fused node")
 
-                if not is_speedup() or self.will_fusion_create_cycle(node1, node2):
+                if not is_speedup():
                     continue
 
-                self.fuse_two_nodes(node_key1, node_key2, fused_nodes)
+                tracker = _LoopMutationTracker.create((node_key1, node_key2))
+                pending_runtime_guards: list[sympy.logic.boolalg.Boolean] = []
+                fused = False
+                try:
+                    if not self._can_fuse_impl(
+                        node_key1,
+                        node_key2,
+                        can_reorder=pending_fusion.can_reorder,
+                        pending_runtime_guards=pending_runtime_guards,
+                    ) or self.will_fusion_create_cycle(node_key1, node_key2):
+                        continue
+                    if not self._install_fusion_guards(pending_runtime_guards):
+                        continue
+                    self.fuse_two_nodes(node_key1, node_key2, fused_nodes)
+                    fused = True
+                finally:
+                    tracker.finish(rollback=not fused)
 
         for node1, node2 in possible_fusion_pairs:
             # if either node is in a pending fusion, resolve it.
@@ -6834,9 +6887,18 @@ class Scheduler:
             ):
                 continue
 
-            if self.can_fuse(
-                node1, node2, is_reorder_round
-            ) and not self.will_fusion_create_cycle(node1, node2):
+            tracker = _LoopMutationTracker.create((node1, node2))
+            pending_runtime_guards: list[sympy.logic.boolalg.Boolean] = []
+            fused = False
+            try:
+                if not self._can_fuse_impl(
+                    node1,
+                    node2,
+                    can_reorder=is_reorder_round,
+                    pending_runtime_guards=pending_runtime_guards,
+                ) or self.will_fusion_create_cycle(node1, node2):
+                    continue
+
                 fusion_res = self.speedup_by_fusion(node1, node2)
                 if fusion_res.callable_fn is not None:
                     pending_fusion = PendingFusion(
@@ -6844,6 +6906,7 @@ class Scheduler:
                         node1=node1,
                         node2=node2,
                         future=fusion_res.future,
+                        can_reorder=is_reorder_round,
                     )
 
                     if is_template_fusion(node1, node2):
@@ -6866,7 +6929,12 @@ class Scheduler:
                 if not fusion_res.should_fuse:
                     continue
 
+                if not self._install_fusion_guards(pending_runtime_guards):
+                    continue
                 self.fuse_two_nodes(node1, node2, fused_nodes)
+                fused = True
+            finally:
+                tracker.finish(rollback=not fused)
 
     def _finish_pending_fusions(
         self,
@@ -6892,7 +6960,13 @@ class Scheduler:
             if self.get_fused_node(node_key2) is not node_key2:
                 raise AssertionError("expected node_key2 to be its own fused node")
 
-            self.fuse_if_speedup(node_key1, node_key2, is_speedup_fn, fused_nodes)
+            self.fuse_if_speedup(
+                node_key1,
+                node_key2,
+                is_speedup_fn,
+                fused_nodes,
+                pending_fusion.can_reorder,
+            )
 
     def _handle_template_overlap(
         self,
@@ -7524,7 +7598,25 @@ class Scheduler:
         Helper to find all legal fusion opportunities, sorted by self.score_fusion()
         """
         possible_fusions = []
+        fusion_scores: dict[tuple[BaseSchedulerNode, BaseSchedulerNode], Any] = {}
         seen = OrderedSet[tuple[BaseSchedulerNode, BaseSchedulerNode]]()
+
+        def check_pair(
+            node1: BaseSchedulerNode, node2: BaseSchedulerNode
+        ) -> tuple[bool, Any]:
+            tracker = _LoopMutationTracker.create((node1, node2))
+            pending_runtime_guards: list[sympy.logic.boolalg.Boolean] = []
+            try:
+                if not self._can_fuse_impl(
+                    node1,
+                    node2,
+                    can_reorder=is_reorder_round,
+                    pending_runtime_guards=pending_runtime_guards,
+                ):
+                    return False, None
+                return True, self.score_fusion_key((node1, node2))
+            finally:
+                tracker.finish(rollback=True)
 
         def check_all_pairs(nodes: list[BaseSchedulerNode]) -> None:
             for node1_index, node1 in enumerate(nodes):
@@ -7538,13 +7630,17 @@ class Scheduler:
                         continue
                     seen.add(key)
 
-                    if self.can_fuse(node1, node2, is_reorder_round):
+                    can_fuse, score = check_pair(node1, node2)
+                    if can_fuse:
                         possible_fusions.append(key)
-                    elif (node2.is_template() or node2.is_foreach()) and self.can_fuse(
-                        node2, node1, is_reorder_round
-                    ):
-                        # foreach fusions and epilogue fusions are order dependent
-                        possible_fusions.append((node2, node1))
+                        fusion_scores[key] = score
+                    elif node2.is_template() or node2.is_foreach():
+                        reverse_key = (node2, node1)
+                        can_fuse, score = check_pair(*reverse_key)
+                        if can_fuse:
+                            # foreach fusions and epilogue fusions are order dependent
+                            possible_fusions.append(reverse_key)
+                            fusion_scores[reverse_key] = score
 
         buffer_names_grouping = collections.defaultdict(list)
         for node in nodes:
@@ -7567,7 +7663,7 @@ class Scheduler:
         possible_fusions = self.get_possible_fusions_with_highest_priority(
             possible_fusions
         )
-        possible_fusions.sort(key=self.score_fusion_key, reverse=True)
+        possible_fusions.sort(key=fusion_scores.__getitem__, reverse=True)
         fusion_log.debug("found %d possible fusions", len(possible_fusions))
         return possible_fusions
 
@@ -8318,10 +8414,6 @@ class Scheduler:
         groups. After reindexing, the shared reads have identical index
         expressions, enabling the codegen to CSE loads.
 
-        When pending_runtime_guards is provided, hinted symbolic profitability
-        checks append their guard there. The caller must install those guards
-        only after all remaining fusion checks accept the transformed nodes.
-
         Returns True if reindexing was applied.
         """
         from .codegen.simd import SIMDKernel
@@ -8392,7 +8484,7 @@ class Scheduler:
             if any(
                 sn._body.has_op(op)
                 for sn in snodes
-                for op in MASKED_EXPANSION_BANNED_OPS
+                for op in _MASKED_EXPANSION_BANNED_OPS
             ) or any(sn._get_non_plain_store_buffers() for sn in snodes):
                 return False
 
@@ -8414,21 +8506,11 @@ class Scheduler:
                     red_numel * pw_rnumel, pw_numel
                 )
                 or not V.graph.sizevars.statically_known_lt(pw_rnumel, red_rnumel)
-                # This is a profitability gate, not a safety condition. Backed
-                # symbolic sizes use their hints to select the transform and a
-                # runtime guard below enforces the ratio.
                 or not ratio_is_valid
             ):
                 return False
 
-            # Deliberately the uncached impl: get_read_write_buffers_sizes() is
-            # @cache_on_self and is not invalidated by the expansion below, so
-            # calling it here would leave a pre-expansion byte count on a node
-            # that estimate_runtime() later reads -- including on candidate
-            # pairs this speculative can_fuse() goes on to reject.
-            pw_access_bytes = pw_node.get_read_write_buffers_sizes_impl(
-                include_reads=True, include_writes=True
-            )
+            pw_access_bytes = pw_node.get_read_write_buffers_sizes()
             if (
                 not pw_numel_hint
                 or target_numel_hint <= pw_numel_hint
@@ -8455,8 +8537,7 @@ class Scheduler:
             return False
 
         broadcast_orders = None
-        # Only search for a broadcast reorder when the existing path cannot
-        # reindex the pointwise ranges as-is.
+        # Reorder broadcasts only when normal reindexing fails.
         if not all(
             SIMDKernel.is_compatible(target_iter_sizes, sn.get_ranges())
             for sn in snodes
@@ -8464,12 +8545,12 @@ class Scheduler:
             if needs_expansion or not config.loop_ordering_after_fusion:
                 return False
             broadcast_orders = self._find_reduction_broadcast_orders(
-                reduction_node, snodes, red_numel, red_rnumel
+                reduction_node.get_buffer_names(), snodes, red_numel
             )
             if broadcast_orders is None or not all(
                 SIMDKernel.is_compatible(
                     target_iter_sizes,
-                    (tuple(sn._sizes[0][i] for i in order), sn._sizes[1]),
+                    (ir.same_reorder(order)(sn._sizes[0]), sn._sizes[1]),
                 )
                 for sn, order in zip(snodes, broadcast_orders, strict=True)
             ):
@@ -8520,22 +8601,26 @@ class Scheduler:
             refresh_group_node_dependencies(pw_node)
 
         if needs_expansion:
-            # LOAD-SIDE LEGALITY PROOF for the whole transform. Only the stores
-            # are masked: the masked path in
-            # expand_dimension_for_pointwise_node_with_masked_stores drops the
-            # `Mod` that the unmasked path relies on, so the tail iterations
-            # issue raw, unclamped loads at indices past the original pointwise
-            # extent. Each such read is legal iff its address still lands inside
-            # the buffer over the *expanded* iteration domain, so prove exactly
-            # that on the post-expansion deps and require every read to either
-            #   (a) be provably in bounds over the expanded domain, or
-            #   (b) match a read the reduction itself performs -- the reduction
-            #       then executes the same address and is the witness.
-            # Both directions fail closed on dynamic shapes. Weakening this
-            # silently produces out-of-bounds loads.
+            # Only stores are masked by the transform. A direct load must remain
+            # inside both the logical numel and physical allocation over the
+            # expanded domain: the first prevents crossing padded logical rows,
+            # while the second handles overlapping layouts. Loads in an
+            # ops.masked subblock are also safe when
+            # they match a reduction read because _MaskStoresHandler strengthens
+            # that predicate with the pointwise tail mask.
             reduction_reads: dict[str, list[Dep]] = defaultdict(list)
             for dep in reduction_node.read_writes.reads:
                 reduction_reads[dep.name].append(dep)
+
+            unmasked_load_names: OrderedSet[str] = OrderedSet()
+            for sn in snodes:
+                for body_node in sn._body.root_block.graph.nodes:
+                    if body_node.op == "call_method" and body_node.target == "load":
+                        name = body_node.kwargs.get(
+                            "name",
+                            body_node.args[1] if len(body_node.args) >= 2 else "",
+                        )
+                        unmasked_load_names.add(sn.mutation_renames.get(name, name))
 
             def read_is_in_bounds(read: Dep) -> bool:
                 if not isinstance(read, MemoryDep) or read.is_indirect():
@@ -8562,19 +8647,33 @@ class Scheduler:
                         lower += endpoint
                     else:
                         return False
-                return V.graph.sizevars.statically_known_leq(
-                    0, lower
-                ) and V.graph.sizevars.statically_known_lt(
-                    upper, V.graph.get_numel(read.name)
+                buffer = V.graph.get_buffer(read.name)
+                if isinstance(buffer, ir.TensorBox):
+                    buffer = buffer.data
+                if isinstance(buffer, ir.StorageBox):
+                    buffer = buffer.data
+                if not isinstance(buffer, (ir.Buffer, ir.TorchBindObject)):
+                    return False
+                return (
+                    V.graph.sizevars.statically_known_leq(0, lower)
+                    and V.graph.sizevars.statically_known_lt(
+                        upper, V.graph.get_numel(read.name)
+                    )
+                    and V.graph.sizevars.statically_known_lt(
+                        upper, V.graph.get_allocation_storage_size(buffer)
+                    )
                 )
 
             unmatched_reads = [
                 read
                 for read in pw_node.read_writes.reads
                 if not read_is_in_bounds(read)
-                and not any(
-                    self.deps_match_normalized(read, reduction_read)
-                    for reduction_read in reduction_reads[read.name]
+                and (
+                    read.name in unmasked_load_names
+                    or not any(
+                        self.deps_match_normalized(read, reduction_read)
+                        for reduction_read in reduction_reads[read.name]
+                    )
                 )
             ]
             if unmatched_reads:
@@ -8658,7 +8757,8 @@ class Scheduler:
             ratio_guard
         ):
             if pending_runtime_guards is None:
-                raise AssertionError("runtime guard requested without a guard sink")
+                rollback_snapshot.restore()
+                return False
             pending_runtime_guards.append(ratio_guard)
 
         # When loop ordering is disabled, re-extract deps with
@@ -8672,28 +8772,19 @@ class Scheduler:
             if isinstance(pw_node, FusedSchedulerNode):
                 refresh_group_node_dependencies(pw_node)
 
-        if needs_expansion:
-            counters["inductor"]["masked_expansion_reindex_attempts"] += 1
         return True
 
     @staticmethod
     def _find_reduction_broadcast_orders(
-        reduction_node: BaseSchedulerNode,
+        reduction_outputs: Collection[str],
         snodes: Sequence[SchedulerNode],
         red_numel: sympy.Expr,
-        red_rnumel: sympy.Expr,
     ) -> list[tuple[int, ...]] | None:
-        """Find loop orders that group reduction-output dimensions before broadcasts.
-
-        Return None unless every pointwise child has one direct reduction-output
-        read and the reordered iteration shapes agree.
-        """
-        reduction_outputs = reduction_node.get_buffer_names()
+        """Group reduction-output dimensions before broadcast dimensions."""
         orders: list[tuple[int, ...]] = []
         for sn in snodes:
-            iter_sizes, reduce_sizes = sn._sizes
-            num_iter_dims = len(iter_sizes)
-            if sn._body is None or reduce_sizes or num_iter_dims <= 2:
+            iter_sizes = sn._sizes[0]
+            if sn._body is None or len(iter_sizes) <= 2:
                 return None
 
             reads = [
@@ -8701,38 +8792,22 @@ class Scheduler:
                 for dep in sn.read_writes.reads
                 if isinstance(dep, MemoryDep) and dep.name in reduction_outputs
             ]
-            if len(reads) != 1:
+            if len(reads) != 1 or reads[0].is_indirect():
                 return None
 
             dep = reads[0]
-            if dep.is_indirect():
-                return None
             loop_vars = sn.read_writes.range_vars
-            if loop_vars is None or len(loop_vars) != num_iter_dims:
+            if loop_vars is None or len(loop_vars) != len(iter_sizes):
                 return None
-            indexed = tuple(
-                i for i, var in enumerate(loop_vars) if var in dep.index.free_symbols
-            )
-            broadcast = tuple(i for i in range(num_iter_dims) if i not in indexed)
-            if not indexed or not broadcast:
-                return None
+            used = dep.index.free_symbols
+            indexed = tuple(i for i, var in enumerate(loop_vars) if var in used)
+            broadcast = tuple(i for i, var in enumerate(loop_vars) if var not in used)
             if not V.graph.sizevars.statically_known_equals(
-                dep.get_numel(), red_numel
-            ) or not V.graph.sizevars.statically_known_equals(
-                sympy_product(iter_sizes[i] for i in broadcast), red_rnumel
+                sympy_product(iter_sizes[i] for i in indexed), red_numel
             ):
                 return None
-            order = indexed + broadcast
-            orders.append(order)
+            orders.append(indexed + broadcast)
 
-        reordered_sizes = OrderedSet(
-            tuple(sn._sizes[0][i] for i in order)
-            for sn, order in zip(snodes, orders, strict=True)
-        )
-        if len(reordered_sizes) != 1 or all(
-            order == tuple(range(len(order))) for order in orders
-        ):
-            return None
         return orders
 
     def unfusable_node(self, node: BaseSchedulerNode) -> bool:
@@ -9004,6 +9079,7 @@ class Scheduler:
         node2: BaseSchedulerNode,
         can_reorder: bool = False,
         allow_mix_order_reduction: bool = True,
+        pending_runtime_guards: list[sympy.logic.boolalg.Boolean] | None = None,
     ) -> bool:
         """
         Determine if it is possible to combine node1 and node2 into a
@@ -9014,6 +9090,7 @@ class Scheduler:
             node2,
             can_reorder=can_reorder,
             allow_mix_order_reduction=allow_mix_order_reduction,
+            pending_runtime_guards=pending_runtime_guards,
         )
 
     def _can_fuse(
@@ -9023,6 +9100,7 @@ class Scheduler:
         can_reorder: bool = False,
         allow_mix_order_reduction: bool = True,
         index_equivalent_dep_names: OrderedSet[str] | None = None,
+        pending_runtime_guards: list[sympy.logic.boolalg.Boolean] | None = None,
     ) -> bool:
         if node1 is node2:
             return False
@@ -9307,6 +9385,21 @@ class Scheduler:
                 node2,
                 index_equivalent_dep_names=index_equivalent_dep_names,
             )
+            # Expansion changes dependency indices, so the transformed loops
+            # can expose a reordering opportunity that did not exist above.
+            if (
+                can_reorder
+                and shared_data_score < config.score_fusion_memory_threshold
+                and (
+                    config.loop_ordering_after_fusion
+                    or config.loop_reindexing_after_fusion
+                )
+            ):
+                new_shared_data_score = self.shared_data_after_reordering_loop(
+                    node1, node2
+                )
+                if new_shared_data_score >= 0:
+                    shared_data_score = new_shared_data_score
 
         if (
             can_reorder
@@ -9357,7 +9450,6 @@ class Scheduler:
             # match (e.g. pointwise reads buf[x//32] while reduction
             # writes buf[x]).  Try reindexing the pointwise to the
             # reduction's domain and retry.
-            pending_runtime_guards: list[sympy.logic.boolalg.Boolean] = []
             if config.loop_reindexing_after_fusion and (
                 self._try_reindex_pointwise_for_reduction(
                     node1,
@@ -9376,10 +9468,7 @@ class Scheduler:
                     )
                     and self.get_backend(device).can_fuse_vertical(node1, node2)
                 )
-                return can_fuse and all(
-                    V.graph.sizevars.guard_or_false(guard)
-                    for guard in pending_runtime_guards
-                )
+                return can_fuse
 
             return False
         else:  # nodes don't depend on each other, but may have common reads

@@ -449,54 +449,45 @@ class ImplDetailTest(MockSchedulerTest):
     def test_find_reduction_broadcast_orders(self):
         def make_node(ranges, indexed_dims, *, indirect=False):
             index_vars = tuple(sympy_index_symbol(f"d{i}") for i in range(len(ranges)))
+            outer, inner = indexed_dims
             index = (
                 sympy_index_symbol("tmp0")
                 if indirect
-                else 7 * index_vars[indexed_dims[0]] + index_vars[indexed_dims[1]]
+                else ranges[inner] * index_vars[outer] + index_vars[inner]
             )
-            dep = MemoryDep(
-                "scale",
-                index,
-                index_vars,
-                tuple(ranges),
-            )
+            dep = MemoryDep("scale", index, index_vars, tuple(ranges))
             node = object.__new__(SchedulerNode)
             node._body = mock.Mock()
             node._sizes = (ranges, ())
-            node.read_writes = mock.Mock(
-                reads=OrderedSet([dep]), range_vars=list(index_vars)
-            )
+            node.read_writes = mock.Mock(reads=OrderedSet([dep]), range_vars=index_vars)
             return node
 
         ordered = make_node([6, 7, 16, 16], (0, 1))
         interleaved = make_node([6, 16, 7, 16], (0, 2))
-        reduction = mock.Mock()
-        reduction.get_buffer_names.return_value = OrderedSet(["scale"])
+        refactored = make_node([3, 14, 16, 16], (0, 1))
+        reduction_outputs = {"scale"}
 
         self.assertEqual(
             Scheduler._find_reduction_broadcast_orders(
-                reduction,
-                [ordered, interleaved],
+                reduction_outputs,
+                [ordered, interleaved, refactored],
                 sympy.Integer(42),
-                sympy.Integer(256),
             ),
-            [(0, 1, 2, 3), (0, 2, 1, 3)],
+            [(0, 1, 2, 3), (0, 2, 1, 3), (0, 1, 2, 3)],
         )
         self.assertIsNone(
             Scheduler._find_reduction_broadcast_orders(
-                reduction,
+                reduction_outputs,
                 [make_node([6, 16, 7, 16], (0, 2), indirect=True)],
                 sympy.Integer(42),
-                sympy.Integer(256),
             )
         )
         ordered._body = None
         self.assertIsNone(
             Scheduler._find_reduction_broadcast_orders(
-                reduction,
+                reduction_outputs,
                 [ordered],
                 sympy.Integer(42),
-                sympy.Integer(256),
             )
         )
 
