@@ -2174,20 +2174,19 @@ class GraphModule(torch.nn.Module):
                 torch.ones(2, 2, device=device), Holder()
             )
 
-    def test_event_record_after_input_mutation_escapes_via_return(self, device):
-        # A trace-created event that escapes via return must still error,
-        # even though the error is now deferred to escape analysis.
-        def fn(x):
+    def test_event_record_after_input_mutation_escapes_via_set(self, device):
+        def fn(x, holder):
             s = torch.Stream(device=device)
             e = torch.Event(device=device)
             with s:
                 x.add_(1)
                 e.record()
-            return e
+            holder.add(e)
+            return x + 1
 
         with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
             torch.compile(fn, backend="eager", fullgraph=True)(
-                torch.ones(2, 2, device=device)
+                torch.ones(2, 2, device=device), set()
             )
 
     def test_event_record_event_after_input_mutation_non_escaping_no_error(
