@@ -1578,10 +1578,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if kwargs:
-            raise_args_mismatch(
-                tx, "mark_non_differentiable", "0 kwargs", f"{len(kwargs)} kwargs"
-            )
+        no_keywords(tx, "mark_non_differentiable", kwargs)
         self.non_differentiable = proxy_args_kwargs(args, {})[0]
         return variables.ConstantVariable.create(None)
 
@@ -1591,8 +1588,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if kwargs:
-            raise_args_mismatch(tx, "mark_dirty", "0 kwargs", f"{len(kwargs)} kwargs")
+        no_keywords(tx, "mark_dirty", kwargs)
         if getattr(self, "proxy", None) is None:
             unimplemented(
                 gb_type="Unsupported autograd.Function context `mark_dirty`",
