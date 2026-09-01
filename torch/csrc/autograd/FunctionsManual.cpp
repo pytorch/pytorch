@@ -8172,7 +8172,8 @@ static Tensor gs_gather2d_multi(
                     .reshape({N, C, out_H, out_W, K});
   if (zeros_oob) {
     auto mask = (h_idx >= 0) & (h_idx < H) & (w_idx >= 0) & (w_idx < W);
-    result = at::where(mask.unsqueeze(1), result, at::zeros({}, result.options()));
+    result =
+        at::where(mask.unsqueeze(1), result, at::zeros({}, result.options()));
   }
   return result;
 }
@@ -8195,7 +8196,8 @@ static Tensor gs_scatter2d_multi(
   auto weighted = values.unsqueeze(-1) * weights.unsqueeze(1);
   if (zeros_oob) {
     auto mask = (h_idx >= 0) & (h_idx < H) & (w_idx >= 0) & (w_idx < W);
-    weighted = at::where(mask.unsqueeze(1), weighted, at::zeros({}, weighted.options()));
+    weighted = at::where(
+        mask.unsqueeze(1), weighted, at::zeros({}, weighted.options()));
   }
   return at::zeros({N, C, H * W}, values.options())
       .scatter_add(2, flat, weighted.reshape({N, C, out_H * out_W * K}))
@@ -8222,7 +8224,8 @@ static Tensor gs_gather2d_bc_multi(
                     .reshape({N, C, out_H, out_W, K});
   if (padding_mode == GridSamplerPadding::Zeros) {
     auto mask = (h_idx >= 0) & (h_idx < H) & (w_idx >= 0) & (w_idx < W);
-    result = at::where(mask.unsqueeze(1), result, at::zeros({}, result.options()));
+    result =
+        at::where(mask.unsqueeze(1), result, at::zeros({}, result.options()));
   }
   return result;
 }
@@ -8248,7 +8251,8 @@ static Tensor gs_scatter2d_bc_multi(
   auto weighted = values.unsqueeze(-1) * weights.unsqueeze(1);
   if (padding_mode == GridSamplerPadding::Zeros) {
     auto mask = (h_idx >= 0) & (h_idx < H) & (w_idx >= 0) & (w_idx < W);
-    weighted = at::where(mask.unsqueeze(1), weighted, at::zeros({}, weighted.options()));
+    weighted = at::where(
+        mask.unsqueeze(1), weighted, at::zeros({}, weighted.options()));
   }
   return at::zeros({N, C, H * W}, values.options())
       .scatter_add(2, flat, weighted.reshape({N, C, out_H * out_W * K}))
@@ -8281,7 +8285,8 @@ static Tensor gs_gather3d_bc_multi(
   if (padding_mode == GridSamplerPadding::Zeros) {
     auto mask = (d_idx >= 0) & (d_idx < D) & (h_idx >= 0) & (h_idx < H) &
         (w_idx >= 0) & (w_idx < W);
-    result = at::where(mask.unsqueeze(1), result, at::zeros({}, result.options()));
+    result =
+        at::where(mask.unsqueeze(1), result, at::zeros({}, result.options()));
   }
   return result;
 }
@@ -8312,7 +8317,8 @@ static Tensor gs_scatter3d_bc_multi(
   if (padding_mode == GridSamplerPadding::Zeros) {
     auto mask = (d_idx >= 0) & (d_idx < D) & (h_idx >= 0) & (h_idx < H) &
         (w_idx >= 0) & (w_idx < W);
-    weighted = at::where(mask.unsqueeze(1), weighted, at::zeros({}, weighted.options()));
+    weighted = at::where(
+        mask.unsqueeze(1), weighted, at::zeros({}, weighted.options()));
   }
   return at::zeros({N, C, D * H * W}, values.options())
       .scatter_add(2, flat, weighted.reshape({N, C, out_D * out_H * out_W * K}))
@@ -8341,7 +8347,8 @@ static Tensor gs_gather3d_multi(
   if (zeros_oob) {
     auto mask = (d_idx >= 0) & (d_idx < D) & (h_idx >= 0) & (h_idx < H) &
         (w_idx >= 0) & (w_idx < W);
-    result = at::where(mask.unsqueeze(1), result, at::zeros({}, result.options()));
+    result =
+        at::where(mask.unsqueeze(1), result, at::zeros({}, result.options()));
   }
   return result;
 }
@@ -8369,7 +8376,8 @@ static Tensor gs_scatter3d_multi(
   if (zeros_oob) {
     auto mask = (d_idx >= 0) & (d_idx < D) & (h_idx >= 0) & (h_idx < H) &
         (w_idx >= 0) & (w_idx < W);
-    weighted = at::where(mask.unsqueeze(1), weighted, at::zeros({}, weighted.options()));
+    weighted = at::where(
+        mask.unsqueeze(1), weighted, at::zeros({}, weighted.options()));
   }
   return at::zeros({N, C, D * H * W}, values.options())
       .scatter_add(2, flat, weighted.reshape({N, C, out_D * out_H * out_W * K}))
