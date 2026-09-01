@@ -207,7 +207,7 @@ log = logging.getLogger(__name__)
 AOTAUTOGRAD_CACHE_PREFIX = "a"
 
 
-def _device_constructor_sort_key(target: Any) -> str:
+def _device_constructor_sort_key(target: object) -> str:
     return ".".join(
         x
         for x in (
@@ -733,7 +733,7 @@ class FxGraphCachePickler(pickle.Pickler):
         self.fast = True
 
     # pyrefly: ignore [bad-override]
-    def reducer_override(self, obj: Any) -> Any:
+    def reducer_override(self, obj: object) -> Any:
         """Fallback reducer for objects not registered in dispatch_table.
 
         This handles extension types (e.g. pybind11 enums) that don't support
@@ -769,7 +769,9 @@ class FxGraphCachePickler(pickle.Pickler):
         return result
 
     @staticmethod
-    def _reduce_unpicklable(obj: Any) -> Any:
+    def _reduce_unpicklable(
+        obj: object,
+    ) -> tuple[Callable[[str], NoReturn], tuple[str]]:
         key = _get_stable_obj_key(obj)
         if key is None:
             raise BypassFxGraphCache(
@@ -846,7 +848,7 @@ class FxGraphCachePickler(pickle.Pickler):
         # hashing.  Guards ensure correctness on cache reload.
         return (_ident, (str(s),))
 
-    def _reduce_unsupported(self, s: Any) -> NoReturn:
+    def _reduce_unsupported(self, s: object) -> NoReturn:
         """
         Custom reducer to handle any objects that we don't support and therefore
         raise to bypass caching.
@@ -893,7 +895,7 @@ class FxGraphCachePickler(pickle.Pickler):
                 self.fast = False
         return (_ident, (t.wrapped_obj, t.script_class_name, t.real_obj))
 
-    def dumps(self, obj: Any) -> bytes:
+    def dumps(self, obj: object) -> bytes:
         """
         Pickle an object and return a byte string.
         """
@@ -913,14 +915,14 @@ class FxGraphCachePickler(pickle.Pickler):
             self._stream.seek(0)
             self._stream.truncate(0)
 
-    def get_hash(self, obj: Any) -> str:
+    def get_hash(self, obj: object) -> str:
         """
         Serialize an object and return a hash of the bytes.
         """
         serialized_data = self.dumps(obj)
         return COMPACT_CACHE_KEY_STRATEGY.key(serialized_data)
 
-    def get_key(self, obj: Any) -> str:
+    def get_key(self, obj: object) -> str:
         """
         Serialize an object and return an FX graph cache key.
         """
@@ -934,7 +936,7 @@ class FxGraphCachePickler(pickle.Pickler):
         to a different value than another.
         """
 
-        def get_str(obj: Any) -> str:
+        def get_str(obj: object) -> str:
             if isinstance(obj, torch.Tensor):
                 return str(extract_tensor_metadata_for_cache_key(obj))
             elif isinstance(obj, bytes):
@@ -1199,7 +1201,7 @@ class CacheabilityValidator:
 
     def _check_cache_key_object(
         self,
-        obj: Any,
+        obj: object,
         seen: set[int] | None = None,  # noqa: set_linter
     ) -> None:
         if seen is None:
@@ -1227,11 +1229,11 @@ class CacheabilityValidator:
 _warned_pre_grad_pass_missing_uuid: OrderedSet[str] = OrderedSet()
 
 
-def _custom_pass_has_uuid(custom_pass: Any) -> bool:
+def _custom_pass_has_uuid(custom_pass: object) -> bool:
     return isinstance(custom_pass, CustomGraphPass) and custom_pass.uuid() is not None
 
 
-def _custom_pass_name(custom_pass: Any) -> str:
+def _custom_pass_name(custom_pass: object) -> str:
     return getattr(custom_pass, "__qualname__", None) or type(custom_pass).__qualname__
 
 
@@ -1372,7 +1374,7 @@ class FxGraphHashDetails:
     )
 
     @classmethod
-    def _contains_tensor(cls, value: Any) -> bool:
+    def _contains_tensor(cls, value: object) -> bool:
         if isinstance(value, torch.Tensor):
             return True
         if isinstance(value, (list, tuple, OrderedSet, frozenset)):
@@ -1385,7 +1387,7 @@ class FxGraphHashDetails:
         return False
 
     @classmethod
-    def _contains_cpu_tensor(cls, value: Any) -> bool:
+    def _contains_cpu_tensor(cls, value: object) -> bool:
         if isinstance(value, torch.Tensor):
             return value.device.type == "cpu"
         if isinstance(value, (list, tuple, OrderedSet, frozenset)):
@@ -1398,7 +1400,7 @@ class FxGraphHashDetails:
         return False
 
     @staticmethod
-    def _device_type(value: Any) -> str | None:
+    def _device_type(value: object) -> str | None:
         if isinstance(value, torch.device):
             return value.type
         if isinstance(value, str):
@@ -1410,7 +1412,7 @@ class FxGraphHashDetails:
 
     @classmethod
     def _is_factory_target(
-        cls, target: Any, targets: tuple[Any, ...], packets: tuple[Any, ...]
+        cls, target: object, targets: tuple[object, ...], packets: tuple[object, ...]
     ) -> bool:
         if target in targets or target in packets:
             return True
@@ -3173,6 +3175,12 @@ end
                 "use_relative_path": use_relative_path,
                 "vec_isa": picked_vec_isa,
             }
+            build_abicompat = (
+                config.is_fbcode()
+                and device_type == "cpu"
+                and graph.aot_mode
+                and not config.aot_inductor.package_cpp_only
+            )
             # If we're packaging via CMake, we build the whole code at max optimization.
             wrapper_build_options = CppTorchDeviceOptions(
                 compile_only=True,
@@ -3221,6 +3229,45 @@ end
             kernel_compile_cmd = kernel_builder.get_command_line()
             kernel_o = kernel_builder.get_target_file_path()
 
+            abicompat_wrapper_builder = None
+            abicompat_kernel_builder = None
+            abicompat_wrapper_compile_cmd = ""
+            abicompat_kernel_compile_cmd = ""
+            abicompat_wrapper_o = ""
+            abicompat_kernel_o = ""
+            if build_abicompat:
+                abicompat_wrapper_build_options = CppTorchDeviceOptions(
+                    compile_only=True,
+                    min_optimize=not config.aot_inductor.package_cpp_only,
+                    cpp_stdlib="libc++",
+                    **compile_command,
+                )
+                abicompat_kernel_build_options = CppTorchDeviceOptions(
+                    compile_only=True,
+                    cpp_stdlib="libc++",
+                    **compile_command,
+                )
+                abicompat_wrapper_builder = CppBuilder(
+                    name=f"{wrapper_path_operator.stem}_abicompat",
+                    sources=wrapper_path,
+                    output_dir=str(wrapper_path_operator.parent),
+                    BuildOption=abicompat_wrapper_build_options,
+                )
+                abicompat_wrapper_compile_cmd = (
+                    abicompat_wrapper_builder.get_command_line()
+                )
+                abicompat_wrapper_o = abicompat_wrapper_builder.get_target_file_path()
+                abicompat_kernel_builder = CppBuilder(
+                    name=f"{kernel_path_operator.stem}_abicompat",
+                    sources=kernel_path,
+                    output_dir=str(wrapper_path_operator.parent),
+                    BuildOption=abicompat_kernel_build_options,
+                )
+                abicompat_kernel_compile_cmd = (
+                    abicompat_kernel_builder.get_command_line()
+                )
+                abicompat_kernel_o = abicompat_kernel_builder.get_target_file_path()
+
             log.debug("aot wrapper compilation command: %s", wrapper_compile_cmd)
             log.debug("aot kernel compilation command: %s", kernel_compile_cmd)
             if config.aot_inductor.package_cpp_only:
@@ -3245,6 +3292,10 @@ end
                         ) from e
                     raise e
                 kernel_builder.build()
+                if abicompat_wrapper_builder is not None:
+                    abicompat_wrapper_builder.build()
+                if abicompat_kernel_builder is not None:
+                    abicompat_kernel_builder.build()
 
             if not use_mmap_weights:
                 aot_constants = serialized_weights
@@ -3481,6 +3532,34 @@ end
             )
             link_cmd = so_builder.get_command_line()
             output_so = so_builder.get_target_file_path()
+            output_sos = [output_so]
+
+            abicompat_obj_srcs: list[str] = []
+            abicompat_so_builder = None
+            abicompat_link_cmd = ""
+            if build_abicompat:
+                abicompat_obj_srcs = [
+                    abicompat_wrapper_o,
+                    abicompat_kernel_o,
+                    consts_o,
+                    *gpu_kernels_o,
+                    *cubins_o,
+                ]
+                abicompat_so_build_options = CppTorchDeviceOptions(
+                    vec_isa=picked_vec_isa,
+                    device_type=device_type,
+                    aot_mode=graph.aot_mode,
+                    use_relative_path=use_relative_path,
+                    cpp_stdlib="libc++",
+                )
+                abicompat_so_builder = CppBuilder(
+                    name=f"{output_name}_abicompat",
+                    sources=abicompat_obj_srcs,
+                    output_dir=output_dir,
+                    BuildOption=abicompat_so_build_options,
+                )
+                abicompat_link_cmd = abicompat_so_builder.get_command_line()
+                output_sos.append(abicompat_so_builder.get_target_file_path())
 
             log.debug("aot linkage command: %s", link_cmd)
 
@@ -3489,11 +3568,23 @@ end
                 f.write("\n")
                 f.write(f"// Compile cmd\n// {wrapper_compile_cmd}\n")
                 f.write(f"// Link cmd\n// {link_cmd}\n")
+                if build_abicompat:
+                    f.write(
+                        "// ABI-compatible compile cmd\n"
+                        f"// {abicompat_wrapper_compile_cmd}\n"
+                    )
+                    f.write(f"// ABI-compatible link cmd\n// {abicompat_link_cmd}\n")
 
             with open(kernel_path, "a") as f:
                 f.write("\n")
                 f.write(f"// Compile cmd\n// {kernel_compile_cmd}\n")
                 f.write(f"// Link cmd\n// {link_cmd}\n")
+                if build_abicompat:
+                    f.write(
+                        "// ABI-compatible compile cmd\n"
+                        f"// {abicompat_kernel_compile_cmd}\n"
+                    )
+                    f.write(f"// ABI-compatible link cmd\n// {abicompat_link_cmd}\n")
 
             if config.aot_inductor.package_cpp_only:
                 linker_flags = str(
@@ -3543,7 +3634,9 @@ end
                 so_builder.save_link_cmd_to_cmake(cmake_path)
             else:
                 so_builder.build()
-                for o_file in obj_srcs:
+                if abicompat_so_builder is not None:
+                    abicompat_so_builder.build()
+                for o_file in dict.fromkeys([*obj_srcs, *abicompat_obj_srcs]):
                     if o_file in gpu_kernels_o:
                         continue
                     # Remove these as they are not needed anymore
@@ -3594,15 +3687,16 @@ end
                     page_size_ = get_page_size()
                     page_size = max(16384, page_size_)
 
-                    with open(output_so, "a+b") as f_so:
-                        so_size = f_so.tell()
-                        # Page align the weights
-                        f_so.write(b" " * (page_size - so_size % page_size))
-                        f_so.write(serialized_weights)
-                        f_so.write(struct.pack("q", magic_number))
+                    for generated_so in output_sos:
+                        with open(generated_so, "a+b") as f_so:
+                            so_size = f_so.tell()
+                            # Page align the weights
+                            f_so.write(b" " * (page_size - so_size % page_size))
+                            f_so.write(serialized_weights)
+                            f_so.write(struct.pack("q", magic_number))
 
                 if config.aot_inductor.package:
-                    generated_files.append(output_so)
+                    generated_files.extend(output_sos)
 
         if config.effective_provenance_tracking_level() != 0:
             kernel_info = torch._inductor.debug.create_kernel_information_json()

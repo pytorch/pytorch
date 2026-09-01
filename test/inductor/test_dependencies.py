@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+from unittest.mock import Mock
 
 import torch
 from torch._inductor.codegen.cpp_utils import CppCSEVariable
@@ -12,7 +13,7 @@ from torch._inductor.ir import (
     Pointwise,
     ShapeAsConstantBuffer,
 )
-from torch._inductor.loop_body import LoopBody
+from torch._inductor.loop_body import _MaskStoresHandler, LoopBody
 from torch._inductor.scheduler import SchedulerNode
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import sympy_index_symbol
@@ -156,6 +157,16 @@ class TestDependencies(InductorTestCase):
         node.outputs = []
 
         self.assertFalse(node.can_inplace(object()))
+
+    def test_masked_expansion_combines_nested_mask(self):
+        inner = Mock()
+        inner.logical_and.return_value = "combined"
+        body = Mock()
+
+        _MaskStoresHandler(inner, "outer").masked("inner", body, "other")
+
+        inner.logical_and.assert_called_once_with("outer", "inner")
+        inner.masked.assert_called_once_with("combined", body, "other")
 
     def test_get_offset(self):
         x = sympy_index_symbol("x")
