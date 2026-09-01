@@ -9,6 +9,7 @@ import torch
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     gfx_arch_supports_opportunistic_fastatomics,
+    SM80OrLater,
     SM90OrLater,
 )
 from torch.testing._internal.common_device_type import (
@@ -564,6 +565,118 @@ class TestScatterGatherDevice(TestCase):
                 if (include_self):
                     expected_result[1] = 0
                 self.assertEqual(input, expected_result)
+
+    @onlyCUDA
+    @unittest.skipUnless(TEST_CUDA and torch.version.hip is None and SM80OrLater, "requires CUDA sm80+")
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_scatter_reduce_minmax_fastpath_edge_cases(self, device, dtype):
+        def run(op, reduce, base, index, src, include_self):
+            out = torch.empty_strided(
+                base.size(), base.stride(), device=base.device, dtype=base.dtype
+            )
+            out.copy_(base)
+            if op == "scatter":
+                expanded = index.view(index.shape[0], *([1] * (src.dim() - 1))).expand_as(src)
+                return out.scatter_reduce_(0, expanded, src, reduce=reduce, include_self=include_self)
+            return out.index_reduce_(0, index, src, reduce=reduce, include_self=include_self)
+
+        def make_noncontiguous(tensor):
+            storage = torch.empty(
+                *tensor.shape[:-1], tensor.shape[-1] * 2,
+                device=tensor.device,
+                dtype=tensor.dtype,
+            )
+            view = storage[..., ::2]
+            view.copy_(tensor)
+            return view
+
+        def assert_fast_matches_fallback(op, reduce, base, index, src, include_self):
+            fallback_base = make_noncontiguous(base)
+            fallback_src = make_noncontiguous(src)
+            fallback_index_storage = torch.empty(
+                index.numel() * 2, device=index.device, dtype=index.dtype
+            )
+            fallback_index = fallback_index_storage[::2]
+            fallback_index.copy_(index)
+
+            expected = run(
+                op, reduce, fallback_base, fallback_index, fallback_src, include_self
+            )
+            actual = run(op, reduce, base, index, src, include_self)
+            self.assertEqual(
+                actual.view(torch.int16).cpu(),
+                expected.contiguous().view(torch.int16).cpu(),
+            )
+
+        torch.manual_seed(0)
+        m, n = 7, 9
+        for reduce in ("amin", "amax"):
+            for include_self in (True, False):
+                base = torch.randn(m, 8, device=device, dtype=dtype)
+                src = torch.randn(n, 8, device=device, dtype=dtype)
+                index = torch.tensor([0, 0, 1, 2, 2, 2, 4, 5, 5], device=device, dtype=torch.int64)
+                for index_dtype in (torch.int32, torch.int64):
+                    idx = index.to(index_dtype)
+                    for op in ("scatter", "index"):
+                        assert_fast_matches_fallback(op, reduce, base, idx, src, include_self)
+
+                # D=3 cannot use v2/v4/v8 and must fall back.
+                base3, src3 = base[:, :3].contiguous(), src[:, :3].contiguous()
+                assert_fast_matches_fallback("scatter", reduce, base3, index, src3, include_self)
+                assert_fast_matches_fallback("index", reduce, base3, index, src3, include_self)
+
+                # Empty index is a no-op for both APIs, including include_self=False.
+                empty_index = torch.empty(0, device=device, dtype=torch.int64)
+                empty_src = torch.empty(0, 8, device=device, dtype=dtype)
+                for op in ("scatter", "index"):
+                    self.assertEqual(
+                        run(op, reduce, base, empty_index, empty_src, include_self), base
+                    )
+
+        # Cover NaN propagation and signed-zero semantics explicitly.
+        special_base = torch.zeros(2, 8, device=device, dtype=dtype)
+        special_src = torch.tensor([[float("nan"), -float("inf"), float("inf"), -0.0, 0.0, 1.0, -1.0, float("nan")]], device=device, dtype=dtype)
+        special_index = torch.zeros(1, device=device, dtype=torch.int64)
+        for reduce in ("amin", "amax"):
+            for include_self in (True, False):
+                for op in ("scatter", "index"):
+                    actual = run(
+                        op,
+                        reduce,
+                        special_base,
+                        special_index,
+                        special_src,
+                        include_self,
+                    )
+                    self.assertTrue(torch.isnan(actual[0, 0]))
+                    self.assertTrue(torch.isnan(actual[0, 7]))
+                    expected_negative_infinity = (
+                        -float("inf") if not include_self or reduce == "amin" else 0
+                    )
+                    expected_positive_infinity = (
+                        float("inf") if not include_self or reduce == "amax" else 0
+                    )
+                    self.assertEqual(actual[0, 1], expected_negative_infinity)
+                    self.assertEqual(actual[0, 2], expected_positive_infinity)
+                    fallback_base = make_noncontiguous(special_base)
+                    fallback_src = make_noncontiguous(special_src)
+                    fallback_index_storage = torch.empty(
+                        special_index.numel() * 2,
+                        device=device,
+                        dtype=special_index.dtype,
+                    )
+                    fallback_index = fallback_index_storage[::2]
+                    fallback_index.copy_(special_index)
+                    expected = run(
+                        op, reduce, fallback_base, fallback_index, fallback_src, include_self
+                    )
+                    self.assertEqual(
+                        actual[0, 3:5].view(torch.int16).cpu(),
+                        expected.contiguous()[0, 3:5].view(torch.int16).cpu(),
+                    )
+                    self.assertEqual(actual[0, 3], 0)
+                    self.assertEqual(actual[0, 4], 0)
+
 
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False))
     @dtypesIfCUDA(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
