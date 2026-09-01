@@ -9,31 +9,15 @@
 
 namespace torch::nativert {
 
-template <typename T, typename __atomic_base = std::atomic<T>>
-struct copyable_atomic : public __atomic_base {
- public:
-  copyable_atomic() = default;
-  ~copyable_atomic() = default;
-  copyable_atomic(const T& t) noexcept(__atomic_base::is_always_lock_free)
-      : __atomic_base(t) {}
-  copyable_atomic(const copyable_atomic& other) noexcept(
-      __atomic_base::is_always_lock_free)
-      : __atomic_base(other.load()) {}
-  copyable_atomic& operator=(const copyable_atomic& other) noexcept(
-      __atomic_base::is_always_lock_free) {
-    this->store(other.load());
-    return *this;
-  }
-  copyable_atomic(copyable_atomic&& other) = delete;
-  copyable_atomic& operator=(copyable_atomic&& other) = delete;
-};
+static_assert(
+    alignof(std::uint_fast32_t) >=
+    std::atomic_ref<std::uint_fast32_t>::required_alignment);
 
 class SessionState {
  public:
   explicit SessionState(
       ExecutionFrame& frame,
-      c10::FastMap<const Node*, copyable_atomic<std::uint_fast32_t>> producers =
-          {})
+      c10::FastMap<const Node*, std::uint_fast32_t> producers = {})
       : producers_(std::move(producers)), frame_(frame) {}
 
   C10_ALWAYS_INLINE void wait() {
@@ -60,12 +44,14 @@ class SessionState {
 
   C10_ALWAYS_INLINE /* producersRemaining == 0 */ bool decrementProducers(
       const Node* node) {
-    return producers_.at(node).fetch_sub(1, std::memory_order_seq_cst) == 1;
+    auto producerCount =
+        std::atomic_ref<std::uint_fast32_t>(producers_.at(node));
+    return producerCount.fetch_sub(1, std::memory_order_seq_cst) == 1;
   }
 
  private:
   std::atomic_uint_fast32_t workOutstanding_;
-  c10::FastMap<const Node*, copyable_atomic<std::uint_fast32_t>> producers_;
+  c10::FastMap<const Node*, std::uint_fast32_t> producers_;
 
   ExecutionFrame& frame_;
 };

@@ -118,7 +118,7 @@ class ParallelGraphExecutor : public GraphExecutorBase {
   std::vector<WorkUnit> workUnits_;
 
   const Graph& graph_;
-  c10::FastMap<const Node*, copyable_atomic<std::uint_fast32_t>> producers_;
+  c10::FastMap<const Node*, std::uint_fast32_t> producers_;
 };
 
 } // namespace torch::nativert
