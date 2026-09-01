@@ -1,4 +1,3 @@
-// @allow-raw-throw
 #ifndef C10_UTIL_EXCEPTION_H_
 #define C10_UTIL_EXCEPTION_H_
 
@@ -394,8 +393,9 @@ C10_API std::string GetExceptionString(const std::exception& e);
 // narrowing conversion Here the static cast is used to pass the build. if this
 // is used inside a lambda the __func__ macro expands to operator(), which isn't
 // very useful, but hard to fix in a macro so suppressing the warning.
-#define C10_THROW_ERROR(err_type, msg) \
-  throw ::c10::err_type(               \
+#define C10_THROW_ERROR(err_type, msg)                       \
+  /* @allow-raw-throw: this macro is the c10 throw itself */ \
+  throw ::c10::err_type(                                     \
       {__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, msg)
 
 #define C10_BUILD_ERROR(err_type, msg) \
@@ -581,32 +581,34 @@ namespace c10::detail {
 // useful when certain headers are used in a libtorch-independent way,
 // e.g. when Vectorized<T> is used in AOTInductor generated code.
 #ifdef STRIP_ERROR_MESSAGES
-#define TORCH_CHECK(cond, ...)                \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
-    throw std::runtime_error(TORCH_CHECK_MSG( \
-        cond,                                 \
-        "",                                   \
-        __func__,                             \
-        ", ",                                 \
-        __FILE__,                             \
-        ":",                                  \
-        __LINE__,                             \
-        ", ",                                 \
-        __VA_ARGS__));                        \
+#define TORCH_CHECK(cond, ...)                             \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                    \
+    /* @allow-raw-throw: this macro is the check itself */ \
+    throw std::runtime_error(TORCH_CHECK_MSG(              \
+        cond,                                              \
+        "",                                                \
+        __func__,                                          \
+        ", ",                                              \
+        __FILE__,                                          \
+        ":",                                               \
+        __LINE__,                                          \
+        ", ",                                              \
+        __VA_ARGS__));                                     \
   }
 #else
-#define TORCH_CHECK(cond, ...)                \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
-    throw std::runtime_error(TORCH_CHECK_MSG( \
-        cond,                                 \
-        "",                                   \
-        __func__,                             \
-        ", ",                                 \
-        __FILE__,                             \
-        ":",                                  \
-        __LINE__,                             \
-        ", ",                                 \
-        ##__VA_ARGS__));                      \
+#define TORCH_CHECK(cond, ...)                             \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                    \
+    /* @allow-raw-throw: this macro is the check itself */ \
+    throw std::runtime_error(TORCH_CHECK_MSG(              \
+        cond,                                              \
+        "",                                                \
+        __func__,                                          \
+        ", ",                                              \
+        __FILE__,                                          \
+        ":",                                               \
+        __LINE__,                                          \
+        ", ",                                              \
+        ##__VA_ARGS__));                                   \
   }
 #endif
 
