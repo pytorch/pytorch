@@ -21,6 +21,7 @@ from torch._dynamo.repro.after_aot import (
     repro_run,
     save_graph_repro,
 )
+from torch._functorch.fx_minifier import MinifierSanityCheckFailed
 from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import (
@@ -137,6 +138,7 @@ class TestAfterAot(torch._dynamo.test_case.TestCase):
         def fake_minifier(*args, **kwargs):
             nonlocal seen_repro_after
             seen_repro_after = torch._dynamo.config.repro_after
+            raise MinifierSanityCheckFailed("Input graph did not fail the tester")
 
         options = SimpleNamespace(
             accuracy="accuracy",
@@ -154,6 +156,9 @@ class TestAfterAot(torch._dynamo.test_case.TestCase):
             torch._dynamo.config.patch(repro_after="aot"),
             patch("torch._dynamo.repro.after_aot.repro_common", fake_repro_common),
             patch("functorch.compile.minifier", fake_minifier),
+            self.assertRaisesRegex(
+                MinifierSanityCheckFailed, "Input graph did not fail the tester"
+            ),
         ):
             repro_minify(options, torch.nn.Identity(), lambda reader: None)
 
