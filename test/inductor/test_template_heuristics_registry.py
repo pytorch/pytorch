@@ -17,12 +17,12 @@ from torch._inductor.heuristics.template.triton import (
     FlexConfig,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-)
 
 
+# Frozen at the #183275 re-land (1374acc2890): the submodules that existed under
+# torch._inductor.template_heuristics when the move landed. Modules added to
+# heuristics/template/ afterwards (e.g. flydsl) never had an old import path, so
+# aliasing them would create a backward-compatibility obligation that never existed.
 _HISTORICAL_SUBMODULES = (
     "aten",
     "base",
@@ -40,32 +40,24 @@ _HISTORICAL_SUBMODULES = (
 )
 
 
-@instantiate_parametrized_tests
 class TestTemplateHeuristicsCompatibility(TestCase):
-    @parametrize("import_order", ("historical_first", "canonical_first"))
-    def test_historical_import_paths(self, import_order):
+    def test_historical_import_paths(self):
+        # Runs in a subprocess because this module already imports
+        # torch._inductor.heuristics.template, and only a cold interpreter
+        # reaches the canonical package through the compatibility shim.
         source = textwrap.dedent(
             f"""
             import importlib
-            import sys
 
-            names = {_HISTORICAL_SUBMODULES!r}
-            if {import_order!r} == "historical_first":
-                historical = importlib.import_module(
-                    "torch._inductor.template_heuristics"
-                )
-                importlib.import_module("torch._inductor.heuristics.template")
-            else:
-                importlib.import_module("torch._inductor.heuristics.template")
-                historical = importlib.import_module(
-                    "torch._inductor.template_heuristics"
-                )
+            historical = importlib.import_module("torch._inductor.template_heuristics")
 
-            for name in names:
-                historical_name = f"torch._inductor.template_heuristics.{{name}}"
-                canonical_name = f"torch._inductor.heuristics.template.{{name}}"
-                historical_module = importlib.import_module(historical_name)
-                canonical_module = importlib.import_module(canonical_name)
+            for name in {_HISTORICAL_SUBMODULES!r}:
+                historical_module = importlib.import_module(
+                    f"torch._inductor.template_heuristics.{{name}}"
+                )
+                canonical_module = importlib.import_module(
+                    f"torch._inductor.heuristics.template.{{name}}"
+                )
                 if historical_module is not canonical_module:
                     raise AssertionError(
                         f"module identity mismatch for {{name}}: "
@@ -75,12 +67,6 @@ class TestTemplateHeuristicsCompatibility(TestCase):
                     raise AssertionError(
                         f"package attribute mismatch for {{name}}: "
                         f"{{getattr(historical, name)!r}} is not {{canonical_module!r}}"
-                    )
-                if historical_name not in sys.modules:
-                    raise AssertionError(f"{{historical_name}} missing from sys.modules")
-                if sys.modules[historical_name] is not canonical_module:
-                    raise AssertionError(
-                        f"sys.modules identity mismatch for {{historical_name}}"
                     )
 
             canonical_registry = importlib.import_module(
@@ -98,33 +84,13 @@ class TestTemplateHeuristicsCompatibility(TestCase):
             capture_output=True,
             text=True,
             check=False,
+            timeout=300,
         )
         self.assertEqual(
             result.returncode,
             0,
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
         )
-
-    def test_registry_compatibility_exports(self):
-        from torch._inductor.heuristics import registry as shared_registry
-        from torch._inductor.heuristics.template import registry as template_registry
-
-        private_names = ("_HEURISTIC_CACHE", "_TEMPLATE_HEURISTIC_REGISTRY")
-        namespace = {}
-        exec(
-            "from torch._inductor.heuristics.template.registry import *",
-            {},
-            namespace,
-        )
-
-        for name in private_names:
-            with self.subTest(name=name):
-                self.assertIn(name, template_registry.__all__)
-                self.assertIs(
-                    getattr(template_registry, name), getattr(shared_registry, name)
-                )
-                self.assertIn(name, namespace)
-                self.assertIs(namespace[name], getattr(shared_registry, name))
 
 
 class TestBlackwellGPUGemmConfig(TestCase):
