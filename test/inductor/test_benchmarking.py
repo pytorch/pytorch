@@ -516,6 +516,15 @@ class TestBenchmarker(TestCase):
                 pass
 
         calls = []
+        grad_states = []
+        grad_tensor = unittest.mock.Mock()
+        grad_tensor.grad = object()
+
+        def call():
+            calls.append("call")
+            grad_states.append(grad_tensor.grad is None)
+            grad_tensor.grad = object()
+
         current_stream = FakeStream()
         with (
             patch("torch.cuda.synchronize"),
@@ -526,11 +535,12 @@ class TestBenchmarker(TestCase):
             patch("torch.cuda.graph", return_value=contextlib.nullcontext()),
         ):
             result = FakeBenchmarker().benchmark_gpu_with_cuda_graph(
-                lambda: calls.append("call"), cudagraph_unroll=4
+                call, grad_to_none=[grad_tensor], cudagraph_unroll=4
             )
 
         self.assertEqual(result, 3.0)
         self.assertEqual(calls, ["call"] * 6 + ["replay"])
+        self.assertEqual(grad_states, [False, True, True, True, True, True])
 
     def test_autotune_cudagraph_benchmarking_requires_max_autotune(self):
         from torch._inductor.runtime import benchmarking as _bench
