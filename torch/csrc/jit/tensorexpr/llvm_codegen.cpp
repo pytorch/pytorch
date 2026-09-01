@@ -1307,10 +1307,10 @@ void LLVMCodeGenImpl::visit(const VarPtr& v) {
 llvm::Value* LLVMCodeGenImpl::varToValue(VarPtr v) {
   // It is possible for v to be in both varToVal_ and varToArgs.
   // In that case, varToVal_ takes precedence.
-  if (varToVal_.count(v)) {
-    return varToVal_.at(v);
-  } else if (varToArg_.count(v)) {
-    auto idx = varToArg_.at(v);
+  if (auto it = varToVal_.find(v); it != varToVal_.end()) {
+    return it->second;
+  } else if (auto it = varToArg_.find(v); it != varToArg_.end()) {
+    auto idx = it->second;
     auto arg = fn_->arg_begin() + idx;
     return arg;
   }
