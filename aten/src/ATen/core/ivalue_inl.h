@@ -374,7 +374,7 @@ struct TORCH_API TupleElements {
     : inlineSize_(0), elementsVector_(std::move(elements)) {}
 
   explicit TupleElements(c10::ArrayRef<IValue> elements)
-    : inlineSize_(elements.size() <= 3 ? elements.size() : 0) {
+    : inlineSize_(elements.size() <= kInlineCapacity ? elements.size() : 0) {
     if (inlineSize_) {
       std::uninitialized_copy_n(elements.begin(), inlineSize_, elementsInline_);
     } else {
@@ -546,7 +546,7 @@ struct TORCH_API TupleElements {
 
   [[nodiscard]] IValue& at(size_t idx) {
     if (inlineSize_) {
-      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inlineSize_ <= 3);
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inlineSize_ <= kInlineCapacity);
       TORCH_CHECK(idx < inlineSize_, "TupleElements: invalid index Index = ", idx, "; Length = ", inlineSize_);
       return elementsInline_[idx];
     } else {
@@ -556,7 +556,7 @@ struct TORCH_API TupleElements {
 
   [[nodiscard]] const IValue& at(size_t idx) const {
     if (inlineSize_) {
-      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inlineSize_ <= 3);
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inlineSize_ <= kInlineCapacity);
       TORCH_CHECK(idx < inlineSize_, "TupleElements: invalid index Index = ", idx, "; Length = ", inlineSize_);
       return elementsInline_[idx];
     } else {
