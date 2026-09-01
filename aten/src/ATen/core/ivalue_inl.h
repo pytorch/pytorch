@@ -434,6 +434,7 @@ struct TORCH_API TupleElements {
     if (inlineSize_ == 0 && rhs.inlineSize_ == 0) {
       elementsVector_ = rhs.elementsVector_;
     } else if (inlineSize_ == 0 && rhs.inlineSize_ > 0) {
+      // NOLINTNEXTLINE(*c-arrays*)
       IValue tmp[kInlineCapacity];
       std::copy_n(rhs.elementsInline_, rhs.inlineSize_, tmp);
       std::destroy_at(&elementsVector_);
