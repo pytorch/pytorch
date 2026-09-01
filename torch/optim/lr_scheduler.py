@@ -2053,6 +2053,8 @@ class PlateauLR(LRScheduler):
     def in_cooldown(self) -> bool:
         return self.cooldown_counter > 0
 
+    # Keep `epoch` for API parity with LRScheduler while its step argument is
+    # being deprecated.
     @override
     def step(
         self, epoch: int | None = None, *, metrics: SupportsFloat | None = None
