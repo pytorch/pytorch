@@ -3079,6 +3079,183 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                     "topk_with_index"
                 ).run(code)
 
+    @skipCUDAIf(not SM90OrLater, "bounded grouping is enabled on SM90 and newer")
+    def test_bounded_topk_index_group(self):
+        def f(x):
+            values, indices = torch.topk(x, 4, dim=-1)
+            sorted_indices, permutation = torch.sort(indices.flatten())
+            histogram = torch.histc(
+                sorted_indices.to(torch.int32),
+                bins=32,
+                min=0,
+                max=31,
+            )
+            offsets = torch.cumsum(histogram, 0, dtype=torch.int32)
+            return values, indices, sorted_indices, permutation, offsets
+
+        x = torch.randn(1000, 32, dtype=torch.bfloat16, device=device_type)
+        actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        values, indices, sorted_indices, permutation, offsets = actual
+
+        self.assertEqual(torch.gather(x, 1, indices), values)
+        expected_indices, expected_permutation = torch.sort(indices.flatten())
+        self.assertEqual(sorted_indices, expected_indices)
+        self.assertEqual(permutation, expected_permutation)
+        expected_offsets = (
+            torch.bincount(indices.flatten(), minlength=32).cumsum(0).to(torch.int32)
+        )
+        self.assertEqual(offsets, expected_offsets)
+        FileCheck().check("tl.associative_scan").check_not(
+            "torch.ops.aten.sort.default("
+        ).check_not("torch.ops.aten.histc.default(").check_not(
+            "torch.ops.aten.cumsum.default("
+        ).run(code)
+
+    @skipCUDAIf(not SM90OrLater, "bounded grouping is enabled on SM90 and newer")
+    def test_bounded_topk_index_group_gpt_oss(self):
+        def f(scores, hidden, gate_up, down):
+            _, indices = torch.topk(scores, 4, dim=-1)
+            sorted_indices, permutation = torch.sort(indices.flatten())
+            selected = hidden[torch.div(permutation, 4, rounding_mode="floor")]
+            histogram = torch.histc(
+                sorted_indices.to(torch.int32),
+                bins=32,
+                min=0,
+                max=31,
+            )
+            offsets = torch.cumsum(histogram, 0, dtype=torch.int32)
+            gate = torch._grouped_mm(selected, gate_up, offs=offsets)
+            output = torch._grouped_mm(gate, down, offs=offsets)
+            return indices, sorted_indices, permutation, offsets, output
+
+        scores = torch.randn(1000, 32, dtype=torch.bfloat16, device=device_type)
+        hidden = torch.randn(1000, 64, dtype=torch.bfloat16, device=device_type)
+        gate_up = torch.randn(32, 64, 128, dtype=torch.bfloat16, device=device_type)
+        down = torch.randn(32, 128, 64, dtype=torch.bfloat16, device=device_type)
+        actual, (code,) = run_and_get_code(
+            torch.compile(f, fullgraph=True),
+            scores,
+            hidden,
+            gate_up,
+            down,
+        )
+        indices, sorted_indices, permutation, offsets, output = actual
+
+        self.assertEqual(indices.flatten()[permutation], sorted_indices)
+        expected_offsets = (
+            torch.bincount(indices.flatten(), minlength=32).cumsum(0).to(torch.int32)
+        )
+        self.assertEqual(offsets, expected_offsets)
+        selected = hidden[torch.div(permutation, 4, rounding_mode="floor")]
+        expected_gate = torch._grouped_mm(selected, gate_up, offs=offsets)
+        expected_output = torch._grouped_mm(expected_gate, down, offs=offsets)
+        self.assertEqual(output, expected_output)
+        FileCheck().check("tl.associative_scan").check_not(
+            "torch.ops.aten.sort.default("
+        ).check_not("torch.ops.aten.histc.default(").check_not(
+            "torch.ops.aten.cumsum.default("
+        ).run(code)
+
+    @skipCUDAIf(not SM90OrLater, "bounded grouping is enabled on SM90 and newer")
+    def test_bounded_topk_index_group_value_range_analysis(self):
+        def supported(x):
+            _, indices = torch.topk(x, 4, dim=1)
+            return torch.sort(indices.reshape(8, 16).reshape(-1))
+
+        def cast_stops_proof(x):
+            _, indices = torch.topk(x, 4, dim=1)
+            keys = indices.to(torch.int32).to(torch.int64).reshape(-1)
+            return torch.sort(keys)
+
+        x = torch.randn(4, 32, 8, dtype=torch.bfloat16, device=device_type)
+        actual, (code,) = run_and_get_code(torch.compile(supported, fullgraph=True), x)
+        sorted_keys, permutation = actual
+        _, indices = torch.topk(x, 4, dim=1)
+        keys = indices.reshape(-1)
+
+        self.assertEqual(sorted_keys, torch.sort(keys)[0])
+        self.assertEqual(keys[permutation], sorted_keys)
+        FileCheck().check("tl.associative_scan").check_not(
+            "torch.ops.aten.sort.default("
+        ).run(code)
+
+        torch._dynamo.reset()
+        actual, (code,) = run_and_get_code(
+            torch.compile(cast_stops_proof, fullgraph=True), x
+        )
+        expected = cast_stops_proof(x)
+        self.assertEqual(actual[0], expected[0])
+        FileCheck().check_not("tl.associative_scan").run(code)
+
+    @skipCUDAIf(not SM90OrLater, "bounded grouping is enabled on SM90 and newer")
+    def test_bounded_topk_index_group_cost_model_fallback(self):
+        def f(x, k):
+            _, indices = torch.topk(x, k, dim=-1)
+            sorted_indices, permutation = torch.sort(indices.flatten())
+            return indices, sorted_indices, permutation
+
+        for name, shape, k in (
+            ("too_many_routes", (8192, 4), 4),
+            ("single_route", (1, 1), 1),
+        ):
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+                x = torch.randn(shape, dtype=torch.bfloat16, device=device_type)
+                actual, (code,) = run_and_get_code(
+                    torch.compile(f, fullgraph=True), x, k
+                )
+                indices, sorted_indices, permutation = actual
+
+                expected_indices, expected_permutation = torch.sort(indices.flatten())
+                self.assertEqual(sorted_indices, expected_indices)
+                self.assertEqual(permutation, expected_permutation)
+                self.assertEqual(indices.flatten()[permutation], sorted_indices)
+                FileCheck().check_not("tl.associative_scan").run(code)
+
+    @skipCUDAIf(not SM90OrLater, "bounded grouping is enabled on SM90 and newer")
+    @config.patch({"triton.persistent_reductions": False})
+    def test_bounded_topk_index_group_requires_persistent_reductions(self):
+        def f(x):
+            _, indices = torch.topk(x, 4, dim=-1)
+            sorted_indices, permutation = torch.sort(indices.flatten())
+            return indices, sorted_indices, permutation
+
+        x = torch.randn(128, 32, dtype=torch.bfloat16, device=device_type)
+        actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        indices, sorted_indices, permutation = actual
+
+        self.assertEqual(sorted_indices, torch.sort(indices.flatten())[0])
+        self.assertEqual(indices.flatten()[permutation], sorted_indices)
+        FileCheck().check_not("tl.associative_scan").run(code)
+
+    @skipCUDAIf(not SM90OrLater, "bounded grouping is enabled on SM90 and newer")
+    def test_bounded_topk_index_group_backend_without_scan(self):
+        from unittest import mock
+
+        from torch._inductor.codegen.common import BackendFeature
+        from torch._inductor.graph import GraphLowering
+
+        def f(x):
+            _, indices = torch.topk(x, 4, dim=-1)
+            sorted_indices, permutation = torch.sort(indices.flatten())
+            return indices, sorted_indices, permutation
+
+        original_has_feature = GraphLowering.has_feature
+
+        def has_feature_without_scan(graph, device, feature):
+            if feature is BackendFeature.SCAN:
+                return False
+            return original_has_feature(graph, device, feature)
+
+        x = torch.randn(128, 32, dtype=torch.bfloat16, device=device_type)
+        with mock.patch.object(GraphLowering, "has_feature", has_feature_without_scan):
+            actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        indices, sorted_indices, permutation = actual
+
+        self.assertEqual(sorted_indices, torch.sort(indices.flatten())[0])
+        self.assertEqual(indices.flatten()[permutation], sorted_indices)
+        FileCheck().check("topk_with_index").check_not("tl.associative_scan").run(code)
+
     @requires_multigpu()
     def test_not_initializing_wrong_device(self):
         device_stats = torch.cuda.memory_stats("cuda:0")

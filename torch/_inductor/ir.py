@@ -3208,6 +3208,35 @@ class SplitScan(Scan):
 
 
 @ir_dataclass
+class ScanScatter(Scan):
+    """A scan whose dense result is consumed only by a masked scatter store."""
+
+    output_indexer: Callable[[Sequence[Expr], tuple[OpsValue, ...]], Sequence[Expr]]
+    output_value: Callable[[Sequence[Expr], tuple[OpsValue, ...]], OpsValue]
+    store_mask: Callable[[Sequence[Expr], tuple[OpsValue, ...]], OpsValue]
+
+    def store_reduction(
+        self,
+        output_name: str | None,
+        indexer: Callable[[Sequence[Expr]], Expr],
+        vars: Sequence[Expr],
+        scan_vars: Sequence[Symbol],
+    ) -> Any:
+        idx = self.reindex(vars, scan_vars)
+        values = tuple(inner_fn(idx) for inner_fn in self.inner_fns)
+        result = ops.scan(self.dtypes, self.combine_fn, values)
+        value = ops.set_store_mask(
+            self.output_value(idx, result),
+            self.store_mask(idx, result),
+        )
+        return ops.store(
+            output_name or "unnamed",
+            indexer(self.output_indexer(idx, result)),
+            value,
+        )
+
+
+@ir_dataclass
 class Sort(Loops):
     """Sort a tuple of key/value pairs, optionally retaining only a Top-K prefix."""
 

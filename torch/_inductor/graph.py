@@ -518,6 +518,10 @@ class GraphLowering(torch.fx.Interpreter):
         self.removed_inplace_buffers: OrderedSet[str] = OrderedSet()
         self.mutated_buffers: OrderedSet[str] = OrderedSet()
         self.sdpa_constraint_cache: dict[tuple, ir.IRNode] = {}
+        # Inclusive offsets produced while lowering a proven-bounded integer
+        # sort. Exact histogram/cumsum consumers can reuse these instead of
+        # materializing an external histogram kernel.
+        self.bounded_group_offsets: dict[torch.fx.Node, ir.TensorBox] = {}
         self.never_reuse_buffers: OrderedSet[str] = OrderedSet()
         self.inplaced_to_remove: OrderedSet[str] = OrderedSet()
         self.device_ops: DeviceOpOverrides = None  # type: ignore[assignment]
