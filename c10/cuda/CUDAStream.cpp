@@ -223,15 +223,17 @@ void initDeviceStreamState(DeviceIndex device_index) {
 
 // Init front-end to ensure initialization only occurs once
 void initCUDAStreamsOnce() {
+  // Quick return if streams have been initialized. current_streams
+  // is thread_local, we don't need to worry about a data race.
+  if (current_streams) {
+    return;
+  }
+
   // Inits default streams (once, globally)
   auto static init_flag [[maybe_unused]] = [] {
     initGlobalStreamState();
     return true;
   }();
-
-  if (current_streams) {
-    return;
-  }
 
   // Inits current streams (thread local) to default streams
   // NOLINTNEXTLINE(*-arrays)

@@ -433,3 +433,7 @@ void bf16bf16_grouped_mm(
 }
 
 } // namespace at::cuda::detail
+
+C10_DIAGNOSTIC_POP()
+C10_DIAGNOSTIC_POP()
+C10_DIAGNOSTIC_POP()
