@@ -600,13 +600,11 @@
   - jathu
   - jbschlosser
   - jeanschmidt
-  - jijunyan
   - kapilsh
   - karthickai
   - kqfu
   - laithsakka
   - liangel-02
-  - meetv18
   - Microve
   - mlazos
   - njriasan
@@ -629,6 +627,7 @@
   - ydwu4
   - yushangdi
   - zpcore
+  - zoranzhao
   mandatory_checks_name:
   - EasyCLA
   - Lint
