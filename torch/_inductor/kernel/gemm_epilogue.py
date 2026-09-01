@@ -62,6 +62,9 @@ class GemmReductionGeometry:
     def group_size(self) -> int:
         return self.group
 
+    def transposed(self) -> "GemmReductionGeometry":
+        return GemmReductionGeometry(self.group, 1 - self.axis)
+
     @classmethod
     def from_output_shape(
         cls, output_shape: Sequence[Any], gemm_shape: Sequence[Any]

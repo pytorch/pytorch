@@ -89,6 +89,14 @@ def _normalize_epilogue_input_tensor(value: Any, permute=None) -> Any:
     return value
 
 
+def _transpose_local_reduce_tensors(
+    reduction: GemmReductionArguments,
+) -> GemmReductionArguments:
+    return reduction.map_tensors(
+        lambda tensor: tensor.mT if tensor.ndim == 2 else tensor
+    )
+
+
 @functools.cache
 def _cutedsl_epilogue_io(
     epilogue_fn: str,
@@ -290,10 +298,10 @@ def _compile_nvgemm_kernel(kernel, args):
     """
     import cutlass.cute as cute
 
-    if hasattr(cute.compile, "__getitem__"):
-        return kernel.compile(args)
-
     with _NVGEMM_COMPILE_LOCK:
+        if hasattr(cute.compile, "__getitem__"):
+            return kernel.compile(args)
+
         wrapped_compile = cute.compile
         unwrapped_compile = wrapped_compile
         while not hasattr(unwrapped_compile, "__getitem__"):
@@ -959,9 +967,10 @@ def _nvgemm_run(
 
         reduction = variant_kwargs.get("local_reduce") if variant_kwargs else None
         if isinstance(reduction, GemmReductionArguments) and reduction.enabled:
-            raise NotImplementedError(
-                "NVGEMM swap_ab does not support fused local reductions"
-            )
+            if variant_kwargs is None:
+                raise AssertionError("expected local-reduction keyword arguments")
+            variant_kwargs = dict(variant_kwargs)
+            variant_kwargs["local_reduce"] = _transpose_local_reduce_tensors(reduction)
         a, b = input_tensors[0], input_tensors[1]
         if len(input_tensors) >= 4:
             sa, sb = input_tensors[2], input_tensors[3]
@@ -1175,7 +1184,7 @@ def _nvgemm_precompile(
     variant_kwargs: dict | None = None,
     max_active_clusters: int | None = None,
     swap_ab: bool = False,
-    has_output_scale: bool = False,
+    output_scale_param_name: str | None = None,
 ):
     """Precompile an NVGEMM kernel in a subprocess for parallel compilation.
 
@@ -1197,7 +1206,10 @@ def _nvgemm_precompile(
     device = f"cuda:{device_index}"
     with FakeTensorMode():
         tensors = {}
-        for name in [*input_param_names, "output"]:
+        tensor_names = [*input_param_names]
+        if output_scale_param_name is not None:
+            tensor_names.append(output_scale_param_name)
+        for name in [*dict.fromkeys(tensor_names), "output"]:
             tensors[name] = torch.empty_strided(
                 tuple(precompile_shapes[name]),
                 tuple(precompile_strides[name]),
@@ -1207,11 +1219,11 @@ def _nvgemm_precompile(
 
     input_tensors = tuple(tensors[n] for n in input_param_names)
     out = tensors["output"]
-
-    output_scale = None
-    if has_output_scale:
-        *gemm_list, output_scale = input_tensors
-        input_tensors = tuple(gemm_list)
+    output_scale = (
+        tensors[output_scale_param_name]
+        if output_scale_param_name is not None
+        else None
+    )
 
     # The generated runtime wrapper applies swap_ab before constructing GEMM
     # arguments.  Precompile must use the identical tensor signatures so its
@@ -1586,7 +1598,10 @@ class NVUniversalGemmKernel(Kernel):
                     else f"out_ptr{output_buffers.index(reduce_name)}"
                 )
                 if reduce_name is not None:
-                    squeeze_dim = -1 if reduction.axis == 1 else -2
+                    logical_axis = (
+                        1 - reduction.axis if self.swap_ab else reduction.axis
+                    )
+                    squeeze_dim = -1 if logical_axis == 1 else -2
                     reduce_ptr = f"{reduce_ptr}.squeeze({squeeze_dim})"
 
                 def feed_output_ptr(output_name: str | None) -> str:
@@ -1694,7 +1709,7 @@ class NVUniversalGemmKernel(Kernel):
                 if self.swap_ab:
                     code.writeline("swap_ab=True,")
                 if direct_output_scale is not None:
-                    code.writeline("has_output_scale=True,")
+                    code.writeline(f"output_scale_param_name={direct_output_scale!r},")
             code.writeline(")")
 
         return code.getvalue()

@@ -392,10 +392,10 @@ class Benchmarker:
         with torch.cuda.graph(
             cuda_graph, stream=stream, capture_error_mode="thread_local"
         ):
-            if grad_to_none is not None:
-                for x in grad_to_none:
-                    x.grad = None
             for _ in range(cudagraph_unroll):
+                if grad_to_none is not None:
+                    for x in grad_to_none:
+                        x.grad = None
                 _callable()
 
         torch.cuda.current_stream().wait_stream(stream)

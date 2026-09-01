@@ -4,6 +4,8 @@
 from collections.abc import Sequence
 from typing import Any
 
+import sympy
+
 import torch
 from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
     CuteDSLCSEVariable,
@@ -83,9 +85,6 @@ class LoopIRCuteDSLCodegen:
         reduction_type: str,
         geometry: GemmReductionGeometry,
     ) -> Any:
-        if geometry.needs_physical_callbacks and geometry.axis == 0:
-            return source
-        desc = tensorssa_reduction(canonical_tensorssa_reduction_type(reduction_type))
         fragment_group = (
             f"cutlass.const_expr(min({geometry.group}, "
             f"cute.size({source}.shape, mode=[0])))"
@@ -94,6 +93,12 @@ class LoopIRCuteDSLCodegen:
             f"cutlass.const_expr(cute.size({source}.shape, mode=[0]) "
             f"// min({geometry.group}, cute.size({source}.shape, mode=[0])))"
         )
+        if geometry.needs_physical_callbacks and geometry.axis == 0:
+            return self._generate_like(
+                f"{source}.reshape((({fragment_group}, 1, {repeats}), 1, 1))",
+                source,
+            )
+        desc = tensorssa_reduction(canonical_tensorssa_reduction_type(reduction_type))
         grouped = self._generate_like(
             f"{source}.reshape(((1, {fragment_group}, {repeats}), 1, 1))",
             source,
@@ -200,24 +205,40 @@ class LoopIRCuteDSLCodegen:
     def _output_scale_name(self, value: Any) -> str | None:
         """Recognize a pure accumulator-times-scalar epilogue."""
 
-        def load_name(expr: Any) -> str | None:
-            while isinstance(expr, GemmEpilogueIRExpression) and expr.op in (
-                "to_dtype",
-                "identity",
-            ):
-                expr = expr.args[0]
+        def load_info(expr: Any) -> tuple[str, torch.dtype] | None:
+            if isinstance(expr, GemmEpilogueIRExpression) and expr.op == "identity":
+                return load_info(expr.args[0])
+            if isinstance(expr, GemmEpilogueIRExpression) and expr.op == "to_dtype":
+                loaded = load_info(expr.args[0])
+                if loaded is None or len(expr.args) < 2 or expr.args[1] != loaded[1]:
+                    return None
+                src_dtype = (
+                    expr.args[2]
+                    if len(expr.args) > 2
+                    else dict(expr.kwargs).get("src_dtype")
+                )
+                return loaded if src_dtype in (None, loaded[1]) else None
             if (
                 isinstance(expr, GemmEpilogueIRExpression)
                 and expr.op == "load"
                 and expr.args[2] is None
             ):
-                return expr.args[0]
+                name = expr.args[0]
+                if name == self.accumulator:
+                    dtype = self.accumulator_value.dtype
+                    return None if dtype is None else (name, dtype)
+                buffer = V.graph.name_to_buffer.get(name)
+                if buffer is None:
+                    buffer = V.graph.graph_inputs.get(name)
+                return None if buffer is None else (name, buffer.get_dtype())
             return None
 
         if not isinstance(value, GemmEpilogueIRExpression) or value.op != "mul":
             return None
         lhs, rhs = value.args[:2]
-        lhs_name, rhs_name = load_name(lhs), load_name(rhs)
+        lhs_info, rhs_info = load_info(lhs), load_info(rhs)
+        lhs_name = None if lhs_info is None else lhs_info[0]
+        rhs_name = None if rhs_info is None else rhs_info[0]
         scale_name = None
         if lhs_name == self.accumulator and rhs_name != self.accumulator:
             scale_name = rhs_name
@@ -357,6 +378,31 @@ class LoopIRCuteDSLCodegen:
         fn_name: str,
     ) -> str:
         """Generate a reduction source callback from its captured Loop IR."""
+        source_indices = []
+        pending = [expression]
+        while pending:
+            value = pending.pop()
+            if isinstance(value, (tuple, list)):
+                pending.extend(value)
+                continue
+            if not isinstance(value, GemmEpilogueIRExpression):
+                continue
+            if value.op == "load":
+                name, index, stored = value.args
+                if name == source_name:
+                    source_indices.append(index)
+                if stored is not None:
+                    pending.append(stored)
+                continue
+            pending.extend(value.args)
+            pending.extend(item for _, item in value.kwargs)
+        if source_indices and any(
+            sympy.simplify(index - source_indices[0]) != 0
+            for index in source_indices[1:]
+        ):
+            raise NotImplementedError(
+                "CuTeDSL reduction source loads must reference one logical element"
+            )
         codegen = cls(source_name, OrderedSet((source_name,)))
         codegen.accumulator_value = CuteDSLCSEVariable(
             "value", ValueRanges.unknown(), dtype=torch.float32, shape=(1,)
