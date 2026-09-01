@@ -56,6 +56,7 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
+    onlyOn,
     skipXPUIf,
 )
 from torch.testing._internal.common_profiler import initialize_kineto_with_accelerator
@@ -3118,6 +3119,31 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                 x, y = (torch.rand(4, 4).to(device) for _ in range(2))
                 torch.add(x, y)
         self.assertTrue(len(p2.events()) == 0)
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    @onlyOn("cpu")
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_profile_memory_all_threads(self, device):
+        allocation_size = 123457
+
+        def allocate_on_worker():
+            tensor = torch.empty(allocation_size, dtype=torch.uint8, device=device)
+            del tensor
+
+        experimental_config = torch._C._profiler._ExperimentalConfig(
+            profile_all_threads=True
+        )
+        with torch.profiler.profile(
+            activities=[ProfilerActivity.CPU],
+            profile_memory=True,
+            experimental_config=experimental_config,
+        ) as prof:
+            worker = threading.Thread(target=allocate_on_worker)
+            worker.start()
+            worker.join()
+
+        memory_sizes = {event.cpu_memory_usage for event in prof.events()}
+        self.assertTrue({allocation_size, -allocation_size}.issubset(memory_sizes))
 
     @onlyAccelerator
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
