@@ -2132,6 +2132,7 @@ class TestScheduler(TestCase):
                     ):
                         tail_masks.append(term)
                 self.assertTrue(tail_masks, msg=f"store lacks tail mask: {line}")
+                self.assertNotIn("r0_mask", predicate)
 
     @xfailIfNoAcceleratorTriton
     @skipCPUIf(True, "requires accelerator Triton")

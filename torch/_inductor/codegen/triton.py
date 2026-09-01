@@ -14,7 +14,7 @@ import operator
 import os
 import textwrap
 from abc import abstractmethod
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from functools import lru_cache
 from typing import Any, cast, TYPE_CHECKING, TypeVar
 
@@ -97,7 +97,7 @@ from ..utils import (
     triton_version_uses_attrs_dict,
     upcast_compute_type,
 )
-from ..virtualized import _ops as ops, ReductionType, StoreMode, V
+from ..virtualized import _ops as ops, OpsWrapper, ReductionType, StoreMode, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
 from .block_analysis import BlockPatternMatcher
 from .common import (
@@ -1239,29 +1239,6 @@ def needs_upcast_to_float32(arg: Any) -> bool:
     )
 
 
-def _is_lossless_integer_cast(src_dtype: torch.dtype, dst_dtype: torch.dtype) -> bool:
-    if src_dtype == dst_dtype:
-        return not src_dtype.is_floating_point and not src_dtype.is_complex
-    try:
-        src_info = torch.iinfo(src_dtype)
-        dst_info = torch.iinfo(dst_dtype)
-    except TypeError:
-        return False
-    return dst_info.min <= src_info.min and src_info.max <= dst_info.max
-
-
-def _is_representable_integer(value: Any, dtype: torch.dtype) -> bool:
-    if not isinstance(value, int) or isinstance(value, bool):
-        return False
-    if dtype == torch.bool:
-        return value in (0, 1)
-    try:
-        info = torch.iinfo(dtype)
-    except TypeError:
-        return False
-    return info.min <= value <= info.max
-
-
 class TritonCSEVariable(CSEVariable):
     def __init__(
         self,
@@ -1273,18 +1250,12 @@ class TritonCSEVariable(CSEVariable):
         super().__init__(name, bounds, dtype, shape=shape)
         # We'll use this to track which masks the variable needs when used for indirect indexing
         self.mask_vars: OrderedSet[str] = OrderedSet()
-        self.implied_mask_vars: OrderedSet[str] = OrderedSet()
-        self.source_index: sympy.Expr | None = None
-        self.scalar_value: bool | int | None = None
         if dtype is None:
             raise AssertionError("TritonCSEVariable must have dtype")
         if shape is None:
             raise AssertionError("TritonCSEVariable must have shape")
 
     def update_on_args(self, name, args, kwargs):
-        dtype = self.dtype
-        if dtype is None:
-            raise AssertionError("TritonCSEVariable must have dtype")
         for arg in args:
             if isinstance(arg, TritonCSEVariable):
                 self.mask_vars.update(arg.mask_vars)
@@ -1298,52 +1269,6 @@ class TritonCSEVariable(CSEVariable):
                     )
                 ) is not None:
                     self.mask_vars.add(mask_name)
-
-        if name == "index_expr" and dtype in (torch.int32, torch.int64):
-            self.source_index = args[0]
-        elif (
-            name == "value_expr"
-            and dtype in (torch.int32, torch.int64)
-            and _is_lossless_integer_cast(
-                cast("TritonKernel", V.kernel).get_index_dtype_as_torch_dtype(), dtype
-            )
-        ):
-            self.source_index = args[0]
-        elif name == "constant":
-            if _is_representable_integer(args[0], dtype):
-                self.scalar_value = args[0]
-        elif name == "to_dtype" and isinstance(args[0], TritonCSEVariable):
-            src_dtype = args[0].dtype
-            if src_dtype is not None and _is_lossless_integer_cast(src_dtype, dtype):
-                self.source_index = args[0].source_index
-                self.scalar_value = args[0].scalar_value
-        elif name == "lt":
-            lhs, rhs = args
-            if (
-                isinstance(lhs, TritonCSEVariable)
-                and isinstance(lhs.source_index, sympy.Symbol)
-                and isinstance(rhs, TritonCSEVariable)
-                and isinstance(rhs.scalar_value, int)
-            ):
-                entry = V.kernel.range_tree_nodes.get(lhs.source_index)
-                if (
-                    entry is not None
-                    and V.graph.sizevars.statically_known_equals(
-                        entry.divisor, sympy.S.One
-                    )
-                    and V.graph.sizevars.statically_known_equals(
-                        entry.length, entry.root.numel
-                    )
-                    and V.graph.sizevars.statically_known_leq(
-                        rhs.scalar_value, entry.root.numel
-                    )
-                    and entry.root.mask_name() in lhs.mask_vars
-                ):
-                    self.implied_mask_vars.add(entry.root.mask_name())
-        elif name in ("logical_and", "and_") and dtype == torch.bool:
-            for arg in args:
-                if isinstance(arg, TritonCSEVariable):
-                    self.implied_mask_vars.update(arg.implied_mask_vars)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -2607,8 +2532,6 @@ class TritonKernelOverrides(TritonOverrides):
         )
 
         var.mask_vars = indexing.mask_vars
-        if output_dtype in (torch.int32, torch.int64):
-            var.source_index = expr
         return var
 
     @classmethod
@@ -2625,10 +2548,6 @@ class TritonKernelOverrides(TritonOverrides):
             var = cls.index_expr(expr, dtype)
         finally:
             V.kernel._index_dtype = real_index_dtype
-        if real_index_dtype != dtype:
-            # value_expr honors an explicitly requested integer width. A
-            # narrower value can wrap even though the kernel's index does not.
-            var.source_index = None
         if real_index_dtype != dtype or var.dtype != dtype:
             var = V.kernel.cse.generate(
                 V.kernel.compute,
@@ -2641,18 +2560,12 @@ class TritonKernelOverrides(TritonOverrides):
     @staticmethod
     def masked(mask, body, other):
         if mask is not None and torch.version.hip is not None:
-            inner_mask = mask
             mask = V.kernel.cse.generate(
                 V.kernel.compute,
                 f"{mask}.to(tl.int1)",
                 dtype=torch.bool,
                 shape=mask.shape,
             )
-            if isinstance(inner_mask, TritonCSEVariable) and isinstance(
-                mask, TritonCSEVariable
-            ):
-                mask.mask_vars.update(inner_mask.mask_vars)
-                mask.implied_mask_vars.update(inner_mask.implied_mask_vars)
 
         nodes = body.graph.find_nodes(op="output")
         if not nodes:
@@ -2678,7 +2591,13 @@ class TritonKernelOverrides(TritonOverrides):
 
         value = None if need_where else other
 
-        with V.kernel.mask_loads(mask, value=value) as new_mask:
+        with V.kernel.mask_loads(
+            mask,
+            value=value,
+            redundant_masks=V.kernel._implied_range_masks(
+                getattr(V.interpreter, "current_node", None)
+            ),
+        ) as new_mask:
             result = body()
 
         if need_where:
@@ -3449,6 +3368,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._op_trace_cse_names: dict[str, str] = {}
         self._op_trace_symbol_names: dict[sympy.Symbol, sympy.Symbol] = {}
         self._op_trace_symbol_counts: collections.Counter[str] = collections.Counter()
+        self._redundant_load_masks: OrderedSet[str] = OrderedSet()
 
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints = OrderedSet[AutotuneHint]()
@@ -3479,6 +3399,86 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
     def triton_tensor_ndim(self) -> int:
         return sum(int(tree.tensor_dim is not None) for tree in self.range_trees)
+
+    def _implied_range_masks(self, node: Any) -> OrderedSet[str]:
+        if not isinstance(node, torch.fx.Node):
+            return OrderedSet()
+        if node.op == "call_module":
+            if (
+                not str(node.target).startswith("masked_subblock")
+                or len(node.args) != 2
+            ):
+                return OrderedSet()
+            return self._implied_range_masks(node.args[0])
+        if node.op == "call_method" and node.target == "masked_store":
+            if len(node.args) != 5:
+                return OrderedSet()
+            return self._implied_range_masks(node.args[4])
+        if node.op == "call_method" and node.target in ("logical_and", "and_"):
+            result = OrderedSet[str]()
+            for arg in node.args[1:]:
+                result.update(self._implied_range_masks(arg))
+            return result
+        if node.op != "call_method" or node.target != "lt" or len(node.args) != 3:
+            return OrderedSet()
+
+        lhs, rhs = node.args[1:]
+        if (
+            not isinstance(lhs, torch.fx.Node)
+            or lhs.op != "call_method"
+            or lhs.target not in ("index_expr", "value_expr")
+            or len(lhs.args) != 3
+            or lhs.args[2] is not torch.int64
+            or not isinstance(rhs, torch.fx.Node)
+            or rhs.op != "call_method"
+            or rhs.target != "constant"
+            or len(rhs.args) != 3
+            or rhs.args[2] is not torch.int64
+        ):
+            return OrderedSet()
+        source = lhs.args[1]
+        upper = rhs.args[1]
+        if (
+            not isinstance(source, torch.fx.Node)
+            or source.op != "call_module"
+            or source.target != "get_index"
+            or not isinstance(upper, int)
+            or isinstance(upper, bool)
+            or not 0 <= upper <= torch.iinfo(torch.int64).max
+        ):
+            return OrderedSet()
+        get_index = getattr(V.interpreter, "submodules", {}).get(source.target)
+        if get_index is None:
+            return OrderedSet()
+        index = get_index(*source.args)
+        if not isinstance(index, sympy.Symbol):
+            return OrderedSet()
+        entry = self.range_tree_nodes.get(index)
+        if (
+            entry is None
+            or not V.graph.sizevars.statically_known_equals(entry.divisor, sympy.S.One)
+            or not V.graph.sizevars.statically_known_equals(
+                entry.length, entry.root.numel
+            )
+            or not V.graph.sizevars.statically_known_leq(upper, entry.root.numel)
+        ):
+            return OrderedSet()
+        return OrderedSet([entry.root.mask_name()])
+
+    @contextlib.contextmanager
+    def mask_loads(
+        self,
+        mask: str | OpsWrapper | TritonCSEVariable,
+        value: int | float,
+        redundant_masks: OrderedSet[str] | None = None,
+    ) -> Iterator[Any]:
+        prior = self._redundant_load_masks
+        self._redundant_load_masks = prior | (redundant_masks or OrderedSet())
+        try:
+            with super().mask_loads(mask, value) as new_mask:
+                yield new_mask
+        finally:
+            self._redundant_load_masks = prior
 
     def indexing_size_str(self, i: int) -> str:
         sizes = ["None"] * self.triton_tensor_ndim()
@@ -5341,7 +5341,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             mask, TritonCSEVariable
         ):
             raise AssertionError("TritonKernel expects TritonCSEVariable operands")
-        with self.mask_loads(mask, value=0):
+        with self.mask_loads(
+            mask,
+            value=0,
+            redundant_masks=self._implied_range_masks(
+                getattr(V.interpreter, "current_node", None)
+            ),
+        ):
             self.store(name, index, value)
 
     def device_assert_async(self, cond, msg) -> None:
@@ -5548,18 +5554,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # tmp0 in the triton code is either a scalar, or single-element tensor
         # so if we emit tl.sum directly, it will only give 1 instead of RBLOCK * 1
         # To avoid this, we broadcast to the expected shape first.
-        def broadcast_to_reduction_shape(v: CSEVariable) -> CSEVariable:
-            if v.shape is not None and tuple(v.shape) == value_shape:
-                return v
-            return self.cse.generate(
+        value = self._map_tuple_or_scalar(
+            lambda v: self.cse.generate(
                 self.compute,
                 f"tl.broadcast_to({v}, {dense_size_str})",
                 dtype=v.dtype,
                 shape=value_shape,
-            )
-
-        value = self._map_tuple_or_scalar(
-            broadcast_to_reduction_shape,
+            ),
             value,
         )
 
@@ -8120,9 +8121,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 mask_vars.discard(tree.mask_name())
 
         mask_vars.discard("None")
-        for mask in list(mask_vars):
-            if isinstance(mask, TritonCSEVariable):
-                mask_vars.difference_update(mask.implied_mask_vars)
+        mask_vars.difference_update(self._redundant_load_masks)
 
     @cache_on_self
     def get_reduction_prefixes(self) -> list[str]:
