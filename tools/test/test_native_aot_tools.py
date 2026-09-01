@@ -2807,13 +2807,13 @@ class TestSourceCommitOrdering(unittest.TestCase):
                 "no native_aot.cmake: its presence marks a finished generation",
             )
 
-    def test_the_old_cmake_is_gone_before_any_source_is_written(self):
+    def test_the_old_cmake_is_invalidated_before_any_source_is_written(self):
         # Sources are individually atomic, but their paths are deterministic and
         # the PREVIOUS file already names them: a run that died between two
         # sources left a NEW source paired with the previous run's OBJECT list, and
         # the main build then failed on undefined symbols -- with stage 2, the only
-        # writer that could repair it, running after that build. Removing the
-        # it first makes that state read as "not generated yet" instead.
+        # writer that could repair it, running after that build. Invalidating it
+        # first makes that state read as "not generated yet" instead.
         order = []
         real = gen_aot_lib._write_atomic
         state = {}
@@ -2826,11 +2826,17 @@ class TestSourceCommitOrdering(unittest.TestCase):
             with open(stale, "w") as f:
                 f.write("ARCH_LIST_ABSENT\nOBJECT=/gone/old.o\n")
 
+            def include_now():
+                if not os.path.exists(stale):
+                    return ""
+                with open(stale) as f:
+                    return f.read()
+
             def spy(path, text):
                 name = os.path.basename(path)
                 order.append(name)
                 if name.startswith("aot_"):
-                    state.setdefault("cmake_existed", os.path.exists(stale))
+                    state.setdefault("cmake_then", include_now())
                 return real(path, text)
 
             with (
@@ -2838,10 +2844,11 @@ class TestSourceCommitOrdering(unittest.TestCase):
                 mock.patch.object(gen_aot_lib, "_write_atomic", spy),
             ):
                 gen_aot_lib.main(["--artifacts-dir", art])
-        self.assertFalse(
-            state["cmake_existed"],
-            "the previous native_aot.cmake must be gone before any source is written",
-        )
+        # The previous CONTENT goes, not the file: unlinking it would drop CMake's
+        # configure dependency and leave the NEXT generation invisible to a plain
+        # `cmake --build` (see gen_aot_lib.write_nothing_to_embed).
+        self.assertNotIn("OBJECT=/gone/old.o", state["cmake_then"])
+        self.assertIn("Nothing to embed", state["cmake_then"])
         # ...and the new one is written LAST, after every source.
         self.assertEqual(order[-1], gen_aot_lib.CMAKE_INCLUDE)
 
@@ -3284,6 +3291,21 @@ class TestEmittedCMake(unittest.TestCase):
         )
         with open(path) as f:
             return f.read()
+
+    def test_a_non_linux_configure_embeds_nothing(self):
+        # The embed is GNU-linker specific and stage 2 refuses to run off Linux, so
+        # the file bails once, up front. It used to guard the two linker blocks
+        # instead, leaving target_sources to embed objects that a non-Linux link
+        # would then neither version-script nor exclude-libs.
+        with tempfile.TemporaryDirectory() as d:
+            emitted = self._emit(d, dsl=os.path.join(d, "libdsl.a"))
+        before, guard, after = emitted.partition("if(NOT UNIX OR APPLE)")
+        self.assertTrue(guard, "no platform guard emitted")
+        # The CALL, not the word: the comment above the guard names it too.
+        self.assertNotIn("target_sources(torch_cuda", before)
+        self.assertIn("return()", after.split("endif()")[0])
+        # ONE exit: no block below re-tests the platform.
+        self.assertNotIn("APPLE", after)
 
     def test_the_linker_options_are_emitted_de_duplication_safe(self):
         # Three hazards, all measured by linking: -Wl, (what LINKER: expands to) is
