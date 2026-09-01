@@ -473,6 +473,14 @@ def store_attr_mutation(
     """Store an attribute mutation in the side effects tracker."""
     se = tx.output.side_effects
     if not se.is_attribute_mutation(item):
+        if item.source is not None:
+            raise AssertionError(
+                f"{item} has a source but was never registered via "
+                "track_object_existing (usually missing at its VariableBuilder "
+                "construction site) -- writes to its writable Member/GetSet "
+                "entries would otherwise be silently dropped instead of "
+                "raising here."
+            )
         se.track_attribute_mutation_new(item)
     value_to_store = variables.DeletedVariable() if value is None else value
     se.store_attr(item, name, value_to_store)
