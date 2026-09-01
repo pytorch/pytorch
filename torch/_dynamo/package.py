@@ -28,6 +28,7 @@ import threading
 import types
 import uuid
 import weakref
+from collections import deque
 from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 from contextlib import nullcontext
 from typing import Any, NewType, Optional, TYPE_CHECKING, Union
@@ -915,6 +916,75 @@ def _compile_frame_context(
     return _ctx()
 
 
+# Installed-globals state of packages that died without uninstall(), awaiting
+# cleanup. The finalize callback can fire from GC at an arbitrary allocation --
+# including under _INSTALLER_REGISTRY_LOCK on this very thread -- so it must
+# never BLOCK on that lock; states it cannot clean immediately are parked here
+# and drained by the next install()/uninstall(). deque.append is atomic, so
+# parking itself needs no lock.
+_DEAD_PACKAGE_GLOBALS: deque = deque()
+
+
+def _cleanup_dead_package_globals(blocking: bool) -> None:
+    while _DEAD_PACKAGE_GLOBALS:
+        if not _INSTALLER_REGISTRY_LOCK.acquire(blocking=blocking):
+            return
+        rebinds = []
+        try:
+            try:
+                installed_globals = _DEAD_PACKAGE_GLOBALS.popleft()
+            except IndexError:
+                return
+            # Pruning ownerless frames and rebinding to the survivor is the
+            # tail of _uninstall()'s own logic (see there for the rationale).
+            # Liveness is decided by ITERATING each WeakSet: when this runs
+            # from the dead owner's own finalize, its entry can still be
+            # pending removal and len() would count it, but iteration yields
+            # only live members.
+            for module, installed in installed_globals.items():
+                for installed_global in installed:
+                    by_name = _GLOBAL_BINDINGS.get(module) or {}
+                    stack = by_name.get(installed_global.name) or []
+                    stack[:] = [b for b in stack if any(True for _ in b.owners)]
+                    survivor = stack[-1].value if stack else _ABSENT_GLOBAL
+                    if not stack:
+                        by_name.pop(installed_global.name, None)
+                    rebinds.append((module, installed_global, survivor))
+        finally:
+            _INSTALLER_REGISTRY_LOCK.release()
+        for module, installed_global, survivor in rebinds:
+            name = installed_global.name
+            current = module.__dict__.get(name, _ABSENT_GLOBAL)
+            if survivor is _ABSENT_GLOBAL:
+                if current is installed_global.value:
+                    del module.__dict__[name]
+            elif current is not survivor and (
+                current is installed_global.value or current is _ABSENT_GLOBAL
+            ):
+                module.__dict__[name] = survivor
+
+
+def _uninstall_abandoned_package(
+    installed_globals: dict[types.ModuleType, list[_InstalledGlobal]],
+    precompile_codes: list[types.CodeType],
+    region_id: int,
+    owner: object,
+) -> None:
+    # weakref.finalize callback for a CompilePackage that died while still
+    # installed: its precompile entries and installed globals must not
+    # outlive it, or every reload of one artifact grows the frame cache and
+    # the module globals without bound. GC can fire this mid-guard-evaluation
+    # or under this module's own locks, so nothing here may block: entry
+    # teardown parks in C++ when the cache lock is unavailable, and the
+    # globals cleanup parks above when the registry lock is.
+    from torch._C._dynamo.eval_frame import _reset_precompile_entries_for_owner
+
+    for code in precompile_codes:
+        _reset_precompile_entries_for_owner(code, region_id, owner)
+    _DEAD_PACKAGE_GLOBALS.append(installed_globals)
+    _cleanup_dead_package_globals(blocking=False)
+
+
 class CompilePackage:
     """
     CompilePackage is considered a low level component and should not be directly exposed to
@@ -949,6 +1019,10 @@ class CompilePackage:
         # installs, so uninstall() can remove its own and leave a neighbour
         # package's entries on a shared code object alone.
         self._install_owner = object()
+        # Uninstalls an installed package that dies without uninstall(),
+        # so repeated loads of one artifact cannot grow the frame cache and
+        # module globals without bound. Registered by install().
+        self._uninstall_finalizer: weakref.finalize | None = None
 
         self._current_entry: _DynamoCodeCacheEntry | None = None
         self._installed_globals: dict[types.ModuleType, list[_InstalledGlobal]] = {}
@@ -1390,6 +1464,7 @@ class CompilePackage:
 
     def uninstall(self) -> None:
         with _PACKAGE_INSTALL_LOCK:
+            _cleanup_dead_package_globals(blocking=True)
             self._uninstall()
 
     def _uninstall(self) -> None:
@@ -1397,6 +1472,9 @@ class CompilePackage:
 
         if self._innermost_fn is None:
             raise AssertionError("_innermost_fn is not set in uninstall")
+        if self._uninstall_finalizer is not None:
+            self._uninstall_finalizer.detach()
+            self._uninstall_finalizer = None
         # This namespace is shared with plain torch.compile and with any other
         # package loaded for the same module, so a name goes only when BOTH
         # hold: it is still bound to what we wrote (something that has rebound
@@ -1526,6 +1604,7 @@ class CompilePackage:
         """
         deserialized_backends = self._deserialize_backends(backends)
         with _PACKAGE_INSTALL_LOCK:
+            _cleanup_dead_package_globals(blocking=True)
             self._uninstall()
             self._installed_precompile_region_id = isolate_recompiles_id
             try:
@@ -1779,6 +1858,18 @@ class CompilePackage:
                         self._installed_precompile_region_id,
                         self._install_owner,
                     )
+        # The callback must not capture self (it would never fire); it works
+        # off the very containers install() just populated, which uninstall()
+        # rebinds rather than mutates, so an explicit uninstall + reinstall
+        # cannot be undone by a stale finalizer.
+        self._uninstall_finalizer = weakref.finalize(
+            self,
+            _uninstall_abandoned_package,
+            self._installed_globals,
+            self._installed_precompile_codes,
+            self._installed_precompile_region_id,
+            self._install_owner,
+        )
 
     def refuse_unserializable(self) -> None:
         """Raise PackageError if this package can never be serialized -- its
