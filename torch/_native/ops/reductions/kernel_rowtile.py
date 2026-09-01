@@ -294,33 +294,28 @@ _ITREE_BLOCK_THREADS = 256
 # run back out of smem, and one butterfly replaces all of them. Bit-neutral (verified: 32 wide
 # lanes plus one butterfly == ATen's per-chunk nesting).
 #
-# It only pays with cp.async. Staging through REGISTERS (global -> reg -> smem) costs more than the
-# shuffles it saves; cp.async goes straight to smem, one instruction per vec group, and the
-# transfers overlap. MEASURED device us, chunk fusion vs staged-with-cp.async vs staged-via-
-# registers:
-#
-#   (  65536,   1024) E= 32   48.2 / 40.7 / 53.2
-#   (  32768,   2048) E= 64   47.5 / 46.5 / 56.4
-#   (  16384,   4096) E=128   48.8 / 48.9 / 54.2
-#   (   8192,   8192) E=256   48.6 / 52.1 / 62.8
-#
-# So it wins while the per-lane run is short and loses once it is long: smem traffic scales with E
-# while the saving (all but one butterfly) does not. Packing rows makes it worse again (45.5 vs
-# 40.7 at N=1024), because smem capacity then caps occupancy.
-#
-# ON for the single-batch mid-band, because PIPELINING made the win broad. Staging the whole batch
-# put smem/row at bte (33 KB at N=8192), which capped occupancy and lost to chunk fusion above
-# E=32. Covering the batch in TILES of `_ITREE_STAGE_E * WARP` columns instead holds smem at 4.5 KB
-# per row for every width, at `span/tile` butterflies rather than one. MEASURED, chunk fusion vs
-# tiled staging, and against the unordered rolled fold:
+# SHIPPING CONFIGURATION: cp.async, one batch, covered in TILES of `_ITREE_STAGE_E * WARP` columns.
+# MEASURED device us, chunk fusion -> tiled staging, and the result against the unordered rolled
+# fold (the number the order is trying not to lose to):
 #
 #   (  65536,   1024)  48.2 -> 40.9 us   1.06x of the rolled fold
 #   (  32768,   2048)  47.6 -> 38.6      0.97x -- FASTER than the rolled fold
 #   (  16384,   4096)  48.9 -> 39.2      1.03x
 #   (   8192,   8192)  48.7 -> 39.6      1.03x
 #
-# so the mid-band's 1.28x over the rolled fold is gone. A run SHORTER than the sweet spot is bad
-# (74.0 vs 51.3 at span=512, where E is forced to 16), hence the gate on the full run.
+# so the mid-band's 1.28x deficit against the rolled fold is gone.
+#
+# Three alternatives were measured and lost, each for a different reason -- kept as one-liners
+# because the reasons still constrain the design:
+#   staging via REGISTERS (global -> reg -> smem): costs more than the shuffles it saves (53.2 us
+#     at N=1024 against 40.7 for cp.async), which is why the gate requires the cp.async path.
+#   staging the WHOLE batch: smem/row becomes the batch (33 KB at N=8192), capping occupancy and
+#     losing to chunk fusion above E=32 -- the reason for tiling rather than one big buffer.
+#   PACKING ROWS per block on top of staging: 45.5 vs 40.7 at N=1024, same cause (smem capacity
+#     caps occupancy).
+# A run SHORTER than the sweet spot is also bad (74.0 vs 51.3 at span=512, where E is forced to
+# 16), hence the gate on the full per-lane run.
+
 # Columns per lane PER TILE. 32 is where the untiled sweep bottomed out (40.7us at N=1024); tiling
 # holds every wider batch at that same per-lane run and the same 4.6 KB of smem per row.
 _ITREE_STAGE_E = 32
@@ -508,9 +503,8 @@ def itree_plan(
     )
     k = _fuse_factor(kc, wpr, vec, prm.effective_loads)
     rpb = max(1, min(M, _ITREE_BLOCK_THREADS // max(1, WARP * (wpr // k))))
-    # SMEM STAGING serves the SINGLE-BATCH shapes only for now: one warp per row, E = span/WARP
-    # columns per lane. Needs the batch to cover the row (so `hi` is one compile-time bound) and
-    # E within the unroll ceiling.
+    # SMEM STAGING serves the SINGLE-BATCH shapes only for now, so the batch covers the row and
+    # `hi` is one compile-time bound.
     span = wpr * prm.effective_loads * WARP * vec
     # `stage_e` is the per-lane run PER TILE, so smem stays at (stage_e + vec) * WARP per row no
     # matter how wide the batch is; the batch is covered in span/(stage_e*WARP) tiles, each ending
@@ -518,10 +512,9 @@ def itree_plan(
     e = min(span // WARP, _ITREE_STAGE_E)
     while e > vec and (span // (e * WARP)) * e * WARP != span:
         e //= 2
-    # Only worth staging when it actually REMOVES butterflies: at span == wle there is already
-    # just one, so staging would buy nothing and still pay the smem round trip.
-    # Stage when the FULL per-lane run is achievable (a shorter one measured badly: 74.0 vs 51.3
-    # at span=512, E=16) and there is more than one butterfly to remove.
+    # Stage when the FULL per-lane run is achievable (a shorter one measured badly: 74.0 vs 51.3 at
+    # span=512, E=16) AND there is more than one butterfly to remove -- at span == wle there is
+    # already just one, so staging would buy nothing and still pay the smem round trip.
     want_stage = (e == _ITREE_STAGE_E and span > WARP * vec) if stage is None else stage
     if (
         want_stage
