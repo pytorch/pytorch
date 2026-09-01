@@ -419,6 +419,45 @@ class TestInnerTreeOrder(TestCase):
                 checked += 1
         self.assertEqual(checked, len(_GOLDEN) // 2)
 
+    def test_no_plan_pairs_an_exact_tile_with_a_bound_or_an_offset_base(self):
+        # tile.load takes an UNPREDICATED wide load when `tm.exact` -- which only says the tile
+        # covers its own N from column 0. A narrower `bound` (the split shape's chunk end, there to
+        # stop a short chunk reading the next chunk's elements) or a shifted `base_col` invalidate
+        # that, so `load` requires them absent. This is the other half of that guard: it is free
+        # only because no plan pairs them, and nothing else says so. A plan change that broke the
+        # pairing would otherwise just make the fast path quietly read the wrong columns -- and
+        # since the fold is bit-neutral by design, the numbers would still look plausible.
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        checked = paired = 0
+        for itemsize in (2, 4, 8):
+            for n in list(range(1, 512)) + [
+                1024,
+                2048,
+                4097,
+                8192,
+                40000,
+                100003,
+                262144,
+            ]:
+                for m in (1, 8, 256, 4096):
+                    plan = rt.itree_plan(n, m, itemsize)
+                    if plan is None:
+                        continue
+                    for b, tm in enumerate(plan.tms):
+                        checked += 1
+                        if tm.vec * tm.loads * tm.tpr != tm.N:
+                            continue  # not exact: takes the predicated path either way
+                        base = plan.batches[b][0] if b < len(plan.batches) else 0
+                        paired += plan.shape == "split" or bool(base)
+        self.assertGreater(checked, 1000, "the sweep stopped covering plans")
+        self.assertEqual(
+            paired,
+            0,
+            "a plan now pairs an exact tile with a bound or an offset base; tile.load's "
+            "unpredicated wide load does not consult either",
+        )
+
     def test_golden_input_can_detect_a_reorder(self):
         # The table is worth nothing if its input cannot tell two orders apart, and the first
         # version of it could not: values were multiples of 0.25 with partial sums under 1.5n,

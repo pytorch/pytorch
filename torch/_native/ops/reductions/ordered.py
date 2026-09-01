@@ -40,6 +40,12 @@ def _layout_ok(out, src):
     # This order's wrap declares a COMPACT (M, N) input and a unit-stride output. A gapped outer
     # stride (a sliced input) or a strided output (a keepdim out= view) is still eligible for the
     # override, so those keep the reference kernel: same order, same bits, no coverage change.
+    #
+    # ALIGNMENT is NOT gated here. A compact input at a non-zero storage offset (`buf[1:].view(M,
+    # N)`) has fine strides and a base pointer that meets less than the wrap would like to declare;
+    # `_run_itree` declares what the pointer actually meets and drops to the unstaged form of the
+    # same plan where the staged one needs more. Both are bit-neutral, so those calls stay on the
+    # order instead of falling back -- which matters because the reference kernel is meant to go.
     return src.stride(0) == src.shape[1] and out.stride(0) == 1
 
 

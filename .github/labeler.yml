@@ -151,13 +151,15 @@
 - torch/_inductor/kernel/mm.py
 - test/inductor/test_max_autotune.py
 - third_party/fbgemm
-# CuTeDSL: smoke_b200 is the only CI job with CuTeDSL installed, so these are
+# CuTeDSL: the smoke configs are the only CI jobs with CuTeDSL installed, so these are
 # unreachable pre-merge without the label. DLPack is the tensor handover into
-# CuTeDSL (tvm-ffi) kernels.
+# CuTeDSL (tvm-ffi) kernels. The test/ glob matters on its own: a change touching only
+# these suites picks up no other label here, so it would otherwise never run them.
 - aten/src/ATen/DLConvertor.*
 - aten/src/ATen/dlpack.h
 - torch/utils/dlpack.py
 - test/test_dlpack.py
+- test/python_native/**
 - torch/_native/**
 - torch/backends/python_native/**
 - torch/_vendor/quack/**
@@ -178,6 +180,11 @@
 - torch/_inductor/kernel/mm.py
 - test/inductor/test_max_autotune.py
 - third_party/fbgemm
+# CuTeDSL native ops, same list the b200 config runs: the kernels are gated at sm_90+, so a
+# Hopper regression would not show up on Blackwell coverage alone.
+- test/python_native/**
+- torch/_native/**
+- torch/backends/python_native/**
 
 "ciflow/rocm-mi300":
 - test/test_matmul_cuda.py
