@@ -513,28 +513,24 @@ class TestCudagraphFqnAnnotations(TestCase):
         )
 
     def test_shared_mask_attn_annotation_discovery(self):
-        """Discovery: print actual annotation strings for the AIB log.
-        Used to determine expected values for test_kernel_annotations_match_expected.
-        Run with cudagraph_fqn_compute_tracking=True to see the new path's output."""
+        """Print all annotation strings to discover expected values for the
+        exact-match test. The key property to verify: the causal-mask Triton
+        kernel annotation must contain only ``where`` and ``full_default`` ops
+        — not the qkv view/permute/split ops that it only reads (over-attribution
+        from the old origins-walk). No cross-layer bleed either.
+
+        Once the GPU CI output is confirmed, replace this with an exact assertEqual.
+        """
         model = SharedMaskAttn(n_layers=2, dim=32, n_heads=2).cuda()
         x = torch.randn(1, 16, 32, device="cuda")
-        patches = {
-            "triton.cudagraphs": True,
-            "triton.cudagraph_kernel_annotations": True,
-            "triton.cudagraph_fqn_compute_tracking": True,
-        }
-        with config.patch(patches), torch.no_grad():
-            compiled = torch.compile(model, fullgraph=True)
-            for _ in range(3):
-                compiled(x)
-                torch.cuda.synchronize()
+
+        self._run_inductor_cg(model, x, annotate=True)
         all_strs = sorted(_all_fqn_strings(dict(get_kernel_annotations())))
         for s in all_strs:
             print(f"  annotation: {s!r}")
         self.assertTrue(all_strs, "expected non-empty annotations")
 
-        # Verify no annotation spans FQNs from two different layer indices.
-        # Cross-layer bleed is the specific regression this fix prevents.
+        # Guard: no annotation spans FQNs from two different layer indices.
         import re as _re
 
         for s in all_strs:
