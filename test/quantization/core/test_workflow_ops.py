@@ -1100,6 +1100,62 @@ class TestFakeQuantizeOps(TestCase):
 
 
 class TestFusedObsFakeQuant(TestCase):
+    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']))
+    @settings(deadline=None)
+    def test_fused_obs_fake_quant_rejects_negative_per_channel_axis(self, device) -> None:
+        x = torch.randn(1, device=device)
+        observer_on = torch.tensor([1], device=device)
+        fake_quant_on = torch.tensor([1], device=device)
+        running_min = torch.tensor([float("inf")], device=device)
+        running_max = torch.tensor([float("-inf")], device=device)
+        scale = torch.tensor([1.0], device=device)
+        zero_point = torch.tensor([0], dtype=torch.int, device=device)
+
+        with self.assertRaisesRegex(RuntimeError, "ch_axis must be non-negative"):
+            torch.fused_moving_avg_obs_fake_quant(
+                x,
+                observer_on,
+                fake_quant_on,
+                running_min,
+                running_max,
+                scale,
+                zero_point,
+                0.01,
+                0,
+                255,
+                -1250999896764,
+                True,
+                False,
+            )
+
+    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']))
+    @settings(deadline=None)
+    def test_fused_obs_fake_quant_allows_per_tensor_axis_sentinel(self, device) -> None:
+        x = torch.randn(2, 3, device=device)
+        running_min = torch.tensor(float("inf"), device=device)
+        running_max = torch.tensor(float("-inf"), device=device)
+        scale = torch.tensor([1.0], device=device)
+        zero_point = torch.tensor([0], dtype=torch.int, device=device)
+        disabled = torch.tensor([0], device=device)
+
+        out = torch.fused_moving_avg_obs_fake_quant(
+            x,
+            disabled,
+            disabled,
+            running_min,
+            running_max,
+            scale,
+            zero_point,
+            0.01,
+            0,
+            255,
+            -1,
+            False,
+            False,
+        )
+
+        self.assertEqual(out, x)
+
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            sampled_dtype=st.sampled_from(['bf16', 'fp16', 'fp32']),
            symmetric_quant=st.booleans(), use_bool=st.booleans())
