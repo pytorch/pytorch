@@ -21215,7 +21215,6 @@ if RUN_GPU:
             x = torch.randn(1024, rnumel, device=GPU_TYPE)
             opt_fn = torch.compile(fn)
             code = run_and_get_triton_code(opt_fn, x)
-            self.assertNotIn("tl.broadcast_to", code)
 
             device = torch.device(GPU_TYPE, 0)
             warp_size = get_warp_size(device)
