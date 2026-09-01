@@ -26,10 +26,7 @@ if torch.backends.mps.is_available():
             "__rpow__",
             "addr",
             "as_stridedpartial_views",
-            "cdouble",
             "cholesky_inverse",
-            "double",
-            "empty_like",
             "float_power",
             "geqrf",
             "jiterator_2inputs_2outputs",
@@ -44,32 +41,18 @@ if torch.backends.mps.is_available():
             "linalg.ldl_factor",
             "linalg.ldl_factor_ex",
             "linalg.ldl_solve",
-            "linalg.lu_solve",
             "linalg.matrix_power",
             "linalg.matrix_sqrth",
-            "linalg.solve",
-            "linalg.solve_ex",
             "linalg.solve_triangular",
             "linalg.tensorinv",
-            "linalg.tensorsolve",
             "log_softmaxwith_dtype",
-            "lu_solve",
-            "new_empty",
-            "new_empty_strided",
-            "nn.functional.alpha_dropout",
             "nn.functional.channel_shuffle",
             "nn.functional.conv3d",
-            "nn.functional.dropout",
-            "nn.functional.dropout2d",
-            "nn.functional.dropout3d",
-            "nn.functional.feature_alpha_dropoutwith_train",
             "nn.functional.padreplicate_negative",
             "ormqr",
             "pow",
-            "randint",
             "renorm",
             "sparse.sampled_addmm",
-            "to",
             "to_sparse",
             "triangular_solve",
         }
@@ -379,10 +362,6 @@ if torch.backends.mps.is_available():
             # logcumsumexp on complex inputs disagrees with CPU at branch
             # cuts (off by 2*pi); shifted RNG exposed a sample on the cut.
             "logcumsumexp": [torch.complex64],
-            # `nn.functional.dropout` keeps a complex64 entry because the
-            # MPS dropout kernel doesn't support complex inputs at all (the
-            # shape comparison would fail to even run).
-            "nn.functional.dropout": [torch.complex64],
             # See https://github.com/pytorch/pytorch/issues/111479
             "nn.functional.multi_head_attention_forward": [
                 torch.float32,
