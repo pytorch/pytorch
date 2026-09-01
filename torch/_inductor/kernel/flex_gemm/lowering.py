@@ -567,6 +567,38 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     ):
         raise NotImplementedError(LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR)
     outputs = epilogue_analysis.outputs
+    packed_transport = epilogue_analysis.packed_transport
+    packed_capture = None
+    if packed_transport is not None:
+        if (
+            gemm_op is not torch.ops.aten.mm.default
+            or mainloop_scale_nodes
+            or explicit_swap_ab
+        ):
+            raise NotImplementedError(
+                "FlexGEMM packed transport currently requires plain aten.mm"
+            )
+        packed_capture = placeholder_args[packed_transport.capture]
+        if not isinstance(packed_capture, TensorBox):
+            raise NotImplementedError(
+                "FlexGEMM packed transport requires a tensor capture"
+            )
+        packed_capture = TensorBox(
+            ir.ExternKernel.require_contiguous(packed_capture.data)
+        )
+        ordinary_epilogue_pairs = tuple(
+            (placeholder, arg)
+            for placeholder, arg in zip(
+                epilogue_arg_placeholders, epilogue_args, strict=True
+            )
+            if placeholder is not packed_transport.capture
+        )
+        if len(ordinary_epilogue_pairs) != len(epilogue_args) - 1:
+            raise AssertionError("packed FlexGEMM capture must be a unique placeholder")
+        epilogue_arg_placeholders = tuple(
+            placeholder for placeholder, _ in ordinary_epilogue_pairs
+        )
+        epilogue_args = [arg for _, arg in ordinary_epilogue_pairs]
     indexed_output = outputs.indexed_output
     indexed_input = None
     if indexed_output is not None:
@@ -607,9 +639,32 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             "FlexGEMM generated epilogues require output metadata"
         )
     output_size = ir.convert_shape_to_inductor(output_meta.shape)
-    aux_metas = validate_flex_gemm_aux_outputs(
-        gemm_op, outputs.aux_outputs, output_size
-    )
+    if packed_transport is not None:
+        gemm_output_meta = gemm_fx_node.meta.get("val")
+        if not isinstance(gemm_output_meta, torch.Tensor):
+            raise NotImplementedError(
+                "FlexGEMM packed transport requires GEMM output metadata"
+            )
+        aux_metas = validate_flex_gemm_aux_outputs(
+            gemm_op,
+            outputs.aux_outputs,
+            ir.convert_shape_to_inductor(gemm_output_meta.shape),
+        )
+    elif main_transform is not None and outputs.aux_outputs:
+        if outputs.aux_outputs != (gemm_fx_node,):
+            raise AssertionError(
+                "grouped-main auxiliary must be the physical GEMM output"
+            )
+        gemm_output_meta = gemm_fx_node.meta.get("val")
+        if not isinstance(gemm_output_meta, torch.Tensor):
+            raise NotImplementedError(
+                "FlexGEMM physical auxiliary requires GEMM output metadata"
+            )
+        aux_metas = (gemm_output_meta,)
+    else:
+        aux_metas = validate_flex_gemm_aux_outputs(
+            gemm_op, outputs.aux_outputs, output_size
+        )
     if indexed_output is None:
         indexed_metas = ()
     else:
@@ -654,6 +709,11 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     epilogue_input_nodes = [
         ir.TemplateBuffer.realize_template_input(arg) for arg in epilogue_args
     ]
+    packed_capture_input_nodes = (
+        []
+        if packed_capture is None
+        else [ir.TemplateBuffer.realize_template_input(packed_capture)]
+    )
     indexed_index_input_nodes = (
         []
         if indexed_input is None
@@ -680,6 +740,9 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     epilogue_arg_indices = append_flex_gemm_template_inputs(
         input_nodes, epilogue_input_nodes
     )
+    packed_capture_input_indices = append_flex_gemm_template_inputs(
+        input_nodes, packed_capture_input_nodes
+    )
     indexed_index_input_indices = append_flex_gemm_template_inputs(
         input_nodes, indexed_index_input_nodes
     )
@@ -692,6 +755,9 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     )
     mutated_input_nodes = (
         aux_input_nodes + indexed_out_input_nodes + local_reduce_input_nodes
+    )
+    packed_capture_input_index = (
+        packed_capture_input_indices[0] if packed_capture_input_indices else None
     )
     indexed_index_input_index = (
         indexed_index_input_indices[0] if indexed_index_input_indices else None
@@ -801,6 +867,8 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             indexed_output=template_indexed_output,
             local_reduce=template_local_reduce,
             main_transform=main_transform,
+            packed_transport=epimod_source.packed_transport,
+            packed_capture_index=packed_capture_input_index,
             fragmentwise=epimod_source.fragmentwise,
             tuned=tuned,
         ),
