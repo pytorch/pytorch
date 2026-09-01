@@ -49,12 +49,10 @@
   } while (0)
 // clang-format on
 
-// Shared by C10_CUDA_DRIVER_WARN and C10_CUDA_DRIVER_CHECK_GOTO below: given a
-// CUresult already evaluated under an active CUDAErrorLogCapture, warn if it
-// failed. Not usable on its own -- the capture object must be constructed
-// immediately before the driver call runs (its constructor resets the
-// thread-local log buffer that a driver callback appends to during the
-// call), so callers each construct their own and evaluate their own call.
+// Shared by C10_CUDA_DRIVER_WARN and C10_CUDA_DRIVER_CHECK_GOTO below. Not
+// usable on its own: LOG_CAPTURE must be constructed immediately before RESULT
+// is evaluated, since its constructor resets the log buffer a driver callback
+// writes to during the call.
 #define C10_CUDA_DRIVER_WARN_RESULT(RESULT, LOG_CAPTURE)                      \
   do {                                                                        \
     if ((RESULT) != CUDA_SUCCESS) {                                           \

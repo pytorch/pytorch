@@ -561,10 +561,8 @@ struct ExpandableSegment {
     if (end > handles_.size()) {
       handles_.resize(end);
     }
-    // On failure (throw or early return), release handles created here but
-    // not yet handed to mapAndSetAccess -- they were never cuMemMap'd, so
-    // unmapHandles (which unconditionally unmaps its whole range) must never
-    // see them as part of an allocated range.
+    // On failure, release handles created so far; they were never cuMemMap'd,
+    // and unmapHandles's bulk cuMemUnmap must never see them as allocated.
     size_t created = begin;
     auto rollback =
         c10::make_scope_exit([&] { releaseHandles(begin, created); });
@@ -629,8 +627,7 @@ struct ExpandableSegment {
         // rollback (scope_exit above) releases handles created so far.
         return rangeFromHandles(begin, begin);
       }
-      // Throws on any other error; rollback (scope_exit above) releases
-      // handles created so far.
+      // Throws on any other error; rollback handles that too.
 #ifdef USE_ROCM
       C10_CUDA_CHECK(status);
 #else
@@ -764,9 +761,7 @@ struct ExpandableSegment {
           "on the producer, or disable expandable_segments.");
     }
 #endif
-    // segment_size divides every address/size computation below (starting
-    // with numSegments() in the constructor); a zero from a corrupted or
-    // malicious peer would be a division by zero.
+    // Zero would divide-by-zero in numSegments() below.
     TORCH_CHECK(
         header.segment_size != 0,
         "expandable_segments IPC: received a zero segment_size in the share "
@@ -787,10 +782,8 @@ struct ExpandableSegment {
 #define SYS_pidfd_getfd 438
 #endif
 #endif // !_WIN32
-    // num_handles is attacker/peer-controlled and sizes this reserve()
-    // upfront, before a single handle has been validated; bound it against
-    // the segment's own capacity, which comes from the local device's
-    // reserved virtual address space rather than the wire payload.
+    // num_handles is peer-controlled; bound it against the segment's own
+    // capacity before sizing reserve() with it.
     TORCH_CHECK(
         header.num_handles <= segment->max_handles_,
         "expandable_segments IPC: share header claims ",
