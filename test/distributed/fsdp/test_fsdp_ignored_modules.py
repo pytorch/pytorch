@@ -481,7 +481,7 @@ class TestFSDPIgnoredModules(FSDPTestContinuous):
 instantiate_device_type_tests(
     TestFSDPIgnoredModules,
     globals(),
-    only_for=("cuda", "hpu", "xpu", "privateuse1"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 
