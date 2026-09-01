@@ -1,35 +1,30 @@
 """Generate the native-AOT kernel library source from declarations + sidecars.
 
-Each op's aot.py (contract: tools/native_aot/decl.py) states the C++
-side as string-returning functions: cpp_dispatch_prelude() (optional
-shared checks + setup), cpp_dispatch(spec) (one boolean per precompile
-point), cpp_launch(spec, launch_fn) (the invocation), cpp_helpers()
-(optional family-shared C++). The Python-side coverage check
-(covered_axes, consumed by torch._native.aot_manifest) lives in the
-same module -- the two sides are kept in sync by hand.
+Each op's aot.py (contract: tools/native_aot/decl.py) states the C++ side as
+string-returning functions: cpp_dispatch_prelude() for shared checks and setup,
+cpp_dispatch(spec) for one boolean per precompile point, cpp_launch(spec, launch_fn)
+for the invocation, and cpp_helpers() for family-shared C++. The Python-side coverage
+check, covered_axes, lives in the same module and is kept in sync by hand.
 
-Kernels are exported to ``<artifacts-dir>/<arch>/<op>/`` -- one tree per
-arch, whatever the arch count. For each op found there this emits
-``<artifacts-dir>/<op>/aot_<op>_<key>.cpp``, one file covering every arch
-the op shipped for, containing:
+Kernels are exported to ``<artifacts-dir>/<arch>/<op>/``, one tree per arch. For each
+op found there this emits ``<artifacts-dir>/<op>/aot_<op>_<key>.cpp``, one file
+covering every arch the op shipped for, containing:
 
-  * a launch_<prefix>() marshalling helper per exported kernel,
-    emitted by the sidecar kind's Toolchain (see toolchains.py); every
-    toolchain produces the same launcher signature, so cpp_launch and
-    the guard chain are toolchain-blind
-  * the stub kernel: an early-out over the shipped compute capabilities,
-    then helpers | prelude, then one cond chain PER CAPABILITY -- an
-    `if (cpp_dispatch(spec)) { cpp_launch; return true; }` per exported
-    precompile point, and `return false` (the fallback) at the end. A device
-    runs only kernels built for exactly its capability.
-  * registration on the generated at::native DispatchStub
-    (<op>_aot_stub) via set_<device>_dispatch_ptr at static-init time
+  * a launch_<prefix>() marshalling helper per exported kernel, emitted by the
+    sidecar kind's Toolchain. Every toolchain produces the same launcher signature,
+    so cpp_launch and the guard chain are toolchain-blind.
+  * the stub kernel: an early-out over the shipped compute capabilities, then helpers
+    and prelude, then one cond chain per capability -- an
+    `if (cpp_dispatch(spec)) { cpp_launch; return true; }` per precompile point, and
+    `return false` at the end. A device runs only kernels built for its capability.
+  * registration on the generated at::native DispatchStub (<op>_aot_stub) at
+    static-init time.
 
-The kernel signature is the op's structured impl signature: outputs are
-allocated by the wrapper's meta() before the stub runs, so bodies write
-into them and return true, or return false to fall through to op.impl.
+The kernel signature is the op's structured impl signature: meta() has allocated the
+outputs before the stub runs, so a body writes into them and returns true, or returns
+false to fall through to op.impl.
 
-Requires torchgen (impl signature) but not a built torch.
+Requires torchgen for the impl signature, but not a built torch.
 """
 
 from __future__ import annotations
@@ -42,10 +37,10 @@ import sys
 REPO = os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 )
-# append, never insert(0): the repo root holds a torch/ SOURCE tree with no
-# compiled extension, and ahead of site-packages it shadows the real torch. An
-# editable checkout hides this, because there that tree IS the installed torch,
-# which is how it reached CI. export.py carries the same note.
+# append, never insert(0): the repo root holds a torch/ SOURCE tree with no compiled
+# extension, and ahead of site-packages it shadows the real torch. An editable
+# checkout hides this, that tree being the installed torch there. export.py carries
+# the same note.
 sys.path.append(REPO)
 
 from torchgen import native_aot_decl as decl
@@ -59,13 +54,14 @@ FILE_TMPL = """\
 //
 // {precompute_note}
 //
-// Includes: core/Tensor.h rather than ATen/ATen.h, which pulls ~1300
-// ATen/ops/*.h and made every generated file depend on unrelated ops -- what
-// AT_PER_OPERATOR_HEADERS exists to avoid. TensorIterator.h and ops/empty.h are unconditional because preludes
-// commonly need them and there is no per-declaration include hook yet; a body
-// calling another at:: FACTORY needs its op header added here. torch/library.h
-// is emitted only for ops with cpp_covers: its sole consumer is the covers
-// registration below, and it pulls the whole dispatcher (~110 headers).
+// Includes: core/Tensor.h rather than ATen/ATen.h, which pulls ~1300 ATen/ops/*.h
+// and would make every generated file depend on unrelated ops -- what
+// AT_PER_OPERATOR_HEADERS exists to avoid. TensorIterator.h and ops/empty.h are
+// unconditional because preludes commonly need them and there is no
+// per-declaration include hook yet; a body calling another at:: FACTORY needs its
+// op header added here. torch/library.h is emitted only for ops with cpp_covers,
+// its sole consumer being the covers registration below, and it pulls the whole
+// dispatcher (~110 headers).
 #include <ATen/core/Tensor.h>
 #include <ATen/NativeAotStubs.h>
 #include <ATen/TensorIterator.h>
@@ -207,17 +203,14 @@ def _spec_from_json(spec):
 
 
 def _by_arch(sidecars: list[dict]) -> dict[tuple[int, int], list[dict]]:
-    """Group sidecars by the compute capability they were compiled for, in
-    ascending cc order, dropping candidates that lose the arch-conditional
-    tie-break.
+    """Group sidecars by the compute capability they were compiled for, in ascending
+    order, dropping the loser of the arch-conditional tie-break.
 
-    Grouped, not one gate over the union, because each device must run kernels
-    built for exactly its cc; a union gate would accept a device nothing was
-    compiled for. Within one cc both "sm_100a" and "sm_100" are valid on the
-    hardware, and the conditional wins: it is what the kernels were written
-    against, and shipping both leaves the choice to directory order. A sidecar
-    with no recorded arch is rejected -- there is no hardware to match it to, and
-    a never-matching branch declines every call in silence."""
+    Grouped rather than one gate over the union, because each device must run kernels
+    built for exactly its capability; a union gate would accept a device nothing was
+    compiled for. Within one capability both "sm_100a" and "sm_100" run on the
+    hardware and the conditional wins, being what the kernels were written against. A
+    sidecar with no recorded arch is rejected: there is no hardware to match it to."""
     groups: dict[tuple[int, int], list[dict]] = {}
     conditional: dict[tuple[int, int], bool] = {}
     for sc in sidecars:
@@ -251,24 +244,20 @@ def _int32_size_gate(params: str) -> str:
     """Runtime gate: decline any call whose tensor has a dimension that
     does not fit in int32.
 
-    aten sizes are int64_t, but the fake tensors declare shape symbols with
-    cute.sym_int(), so export_to_c emits `int32_t dynamic_shapes[]` and the
+    aten sizes are int64_t while the exported ABI takes int32 shape slots, so the
     launcher's `static_cast<int32_t>(...)` would truncate a >=2^31 extent into a
-    wrong (possibly negative) one, with no error. Emitted ahead of the prelude and
-    into cpp_covers, so no declaration hand-writes it and coverage never claims a
-    shape the stub will refuse.
+    wrong, possibly negative one with no error. Emitted ahead of the prelude and into
+    cpp_covers, so no declaration hand-writes it and coverage never claims a shape the
+    stub will refuse.
 
-    Bounds the named tensors' DIMS, not numel(), which would decline a large
-    tensor whose collapsed extent is tiny. A prelude that DERIVES an extent owns
-    bounding that value, with the emitted `_naot_dim_too_big` (SIZE_GATE_HELPER):
-    skipping it truncates silently, which on (2, 2, 2**30) left 256 elements
-    un-accumulated with every dim far under the limit. That duty is UNENFORCED --
-    the generator cannot see a value a prelude computes -- so it is a
-    per-declaration review item.
+    Bounds the named tensors' dims, not numel(), which would decline a large tensor
+    whose collapsed extent is tiny. A prelude that DERIVES an extent must bound that
+    value itself, with the emitted `_naot_dim_too_big`; the generator cannot see a
+    computed value, so that is a per-declaration review item.
 
     TODO(native-aot): serving >=2^31 dims needs the exported header's int32 width
-    fixed upstream and kernels ported off `t.shape[i]`, which is Int32 whatever
-    the symbol; cute.sym_int64() alone is not enough.
+    fixed upstream and kernels ported off `t.shape[i]`, which is Int32 whatever the
+    symbol; cute.sym_int64() alone is not enough.
     """
     # The at::Tensor names in scope: the prelude sees plain `const at::Tensor&`,
     # cpp_covers sees out-variant outputs as `const std::optional<at::Tensor>&`.
@@ -432,8 +421,7 @@ def gen_op(
             schema=covers_schema.replace("\\", "\\\\").replace('"', '\\"'),
         )
     # State the precompute behaviour where authors debug: a raw dim compared
-    # unwrapped against self.dim()-1 silently declines every negative-dim call
-    # (PAIN_POINTS P14).
+    # unwrapped against self.dim()-1 silently declines every negative-dim call.
     if precomputed:
         note = (
             f"Structured META precomputes (impl receives them wrapped/"
@@ -506,8 +494,8 @@ def impl_signature_params(op: str) -> str:
 def precomputed_args(op: str) -> list[str]:
     """Schema argument names the structured META precomputes before the impl runs
     -- index_add's dim arrives maybe_wrap_dim'ed, sum.dim_IntList's arrives RAW.
-    Declarations must know which they get (PAIN_POINTS P14), so the generated
-    .cpp states it per op."""
+    Declarations must know which they get, so the generated .cpp states it per
+    op."""
     g = _structured_group(op)
     pre = g.out.precomputed
     return sorted(pre.replace.keys()) if pre is not None else []
