@@ -11,6 +11,7 @@ from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.value_ranges import ValueRanges
 
+from .gemm_epilogue import GemmEpiloguePlan
 from .gemm_epilogue_codegen import (
     GemmEpilogueCuteDSLKernel,
     GemmEpilogueCuteDSLOpOverrides,
@@ -72,7 +73,7 @@ class LoopIRCuteDSLCodegen:
 
     def render(
         self, buffers: Sequence[ComputedBuffer], fn_name: str
-    ) -> tuple[list[str], list[str], dict[str, str], str]:
+    ) -> GemmEpiloguePlan:
         analysis = GemmEpilogueIRAnalysis.from_buffers(buffers)
         outputs: list[tuple[str, Any]] = []
         if self.accumulator not in self.removed_buffers:
@@ -96,7 +97,13 @@ class LoopIRCuteDSLCodegen:
         source = (
             f"def {fn_name}({params}):\n{body}\n    return {', '.join(result_names)}"
         )
-        return list(self.reads), [name for name, _ in outputs], renames, source
+        return GemmEpiloguePlan(
+            source=source,
+            is_cutedsl=True,
+            reads=tuple(self.reads),
+            writes=tuple(name for name, _ in outputs),
+            renames=renames,
+        )
 
     @classmethod
     def from_buffers(
@@ -105,7 +112,7 @@ class LoopIRCuteDSLCodegen:
         buffers: Sequence[ComputedBuffer],
         removed_buffers: OrderedSet[str],
         fn_name: str,
-    ) -> tuple[list[str], list[str], dict[str, str], str]:
+    ) -> GemmEpiloguePlan:
         codegen = cls(accumulator, removed_buffers)
         with (
             V.set_kernel_handler(codegen.kernel),
