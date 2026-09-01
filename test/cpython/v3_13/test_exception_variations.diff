@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_exception_variations.py b/test/cpython/v3_13/test_exception_variations.py
-index a83a41d2975..c2d6eb3a41a 100644
+index a83a41d2975db666c55acf1d24980d2fc508bfe4..c2d6eb3a41afc135606a58c79215e41bba671028 100644
 --- a/test/cpython/v3_13/test_exception_variations.py
 +++ b/test/cpython/v3_13/test_exception_variations.py
 @@ -1,7 +1,62 @@
