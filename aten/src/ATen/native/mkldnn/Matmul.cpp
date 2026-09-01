@@ -605,8 +605,12 @@ static void _mkldnn_gemm_i8i8i32_with_blas(
 
     TORCH_CHECK(
       status == dnnl::status::success,
-      "oneDNN i8i8i32 gemm failed with status ",
-      static_cast<int>(status));
+      "oneDNN i8i8i32 gemm failed, dnnl_status_t=", static_cast<int>(status),
+      ", transa=", transa, ", transb=", transb,
+      ", m=", m, ", n=", n, ", k=", k,
+      ", lda=", lda, ", ldb=", ldb, ", ldc=", ldc,
+      ", self sizes=", self.sizes(), " strides=", self.strides(),
+      ", mat2 sizes=", mat2.sizes(), " strides=", mat2.strides());
   }
 
 void mkldnn_matmul_i8i8i32(
