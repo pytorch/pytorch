@@ -120,7 +120,6 @@ class TestBwdGradients(TestGradients):
             skip("nn.functional.max_unpool1d"),
             skip("nn.functional.max_unpool2d"),
             skip("nn.functional.max_unpool3d"),
-            xfail("nn.functional.ctc_loss", dtypes=(torch.float64,)),
             xfail("nn.functional.linear_cross_entropy", variant_name="chunked_none"),
             xfail("nn.functional.linear_cross_entropy", variant_name="chunked"),
             xfail("linalg.norm"),
