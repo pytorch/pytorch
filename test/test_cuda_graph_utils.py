@@ -3,6 +3,7 @@
 """Tests for CUDA graph utilities: kernel annotations and graph introspection."""
 
 import unittest
+import unittest.mock
 
 import torch
 from torch.cuda._graph_annotations import (
@@ -278,21 +279,19 @@ class TestMarkKernels(TestCase):
         graph = torch.cuda.CUDAGraph()
         side = torch.cuda.Stream()
         entry_stream = torch.cuda.current_stream()
-        try:
-            with self.assertRaises(Exception):
-                with torch.cuda.graph(graph, enable_annotations=True):
-                    with mark_kernels("completed_scope"):
-                        _ = x + 1
-                    side.wait_event(entry_stream.record_event())
-                    # Forked and never joined, so cudaStreamEndCapture fails.
-                    with torch.cuda.stream(side):
-                        _ = x * 3
-        finally:
-            # torch.cuda.graph.__exit__ propagates before unwinding its stream context,
-            # so put the caller's stream back rather than leaking it into later tests.
-            torch.cuda.set_stream(entry_stream)
+        with self.assertRaises(Exception):
+            with torch.cuda.graph(graph, enable_annotations=True):
+                with mark_kernels("completed_scope"):
+                    _ = x + 1
+                side.wait_event(entry_stream.record_event())
+                # Forked and never joined, so cudaStreamEndCapture fails.
+                with torch.cuda.stream(side):
+                    _ = x * 3
 
         self.assertEqual(len(get_kernel_annotations()), 0)
+        # A failed capture_end must still unwind the stream context, or the graph's
+        # private stream stays current and every later test inherits it.
+        self.assertEqual(torch.cuda.current_stream(), entry_stream)
 
     def test_resolve_without_scopes_is_noop(self):
         resolve_pending_annotations()
@@ -1503,10 +1502,60 @@ class TestRekeyAnnotations(TestCase):
 
 # Runs everywhere (no capture): the public probe must agree with the private
 # gate that mark_kernels no-ops on, whatever this machine supports.
+@instantiate_parametrized_tests
 class TestIsAvailable(TestCase):
     def test_matches_private_gate(self):
         expected = torch.cuda.is_available() and not _is_tools_id_unavailable()
         self.assertEqual(is_available(), expected)
+
+    @parametrize(
+        "err_name",
+        ["cudaErrorInsufficientDriver", "cudaErrorCallRequiresNewerDriver"],
+    )
+    def test_probe_rejects_unusable_driver(self, err_name):
+        """Only an error that proves the API is there counts as supported. ROCm answers
+        cudaErrorInsufficientDriver, which used to read as supported and then blew up on
+        the first real call."""
+        import torch.cuda._graph_annotations as ga
+
+        if ga._cuda_runtime is None:
+            self.skipTest("cuda-bindings not installed")
+        err = getattr(ga._cuda_runtime.cudaError_t, err_name)
+        with unittest.mock.patch.object(
+            ga._cuda_runtime, "cudaGraphNodeGetToolsId", lambda _node: (err, 0)
+        ):
+            self.assertFalse(ga._probe_tools_id())
+
+    def test_rocm_build_reports_bindings_absent(self):
+        """cuda-bindings installs and imports fine on a ROCm box but cannot work there,
+        so the shared gate reports it absent rather than letting each caller discover
+        that at the first call (cudaErrorInsufficientDriver)."""
+        import importlib
+
+        import torch.cuda._utils as u
+
+        orig = torch.version.hip
+        try:
+            torch.version.hip = "6.0.0"
+            importlib.reload(u)
+            self.assertFalse(u._HAS_CUDA_BINDINGS)
+            self.assertIsNone(u._cuda_bindings_runtime)
+            self.assertIsNone(u._cuda_bindings_driver)
+        finally:
+            torch.version.hip = orig
+            importlib.reload(u)
+
+    def test_probe_accepts_invalid_value(self):
+        # A driver that has the API rejects the null node with cudaErrorInvalidValue.
+        import torch.cuda._graph_annotations as ga
+
+        if ga._cuda_runtime is None:
+            self.skipTest("cuda-bindings not installed")
+        err = ga._cuda_runtime.cudaError_t.cudaErrorInvalidValue
+        with unittest.mock.patch.object(
+            ga._cuda_runtime, "cudaGraphNodeGetToolsId", lambda _node: (err, 0)
+        ):
+            self.assertTrue(ga._probe_tools_id())
 
 
 # Host-side test of the graph-instantiate hook registry: consumers register hooks that a
