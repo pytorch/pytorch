@@ -808,8 +808,12 @@ class TestFakeQuantizeOps(TestCase):
             zero_point = torch.full(zero_point.shape, -1 - quant_min).to(dtype=torch.int32, device=device)
 
             # For non-float zero_point, fakequant requires zero_point between quant_min and quant_max.
-            with self.assertRaisesRegex(RuntimeError, "`zero_point` must be between `quant_min` and `quant_max`."):
-                Y = torch.fake_quantize_per_channel_affine(X, scale, zero_point, axis, quant_min, quant_max)
+            # Only CPU raises here: on accelerators the bound is enforced by a device-side assert
+            # inside the kernel, since the host-side form costs a device-to-host sync, and a
+            # device-side assert cannot be caught in-process.
+            if device == 'cpu':
+                with self.assertRaisesRegex(RuntimeError, "`zero_point` must be between `quant_min` and `quant_max`."):
+                    Y = torch.fake_quantize_per_channel_affine(X, scale, zero_point, axis, quant_min, quant_max)
 
             # For float zero_point, fakequant can be outside quant_min and quant_max.
             for zero_point_dtype in [torch.float32, torch.float16]:

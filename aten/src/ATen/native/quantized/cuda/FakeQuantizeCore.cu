@@ -206,6 +206,11 @@ void _fake_quant_per_channel_cachemask_cuda_helper(
     // write mask
     gpu_kernel(iter_mask,
       [=] GPU_LAMBDA (const SelfType input_val, const float scale, const int64_t zero_point) -> bool {
+        CUDA_KERNEL_ASSERT_VERBOSE(
+          zero_point >= quant_min && zero_point <= quant_max
+            && "`zero_point` must be between `quant_min` and `quant_max`",
+          "Expected quant_min (%ld) <= zero_point <= quant_max (%ld), but got zero_point = %ld",
+          quant_min, quant_max, static_cast<int64_t>(zero_point));
         const float inv_scale = 1.0f / scale;
         const auto qval = static_cast<int64_t>(std::nearbyint(input_val * inv_scale)) + zero_point;
         return ((quant_min <= qval) && (qval <= quant_max));

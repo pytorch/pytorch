@@ -66,7 +66,12 @@ std::tuple<Tensor, Tensor> fake_quantize_per_channel_affine_cachemask(
       "`quant_min` should be less than or \
         equal to `quant_max`.");
 
-  if(!at::isFloatingType(zero_point.scalar_type())){
+  // Restricted to CPU because these two .item() calls are device-to-host round
+  // trips: on an accelerator they measure 22.4us against 46.4us for the whole
+  // operator, to validate as few as three integers. Accelerators enforce the
+  // same bound in the kernel that already loads every zero_point element -- see
+  // the CUDA_KERNEL_ASSERT_VERBOSE in FakeQuantizeCore.cu's integer branch.
+  if (zero_point.is_cpu() && !at::isFloatingType(zero_point.scalar_type())) {
       TORCH_CHECK(
           at::min(zero_point).item().toInt() >= quant_min &&
               at::max(zero_point).item().toInt() <= quant_max,
@@ -204,10 +209,15 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
       scale_.numel() == X_.size(axis),
       "dimensions of scale and zero-point are not consistent with input tensor")
 
-  TORCH_CHECK(
-      at::min(zero_point_rounded).item().toLong() >= quant_min &&
-          at::max(zero_point_rounded).item().toLong() <= quant_max,
-      "`zero_point` must be between `quant_min` and `quant_max`.");
+  // CPU only, for the same reason as the forward pass. No device-side
+  // replacement is needed: _get_rounded_zero_point clamps into
+  // [quant_min, quant_max], so this can only fire on a NaN zero_point.
+  if (zero_point_rounded.is_cpu()) {
+    TORCH_CHECK(
+        at::min(zero_point_rounded).item().toLong() >= quant_min &&
+            at::max(zero_point_rounded).item().toLong() <= quant_max,
+        "`zero_point` must be between `quant_min` and `quant_max`.");
+  }
 
   TORCH_CHECK(
       axis >= 0 && axis < X_.dim(),
