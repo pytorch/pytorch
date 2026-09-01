@@ -553,15 +553,11 @@ class TestTritonHeuristics(TestCase):
         self.assertEqual(count([underfilled], dtype_size), 0)
         self.assertEqual(count([valid], dtype_size), 1)
 
-        # Plain GemmConfig lists (int8 / scaled_mm) are still routed through
-        # ROCmConfigHeuristic, so they inherit the arch default kpack (2 on
-        # gfx90a/gfx942) and are subject to the same prune: block_k=16 underfills
-        # the default kpack and is dropped. gfx950 defaults kpack to 1, so nothing
-        # underfills there.
-        from torch._inductor.utils import kpack_supported
-
-        plain = [GemmConfig(64, 64, 16, 2, 4)]
-        self.assertEqual(count(plain, dtype_size), 0 if kpack_supported() else 1)
+        # Plain GemmConfig lists (int8 / scaled_mm) never declare kpack. They
+        # inherit the arch default, which is clamped down to 1 when block_k cannot
+        # fill kpack * kdim, so a valid config is emitted instead of being pruned.
+        int8_configs = [GemmConfig(64, 64, 32, 2, 4), GemmConfig(128, 128, 32, 2, 8)]
+        self.assertEqual(count(int8_configs, 1), len(int8_configs))
 
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_compile_time_autotune_not_repeated_at_runtime(self):

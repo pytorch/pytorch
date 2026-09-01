@@ -1866,10 +1866,10 @@ def kpack_supported() -> bool:
     return "gfx90a" in arch or "gfx942" in arch
 
 
-def get_default_kpack() -> int:
+def get_default_kpack(block_k: int = 0) -> int:
     if not torch.version.hip:
         return 0
-    if kpack_supported():
+    if kpack_supported() and block_k > 16:
         return 2
     return 1
 
@@ -1907,9 +1907,10 @@ def mfma_kdim(dtype_size: int, matrix_instr_nonkdim: int) -> int | None:
     if not torch.version.hip:
         return None
     table = _MFMA_KDIM_CDNA3
-    if "gfx90a" in torch.cuda.get_device_properties(0).gcnArchName:
+    arch = torch.cuda.get_device_properties(0).gcnArchName
+    if "gfx90a" in arch:
         return _MFMA_KDIM_CDNA2.get((dtype_size, matrix_instr_nonkdim))
-    elif "gfx942" in torch.cuda.get_device_properties(0).gcnArchName: 
+    elif "gfx942" in arch: 
         return _MFMA_KDIM_CDNA3.get((dtype_size, matrix_instr_nonkdim))
     else:
         return None
