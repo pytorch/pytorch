@@ -446,8 +446,7 @@ class TestModule(TestCase):
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=True, training=training)
-        if "xpu" in device and module_info.name == "nn.MultiheadAttention":
-            self.skipTest("GradcheckError issue in MultiheadAttention, https://github.com/intel/torch-xpu-ops/issues/2356")
+
         # === Set nondet tol for gradcheck to user-defined value if on CUDA and cudNN is enabled
         gradcheck_nondet_tol = 0.0
         if (torch.device(device).type == 'cuda' and torch.backends.cudnn.enabled) or torch.device(device).type == 'xpu':
