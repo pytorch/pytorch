@@ -141,9 +141,7 @@ flydsl_mm_template = FlyDSLTemplate(
 blackwell_ws_persistent_device_tma_main_loop_scaling_template = TritonTemplate(
     name="blackwell_ws_persistent_device_tma_main_loop_scaling",
     grid=persistent_mm_grid,
-    source=load_kernel_template(
-        "triton_blackwell_ws_persistent_device_tma_main_loop_scaled_mm"
-    ),
+    source=load_kernel_template("triton_blackwell_ws_persistent_device_tma_mm"),
 )
 
 blackwell_ws_persistent_device_tma_mm_template = TritonTemplate(
