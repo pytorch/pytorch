@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdlib>
+#include <exception>
 #include <limits>
 #include <map>
 #include <unordered_map>

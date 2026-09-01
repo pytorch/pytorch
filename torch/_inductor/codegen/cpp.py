@@ -69,6 +69,8 @@ from .common import (
 from .cpp_utils import (
     _get_dtype_from_loopbodies,
     _get_loop_body,
+    capture_exceptions_in_parallel_region,
+    catch_exceptions_inside_parallel_region,
     cexpr,
     cexpr_index,
     codegen_rand,
@@ -2612,6 +2614,8 @@ class CppKernel(Kernel):
             elif threads > 1:
                 if worksharing.single():
                     stack.enter_context(code.indent())
+                    # `omp single` is still inside the parallel region
+                    stack.enter_context(catch_exceptions_inside_parallel_region(code))
 
             def gen_kernel(_loop_nest: LoopNest):
                 def is_parallel_reduction():
@@ -2698,6 +2702,10 @@ class CppKernel(Kernel):
                         return
                     code.writelines(loop_lines)
                     stack.enter_context(code.indent())
+                    if loop.catch_exception:
+                        stack.enter_context(
+                            catch_exceptions_inside_parallel_region(code)
+                        )
                     gen_loop_nest(_loop_nest, depth + 1, loop.is_reduction)
 
             def gen_loop_nest(
@@ -6218,6 +6226,8 @@ class WorkSharing:
                 # Thread count differs from system (user probably set it so hardcode)
                 use_dynamic = False
 
+            self.stack.enter_context(self.code.indent())
+            self.stack.enter_context(capture_exceptions_in_parallel_region(self.code))
             if use_dynamic or config.cpp.dynamic_threads:
                 self.code.writeline("#pragma omp parallel")
             else:
@@ -6260,6 +6270,8 @@ class LoopLevel:
     tiled_size: sympy.Expr = sympy.S.Zero
     steps: sympy.Expr = sympy.S.One
     parallel: int = 0
+    # guard this loop's body so a throw cannot escape the OpenMP region
+    catch_exception: bool = False
     simd_omp: bool = False
     simd_vec: bool = False
     collapsed: bool = False
@@ -6451,6 +6463,10 @@ class LoopNest:
             raise AssertionError("expected len(self.loops) >= par_depth.parallel_depth")
         loop = self.loops[par_depth.start_depth]
         loop.parallel = par_depth.parallel_depth
+        # collapse(n) needs the n loops perfectly nested, so the guard has to
+        # go in the innermost one rather than around the whole nest.
+        innermost_parallel = max(par_depth.start_depth, par_depth.parallel_depth - 1)
+        self.loops[innermost_parallel].catch_exception = True
         if loop.is_reduction:
             # pyrefly: ignore [bad-assignment]
             metrics.parallel_reduction_count += 1

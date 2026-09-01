@@ -822,3 +822,43 @@ def template_fusion_with_epilogues_supported(
         if n.node is not None
     ]
     return _template_fusion_supported(template_outputs, epilogue_nodes)
+
+
+@contextlib.contextmanager
+def capture_exceptions_in_parallel_region(code):
+    """Shared state for carrying an exception out of an OpenMP region.
+
+    An exception must not leave an OpenMP structured block, so we stash the
+    first one and rethrow it once the region has joined, as
+    at::internal::invoke_parallel does.
+    """
+    code.writelines(
+        [
+            "std::atomic<bool> inductor_kernel_err_flag{false};",
+            "std::exception_ptr inductor_kernel_eptr;",
+        ]
+    )
+    yield
+    code.writelines(
+        [
+            "if (inductor_kernel_eptr) {",
+            "    std::rethrow_exception(inductor_kernel_eptr);",
+            "}",
+        ]
+    )
+
+
+@contextlib.contextmanager
+def catch_exceptions_inside_parallel_region(code):
+    """Body half of :func:`capture_exceptions_in_parallel_region`."""
+    code.writeline("try {")
+    yield
+    code.writelines(
+        [
+            "} catch (...) {",
+            "    if (!inductor_kernel_err_flag.exchange(true)) {",
+            "        inductor_kernel_eptr = std::current_exception();",
+            "    }",
+            "}",
+        ]
+    )
