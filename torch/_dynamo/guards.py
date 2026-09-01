@@ -4206,6 +4206,8 @@ class GuardsStatePickler(pickle.Pickler):
         self.guard_tree_values = guard_tree_values
         self.empty_values = empty_values
         self.missing_values = missing_values
+        self._missing_cache: dict[str, _Missing] = {}
+        self._globals_snapshots: dict[int, dict[str, Any]] = {}
         # The object reducer_override was last handed, so a failure inside a
         # __reduce__ can be attributed to a value rather than only to a type.
         self.last_reduced: Any = None
@@ -4351,81 +4353,140 @@ class GuardsStatePickler(pickle.Pickler):
         return SerializedCode.to_code_object(serialized_code)
 
     @classmethod
-    def _unpickle_nested_function(
+    def _unpickle_empty_cell(cls) -> types.CellType:
+        return types.CellType()
+
+    @classmethod
+    def _build_function(
         cls,
-        code: types.CodeType,
+        f_globals: dict[str, Any],
         module: str,
+        code: types.CodeType,
         qualname: str,
         argdefs: tuple[object, ...] | None,
         closure: tuple[types.CellType, ...] | None,
-        kwdefaults: dict[str, object] | None = None,
-        name: str | None = None,
-        attributes: dict[str, object] | None = None,
-        guarded_globals: dict[str, object] | None = None,
-        snapshot_globals: bool = False,
+        kwdefaults: dict[str, object] | None,
+        name: str,
+        attributes: dict[str, object],
     ) -> types.FunctionType:
-        if snapshot_globals:
-            # Deliberately no import_module here: the snapshot IS the scope, and
-            # importing a module only to discard it is a load-time failure mode
-            # this branch does not otherwise have.
-            f_globals: dict[str, Any] = dict(guarded_globals or {})
-        else:
-            # NB obj.__module__ is not reliably the module the function LIVES in
-            # -- functools.wraps copies it from the wrapped function -- so this
-            # scope can belong to a different file. It is only reached when no
-            # guard walks __globals__, since one that does registers the dict
-            # and forces the snapshot above.
-            f_globals = importlib.import_module(module).__dict__
-        fn = types.FunctionType(
-            code,
-            f_globals,
-            name if name is not None else code.co_name,
-            argdefs,
-            closure,
-        )
-        # FunctionType reads __module__ from globals["__name__"], which the
-        # snapshot branch does not have (the snapshot arrives later, as pickle
-        # STATE), so a guard rooted at fn.__module__ would rebuild against
-        # None. Restore it explicitly; in the import branch this is a no-op.
+        fn = types.FunctionType(code, f_globals, name, argdefs, closure)
+        # FunctionType derives __module__ from f_globals["__name__"], so any
+        # scope that is not the real module dict leaves it None and a guard
+        # rooted at fn.__module__ rebuilds against that.
         fn.__module__ = module
         fn.__qualname__ = qualname
         fn.__kwdefaults__ = kwdefaults
-        if attributes:
-            fn.__dict__.update(attributes)
+        fn.__dict__.update(attributes)
         return fn
+
+    @classmethod
+    def _unpickle_function_from_module(
+        cls, module: str, *args: Any
+    ) -> types.FunctionType:
+        # NB module is not reliably where the function LIVES -- functools.wraps
+        # copies __module__ from the wrapped function -- so this scope can belong
+        # to a different file. Reached only when no guard walks __globals__: one
+        # that does registers the dict, which routes to the snapshot variant.
+        f_globals = importlib.import_module(module).__dict__
+        return cls._build_function(f_globals, module, *args)
+
+    @classmethod
+    def _unpickle_function_from_snapshot(
+        cls, module: str, *args: Any
+    ) -> types.FunctionType:
+        # The scope arrives as pickle STATE, through _apply_function_globals.
+        # Deliberately no import_module fallback: importing a module only to
+        # discard its dict is a load-time failure mode this branch is free of.
+        return cls._build_function({}, module, *args)
+
+    # Note [Reconstructing a function a guard is rooted at]
+    #
+    # A function whose qualname does not resolve back to it cannot be pickled by
+    # reference, and every functools.wraps decorator produces one: the wrapper
+    # copies the wrapped function's __module__ and __qualname__ while living in
+    # the decorator's file. Such a function becomes a _Missing sentinel, which is
+    # right for one nothing depends on. When a guard's source walks THROUGH it,
+    # evaluating that source against the sentinel raises while the guard manager
+    # is still being built and the whole load fails, so it is rebuilt from its
+    # code object instead.
+    #
+    # Rebuilding drags along whatever the function holds -- closure cells,
+    # defaults, attributes, and the module scope its body reads -- and carrying
+    # all of that would let an unpicklable neighbour fail a package that never
+    # needed it. So only values some guard tree node references are carried
+    # (_keep) and the rest become sentinels. Two consequences worth knowing:
+    #
+    #   - A registered CONTAINER is carried verbatim rather than pruned per
+    #     element. A guard on the __defaults__ tuple or __kwdefaults__ dict
+    #     itself -- what wrap_listlike's EQUALS_MATCH registers -- rebakes its
+    #     comparison constant from the reconstructed function at load, so a
+    #     pruned element would make that guard fail forever with no load error.
+    #   - The globals snapshot travels as pickle STATE, never as a reduce arg.
+    #     pickle memoizes an object only after saving its reduce args, so a
+    #     snapshot passed as an arg that reaches back to the function -- the
+    #     ordinary `wrapped = deco(base)` at module scope, or two wrappers
+    #     referencing each other -- recurses until RecursionError. State is
+    #     applied after memoization, so those references resolve to the pickle
+    #     already built.
 
     def _keep(self, value: object) -> bool:
         """Whether a value a reconstructed function holds has to be carried.
 
-        Only values some guard tree node references: everything else becomes a
-        _Missing sentinel, so widening the set of reconstructed functions does
-        not drag unrelated -- and possibly unpicklable -- neighbours into the
-        pickle with them. Matching is by identity, which for an interned value
-        (True, None, a small int, a short str) can coincide with an unrelated
-        guarded one and keep it. That is harmless: such values are trivially
-        picklable, and a kept value is always the real one.
+        Matching is by identity, which for an interned value (True, None, a small
+        int, a short str) can coincide with an unrelated guarded one and keep it.
+        That is harmless: such values are trivially picklable, and a kept value is
+        always the real one.
         """
         return id(value) in self.guard_tree_values
+
+    def _missing(self, reason: str) -> _Missing:
+        """One shared sentinel per reason within this pickle.
+
+        A snapshot prunes a whole module dict, so a fresh instance per pruned
+        value bloats the payload with thousands of identical sentinels.
+        Nothing compares sentinels by identity, so sharing is safe.
+        """
+        if reason not in self._missing_cache:
+            self._missing_cache[reason] = _Missing(reason)
+        return self._missing_cache[reason]
+
+    def _prune(self, value: object, reason: str) -> object:
+        return value if self._keep(value) else self._missing(reason)
+
+    def _globals_snapshot(self, f_globals: dict[str, Any]) -> dict[str, Any]:
+        """The pruned module scope, built once per module dict in this pickle.
+
+        Reused so that pickle memoizes it: every function reconstructed from one
+        module otherwise carries its own copy of the whole scope, and the payload
+        grows with their product.
+        """
+        snapshot = self._globals_snapshots.get(id(f_globals))
+        if snapshot is None:
+            snapshot = {
+                name: self._prune(value, "unguarded function global")
+                for name, value in f_globals.items()
+            }
+            self._globals_snapshots[id(f_globals)] = snapshot
+        return snapshot
 
     def _reduce_cell(self, cell: types.CellType) -> types.CellType:
         """Carry a closure cell, or replace it with a sentinel one.
 
-        A carried cell is passed through UNCHANGED so that two functions
-        closing over the same variable still share it after reload, and so that
-        pickle can memoize it. Only a dropped cell is rebuilt.
-
-        An EMPTY cell -- a free variable a decorator only assigns on a path that
-        did not run -- has no contents to read at all, so presence is checked
-        before identity. Reading it unconditionally raised ValueError here,
-        which reaches the caller as a package bypass.
+        A carried cell is passed through UNCHANGED so that two functions closing
+        over the same variable still share it after reload, and so that pickle
+        can memoize it. Only a dropped cell is rebuilt. An EMPTY cell has no
+        contents to prune, so it is always carried -- reducer_override rebuilds
+        it empty.
         """
+        if self._keep(cell):
+            return cell
         try:
             contents = cell.cell_contents
         except ValueError:
-            return type(self)._unpickle_cell(_Missing("empty function closure"))
-        if self._keep(cell) or self._keep(contents):
             return cell
-        return type(self)._unpickle_cell(_Missing("unguarded function closure"))
+        if self._keep(contents):
+            return cell
+        return type(self)._unpickle_cell(self._missing("unguarded function closure"))
 
     @staticmethod
     def _apply_function_globals(
@@ -4433,87 +4494,60 @@ class GuardsStatePickler(pickle.Pickler):
     ) -> None:
         fn.__globals__.update(guarded_globals)
 
-    def _reduce_nested_function(self, obj: types.FunctionType) -> tuple[Any, ...]:
-        snapshot_globals = id(obj.__globals__) in self.guard_tree_values
-        guarded_globals = (
-            {
-                name: (
-                    value
-                    if self._keep(value)
-                    else _Missing("unguarded function global")
-                )
-                for name, value in obj.__globals__.items()
-            }
-            if snapshot_globals
+    def _reduce_function_by_value(self, obj: types.FunctionType) -> tuple[Any, ...]:
+        """Pickle a function by value rather than by reference.
+
+        See Note [Reconstructing a function a guard is rooted at].
+        """
+        snapshot = (
+            self._globals_snapshot(obj.__globals__)
+            if self._keep(obj.__globals__)
             else None
         )
-
+        # A registered container is carried verbatim; otherwise it keeps its
+        # shape -- length, keys -- and only unguarded values become sentinels, so
+        # a guard reading the container's structure still rebuilds against it.
         defaults = obj.__defaults__
-        if defaults is not None:
-            keep_defaults = self._keep(defaults) or any(
-                self._keep(value) for value in defaults
-            )
-            defaults = (
-                tuple(
-                    value
-                    if self._keep(value)
-                    else _Missing("unguarded function default")
-                    for value in defaults
-                )
-                if keep_defaults
-                else None
+        if defaults is not None and not self._keep(defaults):
+            defaults = tuple(
+                self._prune(value, "unguarded function default") for value in defaults
             )
 
         kwdefaults = obj.__kwdefaults__
-        if kwdefaults is not None:
-            keep_kwdefaults = self._keep(kwdefaults)
+        if kwdefaults is not None and not self._keep(kwdefaults):
             kwdefaults = {
-                name: (
-                    value
-                    if self._keep(value)
-                    else _Missing("unguarded function keyword default")
-                )
+                name: self._prune(value, "unguarded function kwdefault")
                 for name, value in kwdefaults.items()
-                if keep_kwdefaults or self._keep(value)
             }
-            if not kwdefaults and not keep_kwdefaults:
-                kwdefaults = None
 
         closure = obj.__closure__
         if closure is not None:
             closure = tuple(self._reduce_cell(cell) for cell in closure)
-        attributes = (
-            dict(obj.__dict__)
-            if self._keep(obj.__dict__)
-            else {
-                name: value for name, value in obj.__dict__.items() if self._keep(value)
-            }
-        )
+        # An unregistered __dict__ drops its unguarded keys outright: unlike a
+        # signature, it holds whatever a decorator happened to stash, and no
+        # guard can read a structure nothing registered.
+        keep_attributes = self._keep(obj.__dict__)
+        attributes = {
+            name: self._prune(value, "unguarded function attribute")
+            for name, value in obj.__dict__.items()
+            if keep_attributes or self._keep(value)
+        }
         args = (
-            obj.__code__,
             obj.__module__,
+            obj.__code__,
             obj.__qualname__,
             defaults,
             closure,
             kwdefaults,
             obj.__name__,
             attributes,
-            None,
-            snapshot_globals,
         )
-        if not snapshot_globals:
-            return type(self)._unpickle_nested_function, args
-        # The snapshot goes in STATE, not in the args. pickle memoizes an object
-        # only after saving its reduce args, so a snapshot passed as an arg that
-        # reaches back to obj -- the ordinary `wrapped = deco(base)` at module
-        # scope, or two functools.wraps helpers referencing each other through
-        # the module dict -- recurses until RecursionError. State is applied
-        # AFTER memoization, so those references resolve to the function pickle
-        # already built.
+        if snapshot is None:
+            return type(self)._unpickle_function_from_module, args
         return (
-            type(self)._unpickle_nested_function,
+            type(self)._unpickle_function_from_snapshot,
             args,
-            guarded_globals,
+            snapshot,
             None,
             None,
             type(self)._apply_function_globals,
@@ -4684,15 +4718,16 @@ class GuardsStatePickler(pickle.Pickler):
 
         elif inspect.isfunction(obj):
             if "<locals>" in obj.__qualname__:
-                return self._reduce_nested_function(obj)
+                return self._reduce_function_by_value(obj)
             if obj.__module__ in sys.modules:
                 f = sys.modules[obj.__module__]
                 for name in obj.__qualname__.split("."):
                     f = getattr(f, name, None)  # type: ignore[assignment]
                 if f is not obj:
+                    # See Note [Reconstructing a function a guard is rooted at].
                     if id(obj) not in self.guard_tree_values:
                         return _Missing, ("fqn mismatch",)
-                    return self._reduce_nested_function(obj)
+                    return self._reduce_function_by_value(obj)
         elif inspect.ismethod(obj):
             func = obj.__func__
             method_self = obj.__self__
@@ -4703,15 +4738,14 @@ class GuardsStatePickler(pickle.Pickler):
                 return type(self)._unpickle_bound_method, (func, method_self)
 
         elif isinstance(obj, type((lambda x: lambda: x)(0).__closure__[0])):  # type: ignore[index] # noqa: PLC3002
-            # An EMPTY cell -- a free variable only assigned on a path that
-            # did not run -- has nothing to read, and reading it raised
-            # ValueError out of here, which reaches the caller as a package
-            # bypass. _reduce_cell handles the cells it builds; this is the
-            # path a cell reached directly takes.
+            # An EMPTY cell -- a free variable only assigned on a path that did
+            # not run -- has nothing to read, so rebuild it empty rather than
+            # reading it. This is the single place that knows how; _reduce_cell
+            # carries such a cell through to here.
             try:
                 contents = obj.cell_contents
             except ValueError:
-                contents = _Missing("empty function closure")
+                return type(self)._unpickle_empty_cell, ()
             return type(self)._unpickle_cell, (contents,)
 
         if (
