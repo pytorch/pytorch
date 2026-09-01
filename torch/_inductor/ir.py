@@ -7121,13 +7121,16 @@ class ProcessKernelResult:
     unbacked_bindings: dict[sympy.Symbol, pytree.KeyPath] | None
 
 
-def _clone_default_generator_state(device: torch.device) -> Any:
+def _clone_default_generator_state(device: torch.device) -> torch._C.Generator:
     """Clone the default generator state backing a GeneratorState graph input.
 
     Eligibility is gated on the graph-safe RNG registry (populated by
     ``torch._functorch._aot_autograd.utils.register_graphsafe_rng_device_type``)
     and the generator is resolved by the GeneratorState's own device, matching
-    the eager path in torch/_prims/rng_prims.py.
+    the eager path in torch/_prims/rng_prims.py. The device index is required
+    even though ``get_default_generator`` would fall back to the current
+    device, because silently cloning another device's generator is the bug
+    class this gate exists to prevent.
     """
     from torch._functorch._aot_autograd.utils import (
         get_default_generator,
@@ -7136,9 +7139,8 @@ def _clone_default_generator_state(device: torch.device) -> Any:
 
     if not supports_graphsafe_rng(device):
         raise AssertionError(
-            f"Device type '{device.type}' is not registered for graph-safe RNG "
-            "(see torch._functorch._aot_autograd.utils."
-            "register_graphsafe_rng_device_type)"
+            f"GraphSafe RNG operations not supported for device '{device}'. "
+            f"Call register_graphsafe_rng_device_type('{device.type}') to register."
         )
     if device.index is None:
         raise AssertionError(

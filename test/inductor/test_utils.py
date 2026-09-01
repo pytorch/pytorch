@@ -1250,6 +1250,9 @@ class TestCloneDefaultGeneratorState(TestCase):
     def test_registered_out_of_tree_device_is_admitted(self):
         # An out-of-tree backend that registered graph-safe RNG is admitted and
         # its generator is resolved by the GeneratorState's own device.
+        # A real backend calls rename_privateuse1_backend() and would report
+        # its own name here; the unrenamed type keeps this test from depending
+        # on any installed out-of-tree backend.
         fake_generator = mock.Mock()
         fake_generator.clone_state.return_value = "cloned-state"
         device = torch.device("privateuseone", 0)
@@ -1274,7 +1277,7 @@ class TestCloneDefaultGeneratorState(TestCase):
             {"cuda"},
         ):
             with self.assertRaisesRegex(
-                AssertionError, "not registered for graph-safe RNG"
+                AssertionError, "GraphSafe RNG operations not supported"
             ):
                 inductor_ir._clone_default_generator_state(
                     torch.device("privateuseone", 0)

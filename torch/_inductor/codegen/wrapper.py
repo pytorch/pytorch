@@ -3333,11 +3333,10 @@ class PythonWrapperCodegen(CodeGen):
                         if _coor_enabled()
                         else value.device.index
                     )
+                    dev_type = value.device.type
                     add_expr_input(
                         name,
-                        f"torch.{value.device.type}._get_generator("
-                        f'torch.device("{value.device.type}", {gen_idx})'
-                        ").graphsafe_get_state()",
+                        f'torch.{dev_type}._get_generator(torch.device("{dev_type}", {gen_idx})).graphsafe_get_state()',
                     )
                 elif isinstance(value, ir.OpaqueObjectState):
                     output.writeline(f"{name} = None")

@@ -549,6 +549,28 @@ class TestKernelBenchmark(TestCase):
             f"print_performance(fn, times=times, repeat=repeat, device='{GPU_TYPE}')"
         ).run(src)
 
+    @unittest.skipIf(
+        GPU_TYPE != "cuda", "graph-safe RNG registry is seeded with cuda only"
+    )
+    def test_benchmark_harness_generator_state(self):
+        """The harness must resolve a GeneratorState input by its own device."""
+
+        def gn(x, y):
+            return torch.sigmoid(torch.rand_like(x) * y) * x
+
+        def fn(x, y):
+            x = torch.sin(x)
+            x = torch.utils.checkpoint.checkpoint(gn, x, y, use_reentrant=True)
+            return torch.sin(x)
+
+        x = torch.randn(4, 4, device=GPU_TYPE, requires_grad=True)
+        y = torch.randn(4, 4, device=GPU_TYPE, requires_grad=True)
+        _, codes = run_and_get_code(torch.compile(fn), x, y)
+
+        FileCheck().check(
+            f'torch.{GPU_TYPE}._get_generator(torch.device("{GPU_TYPE}", 0)).graphsafe_get_state()'
+        ).run("\n".join(codes))
+
 
 if __name__ == "__main__":
     if HAS_GPU:
