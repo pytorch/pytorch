@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
@@ -23,7 +23,7 @@ from torch.utils._ordered_set import OrderedSet
 from ... import config, ir
 from ...ir import IRNode, TensorBox
 from ...lowering import empty_strided, process_subgraph_nodes, register_lowering
-from ...utils import ceildiv
+from ...utils import _IntLike, ceildiv
 from .constraints import (
     is_flex_gemm_partial_reduction_shape,
     LOCAL_REDUCE_AUX_OUTPUT_CONTRACT_ERROR,
@@ -39,6 +39,10 @@ from .debug import (
     format_flex_gemm_selection,
     log_flex_gemm_artifact,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 def decompose_nvgemm_additive_gemm(graph_module: torch.fx.GraphModule) -> None:
@@ -159,7 +163,7 @@ def infer_flex_gemm_epilogue_arg_kinds(
 def validate_flex_gemm_aux_outputs(
     gemm_op: torch._ops.OpOverload,
     aux_outputs: tuple[torch.fx.Node, ...],
-    output_size: list[Any],
+    output_size: Sequence[_IntLike],
 ) -> tuple[Any, ...]:
     """Validate QUACK aux-output support and return fake tensor metadata."""
     if not aux_outputs:

@@ -1412,7 +1412,7 @@ class FlexGemmTensorSSAOpOverrides(GemmEpilogueCuteDSLOpOverrides):
         return CuteDSLOpOverrides._apply_binary_op(
             a,
             b,
-            f"cutlass_math.{op_name}({{a}}, {{b}}, propagate_nan=True)",
+            f"cutlass.{op_name}({{a}}, {{b}})",
             index_expr_fn,
         )
 
@@ -2339,7 +2339,6 @@ class FlexGemmEpiModEmitter:
             "import cutlass.cute as cute\n"
             "import operator\n"
             "from cutlass._mlir.dialects import math as mlir_math\n"
-            "from cutlass._mlir_helpers import math as cutlass_math\n"
             "from torch._inductor.codegen.cutedsl._inline_asm import (\n"
             "    inline_asm_elementwise_intrinsic,\n"
             ")\n\n"

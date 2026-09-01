@@ -3,7 +3,10 @@
 
 import os
 import unittest
-from unittest import mock
+
+
+# Native reductions register during import, so enable the rollout first.
+os.environ["PYTORCH_SUM_INNER_TREE"] = "1"
 
 import torch
 from torch._inductor import config, metrics
@@ -93,9 +96,6 @@ FUSION_CASES = (
 class StrictNumericsTest(TestCase):
     def setUp(self):
         super().setUp()
-        env_patch = mock.patch.dict(os.environ, {"PYTORCH_SUM_INNER_TREE": "1"})
-        env_patch.start()
-        self.addCleanup(env_patch.stop)
         torch.manual_seed(0)
 
     def _run(self, fn, *args, **cfg):

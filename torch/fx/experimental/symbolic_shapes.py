@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sympy
 from sympy import S
+from sympy.core.relational import Relational
 
 from torch._prims_common import BoolLike, FloatLike, IntLike
 
@@ -775,24 +776,19 @@ def is_accessor_node(node: torch.fx.Node) -> bool:
 
 def canonicalize_bool_expr(expr: _T) -> _T:
     """
-    Canonicalize a boolean expression by transforming it into a lt / le
-    inequality and moving all the non-constant terms to the rhs.
-    We canonicalize And / Ors / Not via cnf and then canonicalize their subexpr
-    recursively
+    Canonicalize supported boolean expressions recursively. Ge/Gt relations are
+    rewritten as Le/Lt, and relations with arithmetic operands are normalized by
+    subtraction. Relations with boolean operands are canonicalized structurally
+    without arithmetic. And / Or / Not expressions are first converted to CNF.
     nb. sympy.Rel.canonical is not good enough https://github.com/sympy/sympy/issues/25924
 
     Args:
-        expr (sympy.Expr): Expression to canonicalize
+        expr: Expression to canonicalize
     """
-    # Canonicalise an inequality by transforming it into a lt / le
-    # inequality and moving all the non-constant terms to the rhs
-    # We canonicalise And / Ors / Not via cnf
     # nb. Relational.canonical in sympy is broken
     # https://github.com/sympy/sympy/issues/25924
 
-    if not isinstance(
-        expr, (sympy.Rel, sympy.And, sympy.Or, sympy.Not, sympy.Eq, sympy.Ne)
-    ):
+    if not isinstance(expr, (Relational, sympy.And, sympy.Or, sympy.Not)):
         return expr
 
     if isinstance(expr, (sympy.And, sympy.Or, sympy.Not)):
@@ -857,22 +853,31 @@ def _sympy_from_args(
 
 def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
     """
-    After canonicalization, we are guaranteed to have eliminated Ge/Gt relations
-    (rewriting them to Le/Lt, respectively).
+    After canonicalization, supported relations have Ge/Gt rewritten to Le/Lt.
+    Relations with arithmetic operands are additionally normalized by subtraction.
     """
     if isinstance(expr, (sympy.And, sympy.Or)):
         return type(expr)(*map(canonicalize_bool_expr, expr.args))
 
     opposite = {sympy.Gt: sympy.Lt, sympy.Ge: sympy.Le}
-    t: type[Any]
+    t: type[Relational]
     if isinstance(expr, tuple(opposite.keys())):
-        rhs = expr.lhs - expr.rhs  # type: ignore[attr-defined]
+        lhs, rhs = expr.rhs, expr.lhs  # type: ignore[attr-defined]
         t = opposite[type(expr)]  # type: ignore[index]
     else:
         if not isinstance(expr, (sympy.Lt, sympy.Le, sympy.Eq, sympy.Ne)):
             raise AssertionError(f"Expected Lt/Le/Eq/Ne, got {type(expr)}")
-        rhs = expr.rhs - expr.lhs
+        lhs, rhs = expr.lhs, expr.rhs
         t = type(expr)
+
+    if not (isinstance(lhs, sympy.Expr) and isinstance(rhs, sympy.Expr)):
+        return t(
+            canonicalize_bool_expr(lhs),
+            canonicalize_bool_expr(rhs),
+            evaluate=False,
+        )
+
+    rhs = rhs - lhs
 
     def is_neg(t: sympy.Expr) -> bool:
         return (t.is_Number and t.is_negative) or (
@@ -4150,6 +4155,22 @@ class ShapeEnv:
         # SymNode.expr
         self._replacements_version_counter = 0
 
+        # Note [symbolic op memo]
+        # Symbolic binary arithmetic is overwhelmingly repetitive: deriving
+        # numel and contiguity for every fake tensor recomputes the same
+        # products and comparisons over and over: on one model over 99% of a
+        # few hundred thousand ops were repeats of about two thousand distinct
+        # computations. Memoize on
+        # (op, lhs expr, rhs expr, replacement version); the version keeps a hit
+        # valid only while replacements have not moved.
+        #
+        # What is cached is the result sympy expression. Every call site still
+        # builds its own SymNode around it, and must: see the comment in
+        # SymNode's binary_magic_impl for why two sites cannot share one. Under
+        # proxy tracing binary_magic_impl returns before it reaches this cache,
+        # so nothing being traced is served from here.
+        self._symop_cache: dict[Any, Any] = {}
+
         # Each time divisible is changed this should be set to True, this is set in _update_version_counter.
         self._resimplify_floor_div_axioms = True
 
@@ -4347,6 +4368,7 @@ class ShapeEnv:
             "var_to_range_sloc",
             "replacements_slocs",
             "_replacements_version_counter",
+            "_symop_cache",
             "_resimplify_floor_div_axioms",
             "_expr_sym_node_id",
             "specialization_stacks",
