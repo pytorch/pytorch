@@ -1114,8 +1114,8 @@ void MemDependencyChecker::visit(const LetPtr& v) {
   lastStmt_ = last;
 
   VarPtr var = v->var();
-  if (knownVarBounds_.contains(var)) {
-    currentScope_->shadowedVarBounds[var] = knownVarBounds_[var];
+  if (auto it = knownVarBounds_.find(var); it != knownVarBounds_.end()) {
+    currentScope_->shadowedVarBounds[var] = it->second;
   }
 
   currentScope_->localVars.insert(var);
