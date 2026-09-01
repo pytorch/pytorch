@@ -210,15 +210,14 @@ Tensor& arange_out(const Scalar& start, const Scalar& end, const Scalar& step, T
 
     Tensor r = result.is_contiguous() ? result : result.contiguous();
     auto iter = TensorIterator::borrowing_nullary_op(r);
-    if(isComplexType(result.scalar_type())) {
-      Scalar endc;
+    if(isComplexType(r.scalar_type())) {
       if(size <= 1) {
-        endc = start;
+        result.fill_(start);
       } else {
-        endc = start.to<c10::complex<double>>() + step.to<c10::complex<double>>() * static_cast<double>(size - 1);
+        Scalar endc = start.to<c10::complex<double>>() + step.to<c10::complex<double>>() * static_cast<double>(size - 1);
+        linspace_stub(iter.device_type(), iter, start, endc, size);
       }
 
-      linspace_stub(iter.device_type(), iter, start, endc, size);
     } else {
       arange_stub(iter.device_type(), iter, start, size, step);
     }

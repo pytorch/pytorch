@@ -5550,6 +5550,7 @@ def arange(
         isinstance(start, complex)
         or isinstance(end, complex)
         or isinstance(step, complex)
+        or (dtype is not None and dtype.is_complex)
     )
 
     # Case: torch.arange(5)
@@ -5559,29 +5560,29 @@ def arange(
     torch._check(step != 0, lambda: "step must be nonzero")
 
     if has_complex:
-        startc = complex(start)
-        endc = complex(end)
-        stepc = complex(step)
+        start = complex(start)
+        end = complex(end)
+        step = complex(step)
 
-        if stepc.real > 0:
+        if step.real > 0:
             torch._check(
-                endc.real >= startc.real,
+                end.real >= start.real,
                 lambda: "upper bound and lower bound inconsistent with step sign in real part",
             )
-        elif stepc.real < 0:
+        elif step.real < 0:
             torch._check(
-                endc.real <= startc.real,
+                end.real <= start.real,
                 lambda: "upper bound and lower bound inconsistent with step sign in real part",
             )
 
-        if stepc.imag > 0:
+        if step.imag > 0:
             torch._check(
-                endc.imag >= startc.imag,
+                end.imag >= start.imag,
                 lambda: "upper bound and lower bound inconsistent with step sign in imaginary part",
             )
-        elif stepc.imag < 0:
+        elif step.imag < 0:
             torch._check(
-                endc.imag <= startc.imag,
+                end.imag <= start.imag,
                 lambda: "upper bound and lower bound inconsistent with step sign in imaginary part",
             )
 
@@ -5612,7 +5613,9 @@ def arange(
     )
 
     args = (start, end, step)
-    integer_args = builtins.all(isinstance(arg, IntLike) for arg in args)
+    integer_args = (
+        builtins.all(isinstance(arg, IntLike) for arg in args) and not has_complex
+    )
 
     if dtype is None:
         dtype = torch.int64 if integer_args else torch.get_default_dtype()
@@ -5630,21 +5633,17 @@ def arange(
         length = (xend - xstart + xstep - sgn) // xstep  # type: ignore[possibly-undefined]
     elif has_complex:
         real_length = (
-            math.ceil((endc.real - startc.real) / stepc.real)  # type: ignore[possibly-undefined]
-            if stepc.real != 0  # type: ignore[possibly-undefined]
-            else 1
+            math.ceil((end.real - start.real) / step.real)  # type: ignore[possibly-undefined]
+            if step.real != 0 and math.isfinite(step.real)  # type: ignore[possibly-undefined]
+            else 0
         )
         imag_length = (
-            math.ceil((endc.imag - startc.imag) / stepc.imag)  # type: ignore[possibly-undefined]
-            if stepc.imag != 0  # type: ignore[possibly-undefined]
-            else 1
-        )
-        torch._check(
-            real_length == imag_length,
-            "cannot perform step due to incorrect upper and lower bounds",
+            math.ceil((end.imag - start.imag) / step.imag)  # type: ignore[possibly-undefined]
+            if step.imag != 0 and math.isfinite(step.imag)  # type: ignore[possibly-undefined]
+            else 0
         )
 
-        length = real_length
+        length = max(real_length, imag_length)
     else:
         length = math.ceil((end - start) / step)  # type: ignore[operator not supported]
 
