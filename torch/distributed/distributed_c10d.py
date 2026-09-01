@@ -2806,15 +2806,13 @@ def _new_process_group_helper(
 
     This function is called with ``global_ranks_in_group == []`` for the default group.
     """
-    global _world
-
     if group_name in _world.pg_names.values():
         raise ValueError(
             "The specified group name has already been "
             "created, please use a different group name"
         )
 
-    if device_id is not None and (device_id.index is None or device_id.type == "cpu"):
+    if device_id is not None and device_id.index is None:
         raise ValueError(
             "init_process_group device_id parameter must be an accelerator with an index"
         )

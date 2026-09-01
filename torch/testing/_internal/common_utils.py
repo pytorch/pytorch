@@ -2735,12 +2735,20 @@ class AlwaysWarnTypedStorageRemoval:
 class CudaSyncGuard:
     def __init__(self, sync_debug_mode):
         self.mode = sync_debug_mode
+        # Skip if CUDA is not available (CPU-only builds)
+        self.cuda_available = torch.cuda.is_available()
 
     def __enter__(self):
+        if not self.cuda_available:
+            # When CUDA is not available, do nothing and return self
+            return self
         self.debug_mode_restore = torch.cuda.get_sync_debug_mode()
         torch.cuda.set_sync_debug_mode(self.mode)
 
     def __exit__(self, exception_type, exception_value, traceback):
+        if not self.cuda_available:
+            # Nothing to restore when CUDA was not available
+            return
         torch.cuda.set_sync_debug_mode(self.debug_mode_restore)
 
 # Context manager for setting torch.__future__.set_swap_module_params_on_conversion
