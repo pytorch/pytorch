@@ -107,7 +107,7 @@ def add_step_closure(
 ) -> None:
     """Adds a closure to the list of the ones to be run at the end of the step.
     Many times during model training there is the need to print/report (print to
-    console, post to tensorboard, etc...) information which require the content of
+    console, post to tensorboard, etc...) information which requires the content of
     intermediary tensors to be inspected.
     Inspecting different tensors content in different points of the model code
     requires many executions and typically causes performance issues.

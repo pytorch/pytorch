@@ -1,13 +1,19 @@
 #pragma once
 #include <ATen/Config.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/safe_numerics.h>
 #include <functional>
 #include <string>
 
 namespace at {
 
 inline int64_t divup(int64_t x, int64_t y) {
-  return (x + y - 1) / y;
+  int64_t n = 0;
+  // x + y - 1 overflows for large x or y, and silently rounds down
+  if (C10_UNLIKELY(c10::add_overflows(x, y - 1, &n))) {
+    return x / y + (x % y > 0);
+  }
+  return n / y;
 }
 
 // Called during new thread initialization

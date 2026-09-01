@@ -15,28 +15,32 @@ Instructions to update:
 
 ## `quack`
 
-This is a subset of the full quack library containing the RMSNorm implementation
-and its transitive dependencies.
+This is a subset of the full quack library, currently vendoring RMSNorm and the
+symmetric GEMM implementation together with their transitive dependencies.
 
-After copying the upstream subset, `tools/vendoring/quack/patches` applies
-PyTorch-only vendoring/runtime changes such as cache/worker namespace renames
-and removal of RMSNorm custom-op registration.
+Two patch phases are applied after copying the upstream subset:
 
-Source: https://github.com/Dao-AILab/quack
-
-The pinned upstream commit is the `PINNED_SHA` constant in
-`tools/vendoring/quack/vendor.sh` (`__version__` in the generated vendored
-package records the upstream version). That constant is the single source of
-truth; do not duplicate the pin here. The vendoring script verifies that the
-pinned commit is reachable from Dao-AILab/quack main before applying local
-PyTorch vendoring patches.
+- `tools/vendoring/quack/flex_gemm_patches`: feature deltas required by the
+  vendored GEMM implementation, including the symmetric GEMM adapter
+- `tools/vendoring/quack/patches`: PyTorch-only vendoring/runtime changes, such
+  as relative imports, cache/worker namespace renames, and removal of RMSNorm
+  custom-op registration
 
 FlexGEMM separately uses the full external QuACK package. Its public base is
 pinned in `.github/ci_commit_pins/quack.txt`, and
 `tools/vendoring/quack/prepare_flex_gemm.sh` applies the ordered
-`tools/vendoring/quack/flex_gemm_patches/series` before CI installs the package.
-Those feature patches do not participate in rendering the RMSNorm-only vendored
+`tools/vendoring/quack/external_flex_gemm_patches/series` before CI installs the
+package. Those external patches do not participate in rendering the vendored
 subset.
+
+Source: https://github.com/Dao-AILab/quack
+
+The vendored subset's pinned upstream commit is the `PINNED_SHA` constant in
+`tools/vendoring/quack/vendor.sh` (`__version__` in the generated vendored
+package records the upstream version). That constant is the single source of
+truth; do not duplicate the pin here. The vendoring script verifies that the
+pinned commit is reachable from Dao-AILab/quack main before applying local
+patches.
 
 Instructions to update:
 
@@ -55,5 +59,8 @@ Instructions to update the subset of quack being vendored:
 
 - In the `vendor.sh script`:
   - Update the files to be copied (`FILES`)
-  - Update the `rewrite_imports` methods is there are more patterns required
+  - Update the `rewrite_imports` methods if there are more patterns required
+- Add vendored GEMM feature deltas to `tools/vendoring/quack/flex_gemm_patches`
+- Add external FlexGEMM deltas to
+  `tools/vendoring/quack/external_flex_gemm_patches`
 - Add PyTorch-only vendoring/runtime deltas to `tools/vendoring/quack/patches`

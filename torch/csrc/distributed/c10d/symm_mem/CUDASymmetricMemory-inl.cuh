@@ -63,7 +63,7 @@ __device__ __forceinline__ size_t global_timer_ns() {
   return clock64() / MI300_FREQ_GHZ;
 #else
   size_t val;
-  asm volatile("mov.u64 %0, %globaltimer;" : "=l"(val) : : "memory");
+  asm volatile("mov.u64 %0, %%globaltimer;" : "=l"(val) : : "memory");
   return val;
 #endif
 }

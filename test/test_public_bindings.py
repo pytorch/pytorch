@@ -369,6 +369,7 @@ class TestPublicBindings(TestCase):
             "torch._inductor.kernel.vendored_templates.cutedsl.dense_blockscaled_gemm_persistent",  # depends on cutlass
             "torch._inductor.kernel.vendored_templates.cutedsl.wrappers",  # depends on cutlass_api
             "torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_blockscaled_gemm_kernel",  # depends on cutlass_api
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_gfx950",  # depends on flydsl
             "torch._inductor.runtime.triton_helpers",
             "torch.ao.pruning._experimental.data_sparsifier.lightning.callbacks.data_sparsity",
             "torch.backends._coreml.preprocess",
@@ -428,9 +429,13 @@ class TestPublicBindings(TestCase):
                 "torch._vendor.quack",
                 "torch.profiler._cupti.",
             )
+            dsl_names = ("triton", "flydsl")
             if (
                 mod in private_allowlist
-                or (mod.startswith("torch._native.ops.") and "triton" in mod)
+                or (
+                    mod.startswith("torch._native.ops.")
+                    and any(dsl in mod for dsl in dsl_names)
+                )
                 or mod.startswith(cuda_dep_prefixes)
             ):
                 if self._is_mod_public(mod):
