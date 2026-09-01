@@ -1957,7 +1957,8 @@ inline T IValue::to() && {
 
 template <typename T>
 inline typename c10::detail::ivalue_to_const_ref_overload_return<T>::type IValue::to() const& {
-  using return_type = c10::detail::ivalue_to_const_ref_overload_return<T>::type;
+  using return_type =
+      typename c10::detail::ivalue_to_const_ref_overload_return<T>::type;
 #define DEFINE_BRANCH(type, converter)                                         \
   if constexpr (std::is_same_v<T, type>) {                                     \
     return static_cast<return_type>(this->converter());                        \
@@ -2328,9 +2329,10 @@ IValue::IValue(c10::intrusive_ptr<T> custom_class) : tag(Tag::Object) {
     try {
       return c10::getCustomClassType<c10::intrusive_ptr<T>>();
     } catch (const c10::Error&) {
-      throw c10::Error(
-          "Trying to instantiate a class that isn't a registered custom class: " +
-          std::string(c10::util::get_fully_qualified_type_name<T>()));
+      TORCH_CHECK(
+          false,
+          "Trying to instantiate a class that isn't a registered custom class: ",
+          c10::util::get_fully_qualified_type_name<T>());
     }
   }();
   auto ivalue_obj = c10::ivalue::Object::create(std::move(classType), /* numSlots */1);

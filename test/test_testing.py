@@ -685,6 +685,9 @@ class TestPeriodicDecorator(TestCase):
         self.assertEqual(result.failures, [])
         self.assertEqual(result.errors, [])
 
+    @unittest.skipIf(
+        IS_FBCODE, "run_test.py periodic filtering is only exercised by OSS CI"
+    )
     @skipIfTorchDynamo("subprocess test does not need Dynamo coverage")
     def test_periodic_config_selects_only_periodic_tests(self):
         source = """\

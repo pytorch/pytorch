@@ -576,7 +576,6 @@
   - atalman
   - blaine-rister
   - bobrenjc93
-  - BoyuanFeng
   - choijon5
   - ColinPeppler
   - d4l3k
@@ -627,6 +626,7 @@
   - ydwu4
   - yushangdi
   - zpcore
+  - zoranzhao
   mandatory_checks_name:
   - EasyCLA
   - Lint
