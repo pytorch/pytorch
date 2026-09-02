@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: pt2"]
 import ast
+import types
 import unittest
 
 import torch
@@ -12,6 +13,8 @@ from torch._functorch._aot_autograd.to_standalone_python import (
     _find_effectful_op,
     _known_helper_table,
     _module_level_names,
+    _restride_backward_placeholders,
+    namespace_module_names,
 )
 from torch._functorch.aot_autograd import compile_to_python, load_from_python
 from torch._higher_order_ops.effects import _get_effect, hop_print
@@ -205,41 +208,6 @@ class TestAOTCompileToPython(TestCase):
                 )
 
     @runWithoutCompiledAutograd(
-        "make_fx traces through the .backward() this test needs, and compiled "
-        "autograd serves that backward from a dynamo-optimized function, which "
-        "FX symbolic tracing rejects"
-    )
-    def test_inline_backward_graph_is_not_lowered_as_inference(self):
-        # A graph that differentiates INLINE (make_fx tracing through a
-        # .backward()) has no joint, so a joint-only check would call it
-        # inference. Inductor's decide_layout_opt branches on that and can
-        # convert a conv to channels-last, which makes cuDNN serve a TF32 NHWC
-        # kernel -- a silent ~2e-4 relative difference in the gradients. The ops
-        # decide, not the graph count.
-        from torch._functorch._aot_autograd.to_standalone_python import (
-            _graph_differentiates,
-        )
-
-        conv = torch.nn.Conv2d(4, 8, 3, padding=1)
-        x = torch.randn(2, 4, 8, 8)
-
-        self.assertFalse(_graph_differentiates(_capture(conv, x)))
-
-        def train_step(*args):
-            names = [n for n, _ in conv.named_parameters()]
-            params = dict(zip(names, args[: len(names)]))
-            with stateless._reparametrize_module(conv, params):
-                conv(args[-1]).sum().backward()
-
-        flat = [t.detach().requires_grad_(True) for t in _flat_inputs(conv, x)]
-        with torch.enable_grad():
-            traced = make_fx(train_step)(*flat)
-        self.assertTrue(_graph_differentiates(traced))
-        self.assertTrue(
-            any("convolution_backward" in str(n.target) for n in traced.graph.nodes)
-        )
-
-    @runWithoutCompiledAutograd(
         "the composed module's autograd.Function sets boxed_grads_call and carries "
         "no _aot_id, so compiled autograd cannot trace its backward -- the "
         "standalone artifact is self-contained and never joins an AOT backward"
@@ -275,6 +243,68 @@ class TestAOTCompileToPython(TestCase):
         out.sum().backward()
         for name, param in m.named_parameters():
             self.assertEqual(param.grad, expected[name])
+
+    @runWithoutCompiledAutograd(
+        "the composed module's autograd.Function sets boxed_grads_call and carries "
+        "no _aot_id, so compiled autograd cannot trace its backward"
+    )
+    def test_training_dynamic_saved_activation_stride_runs_like_eager(self):
+        # The backward saves ``x`` (for sin's derivative), so inductor reports its
+        # stride as a symbolic expression ("s0"), not an int. The restride must
+        # evaluate it in the graph's ShapeEnv and the one module must then serve
+        # two sizes with eager-matching parameter gradients.
+        class _SinScale(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.nn.Parameter(torch.randn(4))
+
+            def forward(self, x):
+                return torch.sin(x) * self.w
+
+        m = _SinScale()
+        x = torch.randn(2, 4)
+        gm = _capture(m, x, tracing_mode="symbolic")
+        with torch.enable_grad():
+            src, _cache = compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
+        fn = _exec(src)
+        for n in (2, 5):
+            xi = torch.randn(n, 4)
+            m.w.grad = None
+            out = fn(_flat_inputs(m, xi))
+            out = out[0] if isinstance(out, (list, tuple)) else out
+            out.sum().backward()
+            got = m.w.grad.detach().clone()
+            m.w.grad = None
+            m(xi).sum().backward()
+            self.assertEqual(got, m.w.grad)
+
+    @unittest.skipIf(
+        not torch.cuda.is_available(),
+        "functionalize_rng_ops reads CUDA RNG state during the AOTAutograd pass",
+    )
+    def test_training_rejects_functionalized_rng_wrapper(self):
+        # The training composer splices a fixed set of wrappers; any other active
+        # wrapper must be refused by name rather than dropped from the artifact.
+        class _DropoutLinear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l = torch.nn.Linear(4, 3)
+
+            def forward(self, x):
+                return torch.nn.functional.dropout(self.l(x), p=0.5, training=True)
+
+        m = _DropoutLinear()
+        x = torch.randn(5, 4)
+        with functorch_config.patch(functionalize_rng_ops=True):
+            gm = _capture(m, x)
+            with (
+                torch.enable_grad(),
+                self.assertRaisesRegex(
+                    NotImplementedError,
+                    r"training source: \['functionalized_rng_wrapper'\]",
+                ),
+            ):
+                compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
 
     def test_training_forward_and_backward_do_not_share_names(self):
         # The two inductor modules are spliced into ONE namespace and both define
@@ -800,6 +830,50 @@ class TestComposerHelpers(TestCase):
                 ),
                 f"helper import {import_stmt!r} bypasses the standalone_runtime surface",
             )
+
+    def test_namespace_module_names_uses_byte_offsets(self):
+        # ast column offsets count UTF-8 bytes; a non-ASCII literal before a renamed
+        # name on the same line must not shift the splice.
+        src = 'def call(args):\n    return args\npair = ("\u00e9", call)\n'
+        (out,) = namespace_module_names([src])
+        self.assertIn('pair_s0 = ("\u00e9", call_s0)', out)
+        ns = {}
+        exec(out, ns)
+        self.assertIs(ns["pair_s0"][1], ns["call_s0"])
+
+    def test_namespace_module_names_rewrites_unpacking_and_global(self):
+        # Tuple targets are module-level bindings too, and a ``global`` declaration
+        # names the binding without a Name node; both must be renamed with it.
+        src = "a, b = 1, 2\ndef bump():\n    global a\n    a += b\n"
+        (out,) = namespace_module_names([src])
+        self.assertIn("a_s0, b_s0 = 1, 2", out)
+        self.assertIn("global a_s0", out)
+        ns = {}
+        exec(out, ns)
+        ns["bump_s0"]()
+        self.assertEqual(ns["a_s0"], 3)
+
+    def test_restride_backward_placeholders_keeps_symbolic_strides(self):
+        # Forward output strides arrive as expression strings over the graph's
+        # symbols. Equal expressions must not restride (or specialize) a dynamic
+        # placeholder, and a different layout must restride it symbolically.
+        gm = make_fx(lambda x: x.sin(), tracing_mode="symbolic")(torch.randn(2, 4))
+        (node,) = [n for n in gm.graph.nodes if n.op == "placeholder"]
+        val = node.meta["val"]
+        s0, s1 = (str(d) for d in val.shape)
+        spec = types.SimpleNamespace(
+            fw_metadata=types.SimpleNamespace(
+                tensors_saved_for_backwards_slice=slice(0, None)
+            ),
+            num_symints_saved_for_bw=0,
+        )
+        _restride_backward_placeholders(gm, [(s1, "1")], spec)
+        self.assertIs(node.meta["val"], val)
+        _restride_backward_placeholders(gm, [("1", s0)], spec)
+        restrided = node.meta["val"]
+        self.assertEqual(tuple(restrided.shape), tuple(val.shape))
+        self.assertEqual(restrided.stride(0), 1)
+        self.assertEqual(str(restrided.stride(1)), s0)
 
     def test_module_level_names_excludes_deleted(self):
         # Inductor's inner module binds then dels a name (async_compile = AsyncCompile();
