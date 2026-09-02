@@ -1697,6 +1697,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         produced (callers rely on the visitation order, e.g. for graph output
         ordering).
         """
+        from .hashable import HashableTracker
+
         if cache is None:
             cache = {}
 
@@ -1730,8 +1732,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             elif istype(cur, (dict, collections.OrderedDict)):
                 children = list(cur.values())
                 if visit_keys:
-                    from .hashable import HashableTracker
-
                     children.extend(k.vt for k in cur if isinstance(k, HashableTracker))
             else:
                 continue

@@ -1424,7 +1424,13 @@ class OutputGraph(OutputGraphCommon):
         escaped: OrderedSet[int] = OrderedSet()
 
         def _check(var: VariableTracker) -> None:
-            if isinstance(var, EventVariable) and id(var.value) in pending_ids:
+            # type.__instancecheck__ avoids realizing lazy
+            # VariableTrackers, which would install guards inside
+            # compile_subgraph.
+            if (
+                type.__instancecheck__(EventVariable, var)
+                and id(var.value) in pending_ids
+            ):
                 escaped.add(id(var.value))
 
         roots: list[Any] = [all_stack_values]
@@ -1441,7 +1447,7 @@ class OutputGraph(OutputGraphCommon):
         for gen in self.local_generators:
             roots.extend([gen.inline_tracer.stack, gen.inline_tracer.symbolic_locals])
         # visit_keys=True so events stored as set elements or dict
-        # keys (wrapped in HashableTracker) are reached — the default
+        # keys (wrapped in HashableTracker) are reached; the default
         # visit walks dicts via .values() only.
         VariableTracker.visit(
             _check, roots, side_effects=self.side_effects, visit_keys=True
