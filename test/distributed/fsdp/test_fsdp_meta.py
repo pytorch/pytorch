@@ -400,7 +400,7 @@ class TestFSDPWithMetaDevice(FSDPTestContinuous):
 
     @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
-    def test_bad_arg_meta(self):
+    def test_bad_arg_meta(self, device):
         def meta_module_fn():
             return NestedModel(device="meta")
 
