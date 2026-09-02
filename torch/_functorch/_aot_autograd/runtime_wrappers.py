@@ -8,6 +8,7 @@ This module defines runtime wrappers, which, based on previous analysis attempts
 
 import collections
 import contextlib
+import threading
 import copy
 import functools
 import itertools
@@ -3629,6 +3630,32 @@ class _AOTDispatchAutogradFunctionFactory:
 
 # This is wrapped in a class just for namespacing purposes
 # No need to make it into an actual CompilerWrapper because it doesn't fit the abstract as cleanly
+_compile_spec_sinks = threading.local()
+
+
+@contextlib.contextmanager
+def capture_autograd_compile_specs() -> Generator[
+    list[AOTDispatchAutogradCompileSpec], None, None
+]:
+    """Collect every AOTDispatchAutogradCompileSpec built on this thread while active.
+
+    Thread-local, nestable, and the only sanctioned way to observe the spec from
+    outside AOTAutograd; to_standalone_python composes a training graph from it.
+    """
+    sinks: list[list[AOTDispatchAutogradCompileSpec]] | None = getattr(
+        _compile_spec_sinks, "sinks", None
+    )
+    if sinks is None:
+        sinks = []
+        _compile_spec_sinks.sinks = sinks
+    out: list[AOTDispatchAutogradCompileSpec] = []
+    sinks.append(out)
+    try:
+        yield out
+    finally:
+        sinks.remove(out)
+
+
 class AOTDispatchAutograd:
     @staticmethod
     def _raise_tangent_metadata_error(
@@ -3812,6 +3839,8 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
 
     @staticmethod
     def post_compile(spec: AOTDispatchAutogradCompileSpec) -> Callable[..., Any]:
+        for sink in getattr(_compile_spec_sinks, "sinks", ()):
+            sink.append(spec)
         compiled_function_cls = _AOTDispatchAutogradFunctionFactory(spec).build()
         return RuntimeWrapper(
             indices_of_inps_to_detach=spec.indices_of_inps_to_detach,

@@ -79,16 +79,14 @@ C10_DIAGNOSTIC_POP()
 
 #endif
 
-// Returns borrowed reference
-PyCodeObject* CacheEntry_get_code(CacheEntry* e);
-
-// Returns borrowed string representation of CompileContext
-const char* CacheEntry_get_trace_annotation(CacheEntry* e);
-
 // Returns a borrowed reference to CacheEntry as a PyObject
 // Warning: lifetime is controlled by C++
 PyObject* CacheEntry_to_obj(CacheEntry* e);
 
 #ifdef __cplusplus
 } // extern "C"
+
+// Borrowed on success, nullptr when absent, without raising. `name` must be an
+// interned (or otherwise immortal) str.
+PyObject* lookup_optional_attr(py::handle obj, PyObject* name);
 #endif
