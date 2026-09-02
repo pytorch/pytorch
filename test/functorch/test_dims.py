@@ -638,7 +638,7 @@ class TestMin(TestCase):
 skip_functorch_only = ["test_time_mm_fuse"]
 
 
-class TestMinCudaOnly(TestCase):
+class TestMinCudaOnly(TestMin):
     hw_classification = HardwareClassification.CUDA
 
     def setUp(self):
@@ -677,128 +677,6 @@ class TestMinCudaOnly(TestCase):
         #         profiler.step()
         print(name, elapsed / r)
         return elapsed / r
-
-    def attn(
-        self,
-        batch_size=1,
-        sequence_length=4,
-        hidden_size=6,
-        num_attention_heads=3,
-        linear=Linear,
-        device=None,
-        time=False,
-    ):
-        def maybe_to(x):
-            return x if device is None else x.to(device)
-
-        attention_probs_dropout_prob = 0.0
-        A = maybe_to(
-            BertSelfAttentionA(
-                hidden_size,
-                num_attention_heads,
-                attention_probs_dropout_prob,
-                linear=linear,
-            )
-        )
-        B = maybe_to(
-            BertSelfAttentionB(
-                hidden_size, num_attention_heads, attention_probs_dropout_prob
-            )
-        )
-
-        A.load_state_dict(B.state_dict())
-        hidden_state = maybe_to(torch.rand(batch_size, sequence_length, hidden_size))
-        b_out = B(hidden_state)
-        a_out = A(hidden_state)
-        torch.testing.assert_close(
-            a_out, b_out
-        )  # why does a simple matmul not do the right thing?
-
-        if time:
-            self.gpu_time(lambda: B(hidden_state), "positional", r=3)
-            self.gpu_time(lambda: A(hidden_state), "first_class", r=3)
-
-        for approach in ("relative_key", "relative_key_query"):
-            A = maybe_to(
-                BertSelfAttentionA(
-                    hidden_size,
-                    num_attention_heads,
-                    attention_probs_dropout_prob,
-                    approach,
-                    sequence_length,
-                    linear=linear,
-                )
-            )
-            B = maybe_to(
-                BertSelfAttentionB(
-                    hidden_size,
-                    num_attention_heads,
-                    attention_probs_dropout_prob,
-                    approach,
-                    sequence_length,
-                )
-            )
-            A.load_state_dict(B.state_dict())
-
-            hidden_state = maybe_to(
-                torch.rand(batch_size, sequence_length, hidden_size)
-            )
-            b_out = B(hidden_state)
-            a_out = A(hidden_state)
-            torch.testing.assert_close(a_out, b_out)
-
-            if time:
-                self.gpu_time(lambda: B(hidden_state), "positional", r=3)
-                self.gpu_time(lambda: A(hidden_state), "first_class", r=3)
-
-        A = maybe_to(
-            BertSelfAttentionA(
-                hidden_size,
-                num_attention_heads,
-                attention_probs_dropout_prob,
-                None,
-                None,
-                linear=linear,
-            )
-        )
-        B = maybe_to(
-            BertSelfAttentionB(
-                hidden_size,
-                num_attention_heads,
-                attention_probs_dropout_prob,
-                None,
-                None,
-            )
-        )
-        A.load_state_dict(B.state_dict())
-
-        hidden_state = maybe_to(torch.rand(batch_size, sequence_length, hidden_size))
-        past_key_value = (
-            maybe_to(
-                torch.rand(
-                    batch_size,
-                    num_attention_heads,
-                    sequence_length,
-                    hidden_size // num_attention_heads,
-                )
-            ),
-            maybe_to(
-                torch.rand(
-                    batch_size,
-                    num_attention_heads,
-                    sequence_length,
-                    hidden_size // num_attention_heads,
-                )
-            ),
-        )
-
-        b_out = B(hidden_state, past_key_value=past_key_value)
-        a_out = A(hidden_state, past_key_value=past_key_value)
-        torch.testing.assert_close(a_out, b_out)
-
-        if time:
-            self.gpu_time(lambda: B(hidden_state), "positional", r=3)
-            self.gpu_time(lambda: A(hidden_state), "first_class", r=3)
 
     def test_attn_cuda(self, device):
         # size from the BERT paper, 90% pretraining of sequence length 128
