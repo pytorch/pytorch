@@ -1186,7 +1186,6 @@ def is_desired_scaling(
 
 
 def get_main_loop_dot_precision(device_type: str) -> str:
-    # Quotes are part of the value: template kwargs render verbatim.
     return '"tf32x3"' if device_type == "cuda" else '"ieee"'
 
 
