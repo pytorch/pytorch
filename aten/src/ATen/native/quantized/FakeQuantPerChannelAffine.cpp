@@ -66,12 +66,19 @@ std::tuple<Tensor, Tensor> fake_quantize_per_channel_affine_cachemask(
       "`quant_min` should be less than or \
         equal to `quant_max`.");
 
-  // Restricted to CPU because these two .item() calls are device-to-host round
-  // trips: on an accelerator they measure 22.4us against 46.4us for the whole
-  // operator, to validate as few as three integers. Accelerators enforce the
-  // same bound in the kernel that already loads every zero_point element -- see
-  // the CUDA_KERNEL_ASSERT_VERBOSE in FakeQuantizeCore.cu's integer branch.
-  if (zero_point.is_cpu() && !at::isFloatingType(zero_point.scalar_type())) {
+  // These two .item() calls are device-to-host round trips: on an accelerator
+  // they measure 22.4us against 46.4us for the whole operator, to validate as
+  // few as three integers. Accelerators enforce the same bound in the kernel
+  // that already loads every zero_point element -- see the
+  // CUDA_KERNEL_ASSERT_VERBOSE in FakeQuantizeCore.cu's integer branch -- but
+  // gpu_kernel returns early on an empty iterator, so that assert cannot fire
+  // for an empty input and the host check is still required there. Neither
+  // remaining case pays the sync on the hot path: on CPU .item() is free, and
+  // an empty input does no work at all.
+  const bool zero_point_needs_host_check =
+      !at::isFloatingType(zero_point.scalar_type()) &&
+      (zero_point.is_cpu() || self.numel() == 0);
+  if (zero_point_needs_host_check) {
       TORCH_CHECK(
           at::min(zero_point).item().toInt() >= quant_min &&
               at::max(zero_point).item().toInt() <= quant_max,
