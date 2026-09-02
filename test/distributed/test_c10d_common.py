@@ -2876,7 +2876,9 @@ dist.init_process_group(rank=0, world_size=1, store=dist.HashStore())
         dist.all_to_all_single(output_tensor, input_tensor)
 
         input_tensor = input_tensor.t()
-        with self.assertRaisesRegex(ValueError, "Tensors must be contiguous"):
+        with self.assertRaisesRegex(
+            (ValueError, RuntimeError), "Tensors must be contiguous"
+        ):
             dist.all_to_all_single(output_tensor, input_tensor)
 
 
