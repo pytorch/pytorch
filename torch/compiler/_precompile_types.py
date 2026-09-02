@@ -73,6 +73,16 @@ class PrecompileSummary:
     policy_dropped_guards: tuple[tuple[str, str], ...] = ()
     capture_errors: tuple[str, ...] = ()
 
+    # (backend id, reason) for each compiled subgraph that could not be
+    # composed to readable source and so ships only in the pickled bundle. The
+    # reason is the exception class and message from the compose attempt. A
+    # subgraph is meant to render -- it is Inductor output, which has a source
+    # form -- so an entry here is a readable artifact that silently became an
+    # opaque one; empty for backend="eager", which has nothing to render.
+    # Populated by rendering, so it is filled in on the summary written into
+    # an artifact header and empty on a summary() taken before any render.
+    unrendered_backends: tuple[tuple[str, str], ...] = ()
+
     @property
     def complete(self) -> bool:
         """Whether the capture covers everything it exercised.
@@ -126,9 +136,12 @@ class PrecompileSummary:
             base += f", {len(self.bypassed)} BYPASSED: {list(self.bypassed)}"
         if self.capture_errors:
             base += f", {len(self.capture_errors)} CAPTURE ERROR(S)"
+        if self.unrendered_backends:
+            base += f", {len(self.unrendered_backends)} UNRENDERED subgraph(s)"
         return base
 
 
+ExampleInput.__module__ = "torch.compiler"
 GuardFact.__module__ = "torch.compiler"
 FrameInvariants.__module__ = "torch.compiler"
 PrecompileSummary.__module__ = "torch.compiler"

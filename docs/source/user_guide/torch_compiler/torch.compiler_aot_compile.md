@@ -128,6 +128,11 @@ original function but runs the pre-compiled code. It also exposes:
 
 - `save_compiled_function(path)` -- Serialize the compiled artifact to disk.
 - `disable_guard_check()` -- Disable runtime guard validation (advanced use).
+  When several compiled results are loaded into one `AOTCompiledModel`, an
+  opted-out result is only served when it is the sole candidate; if the model
+  holds more than one result and none of their guards match a call, the call
+  raises `RuntimeError` with one line per rejected candidate rather than
+  falling through to the opted-out one.
 
 **Requirements:**
 
