@@ -4602,7 +4602,15 @@ def pickle_guards_state(
 
     try:
         pickler.dump(state)
-    except (AttributeError, TypeError, pickle.PicklingError) as e:
+    except (AttributeError, pickle.PicklingError) as e:
+        raise torch._dynamo.exc.PackageError(str(e)) from e
+    except TypeError as e:
+        # pickle raises TypeError("cannot pickle '...' object") for a genuinely
+        # unserializable value (thread locks, generators, ...). A TypeError of
+        # any other shape is a bug in a reducer, not an unserializable guard,
+        # so let it surface instead of masking it as a serialization failure.
+        if "cannot pickle" not in str(e):
+            raise
         raise torch._dynamo.exc.PackageError(str(e)) from e
     return buf.getvalue()
 
