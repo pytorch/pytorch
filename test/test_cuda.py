@@ -3464,12 +3464,109 @@ torch.cuda.synchronize()
         self.assertEqual(buf0, ref0)
         self.assertEqual(buf1, ref1)
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/177001")
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM or TEST_CUDAMALLOCASYNC,
+        "capture-stream pool routing is specific to the native CUDA allocator",
+    )
+    def test_graph_rng_capture_stream_pool_routing(self):
+        for pool in (None, torch.cuda.MemPool()):
+            with self.subTest(pool="default" if pool is None else "explicit"):
+                generator = torch.Generator(device="cuda")
+                stream = torch.cuda.Stream()
+                graph = torch.cuda.CUDAGraph()
+                pool_context = (
+                    contextlib.nullcontext()
+                    if pool is None
+                    else torch.cuda.use_mem_pool(pool)
+                )
+
+                with torch.cuda.stream(stream):
+                    graph.capture_begin()
+                    with pool_context:
+                        torch.rand(1, device="cuda", generator=generator)
+                        seed, offset, _ = generator.philox_state(0)
+                    graph.capture_end()
+
+                # Only the graph pool is skipped; an explicit MemPool still wins.
+                expected_pool = (0, 0) if pool is None else pool.id
+                state_addresses = {
+                    seed.untyped_storage().data_ptr(),
+                    offset.untyped_storage().data_ptr(),
+                }
+                state_placements = {
+                    block["address"]: (
+                        segment["segment_pool_id"],
+                        segment["stream"],
+                    )
+                    for segment in torch.cuda.memory_snapshot(include_traces=False)
+                    for block in segment["blocks"]
+                    if block["address"] in state_addresses
+                }
+                self.assertEqual(
+                    state_placements,
+                    dict.fromkeys(state_addresses, (expected_pool, stream.cuda_stream)),
+                )
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM or TEST_CUDAMALLOCASYNC,
+        "captured-event regression is specific to the native CUDA allocator",
+    )
+    def test_graph_rng_thread_local_capture_with_pending_event(self):
+        test_script = """
+import torch
+
+capture_stream = torch.cuda.Stream()
+pending = torch.empty(1, device="cuda")
+graph = torch.cuda.CUDAGraph()
+
+with torch.cuda.stream(capture_stream):
+    graph.capture_begin(capture_error_mode="thread_local")
+    with torch.cuda.stream(torch.cuda.default_stream()):
+        pending.record_stream(capture_stream)
+        pending.untyped_storage().resize_(0)
+    output = torch.rand(1, device="cuda")
+    graph.capture_end()
+
+graph.replay()
+torch.cuda.synchronize()
+"""
+        subprocess.check_call([sys.executable, "-c", test_script])
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM or TEST_CUDAMALLOCASYNC,
+        "cache-disabled fallback is specific to the native CUDA allocator",
+    )
+    def test_graph_rng_with_caching_disabled(self):
+        stream = torch.cuda.Stream()
+        output = torch.empty(1, device="cuda")
+        graph = torch.cuda.CUDAGraph()
+
+        with torch.cuda.memory.caching_allocator_disabled():
+            with torch.cuda.stream(stream):
+                graph.capture_begin(capture_error_mode="thread_local")
+                output.uniform_()
+                graph.capture_end()
+
+        graph.replay()
+        torch.cuda.synchronize()
+
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
     @unittest.skipIf(
         TEST_WITH_ROCM, "ROCM does not support nvrtc or external cuda graph events"
+    )
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "requires native CUDA allocator block statistics"
     )
     @unittest.skipIf(not SM70OrLater, "SM70+ required for inline ptx")
     def test_graph_rng_replay_record_stream(self):
@@ -3510,13 +3607,17 @@ torch.cuda.synchronize()
         # Reference replay
         flag_cpu[0] = 1
         buf.zero_()
-        g.replay()
+        with torch.cuda.stream(s):
+            g.replay()
         torch.cuda.synchronize()
 
-        # Race: replay with spin held, then delete graph
+        # Race: replay with spin held on a stream distinct from the state
+        # tensors' allocation stream, then delete the graph.
         flag_cpu[0] = 0
         buf.zero_()
-        with torch.cuda.stream(s):
+        replay_stream = torch.cuda.Stream()
+        replay_stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(replay_stream):
             g.replay()  # GPU spinning
 
         g.reset()
@@ -3546,6 +3647,7 @@ torch.cuda.synchronize()
             "RNG state tensors should be freed after sync + empty_cache",
         )
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/177001")
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )

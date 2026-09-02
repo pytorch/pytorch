@@ -82,38 +82,54 @@ Generator createCUDAGenerator(DeviceIndex device_index) {
 
 /**
  * Allocate GPU tensors for this capture state.
- *
- * We allocate on the default stream so that the caching allocator routes
- * these tensors to the default memory pool, not the graph's capture pool.
  */
-void CUDAGeneratorCaptureState::initialize(uint64_t seed) {
+void CUDAGeneratorCaptureState::initialize(
+    uint64_t seed,
+    c10::DeviceIndex device,
+    CaptureId_t capture_id,
+    c10::MempoolId_t graph_pool_id) {
   if (is_initialized()) {
     return;
   }
 
-  auto options = at::TensorOptions().device(at::kCUDA).dtype(at::kLong);
+  auto options = at::TensorOptions()
+                     .device(at::Device(at::kCUDA, device))
+                     .dtype(at::kLong);
   c10::InferenceMode inference_guard(false);
 
-  // Allocate on the default stream so that the caching allocator routes
-  // these tensors to the default memory pool, not the graph's capture pool.
-  // The relaxed capture mode guard is needed because the thread-local capture
-  // mode may be Global (set by cudaStreamBeginCapture), which would block
-  // cudaMalloc even on a non-capturing stream.
-  c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard(
-      cudaStreamCaptureModeRelaxed);
-  c10::cuda::CUDAStreamGuard stream_guard(c10::cuda::getDefaultCUDAStream());
+  auto allocate_state = [&]() {
+    rng_state_seed_extragraph_ = at::empty({1}, options);
+    rng_state_offset_extragraph_ = at::empty({1}, options);
+  };
 
-  rng_state_seed_extragraph_ = at::empty({1}, options);
-  rng_state_offset_extragraph_ = at::empty({1}, options);
+#if !defined(USE_ROCM)
+  if (c10::cuda::CUDACachingAllocator::name() == "native" &&
+      c10::cuda::CUDACachingAllocator::isEnabled()) {
+    auto stream = c10::cuda::getCurrentCUDAStream(device);
+    auto current_capture_id = c10::cuda::captureIdMayInitCtx(stream.stream());
+    TORCH_INTERNAL_ASSERT(
+        current_capture_id.has_value() &&
+            current_capture_id.value() == capture_id,
+        "RNG capture state must be initialized on its capture stream.");
+    c10::cuda::CUDACachingAllocator::withPoolRoutingDisabled(
+        device, graph_pool_id, allocate_state);
+  } else
+#endif
+  {
+    // Other allocator backends retain the established default-stream path.
+    c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard(
+        cudaStreamCaptureModeRelaxed);
+    c10::cuda::CUDAStreamGuard stream_guard(
+        c10::cuda::getDefaultCUDAStream(device));
+    allocate_state();
+    c10::cuda::getDefaultCUDAStream(device).synchronize();
+  }
+
   // Captured graphs bake in these buffers' addresses, and philox_state hands
   // out aliases of them; make the storage non-resizable so nothing can
   // reallocate it.
   rng_state_seed_extragraph_.storage().unsafeGetStorageImpl()->set_resizable(false);
   rng_state_offset_extragraph_.storage().unsafeGetStorageImpl()->set_resizable(false);
-
-  // Synchronize the default stream so that any prior work completes before
-  // a different stream writes to this memory.
-  c10::cuda::getDefaultCUDAStream().synchronize();
 
   offset_intragraph_ = 0;
 }
@@ -137,12 +153,13 @@ uint64_t CUDAGeneratorCaptureState::finalize() {
 /**
  * Note [RNG state tensor lifetime and recordStream]
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- * RNG state tensors (seed and offset) are allocated on the default stream
- * so they land in the default memory pool, not the graph's capture pool.
- * This avoids false positives in the CUDA graph tree memory leak checker.
+ * RNG state tensors (seed and offset) live outside the graph's private pool.
+ * The native allocator places them in the normal pool on the capture stream.
+ * This avoids false positives in the CUDA graph tree memory leak checker
+ * without accessing the default stream during capture.
  *
  * However, during replay these tensors are filled and then read by the
- * graph on the replay stream (which may differ from the default stream).
+ * graph on the replay stream (which may differ from the capture stream).
  * If the graph is deleted while a replay is still in flight, the tensors
  * are freed and the allocator could recycle their memory before the replay
  * finishes reading them — a use-after-free.
@@ -193,7 +210,8 @@ CUDAGeneratorCaptureState* CUDAGeneratorState::get_capture_state(CaptureId_t cap
       "RNG op during graph capture but could not find the CUDAGraph object.");
 
   auto capture_state = make_intrusive<CUDAGeneratorCaptureState>();
-  capture_state->initialize(seed_);
+  capture_state->initialize(
+      seed_, graph->capture_dev_, capture_id, graph->mempool_id_);
 
   graph->register_generator_state(
       c10::intrusive_ptr<CUDAGeneratorState>::reclaim_copy(this));
