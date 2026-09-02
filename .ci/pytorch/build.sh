@@ -109,7 +109,12 @@ if [[ "$BUILD_ENVIRONMENT" == *riscv64*cross* ]]; then
   export USE_CUDA=0
   export USE_MKLDNN=0
 
-  export SLEEF_TARGET_EXEC_USE_QEMU=ON
+  # common.sh exports CC=gcc/CXX=g++ for every *gcc* BUILD_ENVIRONMENT, which
+  # matches this one and clobbers the cross toolchain the image sets. Put it
+  # back, or CMake configures for riscv64 while compiling with the host gcc.
+  export CC="riscv64-linux-gnu-gcc-${GCC_VERSION}"
+  export CXX="riscv64-linux-gnu-g++-${GCC_VERSION}"
+
   # Restrict chown to the workspace and the cross-compile sysroot/venv we
   # actually write into. The workspace path differs by runner: EC2 docker
   # mounts it at /var/lib/jenkins/workspace and GITHUB_WORKSPACE points at
@@ -122,6 +127,44 @@ if [[ "$BUILD_ENVIRONMENT" == *riscv64*cross* ]]; then
       sudo chown -R jenkins "$dir"
     fi
   done
+
+  # third_party/protobuf (v21.12) would build a protoc for the target, which this
+  # x86_64 host cannot execute, and the workflow no longer registers qemu-riscv64
+  # with binfmt_misc -- that went away with the EC2 build path in #189113. Use the
+  # host protoc from the image instead, which is the cross-compilation path
+  # cmake/ProtoBuf.cmake documents and what conda-forge does for the same reason.
+  # Ubuntu noble ships protobuf-compiler at 3.21.12, matching the vendored copy, so
+  # generated sources stay compatible with the libprotobuf built for the target.
+  export CAFFE2_CUSTOM_PROTOC_EXECUTABLE=/usr/bin/protoc
+
+  # SLEEF generates headers with small host tools (mkrename and friends). Its
+  # cross-compilation path imports them from NATIVE_BUILD_DIR; the branch keyed on
+  # SLEEF_TARGET_EXEC_USE_QEMU instead builds them for the target and runs them
+  # under emulation, which is why that variable used to be set here and why it is
+  # not any more (see the protoc note above -- same missing binfmt_misc).
+  #
+  # The option set mirrors aten/src/ATen/CMakeLists.txt so the native build
+  # produces exactly the tools the cross build then imports; SLEEF_BUILD_TESTS and
+  # friends change which host executables exist, so a mismatch here surfaces later
+  # as a missing IMPORTED_LOCATION.
+  SLEEF_NATIVE_BUILD_DIR="${HOME}/sleef-native"
+  cmake -S third_party/sleef -B "${SLEEF_NATIVE_BUILD_DIR}" -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_C_COMPILER=gcc \
+      -DSLEEF_BUILD_SHARED_LIBS=OFF \
+      -DSLEEF_BUILD_DFT=OFF \
+      -DSLEEF_BUILD_GNUABI_LIBS=OFF \
+      -DSLEEF_BUILD_TESTS=OFF \
+      -DSLEEF_BUILD_SCALAR_LIB=OFF \
+      -DSLEEF_DISABLE_OPENMP=ON
+  cmake --build "${SLEEF_NATIVE_BUILD_DIR}"
+
+  # NATIVE_BUILD_DIR is a sleef-internal name, so it is passed as a CMake define
+  # rather than added to the environment forwarding in cmake/EnvVarForwarding.cmake.
+  # Append rather than assign: scikit-build-core reads SKBUILD_CMAKE_DEFINE as a
+  # ';'-separated list, so overwriting it would silently drop anything an outer
+  # caller had set.
+  export SKBUILD_CMAKE_DEFINE="${SKBUILD_CMAKE_DEFINE:+${SKBUILD_CMAKE_DEFINE};}NATIVE_BUILD_DIR=${SLEEF_NATIVE_BUILD_DIR}"
 
 elif [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
   export USE_CUDA=0
@@ -282,6 +325,16 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
     python -m build --wheel --no-isolation
   fi
   pip_install_whl "$(echo dist/*.whl)"
+
+  # Regression test for gh-189388: a cross build must ship a SOABI-tagged _C.
+  # This job builds a wheel and never imports it -- the smoke test below is gated
+  # on *full-debug* -- so a wrongly named extension module otherwise passes
+  # silently. The check reads the wheel's own tags rather than this interpreter's
+  # sysconfig, so it does not depend on which python is active here. Pass the
+  # glob unquoted: dist/ may hold more than one wheel.
+  if [[ "$BUILD_ENVIRONMENT" == *riscv64*cross* ]]; then
+    python .ci/pytorch/check_wheel_soabi.py dist/*.whl
+  fi
 
   # Smoke-test tools/build_with_debinfo.py against the real build tree: it must
   # still emit a debug-rebuild plan with a -g compile and the libtorch_python
