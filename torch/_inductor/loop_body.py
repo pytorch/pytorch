@@ -33,6 +33,8 @@ from .virtualized import ops, V
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from torch.utils._ordered_set import OrderedSet
+
 
 T = TypeVar("T")
 
@@ -100,13 +102,14 @@ class InterpreterShim(torch.fx.Interpreter):
     def _dummy_gm():
         return torch.fx.symbolic_trace(identity)
 
-    def __init__(self, graph, submodules):
+    def __init__(self, graph, submodules, loop_body: LoopBody | None = None):
         # call super() with a placeholder to avoid constructing a
         # GraphModule which is very expensive (it does codegen).
         super().__init__(self._dummy_gm(), garbage_collect_values=False)
         self.module = self  # type: ignore[assignment]
         self.graph = graph
         self.submodules = submodules
+        self.loop_body = loop_body
         self.extra_traceback = False
         self.fetch_attr = submodules.__getitem__  # type: ignore[method-assign]
         self.current_node = None
@@ -162,6 +165,11 @@ class LoopBody:
     root_block: LoopBodyBlock
     memory_usage: dict[MemoryUsageType, list[MemoryEntry]]
     op_counts: collections.Counter[str]
+    # masked_subblock / masked_store node -> iteration vars whose predicate
+    # term implies the var is in range (see annotate_range_implied_vars)
+    range_implied_vars: dict[torch.fx.Node, OrderedSet[sympy.Symbol]]
+    # iteration var -> caller's index expression, set for the duration of a call
+    var_substitution: dict[sympy.Symbol, sympy.Expr] | None
 
     # defined only temporarily
     indexing_exprs_name: dict[sympy.Expr, str]
@@ -199,7 +207,9 @@ class LoopBody:
         else:
             self._init_with_tracing(fn, args)
 
+        self.range_implied_vars = {}
         self.indexing = None
+        self.var_substitution = None
 
     def get_original_num_rdims(self) -> int:
         if not self.has_partial_accumulate:
@@ -664,7 +674,9 @@ class LoopBody:
             raise AssertionError("indexing must be set before get_index")
         return self.indexing[name]
 
-    def indexing_from_args(self, indices, allow_same_symbol_in_index=False):
+    def var_substitution_from_args(
+        self, indices, allow_same_symbol_in_index=False
+    ) -> dict[sympy.Symbol, sympy.Expr]:
         index = [*itertools.chain.from_iterable(indices)]
         if not len(index) == len(self.var_ranges):
             raise AssertionError(f"Index length mismatch: {index} vs {self.var_ranges}")
@@ -674,17 +686,28 @@ class LoopBody:
             raise AssertionError(
                 f"Same symbol found in index: {self.var_ranges=}, {indices=}"
             )
+        return dict(zip(self.var_ranges.keys(), index))
 
-        replacements = dict(zip(self.var_ranges.keys(), index))
+    def indexing_from_args(self, indices, allow_same_symbol_in_index=False):
+        replacements = self.var_substitution_from_args(
+            indices, allow_same_symbol_in_index
+        )
         return {
             name: sympy_subs(expr, replacements)
             for name, expr in self.indexing_exprs.items()
         }
 
     def __call__(self, *indices, allow_same_symbol_in_index=False):
-        self.indexing = self.indexing_from_args(indices, allow_same_symbol_in_index)
+        self.var_substitution = self.var_substitution_from_args(
+            indices, allow_same_symbol_in_index
+        )
+        self.indexing = {
+            name: sympy_subs(expr, self.var_substitution)
+            for name, expr in self.indexing_exprs.items()
+        }
         result = self.root_block()
         self.indexing = None
+        self.var_substitution = None
         return result
 
     def bind_set_indirect_shim(self, var, size, check, wrap_neg):
@@ -786,10 +809,8 @@ class LoopBodyBlock:
         return self
 
     def __call__(self):
-        graph = self.graph
-        submodules = self.body.submodules
-
-        return InterpreterShim(graph, submodules).run(V.get_ops_handler())
+        interpreter = InterpreterShim(self.graph, self.body.submodules, self.body)
+        return interpreter.run(V.get_ops_handler())
 
     def debug_str(self, name="block"):
         code = torch.fx.GraphModule(self.body.submodules, self.graph).code
