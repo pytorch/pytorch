@@ -772,9 +772,17 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
         params.v_batch_stride = v_padded.stride(0);
     }
     params.page_block_size = page_block_size;
+
+    // The combine kernel writes the output at bidb * o_batch_stride, which is 0 on
+    // the varlen path. Such a stride only exists when the query lengths are equal.
+    const bool uniform_seqlen_q = total_q == batch_size * max_seqlen_q;
+    if (cu_seqlens_q_d != nullptr && uniform_seqlen_q) {
+        params.o_batch_stride = params.o_row_stride * max_seqlen_q;
+    }
+
     // Keep references to these tensors to extend their lifetime
     at::Tensor softmax_lse_accum, out_accum;
-    if (paged_KV || seqlenq_ngroups_swapped) {
+    if ((paged_KV || seqlenq_ngroups_swapped) && (cu_seqlens_q_d == nullptr || uniform_seqlen_q)) {
         std::tie(softmax_lse_accum, out_accum) = set_params_splitkv(params, batch_size, num_heads,
                            head_size, max_seqlen_k, max_seqlen_q,
                            head_size_rounded, p_dropout, num_splits, dprops, opts);

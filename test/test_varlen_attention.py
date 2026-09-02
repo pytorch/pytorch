@@ -1724,6 +1724,89 @@ class TestVarlenAttention(NNTestCase):
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm does not support block_table")
+    @parametrize("num_splits", [None, 1, 2])
+    @parametrize("q_lens", [[1, 1, 1, 1], [4, 4, 4, 4], [1, 3, 2, 1]])
+    @torch.no_grad()
+    def test_block_table_kv_cache_split_kv(self, device, num_splits, q_lens):
+        # Paged varlen with more than one sequence, over a KV long enough for
+        # set_params_splitkv to actually split. test_block_table_kv_cache caps
+        # actual_kv_lens at 128, so with a 256-element page it never gets past
+        # one split and leaves the combine kernel unreached.
+        # num_splits=2 is spelled out so the split does not depend on the
+        # heuristic staying the way it is today. FA2 only: mha_varlen_fwd is
+        # where o_batch_stride is set.
+        torch.manual_seed(42)
+
+        dtype = torch.bfloat16
+        page_size = 256  # FA2 paged KV requires page_size divisible by 256
+        num_heads = 8
+        head_dim = 64
+        actual_kv_lens = [900, 1000, 700, 1024]
+        batch_size = len(actual_kv_lens)
+
+        max_pages_per_seq = (max(actual_kv_lens) + page_size - 1) // page_size
+        cache_size = max_pages_per_seq * page_size
+        total_pages = batch_size * max_pages_per_seq
+
+        q_seqs = [
+            torch.randn(seqlen, num_heads, head_dim, device=device, dtype=dtype)
+            for seqlen in q_lens
+        ]
+        q_packed, cu_seq_q, max_q = pack_sequences(q_seqs, device)
+
+        k_pages = torch.randn(
+            total_pages, page_size, num_heads, head_dim, device=device, dtype=dtype
+        )
+        v_pages = torch.randn(
+            total_pages, page_size, num_heads, head_dim, device=device, dtype=dtype
+        )
+        block_table = torch.randperm(
+            total_pages, device=device, dtype=torch.int32
+        ).view(batch_size, max_pages_per_seq)
+        seqused_k = torch.tensor(actual_kv_lens, device=device, dtype=torch.int32)
+
+        k_gathered = gather_paged_cache(k_pages, block_table)
+        v_gathered = gather_paged_cache(v_pages, block_table)
+        k_packed, cu_seq_k_real, max_k_real = pack_sequences(
+            [k_gathered[i, : actual_kv_lens[i]] for i in range(batch_size)], device
+        )
+        v_packed = torch.cat(
+            [v_gathered[i, : actual_kv_lens[i]] for i in range(batch_size)], dim=0
+        )
+
+        # Unpaged, so this reference never splits whatever num_splits says.
+        expected = varlen_attn(
+            q_packed, k_packed, v_packed, cu_seq_q, cu_seq_k_real, max_q, max_k_real
+        )
+
+        cu_seq_k = torch.arange(
+            0,
+            (batch_size + 1) * cache_size,
+            cache_size,
+            device=device,
+            dtype=torch.int32,
+        )
+        paged_args = (q_packed, k_pages, v_pages, cu_seq_q, cu_seq_k, max_q, cache_size)
+        paged_kwargs = dict(
+            seqused_k=seqused_k, block_table=block_table, num_splits=num_splits
+        )
+
+        # Pre-filled and checked first: the failure is rows going unwritten
+        # rather than rows being written wrong, and a leftover NaN says so
+        # directly, where a closeness failure would only imply it.
+        out_buf = torch.full_like(q_packed, float("nan"))
+        varlen_attn_out(out_buf, *paged_args, **paged_kwargs)
+        self.assertFalse(
+            out_buf.isnan().any(), "split-KV left part of the output unwritten"
+        )
+
+        # Splitting reassociates the accumulation, so this cannot be exact.
+        self.assertEqual(out_buf.float(), expected.float(), atol=2e-2, rtol=2e-2)
+
+        output = varlen_attn(*paged_args, **paged_kwargs)
+        self.assertEqual(output.float(), expected.float(), atol=2e-2, rtol=2e-2)
+
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm does not support block_table")
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("page_size", [32, 64, 128, 256])
     @parametrize("compile", [False, True])
