@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import dataclasses
 import functools
 import inspect
 import json
@@ -3779,19 +3780,6 @@ class TestMaxAutotune(TestCase):
         self.assertNotIn("acc.to(tl.bfloat16)", code[0])
 
 
-def _pinned_config_heuristic_class(base_cls):
-    """Subclass of ``base_cls`` whose config list is set per iteration.
-
-    The heuristic base uses a singleton metaclass keyed on the class object, so
-    this is built once per test and its single instance is re-pinned each time.
-    """
-
-    class PinnedConfigHeuristic(base_cls):
-        pass
-
-    return PinnedConfigHeuristic
-
-
 @instantiate_parametrized_tests
 class TestTemplateConfigPruning(TestCase):
     """Test class for pruning logic in GEMM autotuning."""
@@ -3809,15 +3797,26 @@ class TestTemplateConfigPruning(TestCase):
             )
             return heuristic_cls() if heuristic_cls is not None else None
 
-        cls.tma_template_uid = (
-            blackwell_ws_persistent_device_tma_mm_template.uid
-            if has_datacenter_blackwell_tma_device()
-            else persistent_tma_mm_template.uid
-        )
+        # Mirrors the persistent-template selection in tuned_mm/tuned_addmm.
+        if has_datacenter_blackwell_tma_device():
+            cls.persistent_template_uid = (
+                blackwell_ws_persistent_device_tma_mm_template.uid
+            )
+        elif torch.version.hip is not None:
+            cls.persistent_template_uid = persistent_mm_template.uid
+        else:
+            cls.persistent_template_uid = persistent_tma_mm_template.uid
+
         cls.addmm_heuristic = _registered_heuristic(mm_template.uid, "addmm")
         cls.mm_heuristic = _registered_heuristic(mm_template.uid, "mm")
-        cls.addmm_tma_heuristic = _registered_heuristic(cls.tma_template_uid, "addmm")
-        cls.mm_tma_heuristic = _registered_heuristic(cls.tma_template_uid, "mm")
+        cls.addmm_persistent_heuristic = _registered_heuristic(
+            cls.persistent_template_uid, "addmm"
+        )
+        cls.mm_persistent_heuristic = _registered_heuristic(
+            cls.persistent_template_uid, "mm"
+        )
+
+        cls.pinned_heuristic_classes = {}
 
         block_sizes = [64, 128, 256]
         num_stages = [4, 5]
@@ -3841,18 +3840,43 @@ class TestTemplateConfigPruning(TestCase):
             if BLOCK_M + BLOCK_N + BLOCK_K < 512 and BLOCK_M + BLOCK_N + BLOCK_K > 192
         ]
 
-    def template_pairs(self, op_name, use_tma):
+    @staticmethod
+    def has_persistent_template_support():
+        """Whether the compiler will select a persistent GEMM template here.
+
+        HIP has no device-side TMA but still runs a non-TMA persistent kernel,
+        so the persistent path is live there despite has_triton_tma_device().
+        """
+        return torch.version.hip is not None or has_triton_tma_device()
+
+    def pinned_heuristic_class(self, heuristic):
+        """Return the pinned subclass of ``heuristic``'s class, built once.
+
+        BaseHeuristicSingleton keys its instance cache on the class object and
+        never evicts, so a class per test method would leak an entry per method.
+        """
+        base_cls = type(heuristic)
+        pinned = self.pinned_heuristic_classes.get(base_cls)
+        if pinned is None:
+            pinned = type(f"Pinned{base_cls.__name__}", (base_cls,), {})
+            self.pinned_heuristic_classes[base_cls] = pinned
+        return pinned
+
+    def template_pairs(self, op_name, use_persistent):
         """Return the (active, disabled) template/op pairs for this variant.
 
         Every GEMM template other than the one under test is disabled so that a
-        single config reaches the autotuner.
+        single config reaches the autotuner. The uids are deduplicated because
+        the persistent template is ``persistent_mm_template`` on HIP.
         """
-        all_uids = (
-            mm_template.uid,
-            self.tma_template_uid,
-            persistent_mm_template.uid,
+        active_uid = self.persistent_template_uid if use_persistent else mm_template.uid
+        all_uids = dict.fromkeys(
+            (
+                mm_template.uid,
+                self.persistent_template_uid,
+                persistent_mm_template.uid,
+            )
         )
-        active_uid = self.tma_template_uid if use_tma else mm_template.uid
         disabled = [(uid, op_name) for uid in all_uids if uid != active_uid]
         return (active_uid, op_name), disabled
 
@@ -3927,7 +3951,11 @@ class TestTemplateConfigPruning(TestCase):
     ):
         """Test shared memory pruning for addmm operation."""
 
-        if use_tma and (dtype == torch.float32 or not has_triton_tma_device()):
+        # use_tma selects the persistent variant, which on ROCm is not TMA.
+        # Parametrize name kept so test ids in slow_tests.json stay valid.
+        if use_tma and (
+            dtype == torch.float32 or not self.has_persistent_template_support()
+        ):
             return
 
         def addmm_op(bias, mat1, mat2):
@@ -3945,7 +3973,7 @@ class TestTemplateConfigPruning(TestCase):
         )
         dtype_size = mat1.dtype.itemsize
 
-        heuristic = self.addmm_tma_heuristic if use_tma else self.addmm_heuristic
+        heuristic = self.addmm_persistent_heuristic if use_tma else self.addmm_heuristic
         active_pair, disabled_pairs = self.template_pairs("addmm", use_tma)
 
         if heuristic is None:
@@ -3975,7 +4003,9 @@ class TestTemplateConfigPruning(TestCase):
         mat2_transposed: bool,
         use_tma: bool,
     ):
-        if use_tma and (dtype == torch.float32 or not has_triton_tma_device()):
+        if use_tma and (
+            dtype == torch.float32 or not self.has_persistent_template_support()
+        ):
             return
 
         def mm_op(mat1, mat2):
@@ -3993,7 +4023,7 @@ class TestTemplateConfigPruning(TestCase):
         )
         dtype_size = mat1.dtype.itemsize
 
-        heuristic = self.mm_tma_heuristic if use_tma else self.mm_heuristic
+        heuristic = self.mm_persistent_heuristic if use_tma else self.mm_heuristic
         active_pair, disabled_pairs = self.template_pairs("mm", use_tma)
 
         if heuristic is None:
@@ -4026,14 +4056,14 @@ class TestTemplateConfigPruning(TestCase):
         )
         if exceeds_checker is None:
             self.skipTest("Device does not support shared memory size query")
-        pinned_heuristic_cls = _pinned_config_heuristic_class(type(heuristic))
+        pinned_heuristic_cls = self.pinned_heuristic_class(heuristic)
         for c in self.gemm_configs:
             smem_estimation = heuristic.get_shared_memory_estimation(
                 c, dtype_size, **shared_memory_checker_opts
             )
-            # Configure heuristics to use only this specific config. This must
-            # go through the registry; the compiler uses its own cached instance.
-            pinned_heuristic_cls().mm_configs = [c]
+            # Copy: ROCmConfigHeuristic._filter_configs rewrites num_stages in
+            # place, which would mutate the shared self.gemm_configs.
+            pinned_heuristic_cls().mm_configs = [dataclasses.replace(c)]
             exceeds = exceeds_checker(c, dtype_size)
 
             original_precompile = CachingAutotuner.precompile
@@ -4055,13 +4085,15 @@ class TestTemplateConfigPruning(TestCase):
                         else kernel.metadata.shared
                     )
                     nonlocal captured_smem
-                    captured_smem = shared_mem
+                    captured_smem = max(captured_smem, shared_mem)
 
             def mock_autotune(self, *args, **kwargs):
                 timings = original_autotune(self, *args, **kwargs)
                 nonlocal triton_compilation_fails, triton_choice_count
-                triton_choice_count = sum(
-                    isinstance(caller, TritonTemplateCaller) for caller in timings
+                # max, so a second autotune call cannot mask a first.
+                triton_choice_count = max(
+                    triton_choice_count,
+                    sum(isinstance(caller, TritonTemplateCaller) for caller in timings),
                 )
                 for caller, t in timings.items():
                     if isinstance(caller, TritonTemplateCaller) and t != float("inf"):
@@ -4070,6 +4102,8 @@ class TestTemplateConfigPruning(TestCase):
 
             with (
                 self.pruning_config_context(),
+                # Swaps the registry entry and clears the heuristic cache; this
+                # is what makes the pinned config reach the compiler.
                 override_template_heuristics(
                     device_type=GPU_TYPE,
                     template_op_pairs=[active_pair],
@@ -4088,13 +4122,15 @@ class TestTemplateConfigPruning(TestCase):
                 compiled_fn = torch.compile(op, mode="max-autotune")
                 run_and_get_code(compiled_fn, *inputs)
 
-            # Guard the restriction itself: if it silently stops applying, the
-            # assertions below would compare against an unrelated kernel.
-            self.assertEqual(
+            # Guard the restriction itself; if it silently stops applying, the
+            # assertions below compare against an unrelated kernel. Not ==1:
+            # a config that overflows shared memory fails to precompile and is
+            # pruned before benchmarking, which is what the branch below tests.
+            self.assertLessEqual(
                 triton_choice_count,
                 1,
-                f"Expected exactly the config under test to be autotuned, "
-                f"got {triton_choice_count} Triton choices for config {c}",
+                f"Config restriction stopped applying: got {triton_choice_count} "
+                f"Triton choices for config {c}, expected at most 1",
             )
 
             if triton_compilation_fails:
