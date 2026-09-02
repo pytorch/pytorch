@@ -32,6 +32,7 @@ on:
       - inductor-perf-nightly-rocm-mi300
       - inductor-perf-nightly-rocm-mi350
       - mac-mps
+      - td-holdout
     types:
       - completed
 
