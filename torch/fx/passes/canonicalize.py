@@ -10,9 +10,7 @@ Provides two passes:
 """
 
 import collections
-import functools
 import heapq
-import importlib
 import itertools
 import operator
 from collections.abc import Callable
@@ -54,23 +52,16 @@ _ORDER_SENSITIVE_NAMESPACES = frozenset(
 )
 
 
-@functools.lru_cache(None)
-def _version_mutating_functions() -> frozenset[object]:
-    """Functions that bump a tensor's version counter in place.
-
-    Resolved lazily: importing ``torch._library`` at module scope would create an
-    import cycle.
-    """
-    fns: list[object] = [torch.autograd.graph.increment_version]
-    for mod, attr in (
-        ("torch._C", "_increment_version"),
-        ("torch._library.custom_ops", "increment_version"),
-    ):
-        try:
-            fns.append(getattr(importlib.import_module(mod), attr))
-        except (ImportError, AttributeError):
-            pass
-    return frozenset(fns)
+# Functions that bump a tensor's version counter in place. Matched by identity,
+# not __name__: torch._C._increment_version is exposed under a different name and
+# is separately allowlisted in Dynamo's trace_rules, so both spellings can appear
+# as graph targets.
+_VERSION_MUTATING_FUNCTIONS = frozenset(
+    {
+        torch.autograd.graph.increment_version,
+        torch._C._increment_version,
+    }
+)
 
 
 def _computation_node_key(
@@ -97,12 +88,82 @@ def _canonical_node_key(node: fx.Node, canonical_idx: dict[fx.Node, int]) -> obj
         return _computation_node_key(node, canonical_idx)
 
 
+_INFERENCE_MODE_FUNCTIONS = frozenset(
+    {
+        torch.autograd.grad_mode._enter_inference_mode,
+        torch.autograd.grad_mode._exit_inference_mode,
+    }
+)
+
+
+# Higher order operators whose whole effect is the subgraphs they are handed:
+# if every branch is pure, the HOP is pure. Anything not listed here keeps its
+# trace-order position, because its effects can hide somewhere this pass cannot
+# see -- a mutable custom op passed as a plain argument (auto_functionalized), a
+# side-table kernel index (triton_kernel_wrapper_mutation), a torchbind object.
+_SUBGRAPH_ONLY_EFFECT_HOPS = frozenset(
+    {
+        "cond",
+        "switch",
+        "while_loop",
+        "invoke_subgraph",
+        "wrap",
+        "tag_activation_checkpoint",
+        "scan",
+        "associative_scan",
+        "map_impl",
+        "flex_attention",
+    }
+)
+
+
+def _hop_effects_are_pure(node: fx.Node) -> bool:
+    """Whether a higher order operator node can be reordered.
+
+    ``Node.is_impure()`` never looks inside a HOP's subgraphs, so a ``cond``
+    whose branches mutate their inputs (legal under inference mode, later
+    cleaned up by auto_functionalization) reports pure. Reordering it lets a
+    read of a mutated tensor hoist above the HOP and observe the pre-mutation
+    value. Recurse into the branches instead, and treat anything we cannot
+    resolve as a barrier.
+    """
+    name = getattr(node.target, "__name__", "")
+    if name not in _SUBGRAPH_ONLY_EFFECT_HOPS:
+        return False
+    owning_module = node.graph.owning_module
+    if owning_module is None:
+        return False
+    subgraphs = [
+        arg
+        for arg in itertools.chain(node.args, node.kwargs.values())
+        if isinstance(arg, fx.Node) and arg.op == "get_attr"
+    ]
+    if not subgraphs:
+        return False
+    for attr in subgraphs:
+        try:
+            submodule = owning_module.get_submodule(str(attr.target))
+        except AttributeError:
+            return False
+        if not isinstance(submodule, fx.GraphModule):
+            return False
+        # Placeholders/outputs are structural; recursion covers nested HOPs.
+        if not all(
+            n.op in ("placeholder", "output", "get_attr") or _is_safe_to_reorder(n)
+            for n in submodule.graph.nodes
+        ):
+            return False
+    return True
+
+
 def _is_safe_to_reorder(node: fx.Node) -> bool:
     """Check if a node is safe to reorder during graph canonicalization.
 
-    Builds on Node.is_impure() (used by DCE) with two additional checks for
-    cases it doesn't cover: in-place call_method nodes and non-OpOverload
-    state-changing functions detected by a no-node-arguments heuristic.
+    Builds on Node.is_impure() (used by DCE), which misses several kinds of
+    ordering-sensitive node: in-place call_methods, higher order operators whose
+    subgraphs mutate, functional collectives, version-counter bumps,
+    inference_mode brackets, and non-OpOverload state-changing functions caught
+    by a no-node-arguments heuristic.
 
     Returning False is a graph-scale decision, not a node-scale one: barriers
     partition the graph into segments (see ``canonicalize_graph``) and pure nodes
@@ -126,6 +187,8 @@ def _is_safe_to_reorder(node: fx.Node) -> bool:
         return True
     if node.is_impure():
         return False
+    if isinstance(node.target, torch._ops.HigherOrderOperator):
+        return _hop_effects_are_pure(node)
     # Functional collectives (all_reduce, wait_tensor, ...) keep their
     # trace-order position. Reordering a collective relative to surrounding
     # compute changes comm/compute overlap and defeats Inductor's in-place
@@ -133,7 +196,7 @@ def _is_safe_to_reorder(node: fx.Node) -> bool:
     # (identical SPMD code), so canonicalization loses nothing here. In Dynamo
     # output graphs these appear as OpOverloadPackets, in aten graphs as
     # OpOverloads, so check both. OpOverloadPacket has no public namespace
-    # accessor, hence _qualified_op_name (test_canonical_graph_is_safe_to_reorder
+    # accessor, hence _qualified_op_name (test_canonical_graph_collectives_are_barriers
     # covers both dispatch forms, so a rename there fails loudly).
     if isinstance(node.target, torch._ops.OpOverload):
         collective_namespace = node.target.namespace
@@ -143,14 +206,19 @@ def _is_safe_to_reorder(node: fx.Node) -> bool:
         collective_namespace = None
     if collective_namespace in _ORDER_SENSITIVE_NAMESPACES:
         return False
-    # increment_version bumps a tensor's version counter in place. It takes the
-    # tensor as an FX Node arg (so the no-input heuristic below misses it) and
-    # is not an OpOverload, so is_impure() doesn't flag it. Reordering it
-    # relative to version reads (prims._tensor_version) corrupts
-    # version-counter semantics. Matched by identity, not __name__:
-    # torch._C._increment_version is exposed under a different name and is in
-    # Dynamo's in-graph allowlist (trace_rules.torch_c_binding_in_graph_functions).
-    if node.target in _version_mutating_functions():
+    # increment_version takes the tensor as an FX Node arg (so the no-input
+    # heuristic below misses it) and is not an OpOverload, so is_impure() does
+    # not flag it. Reordering it relative to version reads
+    # (prims._tensor_version) corrupts version-counter semantics.
+    if node.target in _VERSION_MUTATING_FUNCTIONS:
+        return False
+    # inference_mode brackets the ops traced inside it. Unlike autocast and
+    # set_grad_enabled, neither end is in fx's _side_effectful_functions, and
+    # only the enter is caught incidentally by the no-Node-arguments heuristic
+    # below -- the exit takes the enter's token, so it looks pure. Hoisting the
+    # exit above the compute silently drops inference mode, and the result comes
+    # back with is_inference() False.
+    if node.target in _INFERENCE_MODE_FUNCTIONS:
         return False
     if not isinstance(node.target, torch._ops.OpOverload):
         name = getattr(node.target, "__name__", "")
@@ -162,10 +230,6 @@ def _is_safe_to_reorder(node: fx.Node) -> bool:
         ):
             return False
         if isinstance(node.kwargs.get("out"), fx.Node):
-            return False
-        # triton_kernel_wrapper_mutation mutates tensors via kwargs but
-        # is not detected by is_impure() or trailing-underscore checks.
-        if name == "triton_kernel_wrapper_mutation":
             return False
         # Non-OpOverload targets with no FX Node arguments are likely
         # state-changing (e.g., _vmap_increment_nesting,
