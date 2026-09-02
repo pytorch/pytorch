@@ -269,8 +269,6 @@ void ProcessGroupNCCL::initNcclResources() {
     dependency_event_.emplace(cudaEventDisableTiming);
   }
 
-  max_event_pool_size_ = kDefaultMaxEventPoolSize;
-
   NCCL_CHECK(
       nccl_api_,
       nccl_comm_,
@@ -559,13 +557,7 @@ void ProcessGroupNCCL::finalize() {
     }
   }
 
-  // Clean up event pool
-  {
-    std::lock_guard<std::mutex> lock(event_pool_mutex_);
-    while (!event_pool_.empty()) {
-      event_pool_.pop();
-    }
-  }
+  event_pool_->clear();
 
   barrier_buffer_.clear();
 
