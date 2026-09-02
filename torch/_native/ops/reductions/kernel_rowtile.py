@@ -1,15 +1,7 @@
-# ROW reductions: launch policy for tile.TileReduce on the row axis (reduce the contiguous
-# last dim of a (M, N) input). The kernel body lives in tile.py -- this module owns the
-# measured launch shapes, the narrow-row gates, and the plan cache.
-#
-# Covers 1 or 2 outputs and either a final projection or raw stage-1 partials (which is what
-# makes it reusable as the cross-CTA driver's stage 1), with a ROLLED chunk loop so ONE
-# compiled kernel serves every N in a vec class -- tpr and nt are compile-time while N itself
-# arrives as a runtime arg.
-#
-# Two options serve NARROW rows, where packing threads onto a row wastes most of each warp:
-# tpr=1 gives a row one thread, and past a 128-byte lane stride the load stages through a TMA
-# box (see _TMA_MIN_STRIDE).
+# ROW reductions: launch policy for tile.TileReduce on the row axis (contiguous last dim of an
+# (M, N) input). The body is in tile.py; this module owns the measured launch shapes, the narrow-row
+# gates and the plan cache. Serves 1 or 2 outputs, final or raw stage-1 partials, with a ROLLED
+# chunk loop, so one compiled kernel covers every N in a vec class.
 
 import math
 from typing import NamedTuple
@@ -52,75 +44,28 @@ _WIDE_ROW_BYTES = 16 * 1024
 
 
 # --- NARROW rows: tpr == 1, one thread per row ---
-# `tpr` floors at one WARP whenever lanes have to be merged (warp_reduce shuffles across a
-# full warp), so a row only `N // vec` vec-chunks wide leaves `WARP - chunks` lanes with
-# nothing to load. Measured lane utilization, and what it cost the packed shape at large M:
+# `tpr` floors at a WARP whenever lanes are merged, so a row of `N // vec` chunks leaves
+# `WARP - chunks` lanes idle: 25% lane utilization at N=32, where the packed shape measured 4.0x
+# slower than tpr == 1 at (1048576, 32). tpr == 1 merges nothing, so it serves any trait.
 #
-#   N=16  ->   4 chunks, tpr 128 (the ragged guard forces 1 row/block) ->  3.1% util
-#   N=32  ->   8 chunks, tpr  32                                       -> 25.0% util
-#   N=64  ->  16 chunks, tpr  32                                       -> 50.0% util
-#   N=128 ->  32 chunks, tpr  32                                       ->  100% util
-#
-# and 25.0% util lined up with the packed shape being 4.0x slower than tpr == 1 at
-# (1048576, 32). At tpr == 1 there is no lane merge at all, so the shape is trait-agnostic:
-# index traits and multi-field traits (Welford nfields=3) need no extra machinery. `nt` still
-# comes from the ladder below (128 everywhere in this band), so the only knob is tpr.
-#
-# Upper bound on the row width tpr == 1 will take. The whole row lives in one thread, so the
-# per-thread unroll IS N // vec; must not exceed tile.MAX_UNROLL -- derived from it rather
-# than restated, so the two cannot drift. The measured crossover is far below either (see
-# `narrow_row`); this is the safety ceiling, not the perf choice.
+# SAFETY ceiling on the width it will take (the whole row is one thread's unroll), derived from
+# MAX_UNROLL so the two cannot drift. The measured crossover is far below it -- see `narrow_row`.
 _MAX_NARROW_N = min(256, tile.MAX_UNROLL)
-# MEASURED ladder of (minimum rows, per-thread chunk budget). A launch-shape pick among our
-# own kernels, like the one-shot-vs-xcta choice -- not a capability gate on whether we serve
-# the op.
-#
-# One thread per row makes the grid ~tpr times smaller than the packed shape's, so it needs
-# enough rows to fill the SMs, and the wider the row the more rows it needs. Verified on B200
-# across nfields 1/2/3 (sum, mean, amax, argmax, max.dim, var), device time, gate on vs off,
-# one process per shape:
-#
-#   M       chunks   worst op     best op
-#   4096         6   1.14x sum    1.87x var
-#   8192         6   1.38x sum    2.81x var
-#   16384       16   1.32x amax   1.60x var
-#   65536       24   1.24x sum    2.95x var
-#   65536       32   0.98x var    1.35x max.dim
-#   1048576     8    4.23x amax   9.10x var
-#   262144      4    9.25x sum   33.73x var
-#   16384       32   0.68x var    1.03x sum   <- REGRESSES, excluded by the ladder
-#
-# The last row is why the budget is tiered rather than a single bound: at 32 chunks the
-# multi-field traits lose at M=16384 but not at M=65536.
-#
-# Bounds are in vec-CHUNKS (N // vec), not raw N: chunks is what sets loads and registers per
-# thread, so the bound carries across dtypes (32 chunks is 512 B/thread at fp32 and at fp16).
-# Only fp32 was measured for perf; correctness is covered for fp16/bf16/fp64 too.
+# MEASURED ladder of (minimum rows, per-thread chunk budget): one thread per row shrinks the grid
+# ~tpr times, so it needs enough rows to fill the SMs, and the wider the row the more rows. Bounds
+# are in vec-CHUNKS, not raw N, so they carry across dtypes. Speedup range over the packed shape,
+# B200, nfields 1/2/3:
+#   M=4096 at 6 chunks 1.14-1.87x   M=16384 at 16 1.32-1.60x   M=262144 at 4 9.25-33.7x
+# Tiered rather than one bound because a budget that suits M=65536 loses at M=16384.
 _CHUNK_LADDER = ((65536, 32), (16384, 16), (4096, 6))
 
-# TMA-STAGED LOAD, for the one regime where the direct load is not already at SOL.
-#
-# MEASURED (512 MiB footprint, past L2): the direct tpr == 1 load runs at 91-93% of peak
-# while >= 2 lanes of a warp share a 128-byte line, and collapses to ~60% the moment they do
-# not. Thread t reads row t, so the stride between lanes is N*itemsize, and the cliff is at
-# exactly N*itemsize >= 128 -- 7001 GB/s at N=16 (64 B stride) vs 4584 at N=32 (128 B).
-#
-# The problem is OVER-FETCH, not latency: each lane pulls its own line and uses part of it.
-# So the fix is to make the gmem access contiguous, which a TMA box does by construction --
-# a (rows, N) box spanning FULL rows is one contiguous gmem region, moved by a single
-# descriptor-driven transfer with no per-lane addressing at all.
-#
-# DEPTH 1 on purpose. Multi-stage pipelining cannot un-fetch bytes: a prior experiment in
-# this repo measured the depth curve flat on a bandwidth-bound reduction (D1 2491us vs D2
-# 2437us, D3..D6 unchanged). Depth > 1 is also where PipelineTmaAsync deadlocks -- its empty
-# barrier signals per warp-lane-0, so a full-block consumer group gives the wrong
-# arrive_count on buffer reuse.
-#
-# MEASURED with the smem rotation (tile.fold_smem_rotated, without which this is a
-# REGRESSION): 1.49-1.86x over the direct load, reaching 6943 GB/s = 90% of theoretical peak
-# at (4194304, 32) -- matching the ~7000 GB/s ceiling the stride sweep predicted. Gated to
-# power-of-two N (the rotation uses a mask) in fp32 (the bank arithmetic is 4-byte-specific);
-# everything else keeps the direct load, already at SOL below the cliff.
+# TMA-STAGED LOAD, for the one regime where the direct load is not at SOL. Thread t reads row t, so
+# the lane stride is N*itemsize and the direct load runs at 91-93% of peak only while >= 2 lanes
+# share a 128-byte line: 7001 GB/s at N=16 (64 B stride) against 4584 at N=32 (128 B). It is
+# OVER-FETCH, not latency, so the fix is a contiguous access, which a (rows, N) TMA box is by
+# construction. Worth 1.49-1.86x, reaching 90% of peak at (4194304, 32), but ONLY with the smem
+# rotation (tile.fold_smem_rotated) -- without it, a regression. Gated to power-of-two fp32 N,
+# which is what the rotation's mask and bank arithmetic assume. Staged at depth 1.
 _TMA_MIN_STRIDE = 128
 
 
@@ -152,31 +97,20 @@ def tma_ok(N: int, itemsize: int, M: int, device=None) -> bool:
     return True
 
 
-# --- INNER-TREE ORDER (opt-in) -------------------------------------------------------------
-# A reduction's bit pattern depends on the order its adds are associated in, and every other
-# order here derives that order from the LAUNCH SHAPE -- so it can change with tpr, nt or the
-# one-row override, and two different M can differ in the last bits. The inner-tree order
-# instead fixes the DAG from N alone: a stride-doubling tree per load, a streaming carry at
-# most `depth` deep, warp-major chunks, and an ascending butterfly across lanes. That makes the
-# result reproducible and hash-pinnable, which is what a determinism or batch-invariance claim
-# needs.
+# --- INNER-TREE ORDER (opt-in) ---
+# Every other order here derives its add association from the LAUNCH SHAPE, so it moves with tpr, nt
+# or M. This one fixes the DAG from N alone -- stride-doubling tree per load, streaming carry at most
+# `depth` deep, warp-major chunks, ascending butterfly across lanes -- which is what makes it
+# hash-pinnable and so usable for a determinism claim. It covers EVERY N in three shapes (see
+# _ItreePlan); total coverage is required, since a shape it skipped would silently keep the
+# launch-shape order.
 #
-# It COVERS EVERY N, in three shapes chosen from N the way upstream's host dispatch chooses
-# between its three kernels (see _ItreePlan). Coverage has to be total for the order to be able
-# to REPLACE a fixed-order path: a shape it skipped would keep the launch-shape-derived order,
-# silently, and a determinism claim that holds for most shapes is not a determinism claim.
+# OPT-IN because it costs: 0.92-1.41x the device time of the rolled fold at a fixed 256 MiB
+# footprint, winning where the rolled fold underfills or its gcd `vec` collapses to scalar loads,
+# losing ~1.3x on mid-width rows. It also gives up the N-free compile key.
 #
-# It is OPT-IN because it costs: measured on this datapath at a fixed 256 MiB footprint, the order
-# runs at 0.92-1.41x the DEVICE time of the rolled fold -- it wins where the rolled fold's launch
-# shape underfills or its gcd `vec` collapses to scalar loads (a ragged N), and loses ~1.3x on
-# mid-width rows, where a compile-time DAG cannot roll its chunk loop. It also gives up the N-free
-# compile key: one kernel per shape rather than one per vec class. (Before chunk fusion the range
-# was 0.92-2.24x; see _ITREE_THREAD_ELEMS for what closed it and why the bits did not move.)
-#
-# The gate is OUR OWN env var, deliberately distinct from upstream's PYTORCH_SUM_INNER_TREE:
-# upstream's inner-tree kernels register first and keep their eligible calls, and this order
-# sits alongside them for now rather than replacing them, so the two must be switchable
-# independently (and comparable -- the tests assert BITWISE equality against upstream's).
+# Our OWN env var, not upstream's PYTORCH_SUM_INNER_TREE: upstream's kernels register first and keep
+# their eligible calls, so the two must be switchable independently and stay comparable.
 _INNER_TREE_ENV = "PYTORCH_NATIVE_INNER_TREE"
 # Block size for the two ONE-THREAD-PER-ROW shapes (upstream's kMultiRowThreads and
 # kAccumulateThreads, both 128), and the multirow carry's cap, which is fixed rather than
@@ -184,106 +118,20 @@ _INNER_TREE_ENV = "PYTORCH_NATIVE_INNER_TREE"
 _MULTIROW_ROWS_PER_BLOCK = 128
 _MULTIROW_MAX_DEPTH = 6
 
-# WHY THIS ORDER'S PER-THREAD WIDTH CANNOT BE RAISED -- built, measured, reverted; do not retry.
-#
-# ATen's plan spends row length on WARPS first (num_warps = min(16, N/wle)) and stacks loads per
-# thread only once that saturates, so every N from 64 to 2048 in fp32 hands a thread ONE 16-byte
-# vector -- 4 elements -- behind a butterfly and a cross-warp smem merge. The merge is per LOAD,
-# so at one load per thread nothing amortizes, and that is most of the order's 1.7-2.2x over the
-# rolled fold (measured: forcing wpr 8 -> 1 at N=1024 moves 86.6us -> 48.1us).
-#
-# `wpr` is not ours to change: it decides which chunk a warp folds, so it IS the bit pattern. But
-# the per-batch DAG is exactly the balanced tree over the batch's columns (verified against the
-# real chunk/load/lane/vec nesting over many (wpr, lpw, vec) combinations), so a thread holding an
-# ALIGNED CONTIGUOUS RUN may fold it in registers -- the same combines the butterfly's first
-# log2(k) levels would do, in the same order. That was implemented and IS bit-exact (54 golden
-# hashes and 33 (k, rows_per_block) configurations all matched).
-#
-# It is also SLOWER, because contiguity per thread and coalescing per instruction are mutually
-# exclusive: a thread owning k adjacent vectors puts its lanes k*16 bytes apart, so each load
-# instruction touches k times the footprint it uses. MEASURED device time, fp32 sum at a fixed
-# 256 MiB footprint, k = 1 / 2 / 4:
-#
-#   ( 524288,    128)   68.4 /  70.9 / 129.1 us
-#   (  65536,   1024)   86.5 /  77.1 / 132.6
-#   (  16384,   4096)   64.4 /  73.2 / 131.5
-#   (    671, 100000)   58.5 /  76.2 / 135.2
-#
-# Block size is not the confound -- k=4 with rows_per_block scaled back up to a 256-thread block
-# still costs 128.7 vs 68.4 at N=128. The arithmetic saving is small (fusion removes 2 of ~15 ops
-# per element, since the butterfly shrinks from 5 shuffles to 3) and the memory cost is not.
-#
-# So fuse along the OTHER axis instead: one thread group takes `kchunk` ADJACENT CHUNKS, keeping a
-# full warp (and therefore `vec`-stride, fully coalesced loads) on each chunk while the thread's
-# width grows to kchunk*16 bytes. The k chunk results combine in registers exactly where the
-# cross-chunk merge would have combined them, so the DAG still does not move, and the cross-chunk
-# smem step shrinks from wpr slots to wpr/kchunk (vanishing entirely when kchunk == wpr).
-#
-# MEASURED (device time, fp32 sum, fixed 256 MiB footprint), kchunk = 1 -> best:
-#
-#   (  65536,   1024)   86.5 -> 48.2 us  (k=8)   1.79x
-#   (  16384,   4096)   64.4 -> 47.8     (k=16)  1.35x
-#   (    671, 100000)   58.3 -> 56.7     (k=4)   1.03x
-#   ( 524288,    128)   68.4 -> 68.4     (wpr=1, nothing to fuse)
-#
-# Those match what FORCING wpr down to 1 achieved (48.1 / 47.8) -- so fusing chunks recovers the
-# whole launch-shape overhead while keeping the bit pattern, which changing wpr cannot.
-#
-# Bounded by ELEMENTS PER THREAD, not by kchunk: k*vec*eff elements live in registers at once, and
-# at 256 the shape falls off a cliff (N=100000 at k=16 measured 127.6us vs 56.7 at k=4). A 64
-# budget is within 2% of the best point at every shape above and leaves margin to the cliff.
+# Per-thread width for the order, in ELEMENTS (k*vec*eff live in registers at once). Width is bought
+# by fusing adjacent CHUNKS, which keeps a full warp -- and so coalesced loads -- on each: worth
+# 1.79x at (65536, 1024). 64 is within 2% of the best point at every shape measured, and the shape
+# falls off a cliff at 256 (127.6us against 56.7 at N=100000).
 _ITREE_THREAD_ELEMS = 64
 
-# WIDER VECTORS PER THREAD -- the other way to raise per-thread width. Kept for comparison against
-# chunk fusion; MEASURED SLOWER at every width, so it stays at 1.
-#
-# `vec` sets wle = 32*vec, so widening it shrinks ATen's num_warps = min(16, N/wle) and deepens the
-# in-vector tree. That looks like it must change the bit pattern -- it does NOT, for the same
-# reason chunk fusion does not: every level of the fold stays balanced however (vec, wpr, loads)
-# split a batch, so the result is still the balanced tree over the batch's columns, and the only
-# thing that could move the bits is the BATCH decomposition. `bte = eff*wle*wpr` is pinned to the
-# 8192 threshold whenever that cap binds and covers the whole row when it does not, so `nbatch`
-# never changes. VERIFIED bit-exact vs ATen at vmul 1/2/4/8 for N in {1024, 4097, 6143, 8192,
-# 20000, 100003} -- including the ragged N, where a different batch count would have shown up.
-#
-# MEASURED device time (fp32 sum, 256 MiB footprint), vmul 1 / 2 / 4 / 8 at the best kchunk:
-#
-#   (  65536,   1024)   49.6 /  71.2 / 130.4 / 254.2 us
-#   (  16384,   4096)   48.9 /  72.3 / 132.7 / 258.2
-#   (   8192,   8192)   48.8 /  72.3 / 132.8 / 257.7
-#   (    671, 100000)   56.7 /  77.0 / 136.2 / 260.0
-#
-# Roughly 2x per doubling, and for the same reason the discarded VECTOR fusion lost: a thread
-# reading w contiguous bytes strides the lanes by w, so each load instruction touches w/16 times
-# the footprint it uses. vmul=4 (130.4) and the old kfuse=4 (132.6) agree, as they should -- both
-# put 16 elements in a thread behind a 64-byte lane stride.
-#
-# `vec_linear` folds a thread's whole run as ONE CHAIN (v0 + v1 + ... + vN) instead of the tree,
-# which IS a different association and does leave ATen's bits. Measured alongside the above: the
-# fold SHAPE is free (49.7 tree vs 49.0 linear at N=1024, 48.9 vs 49.1 at 4096, 48.7 vs 49.0 at
-# 8192 -- all within noise), so the width is the entire cost and giving up bit-exactness buys
-# nothing. Both knobs stay for comparison against chunk fusion; neither is on.
+# Vector-width multiplier for the order's `vec`. 1: a wider thread run strides the lanes by its
+# width, which costs ~2x per doubling. Bit-exact at any value -- `bte` pins the batch decomposition,
+# which is what fixes the bits.
 _ITREE_VEC_MUL = 1
 
-# ROWS PER BLOCK is DAG-FREE (only independent rows are packed together, and each row's fold reads
-# only its own smem slots -- verified bit-identical at every value). ATen's plan pins it to 1
-# whenever num_warps >= 8, which after chunk fusion leaves a ONE-WARP block, so we pick it here
-# instead -- by targeting a BLOCK SIZE.
-#
-# 256, not 64. A 64-thread target looked right from the mid-band alone, where the curve is nearly
-# flat (device us at rows_per_block 1/2/4/8/16/32):
-#
-#   (  65536,   1024) tpr= 32   49.7 / 48.1 / 48.2 / 48.1 / 48.5 / 50.4
-#   (  32768,   2048) tpr= 32   48.2 / 47.7 / 47.7 / 48.1 / 49.1 / 50.1
-#   (  16384,   4096) tpr= 64   48.9 / 49.1 / 49.3 / 50.1 / 51.3
-#
-# but it is badly wrong at SMALL N, where a 64-thread block starves the SM of rows:
-#
-#   ( 524288,    128) tpr= 32   nt=64 145.3   vs nt=256  68.2   <- 2.1x
-#   ( 262144,    256) tpr= 32   nt=64  74.0   vs nt=256  50.8   <- 1.5x
-#
-# Targeting 256 costs at most 0.4us in the mid-band and recovers those. Tuning a launch knob on one
-# band and extrapolating is exactly the mistake this comment exists to record.
+# Target BLOCK SIZE, which is how rows-per-block is picked. DAG-free (only independent rows share a
+# block), so this is pure occupancy. 256, because a 64-thread block starves the SM of rows at small
+# N: (524288, 128) 145.3 vs 68.2us, (262144, 256) 74.0 vs 50.8.
 _ITREE_BLOCK_THREADS = 256
 
 
@@ -295,22 +143,17 @@ def inner_tree_order_enabled() -> bool:
 
 
 class _ItreePlan(NamedTuple):
-    """Everything the order's DAG depends on, all compile-time.
+    """Everything the order's DAG depends on, all compile-time. One of three SHAPES, chosen from N as
+    upstream's host dispatch chooses between its three kernels -- the shape is part of the DAG, so it
+    cannot be a launch-time preference:
 
-    One of three SHAPES, chosen from N exactly as upstream's host dispatch chooses between its
-    three kernels -- the shape is part of the DAG, so it cannot be a launch-time preference:
+    "multirow"  one thread per row, the whole row in one static fragment (N <= vec * 8)
+    "looped"    `wpr` warps per row, in up to three compile-time batches with a tile each
+    "split"     one block per (row, batch) writing a partial, then a linear per-row combine
 
-    "multirow"  one thread per row, the whole row in one static fragment. N <= vec * 8.
-    "looped"    `wpr` warps cooperate on a row, covering it in up to three compile-time
-                batches, each with its own tile. Every N up to 3 * 8192 elements.
-    "split"     one block per (row, batch) writing a partial, then a linear per-row combine.
-                Above three batches, where baking them would unroll without bound.
-
-    `batches` holds (offset, remaining, loads, warp_chunk) per COMPILE-TIME batch and `tms` one
-    warp-major tile each, with the order's own `vec` and no exact-tile shortcut since a batch
-    covers only its slice. The split shape's batch index is a RUNTIME value, so its two entries
-    are the two distinct WIDTHS (a full batch and the short last one) rather than two batches,
-    and `split` carries what the kernel selects between them with.
+    `batches` holds (offset, remaining, loads, warp_chunk) per batch and `tms` a warp-major tile
+    each. The split shape's batch index is a RUNTIME value, so its two entries are the two distinct
+    WIDTHS -- a full batch and the short last one -- and `split` says what selects between them.
     """
 
     shape: str
@@ -511,14 +354,10 @@ def row_config(N: int, dtype_width: int, nfields: int = 1, hw=None) -> "_RowConf
     # needs more threads", which tracks smem capacity, so scaling them by hw.smem_scale
     # keeps the rule correct on other GPUs (1.0 on B200 -> the anchors reproduce exactly).
     #
-    # nfields is ACCEPTED (signature parity + autotuner key) but deliberately NOT acted
-    # on. The nfields sweep confirmed wide-accumulator traits (var nf=3) prefer a
-    # different config, BUT the fp32 and bf16 optima move in OPPOSITE directions (fp32
-    # var wants larger tpr / smaller nt; bf16 var the reverse), so no single scalar
-    # rule serves both -- a measured `eff = N*nfields` fit REGRESSED bf16 var to ~0.92x
-    # while helping fp32. Until a per-(dtype, nfields) table is characterized densely
-    # enough to interpolate, nfields is left to the autotuner (which measures per key and
-    # cannot regress). nf=1 (sum/mean/prod/norm/...) is unaffected and keeps its picks.
+    # nfields is ACCEPTED (signature parity + autotuner key) but deliberately NOT acted on: a
+    # wide-accumulator trait does prefer a different config, but the fp32 and bf16 optima move in
+    # OPPOSITE directions, so no single scalar rule serves both. Left to the autotuner, which
+    # measures per key.
     # The ragged-N correctness clamp (tpr -> nt when the row tile isn't a clean vec*tpr
     # multiple) is applied at USE in RowReduce, not here -- it is a correctness invariant.
     smem = 1.0 if hw is None else hw.smem_scale
@@ -533,26 +372,15 @@ def row_config(N: int, dtype_width: int, nfields: int = 1, hw=None) -> "_RowConf
 
 
 def single_row_config(N: int, dtype_width: int, nfields: int = 1, hw=None):
-    # Occupancy override for a ONE-ROW launch (the reduce-all one-shot), or None when the
-    # ladder's pick already stands (the caller then passes no override at all, keeping the
-    # default path -- including its ragged-N bucket gate -- untouched).
+    # Occupancy override for a ONE-ROW launch (the reduce-all one-shot), or None to leave the
+    # ladder's pick standing. The ladder's small tpr exists so nt//tpr ROWS pack per block; with one
+    # row there is nothing to pack and the GPU runs a fraction of one CTA. So give that row the
+    # widest LADDER RUNG it can feed, one row per block.
     #
-    # The ladder's small tpr exists so that nt//tpr ROWS pack into each block -- with a
-    # single row there is nothing to pack, and the pick instead leaves the whole GPU running
-    # a fraction of one CTA (128 threads at N=4096). Give that row the widest LADDER RUNG it
-    # can FEED instead (one thread per vector load), one row per block.
-    #
-    # Pick from _TPR_RUNGS rather than computing a width: tpr here is both the reduce-tree
-    # width and the block size, so it must be a power of two AND a warp multiple. Computing
-    # it got that wrong twice -- N//vec gave 50 threads for a 100-element fp64 row (not a
-    # warp multiple at all), and warp-rounding gave tpr=96, three warps, which silently
-    # returned a WRONG variance for a 400-element fp32 reduce-all. Rungs are valid by
-    # construction, and a row too narrow for one warp keeps the ladder's pick.
-    #
-    # MEASURED (M=1, bf16, vs ATen): var_mean 0.53-0.93x -> 1.47-1.62x for N=1024..4096;
-    # max.dim, aminmax and sum match or improve at every N from 64 to 16384. A flat
-    # tpr=nt=256 also fixes mid-N but REGRESSES N<=256 (0.76x on var_mean), which is why
-    # this feeds the row rather than maxing it out.
+    # From _TPR_RUNGS, not a computed width: tpr is both the reduce-tree width and the block size, so
+    # it must be a power of two AND a warp multiple -- a computed width silently returned a wrong
+    # variance. MEASURED (M=1, bf16, vs ATen): var_mean 0.53-0.93x -> 1.47-1.62x at N=1024..4096,
+    # with max.dim, aminmax and sum matching or improving from N=64 to 16384.
     cfg = row_config(N, dtype_width, nfields, hw)
     vec = math.gcd(N, 128 // dtype_width)
     feedable = min(_TPR_MAX, N // max(1, vec))  # vector loads this row can issue
