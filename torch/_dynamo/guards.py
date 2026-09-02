@@ -4841,8 +4841,12 @@ class CheckFunctionManager:
                 # `raise ... from`, so that covers the whole chain we own,
                 # while __context__ may point at an unrelated exception the
                 # caller is handling, whose traceback is not ours to drop.
+                # CPython only breaks cycles for __context__, not for an
+                # explicit `raise ... from`, so guard against a cyclic chain.
+                seen_links: set[int] = set()
                 link: BaseException | None = e
-                while link is not None:
+                while link is not None and id(link) not in seen_links:
+                    seen_links.add(id(link))
                     link.__traceback__ = None
                     link = link.__cause__
                 # Keep the frames' text (not the frames) on the exception so a
@@ -4897,9 +4901,10 @@ class CheckFunctionManager:
         for guard in sorted_guards:
             guard_type = guard.create_fn_name()
             derived_guard_types = tuple(guard.guard_types) if guard.guard_types else ()
-            # BUILTIN_MATCH calls TYPE_MATCH sometimes, so we need to check both for
-            # a chance that the guard is unserializable
-            if guard_type in ("TYPE_MATCH", "BUILTIN_MATCH"):
+            # BUILTIN_MATCH calls TYPE_MATCH sometimes, and FAKE_SCRIPT_TYPE_MATCH
+            # sets the same flag for a local-scope fake script type, so check
+            # every guard type that can mark itself unserializable.
+            if guard_type in ("TYPE_MATCH", "BUILTIN_MATCH", "FAKE_SCRIPT_TYPE_MATCH"):
                 if guard._unserializable:
                     # Only call builder.get again if we know we're going to throw
                     obj = builder.get(guard)
