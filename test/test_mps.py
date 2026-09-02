@@ -2689,6 +2689,40 @@ class TestMPS(TestCaseMPS):
         res_cpu = torch.norm(d_cpu[0, :, :]), torch.norm(d_cpu[1, :, :])
         self.assertEqual(res, res_cpu)
 
+    @parametrize("dtype", [torch.float32, torch.complex64])
+    @parametrize("p", [None, 1, 2, 0.5, float('inf'), float('-inf'), 'fro', 'nuc'])
+    def test_norm_matches_cpu(self, dtype, p):
+        # torch.norm reroutes strided inputs to linalg.vector_norm/matrix_norm.
+        # MPS used to be excluded, which left it on the legacy path with its own
+        # dtype handling and a different default dim for 'nuc'. Errors are part
+        # of the contract here, so mirror whatever CPU does.
+        for shape in [(4, 4), (2, 4, 4)]:
+            c = torch.randn(shape, dtype=dtype)
+            m = c.to("mps")
+            for dim, keepdim in itertools.product([None, 0, [0, 1]], [False, True]):
+                kwargs = {"p": p, "dim": dim, "keepdim": keepdim, "dtype": dtype}
+                try:
+                    expected = torch.norm(c, **kwargs)
+                except Exception as exc:
+                    with self.assertRaises(type(exc)):
+                        torch.norm(m, **kwargs)
+                else:
+                    self.assertEqual(torch.norm(m, **kwargs).cpu(), expected)
+
+    def test_norm_dtype_conversion_matches_cpu(self):
+        c = torch.randn(4, 4, dtype=torch.float16)
+        m = c.to("mps")
+        for p in [2, 'fro']:
+            self.assertEqual(
+                torch.norm(m, p=p, dtype=torch.float32).cpu(),
+                torch.norm(c, p=p, dtype=torch.float32),
+            )
+        out_mps = torch.empty((), dtype=torch.float32, device="mps")
+        out_cpu = torch.empty((), dtype=torch.float32)
+        torch.norm(m, p=2, dtype=torch.float32, out=out_mps)
+        torch.norm(c, p=2, dtype=torch.float32, out=out_cpu)
+        self.assertEqual(out_mps.cpu(), out_cpu)
+
     def test_linalg_vector_norm(self):
         x_mps = torch.tensor([0, 0, 0, 2, 3], dtype=torch.float, device="mps")
         x_cpu = x_mps.detach().clone().cpu()
