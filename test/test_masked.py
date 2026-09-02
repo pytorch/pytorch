@@ -437,7 +437,7 @@ class TestMaskedGeneric(TestCase):
         self.assertEqual(dense, expected)
 
 
-instantiate_device_type_tests(TestMasked, globals(), except_for='meta')
+instantiate_device_type_tests(TestMasked, globals(), except_for='meta', allow_xpu=True)
 instantiate_parametrized_tests(TestMaskedGeneric)
 
 if __name__ == "__main__":
