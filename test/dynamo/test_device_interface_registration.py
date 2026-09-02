@@ -1,10 +1,11 @@
-# Owner(s): ["module: dynamo"]
+# Owner(s): ["module: dynamo", "module: PrivateUse1"]
 from unittest.mock import MagicMock, patch
 
 import torch
 import torch.utils.backend_registration
 from torch._dynamo.device_interface import DeviceInterface, get_interface_for_device
-from torch.testing._internal.common_utils import HardwareClassification, TestCase
+from torch._dynamo.test_case import TestCase
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class TestPrivateuse1DeviceInterface(TestCase):
@@ -26,12 +27,42 @@ class TestPrivateuse1DeviceInterface(TestCase):
 
         return DummyInterface
 
+    def _save_device_reg(self):
+        """Snapshot the current device registration state."""
+        import torch._dynamo.device_interface as di
+
+        self._saved_initialized = di._device_initialized
+        self._saved_interfaces = dict(di.device_interfaces)
+
+    def _restore_device_reg(self):
+        """Restore the saved device registration state."""
+        import torch._dynamo.device_interface as di
+
+        di.device_interfaces.clear()
+        di.device_interfaces.update(self._saved_interfaces)
+        di._device_initialized = self._saved_initialized
+        # Clear the memoization cache so it picks up the restored registry
+        from torch._dynamo.variables.user_defined import UserDefinedClassVariable
+
+        UserDefinedClassVariable._in_graph_classes.cache_clear()
+
     def _reset_device_reg(self):
         """Reset device registration state so init_device_reg() re-runs."""
         import torch._dynamo.device_interface as di
 
         di._device_initialized = False
         di.device_interfaces.clear()
+        from torch._dynamo.variables.user_defined import UserDefinedClassVariable
+
+        UserDefinedClassVariable._in_graph_classes.cache_clear()
+
+    def setUp(self):
+        super().setUp()
+        self._save_device_reg()
+
+    def tearDown(self):
+        self._restore_device_reg()
+        super().tearDown()
 
     def _setup_fakebackend(self, get_device_interface_fn, device_count_fn=lambda: 0):
         """Set up a fake backend module on torch with the given get_device_interface
@@ -86,16 +117,13 @@ class TestPrivateuse1DeviceInterface(TestCase):
         DummyInterface = self._make_dummy_interface()
 
         self._reset_device_reg()
-        try:
-            p1, p2, p3 = self._setup_fakebackend(
-                get_device_interface_fn=lambda: DummyInterface,
-                device_count_fn=lambda: 1,
-            )
-            with p1, p2, p3:
-                self.assertIs(get_interface_for_device("fakebackend"), DummyInterface)
-                self.assertIs(get_interface_for_device("fakebackend:0"), DummyInterface)
-        finally:
-            self._reset_device_reg()
+        p1, p2, p3 = self._setup_fakebackend(
+            get_device_interface_fn=lambda: DummyInterface,
+            device_count_fn=lambda: 1,
+        )
+        with p1, p2, p3:
+            self.assertIs(get_interface_for_device("fakebackend"), DummyInterface)
+            self.assertIs(get_interface_for_device("fakebackend:0"), DummyInterface)
 
     def test_backend_missing_module(self):
         """When the backend name is set but no module is registered on torch,
@@ -111,7 +139,6 @@ class TestPrivateuse1DeviceInterface(TestCase):
         """When the backend module exists but lacks get_device_interface,
         get_interface_for_device should raise NotImplementedError."""
         mod = MagicMock(spec=[])
-        del mod.get_device_interface
 
         self._reset_device_reg()
         p1, p2 = self._patch_no_backend("fakebackend")
@@ -146,8 +173,9 @@ class TestPrivateuse1DeviceInterface(TestCase):
                 get_interface_for_device("fakebackend")
 
     def test_backend_device_count_raises(self):
-        """When device_count raises, the main device is already registered
-        but indexed devices are not; the exception should not propagate."""
+        """When device_count raises, the main device is still registered
+        (count failure is handled gracefully), but indexed devices are not;
+        the exception should not propagate."""
         DummyInterface = self._make_dummy_interface()
 
         self._reset_device_reg()

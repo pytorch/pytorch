@@ -795,19 +795,31 @@ def get_registered_device_interfaces() -> Iterable[tuple[str, type[DeviceInterfa
 
 def _register_interface_for_privateuse1() -> None:
     backend = torch._C._get_privateuse1_backend_name()
-    if not backend or backend == "privateuseone":
+    if backend == "privateuseone" or backend in device_interfaces:
         return
     from torch.utils.backend_registration import _get_custom_mod_func
 
     try:
         get_device_interface_fn = _get_custom_mod_func("get_device_interface")
         interface = get_device_interface_fn()
-        if interface is None or not issubclass(interface, DeviceInterface):
+        if interface is None or not (
+            isinstance(interface, type) and issubclass(interface, DeviceInterface)
+        ):
+            if interface is not None:
+                import warnings
+
+                warnings.warn(
+                    f"get_device_interface() for backend '{backend}' returned "
+                    f"{interface!r} which is not a DeviceInterface subclass; "
+                    f"skipping registration.",
+                    stacklevel=2,
+                )
             return
         register_interface_for_device(backend, interface)
         device_count_fn = _get_custom_mod_func("device_count")
         if device_count_fn is not None:
-            for i in range(device_count_fn()):
+            device_count = device_count_fn()
+            for i in range(device_count):
                 register_interface_for_device(f"{backend}:{i}", interface)
     except RuntimeError:
         pass
