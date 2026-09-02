@@ -73,7 +73,10 @@ def _rdma_wire_bytes(interface: str) -> tuple[int, int] | None:
 def _wire_bytes(interface: str | None, backend: str) -> tuple[int, int] | None:
     if interface is None:
         return None
-    if backend == "ibverbs" and (counters := _rdma_wire_bytes(interface)) is not None:
+    if (
+        backend in {"ibverbs", "torchcomms"}
+        and (counters := _rdma_wire_bytes(interface)) is not None
+    ):
         return counters
     root = Path(f"/sys/class/net/{interface}/statistics")
     try:
@@ -104,7 +107,12 @@ def _exchange(value: Any) -> Any:
 
 
 def run(args: argparse.Namespace) -> list[dict[str, Any]]:
-    dist.init_process_group("gloo")
+    dist.init_process_group(
+        "gloo",
+        init_method=args.init_method,
+        rank=int(os.environ["RANK"]),
+        world_size=int(os.environ["WORLD_SIZE"]),
+    )
     if dist.get_world_size() != 2:
         raise RuntimeError("transport benchmark requires exactly two ranks")
     rank = dist.get_rank()
@@ -235,6 +243,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--backend", required=True)
     parser.add_argument("--device", default="cuda")
+    parser.add_argument("--init-method", default="env://")
     parser.add_argument(
         "--interfaces", help="network interface, or a comma-separated pair"
     )
