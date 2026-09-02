@@ -6,7 +6,7 @@ import unittest
 from collections import namedtuple, OrderedDict
 from enum import Enum, IntEnum
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import sympy
 
@@ -194,6 +194,75 @@ class TestCodegenTriton(InductorTestCase):
                 )
                 interpreter.current_node = None
                 self.assertEqual(kernel._implied_range_masks(None), set())
+
+    @parametrize(
+        "mode,expected",
+        [
+            ("conjunction", {"xmask"}),
+            ("symbolic_upper_le", {"xmask"}),
+            ("symbolic_upper_le_value_expr", {"xmask"}),
+            ("symbolic_upper_gt", set()),
+            ("non_root_index", set()),
+        ],
+    )
+    def test_implied_range_masks_conjunction_and_symbolic_bounds(self, mode, expected):
+        kernel = TritonKernel(
+            {"x": 8},
+            features=SIMDKernelFeatures([], 8, sympy.S.One),
+            override_persistent_reduction=False,
+            override_cooperative_reduction=False,
+        )
+        with kernel:
+            root = kernel.range_trees[0].full_range().symbol()
+            indices = {
+                "index0": root,
+                "index1": sympy.Integer(8),
+                "index2": sympy.Integer(9),
+            }
+            if mode == "non_root_index":
+                indices["index0"] = sympy.Symbol("not_a_range_var")
+            graph = torch.fx.Graph()
+            ops_node = graph.placeholder("ops")
+            lhs = graph.call_method(
+                "index_expr",
+                (ops_node, graph.call_module("get_index", ("index0",)), torch.int64),
+            )
+            if mode == "conjunction":
+                narrow = graph.call_method(
+                    "lt",
+                    (
+                        ops_node,
+                        lhs,
+                        graph.call_method("constant", (ops_node, 8, torch.int64)),
+                    ),
+                )
+                wide = graph.call_method(
+                    "lt",
+                    (
+                        ops_node,
+                        lhs,
+                        graph.call_method("constant", (ops_node, 100, torch.int64)),
+                    ),
+                )
+                mask = graph.call_method("and_", (ops_node, wide, narrow))
+            else:
+                upper_name = "index2" if mode == "symbolic_upper_gt" else "index1"
+                rhs_op = "value_expr" if mode.endswith("value_expr") else "index_expr"
+                rhs = graph.call_method(
+                    rhs_op,
+                    (
+                        ops_node,
+                        graph.call_module("get_index", (upper_name,)),
+                        torch.int64,
+                    ),
+                )
+                mask = graph.call_method("lt", (ops_node, lhs, rhs))
+            current = graph.call_module("masked_subblock0", (mask, 0.0))
+            interpreter = SimpleNamespace(
+                current_node=current, submodules={"get_index": indices.__getitem__}
+            )
+            with V.set_interpreter_handler(interpreter):
+                self.assertEqual(set(kernel._implied_range_masks(current)), expected)
 
     def test_range_tree_entry_ownership_uses_root_identity(self):
         class AlternateR0Root(IterationRangesRoot):
