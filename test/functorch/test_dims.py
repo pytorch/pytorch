@@ -56,60 +56,7 @@ def triu(A):
     return torch.where(i <= j, a, zero).order(i, j)
 
 
-@skipIfTorchDynamo("Bad interaction")
-class TestMin(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
-    def setUp(self):
-        super().setUp()
-        gc.disable()
-        gc.collect()
-        self.interesting = set()
-        for o in gc.get_objects():
-            if isinstance(o, (torch.Tensor, Dim, Tensor, DimList)):
-                self.interesting.add(id(o))
-
-    def tearDown(self):
-        interesting = []
-        for o in gc.get_objects():
-            if (
-                isinstance(o, (torch.Tensor, Dim, Tensor, DimList))
-                and id(o) not in self.interesting
-            ):
-                interesting.append(o)
-
-        #  nolevels = _n_levels_in_use() == 0
-        if len(interesting) != 0:
-            import refcycle
-
-            refcycle.garbage().export_image("garbage.pdf")
-        gc.collect()
-        # assert nolevels, f"cleanup failed? {_n_levels_in_use()}"
-        self.assertEqual(
-            len(interesting),
-            0,
-            (
-                lambda msg: f"{msg}\nextra torch.Tensor, Dim, or Tensor left allocated: {len(interesting)} objects of types:"
-                f"{[type(t) for t in interesting]}"
-            ),
-        )
-
-    def test_manual_stuff(self):
-        A_ = torch.rand(3, 4)
-        B_ = torch.rand(4, 5)
-        i, j, k = dims()
-        A = A_[i, k]
-        B = B_[k, j]
-        C = (A.expand(j) * B.expand(i)).sum(k)
-        torch.testing.assert_close(C.order(i, j), torch.mm(A_, B_))
-        torch.testing.assert_close(torch.triu(A_, 0), triu(A_))
-
-        D_ = torch.randint(0, 3, (6,))
-        d = dims()
-        D = D_[d]
-
-        A.index([i], [D]).order(k, d)
-
+class TestBase(TestCase):
     def attn(
         self,
         batch_size=1,
@@ -231,6 +178,61 @@ class TestMin(TestCase):
         if time:
             self.gpu_time(lambda: B(hidden_state), "positional", r=3)
             self.gpu_time(lambda: A(hidden_state), "first_class", r=3)
+
+
+@skipIfTorchDynamo("Bad interaction")
+class TestMin(TestBase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def setUp(self):
+        super().setUp()
+        gc.disable()
+        gc.collect()
+        self.interesting = set()
+        for o in gc.get_objects():
+            if isinstance(o, (torch.Tensor, Dim, Tensor, DimList)):
+                self.interesting.add(id(o))
+
+    def tearDown(self):
+        interesting = []
+        for o in gc.get_objects():
+            if (
+                isinstance(o, (torch.Tensor, Dim, Tensor, DimList))
+                and id(o) not in self.interesting
+            ):
+                interesting.append(o)
+
+        #  nolevels = _n_levels_in_use() == 0
+        if len(interesting) != 0:
+            import refcycle
+
+            refcycle.garbage().export_image("garbage.pdf")
+        gc.collect()
+        # assert nolevels, f"cleanup failed? {_n_levels_in_use()}"
+        self.assertEqual(
+            len(interesting),
+            0,
+            (
+                lambda msg: f"{msg}\nextra torch.Tensor, Dim, or Tensor left allocated: {len(interesting)} objects of types:"
+                f"{[type(t) for t in interesting]}"
+            ),
+        )
+
+    def test_manual_stuff(self):
+        A_ = torch.rand(3, 4)
+        B_ = torch.rand(4, 5)
+        i, j, k = dims()
+        A = A_[i, k]
+        B = B_[k, j]
+        C = (A.expand(j) * B.expand(i)).sum(k)
+        torch.testing.assert_close(C.order(i, j), torch.mm(A_, B_))
+        torch.testing.assert_close(torch.triu(A_, 0), triu(A_))
+
+        D_ = torch.randint(0, 3, (6,))
+        d = dims()
+        D = D_[d]
+
+        A.index([i], [D]).order(k, d)
 
     def test_attn(self):
         self.attn()
@@ -638,7 +640,7 @@ class TestMin(TestCase):
 skip_functorch_only = ["test_time_mm_fuse"]
 
 
-class TestMinCudaOnly(TestMin):
+class TestMinCudaOnly(TestBase):
     hw_classification = HardwareClassification.CUDA
 
     def setUp(self):
