@@ -3799,6 +3799,7 @@ class TestTemplateConfigPruning(TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
+
         # Initialize heuristics once for all tests. Registration is
         # device-conditional, so the registry is the only reliable source for
         # the heuristic class the compiler will actually use.
