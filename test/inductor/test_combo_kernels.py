@@ -1287,7 +1287,6 @@ class ComboKernelTests(TestCase):
 
         m = Model()
         torch._dynamo.reset()
-        torch._inductor.metrics.reset()
         out_eager = m(*inps)
         with fresh_cache():
             out_compiled, code = run_and_get_code(torch.compile(m), *inps)
