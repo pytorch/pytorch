@@ -20,7 +20,7 @@ name: !{{ build_environment }}
     invalidation handles the per-Python ABI bits). Everything else still runs
     on the per-Python matrix below. Add more arch types here as their inline
     build job is wired up. -#}
-{%- set unified_arch_types = ['cpu', 'cpu-aarch64', 'cuda', 'cuda-aarch64'] %}
+{%- set unified_arch_types = ['cpu', 'cpu-aarch64', 'cuda', 'cuda-aarch64', 'xpu'] %}
 {%- set unified_build_configs = build_configs | selectattr('gpu_arch_type', 'in', unified_arch_types) | list %}
 {%- set matrix_build_configs = build_configs | rejectattr('gpu_arch_type', 'in', unified_arch_types) | list %}
 
@@ -255,7 +255,7 @@ jobs:
   {%- set first = group[0] %}
   {#- Job name: keep cpu/cpu-aarch64 names stable; for cuda, include the
       desired_cuda variant so cu126/cu130/cu132 each get a distinct job. -#}
-  {%- if desired_cuda == 'cpu' %}
+  {%- if desired_cuda == 'cpu' or desired_cuda == arch_type %}
     {%- set job_name = "manywheel-" ~ arch_type ~ "-build" %}
   {%- else %}
     {%- set job_name = "manywheel-" ~ arch_type ~ "-" ~ desired_cuda ~ "-build" %}
@@ -264,17 +264,19 @@ jobs:
       E.g. "manywheel-py3_10-cuda-aarch64-12_6" -> "-cuda-aarch64-12_6". -#}
   {%- set py_dotless = first['python_version'] | replace('.', '_') %}
   {%- set build_name_suffix = first['build_name'] | replace('manywheel-py' ~ py_dotless, '') %}
+  {%- if arch_type != 'xpu' %}
   {%- set _ = unified_upload_groups.append({
         'job_name': job_name,
         'test_name': job_name | replace('-build', '-test'),
         'configs': group}) %}
+  {%- endif %}
 
   !{{ job_name }}:
     name: !{{ job_name }}
     if: !{{ owner_if }}
     needs: [get-label-type{%- if pin_docker_image %}, get-docker-tag{%- endif %}]
     runs-on: "!{{ runner_prefix }}!{{ build_runs_on }}"
-    timeout-minutes: !{{ timeout_minutes }}
+    timeout-minutes: !{{ 420 if arch_type == 'xpu' else timeout_minutes }}
     container:
       image: !{{ docker_registry_host }}pytorch/!{{ first['container_image'] }}:!{{ first['container_image_tag_prefix'] }}!{{ docker_image_suffix }}
     env:
@@ -314,7 +316,7 @@ jobs:
       - name: Build all wheels
         shell: bash
         run: |
-          # shellcheck disable=SC1091
+          # shellcheck disable=SC1090,SC1091
           source "${BINARY_ENV_FILE}"
           bash .ci/manywheel/build_all.sh
       # One artifact per built Python -- names must match what the test/upload
@@ -492,7 +494,7 @@ jobs:
   manywheel-test-xpu:
     name: ${{ matrix.build_name }}-test
     if: !{{ owner_if }}
-    needs: [get-label-type{%- if pin_docker_image %}, get-docker-tag{%- endif %}, manywheel-build]
+    needs: [get-label-type{%- if pin_docker_image %}, get-docker-tag{%- endif %}, manywheel-xpu-build]
     uses: ./.github/workflows/_binary-test-xpu-linux.yml
     strategy:
       fail-fast: false
@@ -552,7 +554,7 @@ jobs:
 {%- if xpu_configs %}
   {%- set _ = upload_jobs.append({
         'name': 'manywheel-xpu-upload',
-        'needs': ['manywheel-build', 'manywheel-test-xpu'],
+        'needs': ['manywheel-xpu-build', 'manywheel-test-xpu'],
         'configs': xpu_configs}) %}
 {%- endif %}
 {%- for job in upload_jobs %}
