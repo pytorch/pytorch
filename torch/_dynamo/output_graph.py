@@ -687,6 +687,58 @@ def noop_graph_call(*args: Any, **kwargs: Any) -> tuple[Any, ...]:
     return ()
 
 
+def _make_autocast_exception_safe(
+    fn: Callable[..., Any], device_types: tuple[str, ...]
+) -> Callable[..., Any]:
+    """Wrap `fn` so a raised exception restores autocast state the way the
+    traced `with autocast(...):` region's own `__exit__` would have.
+
+    See Note [Autocast exception safety] in OutputGraph.compile_and_call_fx_graph.
+    Used for every compiled callable that can execute a fully-traced autocast
+    region, including per-specialization recompiles -- not just the primary
+    `compiled_fn` -- since any of them can run the region's body without ever
+    reaching its `_exit_autocast` node.
+    """
+
+    def _autocast_exception_safe_wrapper(*args: Any, **kwargs: Any) -> Any:
+        # Read fresh on every call, not once when this wrapper is built:
+        # GlobalStateGuard guards enabled/dtype/cache_enabled, so those never
+        # differ from this compile, but it does not guard the nesting depth.
+        # A cache hit can still invoke this same compiled artifact from a
+        # different ambient nesting depth (e.g. called from inside an
+        # unrelated outer `with autocast(...):` of the same device/dtype),
+        # so the depth to unwind back to has to be read per call.
+        prior_nesting = torch.autocast_increment_nesting() - 1
+        torch.autocast_decrement_nesting()
+        prior_states = {
+            device_type: (
+                torch.is_autocast_enabled(device_type),
+                torch.get_autocast_dtype(device_type),
+                torch.is_autocast_cache_enabled(),
+            )
+            for device_type in device_types
+        }
+        try:
+            return fn(*args, **kwargs)
+        except BaseException:
+            current_nesting = torch.autocast_increment_nesting() - 1
+            torch.autocast_decrement_nesting()
+            for _ in range(current_nesting - prior_nesting):
+                if torch.autocast_decrement_nesting() == 0:
+                    torch.clear_autocast_cache()
+            for device_type, (
+                enabled,
+                dtype,
+                cache_enabled,
+            ) in prior_states.items():
+                torch.set_autocast_enabled(device_type, enabled)
+                torch.set_autocast_dtype(device_type, dtype)
+                torch.set_autocast_cache_enabled(cache_enabled)
+            raise
+
+    return _autocast_exception_safe_wrapper
+
+
 class OutputGraph(OutputGraphCommon):
     """
     Wrapper class to hold outputs of InstructionTranslator.  Mainly the
@@ -3065,86 +3117,28 @@ class OutputGraph(OutputGraphCommon):
             # has no try/finally, so if the compiled graph raises between them,
             # the exit node never runs and autocast state (the nesting counter,
             # per-device enabled/dtype/cache_enabled) leaks past the `with`
-            # block. This has to catch BaseException, not just Exception:
-            # CPython's `with` statement runs `__exit__` on the way out for
-            # BaseException subclasses too (KeyboardInterrupt, SystemExit),
-            # and the wrapper's job is to reproduce that guarantee, not a
-            # narrower one. Eager `with` guarantees `__exit__` runs via Python's own
-            # try/finally, so restore that guarantee here at the call site
-            # instead: on every call, before invoking the compiled function,
-            # snapshot the nesting depth and the current per-device state for
-            # every device type touched by a region traced in this graph, and
-            # on exception only, decrement the nesting counter back down to
-            # the snapshotted depth and restore each device's snapshot.
+            # block. Eager `with` guarantees `__exit__` runs via Python's own
+            # try/finally (for BaseException too, not just Exception -- see
+            # _make_autocast_exception_safe), so restore that guarantee here
+            # at the call site instead.
             #
-            # Both snapshots are taken fresh on every call, not once when this
-            # wrapper is built. The per-device enabled/dtype/cache_enabled
-            # values are already covered by GlobalStateGuard, so a cache hit
-            # can only reuse this compiled artifact when those match what was
-            # traced -- but the guard does not cover the nesting depth, and a
-            # cache hit can still occur from a different ambient nesting than
-            # this compile had (e.g. called from inside an unrelated outer
-            # `with autocast(...):` of the same device/dtype), so the depth to
-            # unwind back to has to be read per call, not baked in here.
-            #
-            # The nesting counter has to be unwound to the snapshotted depth
-            # rather than by a fixed count: a region traced in this graph may
-            # have already run its real enter *and* exit by the time a later,
-            # independent (non-nested) region in the same graph raises, so the
-            # number of regions traced is not the number of enters still open
-            # at the point of the exception. The counter itself always
-            # reflects that correctly at exception time, which is why this
-            # reads it live instead of counting appended entries. The success
-            # path is untouched: nothing here runs unless the call raises, so
-            # the graph's own nodes remain the only thing that affects
-            # autocast state when nothing raises.
-            if autocast_target_values := self.autocast_target_values:
-                self.autocast_target_values = []
-                real_compiled_fn = compiled_fn
-                device_types = tuple(
-                    dict.fromkeys(
-                        device_type for device_type, _, _, _ in autocast_target_values
-                    )
+            # This wraps `compiled_fn`, but that is not the only callable that
+            # can execute this graph's autocast region: the `specializations`
+            # branch below compiles and caches a separate callable per
+            # dynamic-shape specialization, and any of those can run the
+            # traced region's body too. Each one needs its own wrapper --
+            # `specialized_dispatch` wraps its cached per-specialization
+            # callable at the point it's compiled, further down.
+            autocast_device_types = tuple(
+                dict.fromkeys(
+                    device_type for device_type, _, _, _ in self.autocast_target_values
                 )
-
-                def _autocast_exception_safe_wrapper(*args, **kwargs):
-                    # Read fresh on every call, not once when this wrapper is
-                    # built: GlobalStateGuard guards enabled/dtype/cache_enabled,
-                    # so those never differ from this compile, but it does not
-                    # guard the nesting depth. A cache hit can still invoke this
-                    # same compiled artifact from a different ambient nesting
-                    # depth (e.g. called from inside an unrelated outer
-                    # `with autocast(...):` of the same device/dtype), so the
-                    # depth to unwind back to has to be read per call.
-                    prior_nesting = torch.autocast_increment_nesting() - 1
-                    torch.autocast_decrement_nesting()
-                    prior_states = {
-                        device_type: (
-                            torch.is_autocast_enabled(device_type),
-                            torch.get_autocast_dtype(device_type),
-                            torch.is_autocast_cache_enabled(),
-                        )
-                        for device_type in device_types
-                    }
-                    try:
-                        return real_compiled_fn(*args, **kwargs)
-                    except BaseException:
-                        current_nesting = torch.autocast_increment_nesting() - 1
-                        torch.autocast_decrement_nesting()
-                        for _ in range(current_nesting - prior_nesting):
-                            if torch.autocast_decrement_nesting() == 0:
-                                torch.clear_autocast_cache()
-                        for device_type, (
-                            enabled,
-                            dtype,
-                            cache_enabled,
-                        ) in prior_states.items():
-                            torch.set_autocast_enabled(device_type, enabled)
-                            torch.set_autocast_dtype(device_type, dtype)
-                            torch.set_autocast_cache_enabled(cache_enabled)
-                        raise
-
-                compiled_fn = _autocast_exception_safe_wrapper
+            )
+            self.autocast_target_values = []
+            if autocast_device_types:
+                compiled_fn = _make_autocast_exception_safe(
+                    compiled_fn, autocast_device_types
+                )
 
             # If __torch_function__ subclass dispatch was inlined during
             # tracing, wrap the compiled graph to disable __torch_function__
@@ -3216,9 +3210,17 @@ class OutputGraph(OutputGraphCommon):
                                 gm.meta["specialization"] = specialization
                                 example_inputs: list[Tensor] = list(args)
                                 with tracing(self.tracing_context):
-                                    specialization_cache[specialization] = (
-                                        self.call_user_compiler(gm, example_inputs)
+                                    specialized_fn = self.call_user_compiler(
+                                        gm, example_inputs
                                     )
+                                # See Note [Autocast exception safety] above --
+                                # this compiled callable can execute the same
+                                # traced autocast region as compiled_fn.
+                                if autocast_device_types:
+                                    specialized_fn = _make_autocast_exception_safe(
+                                        specialized_fn, autocast_device_types
+                                    )
+                                specialization_cache[specialization] = specialized_fn
 
                             return specialization_cache[specialization](*args, **kwargs)
                     return compiled_fn(*args, **kwargs)

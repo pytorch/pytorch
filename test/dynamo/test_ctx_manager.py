@@ -466,6 +466,47 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         # call) would surface here as a negative or nonzero leftover.
         self.assertEqual(self._get_autocast_cpu_state()[0], 0)
 
+    def test_autocast_exception_restores_state_specialized_dispatch(self):
+        # A graph with a dynamic-shape specialization (torch._dynamo.
+        # mark_dynamic(..., specialize_on=...)) compiles and caches a
+        # separate callable per specialization, alongside the primary
+        # compiled_fn -- see `specialized_dispatch` in
+        # OutputGraph.compile_and_call_fx_graph. If that graph also contains
+        # a fully-traced autocast region, the cached per-specialization
+        # callable needs the same exception-safety wrapping as compiled_fn,
+        # since it can execute the region's body too. This exercises the
+        # cached specialized callable specifically, not the compiled_fn
+        # fallback the other tests above cover.
+        def fn(x, idx):
+            with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                return x.index_select(0, idx)
+
+        x = torch.randn(8)
+        good_idx = torch.tensor([0])
+        bad_idx = torch.tensor([99])
+        torch._dynamo.mark_dynamic(x, 0, specialize_on=[lambda x: x == 8])
+
+        opt_fn = torch.compile(fn, backend="eager")
+        baseline = self._get_autocast_cpu_state()
+
+        # First call: compiles the primary graph, no specialization matched
+        # yet (x.shape[0] == 8, but the specialization is keyed off a fresh
+        # tensor of that exact shape below).
+        opt_fn(x, good_idx)
+        self.assertEqual(self._get_autocast_cpu_state(), baseline)
+
+        # Second call: shape 8 matches the specialization, triggering
+        # specialized_dispatch to compile and cache a specialized callable.
+        x8 = torch.randn(8)
+        opt_fn(x8, good_idx)
+        self.assertEqual(self._get_autocast_cpu_state(), baseline)
+
+        # Third call: same shape, so this hits the now-cached specialized
+        # callable (not a fresh compile) -- and raises inside it.
+        with self.assertRaisesRegex(IndexError, "index"):
+            opt_fn(x8, bad_idx)
+        self.assertEqual(self._get_autocast_cpu_state(), baseline)
+
     def test_autocast_base_exception_restores_state(self):
         # CPython's `with` statement runs `__exit__` on the way out for any
         # BaseException, not just Exception -- KeyboardInterrupt and
@@ -510,7 +551,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         torch.Tensor.index_select = _raising_index_select
         try:
             for _ in range(3):
-                with self.assertRaises(_MyBaseException):
+                with self.assertRaisesRegex(_MyBaseException, "boom"):
                     opt_fn(x, idx)
                 self.assertEqual(self._get_autocast_cpu_state(), baseline)
         finally:
