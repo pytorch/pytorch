@@ -970,6 +970,48 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
         self.assertEqual(out_auto, out_sdpa)
         self.assertIsNone(w_sdpa)
 
+    def test_multihead_attention_is_causal_need_weights_static_k_len(self, device):
+        # static_k sequence length can differ from key.shape[0]; the implicit
+        # causal mask must be built from the final k length, not the original key.
+        embed_dim = 8
+        num_heads = 2
+        head_dim = embed_dim // num_heads
+        tgt_len, key_len, static_len, bsz = 4, 3, 5, 2
+        mha = nn.MultiheadAttention(embed_dim, num_heads, device=device)
+        q = torch.randn(tgt_len, bsz, embed_dim, device=device)
+        key = torch.randn(key_len, bsz, embed_dim, device=device)
+        value = torch.randn(key_len, bsz, embed_dim, device=device)
+        static_k = torch.randn(bsz * num_heads, static_len, head_dim, device=device)
+        static_v = torch.randn(bsz * num_heads, static_len, head_dim, device=device)
+
+        out, w = torch.nn.functional.multi_head_attention_forward(
+            q,
+            key,
+            value,
+            embed_dim,
+            num_heads,
+            mha.in_proj_weight,
+            mha.in_proj_bias,
+            mha.bias_k,
+            mha.bias_v,
+            mha.add_zero_attn,
+            mha.dropout,
+            mha.out_proj.weight,
+            mha.out_proj.bias,
+            training=False,
+            need_weights=True,
+            static_k=static_k,
+            static_v=static_v,
+            is_causal=True,
+        )
+        self.assertEqual(out.shape, (tgt_len, bsz, embed_dim))
+        self.assertEqual(w.shape, (bsz, tgt_len, static_len))
+        future = torch.triu(
+            torch.ones(tgt_len, static_len, dtype=torch.bool, device=device),
+            diagonal=1,
+        )
+        self.assertEqual(w[:, future], torch.zeros_like(w[:, future]))
+
     @dtypes(torch.double)
     @torch.no_grad()
     def test_multihead_attn_in_proj_bias_none(self, device, dtype):
