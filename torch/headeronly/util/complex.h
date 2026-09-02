@@ -18,9 +18,9 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-float-conversion")
 C10_CLANG_DIAGNOSTIC_IGNORE("-Wfloat-conversion")
 #endif
 
-namespace c10 {
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 
-// c10::complex is an implementation of complex numbers that aims
+// complex is an implementation of complex numbers that aims
 // to work on all devices supported by PyTorch
 //
 // Most of the APIs duplicates std::complex
@@ -28,8 +28,8 @@ namespace c10 {
 //
 // [NOTE: Complex Operator Unification]
 // Operators currently use a mix of std::complex, thrust::complex, and
-// c10::complex internally. The end state is that all operators will use
-// c10::complex internally.  Until then, there may be some hacks to support all
+// complex internally. The end state is that all operators will use
+// complex internally.  Until then, there may be some hacks to support all
 // variants.
 //
 //
@@ -90,7 +90,7 @@ namespace c10 {
 //
 // std::complex has custom literals `i`, `if` and `il` defined in namespace
 // `std::literals::complex_literals`. We define our own custom literals in the
-// namespace `c10::complex_literals`. Our custom literals does not follow the
+// namespace `complex_literals`. Our custom literals does not follow the
 // same behavior as in std::complex, instead, we define _if, _id to construct
 // float/double complex literals.
 //
@@ -139,9 +139,9 @@ namespace c10 {
 //
 //
 //
-// TODO(@zasdfgbnm): c10::complex<c10::Half> is not currently supported,
+// TODO(@zasdfgbnm): complex<Half> is not currently supported,
 // because:
-//  - lots of members and functions of c10::Half are not constexpr
+//  - lots of members and functions of Half are not constexpr
 //  - thrust::complex only support float and double
 
 template <typename T>
@@ -166,8 +166,8 @@ struct alignas(sizeof(T) * 2) complex {
 //   complex(other.real(), other.imag()) {}
 #endif
 
-  // Use SFINAE to specialize casting constructor for c10::complex<float> and
-  // c10::complex<double>
+  // Use SFINAE to specialize casting constructor for complex<float> and
+  // complex<double>
   template <typename U = T>
   C10_HOST_DEVICE explicit constexpr complex(
       const std::enable_if_t<std::is_same_v<U, float>, complex<double>>& other)
@@ -431,7 +431,7 @@ constexpr complex<T> operator/(const T& lhs, const complex<T>& rhs) {
   return result /= rhs;
 }
 
-// Define operators between integral scalars and c10::complex. std::complex does
+// Define operators between integral scalars and complex. std::complex does
 // not support this when T is a floating-point number. This is useful because it
 // saves a lot of "static_cast" when operate a complex and an integer. This
 // makes the code both less verbose and potentially more efficient.
@@ -441,42 +441,42 @@ constexpr complex<T> operator/(const T& lhs, const complex<T>& rhs) {
       int> = 0
 
 template <typename fT, typename iT, COMPLEX_INTEGER_OP_TEMPLATE_CONDITION>
-constexpr c10::complex<fT> operator+(const c10::complex<fT>& a, const iT& b) {
+constexpr complex<fT> operator+(const complex<fT>& a, const iT& b) {
   return a + static_cast<fT>(b);
 }
 
 template <typename fT, typename iT, COMPLEX_INTEGER_OP_TEMPLATE_CONDITION>
-constexpr c10::complex<fT> operator+(const iT& a, const c10::complex<fT>& b) {
+constexpr complex<fT> operator+(const iT& a, const complex<fT>& b) {
   return static_cast<fT>(a) + b;
 }
 
 template <typename fT, typename iT, COMPLEX_INTEGER_OP_TEMPLATE_CONDITION>
-constexpr c10::complex<fT> operator-(const c10::complex<fT>& a, const iT& b) {
+constexpr complex<fT> operator-(const complex<fT>& a, const iT& b) {
   return a - static_cast<fT>(b);
 }
 
 template <typename fT, typename iT, COMPLEX_INTEGER_OP_TEMPLATE_CONDITION>
-constexpr c10::complex<fT> operator-(const iT& a, const c10::complex<fT>& b) {
+constexpr complex<fT> operator-(const iT& a, const complex<fT>& b) {
   return static_cast<fT>(a) - b;
 }
 
 template <typename fT, typename iT, COMPLEX_INTEGER_OP_TEMPLATE_CONDITION>
-constexpr c10::complex<fT> operator*(const c10::complex<fT>& a, const iT& b) {
+constexpr complex<fT> operator*(const complex<fT>& a, const iT& b) {
   return a * static_cast<fT>(b);
 }
 
 template <typename fT, typename iT, COMPLEX_INTEGER_OP_TEMPLATE_CONDITION>
-constexpr c10::complex<fT> operator*(const iT& a, const c10::complex<fT>& b) {
+constexpr complex<fT> operator*(const iT& a, const complex<fT>& b) {
   return static_cast<fT>(a) * b;
 }
 
 template <typename fT, typename iT, COMPLEX_INTEGER_OP_TEMPLATE_CONDITION>
-constexpr c10::complex<fT> operator/(const c10::complex<fT>& a, const iT& b) {
+constexpr complex<fT> operator/(const complex<fT>& a, const iT& b) {
   return a / static_cast<fT>(b);
 }
 
 template <typename fT, typename iT, COMPLEX_INTEGER_OP_TEMPLATE_CONDITION>
-constexpr c10::complex<fT> operator/(const iT& a, const c10::complex<fT>& b) {
+constexpr complex<fT> operator/(const iT& a, const complex<fT>& b) {
   return static_cast<fT>(a) / b;
 }
 
@@ -551,11 +551,11 @@ struct alignas(4) complex<Half> {
   // be constexpr
   C10_HOST_DEVICE explicit inline complex(const Half& real, const Half& imag)
       : real_(real), imag_(imag) {}
-  C10_HOST_DEVICE inline complex(const c10::complex<float>& value)
+  C10_HOST_DEVICE inline complex(const complex<float>& value)
       : real_(value.real()), imag_(value.imag()) {}
 
   // Conversion operator
-  inline C10_HOST_DEVICE operator c10::complex<float>() const {
+  inline C10_HOST_DEVICE operator complex<float>() const {
     return {real_, imag_};
   }
 
@@ -602,11 +602,11 @@ struct alignas(4) complex<BFloat16> {
       const BFloat16& real,
       const BFloat16& imag)
       : real_(real), imag_(imag) {}
-  C10_HOST_DEVICE inline complex(const c10::complex<float>& value)
+  C10_HOST_DEVICE inline complex(const complex<float>& value)
       : real_(value.real()), imag_(value.imag()) {}
 
   // Conversion operator
-  inline C10_HOST_DEVICE operator c10::complex<float>() const {
+  inline C10_HOST_DEVICE operator complex<float>() const {
     return {real_, imag_};
   }
 
@@ -643,34 +643,94 @@ struct alignas(4) complex<BFloat16> {
   }
 };
 
-} // namespace c10
-
-HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
-using c10::complex;
-using c10::operator+;
-using c10::operator-;
-using c10::operator*;
-using c10::operator/;
-using c10::operator+=;
-using c10::operator-=;
-using c10::operator*=;
-using c10::operator/=;
-using c10::operator==;
-using c10::operator!=;
-using c10::operator<<;
-using c10::operator>>;
-using c10::polar;
-
-namespace complex_literals {
-using c10::complex_literals::operator""_if;
-using c10::complex_literals::operator""_id;
-} // namespace complex_literals
-
 HIDDEN_NAMESPACE_END(torch, headeronly)
+
+// std functions
+//
+// The implementation of these functions also follow the design of C++20
+
+namespace std {
+
+template <typename T>
+constexpr T real(const ::torch::headeronly::complex<T>& z) {
+  return z.real();
+}
+
+template <typename T>
+constexpr T imag(const ::torch::headeronly::complex<T>& z) {
+  return z.imag();
+}
+
+template <typename T>
+C10_HOST_DEVICE T abs(const ::torch::headeronly::complex<T>& z) {
+#if defined(__CUDACC__) || defined(__HIPCC__)
+  return thrust::abs(static_cast<thrust::complex<T>>(z));
+#else
+  return std::abs(static_cast<std::complex<T>>(z));
+#endif
+}
+
+template <typename T>
+C10_HOST_DEVICE T arg(const ::torch::headeronly::complex<T>& z) {
+  return std::atan2(std::imag(z), std::real(z));
+}
+
+template <typename T>
+constexpr T norm(const ::torch::headeronly::complex<T>& z) {
+  return z.real() * z.real() + z.imag() * z.imag();
+}
+
+// For std::conj, there are other versions of it:
+//   constexpr std::complex<float> conj( float z );
+//   template< class DoubleOrInteger >
+//   constexpr std::complex<double> conj( DoubleOrInteger z );
+//   constexpr std::complex<long double> conj( long double z );
+// These are not implemented
+// TODO(@zasdfgbnm): implement them as conj
+template <typename T>
+constexpr ::torch::headeronly::complex<T> conj(
+    const ::torch::headeronly::complex<T>& z) {
+  return ::torch::headeronly::complex<T>(z.real(), -z.imag());
+}
+
+// Thrust does not have complex --> complex version of thrust::proj,
+// so this function is not implemented right now.
+// TODO(@zasdfgbnm): implement it by ourselves
+
+// There is no version of std::polar for this type, because std::polar always
+// returns std::complex. Use polar instead;
+
+} // namespace std
 
 C10_CLANG_DIAGNOSTIC_POP()
 
 #define C10_INTERNAL_INCLUDE_COMPLEX_REMAINING_H
+// math functions are included in a separate file
+#include <torch/headeronly/util/complex_math.h> // IWYU pragma: keep
 // utilities for complex types
 #include <torch/headeronly/util/complex_utils.h> // IWYU pragma: keep
 #undef C10_INTERNAL_INCLUDE_COMPLEX_REMAINING_H
+
+namespace c10 {
+using ::torch::headeronly::complex;
+using ::torch::headeronly::operator!=;
+using ::torch::headeronly::operator+;
+using ::torch::headeronly::operator-;
+using ::torch::headeronly::operator*;
+using ::torch::headeronly::operator/;
+using ::torch::headeronly::operator<<;
+using ::torch::headeronly::operator>>;
+using ::torch::headeronly::operator+=;
+using ::torch::headeronly::operator-=;
+using ::torch::headeronly::operator*=;
+using ::torch::headeronly::operator/=;
+using ::torch::headeronly::operator==;
+using ::torch::headeronly::is_complex;
+using ::torch::headeronly::polar;
+using ::torch::headeronly::scalar_value_type;
+
+namespace complex_literals {
+using ::torch::headeronly::complex_literals::operator""_if;
+using ::torch::headeronly::complex_literals::operator""_id;
+} // namespace complex_literals
+} // namespace c10
