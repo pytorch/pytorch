@@ -1994,6 +1994,10 @@ class TripletMarginLoss(_Loss):
             raise ValueError(
                 f"TripletMarginLoss: expected margin to be greater than 0, got {margin} instead"
             )
+        if p < 1:
+            raise ValueError(
+                f"TripletMarginLoss: expected p to be >= 1, got {p} instead"
+            )
         self.margin = margin
         self.p = p
         self.eps = eps
