@@ -2716,8 +2716,10 @@ Tensor mexp_impl(
 
 // matrix exponential
 Tensor mexp(const Tensor& a, bool compute_highest_degree_approx = false) {
-  // squash batch dimensions to one dimension for simplicity
-  const auto a_3d = a.view({-1, a.size(-2), a.size(-1)});
+  // squash batch dimensions to one dimension for simplicity. Use reshape
+  // rather than view: a may be non-contiguous (e.g. a channels-last conv
+  // output) in a way where the batch dims cannot be folded without a copy.
+  const auto a_3d = a.reshape({-1, a.size(-2), a.size(-1)});
 
   if (a.scalar_type() == at::ScalarType::Float
       || a.scalar_type() == at::ScalarType::ComplexFloat) {
