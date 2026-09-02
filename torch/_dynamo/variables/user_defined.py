@@ -415,20 +415,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 }
             )
 
-        privateuse1_module = getattr(
-            torch, torch._C._get_privateuse1_backend_name(), None
-        )
-        if privateuse1_module is not None:
-            for tensor_type in tensortype_to_dtype:
-                privateuse1_tensor_type = getattr(
-                    privateuse1_module, tensor_type.__name__, None
-                )
-                if (
-                    isinstance(privateuse1_tensor_type, type)
-                    and privateuse1_tensor_type in torch._tensor_classes
-                ):
-                    _in_graph_class_list.add(privateuse1_tensor_type)
-
         for _, device_interface in get_registered_device_interfaces():
             stream_class = getattr(device_interface, "Stream", None)
             if isinstance(stream_class, type) and issubclass(
@@ -441,6 +427,21 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 _in_graph_class_list.add(event_class)
 
         return set(tensortype_to_dtype.keys()) | _in_graph_class_list
+
+    @staticmethod
+    def _is_privateuse1_tensor_class(value: type[object]) -> bool:
+        # PrivateUse1 tensor classes can be registered after the static class cache
+        # is populated, so resolve them at the constructor routing point.
+        if value not in torch._tensor_classes:
+            return False
+
+        privateuse1_module = getattr(
+            torch, torch._C._get_privateuse1_backend_name(), None
+        )
+        return privateuse1_module is not None and any(
+            value is getattr(privateuse1_module, tensor_type.__name__, None)
+            for tensor_type in tensortype_to_dtype
+        )
 
     @staticmethod
     @functools.cache
@@ -1559,6 +1560,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         elif (
             self.value in self._in_graph_classes()
+            or self._is_privateuse1_tensor_class(self.value)
             or is_traceable_wrapper_subclass_type(self.value)
         ):
             # torch.LongTensor cannot accept a list of FakeTensors.

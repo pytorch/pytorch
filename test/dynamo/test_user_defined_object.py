@@ -1217,21 +1217,25 @@ class TestUserDefinedSetitem(TestCase):
 
 
 class TestObjectConstruction(TestCase):
-    def test_privateuse1_tensor_types_in_graph_classes(self):
+    def test_privateuse1_tensor_constructor_routed_in_graph(self):
         from torch._dynamo.variables.user_defined import UserDefinedClassVariable
 
-        class PrivateUse1FloatTensor:
-            pass
+        class TensorTypeMeta(type):
+            def __call__(cls, value):
+                return torch.as_tensor(value, dtype=torch.float32)
 
-        class UnregisteredDoubleTensor:
+        class PrivateUse1FloatTensor(metaclass=TensorTypeMeta):
             pass
 
         privateuse1_module = types.SimpleNamespace(
             FloatTensor=PrivateUse1FloatTensor,
-            DoubleTensor=UnregisteredDoubleTensor,
         )
-        UserDefinedClassVariable._in_graph_classes.cache_clear()
-        self.addCleanup(UserDefinedClassVariable._in_graph_classes.cache_clear)
+
+        # The static class cache may be populated before a backend is registered.
+        self.assertNotIn(
+            PrivateUse1FloatTensor,
+            UserDefinedClassVariable._in_graph_classes(),
+        )
 
         with (
             unittest.mock.patch.object(
@@ -1251,13 +1255,20 @@ class TestObjectConstruction(TestCase):
                 torch._tensor_classes | {PrivateUse1FloatTensor},
             ),
         ):
-            self.assertIn(
-                PrivateUse1FloatTensor,
-                UserDefinedClassVariable._in_graph_classes(),
-            )
-            self.assertNotIn(
-                UnregisteredDoubleTensor,
-                UserDefinedClassVariable._in_graph_classes(),
+            backend = dynamo_testing.EagerAndRecordGraphs()
+
+            @torch.compile(backend=backend, fullgraph=True)
+            def fn(x):
+                return PrivateUse1FloatTensor(x)
+
+            x = torch.randn(3)
+            self.assertEqual(fn(x), x)
+            self.assertEqual(len(backend.graphs), 1)
+            self.assertTrue(
+                any(
+                    node.op == "call_function" and node.target is PrivateUse1FloatTensor
+                    for node in backend.graphs[0].graph.nodes
+                )
             )
 
     @make_dynamo_test
