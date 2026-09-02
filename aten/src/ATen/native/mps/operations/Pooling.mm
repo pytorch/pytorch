@@ -632,6 +632,8 @@ static void max_unpool_out_mps_template(const Tensor& input,
                                         Tensor& output,
                                         const int32_t pooling_dims,
                                         const std::string& op_name) {
+  TORCH_CHECK_NOT_IMPLEMENTED(!input.is_complex(), op_name, ": not implemented for complex dtypes");
+
   TORCH_CHECK(output_size_.size() == static_cast<size_t>(pooling_dims),
               op_name,
               "There should be exactly ",
