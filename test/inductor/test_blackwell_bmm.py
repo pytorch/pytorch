@@ -4,6 +4,7 @@ from unittest import mock
 
 import torch
 from torch._inductor import config, ir
+from torch._inductor.autows_utils import meta_ws_enabled
 from torch._inductor.kernel.bmm import (
     append_blackwell_bmm_choice,
     BlackwellBMMConfig,
@@ -88,6 +89,10 @@ class TestBlackwellBMM(TestCase):
         torch.testing.assert_close(actual, torch.bmm(a, b), atol=16.0, rtol=1e-1)
         self.assertIn("make_tensor_descriptor", codes[0])
         self.assertNotIn("two_ctas=True", codes[0])
+        if meta_ws_enabled():
+            self.assertIn("data_partition_factor=", codes[0])
+        else:
+            self.assertNotIn("data_partition_factor", codes[0])
 
     def test_1cta_strided_batch(self):
         self._run(False)
@@ -95,6 +100,7 @@ class TestBlackwellBMM(TestCase):
     def test_1cta_broadcast_batch_stride(self):
         self._run(True)
 
+    @unittest.skipUnless(meta_ws_enabled(), "2CTA Blackwell BMM requires MetaWS")
     def test_2cta_flat_output(self):
         bsz, m, k, n = 2, 256, 8193, 128
         a_storage = torch.randn(bsz, k, m, device="cuda", dtype=torch.bfloat16)

@@ -5,6 +5,7 @@ from unittest import mock
 
 import torch
 from torch._inductor import config, ir
+from torch._inductor.autows_utils import meta_ws_enabled
 from torch._inductor.kernel.decompose_k import (
     append_blackwell_decompose_k_partial_choice,
     BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS,
@@ -125,6 +126,7 @@ class TestBlackwellDecomposeKPartial(TestCase):
     def test_1cta(self):
         self._run(False)
 
+    @unittest.skipUnless(meta_ws_enabled(), "2CTA decompose-K requires MetaWS")
     def test_2cta(self):
         self._run(True)
 

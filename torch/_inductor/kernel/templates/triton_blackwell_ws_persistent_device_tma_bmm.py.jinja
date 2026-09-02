@@ -63,6 +63,7 @@
     num_pid_in_group = GROUP_M * grid_n
     tile_id_c = start_pid - NUM_SMS
 
+    {%- if USE_META_WS %}
     for tile_id in tl.range(
         start_pid,
         num_tiles,
@@ -72,6 +73,15 @@
         data_partition_factor=DATA_PARTITION_FACTOR,
         separate_epilogue_store=SEPARATE_EPILOGUE_STORE,
     ):
+    {%- else %}
+    for tile_id in tl.range(
+        start_pid,
+        num_tiles,
+        NUM_SMS,
+        flatten=FLATTEN,
+        warp_specialize=WARP_SPECIALIZE,
+    ):
+    {%- endif %}
         pid_m, pid_n = _blackwell_bmm_pid(
             tile_id, num_pid_in_group, grid_m, GROUP_M
         )
@@ -86,12 +96,20 @@
             b = b_desc.load(
                 [offs_k, offs_bn] if B_ROW_MAJOR else [offs_bn, offs_k],
             )
+            {%- if TWO_CTAS %}
             accumulator += tl.dot(
                 a if A_ROW_MAJOR else a.T,
                 b if B_ROW_MAJOR else b.T,
                 allow_tf32=ALLOW_TF32,
-                two_ctas=TWO_CTAS,
+                two_ctas=True,
             )
+            {%- else %}
+            accumulator += tl.dot(
+                a if A_ROW_MAJOR else a.T,
+                b if B_ROW_MAJOR else b.T,
+                allow_tf32=ALLOW_TF32,
+            )
+            {%- endif %}
 
         tile_id_c += NUM_SMS
         pid_m, pid_n = _blackwell_bmm_pid(

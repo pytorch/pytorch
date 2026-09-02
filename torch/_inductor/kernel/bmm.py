@@ -10,6 +10,7 @@ from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTempla
 from torch._inductor.kernel.mm_common import load_kernel_template
 
 from .. import config as inductor_config, ir, lowering as L
+from ..autows_utils import meta_ws_enabled
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import lowerings, make_pointwise, make_reduction, transform_args
 from ..runtime.runtime_utils import get_max_y_grid
@@ -130,12 +131,15 @@ def append_blackwell_bmm_choice(
         )
     m_tiles = math.ceil(m / config.block_m)
     if config.two_ctas:
+        if not meta_ws_enabled():
+            raise NotImplementedError("2CTA Blackwell BMM requires MetaWS")
         if not flattened_output:
             raise NotImplementedError(
                 "2CTA Blackwell BMM requires a flattened rank-2 output descriptor"
             )
         if m_tiles % 2:
             raise NotImplementedError("2CTA Blackwell BMM requires two useful M peers")
+    use_meta_ws = meta_ws_enabled()
     kwargs = {
         "BLOCK_M": config.block_m,
         "BLOCK_N": config.block_n,
@@ -145,9 +149,9 @@ def append_blackwell_bmm_choice(
         "A_ROW_MAJOR": a_row_major,
         "B_ROW_MAJOR": b_row_major,
         "ALLOW_TF32": False,
-        "USE_META_WS": True,
+        "USE_META_WS": use_meta_ws,
         "WARP_SPECIALIZE": True,
-        "FLATTEN": False,
+        "FLATTEN": not use_meta_ws,
         "DATA_PARTITION_FACTOR": 1,
         "SEPARATE_EPILOGUE_STORE": True,
         "EPILOGUE_SUBTILE": config.epilogue_subtile,

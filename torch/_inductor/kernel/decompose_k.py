@@ -11,6 +11,7 @@ from typing import Any
 
 import torch
 from torch._inductor import inductor_prims, ir
+from torch._inductor.autows_utils import meta_ws_enabled
 from torch._inductor.lowering import register_lowering
 from torch._inductor.select_algorithm import SymbolicGridFn, TritonTemplate
 from torch._inductor.utils import get_num_sms
@@ -88,6 +89,8 @@ def append_blackwell_decompose_k_partial_choice(
         raise AssertionError(f"incompatible K dimensions: {k} and {k_b}")
     if layout.dtype != torch.float32:
         raise AssertionError("decompose-K partial workspace must be FP32")
+    if config.two_ctas and not meta_ws_enabled():
+        raise NotImplementedError("2CTA Blackwell decompose-K requires MetaWS")
 
     m_tiles = math.ceil(m / config.block_m)
     if config.two_ctas:
@@ -104,6 +107,7 @@ def append_blackwell_decompose_k_partial_choice(
     if (k_split - 1) * k_part >= k:
         raise NotImplementedError("aligned split leaves an empty final partition")
 
+    use_meta_ws = meta_ws_enabled()
     kwargs: dict[str, Any] = {
         "BLOCK_M": config.block_m,
         "BLOCK_N": config.block_n,
@@ -115,9 +119,9 @@ def append_blackwell_decompose_k_partial_choice(
         "A_ROW_MAJOR": mat1.get_stride()[1] == 1,
         "B_ROW_MAJOR": mat2.get_stride()[1] == 1,
         "ALLOW_TF32": False,
-        "USE_META_WS": True,
+        "USE_META_WS": use_meta_ws,
         "WARP_SPECIALIZE": True,
-        "FLATTEN": False,
+        "FLATTEN": not use_meta_ws,
         "DATA_PARTITION_FACTOR": 1,
         "SEPARATE_EPILOGUE_STORE": True,
         "EPILOGUE_SUBTILE": config.epilogue_subtile,
