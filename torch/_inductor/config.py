@@ -705,14 +705,6 @@ nvgemm_supplement_configs: bool = (
 # small-M decode shapes typical in LLM inference (M << N).
 nvgemm_swap_ab: bool = os.environ.get("TORCHINDUCTOR_NVGEMM_SWAP_AB", "0") == "1"
 
-# CUDA-graph replay overhead is large enough to distort autotuning for the
-# short, decode-range NVFP4 GEMMs used during LLM inference.  Use a modest
-# scoped unroll for M <= 256 NVGEMM requests while leaving the generic CUDA-graph
-# benchmark unroll unchanged.  Set to 1 to disable the NVGEMM-specific policy.
-nvgemm_autotune_cudagraph_unroll = int(
-    os.environ.get("TORCHINDUCTOR_NVGEMM_AUTOTUNE_CUDAGRAPH_UNROLL", "16")
-)
-
 # Benchmark medium-M NVFP4 GEMMs against a rotating pool of weight tensors large
 # enough to exceed L2. Replaying one weight makes it artificially hot and can
 # select a slower kernel for transformer inference, where each layer uses a
