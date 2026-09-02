@@ -102,6 +102,7 @@ from .base import (
     NO_SUCH_SUBOBJ,
     readonly_setter,
     store_attr_mutation,
+    type_qualified_name,
     unmodeled_setter,
     ValueMutationNew,
     VariableTracker,
@@ -4985,7 +4986,7 @@ class GetSetDescriptorVariable(DescriptorVariable):
             raise_attribute_error(
                 tx,
                 f"attribute '{name}' of "
-                f"'{self.descriptor.__objclass__.__name__}' objects "
+                f"'{type_qualified_name(self.descriptor.__objclass__)}' objects "
                 "is not writable",
             )
         entry.setter(obj, tx, value)
