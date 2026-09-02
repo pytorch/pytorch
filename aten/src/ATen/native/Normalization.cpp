@@ -85,9 +85,11 @@ DEFINE_DISPATCH(batch_norm_cpu_backward_stub);
 DEFINE_DISPATCH(renorm_scale_factor_stub);
 
 namespace {
-  void check_dims_match_num_input_features(const char* arg_name, const SymInt& expected, const SymInt& actual){
-    TORCH_CHECK(actual == expected,
-             arg_name, " should contain ", expected, " elements not ", actual);
+  void check_dims_match_num_input_features(const char* arg_name, const SymInt& expected, const Tensor& tensor){
+    TORCH_CHECK(tensor.dim() == 1,
+             arg_name, " should be a 1D tensor, but got a tensor with ", tensor.dim(), " dims");
+    TORCH_CHECK(tensor.sym_numel() == expected,
+             arg_name, " should contain ", expected, " elements not ", tensor.sym_numel());
   }
 
   inline Tensor repeat_if_defined(const Tensor& t, const SymInt& repeat) {
@@ -588,20 +590,20 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
   }
 
   if (running_mean.defined()) {
-    check_dims_match_num_input_features("running_mean", num_features, running_mean.sym_numel());
+    check_dims_match_num_input_features("running_mean", num_features, running_mean);
   } else if (!training) {
     TORCH_CHECK(false, "running_mean must be defined in evaluation mode");
   }
   if (running_var.defined()) {
-    check_dims_match_num_input_features("running_var", num_features, running_var.sym_numel());
+    check_dims_match_num_input_features("running_var", num_features, running_var);
   } else if (!training) {
     TORCH_CHECK(false, "running_var must be defined in evaluation mode");
   }
   if (weight.defined()) {
-    check_dims_match_num_input_features("weight", num_features, weight.sym_numel());
+    check_dims_match_num_input_features("weight", num_features, weight);
   }
   if (bias.defined()) {
-    check_dims_match_num_input_features("bias", std::move(num_features), bias.sym_numel());
+    check_dims_match_num_input_features("bias", std::move(num_features), bias);
   }
 
   BatchNormBackend backend = _select_batch_norm_backend(input, weight, bias, running_mean, running_var, training, eps);
