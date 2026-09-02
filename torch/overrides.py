@@ -922,6 +922,9 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.nn.functional.hinge_embedding_loss: (
             lambda input, target, margin=1.0, size_average=None, reduce=None, reduction="mean": -1
         ),
+        torch.nn.functional.info_nce_loss: (
+            lambda query, positive_key, negative_keys=None, temperature=0.07, reduction="mean": -1
+        ),
         torch.nn.functional.instance_norm: (
             lambda input, running_mean=None, running_var=None, weight=None, bias=None, use_input_stats=True, momentum=0.1, eps=1e-05: -1
         ),

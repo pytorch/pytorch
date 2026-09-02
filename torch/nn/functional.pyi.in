@@ -384,6 +384,16 @@ def huber_loss(
 
 __all__ += ["huber_loss"]
 
+def info_nce_loss(
+    query: Tensor,
+    positive_key: Tensor,
+    negative_keys: Tensor | None = ...,
+    temperature: float = ...,
+    reduction: str = ...,
+) -> Tensor: ...
+
+__all__ += ["info_nce_loss"]
+
 def instance_norm(
     input: Tensor,
     running_mean: Tensor | None = ...,

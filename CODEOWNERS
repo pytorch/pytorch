@@ -760,6 +760,7 @@
 /test/optim/ @janeyx99
 /test/test_autograd.py @soulitzer
 /test/test_autograd_fallback.py @soulitzer
+# /test/test_info_nce_loss.py
 # /test/test_modules.py
 # /test/test_nn.py
 # /test/test_nnapi.py
