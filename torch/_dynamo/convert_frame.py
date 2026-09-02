@@ -671,9 +671,7 @@ class ConvertFrameAssert:
         else:
             cache_entries_for_reasons = cache_entries
         package = self._package
-        explicit_package = (
-            package is not None and package.serialization_guard_filter_fn is not None
-        )
+        explicit_package = package is not None and package.explicit_capture
         if explicit_package:
             if package is None:
                 raise AssertionError("explicit package must not be None")
@@ -845,7 +843,7 @@ class ConvertFrameAssert:
         if (
             config.caching_precompile
             and self._package is not None
-            and self._package.serialization_guard_filter_fn is None
+            and not self._package.explicit_capture
         ):
             from .package import DynamoCache
 
@@ -1062,6 +1060,7 @@ class DynamoOutput:
             collections.abc.Sequence[bool],
         ]
         | None = None,
+        explicit_capture: bool = False,
     ) -> CheckFunctionManager:
         output_graph = self.tracer_output.output_graph
         if output_graph is None:
@@ -1089,6 +1088,7 @@ class DynamoOutput:
                 save,
                 strict_error,
                 serialization_guard_filter_fn,
+                explicit_capture,
             )
 
         from torch.fx.experimental.validator import bisect, ValidationException
@@ -1102,6 +1102,7 @@ class DynamoOutput:
                 save,
                 strict_error,
                 serialization_guard_filter_fn,
+                explicit_capture,
             )
         except ValidationException:
             bisect(output_graph.shape_env)
@@ -1120,6 +1121,7 @@ class DynamoOutput:
             collections.abc.Sequence[bool],
         ]
         | None = None,
+        explicit_capture: bool = False,
     ) -> CheckFunctionManager:
         return CheckFunctionManager(
             code,
@@ -1128,6 +1130,7 @@ class DynamoOutput:
             hooks.guard_fail_fn if hooks else None,
             hooks.guard_filter_fn if hooks else None,
             serialization_guard_filter_fn=serialization_guard_filter_fn,
+            explicit_capture=explicit_capture,
             save_guards=save,
             strict_error=strict_error,
         )
@@ -2025,6 +2028,7 @@ def _compile(
             build_guards_ctx.enter_context(
                 torch_function_mode_stack_state_mgr.temp_restore_stack()
             )
+        explicit_capture = package is not None and package.explicit_capture
         with dynamo_timed("build_guards", log_pt2_compile_event=True), build_guards_ctx:
             check_fn = dynamo_output.build_guards(
                 code,
@@ -2036,18 +2040,18 @@ def _compile(
                     if package is not None
                     else None
                 ),
-                strict_error=(
-                    package is not None
-                    and package.serialization_guard_filter_fn is not None
-                ),
+                explicit_capture=explicit_capture,
+                strict_error=explicit_capture,
             )
 
-        if package is not None:
+        # bypass_package clears output.package when this entry's guards could
+        # not be serialized; the local still holds what was passed in.
+        if output.package is not None:
             if check_fn.guards_state is None:
                 raise AssertionError("check_fn.guards_state must not be None")
-            package.add_guarded_code(check_fn.guards_state, out_code)
-            package.add_inlined_source(output.tracing_context.traced_code)
-            package.update_device_type(output.current_tracer.graph)
+            output.package.add_guarded_code(check_fn.guards_state, out_code)
+            output.package.add_inlined_source(output.tracing_context.traced_code)
+            output.package.update_device_type(output.current_tracer.graph)
 
         compile_id_str = str(compile_id) if compile_id is not None else "Unknown"
         annotation_str = "Torch-Compiled Region: " + compile_id_str

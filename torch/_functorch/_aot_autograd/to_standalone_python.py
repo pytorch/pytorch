@@ -47,6 +47,7 @@ limitation -- it is the price of the source rendering.
 from __future__ import annotations
 
 import ast
+import contextlib
 import re
 import threading
 from typing import Any, TYPE_CHECKING
@@ -92,7 +93,8 @@ _COMPILE_LOCK = threading.RLock()
 #
 # The objects a wrapper closes over come in a few kinds:
 #   - public runtime helpers the codegen'd source references (e.g. increment_version,
-#     gen_alias_from_base, _unwrap_tensoralias, mark_dynamo_propagated_dynamic_indices,
+#     gen_alias_from_base, _unwrap_tensoralias, _dealias_marked_returns,
+#     mark_dynamo_propagated_dynamic_indices,
 #     the CUDARngStateHelper staticmethods) -- ordinary importable objects;
 #   - the inner Inductor ``call`` that the chain ultimately invokes;
 #   - sibling captured wrappers -- the next link of the runtime chain (an inner subclass /
@@ -209,6 +211,14 @@ def _known_helper_table() -> dict[int, tuple[str, str]]:
         id(rt._unwrap_tensoralias): (
             f"{_RT} _unwrap_tensoralias",
             "_unwrap_tensoralias",
+        ),
+        id(rt._dealias_marked_returns): (
+            f"{_RT} _dealias_marked_returns",
+            "_dealias_marked_returns",
+        ),
+        id(rt._replay_input_mutation): (
+            f"{_RT} _replay_input_mutation",
+            "_replay_input_mutation",
         ),
         id(rt.CUDARngStateHelper.get_torch_state_as_tuple): (
             f"{_RT} CUDARngStateHelper",
@@ -939,12 +949,56 @@ def namespace_module_names(sources: Sequence[str]) -> list[str]:
     return out
 
 
+@contextlib.contextmanager
+def _capture_autograd_specs(into: list[tuple[int | None, Any]]) -> Iterator[None]:
+    """Record every AOTDispatchAutogradCompileSpec AOTAutograd builds while active.
+
+    The training compose needs the spec (fw_metadata, RNG state, disable_amp,
+    the saved/symint counts), which is built during the capture pass and not
+    otherwise reachable. Each one is tagged with the TracingContext identity the
+    codegen'd wrappers carry (``GeneratedSource.origin_id``), so a re-entrant
+    lowering's spec is told apart the same way its wrappers are.
+    """
+    import torch
+
+    from . import runtime_wrappers as _rw
+
+    factory = _rw._AOTDispatchAutogradFunctionFactory
+    orig_build = factory.build
+
+    def build(self):  # type: ignore[no-untyped-def]
+        ctx = torch._guards.TracingContext.try_get()
+        into.append((id(ctx) if ctx is not None else None, self.spec))
+        return orig_build(self)
+
+    factory.build = build  # type: ignore[method-assign]
+    try:
+        yield
+    finally:
+        factory.build = orig_build  # type: ignore[method-assign]
+
+
+def _select_training_spec(
+    specs: list[tuple[int | None, Any]], captured: list[GeneratedSource]
+) -> Any:
+    """The spec built under the same TracingContext as the captured orchestration."""
+    orchestrations = [
+        g for g in captured if g.artifact_name == "runtime_wrapper_orchestration"
+    ]
+    target_origin = orchestrations[-1].origin_id if orchestrations else None
+    matching = [spec for origin, spec in specs if origin == target_origin]
+    if len(matching) != 1:
+        raise NotImplementedError(
+            "aot_autograd.compile_to_python expected exactly one autograd spec "
+            f"built for the training graph, captured {len(matching)}."
+        )
+    return matching[0]
+
+
 def _compose_training_module(
     fw_python: str,
     bw_python: str,
     captured: list[GeneratedSource],
-    fw_call_obj: Any,
-    bw_call_obj: Any,
     spec: Any,
 ) -> str:
     """Compose a FORWARD and BACKWARD lowering into one standalone module.
@@ -956,10 +1010,11 @@ def _compose_training_module(
     ``backward_prologue`` / ``backward_epilogue`` beside them), but the class
     holding them is ordinary Python, so the composer emits it.
 
-    Both inductor modules are spliced at module level and each one's entry is
-    snapshotted immediately, because the second block rebinds ``call`` /
-    ``Runner`` / the kernels that the first block's code resolves as late-bound
-    globals.
+    Both inductor modules are spliced at module level, and each one's ``call`` /
+    ``Runner`` / kernels are renamed with a per-module suffix
+    (``namespace_module_names``) because a module resolves those as late-bound
+    globals when invoked, so the second block would otherwise rebind the names
+    the first block's code looks up.
     """
 
     if spec.maybe_subclass_meta is not None:
@@ -1090,10 +1145,9 @@ def _compose_training_module(
         "import contextlib",
         "import torch",
         "import weakref",
-        "from torch._functorch._aot_autograd.runtime_wrappers import "
-        "_AutogradRngStateTracker, _AutogradSavedState, "
-        "_snapshot_external_objects, index_to_external_object_weakref",
         "from torch._functorch._aot_autograd.standalone_runtime import "
+        "_AutogradRngStateTracker, _AutogradSavedState, "
+        "_snapshot_external_objects, index_to_external_object_weakref, "
         "normalize_as_list",
     }
 
@@ -1113,59 +1167,101 @@ def _finalize(ctx, fw_outs):
     return tuple(raw_returns)
 
 
-def _backward_impl(ctx, all_args):
-    ctx.maybe_clear_saved_tensors()
-    for idx, obj in getattr(ctx, "_external_objects", {{}}).items():
-        index_to_external_object_weakref[idx] = weakref.ref(obj)
-    amp = torch._C._DisableAutocast if _DISABLE_AMP else contextlib.nullcontext
-    with amp():
-        out = _inner_call_bw(all_args)
-    return normalize_as_list(out)
-
-
-def _double_backward(ctx, impl_fn, all_args):
-    class _DoubleBackward(torch.autograd.Function):
-        @staticmethod
-        def forward(double_ctx, *unused_args):
-            return impl_fn(double_ctx)
-
-        @staticmethod
-        def backward(ctx, *args):
-            raise RuntimeError(
-                "torch.compile with aot_autograd does not currently support "
-                "double backward"
-            )
-
-    if not any(t.requires_grad for t in all_args if isinstance(t, torch.Tensor)):
-        all_args = [torch.empty(0, requires_grad=True)] + all_args
-    return _DoubleBackward.apply(*all_args)
-
-
 class _CompiledFunction(torch.autograd.Function):
+    # Same class attributes as AOTAutograd's CompiledFunction (runtime_wrappers.py).
+    compiled_fw = _inner_call_fw
+    compiled_bw = _inner_call_bw
+    metadata = _fw_metadata
+    # The compose refuses tensor subclasses, so this is exactly None here.
+    maybe_subclass_metadata = None
+    num_symints_saved_for_bw = {spec.num_symints_saved_for_bw!r}
+    _aot_id = {spec.aot_config.aot_id!r}
+    # The backward is already lowered above; None is what the real class holds
+    # once its backward is compiled eagerly.
+    _lazy_backward_info = None
+    _bw_prologue_fn = _backward_prologue
+    _bw_epilogue_fn = _backward_epilogue
+    _fwd_fn = _compiled_forward
+    _bwd_fn = _compiled_backward
     boxed_grads_call = True
 
     @staticmethod
+    def _compiled_autograd_key(ctx):
+        return (ctx._autograd_function_id, *ctx.symints)
+
+    @staticmethod
     def forward(ctx, *deduped_flat_tensor_args):
-        return _compiled_forward(
+        return _CompiledFunction._fwd_fn(
             ctx,
             deduped_flat_tensor_args,
             _rng_state.add_forward_args,
             _saved_state.save_from_forward,
             _finalize,
-            _inner_call_fw,
+            _CompiledFunction.compiled_fw,
         )
 
     @staticmethod
     def backward(ctx, *flat_args):
-        return _compiled_backward(
+        return _CompiledFunction._bwd_fn(
             flat_args,
             ctx,
-            _backward_prologue,
+            _CompiledFunction._bw_prologue_fn,
             _rng_state.add_backward_args,
-            _backward_impl,
-            _backward_epilogue,
-            _double_backward,
+            _CompiledFunction._backward_impl,
+            _CompiledFunction._bw_epilogue_fn,
+            _CompiledFunction._double_backward,
         )
+
+    @staticmethod
+    def _double_backward(ctx, impl_fn, all_args):
+        class _CompiledFunctionBackward(torch.autograd.Function):
+            _aot_id = _CompiledFunction._aot_id
+
+            @staticmethod
+            def forward(double_ctx, *unused_args):
+                return impl_fn(double_ctx)
+
+            @staticmethod
+            def backward(ctx, *args):
+                raise RuntimeError(
+                    "torch.compile with aot_autograd does not currently support "
+                    "double backward"
+                )
+
+        _CompiledFunctionBackward._compiled_autograd_key = (
+            _CompiledFunction._compiled_autograd_key
+        )
+        if not any(
+            t.requires_grad for t in all_args if isinstance(t, torch.Tensor)
+        ):
+            all_args = [torch.empty(0, requires_grad=True)] + all_args
+        return _CompiledFunctionBackward.apply(*all_args)
+
+    @staticmethod
+    def _backward_impl(ctx, all_args):
+        ctx.maybe_clear_saved_tensors()
+        if (
+            torch._functorch.config.donated_buffer
+            and torch._C._autograd._get_current_graph_task_keep_graph()
+            and _fw_metadata.bw_donated_idxs != []
+        ):
+            torch._check(
+                False,
+                lambda: (
+                    "This backward function was compiled with non-empty donated "
+                    "buffers which requires create_graph=False and retain_graph=False. "
+                    "Please keep backward(create_graph=False, retain_graph=False) "
+                    "across all backward() function calls, or set "
+                    "torch._functorch.config.donated_buffer=False to disable "
+                    "donated buffer."
+                ),
+            )
+        for idx, obj in getattr(ctx, "_external_objects", {{}}).items():
+            index_to_external_object_weakref[idx] = weakref.ref(obj)
+        amp = torch._C._DisableAutocast if _DISABLE_AMP else contextlib.nullcontext
+        with amp():
+            out = _CompiledFunction.compiled_bw(all_args)
+        return normalize_as_list(out)
 
 
 def _boxed_autograd_apply(args):
@@ -1182,10 +1278,13 @@ def call(flat_inputs):  # noqa: F811
     # ``Runner`` and its kernels; without renaming, the forward's ``call``
     # resolves the BACKWARD's kernels at invocation time.
     fw_ns, bw_ns = namespace_module_names([fw_python, bw_python])
+    # ``import torch`` first: in a fresh process the standalone_runtime import
+    # must not be the one that pulls torch in.
     parts = [
         "# Generated by aot_autograd.compile_to_python (training) -- do not edit.",
         "",
-        *sorted(imports),
+        "import torch",
+        *sorted(imports - {"import torch"}),
         "",
         "# === Inner Inductor output code: FORWARD ===",
         fw_ns,
@@ -1360,18 +1459,8 @@ def compile_to_python(
         # inner inductor ``call`` by object identity, so the placeholder is only a
         # compile-time token and never runs.
         captured: list[GeneratedSource] = []
+        specs: list[tuple[int | None, Any]] = []
         dense: dict[str, Any] = {}
-        # The training compose needs AOTAutograd's own spec (fw_metadata, RNG
-        # state, disable_amp, the saved/symint counts). It is built during the
-        # capture pass and not otherwise reachable from out here.
-        from . import runtime_wrappers as _rw
-
-        factory = _rw._AOTDispatchAutogradFunctionFactory
-        _orig_build = factory.build
-
-        def _grab_spec(self):  # type: ignore[no-untyped-def]
-            dense["spec"] = self.spec
-            return _orig_build(self)
 
         def _capture_inner_compile(dense_gm, dense_inputs, **kwargs):
             # A training graph reaches this TWICE -- once for the forward, once
@@ -1391,7 +1480,6 @@ def compile_to_python(
             # wrapper's inner-ref yet neither is a captured wrapper fn), which is what
             # separates INNER wrappers from the OUTER dedup / synthetic-base wrappers.
             placeholder = make_boxed_func(dense_gm.forward)
-            dense[slot + "_placeholder"] = placeholder
             if slot == "gm":
                 dense["placeholder"] = placeholder
             return placeholder
@@ -1412,26 +1500,23 @@ def compile_to_python(
         shapes_mode = (
             "from_graph" if _graph_has_dynamic_shapes(gm) else "from_example_inputs"
         )
-        factory.build = _grab_spec  # type: ignore[method-assign]
-        try:
-            with (
-                torch.enable_grad() if grad_enabled else torch.no_grad(),
-                _standalone_context(gm, shapes_mode, aot=False),
-                capture_generated_sources(captured),
-            ):
-                with _share_torchbind_and_process_group_on_deepcopy():
-                    gm_owned = copy.deepcopy(gm)
-                compile_fx(
-                    gm_owned,
-                    example_inputs,
-                    # Placeholder returns a boxed callable, not a full OutputCode;
-                    # AOTAutograd only wraps it (never inductor-post-compiles it), so
-                    # this is fine at runtime.
-                    inner_compile=_capture_inner_compile,  # pyrefly: ignore[bad-argument-type]
-                    ignore_shape_env=_resolve_ignore_shape_env(shapes_mode),
-                )
-        finally:
-            factory.build = _orig_build  # type: ignore[method-assign]
+        with (
+            torch.enable_grad() if grad_enabled else torch.no_grad(),
+            _standalone_context(gm, shapes_mode, aot=False),
+            capture_generated_sources(captured),
+            _capture_autograd_specs(specs),
+        ):
+            with _share_torchbind_and_process_group_on_deepcopy():
+                gm_owned = copy.deepcopy(gm)
+            compile_fx(
+                gm_owned,
+                example_inputs,
+                # Placeholder returns a boxed callable, not a full OutputCode;
+                # AOTAutograd only wraps it (never inductor-post-compiles it), so
+                # this is fine at runtime.
+                inner_compile=_capture_inner_compile,  # pyrefly: ignore[bad-argument-type]
+                ignore_shape_env=_resolve_ignore_shape_env(shapes_mode),
+            )
         if "gm" not in dense:
             raise RuntimeError(
                 "aot_autograd.compile_to_python: AOTAutograd never reached the inner "
@@ -1469,7 +1554,8 @@ def compile_to_python(
             )
             return source, cache
 
-        _restride_backward_placeholders(dense["bw"], fwd_output_strides, dense["spec"])
+        spec = _select_training_spec(specs, captured)
+        _restride_backward_placeholders(dense["bw"], fwd_output_strides, spec)
         # is_backward=True matches torch.compile's backward compile: it gates
         # GraphLowering's backward-only require_contiguous safeguard for
         # untagged implicit-fallback aten ops (#140452), without which such a
@@ -1477,14 +1563,7 @@ def compile_to_python(
         bw_python, _ = _inductor_compile_to_python(
             dense["bw"], [], options=options, is_inference=False, is_backward=True
         )
-        source = _compose_training_module(
-            inner_python,
-            bw_python,
-            captured,
-            dense["placeholder"],
-            dense["bw_placeholder"],
-            dense["spec"],
-        )
+        source = _compose_training_module(inner_python, bw_python, captured, spec)
     return source, cache
 
 

@@ -89,6 +89,17 @@ def customized_ctx_manager_with_graph_break(mode):
         torch._C._set_grad_enabled(prev)
 
 
+class HeldAutocastModule(torch.nn.Module):
+    def __init__(self, ctx):
+        super().__init__()
+        self.ctx = ctx
+        self.l = torch.nn.Linear(4, 4)
+
+    def forward(self, x):
+        with self.ctx:
+            return self.l(x)
+
+
 class CtxManagerTests(torch._dynamo.test_case.TestCase):
     def test_no_grad(self):
         def fn1(a, b):
@@ -322,6 +333,15 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled.device.index, 0)
         self.assertEqual(compiled.dtype, torch.float32)
 
+    def _compile_held_autocast_module(self):
+        module = HeldAutocastModule(torch.amp.autocast("cpu", dtype=torch.bfloat16))
+        cnts = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(module, backend=cnts)
+        x = torch.randn(4, 4)
+        self.assertEqual(compiled(x).dtype, torch.bfloat16)
+        self.assertEqual(cnts.frame_count, 1)
+        return module, compiled, cnts, x
+
     def test_autocast_object_guarded_by_value_not_identity(self):
         # A user-held autocast object reaches the trace as four specialized
         # values (device, dtype, enabled, cache_enabled), so those are what the
@@ -329,22 +349,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         # strong -- a second object configured identically cannot reuse the
         # graph -- and unserializable, which is what makes a precompiled
         # artifact drop the guard entirely.
-        class MyModule(torch.nn.Module):
-            def __init__(self, ctx):
-                super().__init__()
-                self.ctx = ctx
-                self.l = torch.nn.Linear(4, 4)
-
-            def forward(self, x):
-                with self.ctx:
-                    return self.l(x)
-
-        module = MyModule(torch.amp.autocast("cpu", dtype=torch.bfloat16))
-        cnts = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(module, backend=cnts)
-        x = torch.randn(4, 4)
-        self.assertEqual(compiled(x).dtype, torch.bfloat16)
-        self.assertEqual(cnts.frame_count, 1)
+        module, compiled, cnts, x = self._compile_held_autocast_module()
 
         # A DIFFERENT object with the same settings: same graph, no recompile.
         # An id() guard would miss here and recompile.
@@ -366,22 +371,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         # stale bf16 graph. This must be the FIRST divergence after compile --
         # any rebind in between would give the id() guard a different object
         # and let a recompile mask the staleness.
-        class MyModule(torch.nn.Module):
-            def __init__(self, ctx):
-                super().__init__()
-                self.ctx = ctx
-                self.l = torch.nn.Linear(4, 4)
-
-            def forward(self, x):
-                with self.ctx:
-                    return self.l(x)
-
-        module = MyModule(torch.amp.autocast("cpu", dtype=torch.bfloat16))
-        cnts = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(module, backend=cnts)
-        x = torch.randn(4, 4)
-        self.assertEqual(compiled(x).dtype, torch.bfloat16)
-        self.assertEqual(cnts.frame_count, 1)
+        module, compiled, cnts, x = self._compile_held_autocast_module()
 
         module.ctx._enabled = False
         self.assertEqual(compiled(x).dtype, torch.float32)

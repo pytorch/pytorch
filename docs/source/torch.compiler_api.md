@@ -45,6 +45,13 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
 ## torch.compiler.precompile
 
+```{warning}
+`torch.compiler.precompile` and everything reached through it (`precompile.load`,
+`torch.compiler.PrecompiledCallable`, and the other objects it returns) is a
+prototype API. Signatures, error types and the artifact format may change between
+releases without a deprecation cycle.
+```
+
 % precompile is a callable instance (not a plain function), which Sphinx
 % autosummary cannot render, so it is documented manually below and
 % intentionally omitted from the autosummary block above.
@@ -227,7 +234,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 .. autoexception:: torch.compiler.PrecompileError
 
 .. autoclass:: torch.compiler.PrecompiledCallable
-   :members:
+   :members: unload, serve_time_compiles
+
+   Returned by :func:`precompile.load` for an artifact that serves by installing,
+   and used as a callable or context manager; it is not constructed directly.
 
 
 ```

@@ -130,7 +130,14 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // this closes). Guarded by pending_invalidation_mutex; applied by the next
   // cache_mutex holder whose cache_python_depth is zero.
   struct PendingEviction {
-    bool clear_all; // when false, an owner reset scoped by the fields below
+    enum Kind : uint8_t {
+      CLEAR_ALL, // every cache and precompile entry
+      OWNER, // precompile entries of (region_id, owner)
+      PRECOMPILE_REGION, // precompile entries of region_id
+      PRECOMPILE_ALL, // every precompile entry
+      CACHE_REGION, // cache entries of region_id
+    };
+    Kind kind;
     int64_t region_id;
     py::object owner;
   };
