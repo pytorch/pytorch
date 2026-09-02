@@ -3048,7 +3048,7 @@ class TestProbeSpawnFailures(unittest.TestCase):
         with mock.patch.object(build_stage2.subprocess, "run", fake_run):
             build_stage2._torch_probe("True")
             build_stage2._torch_value("1")
-        self.assertEqual(seen, [build_stage2._PROBE_TIMEOUT] * 2)
+        self.assertEqual(seen, [build_stage2._PROBE_TIMEOUT_SECONDS] * 2)
 
 
 class TestRegistryConsistency(unittest.TestCase):

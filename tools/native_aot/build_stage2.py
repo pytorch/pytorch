@@ -3,9 +3,7 @@ generate the stub sources, and relink torch_cuda with them embedded.
 
 A post-install step because the kernel builders package-import torch, and
 scikit-build-core has no post-build hook inside the PEP 517 backend (the wheel
-is assembled before torch is importable). This module is the VERDICT half:
-it answers whether a build should export at all, and nothing here runs a
-step -- the CLI and the relink arrive with the rest of the driver.
+is assembled before torch is importable).
 
 Skips -- leaving a normal artifacts-free build -- when AOT kernels are not
 applicable. Keep this list in sync with should_run(), which reports each one:
@@ -21,9 +19,13 @@ applicable. Keep this list in sync with should_run(), which reports each one:
   * TORCH_CUDA_ARCH_LIST names no exportable arch (export.EXPORTABLE_ARCHES);
     with it unset, on-device export runs if a supported GPU is present
 
-Past those gates the DSL runtimes are REQUIRED, and any failure fails the build:
-a wheel missing declared kernels underperforms silently instead of failing.
-TORCH_NATIVE_AOT=0 builds without them.
+Two different processes, gated by skip list.
+
+  * Before: No stage-2, normal wheel without AOT artifacts
+  * After: stage 2 exports and embeds, runtimes required to progress, failures
+    fail the build.
+
+TORCH_NATIVE_AOT=0 opts out at any point.
 """
 
 import glob
@@ -47,18 +49,14 @@ sys.path.append(REPO)
 
 
 def _report(msg: str) -> None:
-    """Progress/diagnostics, on STDERR.
-
-    Not stdout: --print-verdict writes a machine-read word there and the CI
-    shells compare it with ==, so a report on the same stream corrupts the
-    verdict of the one case that reports AND proceeds (multi-arch)."""
+    """Progress and diagnostics on stderr, since --print-verdict owns stdout."""
     print(f"-- native-AOT stage 2: {msg}", file=sys.stderr, flush=True)
 
 
 # Long enough for a cold `import torch` on a machine already running a build,
 # short enough that a wedged one fails rather than holding the job to its step
 # limit with nothing on either stream.
-_PROBE_TIMEOUT = 300
+_PROBE_TIMEOUT_SECONDS = 300
 
 
 def _run_probe(code: str, expr: str) -> subprocess.CompletedProcess[str] | None:
@@ -76,7 +74,7 @@ def _run_probe(code: str, expr: str) -> subprocess.CompletedProcess[str] | None:
             capture_output=True,
             text=True,
             cwd=HERE,
-            timeout=_PROBE_TIMEOUT,
+            timeout=_PROBE_TIMEOUT_SECONDS,
         )
     except (OSError, subprocess.SubprocessError) as e:
         _report(f"probe {expr!r} could not run ({type(e).__name__}: {e})")
