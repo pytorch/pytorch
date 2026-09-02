@@ -2,7 +2,6 @@
 #include <torch/csrc/dynamo/guards.h>
 
 #include <torch/csrc/dynamo/cpython_includes.h>
-#include <torch/csrc/dynamo/debug_macros.h>
 #include <torch/csrc/dynamo/extra_state.h>
 
 #include <atomic>
@@ -37,16 +36,19 @@ CacheEntry::~CacheEntry() {
 C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
 
-void CacheEntry::invalidate(py::object deleted_guard_manager) {
-  // Keep the current pointer alive but make the fields as if no-op
-  this->guard_manager.attr("cache_entry") = py::none();
-  this->guard_manager.attr("extra_state") = py::none();
-  this->code = py::none();
+CacheEntry::Detached CacheEntry::invalidate(py::object deleted_guard_manager) {
+  Detached old{
+      std::move(this->guard_manager),
+      std::move(this->code),
+      std::move(this->backend)};
+  // The moved-from members are null, so these assignments decref nothing.
   this->guard_manager = std::move(deleted_guard_manager);
+  this->code = py::none();
+  this->backend = py::none();
   this->root_mgr = nullptr;
   this->diff_guard_root_mgr = nullptr;
   this->trace_annotation = "Invalidated";
-  this->backend = py::none();
+  return old;
 }
 
 void CacheEntry::update_diff_guard_root_manager() {
@@ -54,17 +56,6 @@ void CacheEntry::update_diff_guard_root_manager() {
       this->guard_manager.attr("diff_guard_root"));
 }
 
-PyObject* CacheEntry_to_obj(CacheEntry* e) {
-  if (!e) {
-    return py::none().release().ptr();
-  }
-  return py::cast(e, py::return_value_policy::reference).release().ptr();
-}
-
-// Returns a BORROWED reference, kept alive by the callback chain it was read
-// off. Both attributes below must therefore be plain stored attributes, not
-// properties or __getattr__ results, or the object dies with the temporary
-// py::object this returns the pointer of.
 // Set once, the first time a backend that carries a cache key is built. Until
 // then the lookup below is skipped: it is a MISS at every level of the callback
 // chain for everyone who never precompiles, and py::hasattr on a const char*
@@ -101,6 +92,10 @@ PyObject* lookup_optional_attr(py::handle obj, PyObject* name) {
   return value;
 }
 
+// Returns a BORROWED reference, kept alive by the callback chain it was read
+// off. Both attributes below must therefore be plain stored attributes, not
+// properties or __getattr__ results, or the object dies with the temporary
+// py::object this returns the pointer of.
 PyObject* get_backend(PyObject* callback) {
   static PyObject* cache_key_name =
       PyUnicode_InternFromString("_torchdynamo_cache_key");

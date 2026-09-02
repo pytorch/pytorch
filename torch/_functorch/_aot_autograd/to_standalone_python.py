@@ -983,13 +983,19 @@ def _compose_training_module(
             f"AOTAutograd to codegen {missing}, which this graph did not produce."
         )
     # Only the wrappers spliced below are wired into the emitted class; any other
-    # active wrapper (functionalized RNG, dedup, synthetic base, debug assert,
-    # effect tokens, ...) would otherwise be dropped from the artifact silently.
+    # active wrapper would otherwise be dropped from the artifact silently. That
+    # covers functionalized RNG, dedup, synthetic base, debug assert and effect
+    # tokens, and also the two the inference compose does splice: outputs that
+    # alias an input or intermediate (output_alias_wrapper) and input mutations
+    # applied outside the graph (mutation_epilogue), which for training would
+    # have to run inside the emitted autograd.Function's forward.
     unsupported = sorted(set(by_name) - {*required, "compiled_fn_wrapper"})
     if unsupported:
         raise NotImplementedError(
             "aot_autograd.compile_to_python cannot yet compose these runtime "
-            f"wrappers into standalone training source: {unsupported}."
+            f"wrappers into standalone training source: {unsupported}. Aliasing "
+            "outputs and out-of-graph input mutations are not yet composable "
+            "for training."
         )
 
     imports: set[str] = set()
@@ -1187,11 +1193,16 @@ def _restride_backward_placeholders(
 
     Layout optimization lets the compiled forward hand back e.g. channels-last
     saved activations, so the backward must be lowered against those strides
-    rather than the eager ones its joint trace carries; this mirrors
-    ``_aot_stage2b_bw_compile``. The strides arrive as expression strings over
-    the graph's shape symbols (see ``set_tracing_context_output_strides``), so
-    they are rebuilt in the graph's ShapeEnv and compared under
-    ``suppress_guards`` so a dynamic dim is not specialized by the comparison.
+    rather than the eager ones its joint trace carries; this plays the role of
+    ``_aot_stage2b_bw_compile``. It deliberately differs in one respect: that
+    path ordinarily receives hint ints (``evaluate_symexpr`` of the strides) and
+    restrides to those concrete values, whereas this one keeps the strides
+    symbolic, because baking one shape's hints into a standalone artifact that
+    must serve every shape its guards admit would be wrong. The strides arrive
+    as expression strings over the graph's shape symbols (see
+    ``set_tracing_context_output_strides``), so they are rebuilt in the graph's
+    ShapeEnv and compared under ``suppress_guards`` so a dynamic dim is not
+    specialized by the comparison.
 
     The rewrite lands on ``node.meta["val"]``, NOT on an example-inputs list:
     ``inductor.compile_to_python`` rebuilds its fakes from the placeholders'

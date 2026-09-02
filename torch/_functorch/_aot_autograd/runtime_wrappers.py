@@ -791,7 +791,25 @@ class _RuntimeForwardEpilogue:
                 else:
                     if not meta.mutates_data:
                         raise AssertionError("expected meta.mutates_data to be True")
-                if meta.is_leaf and original_inpt.requires_grad:
+                # Check if we have stream index information for this mutated input
+                if (
+                    self.runtime_metadata.mutated_inp_stream_indices is not None
+                    and i < len(self.runtime_metadata.mutated_inp_stream_indices)
+                    and self.runtime_metadata.mutated_inp_stream_indices[i] is not None
+                ):
+                    raise RuntimeError(
+                        "Mutations on inputs with user-specified streams are not yet supported. "
+                        "See: https://github.com/pytorch/pytorch/issues/172522"
+                    )
+                # Same three-way split as apply_in_graph_mutations, leaf or not: a
+                # hidden or no_grad write is legal on a requires-grad leaf under
+                # no_grad, and _replay_input_mutation keeps its version counter.
+                if meta.mutations_hidden_from_autograd:
+                    _replay_input_mutation(original_inpt, updated_inpt)
+                elif meta.mutations_under_no_grad_or_inference_mode:
+                    with torch.no_grad():
+                        original_inpt.copy_(updated_inpt)
+                elif meta.is_leaf and original_inpt.requires_grad:
                     # We can hit this situation in this case:
                     #   def f(x):
                     #       x.detach().mul_(2)
@@ -806,24 +824,7 @@ class _RuntimeForwardEpilogue:
                     # In that case, we fully want to hide the mutation from autograd, so detaching is ok.
                     original_inpt.detach().copy_(updated_inpt)
                 else:
-                    # Check if we have stream index information for this mutated input
-                    if (
-                        self.runtime_metadata.mutated_inp_stream_indices is not None
-                        and i < len(self.runtime_metadata.mutated_inp_stream_indices)
-                        and self.runtime_metadata.mutated_inp_stream_indices[i]
-                        is not None
-                    ):
-                        raise RuntimeError(
-                            "Mutations on inputs with user-specified streams are not yet supported. "
-                            "See: https://github.com/pytorch/pytorch/issues/172522"
-                        )
-                    if meta.mutations_hidden_from_autograd:
-                        _replay_input_mutation(original_inpt, updated_inpt)
-                    elif meta.mutations_under_no_grad_or_inference_mode:
-                        with torch.no_grad():
-                            original_inpt.copy_(updated_inpt)
-                    else:
-                        original_inpt.copy_(updated_inpt)
+                    original_inpt.copy_(updated_inpt)
 
     def _replay_output_aliases(
         self, orig_inputs: dict[int, Tensor], fw_outs: list[Any]
@@ -1152,31 +1153,30 @@ def _create_runtime_wrapper(
                             raise AssertionError(
                                 f"expected mutates_data for input {inpt_idx}"
                             )
-                    if meta.is_leaf:
+                    has_stream = (
+                        runtime_metadata.mutated_inp_stream_indices is not None
+                        and i < len(runtime_metadata.mutated_inp_stream_indices)
+                        and runtime_metadata.mutated_inp_stream_indices[i] is not None
+                    )
+                    # Mirrors RuntimeWrapper._apply_input_mutations branch for branch.
+                    if has_stream:
+                        msg_name = buf.bind_value(
+                            "_stream_err",
+                            "Mutations on inputs with user-specified streams are not yet supported. "
+                            "See: https://github.com/pytorch/pytorch/issues/172522",
+                        )
+                        buf.writeline(f"raise RuntimeError({msg_name})")
+                    elif meta.mutations_hidden_from_autograd:
+                        buf.writeline(f"_replay_input_mutation({oi}, {ui})")
+                    elif meta.mutations_under_no_grad_or_inference_mode:
+                        buf.writeline(f"with torch.no_grad(): {oi}.copy_({ui})")
+                    elif meta.is_leaf:
                         buf.writeline(
                             f"if {oi}.requires_grad: {oi}.detach().copy_({ui})"
                         )
                         buf.writeline(f"else: {oi}.copy_({ui})")
                     else:
-                        has_stream = (
-                            runtime_metadata.mutated_inp_stream_indices is not None
-                            and i < len(runtime_metadata.mutated_inp_stream_indices)
-                            and runtime_metadata.mutated_inp_stream_indices[i]
-                            is not None
-                        )
-                        if has_stream:
-                            msg_name = buf.bind_value(
-                                "_stream_err",
-                                "Mutations on inputs with user-specified streams are not yet supported. "
-                                "See: https://github.com/pytorch/pytorch/issues/172522",
-                            )
-                            buf.writeline(f"raise RuntimeError({msg_name})")
-                        elif meta.mutations_hidden_from_autograd:
-                            buf.writeline(f"_replay_input_mutation({oi}, {ui})")
-                        elif meta.mutations_under_no_grad_or_inference_mode:
-                            buf.writeline(f"with torch.no_grad(): {oi}.copy_({ui})")
-                        else:
-                            buf.writeline(f"{oi}.copy_({ui})")
+                        buf.writeline(f"{oi}.copy_({ui})")
             if not wrote_body:
                 buf.writeline("pass")
 
@@ -3780,7 +3780,10 @@ def capture_autograd_compile_specs() -> Generator[
     try:
         yield out
     finally:
-        sinks.remove(out)
+        # Sinks holding equal contents compare equal; pop the innermost by identity.
+        popped = sinks.pop()
+        if popped is not out:
+            raise AssertionError("capture_autograd_compile_specs exited out of order")
 
 
 class AOTDispatchAutograd:

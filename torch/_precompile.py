@@ -330,6 +330,7 @@ import os
 import pickle
 import sys
 import types
+import warnings
 from collections.abc import Callable, Mapping, Sequence
 from types import MappingProxyType
 from typing import Any, cast, NewType, TYPE_CHECKING
@@ -2940,13 +2941,20 @@ class _PrecompileApi:
             neither="passing neither returns (python_code, cache) in memory",
         )
         if example_args:
-            raise TypeError(
-                f"precompile takes no positional example arguments (got "
-                f"{len(example_args)}). The example call goes in example_inputs: "
-                f"precompile(fn, example_inputs=[(arg0, arg1)]). Add "
-                f"tracer='dynamo' to capture several calls, with the graph breaks "
-                f"and recompilations between them."
+            if example_inputs is not None:
+                raise TypeError(
+                    f"precompile got {len(example_args)} positional example "
+                    f"argument(s) AND example_inputs; the example call goes in one "
+                    f"place: precompile(fn, example_inputs=[(arg0, arg1)])."
+                )
+            warnings.warn(
+                "precompile(fn, *example_args) is deprecated; pass the example call "
+                "as example_inputs=[(arg0, arg1)], which also takes several calls "
+                "with tracer='dynamo'.",
+                FutureWarning,
+                stacklevel=2,
             )
+            example_inputs = [tuple(example_args)]
         if backend not in ("inductor", "eager"):
             raise ValueError(
                 f"precompile backend must be 'inductor' or 'eager', got {backend!r}."
