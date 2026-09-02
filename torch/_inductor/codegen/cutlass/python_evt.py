@@ -168,7 +168,7 @@ _ACTIVATION_PATTERNS: tuple[_ActivationPattern, ...] = (
 )
 
 
-def _fuse_activations(code: str) -> str:
+def _fuse_activations(code: str, *, elide_folded_float32_cast: bool = False) -> str:
     """Re-compose decomposed activations back into single CUTLASS functor calls.
 
     Inductor lowers activations such as ``aten.gelu`` into
@@ -227,6 +227,7 @@ def _fuse_activations(code: str) -> str:
         return node
 
     changed = False
+    folded_names: OrderedSet[str] = OrderedSet()
     for stmt in func.body:
         if (
             isinstance(stmt, ast.Assign)
@@ -242,8 +243,29 @@ def _fuse_activations(code: str) -> str:
                         args=[x],
                         keywords=[],
                     )
+                    folded_names.add(stmt.targets[0].id)
                     changed = True
                     break
+
+    if elide_folded_float32_cast:
+        for stmt in func.body:
+            if not (
+                isinstance(stmt, ast.Assign)
+                and len(stmt.targets) == 1
+                and isinstance(stmt.targets[0], ast.Name)
+                and isinstance(stmt.value, ast.Call)
+                and isinstance(stmt.value.func, ast.Attribute)
+                and stmt.value.func.attr == "to"
+                and isinstance(stmt.value.func.value, ast.Name)
+                and stmt.value.func.value.id in folded_names
+                and len(stmt.value.args) == 1
+                and isinstance(stmt.value.args[0], ast.Attribute)
+                and isinstance(stmt.value.args[0].value, ast.Name)
+                and stmt.value.args[0].value.id == "cutlass"
+                and stmt.value.args[0].attr == "Float32"
+            ):
+                continue
+            stmt.value = stmt.value.func.value
 
     if not changed:
         return code
