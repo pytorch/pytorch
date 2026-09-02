@@ -34,8 +34,8 @@ __all__ = [
     "SequentialLR",
     "CosineAnnealingLR",
     "ChainedScheduler",
-    "ReduceLROnPlateau",
     "PlateauLR",
+    "ReduceLROnPlateau",
     "CyclicLR",
     "CosineAnnealingWarmRestarts",
     "OneCycleLR",
@@ -98,10 +98,8 @@ def _step_accepts_kwargs(scheduler: LRScheduler) -> bool:
     """Whether ``scheduler.step`` collects arbitrary keyword arguments.
 
     Every scheduler in this module does. A third-party scheduler still written
-    against the older API -- ``def step(self)`` or
-    ``def step(self, epoch=None)`` -- does not, and the composite schedulers
-    call its ``step`` without keyword arguments so that it keeps working until
-    it is updated.
+    against the older API, ``def step(self)`` or ``def step(self, epoch=None)``,
+    does not, and this function helps us tell them apart.
     """
     # The bound method, so that `self` is not one of the parameters.
     return any(
@@ -263,12 +261,8 @@ class LRScheduler:
                     :meth:`_get_closed_form_lr` if it is available. This is not
                     universally supported. Use :meth:`step` without arguments
                     instead.
-            **kwargs: Extra scheduling inputs, ignored by any scheduler that
-                does not use them. The composite schedulers
-                (:class:`SequentialLR`, :class:`ChainedScheduler`) forward
-                these to the schedulers they hold, so a caller can pass an
-                input that only one of them consumes -- as
-                :class:`PlateauLR` does with ``metrics``.
+            **kwargs: Extra scheduling inputs. It's up to each scheduler how to
+                use them. See :class:`PlateauLR` for an example.
 
         .. note::
             Call this method after calling the optimizer's
@@ -1138,11 +1132,12 @@ class SequentialLR(LRScheduler):
         >>>     scheduler.step()
 
         >>> # xdoctest: +SKIP
-        >>> # A PlateauLR stage receives the monitored metric through the
-        >>> # keyword-only `metrics` argument, forwarded here unchanged:
+        >>> # SequentialLR can pass extra keyword arguments to the schedulers it holds:
+        >>> scheduler1 = LinearLR(optimizer, total_iters=5)
+        >>> scheduler2 = PlateauLR(optimizer)
         >>> scheduler = SequentialLR(
         ...     optimizer,
-        ...     schedulers=[LinearLR(optimizer, total_iters=5), PlateauLR(optimizer)],
+        ...     schedulers=[scheduler1, scheduler2],
         ...     milestones=[5],
         ... )
         >>> for epoch in range(100):
