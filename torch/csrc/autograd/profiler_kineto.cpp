@@ -912,7 +912,7 @@ void enableProfiler(
     if (!has_cpu) {
       global_callback_session.activate(/*new_session=*/true);
     }
-    c10::SetGlobalMemoryReportingInfo(&global_memory_reporting_info);
+    c10::setGlobalMemoryReportingInfo(&global_memory_reporting_info);
   }
 
   if (!config.global()) {
@@ -955,7 +955,7 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
   profilerStateInfo() = nullptr;
 
   // Stop new memory reports before draining the global callback session.
-  c10::SetGlobalMemoryReportingInfo(nullptr);
+  c10::setGlobalMemoryReportingInfo(nullptr);
 
   // If global callbacks were installed (KINETO_ONDEMAND, or KINETO with
   // profile_all_threads), they may be running on other threads right now. Wait
