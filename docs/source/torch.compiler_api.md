@@ -45,18 +45,68 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
 ## torch.compiler.precompile
 
+```{warning}
+`torch.compiler.precompile` and everything reached through it (`precompile.load`,
+`torch.compiler.PrecompiledCallable`, and the other objects it returns) is a
+prototype API. Signatures, error types and the artifact format may change between
+releases without a deprecation cycle.
+```
+
 % precompile is a callable instance (not a plain function), which Sphinx
 % autosummary cannot render, so it is documented manually below and
 % intentionally omitted from the autosummary block above.
 
 ```{eval-rst}
-.. py:function:: precompile(fn, *, backend="inductor", tracer="make_fx", decompositions=None, example_inputs, artifact_path=None, cache_path=None, guard_filter_fn=None, recompile_limit=256, dynamic=None, invariants=None, require_complete=True, require_no_risky_drops=True, require_no_dropped_guards=False, training=False, keep_example_grads=False)
+.. py:function:: precompile(fn, *, example_inputs, artifact_path, cache_path, backend="inductor", tracer="dynamo", guard_filter_fn=None, recompile_limit=256, dynamic=None, invariants=None, require_complete=True, require_no_risky_drops=True, require_no_dropped_guards=False, training=False, keep_example_grads=False)
+
+   Ahead-of-time precompile ``fn`` against ``example_inputs`` -- a sequence of calls, each
+   a tuple of positional arguments -- write the artifact to ``artifact_path`` and
+   ``cache_path``, and return what the example calls returned, in order. precompile makes
+   those calls itself, for real: a real capture's artifact runs to hundreds of megabytes of
+   source, so it goes straight to disk, and the results are how a training capture over
+   real batches hands its losses on without a second forward. Reload with
+   ``torch.compiler.precompile.load(artifact_path=..., cache_path=...)``.
+
+   This form is ``tracer="dynamo"`` only: a ``make_fx`` trace runs ``fn`` under proxy
+   tensors and has no results to give, so it is refused before ``fn`` runs. The pair in
+   memory, and the ``make_fx`` tracer, are :meth:`precompile.artifact`, which documents the
+   contract both forms share and the remaining parameters -- read it, and
+   Note [precompile programming model], before relying on an artifact.
+
+   :param fn: The whole computation to capture, taking the model(s) and runtime inputs
+       positionally, exactly as for :meth:`precompile.artifact`.
+   :param example_inputs: Required. Sequence of calls to capture; see
+       :meth:`precompile.artifact`.
+   :param artifact_path: File to write ``python_code`` to. Required, together with
+       ``cache_path`` -- the two halves load only as a matched pair, so naming one without
+       the other raises. Parent directories are created.
+   :param cache_path: File to write ``cache`` to; see ``artifact_path``.
+   :param tracer: ``"dynamo"``, and nothing else.
+   :returns: What each ``example_inputs`` call returned, in order.
+   :raises PrecompileError: as :meth:`precompile.artifact` does.
+
+   Example::
+
+       losses = torch.compiler.precompile(
+           train_step,
+           training=True,
+           example_inputs=[(model, batch) for batch in batches],
+           artifact_path="model.py",
+           cache_path="model.cache",
+       )
+       step = torch.compiler.precompile.load(
+           artifact_path="model.py", cache_path="model.cache"
+       )
+```
+
+```{eval-rst}
+.. py:method:: precompile.artifact(fn, *, example_inputs, backend="inductor", tracer="make_fx", decompositions=None, guard_filter_fn=None, recompile_limit=256, dynamic=None, invariants=None, require_complete=True, require_no_risky_drops=True, require_no_dropped_guards=False, training=False, keep_example_grads=False)
 
    Ahead-of-time precompile ``fn`` against ``example_inputs``, a sequence of calls each
    given as a tuple of positional arguments. precompile makes those calls itself and
    produces a self-contained, runnable Python source string plus an acceleration cache as
-   ``(python_code, cache)`` -- returned in memory, or written to ``artifact_path`` and
-   ``cache_path`` if you name them. ``tracer`` picks the capture front-end: ``"make_fx"`` (the
+   ``(python_code, cache)``, returned in memory; :func:`precompile` itself writes the same
+   pair to disk instead. ``tracer`` picks the capture front-end: ``"make_fx"`` (the
    default) is one non-strict ATen trace and takes exactly one call, while ``"dynamo"``
    takes as many as you give it and captures every graph-break continuation and guarded
    recompilation those calls exercise, under full runtime guards.
@@ -136,20 +186,20 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        capture. It applies only to ``tracer="make_fx"``; the dynamo tracer lowers through
        the backend instead and rejects it.
    :param guard_filter_fn: Multi-graph serialization filter; returns one boolean per guard
-       entry. Live capture retains all guards so later examples trigger their recompiles.
-       Risky dropped guards are rejected by default when saving, and every
-       custom-filter drop counts as risky.
+       entry. It composes with the default filter (which drops only the identity guards
+       that cannot be serialized), so it can drop more guards, never fewer. Live capture
+       retains all guards so later examples trigger their recompiles. Risky dropped
+       guards are rejected by default when saving, and every drop a custom filter adds
+       beyond the default's counts as risky.
    :param recompile_limit: Maximum multi-graph variants captured per frame; defaults to 256
        and overrides a lower ambient accumulated-recompile limit for this capture.
    :param dynamic: Multi-graph dynamic-shape policy forwarded to ``torch.compile``.
    :param invariants: Optional path receiving the multi-graph invariant report.
-   :param artifact_path: Optional file to write ``python_code`` to. Pass it together with
-       ``cache_path`` -- the two halves load only as a matched pair, so naming one without
-       the other raises. Parent directories are created.
-   :param cache_path: Optional file to write ``cache`` to; see ``artifact_path``.
    :param require_complete: Refuse to produce an artifact whose capture was incomplete --
-       a call raised, a frame hit ``recompile_limit``, or a frame exercised during capture
-       produced no guarded code. Applies only to ``tracer="dynamo"``.
+       a call raised, a frame hit ``recompile_limit``, a frame exercised during capture
+       produced no guarded code, or no graph was compiled at all (every captured frame
+       was empty, as when the whole body sits behind ``torch._dynamo.disable``). Applies
+       only to ``tracer="dynamo"``.
    :param require_no_risky_drops: Refuse to produce an artifact that dropped a guard which
        can affect dispatch. Nothing checks such a guard at load, so a different value can
        silently select the wrong graph instead of recompiling. Applies only to
@@ -168,18 +218,13 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        so nothing tells you a batch went missing. With it set, a gradient already present
        accumulates exactly as it would in eager. Applies only to ``tracer="dynamo"``.
    :returns: ``(python_code, cache)`` -- a self-contained Python source string and a
-       binary acceleration cache. If ``artifact_path`` and ``cache_path`` are given, the
-       pair is written to those files and precompile returns instead what each
-       ``example_inputs`` call RETURNED, in order, so a capture over real batches can hand
-       their results on without a second forward. Only ``tracer="dynamo"`` runs the calls
-       for real, so naming the paths with ``tracer="make_fx"`` is rejected before ``fn``
-       runs rather than returning nothing after it.
+       binary acceleration cache.
    :raises PrecompileError: if capture, lowering, or a runtime call violates the
        contract (see the exception below).
 
    Example::
 
-       python_code, cache = torch.compiler.precompile(
+       python_code, cache = torch.compiler.precompile.artifact(
            lambda m, x: m(x), example_inputs=[(model, x)]
        )
        f = torch.compiler.precompile.load(python_code, cache)
@@ -192,7 +237,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
        # Graph breaks and several variants need the dynamo tracer; make_fx
        # captures a single call as one graph.
-       python_code, cache = torch.compiler.precompile(
+       python_code, cache = torch.compiler.precompile.artifact(
            staged,
            tracer="dynamo",
            example_inputs=[(example_a,), (example_b,)],
@@ -203,16 +248,6 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        # capture holds frames the entry cannot reach -- supports `with`).
        with torch.no_grad():
            out = compiled(example_a)
-
-       # Straight to disk, taking the losses back from the captured calls.
-       losses = torch.compiler.precompile(
-           train_step,
-           tracer="dynamo",
-           training=True,
-           example_inputs=[(model, batch) for batch in batches],
-           artifact_path="model.py",
-           cache_path="model.cache",
-       )
 ```
 
 ```{eval-rst}
@@ -238,7 +273,15 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    The returned object holds a LIVE compiled region, because that is the only way a later call
    can reuse an earlier one's variants: they are filed under an id that nothing can hand back
    to ``torch._dynamo.optimize``. Use it as a context manager, or call ``close()``, to release
-   it; a capture left open keeps precompile's compiler configuration installed.
+   it; a capture left open holds it, and every variant compiled into it, for the life of the
+   process.
+
+   A call whose ``fn`` raises propagates that error and leaves the capture open for the next
+   call. A refusal from the artifact gates (``require_*``) is different and final: the step has
+   already run by then, so the ``PrecompileError`` carries what it returned as ``result``, the
+   capture closes -- the files keep the last artifact that passed -- and every later call
+   raises without running. Calls are serialized: a second thread calling the capture waits for
+   the first call to finish, artifact rewrite included.
 
    :param fn: The whole computation to capture, taking the model(s) and runtime inputs
        positionally, exactly as :func:`torch.compiler.precompile` does.
@@ -247,7 +290,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    :param tracer: ``"dynamo"``, and nothing else -- a make_fx trace is a single graph of a
        single call and has nothing to accumulate.
    :returns: A ``precompile.AccumulatingCapture``. Call it like ``fn``; it also exposes
-       ``summary()``, ``invariants()``, ``calls()`` and ``close()``.
+       ``summary()`` (coverage, recompilation, failure and guard information for everything
+       captured so far), ``invariants()`` (the guards that held across every captured variant
+       of each frame), ``calls()`` (how many calls have been folded in) and ``close()`` (give
+       back the compiled region; the files are unaffected, and closing twice is a no-op).
    :raises PrecompileError: as :func:`torch.compiler.precompile` does, on the call that
        violates the contract.
 
@@ -272,8 +318,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 .. py:method:: precompile.load(python_code=None, cache=None, *, artifact_path=None, cache_path=None, fn=None)
 
    Reconstruct a runnable from the ``(python_code, cache)`` pair produced by
-   ``precompile`` -- passed in memory, or named as the two files precompile wrote with
-   ``load(artifact_path=..., cache_path=...)``. The two forms are exclusive and each needs
+   ``precompile.artifact`` -- passed in memory -- or named as the two files ``precompile``
+   wrote, with ``load(artifact_path=..., cache_path=...)``. The two forms are exclusive and each needs
    both halves. The calling convention is read from ``python_code`` (the single
    source of truth); ``cache`` only accelerates loading -- it carries only the compiled
    backend artifact (the Inductor bundle for ``backend="inductor"``; empty for
@@ -318,7 +364,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    positional arguments of one
    call; wrap a call that needs keyword arguments in this instead::
 
-       torch.compiler.precompile(
+       torch.compiler.precompile.artifact(
            fn,
            example_inputs=[
                (x,),
@@ -329,7 +375,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 .. autoexception:: torch.compiler.PrecompileError
 
 .. autoclass:: torch.compiler.PrecompiledCallable
-   :members:
+   :members: unload, serve_time_compiles
+
+   Returned by :func:`precompile.load` for an artifact that serves by installing,
+   and used as a callable or context manager; it is not constructed directly.
 
 
 ```

@@ -9,7 +9,7 @@ recompiled variant of each -- into a single serializable artifact.
 
 Usage::
 
-    python_code, cache = torch.compiler.precompile(
+    python_code, cache = torch.compiler.precompile.artifact(
         step,  # e.g. lambda model, x: model(x)
         backend="inductor",
         example_inputs=[(model, x1), (model, x2)],
@@ -94,10 +94,10 @@ be used directly.
 The public surface is ``torch.compiler.precompile`` -- with ``example_inputs``
 for this multi-graph form -- and ``torch.compiler.precompile.load``. The
 helpers in this module, including the capture session, implement that surface
-and remain internal. The positional ``torch.compiler.precompile`` form
-produces a self-contained Python source artifact from one example call. Both are distinct from
-``torch._dynamo.config.caching_precompile``, which caches ``torch.compile``
-artifacts transparently without an explicit capture block.
+and remain internal. The default ``tracer="make_fx"`` form of the same call
+produces a self-contained Python source artifact from one example call. Both are
+distinct from ``torch._dynamo.config.caching_precompile``, which caches
+``torch.compile`` artifacts transparently without an explicit capture block.
 """
 
 from __future__ import annotations
@@ -990,6 +990,28 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
         # resolved tensor, and the observation sites reinstall exactly this
         # guard to keep that sound.
         "TYPE_MATCH",
+        # And every guard that pins a Python fact about a value or a container's
+        # contents: whether a key is in a dict or a set, which keys a dict has,
+        # whether an attribute is absent from an instance __dict__, how long a
+        # tuple iterator is, where a range/count iterator stands, whether a
+        # value is None or a given bool. Each one is a branch the graph
+        # specialized on, so a drop serves the captured branch to the other
+        # side, silently -- and a module-owned dict (self.opts = {}) is
+        # environment-rooted, which is exactly where the policy used to drop it.
+        "BOOL_MATCH",
+        "CONSTANT_SUBCLASS_MATCH",
+        "COUNT_ITERATOR_MATCH",
+        "DICT_CONTAINS",
+        "DICT_KEYS_MATCH",
+        "DICT_NOT_CONTAINS",
+        "MAPPING_KEYS_CHECK",
+        "NONE_MATCH",
+        "NOT_NONE_MATCH",
+        "NOT_PRESENT_IN_GENERIC_DICT",
+        "RANGE_ITERATOR_MATCH",
+        "SET_CONTAINS",
+        "SET_NOT_CONTAINS",
+        "TUPLE_ITERATOR_LEN",
     }
 )
 
@@ -1016,8 +1038,10 @@ _UNMODELLED_GUARD_TYPES = frozenset(
 
 
 # The ONLY guard types the invariance policy may drop, and only when proven
-# invariant across every captured variant. The three sets form a total,
-# disjoint classification of GuardBuilder's guard-producing methods, pinned by
+# invariant across every captured variant: identity guards (which the default
+# filter drops anyway, as unserializable) and process-wide compiler state. The
+# three sets form a total, disjoint classification of GuardBuilder's
+# guard-producing methods, pinned by
 # test_precompile.test_guard_policy_classification_is_total: a guard type in
 # none of them -- i.e. any type added to GuardBuilder after this list -- is
 # KEPT unconditionally until someone classifies it here, so a new value-pinning
@@ -1025,17 +1049,11 @@ _UNMODELLED_GUARD_TYPES = frozenset(
 _INVARIANT_DROPPABLE_GUARD_TYPES = frozenset(
     {
         "AUTOGRAD_SAVED_TENSORS_HOOKS",
-        "BOOL_MATCH",
         "BUILTIN_MATCH",
         "CLASS_MATCH",
         "CLOSURE_MATCH",
-        "CONSTANT_SUBCLASS_MATCH",
-        "COUNT_ITERATOR_MATCH",
         "COW_TENSOR_MATCH",
         "DEFAULT_DEVICE",
-        "DICT_CONTAINS",
-        "DICT_KEYS_MATCH",
-        "DICT_NOT_CONTAINS",
         "DICT_VERSION",
         "DUAL_LEVEL",
         "EMPTY_NN_MODULE_HOOKS_DICT",
@@ -1044,16 +1062,8 @@ _INVARIANT_DROPPABLE_GUARD_TYPES = frozenset(
         "FUNCTORCH_STACK_MATCH",
         "GRAD_MODE",
         "ID_MATCH",
-        "MAPPING_KEYS_CHECK",
         "MODULE_MATCH",
         "NN_MODULE",
-        "NONE_MATCH",
-        "NOT_NONE_MATCH",
-        "NOT_PRESENT_IN_GENERIC_DICT",
-        "RANGE_ITERATOR_MATCH",
-        "SET_CONTAINS",
-        "SET_NOT_CONTAINS",
-        "TUPLE_ITERATOR_LEN",
         "WEAKREF_ALIVE",
     }
 )
@@ -1625,6 +1635,7 @@ class PrecompileSession:
         self._package = CompilePackage(
             self._entry_fn,
             serialization_guard_filter_fn=self._guard_filter_fn,
+            explicit_capture=True,
             requires_native_backend_compatibility=backend != "eager",
         )
         self._backend_artifacts: dict[_BackendId, Any] = {}
@@ -1696,9 +1707,8 @@ class PrecompileSession:
                         f"{name!r} on {type(module).__name__}. Automatic examples "
                         "capture ordinary torch.no_grad() semantics, but leaving "
                         "inference_mode does not turn existing tensors into ordinary "
-                        "tensors. Create the module outside torch.inference_mode(), or "
-                        "use capture() manually and serve under the matching inference "
-                        "mode."
+                        "tensors. Create the module outside torch.inference_mode() "
+                        "before passing it to torch.compiler.precompile."
                     )
 
     def _clear_runtime_cache(self) -> None:
@@ -1719,7 +1729,7 @@ class PrecompileSession:
 
     def retire(self) -> None:
         """Final teardown for a RESUMABLE session: drain, then give back the
-        region and precompile's compiler configuration.
+        compiled region.
 
         The accumulating capture's close() ends the session between calls, but
         "between calls" is a per-thread notion: another thread can still be
@@ -1751,7 +1761,11 @@ class PrecompileSession:
             compiled = self._compiled
             self._active_calls += 1
         try:
-            with _capture_config(), _use_code_state(self._pgo_state):
+            with (
+                _capture_config(),
+                _use_code_state(self._pgo_state),
+                record_live_guard_leaves(self._cycle_guard_leaves),
+            ):
                 return compiled(*args, **kwargs)
         except BaseException as e:
             self._record_capture_error(e)
@@ -1771,18 +1785,22 @@ class PrecompileSession:
         self._closing = False
         self._gate_error_mark = len(self._capture_errors)
         if self._stack is not None:
-            raise RuntimeError("PrecompileSession is already active")
+            raise PackageError(
+                "PrecompileSession is already active: a session runs one capture "
+                "block at a time, so serialize concurrent entries."
+            )
         grads: dict[torch.Tensor, torch.Tensor | None] = {}
         stack = contextlib.ExitStack()
         # Backends must serialize into the artifact rather than into the
         # process-local inductor cache.
         stack.enter_context(_capture_config(self._training))
         # Unioned into _live_guard_leaves when the cycle ends, rather than
-        # replacing it: record_live_guard_leaves rebinds a fresh set on every
-        # entry, and _report_guard_drift compares EVERY frame in the package
-        # against it. Keeping only the last cycle's leaves would report every
-        # frame that cycle did not recompile as drifted.
-        self._cycle_guard_leaves = stack.enter_context(record_live_guard_leaves())
+        # replacing it: every cycle starts a fresh set, and _report_guard_drift
+        # compares EVERY frame in the package against it. Keeping only the last
+        # cycle's leaves would report every frame that cycle did not recompile
+        # as drifted. Installed per call by _call, not here: the recording is
+        # thread-scoped, and a call may run on a thread other than this one.
+        self._cycle_guard_leaves = set()
         self._stack = stack
         try:
             if self._example_inputs:
@@ -1842,9 +1860,9 @@ class PrecompileSession:
                         "example_inputs contains an inference tensor. Automatic "
                         "examples capture ordinary torch.no_grad() semantics, but "
                         "leaving inference_mode does not turn an existing inference "
-                        "tensor into an ordinary tensor. Create automatic inputs "
-                        "outside torch.inference_mode(), or use capture() manually "
-                        "and serve under the matching inference mode."
+                        "tensor into an ordinary tensor. Create the example inputs "
+                        "outside torch.inference_mode() before passing them to "
+                        "torch.compiler.precompile."
                     )
                 for value in tree_leaves((args, kwargs)):
                     if isinstance(value, torch.nn.Module):
@@ -2138,6 +2156,7 @@ class PrecompileSession:
                 guard_build_local_state=getattr(loaded, "local_state", None),
                 save_guards=True,
                 serialization_guard_filter_fn=without,
+                explicit_capture=True,
                 strict_error=True,
                 collect_guard_failures=failures,
             ).guards_state
@@ -2327,6 +2346,7 @@ class PrecompileSession:
                         # default and user filters, so the policy is the whole
                         # filter here.
                         serialization_guard_filter_fn=policy,
+                        explicit_capture=True,
                         strict_error=True,
                         collect_guard_failures=failures,
                     )
@@ -2376,18 +2396,25 @@ class PrecompileSession:
 
         def filter_fn(entries: Sequence[GuardFilterEntry]) -> Sequence[bool]:
             decisions = inner(entries)
+            # A custom filter composes with the default, so the identity drops
+            # the default makes anyway are judged as they always are; only a
+            # drop the custom filter ADDED is risky by construction, because
+            # nothing here can say what the caller gave up.
+            default_kept = (
+                default_guard_filter_fn(entries)
+                if self._custom_guard_filter
+                else decisions
+            )
             namespaces = _module_namespaces(entries)
             facts: set[_GuardFact] = set()
             undetermined: set[_GuardFact] = set()
-            for keep, entry in zip(decisions, entries):
+            for keep, by_default, entry in zip(decisions, default_kept, entries):
                 slot = (entry.guard_type, entry.name)
                 if not keep:
                     self._record_dropped_code(slot, entry)
                 target = self._kept_guards if keep else self._dropped_guards
                 target.add(slot)
-                if not keep and (
-                    self._custom_guard_filter or _is_risky_drop(entry, namespaces)
-                ):
+                if not keep and (by_default or _is_risky_drop(entry, namespaces)):
                     self._risky_dropped_guards.add(slot)
                 unmodelled = entry.guard_type in _UNMODELLED_GUARD_TYPES
                 fact = _GuardFact(
@@ -2642,6 +2669,14 @@ class PrecompileSession:
                     "execution, so the callable must actually be run inside the "
                     "capture block. A call Dynamo could not turn into guarded code "
                     "is reported separately as an uncovered frame."
+                )
+            if summary.backend_graphs == 0:
+                raise PackageError(
+                    "Precompilation compiled no graph: every captured frame was "
+                    "empty, so the artifact carries no compiled compute. This is "
+                    "what a callable whose whole body sits behind "
+                    "torch._dynamo.disable looks like. Pass require_complete=False "
+                    "to write the guards-only artifact anyway."
                 )
             if summary.truncated:
                 raise PackageError(
@@ -3013,7 +3048,7 @@ def precompile_load(
     entry_fn = _entry_fn_of(fn)
     store = _SingleFileStore()
     cache_entry = store.load_cache_entry(path)
-    _check_artifact_matches(cache_entry.dynamo, entry_fn, path)
+    _check_artifact_matches(cache_entry.dynamo, entry_fn, f"the artifact at {path}")
     return serve_cache_entry(
         fn,
         cache_entry,
@@ -3054,6 +3089,7 @@ def prepare_cache_entry(
         _entry_fn_of(fn),
         _dynamo_entry_for_serve(cache_entry),
         serialization_guard_filter_fn=default_guard_filter_fn,
+        explicit_capture=True,
     )
     try:
         package.prepare(cache_entry.backends)
@@ -3094,6 +3130,7 @@ def serve_cache_entry(
         serialization_guard_filter_fn=(
             default_guard_filter_fn if guard_filter_fn is None else guard_filter_fn
         ),
+        explicit_capture=True,
     )
     backend_obj = _PrecompileBackend(backend)
     backend_obj.serving = True
@@ -3133,10 +3170,10 @@ def precompile_capture(
     lower ambient ``accumulated_recompile_limit`` for this capture so that the
     explicit API limit is the effective one.
 
-    ``example_inputs`` are run on ``__enter__``, under ``torch.no_grad()``, so
-    the ``with`` body is optional for an inference capture; calls you make in
-    the body run in the ambient grad mode instead. Existing inference tensors in
-    the inputs or an ``nn.Module``'s parameters and buffers are rejected because
+    ``example_inputs`` are run on ``__enter__``, under ``torch.no_grad()`` unless
+    ``training=True``, so the ``with`` body is optional; calls you make in the
+    body run in the ambient grad mode instead. Existing inference tensors in the
+    inputs or an ``nn.Module``'s parameters and buffers are rejected because
     disabling inference mode does not make them ordinary tensors. ``invariants``
     names a file written when the block exits without an exception. A session is
     one-shot; create another capture instead of re-entering it.
@@ -3348,10 +3385,11 @@ def serving() -> Iterator[None]:
 
 
 def _check_artifact_matches(
-    dynamo: _DynamoCacheEntry, entry_fn: Callable[..., object], path: str
+    dynamo: _DynamoCacheEntry, entry_fn: Callable[..., object], artifact: str
 ) -> None:
     """
-    Refuse an artifact captured from a different callable.
+    Refuse an artifact captured from a different callable. ``artifact`` names it
+    in the error, e.g. ``"the artifact at <path>"``.
 
     CompilePackage.initialize discards the serialized entry code object and
     rebinds the stored guards and bytecode onto whatever function it is given,
@@ -3369,14 +3407,14 @@ def _check_artifact_matches(
     """
     code = getattr(entry_fn, "__code__", None)
     if code is None:
-        raise PackageError(f"{entry_fn!r} has no __code__ to load {path} onto.")
+        raise PackageError(f"{entry_fn!r} has no __code__ to load {artifact} onto.")
     if not dynamo.codes:
-        raise PackageError(f"Artifact at {path} contains no code entries.")
+        raise PackageError(f"precompile: {artifact} contains no code entries.")
     entry = dynamo.codes[0]
     actual_module = _defining_module_name(code) or getattr(entry_fn, "__module__", None)
     if actual_module is not None and entry.python_module != actual_module:
         raise PackageError(
-            f"Artifact at {path} was captured from a callable defined in "
+            f"precompile: {artifact} was captured from a callable defined in "
             f"{entry.python_module!r} but is being loaded onto one defined in "
             f"{actual_module!r}. Loading it would serve the captured "
             f"function's graphs for this one."
@@ -3385,19 +3423,19 @@ def _check_artifact_matches(
     actual = getattr(entry_fn, "__qualname__", None)
     if expected is not None and actual is not None and expected != actual:
         raise PackageError(
-            f"Artifact at {path} was captured from {expected!r} but is being "
+            f"precompile: {artifact} was captured from {expected!r} but is being "
             f"loaded onto {actual!r}. Loading it would serve the captured "
             f"function's graphs for this one."
         )
     stored = entry.python_code
     if stored.co_name != code.co_name:
         raise PackageError(
-            f"Artifact at {path} was captured from code object "
+            f"precompile: {artifact} was captured from code object "
             f"{stored.co_name!r} but is being loaded onto {code.co_name!r}."
         )
     if stored.co_firstlineno != code.co_firstlineno:
         raise PackageError(
-            f"Artifact at {path} was captured from a definition at "
+            f"precompile: {artifact} was captured from a definition at "
             f"{entry.python_module}:{stored.co_firstlineno} but the callable of "
             f"that name here is defined at line {code.co_firstlineno}. Same "
             f"name, different definition -- a class defined under an `if` that "

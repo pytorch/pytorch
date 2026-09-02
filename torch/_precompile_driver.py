@@ -701,8 +701,34 @@ def _build_installed_forward():
     import sys
     import types
 
+    import torch
     from torch._dynamo.package import SerializedCode
-    from torch._precompile import _InstalledArtifact
+    from torch._precompile import (
+        _InstalledArtifact,
+        PrecompileError as _PrecompileError,
+    )
+
+    # The same locks the standalone driver checks, for the same reasons: the
+    # package below unmarshals bytecode and unpickles Dynamo internals, so a
+    # foreign Python or torch build has to fail here, with the documented
+    # PrecompileError, rather than wherever the blob happens to break first.
+    produced_on = globals().get("_DYNAMO_PYTHON_VERSION")
+    if produced_on is not None and tuple(produced_on) != sys.version_info[:2]:
+        raise _PrecompileError(
+            f"precompile: this artifact was produced on Python "
+            f"{produced_on[0]}.{produced_on[1]} and cannot load on "
+            f"{sys.version_info[0]}.{sys.version_info[1]}: it inlines marshalled "
+            f"bytecode, which is Python-version-locked. Regenerate the artifact "
+            f"under the serving Python."
+        )
+    produced_by = globals().get("TORCH_VERSION")
+    if produced_by is not None and produced_by != torch.__version__:
+        raise _PrecompileError(
+            f"precompile: this artifact was produced by torch {produced_by} and "
+            f"this is torch {torch.__version__}: its opaque blobs carry Dynamo "
+            f"internals, which are build-locked. Regenerate the artifact under "
+            f"the serving torch."
+        )
 
     cache_entry = pickle.loads(base64.b64decode(_PACKAGE))
 
@@ -748,4 +774,17 @@ def _build_installed_forward():
             PrecompileContext.record_artifact(_backend)
         return serve_cache_entry(fn, cache_entry, backend=BACKEND, prepared=prepared)
 
-    return _InstalledArtifact(_serve, _entry_function)
+    def _check_entry(fn):
+        from torch._dynamo.precompile_package import (
+            _check_artifact_matches,
+            _entry_fn_of,
+        )
+
+        _check_artifact_matches(cache_entry.dynamo, _entry_fn_of(fn), "this artifact")
+
+    return _InstalledArtifact(
+        _serve,
+        _entry_function,
+        check_fn=_check_entry,
+        backend_keys=tuple(cache_entry.backends),
+    )

@@ -386,6 +386,8 @@ class PrecompileContext:
 
         for key, cache_entry in dynamo_entries.items():
             try:
+                # from_cache_entry marks codes with a missing backend as
+                # bypassed; the copy keeps that off the live entry.
                 result = PrecompileCacheEntry.from_cache_entry(
                     copy.deepcopy(cache_entry), backend_artifacts
                 )
