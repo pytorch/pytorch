@@ -1442,10 +1442,10 @@ def forward(self, arg0_1, arg1_1):
         self.assertExpectedInline(
             backend.graphs[0].code.strip(),
             f"""\
-def forward(self, L_nested_counter_c_0_ : {fx_class}, L_nested_counter_c_1_ : {fx_class}, L_x_ : torch.Tensor):
+def forward(self, L_x_ : torch.Tensor, L_nested_counter_c_0_ : {fx_class}, L_nested_counter_c_1_ : {fx_class}):
+    l_x_ = L_x_
     l_nested_counter_c_0_ = L_nested_counter_c_0_
     l_nested_counter_c_1_ = L_nested_counter_c_1_
-    l_x_ = L_x_
     increment_counter = torch.ops._TestOpaqueObject.increment_counter(l_nested_counter_c_0_, l_x_);  l_nested_counter_c_0_ = l_x_ = None
     increment_counter_1 = torch.ops._TestOpaqueObject.increment_counter(l_nested_counter_c_1_, increment_counter);  l_nested_counter_c_1_ = increment_counter = None
     add = increment_counter_1 + 1;  increment_counter_1 = None
@@ -1475,9 +1475,9 @@ def forward(self, L_nested_counter_c_0_ : {fx_class}, L_nested_counter_c_1_ : {f
         self.assertExpectedInline(
             backend.graphs[0].code.strip(),
             f"""\
-def forward(self, L_nested_queue_q : {fx_class}, L_x_ : torch.Tensor):
-    l_nested_queue_q = L_nested_queue_q
+def forward(self, L_x_ : torch.Tensor, L_nested_queue_q : {fx_class}):
     l_x_ = L_x_
+    l_nested_queue_q = L_nested_queue_q
     tan = l_x_.tan()
     queue_push = torch.ops._TestOpaqueObject.queue_push(l_nested_queue_q, tan);  tan = queue_push = None
     cos = l_x_.cos();  l_x_ = None
@@ -1501,19 +1501,19 @@ def forward(self, L_nested_queue_q : {fx_class}, L_x_ : torch.Tensor):
             backend.fw_graphs[0].code.strip(),
             """\
 def forward(self, arg0_1, arg1_1, arg2_1):
-    tan = torch.ops.aten.tan.default(arg2_1)
-    with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops._TestOpaqueObject.queue_push.default, arg1_1, tan);  arg0_1 = tan = None
+    tan = torch.ops.aten.tan.default(arg1_1)
+    with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops._TestOpaqueObject.queue_push.default, arg2_1, tan);  arg0_1 = tan = None
     getitem = with_effects[0];  with_effects = None
-    cos = torch.ops.aten.cos.default(arg2_1);  arg2_1 = None
-    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops._TestOpaqueObject.queue_push.default, arg1_1, cos);  getitem = cos = None
+    cos = torch.ops.aten.cos.default(arg1_1);  arg1_1 = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops._TestOpaqueObject.queue_push.default, arg2_1, cos);  getitem = cos = None
     getitem_2 = with_effects_1[0];  with_effects_1 = None
-    with_effects_2 = torch.ops.higher_order.with_effects(getitem_2, torch.ops._TestOpaqueObject.queue_pop.default, arg1_1);  getitem_2 = None
+    with_effects_2 = torch.ops.higher_order.with_effects(getitem_2, torch.ops._TestOpaqueObject.queue_pop.default, arg2_1);  getitem_2 = None
     getitem_4 = with_effects_2[0]
     getitem_5 = with_effects_2[1];  with_effects_2 = None
     sym_size_int = torch.ops.aten.sym_size.int(getitem_5, 0)
     ge = sym_size_int >= 0
     _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar = None
-    with_effects_3 = torch.ops.higher_order.with_effects(getitem_4, torch.ops._TestOpaqueObject.queue_pop.default, arg1_1);  getitem_4 = arg1_1 = None
+    with_effects_3 = torch.ops.higher_order.with_effects(getitem_4, torch.ops._TestOpaqueObject.queue_pop.default, arg2_1);  getitem_4 = arg2_1 = None
     getitem_6 = with_effects_3[0]
     getitem_7 = with_effects_3[1];  with_effects_3 = None
     sym_size_int_1 = torch.ops.aten.sym_size.int(getitem_7, 0)
@@ -1554,15 +1554,15 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             backend.fw_graphs[0].code.strip(),
             """\
 def forward(self, arg0_1, arg1_1, arg2_1):
-    auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops._TestOpaqueObject.increment_counter.default, c = arg0_1, _prev_base_index = 0, _all_bases = [arg2_1])
+    auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops._TestOpaqueObject.increment_counter.default, c = arg1_1, _prev_base_index = 0, _all_bases = [arg0_1])
     getitem = auto_functionalized_v2[0]
     getitem_1 = auto_functionalized_v2[1];  auto_functionalized_v2 = None
-    mul = torch.ops.aten.mul.Tensor(arg1_1, getitem);  arg1_1 = getitem = None
-    auto_functionalized_v2_1 = torch.ops.higher_order.auto_functionalized_v2(torch.ops._TestOpaqueObject.increment_counter.default, c = arg0_1, _prev_base_index = 0, _all_bases = [getitem_1]);  arg0_1 = getitem_1 = None
+    mul = torch.ops.aten.mul.Tensor(arg2_1, getitem);  arg2_1 = getitem = None
+    auto_functionalized_v2_1 = torch.ops.higher_order.auto_functionalized_v2(torch.ops._TestOpaqueObject.increment_counter.default, c = arg1_1, _prev_base_index = 0, _all_bases = [getitem_1]);  arg1_1 = getitem_1 = None
     getitem_2 = auto_functionalized_v2_1[0]
     getitem_3 = auto_functionalized_v2_1[1];  auto_functionalized_v2_1 = None
     add = torch.ops.aten.add.Tensor(mul, getitem_2);  mul = getitem_2 = None
-    copy_ = torch.ops.aten.copy_.default(arg2_1, getitem_3);  arg2_1 = getitem_3 = copy_ = None
+    copy_ = torch.ops.aten.copy_.default(arg0_1, getitem_3);  arg0_1 = getitem_3 = copy_ = None
     return (add,)""",
         )
 
@@ -3223,9 +3223,9 @@ class GraphModule(torch.nn.Module):
         self.assertExpectedInline(
             fw_graph.code.strip(),
             f"""\
-def forward(self, L_scale_obj_ : {_illegal_char_regex.sub("_", get_opaque_type_name(OpaqueMultiplier))}, L_x_ : torch.Tensor):
-    l_scale_obj_ = L_scale_obj_
+def forward(self, L_x_ : torch.Tensor, L_scale_obj_ : {_illegal_char_regex.sub("_", get_opaque_type_name(OpaqueMultiplier))}):
     l_x_ = L_x_
+    l_scale_obj_ = L_scale_obj_
     mul_with_scale = torch.ops._TestOpaqueObject.mul_with_scale(l_scale_obj_, l_x_);  l_scale_obj_ = l_x_ = None
     mul = mul_with_scale * 2;  mul_with_scale = None
     return (mul,)""",
@@ -3239,19 +3239,19 @@ def forward(self, L_scale_obj_ : {_illegal_char_regex.sub("_", get_opaque_type_n
             fw_graph.code.strip(),
             """\
 def forward(self, primals_1, primals_2):
-    mul_with_scale = torch.ops._TestOpaqueObject.mul_with_scale.default(primals_1, primals_2);  primals_2 = None
+    mul_with_scale = torch.ops._TestOpaqueObject.mul_with_scale.default(primals_2, primals_1);  primals_1 = None
     mul = torch.ops.aten.mul.Tensor(mul_with_scale, 2);  mul_with_scale = None
-    return (mul, primals_1)""",
+    return (mul, primals_2)""",
         )
         self.assertTrue(len(backend.bw_graphs) > 0)
         bw_graph = backend.bw_graphs[0]
         self.assertExpectedInline(
             bw_graph.code.strip(),
             """\
-def forward(self, primals_1, tangents_1):
+def forward(self, primals_2, tangents_1):
     mul_1 = torch.ops.aten.mul.Tensor(tangents_1, 2);  tangents_1 = None
-    get_multiplier_tensor = torch.ops._TestOpaqueObject.get_multiplier_tensor.default(primals_1, mul_1);  primals_1 = mul_1 = None
-    return (None, get_multiplier_tensor)""",
+    get_multiplier_tensor = torch.ops._TestOpaqueObject.get_multiplier_tensor.default(primals_2, mul_1);  primals_2 = mul_1 = None
+    return (get_multiplier_tensor, None)""",
         )
 
         for use_compiled_autograd in [False, True]:
@@ -3325,9 +3325,9 @@ def forward(self, primals_1, tangents_1):
         self.assertExpectedInline(
             graph_code,
             f"""\
-def forward(self, G_Color_GREEN : {_illegal_char_regex.sub("_", get_opaque_type_name(Color))}, L_x_ : torch.Tensor):
-    g_color_green = G_Color_GREEN
+def forward(self, L_x_ : torch.Tensor, G_Color_GREEN : {_illegal_char_regex.sub("_", get_opaque_type_name(Color))}):
     l_x_ = L_x_
+    g_color_green = G_Color_GREEN
     apply_color_scale = torch.ops._TestOpaqueObject.apply_color_scale(g_color_green, l_x_);  g_color_green = l_x_ = None
     return (apply_color_scale,)""",
         )
@@ -3587,9 +3587,9 @@ def forward(self, L_x_ : torch.Tensor):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_scale_obj_ : OpaqueMultiplier, L_x_: "f32[2, 2]"):
-        l_scale_obj_ = L_scale_obj_
+    def forward(self, L_x_: "f32[2, 2]", L_scale_obj_ : OpaqueMultiplier):
         l_x_ = L_x_
+        l_scale_obj_ = L_scale_obj_
 
         subgraph_0 = self.subgraph_0
         invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_scale_obj_, l_x_);  subgraph_0 = l_scale_obj_ = l_x_ = None

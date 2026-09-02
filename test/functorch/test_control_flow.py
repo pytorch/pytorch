@@ -5152,96 +5152,91 @@ class GraphModule(torch.nn.Module):
         l_xs_0_1_0_ = L_xs_0_1_0_
         l_xs_1_ = L_xs_1_
 
-        elem: "f32[3, 10, 2]" = torch.movedim(l_xs_0_0_, 0, 0);  l_xs_0_0_ = None
-        elem_1: "f32[3, 10, 2]" = torch.movedim(l_xs_0_1_0_, 0, 0);  l_xs_0_1_0_ = None
-        elem_2: "f32[3, 10, 2]" = torch.movedim(l_xs_1_, 0, 0);  l_xs_1_ = None
-        elem_3: "f32[3, 10, 2]" = torch.flip(elem, [0]);  elem = None
-        elem_4: "f32[3, 10, 2]" = torch.flip(elem_1, [0]);  elem_1 = None
-        elem_5: "f32[3, 10, 2]" = torch.flip(elem_2, [0]);  elem_2 = None
-        child: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_3, 0, 0, -1, 2)
-        child_1: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_4, 0, 0, -1, 2)
-        child_2: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_5, 0, 0, -1, 2)
-        child_3: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_3, 0, 1, None, 2)
-        child_4: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_4, 0, 1, None, 2)
-        child_5: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_5, 0, 1, None, 2)
+        movedim: "f32[3, 10, 2]" = torch.movedim(l_xs_0_0_, 0, 0);  l_xs_0_0_ = None
+        flip: "f32[3, 10, 2]" = torch.flip(movedim, [0]);  movedim = None
+        movedim_1: "f32[3, 10, 2]" = torch.movedim(l_xs_0_1_0_, 0, 0);  l_xs_0_1_0_ = None
+        flip_1: "f32[3, 10, 2]" = torch.flip(movedim_1, [0]);  movedim_1 = None
+        movedim_2: "f32[3, 10, 2]" = torch.movedim(l_xs_1_, 0, 0);  l_xs_1_ = None
+        flip_2: "f32[3, 10, 2]" = torch.flip(movedim_2, [0]);  movedim_2 = None
+        slice_1: "f32[1, 10, 2]" = torch.ops.aten.slice(flip, 0, 0, -1, 2)
+        slice_2: "f32[1, 10, 2]" = torch.ops.aten.slice(flip, 0, 1, None, 2)
+        slice_3: "f32[1, 10, 2]" = torch.ops.aten.slice(flip_1, 0, 0, -1, 2)
+        slice_4: "f32[1, 10, 2]" = torch.ops.aten.slice(flip_1, 0, 1, None, 2)
+        slice_5: "f32[1, 10, 2]" = torch.ops.aten.slice(flip_2, 0, 0, -1, 2)
+        slice_6: "f32[1, 10, 2]" = torch.ops.aten.slice(flip_2, 0, 1, None, 2)
 
         lazy_load_decompositions = torch._functorch.predispatch.lazy_load_decompositions();  lazy_load_decompositions = None
 
         _vmap_increment_nesting = torch._functorch.predispatch._vmap_increment_nesting(1, 'error');  _vmap_increment_nesting = None
 
-        _add_batch_dim: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child, 0, 1);  child = None
-        _add_batch_dim_1: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_1, 0, 1);  child_1 = None
-        _add_batch_dim_2: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_2, 0, 1);  child_2 = _add_batch_dim_2 = None
-        _add_batch_dim_3: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_3, 0, 1);  child_3 = _add_batch_dim_3 = None
-        _add_batch_dim_4: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_4, 0, 1);  child_4 = _add_batch_dim_4 = None
-        _add_batch_dim_5: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_5, 0, 1);  child_5 = None
+        _add_batch_dim: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(slice_1, 0, 1);  slice_1 = None
+        _add_batch_dim_1: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(slice_3, 0, 1);  slice_3 = None
+        _add_batch_dim_2: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(slice_5, 0, 1);  slice_5 = _add_batch_dim_2 = None
+        _add_batch_dim_3: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(slice_2, 0, 1);  slice_2 = _add_batch_dim_3 = None
+        _add_batch_dim_4: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(slice_4, 0, 1);  slice_4 = _add_batch_dim_4 = None
+        _add_batch_dim_5: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(slice_6, 0, 1);  slice_6 = None
 
-        a: "f32[10, 2]" = _add_batch_dim + _add_batch_dim_5;  _add_batch_dim = None
-        b: "f32[10, 2]" = _add_batch_dim_1 - _add_batch_dim_5;  _add_batch_dim_1 = _add_batch_dim_5 = None
+        add: "f32[10, 2]" = _add_batch_dim + _add_batch_dim_5;  _add_batch_dim = None
+        sub: "f32[10, 2]" = _add_batch_dim_1 - _add_batch_dim_5;  _add_batch_dim_1 = _add_batch_dim_5 = None
 
-        child_6: "f32[10, 2]" = a - b
+        sub_1: "f32[10, 2]" = add - sub
 
-        child_7: "f32[1, 10, 2]" = torch._functorch.predispatch._remove_batch_dim(a, 1, 1, 0);  a = None
-        child_8: "f32[1, 10, 2]" = torch._functorch.predispatch._remove_batch_dim(b, 1, 1, 0);  b = None
-        child_9: "f32[1, 10, 2]" = torch._functorch.predispatch._remove_batch_dim(child_6, 1, 1, 0);  child_6 = None
+        _remove_batch_dim: "f32[1, 10, 2]" = torch._functorch.predispatch._remove_batch_dim(add, 1, 1, 0);  add = None
+        _remove_batch_dim_1: "f32[1, 10, 2]" = torch._functorch.predispatch._remove_batch_dim(sub, 1, 1, 0);  sub = None
+        _remove_batch_dim_2: "f32[1, 10, 2]" = torch._functorch.predispatch._remove_batch_dim(sub_1, 1, 1, 0);  sub_1 = None
 
         _vmap_decrement_nesting = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting = None
 
-        child_10: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_3, 0, 2, None, 2)
-        child_11: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_4, 0, 2, None, 2)
-        child_12: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_5, 0, 2, None, 2)
+        slice_7: "f32[1, 10, 2]" = torch.ops.aten.slice(flip, 0, 2, None, 2)
+        slice_8: "f32[1, 10, 2]" = torch.ops.aten.slice(flip_1, 0, 2, None, 2)
+        slice_9: "f32[1, 10, 2]" = torch.ops.aten.slice(flip_2, 0, 2, None, 2)
 
         lazy_load_decompositions_1 = torch._functorch.predispatch.lazy_load_decompositions();  lazy_load_decompositions_1 = None
 
         _vmap_increment_nesting_1 = torch._functorch.predispatch._vmap_increment_nesting(1, 'error');  _vmap_increment_nesting_1 = None
 
-        _add_batch_dim_6: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_7, 0, 1)
-        _add_batch_dim_7: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_8, 0, 1)
-        _add_batch_dim_8: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_9, 0, 1);  _add_batch_dim_8 = None
-        _add_batch_dim_9: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_10, 0, 1);  child_10 = _add_batch_dim_9 = None
-        _add_batch_dim_10: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_11, 0, 1);  child_11 = _add_batch_dim_10 = None
-        _add_batch_dim_11: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_12, 0, 1);  child_12 = None
+        _add_batch_dim_6: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(_remove_batch_dim, 0, 1)
+        _add_batch_dim_7: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(_remove_batch_dim_1, 0, 1)
+        _add_batch_dim_8: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(_remove_batch_dim_2, 0, 1);  _add_batch_dim_8 = None
+        _add_batch_dim_9: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(slice_7, 0, 1);  slice_7 = _add_batch_dim_9 = None
+        _add_batch_dim_10: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(slice_8, 0, 1);  slice_8 = _add_batch_dim_10 = None
+        _add_batch_dim_11: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(slice_9, 0, 1);  slice_9 = None
 
-        a_1: "f32[10, 2]" = _add_batch_dim_6 + _add_batch_dim_11;  _add_batch_dim_6 = None
-        b_1: "f32[10, 2]" = _add_batch_dim_7 - _add_batch_dim_11;  _add_batch_dim_7 = _add_batch_dim_11 = None
+        add_1: "f32[10, 2]" = _add_batch_dim_6 + _add_batch_dim_11;  _add_batch_dim_6 = None
+        sub_2: "f32[10, 2]" = _add_batch_dim_7 - _add_batch_dim_11;  _add_batch_dim_7 = _add_batch_dim_11 = None
 
-        child_13: "f32[10, 2]" = a_1 - b_1
+        sub_3: "f32[10, 2]" = add_1 - sub_2
 
-        child_14: "f32[1, 10, 2]" = torch._functorch.predispatch._remove_batch_dim(a_1, 1, 1, 0);  a_1 = None
-        child_15: "f32[1, 10, 2]" = torch._functorch.predispatch._remove_batch_dim(b_1, 1, 1, 0);  b_1 = None
-        child_16: "f32[1, 10, 2]" = torch._functorch.predispatch._remove_batch_dim(child_13, 1, 1, 0);  child_13 = None
+        _remove_batch_dim_3: "f32[1, 10, 2]" = torch._functorch.predispatch._remove_batch_dim(add_1, 1, 1, 0);  add_1 = None
+        _remove_batch_dim_4: "f32[1, 10, 2]" = torch._functorch.predispatch._remove_batch_dim(sub_2, 1, 1, 0);  sub_2 = None
+        _remove_batch_dim_5: "f32[1, 10, 2]" = torch._functorch.predispatch._remove_batch_dim(sub_3, 1, 1, 0);  sub_3 = None
 
         _vmap_decrement_nesting_1 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_1 = None
 
-        slice_10: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_3, 0, 0, 1);  elem_3 = None
-        cat: "f32[2, 10, 2]" = torch.cat([slice_10, child_14], dim = 0);  slice_10 = child_14 = None
-        slice_11: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_4, 0, 0, 1);  elem_4 = None
-        cat_1: "f32[2, 10, 2]" = torch.cat([slice_11, child_15], dim = 0);  slice_11 = child_15 = None
-        slice_12: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_5, 0, 0, 1);  elem_5 = None
-        cat_2: "f32[2, 10, 2]" = torch.cat([slice_12, child_16], dim = 0);  slice_12 = child_16 = None
+        pad: "f32[2, 10, 2]" = torch._C._nn.pad(_remove_batch_dim, [0, 0, 0, 0, 0, 1], 'constant', None);  _remove_batch_dim = None
+        pad_1: "f32[2, 10, 2]" = torch._C._nn.pad(_remove_batch_dim_1, [0, 0, 0, 0, 0, 1], 'constant', None);  _remove_batch_dim_1 = None
+        pad_2: "f32[2, 10, 2]" = torch._C._nn.pad(_remove_batch_dim_2, [0, 0, 0, 0, 0, 1], 'constant', None);  _remove_batch_dim_2 = None
 
-        b_2: "f32[2, 10, 2]" = torch._C._nn.pad(child_7, [0, 0, 0, 0, 0, 1], 'constant', None);  child_7 = None
-
-        stacked: "f32[2, 2, 10, 2]" = torch.stack([cat, b_2], dim = 1);  cat = b_2 = None
-        interleaved: "f32[4, 10, 2]" = torch.flatten(stacked, start_dim = 0, end_dim = 1);  stacked = None
-        interleaved_1: "f32[3, 10, 2]" = torch.ops.aten.slice(interleaved, 0, 0, 3);  interleaved = None
-
-        b_3: "f32[2, 10, 2]" = torch._C._nn.pad(child_8, [0, 0, 0, 0, 0, 1], 'constant', None);  child_8 = None
-
-        stacked_1: "f32[2, 2, 10, 2]" = torch.stack([cat_1, b_3], dim = 1);  cat_1 = b_3 = None
-        interleaved_2: "f32[4, 10, 2]" = torch.flatten(stacked_1, start_dim = 0, end_dim = 1);  stacked_1 = None
-        interleaved_3: "f32[3, 10, 2]" = torch.ops.aten.slice(interleaved_2, 0, 0, 3);  interleaved_2 = None
-
-        b_4: "f32[2, 10, 2]" = torch._C._nn.pad(child_9, [0, 0, 0, 0, 0, 1], 'constant', None);  child_9 = None
-
-        stacked_2: "f32[2, 2, 10, 2]" = torch.stack([cat_2, b_4], dim = 1);  cat_2 = b_4 = None
-        interleaved_4: "f32[4, 10, 2]" = torch.flatten(stacked_2, start_dim = 0, end_dim = 1);  stacked_2 = None
-        interleaved_5: "f32[3, 10, 2]" = torch.ops.aten.slice(interleaved_4, 0, 0, 3);  interleaved_4 = None
-        flip_3: "f32[3, 10, 2]" = interleaved_1.flip([0]);  interleaved_1 = None
-        flip_4: "f32[3, 10, 2]" = interleaved_3.flip([0]);  interleaved_3 = None
-        flip_5: "f32[3, 10, 2]" = interleaved_5.flip([0]);  interleaved_5 = None
+        slice_10: "f32[1, 10, 2]" = torch.ops.aten.slice(flip, 0, 0, 1);  flip = None
+        cat: "f32[2, 10, 2]" = torch.cat([slice_10, _remove_batch_dim_3], dim = 0);  slice_10 = _remove_batch_dim_3 = None
+        slice_11: "f32[1, 10, 2]" = torch.ops.aten.slice(flip_1, 0, 0, 1);  flip_1 = None
+        cat_1: "f32[2, 10, 2]" = torch.cat([slice_11, _remove_batch_dim_4], dim = 0);  slice_11 = _remove_batch_dim_4 = None
+        slice_12: "f32[1, 10, 2]" = torch.ops.aten.slice(flip_2, 0, 0, 1);  flip_2 = None
+        cat_2: "f32[2, 10, 2]" = torch.cat([slice_12, _remove_batch_dim_5], dim = 0);  slice_12 = _remove_batch_dim_5 = None
+        stack: "f32[2, 2, 10, 2]" = torch.stack([cat, pad], dim = 1);  cat = pad = None
+        flatten: "f32[4, 10, 2]" = torch.flatten(stack, start_dim = 0, end_dim = 1);  stack = None
+        slice_13: "f32[3, 10, 2]" = torch.ops.aten.slice(flatten, 0, 0, 3);  flatten = None
+        flip_3: "f32[3, 10, 2]" = slice_13.flip([0]);  slice_13 = None
         movedim_3: "f32[3, 10, 2]" = torch.movedim(flip_3, 0, 0);  flip_3 = None
+        stack_1: "f32[2, 2, 10, 2]" = torch.stack([cat_1, pad_1], dim = 1);  cat_1 = pad_1 = None
+        flatten_1: "f32[4, 10, 2]" = torch.flatten(stack_1, start_dim = 0, end_dim = 1);  stack_1 = None
+        slice_14: "f32[3, 10, 2]" = torch.ops.aten.slice(flatten_1, 0, 0, 3);  flatten_1 = None
+        flip_4: "f32[3, 10, 2]" = slice_14.flip([0]);  slice_14 = None
         movedim_4: "f32[3, 10, 2]" = torch.movedim(flip_4, 0, 0);  flip_4 = None
+        stack_2: "f32[2, 2, 10, 2]" = torch.stack([cat_2, pad_2], dim = 1);  cat_2 = pad_2 = None
+        flatten_2: "f32[4, 10, 2]" = torch.flatten(stack_2, start_dim = 0, end_dim = 1);  stack_2 = None
+        slice_15: "f32[3, 10, 2]" = torch.ops.aten.slice(flatten_2, 0, 0, 3);  flatten_2 = None
+        flip_5: "f32[3, 10, 2]" = slice_15.flip([0]);  slice_15 = None
         movedim_5: "f32[3, 10, 2]" = torch.movedim(flip_5, 0, 0);  flip_5 = None
         return (movedim_3, movedim_4, movedim_5)
 """,
@@ -11102,6 +11097,7 @@ class GraphModule(torch.nn.Module):
         while_loop_stack_output = torch.ops.higher_order.while_loop_stack_output(while_loop_cond_graph_0, while_loop_body_graph_0, (primals_1,), (primals_3, primals_2));  while_loop_cond_graph_0 = while_loop_body_graph_0 = None
         getitem: "f32[u2, 3, 3]" = while_loop_stack_output[0];  while_loop_stack_output = None
         select: "f32[3, 3]" = torch.ops.aten.select.int(getitem, 0, -1)
+
         unsqueeze: "f32[1, 3, 3]" = torch.ops.aten.unsqueeze.default(primals_1, 0);  primals_1 = None
         slice_1: "f32[u2 - 1, 3, 3]" = torch.ops.aten.slice.Tensor(getitem, 0, 0, -1);  getitem = None
         cat: "f32[u2, 3, 3]" = torch.ops.aten.cat.default([unsqueeze, slice_1]);  unsqueeze = slice_1 = None
@@ -11144,12 +11140,14 @@ class GraphModule(torch.nn.Module):
     class while_loop_cond_graph_1(torch.nn.Module):
         def forward(self, arg0_1: "i64[]", arg1_1: "f32[3, 3]", arg2_1: "f32[3]", arg3_1: "f32[3, 3]", arg4_1: "f32[u2, 3, 3]", arg5_1: "f32[3]", arg6_1: "f32[3, 3]"):
             sym_size_int_1: "Sym(u2)" = torch.ops.aten.sym_size.int(arg4_1, 0);  arg4_1 = None
+
             lt: "b8[]" = torch.ops.aten.lt.Scalar(arg0_1, sym_size_int_1);  arg0_1 = sym_size_int_1 = None
             return lt
 
     class while_loop_body_graph_1(torch.nn.Module):
         def forward(self, arg0_1: "i64[]", arg1_1: "f32[3, 3]", arg2_1: "f32[3]", arg3_1: "f32[3, 3]", arg4_1: "f32[u2, 3, 3]", arg5_1: "f32[3]", arg6_1: "f32[3, 3]"):
             sym_size_int_1: "Sym(u2)" = torch.ops.aten.sym_size.int(arg4_1, 0)
+
             rsub: "i64[]" = torch.ops.aten.rsub.Scalar(arg0_1, sym_size_int_1);  sym_size_int_1 = None
             sub: "i64[]" = torch.ops.aten.sub.Tensor(rsub, 1);  rsub = None
             _local_scalar_dense: "Sym(u7)" = torch.ops.aten._local_scalar_dense.default(sub);  sub = None
@@ -11165,10 +11163,8 @@ class GraphModule(torch.nn.Module):
             t_4: "f32[3, 3]" = torch.ops.aten.t.default(t_3);  t_3 = None
             mul_1: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select)
             mul_2: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select);  arg1_1 = select = None
-
             add_2: "f32[3, 3]" = torch.ops.aten.add.Tensor(mm, mul_2);  mm = mul_2 = None
             add_3: "f32[3, 3]" = torch.ops.aten.add.Tensor(add_2, mul_1);  add_2 = mul_1 = None
-
             add_4: "i64[]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
             add_5: "f32[3]" = torch.ops.aten.add.Tensor(view, arg2_1);  view = arg2_1 = None
             add_6: "f32[3, 3]" = torch.ops.aten.add.Tensor(t_4, arg3_1);  t_4 = arg3_1 = None
@@ -11876,10 +11872,10 @@ class <lambda>(torch.nn.Module):
         getitem_2: "f32[3, 4]" = auto_functionalized_v2[2];  auto_functionalized_v2 = None
 
         add: "f32[3, 3]" = torch.ops.aten.add.Tensor(arg2_1, getitem);  arg2_1 = getitem = None
-        sum_2: "f32[]" = torch.ops.aten.sum.default(getitem_2);  getitem_2 = None
-        add_1: "f32[3, 3]" = torch.ops.aten.add.Tensor(add, sum_2);  add = sum_2 = None
-        sum_3: "f32[]" = torch.ops.aten.sum.default(getitem_1)
-        add_2: "f32[3, 3]" = torch.ops.aten.add.Tensor(add_1, sum_3);  add_1 = sum_3 = None
+        sum_2: "f32[]" = torch.ops.aten.sum.default(getitem_1)
+        sum_3: "f32[]" = torch.ops.aten.sum.default(getitem_2);  getitem_2 = None
+        add_1: "f32[3, 3]" = torch.ops.aten.add.Tensor(add, sum_3);  add = sum_3 = None
+        add_2: "f32[3, 3]" = torch.ops.aten.add.Tensor(add_1, sum_2);  add_1 = sum_2 = None
 
         copy_: "f32[4, 3]" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = getitem_1 = copy_ = None
         return (add_2,)
@@ -12428,10 +12424,10 @@ class <lambda>(torch.nn.Module):
         getitem_2: "f32[3, 4]" = auto_functionalized_v2[2];  auto_functionalized_v2 = None
 
         add: "f32[3, 3]" = torch.ops.aten.add.Tensor(arg2_1, getitem);  arg2_1 = getitem = None
-        sum_2: "f32[]" = torch.ops.aten.sum.default(getitem_2);  getitem_2 = None
-        add_1: "f32[3, 3]" = torch.ops.aten.add.Tensor(add, sum_2);  add = sum_2 = None
-        sum_3: "f32[]" = torch.ops.aten.sum.default(getitem_1)
-        add_2: "f32[3, 3]" = torch.ops.aten.add.Tensor(add_1, sum_3);  add_1 = sum_3 = None
+        sum_2: "f32[]" = torch.ops.aten.sum.default(getitem_1)
+        sum_3: "f32[]" = torch.ops.aten.sum.default(getitem_2);  getitem_2 = None
+        add_1: "f32[3, 3]" = torch.ops.aten.add.Tensor(add, sum_3);  add = sum_3 = None
+        add_2: "f32[3, 3]" = torch.ops.aten.add.Tensor(add_1, sum_2);  add_1 = sum_2 = None
 
         copy_: "f32[4, 3]" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = getitem_1 = copy_ = None
         return (add_2,)
