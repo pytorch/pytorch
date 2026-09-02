@@ -11,7 +11,9 @@ import contextlib
 import copy
 import functools
 import itertools
+import logging
 import pprint
+import threading
 import typing
 import warnings
 import weakref
@@ -124,6 +126,7 @@ def _unwrap_tensor_subclasses_no_symints(
 
 zip = strict_zip
 
+log = logging.getLogger(__name__)
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
 
@@ -230,6 +233,26 @@ def _unwrap_tensoralias(x: TensorAlias) -> torch.Tensor:
 
 def _identity(x: Any) -> Any:
     return x
+
+
+def _replay_input_mutation(orig: torch.Tensor, updated: torch.Tensor) -> None:
+    """Write back an input mutation that was hidden from autograd.
+
+    Emitted only for an input whose InputAliasInfo records
+    mutations_hidden_from_autograd; a tracked mutation is written back with a
+    plain copy_, so a target that refuses in-place edits (a view stamped
+    IN_CUSTOM_FUNCTION) raises exactly as in eager. Whether an eager write
+    bumps the version counter is decided by the ADInplaceOrView layer (aten
+    codegen, or the fallback torch.library.custom_op installs), so a write
+    recorded hidden bypassed that layer and is replayed under no_grad with the
+    version counter preserved, as apply_in_graph_mutations does in-graph.
+    """
+    if orig.is_inference():
+        with torch.no_grad():
+            orig.copy_(updated)
+        return
+    with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(orig):
+        orig.copy_(updated)
 
 
 class AliasOfInputHandler:
@@ -794,7 +817,13 @@ class _RuntimeForwardEpilogue:
                             "Mutations on inputs with user-specified streams are not yet supported. "
                             "See: https://github.com/pytorch/pytorch/issues/172522"
                         )
-                    original_inpt.copy_(updated_inpt)
+                    if meta.mutations_hidden_from_autograd:
+                        _replay_input_mutation(original_inpt, updated_inpt)
+                    elif meta.mutations_under_no_grad_or_inference_mode:
+                        with torch.no_grad():
+                            original_inpt.copy_(updated_inpt)
+                    else:
+                        original_inpt.copy_(updated_inpt)
 
     def _replay_output_aliases(
         self, orig_inputs: dict[int, Tensor], fw_outs: list[Any]
@@ -1083,7 +1112,11 @@ def _create_runtime_wrapper(
             args="orig_inputs, updated_inputs",
             artifact_name="mutation_epilogue",
         )
-        buf.bind(torch=torch, _unwrap_tensoralias=_unwrap_tensoralias)
+        buf.bind(
+            torch=torch,
+            _unwrap_tensoralias=_unwrap_tensoralias,
+            _replay_input_mutation=_replay_input_mutation,
+        )
         wrote_body = False
         with buf.indent():
             for i, inpt_idx in enumerate(runtime_metadata.mutated_inp_runtime_indices):
@@ -1138,6 +1171,10 @@ def _create_runtime_wrapper(
                                 "See: https://github.com/pytorch/pytorch/issues/172522",
                             )
                             buf.writeline(f"raise RuntimeError({msg_name})")
+                        elif meta.mutations_hidden_from_autograd:
+                            buf.writeline(f"_replay_input_mutation({oi}, {ui})")
+                        elif meta.mutations_under_no_grad_or_inference_mode:
+                            buf.writeline(f"with torch.no_grad(): {oi}.copy_({ui})")
                         else:
                             buf.writeline(f"{oi}.copy_({ui})")
             if not wrote_body:
@@ -2691,6 +2728,37 @@ class _AutogradSavedState:
         ctx.opaque_objects = opaque_object_outs
 
 
+def _dealias_marked_returns(raw_returns: list[Any], marked: frozenset[int]) -> None:
+    """Give each slot about to be marked non-differentiable its own TensorImpl.
+
+    mark_non_differentiable is keyed on TensorImpl, so marking one slot marks
+    EVERY returned slot holding that same object, and with
+    ctx._materialize_non_diff_grads = False a slot marked this way is handed a
+    None instead of zeros. Backends are free to return one object in two slots
+    -- inductor lowers aten.detach to a no-op, and h*1 / h+0 fold away -- so
+    `return h * 1, h.detach()` marks the differentiable output too and drops
+    the gradient, and `return y[:2], y[2:], y.detach()` marks y's intermediate
+    base, which the backward requires a tangent for.
+
+    Substituting an alias is only correct because the slot is one we are about
+    to declare non-differentiable anyway; slots that stay differentiable keep
+    their identity.
+    """
+    # Runs on every forward and almost never fires: index the marked slots
+    # (usually one or two) by identity and probe the unmarked Tensor slots.
+    marked_positions: dict[int, list[int]] = {}
+    for i in marked:
+        x = raw_returns[i]
+        if isinstance(x, Tensor):
+            marked_positions.setdefault(id(x), []).append(i)
+    if not marked_positions:
+        return
+    for j, o in enumerate(raw_returns):
+        if j not in marked and isinstance(o, Tensor):
+            for i in marked_positions.pop(id(o), ()):
+                raw_returns[i] = raw_returns[i].detach()
+
+
 @dataclass
 class _AutogradForwardEpilogue:
     metadata: ViewAndMutationMeta
@@ -2755,12 +2823,13 @@ class _AutogradForwardEpilogue:
             if x.mutation_type == MutationType.MUTATED_OUT_GRAPH
         ] + self.metadata.output_info
 
-        fw_outs_not_requiring_grad = [
-            x
+        non_diff_indices = [
+            i
             for (i, x) in enumerate(raw_returns_not_including_intermediate_bases)
             if isinstance(x, torch.Tensor) and not raw_returns_meta[i].requires_grad
         ]
-        ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
+        _dealias_marked_returns(raw_returns, frozenset(non_diff_indices))
+        ctx.mark_non_differentiable(*(raw_returns[i] for i in non_diff_indices))
         ctx._materialize_non_diff_grads = False
         _snapshot_external_objects(ctx)
 
@@ -2987,6 +3056,30 @@ class _AutogradBackwardCompiler:
                 )
 
 
+class KeptTangentInfo(typing.NamedTuple):
+    """Compile-time description of the tangent slots the backward prologue keeps.
+
+    One of these is built per backward prologue and passed (as a single shared
+    object, not per element) to process_runtime_tangent, which reads it only when
+    a kept slot arrives holding something other than a Tensor. Everything here is
+    metadata that is gone by the time the backward runs: output_info is not
+    reachable from the runtime tangent, and traced_tangents (hence the dtypes)
+    are dropped by ViewAndMutationMeta.make_runtime_safe.
+    """
+
+    # kept tangent j -> its index among the autograd.Function's returned slots
+    grad_out_idx: tuple[int, ...]
+    # kept tangent j -> dtype of the forward output / mutated input behind it
+    dtype: tuple[torch.dtype | None, ...]
+    num_mutated_inputs: int
+    num_outputs: int
+    num_intermediate_bases: int
+    # parallel to fw_metadata.output_info, indexed by user forward output
+    output_type: tuple[str, ...]
+    output_requires_grad: tuple[bool, ...]
+    output_requires_grad_for_backward: tuple[bool, ...]
+
+
 def _codegen_backward_prologue(
     fw_metadata: ViewAndMutationMeta,
     maybe_subclass_meta: SubclassMeta | None,
@@ -3033,6 +3126,28 @@ def _codegen_backward_prologue(
         + list(range(intermediate_start, expected_grad_outs))
     )
     num_flat_bw_args_with_grads = len(all_surviving)
+
+    tangent_dtypes = fw_metadata.traced_tangent_dtypes or []
+    if len(tangent_dtypes) != num_flat_bw_args_with_grads:
+        log.warning(
+            "traced_tangent_dtypes has %d entries but the backward prologue keeps "
+            "%d tangent slots; not reporting tangent dtypes",
+            len(tangent_dtypes),
+            num_flat_bw_args_with_grads,
+        )
+        tangent_dtypes = [None] * num_flat_bw_args_with_grads
+    kept_tangent_info = KeptTangentInfo(
+        grad_out_idx=tuple(all_surviving),
+        dtype=tuple(tangent_dtypes),
+        num_mutated_inputs=num_mutated_runtime_inps,
+        num_outputs=num_outputs,
+        num_intermediate_bases=num_intermediate_bases,
+        output_type=tuple(i.output_type.name for i in fw_metadata.output_info),
+        output_requires_grad=tuple(i.requires_grad for i in fw_metadata.output_info),
+        output_requires_grad_for_backward=tuple(
+            i.requires_grad_for_backward for i in fw_metadata.output_info
+        ),
+    )
 
     buf = PySourceBuilder(
         "_backward_prologue",
@@ -3106,6 +3221,7 @@ def _codegen_backward_prologue(
             _tangent_descs_=fw_metadata.traced_tangents_descs,
             _compile_id_=fw_metadata.compile_id_str,
             _stack_traces_=fw_metadata.tangent_source_stack_traces or (),
+            _kept_tangent_info_=kept_tangent_info,
         )
 
         if has_subclass:
@@ -3123,7 +3239,8 @@ def _codegen_backward_prologue(
             buf.writeline(
                 "_fpt = list(_chain_("
                 "_process_tangent_(t, m, idx, desc, _compile_id_, "
-                "_stack_traces_[idx] if _stack_traces_ else None)[1] "
+                "_stack_traces_[idx] if _stack_traces_ else None, "
+                "_kept_tangent_info_)[1] "
                 "for idx, (t, m, desc) in enumerate("
                 "zip(_tangents, _tangent_metas_, _tangent_descs_))))"
             )
@@ -3142,7 +3259,8 @@ def _codegen_backward_prologue(
                 buf.writeline(
                     "all_args[_i] = _process_tangent_(all_args[_i], "
                     "_tangent_metas_[j], j, _tangent_descs_[j], _compile_id_, "
-                    "_stack_traces_[j] if _stack_traces_ else None)[0]"
+                    "_stack_traces_[j] if _stack_traces_ else None, "
+                    "_kept_tangent_info_)[0]"
                 )
 
         if has_mutations_in_bw:
@@ -3423,7 +3541,12 @@ class _AOTDispatchAutogradFunctionFactory:
             args="raw_returns",
             artifact_name="compiled_fn_wrapper",
         )
-        buf.bind(TensorAlias=TensorAlias, torch=torch, Tensor=Tensor)
+        buf.bind(
+            TensorAlias=TensorAlias,
+            torch=torch,
+            Tensor=Tensor,
+            _dealias_marked_returns=_dealias_marked_returns,
+        )
 
         with buf.indent():
             for i, idx in enumerate(fw_metadata.mutated_inp_runtime_indices):
@@ -3459,6 +3582,11 @@ class _AOTDispatchAutogradFunctionFactory:
                 ):
                     _non_diff_indices.append(i)
             if _non_diff_indices:
+                # See _dealias_marked_returns: marking is keyed on TensorImpl,
+                # so a slot sharing an object with another returned slot marks
+                # that one too.
+                marked = buf.bind_value("_marked", frozenset(_non_diff_indices))
+                buf.writeline(f"_dealias_marked_returns(raw_returns, {marked})")
                 checks = " + ".join(
                     f"([raw_returns[{i}]] if isinstance(raw_returns[{i}], Tensor) else [])"
                     for i in _non_diff_indices
@@ -3629,6 +3757,32 @@ class _AOTDispatchAutogradFunctionFactory:
 
 # This is wrapped in a class just for namespacing purposes
 # No need to make it into an actual CompilerWrapper because it doesn't fit the abstract as cleanly
+_compile_spec_sinks = threading.local()
+
+
+@contextlib.contextmanager
+def capture_autograd_compile_specs() -> Generator[
+    list[AOTDispatchAutogradCompileSpec], None, None
+]:
+    """Collect every AOTDispatchAutogradCompileSpec built on this thread while active.
+
+    Thread-local, nestable, and the only sanctioned way to observe the spec from
+    outside AOTAutograd; to_standalone_python composes a training graph from it.
+    """
+    sinks: list[list[AOTDispatchAutogradCompileSpec]] | None = getattr(
+        _compile_spec_sinks, "sinks", None
+    )
+    if sinks is None:
+        sinks = []
+        _compile_spec_sinks.sinks = sinks
+    out: list[AOTDispatchAutogradCompileSpec] = []
+    sinks.append(out)
+    try:
+        yield out
+    finally:
+        sinks.remove(out)
+
+
 class AOTDispatchAutograd:
     @staticmethod
     def _raise_tangent_metadata_error(
@@ -3706,6 +3860,140 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
             )
 
     @staticmethod
+    def _non_tensor_tangent_error(
+        x: Any,
+        tangent_idx: int,
+        tangent_desc: Any | None,
+        compile_id_str: str | None,
+        tangent_stack_trace: str | None,
+        kept_tangent_info: "KeptTangentInfo | None",
+    ) -> RuntimeError:
+        """Explain a kept tangent slot that arrived as a non-Tensor (in practice None).
+
+        Autograd hands a compiled backward None for a returned slot only when it
+        recorded no gradient metadata for it, and AOTAutograd's forward epilogue sets
+        ctx._materialize_non_diff_grads = False so nothing zero-fills it. Naming the
+        forward output behind the slot is the whole point: inductor reports this
+        several frames lower as "TypeError: expected Tensor()" against a codegen'd
+        name like tangents_3, which is not positional and cannot be mapped back to a
+        user output by hand.
+        """
+        from .descriptors import (
+            IntermediateBaseAOTOutput,
+            PlainAOTOutput,
+            TangentAOTInput,
+        )
+
+        # The descriptor names the user output behind the slot, including through an
+        # intermediate base (which is not itself a user output).
+        out_idx: int | None = None
+        via_base = False
+        if isinstance(tangent_desc, TangentAOTInput):
+            out = tangent_desc.output
+            if isinstance(out, IntermediateBaseAOTOutput):
+                via_base = True
+                out = out.base_of
+            if isinstance(out, PlainAOTOutput):
+                out_idx = out.idx
+
+        lines = [
+            f"  tangent index         : {tangent_idx}",
+            f"  received              : {x!r:.200} (type {type(x).__name__}, expected a Tensor)",
+            f"  tangent descriptor    : {tangent_desc!r}",
+        ]
+        if isinstance(tangent_desc, TangentAOTInput):
+            lines.append(f"  descriptor expression : {tangent_desc.expr()}")
+
+        dtype: torch.dtype | None = None
+        if kept_tangent_info is not None and tangent_idx < len(
+            kept_tangent_info.grad_out_idx
+        ):
+            info = kept_tangent_info
+            dtype = info.dtype[tangent_idx]
+            grad_out_idx = info.grad_out_idx[tangent_idx]
+            total = (
+                info.num_mutated_inputs + info.num_outputs + info.num_intermediate_bases
+            )
+            if grad_out_idx < info.num_mutated_inputs:
+                what = "the updated value of a mutated forward input"
+            elif grad_out_idx < info.num_mutated_inputs + info.num_outputs:
+                what = f"user forward output {grad_out_idx - info.num_mutated_inputs}"
+            else:
+                nth = grad_out_idx - info.num_mutated_inputs - info.num_outputs
+                # An intermediate base is not a user output: AOTAutograd appends
+                # the base of several aliasing outputs as an extra return.
+                what = f"intermediate base {nth} (not a user output)"
+            lines.append(
+                f"  grad_output slot      : {grad_out_idx} of {total} slots returned "
+                "by the compiled autograd.Function"
+            )
+            lines.append(f"  that slot holds       : {what}")
+            if out_idx is not None and out_idx < len(info.output_type):
+                lines.append(
+                    f"  user output index     : {out_idx}"
+                    + (" (the output this intermediate base backs)" if via_base else "")
+                )
+                lines.append(
+                    f"  its OutputType        : OutputType.{info.output_type[out_idx]}"
+                )
+                lines.append(
+                    f"  its requires_grad     : {info.output_requires_grad[out_idx]} "
+                    f"(requires_grad_for_backward="
+                    f"{info.output_requires_grad_for_backward[out_idx]})"
+                )
+            if dtype is not None:
+                lines.append(f"  its dtype             : {dtype}")
+        elif out_idx is not None:
+            lines.append(f"  user output index     : {out_idx}")
+
+        marked_reason = """(2) or (3), since the dtype above is differentiable.
+AOTAutograd marks every returned slot whose recorded requires_grad is False, and
+marking is keyed on TensorImpl, so a backend returning the SAME tensor object in
+two returned slots marks both -- inductor lowers aten.detach to a no-op and
+folds h * 1 / h + 0 away, which is how one object ends up in two slots."""
+        if dtype is None:
+            reason = "any of (1), (2) or (3): no dtype was recorded for this slot."
+        elif not (dtype.is_floating_point or dtype.is_complex):
+            reason = f"""(1).
+{dtype} is not a differentiable dtype, so autograd never recorded gradient
+metadata for this output, yet AOTAutograd recorded that same output as needing a
+tangent."""
+        else:
+            reason = marked_reason
+
+        graph_hint = (
+            f"\nThis error occurred in compiled graph [{compile_id_str}]."
+            if compile_id_str is not None
+            else ""
+        )
+        stack_hint = (
+            f"\nThe forward output was created here:\n{tangent_stack_trace}"
+            if tangent_stack_trace is not None
+            else ""
+        )
+        body = "\n".join(lines)
+        return RuntimeError(
+            f"""
+The compiled backward was handed a non-Tensor for a tangent it requires.
+
+{body}
+
+Autograd hands back None rather than a zero tangent only for a returned slot it
+recorded no gradient metadata for, which is exactly three cases: (1) the output
+has a non-differentiable dtype, (2) the output was marked via
+ctx.mark_non_differentiable, or (3) the forward returned a non-Tensor in that
+slot. AOTAutograd's forward epilogue sets ctx._materialize_non_diff_grads =
+False, so nothing fills the slot back in.
+
+This slot is case {reason}
+
+The backward requires this tangent, so none of the three is something your model
+can ask for: this is a bug in AOTAutograd or in the backend. Please report it
+with this message.
+{graph_hint}{stack_hint}"""
+        )
+
+    @staticmethod
     def process_runtime_tangent(
         x: Any,
         meta: PlainTensorMeta | SubclassCreationMeta,
@@ -3713,8 +4001,23 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
         tangent_desc: Any | None = None,
         compile_id_str: str | None = None,
         tangent_stack_trace: str | None = None,
+        kept_tangent_info: "KeptTangentInfo | None" = None,
     ) -> tuple[Any, list[Any]]:
         if not isinstance(x, torch.Tensor):
+            # Every top-level call comes from the backward prologue, which only
+            # iterates the slots it kept (all_surviving), so a non-Tensor here is
+            # always a tangent the backward graph is about to be handed. Slots the
+            # prologue drops never reach this function, and the recursive call for a
+            # subclass's attrs passes no tangent_idx.
+            if tangent_idx is not None:
+                raise AOTDispatchAutograd._non_tensor_tangent_error(
+                    x,
+                    tangent_idx,
+                    tangent_desc,
+                    compile_id_str,
+                    tangent_stack_trace,
+                    kept_tangent_info,
+                )
             return x, [x]
 
         if is_fake_tensor(x):
@@ -3812,6 +4115,8 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
 
     @staticmethod
     def post_compile(spec: AOTDispatchAutogradCompileSpec) -> Callable[..., Any]:
+        for sink in getattr(_compile_spec_sinks, "sinks", ()):
+            sink.append(spec)
         compiled_function_cls = _AOTDispatchAutogradFunctionFactory(spec).build()
         return RuntimeWrapper(
             indices_of_inps_to_detach=spec.indices_of_inps_to_detach,
