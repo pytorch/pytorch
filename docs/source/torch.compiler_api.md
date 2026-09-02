@@ -36,6 +36,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
      keep_tensor_guards_unsafe
      skip_guard_on_globals_unsafe
      skip_all_guards_unsafe
+     GuardProvenance
      nested_compile_region
      load_cache_artifacts
      load_compiled_function

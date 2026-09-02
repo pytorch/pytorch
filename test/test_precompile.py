@@ -5508,14 +5508,17 @@ class TestPrecompile(TestCase):
     def test_tracer_dynamo_capture_leaves_global_pgo_state_untouched(self):
         from torch._dynamo import pgo
 
-        before = {str(key) for key in pgo.get_code_state()}
+        # Render the full state (per-code automatic-dynamic entries), not just
+        # the key set: capture must not mutate an existing entry's contents
+        # (e.g. flipping a source to dynamic) without adding or dropping a key.
+        before = pgo.render_code_state(pgo.get_code_state())
         torch.compiler.precompile(
             _precompile_dynamo_torch_sin,
             example_inputs=[(torch.randn(3),)],
             tracer="dynamo",
             backend="eager",
         )
-        after = {str(key) for key in pgo.get_code_state()}
+        after = pgo.render_code_state(pgo.get_code_state())
         self.assertEqual(before, after)
 
 

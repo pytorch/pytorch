@@ -2779,8 +2779,8 @@ class _PrecompileDynamoState:
 def _write_dynamo_artifact_files(
     python_code: str, cache: bytes, artifact_path: str, cache_path: str
 ) -> None:
-    # Two-phase: write and fsync both temp files first, then rename back to
-    # back, so the window in which a crash leaves a mismatched
+    # Two-phase: write and fsync both temp files first, then rename both
+    # back-to-back, so the window in which a crash leaves a mismatched
     # (code_hash-rejected) pair on disk is two renames, not a full cache write.
     # A failure before the first rename cleans its temp files up and leaves the
     # previous pair; a failure between the renames leaves the NEW artifact with
@@ -2810,6 +2810,15 @@ def _write_dynamo_artifact_files(
                 os.fsync(f.fileno())
         for tmp, path in renames:
             os.replace(tmp, path)
+        # A rename is not durable until the parent directory entry is fsynced;
+        # without this a crash right after os.replace can lose the new name and
+        # resurrect nothing, widening the mismatch window the scheme bounds.
+        for parent in {os.path.dirname(os.fspath(path)) or "." for _, path in renames}:
+            dir_fd = os.open(parent, os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
     except BaseException:
         # A tmp already renamed away just fails its unlink with ENOENT.
         for tmp, _ in renames:

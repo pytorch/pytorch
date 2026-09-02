@@ -642,7 +642,16 @@ def _build_dynamo_forward():
         # minimized under it, and requires_grad is guarded per input.
         with torch.set_grad_enabled(_DYNAMO_GRAD_ENABLED):
             for manager, function in variants:
-                if manager.check(local_scope):
+                try:
+                    matched = manager.check(local_scope)
+                except Exception:
+                    # A guard that raises on this input (e.g. probing an
+                    # attribute a differently-typed argument lacks) is a
+                    # non-match, not a hard failure: fall through so a later
+                    # variant can match and, failing that, the actionable
+                    # no-match error below fires.
+                    continue
+                if matched:
                     result = function(*args)
                     if _DYNAMO_GRAD_ENABLED and not ambient_grad:
                         result = detach_fresh_outputs(result, args)

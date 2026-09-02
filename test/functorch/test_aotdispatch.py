@@ -1600,7 +1600,7 @@ def forward(self, primals_1):
             aot_config = out[0].grad_fn._forward_cls._aot_config
             object.__setattr__(aot_config, "precompile_backend_id", "test")
             with self.assertRaisesRegex(
-                RuntimeError,
+                torch.compiler.PrecompileError,
                 "autocast state at backward time differs from capture time",
             ):
                 out[0].sum().backward()
@@ -6437,6 +6437,53 @@ def forward(self, tangents_1):
         self.assertFalse(detached.requires_grad)
         out.sum().backward()
         self.assertEqual(x.grad, ref_grad)
+
+    def test_non_differentiable_output_aliasing_intermediate_base(self):
+        # y is an intermediate base aliased by two differentiable view outputs;
+        # returning y.detach() as a third slot shares y's TensorImpl (inductor
+        # lowers detach to a no-op), so marking it non-differentiable would mark
+        # y's base -- which the backward requires a tangent for -- and raise.
+        def f(x):
+            y = x * 2
+            return y[:2], y[2:], y.detach()
+
+        x = torch.randn(4, requires_grad=True)
+        ref_a, ref_b, _ = f(x)
+        (ref_a.sum() + ref_b.sum()).backward()
+        ref_grad, x.grad = x.grad, None
+        a, b, detached = torch.compile(f, backend="inductor")(x)
+        self.assertFalse(detached.requires_grad)
+        (a.sum() + b.sum()).backward()
+        self.assertEqual(x.grad, ref_grad)
+
+    def test_dealias_marked_returns_unit(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _dealias_marked_returns,
+        )
+
+        # A marked slot sharing a TensorImpl with an unmarked slot is detached
+        # off; the unmarked slot keeps its identity.
+        shared = torch.randn(3)
+        returns = [shared, shared, torch.randn(3)]
+        _dealias_marked_returns(returns, [1])
+        self.assertIsNot(returns[1], shared)
+        self.assertIs(returns[0], shared)
+        self.assertEqual(returns[1], shared)
+
+        # No collision: the marked slot is left untouched.
+        a, b = torch.randn(2), torch.randn(2)
+        returns = [a, b]
+        _dealias_marked_returns(returns, [1])
+        self.assertIs(returns[1], b)
+
+        # Non-tensor marked indices are tolerated (the codegen path passes
+        # metadata-selected indices without a tensor filter): the non-tensor
+        # slot is skipped, the colliding tensor slot is still detached off.
+        marker = object()
+        returns = [shared, marker, shared]
+        _dealias_marked_returns(returns, [1, 2])
+        self.assertIs(returns[1], marker)
+        self.assertIsNot(returns[2], shared)
 
 
 def extract_graph(fx_g, _, graph_cell):
