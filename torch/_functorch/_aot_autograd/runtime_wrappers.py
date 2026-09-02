@@ -232,67 +232,59 @@ def _identity(x: Any) -> Any:
     return x
 
 
-# Once per process; see the comment at the warning site.
-_replay_input_mutation_warned = False
+@functools.cache
+def _warn_replayed_custom_function_view(idx: int) -> None:
+    # Once per process and input (the cache, not warnings' registry: each
+    # codegen'd epilogue is a fresh fabricated frame, so the registry would
+    # re-warn per compiled function). Tests reset it with .cache_clear().
+    warnings.warn(
+        f"torch.compile is writing mutated input {idx} back onto a view created "
+        "inside a custom autograd.Function (or an input it returned as-is) "
+        "without autograd tracking. Eager rejects an autograd-visible in-place "
+        "op on such a view; compile cannot tell that apart from a write that "
+        "bypasses autograd (e.g. through .data), so it replays the mutation "
+        "invisibly and gradients that later flow through this input see its "
+        "pre-mutation history only."
+    )
 
 
-def _replay_input_mutation(orig: torch.Tensor, updated: torch.Tensor) -> None:
+def _replay_input_mutation(orig: torch.Tensor, updated: torch.Tensor, idx: int) -> None:
     """Write a functionalized input mutation back onto the caller's tensor.
 
-    The tracked ``copy_`` this normally emits is stricter than the mutation it
-    stands in for. The op that really did the write can be invisible to
-    autograd -- FBGEMM's fused-optimizer kernels declare ``Tensor(a!)`` but
-    write through raw pointers, so nothing bumps a version counter and their
-    meta kernel writes nothing at all -- while the tensor being written can be
-    a view that refuses tracked in-place edits outright, which is what an
-    input returned as-is by a custom autograd.Function becomes (autograd
-    replaces it with an identity view stamped IN_CUSTOM_FUNCTION). Replaying
-    such a mutation the way it actually happened, invisibly, is the only sound
-    option: a tracked copy_ raises, and forcing one through by clearing
-    CreationMeta reroutes the base's history and silently drops the custom
-    Function's backward.
+    Normally a tracked ``copy_``. The exception is a view stamped
+    ``CreationMeta.IN_CUSTOM_FUNCTION`` -- what an input returned as-is by a
+    custom autograd.Function becomes -- which refuses any tracked in-place
+    edit. For that target the write is replayed invisibly: under ``no_grad``
+    with the version counter preserved, i.e. the way an op that writes through
+    raw pointers or ``.data`` (FBGEMM's fused-optimizer kernels, the motivating
+    case) actually did it in eager, where nothing raised.
+
+    This deliberately diverges from eager. Eager raises on an autograd-VISIBLE
+    in-place op to such a view; compile cannot tell a ``.data`` write from a
+    visible one at the region boundary (both functionalize to the same
+    ``mutates_data`` metadata), so it replays either kind invisibly and warns
+    once per process. A later use of the view then differentiates through its
+    pre-mutation history: the custom Function's backward runs, but on the
+    gradient of the post-mutation values with no contribution from the
+    mutating op. Clearing CreationMeta to force a tracked copy through instead
+    would reroute the base's history and silently drop the custom Function's
+    backward entirely.
 
     Decided per call rather than baked into the epilogue because nothing
-    guards it -- a graph traced against an ordinary tensor can be handed one
-    of these later, which for a serialized artifact means a different process.
+    guards it -- a graph traced against an ordinary tensor can be handed such
+    a view later, which for a serialized artifact means a different process.
+    Exactly IN_CUSTOM_FUNCTION, not merely "not DEFAULT": a view made under
+    no_grad or inference mode, or a multi-output-node view, still takes a
+    tracked copy_ so autograd's version check can catch a genuinely stale use.
     """
-    # Exactly IN_CUSTOM_FUNCTION, not merely "not DEFAULT": a view made under
-    # no_grad or inference mode, or a multi-output-node view, still takes a
-    # tracked copy_, and writing those invisibly would skip the version bump
-    # that autograd relies on to catch a genuinely stale use.
     # pybind11 hands back a fresh enum object each call, so this cannot be `is`.
     if (
         orig._is_view()
         and torch._C._autograd._get_creation_meta(orig)
         == torch._C._autograd.CreationMeta.IN_CUSTOM_FUNCTION
     ):
-        global _replay_input_mutation_warned
-        if (
-            not _replay_input_mutation_warned
-            and torch.is_grad_enabled()
-            and orig.requires_grad
-        ):
-            # An autograd-VISIBLE mutation of this view is exactly what eager
-            # rejects ("Output ... is a view and is being modified inplace");
-            # replaying it invisibly instead drops the mutation's contribution
-            # to autograd. Whether the op that really did the write was
-            # visible is unknowable here -- the graph does not guard on the
-            # view's provenance -- so say so ONCE PER PROCESS rather than
-            # guess. The flag, not warnings' own registry: the caller is a
-            # codegen'd epilogue with a fresh fabricated frame per compiled
-            # function, so the registry would re-warn per compilation. The
-            # module-level flag is also how the legitimate invisible-write
-            # case (an op that writes through raw pointers in eager, the
-            # reason this replay exists) avoids a warning on every call.
-            _replay_input_mutation_warned = True
-            warnings.warn(
-                "torch.compile is replaying a mutation of an input that is a "
-                "view created inside a custom autograd.Function, without "
-                "autograd tracking. If the mutating op is autograd-visible in "
-                "eager (where it raises an error on such a view), gradients "
-                "flowing through this input may be silently wrong.",
-                stacklevel=2,
-            )
+        if torch.is_grad_enabled() and orig.requires_grad:
+            _warn_replayed_custom_function_view(idx)
         with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(orig):
             orig.copy_(updated)
     else:
@@ -863,7 +855,7 @@ class _RuntimeForwardEpilogue:
                         )
                     # Keep in sync with the codegen'd epilogue, which emits
                     # _replay_input_mutation here (see finalize()).
-                    _replay_input_mutation(original_inpt, updated_inpt)
+                    _replay_input_mutation(original_inpt, updated_inpt, inpt_idx)
 
     def _replay_output_aliases(
         self, orig_inputs: dict[int, Tensor], fw_outs: list[Any]
@@ -1212,7 +1204,9 @@ def _create_runtime_wrapper(
                             )
                             buf.writeline(f"raise RuntimeError({msg_name})")
                         else:
-                            buf.writeline(f"_replay_input_mutation({oi}, {ui})")
+                            buf.writeline(
+                                f"_replay_input_mutation({oi}, {ui}, {inpt_idx})"
+                            )
             if not wrote_body:
                 buf.writeline("pass")
 
@@ -3100,7 +3094,8 @@ class _AutogradBackwardCompiler:
                 )
 
 
-class KeptTangentInfo(typing.NamedTuple):
+@dataclass(frozen=True)
+class KeptTangentInfo:
     """Compile-time description of the tangent slots the backward prologue keeps.
 
     One of these is built per backward prologue and passed (as a single shared
@@ -3626,7 +3621,6 @@ class _AOTDispatchAutogradFunctionFactory:
                 buf.writeline(
                     f"_dealias_marked_returns(raw_returns, {_non_diff_indices!r})"
                 )
-            if _non_diff_indices:
                 checks = " + ".join(
                     f"([raw_returns[{i}]] if isinstance(raw_returns[{i}], Tensor) else [])"
                     for i in _non_diff_indices
@@ -3880,7 +3874,7 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
         tangent_desc: Any | None,
         compile_id_str: str | None,
         tangent_stack_trace: str | None,
-        kept_tangent_info: "KeptTangentInfo | None",
+        kept_tangent_info: KeptTangentInfo | None,
     ) -> RuntimeError:
         """Explain a kept tangent slot that arrived as a non-Tensor (in practice None).
 
@@ -4015,7 +4009,7 @@ with this message.
         tangent_desc: Any | None = None,
         compile_id_str: str | None = None,
         tangent_stack_trace: str | None = None,
-        kept_tangent_info: "KeptTangentInfo | None" = None,
+        kept_tangent_info: KeptTangentInfo | None = None,
     ) -> tuple[Any, list[Any]]:
         if not isinstance(x, torch.Tensor):
             # Every top-level call comes from the backward prologue, which only
