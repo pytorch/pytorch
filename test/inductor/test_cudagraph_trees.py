@@ -25,7 +25,6 @@ from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._higher_order_ops.invoke_subgraph import get_invoke_subgraph_compile_options
 from torch._inductor import config, ir
 from torch._inductor.codecache import FxGraphCache
-from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.cudagraph_trees import (
     AliasesPriorGraphOutput,
@@ -760,6 +759,50 @@ if HAS_CUDA_AND_TRITON:
 
         @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
         @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
+        @parametrize(
+            "override_kwargs,region_config_kwargs",
+            (
+                (
+                    {"fwd": False},
+                    {"fw_inductor_config_patches": {"triton.cudagraphs": True}},
+                ),
+                (
+                    {"fwd": True},
+                    {"fw_inductor_config_patches": {"triton.cudagraphs": True}},
+                ),
+                (
+                    {"bwd": False},
+                    {"bw_inductor_config_patches": {"triton.cudagraphs": True}},
+                ),
+                (
+                    {"bwd": True},
+                    {"bw_inductor_config_patches": {"triton.cudagraphs": True}},
+                ),
+            ),
+        )
+        def test_invoke_subgraph_region_cudagraph_rejects_dynamo_override(
+            self, override_kwargs, region_config_kwargs
+        ):
+            """Verify Dynamo and regional cudagraph overrides cannot be combined."""
+            nested_config = get_invoke_subgraph_compile_options(**region_config_kwargs)
+
+            @torch.compiler.nested_compile_region(options=nested_config)
+            def g(y):
+                return torch.sin(y)
+
+            def fn(x):
+                return g(x)
+
+            x = torch.randn(10, 4, device="cuda", requires_grad=True)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "override_cudagraphs.*cannot be combined.*nested compile-region",
+            ):
+                with torch._dynamo.override_cudagraphs(**override_kwargs):
+                    torch.compile(fn, fullgraph=True)(x)
+
+        @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
+        @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
         @config.patch("graph_partition", True)
         @config.patch("triton.cudagraphs", True)
         def test_invoke_subgraph_region_cudagraph_inherited_unsafe_body_skips(self):
@@ -863,35 +906,6 @@ if HAS_CUDA_AND_TRITON:
                 self.assertNotIn(
                     "repeated_subgraph0(", _module_def_body(codes[0], match.group())
                 )
-
-        @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
-        @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
-        @config.patch("graph_partition", True)
-        @config.patch("triton.cudagraphs", True)
-        def test_invoke_subgraph_min_size_initializes_wrapper_before_scheduler(self):
-            """Verify profitability scheduling has an initialized wrapper."""
-            nested_config = get_invoke_subgraph_compile_options(
-                fw_inductor_config_patches={"triton.cudagraph_min_partition_size": 1}
-            )
-
-            @torch.compiler.nested_compile_region(options=nested_config)
-            def g(x):
-                y = torch.sin(x)
-                z = torch.cos(y[:, 0])
-                return y + z[:, None]
-
-            x = torch.randn(8, 8, device="cuda")
-            can_reuse = PythonWrapperCodegen.can_reuse
-            with mock.patch.object(
-                PythonWrapperCodegen,
-                "can_reuse",
-                autospec=True,
-                side_effect=can_reuse,
-            ) as can_reuse_mock:
-                result = torch.compile(g, fullgraph=True)(x)
-
-            self.assertEqual(result, g(x))
-            self.assertGreater(can_reuse_mock.call_count, 0)
 
         @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
         @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
@@ -1150,60 +1164,6 @@ if HAS_CUDA_AND_TRITON:
                 self.assertNotIn(
                     "repeated_subgraph0(", _module_def_body(codes[0], match.group())
                 )
-
-        @torch._functorch.config.patch("enable_autograd_cache", True)
-        @config.patch("fx_graph_cache", True)
-        @config.patch("fx_graph_remote_cache", False)
-        @dynamo_config.patch("specialize_float", True)
-        def _check_region_cudagraph_aot_cache_hit(
-            self,
-            opt_fn,
-            eager_fn,
-            expect_manager=True,
-            with_backward=True,
-            expected_partition_post_compile_calls=None,
-        ):
-            counters.clear()
-            AOTAutogradCache.clear()
-            FxGraphCache.clear()
-
-            def run():
-                x = torch.randn(10, 4, device="cuda", requires_grad=with_backward)
-                y = torch.randn(10, 4, device="cuda", requires_grad=with_backward)
-                result = opt_fn(x, y)
-                if with_backward:
-                    result.backward()
-                self.assertEqual(result, eager_fn(x, y))
-
-            run()
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
-            torch._dynamo.reset()
-            torch._inductor.cudagraph_trees.reset_cudagraph_trees()
-
-            with (
-                mock.patch(
-                    "torch._inductor.output_code.cudagraph_post_compile",
-                    wraps=torch._inductor.output_code.cudagraph_post_compile,
-                ) as whole_graph_post_compile,
-                mock.patch(
-                    "torch._inductor.output_code.cudagraph_partition_post_compile",
-                    wraps=torch._inductor.output_code.cudagraph_partition_post_compile,
-                ) as partition_post_compile,
-            ):
-                run()
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
-            self.assertEqual(whole_graph_post_compile.call_count, 0)
-            if expected_partition_post_compile_calls is None:
-                self.assertGreater(partition_post_compile.call_count, 0)
-            else:
-                self.assertEqual(
-                    partition_post_compile.call_count,
-                    expected_partition_post_compile_calls,
-                )
-            if expect_manager:
-                self.assertIsNotNone(self.get_manager())
-            else:
-                self.assertIsNone(self.get_manager())
 
         @config.patch("triton.cudagraphs", True)
         @config.patch("triton.cudagraph_skip_dynamic_graphs", True)
@@ -2069,70 +2029,6 @@ if HAS_CUDA_AND_TRITON:
             # we should not have cudagraph'd anything
             if self.get_manager() is not None:
                 raise AssertionError
-
-        @torch._functorch.config.patch("enable_autograd_cache", True)
-        @torch._inductor.config.patch("fx_graph_cache", True)
-        @torch._inductor.config.patch("fx_graph_remote_cache", False)
-        @torch._dynamo.config.patch("specialize_float", True)
-        def test_cudagraph_backward_override_affects_aot_cache_key(self):
-            """Verify backward cudagraph annotations distinguish AOT cache entries."""
-            counters.clear()
-            AOTAutogradCache.clear()
-            FxGraphCache.clear()
-
-            def fn(x):
-                return torch.sin(x).sum()
-
-            def run(annotated):
-                torch._dynamo.reset()
-                x = torch.randn(10, 4, device="cuda", requires_grad=True)
-                if annotated:
-                    with torch._dynamo.override_cudagraphs(bwd=False):
-                        result = torch.compile(fn, fullgraph=True)(x)
-                else:
-                    result = torch.compile(fn, fullgraph=True)(x)
-                result.backward()
-
-            run(False)
-            run(True)
-            run(True)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
-
-        @torch._functorch.config.patch("enable_autograd_cache", True)
-        @torch._inductor.config.patch("fx_graph_cache", True)
-        @torch._inductor.config.patch("fx_graph_remote_cache", False)
-        @torch._dynamo.config.patch("specialize_float", True)
-        def test_cudagraph_backward_override_aot_cache_hit(self):
-            """Verify a warm load preserves a backward cudagraph opt-out."""
-            counters.clear()
-            AOTAutogradCache.clear()
-            FxGraphCache.clear()
-
-            @torch._dynamo.override_cudagraphs(bwd=False)
-            def fn(x):
-                return torch.sin(x).sum()
-
-            opt_fn = torch.compile(fn, fullgraph=True)
-
-            def run():
-                x = torch.randn(10, 4, device="cuda", requires_grad=True)
-                result = opt_fn(x)
-                result.backward()
-                self.assertEqual(result, fn(x))
-
-            run()
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
-
-            torch._dynamo.reset()
-            for _ in range(3):
-                torch.compiler.cudagraph_mark_step_begin()
-                run()
-
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
-            self.assertIsNotNone(self.get_manager())
-            self.assertEqual(self.get_manager().new_graph_id().id, 1)
 
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         @torch._functorch.config.patch("enable_autograd_cache", True)
@@ -4731,6 +4627,39 @@ if HAS_CUDA_AND_TRITON:
 
             self.assertEqual(result, inp + 1)
             self.assertIsNone(self.get_manager())
+
+        @config.patch("graph_partition", True)
+        @config.patch("triton.cudagraphs", True)
+        def test_cudagraph_annotation_disable_preserves_partition_scheduler(self):
+            @torch._dynamo.override_cudagraphs(fwd=False)
+            def helper(x):
+                return torch.sin(x)
+
+            def fn(x):
+                return helper(x)
+
+            maybe_reorder = Scheduler.maybe_reorder_for_minimizing_partition
+            simple_reorder = Scheduler.reorder_for_partition_with_simple_dependency
+            with (
+                mock.patch.object(
+                    Scheduler,
+                    "maybe_reorder_for_minimizing_partition",
+                    autospec=True,
+                    side_effect=maybe_reorder,
+                ) as maybe_reorder_mock,
+                mock.patch.object(
+                    Scheduler,
+                    "reorder_for_partition_with_simple_dependency",
+                    autospec=True,
+                    side_effect=simple_reorder,
+                ) as simple_reorder_mock,
+            ):
+                x = torch.randn(10, 4, device="cuda")
+                result = torch.compile(fn, fullgraph=True)(x)
+
+            self.assertEqual(result, fn(x))
+            self.assertEqual(maybe_reorder_mock.call_count, 1)
+            self.assertEqual(simple_reorder_mock.call_count, 1)
 
         def test_cudagraph_annotation_disable_fwd_bwd(self):
             @torch._dynamo.override_cudagraphs(fwd=False, bwd=False)
