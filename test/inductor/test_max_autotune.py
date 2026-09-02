@@ -6011,10 +6011,7 @@ class TestTDMConfigDenseAndGeneric(TestCase):
         self.assertFalse(is_gfx1250_arch("amd-gfx1250"))
 
     def test_tdm_device_prereqs_use_runtime_floor_and_backend_probe(self):
-        from torch._inductor.utils import (
-            _gfx1250_device_prereqs,
-            _rocm_version_tuple,
-        )
+        from torch._inductor.utils import _gfx1250_device_prereqs, _rocm_version_tuple
 
         props = mock.Mock(gcnArchName="gfx1250:sramecc+:xnack-")
         device = torch.device("cuda")
@@ -6892,7 +6889,6 @@ class TestTDMEndToEnd(TestCase):
             }
         ):
             return run_and_get_code(torch.compile(fn), *args)
-
 
     def test_tdm_dense_mm_correctness_and_selection(self):
         def fn(a, b):
