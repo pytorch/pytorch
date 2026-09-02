@@ -9,6 +9,7 @@ import multiprocessing
 import os
 import re
 import sys
+import threading
 from concurrent.futures import (
     Future,
     ThreadPoolExecutor,
@@ -97,6 +98,7 @@ _constexpr_root_import_re = re.compile(
     r"^from ([\w.]+) import (\w+) as \2$", re.MULTILINE
 )
 _worker_missing_module_re = re.compile(r"No module named '([^']+)'")
+_CONSTEXPR_LIBRARY_ROOTS = frozenset(OrderedSet(["torch", "triton"]))
 
 
 def _constexpr_module_missing_in_worker(
@@ -126,13 +128,18 @@ def _constexpr_module_missing_in_worker(
     # constexpr imports rather than committing to whichever propagated last.
     # The missing name may be an ancestor of the constexpr module (importing
     # foo.bar fails at foo) or a descendant (foo/__init__.py imports
-    # foo.helpers, which is what the worker lacks).
+    # foo.helpers, which is what the worker lacks). Descendant matching is
+    # skipped for the library roots constexprs themselves import (torch for
+    # dtypes, triton.language for tl dtypes and transitive-closure helpers):
+    # those are always importable in a worker, so a missing submodule under
+    # them is a genuine error, not a stale worker search path.
     for name in candidates:
         for module in modules:
+            library_root = module.split(".", 1)[0] in _CONSTEXPR_LIBRARY_ROOTS
             if (
                 module == name
                 or module.startswith(name + ".")
-                or name.startswith(module + ".")
+                or (not library_root and name.startswith(module + "."))
             ):
                 return module
     return None
@@ -596,10 +603,17 @@ class AsyncCompile:
 
             # LambdaFuture.result() does not memoize, and task.result()
             # re-raises the same worker exception on every call; cache the
-            # fallback kernel so re-entry neither recompiles nor re-warns.
+            # fallback kernel so re-entry neither recompiles nor re-warns. The
+            # future is shared process-wide through CompiledTritonKernels, so
+            # the memo is guarded against concurrent resolvers.
             fallback_kernel: CachingAutotuner | None = None
+            fallback_lock = threading.Lock()
 
             def get_result() -> CachingAutotuner:
+                with fallback_lock:
+                    return _get_result()
+
+            def _get_result() -> CachingAutotuner:
                 nonlocal fallback_kernel
                 if fallback_kernel is not None:
                     return fallback_kernel

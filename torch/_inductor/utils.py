@@ -260,23 +260,11 @@ def _collect_importable_constexpr_types(
                 f"{type_module}.{type_qualname} is not importable. "
                 "Define constexpr config classes at module scope in an importable module."
             )
-        repr_qualname = repr_prefix.removesuffix("(")
-        if repr_qualname != type_qualname:
-            raise ImportError(
-                "Triton constexpr nested value type "
-                f"{type_module}.{type_qualname} uses the bare name "
-                f"{repr_qualname} in its repr, which generated code cannot import. "
-                "Use the type's qualified name in its repr."
-            )
-        if dataclasses.is_dataclass(value) and not isinstance(value, type):
-            for field in dataclasses.fields(value):
-                if field.repr and not field.init:
-                    raise ImportError(
-                        "Triton constexpr dataclass value type "
-                        f"{type_module}.{type_qualname} has repr-visible field "
-                        f"{field.name} with init=False, so its repr cannot be "
-                        "evaluated as a constructor call. Set repr=False or init=True."
-                    )
+        # Only the type's importability matters here: the default value is
+        # never repr'd into the generated module (its def-time expression is
+        # spliced verbatim), so the repr's spelling and constructor shape are
+        # irrelevant. See the bare-root-name contract at the call site in
+        # codegen/wrapper.py.
         root_name = type_qualname.split(".", 1)[0]
         if root_name in _TRITON_CONSTEXPR_RESERVED_NAMES:
             raise ImportError(

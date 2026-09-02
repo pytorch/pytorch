@@ -68,6 +68,7 @@ from ..stream_utils import (
     get_stream_name,
 )
 from ..utils import (
+    _constexpr_type_repr_prefix,
     cache_on_self,
     DeferredLineBase,
     DelayReplaceLine,
@@ -423,6 +424,15 @@ def _constexpr_source_node(
     else:
         if matches is True:
             return source
+    # Types with a constructor-style repr over literal arguments but none of the
+    # field protocols above (fractions.Fraction, decimal.Decimal, ...): spell
+    # the type through its module alias and keep the repr's argument list.
+    # _verify_constexpr_source still has to rebuild an equal value from it.
+    prefix = _constexpr_type_repr_prefix(value)
+    if prefix is not None and type(value).__module__ != "builtins":
+        cls_ref = _constexpr_type_ref(type(value), module_aliases, imports)
+        if cls_ref is not None:
+            return f"{cls_ref}({source[len(prefix) :]}"
     try:
         import triton.language as tl
     except ImportError:
@@ -463,6 +473,18 @@ def _constexpr_values_match(original: Any, rebuilt: Any) -> bool:
         return all(
             _constexpr_values_match(getattr(original, f.name), getattr(rebuilt, f.name))
             for f in attrs_fields
+        )
+    repr_args = getattr(original, "__repr_args__", None)
+    if callable(repr_args):
+        # Field-wise like the dataclass/attrs branches, so a pydantic-style
+        # type does not need an __eq__ of its own to be verifiable.
+        original_items = list(repr_args())
+        rebuilt_items = list(rebuilt.__repr_args__())
+        return len(original_items) == len(rebuilt_items) and all(
+            name == rebuilt_name and _constexpr_values_match(item, rebuilt_item)
+            for (name, item), (rebuilt_name, rebuilt_item) in zip(
+                original_items, rebuilt_items
+            )
         )
     if isinstance(original, dict):
         return len(original) == len(rebuilt) and all(
@@ -513,6 +535,22 @@ def _constexpr_decline_detail(value: Any) -> str:
                 "compares constants by equality."
             )
         cls = type(item)
+        for base in (dict, list, tuple, set, frozenset):  # noqa: set_linter
+            if isinstance(item, base) and not _exact_or_supported_container(item):
+                return (
+                    f" Type {cls.__qualname__} subclasses {base.__name__}; only exact "
+                    "builtin containers (plus namedtuples, torch.Size and "
+                    "OrderedSet) are rendered, since a container display would "
+                    "silently drop the subclass."
+                )
+        if dataclasses.is_dataclass(item) and not isinstance(item, type):
+            for field in dataclasses.fields(item):
+                if field.repr and not field.init:
+                    return (
+                        f" Field {field.name} of {cls.__qualname__} is repr-visible "
+                        "but init=False, so its repr is not a constructor call; "
+                        "set repr=False or init=True."
+                    )
         if "<locals>" in cls.__qualname__:
             return (
                 f" Type {cls.__qualname__} is defined inside a function; define "
@@ -527,6 +565,32 @@ def _constexpr_decline_detail(value: Any) -> str:
         if children:
             worklist.extend(children)
     return ""
+
+
+def _hashable_constexpr_key(value: Any) -> Any:
+    # Container constexprs (lists, dicts, sets) are rendered as source but are
+    # unhashable, and the user-defined-kernel cache keys on call kwargs when
+    # autotune configs are present; freeze them structurally so that path does
+    # not TypeError before rendering. Anything else keys on itself.
+    if type(value) is dict:
+        return (dict, tuple((k, _hashable_constexpr_key(v)) for k, v in value.items()))
+    if type(value) is list:
+        return (list, tuple(_hashable_constexpr_key(v) for v in value))
+    if type(value) in (set, frozenset):  # noqa: set_linter
+        return (type(value), frozenset(_hashable_constexpr_key(v) for v in value))
+    if type(value) is tuple:
+        return tuple(_hashable_constexpr_key(v) for v in value)
+    return value
+
+
+def _exact_or_supported_container(value: Any) -> bool:
+    if type(value) in (dict, list, tuple, set, frozenset):  # noqa: set_linter
+        return True
+    if isinstance(value, tuple) and (
+        hasattr(value, "_fields") or type(value) is torch.Size
+    ):
+        return True
+    return type(value) is OrderedSet
 
 
 class _SourceLiteral:
@@ -561,17 +625,25 @@ def _render_constexpr_mappings(
             expression = _constexpr_source_impl(
                 value, module_aliases, imports, OrderedSet()
             )
-            if expression is not None and not _verify_constexpr_source(
-                value, expression, module_aliases
-            ):
+            if expression is None:
+                reason = "has no source rendering"
+            elif not _verify_constexpr_source(value, expression, module_aliases):
+                reason = (
+                    f"was rendered as {expression} but evaluating that does not "
+                    "rebuild an equal value (a repr=False field holding a "
+                    "non-default value, a coercing __post_init__, or a required "
+                    "constructor argument the repr omits)"
+                )
                 expression = None
             if expression is None:
                 raise RuntimeError(
                     f"Triton kernel constexpr argument {name!r} has value {value!r} "
-                    f"of type {type(value).__name__}, which cannot be written into "
-                    "the generated kernel. Pass an int, an IntEnum, or a value "
-                    "whose type is defined in an importable module."
-                    f"{_constexpr_decline_detail(value)}"
+                    f"of type {type(value).__name__}, which {reason}, so it cannot "
+                    "be written into the generated kernel. Supported: ints, "
+                    "floats, strings, bytes, IntEnums, exact builtin containers "
+                    "of those, torch dtypes, and dataclass/attrs/pydantic-style "
+                    "objects (or types with a constructor-style repr) whose type "
+                    f"is defined in an importable module.{_constexpr_decline_detail(value)}"
                 )
             rendered[name] = (
                 _SourceLiteral(expression) if expression != repr(value) else value
@@ -4365,7 +4437,7 @@ class PythonWrapperCodegen(CodeGen):
             for arg in kwargs.values():
                 # We need to key on non tensor arg only in autotune mode
                 if not isinstance(arg, (ir.Buffer, ir.ReinterpretView)):
-                    cache_key.append(arg)
+                    cache_key.append(_hashable_constexpr_key(arg))
         cache_key.append(str(triton_meta))
         cache_key.extend(str(inductor_meta))
 
@@ -4433,10 +4505,13 @@ class PythonWrapperCodegen(CodeGen):
         # A constexpr parameter default in the kernel signature (e.g.
         # ``cfg: tl.constexpr = Cfg()``) is evaluated when the generated module
         # re-execs the spliced kernel def below, and that def-time expression
-        # references the type by its bare root name, so unlike the rendered
-        # constants above (which go through hidden module aliases) it needs the
-        # root name itself bound by an import. Root names are validated against
-        # generated-code names in get_importable_constexpr_types.
+        # is the user's own text, so unlike the rendered constants above (which
+        # go through hidden module aliases) it needs the names it uses bound in
+        # the generated module. Contract: a default expression may reference
+        # its type only by the type's bare root name (`Cfg()` or
+        # `Cfg.Nested()`, not `mycfg.Cfg()` or a module-level constant), which
+        # get_importable_constexpr_types binds with a root-name import; any
+        # other name in the expression is unbound in the generated module.
         constexpr_defaults = [
             p.default for p in kernel.params if p.is_constexpr and p.has_default
         ]

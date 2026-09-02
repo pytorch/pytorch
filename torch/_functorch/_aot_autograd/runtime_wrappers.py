@@ -2699,9 +2699,10 @@ def _dealias_marked_returns(raw_returns: list[Any], marked: Sequence[int]) -> No
     ctx._materialize_non_diff_grads = False a slot marked this way is handed a
     None instead of zeros. Backends are free to return one object in two slots
     -- inductor lowers aten.detach to a no-op, and h*1 / h+0 fold away -- so
-    `return h * 1, h.detach()` marks the differentiable output too and drops
-    the gradient, and `return y[:2], y[2:], y.detach()` marks y's intermediate
-    base, which the backward requires a tangent for.
+    `return h * 1, h.detach()` marks the differentiable output too (its
+    backward then fails with "does not require grad"), and
+    `return y[:2], y[2:], y.detach()` marks y's intermediate base, silently
+    disconnecting the view outputs from the graph (x.grad stays None).
 
     Substituting an alias is only correct because the slot is one we are about
     to declare non-differentiable anyway; slots that stay differentiable keep
@@ -2709,10 +2710,11 @@ def _dealias_marked_returns(raw_returns: list[Any], marked: Sequence[int]) -> No
 
     ``marked`` may name slots that are not tensors: the ahead-of-time codegen
     path selects indices by output metadata and does not pre-filter, so
-    non-tensor slots are simply skipped here. Unmarked slots may already be
-    wrapped in TensorAlias (aliased outputs and metadata-mutated inputs); the
-    probe looks through the wrapper since marking is keyed on the TensorImpl
-    inside it.
+    non-tensor slots are simply skipped here. Unmarked TensorAlias slots
+    (aliased outputs, metadata-mutated inputs) are not probed: autograd.Function
+    sees them as non-tensor outputs and never consults the non-differentiable
+    set for them, and alias regeneration reads only size/stride/offset from the
+    wrapped tensor, so marking a sibling impl cannot affect them.
     """
     if not marked:
         return
@@ -2731,8 +2733,6 @@ def _dealias_marked_returns(raw_returns: list[Any], marked: Sequence[int]) -> No
     collide: set[int] = set()
     for j, o in enumerate(raw_returns):
         if j not in marked_set:
-            if isinstance(o, TensorAlias):
-                o = o.alias
             hits = marked_positions.get(id(o))
             if hits is not None:
                 collide.update(hits)
