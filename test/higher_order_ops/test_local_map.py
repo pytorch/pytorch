@@ -288,27 +288,27 @@ class GraphModule(torch.nn.Module):
         l_self_modules_wo_parameters_weight_ = L_self_modules_wo_parameters_weight_
         l_self_modules_w1_parameters_weight_ = L_self_modules_w1_parameters_weight_
         l_self_modules_w2_parameters_weight_ = L_self_modules_w2_parameters_weight_
-        q: "f32[8, 16, 96]" = torch._C._nn.linear(l_x_, l_self_modules_wq_parameters_weight_, None);  l_self_modules_wq_parameters_weight_ = None
-        k: "f32[8, 16, 96]" = torch._C._nn.linear(l_x_, l_self_modules_wk_parameters_weight_, None);  l_self_modules_wk_parameters_weight_ = None
-        v: "f32[8, 16, 96]" = torch._C._nn.linear(l_x_, l_self_modules_wv_parameters_weight_, None);  l_self_modules_wv_parameters_weight_ = None
-        unflatten: "f32[8, 16, 16, 6]" = q.unflatten(-1, (16, -1));  q = None
-        q_1: "f32[8, 16, 16, 6]" = unflatten.permute(0, 2, 1, 3);  unflatten = None
-        unflatten_1: "f32[8, 16, 16, 6]" = k.unflatten(-1, (16, -1));  k = None
-        k_1: "f32[8, 16, 16, 6]" = unflatten_1.permute(0, 2, 1, 3);  unflatten_1 = None
-        unflatten_2: "f32[8, 16, 16, 6]" = v.unflatten(-1, (16, -1));  v = None
-        v_1: "f32[8, 16, 16, 6]" = unflatten_2.permute(0, 2, 1, 3);  unflatten_2 = None
+        linear: "f32[8, 16, 96]" = torch._C._nn.linear(l_x_, l_self_modules_wq_parameters_weight_, None);  l_self_modules_wq_parameters_weight_ = None
+        linear_1: "f32[8, 16, 96]" = torch._C._nn.linear(l_x_, l_self_modules_wk_parameters_weight_, None);  l_self_modules_wk_parameters_weight_ = None
+        linear_2: "f32[8, 16, 96]" = torch._C._nn.linear(l_x_, l_self_modules_wv_parameters_weight_, None);  l_self_modules_wv_parameters_weight_ = None
+        unflatten: "f32[8, 16, 16, 6]" = linear.unflatten(-1, (16, -1));  linear = None
+        permute: "f32[8, 16, 16, 6]" = unflatten.permute(0, 2, 1, 3);  unflatten = None
+        unflatten_1: "f32[8, 16, 16, 6]" = linear_1.unflatten(-1, (16, -1));  linear_1 = None
+        permute_1: "f32[8, 16, 16, 6]" = unflatten_1.permute(0, 2, 1, 3);  unflatten_1 = None
+        unflatten_2: "f32[8, 16, 16, 6]" = linear_2.unflatten(-1, (16, -1));  linear_2 = None
+        permute_2: "f32[8, 16, 16, 6]" = unflatten_2.permute(0, 2, 1, 3);  unflatten_2 = None
         subgraph_0 = self.subgraph_0
-        local_map_hop = torch.ops.higher_order.local_map_hop(subgraph_0, q_1, k_1, v_1);  subgraph_0 = q_1 = k_1 = v_1 = None
+        local_map_hop = torch.ops.higher_order.local_map_hop(subgraph_0, permute, permute_1, permute_2);  subgraph_0 = permute = permute_1 = permute_2 = None
         getitem: "f32[8, 16, 16, 6]" = local_map_hop[0];  local_map_hop = None
         permute_3: "f32[8, 16, 16, 6]" = getitem.permute(0, 2, 1, 3);  getitem = None
-        o: "f32[8, 16, 96]" = permute_3.flatten(-2);  permute_3 = None
-        o_1: "f32[8, 16, 96]" = torch._C._nn.linear(o, l_self_modules_wo_parameters_weight_, None);  o = l_self_modules_wo_parameters_weight_ = None
-        o0: "f32[8, 16, 96]" = o_1 + l_x_;  o_1 = l_x_ = None
-        o_2: "f32[8, 16, 384]" = torch._C._nn.linear(o0, l_self_modules_w1_parameters_weight_, None);  l_self_modules_w1_parameters_weight_ = None
-        o_3: "f32[8, 16, 384]" = torch.nn.functional.relu(o_2);  o_2 = None
-        o_4: "f32[8, 16, 96]" = torch._C._nn.linear(o_3, l_self_modules_w2_parameters_weight_, None);  o_3 = l_self_modules_w2_parameters_weight_ = None
-        o_5: "f32[8, 16, 96]" = o0 + o_4;  o0 = o_4 = None
-        return (o_5,)
+        flatten: "f32[8, 16, 96]" = permute_3.flatten(-2);  permute_3 = None
+        linear_3: "f32[8, 16, 96]" = torch._C._nn.linear(flatten, l_self_modules_wo_parameters_weight_, None);  flatten = l_self_modules_wo_parameters_weight_ = None
+        add: "f32[8, 16, 96]" = linear_3 + l_x_;  linear_3 = l_x_ = None
+        linear_4: "f32[8, 16, 384]" = torch._C._nn.linear(add, l_self_modules_w1_parameters_weight_, None);  l_self_modules_w1_parameters_weight_ = None
+        relu: "f32[8, 16, 384]" = torch.nn.functional.relu(linear_4);  linear_4 = None
+        linear_5: "f32[8, 16, 96]" = torch._C._nn.linear(relu, l_self_modules_w2_parameters_weight_, None);  relu = l_self_modules_w2_parameters_weight_ = None
+        add_1: "f32[8, 16, 96]" = add + linear_5;  add = linear_5 = None
+        return (add_1,)
     class subgraph_0(torch.nn.Module):
         def forward(self, query: "f32[1, 2, 4, 6]", key: "f32[1, 2, 16, 6]", value: "f32[1, 2, 16, 6]"):
             out: "f32[1, 2, 4, 6]" = torch._C._nn.scaled_dot_product_attention(query = query, key = key, value = value, is_causal = False);  query = key = value = None
