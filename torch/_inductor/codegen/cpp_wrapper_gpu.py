@@ -1867,7 +1867,17 @@ static inline void ensure_triton_kernel_compiles_started() {{
             # JIT: call the extern "C" symbol directly (resolved at link time
             # via extra_flags pointing at the compiled .so).
             kernel_prefix = "kernels." if V.graph.aot_mode else ""
+            enable_kernel_profile = (
+                config.cpp.enable_kernel_profile and sys.platform in ["linux", "win32"]
+            )
+            if enable_kernel_profile:
+                self.writeline("{")
+                self.writeline(
+                    f'RAIIAtenRecordFunctionHandle record_{kernel_name}_("{kernel_name}", nullptr);'
+                )
             self.writeline(f"{kernel_prefix}{kernel_name}({call_args_str}, {stream});")
+            if enable_kernel_profile:
+                self.writeline("}")
 
     def prepare_triton_wrapper_args(
         self, call_args: list[Any], arg_types: list[Any]
