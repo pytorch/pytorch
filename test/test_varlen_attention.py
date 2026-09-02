@@ -617,15 +617,16 @@ class _VarlenVsSdpaMixin:
 
 
 class TestVarlenAttention(_VarlenVsSdpaMixin, NNTestCase):
-    # NOTE: This class is currently CUDA-specific, although a significant portion of its
-    # functionality can be shared by other backends. Separating the common logic from
-    # CUDA-specific logic would require a substantial refactoring, so this is deferred
-    # for now.
-    # The planned refactoring is to introduce a Capability mechanism, allowing each backend
-    # to report its supported Flash Attention implementations (FA2/FA3/FA4) and determine
-    # whether to enable them accordingly. The cuDNN-related logic will also be separated
-    # from the current class and kept CUDA-specific, ultimately resulting in a generic
-    # Accelerator class and a CUDA-specific class.
+    # NOTE: These tests exercise the flash backends, which every accelerator can in
+    # principle provide, but they stay CUDA-specific for now: the backend matrix is
+    # spelled in terms of FA2/FA3/FA4 and SM capabilities, and only CUDA has a varlen
+    # flash kernel behind aten::_flash_attention_forward. Reclassifying this as
+    # ACCELERATOR needs the planned Capability mechanism, through which each backend
+    # reports the flash implementations it supports.
+    # test_varlen_lse_is_not_differentiable and test_batch_invariance also parametrize
+    # over cuDNN: they compare flash against cuDNN rather than being cuDNN-specific, so
+    # they stay here while both classes are CUDA-only. That parameter has to be split
+    # off before this class can go ACCELERATOR.
     hw_classification = HardwareClassification.CUDA
 
     @unittest.skipIf(
@@ -1466,6 +1467,7 @@ class TestVarlenAttentionCuDNN(_VarlenVsSdpaMixin, NNTestCase):
     # cuDNN is the only varlen backend with dedicated aten ops
     # (_cudnn_attention_forward/_backward) and it is only ever selected for a
     # CUDA query, so these tests cannot be shared with other backends.
+    hw_classification = HardwareClassification.CUDA
 
     @skipIfRocm
     @setSdpaBackendsToDefaultFinally
