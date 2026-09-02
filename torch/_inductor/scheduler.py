@@ -222,6 +222,7 @@ class ComboKernelMemoryContext:
 @dataclasses.dataclass(slots=True)
 class FusionMemoryDeviceState:
     nodes: list[BaseSchedulerNode | None]
+    tracked_nodes: OrderedSet[BaseSchedulerNode]
     graph_outputs: OrderedSet[str]
     node_to_idx: dict[BaseSchedulerNode, int]
     baseline_peak: int
@@ -236,6 +237,18 @@ class FusionMemoryDeviceState:
     node_alloc_sizes: dict[BaseSchedulerNode, int] = dataclasses.field(
         default_factory=dict
     )
+    peak_prefix: list[int] = dataclasses.field(default_factory=list)
+
+    def refresh_peak_positions(self) -> None:
+        self.baseline_peak = max(self.baseline_live_after)
+        self.peak_prefix = [0]
+        for live in self.baseline_live_after:
+            self.peak_prefix.append(
+                self.peak_prefix[-1] + int(live >= self.baseline_peak)
+            )
+
+    def region_contains_peak(self, start: int, end: int) -> bool:
+        return self.peak_prefix[end + 1] != self.peak_prefix[start]
 
     def update_boundaries_match(self, update: FusionMemoryUpdate) -> bool:
         start = update.region_start
@@ -269,7 +282,9 @@ class FusionMemoryDeviceState:
         self.last_use_steps.update(update.last_use_steps)
         self.node_outputs[fused_node] = update.candidate_outputs
         self.node_alloc_sizes[fused_node] = update.candidate_alloc_size
-        self.baseline_peak = max(self.baseline_live_after)
+        self.tracked_nodes.difference_update((update.node1, update.node2))
+        self.tracked_nodes.add(fused_node)
+        self.refresh_peak_positions()
 
         for idx, node in enumerate(region_nodes, start):
             if node is None:
@@ -287,6 +302,7 @@ class FusionMemoryDeviceState:
 
 class FusionMemoryStateStatus(enum.Enum):
     ACTIVE = enum.auto()
+    INVALIDATED = enum.auto()
     FAILED_CLOSED = enum.auto()
 
 
@@ -7706,6 +7722,8 @@ class Scheduler:
             fused.mpi_node.size = sum(
                 update.candidate_alloc_size for update in memory_updates.values()
             )
+        elif state is not None:
+            state.status = FusionMemoryStateStatus.INVALIDATED
         return fused
 
     def fuse_if_speedup(
@@ -9010,6 +9028,7 @@ class Scheduler:
 
             device_state = FusionMemoryDeviceState(
                 nodes=list(nodes),
+                tracked_nodes=OrderedSet(nodes),
                 graph_outputs=device_storage.graph_outputs,
                 node_to_idx=dict(node_to_idx),
                 baseline_peak=baseline_peak,
@@ -9021,6 +9040,7 @@ class Scheduler:
                 node_outputs=node_outputs,
                 node_alloc_sizes=node_alloc_sizes,
             )
+            device_state.refresh_peak_positions()
             device_states[device] = device_state
         return FusionMemoryState(device_states)
 
@@ -9120,10 +9140,34 @@ class Scheduler:
     ) -> tuple[bool, dict[torch.device, FusionMemoryUpdate] | None]:
         if state is None:
             return False, None
+        if state.status is FusionMemoryStateStatus.INVALIDATED:
+            return False, None
         if state.status is FusionMemoryStateStatus.FAILED_CLOSED:
             return True, None
         if not state.device_states:
             return False, None
+
+        if not config.fusion_memory_timeline_full_correctness:
+            tracked_device_states = [
+                device_state
+                for device_state in state.device_states.values()
+                if node1 in device_state.tracked_nodes
+                and node2 in device_state.tracked_nodes
+            ]
+            if not tracked_device_states or not any(
+                device_state.region_contains_peak(
+                    min(
+                        device_state.node_to_idx[node1],
+                        device_state.node_to_idx[node2],
+                    ),
+                    max(
+                        device_state.node_to_idx[node1],
+                        device_state.node_to_idx[node2],
+                    ),
+                )
+                for device_state in tracked_device_states
+            ):
+                return False, None
 
         updates: dict[torch.device, FusionMemoryUpdate] = {}
         for device, device_state in state.device_states.items():
