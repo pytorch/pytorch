@@ -17045,6 +17045,43 @@ class TestErrorInputs(TestCase):
             torch.gather(torch.zeros(3, 4, device=device), 1, torch.tensor([[-1]], device=device))
             torch.mps.synchronize()
 
+    def test_index_fill_out_of_bounds(self, device):
+        # Regression for https://github.com/pytorch/pytorch/issues/189969.
+        # Both the scatter path (indices_numel * 16 < dim_size) and the mask
+        # path (>=) must reject out-of-range indices instead of writing OOB.
+        with self.assertRaisesRegex(torch.AcceleratorError, "out of bounds"):
+            # scatter path: 1 index, large dim
+            torch.zeros(4096, device=device).index_fill_(0, torch.tensor([5000], device=device), 1.0)
+            torch.mps.synchronize()
+        with self.assertRaisesRegex(torch.AcceleratorError, "out of bounds"):
+            # mask path: small dim
+            torch.zeros(5, device=device).index_fill_(0, torch.tensor([8], device=device), 1.0)
+            torch.mps.synchronize()
+        with self.assertRaisesRegex(torch.AcceleratorError, "out of bounds"):
+            # negative index below -dim_size
+            torch.zeros(5, device=device).index_fill_(0, torch.tensor([-6], device=device), 1.0)
+            torch.mps.synchronize()
+        # Valid negative indices in [-dim_size, -1] must still wrap.
+        x = torch.zeros(5, device=device)
+        x.index_fill_(0, torch.tensor([-1], device=device), 3.0)
+        torch.mps.synchronize()
+        self.assertEqual(x[-1].item(), 3.0)
+
+    def test_index_reduce_out_of_bounds(self, device):
+        # Regression for https://github.com/pytorch/pytorch/issues/189970.
+        for reduce in ("amax", "amin", "prod", "mean"):
+            with self.assertRaisesRegex(torch.AcceleratorError, "out of bounds"):
+                torch.ones(5, device=device).index_reduce_(
+                    0, torch.tensor([11], device=device),
+                    torch.tensor([88.0], device=device), reduce, include_self=True)
+                torch.mps.synchronize()
+        with self.assertRaisesRegex(torch.AcceleratorError, "out of bounds"):
+            # index_reduce does not wrap negatives; any negative is out of bounds
+            torch.ones(5, device=device).index_reduce_(
+                0, torch.tensor([-1], device=device),
+                torch.tensor([9.0], device=device), "amax", include_self=True)
+            torch.mps.synchronize()
+
     def test_one_hot_out_of_bounds(self, device):
         # Regression for https://github.com/pytorch/pytorch/issues/170507.
         with self.assertRaisesRegex(torch.AcceleratorError, "out of bounds"):
