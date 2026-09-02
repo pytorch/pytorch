@@ -2466,7 +2466,7 @@ class NativeCachingAllocator : public XPUAllocator {
     return device_allocators[device]->getPoolUseCount(std::move(mempool_id));
   }
 
-  ShareableHandle shareIpcHandle(void* ptr) {
+  ShareableHandle shareIpcHandle(void* ptr) override {
 #if C10_XPU_HAS_SYCL_IPC_MEMORY
     Block* block = get_allocated_block(ptr);
     TORCH_CHECK(block, "Invalid device pointer for XPU IPC: ", ptr);
@@ -2496,9 +2496,9 @@ class NativeCachingAllocator : public XPUAllocator {
 #endif
   }
 
-  std::shared_ptr<void> getIpcDevPtr(
+    std::shared_ptr<void> getIpcDevPtr(
       std::string handle_str,
-      c10::DeviceIndex device) {
+      c10::DeviceIndex device) override {
 #if C10_XPU_HAS_SYCL_IPC_MEMORY
     TORCH_CHECK(!handle_str.empty(), "Empty XPU IPC handle");
 
@@ -2602,13 +2602,13 @@ int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
 }
 
 ShareableHandle shareIpcHandle(void* ptr) {
-  return native_allocator.shareIpcHandle(ptr);
+  return get()->shareIpcHandle(ptr);
 }
 
 std::shared_ptr<void> getIpcDevPtr(
     std::string handle,
     c10::DeviceIndex device) {
-  return native_allocator.getIpcDevPtr(std::move(handle), device);
+  return get()->getIpcDevPtr(std::move(handle), device);
 }
 
 } // namespace c10::xpu::XPUCachingAllocator

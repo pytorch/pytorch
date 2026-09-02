@@ -38,6 +38,11 @@ struct TORCH_PYTHON_API XPUPluggableAllocator
   void init(c10::DeviceIndex device_count) override;
   bool initialized() override;
   void copy_data(void* dest, const void* src, std::size_t count) const final;
+  c10::xpu::XPUCachingAllocator::ShareableHandle shareIpcHandle(
+      void* ptr) override;
+  std::shared_ptr<void> getIpcDevPtr(
+      std::string handle,
+      c10::DeviceIndex device) override;
 
   void recordStream(const c10::DataPtr&, c10::Stream stream) override;
   void emptyCache(c10::MempoolId_t mempool_id = {0, 0}) override;

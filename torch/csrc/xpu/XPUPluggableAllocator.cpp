@@ -72,6 +72,26 @@ void XPUPluggableAllocator::copy_data(
   c10::xpu::getCurrentXPUStream().queue().memcpy(dest, src, count);
 }
 
+c10::xpu::XPUCachingAllocator::ShareableHandle
+XPUPluggableAllocator::shareIpcHandle(void* ptr) {
+  (void)ptr;
+  TORCH_CHECK(
+      false,
+      "XPUPluggableAllocator does not yet support shareIpcHandle. "
+      "If you need it, please file an issue describing your use case.");
+}
+
+std::shared_ptr<void> XPUPluggableAllocator::getIpcDevPtr(
+    std::string handle,
+    c10::DeviceIndex device) {
+  (void)handle;
+  (void)device;
+  TORCH_CHECK(
+      false,
+      "XPUPluggableAllocator does not yet support getIpcDevPtr. "
+      "If you need it, please file an issue describing your use case.");
+}
+
 void XPUPluggableAllocator::recordStream(
     const c10::DataPtr& ptr,
     c10::Stream stream) {

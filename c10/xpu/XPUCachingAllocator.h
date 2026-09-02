@@ -20,6 +20,10 @@ class XPUAllocator : public DeviceAllocator {
   virtual void init(c10::DeviceIndex device_count) = 0;
   virtual void* raw_alloc(size_t size) = 0;
   virtual void raw_delete(void* ptr) = 0;
+  virtual ShareableHandle shareIpcHandle(void* ptr) = 0;
+  virtual std::shared_ptr<void> getIpcDevPtr(
+      std::string handle,
+      c10::DeviceIndex device) = 0;
 };
 
 C10_XPU_API extern std::atomic<XPUAllocator*> allocator;
