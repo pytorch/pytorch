@@ -8,6 +8,7 @@ from torch._inductor.fx_passes.pre_grad import (
     linear_transpose,
     permute_linear_fusion,
     permute_matmul_fusion,
+    remove_identity,
     sink_cat_after_pointwise,
     transpose_linear,
     transpose_matmul,
@@ -45,6 +46,18 @@ def count_call_method(module: torch.fx.GraphModule, target_op: Any) -> int:
 
 
 class TestFxFusion(TestCase):
+    def test_remove_identity_keyword_input(self):
+        module = torch.nn.Identity()
+        graph = torch.fx.Graph()
+        input_node = graph.placeholder("x")
+        identity = graph.call_module("0", args=(), kwargs={"input": input_node})
+        graph.output(identity)
+        graph_module = torch.fx.GraphModule(torch.nn.Sequential(module), graph)
+
+        result = remove_identity(graph_module)
+
+        self.assertEqual(list(result.graph.nodes)[-1].args[0].name, "x")
+
     def test_sink_cat_after_pointwise(self):
         def test_kwarg(x, y):
             return torch.cat([x, y], dim=-1).view(-1).view(128).tanh()
