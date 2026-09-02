@@ -113,6 +113,16 @@ class GuardProvenanceTests(torch._dynamo.test_case.TestCase):
         for cls in roots:
             if not is_torch_own(cls):
                 continue
+            # Require a direct declaration, not an inherited one: a root that
+            # subclasses another root (e.g. class Foo(GlobalSource)) would
+            # otherwise silently inherit the base's provenance even when it
+            # should differ, so force every root to redeclare.
+            self.assertIn(
+                "_provenance",
+                vars(cls),
+                f"{cls.__module__}.{cls.__name__} must declare _provenance "
+                "directly (see Note [Guard provenance] in torch/_guards.py)",
+            )
             self.assertIsInstance(
                 cls._provenance,
                 GuardProvenance,

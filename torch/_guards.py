@@ -242,10 +242,13 @@ class GuardProvenance(enum.Enum):
     # torch-function mode stack, streams): part of the environment, but not
     # reachable through any module's globals.
     AMBIENT = 2
-    # Tracing-internal values with no user-visible runtime lookup IN GUARD
-    # CHECKS (synthetic and temp locals, ephemeral sources, materialized
-    # constants, recorded random values, backward state); their reconstruction
-    # bytecode may still load dynamo-installed globals.
+    # Tracing-internal roots that are not part of the Python environment
+    # (synthetic and temp locals, ephemeral sources, materialized constants,
+    # recorded random values, backward state). Some of these are still guarded
+    # on (SyntheticLocalSource and RandomValueSource render real guard
+    # expressions); the point is that they are never droppable *environment*
+    # state, so a drop policy must keep them. Their reconstruction bytecode may
+    # also load dynamo-installed globals.
     SYNTHETIC = 3
 
 
