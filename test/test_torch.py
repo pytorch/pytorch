@@ -67,6 +67,7 @@ from torch.testing._internal.common_dtype import (
     get_all_qint_dtypes, all_types_complex_float8_and, all_passthru_types_and,
 )
 from torch.testing._internal.two_tensor import TwoTensor
+from torch.profiler import kineto_available
 from torch.testing._internal.common_utils import IS_WINDOWS
 
 if TEST_WITH_TORCHINDUCTOR:
@@ -3384,7 +3385,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(src.neg().bfloat16(), src_bf16.neg())
         self.assertEqual(src.abs().bfloat16(), src_bf16.abs())
 
-    @onlyCPU
+    @onlyNativeDeviceTypes
     @dtypes(torch.bfloat16, torch.half)
     def test_reduced_type_float_copy(self, device, dtype):
         for shape in [(20, 7), (249, 137), (1029, 917), (1, 7, 19, 17), (3, 77, 1091)]:
@@ -3399,6 +3400,33 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(input_s, out1, atol=None, rtol=None, exact_dtype=False)
             out2 = out1.to(torch.float)
             self.assertEqual(out2, out1, atol=0, rtol=0, exact_dtype=False)
+
+    @onlyCUDA
+    @dtypes(torch.bfloat16, torch.half)
+    def test_reduced_type_float_copy_special_values(self, device, dtype):
+        special = torch.tensor(
+            [float("nan"), -float("nan"), float("inf"), -float("inf"), 0.0, -0.0,
+             torch.finfo(dtype).tiny, torch.finfo(dtype).tiny / 2],
+            dtype=dtype, device=device)
+        dense = torch.randn(4099, dtype=dtype, device=device)
+        dense[:special.numel()] = special
+        strided = torch.empty(4099 * 2, dtype=dtype, device=device)[::2]
+        strided.copy_(dense)
+        self.assertEqual(
+            dense.to(torch.float32).view(torch.uint8),
+            strided.to(torch.float32).view(torch.uint8))
+
+    @onlyCUDA
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @dtypes(torch.bfloat16, torch.half)
+    def test_reduced_type_float_copy_emits_vectorized_kernel(self, device, dtype):
+        src = make_tensor((1024, 1024), dtype=dtype, device=device)
+        torch.cuda.synchronize()
+        with torch.profiler.profile() as prof:
+            src.to(torch.float32)
+            torch.cuda.synchronize()
+        names = tuple(event.key for event in prof.key_averages())
+        self.assertTrue(any("vectorized_elementwise_kernel" in name for name in names), names)
 
     # FIXME: move to data movement test suite
     @onlyNativeDeviceTypes
