@@ -21,7 +21,7 @@ from torch.testing._internal.common_device_type import (
     requires_capabilities,
 )
 from torch.testing._internal.common_distributed import requires_world_size
-from torch.testing._internal.common_fsdp import FSDPTestContinuous
+from torch.testing._internal.common_fsdp import DISTRIBUTED_BACKEND, FSDPTestContinuous
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -87,7 +87,14 @@ class FineTuneTestBase(FSDPTestContinuous):
 
     @classmethod
     def backend_str(cls) -> str:
-        return dist.get_default_backend_for_device(cls._resolved_device_type())
+        try:
+            return dist.get_default_backend_for_device(cls._resolved_device_type())
+        except ValueError:
+            # Devices without a registered default backend (e.g. ``hpu`` unless
+            # the vendor extension registers ``hccl`` via ``register_backend``):
+            # fall back to the historical ``common_fsdp`` ``DISTRIBUTED_BACKEND``
+            # ("hccl" on HPU), preserving the pre-refactor behavior.
+            return DISTRIBUTED_BACKEND
 
     @property
     def world_size(self) -> int:
@@ -129,7 +136,6 @@ class TestFSDPFineTune(FineTuneTestBase):
         """
         self.run_subtests(
             {
-                "device_id": [device],
                 "sharding_strategy": [
                     ShardingStrategy.FULL_SHARD,
                     ShardingStrategy.SHARD_GRAD_OP,
@@ -144,7 +150,6 @@ class TestFSDPFineTune(FineTuneTestBase):
 
     def _test_backward_reshard_hooks(
         self,
-        device_id,
         sharding_strategy: ShardingStrategy,
         use_orig_params: bool,
         inp_requires_grad: bool,
@@ -378,7 +383,6 @@ class TestFSDPFineTune(FineTuneTestBase):
         """
         self.run_subtests(
             {
-                "device_id": [device],
                 "sharding_strategy": [
                     ShardingStrategy.FULL_SHARD,
                     ShardingStrategy.SHARD_GRAD_OP,
@@ -403,7 +407,6 @@ class TestFSDPFineTune(FineTuneTestBase):
 
     def _test_parity_with_non_frozen_fsdp(
         self,
-        device_id,
         sharding_strategy: ShardingStrategy,
         use_orig_params: bool,
         offload_params: bool,
