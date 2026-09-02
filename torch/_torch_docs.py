@@ -3637,6 +3637,19 @@ Args:
 )
 
 add_docstr(
+    torch.detach,
+    r"""
+detach(input) -> Tensor
+
+Returns a new Tensor, detached from the current graph.
+See :meth:`~Tensor.detach` for function description.
+
+Args:
+    {input}
+""".format(**common_args),
+)
+
+add_docstr(
     torch.diag,
     r"""
 diag(input, diagonal=0, *, out=None) -> Tensor
