@@ -234,7 +234,9 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
             x = x + c
             return x.cos()
 
-        a, b, c = (torch.randn(4, 4, requires_grad=True, device=device) for _ in range(3))
+        a, b, c = (
+            torch.randn(4, 4, requires_grad=True, device=device) for _ in range(3)
+        )
 
         inputs = [a, b, c]
         with config.patch(compile_threads=1):
