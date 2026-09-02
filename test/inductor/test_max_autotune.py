@@ -210,7 +210,10 @@ class TestMaxAutotune(TestCase):
 
     @unittest.skipUnless(HAS_GPU and SM100OrLater, "requires NVIDIA SM100+")
     @parametrize("broadcast_b", (False, True))
-    def test_blackwell_bmm_template(self, broadcast_b: bool) -> None:
+    @parametrize("epilogue_subtile", (1, 2, 4))
+    def test_blackwell_bmm_template(
+        self, broadcast_b: bool, epilogue_subtile: int
+    ) -> None:
         bsz, m, k, n = 3, 256, 8193, 128
         a_storage = torch.randn(bsz, k, m, device="cuda", dtype=torch.bfloat16)
         a = a_storage.transpose(1, 2)
@@ -225,7 +228,7 @@ class TestMaxAutotune(TestCase):
             block_n=128,
             block_k=128,
             num_stages=3,
-            epilogue_subtile=1,
+            epilogue_subtile=epilogue_subtile,
         )
 
         def lowering(a_node, b_node):
