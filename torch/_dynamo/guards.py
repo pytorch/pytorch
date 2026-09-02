@@ -4602,15 +4602,15 @@ def pickle_guards_state(
 
     try:
         pickler.dump(state)
-    except (AttributeError, pickle.PicklingError) as e:
-        raise torch._dynamo.exc.PackageError(str(e)) from e
-    except TypeError as e:
-        # pickle raises TypeError("cannot pickle '...' object") for a genuinely
-        # unserializable value (thread locks, generators, ...). A TypeError of
-        # any other shape is a bug in a reducer, not an unserializable guard,
-        # so let it surface instead of masking it as a serialization failure.
-        if "cannot pickle" not in str(e):
-            raise
+    except (AttributeError, pickle.PicklingError, TypeError) as e:
+        # Any failure to pickle the guard state means these guards cannot be
+        # serialized, so surface it as the typed PackageError uniformly rather
+        # than branching on the exception's message text: pickle spells an
+        # unserializable value as TypeError("cannot pickle '...'"), PicklingError,
+        # or AttributeError depending on the value and the reducer, and matching
+        # a CPython-internal substring silently regressed to InternalTorchDynamoError
+        # whenever the wording drifted. A bug inside a reducer that raises one of
+        # these is still fully diagnosable: it is preserved as __cause__.
         raise torch._dynamo.exc.PackageError(str(e)) from e
     return buf.getvalue()
 

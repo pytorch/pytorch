@@ -110,6 +110,27 @@ class GuardProvenanceTests(torch._dynamo.test_case.TestCase):
             return mod == "torch" or mod.startswith("torch.")
 
         self.assertGreater(len(roots), 10)  # sanity: the walk found the roots
+
+        # Totality guarantee is only as good as the walk's coverage: it sees a
+        # root class only once its defining module is imported. To keep the
+        # guarantee from silently depending on import order, require every
+        # torch-own root to live in a module this test imports up front, so a
+        # new root defined elsewhere either lands here (and is checked) or trips
+        # this assertion telling the author where roots must live.
+        root_source_modules = {"torch._dynamo.source", "torch._guards"}
+        for cls in roots:
+            if not is_torch_own(cls):
+                continue
+            self.assertIn(
+                cls.__module__,
+                root_source_modules,
+                f"{cls.__module__}.{cls.__name__} is a root Source defined "
+                f"outside {sorted(root_source_modules)}; either move it there "
+                "or extend this test to import its module, otherwise "
+                "test_every_source_declares_provenance cannot see it and its "
+                "classification goes unenforced.",
+            )
+
         for cls in roots:
             if not is_torch_own(cls):
                 continue
