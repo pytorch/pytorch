@@ -11895,6 +11895,21 @@ def sample_inputs_alias_copy(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_tensor((S,), dtype=dtype, device=device, requires_grad=requires_grad))
     yield SampleInput(make_tensor((), dtype=dtype, device=device, requires_grad=requires_grad))
 
+def sample_inputs_expm1(op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs):
+    yield from sample_inputs_elementwise_unary(
+        op_info, device, dtype, requires_grad, op_kwargs=op_kwargs, **kwargs
+    )
+
+    if dtype == torch.float64:
+        yield SampleInput(
+            torch.tensor(
+                [[-40.0]],
+                device=device,
+                dtype=dtype,
+                requires_grad=requires_grad,
+            )
+        )
+
 def sample_inputs_abs(op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs):
     yield from sample_inputs_elementwise_unary(op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs)
     if dtype == torch.cfloat:
@@ -18936,6 +18951,7 @@ op_db: list[OpInfo] = [
                    aliases=('special.expm1', ),
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.expm1),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   sample_inputs_func=sample_inputs_expm1,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    supports_sparse=True,
