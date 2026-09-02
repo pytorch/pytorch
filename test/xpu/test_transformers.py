@@ -7,13 +7,19 @@ import torch.nn.functional as F
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
-from torch.testing._internal.common_utils import parametrize, run_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    parametrize,
+    run_tests,
+)
 
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
 
 
 class TestSDPAXpuOnly(NNTestCase):
+    hw_classification = HardwareClassification.XPU
+
     @parametrize("dtype", [torch.half, torch.bfloat16, torch.float32])
     @parametrize("train", [False])
     def test_onednn_attention_unaligned_input(self, device, dtype, train):
