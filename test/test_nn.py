@@ -3514,6 +3514,25 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             gradcheck(lambda self, target: nn.BCEWithLogitsLoss(reduction=reduction)(self, target),
                       (output, target), check_forward_ad=True)
 
+    def test_losses_have_correct_forward_grad_with_integral_target(self):
+        x = torch.tensor([0.5, 1.5, 0.25, 2.0, 1.0])
+        v = torch.tensor([1.0, 0.0, 0.0, 0.0, 0.0])
+        for target in (torch.tensor([1, 0, 2, 0, 1]),
+                       torch.tensor([True, False, True, False, True])):
+            for reduction in ('sum', 'mean', 'none'):
+                for loss in (F.mse_loss, F.smooth_l1_loss):
+                    xb = x.clone().requires_grad_()
+                    out = loss(xb, target, reduction=reduction)
+                    grad = torch.autograd.grad(out.sum(), xb)[0]
+                    if reduction == 'none':
+                        expected = grad * v
+                    else:
+                        expected = (grad * v).sum()
+                    with fwAD.dual_level():
+                        dual = fwAD.make_dual(x, v)
+                        tangent = fwAD.unpack_dual(loss(dual, target, reduction=reduction)).tangent
+                    self.assertEqual(tangent, expected)
+
     def test_bce_with_logits_has_correct_grad_at_zero(self):
         output = torch.zeros(3, 1, requires_grad=True)
         target = torch.zeros(3, 1)
