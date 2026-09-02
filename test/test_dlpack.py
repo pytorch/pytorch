@@ -8,7 +8,6 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfMPS,
     instantiate_device_type_tests,
-    onlyCPU,
     onlyNativeDeviceTypes,
     onlyOn,
     skipCUDAIfNotRocm,
@@ -50,6 +49,92 @@ class TensorDLPackWrapper:
 
     def __dlpack_device__(self, *args, **kwargs):
         return self.tensor.__dlpack_device__(*args, **kwargs)
+
+
+class TestTorchDlPack(TestCase):
+    # These tests exercise the parts of the DLPack protocol that don't depend on
+    # where the tensor lives: export rejections, stride handling and the NumPy
+    # producer path.
+
+    def test_dlpack_invalid_cpu_stream(self):
+        x = make_tensor((5,), dtype=torch.float32, device="cpu")
+        with self.assertRaisesRegex(AssertionError, r"stream should be None on cpu."):
+            x.__dlpack__(stream=0)
+
+    # TODO: add interchange tests once NumPy 1.22 (dlpack support) is required
+    def test_dlpack_export_requires_grad(self):
+        x = torch.zeros(10, dtype=torch.float32, requires_grad=True)
+        with self.assertRaisesRegex(BufferError, r"require gradient"):
+            x.__dlpack__()
+
+    def test_dlpack_export_is_conj(self):
+        x = torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j])
+        y = torch.conj(x)
+        with self.assertRaisesRegex(BufferError, r"conjugate bit"):
+            y.__dlpack__()
+
+    def test_dlpack_export_non_strided(self):
+        x = torch.sparse_coo_tensor([[0]], [1], size=(1,))
+        y = torch.conj(x)
+        with self.assertRaisesRegex(BufferError, r"strided"):
+            y.__dlpack__()
+
+    def test_dlpack_normalize_strides(self):
+        x = torch.rand(16)
+        y = x[::3][:1]
+        self.assertEqual(y.shape, (1,))
+        self.assertEqual(y.stride(), (3,))
+        z = from_dlpack(y)
+        self.assertEqual(z.shape, (1,))
+        # Stride normalization has been removed, strides should be preserved
+        self.assertEqual(z.stride(), (3,))
+
+    @xfailIfTorchDynamo
+    def test_from_dlpack_negative_strides(self):
+        # torch.from_dlpack() on a NumPy array with negative strides used to
+        # abort the process instead of raising a catchable Python exception.
+        # See https://github.com/pytorch/pytorch/issues/188023.
+        import numpy as np
+
+        # 1-D negative stride
+        a1 = np.arange(8.0)[::-1]
+        with self.assertRaisesRegex(
+            RuntimeError, "Storage size calculation overflowed"
+        ):
+            torch.from_dlpack(a1)
+
+        # 2-D, one negative axis
+        a2 = np.arange(12.0).reshape(3, 4)[:, ::-1]
+        with self.assertRaisesRegex(
+            RuntimeError, "Storage size calculation overflowed"
+        ):
+            torch.from_dlpack(a2)
+
+    def test_dlpack_copy_fallback(self):
+        """Test that copy parameter works even with producers that don't support it"""
+        import numpy as np
+
+        # Test copy=True - should work even if NumPy doesn't support copy parameter
+        np_array = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+        t = from_dlpack(np_array, copy=True)
+
+        # Verify it's a copy by modifying tensor and checking NumPy unchanged
+        t[0] = 999.0
+        self.assertEqual(np_array[0], 1.0)
+
+        # Test copy=None (default) - should be zero-copy view
+        np_array2 = np.array([10.0, 20.0, 30.0], dtype=np.float32)
+        t2 = from_dlpack(np_array2)
+        t2[0] = 999.0
+        self.assertEqual(np_array2[0], 999.0)
+
+    def test_dlpack_unsupported_dtype_error(self):
+        inp = torch.quantize_per_tensor(torch.randn(()), 0.1, 10, torch.qint8)
+
+        with self.assertRaisesRegex(
+            BufferError, ".* types are not supported by dlpack"
+        ):
+            from_dlpack(inp)
 
 
 class TestTorchDlPackDevice(TestCase):
@@ -231,12 +316,6 @@ class TestTorchDlPackDevice(TestCase):
             x.__dlpack__(stream=object())
 
     @skipMeta
-    def test_dlpack_invalid_cpu_stream(self):
-        x = make_tensor((5,), dtype=torch.float32, device="cpu")
-        with self.assertRaisesRegex(AssertionError, r"stream should be None on cpu."):
-            x.__dlpack__(stream=0)
-
-    @skipMeta
     @onlyOn(["xpu", "cuda"])
     @deviceCountAtLeast(2)
     def test_dlpack_tensor_on_different_device(self, devices):
@@ -250,61 +329,6 @@ class TestTorchDlPackDevice(TestCase):
         ):
             with torch.accelerator.device_index(torch.device(dev1).index):
                 x.__dlpack__()
-
-    # TODO: add interchange tests once NumPy 1.22 (dlpack support) is required
-    @skipMeta
-    def test_dlpack_export_requires_grad(self):
-        x = torch.zeros(10, dtype=torch.float32, requires_grad=True)
-        with self.assertRaisesRegex(BufferError, r"require gradient"):
-            x.__dlpack__()
-
-    @skipMeta
-    def test_dlpack_export_is_conj(self):
-        x = torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j])
-        y = torch.conj(x)
-        with self.assertRaisesRegex(BufferError, r"conjugate bit"):
-            y.__dlpack__()
-
-    @skipMeta
-    def test_dlpack_export_non_strided(self):
-        x = torch.sparse_coo_tensor([[0]], [1], size=(1,))
-        y = torch.conj(x)
-        with self.assertRaisesRegex(BufferError, r"strided"):
-            y.__dlpack__()
-
-    @skipMeta
-    def test_dlpack_normalize_strides(self):
-        x = torch.rand(16)
-        y = x[::3][:1]
-        self.assertEqual(y.shape, (1,))
-        self.assertEqual(y.stride(), (3,))
-        z = from_dlpack(y)
-        self.assertEqual(z.shape, (1,))
-        # Stride normalization has been removed, strides should be preserved
-        self.assertEqual(z.stride(), (3,))
-
-    @xfailIfTorchDynamo
-    @skipMeta
-    @onlyCPU
-    def test_from_dlpack_negative_strides(self, device):
-        # torch.from_dlpack() on a NumPy array with negative strides used to
-        # abort the process instead of raising a catchable Python exception.
-        # See https://github.com/pytorch/pytorch/issues/188023.
-        import numpy as np
-
-        # 1-D negative stride
-        a1 = np.arange(8.0)[::-1]
-        with self.assertRaisesRegex(
-            RuntimeError, "Storage size calculation overflowed"
-        ):
-            torch.from_dlpack(a1)
-
-        # 2-D, one negative axis
-        a2 = np.arange(12.0).reshape(3, 4)[:, ::-1]
-        with self.assertRaisesRegex(
-            RuntimeError, "Storage size calculation overflowed"
-        ):
-            torch.from_dlpack(a2)
 
     @skipMeta
     @onlyNativeDeviceTypes
@@ -400,24 +424,6 @@ class TestTorchDlPackDevice(TestCase):
         with self.assertRaisesRegex(ValueError, r"cannot move .* tensor from .*"):
             self._test_from_dlpack(device, out_device="cpu", copy=False)
 
-    def test_dlpack_copy_fallback(self):
-        """Test that copy parameter works even with producers that don't support it"""
-        import numpy as np
-
-        # Test copy=True - should work even if NumPy doesn't support copy parameter
-        np_array = np.array([1.0, 2.0, 3.0], dtype=np.float32)
-        t = from_dlpack(np_array, copy=True)
-
-        # Verify it's a copy by modifying tensor and checking NumPy unchanged
-        t[0] = 999.0
-        self.assertEqual(np_array[0], 1.0)
-
-        # Test copy=None (default) - should be zero-copy view
-        np_array2 = np.array([10.0, 20.0, 30.0], dtype=np.float32)
-        t2 = from_dlpack(np_array2)
-        t2[0] = 999.0
-        self.assertEqual(np_array2[0], 999.0)
-
     @skipMeta
     @onlyNativeDeviceTypes
     def test_unsupported_device_error(self, device):
@@ -428,16 +434,6 @@ class TestTorchDlPackDevice(TestCase):
             BufferError, f"Unsupported device_type: {int(dl_device_type)}"
         ):
             inp.__dlpack__(max_version=(1, 0), dl_device=(dl_device_type, 0))
-
-    @skipMeta
-    @onlyCPU
-    def test_dlpack_unsupported_dtype_error(self, device):
-        inp = torch.quantize_per_tensor(torch.randn(()), 0.1, 10, torch.qint8)
-
-        with self.assertRaisesRegex(
-            BufferError, ".* types are not supported by dlpack"
-        ):
-            from_dlpack(inp)
 
     @xfailCUDAIfSM89OrLaterOnWindows
     @skipMeta
