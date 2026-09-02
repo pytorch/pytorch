@@ -140,9 +140,8 @@ def keep_renamed_name(func):
 def keep_module(func):
     @functools.wraps(func)
     def wrapper(self, x):
-        # Also roots a guard at __globals__ so the SNAPSHOT variant is used:
-        # built from a real module dict, FunctionType derives __module__ on its
-        # own and dropping the explicit restore would go unnoticed.
+        # Also roots a guard at __globals__ so the SNAPSHOT variant is used,
+        # the only one where __module__ has to be restored explicitly.
         if func.__module__ == func.__globals__["__name__"]:
             x = x + 1
         return func(self, x)
@@ -237,11 +236,10 @@ class DecoratedUnpicklableDefaultForwardModule(torch.nn.Module):
 
 # --- module-scope wrappers that reach themselves through their own globals ---
 # `wrapped = deco(base)` at module scope: the wrapper is reachable from its own
-# __globals__, so a globals snapshot passed as a reduce ARG contains the very
-# object being reduced. pickle memoizes only after saving args, so that recursed
-# forever; two wrappers referencing each other do it across the pair. Each
-# wrapper reads its OWN global: Dynamo dedups a guard on one global, and a
-# wrapper nothing guards is a sentinel in the snapshot rather than a cycle.
+# __globals__, so the snapshot contains the very object being reduced, and two
+# such wrappers reach each other through it. Dynamo sources the module dict
+# once (through A), so what puts B in the guard tree is the CONSTANT_MATCH on
+# its own `const_name` cell; both are then rebuilt against the one snapshot.
 MODULE_SCOPE_CONST = 2
 MODULE_SCOPE_CONST_B = 2
 
@@ -345,12 +343,12 @@ class DecoratedUnpicklableGuardedDefaultForwardModule(torch.nn.Module):
 # --- an empty closure cell -------------------------------------------------
 def keep_name_with_empty_cell(func):
     @functools.wraps(func)
-    def wrapper(self, x):
-        if func.__name__ == "forward":
+    def wrapper(x):
+        if func.__name__ == "renamed":
             x = x + 1
         if x is None:
             return unset
-        return func(self, x)
+        return func(x)
 
     if func is None:
         unset = 1  # never runs, so the cell wrapper closes over stays EMPTY
@@ -358,17 +356,11 @@ def keep_name_with_empty_cell(func):
     return wrapper
 
 
-def _empty_cell_base(self, x):
+def _empty_cell_base(x):
     return x * 2
 
 
 EMPTY_CELL_WRAPPED = keep_name_with_empty_cell(_empty_cell_base)
-
-
-class DecoratedEmptyCellForwardModule(torch.nn.Module):
-    @keep_name_with_empty_cell
-    def forward(self, x):
-        return x * 2
 
 
 # --- a guarded default whose VALUE must survive, not just the tuple length --
@@ -389,17 +381,14 @@ class DecoratedDefaultValueForwardModule(torch.nn.Module):
 
 
 # --- a value guard on the defaults TUPLE itself, not on an element ----------
-def _guarded_defaults_tuple_fn():
-    def fn(x, a=2.0, b=1.0, *, c=3.0):
-        return x * a + b + c
-
-    return fn
-
-
 class GuardedDefaultsTupleModule(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.fn = _guarded_defaults_tuple_fn()
+
+        def fn(x, a=2.0, b=1.0, *, c=3.0):
+            return x * a + b + c
+
+        self.fn = fn
 
     def forward(self, x):
         # EQUALS_MATCH lands on __defaults__ / __kwdefaults__ themselves,
@@ -472,10 +461,6 @@ FQN_MISMATCH_CASES = [
     subtest(
         ("EQUALS_MATCH", DecoratedUnpicklableDefaultForwardModule, ("__name__", "x")),
         name="name_beside_unpicklable_default",
-    ),
-    subtest(
-        ("EQUALS_MATCH", DecoratedEmptyCellForwardModule, ("__name__", "x")),
-        name="empty_cell",
     ),
 ]
 
@@ -940,9 +925,8 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertIs(out["a"].__closure__[0], out["b"].__closure__[0])
 
     def test_snapshot_globals_function_preserves_module(self):
-        # The globals snapshot arrives as pickle STATE, so FunctionType is
-        # constructed with empty globals and reads __module__ = None from
-        # them; a guard rooted at fn.__module__ would rebuild against None.
+        # The snapshot variant builds the function with empty globals; see
+        # FunctionPicklerBase._build_function.
         def outer():
             def inner():
                 return FQN_MISMATCH_GLOBAL
@@ -1037,8 +1021,8 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertEqual(len(sentinels), 1)
 
     def test_reduce_keeps_a_none_valued_cell(self):
-        # Bare None as reduce state is skipped by pickle, so the cell came back
-        # EMPTY, indistinguishable from a genuinely unassigned free variable.
+        # None is a value, not an empty cell; see
+        # FunctionPicklerBase._set_cell_contents.
         def outer():
             scale = None
 
@@ -1056,10 +1040,8 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertIsNone(out())
 
     def test_function_reaching_itself_through_its_dict(self):
-        # wrapper.me = wrapper, and wrapper is its own free variable. Carried
-        # as reduce args, pickle descends into them before memoizing the
-        # function and never terminates; as state both resolve to the pickle
-        # already built, so identity survives the round trip.
+        # wrapper.me = wrapper, and wrapper is its own free variable; identity
+        # has to survive the round trip through both.
         w = SELF_REFERENCING_WRAPPED
         cell = [i for i, c in enumerate(w.__closure__) if c.cell_contents is w]
         self.assertEqual(len(cell), 1)
@@ -1087,14 +1069,10 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_serialization("TENSOR_MATCH", fn, torch.randn(3), foo)
 
     def test_guard_rooted_at_module_scope_wrappers_that_reach_themselves(self):
-        # Driven through a real capture, not the pickler: two functools.wraps
-        # helpers bound at module scope and called from one compiled frame is
-        # ordinary code. Each roots a guard at its own global, so both are in
-        # the guard tree and the one snapshot they share contains both of
-        # them. Passing that snapshot as a reduce ARG recursed until
-        # RecursionError; it goes in reduce STATE, which pickle applies after
-        # memoizing, so the references resolve to the functions it already
-        # built. Rejecting through either global shows both guards survived.
+        # Two functools.wraps helpers bound at module scope and called from one
+        # frame is ordinary code; see the fixture for why both are rebuilt
+        # against one snapshot. Rejecting through either global shows both
+        # guards survived the round trip.
         global MODULE_SCOPE_CONST, MODULE_SCOPE_CONST_B
 
         def fn(x):
@@ -1113,10 +1091,9 @@ class TestGuardSerialization(TestGuardSerializationBase):
             MODULE_SCOPE_CONST = MODULE_SCOPE_CONST_B = 2
 
     def test_guard_rooted_at_wrapper_that_reaches_itself(self):
-        # The wrapper is a free variable of its own body and stashes itself in
-        # its __dict__, so the kept closure cell and attribute both reach back
-        # to the function being reduced. Carried as reduce args that recursed
-        # until RecursionError; as pickle state it resolves through the memo.
+        # A kept closure cell and a kept attribute both reach back to the
+        # function being reduced; see FunctionPicklerBase for why that has to
+        # travel as pickle state.
         def fn(x):
             return SELF_REFERENCING_WRAPPED(x)
 
@@ -1128,11 +1105,23 @@ class TestGuardSerialization(TestGuardSerializationBase):
         finally:
             SELF_REFERENCING_WRAPPED.flag = 2.0
 
+    def test_guard_rooted_at_fqn_mismatched_function_with_an_empty_cell(self):
+        # The wrapper owns the empty cell and is rebuilt by value, so the cell
+        # goes through _prune_cell and _reduce_cell rebuilds it empty.
+        def fn(x):
+            return EMPTY_CELL_WRAPPED(x)
+
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, torch.randn(3))
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, True)
+        _empty_cell_base.__name__ = "renamed"
+        try:
+            self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, False)
+        finally:
+            _empty_cell_base.__name__ = "_empty_cell_base"
+
     def test_guard_rooted_at_a_none_valued_closure_cell(self):
-        # The wrapper's cell is reached as a CELL through its __closure__, so
-        # it goes through _reduce_cell. pickle skips the state step when the
-        # state object is None, so a cell carrying bare None as state came
-        # back EMPTY and the load failed reading it.
+        # The cell is reached as a CELL through the wrapper's __closure__, so
+        # _reduce_cell has to hand None back as a value, not an empty cell.
         def fn(x):
             return NONE_CELL_WRAPPED(x)
 
@@ -1148,8 +1137,9 @@ class TestGuardSerialization(TestGuardSerializationBase):
             cell.cell_contents = None
 
     def test_fqn_mismatched_function_rejects_a_new_global(self):
-        # DICT_KEYS_MATCH on func.__globals__ rebuilds against the snapshot's
-        # key set, so a key added to the live module dict is rejected.
+        # len(func.__globals__) installs SEQUENCE_LENGTH (derived
+        # DICT_KEYS_MATCH), rebaked from the snapshot's size at load, so a key
+        # added to the live module dict is rejected.
         mod = DecoratedGlobalsLengthForwardModule()
         ref, loaded = self._test_serialization("DICT_KEYS_MATCH", mod, torch.randn(3))
         inner = type(mod).forward.__wrapped__
@@ -1174,10 +1164,8 @@ class TestGuardSerialization(TestGuardSerializationBase):
     def test_guard_rooted_at_fqn_mismatched_function(
         self, guard_type, module_cls, mutation
     ):
-        # functools.wraps copies __module__ and __qualname__ onto the wrapper,
-        # so the undecorated function the guard is rooted at is not what that
-        # fqn resolves to and has to be rebuilt by value, with whatever the
-        # guard reads still intact.
+        # The undecorated function the guard is rooted at is rebuilt by value
+        # (see DecoratedForwardModule), with whatever the guard reads intact.
         mod = module_cls()
         ref, loaded = self._test_serialization(guard_type, mod, torch.randn(3))
         inner = type(mod).forward.__wrapped__
@@ -1213,10 +1201,9 @@ class TestGuardSerialization(TestGuardSerializationBase):
             FQN_MISMATCH_GLOBAL = old_value
 
     def test_nested_function_preserves_a_guarded_defaults_tuple(self):
-        # EQUALS_MATCH on fn.__defaults__ / fn.__kwdefaults__ registers only
-        # the CONTAINER, no per-element source. Pruning the elements to
-        # sentinels loaded without error, but the rebaked guard then compared
-        # real defaults against sentinels: a silent permanent cache miss.
+        # A guard on the container itself registers no per-element source, so
+        # pruning the elements is a silent permanent cache miss, not a load
+        # error; see the Note in guards.py.
         mod = GuardedDefaultsTupleModule()
         ref, loaded = self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
         self._test_check_fn(ref, loaded, {"self": mod, "x": torch.randn(3)}, True)

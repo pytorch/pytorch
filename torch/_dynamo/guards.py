@@ -4298,10 +4298,10 @@ class GuardsStatePickler(FunctionPicklerBase):
     # needed it. So only values some guard tree node references are carried
     # (_keep) and the rest become sentinels. A registered CONTAINER is carried
     # verbatim rather than pruned per element: a guard on the __defaults__ tuple
-    # or __kwdefaults__ dict itself -- what wrap_listlike's EQUALS_MATCH
-    # registers -- rebakes its comparison constant from the reconstructed
-    # function at load, so a pruned element would make that guard fail forever
-    # with no load error.
+    # or __kwdefaults__ dict itself -- what wrap_listlike's SEQUENCE_LENGTH and
+    # CONSTANT_MATCH register -- rebakes its comparison constant from the
+    # reconstructed function at load, so a pruned element would make that guard
+    # fail forever with no load error.
 
     def _keep(self, value: object) -> bool:
         """Whether a value a reconstructed function holds has to be carried.
@@ -4344,14 +4344,8 @@ class GuardsStatePickler(FunctionPicklerBase):
         return snapshot
 
     def _prune_cell(self, cell: types.CellType) -> types.CellType:
-        """Carry a closure cell, or replace it with a sentinel one.
-
-        A carried cell is passed through UNCHANGED so that two functions closing
-        over the same variable still share it after reload, and so that pickle
-        can memoize it. Only a dropped cell is rebuilt. An EMPTY cell has no
-        contents to prune, so it is always carried -- _reduce_cell rebuilds it
-        empty.
-        """
+        # A carried cell passes through UNCHANGED so pickle memoizes it and two
+        # functions closing over one variable still share it after reload.
         if self._keep(cell):
             return cell
         try:
@@ -4370,9 +4364,8 @@ class GuardsStatePickler(FunctionPicklerBase):
         snapshot = None
         if self._keep(obj.__globals__):
             snapshot = self._globals_snapshot(obj.__globals__)
-        # A registered container is carried verbatim; otherwise it keeps its
-        # shape -- length, keys -- and only unguarded values become sentinels, so
-        # a guard reading the container's structure still rebuilds against it.
+        # An unregistered container keeps its shape; see the Note for why a
+        # registered one is carried verbatim.
         defaults = obj.__defaults__
         if defaults is not None and not self._keep(defaults):
             reason = "unguarded function default"
@@ -4677,11 +4670,10 @@ def pickle_guards_state(
         state.output_graph.guard_on_key_order = set()
         state.output_graph.global_scope = {}
 
-    # Whatever dump raises, some guarded value cannot be serialized. That is a
-    # package bypass, or an error under strict_precompile, never a compiler
-    # crash; the cause stays chained for debugging. RecursionError is the
-    # exception: a cycle the reducers did not route through pickle state is a
-    # pickler bug, not an unserializable value, so it stays loud.
+    # Anything dump raises means a guarded value cannot be serialized, which is
+    # a bypass (an error under strict_precompile), never a compiler crash. A
+    # RecursionError is a cycle the reducers did not route through pickle
+    # state, i.e. a pickler bug, so it stays loud.
     try:
         pickler.dump(state)
     except RecursionError:

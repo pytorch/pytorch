@@ -938,6 +938,9 @@ class CompilePackage:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in bypass_current_entry")
         self._current_entry.bypassed = True
+        # A bypassed entry is never installed, so backends it already registered
+        # would only be serialized for nothing.
+        self._current_entry.backend_ids.clear()
 
     def add_resume_function(
         self,
@@ -963,6 +966,8 @@ class CompilePackage:
     ) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_backend_id")
+        if self._current_entry.bypassed:
+            return
         if backend_id not in self._current_entry.backend_ids:
             self._current_entry.backend_ids.append(backend_id)
         if backend is not None:

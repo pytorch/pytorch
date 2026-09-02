@@ -1893,8 +1893,7 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         self.assertEqual(out.tag, 2.0)
         cells = dict(zip(out.__code__.co_freevars, out.__closure__))
         self.assertRaises(ValueError, lambda: cells["unset"].cell_contents)
-        # A None-valued cell is not an empty one: bare None as reduce state is
-        # skipped by pickle, so it used to come back empty.
+        # None is a value, not an empty cell.
         self.assertIsNone(cells["scale"].cell_contents)
 
 

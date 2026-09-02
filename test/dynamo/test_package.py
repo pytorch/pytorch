@@ -531,10 +531,11 @@ def add(x, y):
     @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
     def test_unserializable_guard_bypasses_the_package(self):
         # A guarded value that cannot be pickled is a package bypass, not a
-        # compile failure: the entry is dropped and the frame still compiles
-        # and runs. convert_frame used to assert on the missing guards_state
-        # because it checked the package it was handed, not the one the
-        # bypass had cleared on the output graph.
+        # compile failure: the frame still compiles and runs, and its entry is
+        # saved bypassed with no backend, so nothing is installed on reload.
+        # convert_frame used to assert on the missing guards_state because it
+        # checked the package it was handed, not the one the bypass had
+        # cleared on the output graph.
         from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
 
         def fn(x, cfg=UnpicklableConfig()):
@@ -543,10 +544,17 @@ def add(x, y):
             return x.sin()
 
         x = torch.randn(3)
+        expected = fn(x)
         with self.assertLogs("torch._dynamo", level="WARNING") as logs:
-            self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+            self.assertEqual(torch.compile(fn)(x), expected)  # noqa: UNSPECIFIED_BACKEND
         self.assertTrue(any("package bypass" in line for line in logs.output))
+        (entry,) = PrecompileContext.save_to_dynamo_cache()["dynamo"]
+        self.assertEqual(entry["backend_ids"], [])
+        torch._dynamo.reset()
+        PrecompileContext.clear()
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+        with self.assertLogs("torch._dynamo", level="WARNING"):
+            self.assertEqual(torch.compile(fn)(x), expected)  # noqa: UNSPECIFIED_BACKEND
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
