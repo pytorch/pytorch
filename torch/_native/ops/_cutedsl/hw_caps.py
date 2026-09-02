@@ -1,13 +1,6 @@
-# Hardware capability struct for launch heuristics.
-#
-# WHY: the reduction launch heuristics were full of magic numbers (2*sm, block_x=64,
-# the 3/4*sm gate) that are really PROXIES for hardware quantities. Expressing them
-# as formulas in device properties makes the SAME heuristic code reason correctly
-# across architectures -- Hopper (132 SM, 228KB smem), Blackwell (148 SM, 232KB),
-# Rubin (future, unknown counts) -- instead of being silently tuned to one GPU.
-#
-# Everything here is read from torch.cuda.get_device_properties; nothing is baked.
-# Cached per device index (properties don't change at runtime).
+# Hardware capability struct for launch heuristics: expresses them as formulas in device properties
+# rather than magic numbers, so the same heuristic reasons correctly across architectures instead of
+# being silently tuned to one GPU. All read from get_device_properties, cached per device index.
 
 import torch
 
@@ -16,15 +9,10 @@ from .plan_cache import cached_plan
 
 _CACHE = {}
 
-# Reference GPU the launch-heuristic constants were TUNED on (B200 / sm_100a). The
-# heuristics keep their measured anchor numbers but multiply size/occupancy thresholds
-# by a hardware-scale RATIO against this reference, so on B200 every ratio is 1.0 (the
-# anchors reproduce exactly, no regression) and on other GPUs (Hopper, Rubin, ...) the
-# same formula adapts by device fill capacity + smem. Update only if we re-tune on a
-# different reference GPU. Values are B200's device properties.
-# These are B200's EXACT device-property values (read from get_device_properties on
-# sm_100a), so every *_scale ratio is precisely 1.0 on B200 and the anchor heuristics
-# reproduce byte-identically. Do not round -- e.g. smem is 233472 B, not 228*1024.
+# Reference GPU the launch-heuristic constants were TUNED on (B200 / sm_100a). Thresholds multiply
+# by a hardware-scale RATIO against these, so the ratio is exactly 1.0 on B200 and the anchors
+# reproduce byte-identically. EXACT device-property values -- do not round; smem is 233472 B, not
+# 228*1024. Update only when re-tuning on a different reference GPU.
 _REF_SM_COUNT = 148
 _REF_MAX_THREADS_PER_SM = 2048
 _REF_SMEM_PER_SM = 233472
@@ -102,10 +90,9 @@ class HWCaps:
 
 
 def caps(device=None):
-    # Key on the DEVICE INDEX, resolving whatever form the caller passed (an index,
-    # torch.device, "cuda:1", or a tensor's device). Falling back to current_device() for
-    # anything non-int silently returned ANOTHER device's properties, which is a wrong launch
-    # shape rather than an error.
+    # Key on the DEVICE INDEX, resolving whatever form the caller passed (an index, torch.device,
+    # "cuda:1", or a tensor's device). Must not fall back to current_device() for a non-int: that
+    # returns another device's properties, which is a wrong launch shape rather than an error.
     idx = torch.cuda.current_device() if device is None else torch.device(device).index
     if idx is None:  # torch.device("cuda") carries no index: that means the current one
         idx = torch.cuda.current_device()
