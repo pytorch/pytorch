@@ -43,12 +43,23 @@ class SessionState {
 
   C10_ALWAYS_INLINE /* producersRemaining == 0 */ bool decrementProducers(
       const Node* node) {
-    return producers_.at(node).fetch_sub(1, std::memory_order_seq_cst) == 1;
+    return producers_.at(node).atomicRef().fetch_sub(
+               1, std::memory_order_seq_cst) == 1;
   }
 
  private:
+  // FBCODE uses folly::F14FastMap which requires values to be moveable.
+  // This prevents us from using std::atomic<uint32_t> in c10::FastMap.
+  struct AtomicRefableInt {
+    using AtomicRef = std::atomic_ref<uint32_t>;
+    alignas(AtomicRef::required_alignment) AtomicRef::value_type value;
+    AtomicRef atomicRef() {
+      return AtomicRef(value);
+    }
+  };
+
   std::atomic_uint32_t workOutstanding_{0};
-  c10::FastMap<const Node*, std::atomic_uint32_t> producers_;
+  c10::FastMap<const Node*, AtomicRefableInt> producers_;
 
   ExecutionFrame& frame_;
 };
