@@ -30,12 +30,12 @@
   if (blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0 &&        \
       threadIdx.x == PRINT_LANE_ID && threadIdx.y == PRINT_WARP_ID && \
       threadIdx.z == 0) {                                             \
-    printf(msg "\n", ##__VA_ARGS__);                                  \
+    printf(msg "\n" __VA_OPT__(,) __VA_ARGS__);                                  \
   }
 #define PRINT_T0(msg, ...)                                            \
   if (threadIdx.x == PRINT_LANE_ID && threadIdx.y == PRINT_WARP_ID && \
       threadIdx.z == 0) {                                             \
-    printf(msg "\n", ##__VA_ARGS__);                                  \
+    printf(msg "\n" __VA_OPT__(,) __VA_ARGS__);                                  \
   }
 #define PRINT_TX_LX(msg, ...)                                                 \
   for (int bx = 0; bx < gridDim.x; ++bx) {                                    \
@@ -55,8 +55,8 @@
                     bz,                                                       \
                     tx,                                                       \
                     ty,                                                       \
-                    tz,                                                       \
-                    ##__VA_ARGS__);                                           \
+                    tz                                                       \
+                    __VA_OPT__(,) __VA_ARGS__);                                           \
               }                                                               \
             }                                                                 \
           }                                                                   \

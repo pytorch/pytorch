@@ -521,13 +521,13 @@ inline C10_API const char* torchCheckMsgImpl(
 }
 } // namespace c10::detail
 
-#define TORCH_CHECK_MSG(cond, type, ...)                   \
-  (::c10::detail::torchCheckMsgImpl(                       \
-      "Expected " #cond                                    \
-      " to be true, but got false.  "                      \
-      "(Could this error message be improved?  If so, "    \
-      "please report an enhancement request to PyTorch.)", \
-      ##__VA_ARGS__))
+#define TORCH_CHECK_MSG(cond, type, ...)                                 \
+  (::c10::detail::torchCheckMsgImpl(                                     \
+      "Expected " #cond                                                  \
+      " to be true, but got false.  "                                    \
+      "(Could this error message be improved?  If so, "                  \
+      "please report an enhancement request to PyTorch.)" __VA_OPT__(, ) \
+          __VA_ARGS__))
 #define TORCH_CHECK_WITH_MSG(error_t, cond, type, ...)                  \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {                                 \
     C10_THROW_ERROR(error_t, TORCH_CHECK_MSG(cond, type, __VA_ARGS__)); \
@@ -607,8 +607,7 @@ namespace c10::detail {
         __FILE__,                                          \
         ":",                                               \
         __LINE__,                                          \
-        ", ",                                              \
-        ##__VA_ARGS__));                                   \
+        ", " __VA_OPT__(, ) __VA_ARGS__));                 \
   }
 #endif
 
@@ -624,13 +623,13 @@ namespace c10::detail {
         TORCH_CHECK_MSG(cond, "", __VA_ARGS__)); \
   }
 #else
-#define TORCH_CHECK(cond, ...)                     \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {            \
-    ::c10::detail::torchCheckFail(                 \
-        __func__,                                  \
-        __FILE__,                                  \
-        static_cast<uint32_t>(__LINE__),           \
-        TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__)); \
+#define TORCH_CHECK(cond, ...)                                 \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                        \
+    ::c10::detail::torchCheckFail(                             \
+        __func__,                                              \
+        __FILE__,                                              \
+        static_cast<uint32_t>(__LINE__),                       \
+        TORCH_CHECK_MSG(cond, "" __VA_OPT__(, ) __VA_ARGS__)); \
   }
 #endif
 
@@ -642,7 +641,8 @@ namespace c10::detail {
 #if defined(__CUDACC__) || defined(__HIPCC__)
 #define TORCH_CHECK_IF_NOT_ON_CUDA(cond, ...)
 #else
-#define TORCH_CHECK_IF_NOT_ON_CUDA(cond, ...) TORCH_CHECK(cond, ##__VA_ARGS__)
+#define TORCH_CHECK_IF_NOT_ON_CUDA(cond, ...) \
+  TORCH_CHECK(cond __VA_OPT__(, ) __VA_ARGS__)
 #endif
 
 // Debug only version of TORCH_INTERNAL_ASSERT. This macro only checks in debug
@@ -698,7 +698,7 @@ namespace c10::detail {
 
 #define TORCH_CHECK_ALWAYS_SHOW_CPP_STACKTRACE(cond, ...) \
   TORCH_CHECK_WITH_MSG(                                   \
-      ErrorAlwaysShowCppStacktrace, cond, "TYPE", ##__VA_ARGS__)
+      ErrorAlwaysShowCppStacktrace, cond, "TYPE" __VA_OPT__(, ) __VA_ARGS__)
 
 #ifdef STRIP_ERROR_MESSAGES
 #define WARNING_MESSAGE_STRING(...) \
