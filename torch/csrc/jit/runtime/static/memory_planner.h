@@ -218,7 +218,7 @@ class MemoryPlanner {
     if (storages_.empty()) {
       return false;
     }
-    const std::less<> less;
+    constexpr std::less<> less;
     const auto* start = &storages_[0];
     const auto* end = start + storages_.size();
     return !less(impl, start) && less(impl, end);
