@@ -5,8 +5,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import gc
-import unittest
-from unittest import skip, skipIf
+from unittest import skip
 
 from attn_ft import BertSelfAttention as BertSelfAttentionA, Linear
 from attn_positional import BertSelfAttention as BertSelfAttentionB
@@ -14,15 +13,11 @@ from attn_positional import BertSelfAttention as BertSelfAttentionB
 import functorch.dim
 import torch
 from functorch.dim import Dim, DimList, dimlists, dims, stack, Tensor
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    IS_LINUX,
-    IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
-    TEST_CUDA,
-    TEST_WITH_ROCM,
-    TEST_WITH_SLOW,
     TestCase,
 )
 
@@ -643,12 +638,7 @@ class TestMin(TestCase):
 skip_functorch_only = ["test_time_mm_fuse"]
 
 
-@unittest.skipIf(
-    IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW or IS_WINDOWS,
-    "https://github.com/pytorch/pytorch/issues/86710",
-)
-@skipIf(not TEST_CUDA, "no CUDA")
-class TestMinCudaOnly(TestMin):
+class TestMinCudaOnly(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     def setUp(self):
@@ -688,17 +678,142 @@ class TestMinCudaOnly(TestMin):
         print(name, elapsed / r)
         return elapsed / r
 
-    def test_attn_cuda(self):
+    def attn(
+        self,
+        batch_size=1,
+        sequence_length=4,
+        hidden_size=6,
+        num_attention_heads=3,
+        linear=Linear,
+        device=None,
+        time=False,
+    ):
+        def maybe_to(x):
+            return x if device is None else x.to(device)
+
+        attention_probs_dropout_prob = 0.0
+        A = maybe_to(
+            BertSelfAttentionA(
+                hidden_size,
+                num_attention_heads,
+                attention_probs_dropout_prob,
+                linear=linear,
+            )
+        )
+        B = maybe_to(
+            BertSelfAttentionB(
+                hidden_size, num_attention_heads, attention_probs_dropout_prob
+            )
+        )
+
+        A.load_state_dict(B.state_dict())
+        hidden_state = maybe_to(torch.rand(batch_size, sequence_length, hidden_size))
+        b_out = B(hidden_state)
+        a_out = A(hidden_state)
+        torch.testing.assert_close(
+            a_out, b_out
+        )  # why does a simple matmul not do the right thing?
+
+        if time:
+            self.gpu_time(lambda: B(hidden_state), "positional", r=3)
+            self.gpu_time(lambda: A(hidden_state), "first_class", r=3)
+
+        for approach in ("relative_key", "relative_key_query"):
+            A = maybe_to(
+                BertSelfAttentionA(
+                    hidden_size,
+                    num_attention_heads,
+                    attention_probs_dropout_prob,
+                    approach,
+                    sequence_length,
+                    linear=linear,
+                )
+            )
+            B = maybe_to(
+                BertSelfAttentionB(
+                    hidden_size,
+                    num_attention_heads,
+                    attention_probs_dropout_prob,
+                    approach,
+                    sequence_length,
+                )
+            )
+            A.load_state_dict(B.state_dict())
+
+            hidden_state = maybe_to(
+                torch.rand(batch_size, sequence_length, hidden_size)
+            )
+            b_out = B(hidden_state)
+            a_out = A(hidden_state)
+            torch.testing.assert_close(a_out, b_out)
+
+            if time:
+                self.gpu_time(lambda: B(hidden_state), "positional", r=3)
+                self.gpu_time(lambda: A(hidden_state), "first_class", r=3)
+
+        A = maybe_to(
+            BertSelfAttentionA(
+                hidden_size,
+                num_attention_heads,
+                attention_probs_dropout_prob,
+                None,
+                None,
+                linear=linear,
+            )
+        )
+        B = maybe_to(
+            BertSelfAttentionB(
+                hidden_size,
+                num_attention_heads,
+                attention_probs_dropout_prob,
+                None,
+                None,
+            )
+        )
+        A.load_state_dict(B.state_dict())
+
+        hidden_state = maybe_to(torch.rand(batch_size, sequence_length, hidden_size))
+        past_key_value = (
+            maybe_to(
+                torch.rand(
+                    batch_size,
+                    num_attention_heads,
+                    sequence_length,
+                    hidden_size // num_attention_heads,
+                )
+            ),
+            maybe_to(
+                torch.rand(
+                    batch_size,
+                    num_attention_heads,
+                    sequence_length,
+                    hidden_size // num_attention_heads,
+                )
+            ),
+        )
+
+        b_out = B(hidden_state, past_key_value=past_key_value)
+        a_out = A(hidden_state, past_key_value=past_key_value)
+        torch.testing.assert_close(a_out, b_out)
+
+        if time:
+            self.gpu_time(lambda: B(hidden_state), "positional", r=3)
+            self.gpu_time(lambda: A(hidden_state), "first_class", r=3)
+
+    def test_attn_cuda(self, device):
         # size from the BERT paper, 90% pretraining of sequence length 128
         self.attn(
             batch_size=256,
             hidden_size=768,
             sequence_length=128,
             num_attention_heads=12,
-            device="cuda",
+            device=device,
             time=measure_perf,
             linear=torch.nn.Linear,
         )
+
+
+instantiate_device_type_tests(TestMinCudaOnly, globals(), only_for=("cuda",))
 
 
 class TestMinFunctorchOnly(TestMin):
