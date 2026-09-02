@@ -3510,7 +3510,6 @@ class _AOTDispatchAutogradFunctionFactory:
                 buf.writeline(
                     f"_dealias_marked_returns(raw_returns, {_non_diff_indices!r})"
                 )
-            if _non_diff_indices:
                 checks = " + ".join(
                     f"([raw_returns[{i}]] if isinstance(raw_returns[{i}], Tensor) else [])"
                     for i in _non_diff_indices
