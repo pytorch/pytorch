@@ -9,6 +9,10 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_adaptive_avg_pool3d_backward_native.h>
+#include <ATen/ops/_adaptive_avg_pool3d_native.h>
+#include <ATen/ops/adaptive_avg_pool3d_backward_native.h>
+#include <ATen/ops/adaptive_avg_pool3d_native.h>
 #include <ATen/ops/adaptive_max_pool2d_backward_native.h>
 #include <ATen/ops/adaptive_max_pool2d_native.h>
 #include <ATen/ops/aminmax.h>
@@ -560,6 +564,84 @@ static void adaptive_max_pool_out_mps_template(const Tensor& output,
   }
 
   launch_max_pool_kernel(input, output, indices, params, op_name);
+}
+
+static AdaptiveAvgPool3dParams make_adaptive_avg_pool3d_params(const Tensor& input, IntArrayRef output_size) {
+  const auto ndims = input.dim();
+  return AdaptiveAvgPool3dParams{
+      .inputT = safe_downcast<int32_t, int64_t>(input.size(ndims - 3)),
+      .inputH = safe_downcast<int32_t, int64_t>(input.size(ndims - 2)),
+      .inputW = safe_downcast<int32_t, int64_t>(input.size(ndims - 1)),
+      .outputT = safe_downcast<int32_t, int64_t>(output_size[0]),
+      .outputH = safe_downcast<int32_t, int64_t>(output_size[1]),
+      .outputW = safe_downcast<int32_t, int64_t>(output_size[2]),
+  };
+}
+
+static void adaptive_avg_pool3d_out_mps_template(const Tensor& output, const Tensor& input, IntArrayRef output_size) {
+  const auto ndims = input.dim();
+  TORCH_CHECK(ndims == 4 || ndims == 5, "adaptive_avg_pool3d(): expected 4D or 5D tensor, but got ", input.sizes());
+  for (const auto i : c10::irange(1, ndims)) {
+    TORCH_CHECK(input.size(i) > 0,
+                "adaptive_avg_pool3d(): Expected input to have non-zero size for non-batch dimensions, but input has "
+                "sizes ",
+                input.sizes());
+  }
+
+  auto out_sizes = input.sizes().vec();
+  out_sizes[ndims - 3] = output_size[0];
+  out_sizes[ndims - 2] = output_size[1];
+  out_sizes[ndims - 1] = output_size[2];
+  output.resize_(out_sizes);
+  if (output.numel() == 0) {
+    return;
+  }
+
+  const auto params = make_adaptive_avg_pool3d_params(input, output_size);
+  const auto input_c = input.contiguous();
+  const auto numThreads = static_cast<uint32_t>(output.numel());
+
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = stream->commandEncoder();
+      auto pso = lib.getPipelineStateForFunc("adaptive_avg_pool3d_" + scalarToMetalTypeString(input));
+      getMPSProfiler().beginProfileKernel(pso, "adaptive_avg_pool3d", {input}, stream);
+      [computeEncoder setComputePipelineState:pso];
+      mtl_setArgs(computeEncoder, input_c, output, params);
+      mtl_dispatch1DJob(computeEncoder, pso, numThreads);
+      getMPSProfiler().endProfileKernel(pso, stream);
+    }
+  });
+}
+
+static void adaptive_avg_pool3d_backward_out_mps_template(const Tensor& grad_input,
+                                                          const Tensor& grad_output,
+                                                          const Tensor& input) {
+  grad_input.resize_as_(input);
+  grad_input.zero_();
+  if (grad_output.numel() == 0) {
+    return;
+  }
+
+  const auto ndims = grad_output.dim();
+  const auto params = make_adaptive_avg_pool3d_params(
+      input, {grad_output.size(ndims - 3), grad_output.size(ndims - 2), grad_output.size(ndims - 1)});
+  const auto grad_output_c = grad_output.contiguous();
+  const auto numThreads = static_cast<uint32_t>(grad_output.numel());
+
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = stream->commandEncoder();
+      auto pso = lib.getPipelineStateForFunc("adaptive_avg_pool3d_backward_" + scalarToMetalTypeString(input));
+      getMPSProfiler().beginProfileKernel(pso, "adaptive_avg_pool3d_backward", {grad_output}, stream);
+      [computeEncoder setComputePipelineState:pso];
+      mtl_setArgs(computeEncoder, grad_input, grad_output_c, params);
+      mtl_dispatch1DJob(computeEncoder, pso, numThreads);
+      getMPSProfiler().endProfileKernel(pso, stream);
+    }
+  });
 }
 
 static void max_pool_backward_out_mps_template(Tensor& grad_input,
@@ -1402,6 +1484,28 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_mps)(const Tensor& grad_output,
                                           divisor_override,
                                           /*pooling_dims=*/3,
                                           "avg_pool3d_backward");
+}
+
+Tensor& adaptive_avg_pool3d_out_mps(const Tensor& input, IntArrayRef output_size, Tensor& output) {
+  mps::adaptive_avg_pool3d_out_mps_template(output, input, output_size);
+  return output;
+}
+
+Tensor adaptive_avg_pool3d_mps(const Tensor& input, IntArrayRef output_size) {
+  Tensor output = at::empty({0}, input.options());
+  mps::adaptive_avg_pool3d_out_mps_template(output, input, output_size);
+  return output;
+}
+
+Tensor& adaptive_avg_pool3d_backward_out_mps(const Tensor& grad_output, const Tensor& input, Tensor& grad_input) {
+  mps::adaptive_avg_pool3d_backward_out_mps_template(grad_input, grad_output, input);
+  return grad_input;
+}
+
+Tensor adaptive_avg_pool3d_backward_mps(const Tensor& grad_output, const Tensor& input) {
+  Tensor grad_input = at::empty({0}, input.options());
+  mps::adaptive_avg_pool3d_backward_out_mps_template(grad_input, grad_output, input);
+  return grad_input;
 }
 
 } // namespace at::native

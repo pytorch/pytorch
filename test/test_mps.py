@@ -16263,6 +16263,11 @@ class TestConsistency(TestCaseMPS):
         'addr', 'var_mean',
         'acosh', 'asinh', 'asin',
         'masked.std',
+        # MPS accumulates the pooling window in fp32 while CPU accumulates in
+        # the input dtype, so MPS is the more accurate of the two (measured
+        # against an fp64 reference) but the two disagree past the default
+        # half tolerance.
+        'nn.functional.adaptive_avg_pool3d',
         'nn.functional.avg_pool2d',  # NS: Only for backward pass
         'nn.functional.normalize',
         'nn.functional.triplet_margin_loss',

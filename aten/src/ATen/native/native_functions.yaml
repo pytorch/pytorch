@@ -12403,6 +12403,7 @@
   dispatch:
     CPU: adaptive_avg_pool3d_out_cpu
     CUDA: adaptive_avg_pool3d_out_cuda
+    MPS: adaptive_avg_pool3d_out_mps
     XPU: adaptive_avg_pool3d_out_xpu
     QuantizedCPU: adaptive_avg_pool3d_out_quantized_cpu
 
@@ -12415,6 +12416,7 @@
   dispatch:
     CPU: adaptive_avg_pool3d_cpu
     CUDA: adaptive_avg_pool3d_cuda
+    MPS: adaptive_avg_pool3d_mps
     XPU: adaptive_avg_pool3d_xpu
     QuantizedCPU: adaptive_avg_pool3d_quantized_cpu
   autogen: _adaptive_avg_pool3d.out
@@ -12425,6 +12427,7 @@
   dispatch:
     CPU: adaptive_avg_pool3d_backward_out_cpu
     CUDA: adaptive_avg_pool3d_backward_out_cuda
+    MPS: adaptive_avg_pool3d_backward_out_mps
     XPU: adaptive_avg_pool3d_backward_out_xpu
 
 - func: _adaptive_avg_pool3d_backward(Tensor grad_output, Tensor self) -> Tensor
@@ -12432,6 +12435,7 @@
   dispatch:
     CPU: adaptive_avg_pool3d_backward_cpu
     CUDA: adaptive_avg_pool3d_backward_cuda
+    MPS: adaptive_avg_pool3d_backward_mps
     XPU: adaptive_avg_pool3d_backward_xpu
   autogen: _adaptive_avg_pool3d_backward.out
 
