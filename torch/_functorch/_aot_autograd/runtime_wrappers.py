@@ -2706,12 +2706,17 @@ def _dealias_marked_returns(raw_returns: list[Any], marked: Sequence[int]) -> No
     Substituting an alias is only correct because the slot is one we are about
     to declare non-differentiable anyway; slots that stay differentiable keep
     their identity.
+
+    ``marked`` may name slots that are not tensors: the ahead-of-time codegen
+    path selects indices by output metadata and does not pre-filter, so
+    non-tensor slots are simply skipped here.
     """
     if not marked:
         return
     # This runs on every forward of every compiled autograd function and almost
-    # never fires, so index the marked slots -- usually one or two -- and probe
-    # the rest against them, rather than indexing all of raw_returns.
+    # never fires. Build the id->positions map from only the marked slots
+    # (usually one or two) so it stays tiny; the single pass over raw_returns
+    # below to probe for collisions is unavoidable.
     marked_positions: dict[int, list[int]] = {}
     for i in marked:
         x = raw_returns[i]
