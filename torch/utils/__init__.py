@@ -1,10 +1,10 @@
 # mypy: allow-untyped-defs
 
 import copyreg
-import os.path as _osp
 import weakref
 
 import torch
+from torch._utils_internal import get_file_path as _get_file_path
 from torch.utils import (
     backcompat as backcompat,
     collect_env as collect_env,
@@ -29,7 +29,10 @@ def set_module(obj, mod):
     obj.__module__ = mod
 
 
-cmake_prefix_path = _osp.join(_osp.dirname(_osp.dirname(__file__)), "share", "cmake")
+# Resolve through the installed distribution: `__file__` points into the
+# source checkout under a redirect-mode editable install, where the CMake
+# package files are staged elsewhere.
+cmake_prefix_path = _get_file_path("torch", "share", "cmake")
 
 
 def swap_tensors(t1, t2):
