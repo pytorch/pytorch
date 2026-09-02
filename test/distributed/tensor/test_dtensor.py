@@ -106,6 +106,38 @@ class DTensorTest(DTensorTestBase):
             )
 
     @with_comms
+    def test_from_local_to_local_grad_dtype(self):
+        device_mesh = self.build_device_mesh()
+        local_tensor = torch.randn(
+            4,
+            4,
+            device=self.device_type,
+            dtype=torch.bfloat16,
+            requires_grad=True,
+        )
+        local_tensor.grad_dtype = torch.float32
+
+        dtensor = DTensor.from_local(
+            local_tensor, device_mesh, [Replicate()], run_check=False
+        )
+        self.assertEqual(dtensor.dtype, torch.bfloat16)
+        self.assertEqual(dtensor.grad_dtype, torch.float32)
+
+        local_output = dtensor.to_local()
+        self.assertEqual(local_output.dtype, torch.bfloat16)
+        self.assertEqual(local_output.grad_dtype, torch.float32)
+
+        grad_value = 1.0 + 2.0**-8
+        self.assertNotEqual(
+            torch.tensor(grad_value, dtype=torch.bfloat16).float().item(), grad_value
+        )
+        grad = torch.full_like(local_output, grad_value, dtype=torch.float32)
+        local_output.backward(grad)
+
+        self.assertEqual(local_tensor.grad.dtype, torch.float32)
+        self.assertEqual(local_tensor.grad, grad)
+
+    @with_comms
     def test_meta_dtensor(self):
         device_mesh = self.build_device_mesh()
         dist_specs = [[Shard(0)], [Replicate()]]
