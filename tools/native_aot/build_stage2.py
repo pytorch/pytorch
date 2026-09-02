@@ -19,13 +19,15 @@ applicable. Keep this list in sync with should_run(), which reports each one:
   * TORCH_CUDA_ARCH_LIST names no exportable arch (export.EXPORTABLE_ARCHES);
     with it unset, on-device export runs if a supported GPU is present
 
-Two different processes, gated by skip list.
+Two modes, split by the skip list.
 
-  * Before: No stage-2, normal wheel without AOT artifacts
+  * Before: no stage-2 work, so a normal wheel with the generated stubs in place
+    but no kernels behind them
   * After: stage 2 exports and embeds, runtimes required to progress, failures
     fail the build.
 
-TORCH_NATIVE_AOT=0 opts out at any point.
+TORCH_NATIVE_AOT=0 opts out, and every entry point honours it; it is expected to
+stay constant across a build's phases.
 """
 
 import glob
