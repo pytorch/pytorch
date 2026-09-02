@@ -1012,7 +1012,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   // Get the result of the current future.
   IValue value() {
-    std::unique_lock<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
     if (eptr_) {
       std::rethrow_exception(eptr_);
@@ -1023,7 +1023,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // This accessor should only be used if we know that the future is
   // completed() with no error.
   const IValue& constValue() const {
-    std::unique_lock<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
     TORCH_INTERNAL_ASSERT(
       !eptr_,
@@ -1037,7 +1037,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // This accessor should only be used if we know that the future is
   // completed() with no error.
   const std::vector<WeakStorage>& storages() const {
-    std::unique_lock<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
     AT_ASSERT(!eptr_);
     return storages_;
@@ -1128,7 +1128,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // Tries to retrieve the error message from std::exception_ptr.
   std::string tryRetrieveErrorMessage() const {
     TORCH_CHECK(hasError(), "No error present on the future.");
-    std::unique_lock<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(mutex_);
     return tryRetrieveErrorMessageInternal(eptr_);
   }
 
@@ -1138,17 +1138,17 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
   bool hasValue() const {
-    std::unique_lock<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(mutex_);
     return completed_ && !eptr_;
   }
 
   bool hasError() const {
-    std::unique_lock<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(mutex_);
     return eptr_ ? true : false;
   }
 
   std::exception_ptr exception_ptr() const {
-    std::unique_lock<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(mutex_);
     return eptr_;
   }
 
@@ -1359,6 +1359,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     // We assume the devices in both vectors have the same consistent type, and
     // their indices are unique and sorted.
     std::vector<c10::Device> excessDevices;
+    excessDevices.reserve(subset.size());
     std::set_difference(
         subset.begin(),
         subset.end(),
@@ -1873,11 +1874,7 @@ Tuple generic_to_tuple_impl(
 template <
     typename... Args,
     typename Indices = std::make_index_sequence<sizeof...(Args)>,
-    std::enable_if_t<
-        !std::disjunction_v<
-            std::is_lvalue_reference<Args>...,
-            std::negation<std::is_constructible<IValue, Args>>...>,
-        std::nullptr_t> = nullptr>
+    typename = IValue::enable_if_ivalue_compatible<Args...>::type>
 std::tuple<Args...> generic_to(const IValue& ivalue, _fake_type<std::tuple<Args...>> /*unused*/) {
   const auto& vals = ivalue.toTupleRef().elements();
   TORCH_CHECK(vals.size() == sizeof...(Args));
@@ -2137,24 +2134,12 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::Tuple> v)
     : tag(Tag::Tuple) {
   payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.release());
 }
-template <
-    typename... Args,
-    std::enable_if_t<
-        !std::disjunction_v<
-            std::is_lvalue_reference<Args>...,
-            std::negation<std::is_constructible<IValue, Args>>...>,
-        std::nullptr_t>>
+template <typename... Args, typename /* Enable */>
 inline IValue::IValue(const std::tuple<Args...>& t)
     : IValue(std::apply(c10::ivalue::Tuple::create<const Args&...>, t)) {
 }
 
-template <
-    typename... Args,
-    std::enable_if_t<
-        !std::disjunction_v<
-            std::is_lvalue_reference<Args>...,
-            std::negation<std::is_constructible<IValue, Args>>...>,
-        std::nullptr_t>>
+template <typename... Args, typename /* Enable */>
 inline IValue::IValue(std::tuple<Args...>&& t)
     : IValue(std::apply(c10::ivalue::Tuple::create<Args&&...>, std::move(t))) {
 }
@@ -2343,10 +2328,9 @@ IValue::IValue(c10::intrusive_ptr<T> custom_class) : tag(Tag::Object) {
     try {
       return c10::getCustomClassType<c10::intrusive_ptr<T>>();
     } catch (const c10::Error&) {
-      TORCH_CHECK(
-          false,
-          "Trying to instantiate a class that isn't a registered custom class: ",
-          c10::util::get_fully_qualified_type_name<T>());
+      throw c10::Error(
+          "Trying to instantiate a class that isn't a registered custom class: " +
+          std::string(c10::util::get_fully_qualified_type_name<T>()));
     }
   }();
   auto ivalue_obj = c10::ivalue::Object::create(std::move(classType), /* numSlots */1);
@@ -2420,15 +2404,15 @@ inline PyObject* IValue::toPyObject() const {
 }
 
 template <typename T>
-inline std::optional<T> IValue::toOptional() {
+inline std::optional<T> IValue::toOptional() && {
   if (this->isNone()) {
     return std::nullopt;
   }
-  return this->to<T>();
+  return std::move(*this).to<T>();
 }
 
 template <typename T>
-inline std::optional<T> IValue::toOptional() const {
+inline std::optional<T> IValue::toOptional() const& {
   if (this->isNone()) {
     return std::nullopt;
   }
@@ -2479,29 +2463,17 @@ inline bool IValue::isSameIdentity(const IValue& rhs) const {
 }
 
 namespace ivalue {
-namespace detail {
-
-template <typename T>
-IValue from_(T&& x, std::true_type /*unused*/) {
-  return IValue(std::forward<T>(x));
-}
-template <typename T>
-IValue from_(c10::intrusive_ptr<T> x, std::false_type /*unused*/) {
-  return IValue(std::move(x));
-}
-template <typename T>
-IValue from_(T&& /*x*/, std::false_type /*unused*/) {
-  static_assert(
-      guts::false_t<T>::value,
-      "You are calling from with a type that it doesn't support, and isn't a potential custom class (ie: is an intrusive_ptr)");
-  return IValue();
-}
-} // namespace detail
 
 template <typename T>
 IValue from(T&& x) {
-  return detail::from_(
-      std::forward<T>(x), typename std::is_constructible<IValue, T>::type{});
+  if constexpr (std::is_constructible_v<IValue, T>) {
+    return IValue(std::forward<T>(x));
+  } else {
+    static_assert(
+        guts::false_t<T>::value,
+        "You are calling from with a type that it doesn't support, and isn't a potential custom class (ie: is an intrusive_ptr)");
+    return IValue();
+  }
 }
 
 } // namespace ivalue
