@@ -389,6 +389,33 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         self.assertEqual(grad, expected_grad)
 
     @parametrize("device", devices)
+    @parametrize("reduce_op_name, reduce_op", min_max_reduce_ops)
+    def test_all_reduce_min_max_ties_backward(self, device, reduce_op_name, reduce_op):
+        """min/max backward splits grad evenly across tied extremum holders.
+
+        The lower half of the ranks hold the min and the upper half hold the
+        max, so the summed grad (world_size) is divided by the number of tied
+        ranks, matching ATen's evenly_distribute_backward.
+        """
+        shape = (3, 3)
+        group_name = dist.group.WORLD.group_name
+        rank = dist.get_rank()
+        half = self.world_size // 2
+
+        value = 0.0 if rank < half else 1.0
+        input_tensor = torch.full(
+            shape, fill_value=value, requires_grad=True, device=device
+        )
+        output = fcols.all_reduce(input_tensor, reduce_op, group=group_name)
+        output.sum().backward()
+
+        # Grad G = world_size is split across the `half` tied extremum holders.
+        holds_extremum = (reduce_op_name == "min") == (rank < half)
+        expected_val = self.world_size / half if holds_extremum else 0.0
+        expected_grad = torch.full(shape, fill_value=expected_val, device=device)
+        self.assertEqual(input_tensor.grad, expected_grad)
+
+    @parametrize("device", devices)
     @parametrize("gather_dim", [0, 1, 2])
     def test_all_gather_tensor_backward(self, device, gather_dim):
         """Test all_gather_tensor backward does reduce_scatter.
@@ -590,6 +617,37 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
             if rank == 0:
                 expected_grad[0, 0] = G
             self.assertEqual(grad, expected_grad)
+
+    @parametrize("device", devices)
+    @parametrize("reduce_op_name, reduce_op", min_max_reduce_ops)
+    def test_all_reduce_coalesced_min_max_ties_backward(
+        self, device, reduce_op_name, reduce_op
+    ):
+        """all_reduce_coalesced min/max backward splits grad evenly across ties.
+
+        The lower half of the ranks hold the min and the upper half hold the
+        max, so each tensor's summed grad (world_size) is divided by the number
+        of tied ranks, matching ATen's evenly_distribute_backward.
+        """
+        shapes = [(3, 3), (2, 2)]
+        group_name = dist.group.WORLD.group_name
+        rank = dist.get_rank()
+        half = self.world_size // 2
+
+        value = 0.0 if rank < half else 1.0
+        input_tensors = [
+            torch.full(shape, fill_value=value, requires_grad=True, device=device)
+            for shape in shapes
+        ]
+        outputs = fcols.all_reduce_coalesced(input_tensors, reduce_op, group=group_name)
+        loss = sum(output.sum() for output in outputs)
+        loss.backward()
+
+        holds_extremum = (reduce_op_name == "min") == (rank < half)
+        expected_val = self.world_size / half if holds_extremum else 0.0
+        for input_tensor in input_tensors:
+            expected_grad = torch.full_like(input_tensor, fill_value=expected_val)
+            self.assertEqual(input_tensor.grad, expected_grad)
 
     @parametrize("device", devices)
     def test_all_gather_into_tensor_coalesced_backward(self, device):

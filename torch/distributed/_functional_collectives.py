@@ -687,6 +687,13 @@ def _is_reduceop_supported(op: str | ReduceOp):
     )
 
 
+def _min_max_extremum_mask(fwd_input: torch.Tensor, fwd_output: torch.Tensor):
+    # A NaN input is the extremum only when the reduced output is also NaN;
+    # gating on both keeps the extremum mask disjoint from the NaN mask even if
+    # the backend drops NaN through min/max.
+    return (fwd_input == fwd_output) | (fwd_input.isnan() & fwd_output.isnan())
+
+
 def all_reduce_backward(ctx, grad_output: torch.Tensor):
     """
     Backward for all_reduce: all_reduce with same reduce_op.
@@ -715,14 +722,16 @@ def all_reduce_backward(ctx, grad_output: torch.Tensor):
     if _is_min_max(reduce_op):
         fwd_input, fwd_output = ctx.saved_tensors
         fwd_output = wait_tensor(fwd_output)
-        # Route grad to the extremum holder (input == output). A NaN input is
-        # the extremum only when the reduced output is also NaN; gating on both
-        # keeps the two masks disjoint even if the backend drops NaN in min/max.
-        output = torch.ops.aten.where.self(
-            fwd_input.isnan() & fwd_output.isnan(),
-            output,
-            torch.ops.aten.where.ScalarOther(fwd_input == fwd_output, output, 0),
+        # Split the summed grad evenly across extremum holders like ATen's
+        # evenly_distribute_backward. Ties may span ranks, so the holder count
+        # is itself an all_reduce(sum) of the local extremum mask.
+        mask = _min_max_extremum_mask(fwd_input, fwd_output)
+        tie_count = wait_tensor(
+            torch.ops._c10d_functional.all_reduce(
+                mask.to(output.dtype), "sum", group_name
+            )
         )
+        output = torch.ops.aten.where.ScalarOther(mask, output / tie_count, 0)
     return output, None, None
 
 
@@ -956,20 +965,24 @@ def all_reduce_coalesced_backward(ctx, grad_outputs: list[torch.Tensor]):
         n = len(grad_inputs)
         fwd_inputs = saved[:n]
         fwd_outputs = [wait_tensor(o) for o in saved[n:]]
-        # Route grad to the extremum holder (input == output). A NaN input is
-        # the extremum only when the reduced output is also NaN; gating on both
-        # keeps the two masks disjoint even if the backend drops NaN in min/max.
+        # Split each summed grad evenly across extremum holders like ATen's
+        # evenly_distribute_backward. Ties may span ranks, so holder counts are
+        # an all_reduce(sum) of the local extremum masks, batched into one
+        # coalesced collective.
+        masks = [
+            _min_max_extremum_mask(fwd_input, fwd_output)
+            for fwd_input, fwd_output in zip(fwd_inputs, fwd_outputs)
+        ]
+        tie_counts = wait_tensors(
+            torch.ops._c10d_functional.all_reduce_coalesced(
+                [mask.to(g.dtype) for mask, g in zip(masks, grad_inputs)],
+                "sum",
+                group_name,
+            )
+        )
         grad_inputs = [
-            torch.ops.aten.where.self(
-                fwd_input.isnan() & fwd_output.isnan(),
-                grad_input,
-                torch.ops.aten.where.ScalarOther(
-                    fwd_input == fwd_output, grad_input, 0
-                ),
-            )
-            for grad_input, fwd_input, fwd_output in zip(
-                grad_inputs, fwd_inputs, fwd_outputs
-            )
+            torch.ops.aten.where.ScalarOther(mask, g / count, 0)
+            for g, mask, count in zip(grad_inputs, masks, tie_counts)
         ]
     return (grad_inputs, None, None)
 
