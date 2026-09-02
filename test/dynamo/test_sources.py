@@ -89,10 +89,10 @@ class GuardProvenanceTests(torch._dynamo.test_case.TestCase):
 
         def walk(cls):
             for sub in cls.__subclasses__():
-                if issubclass(sub, ChainedSource):
-                    chained.append(sub)
-                elif sub is not ChainedSource:
+                if not issubclass(sub, ChainedSource):
                     roots.append(sub)
+                elif sub is not ChainedSource:
+                    chained.append(sub)
                 walk(sub)
 
         walk(Source)
@@ -132,8 +132,12 @@ class GuardProvenanceTests(torch._dynamo.test_case.TestCase):
 
     def test_provenance_classifies_by_root(self):
         from torch._dynamo.source import (
+            ConstDictKeySource,
+            DictGetItemSource,
+            GetItemSource,
             GlobalStateSource,
             GlobalWeakRefSource,
+            ImportSource,
             NumpyTensorSource,
             ShapeEnvSource,
             TupleIteratorGetItemSource,
@@ -150,14 +154,27 @@ class GuardProvenanceTests(torch._dynamo.test_case.TestCase):
         )
         self.assertEqual(NumpyTensorSource(local).provenance, GuardProvenance.INPUT)
         self.assertEqual(TypeSource(local).provenance, GuardProvenance.INPUT)
+        # Deeper chains and dict-key indices still classify by the root.
+        self.assertEqual(
+            GetItemSource(AttrSource(local, "a"), 0).provenance, GuardProvenance.INPUT
+        )
+        self.assertEqual(
+            DictGetItemSource(local, ConstDictKeySource(local, 0)).provenance,
+            GuardProvenance.INPUT,
+        )
         self.assertEqual(
             AttrSource(GlobalSource("g"), "attr").provenance,
             GuardProvenance.GLOBAL,
         )
+        self.assertEqual(
+            AttrSource(ImportSource("torch"), "utils").provenance,
+            GuardProvenance.GLOBAL,
+        )
         self.assertEqual(GlobalStateSource().provenance, GuardProvenance.AMBIENT)
-        self.assertEqual(ShapeEnvSource().provenance, GuardProvenance.AMBIENT)
-        # Dynamo-installed weakref proxies stand in for traced-value identity;
-        # an environment-drop policy must never see them as droppable GLOBAL.
+        # SHAPE_ENV is the dynamic-shape dispatch guard over input sizes.
+        self.assertEqual(ShapeEnvSource().provenance, GuardProvenance.INPUT)
+        # A liveness guard on a compile-time-bound object the compiled bytecode
+        # dereferences at runtime: kept conservatively, never droppable GLOBAL.
         self.assertEqual(
             GlobalWeakRefSource("__optimizer_1").provenance, GuardProvenance.INPUT
         )
@@ -198,11 +215,11 @@ class GuardProvenanceTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ambient[0].provenance, GuardProvenance.AMBIENT)
 
     def test_optimizer_weakref_guards_classify_as_input(self):
-        # Compiling an optimizer step installs weakref proxies for the
-        # optimizer object and its params (G['__optimizer_...']) and guards
-        # their liveness with WEAKREF_ALIVE; those guards distinguish
-        # optimizer instances, so they must classify INPUT, not as droppable
-        # environment guards.
+        # Compiling an optimizer step installs weakrefs to its params
+        # (G['__optimizer_...']) that the compiled bytecode dereferences, and
+        # guards their liveness with WEAKREF_ALIVE. Dropping that guard as an
+        # environment guard would run the code against a dead weakref, so it
+        # must classify INPUT.
         from torch._guards import GuardProvenance
 
         seen = []
@@ -224,6 +241,51 @@ class GuardProvenanceTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(weakref_entries)
         for entry in weakref_entries:
             self.assertEqual(entry.provenance, GuardProvenance.INPUT)
+
+    def test_input_only_filter_keeps_shape_env_guard(self):
+        # A filter that keeps only INPUT guards (the environment-drop contract
+        # of the Note) must keep SHAPE_ENV: it is the dynamic-shape dispatch
+        # guard, and without it a size-2 call is served the size-5 branch.
+        from torch._guards import GuardProvenance
+
+        kept_types = []
+
+        def keep_input_guards(entries):
+            keep = [e.provenance is GuardProvenance.INPUT for e in entries]
+            kept_types.extend(e.guard_type for e, k in zip(entries, keep) if k)
+            return keep
+
+        opts = {"guard_filter_fn": keep_input_guards}
+
+        @torch.compile(backend="eager", dynamic=True, options=opts)
+        def fn(x):
+            return x + 1 if x.size(0) > 3 else x - 1
+
+        self.assertEqual(fn(torch.zeros(5)), torch.ones(5))
+        self.assertIn("SHAPE_ENV", kept_types)
+        self.assertEqual(fn(torch.zeros(2)), -torch.ones(2))
+
+    def test_guard_filter_entry_provenance_is_lazy(self):
+        # The base seven-field positional constructor still works, and
+        # provenance is derived from orig_guard on access, so an unclassified
+        # out-of-tree Source only fails the filter that asks for it.
+        from torch._dynamo.guards import GuardBuilder
+        from torch._dynamo.types import GuardFilterEntry
+        from torch._guards import Guard, GuardProvenance, Source
+
+        class UnclassifiedSource(Source):
+            pass
+
+        guard = Guard(UnclassifiedSource(), GuardBuilder.TYPE_MATCH)
+        entry = GuardFilterEntry("x", False, None, "TYPE_MATCH", (), False, guard)
+        self.assertIs(entry.orig_guard, guard)
+        with self.assertRaisesRegex(NotImplementedError, "Guard provenance"):
+            _ = entry.provenance
+
+        guard = Guard(LocalSource("x"), GuardBuilder.TYPE_MATCH)
+        entry = GuardFilterEntry("x", False, None, "TYPE_MATCH", (), False, guard)
+        self.assertIs(entry.provenance, entry.orig_guard.provenance)
+        self.assertIs(entry.provenance, GuardProvenance.INPUT)
 
 
 if __name__ == "__main__":

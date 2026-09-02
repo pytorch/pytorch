@@ -4556,7 +4556,6 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
         guard_type=guard.create_fn_name(),
         derived_guard_types=(tuple(guard.guard_types) if guard.guard_types else ()),
         is_global=is_global,
-        provenance=guard.provenance,
         orig_guard=guard,
     )
 

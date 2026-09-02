@@ -276,12 +276,12 @@ class GlobalSource(Source):
 
 @dataclass_with_cached_hash(frozen=True)
 class GlobalWeakRefSource(Source):
-    # INPUT, not GLOBAL: these are Dynamo-INSTALLED weakref proxies standing in
-    # for the identity/liveness of traced runtime objects (e.g. an optimizer
-    # passed as an argument and its params, via store_global_weakref_by_id).
-    # Their WEAKREF_ALIVE / identity guards are dispatch-relevant, so an
-    # environment-drop policy must never see them as droppable, even though
-    # the lookup goes through the globals dict.
+    # INPUT, not GLOBAL: a dynamo-installed weakref to an object bound at
+    # compile time (e.g. an optimizer's params, via store_global_weakref_by_id)
+    # that the compiled bytecode dereferences at runtime. Its WEAKREF_ALIVE
+    # guard checks liveness only (instance dispatch comes from ID_MATCH on the
+    # traced input), but an environment-drop policy must never remove it:
+    # dropping it would run the compiled code against a dead weakref.
     _provenance: ClassVar[GuardProvenance] = GuardProvenance.INPUT
 
     global_name: str
@@ -1284,7 +1284,9 @@ class ContextVarGetSource(ChainedSource):
 # guard contents from the ambient ShapeEnv
 @dataclass_with_cached_hash(frozen=True)
 class ShapeEnvSource(Source):
-    _provenance: ClassVar[GuardProvenance] = GuardProvenance.AMBIENT
+    # INPUT: the SHAPE_ENV guard is the dynamic-shape dispatch guard over
+    # input sizes, so an environment-drop policy must keep it.
+    _provenance: ClassVar[GuardProvenance] = GuardProvenance.INPUT
 
     @property
     def _name_template(self) -> str:
