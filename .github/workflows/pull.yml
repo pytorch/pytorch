@@ -237,6 +237,7 @@ jobs:
       tests-to-exclude: "inductor/test_torchinductor_opinfo"
       python-version: "3.14t"
       compiler: clang21
+      timeout-minutes: 360
     secrets: inherit
 
   # Docs are built and the preview is published by docs-build.yml so the
@@ -397,6 +398,7 @@ jobs:
       tests-to-exclude: "inductor/test_torchinductor_opinfo"
       python-version: "3.10"
       compiler: clang21
+      timeout-minutes: 360
     secrets: inherit
 
   # ╠══════════════════════════════════════════════════════════════════════╣
@@ -457,6 +459,7 @@ jobs:
       tests-to-exclude: "inductor/test_torchinductor_opinfo"
       python-version: "3.14"
       compiler: clang21
+      timeout-minutes: 360
     secrets: inherit
 
   # ╠══════════════════════════════════════════════════════════════════════╣
