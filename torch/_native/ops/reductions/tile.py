@@ -1,31 +1,7 @@
-# The shared reduction KERNEL and the datapath it is built from: where a tile's load width,
-# alignment and thread mapping are derived, the folds that walk them, and the ONE @cute.kernel
-# (TileReduce, at the bottom) that every fast reduction path launches -- row or column,
-# one-shot or split stage, direct or TMA-staged. The kernel_* modules above it are drivers:
-# they pick the launch shape and own the plan cache, but the body lives here.
-#
-# Why this module exists. The load stage is where the bugs were, twice, in two hand-rolled
-# copies: one kernel lost 3.7x to per-element (un-widened) reads, and another then lost 3x to
-# a missing `assumed_align` -- both invisible in the source. One load stage means one place to
-# get width and alignment right, and one place to record WHY (see vec_size / align_bytes).
-#
-# A tile is described by TileMap: `vec` elements per load, `tpr` threads per row. `tpr == 1`
-# is the degenerate multirow shape -- one thread owns a whole row and there is no lane merge
-# at all -- and any tpr > 1 shape finishes by folding across its lanes (merge_lanes).
-#
-# Most folds here are ROLLED: the trip count is a RUNTIME value, so ONE compiled kernel
-# serves every row length in a vec class. That is the default for a good reason -- a static
-# per-thread loop makes compile time scale with the shape (see MAX_UNROLL) and the kernel
-# count scale with the number of distinct shapes seen.
-#
-# The exception is an ORDER that fixes its add DAG at compile time (the inner-tree order): it
-# binds every value to a slot in a tree, so it cannot ride a runtime trip count. That form
-# needs the STATIC fragment -- `load` fills a per-thread tile once and the fold walks it with
-# `range_constexpr` -- and pays the compile/kernel-count cost in exchange for a reproducible
-# bit pattern. `TileMap.strides` is where the two chunk-to-warp assignments differ, and it is
-# the only place they differ: the emitted loads are identical either way. The one thing that
-# order still takes at RUNTIME is the number of per-row partials its widest shape leaves behind
-# -- that count grows with N, and a linear chain folds in the same order however it is rolled.
+# The shared reduction kernel (TileReduce, at the bottom) and its datapath: load width, alignment,
+# thread mapping (TileMap), and the folds that walk them. The kernel_* modules are drivers -- they
+# pick the launch shape and own the plan cache. Folds are ROLLED (runtime trip count, one kernel per
+# vec class) except under a fixed-DAG order, which needs the static fragment. See MAX_UNROLL.
 
 import math
 from typing import Any
@@ -38,77 +14,41 @@ from cutlass.cute.nvgpu import cpasync
 
 WARP = 32
 
-# HARD bound on the per-thread unroll, enforced in TileMap. A tile of `vec * loads` elements
-# per thread folded with a STATIC trip count emits that whole loop at trace time, so COMPILE
-# TIME SCALES WITH it. Measured (fp32 sum, cold compile, one N per point):
-#
+# SAFETY bound on the per-thread unroll (vec * loads), enforced in TileMap: a static trip count is
+# emitted at trace time, so compile time scales with it, superlinearly past ~1300 ops.
 #   unrolled ops   12    80   320   640  1280  2560
 #   compile (s)  0.14  0.17  0.35  0.60  1.17  4.54
-#
-# so roughly 1 ms per unrolled element op, going superlinear past ~1300. A multi-field trait
-# multiplies the IR per element (Welford is 3 fields), so the effective cost is worse. Left
-# unbounded, a caller asking for N=4096 at tpr=1 emits 4096 element ops and compilation does
-# not finish in any reasonable time -- that is not a hypothetical, it wedged a sweep here.
-#
-# This is a SAFETY bound, deliberately looser than any perf gate. The point is that no caller
-# -- including a benchmark harness that bypasses the perf gates -- can silently blow up
-# compile time.
 MAX_UNROLL = 512
 
 
 def vec_size(N: int, itemsize: int) -> int:
-    """Elements per load instruction.
-
-    gcd rather than `16 // itemsize`: it makes vec divide N, which buys three things at
-    once -- no ragged tail inside a chunk, every chunk base a multiple of vec, and a row
-    stride (N*itemsize) that is a multiple of vec*itemsize, so every ROW start carries the
-    same alignment as the base pointer.
+    """Elements per load instruction. gcd, not `16 // itemsize`, so vec DIVIDES N: no ragged tail
+    in a chunk, and every chunk base and row start carries the base pointer's alignment.
     """
     return math.gcd(N, max(1, 16 // itemsize))
 
 
 def align_bytes(N: int, itemsize: int) -> int:
-    """Alignment to DECLARE on the input wrap so the DSL emits the wide load.
-
-    Not optional: `from_dlpack` otherwise assumes only the element's natural width and
-    silently emits narrow loads (measured 3x on the multirow shape). Safe by the `vec_size`
-    argument above, given a tensor whose base pointer is an allocation base.
+    """Alignment to DECLARE on the input wrap. Not optional: `from_dlpack` otherwise assumes the
+    element width and silently emits narrow loads, measured 3x on the multirow shape.
     """
     return vec_size(N, itemsize) * itemsize
 
 
 def _magic(d):
-    # Magic-number reciprocal for exact n // d over 0 <= n < 2^31 as
-    # (n * m) >> sh -- one 64-bit multiply + shift instead of a runtime 64-bit
-    # divide (which the ~%25-slower runtime-geometry decode would otherwise emit
-    # per element per pair). Same Granlund-Montgomery family as aten's IntDivider
-    # (aten/src/ATen/cuda/detail/IntegerDivider.cuh, hackersdelight.org/magic.htm);
-    # that one uses the add-indicator form for the full unsigned 2^32 domain, but
-    # K0's linear indices are Int32-positive (< 2^31), so the simpler round-up form
-    # is exact and one instruction cheaper. Proof sketch: m = floor(2^(31+l)/d)+1
-    # with l = ceil(log2 d), so m*d = 2^(31+l) + e with 0 < e <= d, and for n < 2^31
-    # the error term n*e/(d*2^(31+l)) < 2^-l * 1 < 1/d ... floor((n*m) >> (31+l))
-    # = n//d exactly. m < 2^32 (d > 2^(l-1)) so n*m < 2^63: no Int64 overflow.
+    # Exact n // d for 0 <= n < 2^31 as (n * m) >> sh: one multiply-shift instead of a runtime
+    # 64-bit divide per element per pair. Granlund-Montgomery, in the round-up form that the
+    # Int32-positive domain allows (aten's IntDivider uses the add-indicator form for full 2^32).
     l = (d - 1).bit_length()
     return (1 << (31 + l)) // d + 1, 31 + l
 
 
 def _decode_offset(linear, vals, npairs):
-    # Mixed-radix decode of a linear index into a flat element offset. vals is a
-    # RUNTIME Int64 list of QUADS, fastest-varying dim first:
-    #     [m0, sh0, ext0, strd0,  m1, sh1, ext1, strd1, ...]
-    # where (m, sh) is _magic(ext). npairs is the compile-time pair COUNT (only the
-    # loop STRUCTURE is baked -- the values are launch args, so one compiled kernel
-    # serves every geometry with the same pair count). Divisions run as magic
-    # multiply+shift; the LAST pair needs neither div nor mod (a linear index in
-    # range has rem < ext_last; out-of-range lanes decode garbage that the callers'
-    # `valid` predication never reads). For a single pair this is linear*stride.
-    #
-    # INT64: the flat offset can exceed int32 (numel >= 2^31, e.g. a (300000, 8192)
-    # reduction). Cast the linear index to Int64 up front so every rem*stride product
-    # and accumulation is 64-bit; an int32 product silently wraps negative and reads
-    # out of bounds. The returned offset indexes a flat gmem tensor, which expects a
-    # 64-bit offset.
+    # Mixed-radix decode of a linear index to a flat element offset. `vals` is a RUNTIME quad list,
+    # fastest dim first -- [m, sh, ext, stride] per pair, (m, sh) from _magic(ext) -- so only the
+    # pair COUNT is baked and one kernel serves every geometry sharing it. The last pair needs
+    # neither div nor mod. INT64 throughout: numel can exceed 2^31 and an int32 product would wrap
+    # negative and read out of bounds.
     rem = cutlass.Int64(linear)
     # npairs is at least 1 here: an empty KEPT list is legal (a full reduction) but the
     # caller drops the decode entirely for it, and a plan with no REDUCED runs is refused by
@@ -195,12 +135,8 @@ class TileMap:
         return self.vec * itemsize if self.wide_ok else itemsize
 
     def strides(self):
-        """(lane, w, l) column strides -- the ORDER lives here and nowhere else.
-
-        The regular and inner-tree orders read the SAME elements into the SAME registers and
-        differ only in which chunk goes to which warp, i.e. in the `l` and `w` strides being
-        swapped. Both keep stride-1 innermost and both are compact, so the emitted instruction
-        stream is byte-identical either way.
+        """(lane, w, l) column strides -- the ORDER lives here and nowhere else. The two orders read
+        the same elements into the same registers, swapping only the `l` and `w` strides.
         """
         if self.tpr == 1:
             return (0, 0, self.vec)
@@ -210,13 +146,9 @@ class TileMap:
         return (self.vec, wle, wle * self.nw)
 
     def col_base(self, lane, w, l: int, warp_stride=None):
-        """Column of element 0 of this thread's load `l`.
-
-        Returns a PYTHON INT when the whole offset is compile-time (tpr == 1), and only builds
-        a dynamic value when lane/w actually participate. That distinction is load-bearing,
-        not cosmetic: a static offset folds into the address so the compiler can prove the
-        16-byte alignment and emit the wide load, while wrapping the same number in Int32
-        hides it and silently costs 3x.
+        """Column of element 0 of this thread's load `l`. Returns a PYTHON INT when the offset is
+        entirely compile-time: a static offset lets the compiler prove 16-byte alignment and emit
+        the wide load, where the same number wrapped in Int32 silently costs 3x.
         """
         s_lane, s_w, s_l = self.strides()
         if warp_stride is not None:
@@ -244,18 +176,11 @@ def fold_decoded(
 ):
     """Grid-stride fold of ONE output's reduced run, addressed by mixed-radix DECODE.
 
-    The arm for an arbitrary layout: `rvals` carries the reduced (extent, stride) quads, so a
-    transposed, sliced, permuted, expanded or overlapping-window input is just a different
-    decode rather than a different kernel. All `nt` threads of the block cooperate on this one
-    output and their partial accumulators are merged by the caller.
-
-    `rb` is the pre-clamped step bound (the caller applies the reduce-all tail or the ragged
-    chunk clamp), so every FULL wave is in range and its trip count can be a dynamic
-    `cutlass.range` -- a per-element `valid` would trip the IR flattener. One predicated
-    remainder pass follows, and compile depth stays O(1) in the extent.
-
-    `gidx` picks what an index trait is told the position is: "r" the linear step index,
-    "flat" the global flat input offset (reduce-all), "chunk" chunk_base + r (a split run).
+    The arbitrary-layout arm: `rvals` carries the reduced (extent, stride) quads, so a transposed or
+    expanded input is a different decode, not a different kernel. All `nt` threads cooperate on one
+    output and the caller merges their partials. `rb` is pre-clamped, so the full-wave trip count can
+    be a dynamic `cutlass.range` with one predicated remainder pass and O(1) compile depth. `gidx`
+    picks what an index trait is told the position is: "r", "flat" or "chunk".
     """
     reduce_fn, acc_dt = trait.reduce, trait.acc
     acc = trait.init()
@@ -301,16 +226,9 @@ def fold_decoded(
 
 @cute.jit
 def fold_partials_run(trait, mIns, obase, rb, nt: cutlass.Constexpr, tidx, in_base):
-    """COMBINE one output's pre-reduced accumulator tuples: a contiguous run of `rb` per
-    field from `obase`, grid-strided by `nt`.
-
-    The stage-2 reader for every split whose partials are laid out per output (reduce-all,
-    the ragged row split, the general split, xcta). Offsetting by obase is what keeps each
-    output on its OWN partials -- without it every output reads output 0's.
-
-    Dynamic full-wave loop + constexpr remainder, as in fold_decoded: `rb` can be ~1e5 for a
-    huge-N split, and a static unroll over it scaled compile time with the partial count
-    (98125 partials was a ~384-deep unroll, ~3s to compile).
+    """COMBINE one output's pre-reduced accumulator tuples: a run of `rb` per field from `obase`,
+    grid-strided by `nt`. The stage-2 reader for every per-output split; the loop is dynamic because
+    `rb` reaches ~1e5, where a static unroll costs ~3s to compile.
     """
     combine_fn = trait.combine
     fdtypes = trait.fdtypes
@@ -333,10 +251,9 @@ def fold_partials_run(trait, mIns, obase, rb, nt: cutlass.Constexpr, tidx, in_ba
 
 @cute.jit
 def merge_lanes(trait, acc, tpr: cutlass.Constexpr, asc: cutlass.Constexpr = False):
-    """Reduce across the `tpr` lanes covering one output. A no-op at tpr == 1.
-
-    `asc` selects the ASCENDING butterfly over the descending one. The folds below hand
-    columns out in that direction, and an index trait's ties depend on which it is.
+    """Reduce across the `tpr` lanes covering one output; a no-op at tpr == 1. `asc` selects the
+    ASCENDING butterfly, which is the direction the folds hand columns out in and which an index
+    trait's ties depend on.
     """
     if const_expr(tpr == 1):
         return acc
@@ -408,24 +325,11 @@ def fold_groups(
 ):
     """THE inner-tree fold. One body for every shape of the order; the caller supplies the layout.
 
-    `frag` is a (vec, ngroups) register tile and `cols[i]` is the true column of group i's element
-    0 -- that pair is the whole interface, so a strided per-chunk read and a contiguous run read
-    back from smem both land here unchanged. Returns an nfields acc tuple.
-
-    Two parameters carry the only structural differences between the callers:
-      * `merge_per_group` -- the lane butterfly runs INSIDE the group loop (one per 32-lane load,
-        which is what ATen's per-chunk nesting does) or ONCE at the end (which is what a lane
-        owning a contiguous run allows). Both are the balanced tree over the same columns, so the
-        bits are the same either way; the choice is only where the shuffles happen.
-      * `exact` -- when the tile provably lies inside the row the mask is a no-op, and emitting it
-        would cost a compare and a select PER ELEMENT on the fold's critical path.
-
-    Works for ANY trait, because every step goes through `leaf` and `combine` on nfields-tuples: an
-    index trait gets its position from the column the tree already knows, and Welford's
-    single-element accumulators merge pairwise (its parallel formula, not its online one).
-
-    A slot past the row's end folds the IDENTITY rather than being skipped -- that padding is part
-    of the DAG, not an implementation detail.
+    Interface is `frag`, a (vec, ngroups) register tile, plus `cols[i]`, the true column of group i's
+    element 0, so a strided per-chunk read and a contiguous run out of smem both land here.
+    `merge_per_group` puts the lane butterfly inside the group loop or once at the end (same tree
+    either way); `exact` drops the per-element mask. A slot past the row's end folds the IDENTITY --
+    that padding is part of the DAG.
     """
     op, ident = leaf_op(trait), identity(trait)
     nf = const_expr(trait.nfields)
@@ -489,20 +393,8 @@ def fold_itree_warp(
     )
 
 
-# Buffers in the staged fold's software pipeline (see _fold_itree_smem). 1 = stage-then-fold;
-# 2 would overlap the next tile's cp.async with this tile's fold.
-#
-# ONE, because overlapping LOSES. Depth 2 doubles smem per row (4.5 KB -> 9 KB), and with one warp
-# per block that halves the blocks an SM can hold, which this kernel feels more than it feels the
-# transfer latency. MEASURED device us, depth 1 vs 2:
-#
-#   (  65536,   1024)   40.9 / 40.9   (ntiles=1, so depth 2 never engages)
-#   (  32768,   2048)   38.8 / 46.5
-#   (  16384,   4096)   39.2 / 47.0
-#   (   8192,   8192)   39.6 / 47.9
-#
-# Same mechanism that sank the untiled version, where smem was the whole batch: on this fold, smem
-# footprint buys occupancy and occupancy beats overlap.
+# Buffers in the staged fold's pipeline (see _fold_itree_smem). ONE: this fold feels the smem
+# footprint's effect on occupancy more than it feels transfer latency.
 _ITREE_STAGE_DEPTH = 1
 
 _ROLL_UNROLL = 4
@@ -521,10 +413,9 @@ def fold_row_rolled(
 ):
     """Fold row `r` across `tm.tpr` lanes with a RUNTIME chunk loop. Returns an acc tuple.
 
-    Each wave covers tpr*vec contiguous elements; this thread takes chunk (c*tpr + lane).
-    A wave that runs past the row's last chunk is handled by CLAMPING the chunk index and
-    passing valid=False to the trait, not by branching -- binding a dynamic value inside a
-    dynamic `if` is rejected by the DSL, and the trait already folds `valid` correctly.
+    Each wave covers tpr*vec contiguous elements and this thread takes chunk (c*tpr + lane). A wave
+    past the row's last chunk CLAMPS the index and passes valid=False rather than branching, which
+    the DSL rejects for a dynamic bind.
     """
     reduce_fn, acc_dt = trait.reduce, trait.acc
     acc = trait.init()
@@ -585,20 +476,15 @@ def load(
 ):
     """Fill `frag` ((vec, loads) rmem) with this thread's slice of row `r`.
 
-    Emits ONE wide load per (thread, load) when the tile is exact. Otherwise the group is
-    tested once -- a fully in-row group still takes the wide load, and only a ragged group
-    falls back to per-element reads, with out-of-row elements left UNTOUCHED for the caller
-    to treat as identity.
+    ONE wide load per (thread, load) when the tile is exact. Otherwise the group is tested once, so
+    only a RAGGED group falls back to per-element reads, leaving out-of-row elements UNTOUCHED for
+    the caller to treat as identity.
     """
     hi = Int32(const_expr(tm.N)) if bound is None else bound
-    # `tm.exact` justifies an UNPREDICATED wide load, but it only says vec*loads*tpr == tm.N -- a
-    # statement about a tile based at column 0 covering its whole row. A narrower `bound` (the split
-    # shape's chunk end, whose entire job is to stop a short chunk reading the NEXT chunk's
-    # elements) or a shifted `base_col` each invalidate it, and the fast path consults neither. So
-    # require them absent instead of assuming it. Both tests are compile-time, and no plan
-    # `itree_plan` builds pairs an exact tile with either -- 0 of 35,376 enumerated, per batch -- so
-    # this changes nothing generated today and stops the fast path being silently wrong if a later
-    # caller combines them.
+    # `tm.exact` only says vec*loads*tpr == tm.N, i.e. a tile at column 0 covering its whole row. A
+    # narrower `bound` (the split shape's chunk end) or a shifted `base_col` each invalidate the
+    # unpredicated load, so require them absent rather than assume it. All three tests are
+    # compile-time, and no plan pairs an exact tile with either today.
     whole_row = const_expr(
         tm.exact and bound is None and isinstance(base_col, int) and base_col == 0
     )
@@ -634,13 +520,8 @@ def smem_box_layout(N: int, threads: int):
     """Smem destination for a (threads, N) TMA box of whole rows: plain row-major.
 
     The bank conflict a whole-row read implies is dealt with in the ACCESS PATTERN (see
-    fold_smem_rotated), not here, because neither layout-side fix works -- both were built
-    and measured:
-      * an arbitrary XOR swizzle (row bits into the bank bits) is REJECTED by the atom
-        ("unable to partition input tensors for TMA"); TMA supports only the GEMM swizzle
-        family (32B/64B/128B), whose phase pattern does not de-conflict a whole-row read.
-      * a transposed (column-major) destination BUILDS AND RUNS BUT IS WRONG -- the transfer
-        cannot transpose, so logical (t, c) indexing then reads the wrong elements.
+    fold_smem_rotated) rather than the layout: TMA accepts only the GEMM swizzle family, whose phase
+    pattern does not de-conflict a whole-row read, and the transfer cannot transpose.
     """
     return cute.make_ordered_layout((threads, N), order=(1, 0))
 
@@ -649,17 +530,10 @@ def smem_box_layout(N: int, threads: int):
 def fold_smem_rotated(trait, sX, rb, N: cutlass.Constexpr):
     """Fold row `rb` of a staged (threads, N) smem tile. One thread per row, no lane merge.
 
-    Indexed LOGICALLY so the true column reaches the trait -- reading `vec` physically
-    adjacent words instead would hand an index trait (argmax) a permuted position.
-
-    ROTATE each thread's read order by its row index: at step c, thread t reads column
-    (c + t) % N. Thread t reads row t, so an unrotated row-major read puts every lane of a
-    warp in bank c % 32 -- a 32-way conflict, measured to cost MORE than the coalescing the
-    TMA staging buys (0.86-0.91x, a regression). The rotation is a swizzle in the ACCESS
-    PATTERN, which needs no layout support at all. Legal because this path carries a numeric
-    contract, not a bitwise one, and the true column still reaches the trait.
-
-    N is a power of two here (see kernel_rowtile.tma_ok), so the modulo is a mask.
+    Indexed LOGICALLY so the true column reaches the trait, and ROTATED by row index -- at step c
+    thread t reads column (c + t) % N. Thread t reads row t, so an unrotated read puts every lane in
+    one bank, a 32-way conflict costing more than TMA's coalescing buys. Legal because this path
+    carries a numeric contract, not a bitwise one; N is a power of two, so the modulo is a mask.
     """
     acc = trait.init()
     mask = const_expr(N - 1)
@@ -681,13 +555,9 @@ def fold_cols_rolled(
 ):
     """Accumulate DOWN the rows, keeping `vec` independent accumulators. For columns.
 
-    The transpose of every other fold here. A row reduction collapses a thread's fragment to
-    ONE accumulator and then merges lanes; a column reduction vectorizes along the CONTIGUOUS
-    (kept) axis, so each thread owns `vec` adjacent columns, carries one accumulator per
-    column, and never merges across lanes at all. The addressing is still a per-row wide load,
-    which is what makes it reachable from these same primitives.
-
-    State is a loop-carried TUPLE of acc tuples, one per column this thread owns.
+    The transpose of every other fold here: vectorized along the CONTIGUOUS (kept) axis, so a thread
+    owns `vec` adjacent columns and one accumulator each, and never merges across lanes. State is a
+    loop-carried TUPLE of acc tuples, one per column.
     """
     reduce_fn, acc_dt = trait.reduce, trait.acc
     accs = tuple(trait.init() for _ in range(vec))
@@ -709,40 +579,20 @@ def fold_cols_rolled(
 class TileReduce:
     """The tile reduction KERNEL: one body, parameterized by which axis is reduced.
 
-    axis "row" -- the reduced axis is CONTIGUOUS. `tpr` threads share a row, each folding its
-        own chunks of it, and then the lanes merge (and the warps too, when a row spans more
-        than one). tpr == 1 is the narrow-row shape: one thread owns the whole row and nothing
-        merges. `use_tma` stages the block's rows through a TMA box first.
-    axis "col" -- the reduced axis is STRIDED (dim 0). Each thread owns `vec` ADJACENT columns
-        and folds DOWN the rows, so there is one accumulator per output and nothing merges
-        across lanes at all. The y-grid splits the reduced axis, and `combine` folds the
-        partials that split leaves, in a second pass of this same body.
-    axis "general" -- ANY layout. One block per output, all `nt` threads on it, addressing by
-        TensorIterator-derived mixed-radix decode (fold_decoded), so a transposed, sliced,
-        permuted, expanded or overlapping-window input needs no reshape and no special case.
-        This is the arm that makes "never decline a geometry" possible, and it is also the
-        COMBINE engine for every split whose partials are laid out per output (`combine`).
+    axis "row" -- reduced axis CONTIGUOUS. `tpr` threads share a row, then the lanes (and warps)
+        merge. tpr == 1 owns a whole row and merges nothing. `use_tma` stages the rows first.
+    axis "col" -- reduced axis STRIDED (dim 0). A thread owns `vec` adjacent columns and folds down
+        the rows, so nothing merges across lanes. The y-grid splits the axis; `combine` folds the
+        partials in a second pass of this body.
+    axis "general" -- ANY layout, one block per output, addressed by mixed-radix decode
+        (fold_decoded), so transposed / sliced / expanded inputs need no reshape. Also the combine
+        engine for every split whose partials are laid out per output.
 
-    `order` is orthogonal to `axis` and applies to the row axis: "linear" is the default
-    rolled fold, "inner_tree" is a COMPILE-TIME add DAG (a stride-doubling tree per load plus a
-    streaming carry) whose bit pattern is reproducible and pinnable. It brings its own thread
-    map -- (lane, warp) rather than (lane, row) -- and its own cross-warp step, an ascending
-    butterfly over smem rather than the generic block reduce, because both are part of the DAG
-    and neither can be swapped for the shared version without changing the bits. Its plan
-    (per-batch tiles, warps per row, carry depth) is the driver's, in `itree`, and the plan's
-    SHAPE also picks the thread map: one thread per row for a row that fits one fragment or for
-    the per-row combine, `wpr` warps per row otherwise.
+    `order` is orthogonal and row-only: "inner_tree" is a compile-time add DAG with its own thread
+    map and its own ascending-butterfly cross-warp step, both part of the bit pattern and neither
+    swappable for the shared version. Its plan is the driver's, in `itree`.
 
-    Why one body and not three: only the FOLD is axis-specific, and every fold is a
-    primitive above. The general axis runs at tpr == nt (every thread of the block on one
-    output), which is exactly the row axis's tail -- merge_lanes clamps to a warp and
-    block_reduce defaults to one row per block -- so it inherits the lane merge, the warp
-    merge unchanged. What follows it is shared by all three: the clamp of dead threads, the
-    projection (which has to happen OUTSIDE the store branch either way, or the DSL rejects
-    the binding) and the store -- every axis writes nslots x nouts results and they differ
-    only in the index written to. The col axis pins
-    `lane = 0`, since its mapping already gives every output group a thread of its own; that
-    is what lets one store serve both.
+    Only the fold is axis-specific; the clamp, projection and store that follow are shared.
     """
 
     def __init__(
@@ -1089,28 +939,19 @@ class TileReduce:
     @cute.jit
     def _fold_itree_smem(self, mX, r, lane, row_in_block):
         """Stage through smem in TILES, so one warp folds a batch with `span/T` butterflies while
-        smem stays at T columns per row regardless of how wide the batch is.
+        smem stays at T columns per row however wide the batch is.
 
-        The butterfly count is span/(WARP*vec) -- one per 32-lane load -- because a coalesced load
-        leaves a lane owning only `vec` adjacent columns, and in-register tree levels need an
-        ALIGNED CONTIGUOUS run. Staging breaks the tie: the global read stays coalesced, the lane
-        reads its own contiguous run back out of smem, and one butterfly covers the whole tile.
-        Tiles then combine through the streaming carry, so the DAG is still the balanced tree over
-        the batch's columns and the bits do not move.
-        `T = stage_e * WARP` is the knob: T = span is one butterfly and smem the whole batch, while
-        a smaller T trades butterflies back for a smem footprint that no longer grows with N.
+        A coalesced load leaves a lane owning only `vec` adjacent columns, but in-register tree
+        levels need an aligned contiguous run; staging breaks the tie, so one butterfly covers a
+        whole tile and the DAG is unchanged. `T = stage_e * WARP` trades butterflies against smem.
 
-        ONE BUFFER, stage-then-fold: wait for this tile, fold it, then refill for the next. The
-        refill CANNOT move ahead of the fold -- that is a write-after-read race on the buffer being
-        read, and it stays invisible until M is large enough for the transfer to land mid-fold. So
-        there is no copy/arithmetic overlap here by construction; see `_ITREE_STAGE_DEPTH` for the
-        measurements that rejected the two-buffer version that would have provided it.
+        ONE BUFFER, stage-then-fold: the refill MUST NOT move ahead of the fold -- that is a
+        write-after-read race that stays invisible until M is large enough for the transfer to land
+        mid-fold. See `_ITREE_STAGE_DEPTH` for the two-buffer measurements.
 
-        SMEM LAYOUT is (stage_e, WARP) per buffer with the lane stride padded by `vec`, i.e. tile
-        column c at `c + vec * (c // stage_e)`. The padding is what makes both directions
-        conflict-free: a lane's run stays contiguous (both the store and the load stay 16-byte
-        wide) while the run starts land `vec` words apart, so 32 lanes hit 32 distinct bank groups
-        instead of one.
+        SMEM LAYOUT (stage_e, WARP) per buffer, lane stride padded by `vec`: column c sits at
+        `c + vec * (c // stage_e)`, which keeps a lane's run contiguous and 16-byte wide while the
+        run starts land `vec` words apart, so 32 lanes hit distinct bank groups.
         """
         trait = self.trait
         it = self.itree
@@ -1343,21 +1184,11 @@ class TileReduce:
         limit,
     ):
         # RUNTIME args, so one compiled kernel serves every extent sharing a structure:
-        #   nchunks   vec-chunks along the axis a thread walks (row: of its row; col: of the
-        #             column count, i.e. how many threads have work)
-        #   nwaves    row only: waves of tpr chunks the rolled fold takes
-        #   project_n the TRUE reduced extent -- mean/var's divisor, and on the col axis the
-        #             row count its per-block chunk bound is measured against
-        #   q, npar   col only: the reduced-axis split (rows per chunk, chunk count)
-        #   rvals     general only: the reduced (extent, stride) magic quads to decode
-        #   kvals     general only: the same for the kept dims, decoding this block's output
-        #   in_base   general only: flat input offset of output coordinate 0
-        #   limit     general only: the bound the fold clamp measures against
-        #             (nchunks doubles as the general axis's per-output step count)
-        #
-        # An arg a variant does not use is passed as None, NOT as a dummy value: one extra
-        # unused Int32 param measured 1.27x on the column fold (8.2 -> 10.4us at (65536, 256)
-        # fp32 sum), which is why the drivers pin the other axis's args to None.
+        #   nchunks   vec-chunks along the axis a thread walks    nwaves    row: waves of tpr chunks
+        #   project_n the TRUE reduced extent (mean/var's divisor) q, npar   col: the axis split
+        #   rvals / kvals / in_base / limit   general: the decode quads, base offset and clamp bound
+        # An arg a variant does not use is passed as None, not a dummy: one unused Int32 param
+        # measured 1.27x on the column fold (8.2 -> 10.4us at (65536, 256)).
         tx, _, _ = cute.arch.thread_idx()
         bx, by, _ = cute.arch.block_idx()
         trait = self.trait

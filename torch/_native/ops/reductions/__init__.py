@@ -16,12 +16,9 @@
 #   kernel_coltile - launch policy for the COLUMN (dim-0) axis: one output per thread,
 #                    splitting the reduced axis for parallelism.
 #
-# The remaining fast paths, and the aten op overrides that put torch.sum / mean /
-# var / ... on this package at all, arrive in later stages.
-#
-# The kernel modules import `cutlass`, so they are NOT imported here -- that
-# would pull the DSL runtime into `import torch` (the lazy-DSL-import contract;
-# see test_no_dsl_imports_after_import_torch). overrides.py binds them lazily.
+# The kernel modules import `cutlass`, so they are NOT imported here: that would pull the DSL
+# runtime into `import torch` (see test_no_dsl_imports_after_import_torch). overrides.py binds
+# them lazily.
 
 from .cutedsl_impl import register_to_dispatch
 
