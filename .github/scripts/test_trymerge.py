@@ -14,7 +14,6 @@ import gzip
 import json
 import os
 import warnings
-from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from typing import Any
 from unittest import main, mock, skip, TestCase
@@ -33,8 +32,6 @@ from trymerge import (
     _AUTHORIZED_WITHOUT_GREENLIGHT,
     _find_non_matching_files,
     _revlist_to_prs,
-    AdvisorWaitWindow,
-    AI_VERDICT_MAX_WAIT,
     can_skip_internal_checks,
     categorize_checks,
     check_greenlight_reviewed_head_sha,
@@ -49,13 +46,11 @@ from trymerge import (
     GitHubPR,
     IGNORABLE_FAILED_CHECKS_THESHOLD,
     is_ai_not_related,
-    is_ai_pending,
     is_authorized_without_greenlight,
     is_bot_initiated_codev_merge,
     is_docker_affecting_files,
     iter_issue_timeline_until_comment,
     JobCheckState,
-    JobNameToStateDict,
     main as trymerge_main,
     MandatoryChecksMissingError,
     merge,
@@ -2537,71 +2532,6 @@ class TestAdvisorNotRelated(TestCase):
         )
         self.assertEqual(failed, [])
 
-
-class TestAdvisorPending(TestCase):
-    """Waiting for a verdict on a failure that arrived mid-merge.
-
-    `@pytorchbot merge` adds ciflow/trunk, so trunk jobs start as the merge
-    does and a fresh failure can land while the loop is already running.
-    """
-
-    @staticmethod
-    def _check(name: str, job_id: int | None) -> JobCheckState:
-        return JobCheckState(
-            name, "https://example.com", "FAILURE", None, job_id, "", ""
-        )
-
-    @staticmethod
-    def _awaited_checks() -> JobNameToStateDict:
-        return {"job": JobCheckState("job", "", "FAILURE", "AI_PENDING", 7, "", "")}
-
-    def test_matches_on_job_id_only(self) -> None:
-        drci = {"AI_PENDING": [{"id": 7, "name": "some job"}]}
-        self.assertTrue(is_ai_pending(self._check("some job", 7), drci))
-        self.assertFalse(is_ai_pending(self._check("some job", 8), drci))
-        self.assertFalse(is_ai_pending(self._check("some job", None), drci))
-        self.assertFalse(is_ai_pending(self._check("some job", 7), {}))
-
-    def test_an_unclassified_failure_is_pending_not_failing(self) -> None:
-        """Both merge gates must see it as pending, or the merge is not retried."""
-        checks = self._awaited_checks()
-        pending, failed, _ = categorize_checks(checks, list(checks.keys()))
-        self.assertEqual([x[0] for x in pending], ["job"])
-        self.assertEqual(failed, [])
-
-    def test_keeps_waiting_inside_the_budget(self) -> None:
-        checks = self._awaited_checks()
-        pending = [("job", "", 7)]
-        window = AdvisorWaitWindow()
-        self.assertEqual(window.apply(checks, pending, []), (pending, []))
-        # The budget opens at the first wait, not when the merge started.
-        self.assertIsNotNone(window.opened_at)
-
-    def test_gives_up_once_the_budget_is_spent(self) -> None:
-        window = AdvisorWaitWindow(
-            opened_at=datetime.now(timezone.utc)
-            - AI_VERDICT_MAX_WAIT
-            - timedelta(seconds=1)
-        )
-        still_pending, now_failing = window.apply(
-            self._awaited_checks(), [("job", "", 7)], []
-        )
-        self.assertEqual(still_pending, [])
-        self.assertEqual([x[0] for x in now_failing], ["job"])
-
-    def test_the_budget_does_not_open_without_something_to_wait_for(self) -> None:
-        window = AdvisorWaitWindow()
-        window.apply({}, [], [])
-        self.assertIsNone(window.opened_at)
-
-    def test_ignore_current_wins_over_waiting(self) -> None:
-        """--ignore-current takes a snapshot; waiting on an ignored check breaks it."""
-        checks = {"job": self._check("job", 7)}
-        drci = {"AI_PENDING": [{"id": 7, "name": "job"}]}
-        with mock.patch("trymerge.get_drci_classifications", return_value=drci):
-            classified = get_classifications(1, "pytorch", checks, ["job"])
-        self.assertEqual(classified["job"].classification, "IGNORE_CURRENT_CHECK")
-
     def test_a_cleared_check_is_classified_through_get_classifications(self) -> None:
         """The happy path through the real entry point, not a hand-built state.
 
@@ -2668,7 +2598,6 @@ class TestAdvisorPending(TestCase):
         summary = json.dumps(
             {
                 "AI_NOT_RELATED": [{"id": 7, "name": "job"}],
-                "AI_PENDING": [{"id": 8, "name": "other"}],
                 "FLAKY": [{"id": 9, "name": "flaky job"}],
             }
         )
@@ -2677,27 +2606,13 @@ class TestAdvisorPending(TestCase):
                 DRCI_CHECKRUN_NAME, "", "NEUTRAL", None, None, "", summary
             ),
             "job": self._check("job", 7),
-            "other": self._check("other", 8),
             "flaky job": self._check("flaky job", 9),
         }
         with mock.patch("trymerge.get_drci_classifications", return_value={}):
             classified = get_classifications(1, "pytorch", checks, [])
-        # Both AI categories are dropped from the fallback; FLAKY still applies.
+        # The AI category is dropped from the fallback; FLAKY still applies.
         self.assertIsNone(classified["job"].classification)
-        self.assertIsNone(classified["other"].classification)
         self.assertEqual(classified["flaky job"].classification, "FLAKY")
-
-    def test_giving_up_leaves_other_pending_checks_alone(self) -> None:
-        checks = self._awaited_checks()
-        checks["other"] = JobCheckState("other", "", None, None, 8, "", "")
-        window = AdvisorWaitWindow(
-            opened_at=datetime.now(timezone.utc) - AI_VERDICT_MAX_WAIT
-        )
-        still_pending, now_failing = window.apply(
-            checks, [("job", "", 7), ("other", "", 8)], []
-        )
-        self.assertEqual([x[0] for x in still_pending], ["other"])
-        self.assertEqual([x[0] for x in now_failing], ["job"])
 
 
 if __name__ == "__main__":
