@@ -1901,8 +1901,11 @@ class BuiltinVariable(BaseBuiltinVariable):
             inspect.getattr_static(self.fn, name, None),
             (types.WrapperDescriptorType, types.MethodDescriptorType),
         ):
-            if isinstance(args[0], variables.UserDefinedObjectVariable):
-                return args[0].call_base_method(tx, name, args[1:], kwargs)
+            if (
+                isinstance(args[0], variables.UserDefinedObjectVariable)
+                and args[0]._base_vt is not None
+            ):
+                return args[0]._base_vt.call_method(tx, name, args[1:], kwargs)
             return args[0].call_method(tx, name, args[1:], kwargs)
 
         if (
@@ -3875,8 +3878,8 @@ class ListBuiltinVariable(BaseBuiltinVariable):
         resolved_fn = getattr(list, name, None)
         if resolved_fn is not None and resolved_fn in list_methods:
             obj = args[0]
-            if isinstance(obj, UserDefinedObjectVariable):
-                return obj.call_base_method(tx, name, args[1:], kwargs)
+            if isinstance(obj, UserDefinedObjectVariable) and obj._base_vt is not None:
+                return obj._base_vt.call_method(tx, name, args[1:], kwargs)
             return obj.call_method(tx, name, args[1:], kwargs)
 
         return super().call_method(tx, name, args, kwargs)
