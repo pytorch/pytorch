@@ -209,7 +209,7 @@ If you want to compile with CUDA support, [select a supported version of CUDA fr
 Note: You could refer to the [cuDNN Support Matrix](https://docs.nvidia.com/deeplearning/cudnn/backend/latest/reference/support-matrix.html) for cuDNN versions with the various supported CUDA, CUDA driver, and NVIDIA hardware.
 
 If you want to disable CUDA support, export the environment variable `USE_CUDA=0`.
-Other potentially useful environment variables are documented in [`cmake/EnvVarForwarding.cmake`](./cmake/EnvVarForwarding.cmake).  If
+Other potentially useful environment variables are documented in the [Build environment variable reference](CONTRIBUTING.md#build-environment-variable-reference) in CONTRIBUTING.md.  If
 CUDA is installed in a non-standard location, set PATH so that the nvcc you
 want to use can be found (e.g., `export PATH=/usr/local/cuda-12.8/bin:$PATH`).
 
@@ -223,7 +223,7 @@ If you want to compile with ROCm support, install
 By default the build system expects ROCm to be installed in `/opt/rocm`. If ROCm is installed in a different directory, the `ROCM_PATH` environment variable must be set to the ROCm installation directory. The build system automatically detects the AMD GPU architecture. Optionally, the AMD GPU architecture can be explicitly set with the `PYTORCH_ROCM_ARCH` environment variable [AMD GPU architecture](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html#supported-gpus)
 
 If you want to disable ROCm support, export the environment variable `USE_ROCM=0`.
-Other potentially useful environment variables are documented in [`cmake/EnvVarForwarding.cmake`](./cmake/EnvVarForwarding.cmake).
+Other potentially useful environment variables are documented in the [Build environment variable reference](CONTRIBUTING.md#build-environment-variable-reference) in CONTRIBUTING.md.
 
 ##### Intel GPU Support
 If you want to compile with Intel GPU support, follow these
@@ -231,7 +231,7 @@ If you want to compile with Intel GPU support, follow these
 - Intel GPU is supported for Linux and Windows.
 
 If you want to disable Intel GPU support, export the environment variable `USE_XPU=0`.
-Other potentially useful environment variables are documented in [`cmake/EnvVarForwarding.cmake`](./cmake/EnvVarForwarding.cmake).
+Other potentially useful environment variables are documented in the [Build environment variable reference](CONTRIBUTING.md#build-environment-variable-reference) in CONTRIBUTING.md.
 
 #### Get the PyTorch Source
 
@@ -381,8 +381,8 @@ python -m pip install --no-build-isolation -v -e .
 ##### Adjust Build Options (Optional)
 
 You can adjust the configuration of CMake variables through environment variables, which the
-build forwards to CMake (see [`cmake/EnvVarForwarding.cmake`](./cmake/EnvVarForwarding.cmake) for
-the full list). For example, pointing the build at a specific Conda prefix, CuDNN, or BLAS:
+build forwards to CMake (see the [Build environment variable reference](CONTRIBUTING.md#build-environment-variable-reference)
+in CONTRIBUTING.md for the full list). For example, pointing the build at a specific Conda prefix, CuDNN, or BLAS:
 
 On Linux
 
@@ -433,7 +433,7 @@ make -f docker.Makefile
 ```
 
 You can also pass the `CMAKE_VARS="..."` environment variable to specify additional CMake variables to be passed to CMake during the build.
-See [`cmake/EnvVarForwarding.cmake`](./cmake/EnvVarForwarding.cmake) for the list of available variables.
+See the [Build environment variable reference](CONTRIBUTING.md#build-environment-variable-reference) in CONTRIBUTING.md for the list of available variables.
 
 ```bash
 make -f docker.Makefile
