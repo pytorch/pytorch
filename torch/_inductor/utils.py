@@ -407,6 +407,26 @@ ALIGNMENT = 16
 TMA_ALIGNMENT = 16
 TMA_DESCRIPTOR_SIZE = 128
 
+# AMD TDM descriptor thresholds. Three distinct rules, deliberately separate:
+#
+# 1. Legality. `make_tensor_descriptor` enforces rank 1-5, a unit innermost
+#    stride, and an innermost *block* extent of at least 16 bytes. This is the
+#    only alignment-shaped rule Triton actually checks.
+# 2. Operand policy. Inductor additionally requires 16-byte storage offset and
+#    outer strides. Conservative, not required: it constrains where an operand
+#    may start, and does not establish base-pointer alignment.
+# 3. Direct-path policy. 128-byte relative alignment is a *performance* choice.
+#    A 16-byte-but-not-128-byte descriptor still compiles and is still correct;
+#    it only forgoes the direct request path. Being relative, it never proves a
+#    tile starts at a 128-byte address, and it rejects shapes that would have
+#    worked (FP16 head_dim 32 is 64 bytes).
+_TDM_MIN_INNERMOST_REQUEST_BYTES = TMA_ALIGNMENT
+_TDM_OPERAND_ALIGNMENT_BYTES = TMA_ALIGNMENT
+_TDM_DIRECT_PATH_RELATIVE_POLICY_BYTES = 128
+_TDM_SUPPORTED_DTYPES: OrderedSet[torch.dtype] = OrderedSet(
+    [torch.float16, torch.bfloat16, torch.float32]
+)
+
 TRITON_FLOAT8_DTYPES = (
     torch.float8_e4m3fn,
     torch.float8_e5m2,
@@ -2202,6 +2222,27 @@ def use_triton_template(
     )
 
 
+def _bytes_aligned(expr_bytes: _IntLike, alignment: int = TMA_ALIGNMENT) -> bool:
+    """Statically-known multiple-of test for a byte-valued expression."""
+    from .virtualized import V
+
+    return V.graph.sizevars.statically_known_multiple_of(expr_bytes, alignment)
+
+
+def _single_unit_stride_dim(strides_i: Sequence[_IntLike]) -> int | None:
+    """Index of the sole unit-stride dim, or None when there is not exactly one."""
+    from .virtualized import V
+
+    inner = [
+        i
+        for i, stride in enumerate(strides_i)
+        if V.graph.sizevars.statically_known_equals(stride, 1)
+    ]
+    if len(inner) != 1:
+        return None
+    return inner[0]
+
+
 def can_use_tma(
     *matrices: IRNode, output_layout: Layout | None = None, add_guards: bool = False
 ) -> bool:
@@ -2223,8 +2264,7 @@ def can_use_tma(
 
     from .virtualized import V
 
-    def _aligned(expr_bytes: int | sympy.Expr) -> bool:
-        return V.graph.sizevars.statically_known_multiple_of(expr_bytes, TMA_ALIGNMENT)
+    _aligned = _bytes_aligned
 
     def _is_tma_compatible_layout(layout: Layout | None) -> bool:
         if layout is None:
@@ -2279,14 +2319,9 @@ def can_use_tma(
             ]
 
         # Find the single contiguous ("inner") dim
-        inner = [
-            i
-            for i, st in enumerate(strides_i)
-            if V.graph.sizevars.statically_known_equals(st, 1)
-        ]
-        if len(inner) != 1:
+        inner_idx = _single_unit_stride_dim(strides_i)
+        if inner_idx is None:
             return False
-        inner_idx = inner[0]
 
         # All "outer" dims must have 16-byte aligned strides
         for i, st in enumerate(strides_i):
@@ -2335,22 +2370,38 @@ def can_use_tma(
     )
 
 
-def _descriptor_shape_fits_in_int32(
-    sizes: Sequence[sympy.Expr], add_guards: bool = False
+def _descriptor_shapes_fit_in_int32(
+    shapes: Sequence[Sequence[sympy.Expr]], add_guards: bool = False
 ) -> bool:
+    """Range-check several descriptor shapes, installing at most one guard.
+
+    Checking operands one at a time leaves a guard behind for every operand that
+    passed before a later one failed, constraining the graph for a feature that
+    was then rejected. Every dimension is therefore decided guard-free first --
+    constants directly, backed symbols through their hints -- so no rejection
+    installs anything. `guard_or_false` would otherwise append the *negated*
+    bound when a hint is out of range. Only once all dimensions pass are the
+    symbolic conditions combined into a single guard. Unbacked symbols have no
+    hint, so they fall through to that guard, which fails closed.
+    """
+    from .virtualized import V
+
     int32_max = torch.iinfo(torch.int32).max
     conditions = []
-    for size in sizes:
-        if isinstance(size, (int, sympy.Integer)):
-            if size > int32_max:
-                return False
-        else:
+    for sizes in shapes:
+        for size in sizes:
+            if isinstance(size, (int, sympy.Integer)):
+                if size > int32_max:
+                    return False
+                continue
+            if add_guards:
+                hint = V.graph.sizevars.replace_backed_symbols_with_hints(size)
+                if isinstance(hint, (int, sympy.Integer)) and hint > int32_max:
+                    return False
             conditions.append(sympy.Le(size, int32_max))
 
     if not conditions:
         return True
-
-    from .virtualized import V
 
     condition = conditions[0] if len(conditions) == 1 else sympy.And(*conditions)
     return (
@@ -2358,6 +2409,221 @@ def _descriptor_shape_fits_in_int32(
         if add_guards
         else V.graph.sizevars.statically_known_true(condition)
     )
+
+
+def _descriptor_shape_fits_in_int32(
+    sizes: Sequence[sympy.Expr], add_guards: bool = False
+) -> bool:
+    return _descriptor_shapes_fit_in_int32([sizes], add_guards=add_guards)
+
+
+def is_gfx1250_arch(arch: str) -> bool:
+    """Return True only for gfx1250, including feature-suffixed GCN names."""
+    return arch.split(":", 1)[0] == "gfx1250"
+
+
+# The torch.version attributes are process-constant, so the parse happens once.
+@functools.cache
+def _rocm_version_tuple() -> tuple[int, int]:
+    """Return the ROCm SDK ``(major, minor)``, or ``(0, 0)`` if unavailable.
+
+    ``torch.version.rocm`` carries CMake's ``ROCM_VERSION_DEV``, which PyTorch's
+    own ROCm component gates compare (see the 7.14 hipfile gate in
+    ``cmake/public/LoadHIP.cmake``), so it wins. ``torch.version.hip`` carries
+    ``HIP_VERSION_CLEAN`` and is consulted only when ``rocm`` is absent. A
+    present-but-malformed ``rocm`` fails closed rather than falling through.
+    """
+    version = getattr(torch.version, "rocm", None)
+    if not version:
+        version = torch.version.hip
+    if not version:
+        return (0, 0)
+    match = re.match(r"(\d+)\.(\d+)", version)
+    if match is None:
+        return (0, 0)
+    return (int(match.group(1)), int(match.group(2)))
+
+
+def _rocm_version_at_least(major: int, minor: int) -> bool:
+    if not torch.version.hip:
+        return False
+    return _rocm_version_tuple() >= (major, minor)
+
+
+def _gfx1250_device_prereqs(device: torch.device | None) -> bool:
+    """Check the runtime and compiler prerequisites shared by TDM paths.
+
+    Not memoized: the device-property probe can fail transiently during
+    initialization, and caching that failure would disable TDM process-wide.
+    """
+    from torch.utils._triton import has_triton_amd_tdm_device
+
+    # ROCm 7.14 is the first supported compiler/runtime toolchain for gfx1250.
+    if not _rocm_version_at_least(7, 14):
+        return False
+    if device is None or device.type != "cuda":
+        return False
+    try:
+        props = torch.cuda.get_device_properties(device)
+        arch = getattr(props, "gcnArchName", "")
+    except Exception:
+        return False
+    # The Triton probe also requires the stable make_tensor_descriptor API.
+    return is_gfx1250_arch(arch) and has_triton_amd_tdm_device(arch)
+
+
+def _tdm_row_major_from_strides(strides_i: Sequence[sympy.Expr | int]) -> bool | None:
+    """Classify an already-resolved 2D stride pair by its unit-stride dimension.
+
+    Split out of ``tdm_descriptor_row_major`` so callers that already resolved
+    the strides do not resolve (or re-specialize) them twice.
+    """
+    inner_idx = _single_unit_stride_dim(strides_i)
+    if inner_idx is None:
+        return None
+    return inner_idx == 1
+
+
+def tdm_descriptor_row_major(mat: IRNode) -> bool | None:
+    """Classify a 2D operand by its single statically unit-stride dimension."""
+    from .virtualized import V
+
+    strides = mat.get_stride()
+    if len(strides) != 2:
+        return None
+    strides_i = [
+        V.graph.sizevars.replace_backed_symbols_with_hints(st) for st in strides
+    ]
+    return _tdm_row_major_from_strides(strides_i)
+
+
+def _tdm_operand_compatible(
+    mat: IRNode,
+    accepted_dtypes: OrderedSet[torch.dtype],
+) -> bool:
+    """Check descriptor semantics and the current direct-path selection policy."""
+    from .virtualized import V
+
+    dtype = mat.get_dtype()
+    sizes = mat.get_size()
+    strides = mat.get_stride()
+    if dtype not in accepted_dtypes or len(sizes) != 2 or len(strides) != 2:
+        return False
+    if mat.get_name() in V.graph.unaligned_buffers:
+        return False
+
+    strides_i = [
+        V.graph.sizevars.replace_backed_symbols_with_hints(stride) for stride in strides
+    ]
+    offset = V.graph.sizevars.replace_backed_symbols_with_hints(mat.get_layout().offset)
+
+    # Reuse the strides resolved above rather than resolving their hints twice.
+    row_major = _tdm_row_major_from_strides(strides_i)
+    if row_major is None:
+        return False
+    outer_idx = 0 if row_major else 1
+    itemsize = dtype.itemsize
+
+    aligned = _bytes_aligned
+
+    # Operand policy (rule 2). The innermost block extent (rule 1) is checked by
+    # the template config filter, not by constraining the tensor extent here.
+    if not aligned(offset * itemsize, _TDM_OPERAND_ALIGNMENT_BYTES):
+        return False
+    # Redundant under the 128-byte check below, kept because that one is
+    # provisional while this is an independent policy on outer strides.
+    if not aligned(strides_i[outer_idx] * itemsize, _TDM_OPERAND_ALIGNMENT_BYTES):
+        return False
+
+    # Direct-path policy (rule 3): relative only, proves nothing about the
+    # absolute address.
+    return aligned(
+        strides_i[outer_idx] * itemsize, _TDM_DIRECT_PATH_RELATIVE_POLICY_BYTES
+    )
+
+
+def _guard_tdm_operand_layout(mat: IRNode) -> None:
+    """Specialize the values used to construct a selected TDM descriptor."""
+    from .virtualized import V
+
+    V.graph.sizevars.guard_int_seq(mat.get_size())
+    V.graph.sizevars.guard_int_seq(mat.get_stride())
+    V.graph.sizevars.guard_int(mat.get_layout().offset)
+
+
+class TDMGuardMode(enum.Enum):
+    """How much a TDM operand check is allowed to constrain the graph.
+
+    Admission and commitment are separate phases because they happen at
+    different times: a template is admitted while lowering, but its
+    configuration pool is not known until the heuristic has finished filtering
+    and scaling. Committing exact layout at admission specializes the graph for
+    a template that may end up contributing nothing.
+    """
+
+    # Admission. May bound a dynamic descriptor dimension to int32, which does
+    # not pin its value, but must not call guard_int.
+    BOUNDS = "bounds"
+    # Commitment. Pins size, stride and storage offset. Only legitimate once a
+    # non-empty configuration set has materialized.
+    EXACT = "exact"
+
+
+def _tdm_operands_compatible(
+    matrices: Sequence[IRNode],
+    accepted_dtypes: OrderedSet[torch.dtype],
+    guard_mode: TDMGuardMode,
+) -> bool:
+    """Check a full operand list for TDM under the given guard mode.
+
+    Rejecting an operand must not leave the graph specialized on its shape, so
+    the decision is made guard-free before anything pins a hint.
+    """
+    if not all(_tdm_operand_compatible(mat, accepted_dtypes) for mat in matrices):
+        return False
+
+    # Bounds only: this does not pin a dynamic dim.
+    if not _descriptor_shapes_fit_in_int32(
+        [mat.get_size() for mat in matrices], add_guards=True
+    ):
+        return False
+
+    if guard_mode is not TDMGuardMode.EXACT:
+        return True
+
+    for mat in matrices:
+        _guard_tdm_operand_layout(mat)
+    return True
+
+
+def use_triton_tdm_template(*matrices: IRNode) -> bool:
+    """Return whether dense MM operands may be admitted to the TDM template.
+
+    Admission only. It may bound a dynamic dimension to int32 but never pins a
+    size, stride or offset -- the operands are not specialized until
+    ``commit_tdm_operand_layout`` runs against a materialized config set.
+    """
+    if not matrices or not config.triton.enable_persistent_tma_matmul:
+        return False
+    if not _gfx1250_device_prereqs(matrices[0].get_device()):
+        return False
+    return _tdm_operands_compatible(
+        matrices, _TDM_SUPPORTED_DTYPES, TDMGuardMode.BOUNDS
+    )
+
+
+def commit_tdm_operand_layout(*matrices: IRNode) -> None:
+    """Specialize operands whose TDM configurations have actually materialized.
+
+    The only production caller of ``TDMGuardMode.EXACT``. Revalidates rather
+    than trusting admission, and raises rather than falling back: reaching here
+    means a TDM choice is being built, so a failed premise is a bug in the
+    admission/commit split and not an ordinary "no candidates" outcome.
+    """
+    if not _tdm_operands_compatible(
+        matrices, _TDM_SUPPORTED_DTYPES, TDMGuardMode.EXACT
+    ):
+        raise AssertionError("TDM layout commit revalidation failed")
 
 
 def _tma_descriptor_max_offset_fits_in_int32(

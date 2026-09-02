@@ -26,6 +26,7 @@ from ...kernel.mm import (
     get_tile_size,
     mm_template,
     persistent_mm_template,
+    persistent_tdm_mm_template,
     persistent_tma_mm_template,
     scaled_mm_device_tma_epilogue_scaling_template,
     scaled_mm_device_tma_main_loop_scaling_template,
@@ -34,10 +35,15 @@ from ...kernel.mm_plus_mm import mm_plus_mm_template
 from ...kernel_inputs import KernelInputs, MMKernelInputs
 from ...runtime.hints import DeviceProperties
 from ...utils import (
+    _rocm_version_tuple,
+    _TDM_DIRECT_PATH_RELATIVE_POLICY_BYTES,
+    _TDM_MIN_INNERMOST_REQUEST_BYTES,
+    commit_tdm_operand_layout,
     get_backend_num_stages,
     get_default_kpack,
     get_num_sms,
     get_tma_workspace_arg,
+    tdm_descriptor_row_major,
     TMA_DESCRIPTOR_SIZE,
     triton_type,
     using_b200,
@@ -73,10 +79,7 @@ def _use_template_autows() -> bool:
 # Check if running on ROCm
 IS_ROCM = torch.version.hip is not None
 
-_rocm_str: str | None = getattr(torch.version, "rocm", None) or torch.version.hip
-_rocm_version = (
-    tuple(int(v) for v in _rocm_str.split(".")[:2]) if _rocm_str is not None else (0, 0)
-)
+_rocm_version = _rocm_version_tuple()
 # First ROCm version where origami is not supported.
 ORIGAMI_UNSUPPORTED_ROCM_VERSION = (10, 0)
 
@@ -84,6 +87,85 @@ ORIGAMI_UNSUPPORTED_ROCM_VERSION = (10, 0)
 def _origami_enabled() -> bool:
     """Check if origami GEMM optimization is enabled."""
     return config.rocm.origami and _rocm_version < ORIGAMI_UNSUPPORTED_ROCM_VERSION
+
+
+def _tdm_descriptor_orientation(kwargs: dict[str, Any]) -> tuple[bool, bool]:
+    """Read the operand orientations a TDM heuristic must have injected.
+
+    Fails closed rather than defaulting to row-major: which tile extent is
+    contiguous depends on the orientation, so a wrong default would silently
+    filter against the wrong axis and admit misaligned blocks.
+    """
+    missing = [
+        key for key in ("tdm_a_row_major", "tdm_b_row_major") if key not in kwargs
+    ]
+    if missing:
+        raise AssertionError(
+            f"TDM config filtering requires {', '.join(missing)}; they are "
+            "injected by the TDM template heuristics and must not be defaulted"
+        )
+    return kwargs["tdm_a_row_major"], kwargs["tdm_b_row_major"]
+
+
+def _tdm_block_legal(block: int, dtype_size: int) -> bool:
+    """Rule 1: the innermost request must hold >= 16 bytes.
+
+    Kept independent of rule 3, which currently implies it but is provisional.
+    """
+    return int(block) * dtype_size >= _TDM_MIN_INNERMOST_REQUEST_BYTES
+
+
+def _tdm_block_direct_path(block: int, dtype_size: int) -> bool:
+    """Rule 3: relative 128-byte contiguous block width."""
+    return (int(block) * dtype_size) % _TDM_DIRECT_PATH_RELATIVE_POLICY_BYTES == 0
+
+
+def _tdm_block_aligned(block: int, dtype_size: int) -> bool:
+    """Whether a tile's contiguous extent is both legal and selected."""
+    if dtype_size <= 0:
+        raise AssertionError(
+            f"TDM config filtering requires a positive dtype_size, got {dtype_size}"
+        )
+    return _tdm_block_legal(block, dtype_size) and _tdm_block_direct_path(
+        block, dtype_size
+    )
+
+
+def _tdm_descriptor_blocks_aligned(
+    block_m: int,
+    block_n: int,
+    block_k: int,
+    dtype_size: int,
+    *,
+    a_row_major: bool,
+    b_row_major: bool,
+) -> bool:
+    a_contiguous_block = block_k if a_row_major else block_m
+    b_contiguous_block = block_n if b_row_major else block_k
+    return _tdm_block_aligned(a_contiguous_block, dtype_size) and _tdm_block_aligned(
+        b_contiguous_block, dtype_size
+    )
+
+
+def _filter_tdm_descriptor_block_configs(
+    configs: list[BaseConfig],
+    dtype_size: int,
+    *,
+    a_row_major: bool,
+    b_row_major: bool,
+) -> list[BaseConfig]:
+    return [
+        config
+        for config in configs
+        if _tdm_descriptor_blocks_aligned(
+            config.block_m,
+            config.block_n,
+            config.block_k,
+            dtype_size,
+            a_row_major=a_row_major,
+            b_row_major=b_row_major,
+        )
+    ]
 
 
 # rocm-origami pip pkg is only available on ROCm builds and is only used when
@@ -342,6 +424,8 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         # Whether the heuristic is used for int8. Use this when the heuristic is int8 exclusive
         # but prefer the preprocess_mm_configs argument when it's used for both
         self.has_int8_tensor: bool = False
+        # Whether descriptor-specific TDM config filtering is active.
+        self.uses_tdm_configs: bool = False
         # Whether to scale configs at all
         # TODO(coconutruben): remove this once mm_plus_mm and tests support scaling
         self.should_scale_configs: bool = True
@@ -1804,6 +1888,106 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for kpack in [1, 2]
         ]
 
+    def preprocess_mm_configs(
+        self,
+        m: int,
+        n: int,
+        k: int,
+        configs: list[BaseConfig],
+        has_int8_tensor: bool = False,
+        scale: float = 1.0,
+        exclude: Callable[
+            [sympy.Integer, sympy.Integer, sympy.Integer], bool
+        ] = lambda m, n, k: False,
+        dtype_size: int = 0,
+        op_name: str = "mm",
+        **kwargs,
+    ) -> Generator[TritonConfig, None, None]:
+        tdm_report: tuple[int, int, bool, bool] | None = None
+        if self.uses_tdm_configs:
+            # Validate before filtering: an already-empty pool would skip a
+            # per-config check entirely and report success for bad metadata.
+            a_row_major, b_row_major = _tdm_descriptor_orientation(kwargs)
+            if dtype_size <= 0:
+                raise AssertionError(
+                    "TDM config filtering requires a positive dtype_size, "
+                    f"got {dtype_size}"
+                )
+            candidate_count = len(configs)
+            configs = _filter_tdm_descriptor_block_configs(
+                configs,
+                dtype_size,
+                a_row_major=a_row_major,
+                b_row_major=b_row_major,
+            )
+            tdm_report = (candidate_count, dtype_size, a_row_major, b_row_major)
+            caller_exclude = exclude
+
+            def tdm_exclude(
+                block_m: sympy.Integer,
+                block_n: sympy.Integer,
+                block_k: sympy.Integer,
+            ) -> bool:
+                return not _tdm_descriptor_blocks_aligned(
+                    block_m,
+                    block_n,
+                    block_k,
+                    dtype_size,
+                    a_row_major=a_row_major,
+                    b_row_major=b_row_major,
+                ) or caller_exclude(block_m, block_n, block_k)
+
+            exclude = tdm_exclude
+
+        scaled = super().preprocess_mm_configs(
+            m,
+            n,
+            k,
+            configs,
+            has_int8_tensor,
+            scale,
+            exclude,
+            dtype_size,
+            op_name,
+            **kwargs,
+        )
+        if tdm_report is None:
+            return scaled
+        return self._report_empty_tdm_pool(scaled, *tdm_report)
+
+    @staticmethod
+    def _report_empty_tdm_pool(
+        configs: Generator[TritonConfig, None, None],
+        candidate_count: int,
+        dtype_size: int,
+        a_row_major: bool,
+        b_row_major: bool,
+    ) -> Generator[TritonConfig, None, None]:
+        """Report when preprocessing leaves a TDM template with no configs.
+
+        Counted after scaling, not right after the block filter: scaling clamps
+        block sizes to the shape hints and re-applies ``tdm_exclude``, so a
+        config that passed at full size can still be dropped by a small K.
+        """
+        surviving = 0
+        for triton_config in configs:
+            surviving += 1
+            yield triton_config
+        if not surviving:
+            # debug, not warning: an empty pool is expected for any shape whose
+            # clamped block width misses the 128-byte policy, and the cause is
+            # not necessarily alignment -- caller exclusions and the other
+            # preprocessing stages can empty it too.
+            log.debug(
+                "TDM: preprocessing left no usable configs out of %d candidates "
+                "(dtype_size=%d, a_row_major=%s, b_row_major=%s); this template "
+                "contributes no autotuning choices",
+                candidate_count,
+                dtype_size,
+                a_row_major,
+                b_row_major,
+            )
+
     def _prune_exhaustive_configs(
         self,
         configs: list[BaseConfig],
@@ -2172,6 +2356,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     # attributes used by the origami branch in _get_template_configs_impl.
     default_num_stages: int
     exhaustive_configs: list[BaseConfig]
+    uses_tdm_configs: bool
     _get_exceeding_shared_memory_checker: Callable[
         [bool, int], Callable[[BaseConfig, int], bool] | None
     ]
@@ -2288,7 +2473,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
             # have to drop its best picks at compile time (Triton OutOfResources
             # is not always caught on the HIP backend). Check against
             # self.default_num_stages because ROCmConfigHeuristic._filter_configs
-            # (triton.py:1728) clobbers num_stages to that value downstream.
+            # normalizes num_stages to that value downstream.
             lds_check = self._get_exceeding_shared_memory_checker(False, 0)
             exhaustive = self.exhaustive_configs
             if lds_check is not None:
@@ -2316,6 +2501,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                 configs=exhaustive,
                 dtype_size=dtype.itemsize,
                 op_name=op_name,
+                **kwargs,
             )
             selector = origami.OrigamiMatmulSelector(
                 allcfgs,
@@ -2392,10 +2578,9 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                     max_warps,
                     max(1, tile_area // (mfma_dim * warp_size)),
                 )
-                # num_stages: ROCmConfigHeuristic._filter_configs (triton.py:1728)
-                # overwrites this to self.default_num_stages, so seed with that
-                # value to keep the in-flight GemmConfig consistent with the
-                # post-filter state.
+                # ROCmConfigHeuristic._filter_configs normalizes num_stages to
+                # self.default_num_stages, so seed with that value to keep the
+                # in-flight GemmConfig consistent with the post-filter state.
                 base_config = GemmConfig(
                     block_m=cfg.mt.m,
                     block_n=cfg.mt.n,
@@ -2411,6 +2596,26 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                     cfg.occupancy,
                     wgm_result.wgm,
                 )
+
+            # Revalidate the reconstructed Origami tiles. The candidate pool was
+            # filtered above, but selected results are rebuilt as GemmConfig objects.
+            if self.uses_tdm_configs:
+                a_row_major, b_row_major = _tdm_descriptor_orientation(kwargs)
+                origami_config_count = len(origami_configs)
+                origami_configs = _filter_tdm_descriptor_block_configs(
+                    origami_configs,
+                    dtype.itemsize,
+                    a_row_major=a_row_major,
+                    b_row_major=b_row_major,
+                )
+                pruned = origami_config_count - len(origami_configs)
+                if pruned:
+                    log.info(
+                        "Origami: pruned %d/%d selected configs failing "
+                        "TDM descriptor alignment",
+                        pruned,
+                        origami_config_count,
+                    )
 
             # Apply backend filters (max block size, memory constraints, etc.).
             # LDS-overflow prune already happened upstream against
@@ -2453,9 +2658,9 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                     )
                     yield template_kwargs
             else:
-                # No origami configs returned (e.g., topk=0), fall back to regular generator
+                # No valid Origami configs remain; fall back to the regular generator.
                 log.warning(
-                    "Origami returned no configs, falling back to regular config generator"
+                    "No valid Origami configs remain, falling back to regular config generator"
                 )
                 for c in configs(
                     m,
@@ -2673,6 +2878,10 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
     """
     TMA-specific mixin that uses persistent configs and adds TMA options.
     This inherits from MMTemplateConfigMixin and overrides config generation.
+
+    ``ROCmPersistentTDMTemplateConfigHeuristic`` feeds the same Jinja template
+    with deliberately different probes (unit-stride row-majorness, stable
+    descriptor API, no workspace). Keep both in sync when adding a variable.
     """
 
     def _get_template_configs_impl(
@@ -3172,6 +3381,92 @@ class PersistentMMTemplateConfigHeuristic(
             kernel_inputs, op_name, **kwargs
         ):
             yield {**template_kwargs, "NUM_SMS": get_num_sms()}
+
+
+@register_template_heuristic(
+    persistent_tdm_mm_template.uid,
+    "cuda",
+    register=IS_ROCM,
+)
+class ROCmPersistentTDMTemplateConfigHeuristic(
+    MMTemplateConfigMixin,
+    ROCmConfigHeuristic,  # type: ignore[misc]
+):
+    """Persistent descriptor MM heuristic for gfx1250 TDM.
+
+    No `TMAWorkspaceMixin`: stable descriptors need no explicit TMA descriptor
+    workspace. Its `num_warps != 2` filter is NVIDIA-TMA policy.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Persistent pool; ROCm finalization backfills the AMD kernargs.
+        self.mm_configs = self.persistent_mm_configs
+        self.uses_tdm_configs = True
+
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+        **kwargs,
+    ) -> Generator[dict[str, Any], None, None]:
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError(
+                "ROCmPersistentTDMTemplateConfigHeuristic requires MMKernelInputs"
+            )
+        mat1, mat2 = kernel_inputs.mat1mat2()
+        # Orientation is read from hints here; admission installed int32 bounds
+        # only. Exact size/stride/offset guards are deferred to the commit below.
+        a_row_major = tdm_descriptor_row_major(mat1)
+        b_row_major = tdm_descriptor_row_major(mat2)
+        if a_row_major is None or b_row_major is None:
+            return
+
+        kwargs = {
+            **kwargs,
+            "tdm_a_row_major": a_row_major,
+            "tdm_b_row_major": b_row_major,
+        }
+        # Materialize before committing: alignment filtering, shape-hint
+        # scaling, Origami selection and backend filters all run below and any
+        # can empty the pool. Specializing for a template that then contributes
+        # nothing is the defect this ordering avoids.
+        generated = super()._get_template_configs_impl(kernel_inputs, op_name, **kwargs)
+        # Same Jinja template as TMATemplateConfigMixin, deliberately different
+        # probes; see that class for why the two option blocks stay separate.
+        configs = [
+            {
+                **template_kwargs,
+                "A_ROW_MAJOR": a_row_major,
+                "B_ROW_MAJOR": b_row_major,
+                "NUM_SMS": get_num_sms(),
+                # The TDM capability gate requires make_tensor_descriptor.
+                "TMA_EXPERIMENTAL_API": False,
+            }
+            for template_kwargs in generated
+        ]
+        if not configs:
+            log.debug(
+                "TDM: no configs survived filtering; leaving operands unspecialized"
+            )
+            return
+
+        # The one production commit point; addmm inherits this method.
+        commit_tdm_operand_layout(mat1, mat2)
+        log.debug("TDM: committed operand layout for %d configs", len(configs))
+        yield from configs
+
+
+@register_template_heuristic(
+    persistent_tdm_mm_template.uid,
+    "cuda",
+    register=IS_ROCM,
+    op_name="addmm",
+)
+class ROCmAddMMPersistentTDMTemplateConfigHeuristic(
+    AddMMConfigMixin, ROCmPersistentTDMTemplateConfigHeuristic
+):
+    """Addmm extension for the gfx1250 TDM persistent template."""
 
 
 @register_template_heuristic(
