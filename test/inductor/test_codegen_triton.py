@@ -66,6 +66,7 @@ try:
         tl as TritonLanguageShadowConfig,
         UserDefinedAttrsLikeConfig,
         UserDefinedAttrsPrivateFieldConfig,
+        UserDefinedBareNestedReprConfig,
         UserDefinedPydanticLikeConfig,
         UserDefinedPydanticLikeNoEqConfig,
         UserDefinedTritonKernelCoercingConfig,
@@ -86,6 +87,7 @@ except ImportError:
         tl as TritonLanguageShadowConfig,
         UserDefinedAttrsLikeConfig,
         UserDefinedAttrsPrivateFieldConfig,
+        UserDefinedBareNestedReprConfig,
         UserDefinedPydanticLikeConfig,
         UserDefinedPydanticLikeNoEqConfig,
         UserDefinedTritonKernelCoercingConfig,
@@ -1680,6 +1682,61 @@ def helper(x):
         self.assertIs(type(rebuilt), UserDefinedPydanticLikeNoEqConfig)
         self.assertEqual(rebuilt.nested, nested)
 
+    def test_constexpr_source_repr_args_hidden_state_declines(self):
+        # __repr_args__ hides `hidden`; the type's own __eq__ sees it, so a
+        # non-default hidden value must decline rather than render as the
+        # default and silently miscompute.
+        from torch._inductor.codegen.wrapper import _render_constexpr_mappings
+
+        nested = UserDefinedTritonKernelConfigNamespace.Nested(offset=2)
+        with self.assertRaisesRegex(RuntimeError, "not equal to the original"):
+            _render_constexpr_mappings(
+                [{"CFG": UserDefinedPydanticLikeConfig(nested=nested, hidden="secret")}]
+            )
+        # The default hidden value still renders (equal after rebuild).
+        source, _ = _constexpr_source(UserDefinedPydanticLikeConfig(nested=nested))
+        self.assertIn("UserDefinedPydanticLikeConfig(nested=", source)
+
+    def test_constexpr_decline_names_evaluation_error(self):
+        # A constructor repr over a name the generated module cannot bind
+        # declines with the evaluation error, not a guess about hidden fields.
+        from torch._inductor.codegen.wrapper import _render_constexpr_mappings
+
+        with self.assertRaisesRegex(RuntimeError, "evaluating it raised NameError"):
+            _render_constexpr_mappings([{"CFG": UserDefinedBareNestedReprConfig(1)}])
+
+    def test_restore_degraded_kwargs_requires_agreement(self):
+        # A cached raw value that several candidates serialize to is only
+        # restored when they agree on the typed value; a Mode.A vs raw 1 split
+        # must re-autotune instead of picking by candidate order.
+        from types import SimpleNamespace
+
+        from torch._inductor.runtime.autotune_cache import _restore_degraded_kwargs
+
+        class Mode(Enum):
+            A = 1
+
+        for order in (
+            [
+                SimpleNamespace(kwargs={"MODE": 1}),
+                SimpleNamespace(kwargs={"MODE": Mode.A}),
+            ],
+            [
+                SimpleNamespace(kwargs={"MODE": Mode.A}),
+                SimpleNamespace(kwargs={"MODE": 1}),
+            ],
+        ):
+            self.assertFalse(_restore_degraded_kwargs({"MODE": 1, "BLOCK": 8}, order))
+        best = {"MODE": 1, "SHAPE": [2, 3], "BLOCK": 8, "num_warps": 4}
+        agreeing = [
+            SimpleNamespace(kwargs={"MODE": Mode.A, "SHAPE": (2, 3), "BLOCK": b})
+            for b in (8, 16)
+        ]
+        self.assertTrue(_restore_degraded_kwargs(best, agreeing))
+        self.assertIs(best["MODE"], Mode.A)
+        self.assertEqual(best["SHAPE"], (2, 3))
+        self.assertEqual(best["num_warps"], 4)
+
     def test_constexpr_decline_detail_names_cause(self):
         from torch._inductor.codegen.wrapper import _render_constexpr_mappings
 
@@ -1692,7 +1749,7 @@ def helper(x):
             _render_constexpr_mappings(
                 [{"CFG": UserDefinedTritonKernelNonInitConfig(offset=2)}]
             )
-        with self.assertRaisesRegex(RuntimeError, "does not rebuild an equal value"):
+        with self.assertRaisesRegex(RuntimeError, "not equal to the original"):
             _render_constexpr_mappings(
                 [{"CFG": UserDefinedTritonKernelHiddenDefaultConfig(offset=3, scale=7)}]
             )
