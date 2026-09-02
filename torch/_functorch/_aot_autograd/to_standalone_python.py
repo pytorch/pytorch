@@ -1169,6 +1169,14 @@ def _finalize(ctx, fw_outs):
     return tuple(raw_returns)
 
 
+class _NoCompiledAutogradError(NotImplementedError, AttributeError):
+    # Also an AttributeError so hasattr/getattr-with-default/inspect.getmembers
+    # read the attribute as absent instead of raising; compiled autograd reads
+    # it directly and gets the NotImplementedError. A reader that defaulted to
+    # None would fall into compiled autograd's AOTAutogradCache advice instead.
+    pass
+
+
 class _NoCompiledAutograd:
     # Compiled autograd reads _lazy_backward_info off the forward class before
     # anything else (set_node_origin) and, finding None, blames AOTAutogradCache
@@ -1177,7 +1185,7 @@ class _NoCompiledAutograd:
     # cache-loaded case); this artifact has no fx bw_module to hand over, its
     # backward is already lowered above, so refuse up front with the reason.
     def __get__(self, obj, objtype=None):
-        raise NotImplementedError(
+        raise _NoCompiledAutogradError(
             "compiled autograd is not supported for a standalone training artifact"
         )
 
