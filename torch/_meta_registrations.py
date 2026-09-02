@@ -6653,11 +6653,15 @@ def meta__scaled_dot_product_flash_attention_for_cpu(
         lambda: "scaled_dot_product_attention_flash_attention: Currently do not "
         "support dropout > 0",
     )
-    torch._check(
-        query.size(3) == value.size(3) and key.size(3) == value.size(3),
-        lambda: "scaled_dot_product_attention_flash_attention: Q/K/V should have "
-        "the same head size",
+    # Checked as two separate torch._check calls rather than one `and`: `and`
+    # forces bool() on the first SymBool, which is an unbacked guard, while
+    # torch._check takes the SymBool and defers it to a runtime assert.
+    head_size_msg = (
+        "scaled_dot_product_attention_flash_attention: Q/K/V should have "
+        "the same head size"
     )
+    torch._check(query.size(3) == value.size(3), lambda: head_size_msg)
+    torch._check(key.size(3) == value.size(3), lambda: head_size_msg)
     if attn_mask is not None:
         torch._check(
             attn_mask.dtype == torch.float or attn_mask.dtype == query.dtype,
