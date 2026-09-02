@@ -1105,6 +1105,33 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         )
         self.assertEqual(counters["inductor"]["fuse_attention"], 0)
 
+    def _test_sdpa_rewriter_same_rank_reshaped_output(self):
+        # Companion to the test above: a caller view that keeps the rank is
+        # still fused, and stays correct. The replacement reproduces the shape
+        # the consumer sees whenever the rank is unchanged, so the guard keys
+        # on rank rather than on the full shape - keying on shape would decline
+        # matches like this one for no correctness gain.
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = torch.nn.Linear(8, 8)
+
+            def forward(self, query, key, value):
+                out = (
+                    torch.matmul(query, key.transpose(-2, -1))
+                    .div(math.sqrt(key.shape[-1]))
+                    .softmax(dim=-1)
+                    .matmul(value)
+                )
+                return self.fc(out.view(1, 1, 2, 8))
+
+        args = [
+            torch.randn((1, 2, 1, 8), device=self.device),
+            torch.randn((1, 2, 2, 8), device=self.device),
+            torch.randn((1, 2, 2, 8), device=self.device),
+        ]
+        self._check_common(Model().to(self.device), args1=args, check_train=False)
+
     def _test_sdpa_rewriter_14(self):
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
@@ -2237,6 +2264,9 @@ if HAS_CPU:
         )
         test_sdpa_rewriter_reshaped_output_cpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_reshaped_output
+        )
+        test_sdpa_rewriter_same_rank_reshaped_output_cpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_same_rank_reshaped_output
         )
 
 
