@@ -1,31 +1,31 @@
 # mypy: allow-untyped-defs
 """
-Optimize complete chains that assemble a tensor from slices.
+Rewrite slice_scatter chains that fill an entire tensor into cat or bounded copies.
 
-Match and replace contiguous chunks as follows:
+Functionalizing chunking results in a chain of slice_scatter nodes,
+holding full-sized intermediate by the end of the chain.
 
-    out = base
-    copied0 = aten.copy(aten.slice(out, dim, 0, end0), chunk0)
-    out = aten.slice_scatter(out, copied0, dim, 0, end0)
-    copied1 = aten.copy(aten.slice(out, dim, end0, size), chunk1)
-    out = aten.slice_scatter(out, copied1, dim, end0, size)
+The goal is to remove the full-sized intermediates without regressing producer fusion.
+
+Input:
+
+    base = aten.empty(size)
+    out = aten.slice_scatter(base, chunk0, dim, 0, end0)
+    out = aten.slice_scatter(out, chunk1, dim, end0, size)
+
+Output:
+1. cat, when chunks are backed by graph inputs or supported nested regions.
+
+    out = aten.cat([chunk0, chunk1], dim)
+
+2. copies into the reused base, so each chunk dies at its own write:
 
     aten.copy_(aten.slice(base, dim, 0, end0), chunk0)
     aten.copy_(aten.slice(base, dim, end0, size), chunk1)
     out = base
 
-The source may be the chunk directly, or functionalization may wrap it in a
-fully overwriting ``copy(slice(out), chunk)`` and insert aliases around
-``out``. Reuse an ``empty`` or ``empty_strided`` base allocation and replace
-the chain with ``copy_`` into its slices. This consumes each chunk where its
-original ``slice_scatter`` occurred instead of keeping every chunk live until
-the end of the chain. Canonical single-use graph inputs, non-realized contiguous
-pointwise chunks, and CUDA outputs of nested compile regions instead become
-``cat`` so they can use one output copy.
-
-The writes must replace every value from ``base``, and the output and chunks
-must have the same dtype and device. Other chains are left unchanged for normal
-lowering.
+Unrealized pointwise intermediate storages are left unchanged. Their fusion
+behavior depends on IR-level decisions that are unavailable here.
 """
 
 import operator
@@ -33,13 +33,14 @@ from dataclasses import dataclass
 from typing import Any
 
 import torch
-from torch._inductor.fx_utils import is_node_realized
+from torch._inductor.fx_utils import get_node_storage, is_node_realized
 from torch._inductor.pattern_matcher import (
     CallFunctionVarArgs,
     compute_mutation_region_ids,
     Match,
     MULTIPLE,
 )
+from torch._inductor.utils import is_gpu
 from torch._prims_common import make_contiguous_strides_for
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.fx.operator_schemas import normalize_function
@@ -106,6 +107,15 @@ def _custom_context(node: torch.fx.Node) -> tuple[Any, Any, Any]:
     )
 
 
+def _get_tensor_input(node: torch.fx.Node) -> Any:
+    if node.args:
+        return node.args[0]
+    target = node.target
+    if not isinstance(target, torch._ops.OpOverload) or not target._schema.arguments:
+        return None
+    return node.kwargs.get(target._schema.arguments[0].name)
+
+
 def _strip_aliases(
     node: Any,
     removable_nodes: OrderedSet[torch.fx.Node],
@@ -116,7 +126,7 @@ def _strip_aliases(
             return None
         examined.add(node)
         removable_nodes.add(node)
-        node = node.args[0]
+        node = _get_tensor_input(node)
     return node
 
 
@@ -167,7 +177,7 @@ def _view_path_to_state(
             return None
         examined.add(node)
         path.append(node)
-        node = node.args[0]
+        node = _get_tensor_input(node)
     return path if node in state_nodes else None
 
 
@@ -264,8 +274,12 @@ def _get_full_tensor_slice_scatter_chain(
             removable_nodes.update(view_path)
         else:
             copy_non_blocking = False
-        start_val = _get_val(start)
+        start_val = 0 if start is None else _get_val(start)
         end_val = _get_val(end)
+        if end is None or (
+            end_val is not None and statically_known_true(end_val >= 2**63 - 1)
+        ):
+            end_val = base_val.shape[dim]
         if not isinstance(node_dim, int) or not isinstance(src, torch.fx.Node):
             return None
         node_dim %= base_val.dim()
@@ -388,11 +402,46 @@ def _is_nested_compile_region_output(node: torch.fx.Node) -> bool:
         and region.op == "call_function"
         and region.target is torch.ops.higher_order.invoke_subgraph
         and isinstance(value, torch.Tensor)
-        and value.device.type == "cuda"
+        and is_gpu(value.device.type)
     )
 
 
-def _can_fuse_as_cat(chain: _SliceScatterChain) -> bool:
+def _is_pointwise_output(node: torch.fx.Node) -> bool:
+    producer = node
+    if (
+        node.op == "call_function"
+        and node.target is operator.getitem
+        and node.args
+        and isinstance(node.args[0], torch.fx.Node)
+    ):
+        producer = node.args[0]
+    return (
+        isinstance(producer.target, torch._ops.OpOverload)
+        and torch.Tag.pointwise in producer.target.tags
+    )
+
+
+def _requires_preserving_chain(
+    chain: _SliceScatterChain,
+    graph_input_storages: OrderedSet[int],
+    pointwise_intermediate_storages: OrderedSet[int],
+) -> bool:
+    if chain.functional_copies:
+        return False
+    for src in chain.sources:
+        storage = get_node_storage(src)
+        if storage is not None and storage in graph_input_storages:
+            continue
+        if storage is not None and storage in pointwise_intermediate_storages:
+            # Rewriting an unrealized pointwise storage may split its producer
+            # into one kernel per chunk. Leave that decision to IR lowering.
+            return True
+    return False
+
+
+def _can_fuse_as_cat(
+    chain: _SliceScatterChain, graph_input_storages: OrderedSet[int]
+) -> bool:
     base_val = chain.base.meta.get("val")
     if (
         chain.functional_copies
@@ -402,16 +451,18 @@ def _can_fuse_as_cat(chain: _SliceScatterChain) -> bool:
         return False
 
     for src in chain.sources:
-        is_input = src.op == "placeholder"
-        is_pointwise = (
-            isinstance(src.target, torch._ops.OpOverload)
-            and torch.Tag.pointwise in src.target.tags
-        )
-        if (
-            len(src.users) != 1
-            or not (is_input or is_pointwise or _is_nested_compile_region_output(src))
-            or (not is_input and is_node_realized(src))
-        ):
+        storage = get_node_storage(src)
+        is_input_storage = storage is not None and storage in graph_input_storages
+        if is_input_storage:
+            continue
+        # A shared source cannot disappear into cat.
+        if len(src.users) != 1:
+            return False
+        # Nested-region outputs have a supported one-copy cat path.
+        if not _is_nested_compile_region_output(src):
+            return False
+        # Only unrealized region outputs can use that path without an extra buffer.
+        if is_node_realized(src):
             return False
 
     tensors = [base_val, *(src.meta.get("val") for src in chain.sources)]
@@ -442,14 +493,22 @@ def slice_scatter_chunking_pass(graph: torch.fx.Graph) -> bool:
 
     compute_mutation_region_ids(graph)
     introduced_mutation = False
-    node_order = {node: index for index, node in enumerate(graph.nodes)}
+    node_order = {}
+    graph_input_storages: OrderedSet[int] = OrderedSet()
+    pointwise_intermediate_storages: OrderedSet[int] = OrderedSet()
+    for index, node in enumerate(graph.nodes):
+        node_order[node] = index
+        if (storage := get_node_storage(node)) is not None:
+            if node.op == "placeholder":
+                graph_input_storages.add(storage)
+            elif _is_pointwise_output(node) and not is_node_realized(node):
+                pointwise_intermediate_storages.add(storage)
     examined = OrderedSet[torch.fx.Node]()
     for slice_scatter in reversed(slice_scatters):
-        # Only consider maximal chains. Retrying every rejected prefix makes a
-        # long unsupported chain quadratic and is not needed by the target use case.
         if slice_scatter._erased or slice_scatter in examined:
             continue
         match = _SLICE_SCATTER_PATTERN.match(slice_scatter)
+
         # A full-tensor chain overwrites the base through adjacent slices with
         # no gaps or overlaps, so the original base values are unobservable.
         if not isinstance(match, Match):
@@ -466,7 +525,12 @@ def slice_scatter_chunking_pass(graph: torch.fx.Graph) -> bool:
         if _custom_context(result.base) != _custom_context(result.slice_scatters[-1]):
             continue
 
-        if _can_fuse_as_cat(result):
+        if _requires_preserving_chain(
+            result, graph_input_storages, pointwise_intermediate_storages
+        ):
+            continue
+
+        if _can_fuse_as_cat(result, graph_input_storages):
 
             def replacement(*chunks):
                 return torch.cat(chunks, dim=result.dim)
