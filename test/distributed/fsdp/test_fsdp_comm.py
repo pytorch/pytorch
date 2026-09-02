@@ -21,6 +21,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_distributed import requires_world_size
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
+    DISTRIBUTED_BACKEND,
     FSDPInitMode,
     FSDPTestContinuous,
     MLP,
@@ -73,7 +74,14 @@ class FSDPCommTestBase(FSDPTestContinuous):
 
     @classmethod
     def backend_str(cls) -> str:
-        return dist.get_default_backend_for_device(cls._resolved_device_type())
+        try:
+            return dist.get_default_backend_for_device(cls._resolved_device_type())
+        except ValueError:
+            # Devices without a registered default backend (e.g. ``hpu`` unless
+            # the vendor extension registers ``hccl`` via ``register_backend``):
+            # fall back to the historical ``common_fsdp`` ``DISTRIBUTED_BACKEND``
+            # ("hccl" on HPU), preserving the pre-refactor behavior.
+            return DISTRIBUTED_BACKEND
 
     @property
     def world_size(self) -> int:
