@@ -2480,10 +2480,7 @@ def fw_compiler_freezing(
     dynamo_model: GraphModule,
     num_example_inputs: int,
     inner_compile: Callable[..., Any],
-    # TODO: Take compiler_config_extra instead
-    cudagraphs: BoxedBool,
-    graph_id: int,
-    forward_device: BoxedDeviceIndex,
+    compiler_config_extra: CompilerConfigExtra,
 ) -> Callable[[list[object]], Sequence[torch.Tensor]]:
     from torch._inductor.freezing import convert_conv_weights_to_channels_last, freeze
 
@@ -2563,10 +2560,10 @@ def fw_compiler_freezing(
             opt_model,
             aot_example_inputs,
             static_input_idxs=static_input_idxs,
-            cudagraphs=cudagraphs,
-            graph_id=graph_id,
+            cudagraphs=compiler_config_extra.forward_cudagraphs,
+            graph_id=compiler_config_extra.graph_id,
             is_inference=True,
-            boxed_forward_device_index=forward_device,
+            boxed_forward_device_index=compiler_config_extra.forward_device_index,
             layout_opt=layout_opt,
         )
 
@@ -3372,9 +3369,7 @@ def _compile_fx_main(
                 dynamo_model=model_,
                 num_example_inputs=num_example_inputs,
                 inner_compile=inner_compile,
-                cudagraphs=compiler_config_extra.forward_cudagraphs,
-                graph_id=compiler_config_extra.graph_id,
-                forward_device=compiler_config_extra.forward_device_index,
+                compiler_config_extra=compiler_config_extra,
             )
         else:
             inference_compiler = functools.partial(fw_compiler_base, is_inference=True)
