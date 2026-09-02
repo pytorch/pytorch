@@ -436,10 +436,17 @@ _NO_NATIVE_CODE_BACKENDS = frozenset(
         "aot_eager_decomp_partition_crossref",
         "aot_eager_decomp_partition_with_mode",
         "aot_eager_default_partitioner",
+        "aot_ts",
+        "cudagraphs",
         "eager",
         "eager_debug",
         "eager_noexcept",
+        "non_leaf_compile_error_TESTING_ONLY",
         "pre_dispatch_eager",
+        "relu_accuracy_error_TESTING_ONLY",
+        "relu_compile_error_TESTING_ONLY",
+        "relu_runtime_error_TESTING_ONLY",
+        "ts",
     }
 )
 
@@ -583,6 +590,7 @@ class _DynamoCacheEntry:
     system_info: SystemInfo = dataclasses.field(
         default_factory=functools.partial(SystemInfo.current, cpu_codegen=False)
     )
+    device_types: frozenset[str] | None = None
     requires_native_backend_compatibility: bool = True
     fn_name: str | None = None
     fn_first_lineno: str | None = None
@@ -593,21 +601,25 @@ class _DynamoCacheEntry:
 
     def check_versions(self) -> None:
         """Check if the current system is compatible with the system used to create this cache entry."""
-        # Determining the codegen target runs the C++ toolchain -- seconds on a
-        # cold inductor cache, and a re-raised InvalidCxxCompiler on a host with
-        # no compiler at all -- so only pay for it when this artifact actually
-        # records one to compare against.
-        check_codegen = self.requires_native_backend_compatibility
+        device_types = getattr(self, "device_types", None) or frozenset(
+            (self.device_type,)
+        )
+        check_codegen = getattr(self, "requires_native_backend_compatibility", True)
+        # Determining the codegen target runs the C++ toolchain, so only pay for
+        # it when this artifact actually records one to compare against.
         current_system_info = SystemInfo.current(
             cpu_codegen=(
                 check_codegen
-                and self.device_type == "cpu"
+                and "cpu" in device_types
                 and self.system_info.cpu_codegen_target is not None
             )
         )
-        self.system_info.check_compatibility(
-            current_system_info, self.device_type, check_codegen=check_codegen
-        )
+        for device_type in device_types:
+            self.system_info.check_compatibility(
+                current_system_info,
+                device_type,
+                check_codegen=check_codegen,
+            )
 
     def debug_info(self) -> dict[str, Any]:
         if len(self.codes) == 0:
@@ -617,6 +629,9 @@ class _DynamoCacheEntry:
             "fn_name": self.fn_name,
             "fn_first_lineno": self.fn_first_lineno,
             "device_type": self.device_type,
+            "device_types": sorted(
+                getattr(self, "device_types", None) or frozenset((self.device_type,))
+            ),
             "backend_ids": list(self.backend_ids),
         }
 
@@ -761,8 +776,9 @@ class CompilePackage:
 
         self._current_entry: _DynamoCodeCacheEntry | None = None
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
-        # device_type that model compiled with.
-        self._device_type = "cpu"
+        # Every device the captured graphs name; the cache entry records the
+        # set, so an accelerator capture with a CPU epilogue is checked as both.
+        self._device_types: set[str] = set()
         # Whether this package's backend generates native code. An eager one
         # bakes no vector width, so it must neither pay the C++ toolchain probe
         # at save nor be rejected on ISA skew at load.
@@ -794,6 +810,7 @@ class CompilePackage:
         if self._initialized:
             raise AssertionError("CompilePackage is already initialized")
         self._source_info = SourceInfo(inlined_sources=set())
+        self._device_types = set()
         self._innermost_fn = innermost_fn(fn)  # type: ignore[assignment]
         if self._innermost_fn is None:
             raise AssertionError("innermost_fn returned None")
@@ -811,6 +828,9 @@ class CompilePackage:
                         )
 
                 self._source_info = dynamo.source_info
+                self._device_types = set(
+                    getattr(dynamo, "device_types", None) or (dynamo.device_type,)
+                )
 
             main, *codes = dynamo.codes
             self._codes = {self._innermost_fn.__code__: main}
@@ -934,10 +954,7 @@ class CompilePackage:
         # a cpu_codegen_target it has no native code for -- which then refuses
         # to load on a host with a different vector ISA or no C++ compiler. A
         # graph that names nothing emits nothing and contributes nothing.
-        device_types = _graph_device_types(graph)
-        if not device_types:
-            return
-        self._device_type = next((d for d in sorted(device_types) if d != "cpu"), "cpu")
+        self._device_types.update(_graph_device_types(graph))
 
     def bypass_current_entry(self) -> None:
         if self._current_entry is None:
@@ -1139,17 +1156,23 @@ class CompilePackage:
         self.validate()
         if self._innermost_fn is None:
             raise AssertionError("_innermost_fn is not set in cache_entry")
+        device_types = frozenset(self._device_types or ("cpu",))
+        device_type = next(
+            (device for device in sorted(device_types) if device != "cpu"),
+            "cpu",
+        )
         return _DynamoCacheEntry(
             codes=list(self._codes.values()),
             source_info=self._source_info,
-            device_type=self._device_type,
+            device_type=device_type,
+            device_types=device_types,
             # The field's default_factory would run the C++ toolchain probe on
             # every save; only an artifact that can hold CPU native code has a
             # baked vector width to record.
             system_info=SystemInfo.current(
                 cpu_codegen=(
                     self._requires_native_backend_compatibility
-                    and self._device_type == "cpu"
+                    and "cpu" in device_types
                 )
             ),
             requires_native_backend_compatibility=(

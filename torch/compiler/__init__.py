@@ -989,6 +989,7 @@ def load_compiled_function(
     *,
     f_globals: dict[str, object] | None = None,
     external_data: dict[str, Any] | None = None,
+    guard_globals: dict[str, object] | None = None,
 ) -> Callable[..., Any]:
     """
     Load an aot-compiled function from a file.
@@ -1003,6 +1004,12 @@ def load_compiled_function(
         external_data: Optional data to be loaded into the runtime environment
                        of the compiled function. This should contain the same
                        data as AOTCompileResult.external_data returned from save_compiled_function() call.
+        guard_globals: Optional live global scope the serialized global guards are
+                       checked against, held by reference so a global rebound after
+                       load redirects dispatch. Defaults to the compiled function's
+                       own (reconstructed) globals. Loading injects Dynamo's synthetic
+                       ``__import_*`` module aliases into this scope for any alias not
+                       already bound there, and leaves them in place.
 
     Returns:
         A torch-compiled function with compilation preloaded from disk.
@@ -1010,4 +1017,6 @@ def load_compiled_function(
     from torch._dynamo.aot_compile import AOTCompiledFunction
 
     data = file.read()
-    return AOTCompiledFunction.deserialize(data, f_globals, external_data)
+    return AOTCompiledFunction.deserialize(
+        data, f_globals, external_data, guard_globals=guard_globals
+    )
