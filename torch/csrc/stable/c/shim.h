@@ -312,9 +312,9 @@ AOTI_TORCH_EXPORT AOTITorchError torch_mps_set_arg_bytes(
 #endif // USE_MPS
 
 // --- Python interop shims -------------------------------------------------
-// Unlike the rest of the stable ABI, these convert between a Python
-// torch.Tensor (a PyObject*, passed as an opaque void* so this header stays
-// free of Python.h) and an AtenTensorHandle. The conversion is implemented in
+// Unlike the rest of the stable ABI, these convert between Python objects
+// (PyObject*, passed as an opaque void* so this header stays free of Python.h)
+// and their libtorch equivalents. The conversion is implemented in
 // libtorch_python via a vtable it registers with libtorch, so an extension
 // still links only libtorch; if libtorch_python is not loaded at runtime the
 // call errors. The GIL must be held.
@@ -334,6 +334,47 @@ AOTI_TORCH_EXPORT AOTITorchError torch_tensor_to_pyobject(
     void** ret); // returns new reference
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
+
+/**
+ * The beginning of all shims added in 2.15.0 onwards.
+ */
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_15_0
+
+// More Python interop shims; see the Python interop section above for the
+// libtorch_python / GIL contract.
+
+// Whether py_obj is a Python torch.Tensor (or a subclass). A probe for callers
+// that want to type-check before torch_tensor_from_pyobject (which errors on
+// non-tensors).
+AOTI_TORCH_EXPORT AOTITorchError
+torch_is_tensor_pyobject(void* py_obj, bool* ret);
+
+// Read the dtype out of a Python torch.dtype object. The returned code uses
+// the same encoding as aoti_torch_dtype_*().
+AOTI_TORCH_EXPORT AOTITorchError
+torch_dtype_from_pyobject(void* py_obj, int32_t* ret_dtype);
+
+// Wrap a dtype code (aoti_torch_dtype_*() encoding) as a Python torch.dtype.
+AOTI_TORCH_EXPORT AOTITorchError torch_dtype_to_pyobject(
+    int32_t dtype,
+    void** ret); // returns new reference
+
+// Read the device type and index out of a Python torch.device object.
+// device_type uses the same encoding as aoti_torch_device_type_*(); the index
+// is -1 when the device has none.
+AOTI_TORCH_EXPORT AOTITorchError torch_device_from_pyobject(
+    void* py_obj,
+    int32_t* ret_device_type,
+    int32_t* ret_device_index);
+
+// Wrap a device type (aoti_torch_device_type_*() encoding) and index as a
+// Python torch.device. Pass -1 as device_index for a device without an index.
+AOTI_TORCH_EXPORT AOTITorchError torch_device_to_pyobject(
+    int32_t device_type,
+    int32_t device_index,
+    void** ret); // returns new reference
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_15_0
 
 #ifdef __cplusplus
 } // extern "C"
