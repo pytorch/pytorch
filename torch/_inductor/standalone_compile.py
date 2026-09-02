@@ -645,7 +645,11 @@ def _passthrough_source(gm: GraphModule) -> str | None:
         result = render(output.args[0])
     except (KeyError, TypeError):
         return None
-    return f"def call(args):\n    return {result}\n"
+    # Honor inductor's boxed-call contract of consuming the argument list so a
+    # backward's saved tensors are released as early as the real kernel would.
+    return (
+        f"def call(args):\n    result = {result}\n    args.clear()\n    return result\n"
+    )
 
 
 def _runnable_source(
@@ -741,6 +745,7 @@ def compile_to_python(
     is_inference: bool = True,
     is_backward: bool = False,
     output_strides: list[tuple[str, ...] | None] | None = None,
+    num_user_visible_outputs: int | None = None,
 ) -> tuple[str, bytes | None]:
     """Compile ``gm`` and return ``(inner_python, cache)`` -- the INNER half of the
     backend contract behind ``torch.compiler.precompile``.
@@ -762,7 +767,10 @@ def compile_to_python(
     ``is_backward`` enables backward-specific lowering constraints. If ``output_strides``
     is provided, it is extended with the layouts selected for the graph outputs so an
     AOTAutograd backward can be lowered against the forward's actual saved-activation
-    layouts.
+    layouts. The first ``num_user_visible_outputs`` outputs (all of them when None)
+    are marked user-visible, which pins their strides to the graph's (as
+    ``torch.compile`` does through ``fw_compiler_base``) instead of letting inductor
+    pad or re-lay-out tensors the caller will hand to autograd or return.
 
     Caller preconditions (this layer does not re-derive them):
 
@@ -879,6 +887,15 @@ def compile_to_python(
     # dims. A post-AOTAutograd graph's shapes are already baked into this metadata, so
     # there is no separate dynamic-shapes knob.
     fake_inputs = _placeholder_fake_inputs(gm)
+    output_node = gm.graph.find_nodes(op="output")[-1]
+    outputs = list(output_node.args[0]) if output_node.args else []
+    if num_user_visible_outputs is not None:
+        outputs = outputs[:num_user_visible_outputs]
+    # Like compile_fx's marking, only tensor outputs are user visible; None and
+    # symbolic-int outputs carry no layout.
+    output_node.meta["user_visible_output_idxs"] = [
+        idx for idx, out in enumerate(outputs) if isinstance(out, torch.fx.Node)
+    ]
     fake_mode = detect_fake_mode(fake_inputs)
     if fake_mode is None:
         raise RuntimeError(

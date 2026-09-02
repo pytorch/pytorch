@@ -2434,6 +2434,41 @@ def _backward_placeholder_key(node: torch.fx.Node) -> tuple[str, str]:
     return "name", str(node.target)
 
 
+def _forward_output_fingerprints(fw_module: torch.fx.GraphModule) -> dict[str, int]:
+    """Structural fingerprint of every forward output node, keyed by node name.
+
+    Saved activations reach the backward as placeholders that carry no desc,
+    only the joint trace's codegen name (add_1, detach_2, ...), and a retrace
+    that drops a branch renumbers those names, so two different intermediates
+    can share a name across the original and retraced graphs. The fingerprint
+    hashes what a node computes (op, target, constant args, and the fingerprints
+    of its node args, down to placeholders identified by desc), so a retraced
+    saved activation is bound to the original one that computes the same value,
+    or the retrace declines.
+    """
+    memo: dict[torch.fx.Node, int] = {}
+    for node in fw_module.graph.nodes:
+        if node.op == "placeholder":
+            desc = node.meta.get("desc")
+            key: tuple[Any, ...] = (
+                "placeholder",
+                repr(desc) if desc is not None else node.name,
+            )
+        elif node.op == "get_attr":
+            key = ("get_attr", str(node.target))
+        elif node.op == "output":
+            continue
+        else:
+            args = torch.fx.node.map_arg(node.args, lambda n: ("node", memo[n]))
+            kwargs = torch.fx.node.map_arg(node.kwargs, lambda n: ("node", memo[n]))
+            key = (node.op, str(node.target), repr(args), repr(kwargs))
+        memo[node] = hash(key)
+    outputs = next(reversed(fw_module.graph.find_nodes(op="output"))).args[0]
+    return {
+        node.name: memo[node] for node in outputs if isinstance(node, torch.fx.Node)
+    }
+
+
 def _autocast_fingerprint(flat_args: Sequence[Any]) -> tuple[Any, ...]:
     # Cover every autocast-capable device type, not just the input tensors'
     # devices: the traced region can move activations to a device that never
@@ -2604,6 +2639,8 @@ def _retrace_backward_for_undefined_grad_outputs(
         raise AssertionError(
             "expected the original backward placeholders and inputs to line up"
         )
+    original_fingerprints = _forward_output_fingerprints(trace_info.original_fw_module)
+    retraced_fingerprints = _forward_output_fingerprints(fw_module)
     original_by_key: dict[tuple[str, str], list[tuple[int, torch.fx.Node, Any]]] = (
         defaultdict(list)
     )
@@ -2619,13 +2656,36 @@ def _retrace_backward_for_undefined_grad_outputs(
     kept_arg_indices: list[int] = []
     placeholder_list: list[Any] = []
     for node in bw_module.graph.find_nodes(op="placeholder"):
-        matches = original_by_key.get(_backward_placeholder_key(node))
+        key = _backward_placeholder_key(node)
+        matches = original_by_key.get(key)
         if not matches:
             declined(
                 "the retraced backward needs an input the compiled forward did not save"
             )
             return None
-        index, original_node, value = matches.pop(0)
+        if key[0] == "name":
+            # A name-keyed placeholder is a saved activation; bind it to the
+            # original that computes the same value, not merely the same name.
+            fingerprint = retraced_fingerprints.get(str(node.target))
+            chosen = next(
+                (
+                    position
+                    for position, (_, original_node, _) in enumerate(matches)
+                    if fingerprint is not None
+                    and original_fingerprints.get(str(original_node.target))
+                    == fingerprint
+                ),
+                None,
+            )
+            if chosen is None:
+                declined(
+                    "a saved activation of the retraced backward does not "
+                    "structurally match any the compiled forward saved"
+                )
+                return None
+            index, original_node, value = matches.pop(chosen)
+        else:
+            index, original_node, value = matches.pop(0)
         kept_arg_indices.append(index)
         placeholder_list.append(value)
         if "val" in original_node.meta:
@@ -2646,18 +2706,18 @@ def retrace_backward_handling_errors(
     Used identically by the live runtime, compiled-autograd, and standalone
     retrace sites: a PrecompileError propagates (precompile requires a portable
     backward), any other exception declines to structural specialization by
-    returning None.
+    returning None. That includes AssertionError: the retrace re-runs the user's
+    forward, the partitioner and inductor's joint-graph passes, any of which may
+    assert for reasons unrelated to this optimization, and a backward that the
+    structural or materialize fallback can still serve must not die for it. The
+    traceback is logged at WARNING so an internal bug remains visible.
     """
     try:
         return retrace()
     except Exception as e:
         from torch._precompile import PrecompileError
 
-        # PrecompileError means the backward is not portable and precompile must
-        # see it; an AssertionError is an internal invariant violation and must
-        # not be silently downgraded to a fallback. Everything else is a
-        # legitimate reason to decline to structural specialization.
-        if isinstance(e, (PrecompileError, AssertionError)):
+        if isinstance(e, PrecompileError):
             raise
         log.warning(
             "Backward retrace for undefined grad outputs %s failed; "

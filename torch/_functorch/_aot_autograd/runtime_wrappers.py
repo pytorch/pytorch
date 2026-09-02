@@ -19,7 +19,7 @@ import typing
 import warnings
 import weakref
 from collections.abc import Callable, Generator, Sequence
-from contextlib import AbstractContextManager, nullcontext
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
 from typing import Any
@@ -2782,7 +2782,7 @@ class KeptTangentInfo(typing.NamedTuple):
 
 def _kept_tangent_info(fw_metadata: ViewAndMutationMeta) -> KeptTangentInfo:
     grad_out_idx = tuple(_grad_output_surviving_indices(fw_metadata))
-    tangent_dtypes = getattr(fw_metadata, "traced_tangent_dtypes", None) or []
+    tangent_dtypes = fw_metadata.traced_tangent_dtypes or []
     if len(tangent_dtypes) != len(grad_out_idx):
         tangent_dtypes = [None] * len(grad_out_idx)
     return KeptTangentInfo(
@@ -3491,10 +3491,11 @@ def _all_backward_grad_args_are_pruned_zeros(
 ) -> bool:
     if not isinstance(target, OpOverload):
         return False
-    # Fast reject on the aten *_backward naming convention; the actual gate is
-    # the grad-named-argument scan below, which is the structural signal that
-    # this op consumes tangents.
-    if "backward" not in target.overloadpacket.__name__:
+    # Only aten backward formulas are known to be linear in their grad-named
+    # arguments (zero tangents in, zero out). A custom op merely named
+    # *_backward makes no such promise (grad_output + x is a valid custom
+    # backward), so it is never folded.
+    if target.namespace != "aten" or "backward" not in target.overloadpacket.__name__:
         return False
 
     grad_arg_indices: list[tuple[int, str]] = []
@@ -3798,6 +3799,14 @@ def _pruned_backward_output_indices_for_undefined_grad_outputs(
     # that branches on `.grad is None` can observe the difference. This is the
     # only nondeterminism the masking introduces relative to eager, and it is
     # accepted (a None and a zero gradient are numerically equivalent).
+    #
+    # The live runtime (get_or_compile) and compiled autograd
+    # (proxy_call_aot_backward) run the same ladder -- retrace, structural
+    # specialization, materialize -- and mask the same outputs. They differ in
+    # two deliberate ways: compiled autograd never raises the precompile error
+    # (it is not a precompiled artifact, so materializing zero tangents is
+    # always acceptable there), and it recomputes the specialization per graph
+    # capture instead of caching per mask.
     undefined_tangent_flat_indices = _undefined_tangent_flat_indices(
         fw_metadata, undefined_grad_out_indices
     )
@@ -4086,9 +4095,10 @@ def _dealias_marked_returns(raw_returns: list[Any], marked: Sequence[int]) -> No
     ctx._materialize_non_diff_grads = False a slot marked this way is handed a
     None instead of zeros. Backends are free to return one object in two slots
     -- inductor lowers aten.detach to a no-op, and h*1 / h+0 fold away -- so
-    `return h * 1, h.detach()` marks the differentiable output too and drops
-    the gradient, and `return y[:2], y[2:], y.detach()` marks y's intermediate
-    base, which the backward requires a tangent for.
+    `return h * 1, h.detach()` marks the differentiable output too (its
+    backward then fails with "does not require grad"), and
+    `return y[:2], y[2:], y.detach()` marks y's intermediate base, silently
+    disconnecting the view outputs from the graph (x.grad stays None).
 
     Substituting an alias is only correct because the slot is one we are about
     to declare non-differentiable anyway; slots that stay differentiable keep
@@ -4096,10 +4106,11 @@ def _dealias_marked_returns(raw_returns: list[Any], marked: Sequence[int]) -> No
 
     ``marked`` may name slots that are not tensors: the ahead-of-time codegen
     path selects indices by output metadata and does not pre-filter, so
-    non-tensor slots are simply skipped here. Unmarked slots may already be
-    wrapped in TensorAlias (aliased outputs and metadata-mutated inputs); the
-    probe looks through the wrapper since marking is keyed on the TensorImpl
-    inside it.
+    non-tensor slots are simply skipped here. Unmarked TensorAlias slots
+    (aliased outputs, metadata-mutated inputs) are not probed: autograd.Function
+    sees them as non-tensor outputs and never consults the non-differentiable
+    set for them, and alias regeneration reads only size/stride/offset from the
+    wrapped tensor, so marking a sibling impl cannot affect them.
     """
     if not marked:
         return
@@ -4118,8 +4129,6 @@ def _dealias_marked_returns(raw_returns: list[Any], marked: Sequence[int]) -> No
     collide: set[int] = set()
     for j, o in enumerate(raw_returns):
         if j not in marked_set:
-            if isinstance(o, TensorAlias):
-                o = o.alias
             hits = marked_positions.get(id(o))
             if hits is not None:
                 collide.update(hits)
@@ -4305,6 +4314,30 @@ def _prune_runtime_args_in_place(
     all_args.extend(kept_args)
 
 
+_TRACING_CONTEXT_COMPILE_LOCKS: "weakref.WeakKeyDictionary[TracingContext, threading.Lock]" = weakref.WeakKeyDictionary()
+_TRACING_CONTEXT_COMPILE_LOCKS_GUARD = threading.Lock()
+
+
+def _tracing_context_compile_lock(saved_context: TracingContext) -> threading.Lock:
+    with _TRACING_CONTEXT_COMPILE_LOCKS_GUARD:
+        lock = _TRACING_CONTEXT_COMPILE_LOCKS.get(saved_context)
+        if lock is None:
+            lock = threading.Lock()
+            _TRACING_CONTEXT_COMPILE_LOCKS[saved_context] = lock
+        return lock
+
+
+class _CompiledBackward(typing.NamedTuple):
+    fn: Callable[..., Any]
+    # Compiled with non-empty donated buffer indices: such a backward may only
+    # run with retain_graph=False, and the check travels with the entry so it
+    # cannot disagree with the metadata a concurrent clear is rewriting.
+    donated: bool
+    # For a specialized entry, the positions of the original backward's inputs
+    # it keeps (None for the base backward, which keeps them all).
+    kept_arg_indices: tuple[int, ...] | None = None
+
+
 @dataclass
 class _AutogradBackwardCompiler:
     # Thread-safety: the caches below (compiled_bw, specialized_compiled_bws,
@@ -4317,10 +4350,14 @@ class _AutogradBackwardCompiler:
     # specialized_compiled_bws (under _prepare_lock) when saved_tensors_use_once
     # flips and the donated-buffer backwards must be recompiled. Lock-free
     # readers in get_or_compile therefore read each cache field exactly once
-    # into a local (single attribute read, dict.get) so that a concurrent clear
-    # is observed as a miss-and-recompile, never as a KeyError or a None
-    # backward handed to the caller.
-    compiled_bw: Callable[..., Any] | None
+    # into a local (single attribute read, dict.get), every decision that depends
+    # on the entry (its donation status, its kept inputs) is carried by the
+    # _CompiledBackward entry itself, and nothing else on the hot path reads
+    # compiled_bw, so a concurrent clear is observed as a miss-and-recompile,
+    # never as a KeyError, a None backward, or a stale donation check. Compiles
+    # themselves run under a per-TracingContext lock (_compile_fw_metadata) while
+    # this compiler's own fw_metadata is installed on the context.
+    compiled_bw: _CompiledBackward | None
     lazy_backward_info: (
         AutogradLazyBackwardCompileInfo | CachedAutogradLazyBackwardCompileInfo | None
     )
@@ -4329,9 +4366,7 @@ class _AutogradBackwardCompiler:
     aot_config: AOTConfig
     fw_metadata: ViewAndMutationMeta
     try_save_cache_entry: Callable[..., Any] | None
-    specialized_compiled_bws: dict[int, tuple[Callable[..., Any], tuple[int, ...]]] = (
-        field(default_factory=dict)
-    )
+    specialized_compiled_bws: dict[int, _CompiledBackward] = field(default_factory=dict)
     pruned_backward_output_indices: dict[int, tuple[int, ...]] = field(
         default_factory=dict
     )
@@ -4347,14 +4382,49 @@ class _AutogradBackwardCompiler:
     _prepare_lock: threading.Lock = field(default_factory=threading.Lock)
 
     def can_specialize_undefined_grad_outputs(self) -> bool:
-        return (
-            self.bw_compiler is not None
-            and isinstance(self.lazy_backward_info, AutogradLazyBackwardCompileInfo)
-            and (
-                self.compiled_bw is None
-                or self.lazy_backward_info.autograd_trace_info is not None
-            )
+        # A static property of the compiler: the retrace needs trace info, but
+        # structural specialization only needs the backward module, so whether
+        # the base backward has already been compiled must not enter into it.
+        # backward() uses this to decide whether the prologue leaves undefined
+        # tangents as None for the ladder in get_or_compile to resolve, and the
+        # two decisions must agree even under concurrent backwards.
+        return self.bw_compiler is not None and isinstance(
+            self.lazy_backward_info, AutogradLazyBackwardCompileInfo
         )
+
+    def _donated_idxs_for(self, kept_arg_indices: Sequence[int] | None) -> list[int]:
+        # bw_donated_idxs are positions in the ORIGINAL backward's input list;
+        # a specialized backward keeps a subset (kept_arg_indices maps its
+        # positions back), so remap before inductor applies them positionally.
+        donated = self.fw_metadata.bw_donated_idxs or []
+        if kept_arg_indices is None:
+            return list(donated)
+        donated_set = set(donated)
+        return [new for new, orig in enumerate(kept_arg_indices) if orig in donated_set]
+
+    @contextmanager
+    def _compile_fw_metadata(
+        self, saved_context: Any, bw_donated_idxs: Sequence[int]
+    ) -> Generator[None, None, None]:
+        # Inductor reads TracingContext.fw_metadata during the backward compile
+        # (bw_donated_idxs positionally via get_donated_idxs, and under
+        # DDPOptimizer the bucket's own metadata), so install THIS compile's
+        # view for its duration: this compiler's fw_metadata with the donated
+        # indices remapped for the module being compiled. The TracingContext is
+        # shared by every bucket of a DDPOptimizer graph and by concurrent
+        # backwards, hence the per-context lock.
+        if not isinstance(saved_context, TracingContext):
+            yield
+            return
+        with _tracing_context_compile_lock(saved_context):
+            previous = saved_context.fw_metadata
+            metadata = copy.copy(self.fw_metadata)
+            metadata.bw_donated_idxs = list(bw_donated_idxs)
+            saved_context.fw_metadata = metadata
+            try:
+                yield
+            finally:
+                saved_context.fw_metadata = previous
 
     def get_pruned_backward_output_indices(
         self,
@@ -4397,7 +4467,13 @@ class _AutogradBackwardCompiler:
         grad_output_prototypes: Sequence[_GradOutputPrototypeType | None],
         grad_output_prototype_objects: Sequence[Any],
         all_args: list[Any],
-    ) -> tuple[Callable[..., Any], list[Any], tuple[int, ...]]:
+    ) -> tuple[Callable[..., Any], list[Any], tuple[int, ...], bool]:
+        """Return ``(backward, args, pruned_output_indices, donated)``.
+
+        ``donated`` reports whether the returned backward was compiled with
+        donated buffers, which the caller must refuse to run with the graph
+        retained.
+        """
         # Runs on every backward. The mask is a cheap metadata scan; when no grad
         # output is prunably undefined it is 0 and we return the already-compiled
         # backward immediately, so the specialization ladder below is skipped on the
@@ -4408,13 +4484,14 @@ class _AutogradBackwardCompiler:
         # Single reads per cache field: see the thread-safety note on the class.
         base_bw = self.compiled_bw
         if not specialization_key and base_bw is not None:
-            return base_bw, all_args, ()
+            return base_bw.fn, all_args, (), base_bw.donated
 
         specialized_entry = self.specialized_compiled_bws.get(specialization_key)
         if specialized_entry is not None:
-            compiled_bw, kept_arg_indices = specialized_entry
-            _prune_runtime_args_in_place(all_args, kept_arg_indices)
-            return compiled_bw, all_args, ()
+            if specialized_entry.kept_arg_indices is None:
+                raise AssertionError("specialized entry must record kept_arg_indices")
+            _prune_runtime_args_in_place(all_args, specialized_entry.kept_arg_indices)
+            return specialized_entry.fn, all_args, (), specialized_entry.donated
 
         if self.lazy_backward_info is None:
             raise AssertionError("lazy_backward_info must not be None")
@@ -4423,9 +4500,10 @@ class _AutogradBackwardCompiler:
             if base_bw is None:
                 raise AssertionError("compiled_bw must not be None")
             return (
-                base_bw,
+                base_bw.fn,
                 all_args,
                 self.get_pruned_backward_output_indices(undefined_grad_out_indices),
+                base_bw.donated,
             )
 
         bw_compiler = self.bw_compiler
@@ -4448,9 +4526,10 @@ class _AutogradBackwardCompiler:
             if base_bw is None:
                 raise AssertionError("compiled_bw must not be None")
             return (
-                base_bw,
+                base_bw.fn,
                 all_args,
                 self.get_pruned_backward_output_indices(undefined_grad_out_indices),
+                base_bw.donated,
             )
         else:
             raise AssertionError(
@@ -4480,9 +4559,10 @@ class _AutogradBackwardCompiler:
                     grad_output_prototype_objects,
                 )
                 return (
-                    base_bw,
+                    base_bw.fn,
                     all_args,
                     self.get_pruned_backward_output_indices(undefined_grad_out_indices),
+                    base_bw.donated,
                 )
 
         if specialization_key:
@@ -4571,18 +4651,21 @@ class _AutogradBackwardCompiler:
                 specialization_key = 0
                 if base_bw is not None:
                     return (
-                        base_bw,
+                        base_bw.fn,
                         all_args,
                         self.get_pruned_backward_output_indices(
                             undefined_grad_out_indices
                         ),
+                        base_bw.donated,
                     )
             else:
                 bw_module, placeholder_list, kept_arg_indices = specialized
 
+        donated_idxs = self._donated_idxs_for(kept_arg_indices)
         context = torch._C._DisableAutocast if self.disable_amp else nullcontext
         metrics_context = get_metrics_context()
         with (
+            self._compile_fw_metadata(saved_context, donated_idxs),
             tracing(saved_context),
             compile_context(saved_compile_context),
             context(),
@@ -4615,12 +4698,12 @@ class _AutogradBackwardCompiler:
                     self.aot_config,
                 )
 
+        donated = bool(donated_idxs)
         if specialization_key:
             if kept_arg_indices is None:
                 raise AssertionError("kept_arg_indices must not be None")
-            self.specialized_compiled_bws[specialization_key] = (
-                compiled_bw,
-                kept_arg_indices,
+            self.specialized_compiled_bws[specialization_key] = _CompiledBackward(
+                compiled_bw, donated, kept_arg_indices
             )
             log.info(
                 "Compiled specialized backward for undefined grad output mask %s "
@@ -4629,13 +4712,14 @@ class _AutogradBackwardCompiler:
                 len(self.specialized_compiled_bws),
             )
             _prune_runtime_args_in_place(all_args, kept_arg_indices)
-            return compiled_bw, all_args, ()
+            return compiled_bw, all_args, (), donated
 
-        self.compiled_bw = compiled_bw
+        self.compiled_bw = _CompiledBackward(compiled_bw, donated)
         return (
             compiled_bw,
             all_args,
             self.get_pruned_backward_output_indices(undefined_grad_out_indices),
+            donated,
         )
 
     def _prepare_lazy_backward_context(self, saved_tensors_use_once: bool) -> None:
@@ -5112,8 +5196,18 @@ class _AOTDispatchAutogradFunctionFactory:
             graphsafe_idx=self.spec.fw_metadata.graphsafe_rng_state_index,
             device=self.spec.fw_metadata.graphsafe_rng_device,
         )
+        # A backward compiled ahead of time (non-lazy, or loaded from cache)
+        # was compiled against the metadata's current donated indices.
+        compiled_bw_entry = (
+            _CompiledBackward(
+                self.spec.compiled_bw_func,
+                bool(self.spec.fw_metadata.bw_donated_idxs),
+            )
+            if self.spec.compiled_bw_func is not None
+            else None
+        )
         backward_compiler = _AutogradBackwardCompiler(
-            compiled_bw=self.spec.compiled_bw_func,
+            compiled_bw=compiled_bw_entry,
             lazy_backward_info=self.spec.lazy_backward_info,
             disable_amp=self.spec.disable_amp,
             bw_compiler=self.spec.bw_compiler,
@@ -5167,7 +5261,9 @@ class _AOTDispatchAutogradFunctionFactory:
 
         # Codegen for CompiledFunction.forward: emit straight-line TensorAlias
         # wrapping, _unsafe_view, and non-differentiable output collection with
-        # all indices resolved at compile time.
+        # all indices resolved at compile time. The one runtime pass left is
+        # _dealias_marked_returns' probe over raw_returns for slots that share
+        # a TensorImpl, which depends on what the backend returned.
         num_mutated_runtime_inps = fw_metadata.num_mutated_inp_runtime_indices
         num_outputs = fw_metadata.num_outputs
         num_outputs_aliased = fw_metadata.num_outputs_aliased
@@ -5205,8 +5301,10 @@ class _AOTDispatchAutogradFunctionFactory:
                     ri = num_mutated_runtime_inps + idx
                     buf.writeline(f"raw_returns[{ri}] = TensorAlias(raw_returns[{ri}])")
 
-            # Non-differentiable output collection: build a list of specific indices
-            # at compile time rather than iterating at runtime.
+            # Non-differentiable output collection: the marked indices are fixed
+            # at compile time; _dealias_marked_returns still probes raw_returns
+            # once per forward (about a microsecond) because aliasing between
+            # slots is only known once the backend has returned them.
             _non_diff_indices: list[int] = []
             _returns_meta = [
                 x
@@ -5384,10 +5482,10 @@ class _AOTDispatchAutogradFunctionFactory:
                 saved_tensors_use_once = (
                     not torch._C._autograd._get_current_graph_task_keep_graph()
                 )
-                undefined_grad_out_indices = getattr(
-                    ctx, "_undefined_grad_out_indices", ()
-                )
-                compiled_bw, all_args, pruned_output_indices = (
+                # Always set by backward() above; read it directly so a missing
+                # attribute is a bug, not a silent full-tangent backward.
+                undefined_grad_out_indices = ctx._undefined_grad_out_indices
+                compiled_bw, all_args, pruned_output_indices, donated = (
                     backward_compiler.get_or_compile(
                         saved_tensors_use_once=saved_tensors_use_once,
                         undefined_grad_out_indices=undefined_grad_out_indices,
@@ -5399,10 +5497,13 @@ class _AOTDispatchAutogradFunctionFactory:
                     )
                 )
 
+                # Checked against the backward actually returned, not against
+                # fw_metadata, which a concurrent _prepare_lazy_backward_context
+                # may be rewriting.
                 if (
                     torch._functorch.config.donated_buffer
                     and not saved_tensors_use_once
-                    and fw_metadata.bw_donated_idxs != []
+                    and donated
                 ):
                     torch._check(
                         False,
