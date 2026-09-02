@@ -23,20 +23,12 @@ from torch._dynamo.exc import (
 )
 from torch._dynamo.testing import skipIfNotPy312, skipIfOnlyNotPy312
 from torch._dynamo.utils import counters
-<<<<<<< HEAD
-from torch.testing._internal.common_utils import IS_FBCODE, IS_S390X, munge_exc
-from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
-
-
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-=======
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_FBCODE,
+    IS_S390X,
     munge_exc,
->>>>>>> 08cd179086b (refctor 3 files)
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
