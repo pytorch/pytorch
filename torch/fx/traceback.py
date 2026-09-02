@@ -366,12 +366,22 @@ def annotate(annotation_dict: dict[str, Any]) -> Iterator[None]:
 # writer and the reader below so the partitioner / AOTAutograd cache read it the
 # same way.
 MEMORY_BUDGET_ANNOTATION_KEY = "_region_activation_memory_budget"
+MEMORY_BUDGET_REQUIRE_FULL_COVERAGE_KEY = (
+    "_region_activation_memory_budget_require_full_coverage"
+)
 
 
 @contextmanager
-def _dynamo_region_activation_memory_budget(budget: float) -> Iterator[None]:
+def _dynamo_region_activation_memory_budget(
+    budget: float, require_full_coverage: bool = True
+) -> Iterator[None]:
     with (
-        annotate({MEMORY_BUDGET_ANNOTATION_KEY: budget}),
+        annotate(
+            {
+                MEMORY_BUDGET_ANNOTATION_KEY: budget,
+                MEMORY_BUDGET_REQUIRE_FULL_COVERAGE_KEY: require_full_coverage,
+            }
+        ),
         preserve_node_meta(),
     ):
         yield
@@ -388,6 +398,13 @@ def _get_memory_budget_annotation(node: Node) -> float | None:
     if not isinstance(custom, dict):
         return None
     return custom.get(MEMORY_BUDGET_ANNOTATION_KEY)
+
+
+def _get_memory_budget_require_full_coverage(node: Node) -> bool:
+    custom = node.meta.get("custom")
+    if not isinstance(custom, dict):
+        return True
+    return custom.get(MEMORY_BUDGET_REQUIRE_FULL_COVERAGE_KEY) is not False
 
 
 @compatibility(is_backward_compatible=False)

@@ -65,7 +65,10 @@ from torch.compiler._cache import (
 )
 from torch.fx.experimental.symbolic_shapes import guarding_hint_or_throw
 from torch.fx.node import Node
-from torch.fx.traceback import _get_memory_budget_annotation
+from torch.fx.traceback import (
+    _get_memory_budget_annotation,
+    _get_memory_budget_require_full_coverage,
+)
 from torch.utils._triton import has_triton_package
 
 from .aot_autograd_result import (
@@ -598,9 +601,15 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         self.sac_context_fn_hashes = _collect_context_fn_hashes(gm)
 
         # node.meta is stripped by GraphModule.__reduce__, so preserve the
-        # location and value of every budget annotation in the cache key.
+        # location, value, and coverage requirement of every budget annotation
+        # in the cache key.
         self.region_activation_memory_budget_annotations = tuple(
-            (module_name, node_index, budget)
+            (
+                module_name,
+                node_index,
+                budget,
+                _get_memory_budget_require_full_coverage(node),
+            )
             for module_name, module in gm.named_modules()
             if isinstance(module, torch.fx.GraphModule)
             for node_index, node in enumerate(module.graph.nodes)
