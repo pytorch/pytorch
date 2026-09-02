@@ -50,13 +50,11 @@ class GuardFilterEntry:
     # backward compatibility with existing filters.
     is_global: bool
     orig_guard: Guard
-
-    @property
-    def provenance(self) -> GuardProvenance:
-        # Where the guard's source chain is rooted; see Note [Guard provenance]
-        # in torch/_guards.py. Computed on demand so an unclassified
-        # out-of-tree Source only fails the filter that asks for it.
-        return self.orig_guard.provenance
+    # Where the guard's source chain is rooted; see Note [Guard provenance] in
+    # torch/_guards.py. INPUT guards are dispatch-relevant; GLOBAL and AMBIENT
+    # guards belong to the Python environment. Added at the end so existing
+    # fields keep their positions.
+    provenance: GuardProvenance
 
 
 class GuardFn(Protocol):

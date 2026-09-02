@@ -1962,12 +1962,15 @@ def _compile(
             )
 
         if package is not None:
-            # guards_state is None only when CheckFunctionManager swallowed a
-            # non-strict serialization failure; it has already bypassed the
-            # package entry (the add_* calls below are no-ops on a bypassed
-            # entry) and the compile continues uncached.
-            if check_fn.guards_state is not None:
-                package.add_guarded_code(check_fn.guards_state, out_code)
+            if check_fn.guards_state is None:
+                # The non-strict CheckFunctionManager swallowed the
+                # serialization failure; re-raise it typed (and chained to the
+                # specific-guard cause when there is one) so package consumers
+                # can handle it without matching message text.
+                raise exc.PackageError(
+                    "check_fn.guards_state must not be None"
+                ) from check_fn.guards_serialization_failure
+            package.add_guarded_code(check_fn.guards_state, out_code)
             package.add_inlined_source(output.tracing_context.traced_code)
             package.update_device_type(output.current_tracer.graph)
 

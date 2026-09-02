@@ -6,6 +6,7 @@ from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
+from torch._guards import GuardProvenance as GuardProvenance
 from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
 
 # ``torch.compiler.precompile``: make_fx AOT capture -> self-contained Python source
@@ -61,6 +62,7 @@ __all__ = [
     "skip_guard_on_globals_unsafe",
     "skip_all_guards_unsafe",
     "nested_compile_region",
+    "GuardProvenance",
 ]
 
 
