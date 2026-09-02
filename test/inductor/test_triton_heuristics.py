@@ -1754,6 +1754,49 @@ class TestMakeLaunchersMemory(TestCase):
         self.assertEqual(len(fake_self.launchers), 1)
 
 
+class TestCachingAutotunerMakeLaunchers(TestCase):
+    def test_valid_launcher_skips_pipelining_recompile(self):
+        import contextlib
+
+        failed_result = types.SimpleNamespace(
+            config=types.SimpleNamespace(num_stages=2, kwargs={})
+        )
+        valid_result = types.SimpleNamespace(
+            config=types.SimpleNamespace(num_stages=1, kwargs={})
+        )
+        valid_launcher = object()
+
+        def make_launcher(result):
+            if result is failed_result:
+                return None, torch.cuda.OutOfMemoryError("test")
+            return valid_launcher, None
+
+        recompile = MagicMock(
+            side_effect=AssertionError(
+                "pipelining recompile ran before checking all compiled configs"
+            )
+        )
+        autotuner = CachingAutotuner.__new__(CachingAutotuner)
+        autotuner.launchers = []
+        autotuner.compile_results = [failed_result, valid_result]
+        autotuner.triton_meta = {"device": 0}
+        autotuner.device_props = types.SimpleNamespace(type="cuda")
+        autotuner.inductor_meta = {}
+        autotuner.get_device_interface = lambda: None
+        autotuner._make_launcher = make_launcher
+        autotuner._ensure_kernel_loaded = MagicMock()
+        autotuner._precompile_config = recompile
+
+        with patch(
+            "torch._dynamo.device_interface.DeviceGuard",
+            lambda *args, **kwargs: contextlib.nullcontext(),
+        ):
+            autotuner._make_launchers()
+
+        recompile.assert_not_called()
+        self.assertEqual(autotuner.launchers, [valid_launcher])
+
+
 if __name__ == "__main__":
     if IS_LINUX:
         run_tests()
