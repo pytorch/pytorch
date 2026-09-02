@@ -5,6 +5,7 @@ import sys
 import unittest
 from collections import defaultdict
 from contextlib import contextmanager
+from unittest import mock
 
 import torch
 import torch._dynamo.test_case
@@ -91,6 +92,174 @@ def customized_ctx_manager_with_graph_break(mode):
 
 
 class CtxManagerTests(torch._dynamo.test_case.TestCase):
+    class _Probe(torch._dynamo.test_case.TestCase):
+        def runTest(self):
+            pass
+
+    def _autocast_state(self):
+        return (
+            {
+                f"{device}_enabled": torch.is_autocast_enabled(device)
+                for device in ("cpu", "cuda")
+            }
+            | {
+                f"{device}_dtype": torch.get_autocast_dtype(device)
+                for device in ("cpu", "cuda")
+            }
+            | {
+                "cache_enabled": torch.is_autocast_cache_enabled(),
+                "nesting": torch._dynamo.test_case._autocast_nesting(),
+            }
+        )
+
+    def _run_leaking_pair(self, leak_fn):
+        probe = self._Probe()
+        probe.setUp()
+        try:
+            leak_fn()
+        finally:
+            probe.tearDown()
+
+        return self._autocast_state()
+
+    def test_teardown_restores_autocast_enabled(self):
+        baseline = self._autocast_state()
+
+        def leak():
+            for device in ("cpu", "cuda"):
+                torch.set_autocast_enabled(device, not baseline[f"{device}_enabled"])
+
+        self.assertEqual(self._run_leaking_pair(leak), baseline)
+
+    def test_teardown_restores_autocast_dtype(self):
+        baseline = self._autocast_state()
+
+        def leak():
+            for device in ("cpu", "cuda"):
+                dtype = baseline[f"{device}_dtype"]
+                other = torch.float16 if dtype != torch.float16 else torch.bfloat16
+                torch.set_autocast_dtype(device, other)
+
+        self.assertEqual(self._run_leaking_pair(leak), baseline)
+
+    def test_teardown_restores_autocast_cache_enabled(self):
+        baseline = self._autocast_state()
+
+        def leak():
+            torch.set_autocast_cache_enabled(not baseline["cache_enabled"])
+
+        self.assertEqual(self._run_leaking_pair(leak), baseline)
+
+    def test_teardown_restores_autocast_nesting(self):
+        baseline = self._autocast_state()
+
+        def leak():
+            torch.autocast_increment_nesting()
+            self.assertEqual(
+                torch._dynamo.test_case._autocast_nesting(), baseline["nesting"] + 1
+            )
+
+        with mock.patch.object(
+            torch, "clear_autocast_cache", wraps=torch.clear_autocast_cache
+        ) as clear_cache:
+            self.assertEqual(self._run_leaking_pair(leak), baseline)
+        clear_cache.assert_called_once_with()
+
+    def test_teardown_restores_autocast_after_super_teardown_error(self):
+        baseline = self._autocast_state()
+        default_dtype = torch.get_default_dtype()
+        grad_enabled = torch.is_grad_enabled()
+        probe = self._Probe()
+        probe._default_dtype_check_enabled = True
+        probe.setUp()
+        torch.set_autocast_enabled("cpu", not baseline["cpu_enabled"])
+        torch.set_grad_enabled(not grad_enabled)
+        try:
+            torch.set_default_dtype(torch.float64)
+            with self.assertRaisesRegex(AssertionError, "expected default dtype"):
+                probe.tearDown()
+        finally:
+            torch.set_default_dtype(default_dtype)
+        self.assertEqual(self._autocast_state(), baseline)
+        self.assertEqual(torch.is_grad_enabled(), grad_enabled)
+
+    def test_teardown_does_not_mask_super_teardown_error(self):
+        enabled = torch.is_autocast_enabled("cpu")
+        default_dtype = torch.get_default_dtype()
+        probe = self._Probe()
+        probe._default_dtype_check_enabled = True
+        probe.setUp()
+        torch.set_autocast_enabled("cpu", not enabled)
+        try:
+            torch.set_default_dtype(torch.float64)
+            with (
+                mock.patch.object(
+                    torch._dynamo.test_case,
+                    "_restore_autocast_state",
+                    side_effect=RuntimeError("autocast restore failed"),
+                ),
+                self.assertRaisesRegex(AssertionError, "expected default dtype"),
+            ):
+                probe.tearDown()
+        finally:
+            torch.set_default_dtype(default_dtype)
+            torch.set_autocast_enabled("cpu", enabled)
+
+    def test_teardown_restore_error_not_suppressed_by_handled_exception(self):
+        enabled = torch.is_autocast_enabled("cpu")
+        probe = self._Probe()
+        probe.setUp()
+        torch.set_autocast_enabled("cpu", not enabled)
+        try:
+            try:
+                raise RuntimeError("unrelated outer error")
+            except RuntimeError:
+                with (
+                    mock.patch.object(
+                        torch._dynamo.test_case,
+                        "_restore_autocast_state",
+                        side_effect=RuntimeError("autocast restore failed"),
+                    ),
+                    self.assertRaisesRegex(RuntimeError, "autocast restore failed"),
+                ):
+                    probe.tearDown()
+        finally:
+            torch.set_autocast_enabled("cpu", enabled)
+
+    def test_teardown_logs_additional_restore_errors(self):
+        enabled = torch.is_autocast_enabled("cpu")
+        grad_enabled = torch.is_grad_enabled()
+        probe = self._Probe()
+        probe.setUp()
+        torch.set_grad_enabled(not grad_enabled)
+        torch.set_autocast_enabled("cpu", not enabled)
+        try:
+            with (
+                mock.patch.object(
+                    torch,
+                    "set_grad_enabled",
+                    side_effect=RuntimeError("grad restore failed"),
+                ),
+                mock.patch.object(
+                    torch._dynamo.test_case,
+                    "_restore_autocast_state",
+                    side_effect=RuntimeError("autocast restore failed"),
+                ),
+                self.assertLogs("torch._dynamo.test_case", level="ERROR") as logs,
+                self.assertRaisesRegex(RuntimeError, "grad restore failed"),
+            ):
+                probe.tearDown()
+        finally:
+            torch._C._set_grad_enabled(grad_enabled)
+            torch.set_autocast_enabled("cpu", enabled)
+        self.assertTrue(
+            any(
+                "Additional failure restoring autocast state" in output
+                and "autocast restore failed" in output
+                for output in logs.output
+            )
+        )
+
     def test_no_grad(self):
         def fn1(a, b):
             x = a + 1
