@@ -112,21 +112,22 @@ def _constexpr_module_missing_in_worker(
     if the failure is anything else.
     """
     if isinstance(error, ModuleNotFoundError):
-        name = error.name
+        candidates = [error.name] if error.name else []
     else:
         if "ModuleNotFoundError" not in error:
             return None
-        # A formatted traceback lists chained exceptions oldest first; the
-        # last "No module named" is the error that actually propagated.
-        missing = _worker_missing_module_re.findall(error)
-        name = missing[-1] if missing else None
-    if name is None:
+        candidates = _worker_missing_module_re.findall(error)
+    if not candidates:
         return None
     modules = _constexpr_module_import_re.findall(source_code)
     modules += [module for module, _ in _constexpr_root_import_re.findall(source_code)]
-    for module in modules:
-        if module == name or module.startswith(name + "."):
-            return module
+    # A formatted traceback can chain an unrelated secondary import failure
+    # after the constexpr one, so match any reported missing module against the
+    # constexpr imports rather than committing to whichever propagated last.
+    for name in candidates:
+        for module in modules:
+            if module == name or module.startswith(name + "."):
+                return module
     return None
 
 
