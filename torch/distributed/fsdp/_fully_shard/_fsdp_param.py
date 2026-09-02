@@ -230,6 +230,18 @@ class FSDPParam:
         self.pin_memory = (
             self.offload_to_cpu and cast(CPUOffloadPolicy, offload_policy).pin_memory
         )
+        # Per-phase stashing: whether to move the sharded param home back to
+        # CPU after forward / backward. Both default True == legacy behavior
+        # (home always on CPU). Setting offload_after_backward=False keeps the
+        # sharded param + grad on the compute device for a device-side optimizer.
+        self.offload_after_forward: bool = (
+            self.offload_to_cpu
+            and cast(CPUOffloadPolicy, offload_policy).offload_after_forward
+        )
+        self.offload_after_backward: bool = (
+            self.offload_to_cpu
+            and cast(CPUOffloadPolicy, offload_policy).offload_after_backward
+        )
         self.grad_offload_event: torch.Event | None = None
         self._init_sharded_param(param, device, shard_placement_fn, mesh_info)
         if self.post_forward_mesh_info:
@@ -343,7 +355,15 @@ class FSDPParam:
             padded_sharded_param.narrow(
                 dim=shard_dim, start=0, length=sharded_param.size(shard_dim)
             ).copy_(sharded_param)
-        if self.offload_to_cpu and not padded_sharded_param.is_meta:
+        # The sharded param's resting device is CPU only when it is offloaded
+        # after backward. With offload_after_backward=False it rests on the
+        # compute device (so an eager-initialized / device-side optimizer sees a
+        # device param) and is only transiently stashed to CPU after forward.
+        if (
+            self.offload_to_cpu
+            and self.offload_after_backward
+            and not padded_sharded_param.is_meta
+        ):
             padded_sharded_param = padded_sharded_param.cpu()
             if self.pin_memory:
                 padded_sharded_param = padded_sharded_param.pin_memory()
@@ -1325,7 +1345,11 @@ class FSDPParam:
             )
             local_tensor = padded_local_tensor
             updated_local_tensor = True
-        if self.pin_memory and not local_tensor.is_pinned():
+        if (
+            self.offload_after_backward
+            and self.pin_memory
+            and not local_tensor.is_pinned()
+        ):
             local_tensor = local_tensor.cpu().pin_memory()
             updated_local_tensor = True
         if not same_local_tensor:
@@ -1342,6 +1366,53 @@ class FSDPParam:
                     "Expected sharded_param._local_tensor to be contiguous"
                 )
         self._sharding_spec = self.sharded_param._spec
+
+    @torch.no_grad()
+    def _ensure_sharded_param_device(self, device: torch.device) -> None:
+        """Move the sharded parameter's home storage to ``device`` for per-phase
+        stashing (CPU offload). No-op unless CPU offload is enabled and a real
+        device change is needed. Rebuilds the DTensor local-tensor view and
+        sharding spec, mirroring ``reset_sharded_param``.
+
+        Only the default plain-tensor path is supported. Tensor subclasses /
+        all-gather extensions (with ``fsdp_pre_all_gather``) are not supported:
+        if a real device migration is required for one, we fail fast rather than
+        silently leaving the sharded param on the wrong device (which would later
+        crash the optimizer step with a device mismatch).
+        """
+        if not self.offload_to_cpu:
+            return
+        local_tensor = self._sharded_param_data
+        if local_tensor.is_meta or local_tensor.device.type == device.type:
+            return
+        if type(local_tensor) is not torch.Tensor:
+            raise NotImplementedError(
+                "Per-phase CPU offload stashing (offload_after_forward / "
+                "offload_after_backward) does not support tensor subclasses / "
+                "all-gather extensions. Use the defaults "
+                "(offload_after_forward=True, offload_after_backward=True) or "
+                "plain-tensor parameters."
+            )
+        shard_dim = self.fsdp_placement.dim
+        padded = local_tensor.view(self.padded_sharded_param_size).to(
+            device, non_blocking=True
+        )
+        if device.type == "cpu" and self.pin_memory:
+            padded = padded.pin_memory()
+        self._sharded_param_data = padded.view(-1)
+        cur_local = cast(DTensor, self.sharded_param)._local_tensor
+        length = cur_local.size(shard_dim) if cur_local.numel() > 0 else 0
+        new_local = padded.narrow(dim=shard_dim, start=0, length=length)
+        # Change BOTH the outer DTensor wrapper device (via ``.data``, so grad
+        # assignment / device checks see the new device and the Parameter object
+        # identity is preserved for the optimizer) AND the inner ``_local_tensor``
+        # (so the foreach optimizer math on the local shard runs on the new
+        # device). Setting only one leaves a half-migrated param: ``.data`` alone
+        # keeps a stale CPU local tensor; ``._local_tensor`` alone keeps a stale
+        # CPU wrapper device.
+        self.sharded_param.data = self.to_sharded_dtensor(new_local)
+        cast(DTensor, self.sharded_param)._local_tensor = new_local
+        self._sharding_spec = cast(DTensor, self.sharded_param)._spec
 
     def __repr__(self):
         return f"FSDPParam(fqn={self._param_fqn}, orig_size={self._orig_size})"
