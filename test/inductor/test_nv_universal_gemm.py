@@ -850,6 +850,32 @@ class TestNVUniversalGemm(TestCase):
 class TestNVUniversalGemmHeuristics(TestCase):
     """Unit tests for NVUniversalGemmHeuristics without requiring actual libraries."""
 
+    def test_atomic_reduction_fusion_hooks(self):
+        from torch._inductor.codegen.cuda_combined_scheduling import (
+            CUDACombinedScheduling,
+        )
+
+        scheduling = CUDACombinedScheduling.__new__(CUDACombinedScheduling)
+        nvgemm = MagicMock()
+        triton = MagicMock()
+        scheduling._nv_universal_gemm_scheduling = nvgemm
+        scheduling._triton_scheduling = triton
+        node1, node2 = MagicMock(), MagicMock()
+
+        nvgemm.has_conflicting_epilogue_reductions.return_value = True
+        self.assertFalse(scheduling.can_fuse_reduction_pair(node1, node2))
+
+        nvgemm.get_fusion_pair_priority.return_value = 1
+        self.assertEqual(scheduling.get_fusion_pair_priority(node1, node2), 1)
+        triton.get_fusion_pair_priority.assert_not_called()
+
+        nvgemm.get_fusion_pair_priority.return_value = 2
+        triton.get_fusion_pair_priority.return_value = 4
+        self.assertEqual(scheduling.get_fusion_pair_priority(node1, node2), 6)
+
+        nvgemm.has_nvgemm_bool_output.side_effect = (False, True)
+        self.assertFalse(scheduling.can_fuse_horizontal(node1, node2))
+
     def test_grouped_reduction_affine_index_rejects_offset(self):
         from torch._inductor.codegen.nv_universal_gemm.epilogue_lowering import (
             _matches_affine_index,
@@ -892,6 +918,41 @@ class TestNVUniversalGemmHeuristics(TestCase):
         )
         with self.assertRaisesRegex(NotImplementedError, "one logical element"):
             LoopIRCuteDSLCodegen.source_from_expression("gemm", source, "source")
+
+    def test_epilogue_rejects_remapped_same_shape_load(self):
+        from torch._inductor.kernel.loop_ir_cutedsl_codegen import LoopIRCuteDSLCodegen
+        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
+            GemmEpilogueIRAnalysis,
+            GemmEpilogueIRExpression as Expr,
+            GemmEpilogueIRStore,
+        )
+
+        i, j = sympy.symbols("i j", integer=True)
+        buffers = {name: MagicMock() for name in ("gemm", "other", "out")}
+        for buffer in buffers.values():
+            buffer.get_size.return_value = (4, 4)
+            buffer.get_stride.return_value = (4, 1)
+            buffer.get_layout.return_value.offset = 0
+        graph = MagicMock(graph_inputs={})
+        graph.get_buffer.side_effect = buffers.get
+        graph.sizevars.statically_known_equals.side_effect = lambda a, b: a == b
+        analysis = GemmEpilogueIRAnalysis(
+            {
+                "out": GemmEpilogueIRStore(
+                    4 * i + j,
+                    Expr("load", ("other", i + 4 * j, None)),
+                )
+            },
+            index_vars={"out": (i, j)},
+        )
+
+        with (
+            V.set_graph_handler(graph),
+            self.assertRaisesRegex(NotImplementedError, "remapped tensor loads"),
+        ):
+            LoopIRCuteDSLCodegen("gemm", OrderedSet())._validate_load_indices(
+                analysis, "out"
+            )
 
     def test_output_scale_rejects_value_changing_cast(self):
         from torch._inductor.kernel.loop_ir_cutedsl_codegen import LoopIRCuteDSLCodegen
