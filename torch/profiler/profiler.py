@@ -577,6 +577,19 @@ class _KinetoProfile:
         self._monitor_window_id = None
         return obs
 
+    def export_using_protocol(self, path: str, protocol_name: str | None = None):
+        """Export trace using a registered Kineto protocol.
+
+        When ``protocol_name`` is ``None`` or ``"chrome"``, this falls back to
+        :meth:`export_chrome_trace`.  Otherwise the path is forwarded to
+        Kineto's save as ``<protocol_name>://<path>``.
+        """
+        if self.profiler is None:
+            raise AssertionError(
+                "Profiler must be initialized before exporting with a protocol"
+            )
+        self.profiler.export_using_protocol(path, protocol_name)
+
     def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
         """Save stack traces to a file
 
@@ -875,15 +888,32 @@ def tensorboard_trace_handler(
     worker_name: str | None = None,
     use_gzip: bool = False,
     use_python_export: bool = False,
+    save_protocol: str | None = None,
+    save_extension: str | None = None,
 ):
     """
     Outputs tracing files to directory of ``dir_name``, then that directory can be
     directly delivered to tensorboard as logdir.
     ``worker_name`` should be unique for each worker in distributed scenario,
     it will be set to '[hostname]_[pid]' by default.
+
+    Args:
+        dir_name: Output directory for tracing files
+        worker_name: Unique name per worker for creating output filename
+        use_gzip: Flag whether the output file should be gzipped
+        use_python_export: Only honored for chrome protocol, flags whether
+            to utilize the python or libkineto implementation for chrome export
+        save_protocol: Kineto logger protocol name (e.g. ``"perfetto"``).
+            When ``None``, the default chrome trace export is used.
+        save_extension: File extension including the leading dot
+            (e.g. ``".pftrace"``).  Required when ``save_protocol`` is set.
+            Defaults to ``".pt.trace.json"`` when no protocol is specified.
     """
     import socket
     import time
+
+    if save_protocol is not None and save_extension is None:
+        raise ValueError("save_extension is required when save_protocol is set")
 
     def handler_fn(prof) -> None:
         nonlocal worker_name
@@ -894,14 +924,31 @@ def tensorboard_trace_handler(
                 raise RuntimeError("Can't create directory: " + dir_name) from e
         if not worker_name:
             worker_name = f"{socket.gethostname()}_{os.getpid()}"
+        ext = save_extension if save_extension is not None else ".pt.trace.json"
         # Use nanosecond here to avoid naming clash when exporting the trace
-        file_name = f"{worker_name}.{time.time_ns()}.pt.trace.json"
+        file_name = f"{worker_name}.{time.time_ns()}{ext}"
         if use_gzip:
             file_name = file_name + ".gz"
-        prof.export_chrome_trace(
-            os.path.join(dir_name, file_name),
-            use_python_export=use_python_export,
-        )
+        file_path = os.path.join(dir_name, file_name)
+        if save_protocol is not None:
+            if use_gzip:
+                with tempfile.NamedTemporaryFile(
+                    suffix=ext, dir=dir_name, delete=False
+                ) as fp:
+                    tmp_path = fp.name
+                try:
+                    prof.export_using_protocol(tmp_path, save_protocol)
+                    with (
+                        open(tmp_path, "rb") as fin,
+                        gzip.open(file_path, "wb") as fout,
+                    ):
+                        fout.writelines(fin)
+                finally:
+                    os.unlink(tmp_path)
+            else:
+                prof.export_using_protocol(file_path, save_protocol)
+        else:
+            prof.export_chrome_trace(file_path, use_python_export=use_python_export)
 
     return handler_fn
 
