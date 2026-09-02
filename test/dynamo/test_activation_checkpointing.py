@@ -2523,6 +2523,60 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
 
         self.assertEqual(budgets, [0.0, 0.0, 0.7, 0.7])
 
+    def test_region_activation_memory_budget_partial_coverage_survives_graph_break(
+        self,
+    ):
+        def fn(x):
+            with torch.autograd.graph.region_activation_memory_budget(
+                0.2, require_full_coverage=False
+            ):
+                x = x.sin()
+                torch._dynamo.graph_break()
+                x = x.cos()
+            return x + 1
+
+        compiled = torch.compile(fn, backend="aot_eager")
+        x = torch.randn(4, requires_grad=True)
+        out = compiled(x)
+        self.assertEqual(out, x.sin().cos() + 1)
+        out.sum().backward()
+
+    def test_region_activation_memory_budget_coverage_continuation_cache(self):
+        graphs = []
+
+        def backend(gm, _):
+            graphs.append(gm)
+            return gm.forward
+
+        def fn(x, require_full_coverage):
+            with torch.autograd.graph.region_activation_memory_budget(
+                0.2, require_full_coverage=require_full_coverage
+            ):
+                x = x.sin()
+                torch._dynamo.graph_break()
+                return x.cos()
+
+        compiled = torch.compile(fn, backend=backend)
+        x = torch.randn(4)
+        for require_full_coverage in (True, False, True):
+            self.assertEqual(compiled(x, require_full_coverage), x.sin().cos())
+
+        annotations = []
+        get_requirement = torch.fx.traceback._get_memory_budget_require_full_coverage
+        for gm in graphs:
+            graph_annotations = []
+            for node in gm.graph.nodes:
+                if node.op not in ("call_function", "call_method"):
+                    continue
+                budget = torch.fx.traceback._get_memory_budget_annotation(node)
+                if budget is not None:
+                    graph_annotations.append((budget, get_requirement(node)))
+            annotations.append(graph_annotations)
+        self.assertEqual(
+            annotations,
+            [[(0.2, True)], [(0.2, True)], [(0.2, False)], [(0.2, False)]],
+        )
+
     def test_region_activation_memory_budget_nested_graph_breaks(self):
         graphs = []
 
@@ -2637,6 +2691,8 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
             region_activation_memory_budget(2.0)
         with self.assertRaisesRegex(ValueError, r"\[0, 1\]"):
             region_activation_memory_budget(-0.1)
+        with self.assertRaisesRegex(TypeError, "require_full_coverage.*bool"):
+            region_activation_memory_budget(0.5, require_full_coverage=1)
 
     def test_region_activation_memory_budget_eager_raises(self):
         """Using the context manager outside a torch.compile region is an error."""
@@ -2661,8 +2717,7 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
             cfn(x, y).sum().backward()
 
     def test_region_activation_memory_budget_partial_annotation_raises(self):
-        """Annotating only part of a graph is rejected: the budget is applied
-        graph-wide, so it must cover the entire forward."""
+        """The default rejects a context that annotates only part of a graph."""
 
         def fn(x, y):
             with torch.autograd.graph.region_activation_memory_budget(0.3):
@@ -2675,6 +2730,76 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
         y = torch.randn(8, 8, requires_grad=True)
         with self.assertRaisesRegex(RuntimeError, "must cover the entire forward"):
             cfn(x, y).sum().backward()
+
+    def test_region_activation_memory_budget_partial_coverage_allowed(self):
+        from unittest.mock import patch
+
+        import torch._functorch.partitioners as partitioners
+
+        budgets = []
+        choose_saved_values_set = partitioners.choose_saved_values_set
+
+        def record_budget(joint_graph, node_info, memory_budget=1):
+            budgets.append(memory_budget)
+            return choose_saved_values_set(
+                joint_graph, node_info, memory_budget=memory_budget
+            )
+
+        def fn(x, y):
+            with torch.autograd.graph.region_activation_memory_budget(
+                0.3, require_full_coverage=False
+            ):
+                a = (torch.mm(x, y) + 1).relu()
+            return (a * 2).relu()
+
+        backend = aot_autograd(
+            fw_compiler=lambda gm, _: gm.forward,
+            bw_compiler=lambda gm, _: gm.forward,
+            partition_fn=min_cut_rematerialization_partition,
+        )
+        with patch.object(partitioners, "choose_saved_values_set", record_budget):
+            cfn = torch.compile(fn, backend=backend, fullgraph=True)
+            x = torch.randn(8, 8, requires_grad=True)
+            y = torch.randn(8, 8, requires_grad=True)
+            cfn(x, y).sum().backward()
+
+        self.assertEqual(budgets, [0.3])
+
+    def test_region_activation_memory_budget_strict_coverage_wins(self):
+        def fn(x):
+            with torch.autograd.graph.region_activation_memory_budget(
+                0.3, require_full_coverage=False
+            ):
+                x = x.sin()
+            with torch.autograd.graph.region_activation_memory_budget(0.3):
+                x = x.cos()
+            return x.tan()
+
+        cfn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        x = torch.randn(8, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "must cover the entire forward"):
+            cfn(x).sum().backward()
+
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_region_activation_memory_budget_partial_coverage_invoke_subgraph(self):
+        from torch.compiler import nested_compile_region
+
+        weight = torch.randn(8, 8, requires_grad=True)
+
+        @nested_compile_region
+        def region(x):
+            with torch.autograd.graph.region_activation_memory_budget(
+                0.3, require_full_coverage=False
+            ):
+                return (x @ weight).relu()
+
+        def fn(x):
+            return (region(x) + 1).sum()
+
+        cfn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        x = torch.randn(8, 8, requires_grad=True)
+        cfn(x).backward()
+        self.assertIsNotNone(x.grad)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)

@@ -60,7 +60,10 @@ from torch.fx.experimental.symbolic_shapes import (
     statically_known_true,
 )
 from torch.fx.passes import graph_drawer
-from torch.fx.traceback import _get_memory_budget_annotation
+from torch.fx.traceback import (
+    _get_memory_budget_annotation,
+    _get_memory_budget_require_full_coverage,
+)
 from torch.utils._ordered_set import OrderedSet
 from torch.utils.checkpoint import CheckpointPolicy
 
@@ -4268,23 +4271,24 @@ def min_cut_rematerialization_partition(
             break
 
     # The partitioner applies a single budget per joint graph, so all annotated
-    # nodes must agree and the annotation must cover every forward op; otherwise
-    # the caller mixed budgets or annotated only part of a graph (across a graph
-    # break each graph is resolved independently). Collect both in one pass.
+    # nodes must agree. By default the annotation must cover every forward op;
+    # require_full_coverage=False permits partial coverage and applies the budget
+    # to the entire graph. Collect the budget, coverage requirement, and any
+    # unannotated forward ops in one pass.
     region_budgets: OrderedSet[float] = OrderedSet()
+    requires_full_coverage = False
     unannotated_fw_ops: list[fx.Node] = []
     for node in joint_graph.nodes:
         budget = _get_memory_budget_annotation(node)
         if budget is not None:
             region_budgets.add(budget)
+            requires_full_coverage |= _get_memory_budget_require_full_coverage(node)
         elif node.op == "call_function" and node_info.is_required_fw(node):
             unannotated_fw_ops.append(node)
 
-    # A budget must consistently cover the entire forward, including HOP bodies.
-    # Recurse into nested subgraph modules: collect their budgets (for the
-    # agreement check) and flag any unannotated call_function (for coverage). In
-    # a consistent graph every node in every body carries the budget, so an
-    # unannotated body op means the budget did not cover that HOP.
+    # Budget agreement and optional full-coverage checks include HOP bodies.
+    # Recurse into nested subgraph modules to collect their budgets and any
+    # unannotated call_function nodes.
     all_budgets: OrderedSet[float] = OrderedSet(region_budgets)
     for _, sub in joint_module.named_modules():
         if isinstance(sub, fx.GraphModule) and sub.graph is not joint_graph:
@@ -4292,6 +4296,9 @@ def min_cut_rematerialization_partition(
                 b = _get_memory_budget_annotation(node)
                 if b is not None:
                     all_budgets.add(b)
+                    requires_full_coverage |= _get_memory_budget_require_full_coverage(
+                        node
+                    )
                 elif node.op == "call_function":
                     unannotated_fw_ops.append(node)
     if len(all_budgets) > 1:
@@ -4303,14 +4310,14 @@ def min_cut_rematerialization_partition(
         )
 
     if all_budgets:
-        if unannotated_fw_ops:
+        if requires_full_coverage and unannotated_fw_ops:
             raise RuntimeError(
                 f"torch.autograd.graph.region_activation_memory_budget: must "
                 f"cover the entire forward of a graph (including HOP bodies), but "
                 f"{len(unannotated_fw_ops)} forward op(s) are unannotated. Wrap "
-                f"the whole forward in a single region; use a graph break to scope "
-                f"different budgets to different graphs. Note that a graph break "
-                f"inside the annotated region can also cause unannotated ops here. "
+                f"the whole forward in a single region, or set "
+                f"require_full_coverage=False to apply the budget to the entire "
+                f"compiled region. "
                 f"Unannotated ops: {[n.name for n in unannotated_fw_ops]}."
             )
         memory_budget = next(iter(all_budgets))
