@@ -1385,17 +1385,13 @@ class NCCLSymmetricMemoryNccl2Test(MultiProcContinuousTest):
             tensor = symm_mem.empty(
                 1_234_567, dtype=torch.float, device=self.device
             ).fill_(self.rank + 1)
-            result = torch.ops.symm_mem.one_shot_all_reduce(
-                tensor, "sum", group_name
-            )
+            result = torch.ops.symm_mem.one_shot_all_reduce(tensor, "sum", group_name)
 
         for _ in range(3):
             graph.replay()
             self.assertEqual(
                 result,
-                torch.full_like(
-                    result, self.world_size * (self.world_size + 1) / 2
-                ),
+                torch.full_like(result, self.world_size * (self.world_size + 1) / 2),
             )
 
 

@@ -122,21 +122,19 @@ class TORCH_API NCCLDevCommManager {
     auto comm_it = group_to_comm_.find(group_name);
     auto support_it = group_to_device_api_support_.find(group_name);
     return comm_it != group_to_comm_.end() && comm_it->second == comm &&
-        support_it != group_to_device_api_support_.end() &&
-        support_it->second;
+        support_it != group_to_device_api_support_.end() && support_it->second;
   }
 
   bool capture_allocation_supported() {
-    if (c10::utils::check_env(
-            "TORCH_NCCL_SYMM_MEM_DISABLE_CAPTURE_ALLOC") == true) {
+    if (c10::utils::check_env("TORCH_NCCL_SYMM_MEM_DISABLE_CAPTURE_ALLOC") ==
+        true) {
       return false;
     }
     std::lock_guard<std::mutex> lock(mutex_);
     if (capture_setup_stream_ == nullptr) {
       return false;
     }
-    for (const auto& [_, supported] :
-         group_to_capture_allocation_support_) {
+    for (const auto& [_, supported] : group_to_capture_allocation_support_) {
       if (supported) {
         return true;
       }
@@ -363,8 +361,7 @@ class TORCH_API NCCLDevCommManager {
 
 #ifdef USE_ROCM
   std::unordered_map<std::string, bool> group_to_device_api_support_;
-  std::unordered_map<std::string, bool>
-      group_to_capture_allocation_support_;
+  std::unordered_map<std::string, bool> group_to_capture_allocation_support_;
   cudaStream_t capture_setup_stream_{nullptr};
   std::mutex capture_setup_mutex_;
 #endif
