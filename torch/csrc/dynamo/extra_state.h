@@ -128,7 +128,10 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // admits it -- must not free or relink nodes that lookup is iterating
   // (reset_code from Python run BY A GUARD is the same-thread use-after-free
   // this closes). Guarded by pending_invalidation_mutex; applied by the next
-  // cache_mutex holder whose cache_python_depth is zero.
+  // cache_mutex holder whose cache_python_depth is zero. Known limit: an
+  // eviction parked from inside a lookup is applied AFTER entries that same
+  // Python then installs or compiles, and takes them too unless (as install()
+  // does with a fresh owner token) they are keyed apart from it.
   struct PendingEviction {
     enum Kind : uint8_t {
       CLEAR_ALL, // every cache and precompile entry

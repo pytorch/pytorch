@@ -234,9 +234,11 @@ def _identity(x: Any) -> Any:
 
 @functools.cache
 def _warn_replayed_custom_function_view(idx: int) -> None:
-    # Once per process and input (the cache, not warnings' registry: each
-    # codegen'd epilogue is a fresh fabricated frame, so the registry would
-    # re-warn per compiled function). Tests reset it with .cache_clear().
+    # Once per process per mutated input index, where idx is the input's
+    # position among the compiled function's inputs (the cache, not warnings'
+    # registry: each codegen'd epilogue is a fresh fabricated frame, so the
+    # registry would re-warn per compiled function). Tests reset it with
+    # .cache_clear().
     warnings.warn(
         f"torch.compile is writing mutated input {idx} back onto a view created "
         "inside a custom autograd.Function (or an input it returned as-is) "
@@ -263,12 +265,13 @@ def _replay_input_mutation(orig: torch.Tensor, updated: torch.Tensor, idx: int) 
     in-place op to such a view; compile cannot tell a ``.data`` write from a
     visible one at the region boundary (both functionalize to the same
     ``mutates_data`` metadata), so it replays either kind invisibly and warns
-    once per process. A later use of the view then differentiates through its
-    pre-mutation history: the custom Function's backward runs, but on the
-    gradient of the post-mutation values with no contribution from the
-    mutating op. Clearing CreationMeta to force a tracked copy through instead
-    would reroute the base's history and silently drop the custom Function's
-    backward entirely.
+    once per process per mutated input index (``idx``, the input's position
+    among the compiled function's inputs). A later use of the view then
+    differentiates through its pre-mutation history: the custom Function's
+    backward runs, but on the gradient of the post-mutation values with no
+    contribution from the mutating op. Clearing CreationMeta to force a tracked
+    copy through instead would reroute the base's history and silently drop the
+    custom Function's backward entirely.
 
     Decided per call rather than baked into the epilogue because nothing
     guards it -- a graph traced against an ordinary tensor can be handed such
