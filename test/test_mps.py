@@ -4914,6 +4914,23 @@ class TestMPS(TestCaseMPS):
             helper((1, 5), (4, 0, 5), src_dtype, dst_dtype)
             helper((3, 1, 0), (3, 5, 0), src_dtype, dst_dtype)
             helper((0, 1, 0), (0, 5, 0), src_dtype, dst_dtype)
+
+        def check_uint8_broadcast(src, dst_shape):
+            cpu_dst = torch.zeros(dst_shape, dtype=torch.uint8)
+            cpu_result = cpu_dst.copy_(src)
+            mps_dst = torch.zeros(dst_shape, dtype=torch.uint8, device="mps")
+            mps_result = mps_dst.copy_(src.to("mps"))
+            self.assertEqual(cpu_result, mps_result)
+
+        # Regression test for https://github.com/pytorch/pytorch/issues/160744
+        for src_dtype in (torch.float32, torch.int32):
+            for dst_shape in ((), (1,), (1, 1, 1), (3,), (2, 2)):
+                check_uint8_broadcast(torch.tensor(-1, dtype=src_dtype), dst_shape)
+
+        for value in (-1.0, 0.0, 1.0, 255.0):
+            check_uint8_broadcast(torch.full((1,), value, dtype=torch.float32), (3,))
+            check_uint8_broadcast(torch.full((1, 1), value, dtype=torch.float32), (2, 2))
+
         # Regression test for https://github.com/pytorch/pytorch/issues/107867
         self.assertEqual(torch.tensor([[1]], device='mps').item(), 1.0)
 
