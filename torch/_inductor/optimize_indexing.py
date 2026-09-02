@@ -182,8 +182,8 @@ def indexing_dtype_strength_reduction(loop_body: LoopBody) -> None:
         )
 
 
-def _int64_index_expr(loop_body: LoopBody, node: Any) -> sympy.Expr | None:
-    """Loop-body expression behind an int64 ``index_expr``/``value_expr`` node."""
+def _index_expr_arg(loop_body: LoopBody, node: Any) -> tuple[str, sympy.Expr] | None:
+    """Indexing name and expression behind an int64 ``index_expr``/``value_expr`` node."""
     if not (
         isinstance(node, torch.fx.Node)
         and node.op == "call_method"
@@ -198,28 +198,24 @@ def _int64_index_expr(loop_body: LoopBody, node: Any) -> sympy.Expr | None:
         and index.target == "get_index"
     ):
         return None
-    return loop_body.indexing_exprs[index.args[0]]
+    return index.args[0], loop_body.indexing_exprs[index.args[0]]
 
 
-def _range_implied_vars(
-    loop_body: LoopBody, predicate: Any
-) -> OrderedSet[sympy.Symbol]:
-    """
-    Iteration vars ``v`` for which ``predicate`` being true proves
-    ``v < var_ranges[v]``: conjunctions of ``v < bound`` terms with a
-    statically known ``0 <= bound <= var_ranges[v]``.
-    """
-    result: OrderedSet[sympy.Symbol] = OrderedSet()
+def _range_implied_indices(loop_body: LoopBody, predicate: Any) -> OrderedSet[str]:
+    result = OrderedSet[str]()
     if not isinstance(predicate, torch.fx.Node) or predicate.op != "call_method":
         return result
     if predicate.target in ("and_", "logical_and"):
         for term in predicate.args[1:]:
-            result |= _range_implied_vars(loop_body, term)
+            result |= _range_implied_indices(loop_body, term)
         return result
     if predicate.target != "lt":
         return result
     lhs, rhs = predicate.args[1:]
-    var = _int64_index_expr(loop_body, lhs)
+    lhs_index = _index_expr_arg(loop_body, lhs)
+    if lhs_index is None:
+        return result
+    name, var = lhs_index
     if not isinstance(var, sympy.Symbol) or var not in loop_body.var_ranges:
         return result
     if (
@@ -231,33 +227,30 @@ def _range_implied_vars(
     ):
         bound: sympy.Expr | None = sympy.Integer(rhs.args[1])
     else:
-        bound = _int64_index_expr(loop_body, rhs)
+        rhs_index = _index_expr_arg(loop_body, rhs)
+        bound = None if rhs_index is None else rhs_index[1]
     sizevars = V.graph.sizevars
     if (
         bound is not None
         and sizevars.statically_known_geq(bound, 0)
         and sizevars.statically_known_leq(bound, loop_body.var_ranges[var])
     ):
-        result.add(var)
+        result.add(name)
     return result
 
 
-def annotate_range_implied_vars(loop_body: LoopBody) -> None:
+def range_implied_indices(loop_body: LoopBody, node: torch.fx.Node) -> OrderedSet[str]:
     """
-    For every ``masked_subblock`` and ``masked_store`` node, record the
-    iteration vars whose range bound is implied by the node's predicate in
-    ``loop_body.range_implied_vars``. Codegen may drop the range mask of
-    those vars inside the masked region since the predicate already
-    excludes the out-of-range lanes.
+    Indexing names of ``loop_body`` that are a single iteration var ``v``
+    whose range bound ``v < var_ranges[v]`` is implied by the predicate of
+    ``node``, a ``masked_subblock`` call or a ``masked_store``: the predicate
+    is a conjunction of ``v < bound`` terms with a statically known
+    ``0 <= bound <= var_ranges[v]``. Codegen may drop the range mask of such a
+    var inside the masked region since the predicate already excludes the
+    out-of-range lanes.
     """
-    for node in loop_body.get_nodes():
-        if node.op == "call_module" and str(node.target).startswith("masked_subblock"):
-            predicate = node.args[0]
-        elif node.op == "call_method" and node.target == "masked_store":
-            predicate = node.args[4]
-        else:
-            continue
-        loop_body.range_implied_vars[node] = _range_implied_vars(loop_body, predicate)
+    predicate = node.args[4] if node.target == "masked_store" else node.args[0]
+    return _range_implied_indices(loop_body, predicate)
 
 
 @dataclass(frozen=True)

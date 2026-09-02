@@ -9,8 +9,8 @@ from torch._inductor import config
 from torch._inductor.codegen.common import deduce_output_dtype_by_name
 from torch._inductor.loop_body import LoopBody
 from torch._inductor.optimize_indexing import (
-    annotate_range_implied_vars,
     convert_index_expr_to_value_expr,
+    range_implied_indices,
     remove_redundant_argreduce_indices,
 )
 from torch._inductor.sizevars import SizeVarAllocator
@@ -109,7 +109,7 @@ class TestOptimizeIndexing(TestCase):
         return graph, reduction, value, index_expr, get_index
 
     def _masked_loop_body(self, predicate, var_range, masked_store=False):
-        """Trace ``masked``/``masked_store`` over one iteration var guarded by ``predicate(var)``."""
+        """Trace ``masked``/``masked_store`` over one iteration var guarded by ``predicate(var)``; return the var and the implied iteration vars."""
         r0 = sympy.Symbol("r0", integer=True, nonnegative=True)
 
         def fn(index, reduction_index):
@@ -120,15 +120,13 @@ class TestOptimizeIndexing(TestCase):
                 return V.ops.masked_store("buf1", i, value, mask)
             return V.ops.masked(mask, lambda: V.ops.load("buf0", i), 0.0)
 
-        shape_env = ShapeEnv()
         graph = _FakeGraph()
-        graph.sizevars = SizeVarAllocator(shape_env)
+        graph.sizevars = SizeVarAllocator(ShapeEnv())
         with V.set_graph_handler(graph):
             loop_body = LoopBody(fn, ([r0], []), {r0: var_range}, [r0], [])
-            annotate_range_implied_vars(loop_body)
-        (node,) = loop_body.range_implied_vars
-        self.assertEqual(node.op, "call_method" if masked_store else "call_module")
-        return r0, loop_body.range_implied_vars[node]
+            node = loop_body.root_block.graph.output_node().args[0]
+            names = range_implied_indices(loop_body, node)
+        return r0, OrderedSet(loop_body.indexing_exprs[name] for name in names)
 
     @staticmethod
     def _size_symbol(name="s0", hint=1000):
@@ -141,7 +139,7 @@ class TestOptimizeIndexing(TestCase):
     @parametrize(
         "bound,var_range,accepted", [(8, 9, True), (8, 8, True), (9, 8, False)]
     )
-    def test_range_implied_vars_constant_bound(self, op, bound, var_range, accepted):
+    def test_range_implied_indices_constant_bound(self, op, bound, var_range, accepted):
         def predicate(i):
             lhs = getattr(V.ops, op)(i, torch.int64)
             return V.ops.lt(lhs, V.ops.constant(bound, torch.int64))
@@ -149,7 +147,7 @@ class TestOptimizeIndexing(TestCase):
         r0, implied = self._masked_loop_body(predicate, var_range)
         self.assertEqual(implied, OrderedSet([r0]) if accepted else OrderedSet())
 
-    def test_range_implied_vars_non_variable_lhs_rejected(self):
+    def test_range_implied_indices_non_variable_lhs_rejected(self):
         def predicate(i):
             lhs = V.ops.index_expr(2 * i, torch.int64)
             return V.ops.lt(lhs, V.ops.constant(8, torch.int64))
@@ -157,7 +155,7 @@ class TestOptimizeIndexing(TestCase):
         _, implied = self._masked_loop_body(predicate, 9)
         self.assertEqual(implied, OrderedSet())
 
-    def test_range_implied_vars_constant_lhs_rejected(self):
+    def test_range_implied_indices_constant_lhs_rejected(self):
         def predicate(i):
             rhs = V.ops.index_expr(i, torch.int64)
             return V.ops.lt(V.ops.constant(1, torch.int64), rhs)
@@ -165,7 +163,7 @@ class TestOptimizeIndexing(TestCase):
         _, implied = self._masked_loop_body(predicate, 9)
         self.assertEqual(implied, OrderedSet())
 
-    def test_range_implied_vars_conjunction(self):
+    def test_range_implied_indices_conjunction(self):
         def predicate(i):
             idx = V.ops.index_expr(i, torch.int64)
             lower = V.ops.ge(idx, V.ops.constant(1, torch.int64))
@@ -176,7 +174,7 @@ class TestOptimizeIndexing(TestCase):
         self.assertEqual(implied, OrderedSet([r0]))
 
     @parametrize("accepted", [True, False])
-    def test_range_implied_vars_symbolic_bound(self, accepted):
+    def test_range_implied_indices_symbolic_bound(self, accepted):
         s0 = self._size_symbol()
 
         def predicate(i):
@@ -187,7 +185,7 @@ class TestOptimizeIndexing(TestCase):
         self.assertEqual(implied, OrderedSet([r0]) if accepted else OrderedSet())
 
     @parametrize("accepted", [True, False])
-    def test_range_implied_vars_masked_store(self, accepted):
+    def test_range_implied_indices_masked_store(self, accepted):
         def predicate(i):
             idx = V.ops.index_expr(i, torch.int64)
             return V.ops.lt(idx, V.ops.constant(8 if accepted else 9, torch.int64))
