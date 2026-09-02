@@ -24,18 +24,37 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #endif
 
 static void cdist_kernel_mps(Tensor& result, const Tensor& x1, const Tensor& x2, const double p) {
-  // Promote fp16/bf16 to fp32 internally so the max-norm argmax selection
-  // matches what the CPU reference does (which falls back to fp32 for
-  // these dtypes anyway).
-  const auto out_dtype = result.scalar_type();
-  const bool promote = at::isReducedFloatingType(out_dtype);
-  const auto compute_dtype = promote ? at::kFloat : out_dtype;
-  auto diff = x1.to(compute_dtype).unsqueeze(-2).sub(x2.to(compute_dtype).unsqueeze(-3));
-  auto out = at::linalg_vector_norm(diff, p, makeArrayRef<int64_t>(-1), /*keepdim=*/false, /*dtype=*/std::nullopt);
-  if (promote) {
-    out = out.to(out_dtype);
+  const int64_t batches = x1.size(0);
+  const int64_t x1_rows = x1.size(1);
+  const int64_t x2_rows = x2.size(1);
+  const int64_t dimensions = x1.size(2);
+  const int p_kind = p == 0.0 ? 0 : p == 1.0 ? 1 : p == 2.0 ? 2 : std::isinf(p) ? 3 : 4;
+  const bool scalar4 = p_kind != 4;
+  const auto kernel =
+      fmt::format("cdist_forward_{}{}_p{}", scalar4 ? "scalar4_" : "scalar_", scalarToMetalTypeString(x1), p_kind);
+  const CdistFwdParams params{
+      .B = batches,
+      .P = x1_rows,
+      .R = x2_rows,
+      .D = dimensions,
+      .p = static_cast<float>(p),
+  };
+  const NSUInteger inner = scalar4 ? c10::metal::ceil_div(x2_rows, int64_t{4}) : x2_rows;
+  const NSUInteger outer = batches * x1_rows;
+  auto stream = getCurrentMPSStream();
+  @autoreleasepool {
+    auto pso = lib.getPipelineStateForFunc(kernel);
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        auto encoder = stream->commandEncoder();
+        getMPSProfiler().beginProfileKernel(pso, "cdist_forward", {x1, x2});
+        [encoder setComputePipelineState:pso];
+        mtl_setArgs(encoder, x1, x2, result, params);
+        mtl_dispatch2DJob(encoder, pso, inner, outer);
+        getMPSProfiler().endProfileKernel(pso);
+      }
+    });
   }
-  result.copy_(out.reshape(result.sizes()));
 }
 
 static void cdist_backward_kernel_mps(Tensor& result,
