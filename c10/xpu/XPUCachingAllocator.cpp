@@ -2478,7 +2478,7 @@ class NativeCachingAllocator : public XPUAllocator {
       c10::DeviceGuard guard(c10::Device(c10::kXPU, block->device));
       auto& current_queue = xpu::getCurrentXPUStream(block->device).queue();
       sycl::context ctx = current_queue.get_context();
-        auto handle_owner = xpu_ipc::ipc_exported_handle_cache->getOrCreate(
+      auto handle_owner = xpu_ipc::ipc_exported_handle_cache->getOrCreate(
           base_ptr, block->device, ctx);
 
       return {

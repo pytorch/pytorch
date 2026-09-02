@@ -279,18 +279,20 @@ XpuSharedStorage ShareXpuStorage(const at::Storage& storage) {
     return shared;
   }
 
-  auto shandle =
+  auto share_handle =
       c10::xpu::XPUCachingAllocator::shareIpcHandle(storage.mutable_data());
 
-  shared.handle = shandle.handle;
-  shared.offset_bytes = shandle.offset;
+  shared.handle = share_handle.handle;
+  shared.offset_bytes = share_handle.offset;
 
   at::DataPtr sent_data_ptr =
       GetNewRefCountedXpuSentData(storage.mutable_data(), storage.device());
   auto old_data_ptr = storage.set_data_ptr(std::move(sent_data_ptr));
   auto sent_data = static_cast<XpuIPCSentData*>(storage.data_ptr().get_context());
   sent_data->set_original_ptr(std::move(old_data_ptr));
-  sent_data->set_export_handle_owner(std::move(shandle.handle_owner));
+  if (share_handle.owner.has_value()) {
+    sent_data->set_export_handle_owner(std::move(share_handle.owner.value()));
+  }
 
   shared.ref_counter_handle = sent_data->handle();
   shared.ref_counter_offset = sent_data->offset();

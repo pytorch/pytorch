@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/AllocatorIPC.h>
 #include <c10/core/AllocatorConfig.h>
 #include <c10/core/CachingDeviceAllocator.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
@@ -19,14 +20,7 @@
 #include <utility>
 
 namespace c10 {
-
-// Caching allocator will execute every registered callback if it unable to find
-// block inside of already allocated area.
-class C10_CUDA_API FreeMemoryCallback {
- public:
-  virtual ~FreeMemoryCallback() = default;
-  virtual bool Execute() = 0;
-};
+using allocator::ipc::FreeMemoryCallback;
 
 C10_DECLARE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback);
 #define REGISTER_FREE_MEMORY_CALLBACK(name, ...) \
@@ -47,6 +41,8 @@ C10_DECLARE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback);
 // of these functions.
 
 namespace c10::cuda::CUDACachingAllocator {
+
+using c10::allocator::ipc::ShareableHandle;
 
 // Preserved only for BC reasons
 // NOLINTNEXTLINE(misc-unused-using-decls)
@@ -110,11 +106,6 @@ using OomRejectionObserver = std::function<void(
     size_t alloc_size,
     size_t total_allocated,
     size_t device_total)>;
-
-struct ShareableHandle {
-  ptrdiff_t offset;
-  std::string handle;
-};
 
 struct StreamSegmentSize {
   StreamSegmentSize(cudaStream_t s, bool small_, size_t sz)
