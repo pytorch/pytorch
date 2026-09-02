@@ -4,6 +4,7 @@ import contextlib
 import copy
 import itertools
 import logging
+import math
 import os
 import pickle
 import shutil
@@ -612,7 +613,44 @@ class NoRunnableInductorModuleError(RuntimeError):
     """
 
 
-def _runnable_source(compiled_graph: OutputCode) -> str:
+def _passthrough_source(gm: GraphModule) -> str | None:
+    placeholders = {
+        node: index
+        for index, node in enumerate(gm.graph.nodes)
+        if node.op == "placeholder"
+    }
+    output = next((node for node in gm.graph.nodes if node.op == "output"), None)
+    if output is None or any(
+        node.op not in ("placeholder", "output") for node in gm.graph.nodes
+    ):
+        return None
+
+    def render(value: Any) -> str:
+        if isinstance(value, torch.fx.Node):
+            if value not in placeholders:
+                raise KeyError(value)
+            return f"args[{placeholders[value]}]"
+        if isinstance(value, tuple):
+            values = ", ".join(render(item) for item in value)
+            return f"({values},)" if len(value) == 1 else f"({values})"
+        if isinstance(value, list):
+            return f"[{', '.join(render(item) for item in value)}]"
+        if isinstance(value, float) and not math.isfinite(value):
+            return f"float({str(value)!r})"
+        if value is None or isinstance(value, (bool, int, float, str)):
+            return repr(value)
+        raise TypeError
+
+    try:
+        result = render(output.args[0])
+    except (KeyError, TypeError):
+        return None
+    return f"def call(args):\n    return {result}\n"
+
+
+def _runnable_source(
+    compiled_graph: OutputCode, gm: GraphModule, *, allow_passthrough: bool = False
+) -> str:
     """Return the Inductor output-module source for a compiled inner graph.
 
     ``compile_fx_inner`` returns a ``CompiledFxGraph`` that carries the wrapper-module
@@ -621,6 +659,8 @@ def _runnable_source(compiled_graph: OutputCode) -> str:
     surface as ``NoRunnableInductorModuleError``.
     """
     source = getattr(compiled_graph, "source_code", None)
+    if not source and allow_passthrough:
+        source = _passthrough_source(gm)
     if not source:
         raise NoRunnableInductorModuleError(
             "the compiled graph produced no runnable Inductor output module: it has no "
@@ -698,6 +738,9 @@ def compile_to_python(
     example_inputs: Sequence[InputType],
     *,
     options: dict[str, Any] | None = None,
+    is_inference: bool = True,
+    is_backward: bool = False,
+    output_strides: list[tuple[str, ...] | None] | None = None,
 ) -> tuple[str, bytes | None]:
     """Compile ``gm`` and return ``(inner_python, cache)`` -- the INNER half of the
     backend contract behind ``torch.compiler.precompile``.
@@ -715,6 +758,11 @@ def compile_to_python(
     layer -- a companion change in ``torch._functorch.aot_autograd`` wraps this and
     composes AOTAutograd's codegen'd runtime wrappers around the result.
     Callers must run ``call`` under ``torch.no_grad()`` (the kernels use out= ops).
+    ``is_inference`` selects Inductor's inference or training layout heuristics, while
+    ``is_backward`` enables backward-specific lowering constraints. If ``output_strides``
+    is provided, it is extended with the layouts selected for the graph outputs so an
+    AOTAutograd backward can be lowered against the forward's actual saved-activation
+    layouts.
 
     Caller preconditions (this layer does not re-derive them):
 
@@ -853,11 +901,19 @@ def compile_to_python(
             fake_inputs,
             static_input_idxs=(),
             cudagraphs=BoxedBool(False),
-            is_inference=True,
+            is_inference=is_inference,
+            is_backward=is_backward,
             boxed_forward_device_index=BoxedDeviceIndex(None),
         )
         artifacts = torch.compiler.save_cache_artifacts()
-    inner_python = _runnable_source(compiled_graph)
+    if output_strides is not None:
+        # The strides Inductor CHOSE for this graph's outputs, which only exist
+        # once it has lowered. A training backward has to be compiled against
+        # the forward's actual choices -- layout optimization is free to hand
+        # back channels-last saved activations -- and this is the only channel
+        # for that, since the caller cannot see the CompiledFxGraph.
+        output_strides.extend(getattr(compiled_graph, "output_strides", None) or [])
+    inner_python = _runnable_source(compiled_graph, gm, allow_passthrough=is_backward)
     cache = _acceleration_cache_bytes(artifacts)
     return inner_python, cache
 
