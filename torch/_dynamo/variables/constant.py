@@ -11,7 +11,7 @@ from __future__ import annotations
 import enum
 import operator
 from collections.abc import Iterable
-from typing import Any, Literal, overload, TYPE_CHECKING
+from typing import Any, cast, Literal, overload, TYPE_CHECKING
 
 import torch
 from torch._dynamo.source import GetItemSource
@@ -230,7 +230,13 @@ class ConstantVariable(VariableTracker):
 
     def hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
         """Dynamo tracing rule for long_hash, float_hash, unicode_hash, etc."""
-        return hash(self.value), False
+        # __mro__ always ends ..., <builtin base>, object, no matter how many
+        # subclass levels sit on top (a user-defined int/float/str subclass
+        # included) -- so the entry just before object is always the actual
+        # immutable builtin whose own __hash__ we want, bypassing any
+        # Python-level __hash__ override further down the MRO.
+        base = cast(Any, type(self.value).__mro__[-2])
+        return base.__hash__(self.value), False
 
     def tp_richcompare_impl(
         self, tx: InstructionTranslatorBase, other: VariableTracker, op: str
@@ -377,7 +383,7 @@ class ConstantVariable(VariableTracker):
             if name in ("split", "rsplit", "splitlines"):
                 return ConstantVariable.create(result, mutation_type=ValueMutationNew())
             return ConstantVariable.create(result)
-        elif isinstance(self.value, (float, int)) and hasattr(self.value, name):
+        elif istype(self.value, (float, int)) and hasattr(self.value, name):
             if not (args or kwargs):
                 try:
                     return ConstantVariable.create(getattr(self.value, name)())
