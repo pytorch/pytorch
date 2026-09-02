@@ -12,6 +12,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_utils import HardwareClassification, serialTest
 from torch.utils._triton import has_triton
 
+
 try:
     import triton
     from triton import language as tl
@@ -59,18 +60,21 @@ class TestOperatorReorderForPeakMemory(TestCase):
 
     def setUp(self):
         super().setUp()
-
-        self.model = Foo().to(self.device_type)
-        M = 4096 if torch.version.hip is not None else 2048
-        self.inputs = torch.ones((M, 2), device=self.device_type)
         self.orig_reorder_method = memory.reorder_for_peak_memory
+
+    def _create_model_and_inputs(self, device):
+        model = Foo().to(device)
+        M = 4096 if torch.version.hip is not None else 2048
+        inputs = torch.ones((M, 2), device=device)
+        return model, inputs
 
     @config.patch("score_fusion_memory_threshold", 1)
     @mock.patch.object(config, "reorder_for_peak_memory", True)
     def test_reorder_peak_memory(self, device):
-        outp_corr = self.model(self.inputs)
-        compiled_model = torch.compile(self.model)
-        code = run_and_get_triton_code(compiled_model, self.inputs)
+        model, inputs = self._create_model_and_inputs(device)
+        outp_corr = model(inputs)
+        compiled_model = torch.compile(model)
+        code = run_and_get_triton_code(compiled_model, inputs)
 
         call_str = (
             "def call(self, args):"
@@ -91,13 +95,14 @@ class TestOperatorReorderForPeakMemory(TestCase):
             .run(code)
         )
         # check for correctness
-        outp = compiled_model(self.inputs)
+        outp = compiled_model(inputs)
         self.assertTrue(same(outp, outp_corr))
 
     @config.patch("score_fusion_memory_threshold", 1)
     @mock.patch.object(config, "reorder_for_peak_memory", True)
     def test_reorder_peak_memory_lpmf(self, device):
-        outp_corr = self.model(self.inputs)
+        model, inputs = self._create_model_and_inputs(device)
+        outp_corr = model(inputs)
 
         def reorder_with_only_lpmf(
             nodes,
@@ -125,9 +130,9 @@ class TestOperatorReorderForPeakMemory(TestCase):
         with mock.patch.object(
             memory, "reorder_for_peak_memory", reorder_with_only_lpmf
         ):
-            compiled_model = torch.compile(self.model)
+            compiled_model = torch.compile(model)
 
-            code = run_and_get_triton_code(compiled_model, self.inputs)
+            code = run_and_get_triton_code(compiled_model, inputs)
             (
                 FileCheck()
                 .check(call_str)
@@ -141,13 +146,14 @@ class TestOperatorReorderForPeakMemory(TestCase):
                 .run(code)
             )
             # check for correctness
-            outp = compiled_model(self.inputs)
+            outp = compiled_model(inputs)
             self.assertTrue(same(outp, outp_corr))
 
     @config.patch("score_fusion_memory_threshold", 1)
     @mock.patch.object(config, "reorder_for_peak_memory", True)
     def test_reorder_peak_memory_bfs(self, device):
-        outp_corr = self.model(self.inputs)
+        model, inputs = self._create_model_and_inputs(device)
+        outp_corr = model(inputs)
 
         def reorder_with_only_bfs(
             nodes,
@@ -175,9 +181,9 @@ class TestOperatorReorderForPeakMemory(TestCase):
         with mock.patch.object(
             memory, "reorder_for_peak_memory", reorder_with_only_bfs
         ):
-            compiled_model = torch.compile(self.model)
+            compiled_model = torch.compile(model)
 
-            code = run_and_get_triton_code(compiled_model, self.inputs)
+            code = run_and_get_triton_code(compiled_model, inputs)
 
             (
                 FileCheck()
@@ -192,13 +198,14 @@ class TestOperatorReorderForPeakMemory(TestCase):
                 .run(code)
             )
             # check for correctness
-            outp = compiled_model(self.inputs)
+            outp = compiled_model(inputs)
             self.assertTrue(same(outp, outp_corr))
 
     @config.patch("score_fusion_memory_threshold", 1)
     @mock.patch.object(config, "reorder_for_peak_memory", True)
     def test_reorder_peak_memory_dfs(self, device):
-        outp_corr = self.model(self.inputs)
+        model, inputs = self._create_model_and_inputs(device)
+        outp_corr = model(inputs)
 
         def reorder_with_only_dfs(
             nodes,
@@ -226,9 +233,9 @@ class TestOperatorReorderForPeakMemory(TestCase):
         with mock.patch.object(
             memory, "reorder_for_peak_memory", reorder_with_only_dfs
         ):
-            compiled_model = torch.compile(self.model)
+            compiled_model = torch.compile(model)
 
-            code = run_and_get_triton_code(compiled_model, self.inputs)
+            code = run_and_get_triton_code(compiled_model, inputs)
             (
                 FileCheck()
                 .check(call_str)
@@ -242,7 +249,7 @@ class TestOperatorReorderForPeakMemory(TestCase):
                 .run(code)
             )
             # check for correctness
-            outp = compiled_model(self.inputs)
+            outp = compiled_model(inputs)
             self.assertTrue(same(outp, outp_corr))
 
     @config.patch("score_fusion_memory_threshold", 1)
