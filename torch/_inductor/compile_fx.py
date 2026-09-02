@@ -677,6 +677,28 @@ def _patch_nested_region_inductor_config(
     return config.patch(patches)
 
 
+def _any_subgraph_configures_cudagraphs(gm: GraphModule) -> bool:
+    """True if any invoke_subgraph region configures forward or backward cudagraphs."""
+    for mod in gm.modules():
+        if not isinstance(mod, GraphModule):
+            continue
+        for node in mod.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.invoke_subgraph
+        ):
+            nested_config = node.meta.get("custom", {}).get("nested_region_config")
+            if nested_config is None:
+                continue
+            if any(
+                patches is not None and "triton.cudagraphs" in patches
+                for patches in (
+                    nested_config.inductor_config_patches,
+                    nested_config.bw_inductor_config_patches,
+                )
+            ):
+                return True
+    return False
+
+
 def _propagate_invoke_subgraph_nested_region_config(gm: GraphModule) -> None:
     # Seed each invoke_subgraph subgraph module's meta from the node meta, which
     # (unlike a GraphModule's meta) survives FX transforms. Re-run at the start of
@@ -996,6 +1018,8 @@ def with_fresh_cache_if_config() -> Generator[None, None, None]:
 
 class _CompileFxKwargs(TypedDict, total=False):
     cudagraphs: BoxedBool | None
+    # True when graph_partition should create partitions only for annotated regions.
+    cudagraph_partition_only_regions: bool
     static_input_idxs: Sequence[int]
     is_backward: bool
     graph_id: int | None
@@ -1811,6 +1835,9 @@ class _InProcessFxCompile(FxCompile):
                     inputs_to_check=inputs_to_check,
                     fx_wrapper=fx_wrapper,
                     get_decomp_fn=get_decomp_fn,
+                    cudagraph_partition_only_regions=graph_kwargs.get(
+                        "cudagraph_partition_only_regions", False
+                    ),
                 )
                 metrics_helper = metrics.CachedMetricsHelper()
 
@@ -2047,7 +2074,9 @@ class _InProcessFxCompile(FxCompile):
                         V.graph.disable_cudagraphs_reason = (
                             check_lowering_disable_cudagraph(
                                 # pyrefly: ignore [unbound-name]
-                                V.graph.device_node_mapping
+                                V.graph.device_node_mapping,
+                                # pyrefly: ignore [unbound-name]
+                                use_cudagraph_partition=V.graph.use_cudagraph_partition,
                             )
                         )
 
@@ -2725,7 +2754,28 @@ class CompilerConfigExtra:
 def create_compiler_config_extra(
     gm: GraphModule | GmWrapper,
 ) -> CompilerConfigExtra:
+    """Compute state shared by the AOT forward and backward compilers."""
     dynamo_graph_metadata = gm.meta if isinstance(gm, GraphModule) else None
+    pre_aot_graph = gm if isinstance(gm, GraphModule) else getattr(gm, "gm", None)
+    has_regional_cudagraphs = (
+        pre_aot_graph is not None and _any_subgraph_configures_cudagraphs(pre_aot_graph)
+    )
+    cudagraph_annotation = (
+        dynamo_graph_metadata.get("cudagraph_annotation")
+        if dynamo_graph_metadata is not None
+        else None
+    )
+    if (
+        has_regional_cudagraphs
+        and cudagraph_annotation is not None
+        and (
+            cudagraph_annotation.fwd is not None or cudagraph_annotation.bwd is not None
+        )
+    ):
+        raise RuntimeError(
+            "torch._dynamo.override_cudagraphs cannot be combined with "
+            "triton.cudagraphs in nested compile-region options"
+        )
 
     # Although cudagraphs may have been enabled via config, various
     # conditions (which are tested within the bowels of Inductor) may
@@ -2738,14 +2788,13 @@ def create_compiler_config_extra(
     # Override cudagraphs BoxedBool based on override_cudagraphs annotation.
     # Disabling fwd disables bwd (copying activations isn't profitable),
     # so cudagraphs_bwd_override is only needed for fwd=True / bwd=False.
-    if (
-        dynamo_graph_metadata is not None
-        and (annotation := dynamo_graph_metadata.get("cudagraph_annotation"))
-        is not None
-    ):
-        if annotation.fwd is not None and annotation.fwd != config.triton.cudagraphs:
-            forward_cudagraphs = BoxedBool(annotation.fwd)
-            if annotation.fwd:
+    if cudagraph_annotation is not None:
+        if (
+            cudagraph_annotation.fwd is not None
+            and cudagraph_annotation.fwd != config.triton.cudagraphs
+        ):
+            forward_cudagraphs = BoxedBool(cudagraph_annotation.fwd)
+            if cudagraph_annotation.fwd:
                 cudagraphs_log.info(
                     "enabling cudagraphs due to override_cudagraphs annotation"
                 )
@@ -2758,10 +2807,10 @@ def create_compiler_config_extra(
         # explicitly disables them.
         if (
             forward_cudagraphs.value
-            and annotation.bwd is not None
-            and not annotation.bwd
+            and cudagraph_annotation.bwd is not None
+            and not cudagraph_annotation.bwd
         ):
-            cudagraphs_bwd_override = annotation.bwd
+            cudagraphs_bwd_override = cudagraph_annotation.bwd
             log_cudagraph_skip_and_bump_counter(
                 "disabling cudagraphs for backward due to override_cudagraphs annotation"
             )
