@@ -143,6 +143,23 @@ class TestBlackwellBMM(TestCase):
         self.assertIn("ctas_per_cga=(2, 1, 1)", codes[0])
         self.assertIn("make_tensor_descriptor(out_ptr0", codes[0])
 
+    def test_tuned_bmm_choice_smoke(self):
+        bsz, m, k, n = 3, 256, 8193, 128
+        a_storage = torch.randn(bsz, k, m, device="cuda", dtype=torch.bfloat16)
+        a = a_storage.transpose(1, 2)
+        b = torch.randn(bsz, k, n, device="cuda", dtype=torch.bfloat16)
+        with config.patch(
+            max_autotune=True,
+            max_autotune_gemm_backends="ATEN,TRITON",
+            compile_threads=1,
+            **{
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.enable_blackwell_bmm_template": True,
+            },
+        ):
+            actual = torch.compile(torch.bmm, fullgraph=True)(a, b)
+        torch.testing.assert_close(actual, torch.bmm(a, b), atol=16.0, rtol=1e-1)
+
 
 if __name__ == "__main__":
     if HAS_GPU and HAS_CPU:
