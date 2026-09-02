@@ -4221,9 +4221,11 @@ class ReinterpretView(BaseView):
         return list(self.layout.stride)
 
     def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
+        name = self.get_name()
+
         def loader(index: Sequence[Expr]) -> OpsValue:
             indexer = self.layout.make_indexer()
-            tmp_loader = ops.load(self.get_name(), indexer(index))
+            tmp_loader = ops.load(name, indexer(index))
             if self.layout.dtype != self.data.dtype:
                 return ops.to_dtype_bitcast(tmp_loader, self.dtype, self.data.dtype)
             else:
