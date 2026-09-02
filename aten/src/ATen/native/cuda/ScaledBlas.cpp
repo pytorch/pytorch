@@ -1261,7 +1261,7 @@ _scaled_mxfp4_mxfp4(
               "Block-wise scaling only supports BFloat16 or Half output types");
 #endif
 
-  return _scaled_gemm(mat_a, mat_b, scale_a, scale_b, ScalingType::BlockWise1x32, ScalingType::BlockWise1x32, swizzle_a, swizzle_b, bias, false /* use_fast_accum */, out);
+  return _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, swizzle_a, swizzle_b, bias, false /* use_fast_accum */, out);
 #else
   // NVIDIA
   mslk::gemm::f4f4bf16(
