@@ -244,6 +244,14 @@ by default, which will fill the uninitialized memory with a known value if
 `torch.use_deterministic_algorithms(True)` is set. This will prevent the
 possibility of this kind of nondeterministic behavior.
 
+As a result, a nondeterministic failure that disappears after enabling
+`torch.use_deterministic_algorithms(True)` is not necessarily caused by
+nondeterministic algorithms. Filling uninitialized memory can also make the
+failure deterministic. To distinguish these cases, leave deterministic
+algorithms enabled and temporarily set
+`torch.utils.deterministic.fill_uninitialized_memory` to `False`. If the
+failure becomes nondeterministic again, it may be reading uninitialized memory.
+
 However, filling uninitialized memory is detrimental to performance. So if your
 program is valid and does not use uninitialized memory as the input to an
 operation, then this setting can be turned off for better performance.
