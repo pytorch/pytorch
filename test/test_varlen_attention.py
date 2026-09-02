@@ -364,6 +364,7 @@ def create_variable_length_batch(
 class TestVarlenAttentionDevice(NNTestCase):
     # varlen_attn validates the scale and resolves a backend before dispatching
     # any kernel, so these checks hold on every device.
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @parametrize("scale", [0.0, -0.125, float("nan")])
     def test_varlen_invalid_scale(self, device, scale):
