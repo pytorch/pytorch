@@ -705,6 +705,19 @@ nvgemm_supplement_configs: bool = (
 # small-M decode shapes typical in LLM inference (M << N).
 nvgemm_swap_ab: bool = os.environ.get("TORCHINDUCTOR_NVGEMM_SWAP_AB", "0") == "1"
 
+# Benchmark medium-M NVFP4 GEMMs against a rotating pool of weight tensors large
+# enough to exceed L2. Replaying one weight makes it artificially hot and can
+# select a slower kernel for transformer inference, where each layer uses a
+# different weight matrix. The benchmark request further scopes this to shapes
+# where the cold-weight policy changed model-level winners.
+nvgemm_autotune_cold_cache: bool = (
+    os.environ.get("TORCHINDUCTOR_NVGEMM_AUTOTUNE_COLD_CACHE", "0") == "1"
+)
+
+# Controls weight-prefetch variants for the vendored SM100 block-scaled GEMM.
+# "autotune" makes both variants available to the normal algorithm selector.
+nvgemm_prefetch: str = os.environ.get("TORCHINDUCTOR_NVGEMM_PREFETCH", "0")
+
 
 # Triton conv templates show wins on ROCm; on CUDA, profiling shows no gains on H100.
 _conv_default_backends = "ATEN,TRITON" if torch.version.hip else "ATEN"
