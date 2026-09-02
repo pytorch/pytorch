@@ -5,28 +5,35 @@ Optimize complete chains that assemble a tensor from slices.
 Match and replace contiguous chunks as follows:
 
     out = base
-    out = aten.slice_scatter(out, chunk0, dim, 0, end0)
-    out = aten.slice_scatter(out, chunk1, dim, end0, end1)
-    out = aten.slice_scatter(out, chunk2, dim, end1, size)
+    copied0 = aten.copy(aten.slice(out, dim, 0, end0), chunk0)
+    out = aten.slice_scatter(out, copied0, dim, 0, end0)
+    copied1 = aten.copy(aten.slice(out, dim, end0, size), chunk1)
+    out = aten.slice_scatter(out, copied1, dim, end0, size)
 
-    out = aten.cat([chunk0, chunk1, chunk2], dim)
+    aten.copy_(aten.slice(base, dim, 0, end0), chunk0)
+    aten.copy_(aten.slice(base, dim, end0, size), chunk1)
+    out = base
 
-Functionalization can additionally wrap a chunk in a fully overwriting
-``copy(slice(out), chunk)`` and insert aliases around ``out``. For that form,
-reuse an ``empty`` or ``empty_strided`` base allocation and replace the chain
-with ``copy_`` into its slices. This consumes each chunk where its original
-``slice_scatter`` occurred instead of keeping every chunk live until a final
-``cat``.
+The source may be the chunk directly, or functionalization may wrap it in a
+fully overwriting ``copy(slice(out), chunk)`` and insert aliases around
+``out``. Reuse an ``empty`` or ``empty_strided`` base allocation and replace
+the chain with ``copy_`` into its slices. This consumes each chunk where its
+original ``slice_scatter`` occurred instead of keeping every chunk live until
+the end of the chain. Canonical single-use graph inputs, non-realized contiguous
+pointwise chunks, and CUDA outputs of nested compile regions instead become
+``cat`` so they can use one output copy.
 
-The writes must replace every value from ``base``. The output and chunks must
-have the same dtype, and ``cat`` must preserve the output layout. Other chains
-are left unchanged for normal lowering.
+The writes must replace every value from ``base``, and the output and chunks
+must have the same dtype and device. Other chains are left unchanged for normal
+lowering.
 """
 
+import operator
 from dataclasses import dataclass
 from typing import Any
 
 import torch
+from torch._inductor.fx_utils import is_node_realized
 from torch._inductor.pattern_matcher import (
     CallFunctionVarArgs,
     compute_mutation_region_ids,
@@ -167,14 +174,30 @@ def _view_path_to_state(
 def _collect_dead_view_nodes(
     node: torch.fx.Node, removable_nodes: OrderedSet[torch.fx.Node]
 ) -> bool:
-    if node in removable_nodes:
-        return True
-    if not _is_view_op(node.target) or any(
-        not _collect_dead_view_nodes(user, removable_nodes) for user in node.users
-    ):
-        return False
-    removable_nodes.add(node)
-    return True
+    postorder = []
+    is_view = {}
+    seen = OrderedSet[torch.fx.Node]()
+    stack = [(node, False)]
+    while stack:
+        current, expanded = stack.pop()
+        if current in removable_nodes:
+            continue
+        if expanded:
+            postorder.append(current)
+            continue
+        if current in seen:
+            continue
+        seen.add(current)
+        current_is_view = _is_view_op(current.target)
+        is_view[current] = current_is_view
+        stack.append((current, True))
+        if current_is_view:
+            stack.extend((user, False) for user in current.users)
+
+    for current in postorder:
+        if is_view[current] and all(user in removable_nodes for user in current.users):
+            removable_nodes.add(current)
+    return node in removable_nodes
 
 
 def _get_full_tensor_slice_scatter_chain(
@@ -355,46 +378,70 @@ def _replace_with_inplace_copies(match: Match, chain: _SliceScatterChain) -> Non
     match.erase_nodes()
 
 
-def _is_inductor_optimizable_cat(
-    base: torch.fx.Node, sources: list[torch.fx.Node]
-) -> bool:
-    # cat is usable only when it preserves the factory's tensor metadata and
-    # presents ordinary contiguous inputs to Inductor's fusion machinery.
-    base_val = base.meta.get("val")
-    if not isinstance(base_val, torch.Tensor):
+def _is_nested_compile_region_output(node: torch.fx.Node) -> bool:
+    if node.op != "call_function" or node.target is not operator.getitem:
         return False
-    if (
-        not _is_supported_base_factory(base)
-        or base_val.layout != torch.strided
-        or not _has_contiguous_memory_format_strides(base_val)
-    ):
-        return False
-    return all(
-        isinstance(src_val := src.meta.get("val"), torch.Tensor)
-        and src_val.device == base_val.device
-        and src_val.dtype == base_val.dtype
-        and src_val.layout == base_val.layout
-        and _has_contiguous_memory_format_strides(src_val)
-        for src in sources
+    region = node.args[0]
+    value = node.meta.get("val")
+    return (
+        isinstance(region, torch.fx.Node)
+        and region.op == "call_function"
+        and region.target is torch.ops.higher_order.invoke_subgraph
+        and isinstance(value, torch.Tensor)
+        and value.device.type == "cuda"
     )
 
 
-def _has_contiguous_memory_format_strides(tensor: torch.Tensor) -> bool:
-    return all(
-        _statically_known_eq(actual, expected)
-        for actual, expected in zip(
-            tensor.stride(), make_contiguous_strides_for(tensor.shape), strict=True
+def _can_fuse_as_cat(chain: _SliceScatterChain) -> bool:
+    base_val = chain.base.meta.get("val")
+    if (
+        chain.functional_copies
+        or not isinstance(base_val, torch.Tensor)
+        or base_val.layout != torch.strided
+    ):
+        return False
+
+    for src in chain.sources:
+        is_input = src.op == "placeholder"
+        is_pointwise = (
+            isinstance(src.target, torch._ops.OpOverload)
+            and torch.Tag.pointwise in src.target.tags
         )
+        if (
+            len(src.users) != 1
+            or not (is_input or is_pointwise or _is_nested_compile_region_output(src))
+            or (not is_input and is_node_realized(src))
+        ):
+            return False
+
+    tensors = [base_val, *(src.meta.get("val") for src in chain.sources)]
+    return all(
+        isinstance(tensor, torch.Tensor)
+        and tensor.device == base_val.device
+        and tensor.dtype == base_val.dtype
+        and tensor.layout == base_val.layout
+        and all(
+            _statically_known_eq(actual, expected)
+            for actual, expected in zip(
+                tensor.stride(),
+                make_contiguous_strides_for(tensor.shape),
+                strict=True,
+            )
+        )
+        for tensor in tensors
     )
 
 
 def slice_scatter_chunking_pass(graph: torch.fx.Graph) -> bool:
-    """Rewrite complete slice_scatter chains as cat or bounded-lifetime copies."""
-    compute_mutation_region_ids(graph)
-    introduced_mutation = False
+    """Rewrite complete slice_scatter chains without full-sized intermediates."""
     slice_scatters = graph.find_nodes(
         op="call_function", target=aten.slice_scatter.default
     )
+    if len(slice_scatters) < 2:
+        return False
+
+    compute_mutation_region_ids(graph)
+    introduced_mutation = False
     node_order = {node: index for index, node in enumerate(graph.nodes)}
     examined = OrderedSet[torch.fx.Node]()
     for slice_scatter in reversed(slice_scatters):
@@ -414,33 +461,23 @@ def slice_scatter_chunking_pass(graph: torch.fx.Graph) -> bool:
 
         match.nodes = sorted(result.removable_nodes, key=node_order.__getitem__)
 
-        # A functional copy snapshots each chunk at its original write. Keep
-        # that lifetime by writing into a proven-fresh base at the same point;
-        # cat would retain every chunk until the end of the chain.
-        if result.functional_copies:
-            if not _is_reusable_base_factory(result.base):
-                continue
-            if _custom_context(result.base) != _custom_context(
-                result.slice_scatters[-1]
-            ):
-                continue
-            _replace_with_inplace_copies(match, result)
-            introduced_mutation = True
+        if not _is_reusable_base_factory(result.base):
+            continue
+        if _custom_context(result.base) != _custom_context(result.slice_scatters[-1]):
             continue
 
-        if not _is_inductor_optimizable_cat(result.base, result.sources):
+        if _can_fuse_as_cat(result):
+
+            def replacement(*chunks):
+                return torch.cat(chunks, dim=result.dim)
+
+            match.replace_by_example(replacement, result.sources)
+            if not result.base.users and not result.base.is_impure():
+                graph.erase_node(result.base)
             continue
 
-        def replacement(*chunks):
-            return torch.cat(chunks, dim=result.dim)
-
-        match.replace_by_example(replacement, result.sources)
-        if (
-            result.base.op == "call_function"
-            and not result.base.users
-            and not result.base.is_impure()
-        ):
-            graph.erase_node(result.base)
+        _replace_with_inplace_copies(match, result)
+        introduced_mutation = True
     if introduced_mutation:
         # Each mutated base is writable storage disjoint from its inputs and has
         # no users outside its chain, so rewrites cannot invalidate later matches.
