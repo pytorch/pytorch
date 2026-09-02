@@ -4392,11 +4392,15 @@ class _AutogradBackwardCompiler:
             self.lazy_backward_info, AutogradLazyBackwardCompileInfo
         )
 
-    def _donated_idxs_for(self, kept_arg_indices: Sequence[int] | None) -> list[int]:
-        # bw_donated_idxs are positions in the ORIGINAL backward's input list;
-        # a specialized backward keeps a subset (kept_arg_indices maps its
-        # positions back), so remap before inductor applies them positionally.
-        donated = self.fw_metadata.bw_donated_idxs or []
+    @staticmethod
+    def _donated_idxs_for(
+        donated: Sequence[int], kept_arg_indices: Sequence[int] | None
+    ) -> list[int]:
+        # ``donated`` are positions in the ORIGINAL backward's input list (the
+        # snapshot _prepare_lazy_backward_context took under its lock, so it
+        # cannot straddle a concurrent retain_graph clear); a specialized
+        # backward keeps a subset (kept_arg_indices maps its positions back),
+        # so remap before inductor applies them positionally.
         if kept_arg_indices is None:
             return list(donated)
         donated_set = set(donated)
@@ -4508,7 +4512,9 @@ class _AutogradBackwardCompiler:
 
         bw_compiler = self.bw_compiler
         if isinstance(self.lazy_backward_info, AutogradLazyBackwardCompileInfo):
-            self._prepare_lazy_backward_context(saved_tensors_use_once)
+            donated_snapshot = self._prepare_lazy_backward_context(
+                saved_tensors_use_once
+            )
             # May have dropped the donated-buffer backwards; re-snapshot.
             base_bw = self.compiled_bw
             bw_module = typing.cast(
@@ -4577,7 +4583,18 @@ class _AutogradBackwardCompiler:
                 )
 
                 def _retrace() -> Any:
+                    # The retrace re-runs the joint trace under the shared
+                    # TracingContext's fake mode, whose dispatch state is not
+                    # safe to use from two threads at once; serialize it on the
+                    # same per-context lock the compile below takes (never
+                    # nested with it: the retrace completes before the compile).
+                    retrace_lock: AbstractContextManager[Any] = (
+                        _tracing_context_compile_lock(saved_context)
+                        if isinstance(saved_context, TracingContext)
+                        else nullcontext()
+                    )
                     with (
+                        retrace_lock,
                         tracing(saved_context),
                         compile_context(saved_compile_context),
                     ):
@@ -4661,7 +4678,7 @@ class _AutogradBackwardCompiler:
             else:
                 bw_module, placeholder_list, kept_arg_indices = specialized
 
-        donated_idxs = self._donated_idxs_for(kept_arg_indices)
+        donated_idxs = self._donated_idxs_for(donated_snapshot, kept_arg_indices)
         context = torch._C._DisableAutocast if self.disable_amp else nullcontext
         metrics_context = get_metrics_context()
         with (
@@ -4722,7 +4739,11 @@ class _AutogradBackwardCompiler:
             donated,
         )
 
-    def _prepare_lazy_backward_context(self, saved_tensors_use_once: bool) -> None:
+    def _prepare_lazy_backward_context(self, saved_tensors_use_once: bool) -> list[int]:
+        """Prepare for a lazy backward compile; return the donated-buffer
+        indices the compile must use, snapshotted under the lock so the
+        recorded donation status of the resulting entry cannot straddle a
+        concurrent retain_graph clear."""
         if self.lazy_backward_info is None:
             raise AssertionError("lazy_backward_info must not be None")
         if not isinstance(self.lazy_backward_info, AutogradLazyBackwardCompileInfo):
@@ -4750,7 +4771,6 @@ class _AutogradBackwardCompiler:
                             "expected same # of fw and bw compiles, "
                             f"but found bucket {ddp_ctx.curr_bucket}"
                         )
-                    curr_fw_meta = ddp_ctx.metadata_per_bucket[ddp_ctx.curr_bucket]
                     # Note [DDPOptimizer and fw_metadata]
                     # When using the DDPOptimizer, we have a single dynamo graph (and TracingContext),
                     # but multiple AOTDispatcher graph.
@@ -4771,8 +4791,11 @@ class _AutogradBackwardCompiler:
                     # We do this by stashing a DDPOptimizerContext, which tracks:
                     # - the metadata of all N graphs
                     # - the graph we are currently compiling in our DDPOptimizer region.
+                    # Only the bucket bookkeeping remains here: every backward
+                    # compile installs this compiler's own fw_metadata on the
+                    # context for its duration (_compile_fw_metadata), so the
+                    # context's fw_metadata is never read from here.
                     ddp_ctx.curr_bucket -= 1
-                    saved_ctx.fw_metadata = curr_fw_meta
                 self.lazy_backward_context_prepared = True
             else:
                 self.lazy_backward_context_prepared = True
@@ -4786,19 +4809,7 @@ class _AutogradBackwardCompiler:
                     self.specialized_compiled_bws.clear()
                     self.compiled_bw = None
                 self.fw_metadata.bw_donated_idxs = []
-                # Update bw_donated_idxs if using lazy_backward_info from `aot_dispatch_autograd`
-                if (
-                    hasattr(self.lazy_backward_info, "saved_context")
-                    and hasattr(self.lazy_backward_info.saved_context, "fw_metadata")
-                    and hasattr(
-                        self.lazy_backward_info.saved_context.fw_metadata,  # type: ignore[union-attr]
-                        "bw_donated_idxs",
-                    )
-                ):
-                    self.lazy_backward_info.saved_context.fw_metadata.bw_donated_idxs = (  # type: ignore[union-attr]
-                        # pyrefly: ignore [implicit-any]
-                        []
-                    )
+            return list(self.fw_metadata.bw_donated_idxs or [])
 
 
 def _codegen_backward_prologue(

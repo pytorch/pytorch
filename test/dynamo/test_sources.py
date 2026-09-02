@@ -164,6 +164,17 @@ class GuardProvenanceTests(torch._dynamo.test_case.TestCase):
                 "root source (see Note [Guard provenance] in torch/_guards.py)",
             )
 
+    def test_guard_provenance_is_public(self):
+        # The enum is re-exported from torch.compiler for guard_filter_fn
+        # authors; the re-export is the same object and reports the public
+        # module (test_public_bindings checks the latter, not the former).
+        import torch.compiler
+        from torch._guards import GuardProvenance
+
+        self.assertIs(torch.compiler.GuardProvenance, GuardProvenance)
+        self.assertEqual(torch.compiler.GuardProvenance.__module__, "torch.compiler")
+        self.assertIn("GuardProvenance", torch.compiler.__all__)
+
     def test_provenance_classifies_by_root(self):
         from torch._dynamo.source import (
             BackwardStateSource,

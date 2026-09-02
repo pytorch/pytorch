@@ -99,7 +99,9 @@ _STANDALONE_RUNTIME_IMPORT = (
 
 
 def _standalone_runtime_exports() -> dict[int, str]:
-    # Lazy: standalone_runtime imports runtime_wrappers, which imports this module.
+    # Lazy so that importing source_emit on its own does not pull in
+    # standalone_runtime's torch._dynamo import chain; nothing needs the table
+    # before an object is actually emitted.
     from . import standalone_runtime as rt
 
     return {id(getattr(rt, name)): name for name in rt.__all__}

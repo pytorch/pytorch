@@ -2528,8 +2528,9 @@ def _retrace_backward_for_undefined_grad_outputs(
     # the bit cannot change the retraced graph's dtypes.
     if trace_info.autocast_state is None:
         # The sole AOTAutogradTraceInfo constructor always records autocast_state
-        # (_autocast_fingerprint never returns None), so a None here is a bug,
-        # not a declinable runtime condition.
+        # (_autocast_fingerprint never returns None), so a None here is a bug;
+        # retrace_backward_handling_errors turns it into a logged decline so the
+        # user's backward still runs through the fallbacks.
         raise AssertionError("autocast_state is always captured at trace time")
     autocast_cache_enabled, per_device_autocast_state = trace_info.autocast_state
     if per_device_autocast_state != _autocast_fingerprint(trace_info.flat_args)[1]:
@@ -2641,13 +2642,26 @@ def _retrace_backward_for_undefined_grad_outputs(
         )
     original_fingerprints = _forward_output_fingerprints(trace_info.original_fw_module)
     retraced_fingerprints = _forward_output_fingerprints(fw_module)
+    # Desc-keyed placeholders (primals, tangents) bind by desc. Name-keyed ones
+    # are saved activations whose codegen names shift when the retrace drops a
+    # branch, so they bind by what they compute: index the originals by
+    # fingerprint, and decline when a fingerprint is ambiguous or unknown.
     original_by_key: dict[tuple[str, str], list[tuple[int, torch.fx.Node, Any]]] = (
+        defaultdict(list)
+    )
+    original_by_fingerprint: dict[int, list[tuple[int, torch.fx.Node, Any]]] = (
         defaultdict(list)
     )
     for index, (node, value) in enumerate(
         zip(original_placeholders, original_placeholder_list)
     ):
-        original_by_key[_backward_placeholder_key(node)].append((index, node, value))
+        key = _backward_placeholder_key(node)
+        if key[0] == "name":
+            fingerprint = original_fingerprints.get(str(node.target))
+            if fingerprint is not None:
+                original_by_fingerprint[fingerprint].append((index, node, value))
+        else:
+            original_by_key[key].append((index, node, value))
 
     for node in list(bw_module.graph.find_nodes(op="placeholder")):
         if not node.users and "val" not in node.meta:
@@ -2657,34 +2671,33 @@ def _retrace_backward_for_undefined_grad_outputs(
     placeholder_list: list[Any] = []
     for node in bw_module.graph.find_nodes(op="placeholder"):
         key = _backward_placeholder_key(node)
-        matches = original_by_key.get(key)
-        if not matches:
-            declined(
-                "the retraced backward needs an input the compiled forward did not save"
-            )
-            return None
         if key[0] == "name":
-            # A name-keyed placeholder is a saved activation; bind it to the
-            # original that computes the same value, not merely the same name.
             fingerprint = retraced_fingerprints.get(str(node.target))
-            chosen = next(
-                (
-                    position
-                    for position, (_, original_node, _) in enumerate(matches)
-                    if fingerprint is not None
-                    and original_fingerprints.get(str(original_node.target))
-                    == fingerprint
-                ),
-                None,
+            matches = (
+                original_by_fingerprint.get(fingerprint)
+                if fingerprint is not None
+                else None
             )
-            if chosen is None:
+            if not matches:
                 declined(
                     "a saved activation of the retraced backward does not "
                     "structurally match any the compiled forward saved"
                 )
                 return None
-            index, original_node, value = matches.pop(chosen)
+            if len(matches) > 1:
+                declined(
+                    "a saved activation of the retraced backward structurally "
+                    "matches several the compiled forward saved"
+                )
+                return None
+            index, original_node, value = matches.pop(0)
         else:
+            matches = original_by_key.get(key)
+            if not matches:
+                declined(
+                    "the retraced backward needs an input the compiled forward did not save"
+                )
+                return None
             index, original_node, value = matches.pop(0)
         kept_arg_indices.append(index)
         placeholder_list.append(value)

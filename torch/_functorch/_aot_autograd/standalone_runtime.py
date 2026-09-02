@@ -18,20 +18,15 @@ import torch._dynamo  # noqa: F401
 
 # IDENTITY CONTRACT: these names MUST be plain re-exports that preserve the original
 # object identity -- never wrap, decorate, or alias them (e.g. functools.wraps, a thin
-# forwarding lambda, a partial). to_standalone_python._known_helper_table keys on
-# id() of these exact objects to recognize a global the codegen'd wrappers close over.
-# A wrapper would change id(), so the table lookup would silently miss and that global
-# would route to its internal AOTAutograd location instead of this stable surface.
+# forwarding lambda, a partial). source_emit._standalone_runtime_exports (and the
+# remaining rows of to_standalone_python._known_helper_table) key on id() of these
+# exact objects to recognize a global the codegen'd wrappers close over or a type
+# their baked metadata is rebuilt from. A wrapper would change id(), so the lookup
+# would silently miss and that object would be referenced by its internal
+# AOTAutograd location instead of this stable surface.
 # The same contract covers ``CUDARngStateHelper`` (imported above for circular-import
 # ordering): the table keys on id() of its ``get_torch_state_as_tuple`` /
 # ``set_new_offset`` staticmethods, so it too must not be wrapped or aliased.
-from torch._C import (
-    _get_obj_in_tls,
-    _is_key_in_tls,
-    _is_view_replay_enabled,
-    _set_view_replay_enabled,
-)
-from torch._C._functorch import peek_interpreter_stack
 from torch._prims_common import CUDARngStateHelper
 
 from .descriptors import PlainAOTOutput, TangentAOTInput
@@ -66,11 +61,12 @@ from .utils import normalize_as_list
 
 # Inference artifacts use the first group; training artifacts (compile_to_python
 # with grad_enabled=True) additionally use the autograd-function epilogue and
-# prologue helpers, the metadata types their baked ViewAndMutationMeta is
-# reconstructed from, and the torch._C entry points the codegen'd wrappers
-# close over. source_emit redirects any reference to one of these objects to
-# this module, so a generated artifact never imports an AOTAutograd module by
-# its internal path.
+# prologue helpers and the metadata types their baked ViewAndMutationMeta is
+# reconstructed from. source_emit redirects any reference to one of these
+# objects to this module, so a generated artifact never imports an AOTAutograd
+# module by its internal path. (The wrappers' torch._C calls are attribute
+# chains off the ``torch`` global and are emitted as such; they are not routed
+# here.)
 __all__ = [
     "gen_alias_from_base",
     "_unwrap_tensoralias",
@@ -98,9 +94,4 @@ __all__ = [
     "ViewAndMutationMeta",
     "PlainAOTOutput",
     "TangentAOTInput",
-    "_get_obj_in_tls",
-    "_is_key_in_tls",
-    "_is_view_replay_enabled",
-    "_set_view_replay_enabled",
-    "peek_interpreter_stack",
 ]

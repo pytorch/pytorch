@@ -6,6 +6,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import contextlib
 import copy
 import gc
 import io
@@ -1814,6 +1815,47 @@ def forward(self, primals_1):
         self._two_branch_fn(x_ref, y_ref)[0].sum().backward()
         return x_ref.grad, y_ref.grad
 
+    @contextlib.contextmanager
+    def _spy_backward_specialization(self):
+        # Records (retrace kept_arg_indices or None, [decline reasons]) and the
+        # (donated snapshot, kept_arg_indices) -> remapped donated indices
+        # calls, so a test can assert WHICH path served the backward instead
+        # of only checking numerics that every fallback also produces.
+        import torch._functorch._aot_autograd.graph_compile as graph_compile
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _AutogradBackwardCompiler,
+        )
+
+        record = {"retrace": [], "donated": []}
+        orig_retrace = graph_compile._retrace_backward_for_undefined_grad_outputs
+        orig_donated = _AutogradBackwardCompiler._donated_idxs_for
+
+        def spy_retrace(*args, decline_reason=None, **kwargs):
+            result = orig_retrace(*args, decline_reason=decline_reason, **kwargs)
+            record["retrace"].append(
+                (None if result is None else result[2], list(decline_reason or []))
+            )
+            return result
+
+        def spy_donated(donated, kept_arg_indices):
+            remapped = orig_donated(donated, kept_arg_indices)
+            record["donated"].append((list(donated), kept_arg_indices, remapped))
+            return remapped
+
+        with (
+            patch.object(
+                graph_compile,
+                "_retrace_backward_for_undefined_grad_outputs",
+                spy_retrace,
+            ),
+            patch.object(
+                _AutogradBackwardCompiler,
+                "_donated_idxs_for",
+                staticmethod(spy_donated),
+            ),
+        ):
+            yield record
+
     @torch._functorch.config.patch(
         aot_autograd_prune_unused_outputs=True, donated_buffer=False
     )
@@ -1822,15 +1864,19 @@ def forward(self, primals_1):
     ):
         # Name-only binding of saved activations handed the x backward the y
         # branch's mask (same codegen name after the retrace renumbered nodes);
-        # binding must match what the activation computes.
+        # binding must match what the activation computes. The original
+        # backward's inputs are [primals_2, y_mask, x_mask, tangents_1,
+        # tangents_2]; the retrace keeps the x mask and its tangent, (2, 3).
         x = torch.randn(8, requires_grad=True)
         y = torch.randn(8, requires_grad=True)
         x_grad, y_grad = self._eager_two_branch_grads(x, y)
         out = torch.compile(self._two_branch_fn, backend="aot_eager")(x, y)
-        out[0].sum().backward()
+        with self._spy_backward_specialization() as record:
+            out[0].sum().backward()
         self.assertEqual(x.grad, x_grad)
         self.assertIsNone(y.grad)
         self.assertIsNone(y_grad)
+        self.assertEqual(record["retrace"], [((2, 3), [])])
 
     @torch._functorch.config.patch(
         aot_autograd_prune_unused_outputs=True, donated_buffer=True
@@ -1843,13 +1889,17 @@ def forward(self, primals_1):
         # user's grad tensor is overwritten in place.
         x = torch.randn(8, requires_grad=True)
         y = torch.randn(8, requires_grad=True)
-        x_grad, _ = self._eager_two_branch_grads(x, y)
         out = torch.compile(self._two_branch_fn, backend="inductor")(x, y)
         grad = torch.randn(8)
         grad_copy = grad.clone()
-        out[0].backward(grad)
+        with self._spy_backward_specialization() as record:
+            out[0].backward(grad)
         self.assertEqual(grad, grad_copy)
         self.assertEqual(x.grad, torch.where(x.detach() * 2 > 0, grad_copy * 2, 0.0))
+        # The retrace served it, and the original donated indices [1, 2]
+        # (both masks) were remapped through kept (2, 3) to [0]: the kept mask.
+        self.assertEqual(record["retrace"], [((2, 3), [])])
+        self.assertEqual(record["donated"], [([1, 2], (2, 3), [0])])
 
     @torch._functorch.config.patch(aot_autograd_prune_unused_outputs=True)
     def test_unused_differentiable_outputs_do_not_fold_custom_backward_ops(self):
@@ -1870,12 +1920,33 @@ def forward(self, primals_1):
         def fn(x, y):
             return Affine.apply(x), y.cos()
 
+        from torch._functorch._aot_autograd import runtime_wrappers
+
+        consulted = []
+        orig = runtime_wrappers._all_backward_grad_args_are_pruned_zeros
+
+        def spy(target, args, kwargs):
+            folded = orig(target, args, kwargs)
+            consulted.append((target, folded))
+            return folded
+
+        # Backward through y.cos() only, so Affine's tangent is the pruned one
+        # and the fold gate is consulted with the custom op. Eager leaves x.grad
+        # None (the Affine node never runs); the compiled backward cannot prove
+        # the custom op zero, so it materializes a zero tangent and runs it:
+        # x.grad = affine_backward(zeros, x) = x, the same as with pruning off.
+        # A fold to zero would instead have produced None.
         x = torch.randn(4, requires_grad=True)
         y = torch.randn(4, requires_grad=True)
-        x_ref = x.detach().clone().requires_grad_()
-        fn(x_ref, y.detach().clone().requires_grad_())[0].sum().backward()
-        torch.compile(fn, backend="aot_eager")(x, y)[0].sum().backward()
-        self.assertEqual(x.grad, x_ref.grad)
+        out = torch.compile(fn, backend="aot_eager")(x, y)
+        with patch.object(
+            runtime_wrappers, "_all_backward_grad_args_are_pruned_zeros", spy
+        ):
+            out[1].sum().backward()
+        self.assertEqual(x.grad, x.detach())
+        self.assertIn(
+            (torch.ops.aot_test_prune.affine_backward.default, False), consulted
+        )
 
     def test_prunes_to_zero_only_folds_aten_backward_ops(self):
         from torch._functorch._aot_autograd.runtime_wrappers import (
@@ -1930,10 +2001,16 @@ def forward(self, primals_1):
                 failures.append(e)
 
         threads = [threading.Thread(target=worker, args=(i % 2,)) for i in range(6)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
+        # Concurrent retraces share the TracingContext's fake mode; they must be
+        # serialized rather than tripping its dispatch-state assertion and
+        # silently degrading to the structural fallback.
+        with self.assertNoLogs(
+            "torch._functorch._aot_autograd.graph_compile", level="WARNING"
+        ):
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
         self.assertEqual(failures, [])
 
     @torch._functorch.config.patch(aot_autograd_prune_unused_outputs=True)
@@ -6596,6 +6673,10 @@ def forward(self, tangents_1):
 
         self._assert_no_extra_refs(refcount_box)
 
+    # The h * 1 fold these tests rely on is joint_graph_constant_folding; pin
+    # it so the data_ptr assertions below cannot fail under a config that
+    # disables it.
+    @torch._inductor.config.patch(joint_graph_constant_folding=True)
     def test_non_differentiable_output_aliasing_differentiable_output(self):
         # inductor lowers detach to a no-op and folds h * 1, so both returned
         # slots hold one TensorImpl; marking the detached slot non-differentiable
@@ -6672,6 +6753,10 @@ def forward(self, tangents_1):
         self.assertIs(returns[0], shared)
         self.assertIs(returns[1], shared)
 
+    # The h * 1 fold these tests rely on is joint_graph_constant_folding; pin
+    # it so the data_ptr assertions below cannot fail under a config that
+    # disables it.
+    @torch._inductor.config.patch(joint_graph_constant_folding=True)
     def test_non_differentiable_output_duplicated(self):
         # Two detached slots plus the differentiable one all fold to one
         # TensorImpl under inductor; both marked slots must be detached off.
