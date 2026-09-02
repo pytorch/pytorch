@@ -1303,8 +1303,9 @@ class AutogradFunctionVariable(VariableTracker):
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
+        fn_name: str = "backward",
     ) -> VariableTracker:
-        fn = self.fn_cls.backward
+        fn = getattr(self.fn_cls, fn_name)
         if (
             type(args[0].value)  # type: ignore[attr-defined]
             is not torch._dynamo.external_utils.FakeBackwardCFunction
@@ -1316,7 +1317,7 @@ class AutogradFunctionVariable(VariableTracker):
             raise AssertionError(f"Expected FunctionType, got {type(fn)}")
         if self.source is None:
             raise AssertionError("AutogradFunctionVariable requires a source")
-        fn_source = AttrSource(self.source, "backward")
+        fn_source = AttrSource(self.source, fn_name)
         fn_vt = VariableTracker.build(tx, fn, source=fn_source, realize=True)
         return fn_vt.call_function(tx, args, kwargs)
 
@@ -1467,8 +1468,8 @@ class AutogradFunctionVariable(VariableTracker):
             else:
                 return self.call_apply(tx, args, kwargs)
 
-        elif name == "backward":
-            return self.call_backward(tx, args, kwargs)
+        elif name in ("backward", "vjp"):
+            return self.call_backward(tx, args, kwargs, fn_name=name)
         else:
             source = (
                 AttrSource(self.fn_cls_source, name)
