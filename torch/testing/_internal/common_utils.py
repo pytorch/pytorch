@@ -6493,7 +6493,12 @@ def check_leaked_tensors(limit=1, matched_type=torch.Tensor):
     limit specifies how many tensors to dump debug graphs for (default=1)
     """
     def match_obj(obj):
-        return isinstance(obj, matched_type)
+        if not isinstance(obj, matched_type):
+            return False
+        # Meta tensors are excluded: they own no storage, so cannot leak memory.
+        # Counting them makes this report count reference-cycle hygiene rather
+        # than leaked memory, and produces failures that depend on when the collector happens to run.
+        return not (isinstance(obj, torch.Tensor) and obj.device.type == "meta")
 
     try:
         gc.collect()
@@ -6523,6 +6528,9 @@ def check_leaked_tensors(limit=1, matched_type=torch.Tensor):
 
     finally:
         gc.set_debug(0)
+        # gc.garbage is module-global and gc.set_debug(0) does not empty it, so
+        # entries saved here would otherwise outlive this block.
+        del gc.garbage[:]
 
 
 def _win_rmtree_onerror(func, path, exc_info):
