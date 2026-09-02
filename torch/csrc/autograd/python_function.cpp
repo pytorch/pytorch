@@ -39,14 +39,11 @@
 #include <torch/csrc/utils/pyobject_preservation.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
-#include <torch/csrc/utils/tensor_dtypes.h>
 
 #include <torch/csrc/autograd/function.h>
 #include <functional>
 #include <memory>
-#include <stdexcept>
 #include <string>
-#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>

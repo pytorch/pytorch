@@ -28,6 +28,7 @@ from ..utils import (
     get_num_sms,
     GPU_ALIGN_BYTES,
     has_free_symbols,
+    is_bf16x9_matmul,
     use_aten_gemm_kernels,
     use_blackwell_cutedsl_grouped_mm,
     use_flydsl_gemm_template,
@@ -503,6 +504,15 @@ def _tuned_grouped_mm_common(
         use_fast_accum = False
 
     choices: list[ChoiceCaller] = []
+    # Native _grouped_mm accepts FP32 even though its current meta function is
+    # narrower. Keep that path safe when the meta contract is corrected.
+    if is_bf16x9_matmul(mat_a.get_device().type, mat_a.get_dtype()):
+        # See Note [BF16x9 precision] in torch/_inductor/utils.py.
+        choices.append(aten_choice)
+        node, _ = autotune_select_algorithm(
+            algorithm_name, choices, input_nodes, layout
+        )
+        return node
     if use_aten_gemm_kernels():
         choices.append(aten_choice)
 

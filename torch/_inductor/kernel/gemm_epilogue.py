@@ -4,7 +4,7 @@
 import dataclasses
 import operator
 from collections.abc import Iterator, Sequence
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 import torch
 from torch._inductor import inductor_prims
@@ -13,6 +13,28 @@ from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
 from torch.utils._ordered_set import OrderedSet
 
 from .gemm_epilogue_utils import statically_known_shape_equal
+
+
+GEMM_ACCUMULATOR_ARG_NAME = "accum"
+GEMM_LOCAL_REDUCTION_RESULT_NAME = "_local_reduce"
+GEMM_REDUCTION_FRAGMENT_WIDTH = 32
+GEMM_REDUCTION_IDENTITY_SOURCE = "def _local_reduce_source(value):\n    return value"
+
+GemmReductionType = Literal["sum", "mean", "prod", "max", "min"]
+# "default" uses one associative reduction. The other values select physical
+# multi-pass schedules that generated scalar callbacks cannot yet express;
+# source, combine, finalize, and consumer arithmetic is still callback-generated.
+GemmReductionAlgorithm = Literal["default", "logsumexp", "online_softmax", "variance"]
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class GemmEpiloguePlan:
+    source: str | None = None
+    is_cutedsl: bool = False
+    reads: tuple[str, ...] = ()
+    writes: tuple[str, ...] = ()
+    renames: dict[str, Any] = dataclasses.field(default_factory=dict)
+    output_scale: str | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -82,33 +104,6 @@ class GemmReductionGeometry:
 
 
 @dataclasses.dataclass(frozen=True)
-class GemmReductionDescriptor:
-    """Backend lowering descriptor for a recognized reduction expression.
-
-    Attributes:
-        kind: Canonical reduction or normalized-consumer expression name.
-        parameters: Compile-time scalar parameters encoded by that expression.
-    """
-
-    kind: str
-    parameters: tuple[float, ...] = ()
-
-    @classmethod
-    def parse(cls, value: str) -> "GemmReductionDescriptor":
-        kind, *parameters = value.split(":")
-        return cls(kind, tuple(float(parameter) for parameter in parameters))
-
-    def serialize(self) -> str:
-        if not self.parameters:
-            return self.kind
-        return (
-            self.kind
-            + ":"
-            + ":".join(format(parameter, ".17g") for parameter in self.parameters)
-        )
-
-
-@dataclasses.dataclass(frozen=True)
 class GemmReductionConfig:
     """Reduction recognized from frontend graph or scheduler loop IR.
 
@@ -119,23 +114,24 @@ class GemmReductionConfig:
         output_name: Buffer produced by the recognized reduction.
         group: Number of adjacent GEMM output elements in each reduction group.
         axis: GEMM output axis grouped by the reduction, either M (0) or N (1).
-        reduction_type: Reduction or normalized consumer expression to compute.
+        reduction_type: Associative primitive computed by the kernel.
         source_type: Transformation applied to GEMM accumulator values.
+        reduction_algorithm: Optional multi-stage physical reduction algorithm.
     """
 
     output_name: str
     group: int
     axis: int
-    reduction_type: str
+    reduction_type: GemmReductionType
     source_type: str
+    reduction_algorithm: GemmReductionAlgorithm = "default"
+    finalizer_fn: str | None = None
+    secondary_consumer_fn: str | None = None
+    source_fn: str | None = None
 
     @property
     def geometry(self) -> GemmReductionGeometry:
         return GemmReductionGeometry(self.group, self.axis)
-
-    @property
-    def contract(self) -> tuple[int, int, str, str]:
-        return self.group, self.axis, self.reduction_type, self.source_type
 
 
 @dataclasses.dataclass(frozen=True)
@@ -146,29 +142,53 @@ class GemmReductionPlan:
         reduction_output: Optional compressed reduction output buffer.
         group: Number of adjacent GEMM output elements in each reduction group.
         axis: GEMM output axis grouped by the reduction, either M (0) or N (1).
-        reduction_type: Reduction or normalized consumer expression to compute.
+        reduction_type: Associative primitive computed by the kernel.
         source_type: Transformation applied to GEMM accumulator values.
+        reduction_algorithm: Optional multi-stage physical reduction algorithm.
         primary_output: Buffer receiving the primary GEMM result.
         feeds_main: Whether the reduction participates in the primary output.
         feed_output: Optional full-shape output consuming the reduction.
         secondary_feed_output: Optional second full-shape reduction consumer.
-        secondary_feed_type: Expression implemented by the secondary consumer.
+        finalizer_fn: Optional source for post-reduction scalar finalization.
+        consumer_fn: Optional source for the primary full-shape consumer.
+        secondary_consumer_fn: Optional source for the secondary consumer.
     """
 
     reduction_output: str | None
     group: int
     axis: int
-    reduction_type: str
+    reduction_type: GemmReductionType | None
     source_type: str
     primary_output: str
+    reduction_algorithm: GemmReductionAlgorithm = "default"
     feeds_main: bool = False
     feed_output: str | None = None
     secondary_feed_output: str | None = None
-    secondary_feed_type: str | None = None
+    finalizer_fn: str | None = None
+    consumer_fn: str | None = None
+    secondary_consumer_fn: str | None = None
+    source_fn: str | None = None
+    combine_fn: str | None = None
+    tensor_epilogue_returns_local_reduce: bool = False
 
     @property
     def geometry(self) -> GemmReductionGeometry:
         return GemmReductionGeometry(self.group, self.axis)
+
+    @classmethod
+    def from_config(
+        cls, config: GemmReductionConfig, **plan_fields: Any
+    ) -> "GemmReductionPlan":
+        plan_fields.setdefault("finalizer_fn", config.finalizer_fn)
+        plan_fields.setdefault("secondary_consumer_fn", config.secondary_consumer_fn)
+        return cls(
+            group=config.group,
+            axis=config.axis,
+            reduction_type=config.reduction_type,
+            source_type=config.source_type,
+            source_fn=config.source_fn,
+            **plan_fields,
+        )
 
     @property
     def auxiliary_outputs(self) -> tuple[str, ...]:
@@ -185,7 +205,7 @@ class GemmReductionPlan:
         )
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class GemmReductionArguments:
     """Runtime tensors and compile-time parameters for a grouped GEMM reduction.
 
@@ -193,41 +213,57 @@ class GemmReductionArguments:
         output: Optional tensor receiving the compressed reduction.
         feed_output: Optional full-shape tensor receiving the reduction consumer.
         secondary_feed_output: Optional second full-shape reduction consumer.
-        secondary_feed_type: Expression implemented by ``secondary_feed_output``.
         group: Number of adjacent GEMM output elements in each reduction group.
         axis: GEMM output axis grouped by the reduction, either M (0) or N (1).
-        reduction_type: Reduction or normalized consumer expression to compute.
+        reduction_type: Associative primitive computed by the kernel.
         source_type: Transformation applied to GEMM accumulator values.
+        reduction_algorithm: Optional multi-stage physical reduction algorithm.
         feeds_main: Whether the reduction also produces the primary GEMM output.
     """
 
     output: Any | None = None
     feed_output: Any | None = None
     secondary_feed_output: Any | None = None
-    secondary_feed_type: str | None = None
     group: int = 0
     axis: int = 1
-    reduction_type: str = "sum"
+    reduction_type: GemmReductionType = "sum"
     source_type: str = "identity"
+    reduction_algorithm: GemmReductionAlgorithm = "default"
     feeds_main: bool = False
+    finalizer_fn: str | None = None
+    consumer_fn: str | None = None
+    secondary_consumer_fn: str | None = None
 
+    TENSOR_FIELDS: ClassVar[tuple[str, ...]] = (
+        "output",
+        "feed_output",
+        "secondary_feed_output",
+    )
     SPECIALIZATION_FIELDS: ClassVar[tuple[str, ...]] = (
         "group",
         "axis",
         "reduction_type",
         "source_type",
+        "reduction_algorithm",
         "feeds_main",
-        "secondary_feed_type",
+        "finalizer_fn",
+        "consumer_fn",
+        "secondary_consumer_fn",
     )
+
+    @classmethod
+    def from_plan(
+        cls, plan: GemmReductionPlan, **tensor_values: Any
+    ) -> "GemmReductionArguments":
+        return cls(
+            **tensor_values,
+            **{field: getattr(plan, field) for field in cls.SPECIALIZATION_FIELDS},
+        )
 
     @property
     def enabled(self) -> bool:
-        return (
-            any(
-                value is not None
-                for value in (self.output, self.feed_output, self.secondary_feed_output)
-            )
-            or self.feeds_main
+        return self.feeds_main or any(
+            value is not None for _, value in self.tensor_items()
         )
 
     @property
@@ -236,18 +272,19 @@ class GemmReductionArguments:
             self.output is not None or self.feed_output is not None or self.feeds_main
         )
 
-    @property
-    def descriptor(self) -> GemmReductionDescriptor:
-        return GemmReductionDescriptor.parse(self.reduction_type)
+    def tensor_items(self) -> Iterator[tuple[str, Any | None]]:
+        return ((field, getattr(self, field)) for field in self.TENSOR_FIELDS)
 
-    def tensors(self, attr: str) -> tuple[Any | None, Any | None, Any | None]:
-        def tensor(value: Any | None) -> Any | None:
-            return getattr(value, attr) if value is not None else None
+    def specialization_items(self) -> Iterator[tuple[str, Any]]:
+        return ((field, getattr(self, field)) for field in self.SPECIALIZATION_FIELDS)
 
-        return (
-            tensor(self.output),
-            tensor(self.feed_output),
-            tensor(self.secondary_feed_output),
+    def map_tensors(self, transform) -> "GemmReductionArguments":
+        return dataclasses.replace(
+            self,
+            **{
+                field: None if value is None else transform(value)
+                for field, value in self.tensor_items()
+            },
         )
 
 
@@ -275,7 +312,7 @@ class NormalizedReduction:
     dim: Any
     keepdim: Any
     dtype: Any
-    reduction_type: str
+    reduction_type: GemmReductionType
 
 
 @dataclasses.dataclass(frozen=True)
@@ -348,7 +385,7 @@ NormalizedNode = (
 )
 
 
-FUNCTION_REDUCTION_TYPES = {
+FUNCTION_REDUCTION_TYPES: dict[Any, tuple[GemmReductionType, bool]] = {
     torch.ops.aten.sum.dim_IntList: ("sum", True),
     torch.ops.aten.mean.dim: ("mean", True),
     torch.ops.aten.prod.dim_int: ("prod", True),
