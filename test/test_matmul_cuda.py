@@ -42,6 +42,7 @@ from torch.testing._internal.common_device_type import (
 )
 
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_JETSON,
     IS_WINDOWS,
     MI200_ARCH,
@@ -123,6 +124,8 @@ def sm_carveout(value: int | None):
 
 
 class TestMatmulCuda(InductorTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         # Snapshot fp32_precision (not allow_tf32) so the round-trip is exact:
@@ -1521,6 +1524,8 @@ class TestMatmulCuda(InductorTestCase):
 @unittest.skipIf(IS_WINDOWS, "Windows doesn't support CUTLASS extensions")
 @unittest.skipIf(not _IS_SM8X, "mixed dtypes linear only supported on SM 8.x")
 class TestMixedDtypesLinearCuda(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @dtypes(torch.float16, torch.bfloat16)
     def test_mixed_dtypes_linear(self, dtype: torch.dtype, device: str = "cuda"):
         def run_test(
