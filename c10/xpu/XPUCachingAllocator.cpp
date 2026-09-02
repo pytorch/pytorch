@@ -6,8 +6,11 @@
 #include <cstring>
 #include <cstdlib>
 #include <deque>
+#include <limits>
 #include <mutex>
+#include <optional>
 #include <set>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -1864,6 +1867,101 @@ using SyclIpcExportHandle =
 using SyclIpcHandle =
     sycl::ext::oneapi::experimental::ipc_memory::handle_data_t;
 
+constexpr char kXpuShareableHandleMagic[] = "XPUIPC";
+constexpr uint8_t kXpuShareableHandleVersion = 1;
+
+enum class ShareableHandleType : uint8_t {
+  SyclIpcMemory = 1,
+};
+
+constexpr size_t kShareableHandleHeaderSize =
+  (sizeof(kXpuShareableHandleMagic) - 1) + sizeof(uint8_t) +
+  sizeof(uint8_t) + sizeof(uint32_t);
+
+void append_uint32_le(std::string& out, uint32_t value) {
+  out.push_back(static_cast<char>(value & 0xFFu));
+  out.push_back(static_cast<char>((value >> 8) & 0xFFu));
+  out.push_back(static_cast<char>((value >> 16) & 0xFFu));
+  out.push_back(static_cast<char>((value >> 24) & 0xFFu));
+}
+
+std::optional<uint32_t> parse_uint32_le(std::string_view in, size_t offset) {
+  if (in.size() < offset + sizeof(uint32_t)) {
+  return std::nullopt;
+  }
+  const auto* bytes =
+    reinterpret_cast<const unsigned char*>(in.data() + offset);
+  return static_cast<uint32_t>(bytes[0]) |
+    (static_cast<uint32_t>(bytes[1]) << 8) |
+    (static_cast<uint32_t>(bytes[2]) << 16) |
+    (static_cast<uint32_t>(bytes[3]) << 24);
+}
+
+std::string frame_shareable_handle(const SyclIpcHandle& handle_data) {
+  TORCH_CHECK(
+    handle_data.size() <= std::numeric_limits<uint32_t>::max(),
+    "XPU IPC handle payload too large: ",
+    handle_data.size());
+
+  std::string framed;
+  framed.reserve(kShareableHandleHeaderSize + handle_data.size());
+  framed.append(kXpuShareableHandleMagic, sizeof(kXpuShareableHandleMagic) - 1);
+  framed.push_back(static_cast<char>(kXpuShareableHandleVersion));
+  framed.push_back(static_cast<char>(ShareableHandleType::SyclIpcMemory));
+  append_uint32_le(framed, static_cast<uint32_t>(handle_data.size()));
+  framed.append(
+    reinterpret_cast<const char*>(handle_data.data()), handle_data.size());
+  return framed;
+}
+
+std::string unframe_shareable_handle(const std::string& serialized_handle) {
+  const bool has_magic =
+      serialized_handle.size() >= (sizeof(kXpuShareableHandleMagic) - 1) &&
+      std::memcmp(
+          serialized_handle.data(),
+          kXpuShareableHandleMagic,
+          sizeof(kXpuShareableHandleMagic) - 1) == 0;
+  TORCH_CHECK(
+      has_magic,
+      "XPU IPC shareable handle is illformed: missing protocol magic");
+
+  TORCH_CHECK(
+    serialized_handle.size() >= kShareableHandleHeaderSize,
+    "XPU IPC shareable handle is illformed: truncated header");
+
+  const size_t version_offset = sizeof(kXpuShareableHandleMagic) - 1;
+  const auto* bytes =
+    reinterpret_cast<const unsigned char*>(serialized_handle.data());
+  const auto version = static_cast<uint8_t>(bytes[version_offset]);
+  TORCH_CHECK(
+    version <= kXpuShareableHandleVersion,
+    "received sharable handle from a future version of torch that this "
+    "version does not know how to handle");
+
+  const auto handle_type = static_cast<uint8_t>(bytes[version_offset + 1]);
+  TORCH_CHECK(
+    handle_type == static_cast<uint8_t>(ShareableHandleType::SyclIpcMemory),
+    "unexpected or illformed XPU shareable handle type: ",
+    static_cast<int>(handle_type));
+
+  const auto payload_size =
+    parse_uint32_le(serialized_handle, version_offset + 2);
+  TORCH_INTERNAL_ASSERT(payload_size.has_value());
+
+  TORCH_CHECK(
+    serialized_handle.size() ==
+      kShareableHandleHeaderSize + payload_size.value(),
+    "XPU IPC shareable handle payload length mismatch: expected ",
+    payload_size.value(),
+    " bytes, got ",
+    serialized_handle.size() - kShareableHandleHeaderSize,
+    " bytes");
+
+  return std::string(
+    serialized_handle.data() + kShareableHandleHeaderSize,
+    payload_size.value());
+}
+
 class ExportedIpcHandle final {
  public:
   ExportedIpcHandle(SyclIpcExportHandle handle, sycl::context context)
@@ -1879,9 +1977,7 @@ class ExportedIpcHandle final {
 
   std::string serialize() const {
     const auto handle_data = handle_.data();
-    return std::string(
-        reinterpret_cast<const char*>(handle_data.data()),
-        handle_data.size());
+    return frame_shareable_handle(handle_data);
   }
 
  private:
@@ -2406,10 +2502,12 @@ class NativeCachingAllocator : public XPUAllocator {
 #if C10_XPU_HAS_SYCL_IPC_MEMORY
     TORCH_CHECK(!handle_str.empty(), "Empty XPU IPC handle");
 
+    auto handle_payload = xpu_ipc::unframe_shareable_handle(handle_str);
+
     xpu_ipc::SyclIpcHandle handle_data(
-        reinterpret_cast<const std::byte*>(handle_str.data()),
-        reinterpret_cast<const std::byte*>(handle_str.data()) +
-            handle_str.size());
+      reinterpret_cast<const std::byte*>(handle_payload.data()),
+      reinterpret_cast<const std::byte*>(handle_payload.data()) +
+        handle_payload.size());
 
     return xpu_ipc::ipc_memory_cache->getOrOpenHandle(handle_data, device);
 #else
