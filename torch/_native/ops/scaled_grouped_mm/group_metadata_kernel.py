@@ -208,6 +208,8 @@ def _compile_build_group_metadata(
 ):
     from cutlass import Int32 as _Int32, Int64 as _Int64
 
+    from ._compile_with_safe_names import _compile_with_safe_names
+
     offs_fake = _make_fake_1d_tensor(_Int32)
     out_mnkl_fake = _make_fake_2d_tensor(_Int32, 4)
     out_ptrs_abc_fake = _make_fake_2d_tensor(_Int64, 3)
@@ -216,37 +218,39 @@ def _compile_build_group_metadata(
     out_total_tiles_fake = _make_fake_1d_tensor(_Int32)
     zero_i64 = _Int64(0)
     zero_i32 = _Int32(0)
-    return cute.compile(
-        _BuildGroupMetadata(
-            elem_size_ab, elem_size_scale, elem_size_c, cluster_m, groups_split_k
-        ),
-        zero_i32,
-        offs_fake,
-        zero_i64,
-        zero_i64,
-        zero_i64,
-        zero_i64,
-        zero_i64,
-        zero_i64,
-        zero_i64,
-        zero_i64,
-        zero_i64,
-        zero_i64,
-        zero_i32,
-        zero_i32,
-        zero_i32,
-        zero_i32,
-        zero_i32,
-        zero_i32,
-        out_mnkl_fake,
-        out_ptrs_abc_fake,
-        out_ptrs_scale_ab_fake,
-        out_tile_offsets_fake,
-        out_total_tiles_fake,
-        zero_i32,
-        256,
-        cute.runtime.make_fake_stream(use_tvm_ffi_env_stream=True),
-        options="--enable-tvm-ffi --enable-assertions",
+    return _compile_with_safe_names(
+        lambda: cute.compile(
+            _BuildGroupMetadata(
+                elem_size_ab, elem_size_scale, elem_size_c, cluster_m, groups_split_k
+            ),
+            zero_i32,
+            offs_fake,
+            zero_i64,
+            zero_i64,
+            zero_i64,
+            zero_i64,
+            zero_i64,
+            zero_i64,
+            zero_i64,
+            zero_i64,
+            zero_i64,
+            zero_i64,
+            zero_i32,
+            zero_i32,
+            zero_i32,
+            zero_i32,
+            zero_i32,
+            zero_i32,
+            out_mnkl_fake,
+            out_ptrs_abc_fake,
+            out_ptrs_scale_ab_fake,
+            out_tile_offsets_fake,
+            out_total_tiles_fake,
+            zero_i32,
+            256,
+            cute.runtime.make_fake_stream(use_tvm_ffi_env_stream=True),
+            options="--enable-tvm-ffi --enable-assertions",
+        )
     )
 
 

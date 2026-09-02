@@ -82,6 +82,11 @@ def _out_cond(
     elem_size = 2
     alignment = max(16 // elem_size, 1)
     padded_n = -(-n // alignment) * alignment
+    if self.dim() == 3:
+        batch, m = self.size(0), self.size(1)
+        if out.shape != (batch, m, n):
+            return False
+        return out.stride() == (m * padded_n, padded_n, 1)
     m = self.size(0)
     if mat2.dim() == 2:
         groups = offs.size(0) if offs is not None else 0

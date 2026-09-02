@@ -17,30 +17,23 @@ class GroupMetadata(NamedTuple):
     total_tiles: torch.Tensor
 
 
-_launch_build_group_metadata = None
-
-
-def _get_launch_build_group_metadata():
-    global _launch_build_group_metadata
-    if _launch_build_group_metadata is None:
-        from .group_metadata_kernel import launch_build_group_metadata
-
-        _launch_build_group_metadata = launch_build_group_metadata
-    return _launch_build_group_metadata
-
-
 def expected_out_size_stride(
     mat_a: torch.Tensor,
     mat_b: torch.Tensor,
     out_dtype: torch.dtype,
     group_count: int | None = None,
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
-    m = mat_a.size(0)
     n = mat_b.size(-1)
     elem_size = torch.empty((), dtype=out_dtype).element_size()
     alignment = max(16 // elem_size, 1)
     padded_n = -(-n // alignment) * alignment
+    if mat_a.dim() == 3:
+        batch, m = mat_a.size(0), mat_a.size(1)
+        return (batch, m, n), (m * padded_n, padded_n, 1)
+    m = mat_a.size(0)
     if mat_b.dim() == 2:
+        if group_count is None:
+            raise AssertionError("group_count is required for a 2d mat_b")
         return (group_count, m, n), (m * padded_n, padded_n, 1)
     return (m, n), (padded_n, 1)
 
@@ -93,13 +86,17 @@ def build_group_metadata(
     out: torch.Tensor,
     config: HopperDeepSeekConfig | None = None,
 ) -> GroupMetadata:
-    # mat_b.size(0) is K when offs splits K.
-    group_count = offs.numel()
+    # mat_b.size(0) is K when offs splits K; offs is absent when batched.
+    batched = mat_a.dim() == 3
+    group_count = mat_a.size(0) if batched else offs.numel()
     device_index = mat_a.device.index
     if device_index is None:
         device_index = torch.cuda.current_device()
     stream_ptr = torch.cuda.current_stream(device_index).cuda_stream
     meta = _get_group_metadata_tensors(group_count, device_index, stream_ptr)
+    if batched:
+        # Uniform per-batch problem: the kernel derives tile counts itself.
+        return meta
     if group_count == 0:
         meta.tile_offsets.zero_()
         meta.total_tiles.zero_()
@@ -133,7 +130,10 @@ def build_group_metadata(
         )
         scale_b_group_stride = scale_b.stride(0)
 
-    _get_launch_build_group_metadata()(
+    # Local import: keeps cutlass off the `import torch` path.
+    from .group_metadata_kernel import launch_build_group_metadata
+
+    launch_build_group_metadata(
         offs,
         mat_a.data_ptr(),
         mat_b.data_ptr(),

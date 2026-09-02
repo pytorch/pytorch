@@ -1,5 +1,6 @@
 """Config for SM90 DeepSeek grouped mm."""
 
+import functools
 import math
 from typing import NamedTuple
 
@@ -58,6 +59,7 @@ def _tile_rank(
     return -work, wave_fill * math.sqrt(tile_m * tile_n), tile_n
 
 
+@functools.lru_cache(maxsize=128)
 def select_kernel_config(
     total_m: int | None = None,
     n: int | None = None,
@@ -65,6 +67,7 @@ def select_kernel_config(
     group_count: int | None = None,
     num_sms: int | None = None,
     groups_split_k: bool = False,
+    batched: bool = False,
 ) -> HopperDeepSeekConfig:
     del k
     if not total_m or not n or not group_count:
@@ -72,8 +75,9 @@ def select_kernel_config(
     if not num_sms:
         num_sms = _DEFAULT_NUM_SMS
 
-    # Splitting K leaves every group spanning all of total_m.
-    if groups_split_k:
+    # Splitting K, and batching, both leave every group spanning all of total_m.
+    uniform_m = groups_split_k or batched
+    if uniform_m:
         avg_group_m = total_m
     else:
         avg_group_m = max(1, total_m // group_count)
@@ -81,6 +85,8 @@ def select_kernel_config(
     best_tile = None
     for tile_m in _TILE_MS:
         for tile_n in _TILE_NS:
+            if tile_n > n:
+                continue
             rank = _tile_rank(tile_m, tile_n, avg_group_m, n, group_count, num_sms)
             if best_rank is None or rank > best_rank:
                 best_rank = rank
@@ -93,16 +99,18 @@ def select_kernel_config(
     tiles_n = -(-n // tile_n)
     tiny_single_group = (
         group_count == 1
-        and not groups_split_k
+        and not uniform_m
         and total_m < tile_m
         and tiles_n >= _CLUSTER_N_MIN_TILES_N
     )
-    cluster_n_eligible = total_m >= _CLUSTER_N_MIN_TOTAL_M or tiny_single_group
+    # A batched total_m is per-batch; L2 pressure scales with all the rows.
+    total_rows = total_m * group_count if batched else total_m
+    cluster_n_eligible = total_rows >= _CLUSTER_N_MIN_TOTAL_M or tiny_single_group
     if cluster_n_eligible and tiles_n % 2 == 0:
         cluster_n = 2
     # The narrow A-scale copy needs an aligned M start: splitting K keeps it at
     # m_tile * tile_m, splitting M does not.
-    if groups_split_k:
+    if uniform_m:
         a_scale_wide = total_m % tile_m != 0
     else:
         a_scale_wide = not (group_count == 1 and total_m % tile_m == 0)

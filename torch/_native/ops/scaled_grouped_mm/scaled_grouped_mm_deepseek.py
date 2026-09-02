@@ -5,6 +5,7 @@ import functools
 import torch
 
 from ._common import BLOCKWISE_128X128, BLOCKWISE_1X128, ceil_div, NO_SWIZZLE, round_up
+from .hopper_config import select_kernel_config
 
 
 _DEEPSEEK_RECIPES = {
@@ -12,6 +13,13 @@ _DEEPSEEK_RECIPES = {
     (BLOCKWISE_1X128, BLOCKWISE_128X128),
     (BLOCKWISE_128X128, BLOCKWISE_1X128),
 }
+
+
+@functools.cache
+def _num_sms(device: int) -> int:
+    return torch.cuda.get_device_properties(
+        torch.device("cuda", device)
+    ).multi_processor_count
 
 
 @functools.cache
@@ -30,10 +38,14 @@ def _expected_scale_b_shape(
     return inner if b_is_2d else (group_count, *inner)
 
 
-def _expected_scale_a_shape(recipe_a: int, total_m: int, k: int) -> tuple[int, int]:
+def _expected_scale_a_shape(
+    recipe_a: int, total_m: int, k: int, batch: int | None = None
+) -> tuple[int, ...]:
     if recipe_a == BLOCKWISE_1X128:
-        return (total_m, ceil_div(k, 128))
-    return (round_up(ceil_div(k, 128), 4), ceil_div(total_m, 128))
+        inner: tuple[int, ...] = (total_m, ceil_div(k, 128))
+    else:
+        inner = (round_up(ceil_div(k, 128), 4), ceil_div(total_m, 128))
+    return inner if batch is None else (batch, *inner)
 
 
 def _valid_blockwise_scale_strides(
@@ -67,7 +79,7 @@ def _should_use_cutedsl_scaled_grouped_mm_deepseek(
         return False
     if self.dtype != torch.float8_e4m3fn or mat2.dtype != torch.float8_e4m3fn:
         return False
-    if self.dim() != 2 or mat2.dim() not in (2, 3):
+    if self.dim() not in (2, 3) or mat2.dim() not in (2, 3):
         return False
     if bias is not None:
         return False
@@ -77,7 +89,14 @@ def _should_use_cutedsl_scaled_grouped_mm_deepseek(
         return False
     if use_fast_accum:
         return False
-    if (
+    a_is_3d = self.dim() == 3
+    b_is_3d = mat2.dim() == 3
+    if a_is_3d and not b_is_3d:
+        return False
+    if a_is_3d:
+        if offs is not None:
+            return False
+    elif (
         offs is None
         or offs.dtype != torch.int32
         or offs.dim() != 1
@@ -115,21 +134,34 @@ def _should_use_cutedsl_scaled_grouped_mm_deepseek(
     if self.data_ptr() % 16 != 0 or mat2.data_ptr() % 16 != 0:
         return False
 
-    total_m, k = self.shape
     b_is_2d = mat2.dim() == 2
-    group_count = offs.shape[0]
-    if b_is_2d:
-        k2, n = mat2.shape
-    else:
-        b_groups, k2, n = mat2.shape
-        if b_groups != group_count:
+    if a_is_3d:
+        batch, total_m, k = self.shape
+        group_count = batch
+        b_batch, k2, n = mat2.shape
+        if b_batch != batch:
             return False
+        if self.stride(0) % 16 != 0:
+            return False
+    else:
+        batch = None
+        total_m, k = self.shape
+        group_count = offs.shape[0]
+        if b_is_2d:
+            k2, n = mat2.shape
+        else:
+            b_groups, k2, n = mat2.shape
+            if b_groups != group_count:
+                return False
     if k2 != k:
         return False
     if k % 128 != 0:
         return False
-    self_stride0 = self.stride(0)
-    if self.stride(1) != 1 or self_stride0 < max(1, k) or self_stride0 % 16 != 0:
+    # ATen validates this before it picks a backend, so accepting it here would
+    # make the op's domain depend on whether this path is registered.
+    if n % 16 != 0:
+        return False
+    if self.stride(-1) != 1 or self.stride(-2) < max(1, k) or self.stride(-2) % 16 != 0:
         return False
     if b_is_2d:
         if (
@@ -147,20 +179,23 @@ def _should_use_cutedsl_scaled_grouped_mm_deepseek(
             or mat2_stride2 % 16 != 0
         ):
             return False
-    if scale_a0.shape != _expected_scale_a_shape(recipe_a0, total_m, k):
+    if scale_a0.shape != _expected_scale_a_shape(recipe_a0, total_m, k, batch):
         return False
+    a_unit_dim = 1 if a_is_3d else 0
     expected_a_outer_stride = (
-        total_m if recipe_a0 == BLOCKWISE_1X128 else scale_a0.size(0)
+        total_m if recipe_a0 == BLOCKWISE_1X128 else scale_a0.size(a_unit_dim)
     )
-    if not _valid_blockwise_scale_strides(scale_a0, 0, 1, expected_a_outer_stride):
+    if not _valid_blockwise_scale_strides(
+        scale_a0, a_unit_dim, a_unit_dim + 1, expected_a_outer_stride
+    ):
         return False
     # At offset 0 alignment rounding can only move forward, so row/col 0 is
     # only covered if these strides are already 4-aligned. A single k-block
     # never multiplies the stride, so it is exempt.
     if (
         recipe_a0 == BLOCKWISE_1X128
-        and scale_a0.size(1) > 1
-        and scale_a0.stride(1) % 4 != 0
+        and scale_a0.size(-1) > 1
+        and scale_a0.stride(-1) % 4 != 0
     ):
         return False
     if recipe_a0 == BLOCKWISE_1X128 and scale_a0.data_ptr() % 16 != 0:
@@ -184,5 +219,18 @@ def _should_use_cutedsl_scaled_grouped_mm_deepseek(
     if recipe_b0 == BLOCKWISE_1X128 and not b_is_2d and scale_b0.stride(0) % 4 != 0:
         return False
     if recipe_b0 == BLOCKWISE_1X128 and scale_b0.data_ptr() % 16 != 0:
+        return False
+    # Decline shapes the selector cannot tile, rather than letting the launch
+    # path raise after this returned True.
+    config = select_kernel_config(
+        total_m=total_m,
+        n=n,
+        k=k,
+        group_count=group_count,
+        num_sms=_num_sms(self.device.index or 0),
+        groups_split_k=b_is_2d,
+        batched=a_is_3d,
+    )
+    if config.tile_n > n:
         return False
     return True

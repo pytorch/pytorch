@@ -263,6 +263,81 @@ def _make_reference_2d2d(
     return reference
 
 
+def _stack_op_scales(scales):
+    d0, d1 = scales[0].shape
+    out = torch.empty_strided(
+        (len(scales), d0, d1),
+        (d0 * d1, 1, d0),
+        device=scales[0].device,
+        dtype=scales[0].dtype,
+    )
+    for i, sc in enumerate(scales):
+        out[i].copy_(sc)
+    return out
+
+
+def _build_inputs_3d3d(total_m, g, K, N, lhs_block, rhs_block, device):
+    M = total_m // g
+    a_l, a_s_l, b_l, b_s_l = [], [], [], []
+    for _ in range(g):
+        a = torch.randn(M, K, device=device, dtype=torch.bfloat16)
+        a_fp8_i, a_scale_i = _quantize_block(a, block_outer=lhs_block)
+        b = torch.randn(N, K, device=device, dtype=torch.bfloat16)
+        b_fp8_i, b_scale_i = _quantize_block(b, block_outer=rhs_block)
+        a_l.append(a_fp8_i)
+        b_l.append(b_fp8_i)
+        a_s_l.append(
+            _to_ref_scale_1x128(a_scale_i)
+            if lhs_block == 1
+            else _to_op_scale_128x128(a_scale_i, K)
+        )
+        b_s_l.append(
+            _to_ref_scale_1x128(b_scale_i)
+            if rhs_block == 1
+            else _to_op_scale_128x128(b_scale_i, K)
+        )
+    mat_a = torch.stack(a_l, dim=0)
+    mat2 = torch.stack(b_l, dim=0).transpose(-2, -1)
+    return mat_a, _stack_op_scales(a_s_l), mat2, _stack_op_scales(b_s_l), (a_l, b_l)
+
+
+def _make_reference_3d3d(per_batch, a_scale, scale_b, lhs_recipe, rhs_recipe, M, N):
+    a_l, b_l = per_batch
+    g = len(a_l)
+
+    if g == 1:
+        # Return the result directly; a copy into a batched buffer would make
+        # the reference look slower than the 2d-3d one for the same GEMM.
+        def reference_single():
+            return scaled_mm(
+                a_l[0],
+                b_l[0].t(),
+                a_scale[0],
+                lhs_recipe,
+                scale_b[0],
+                rhs_recipe,
+                output_dtype=torch.bfloat16,
+            ).unsqueeze(0)
+
+        return reference_single
+
+    def reference():
+        out = torch.empty(g, M, N, device=a_l[0].device, dtype=torch.bfloat16)
+        for i in range(g):
+            out[i] = scaled_mm(
+                a_l[i],
+                b_l[i].t(),
+                a_scale[i],
+                lhs_recipe,
+                scale_b[i],
+                rhs_recipe,
+                output_dtype=torch.bfloat16,
+            )
+        return out
+
+    return reference
+
+
 def _percentile(sorted_samples: list[float], percentile: float) -> float:
     if len(sorted_samples) == 1:
         return sorted_samples[0]
@@ -355,7 +430,10 @@ def _make_grouped_op(a_fp8, mat2, a_scale, scale_b, lhs_recipe, rhs_recipe, offs
     rhs_recipe_int = rhs_recipe.value if hasattr(rhs_recipe, "value") else rhs_recipe
     swizzle_int = SwizzleType.NO_SWIZZLE.value
     out_size, out_stride = expected_out_size_stride(
-        a_fp8, mat2, torch.bfloat16, offs.numel() if mat2.dim() == 2 else None
+        a_fp8,
+        mat2,
+        torch.bfloat16,
+        offs.numel() if (offs is not None and mat2.dim() == 2) else None,
     )
     out = torch.empty_strided(
         out_size, out_stride, device=a_fp8.device, dtype=torch.bfloat16
@@ -480,6 +558,24 @@ def _make_case_fns(
     rhs_recipe = (
         ScalingType.BlockWise1x128 if rhs_block == 1 else ScalingType.BlockWise128x128
     )
+    if layout == "3d_3d":
+        mat_a, a_scale, mat2, scale_b, per_batch = _build_inputs_3d3d(
+            total_m, g, K, N, lhs_block, rhs_block, device
+        )
+        return (
+            _make_grouped_op(
+                mat_a, mat2, a_scale, scale_b, lhs_recipe, rhs_recipe, None
+            ),
+            _make_reference_3d3d(
+                per_batch,
+                a_scale,
+                scale_b,
+                lhs_recipe,
+                rhs_recipe,
+                total_m // g,
+                N,
+            ),
+        )
     if layout == "2d_2d":
         a_fp8, a_scale, mat2, scale_b, nats, offs = _build_inputs_2d2d(
             total_m, g, K, N, lhs_block, rhs_block, device, grouping=grouping
@@ -751,9 +847,10 @@ if __name__ == "__main__":
     parser.add_argument("--stat", choices=_STAT_CHOICES, default="median")
     parser.add_argument(
         "--layout",
-        choices=["2d_3d", "2d_2d"],
+        choices=["2d_3d", "2d_2d", "3d_3d"],
         default="2d_3d",
-        help="2d_3d: offs splits M, B is (G,K,N). 2d_2d: offs splits K, B is (K,N).",
+        help="2d_3d: offs splits M, B is (G,K,N). 2d_2d: offs splits K, B is "
+        "(K,N). 3d_3d: batched, no offs, M is the total (M/G per batch).",
     )
     args = parser.parse_args()
 

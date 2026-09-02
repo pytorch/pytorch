@@ -4,21 +4,9 @@ import functools
 
 import torch
 
-from ._common import BLOCKWISE_1X128, fp32_scale_stage_size
+from ._common import BLOCKWISE_1X128
 from .group_meta import build_group_metadata
 from .hopper_config import select_kernel_config
-
-
-_launch_deepseek_grouped_wgmma = None
-
-
-def _get_launch_deepseek_grouped_wgmma():
-    global _launch_deepseek_grouped_wgmma
-    if _launch_deepseek_grouped_wgmma is None:
-        from .wgmma_kernel import launch_deepseek_grouped_wgmma
-
-        _launch_deepseek_grouped_wgmma = launch_deepseek_grouped_wgmma
-    return _launch_deepseek_grouped_wgmma
 
 
 @functools.cache
@@ -42,28 +30,20 @@ def run_deepseek_grouped_gemm(
     if device_index is None:
         device_index = torch.cuda.current_device()
     num_sms = _num_sms(device_index)
-    total_m = mat_a.size(0)
+    batched = mat_a.dim() == 3
+    total_m = mat_a.size(-2)
     n = mat_b.size(-1)
-    group_count = offs.numel()
+    group_count = mat_a.size(0) if batched else offs.numel()
     config = select_kernel_config(
         total_m=total_m,
         n=n,
-        k=mat_a.size(1),
+        k=mat_a.size(-1),
         group_count=group_count,
         num_sms=num_sms,
         groups_split_k=mat_b.dim() == 2,
+        batched=batched,
     )
-    torch._check(
-        n >= config.tile_n,
-        lambda: f"DeepSeek grouped mm requires n ({n}) >= tile_n ({config.tile_n})",
-    )
-    if recipe_b == BLOCKWISE_1X128 and config.b_scale_wide:
-        scale_b_cols = fp32_scale_stage_size(config.tile_n)
-        torch._check(
-            n >= scale_b_cols,
-            lambda: f"DeepSeek grouped mm requires n ({n}) >= scale B cols ({scale_b_cols})",
-        )
-    if recipe_a != BLOCKWISE_1X128 and offs.numel() > 1:
+    if recipe_a != BLOCKWISE_1X128 and not batched and offs.numel() > 1:
         # group_start // 128 truncation (accumulate_scaled) needs 128-aligned
         # boundaries. Checked here, not in _cond, because it needs a sync.
         torch._check(
@@ -75,14 +55,20 @@ def run_deepseek_grouped_gemm(
     problem_sizes, ptrs_abc, _, tile_offsets, total_tiles = build_group_metadata(
         mat_a, mat_b, scale_a, scale_b, recipe_a, offs, out, config=config
     )
-    _get_launch_deepseek_grouped_wgmma()(
+    # Batched needs no group metadata; offs is unread, so reuse a tensor of the
+    # right dtype/rank rather than allocating one.
+    offs_arg = tile_offsets if batched else offs
+    # Local import: keeps cutlass off the `import torch` path.
+    from .wgmma_kernel import launch_deepseek_grouped_wgmma
+
+    launch_deepseek_grouped_wgmma(
         mat_a,
         mat_b,
         scale_a,
         scale_b,
         recipe_a,
         recipe_b,
-        offs,
+        offs_arg,
         problem_sizes,
         tile_offsets,
         total_tiles,
