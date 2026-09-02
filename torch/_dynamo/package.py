@@ -111,6 +111,136 @@ class SerializedCode:
         )
 
 
+class FunctionPicklerBase(pickle.Pickler):
+    """Reducers shared by GuardsStatePickler and AOTCompilePickler.
+
+    Both rebuild the same kinds of objects that pickle cannot do by reference:
+    code objects, closure cells, python modules, bound methods, and functions
+    rebuilt from their code object. Each subclass keeps its own dispatch and
+    decides what a rebuilt function carries; this class fixes HOW it is rebuilt
+    so a fix in one pickler cannot be missed in the other.
+
+    A cell carries its contents, and a function everything beyond what
+    FunctionType() needs, as pickle STATE rather than as reduce args. pickle
+    memoizes an object only after saving its reduce args, so a value that
+    reaches back to the object being reduced -- a wrapper closing over itself,
+    `wrapper.cache = wrapper`, two module-scope wrappers in each other's
+    globals -- would otherwise recurse until RecursionError. State is applied
+    after memoization, so such references resolve to the pickle already built.
+    """
+
+    @classmethod
+    def _unpickle_code(cls, serialized_code: SerializedCode) -> types.CodeType:
+        return SerializedCode.to_code_object(serialized_code)
+
+    @classmethod
+    def _unpickle_python_module(cls, name: str) -> types.ModuleType:
+        return importlib.import_module(name)
+
+    @classmethod
+    def _unpickle_bound_method(cls, func: Any, base: Any) -> types.MethodType:
+        return types.MethodType(func, base)
+
+    @classmethod
+    def _unpickle_empty_cell(cls) -> types.CellType:
+        return types.CellType()
+
+    @staticmethod
+    def _set_cell_contents(cell: types.CellType, state: tuple[Any]) -> None:
+        # The contents travel wrapped in a 1-tuple: pickle skips the state step
+        # entirely when the state object is None, and None is an ordinary cell
+        # value that must not come back as an empty cell.
+        cell.cell_contents = state[0]
+
+    @classmethod
+    def _build_function(
+        cls,
+        f_globals: dict[str, Any],
+        module: str,
+        code: types.CodeType,
+        qualname: str,
+        name: str,
+        closure: tuple[types.CellType, ...] | None,
+    ) -> types.FunctionType:
+        fn = types.FunctionType(code, f_globals, name, None, closure)
+        # FunctionType derives __module__ from f_globals["__name__"], so any
+        # scope that is not the real module dict leaves it None and a guard
+        # rooted at fn.__module__ rebuilds against that.
+        fn.__module__ = module
+        fn.__qualname__ = qualname
+        return fn
+
+    @classmethod
+    def _unpickle_fn_from_module(cls, module: str, *args: Any) -> types.FunctionType:
+        # NB module is not reliably where the function LIVES -- functools.wraps
+        # copies __module__ from the wrapped function -- so this scope can belong
+        # to a different file. A pickler that guards __globals__ sends the
+        # snapshot variant instead.
+        f_globals = importlib.import_module(module).__dict__
+        return cls._build_function(f_globals, module, *args)
+
+    @classmethod
+    def _unpickle_fn_from_snapshot(cls, module: str, *args: Any) -> types.FunctionType:
+        # The scope arrives as pickle STATE, through _apply_function_state.
+        # Deliberately no import_module fallback: importing a module only to
+        # discard its dict is a load-time failure mode this branch is free of.
+        return cls._build_function({}, module, *args)
+
+    @staticmethod
+    def _apply_function_state(fn: types.FunctionType, state: tuple[Any, ...]) -> None:
+        defaults, kwdefaults, attributes, globals_snapshot = state
+        fn.__defaults__ = defaults
+        fn.__kwdefaults__ = kwdefaults
+        fn.__dict__.update(attributes)
+        if globals_snapshot is not None:
+            fn.__globals__.update(globals_snapshot)
+
+    def _reduce_cell(self, cell: types.CellType) -> tuple[Any, ...]:
+        try:
+            contents = cell.cell_contents
+        except ValueError:
+            # A free variable only assigned on a path that did not run.
+            return type(self)._unpickle_empty_cell, ()
+        return (
+            type(self)._unpickle_empty_cell,
+            (),
+            (contents,),
+            None,
+            None,
+            type(self)._set_cell_contents,
+        )
+
+    def _reduce_bound_method(self, method: types.MethodType) -> tuple[Any, ...] | None:
+        # pickle rebuilds a bound method by getattr() on self at load, which is
+        # wrong when that does not resolve back to the same function; those
+        # carry the function and self explicitly.
+        func = method.__func__
+        inner = getattr(method.__self__, func.__name__)
+        if inspect.ismethod(inner):
+            inner = inner.__func__
+        if func is inner:
+            return None
+        return type(self)._unpickle_bound_method, (func, method.__self__)
+
+    def _reduce_function(
+        self,
+        fn: types.FunctionType,
+        *,
+        defaults: tuple[Any, ...] | None,
+        kwdefaults: dict[str, Any] | None,
+        closure: tuple[types.CellType, ...] | None,
+        attributes: dict[str, Any],
+        globals_snapshot: dict[str, Any] | None = None,
+    ) -> tuple[Any, ...]:
+        args = (fn.__module__, fn.__code__, fn.__qualname__, fn.__name__, closure)
+        if globals_snapshot is None:
+            unpickle = type(self)._unpickle_fn_from_module
+        else:
+            unpickle = type(self)._unpickle_fn_from_snapshot
+        state = (defaults, kwdefaults, attributes, globals_snapshot)
+        return unpickle, args, state, None, None, type(self)._apply_function_state
+
+
 @dataclasses.dataclass
 class _GuardedCodeCacheEntry:
     """
@@ -804,6 +934,10 @@ class CompilePackage:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in bypass_current_entry")
         self._current_entry.bypassed = True
+        # A bypassed entry is never installed, so what it already registered
+        # would only be serialized for nothing.
+        self._current_entry.backend_ids.clear()
+        self._current_entry.guarded_codes.clear()
 
     def add_resume_function(
         self,
@@ -829,6 +963,8 @@ class CompilePackage:
     ) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_backend_id")
+        if self._current_entry.bypassed:
+            return
         if backend_id not in self._current_entry.backend_ids:
             self._current_entry.backend_ids.append(backend_id)
         if backend is not None:
