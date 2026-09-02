@@ -1965,9 +1965,13 @@ def _compile(
             if check_fn.guards_state is None:
                 if check_fn.guards_serialization_failure is not None:
                     # The non-strict CheckFunctionManager swallowed the
-                    # serialization failure; re-raise it typed (chained to the
-                    # specific-guard cause) so package consumers can handle it
-                    # without matching message text.
+                    # serialization failure and marked the package entry
+                    # bypassed. A frame whose guards cannot be serialized has
+                    # always been a hard failure here (formerly a bare
+                    # AssertionError); continuing without the package would
+                    # need every package consumer to tolerate a missing entry,
+                    # so re-raise it typed (chained to the specific-guard
+                    # cause) for consumers to handle without matching text.
                     raise exc.PackageError(
                         "Failed to serialize guards for this compiled code; it "
                         "cannot be saved to the package. See the chained cause "

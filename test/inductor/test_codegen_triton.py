@@ -67,6 +67,7 @@ try:
         UserDefinedAttrsLikeConfig,
         UserDefinedAttrsPrivateFieldConfig,
         UserDefinedPydanticLikeConfig,
+        UserDefinedPydanticLikeNoEqConfig,
         UserDefinedTritonKernelCoercingConfig,
         UserDefinedTritonKernelConfigMode,
         UserDefinedTritonKernelConfigNamespace,
@@ -86,6 +87,7 @@ except ImportError:
         UserDefinedAttrsLikeConfig,
         UserDefinedAttrsPrivateFieldConfig,
         UserDefinedPydanticLikeConfig,
+        UserDefinedPydanticLikeNoEqConfig,
         UserDefinedTritonKernelCoercingConfig,
         UserDefinedTritonKernelConfigMode,
         UserDefinedTritonKernelConfigNamespace,
@@ -250,11 +252,16 @@ class TestCodegenTriton(InductorTestCase):
         self.assertEqual(type_specs[0].module, namespace.__module__)
         self.assertEqual(type_specs[0].root_name, namespace.__name__)
 
-    def test_importable_constexpr_types_bare_nested_class_repr(self):
+    def test_importable_constexpr_types_ignore_repr_spelling(self):
+        # Defaults are never repr'd into the generated module (the user's own
+        # def-time expression is spliced), so a repr that spells a nested type
+        # by its bare name is irrelevant; only the root import matters.
         nested_type = UserDefinedTritonKernelConfigNamespace.BareNested
-        value = nested_type(offset=2)
-        with self.assertRaisesRegex(ImportError, "uses the bare name BareNested"):
-            get_importable_constexpr_types([value])
+        type_specs = get_importable_constexpr_types([nested_type(offset=2)])
+        self.assertEqual(
+            [spec.root_name for spec in type_specs],
+            [UserDefinedTritonKernelConfigNamespace.__name__],
+        )
 
     def test_importable_constexpr_types_skip_hidden_dataclass_field(self):
         @dataclasses.dataclass
@@ -270,12 +277,16 @@ class TestCodegenTriton(InductorTestCase):
             UserDefinedTritonKernelHiddenConfig.__qualname__,
         )
 
-    def test_importable_constexpr_types_non_init_dataclass_field_error(self):
+    def test_importable_constexpr_types_ignore_constructor_shape(self):
+        # Same reason as above: an init=False repr field only matters for
+        # rendered constants (which decline in _render_constexpr_mappings), not
+        # for a default the user constructed themselves.
         value = UserDefinedTritonKernelNonInitConfig(offset=2)
-        with self.assertRaisesRegex(
-            ImportError, "repr-visible field derived with init=False"
-        ):
-            get_importable_constexpr_types([value])
+        type_specs = get_importable_constexpr_types([value])
+        self.assertEqual(
+            [spec.qualname for spec in type_specs],
+            [UserDefinedTritonKernelNonInitConfig.__qualname__],
+        )
 
     def test_importable_constexpr_types_skip_builtin_repr(self):
         with patch("builtins.repr") as repr_mock:
@@ -1641,6 +1652,64 @@ def helper(x):
         exec("\n".join(imports), scope)
         self.assertEqual(eval(source, scope), config)
 
+    def test_constexpr_source_constructor_repr_types(self):
+        # Types with a constructor-style repr over literal arguments but no
+        # field protocol (Fraction, Decimal) render through the module alias and
+        # rebuild equal, as they did before the field-protocol renderer.
+        from decimal import Decimal
+        from fractions import Fraction
+
+        for value in (Fraction(1, 2), Decimal("1.5")):
+            source, imports = _constexpr_source(value)
+            scope = {}
+            exec("\n".join(imports), scope)
+            rebuilt = eval(source, scope)
+            self.assertIs(type(rebuilt), type(value))
+            self.assertEqual(rebuilt, value)
+
+    def test_constexpr_source_repr_args_without_eq(self):
+        # A pydantic-style __repr_args__ type is verified field-wise, so it does
+        # not need an __eq__ of its own.
+        nested = UserDefinedTritonKernelConfigNamespace.Nested(offset=2)
+        source, imports = _constexpr_source(
+            UserDefinedPydanticLikeNoEqConfig(nested=nested)
+        )
+        scope = {}
+        exec("\n".join(imports), scope)
+        rebuilt = eval(source, scope)
+        self.assertIs(type(rebuilt), UserDefinedPydanticLikeNoEqConfig)
+        self.assertEqual(rebuilt.nested, nested)
+
+    def test_constexpr_decline_detail_names_cause(self):
+        from torch._inductor.codegen.wrapper import _render_constexpr_mappings
+
+        class Local(list):
+            __slots__ = ()
+
+        with self.assertRaisesRegex(RuntimeError, "subclasses list"):
+            _render_constexpr_mappings([{"CFG": Local([1])}])
+        with self.assertRaisesRegex(RuntimeError, "repr-visible but init=False"):
+            _render_constexpr_mappings(
+                [{"CFG": UserDefinedTritonKernelNonInitConfig(offset=2)}]
+            )
+        with self.assertRaisesRegex(RuntimeError, "does not rebuild an equal value"):
+            _render_constexpr_mappings(
+                [{"CFG": UserDefinedTritonKernelHiddenDefaultConfig(offset=3, scale=7)}]
+            )
+
+    def test_hashable_constexpr_key(self):
+        from torch._inductor.codegen.wrapper import _hashable_constexpr_key
+
+        key = _hashable_constexpr_key({"a": [1, {2, 3}], "b": (4, [5])})
+        hash(key)
+        self.assertEqual(
+            key, _hashable_constexpr_key({"a": [1, {3, 2}], "b": (4, [5])})
+        )
+        self.assertNotEqual(
+            key, _hashable_constexpr_key({"a": [1, {2, 3}], "b": (4, (5,))})
+        )
+        self.assertIs(_hashable_constexpr_key(7), 7)
+
     def test_constexpr_nested_nan_decline_names_nan(self):
         from torch._inductor.codegen.wrapper import _render_constexpr_mappings
 
@@ -2075,7 +2144,7 @@ def helper(x):
             offsets = tl.arange(0, BLOCK_SIZE)
             mask = offsets < numel
             x = tl.load(in_ptr + offsets, mask=mask)
-            output = tl.where(MODE == 1, x + 1, x + 1)
+            output = tl.where(MODE == 1, x + 1, x * 2)
             tl.store(out_ptr + offsets, output, mask=mask)
 
         def fn(x):
@@ -2277,6 +2346,30 @@ def helper(x):
         self.assertIs(loaded, cfg)
         self.assertEqual(loaded.kwargs, kw)
         self.assertIs(loaded.kwargs["MODE"], TupleMode.PAIR)
+        self.assertIs(type(loaded.kwargs["SHAPE"]), tuple)
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_autotune_cache_coordesc_entry_restores_typed_kwargs(self):
+        # A coordesc-stamped winner is reconstructed from JSON, so a tuple
+        # constexpr comes back as a list; the candidates (which hold the tuple,
+        # constant across configs) supply the typed value instead of forcing a
+        # re-autotune on every warm start.
+        import json
+
+        import triton
+
+        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+
+        cfg = triton.Config({"SHAPE": (2, 3), "BLOCK": 64}, num_warps=4, num_stages=2)
+        data = {"SHAPE": [2, 3], "BLOCK": 128, "num_warps": 8, "num_stages": 2}
+        data.update({"configs_hash": "h", "found_by_coordesc": True})
+        best = json.loads(json.dumps(data))
+        loaded = _load_cached_autotuning(
+            best, "h", [cfg], {"coordinate_descent_tuning": True}
+        )
+        self.assertIsNotNone(loaded)
+        self.assertTrue(loaded.found_by_coordesc)
+        self.assertEqual(loaded.kwargs, {"SHAPE": (2, 3), "BLOCK": 128})
         self.assertIs(type(loaded.kwargs["SHAPE"]), tuple)
 
     @unittest.skipUnless(has_triton_package(), "requires Triton")
@@ -2639,7 +2732,6 @@ def helper(x):
                 sys.modules.pop(module_name, None)
                 shutdown_compile_workers()
 
-    @unittest.skipUnless(has_triton_package(), "requires Triton")
     def test_constexpr_fallback_result_is_memoized(self):
         # LambdaFuture.result() re-runs its result_fn on every call and the
         # worker task re-raises the same SubprocException, so without
@@ -2712,6 +2804,27 @@ def helper(x):
         )
         lookalike = ModuleNotFoundError("No module named 'foobar'", name="foobar")
         self.assertIsNone(_constexpr_module_missing_in_worker(parent_src, lookalike))
+        # torch.dtype / tl.dtype constexprs import the library roots themselves;
+        # a missing submodule under those is a real error in the worker, not a
+        # stale search path, so it must not trigger the in-process fallback.
+        for root in ("torch", "triton.language"):
+            root_src = f"import {root} as __inductor_constexpr_module_0\n"
+            missing_sub = ModuleNotFoundError(
+                f"No module named '{root}.zzz'", name=f"{root}.zzz"
+            )
+            self.assertIsNone(
+                _constexpr_module_missing_in_worker(root_src, missing_sub)
+            )
+        helper_src = "from triton.language import store as store\n"
+        self.assertIsNone(
+            _constexpr_module_missing_in_worker(
+                helper_src,
+                ModuleNotFoundError(
+                    "No module named 'triton.language.extra.x'",
+                    name="triton.language.extra.x",
+                ),
+            )
+        )
         # A formatted worker traceback may chain the constexpr import failure
         # before an unrelated secondary one; any reported missing module that
         # matches a constexpr import is attributed regardless of chain order,
