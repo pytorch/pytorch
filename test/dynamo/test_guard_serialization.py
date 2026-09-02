@@ -34,8 +34,11 @@ from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._guards import compile_context, CompileContext, tracing
 from torch.overrides import TorchFunctionMode
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_LINUX,
     IS_MACOS,
+    parametrize,
+    subtest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
@@ -154,16 +157,6 @@ class UnpicklableDefault:
         raise RuntimeError("unrelated default cannot pickle")
 
 
-def keep_name_with_unpicklable_default(func):
-    @functools.wraps(func)
-    def wrapper(self, x):
-        if func.__name__ == "forward":
-            x = x + 1
-        return func(self, x)
-
-    return wrapper
-
-
 class DecoratedForwardModule(torch.nn.Module):
     # forward is the wrapper; the undecorated function it closes over has the
     # same __qualname__ but is unreachable from the module, which is what makes
@@ -210,7 +203,7 @@ class DecoratedGlobalsLengthForwardModule(torch.nn.Module):
 
 
 class DecoratedUnpicklableDefaultForwardModule(torch.nn.Module):
-    @keep_name_with_unpicklable_default
+    @keep_name
     def forward(self, x, unused=UnpicklableDefault()):
         return x * 2
 
@@ -312,6 +305,72 @@ def _self_referencing_base(x):
 
 
 SELF_REFERENCING_WRAPPED = self_referencing_wrapper(_self_referencing_base)
+
+
+def _make_function_cycle():
+    # The wrapper closes over the base and the base holds the wrapper in its
+    # __dict__, so the cycle runs through the closure of one and the attributes
+    # of the other. Neither is reachable by fqn, so both are reconstructed.
+    def base(x):
+        return x * 2
+
+    @functools.wraps(base)
+    def wrapper(x):
+        return base(x) + 1
+
+    base.wrapper = wrapper
+    return base, wrapper
+
+
+CYCLE_BASE, CYCLE_WRAPPER = _make_function_cycle()
+
+
+class CarriedPayload:
+    def __init__(self, size):
+        self.size = size
+
+
+class ReconstructedByReduce:
+    # __reduce__ decides what its arguments MEAN, so a pruned attribute arrives
+    # as a constructor argument rather than as an attribute nobody reads. The
+    # check makes that fail loudly instead of reconstructing a wrong object.
+    def __init__(self, tag, payload):
+        if not isinstance(payload, CarriedPayload):
+            raise TypeError(f"payload must be a CarriedPayload, got {type(payload)}")
+        self.tag = tag
+        self.payload = payload
+
+    def __reduce__(self):
+        return (type(self), (self.tag, self.payload))
+
+
+class ReconstructedBySetstate:
+    # The default protocol hands __setstate__ the whole __dict__, so a pruned
+    # attribute arrives as a field this __setstate__ reads.
+    def __init__(self, tag, payload):
+        self.tag = tag
+        self.payload = payload
+
+    def __setstate__(self, state):
+        if not isinstance(state["payload"], CarriedPayload):
+            raise TypeError(f"payload must be a CarriedPayload, got {state['payload']}")
+        self.__dict__.update(state)
+
+
+class ReconstructedByNewargs:
+    # __getnewargs__ feeds a validating __new__ under the DEFAULT __reduce_ex__,
+    # so a pruned attribute arrives as a constructor argument.
+    def __new__(cls, payload):
+        if not isinstance(payload, CarriedPayload):
+            raise TypeError(f"payload must be a CarriedPayload, got {payload}")
+        return super().__new__(cls)
+
+    def __init__(self, payload):
+        self.tag = "tag"
+        self.payload = payload
+
+    def __getnewargs__(self):
+        return (self.payload,)
 
 
 # --- an empty closure cell -------------------------------------------------
@@ -760,6 +819,7 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
 
 
 @torch._dynamo.config.patch({"strict_precompile": True})
+@instantiate_parametrized_tests
 class TestGuardSerialization(TestGuardSerializationBase):
     def test_function_locals(self):
         def foo(x):
@@ -823,10 +883,11 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self.assertTrue(any(contents is got for contents in cells))
 
     def test_a_shared_closure_cell_survives_a_self_reference(self):
-        # The self-reference fix builds a placeholder cell, so it must not cost
-        # the sharing that _reduce_cell passes cells through unchanged to keep:
-        # two functions closing over one variable must still close over ONE
-        # cell after the round trip.
+        # A cell's CONTENTS travel in the owning function's state, so the cell
+        # itself comes back empty -- that must not cost the sharing keeping the
+        # cell object in the reduce args exists to preserve: two functions
+        # closing over one variable must still close over ONE cell after the
+        # round trip.
         from torch._dynamo.guards import GuardsStatePickler
 
         def pair():
@@ -865,7 +926,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ):
                 _REDUCE_RAISES = exc_type
                 with self.subTest(exc=exc_type.__name__):
-                    with self.assertRaises(exc_type):
+                    with self.assertRaisesRegex(exc_type, "from __reduce__"):
                         _dump_through_pickle_guards_state(_RaisesFromReduce())
 
             # ... while an ordinary failure inside __reduce__ still becomes one.
@@ -878,17 +939,15 @@ class TestGuardSerialization(TestGuardSerializationBase):
             _REDUCE_RAISES = original
 
     def test_reducer_handles_an_empty_cell_reached_directly(self):
-        # _reduce_cell only covers cells it builds for a reconstructed
-        # function. A cell reached directly -- a guarded __closure__ tuple, or
-        # the cell itself -- goes through reducer_override's CellType branch,
+        # A cell in a reconstructed function's closure is filled from that
+        # function's state. A cell reached directly -- a guarded __closure__
+        # tuple, or the cell itself -- goes through reducer_override's branch,
         # which read cell_contents unguarded and raised ValueError out of the
         # pickler, i.e. a package bypass. Pickler-level because a guard cannot
         # root at a raw cell through a capture: CLOSURE_MATCH is dropped.
         from torch._dynamo.guards import GuardsStatePickler
 
-        empty = [
-            c for c in EMPTY_CELL_WRAPPED.__closure__ if not self._cell_has_contents(c)
-        ]
+        empty = [c for c in EMPTY_CELL_WRAPPED.__closure__ if not _cell_is_full(c)]
         self.assertEqual(len(empty), 1)
         buf = io.BytesIO()
         GuardsStatePickler({}, {}, {}, buf).dump({"cell": empty[0]})
@@ -901,31 +960,12 @@ class TestGuardSerialization(TestGuardSerializationBase):
         from torch._dynamo.guards import GuardsStatePickler
 
         wrapped = EMPTY_CELL_WRAPPED
-        empty = [c for c in wrapped.__closure__ if not self._cell_has_contents(c)]
+        empty = [c for c in wrapped.__closure__ if not _cell_is_full(c)]
         self.assertEqual(len(empty), 1)
         gtv = {id(wrapped): wrapped}
         buf = io.BytesIO()
         GuardsStatePickler(gtv, {}, {}, buf).dump({"fn": wrapped})
         self.assertGreater(len(buf.getvalue()), 0)
-
-    @staticmethod
-    def _cell_has_contents(cell):
-        try:
-            cell.cell_contents
-        except ValueError:
-            return False
-        return True
-
-    def test_fqn_mismatched_function_preserves_a_guarded_default_value(self):
-        # The SEQUENCE_LENGTH test pins the defaults TUPLE's length. This pins
-        # that a guarded element's value survives: forcing every default to
-        # _Missing passes that one and fails this one.
-        mod = DecoratedDefaultValueForwardModule()
-        ref, loaded = self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
-        inner = type(mod).forward.__wrapped__
-        self._test_check_fn(
-            ref, loaded, {"self": mod, "x": torch.randn(3), "func": inner}, True
-        )
 
     def test_fqn_mismatched_function_keeps_a_shared_closure_cell_shared(self):
         # Two functions closing over one variable must still share the cell
@@ -953,33 +993,36 @@ class TestGuardSerialization(TestGuardSerializationBase):
         out = pickle.loads(buf.getvalue())
         self.assertIs(out["a"].__closure__[0], out["b"].__closure__[0])
 
-    def test_guard_rooted_at_fqn_mismatched_function(self):
-        mod = DecoratedForwardModule()
-        ref, loaded = self._test_serialization("SEQUENCE_LENGTH", mod, torch.randn(3))
-        inner = type(mod).forward.__wrapped__
-        self._test_check_fn(
-            ref, loaded, {"self": mod, "x": torch.randn(3), "func": inner}, True
-        )
-
-    def test_fqn_mismatched_function_preserves_kwdefaults(self):
-        mod = DecoratedKwdefaultsForwardModule()
-        ref, loaded = self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
-        inner = type(mod).forward.__wrapped__
-        self._test_check_fn(
-            ref, loaded, {"self": mod, "x": torch.randn(3), "func": inner}, True
-        )
-
-    def test_fqn_mismatched_function_preserves_attributes(self):
-        mod = DecoratedAttributeForwardModule()
-        ref, loaded = self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
-        inner = type(mod).forward.__wrapped__
-        self._test_check_fn(
-            ref, loaded, {"self": mod, "x": torch.randn(3), "func": inner}, True
-        )
-
-    def test_fqn_mismatched_function_preserves_name(self):
-        mod = DecoratedNameForwardModule()
-        ref, loaded = self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
+    @parametrize(
+        "module_type,guard_type",
+        [
+            # The defaults TUPLE's length, and separately the VALUE of a guarded
+            # element: forcing every default to _Missing passes the first and
+            # fails the second.
+            subtest((DecoratedForwardModule, "SEQUENCE_LENGTH"), name="defaults"),
+            subtest(
+                (DecoratedDefaultValueForwardModule, "EQUALS_MATCH"),
+                name="default_value",
+            ),
+            subtest(
+                (DecoratedKwdefaultsForwardModule, "EQUALS_MATCH"), name="kwdefaults"
+            ),
+            subtest(
+                (DecoratedAttributeForwardModule, "EQUALS_MATCH"), name="attribute"
+            ),
+            subtest((DecoratedNameForwardModule, "EQUALS_MATCH"), name="name"),
+            subtest(
+                (DecoratedGlobalsLengthForwardModule, "DICT_KEYS_MATCH"),
+                name="globals_structure",
+            ),
+        ],
+    )
+    def test_guard_rooted_at_fqn_mismatched_function(self, module_type, guard_type):
+        # forward is a functools.wraps wrapper, so the function it closes over is
+        # unreachable by fqn and has to be reconstructed. Each case guards a
+        # different piece of what the reconstruction must carry with it.
+        mod = module_type()
+        ref, loaded = self._test_serialization(guard_type, mod, torch.randn(3))
         inner = type(mod).forward.__wrapped__
         self._test_check_fn(
             ref, loaded, {"self": mod, "x": torch.randn(3), "func": inner}, True
@@ -1021,14 +1064,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
         finally:
             FQN_MISMATCH_GLOBAL = 2
 
-    def test_fqn_mismatched_function_preserves_globals_structure(self):
-        mod = DecoratedGlobalsLengthForwardModule()
-        ref, loaded = self._test_serialization("DICT_KEYS_MATCH", mod, torch.randn(3))
-        inner = type(mod).forward.__wrapped__
-        self._test_check_fn(
-            ref, loaded, {"self": mod, "x": torch.randn(3), "func": inner}, True
-        )
-
     def test_fqn_mismatched_function_prunes_unguarded_defaults(self):
         mod = DecoratedUnpicklableDefaultForwardModule()
         ref, loaded = self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
@@ -1036,6 +1071,39 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(
             ref, loaded, {"self": mod, "x": torch.randn(3), "func": inner}, True
         )
+
+    def test_two_functions_that_reference_each_other(self):
+        # Deferring to state used to be conditional on a DIRECT self-reference,
+        # which a PAIR does not have: the wrapper's cell reaches the base, whose
+        # __dict__ reaches the wrapper, and neither is memoized while its own
+        # args are being saved, so the pair recursed until RecursionError. Only
+        # the code, the names and the cells travel in args now.
+        from torch._dynamo.guards import GuardsStatePickler
+
+        base, wrapper = CYCLE_BASE, CYCLE_WRAPPER
+        cell = wrapper.__closure__[0]
+        gtv = {id(base): base, id(wrapper): wrapper, id(cell): cell}
+        buf = io.BytesIO()
+        GuardsStatePickler(gtv, {}, {}, buf).dump({"wrapper": wrapper})
+        got = pickle.loads(buf.getvalue())["wrapper"]
+        inner = got.__closure__[0].cell_contents
+        self.assertIs(inner.wrapper, got)
+        self.assertEqual(got(torch.ones(1)), torch.full((1,), 3.0))
+
+    def test_a_reconstructed_function_keeps_its_module(self):
+        # A guarded __globals__ makes the function rebuild from a globals
+        # SNAPSHOT, and FunctionType reads __module__ out of globals["__name__"],
+        # which a snapshot has no reason to contain -- so __module__ came back
+        # None and a guard reading it could never match.
+        from torch._dynamo.guards import GuardsStatePickler
+
+        w = SELF_REFERENCING_WRAPPED
+        buf = io.BytesIO()
+        gtv = {id(w): w, id(w.__globals__): w.__globals__}
+        GuardsStatePickler(gtv, {}, {}, buf).dump({"fn": w})
+        got = pickle.loads(buf.getvalue())["fn"]
+        self.assertEqual(got.__module__, w.__module__)
+        self.assertEqual(got.__doc__, w.__doc__)
 
     def test_tensor_match(self):
         def f(x: torch.Tensor):
@@ -2535,6 +2603,49 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # Round-trip through pickle should work even with init=False fields
         restored = pickle.loads(pickle.dumps(source))
         self.assertEqual(source, restored)
+
+    def test_guard_on_an_object_that_reconstructs_itself(self):
+        # Pruning replaces an unguarded attribute by id, which only comes back
+        # as a missing attribute under the DEFAULT protocol. A class with its own
+        # __reduce__ gets the sentinel as a constructor ARGUMENT instead, so its
+        # attributes must not be pruned at all.
+        obj = ReconstructedByReduce("tag", CarriedPayload(3))
+
+        def fn(x):
+            if obj.tag == "tag":
+                return x + 1
+            return x - 1
+
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, torch.randn(3))
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "obj": obj}, True)
+
+    def test_guard_on_an_object_whose_setstate_or_new_reads_state(self):
+        # __reduce__ is not the only hook that reads a pruned value back: the
+        # default protocol hands __setstate__ the whole __dict__, and
+        # __getnewargs__ feeds __new__. Either saw the sentinel and raised at
+        # load, so both classes must keep every attribute.
+        from torch._dynamo.guards import _builds_its_own_pickle
+
+        self.assertFalse(_builds_its_own_pickle(CarriedPayload))
+        for obj in (
+            ReconstructedBySetstate("tag", CarriedPayload(3)),
+            ReconstructedByNewargs(CarriedPayload(3)),
+        ):
+            self.assertTrue(_builds_its_own_pickle(type(obj)))
+
+            def fn(x):
+                if obj.tag == "tag":
+                    return x + 1
+                return x - 1
+
+            with self.subTest(cls=type(obj).__name__):
+                ref, loaded = self._test_serialization(
+                    "EQUALS_MATCH", fn, torch.randn(3)
+                )
+                self._test_check_fn(
+                    ref, loaded, {"x": torch.randn(3), "obj": obj}, True
+                )
+
 
 
 class SimpleModule(torch.nn.Module):
