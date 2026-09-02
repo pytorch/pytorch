@@ -2682,6 +2682,15 @@ def commit_tdm_operand_layout(*matrices: IRNode) -> None:
         raise AssertionError("TDM layout commit revalidation failed")
 
 
+def use_gfx1250_descriptor_codegen(device: torch.device | None) -> bool:
+    """Return whether generic tensor descriptor codegen may target AMD TDM."""
+    return (
+        config.triton.use_tensor_descriptor
+        and config.assume_aligned_inputs
+        and _gfx1250_device_prereqs(device)
+    )
+
+
 def _tma_descriptor_max_offset_fits_in_int32(
     mat: IRNode, add_guards: bool = False
 ) -> bool:
