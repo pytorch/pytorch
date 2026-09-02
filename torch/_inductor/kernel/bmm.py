@@ -153,6 +153,9 @@ def append_blackwell_bmm_choice(
         "EPILOGUE_SUBTILE": config.epilogue_subtile,
         "TWO_CTAS": config.two_ctas,
         "FLATTEN_OUTPUT": flattened_output,
+        "DECOMPOSE_K": False,
+        "K_SPLIT": 1,
+        "M_PAD": m,
         "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),
         # Keep the output a normal logical rank-3 tensor.  Until 2CTA output
         # transformation supports rank-3 descriptors, use the generic pointer
