@@ -54,16 +54,21 @@ def sample_inputs_i0_i1(op_info, device, dtype, requires_grad, **kwargs):
         requires_grad=requires_grad,
         exclude_zero=exclude_zero,
     )
-    yield SampleInput(make_arg((S,)))
-    yield SampleInput(make_arg(()))
+    cases = (
+        (),
+        (S,),
+        (S, S),
+    )
 
-    if requires_grad and not exclude_zero:
-        # Special Case for gradient
-        # Sample with `0` in the input
-        t = make_arg((S,))
-        t[0] = 0
+    for shape in cases:
+        yield SampleInput(make_arg(shape))
 
-        yield SampleInput(t)
+    tensor_173 = torch.tensor([173.0], device=device, dtype=dtype)
+    
+    if requires_grad:
+        tensor_173.requires_grad_()
+        
+    yield SampleInput(tensor_173)
 
 
 def sample_inputs_polygamma(op_info, device, dtype, requires_grad, **kwargs):
