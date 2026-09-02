@@ -171,6 +171,7 @@ class TestCutlassEVT(TestCase):
                 ],
                 OrderedSet([]),
             )
+        self.assertTrue(epilogue.is_evt_fallback)
         reads = list(epilogue.reads)
         writes = list(epilogue.writes)
         code = epilogue.source
