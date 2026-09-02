@@ -823,6 +823,24 @@ class TestFakeQuantizeOps(TestCase):
                                                                     axis, quant_min, quant_max)
                 np.testing.assert_allclose(Y.cpu().numpy(), Y_ref.cpu().numpy(), rtol=tolerance, atol=tolerance)
 
+    def test_fake_quant_per_channel_qparam_range_empty_input(self):
+        # An empty input launches no kernel, so the device-side zero_point bound
+        # check in FakeQuantizeCore.cu cannot fire. The host-side check must
+        # still reject an out-of-range zero_point on every device.
+        quant_min, quant_max = 0, 255
+        for device in ['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']:
+            X = torch.empty(0, 3, device=device)
+            scale = torch.ones(3, device=device)
+            zero_point = torch.full((3,), -1, dtype=torch.int32, device=device)
+
+            with self.assertRaisesRegex(RuntimeError, "`zero_point` must be between `quant_min` and `quant_max`."):
+                torch.fake_quantize_per_channel_affine(X, scale, zero_point, 1, quant_min, quant_max)
+
+            # An in-range zero_point must still return an empty result, not raise.
+            zero_point.fill_(0)
+            Y = torch.fake_quantize_per_channel_affine(X, scale, zero_point, 1, quant_min, quant_max)
+            self.assertEqual(Y.shape, X.shape)
+
     def _test_learnable_forward_per_channel(self, X_base, device, scale_base, zero_point_base, axis):
         r"""Tests the forward path of the learnable FakeQuantizePerTensorAffine op.
         """
