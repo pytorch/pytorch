@@ -2709,7 +2709,10 @@ def _dealias_marked_returns(raw_returns: list[Any], marked: Sequence[int]) -> No
 
     ``marked`` may name slots that are not tensors: the ahead-of-time codegen
     path selects indices by output metadata and does not pre-filter, so
-    non-tensor slots are simply skipped here.
+    non-tensor slots are simply skipped here. Unmarked slots may already be
+    wrapped in TensorAlias (aliased outputs and metadata-mutated inputs); the
+    probe looks through the wrapper since marking is keyed on the TensorImpl
+    inside it.
     """
     if not marked:
         return
@@ -2728,6 +2731,8 @@ def _dealias_marked_returns(raw_returns: list[Any], marked: Sequence[int]) -> No
     collide: set[int] = set()
     for j, o in enumerate(raw_returns):
         if j not in marked_set:
+            if isinstance(o, TensorAlias):
+                o = o.alias
             hits = marked_positions.get(id(o))
             if hits is not None:
                 collide.update(hits)
