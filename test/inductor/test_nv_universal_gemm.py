@@ -2574,6 +2574,75 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             self.assertNotIn("'local_reduce': GemmReductionArguments", strict_code)
             self.assertIn("ReductionOrdering.INNER_TREE", strict_code)
 
+    def test_scaled_mm_grouped_reduce_shared_sum_not_folded(self):
+        m, n, k, group = 128, 128, 512, 32
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
+        b = b.T
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+
+        def fn(a, b, scale_a, scale_b):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            grouped = result.float().view(m, -1, group)
+            summed = grouped.sum(-1)
+            return summed / group, summed
+
+        result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
+        expected = fn(a, b, scale_a, scale_b)
+        self.assertEqual(result, expected)
+        self.assertNotIn("'local_reduce_type': 'mean'", code)
+
+    def test_scaled_mm_grouped_reduce_sum_then_div_fusion(self):
+        m, n, k, group = 128, 128, 512, 32
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
+        b = b.T
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+
+        def fn(a, b, scale_a, scale_b):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            grouped = result.float().view(m, -1, group)
+            summed = grouped.sum(-1)
+            return summed / group
+
+        result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
+        self.assertEqual(result, fn(a, b, scale_a, scale_b))
+        self.assertIn("'local_reduce_type': 'mean'", code)
+
     def test_scaled_mm_grouped_reduce_source_fusion(self):
         m, n, k, group = 128, 128, 512, 32
         packed_k = k // 2
