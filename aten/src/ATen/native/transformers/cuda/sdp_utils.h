@@ -14,5 +14,6 @@ C10_EXPORT bool can_use_flash_attention(sdp_params const& params, bool debug);
 C10_EXPORT bool can_use_mem_efficient_attention(sdp_params const& params, bool debug);
 C10_EXPORT bool can_use_cudnn_attention(sdp_params const& params, bool debug);
 C10_EXPORT bool is_cudnn_attention_decode_disabled();
+C10_EXPORT bool is_cudnn_varlen_924_or_later();
 
 } // namespace sdp
