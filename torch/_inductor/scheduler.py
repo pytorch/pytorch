@@ -34,6 +34,7 @@ if TYPE_CHECKING:
 
     from .codegen.simd import MemoryCoalescing
     from .codegen.wrapper import PythonWrapperCodegen
+    from .memory import FreeableInputBuffer, SchedulerMemoryStorage
     from .tiling_utils import CoalesceVarAnalysis
 
 import sympy
@@ -153,9 +154,46 @@ class PendingFusion:
     node1: BaseSchedulerNode
     node2: BaseSchedulerNode
     future: LambdaFuture | None = None
+    can_reorder: bool = False
 
     def get_fusion_nodes(self) -> tuple[BaseSchedulerNode, BaseSchedulerNode]:
         return (self.node1, self.node2)
+
+
+@dataclasses.dataclass(eq=False, slots=True)
+class _FusionMemoryCandidate:
+    snodes: tuple[BaseSchedulerNode, ...]
+    operation_names: OrderedSet[str]
+    buffer_names: OrderedSet[str]
+    unmet_dependencies: OrderedSet[Dep]
+    mpi_node: MemoryPlanningInfoForNode = dataclasses.field(
+        default_factory=MemoryPlanningInfoForNode
+    )
+
+    def get_nodes(self) -> tuple[BaseSchedulerNode, ...]:
+        return self.snodes
+
+    def get_buffer_names(self) -> OrderedSet[str]:
+        return self.buffer_names
+
+    def get_operation_names(self) -> OrderedSet[str]:
+        return self.operation_names
+
+
+@dataclasses.dataclass(slots=True)
+class FusionMemoryUpdate:
+    node1: BaseSchedulerNode
+    node2: BaseSchedulerNode
+    candidate: _FusionMemoryCandidate
+    candidate_step: int
+    region_start: int
+    region_end: int
+    local_nodes: list[BaseSchedulerNode]
+    live_before: list[int]
+    live_after: list[int]
+    last_use_steps: dict[int, int | None]
+    candidate_outputs: Sequence[SchedulerBuffer]
+    candidate_alloc_size: int
 
 
 @dataclasses.dataclass(slots=True)
@@ -179,6 +217,83 @@ class ComboKernelMemoryContext:
     # are evaluated independently, so a window's entry memory is the
     # precomputed baseline live-in at `region_start`.
     baseline_live_before: list[int] = dataclasses.field(default_factory=list)
+
+
+@dataclasses.dataclass(slots=True)
+class FusionMemoryDeviceState:
+    nodes: list[BaseSchedulerNode | None]
+    graph_outputs: OrderedSet[str]
+    node_to_idx: dict[BaseSchedulerNode, int]
+    baseline_peak: int
+    baseline_live_before: list[int]
+    baseline_live_after: list[int]
+    peak_limit: int
+    storage: SchedulerMemoryStorage
+    last_use_steps: dict[int, int | None] = dataclasses.field(default_factory=dict)
+    node_outputs: dict[BaseSchedulerNode, Sequence[SchedulerBuffer]] = (
+        dataclasses.field(default_factory=dict)
+    )
+    node_alloc_sizes: dict[BaseSchedulerNode, int] = dataclasses.field(
+        default_factory=dict
+    )
+
+    def update_boundaries_match(self, update: FusionMemoryUpdate) -> bool:
+        start = update.region_start
+        end = update.region_end + 1
+        return (
+            len(update.live_after) == end - start
+            and len(update.live_before) == end - start + 1
+            and update.live_before[0] == self.baseline_live_before[start]
+            and update.live_before[-1] == self.baseline_live_before[end]
+        )
+
+    def apply_accepted_fusion(
+        self, update: FusionMemoryUpdate, fused_node: BaseSchedulerNode
+    ) -> None:
+        start = update.region_start
+        end = update.region_end + 1
+        if len(update.live_after) != end - start:
+            raise AssertionError("unexpected live-after region length")
+        if len(update.live_before) != end - start + 1:
+            raise AssertionError("unexpected live-before region length")
+
+        region_nodes: list[BaseSchedulerNode | None] = [None] * (end - start)
+        for idx, node in enumerate(update.local_nodes):
+            if idx >= len(region_nodes):
+                raise AssertionError("too many nodes in fused memory region")
+            region_nodes[idx] = fused_node if node is update.candidate else node
+        self.nodes[start:end] = region_nodes
+
+        self.baseline_live_after[start:end] = update.live_after
+        self.baseline_live_before[start : end + 1] = update.live_before
+        self.last_use_steps.update(update.last_use_steps)
+        self.node_outputs[fused_node] = update.candidate_outputs
+        self.node_alloc_sizes[fused_node] = update.candidate_alloc_size
+        self.baseline_peak = max(self.baseline_live_after)
+
+        for idx, node in enumerate(region_nodes, start):
+            if node is None:
+                continue
+            self.node_to_idx[node] = idx
+            for snode in node.get_nodes():
+                self.node_to_idx[snode] = idx
+
+        self.node_to_idx[fused_node] = update.candidate_step
+        for node in (update.node1, update.node2):
+            self.node_to_idx[node] = update.candidate_step
+            for snode in node.get_nodes():
+                self.node_to_idx[snode] = update.candidate_step
+
+
+class FusionMemoryStateStatus(enum.Enum):
+    ACTIVE = enum.auto()
+    FAILED_CLOSED = enum.auto()
+
+
+@dataclasses.dataclass(slots=True)
+class FusionMemoryState:
+    device_states: dict[torch.device, FusionMemoryDeviceState]
+    status: FusionMemoryStateStatus = FusionMemoryStateStatus.ACTIVE
 
 
 def _is_gpu_triton_backend(
@@ -5419,7 +5534,7 @@ class _LoopStateSnapshot:
             refresh_group_node_dependencies(node)
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(eq=False)
 class _LoopMutationTracker:
     """Rollback scope for speculative loop mutations during can_fuse().
 
@@ -5428,9 +5543,6 @@ class _LoopMutationTracker:
     this tracker restores the original loop structure so later fusion
     candidates do not inherit a speculative layout chosen for a fusion
     that did not happen.
-
-    Recursive can_fuse() calls chain their listeners so each scope captures its
-    own decision boundary while the outer scope still sees nested mutations.
 
     Use finish(rollback=False) to keep mutations or finish(rollback=True) to
     restore the original state. If no mutation occurred, finish() is a no-op.
@@ -5443,6 +5555,13 @@ class _LoopMutationTracker:
     previous_listeners: dict[SchedulerNode, Callable[[SchedulerNode], None] | None] = (
         dataclasses.field(default_factory=dict)
     )
+    fusion_memory_scheduler: Scheduler | None = None
+    fusion_memory_original_generations: dict[SchedulerNode, int] = dataclasses.field(
+        default_factory=dict
+    )
+    fusion_memory_cache_keys: OrderedSet[tuple[Any, ...]] = dataclasses.field(
+        default_factory=OrderedSet
+    )
     state: _LoopStateSnapshot | None = None
 
     @classmethod
@@ -5454,6 +5573,40 @@ class _LoopMutationTracker:
             if isinstance(node, SchedulerNode):
                 tracker.watch(node)
         return tracker
+
+    @classmethod
+    def create_fusion_memory(
+        cls, nodes: tuple[BaseSchedulerNode, ...]
+    ) -> _LoopMutationTracker:
+        tracker = cls.create(nodes)
+        schedulers = OrderedSet(sn.scheduler for sn in tracker.watched_nodes)
+        if len(schedulers) > 1:
+            raise AssertionError("expected one scheduler for a fusion trial")
+        if schedulers:
+            tracker._register_fusion_memory_cache(next(iter(schedulers)))
+        return tracker
+
+    def _register_fusion_memory_cache(self, scheduler: Scheduler) -> None:
+        if self.fusion_memory_scheduler is scheduler:
+            return
+        if self.fusion_memory_scheduler is not None:
+            raise AssertionError("fusion trial cannot span schedulers")
+        self.fusion_memory_scheduler = scheduler
+        self.fusion_memory_original_generations = {
+            sn: sn._loop_state_gen for sn in self.watched_nodes
+        }
+        trackers = getattr(scheduler, "_fusion_memory_cache_trackers", None)
+        if trackers is None:
+            trackers = scheduler._fusion_memory_cache_trackers = []
+        trackers.append(self)
+
+    def track_fusion_memory_cache_key(self, cache_key: tuple[Any, ...]) -> None:
+        if any(
+            sn in self.fusion_memory_original_generations
+            and generation != self.fusion_memory_original_generations[sn]
+            for sn, generation in cache_key
+        ):
+            self.fusion_memory_cache_keys.add(cache_key)
 
     def watch(self, sn: SchedulerNode) -> None:
         """Install this scope as the mutation listener for a leaf node."""
@@ -5482,9 +5635,19 @@ class _LoopMutationTracker:
         """Detach listeners and restore captured state if rolling back."""
         for sn in self.watched_nodes:
             sn._loop_mutation_listener = self.previous_listeners[sn]
-        if not rollback or self.state is None:
-            return
-        self.state.restore()
+        if rollback and self.state is not None:
+            self.state.restore()
+        if self.fusion_memory_scheduler is not None:
+            self.fusion_memory_scheduler._fusion_memory_cache_trackers.remove(self)
+            if rollback:
+                for cache_key in self.fusion_memory_cache_keys:
+                    self.fusion_memory_scheduler._tiling_memory_cache.pop(
+                        cache_key, None
+                    )
+
+    def finish_fusion_memory(self, *, rollback: bool) -> None:
+        """Finish a memory-guard trial and discard rejected trial cache entries."""
+        self.finish(rollback=rollback)
 
 
 # Distinguishes "not cached" from a cached None in _tiling_memory_cache.
@@ -5514,6 +5677,11 @@ class Scheduler:
         self.backends: dict[torch.device, BaseScheduling] = {}
         self.post_grad_graph_id = next(_post_grad_graph_counter)
         self._graph_partition_counter = itertools.count()
+        self._fusion_memory_state: FusionMemoryState | None = None
+        self._fusion_memory_buffer_sizes: dict[str, tuple[int, int]] | None = None
+        self._fusion_memory_peak_limits: dict[torch.device, int] = {}
+        self._fusion_memory_cache_trackers: list[_LoopMutationTracker] = []
+
         self.completed_operations: OrderedSet[str] = OrderedSet()
         self.available_buffer_names = OrderedSet(
             [
@@ -6314,7 +6482,6 @@ class Scheduler:
         from .memory import (
             assign_memory_planning_info_for_scheduler_buffers,
             compute_memory_timeline,
-            FreeableInputBuffer,
             get_freeable_input_buf,
         )
 
@@ -6607,6 +6774,7 @@ class Scheduler:
         with dynamo_timed(
             "Scheduler.fused_nodes", log_pt2_compile_event=True, log_waitcounter=True
         ):
+            self._fusion_memory_peak_limits.clear()
             for i in range(10):
                 old_len = len(nodes)
                 fusion_log.debug(
@@ -6633,6 +6801,7 @@ class Scheduler:
                 or config.loop_index_inversion_in_fusion
             ):
                 nodes = self.fuse_nodes_once(nodes, is_reorder_round=True)
+            self._fusion_memory_peak_limits.clear()
             return nodes
 
     def process_grouped_nodes(self) -> None:
@@ -7521,6 +7690,24 @@ class Scheduler:
 
         return node3
 
+    def _fuse_two_nodes_with_memory_update(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        fused_nodes: OrderedSet[BaseSchedulerNode],
+        state: FusionMemoryState | None,
+        memory_updates: dict[torch.device, FusionMemoryUpdate] | None,
+    ) -> BaseSchedulerNode:
+        fused = self.fuse_two_nodes(node1, node2, fused_nodes)
+        if state is not None and memory_updates:
+            for device, update in memory_updates.items():
+                state.device_states[device].apply_accepted_fusion(update, fused)
+            fused.mpi_node = next(iter(memory_updates.values())).candidate.mpi_node
+            fused.mpi_node.size = sum(
+                update.candidate_alloc_size for update in memory_updates.values()
+            )
+        return fused
+
     def fuse_if_speedup(
         self,
         node1: BaseSchedulerNode,
@@ -7537,6 +7724,41 @@ class Scheduler:
             return True
 
         return False
+
+    def _fuse_if_speedup_with_memory(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        speedup_fn: Callable[[], bool],
+        fused_nodes: OrderedSet[BaseSchedulerNode],
+        *,
+        can_reorder: bool,
+    ):
+        state = self._fusion_memory_state
+        if state is None:
+            raise AssertionError("expected fusion memory state")
+
+        loop_tracker = _LoopMutationTracker.create_fusion_memory((node1, node2))
+        can_fuse = self._can_fuse_impl(
+            node1,
+            node2,
+            can_reorder=can_reorder,
+            allow_mix_order_reduction=True,
+        )
+        if not can_fuse or self.will_fusion_create_cycle(node1, node2):
+            loop_tracker.finish_fusion_memory(rollback=True)
+            return False
+
+        rejected, memory_updates = self._check_fusion_memory(state, node1, node2)
+        if rejected or not speedup_fn():
+            loop_tracker.finish_fusion_memory(rollback=True)
+            return False
+
+        self._fuse_two_nodes_with_memory_update(
+            node1, node2, fused_nodes, state, memory_updates
+        )
+        loop_tracker.finish(rollback=False)
+        return True
 
     def _evaluate_pending_template_fusions(
         self,
@@ -7600,20 +7822,39 @@ class Scheduler:
                     future_to_pending_fusion[f] = (pending_fusion, candidate)
                 else:
                     # Non AsyncCompile path, perform fusion
-                    if self.fuse_if_speedup(
-                        node1, node2, pending_fusion.callable_fn, fused_nodes
-                    ):
+                    if self._fusion_memory_state is None:
+                        fused = self.fuse_if_speedup(
+                            node1, node2, pending_fusion.callable_fn, fused_nodes
+                        )
+                    else:
+                        fused = self._fuse_if_speedup_with_memory(
+                            node1,
+                            node2,
+                            pending_fusion.callable_fn,
+                            fused_nodes,
+                            can_reorder=pending_fusion.can_reorder,
+                        )
+                    if fused:
                         fusions_to_remove.add(candidate)
 
             # Evaluate fusion candidates as async_compile completes
             for f in as_completed(template_futures):
                 pending_fusion, cand = future_to_pending_fusion[f]
-                if self.fuse_if_speedup(
-                    self.get_fused_node(pending_fusion.node1),
-                    self.get_fused_node(pending_fusion.node2),
-                    pending_fusion.callable_fn,
-                    fused_nodes,
-                ):
+                node1 = self.get_fused_node(pending_fusion.node1)
+                node2 = self.get_fused_node(pending_fusion.node2)
+                if self._fusion_memory_state is None:
+                    fused = self.fuse_if_speedup(
+                        node1, node2, pending_fusion.callable_fn, fused_nodes
+                    )
+                else:
+                    fused = self._fuse_if_speedup_with_memory(
+                        node1,
+                        node2,
+                        pending_fusion.callable_fn,
+                        fused_nodes,
+                        can_reorder=pending_fusion.can_reorder,
+                    )
+                if fused:
                     fusions_to_remove.add(cand)
 
             for f in fusions_to_remove:
@@ -7653,10 +7894,18 @@ class Scheduler:
                 if self.get_fused_node(node_key2) is not node_key2:
                     raise AssertionError("expected node_key2 to be its own fused node")
 
-                if not is_speedup() or self.will_fusion_create_cycle(node1, node2):
-                    continue
-
-                self.fuse_two_nodes(node_key1, node_key2, fused_nodes)
+                if self._fusion_memory_state is None:
+                    if not is_speedup() or self.will_fusion_create_cycle(node1, node2):
+                        continue
+                    self.fuse_two_nodes(node_key1, node_key2, fused_nodes)
+                else:
+                    self._fuse_if_speedup_with_memory(
+                        node_key1,
+                        node_key2,
+                        is_speedup,
+                        fused_nodes,
+                        can_reorder=pending_fusion.can_reorder,
+                    )
 
         for node1, node2 in possible_fusion_pairs:
             # if either node is in a pending fusion, resolve it.
@@ -7672,16 +7921,44 @@ class Scheduler:
             ):
                 continue
 
-            if self.can_fuse(
-                node1, node2, is_reorder_round
-            ) and not self.will_fusion_create_cycle(node1, node2):
+            memory_state = self._fusion_memory_state
+            loop_tracker = (
+                _LoopMutationTracker.create_fusion_memory((node1, node2))
+                if memory_state is not None
+                else None
+            )
+            can_fuse = (
+                self.can_fuse(node1, node2, is_reorder_round)
+                if memory_state is None
+                else self._can_fuse_impl(
+                    node1,
+                    node2,
+                    can_reorder=is_reorder_round,
+                    allow_mix_order_reduction=True,
+                )
+            )
+            if can_fuse and not self.will_fusion_create_cycle(node1, node2):
+                if memory_state is None:
+                    rejected = False
+                    memory_updates = None
+                else:
+                    rejected, memory_updates = self._check_fusion_memory(
+                        memory_state, node1, node2
+                    )
+                if rejected:
+                    if loop_tracker is not None:
+                        loop_tracker.finish_fusion_memory(rollback=True)
+                    continue
                 fusion_res = self.speedup_by_fusion(node1, node2)
                 if fusion_res.callable_fn is not None:
+                    if loop_tracker is not None:
+                        loop_tracker.finish_fusion_memory(rollback=True)
                     pending_fusion = PendingFusion(
                         callable_fn=fusion_res.callable_fn,
                         node1=node1,
                         node2=node2,
                         future=fusion_res.future,
+                        can_reorder=is_reorder_round and memory_state is not None,
                     )
 
                     if is_template_fusion(node1, node2):
@@ -7702,9 +7979,20 @@ class Scheduler:
                     continue
 
                 if not fusion_res.should_fuse:
+                    if loop_tracker is not None:
+                        loop_tracker.finish_fusion_memory(rollback=True)
                     continue
 
-                self.fuse_two_nodes(node1, node2, fused_nodes)
+                if memory_state is None:
+                    self.fuse_two_nodes(node1, node2, fused_nodes)
+                else:
+                    self._fuse_two_nodes_with_memory_update(
+                        node1, node2, fused_nodes, memory_state, memory_updates
+                    )
+                if loop_tracker is not None:
+                    loop_tracker.finish(rollback=False)
+            elif loop_tracker is not None:
+                loop_tracker.finish_fusion_memory(rollback=True)
 
     def _finish_pending_fusions(
         self,
@@ -7730,7 +8018,16 @@ class Scheduler:
             if self.get_fused_node(node_key2) is not node_key2:
                 raise AssertionError("expected node_key2 to be its own fused node")
 
-            self.fuse_if_speedup(node_key1, node_key2, is_speedup_fn, fused_nodes)
+            if self._fusion_memory_state is None:
+                self.fuse_if_speedup(node_key1, node_key2, is_speedup_fn, fused_nodes)
+            else:
+                self._fuse_if_speedup_with_memory(
+                    node_key1,
+                    node_key2,
+                    is_speedup_fn,
+                    fused_nodes,
+                    can_reorder=pending_fusion.can_reorder,
+                )
 
     def _handle_template_overlap(
         self,
@@ -7785,6 +8082,14 @@ class Scheduler:
             tuple[BaseSchedulerNode, BaseSchedulerNode]
         ] = []
 
+        fusion_memory_state = None
+        if (
+            nodes
+            and self.fusion_memory_timeline_peak_allowed_increase_bytes() is not None
+        ):
+            fusion_memory_state = self._init_fusion_memory_state(nodes)
+        self._fusion_memory_state = fusion_memory_state
+
         possible_fusions = self.get_possible_fusions(
             nodes,
             is_reorder_round,
@@ -7819,6 +8124,23 @@ class Scheduler:
 
         nodes = sorted(fused_nodes, key=lambda x: x.min_order)
         nodes = self.topological_sort_schedule(nodes)
+        if fusion_memory_state is not None:
+            from .memory import (
+                assign_memory_planning_info_for_scheduler_buffers,
+                assign_memory_planning_info_for_scheduler_nodes,
+                get_freeable_input_buf,
+            )
+
+            graph_inputs = OrderedSet(V.graph.graph_inputs.keys())
+            name_to_freeable = get_freeable_input_buf(nodes, graph_inputs)
+            assign_memory_planning_info_for_scheduler_buffers(nodes, self.name_to_buf)
+            assign_memory_planning_info_for_scheduler_nodes(
+                nodes,
+                self.name_to_fused_node,
+                self.name_to_buf,
+                name_to_freeable,
+            )
+        self._fusion_memory_state = None
         return nodes
 
     def _combo_kernel_context_key(
@@ -8245,13 +8567,16 @@ class Scheduler:
         # therefore the original-schedule live memory before this region starts.
         cur_memory = mem_ctx.baseline_live_before[region_start]
 
-        region_peak = estimate_region_peak_memory(
-            local_nodes,
-            region_start=region_start,
-            region_end=region_end - 1,
-            step_of=step_of,
-            graph_outputs=mem_ctx.graph_outputs,
-            cur_memory=cur_memory,
+        region_peak = typing.cast(
+            int,
+            estimate_region_peak_memory(
+                local_nodes,
+                region_start=region_start,
+                region_end=region_end - 1,
+                step_of=step_of,
+                graph_outputs=mem_ctx.graph_outputs,
+                cur_memory=cur_memory,
+            ),
         )
 
         # Compare against the *original* baseline peak (not the running
@@ -8363,6 +8688,11 @@ class Scheduler:
         """
         possible_fusions = []
         seen = OrderedSet[tuple[BaseSchedulerNode, BaseSchedulerNode]]()
+        can_fuse = (
+            self._can_fuse_for_search
+            if self._fusion_memory_state is not None
+            else self.can_fuse
+        )
 
         def check_all_pairs(nodes: list[BaseSchedulerNode]) -> None:
             for node1_index, node1 in enumerate(nodes):
@@ -8376,13 +8706,13 @@ class Scheduler:
                         continue
                     seen.add(key)
 
-                    if self.can_fuse(node1, node2, is_reorder_round):
+                    if can_fuse(node1, node2, is_reorder_round):
                         possible_fusions.append(key)
                     elif (
                         node2.is_template()
                         or node2.is_foreach()
                         or isinstance(node2, FusedNestedReductions)
-                    ) and self.can_fuse(node2, node1, is_reorder_round):
+                    ) and can_fuse(node2, node1, is_reorder_round):
                         # These fusions are order dependent. Fused nested reductions
                         # must remain the producer for scheduler bookkeeping.
                         possible_fusions.append((node2, node1))
@@ -8411,6 +8741,23 @@ class Scheduler:
         possible_fusions.sort(key=self.score_fusion_key, reverse=True)
         fusion_log.debug("found %d possible fusions", len(possible_fusions))
         return possible_fusions
+
+    def _can_fuse_for_search(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        can_reorder: bool,
+    ) -> bool:
+        tracker = _LoopMutationTracker.create_fusion_memory((node1, node2))
+        try:
+            return self._can_fuse_impl(
+                node1,
+                node2,
+                can_reorder=can_reorder,
+                allow_mix_order_reduction=True,
+            )
+        finally:
+            tracker.finish_fusion_memory(rollback=True)
 
     def will_fusion_create_cycle(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
@@ -8527,6 +8874,446 @@ class Scheduler:
         if V.graph.sizevars.statically_known_gt(memory_overhead, 32 * bw_saving):
             return True
         return False
+
+    def _init_fusion_memory_state(
+        self, nodes: list[BaseSchedulerNode]
+    ) -> FusionMemoryState:
+        from .memory import (
+            assign_memory_planning_info_for_scheduler_buffers,
+            assign_memory_planning_info_for_scheduler_nodes,
+            build_scheduler_memory_storage,
+            compute_size_for_scheduler_buffer,
+            estimate_region_peak_memory,
+            get_freeable_input_buf,
+        )
+
+        # TODO: Support ResizeStorageBytes in the fusion memory model. Its storage
+        # changes are not represented in the timeline, so fail closed for now.
+        if any(
+            isinstance(getattr(snode, "node", None), ir.ResizeStorageBytes)
+            for node in nodes
+            for snode in node.get_nodes()
+        ):
+            torch._logging.warning_once(log, "ResizeStorageBytes disables all fusion.")
+            counters["inductor"]["fusion_memory_timeline_resize_unsupported"] += 1
+            return FusionMemoryState({}, status=FusionMemoryStateStatus.FAILED_CLOSED)
+
+        graph_inputs = OrderedSet(V.graph.graph_inputs_original.keys())
+        graph_outputs = OrderedSet(V.graph.get_output_names())
+        name_to_freeable = get_freeable_input_buf(
+            nodes, graph_inputs, use_allocation_storage_size=True
+        )
+        if self._fusion_memory_buffer_sizes is None:
+            self._fusion_memory_buffer_sizes = compute_size_for_scheduler_buffer(
+                self.name_to_buf, use_allocation_storage_size=True
+            )
+        assign_memory_planning_info_for_scheduler_buffers(nodes, self.name_to_buf)
+        for name, (size_alloc, size_free) in self._fusion_memory_buffer_sizes.items():
+            self.name_to_buf[name].mpi_buffer.size_alloc = size_alloc
+            self.name_to_buf[name].mpi_buffer.size_free = size_free
+        storage = build_scheduler_memory_storage(
+            self.name_to_buf,
+            graph_outputs,
+            self.mutation_real_name,
+            name_to_freeable,
+        )
+        assign_memory_planning_info_for_scheduler_nodes(
+            nodes, self.name_to_fused_node, self.name_to_buf, name_to_freeable
+        )
+        for record in storage.records:
+            if record.lifetime_starts_at_allocation:
+                for successor in record.successor_nodes:
+                    successor.mpi_node.pred_buffers.add(record.lifetime_buffer)
+        node_to_idx: dict[BaseSchedulerNode, int] = {}
+        for idx, node in enumerate(nodes):
+            node_to_idx[node] = idx
+            for snode in node.get_nodes():
+                node_to_idx[snode] = idx
+
+        allowed_increase = self.fusion_memory_timeline_peak_allowed_increase_bytes()
+        if allowed_increase is None:
+            raise AssertionError("expected fusion memory guard to be enabled")
+
+        devices = OrderedSet[torch.device]()
+        for node in nodes:
+            if (device := node.get_device()) is not None:
+                devices.add(device)
+        for name in name_to_freeable:
+            devices.add(V.graph.graph_inputs[name].get_device())
+        for record in storage.records:
+            if (device := record.lifetime_buffer.node.get_device()) is not None:
+                devices.add(device)
+        device_states: dict[torch.device, FusionMemoryDeviceState] = {}
+        for device in devices:
+            device_storage = storage.for_device(device)
+            device_inputs = {
+                name: buffer
+                for name, buffer in name_to_freeable.items()
+                if V.graph.graph_inputs[name].get_device() == device
+            }
+            if not device_storage.records and not device_inputs:
+                continue
+            node_memory = {
+                node: device_storage.materialize(node.get_operation_names())
+                for node in nodes
+            }
+            node_outputs: dict[BaseSchedulerNode, Sequence[SchedulerBuffer]] = {
+                node: memory.lifetime_buffers for node, memory in node_memory.items()
+            }
+            node_alloc_sizes = {
+                node: memory.size_alloc for node, memory in node_memory.items()
+            }
+            buffer_free_sizes = dict(device_storage.buffer_free_sizes)
+            for input_buffer in device_inputs.values():
+                buffer_free_sizes[id(input_buffer.mpi_buffer)] = (
+                    input_buffer.mpi_buffer.size_free
+                )
+            device_storage.buffer_free_sizes = buffer_free_sizes
+            last_use_steps: dict[int, int | None] = {}
+            lifetime_buffers = [
+                *device_inputs.values(),
+                *(buffer for outputs in node_outputs.values() for buffer in outputs),
+            ]
+            for buffer in lifetime_buffers:
+                successors = buffer.mpi_buffer.succ_nodes
+                last_use_steps[id(buffer.mpi_buffer)] = (
+                    max(node_to_idx[node] for node in successors)
+                    if successors
+                    else None
+                )
+            initial_memory = sum(
+                buffer.mpi_buffer.size_free for buffer in device_inputs.values()
+            )
+            baseline_peak, baseline_live_before, baseline_live_after = typing.cast(
+                tuple[int, list[int], list[int]],
+                estimate_region_peak_memory(
+                    nodes,
+                    region_start=0,
+                    region_end=len(nodes) - 1,
+                    step_of=lambda node: node_to_idx[node],
+                    graph_outputs=device_storage.graph_outputs,
+                    cur_memory=initial_memory,
+                    known_last_use_steps=last_use_steps,
+                    node_outputs=node_outputs,
+                    node_alloc_sizes=node_alloc_sizes,
+                    buffer_free_sizes=buffer_free_sizes,
+                    allocation_operation_by_buffer=(
+                        device_storage.allocation_operation_by_buffer
+                    ),
+                    return_live_memory=True,
+                ),
+            )
+            peak_limit = self._fusion_memory_peak_limits.get(device)
+            if peak_limit is None:
+                peak_limit = baseline_peak + allowed_increase
+                self._fusion_memory_peak_limits[device] = peak_limit
+
+            device_state = FusionMemoryDeviceState(
+                nodes=list(nodes),
+                graph_outputs=device_storage.graph_outputs,
+                node_to_idx=dict(node_to_idx),
+                baseline_peak=baseline_peak,
+                baseline_live_before=baseline_live_before,
+                baseline_live_after=baseline_live_after,
+                peak_limit=peak_limit,
+                storage=device_storage,
+                last_use_steps=last_use_steps,
+                node_outputs=node_outputs,
+                node_alloc_sizes=node_alloc_sizes,
+            )
+            device_states[device] = device_state
+        return FusionMemoryState(device_states)
+
+    @staticmethod
+    def fusion_memory_timeline_peak_allowed_increase_bytes() -> int | None:
+        allowed_mb = config.fusion_memory_timeline_peak_allowed_increase_mb
+        if allowed_mb is None:
+            return None
+        valid = (
+            not isinstance(allowed_mb, bool)
+            and isinstance(allowed_mb, (int, float))
+            and allowed_mb >= 0
+            and (not isinstance(allowed_mb, float) or math.isfinite(allowed_mb))
+        )
+        if not valid:
+            raise ValueError(
+                "fusion_memory_timeline_peak_allowed_increase_mb must be "
+                "a finite non-negative number or None"
+            )
+        if isinstance(allowed_mb, int):
+            return allowed_mb * 1024 * 1024
+        numerator, denominator = allowed_mb.as_integer_ratio()
+        return numerator * 1024 * 1024 // denominator
+
+    @staticmethod
+    def _fusion_node_step(
+        state: FusionMemoryDeviceState, node: BaseSchedulerNode | OutputNode
+    ) -> int | None:
+        if isinstance(node, OutputNode):
+            return None
+        if node in state.node_to_idx:
+            return state.node_to_idx[node]
+        steps = [
+            state.node_to_idx[n] for n in node.get_nodes() if n in state.node_to_idx
+        ]
+        return min(steps) if steps else None
+
+    @staticmethod
+    def _fusion_pred_buffers(
+        node: BaseSchedulerNode,
+    ) -> OrderedSet[SchedulerBuffer | FreeableInputBuffer]:
+        if hasattr(node, "mpi_node"):
+            return node.mpi_node.pred_buffers
+        pred_buffers = OrderedSet()
+        for snode in node.get_nodes():
+            pred_buffers.update(snode.mpi_node.pred_buffers)
+        return pred_buffers
+
+    @staticmethod
+    def _make_fusion_memory_candidate(
+        node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> _FusionMemoryCandidate:
+        snodes = tuple(OrderedSet([*node1.get_nodes(), *node2.get_nodes()]))
+        operation_names = node1.get_operation_names() | node2.get_operation_names()
+        buffer_names = node1.get_buffer_names() | node2.get_buffer_names()
+        unmet_dependencies = OrderedSet(
+            dep
+            for node in (node1, node2)
+            for dep in node.unmet_dependencies
+            if dep.name not in buffer_names
+        )
+        return _FusionMemoryCandidate(
+            snodes=snodes,
+            operation_names=operation_names,
+            buffer_names=buffer_names,
+            unmet_dependencies=unmet_dependencies,
+        )
+
+    def _assign_fusion_memory_planning_info(
+        self,
+        state: FusionMemoryDeviceState,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        candidate: _FusionMemoryCandidate,
+    ) -> tuple[Sequence[SchedulerBuffer], int]:
+        candidate_buffers = candidate.get_buffer_names()
+        candidate_memory = state.storage.materialize(candidate.operation_names)
+        candidate_outputs = candidate_memory.lifetime_buffers
+        input_buffers = OrderedSet()
+        for node in (node1, node2):
+            input_buffers.update(self._fusion_pred_buffers(node))
+        candidate.mpi_node = MemoryPlanningInfoForNode(
+            size=candidate_memory.size_alloc,
+            pred_buffers=OrderedSet(
+                buf for buf in input_buffers if buf.get_name() not in candidate_buffers
+            ),
+        )
+        return candidate_outputs, candidate_memory.size_alloc
+
+    def _check_fusion_memory(
+        self,
+        state: FusionMemoryState | None,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        *,
+        materialize_update: bool = True,
+    ) -> tuple[bool, dict[torch.device, FusionMemoryUpdate] | None]:
+        if state is None:
+            return False, None
+        if state.status is FusionMemoryStateStatus.FAILED_CLOSED:
+            return True, None
+        if not state.device_states:
+            return False, None
+
+        updates: dict[torch.device, FusionMemoryUpdate] = {}
+        for device, device_state in state.device_states.items():
+            rejected, update = self._fusion_memory_update(
+                device_state,
+                node1,
+                node2,
+                return_live_memory=materialize_update,
+                peak_limit=device_state.peak_limit,
+            )
+            if rejected:
+                return True, None
+            if not materialize_update:
+                continue
+            if update is None or not device_state.update_boundaries_match(update):
+                fusion_log.debug(
+                    "memory-timeline fusion rejected %s with %s: "
+                    "unable to preserve the %s timeline boundary",
+                    node1.get_name(),
+                    node2.get_name(),
+                    device,
+                )
+                state.status = FusionMemoryStateStatus.FAILED_CLOSED
+                return True, None
+            updates[device] = update
+        return False, updates if materialize_update else None
+
+    def _fusion_dep_producer(self, dep: Dep) -> BaseSchedulerNode | None:
+        buf = self.name_to_buf.get(dep.name)
+        return (
+            self.name_to_fused_node.get(buf.defining_op_name())
+            if buf is not None
+            else None
+        )
+
+    def _fusion_memory_update(
+        self,
+        state: FusionMemoryDeviceState,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        *,
+        return_live_memory: bool,
+        peak_limit: int | None,
+    ) -> tuple[bool, FusionMemoryUpdate | None]:
+        from .memory import estimate_region_peak_memory
+
+        step1 = self._fusion_node_step(state, node1)
+        step2 = self._fusion_node_step(state, node2)
+        if step1 is None or step2 is None:
+            return False, None
+
+        region_start = min(step1, step2)
+        region_end = max(step1, step2)
+
+        candidate = self._make_fusion_memory_candidate(node1, node2)
+        candidate_outputs, candidate_alloc_size = (
+            self._assign_fusion_memory_planning_info(state, node1, node2, candidate)
+        )
+        candidate_node = typing.cast(BaseSchedulerNode, candidate)
+
+        local_nodes: list[BaseSchedulerNode] = [candidate_node]
+        for idx in range(region_start, region_end + 1):
+            node = state.nodes[idx]
+            if node is None or node is node1 or node is node2:
+                continue
+            local_nodes.append(node)
+
+        for dep in candidate.unmet_dependencies:
+            producer = self._fusion_dep_producer(dep)
+            if producer is None or producer is node1 or producer is node2:
+                continue
+            producer_step = state.node_to_idx.get(producer)
+            if (
+                producer_step is not None
+                and region_start <= producer_step <= region_end
+            ):
+                local_set = OrderedSet(local_nodes)
+                seen: OrderedSet[BaseSchedulerNode] = OrderedSet()
+                ordered_nodes: list[BaseSchedulerNode] = []
+
+                def visit(node: BaseSchedulerNode) -> None:
+                    if node in seen:
+                        return
+                    seen.add(node)
+                    for node_dep in sorted(
+                        node.unmet_dependencies, key=lambda d: d.name
+                    ):
+                        dep_producer = self._fusion_dep_producer(node_dep)
+                        if dep_producer is not None and dep_producer in local_set:
+                            visit(dep_producer)
+                    ordered_nodes.append(node)
+
+                visit(candidate_node)
+                ordered_nodes.extend(node for node in local_nodes if node not in seen)
+                local_nodes = ordered_nodes
+                break
+        new_step = {node: region_start + idx for idx, node in enumerate(local_nodes)}
+        candidate_step = new_step[candidate_node]
+        for node in local_nodes:
+            step = new_step[node]
+            for snode in node.get_nodes():
+                new_step[snode] = step
+        for node in (node1, node2):
+            new_step[node] = candidate_step
+
+        node_to_idx = state.node_to_idx
+        step_cache = {}
+
+        def step_of(node: BaseSchedulerNode) -> int:
+            if node not in step_cache:
+                if node in new_step:
+                    step_cache[node] = new_step[node]
+                elif node in node_to_idx:
+                    step_cache[node] = node_to_idx[node]
+                else:
+                    steps = [new_step[n] for n in node.get_nodes() if n in new_step]
+                    step_cache[node] = min(steps) if steps else node_to_idx[node]
+            return step_cache[node]
+
+        candidate_last_use_steps: dict[int, int | None] = {}
+        affected_buffers: OrderedSet[SchedulerBuffer | FreeableInputBuffer] = (
+            OrderedSet(candidate_outputs)
+        )
+        for node, step in new_step.items():
+            if node_to_idx.get(node) != step and hasattr(node, "mpi_node"):
+                affected_buffers.update(node.mpi_node.pred_buffers)
+        for buf in affected_buffers:
+            last_step = None
+            for succ in buf.mpi_buffer.succ_nodes:
+                step = step_of(succ)
+                if last_step is None or step > last_step:
+                    last_step = step
+            candidate_last_use_steps[id(buf.mpi_buffer)] = last_step
+
+        node_outputs = collections.ChainMap(
+            {candidate_node: candidate_outputs}, state.node_outputs
+        )
+        node_alloc_sizes = collections.ChainMap(
+            {candidate_node: candidate_alloc_size}, state.node_alloc_sizes
+        )
+        memory_estimate = estimate_region_peak_memory(
+            local_nodes,
+            region_start=region_start,
+            region_end=region_end,
+            step_of=step_of,
+            graph_outputs=state.graph_outputs,
+            cur_memory=state.baseline_live_before[region_start],
+            last_use_step_cache=candidate_last_use_steps,
+            known_last_use_steps=state.last_use_steps,
+            node_outputs=node_outputs,
+            node_alloc_sizes=node_alloc_sizes,
+            buffer_free_sizes=state.storage.buffer_free_sizes,
+            allocation_operation_by_buffer=(
+                state.storage.allocation_operation_by_buffer
+            ),
+            max_peak=peak_limit,
+            return_live_memory=return_live_memory,
+        )
+        if return_live_memory:
+            region_peak, live_before, live_after = typing.cast(
+                tuple[int, list[int], list[int]], memory_estimate
+            )
+        else:
+            region_peak = typing.cast(int, memory_estimate)
+            live_before = live_after = []
+        if peak_limit is not None and region_peak > peak_limit:
+            fusion_log.debug(
+                "memory-timeline fusion rejected %s with %s: estimated peak delta %d bytes",
+                node1.get_name(),
+                node2.get_name(),
+                region_peak - state.baseline_peak,
+            )
+            return True, None
+        if not return_live_memory:
+            return False, None
+        update = FusionMemoryUpdate(
+            node1=node1,
+            node2=node2,
+            candidate=candidate,
+            candidate_step=candidate_step,
+            region_start=region_start,
+            region_end=region_end,
+            local_nodes=local_nodes,
+            live_before=live_before,
+            live_after=live_after,
+            last_use_steps=candidate_last_use_steps,
+            candidate_outputs=candidate_outputs,
+            candidate_alloc_size=candidate_alloc_size,
+        )
+        return False, update
 
     def fusion_prevent_too_many_reads_and_writes(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode, threshold: int
@@ -9097,16 +9884,16 @@ class Scheduler:
             return cached
 
         analysis = analyze_memory_coalescing_for_nodes(snodes)
-        if analysis is None:
-            self._tiling_memory_cache[cache_key] = None
-            return None
-
-        reduction = max(snodes, key=lambda node: int(node.is_reduction()))
-        _, (numel, rnumel) = reduction.group
-        result = SIMDScheduling.select_tiling_with_memory(
-            snodes, numel, rnumel, analysis
-        ).memory
+        result = None
+        if analysis is not None:
+            reduction = max(snodes, key=lambda node: int(node.is_reduction()))
+            _, (numel, rnumel) = reduction.group
+            result = SIMDScheduling.select_tiling_with_memory(
+                snodes, numel, rnumel, analysis
+            ).memory
         self._tiling_memory_cache[cache_key] = result
+        for tracker in self._fusion_memory_cache_trackers:
+            tracker.track_fusion_memory_cache_key(cache_key)
         return result
 
     def _reindexing_regresses_memory_coalescing(
@@ -10759,15 +11546,34 @@ class Scheduler:
                 possible_fusions_group_by_priority[fusion_pair_priority].append(
                     (node1, node2)
                 )
-        # return the possible fusions with highest priority
-        possible_fusions_with_highest_priority = min(
+        memory_state = self._fusion_memory_state
+        if memory_state is None:
+            possible_fusions_with_highest_priority = min(
+                possible_fusions_group_by_priority.items(), key=operator.itemgetter(0)
+            )[1]
+            if not possible_fusions_with_highest_priority:
+                raise AssertionError(
+                    "expected at least one possible fusion with highest priority"
+                )
+            return possible_fusions_with_highest_priority
+
+        for _, possible_fusions_with_highest_priority in sorted(
             possible_fusions_group_by_priority.items(), key=operator.itemgetter(0)
-        )[1]
-        if len(possible_fusions_with_highest_priority) <= 0:
-            raise AssertionError(
-                "expected at least one possible fusion with highest priority"
-            )
-        return possible_fusions_with_highest_priority
+        ):
+            possible_fusions_with_highest_priority = [
+                (node1, node2)
+                for node1, node2 in possible_fusions_with_highest_priority
+                if not self._check_fusion_memory(
+                    memory_state,
+                    node1,
+                    node2,
+                    materialize_update=False,
+                )[0]
+            ]
+            if possible_fusions_with_highest_priority:
+                return possible_fusions_with_highest_priority
+
+        return []
 
     def score_fusion_key(
         self, nodes: tuple[BaseSchedulerNode, BaseSchedulerNode]
