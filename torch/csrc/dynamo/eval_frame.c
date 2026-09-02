@@ -708,8 +708,9 @@ static PyObject* reset_code(PyObject* dummy, PyObject* code) {
     return NULL;
   }
 
-  // set_extra_state destroys the existing object on extra scratch space.
-  set_extra_state((PyCodeObject*)code, NULL);
+  // Drops the code object's reference to its ExtraState; a lookup or compile
+  // still inside it on another thread keeps it alive until it returns.
+  reset_extra_state((PyCodeObject*)code);
   Py_RETURN_NONE;
 }
 
