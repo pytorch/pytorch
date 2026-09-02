@@ -350,41 +350,6 @@ class TestTorchDlPackDevice(TestCase):
         # Consumer should still be able to process a smaller version capsule.
         test(device, max_version=(2, 0))
 
-    @skipMeta
-    @onlyCPU
-    @dtypes(
-        # Note: NumPy DLPack bool support only landed in 1.25.
-        *all_types_and_complex_and(
-            torch.half,
-            torch.uint16,
-            torch.uint32,
-            torch.uint64,
-        )
-    )
-    def test_numpy_dlpack_protocol_conversion(self, device, dtype):
-        import numpy as np
-
-        t = make_tensor((5,), dtype=dtype, device=device)
-
-        if hasattr(np, "from_dlpack"):
-            # DLPack support only available from NumPy 1.22 onwards.
-            # Here, we test having another framework (NumPy) calling our
-            # Tensor.__dlpack__ implementation.
-            np_from_dlpack = np.from_dlpack(t)
-            np_from_copy = t.numpy()
-            self.assertEqual(np_from_dlpack, np_from_copy)
-
-        # We can't use the array created above as input to from_dlpack.
-        # That's because DLPack imported NumPy arrays are read-only.
-        # Thus, we need to convert it to NumPy by using the numpy() method.
-        t_arr = t.numpy()
-
-        # Transform the NumPy array back using DLPack.
-        res = from_dlpack(t_arr)
-
-        self.assertEqual(t, res)
-        self.assertEqual(t.data_ptr(), res.data_ptr())
-
     def _test_from_dlpack(self, device, out_device=None, copy=None):
         if isinstance(device, str):
             device = torch.device(device)
@@ -788,6 +753,43 @@ class TestTorchDlPackDevice(TestCase):
         self.assertNotEqual(t0.device, t1.device)
 
 
+# NumPy is the other end of every exchange below, so CPU is a real dependency
+# rather than an untested restriction.
+class TestTorchDlPackCPUOnly(TestCase):
+    @dtypes(
+        # Note: NumPy DLPack bool support only landed in 1.25.
+        *all_types_and_complex_and(
+            torch.half,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
+        )
+    )
+    def test_numpy_dlpack_protocol_conversion(self, device, dtype):
+        import numpy as np
+
+        t = make_tensor((5,), dtype=dtype, device=device)
+
+        if hasattr(np, "from_dlpack"):
+            # DLPack support only available from NumPy 1.22 onwards.
+            # Here, we test having another framework (NumPy) calling our
+            # Tensor.__dlpack__ implementation.
+            np_from_dlpack = np.from_dlpack(t)
+            np_from_copy = t.numpy()
+            self.assertEqual(np_from_dlpack, np_from_copy)
+
+        # We can't use the array created above as input to from_dlpack.
+        # That's because DLPack imported NumPy arrays are read-only.
+        # Thus, we need to convert it to NumPy by using the numpy() method.
+        t_arr = t.numpy()
+
+        # Transform the NumPy array back using DLPack.
+        res = from_dlpack(t_arr)
+
+        self.assertEqual(t, res)
+        self.assertEqual(t.data_ptr(), res.data_ptr())
+
+
 class TestTorchDlPackStreams(TestCase):
     # DLPack stream exchange is only specified for CUDA and ROCm; the sentinel
     # stream values below have no meaning on any other backend.
@@ -914,6 +916,7 @@ class TestTorchDlPackStreams(TestCase):
 instantiate_device_type_tests(
     TestTorchDlPackDevice, globals(), allow_mps=True, allow_xpu=True
 )
+instantiate_device_type_tests(TestTorchDlPackCPUOnly, globals(), only_for="cpu")
 instantiate_device_type_tests(TestTorchDlPackStreams, globals(), only_for="cuda")
 
 
