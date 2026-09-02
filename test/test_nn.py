@@ -11483,6 +11483,33 @@ class TestNNDeviceType(NNTestCase):
         out_zero_bias = torch.layer_norm(input, normalized_shape, data, bias, eps)
         self.assertEqual(out_none_bias, out_zero_bias)
 
+    @dtypes(torch.float32, torch.float64)
+    @dtypesIfMPS(torch.float32)  # MPS doesn't support float64
+    def test_layer_norm_affine_null_cases(self, device, dtype):
+        # The CPU LayerNormSecondPass has dedicated vectorized paths for every
+        # weight/bias == None combination. Each must match passing explicit
+        # identity tensors (ones for weight, zeros for bias), which take the
+        # general (non-null) path. N values span the vector width and a scalar
+        # tail so both the vectorized body and the remainder are exercised.
+        eps = 1e-5
+        for N in (8, 131, 1024):
+            normalized_shape = (N,)
+            input = torch.randn(64, N, device=device, dtype=dtype)
+            weight = torch.randn(N, device=device, dtype=dtype)
+            bias = torch.randn(N, device=device, dtype=dtype)
+            ones = torch.ones(N, device=device, dtype=dtype)
+            zeros = torch.zeros(N, device=device, dtype=dtype)
+
+            self.assertEqual(
+                torch.layer_norm(input, normalized_shape, None, None, eps),
+                torch.layer_norm(input, normalized_shape, ones, zeros, eps))
+            self.assertEqual(
+                torch.layer_norm(input, normalized_shape, None, bias, eps),
+                torch.layer_norm(input, normalized_shape, ones, bias, eps))
+            self.assertEqual(
+                torch.layer_norm(input, normalized_shape, weight, None, eps),
+                torch.layer_norm(input, normalized_shape, weight, zeros, eps))
+
     @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     def test_hardsigmoid_grad(self, device):
         inputs = (torch.randn(4, 16, 16, device=device, dtype=torch.double) - 0.5) * 10
