@@ -1078,6 +1078,7 @@ class TestForeachDevice(TestCase):
     @parametrize("w_empty", (False, True))
     def test_big_num_tensors(self, device, dtype, op, use_accelerator_graph, w_empty):
         # foreach_max cannot handle empty tensors as max requires an identity
+        device_type = torch.device(device).type
         intersperse_empty_tensors = w_empty and op.name != "_foreach_max"
 
         N = 4000
@@ -1109,8 +1110,14 @@ class TestForeachDevice(TestCase):
             if use_accelerator_graph:
                 # Verifies multi_tensor_apply's behavior when tensor metadata
                 # doesn't fit in the static kernel argument space.
-                g = torch.accelerator.Graph()
-                with g:
+                if device_type == "xpu":
+                    g = torch.xpu.XPUGraph()
+                    ctx_mgr = torch.xpu.graph(g)
+                else:
+                    g = torch.cuda.CUDAGraph()
+                    ctx_mgr = torch.cuda.graph(g)
+
+                with ctx_mgr:
                     actual = fn.func(tensorlist, **kwargs)
                 g.replay()
             else:
@@ -1688,6 +1695,14 @@ class TestForeachDevice(TestCase):
     def test_foreach_copy_with_different_device_inputs(self, device, dtype, op):
         if dtype in (torch.complex128, torch.complex64):
             self.skipTest("Complex dtype not supported")
+
+        device_type = torch.device(device).type
+        if device_type == "xpu" and dtype in (
+            torch.float8_e4m3fnuz,
+            torch.float8_e5m2fnuz,
+        ):
+            self.skipTest("fp8e4b8/fp8e5fnuz not supported in XPU Triton backend")
+
         # check foreach_copy when self and src tensorList have different device
         foreach_copy = op.method_variant
         copy_ = op.ref_inplace
