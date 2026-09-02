@@ -5417,6 +5417,21 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(sample_indices.dim(), 2, msg="wrong number of dimensions")
         self.assertEqual(sample_indices.size(1), n_sample, msg="wrong number of samples")
 
+    @dtypes(torch.float, torch.double)
+    def test_multinomial_without_replacement_zero_prob(self, device, dtype):
+        # https://github.com/pytorch/pytorch/issues/125388
+        weights = torch.tensor([0, 10, 3, 0], dtype=dtype, device=device)
+        # n_sample == number of nonzero categories is fine and never draws a zero-prob index
+        idx = torch.multinomial(weights, 2, replacement=False)
+        self.assertFalse((weights[idx] == 0).any(), msg="sampled an index with zero probability")
+        # drawing more than the nonzero categories must raise instead of returning zero-prob indices
+        if self.device_type == "cpu":
+            with self.assertRaisesRegex(RuntimeError, "nonzero"):
+                torch.multinomial(weights, 3, replacement=False)
+            batched = torch.tensor([[1, 1, 1, 1], [0, 5, 5, 0]], dtype=dtype, device=device)
+            with self.assertRaisesRegex(RuntimeError, "nonzero"):
+                torch.multinomial(batched, 3, replacement=False)
+
     # FIXME: move to test distributions
     @onlyCUDA
     @dtypes(torch.float, torch.double, torch.half)
