@@ -25,9 +25,13 @@ and with CONTRIBUTING.md, which states them for users:
   * TORCH_CUDA_ARCH_LIST names no exportable arch (export.EXPORTABLE_ARCHES);
     with it unset, on-device export runs if a supported GPU is present
 
-Past those gates the DSL runtimes are REQUIRED, and any failure fails the build:
-a wheel missing declared kernels underperforms silently instead of failing.
-TORCH_NATIVE_AOT=0 builds without them.
+Two different processes, gated by skip list.
+
+  * Before: No stage-2, normal wheel without AOT artifacts
+  * After: stage 2 exports and embeds, runtimes required to progress, failures
+    fail the build.
+
+TORCH_NATIVE_AOT=0 opts out at any point.
 
 Assumes the torch it finds installed is the one this tree just built: both CI shells
 install the wheel on the line above, and `spin develop` chains this after its own
@@ -64,18 +68,14 @@ sys.path.append(REPO)
 
 
 def _report(msg: str) -> None:
-    """Progress/diagnostics, on STDERR.
-
-    Not stdout: --print-verdict writes a machine-read word there and the CI
-    shells compare it with ==, so a report on the same stream corrupts the
-    verdict of the one case that reports AND proceeds (multi-arch)."""
+    """Progress and diagnostics on stderr, since --print-verdict owns stdout."""
     print(f"-- native-AOT stage 2: {msg}", file=sys.stderr, flush=True)
 
 
 # Long enough for a cold `import torch` on a machine already running a build,
 # short enough that a wedged one fails rather than holding the job to its step
 # limit with nothing on either stream.
-_PROBE_TIMEOUT = 300
+_PROBE_TIMEOUT_SECONDS = 300
 
 
 def _run_probe(code: str, expr: str) -> subprocess.CompletedProcess[str] | None:
@@ -93,7 +93,7 @@ def _run_probe(code: str, expr: str) -> subprocess.CompletedProcess[str] | None:
             capture_output=True,
             text=True,
             cwd=HERE,
-            timeout=_PROBE_TIMEOUT,
+            timeout=_PROBE_TIMEOUT_SECONDS,
         )
     except (OSError, subprocess.SubprocessError) as e:
         _report(f"probe {expr!r} could not run ({type(e).__name__}: {e})")
@@ -908,9 +908,6 @@ def main(argv: list[str] | None = None) -> int:
             f"sys.path is not the one this tree built. Install the wheel from "
             f"this build first, or set TORCH_NATIVE_AOT=0."
         )
-    # Temp file + rename: copying in place truncates the library other processes
-    # may be mapping, and a failure part-way (ENOSPC, EPERM on a root-owned
-    # site-packages) would leave a torch that cannot import at all.
     # Temp file + rename: copying in place truncates a library other processes may
     # be mapping, and a failure part-way (ENOSPC, EPERM on a root-owned
     # site-packages) would leave a torch that cannot import at all. ONE os.replace,
