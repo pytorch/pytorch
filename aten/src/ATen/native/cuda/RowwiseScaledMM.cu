@@ -414,11 +414,23 @@ void f8f8bf16_rowwise_impl_sm100_sm120(
           cutlass::gemm::collective::StageCountAutoCarveout<static_cast<int>(sizeof(typename CollectiveEpilogue::SharedStorage))>,
           MainloopScheduleType>::CollectiveOp;
 
-  using GemmKernel = at::cuda::detail::enable_3x_kernel_for_sm10_or_later<
-      cutlass::gemm::kernel::GemmUniversal<
-          cute::Shape<int, int, int>,
-          CollectiveMainloop,
-          CollectiveEpilogue>>;
+  using GemmKernelBase = cutlass::gemm::kernel::GemmUniversal<
+      cute::Shape<int, int, int>,
+      CollectiveMainloop,
+      CollectiveEpilogue>;
+
+  static_assert(
+      std::is_same_v<ArchTag, cutlass::arch::Sm100> ||
+          std::is_same_v<ArchTag, cutlass::arch::Sm120>,
+      "RowwiseScaledMM only supports the Sm100 and Sm120 arch tags");
+
+  using GemmKernel = std::conditional_t<
+      std::is_same_v<ArchTag, cutlass::arch::Sm100>,
+      at::cuda::detail::enable_3x_kernel_for_sm10<GemmKernelBase>,
+      std::conditional_t<
+          std::is_same_v<ArchTag, cutlass::arch::Sm120>,
+          at::cuda::detail::enable_3x_kernel_for_sm12<GemmKernelBase>,
+          void>>;
 
   using Gemm = cutlass::gemm::device::GemmUniversalAdapter<GemmKernel>;
 
