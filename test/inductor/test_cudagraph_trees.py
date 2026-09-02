@@ -1822,6 +1822,86 @@ if HAS_CUDA_AND_TRITON:
         @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
         @config.patch("graph_partition", False)
         @config.patch("triton.cudagraphs", False)
+        @parametrize(
+            "direction,outer_cudagraphs,inner_cudagraphs",
+            tuple(
+                (direction, outer, not outer)
+                for direction in ("forward", "backward")
+                for outer in (False, True)
+            ),
+        )
+        def test_nested_region_rejects_conflicting_cudagraph_configs(
+            self, direction, outer_cudagraphs, inner_cudagraphs
+        ):
+            """Verify nested regions cannot override their enclosing region."""
+            patch_name = (
+                "fw_inductor_config_patches"
+                if direction == "forward"
+                else "bw_inductor_config_patches"
+            )
+            inner_config = get_invoke_subgraph_compile_options(
+                **{patch_name: {"triton.cudagraphs": inner_cudagraphs}}
+            )
+            outer_config = get_invoke_subgraph_compile_options(
+                **{patch_name: {"triton.cudagraphs": outer_cudagraphs}}
+            )
+
+            @torch.compiler.nested_compile_region(options=inner_config)
+            def inner(x):
+                return torch.sin(x)
+
+            @torch.compiler.nested_compile_region(options=outer_config)
+            def outer(x):
+                return torch.cos(inner(x))
+
+            def fn(x):
+                return outer(x).sum()
+
+            x = torch.randn(10, 4, device="cuda", requires_grad=True)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "nested compile regions cannot have conflicting cudagraph configs",
+            ):
+                torch.compile(fn, fullgraph=True)(x)
+
+        @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
+        @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
+        @config.patch("triton.cudagraphs", False)
+        def test_nested_region_rejects_conflict_inside_cond(self):
+            """Verify nested conflicts are found through other HOP subgraphs."""
+            inner_config = get_invoke_subgraph_compile_options(
+                fw_inductor_config_patches={"triton.cudagraphs": False}
+            )
+            outer_config = get_invoke_subgraph_compile_options(
+                fw_inductor_config_patches={"triton.cudagraphs": True}
+            )
+
+            @torch.compiler.nested_compile_region(options=inner_config)
+            def inner(x):
+                return torch.sin(x)
+
+            def true_fn(x):
+                return inner(x)
+
+            def false_fn(x):
+                return torch.cos(x)
+
+            @torch.compiler.nested_compile_region(options=outer_config)
+            def outer(pred, x):
+                return torch.cond(pred, true_fn, false_fn, (x,))
+
+            pred = torch.tensor(True, device="cuda")
+            x = torch.randn(10, 4, device="cuda")
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "nested compile regions cannot have conflicting cudagraph configs",
+            ):
+                torch.compile(outer, fullgraph=True)(pred, x)
+
+        @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
+        @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
+        @config.patch("graph_partition", False)
+        @config.patch("triton.cudagraphs", False)
         @parametrize("fw_cudagraphs,bw_cudagraphs", [(None, True), (True, None)])
         def test_invoke_subgraph_region_cudagraph_directional_optin(
             self, fw_cudagraphs, bw_cudagraphs
