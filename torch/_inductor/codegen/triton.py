@@ -1250,6 +1250,12 @@ class TritonCSEVariable(CSEVariable):
         super().__init__(name, bounds, dtype, shape=shape)
         # We'll use this to track which masks the variable needs when used for indirect indexing
         self.mask_vars: OrderedSet[str] = OrderedSet()
+        # The sympy value of an index_expr/value_expr/integer constant, and the
+        # range masks a boolean predicate is proven to imply (see
+        # _range_masks_implied_by_lt). Only the ops in update_on_args that
+        # preserve these properties propagate them.
+        self.index_value: sympy.Expr | None = None
+        self.range_mask_vars: OrderedSet[str] = OrderedSet()
         if dtype is None:
             raise AssertionError("TritonCSEVariable must have dtype")
         if shape is None:
@@ -1269,6 +1275,66 @@ class TritonCSEVariable(CSEVariable):
                     )
                 ) is not None:
                     self.mask_vars.add(mask_name)
+        if name in ("index_expr", "value_expr"):
+            self.index_value = args[0]
+        elif name == "constant" and is_integer_dtype(args[1]):
+            self.index_value = sympy.Integer(args[0])
+        elif (
+            name == "to_dtype"
+            and isinstance(args[0], TritonCSEVariable)
+            and _is_lossless_int_cast(args[0].dtype, args[1])
+        ):
+            self.index_value = args[0].index_value
+        elif name == "lt":
+            self.range_mask_vars = _range_masks_implied_by_lt(*args)
+        elif name in ("and_", "logical_and"):
+            for arg in args:
+                if isinstance(arg, TritonCSEVariable):
+                    self.range_mask_vars.update(arg.range_mask_vars)
+
+
+def _is_lossless_int_cast(src: torch.dtype | None, dst: torch.dtype | None) -> bool:
+    if src is None or dst is None:
+        return False
+    if not (is_integer_dtype(src) and is_integer_dtype(dst)):
+        return False
+    src_info, dst_info = torch.iinfo(src), torch.iinfo(dst)
+    return dst_info.min <= src_info.min and src_info.max <= dst_info.max
+
+
+def _range_masks_implied_by_lt(index: Any, bound: Any) -> OrderedSet[str]:
+    """
+    ``index < bound`` implies a range tree's mask when ``index`` is exactly
+    that tree's root iteration variable and ``0 <= bound <= numel`` is
+    statically known. Loads and stores predicated on such a comparison can
+    drop the range mask (see TritonKernel.mask_loads).
+    """
+    if (
+        not isinstance(index, TritonCSEVariable)
+        or not isinstance(bound, TritonCSEVariable)
+        or index.index_value is None
+        or bound.index_value is None
+    ):
+        return OrderedSet()
+    kernel = V.kernel
+    # Operands narrower than the kernel index dtype may have wrapped.
+    index_dtype = kernel.get_index_dtype_as_torch_dtype()
+    if not (
+        _is_lossless_int_cast(index_dtype, index.dtype)
+        and _is_lossless_int_cast(index_dtype, bound.dtype)
+    ):
+        return OrderedSet()
+    entry = kernel.range_tree_nodes.get(index.index_value)
+    sizevars = V.graph.sizevars
+    if (
+        entry is None
+        or not sizevars.statically_known_equals(entry.divisor, sympy.S.One)
+        or not sizevars.statically_known_equals(entry.length, entry.root.numel)
+        or not sizevars.statically_known_geq(bound.index_value, 0)
+        or not sizevars.statically_known_leq(bound.index_value, entry.root.numel)
+    ):
+        return OrderedSet()
+    return OrderedSet([entry.root.mask_name()])
 
 
 @dataclasses.dataclass(frozen=True)
@@ -2560,12 +2626,14 @@ class TritonKernelOverrides(TritonOverrides):
     @staticmethod
     def masked(mask, body, other):
         if mask is not None and torch.version.hip is not None:
-            mask = V.kernel.cse.generate(
+            hip_mask = V.kernel.cse.generate(
                 V.kernel.compute,
                 f"{mask}.to(tl.int1)",
                 dtype=torch.bool,
                 shape=mask.shape,
             )
+            hip_mask.range_mask_vars = mask.range_mask_vars
+            mask = hip_mask
 
         nodes = body.graph.find_nodes(op="output")
         if not nodes:
@@ -2592,11 +2660,7 @@ class TritonKernelOverrides(TritonOverrides):
         value = None if need_where else other
 
         with V.kernel.mask_loads(
-            mask,
-            value=value,
-            redundant_masks=V.kernel._implied_range_masks(
-                getattr(V.interpreter, "current_node", None)
-            ),
+            mask, value=value, redundant_masks=mask.range_mask_vars
         ) as new_mask:
             result = body()
 
@@ -3403,83 +3467,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
     def triton_tensor_ndim(self) -> int:
         return sum(int(tree.tensor_dim is not None) for tree in self.range_trees)
-
-    def _implied_range_masks(self, node: Any) -> OrderedSet[str]:
-        if not isinstance(node, torch.fx.Node):
-            return OrderedSet()
-        if node.op == "call_module":
-            if (
-                not str(node.target).startswith("masked_subblock")
-                or len(node.args) != 2
-            ):
-                return OrderedSet()
-            return self._implied_range_masks(node.args[0])
-        if node.op == "call_method" and node.target == "masked_store":
-            if len(node.args) != 5:
-                return OrderedSet()
-            return self._implied_range_masks(node.args[4])
-        if node.op == "call_method" and node.target in ("logical_and", "and_"):
-            result = OrderedSet[str]()
-            for arg in node.args[1:]:
-                result.update(self._implied_range_masks(arg))
-            return result
-        if node.op != "call_method" or node.target != "lt" or len(node.args) != 3:
-            return OrderedSet()
-
-        lhs, rhs = node.args[1:]
-        if (
-            not isinstance(lhs, torch.fx.Node)
-            or lhs.op != "call_method"
-            or lhs.target not in ("index_expr", "value_expr")
-            or len(lhs.args) != 3
-            or lhs.args[2] is not torch.int64
-            or not isinstance(rhs, torch.fx.Node)
-            or rhs.op != "call_method"
-            or rhs.target not in ("constant", "index_expr", "value_expr")
-            or len(rhs.args) != 3
-            or rhs.args[2] is not torch.int64
-        ):
-            return OrderedSet()
-        get_index = getattr(V.interpreter, "submodules", {}).get("get_index")
-        if get_index is None:
-            return OrderedSet()
-
-        def resolve_index(arg: Any) -> sympy.Expr | None:
-            if (
-                isinstance(arg, torch.fx.Node)
-                and arg.op == "call_module"
-                and arg.target == "get_index"
-            ):
-                return get_index(*arg.args)
-            return None
-
-        index = resolve_index(lhs.args[1])
-        if not isinstance(index, sympy.Symbol):
-            return OrderedSet()
-        upper: sympy.Expr | int | None
-        if rhs.target == "constant":
-            upper = rhs.args[1]
-            if (
-                not isinstance(upper, int)
-                or isinstance(upper, bool)
-                or not 0 <= upper <= torch.iinfo(torch.int64).max
-            ):
-                return OrderedSet()
-        else:
-            upper = resolve_index(rhs.args[1])
-            if upper is None or not V.graph.sizevars.statically_known_geq(upper, 0):
-                return OrderedSet()
-        entry = self.range_tree_nodes.get(index)
-        if (
-            entry is None
-            or not V.graph.sizevars.statically_known_equals(entry.divisor, sympy.S.One)
-            or not V.graph.sizevars.statically_known_equals(
-                entry.length, entry.root.numel
-            )
-            or not V.graph.sizevars.statically_known_leq(upper, entry.root.numel)
-        ):
-            return OrderedSet()
-        return OrderedSet([entry.root.mask_name()])
 
     @contextlib.contextmanager
     def mask_loads(
@@ -5357,13 +5344,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             mask, TritonCSEVariable
         ):
             raise AssertionError("TritonKernel expects TritonCSEVariable operands")
-        with self.mask_loads(
-            mask,
-            value=0,
-            redundant_masks=self._implied_range_masks(
-                getattr(V.interpreter, "current_node", None)
-            ),
-        ):
+        with self.mask_loads(mask, value=0, redundant_masks=mask.range_mask_vars):
             self.store(name, index, value)
 
     def device_assert_async(self, cond, msg) -> None:
