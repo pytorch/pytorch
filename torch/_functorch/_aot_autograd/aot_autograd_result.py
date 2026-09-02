@@ -705,14 +705,10 @@ def deserialize_bundled_cache_entry(
     # In the precompile use case, guards are already serialized
     # by dynamo, so we don't need to add them to the environment
     entry.guards_expr = None
-    serialized_cudagraphs = getattr(entry.compiled_fw.result, "fx_kwargs", {}).get(
-        "cudagraphs"
-    )
-    cudagraphs = BoxedBool(
-        serialized_cudagraphs.value
-        if isinstance(serialized_cudagraphs, BoxedBool)
-        else torch._inductor.config.triton.cudagraphs
-    )
+    # TODO: this isn't exactly right, because cudagraphs needs to be a shared config
+    # which is set by compile_fx. But in precompile, we never actually call compile_fx
+    # so we don't have a place to track cudagraphs here.
+    cudagraphs = BoxedBool(torch._inductor.config.triton.cudagraphs)
     boxed_forward_device_index = BoxedDeviceIndex(None)
     # We need to make a clean copy of the cache entry
     # in case it needs to be serialized again
