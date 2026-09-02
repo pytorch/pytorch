@@ -3395,7 +3395,7 @@ class TestProbeSpawnFailures(unittest.TestCase):
             # ...including the probe that locates the installed torch: find_spec
             # imports the parent package, so that call is a full `import torch` too.
             build_stage2._installed_lib_dir()
-        self.assertEqual(seen, [build_stage2._PROBE_TIMEOUT] * 3)
+        self.assertEqual(seen, [build_stage2._PROBE_TIMEOUT_SECONDS] * 3)
 
 
 class TestRegistryConsistency(unittest.TestCase):
@@ -4298,7 +4298,10 @@ class TestCiAndCMakeWiring(unittest.TestCase):
             ("nothing declares kernels", "nothing declares kernels"),
             ("names no exportable arch", "no supported arch is targeted"),
         )
-        skips = doc.partition("Keep this list in sync")[2].partition("Past those")[0]
+        # The first bullet block after the lead-in, delimited by blank lines: keyed on
+        # a following paragraph's wording, this counted that paragraph's bullets too.
+        blocks = doc.partition("Keep this list in sync")[2].split("\n\n")
+        skips = next(b for b in blocks if b.strip().startswith("* "))
         bullets = [ln for ln in skips.splitlines() if ln.strip().startswith("* ")]
         self.assertEqual(len(bullets), len(arms), f"docstring skip bullets: {bullets}")
         for in_doc, in_contributing in arms:
