@@ -816,17 +816,9 @@ void bgemm_internal<at::BFloat16, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at:
   }
 }
 
-// Returns true iff the TunableOp dispatch succeeded. On a total miss
-// operator() resolves to ResultEntry::Default(), which is bgemm_internal --
-// the same path bgemm() takes when TunableOp is disabled -- so a miss costs
-// nothing extra. False means the selected kernel reported a non-OK status
-// and the caller must retry via bgemm_internal.
 template <typename Dtype, typename C_Dtype = Dtype>
-inline bool bgemm_tunable(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
+inline void bgemm_tunable(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
   tunable::GemmStridedBatchedParams<Dtype> params;
-  // Stamp per-call dynamic-dims mask before invoking the TunableOp; see
-  // launchTunableGemmAndBias in Blas.cpp for the rationale.
-  params.dynamic_dims_mask = at::cuda::tunable::GetCurrentDynamicDimsMask();
   params.transa = transa;
   params.transb = transb;
   params.m = m;
@@ -850,19 +842,19 @@ inline bool bgemm_tunable(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
 
   if (transa_ && transb_) {
     static tunable::GemmStridedBatchedTunableOp<Dtype, tunable::BlasOp::T, tunable::BlasOp::T> bgemm{};
-    return bgemm(&params) == tunable::OK;
+    bgemm(&params);
   }
   else if (transa_ && !transb_) {
     static tunable::GemmStridedBatchedTunableOp<Dtype, tunable::BlasOp::T, tunable::BlasOp::N> bgemm{};
-    return bgemm(&params) == tunable::OK;
+    bgemm(&params);
   }
   else if (!transa_ && transb_) {
     static tunable::GemmStridedBatchedTunableOp<Dtype, tunable::BlasOp::N, tunable::BlasOp::T> bgemm{};
-    return bgemm(&params) == tunable::OK;
+    bgemm(&params);
   }
   else if (!transa_ && !transb_) {
     static tunable::GemmStridedBatchedTunableOp<Dtype, tunable::BlasOp::N, tunable::BlasOp::N> bgemm{};
-    return bgemm(&params) == tunable::OK;
+    bgemm(&params);
   }
   else {
     TORCH_CHECK(false, "unreachable");
@@ -872,61 +864,67 @@ inline bool bgemm_tunable(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
 template <>
 void bgemm<double>(CUDABLAS_BGEMM_ARGTYPES(double)) {
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
-  if (tuning_ctx->IsTunableOpEnabled()
-      && bgemm_tunable<double>(CUDABLAS_BGEMM_ARGS(double))) {
-    return;
+  if (tuning_ctx->IsTunableOpEnabled()) {
+    bgemm_tunable<double>(CUDABLAS_BGEMM_ARGS(double));
   }
-  bgemm_internal<double>(CUDABLAS_BGEMM_ARGS(double));
+  else {
+    bgemm_internal<double>(CUDABLAS_BGEMM_ARGS(double));
+  }
 }
 
 template <>
 void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
-  if (tuning_ctx->IsTunableOpEnabled()
-      && bgemm_tunable<float>(CUDABLAS_BGEMM_ARGS(float))) {
-    return;
+  if (tuning_ctx->IsTunableOpEnabled()) {
+    bgemm_tunable<float>(CUDABLAS_BGEMM_ARGS(float));
   }
-  bgemm_internal<float>(CUDABLAS_BGEMM_ARGS(float));
+  else {
+    bgemm_internal<float>(CUDABLAS_BGEMM_ARGS(float));
+  }
 }
 
 template <>
 void bgemm<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<double>)) {
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
-  if (tuning_ctx->IsTunableOpEnabled()
-      && bgemm_tunable<c10::complex<double>>(CUDABLAS_BGEMM_ARGS(c10::complex<double>))) {
-    return;
+  if (tuning_ctx->IsTunableOpEnabled()) {
+    bgemm_tunable<c10::complex<double>>(CUDABLAS_BGEMM_ARGS(c10::complex<double>));
   }
-  bgemm_internal<c10::complex<double>>(CUDABLAS_BGEMM_ARGS(c10::complex<double>));
+  else {
+    bgemm_internal<c10::complex<double>>(CUDABLAS_BGEMM_ARGS(c10::complex<double>));
+  }
 }
 
 template <>
 void bgemm<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>)) {
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
-  if (tuning_ctx->IsTunableOpEnabled()
-      && bgemm_tunable<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>))) {
-    return;
+  if (tuning_ctx->IsTunableOpEnabled()) {
+    bgemm_tunable<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>));
   }
-  bgemm_internal<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>));
+  else {
+    bgemm_internal<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>));
+  }
 }
 
 template <>
 void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
-  if (tuning_ctx->IsTunableOpEnabled()
-      && bgemm_tunable<at::Half>(CUDABLAS_BGEMM_ARGS(at::Half))) {
-    return;
+  if (tuning_ctx->IsTunableOpEnabled()) {
+    bgemm_tunable<at::Half>(CUDABLAS_BGEMM_ARGS(at::Half));
   }
-  bgemm_internal<at::Half>(CUDABLAS_BGEMM_ARGS(at::Half));
+  else {
+    bgemm_internal<at::Half>(CUDABLAS_BGEMM_ARGS(at::Half));
+  }
 }
 
 template <>
 void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
-  if (tuning_ctx->IsTunableOpEnabled()
-      && bgemm_tunable<at::BFloat16>(CUDABLAS_BGEMM_ARGS(at::BFloat16))) {
-    return;
+  if (tuning_ctx->IsTunableOpEnabled()) {
+    bgemm_tunable<at::BFloat16>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
   }
-  bgemm_internal<at::BFloat16>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
+  else {
+    bgemm_internal<at::BFloat16>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
+  }
 }
 
 template <>
@@ -1367,17 +1365,9 @@ void gemm_internal<at::BFloat16, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::B
   }
 }
 
-// Returns true iff the TunableOp dispatch succeeded. On a total miss
-// operator() resolves to ResultEntry::Default(), which is gemm_internal --
-// the same path gemm() takes when TunableOp is disabled -- so a miss costs
-// nothing extra. False means the selected kernel reported a non-OK status
-// and the caller must retry via gemm_internal.
 template <typename DType, typename C_Dtype>
-inline bool gemm_tunable(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(DType, C_Dtype)) {
+inline void gemm_tunable(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(DType, C_Dtype)) {
   tunable::GemmParams<DType> params;
-  // Stamp per-call dynamic-dims mask before invoking the TunableOp; see
-  // launchTunableGemmAndBias in Blas.cpp for the rationale.
-  params.dynamic_dims_mask = at::cuda::tunable::GetCurrentDynamicDimsMask();
   params.transa = transa;
   params.transb = transb;
   params.m = m;
@@ -1397,19 +1387,19 @@ inline bool gemm_tunable(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(DType, C_Dtype)) {
 
   if (transa_ && transb_) {
     static tunable::GemmTunableOp<DType, tunable::BlasOp::T, tunable::BlasOp::T> gemm{};
-    return gemm(&params) == tunable::OK;
+    gemm(&params);
   }
   else if (transa_ && !transb_) {
     static tunable::GemmTunableOp<DType, tunable::BlasOp::T, tunable::BlasOp::N> gemm{};
-    return gemm(&params) == tunable::OK;
+    gemm(&params);
   }
   else if (!transa_ && transb_) {
     static tunable::GemmTunableOp<DType, tunable::BlasOp::N, tunable::BlasOp::T> gemm{};
-    return gemm(&params) == tunable::OK;
+    gemm(&params);
   }
   else if (!transa_ && !transb_) {
     static tunable::GemmTunableOp<DType, tunable::BlasOp::N, tunable::BlasOp::N> gemm{};
-    return gemm(&params) == tunable::OK;
+    gemm(&params);
   }
   else {
     TORCH_CHECK(false, "unreachable");
@@ -1419,61 +1409,67 @@ inline bool gemm_tunable(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(DType, C_Dtype)) {
 template <>
 void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
-  if (tuning_ctx->IsTunableOpEnabled()
-      && gemm_tunable<double>(CUDABLAS_GEMM_ARGS(double))) {
-    return;
+  if (tuning_ctx->IsTunableOpEnabled()) {
+    gemm_tunable<double>(CUDABLAS_GEMM_ARGS(double));
   }
-  gemm_internal<double>(CUDABLAS_GEMM_ARGS(double));
+  else {
+    gemm_internal<double>(CUDABLAS_GEMM_ARGS(double));
+  }
 }
 
 template <>
 void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
-  if (tuning_ctx->IsTunableOpEnabled()
-      && gemm_tunable<float>(CUDABLAS_GEMM_ARGS(float))) {
-    return;
+  if (tuning_ctx->IsTunableOpEnabled()) {
+    gemm_tunable<float>(CUDABLAS_GEMM_ARGS(float));
   }
-  gemm_internal<float>(CUDABLAS_GEMM_ARGS(float));
+  else {
+    gemm_internal<float>(CUDABLAS_GEMM_ARGS(float));
+  }
 }
 
 template <>
 void gemm<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>)) {
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
-  if (tuning_ctx->IsTunableOpEnabled()
-      && gemm_tunable<c10::complex<double>>(CUDABLAS_GEMM_ARGS(c10::complex<double>))) {
-    return;
+  if (tuning_ctx->IsTunableOpEnabled()) {
+    gemm_tunable<c10::complex<double>>(CUDABLAS_GEMM_ARGS(c10::complex<double>));
   }
-  gemm_internal<c10::complex<double>>(CUDABLAS_GEMM_ARGS(c10::complex<double>));
+  else {
+    gemm_internal<c10::complex<double>>(CUDABLAS_GEMM_ARGS(c10::complex<double>));
+  }
 }
 
 template <>
 void gemm<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>)) {
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
-  if (tuning_ctx->IsTunableOpEnabled()
-      && gemm_tunable<c10::complex<float>>(CUDABLAS_GEMM_ARGS(c10::complex<float>))) {
-    return;
+  if (tuning_ctx->IsTunableOpEnabled()) {
+    gemm_tunable<c10::complex<float>>(CUDABLAS_GEMM_ARGS(c10::complex<float>));
   }
-  gemm_internal<c10::complex<float>>(CUDABLAS_GEMM_ARGS(c10::complex<float>));
+  else {
+    gemm_internal<c10::complex<float>>(CUDABLAS_GEMM_ARGS(c10::complex<float>));
+  }
 }
 
 template <>
 void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
-  if (tuning_ctx->IsTunableOpEnabled()
-      && gemm_tunable<at::Half>(CUDABLAS_GEMM_ARGS(at::Half))) {
-    return;
+  if (tuning_ctx->IsTunableOpEnabled()) {
+    gemm_tunable<at::Half>(CUDABLAS_GEMM_ARGS(at::Half));
   }
-  gemm_internal<at::Half>(CUDABLAS_GEMM_ARGS(at::Half));
+  else {
+    gemm_internal<at::Half>(CUDABLAS_GEMM_ARGS(at::Half));
+  }
 }
 
 template <>
 void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
-  if (tuning_ctx->IsTunableOpEnabled()
-      && gemm_tunable<at::BFloat16>(CUDABLAS_GEMM_ARGS(at::BFloat16))) {
-    return;
+  if (tuning_ctx->IsTunableOpEnabled()) {
+    gemm_tunable<at::BFloat16>(CUDABLAS_GEMM_ARGS(at::BFloat16));
   }
-  gemm_internal<at::BFloat16>(CUDABLAS_GEMM_ARGS(at::BFloat16));
+  else {
+    gemm_internal<at::BFloat16>(CUDABLAS_GEMM_ARGS(at::BFloat16));
+  }
 }
 
 template <>

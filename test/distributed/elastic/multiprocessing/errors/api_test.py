@@ -49,31 +49,6 @@ def raise_child_failure_error_fn(name, child_error_file=""):
     raise ChildFailedError(name, {0: pf})
 
 
-def raise_sentinel_error_fn():
-    raise SentinelError("foobar")
-
-
-class FnNameCapturingErrorHandler(ErrorHandler):
-    """Captures the entrypoint fn_name that ``@record`` threads via handler state.
-
-    Deliberately overrides ``initialize``/``record_exception`` with the
-    pre-fn_name signatures to prove that old-style subclasses still receive the
-    entrypoint name (through ``self._fn_name``) and are not broken by ``@record``.
-    """
-
-    def __init__(self) -> None:
-        self.initialize_fn_name: str | None = None
-        self.record_exception_fn_name: str | None = None
-
-    def initialize(self) -> None:
-        self.initialize_fn_name = self._fn_name
-        super().initialize()
-
-    def record_exception(self, e: BaseException) -> None:
-        self.record_exception_fn_name = self._fn_name
-        super().record_exception(e)
-
-
 def read_resource_file(resource_file: str) -> str:
     with open(os.path.join(os.path.dirname(__file__), resource_file)) as fp:
         return "".join(fp.readlines())
@@ -308,35 +283,3 @@ class ApiTest(unittest.TestCase):
         error_msg = str(ex)
         self.assertIn("(SIGSEGV)", error_msg)
         self.assertIn(f"exitcode  : {-signal.SIGSEGV}", error_msg)
-
-    def test_record_passes_fn_name_to_error_handler(self):
-        # a subclass using the pre-fn_name signatures must still receive the
-        # entrypoint name via handler state and must not raise from @record
-        error_handler = FnNameCapturingErrorHandler()
-        wrapped = record(raise_sentinel_error_fn, error_handler=error_handler)
-
-        with mock.patch.dict(
-            os.environ, {"TORCHELASTIC_ERROR_FILE": self.test_error_file}
-        ):
-            with self.assertRaises(SentinelError):
-                wrapped()
-
-        self.assertEqual("raise_sentinel_error_fn", error_handler.initialize_fn_name)
-        self.assertEqual(
-            "raise_sentinel_error_fn", error_handler.record_exception_fn_name
-        )
-
-    def test_record_does_not_write_fn_name_to_error_file(self):
-        # extraInfo is a map<string,string> for downstream consumers, so @record
-        # threads fn_name to the handler but the base handler does not persist it
-        wrapped = record(raise_sentinel_error_fn, error_handler=ErrorHandler())
-
-        with mock.patch.dict(
-            os.environ, {"TORCHELASTIC_ERROR_FILE": self.test_error_file}
-        ):
-            with self.assertRaises(SentinelError):
-                wrapped()
-
-        with open(self.test_error_file) as fp:
-            err = json.load(fp)
-        self.assertNotIn("fn_name", err["message"]["extraInfo"])

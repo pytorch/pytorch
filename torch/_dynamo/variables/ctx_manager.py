@@ -180,7 +180,7 @@ class ContextWrappingVariable(VariableTracker):
 
 
 class GenericContextWrappingVariable(UserDefinedObjectVariable):
-    # Some methods in ContextWrappingVariable assume the arguments are
+    # Some methods in ContextWrappingVariable assumes the arguments are
     # python constants. Which might not always be the case here.
     def __init__(self, cm_obj: AbstractContextManager[Any], **kwargs: Any) -> None:
         if cm_obj is None:

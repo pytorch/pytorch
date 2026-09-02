@@ -1,5 +1,5 @@
-#include <ATen/core/Tensor.h>
-#include <ATen/ops/empty.h>
+#include <ATen/ATen.h>
+#include <c10/xpu/XPUFunctions.h>
 
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>

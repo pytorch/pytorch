@@ -15,9 +15,9 @@ from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from ...utils._ordered_set import OrderedSet
 from ...utils._sympy.functions import FloorDiv, Min, ModularIndexing
 from ...utils._sympy.symbol import make_symbol, SymT
-from .. import ir
+from .. import config, ir
 from ..dependencies import Dep, extract_loop_body_with_args, MemoryDep
-from ..runtime.hints import ReductionHint, SCALAR_ONLINE_SOFTMAX_MIN_RBLOCK
+from ..runtime.hints import ReductionHint
 from ..runtime.runtime_utils import next_power_of_2
 from ..scheduler import SchedulerNode
 from ..utils import cache_on_self, prefix_is_reduction
@@ -33,10 +33,10 @@ if typing.TYPE_CHECKING:
 _INNER_REDUCTION_RATIO = 32
 _SMALL_INNER_REDUCTION_RATIO = 16
 _SMALL_INNER_REDUCTION_MAX_RBLOCK = 512
-# Keep the scalar online-softmax selector within the simple fused kernels
-# covered by the performance sweep. These are profitability limits.
+# Profitability limits for scalar online-softmax accumulators, chosen from the
+# performance sweep of simple fused kernels.
+_SCALAR_ONLINE_SOFTMAX_MIN_RNUMEL = 8192
 _SCALAR_ONLINE_SOFTMAX_MAX_LOADS = 3
-_SCALAR_ONLINE_SOFTMAX_MAX_REDUCTIONS = 2
 
 
 def tiling_scores_suggest_inner_reduction(
@@ -205,58 +205,67 @@ class SIMDKernelFeatures:
 
     @cache_on_self
     def has_multiple_escaping_full_size_outputs(self) -> bool:
-        """Return whether at least two full-size outputs escape this kernel."""
-        scheduler_nodes = tuple(self.scheduler_nodes())
-        scheduler_node_set = OrderedSet(scheduler_nodes)
-        materialized_numel = V.graph.sizevars.optimization_hint(
-            self.numel * self.reduction_numel
-        )
-        escaping_names: OrderedSet[str] = OrderedSet()
+        """At least two outputs of the full loop size are stored for use outside this kernel."""
+        scheduler_nodes = OrderedSet(self.scheduler_nodes())
+        sizevars = V.graph.sizevars
+        full_numel = sizevars.optimization_hint(self.numel * self.reduction_numel)
+        num_escaping = 0
         for node in scheduler_nodes:
             for buf in node.get_outputs():
-                name = buf.get_name()
-                if name in V.graph.removed_buffers or all(
-                    user.node in scheduler_node_set for user in buf.users
+                if buf.get_name() in V.graph.removed_buffers or all(
+                    user.node in scheduler_nodes for user in buf.users
                 ):
                     continue
-                try:
-                    buf_numel = buf.node.get_numel()
-                    is_smaller = (
-                        not free_unbacked_symbols(buf_numel)
-                        and V.graph.sizevars.optimization_hint(buf_numel)
-                        < materialized_numel
-                    )
-                except NotImplementedError:
-                    is_smaller = False
-                if is_smaller:
+                buf_numel = buf.node.get_numel()
+                if (
+                    not free_unbacked_symbols(buf_numel)
+                    and sizevars.optimization_hint(buf_numel) < full_numel
+                ):
                     continue
-                escaping_names.add(name)
-                if len(escaping_names) >= 2:
-                    return True
-        return False
+                num_escaping += 1
+        return num_escaping >= 2
 
     def can_use_scalar_online_softmax(
         self,
         tiling: dict[str, sympy.Expr],
         tiling_scores: dict[str, sympy.Expr] | None,
     ) -> bool:
-        """Return whether scalar online-softmax accumulation is profitable."""
+        """
+        Whether this kernel is a large inner online-softmax reduction where
+        scalar (per-row) max/sum accumulators are supported and profitable.
+        The caller still has to rule out persistent, cooperative, mix-order
+        and combo kernels, which have their own accumulator layouts.
+        """
         scheduler_nodes = tuple(self.scheduler_nodes())
+        if not config.triton.scalar_online_softmax_accumulators or not scheduler_nodes:
+            return False
+        device = scheduler_nodes[0].get_device()
+        if device is None or device.type != "cuda" or torch.version.hip is not None:
+            return False
         if (
-            not scheduler_nodes
-            or tuple(self.indexing_scheduler_nodes()) != scheduler_nodes
+            tuple(self.indexing_scheduler_nodes()) != scheduler_nodes
             or sum(prefix_is_reduction(prefix) for prefix in tiling) != 1
             or not any(not prefix_is_reduction(prefix) for prefix in tiling)
             or self.get_reduction_hint(tiling_scores) != ReductionHint.INNER
         ):
             return False
 
+        # Each output of the online softmax is its own scheduler node, so a
+        # kernel containing exactly one online softmax has two reduction nodes.
         reduction_nodes = self.reduction_nodes()
-        if len(reduction_nodes) > _SCALAR_ONLINE_SOFTMAX_MAX_REDUCTIONS or not any(
-            isinstance(node.node, (ir.ComputedBuffer, ir.TemplateBuffer))
+        if len(reduction_nodes) > 2 or not all(
+            isinstance(node.node, ir.OperationBuffer)
             and node.node.get_reduction_type() == "online_softmax_reduce"
             for node in reduction_nodes
         ):
+            return False
+
+        if free_unbacked_symbols(self.reduction_numel):
+            return False
+        reduction_numel_hint = next_power_of_2(
+            int(V.graph.sizevars.optimization_hint(self.reduction_numel))
+        )
+        if reduction_numel_hint < _SCALAR_ONLINE_SOFTMAX_MIN_RNUMEL:
             return False
 
         produced_names = OrderedSet(
@@ -270,23 +279,7 @@ class SIMDKernelFeatures:
         )
         if len(external_reads) > _SCALAR_ONLINE_SOFTMAX_MAX_LOADS:
             return False
-
-        reduction_numel = self.reduction_numel
-        if free_unbacked_symbols(reduction_numel):
-            return False
-        reduction_numel_hint = next_power_of_2(
-            int(V.graph.sizevars.optimization_hint(reduction_numel))
-        )
-        if reduction_numel_hint < SCALAR_ONLINE_SOFTMAX_MIN_RBLOCK:
-            return False
-
-        device = scheduler_nodes[0].get_device()
-        return (
-            device is not None
-            and device.type == "cuda"
-            and torch.version.hip is None
-            and not self.has_multiple_escaping_full_size_outputs()
-        )
+        return not self.has_multiple_escaping_full_size_outputs()
 
     def contains_op(self, op_name: str) -> bool:
         """True if V.ops.{op_name} is used in node_schedule"""

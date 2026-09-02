@@ -33,7 +33,7 @@ int traverse_node(
   }
   auto& fn = *fn_ptr;
   // The fields traversed below are owned by the cpp grad_fn, which we own a
-  // reference to. We should only traverse them however if we are the only
+  // reference to. We should only them traverse however if we are the only
   // owner of the grad_fn, otherwise we risk prematurely gc'ing the grad_fn.
   //
   // See: https://github.com/pytorch/pytorch/issues/102174

@@ -237,13 +237,9 @@ def signature_to_meta(
         # tl.int32 whenever the (deprecated) block-pointer path is actually
         # active. Templates like flex attention/decoding likewise use
         # hand-written block pointers, so they also stay on 32-bit ks indexing.
-        #
-        # assume_32bit_indexing already asserts (and guards) that every ks* symbol
-        # fits in int32.
         if (
             not is_template
             and not use_block_ptr_enabled()
-            and not config.assume_32bit_indexing
             and isinstance(arg, SizeArg)
             and arg.name.startswith("ks")
         ):

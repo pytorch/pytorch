@@ -108,7 +108,7 @@ class AotAutograd:
                 # Note [Wrapping bw_compiler in disable]
                 # The two disables here:
                 # - stop TorchDynamo from trying to compile the bw_compiler function itself
-                # - stop TorchDynamo from trying to compile the generated backwards pass bw_compiler produces
+                # - stop TorchDynamo from trying to compile our the generated backwards pass bw_compiler produces
 
                 return disable(
                     disable(

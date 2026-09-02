@@ -3352,8 +3352,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.has_load_with_contiguous_rdim = False
         # We track the store name since a store can be canceled later
         self.stores_with_contiguous_rdim: list[str] = []
-        self.has_scalar_online_softmax_reduction: bool = False
-        self.has_non_scalar_reduction: bool = False
 
     @property
     def uses_tma(self) -> bool:
@@ -4542,9 +4540,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             self.inside_reduction
             and self.range_trees[-1].is_loop
             and not indexing.has_rindex()
-            and not indexing.has_rmask()
         ):
-            # Lift loads whose address and mask are available outside the loop.
+            # can lift a common load outside of reduction loop
+            # One exception is when this is an indirect_load.
             return self.body
         else:
             return self.loads
@@ -4922,6 +4920,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if isinstance(indexing, IndexingOptions):
             if self._has_stride1_on_rdim(indexing.index):
                 self.has_load_with_contiguous_rdim = True
+            reduction_axes_omitted = indexing.reduction_axes_omitted
+        else:
+            reduction_axes_omitted = False
 
         has_rindex = indexing.has_rindex()
         has_tmpmask = indexing.has_tmpmask()
@@ -5108,8 +5109,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     ),
                 )
 
-        # Only CSE values emitted outside the loop remain valid after it closes.
-        if not self.inside_reduction or load_buffer is self.body:
+        if not self.inside_reduction or (
+            not indexing.has_rmask()
+            and not has_rindex
+            # The address and predicate producers for a narrowed load live in
+            # the loop-local compute buffer, so re-emit it for each loop chunk.
+            and not reduction_axes_omitted
+        ):
             self.outside_loop_vars.add(result_var)
 
         return result_var
@@ -5341,27 +5347,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         )
 
     @functools.cached_property
-    def _scalar_online_softmax_eligible(self) -> bool:
+    def use_scalar_online_softmax(self) -> bool:
         return (
             not self.is_combo_kernel
             and not self.persistent_reduction
             and not self.cooperative_reduction
             and not self.mix_order_reduction
-            and config.triton.scalar_online_softmax_accumulators
             and self.features.can_use_scalar_online_softmax(
                 self.tiling, self.tiling_scores
             )
-        )
-
-    def _should_use_scalar_online_softmax(
-        self,
-        reduction_type: ReductionType,
-        value: CSEVariable | tuple[CSEVariable, ...],
-    ) -> bool:
-        return (
-            reduction_type == "online_softmax_reduce"
-            and not isinstance(value, tuple)
-            and self._scalar_online_softmax_eligible
         )
 
     def reduction(
@@ -5622,7 +5616,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             return TritonKernelOverrides.where(cond, tval, fval)
 
         if self.persistent_reduction:
-            self.has_non_scalar_reduction = True
             default = ir.Reduction.default_value(reduction_type, src_dtype)
 
             def update_constant_dtype(constant, src_dtype, dst_dtype):
@@ -5767,13 +5760,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 if reduction_type in arg_with_value_reduction_types
                 else result_var
             )
-            use_scalar_online_softmax = self._should_use_scalar_online_softmax(
-                reduction_type, value
-            )
-            if use_scalar_online_softmax:
-                self.has_scalar_online_softmax_reduction = True
-            else:
-                self.has_non_scalar_reduction = True
             accumulator = self.cse.namedvar(
                 f"_{result_prefix}",
                 dtype=torch_acc_type,
@@ -5846,32 +5832,25 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 accumulator_max = f"_{result_var}_max"
                 accumulator_sum = f"_{result_var}_sum"
 
-                if use_scalar_online_softmax:
-                    scalar_acc_shape = tuple(self.dense_size_list()[:dim])
-                    scalar_acc_size = f"[{', '.join(scalar_acc_shape)}]"
+                if self.use_scalar_online_softmax and not isinstance(value, tuple):
+                    # Per-row accumulators: each block is reduced along the
+                    # reduction dim before it is folded into the running state.
+                    self.autotune_hints.add(AutotuneHint.SCALAR_ONLINE_SOFTMAX)
+                    acc_size = f"[{', '.join(self.dense_size_list()[:dim])}]"
                     self.body.writeline(
-                        f"{accumulator_max} = tl.full({scalar_acc_size}, float('-inf'), {acc_type})"
+                        f"{accumulator_max} = tl.full({acc_size}, float('-inf'), {acc_type})"
                     )
                     self.body.writeline(
-                        f"{accumulator_sum} = tl.full({scalar_acc_size}, 0.0, {acc_type})"
+                        f"{accumulator_sum} = tl.full({acc_size}, 0.0, {acc_type})"
                     )
-
-                    if cond:
-                        masked_val = f"tl.where({cond}, {value}, float('-inf'))"
-                        valid_mask = cond
-                    else:
-                        masked_val = str(value)
-                        valid_mask = "True"
-
                     self.compute.splice(
                         f"""
                         {accumulator_max}, {accumulator_sum} = triton_helpers.online_softmax_reduce_scalar_combine(
-                            {accumulator_max}, {accumulator_sum}, {masked_val}, {valid_mask}, {dim},
+                            {accumulator_max}, {accumulator_sum}, {value}, {cond or True}, {dim},
                             {config.use_fast_math}, {config.strict_signed_zero}
                         )
                         """
                     )
-
                     result_max = cast(CSEVariable, result_var)
                     result_sum = self.cse.newvar(dtype=dtype, shape=result_max.shape)
                     self.post_loop_combine.splice(
@@ -5882,7 +5861,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     )
                     result_var = result_max, result_sum
                 else:
-                    # Original vector accumulator path
                     # setup accumulator
                     self.body.writeline(
                         f"{accumulator_max} = tl.full({self.dense_size_str()}, float('-inf'), {acc_type})"
@@ -7263,12 +7241,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         Used by both standalone codegen_kernel() and ComboKernel.combo_grid_meta()
         (which calls this on each sub_kernel).
         """
-        autotune_hints = set(self.autotune_hints)  # noqa: set_linter
-        if (
-            self.has_scalar_online_softmax_reduction
-            and not self.has_non_scalar_reduction
-        ):
-            autotune_hints.add(AutotuneHint.SCALAR_ONLINE_SOFTMAX)
         out: dict[str, Any] = {
             "no_x_dim": self.no_x_dim,
             "atomic_add_found": self.atomic_add_found,
@@ -7276,7 +7248,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "num_store": self.num_store,
             "num_reduction": self.num_reduction,
             # Triton will not accept an OrderedSet for autotune_hints
-            "autotune_hints": autotune_hints,
+            "autotune_hints": set(self.autotune_hints),  # noqa: set_linter
         }
         if self.mix_order_reduction:
             out["RSPLIT_SIZE"] = self.rsplit_size

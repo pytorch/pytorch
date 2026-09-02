@@ -406,18 +406,22 @@ def online_softmax_combine(
 def online_softmax_reduce_scalar_combine(
     lhs_max,
     lhs_sum,
-    rhs_max,
-    valid_mask,
+    rhs,
+    rhs_mask,
     dim,
     use_fast_math: tl.constexpr,
     strict_signed_zero: tl.constexpr,
 ):
+    """
+    Fold a block of values (rhs, with rhs_sum implicitly 1) into a per-row
+    (max, sum) state that has already been reduced along `dim`. Compared to
+    online_softmax_combine this keeps only one max/sum per output row live.
+    """
+    rhs = tl.where(rhs_mask, rhs, float("-inf"))
     if strict_signed_zero:
-        block_max = max2_strict(rhs_max, dim)
-        out_max = _maximum_reduce(lhs_max, block_max)
+        out_max = _maximum_reduce(lhs_max, max2_strict(rhs, dim))
     else:
-        block_max = max2(rhs_max, dim)
-        out_max = maximum(lhs_max, block_max)
+        out_max = maximum(lhs_max, max2(rhs, dim))
     lhs_scale = tl.where(
         out_max == float("-inf"), 1.0, exp(lhs_max - out_max, use_fast_math)
     )
@@ -425,10 +429,10 @@ def online_softmax_reduce_scalar_combine(
     rhs_scale = tl.where(
         out_max_keepdim == float("-inf"),
         1.0,
-        exp(rhs_max - out_max_keepdim, use_fast_math),
+        exp(rhs - out_max_keepdim, use_fast_math),
     )
-    # The guard above gives padded lanes scale 1 when every value is -inf.
-    rhs_scale = tl.where(valid_mask, rhs_scale, 0.0)
+    # The -inf guard above gives masked lanes scale 1 when the row is all -inf.
+    rhs_scale = tl.where(rhs_mask, rhs_scale, 0.0)
     out_sum = lhs_sum * lhs_scale + tl.sum(rhs_scale, dim)
     return out_max, out_sum
 

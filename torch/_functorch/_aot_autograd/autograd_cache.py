@@ -311,7 +311,7 @@ def check_node_safe(node: Node) -> None:
         if node.meta and node.meta.get("is_wrapped", False):
             # This is fx.wrap function
             # By default we BypassAOTAutogradCache for unknown functions,
-            # But if user explicitly specified cache hash - allow caching it.
+            # But if user explicitly specified cache hash - allow to cache it.
             if node.meta.get("user_cache_hash", None):
                 return
         if isinstance(node.target, str):

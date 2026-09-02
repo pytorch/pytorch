@@ -992,7 +992,7 @@ def substitute_in_graph(
                 f"already handled by {polyfill_handlers[original_fn]}"
             )
 
-        # Need to wrap the function because we may not be able to assign __torch_dynamo_polyfill__ to a
+        # Need to wrap the function because we may cannot assign __torch_dynamo_polyfill__ to a
         # C++ function.
         @functools.wraps(traceable_fn)
         def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:

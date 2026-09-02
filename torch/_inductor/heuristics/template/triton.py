@@ -419,6 +419,11 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(256, 128, 128, 3, 8),
         ]
 
+        self.mixed_mm_configs: list[BaseConfig] = [
+            GemmConfig(16, 128, 256, 3, 4),
+            GemmConfig(16, 128, 256, 5, 8),
+        ]
+
         self.persistent_mm_configs: list[BaseConfig] = [
             GemmConfig(128, 256, 64, 3, 8),
             GemmConfig(128, 128, 64, 3, 8),

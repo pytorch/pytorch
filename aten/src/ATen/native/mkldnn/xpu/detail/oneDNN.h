@@ -1,11 +1,10 @@
 #pragma once
 
+#include <ATen/ATen.h>
 #include <ATen/BlasBackend.h>
-#include <ATen/core/Tensor.h>
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
-#include <c10/core/Scalar.h>
 
 namespace at::native::onednn {
 
