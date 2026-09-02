@@ -724,14 +724,18 @@ def all_reduce_backward(ctx, grad_output: torch.Tensor):
         fwd_output = wait_tensor(fwd_output)
         # Split the summed grad evenly across extremum holders like ATen's
         # evenly_distribute_backward. Ties may span ranks, so the holder count
-        # is itself an all_reduce(sum) of the local extremum mask.
+        # is itself an all_reduce(sum) of the local extremum mask. The count is
+        # summed in float32 (not the grad dtype) so it stays exact -- fp16/bf16
+        # cannot represent large integer counts. Scale in the promoted dtype,
+        # then cast back to the grad dtype.
         mask = _min_max_extremum_mask(fwd_input, fwd_output)
         tie_count = wait_tensor(
             torch.ops._c10d_functional.all_reduce(
-                mask.to(output.dtype), "sum", group_name
+                mask.to(torch.float32), "sum", group_name
             )
         )
-        output = torch.ops.aten.where.ScalarOther(mask, output / tie_count, 0)
+        scaled = (output / tie_count).to(output.dtype)
+        output = torch.ops.aten.where.ScalarOther(mask, scaled, 0)
     return output, None, None
 
 
@@ -964,24 +968,26 @@ def all_reduce_coalesced_backward(ctx, grad_outputs: list[torch.Tensor]):
         saved = ctx.saved_tensors
         n = len(grad_inputs)
         fwd_inputs = saved[:n]
-        fwd_outputs = [wait_tensor(o) for o in saved[n:]]
+        fwd_outputs = wait_tensors(list(saved[n:]))
         # Split each summed grad evenly across extremum holders like ATen's
         # evenly_distribute_backward. Ties may span ranks, so holder counts are
         # an all_reduce(sum) of the local extremum masks, batched into one
-        # coalesced collective.
+        # coalesced collective. Counts are summed in float32 (not the grad dtype)
+        # so they stay exact -- fp16/bf16 cannot represent large integer counts.
+        # Scale in the promoted dtype, then cast back to each grad dtype.
         masks = [
             _min_max_extremum_mask(fwd_input, fwd_output)
             for fwd_input, fwd_output in zip(fwd_inputs, fwd_outputs)
         ]
         tie_counts = wait_tensors(
             torch.ops._c10d_functional.all_reduce_coalesced(
-                [mask.to(g.dtype) for mask, g in zip(masks, grad_inputs)],
+                [mask.to(torch.float32) for mask in masks],
                 "sum",
                 group_name,
             )
         )
         grad_inputs = [
-            torch.ops.aten.where.ScalarOther(mask, g / count, 0)
+            torch.ops.aten.where.ScalarOther(mask, (g / count).to(g.dtype), 0)
             for g, mask, count in zip(grad_inputs, masks, tie_counts)
         ]
     return (grad_inputs, None, None)

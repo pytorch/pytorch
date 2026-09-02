@@ -409,9 +409,11 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         output = fcols.all_reduce(input_tensor, reduce_op, group=group_name)
         output.sum().backward()
 
-        # Grad G = world_size is split across the `half` tied extremum holders.
+        # Grad G = world_size is split evenly across the extremum holders: the
+        # `half` low ranks for min, the `world_size - half` high ranks for max.
         holds_extremum = (reduce_op_name == "min") == (rank < half)
-        expected_val = self.world_size / half if holds_extremum else 0.0
+        num_holders = half if reduce_op_name == "min" else self.world_size - half
+        expected_val = self.world_size / num_holders if holds_extremum else 0.0
         expected_grad = torch.full(shape, fill_value=expected_val, device=device)
         self.assertEqual(input_tensor.grad, expected_grad)
 
@@ -644,7 +646,8 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         loss.backward()
 
         holds_extremum = (reduce_op_name == "min") == (rank < half)
-        expected_val = self.world_size / half if holds_extremum else 0.0
+        num_holders = half if reduce_op_name == "min" else self.world_size - half
+        expected_val = self.world_size / num_holders if holds_extremum else 0.0
         for input_tensor in input_tensors:
             expected_grad = torch.full_like(input_tensor, fill_value=expected_val)
             self.assertEqual(input_tensor.grad, expected_grad)
@@ -1001,6 +1004,36 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
                     expected_grad = torch.full(
                         shape, fill_value=grad_val, device=self.device
                     )
+                self.assertEqual(input_tensor.grad, expected_grad)
+
+    @with_comms
+    def test_all_reduce_min_max_ties_compile(self):
+        """min/max backward splits grad evenly across tied holders under compile.
+
+        Every rank holds the same value, so all ranks tie for both min and max
+        and the summed grad (world_size) is divided by world_size, matching
+        ATen's evenly_distribute_backward.
+        """
+        shape = (3, 3)
+        group_name = dist.group.WORLD.group_name
+
+        for reduce_op in ["min", "max"]:
+            with self.subTest(reduce_op=reduce_op):
+
+                @torch.compile(fullgraph=True)
+                def compiled_fn(tensor):
+                    output = fcols.all_reduce(tensor, reduce_op, group=group_name)
+                    return output.sum()
+
+                input_tensor = torch.full(
+                    shape, fill_value=1.0, device=self.device, requires_grad=True
+                )
+
+                loss = compiled_fn(input_tensor)
+                loss.backward()
+
+                self.assertIsNotNone(input_tensor.grad)
+                expected_grad = torch.full(shape, fill_value=1.0, device=self.device)
                 self.assertEqual(input_tensor.grad, expected_grad)
 
     @with_comms
