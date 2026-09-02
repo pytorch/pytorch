@@ -18,9 +18,8 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_mps import mps_ops_modifier
 from numbers import Number
 from typing import Any
-from packaging import version
 from torch.testing._internal.common_cuda import \
-    (SM80OrLater, TEST_MULTIGPU)
+    (ROCM_VERSION, SM80OrLater, TEST_MULTIGPU)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, dtypesIfMPS, onlyCPU, onlyCUDA, precisionOverride,
      deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes, skipCUDAIf, expectedFailureMPS,
@@ -135,7 +134,7 @@ CUSPARSE_SPMM_COMPLEX128_SUPPORTED = (
     IS_WINDOWS and torch.version.cuda
 ) or (not IS_WINDOWS and not TEST_WITH_ROCM)
 
-HIPSPARSE_SPMM_COMPLEX128_SUPPORTED = torch.version.hip and version.parse(torch.version.hip.split("-")[0]) >= version.parse("6.0")
+HIPSPARSE_SPMM_COMPLEX128_SUPPORTED = ROCM_VERSION >= (6, 0)
 
 def all_sparse_layouts(test_name='layout', include_strided=False):
     return parametrize(test_name, [
@@ -2031,7 +2030,10 @@ class TestSparse(TestSparseBase):
         def test_shape(sparse_dims, nnz, with_size):
             x, _, _ = self._gen_sparse(sparse_dims, nnz, with_size, dtype, device, coalesced)
             y = x.coalesce()
-            self.assertEqual(x.norm(), y._values().norm())
+            self.assertEqual(
+                torch.linalg.vector_norm(x),
+                torch.linalg.vector_norm(y._values()),
+            )
 
         test_shape(3, 10, 100)
         test_shape(4, 10, [100, 100, 100, 5, 5, 5, 0])
@@ -2043,15 +2045,13 @@ class TestSparse(TestSparseBase):
              RuntimeError, r'norm_sparse currently does not support keepdim=True'),
             ({'dim': 0},
              RuntimeError, r'norm_sparse currently only supports full reductions'),
-            ({'dtype': torch.double, 'p': 'fro'},
-             ValueError, r'dtype argument is not supported in frobenius norm'),
-            ({'dtype': torch.double, 'p': 0},
-             RuntimeError, r"norm_sparse currently does not support 'dtype' argument")
+            ({'dtype': torch.double, 'ord': 0},
+             RuntimeError, r"norm_sparse currently does not support 'dtype' argument"),
         ]
         x = self._gen_sparse(3, 10, 100, dtype, device, coalesced)[0]
         for kwargs, err, msg in kwarg_error_pairs:
             with self.assertRaisesRegex(err, msg):
-                x.norm(**kwargs)
+                torch.linalg.vector_norm(x, **kwargs)
 
     @coalescedonoff
     @dtypes(torch.double)

@@ -1,8 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/Config.h>
 
 #include <ATen/native/mkldnn/Matmul.h>
 #include <ATen/native/mkldnn/Linear.h>
@@ -19,19 +17,11 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_efficientzerotensor.h>
-#include <ATen/ops/addmv.h>
-#include <ATen/ops/addmv_native.h>
 #include <ATen/ops/copy_native.h>
-#include <ATen/ops/dot.h>
-#include <ATen/ops/dot_native.h>
 #include <ATen/ops/empty.h>
-#include <ATen/ops/mul_cpu_dispatch.h>
-#include <ATen/ops/mv_native.h>
-#include <ATen/ops/scalar_tensor_native.h>
-#include <ATen/ops/vdot_native.h>
 #include <ATen/ops/_scaled_mm_native.h>
 #include <ATen/ops/_scaled_mm_v2_native.h>
+#include <ATen/ops/_scaled_grouped_mm_v2_native.h>
 #include <ATen/ops/mul.h>
 #include <ATen/ops/matmul.h>
 #endif
@@ -39,6 +29,74 @@
 namespace at::meta {
 
 namespace scaled_blas = at::native::scaled;
+
+namespace {
+
+void validate_scaled_mm_meta_inputs(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const at::ITensorListRef& scale_a,
+    at::IntArrayRef recipe_a,
+    at::IntArrayRef swizzle_a,
+    const at::ITensorListRef& scale_b,
+    at::IntArrayRef recipe_b,
+    at::IntArrayRef swizzle_b,
+    at::IntArrayRef contraction_dim) {
+  TORCH_CHECK_VALUE(mat_a.dim() == 2, "mat_a must be a matrix");
+  TORCH_CHECK_VALUE(mat_b.dim() == 2, "mat_b must be a matrix");
+
+  if (!contraction_dim.empty()) {
+    TORCH_CHECK_VALUE(
+        contraction_dim.size() == 2,
+        "contraction_dim must have exactly 2 elements");
+    auto mat_a_dim = contraction_dim[0];
+    auto mat_b_dim = contraction_dim[1];
+    TORCH_CHECK_VALUE(
+        mat_a.sym_size(mat_a_dim) == mat_b.sym_size(mat_b_dim),
+        "mat_a and mat_b shapes cannot be multiplied (",
+        mat_a.sym_size(0),
+        "x",
+        mat_a.sym_size(1),
+        " and ",
+        mat_b.sym_size(0),
+        "x",
+        mat_b.sym_size(1),
+        ") with contraction dims mat_a: ",
+        mat_a_dim,
+        ", mat_b: ",
+        mat_b_dim);
+  } else {
+    TORCH_CHECK_VALUE(
+        mat_a.sym_size(1) == mat_b.sym_size(0),
+        "mat_a and mat_b shapes cannot be multiplied (",
+        mat_a.sym_size(0),
+        "x",
+        mat_a.sym_size(1),
+        " and ",
+        mat_b.sym_size(0),
+        "x",
+        mat_b.sym_size(1),
+        ")");
+  }
+
+  std::vector<Tensor> scale_a_vec(scale_a.begin(), scale_a.end());
+  std::vector<Tensor> scale_b_vec(scale_b.begin(), scale_b.end());
+  auto recipe_a_enum = scaled_blas::convert_int_to_enum<at::blas::ScalingType>(recipe_a);
+  auto recipe_b_enum = scaled_blas::convert_int_to_enum<at::blas::ScalingType>(recipe_b);
+  auto swizzle_a_enum = scaled_blas::convert_int_to_enum<at::blas::SwizzleType>(swizzle_a);
+  auto swizzle_b_enum = scaled_blas::convert_int_to_enum<at::blas::SwizzleType>(swizzle_b);
+  scaled_blas::validate_scaled_mm_v2_inputs(
+      mat_a,
+      mat_b,
+      scale_a_vec,
+      recipe_a_enum,
+      swizzle_a_enum,
+      scale_b_vec,
+      recipe_b_enum,
+      swizzle_b_enum);
+}
+
+} // namespace
 
 // V2: Computes matrix multiply + bias while applying scaling to input and output matrices.
 // Scales are only applicable when matrices are of Float8 / Float4 type and assumed to be 1.0
@@ -74,39 +132,20 @@ TORCH_META_FUNC(_scaled_mm_v2)(
     std::optional<c10::ScalarType> out_dtype,
     at::IntArrayRef contraction_dim,
     bool use_fast_accum) {
-  TORCH_CHECK_VALUE(self.dim() == 2, "mat_a must be a matrix");
-  TORCH_CHECK_VALUE(mat2.dim() == 2, "mat_b must be a matrix");
-
-  if (!contraction_dim.empty()) {
-    TORCH_CHECK_VALUE(contraction_dim.size() == 2, "contraction_dim must have exactly 2 elements");
-    auto mat_a_dim = contraction_dim[0];
-    auto mat_b_dim = contraction_dim[1];
-    TORCH_CHECK_VALUE(
-        self.sym_size(mat_a_dim) == mat2.sym_size(mat_b_dim), "mat_a and mat_b shapes cannot be multiplied (",
-        self.sym_size(0), "x", self.sym_size(1), " and ", mat2.sym_size(0), "x", mat2.sym_size(1), ") ",
-        "with contraction dims mat_a: ", mat_a_dim, ", mat_b: ", mat_b_dim);
-  } else {
-    TORCH_CHECK_VALUE(
-        self.sym_size(1) == mat2.sym_size(0), "mat_a and mat_b shapes cannot be multiplied (",
-        self.sym_size(0), "x", self.sym_size(1), " and ", mat2.sym_size(0), "x", mat2.sym_size(1), ")");
-  }
+  validate_scaled_mm_meta_inputs(
+      self,
+      mat2,
+      scale_a,
+      recipe_a,
+      swizzle_a,
+      scale_b,
+      recipe_b,
+      swizzle_b,
+      contraction_dim);
 
   TORCH_CHECK_VALUE(
       !bias.has_value() || bias->sym_numel() == mat2.sym_size(1),
       "Bias must be size ", mat2.sym_size(1), " but got ", bias->sym_numel());
-
-  // Layout / per-recipe scale-shape validation. Materialize the lists so the
-  // helper sees ArrayRef<Tensor> rather than ITensorListRef.
-  std::vector<Tensor> scale_a_vec(scale_a.begin(), scale_a.end());
-  std::vector<Tensor> scale_b_vec(scale_b.begin(), scale_b.end());
-  auto recipe_a_enum = scaled_blas::convert_int_to_enum<at::blas::ScalingType>(recipe_a);
-  auto recipe_b_enum = scaled_blas::convert_int_to_enum<at::blas::ScalingType>(recipe_b);
-  auto swizzle_a_enum = scaled_blas::convert_int_to_enum<at::blas::SwizzleType>(swizzle_a);
-  auto swizzle_b_enum = scaled_blas::convert_int_to_enum<at::blas::SwizzleType>(swizzle_b);
-  scaled_blas::validate_scaled_mm_v2_inputs(
-      self, mat2,
-      scale_a_vec, recipe_a_enum, swizzle_a_enum,
-      scale_b_vec, recipe_b_enum, swizzle_b_enum);
 
   const auto out_dtype_ = out_dtype.value_or(self.scalar_type());
   set_output_raw_strided(
@@ -114,6 +153,40 @@ TORCH_META_FUNC(_scaled_mm_v2)(
       {self.size(0), mat2.size(1)},
       {},
       self.options().dtype(out_dtype_));
+}
+
+// V2: Grouped scaled matrix multiply. Shape inference + output allocation runs
+// here; recipe-independent input validation runs here too (in eager, before
+// TORCH_IMPL_FUNC, and during `torch.compile` tracing). Per-recipe scale-shape
+// checks, the device-capability gate, and kernel dispatch live in the CUDA
+// TORCH_IMPL_FUNC. Output is bf16 only.
+//
+// `self`/`mat2` may be 2D or 3D; `offs` carries group boundaries when either
+// operand is 2D. The output size/stride mirror `create_grouped_gemm_output_tensor`.
+TORCH_META_FUNC(_scaled_grouped_mm_v2)(
+    const Tensor& self,
+    const Tensor& mat2,
+    const at::ITensorListRef& scale_a,
+    at::IntArrayRef recipe_a,
+    at::IntArrayRef swizzle_a,
+    const at::ITensorListRef& scale_b,
+    at::IntArrayRef recipe_b,
+    at::IntArrayRef swizzle_b,
+    at::OptionalTensorRef offs,
+    at::OptionalTensorRef bias,
+    std::optional<c10::ScalarType> out_dtype,
+    at::IntArrayRef contraction_dim,
+    bool use_fast_accum) {
+  scaled_blas::validate_scaled_grouped_mm_v2_inputs(
+      self, mat2, offs, bias, contraction_dim, out_dtype);
+
+  const auto out_dtype_ = out_dtype.value_or(kBFloat16);
+  std::optional<Tensor> offs_opt =
+      offs.has_value() ? std::optional<Tensor>{*offs} : std::nullopt;
+  auto [out_size, out_stride] =
+      at::native::compute_grouped_gemm_output_size_stride(self, mat2, offs_opt, out_dtype_);
+  set_output_raw_strided(
+      0, out_size, out_stride, self.options().dtype(out_dtype_));
 }
 
 } // namespace at::meta
