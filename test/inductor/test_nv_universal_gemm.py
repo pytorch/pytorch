@@ -850,6 +850,32 @@ class TestNVUniversalGemm(TestCase):
 class TestNVUniversalGemmHeuristics(TestCase):
     """Unit tests for NVUniversalGemmHeuristics without requiring actual libraries."""
 
+    def test_atomic_reduction_fusion_hooks(self):
+        from torch._inductor.codegen.cuda_combined_scheduling import (
+            CUDACombinedScheduling,
+        )
+
+        scheduling = CUDACombinedScheduling.__new__(CUDACombinedScheduling)
+        nvgemm = MagicMock()
+        triton = MagicMock()
+        scheduling._nv_universal_gemm_scheduling = nvgemm
+        scheduling._triton_scheduling = triton
+        node1, node2 = MagicMock(), MagicMock()
+
+        nvgemm.has_conflicting_epilogue_reductions.return_value = True
+        self.assertFalse(scheduling.can_fuse_reduction_pair(node1, node2))
+
+        nvgemm.get_fusion_pair_priority.return_value = 1
+        self.assertEqual(scheduling.get_fusion_pair_priority(node1, node2), 1)
+        triton.get_fusion_pair_priority.assert_not_called()
+
+        nvgemm.get_fusion_pair_priority.return_value = 2
+        triton.get_fusion_pair_priority.return_value = 4
+        self.assertEqual(scheduling.get_fusion_pair_priority(node1, node2), 6)
+
+        nvgemm.has_nvgemm_bool_output.side_effect = (False, True)
+        self.assertFalse(scheduling.can_fuse_horizontal(node1, node2))
+
     def test_grouped_reduction_affine_index_rejects_offset(self):
         from torch._inductor.codegen.nv_universal_gemm.epilogue_lowering import (
             _matches_affine_index,
