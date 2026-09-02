@@ -265,7 +265,9 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_attention_backward(
       // std::optional to undefined tensor
       std::optional<Tensor> attn_bias_;
       if (attn_bias.defined()) {
-        attn_bias_ = attn_bias;
+        attn_bias_ = attn_bias.dtype() != query.dtype()
+            ? attn_bias.to(query.dtype())
+            : attn_bias;
       }
       if (attn_bias_.has_value()) {
         const auto bias_dim = attn_bias_.value().dim();
@@ -315,7 +317,9 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_attention_backward(
       const int64_t head_dim_v = value.size(-1);
       std::optional<Tensor> attn_bias_;
       if (attn_bias.defined()) {
-        attn_bias_ = attn_bias;
+        attn_bias_ = attn_bias.dtype() != query.dtype()
+            ? attn_bias.to(query.dtype())
+            : attn_bias;
       }
       if (attn_bias_.has_value()) {
         const auto bias_dim = attn_bias_.value().dim();
