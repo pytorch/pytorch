@@ -1294,15 +1294,6 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             self._load_mask = prior
             self._load_other = prior_val
 
-    def masked_store(
-        self,
-        name: str,
-        index: sympy.Expr,
-        value: CSEVariable,
-        mask: CSEVariable,
-    ) -> None:
-        raise NotImplementedError(f"{type(self).__name__}: masked_store")
-
     def get_strides_of_load(self, index: sympy.Expr) -> dict[sympy.Symbol, sympy.Expr]:
         """
         This gets the stride of the index for each of the tiling variables

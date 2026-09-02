@@ -148,6 +148,58 @@ class TestDependencies(InductorTestCase):
         self.assertEqual(writes[0].get_numel(), 64)
         self.assertEqual(writes[0].mode, None)
 
+    def test_masked_expansion_rewrites_stores_and_keeps_raw_loads(self):
+        from torch._inductor.loop_body import MASKED_EXPANSION_BANNED_OPS
+        from torch.utils._sympy.functions import ModularIndexing
+
+        x = sympy_index_symbol("x")
+
+        def fn(index, rindex):
+            (i,) = index
+            edge = ops.lt(ops.index_expr(i, torch.int64), ops.constant(2, torch.int64))
+            other = ops.masked(edge, lambda: ops.load("other", i), 0.0)
+            ops.store("out", i, ops.add(ops.load("inp", i), other))
+
+        body = LoopBody(fn, ([x], []), {x: 4}, [x], [])
+        expanded = body.expand_dimension_for_pointwise_node_with_masked_stores(0, 6)
+
+        self.assertEqual(expanded.sizes, ((6,), ()))
+        self.assertTrue(expanded.has_op("masked_store"))
+        self.assertFalse(expanded.has_op("store"))
+        self.assertFalse(
+            any(e.has(ModularIndexing) for e in expanded.indexing_exprs.values())
+        )
+        # The tail predicate is combined into the nested mask.
+        masked_calls = expanded.root_block.graph.find_nodes(op="call_module")
+        self.assertTrue(
+            any(str(n.target).startswith("masked_subblock") for n in masked_calls)
+        )
+        self.assertEqual(
+            len(
+                expanded.root_block.graph.find_nodes(
+                    op="call_method", target="logical_and"
+                )
+            ),
+            1,
+        )
+        # Expanding to the current range is a no-op.
+        self.assertIs(
+            body.expand_dimension_for_pointwise_node_with_masked_stores(0, 4), body
+        )
+        # Bodies with banned ops are rejected before any mutation.
+        self.assertIn("indirect_indexing", MASKED_EXPANSION_BANNED_OPS)
+
+        def indirect(index, rindex):
+            (i,) = index
+            j = ops.indirect_indexing(ops.load("idx", i), 4)
+            ops.store("out", i, ops.load("inp", j))
+
+        bad = LoopBody(indirect, ([x], []), {x: 4}, [x], [])
+        with self.assertRaisesRegex(AssertionError, "indirect_indexing"):
+            bad.expand_dimension_for_pointwise_node_with_masked_stores(0, 6)
+        with self.assertRaisesRegex(AssertionError, "masked_store"):
+            expanded.expand_dimension_for_pointwise_node_with_masked_stores(0, 8)
+
     def test_masked_store_disables_inplace_reuse(self):
         body = object.__new__(LoopBody)
         body.op_counts = {"masked_store": 1}
