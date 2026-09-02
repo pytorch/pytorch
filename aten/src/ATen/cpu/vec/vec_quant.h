@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/cpu/vec/intrinsics.h>
-#include <c10/util/Exception.h>
+#include <torch/headeronly/util/Exception.h>
 
 namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
@@ -99,7 +99,7 @@ static inline void transpose_pad_4x64_block(
     _mm512_storeu_si512(reinterpret_cast<__m512i*>(dst + 64 * 3), r3);
   }
 #else
-  TORCH_CHECK(
+  STD_TORCH_CHECK(
       false,
       "transpose_pad_4x64_block is only supported when AVX-512 is supported")
 #endif
@@ -145,7 +145,8 @@ static inline void pack_vnni4(
     }
   }
 #else
-  TORCH_CHECK(false, "pack_vnni4 is only supported when AVX-512 is supported")
+  STD_TORCH_CHECK(
+      false, "pack_vnni4 is only supported when AVX-512 is supported")
 #endif
 }
 
@@ -206,7 +207,7 @@ static inline void transpose_vnni4_pad_4x16_block(
         reinterpret_cast<__m128i*>(dst + ld_dst * 3), mask, r3);
   }
 #else
-  TORCH_CHECK(
+  STD_TORCH_CHECK(
       false,
       "transpose_vnni4_pad_4x16_block is only supported when AVX-512 is supported")
 #endif
@@ -222,7 +223,7 @@ static inline void transpose_pack_vnni4(
     int64_t K,
     int64_t N) {
 #if defined(CPU_CAPABILITY_AVX512)
-  TORCH_CHECK(
+  STD_TORCH_CHECK(
       N % 16 == 0, "N needs to be multiple of 16 for transpose_pack_vnni4");
   int64_t bk = 0;
   int64_t _K = K / 4 * 4;
@@ -244,7 +245,7 @@ static inline void transpose_pack_vnni4(
     }
   }
 #else
-  TORCH_CHECK(
+  STD_TORCH_CHECK(
       false, "transpose_pack_vnni4 is only supported when AVX-512 is supported")
 #endif
 }

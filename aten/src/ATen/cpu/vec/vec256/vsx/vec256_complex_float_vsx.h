@@ -5,6 +5,7 @@
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/complex.h>
 #include <c10/util/irange.h>
+#include <torch/headeronly/util/Exception.h>
 
 namespace at {
 namespace vec {
@@ -593,19 +594,19 @@ class Vectorized<ComplexFlt> {
   }
 
   Vectorized<ComplexFlt> operator<(const Vectorized<ComplexFlt>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    STD_TORCH_CHECK(false, "not supported for complex numbers");
   }
 
   Vectorized<ComplexFlt> operator<=(const Vectorized<ComplexFlt>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    STD_TORCH_CHECK(false, "not supported for complex numbers");
   }
 
   Vectorized<ComplexFlt> operator>(const Vectorized<ComplexFlt>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    STD_TORCH_CHECK(false, "not supported for complex numbers");
   }
 
   Vectorized<ComplexFlt> operator>=(const Vectorized<ComplexFlt>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    STD_TORCH_CHECK(false, "not supported for complex numbers");
   }
 
   DEFINE_MEMBER_OP(operator==, ComplexFlt, vec_cmpeq)
