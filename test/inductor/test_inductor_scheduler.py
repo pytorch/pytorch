@@ -424,6 +424,32 @@ class TestScheduler(TestCase):
         speedup.assert_not_called()
         scheduler.fuse_two_nodes.assert_not_called()
 
+    def test_unchecked_fusion_invalidates_memory_state_until_next_round(self):
+        from torch._inductor.scheduler import FusionMemoryState, FusionMemoryStateStatus
+
+        scheduler = object.__new__(Scheduler)
+        node1, node2 = Mock(), Mock()
+        state = FusionMemoryState({torch.device("cpu"): Mock()})
+        scheduler._fusion_memory_state = state
+        fused = object()
+        scheduler.fuse_two_nodes = Mock(return_value=fused)
+
+        self.assertIs(
+            scheduler._fuse_two_nodes_with_memory_update(
+                node1,
+                node2,
+                OrderedSet([node1, node2]),
+                state,
+                None,
+            ),
+            fused,
+        )
+        self.assertEqual(state.status, FusionMemoryStateStatus.INVALIDATED)
+        self.assertIs(scheduler._fusion_memory_state, state)
+        self.assertEqual(
+            scheduler._check_fusion_memory(state, node1, node2), (False, None)
+        )
+
     def test_resize_storage_fails_fusion_memory_closed(self):
         scheduler = object.__new__(Scheduler)
         node = self._mock_base_snode("resize")
@@ -480,7 +506,10 @@ class TestScheduler(TestCase):
 
     @xfailIfNoAcceleratorTriton
     @onlyCUDA
-    def test_fusion_memory_guard_rejects_in_torch_compile(self, device):
+    @parametrize("full_correctness", [False, True])
+    def test_fusion_memory_guard_rejects_in_torch_compile(
+        self, device, full_correctness
+    ):
         def fn(x, weight):
             early = torch.mm(torch.sin(x).sum(dim=0)[None, :], weight)
             late = torch.cos(x).sum(dim=0)
@@ -503,6 +532,7 @@ class TestScheduler(TestCase):
                     "fx_graph_cache": False,
                     "reorder_for_peak_memory": False,
                     memory_config: allowed_increase_mb,
+                    "fusion_memory_timeline_full_correctness": full_correctness,
                 },
             )
             self.assertEqual(compiled(x, weight), fn(x, weight))
