@@ -11,6 +11,8 @@
 #else
 #include <ATen/ops/adaptive_max_pool2d_backward_native.h>
 #include <ATen/ops/adaptive_max_pool2d_native.h>
+#include <ATen/ops/adaptive_max_pool3d_backward_native.h>
+#include <ATen/ops/adaptive_max_pool3d_native.h>
 #include <ATen/ops/aminmax.h>
 #include <ATen/ops/avg_pool2d.h>
 #include <ATen/ops/avg_pool2d_backward.h>
@@ -1147,6 +1149,26 @@ TORCH_IMPL_FUNC(adaptive_max_pool2d_backward_out_mps)
                                           static_cast<int32_t>(input.dim()),
                                           /*pooling_dims=*/2,
                                           "adaptive_max_pool2d_backward");
+}
+
+TORCH_IMPL_FUNC(adaptive_max_pool3d_out_mps)
+(const Tensor& input, IntArrayRef output_size, const Tensor& output, const Tensor& indices) {
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(input.scalar_type()),
+                              "Adaptive max pooling for complex is not supported for MPS");
+  mps::adaptive_max_pool_out_mps_template(output, indices, input, /*pooling_dims=*/3, "adaptive_max_pool3d");
+}
+
+TORCH_IMPL_FUNC(adaptive_max_pool3d_backward_out_mps)
+(const Tensor& grad_output, const Tensor& input, const Tensor& indices, const Tensor& grad_input) {
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(input.scalar_type()),
+                              "Adaptive max pooling backward for complex is not supported for MPS");
+  mps::max_pool_backward_out_mps_template(const_cast<Tensor&>(grad_input),
+                                          indices,
+                                          input,
+                                          grad_output,
+                                          static_cast<int32_t>(input.dim()),
+                                          /*pooling_dims=*/3,
+                                          "adaptive_max_pool3d_backward");
 }
 
 std::tuple<Tensor&, Tensor&> max_pool3d_with_indices_out_mps(const Tensor& input,
