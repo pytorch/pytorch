@@ -2435,7 +2435,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         value: CSEVariable,
         mask: CSEVariable,
     ) -> None:
-        raise NotImplementedError
+        raise NotImplementedError(f"{type(self).__name__}: masked_store")
 
     def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
         raise NotImplementedError(
@@ -3102,6 +3102,9 @@ class CSEProxy(DefaultHandler):
         if name not in V.graph.removed_buffers:
             self.kernel.masked_store(name, index, value, mask)
             self.kernel.num_store += 1
+            self.kernel.store_buffer_counts[name] = (
+                self.kernel.store_buffer_counts.get(name, 0) + 1
+            )
         self.kernel.record_op_trace("masked_store", (name, index, value, mask), {})
 
     def device_assert_async(self, cond: CSEVariable, msg: str) -> None:

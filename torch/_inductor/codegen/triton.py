@@ -2616,7 +2616,11 @@ class TritonKernelOverrides(TritonOverrides):
         else:
             ret = result
 
+        # Loads inside the region may have dropped range masks that new_mask
+        # implies; restore them from the predicate so escaping values keep the
+        # same mask set as before the elision.
         ret.mask_vars.discard(new_mask)
+        ret.mask_vars.update(new_mask.mask_vars)
         return ret
 
     @staticmethod
@@ -3431,28 +3435,40 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             or lhs.args[2] is not torch.int64
             or not isinstance(rhs, torch.fx.Node)
             or rhs.op != "call_method"
-            or rhs.target != "constant"
+            or rhs.target not in ("constant", "index_expr", "value_expr")
             or len(rhs.args) != 3
             or rhs.args[2] is not torch.int64
         ):
             return OrderedSet()
-        source = lhs.args[1]
-        upper = rhs.args[1]
-        if (
-            not isinstance(source, torch.fx.Node)
-            or source.op != "call_module"
-            or source.target != "get_index"
-            or not isinstance(upper, int)
-            or isinstance(upper, bool)
-            or not 0 <= upper <= torch.iinfo(torch.int64).max
-        ):
-            return OrderedSet()
-        get_index = getattr(V.interpreter, "submodules", {}).get(source.target)
+        get_index = getattr(V.interpreter, "submodules", {}).get("get_index")
         if get_index is None:
             return OrderedSet()
-        index = get_index(*source.args)
+
+        def resolve_index(arg: Any) -> sympy.Expr | None:
+            if (
+                isinstance(arg, torch.fx.Node)
+                and arg.op == "call_module"
+                and arg.target == "get_index"
+            ):
+                return get_index(*arg.args)
+            return None
+
+        index = resolve_index(lhs.args[1])
         if not isinstance(index, sympy.Symbol):
             return OrderedSet()
+        upper: sympy.Expr | int | None
+        if rhs.target == "constant":
+            upper = rhs.args[1]
+            if (
+                not isinstance(upper, int)
+                or isinstance(upper, bool)
+                or not 0 <= upper <= torch.iinfo(torch.int64).max
+            ):
+                return OrderedSet()
+        else:
+            upper = resolve_index(rhs.args[1])
+            if upper is None or not V.graph.sizevars.statically_known_geq(upper, 0):
+                return OrderedSet()
         entry = self.range_tree_nodes.get(index)
         if (
             entry is None
