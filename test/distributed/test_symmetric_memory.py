@@ -820,9 +820,9 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
 # MultiProcContinuousTest will skip all the following tests if a test fails (
 # we should fix this too). We still want to get the test signals for the core
 # symmetric memory APIs when Async TP ops fail.
-@skip_if_rocm_multiprocess  # AsyncTP is not yet supported on ROCm
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
+@skipIf(not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch")
 class AsyncTPTest(MultiProcContinuousTest):
     @property
     def device(self) -> torch.device:
@@ -835,9 +835,6 @@ class AsyncTPTest(MultiProcContinuousTest):
         torch.set_deterministic_debug_mode("warn")
         torch.utils.deterministic.fill_uninitialized_memory = True
 
-    @skipIf(
-        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
-    )
     @skip_if_lt_x_gpu(2)
     @parametrize("gather_dim", [0, 1, 2])
     def test_fused_all_gather_matmul(self, gather_dim: int) -> None:
@@ -878,11 +875,11 @@ class AsyncTPTest(MultiProcContinuousTest):
                     f"Expected mm_output_0.stride() to be truthy, got {mm_output_0.stride()}"
                 )
 
-    @skip_if_rocm_multiprocess  # this requires async_input_mm support
     @skipIf(
         not SM90OrLater,
         "_fused_all_gather_matmul_native currently only supports sm>=90",
     )
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     @skip_if_lt_x_gpu(2)
     @parametrize("symm_mem_input", [True, False])
     @parametrize("is_b_row_major", [True, False])
@@ -924,11 +921,16 @@ class AsyncTPTest(MultiProcContinuousTest):
         ag_baseline, mm_baseline = _fused_all_gather_matmul_fallback(
             A_shard, [B], gather_dim=0, group_name=group_name
         )
-        with torch.profiler.profile(
-            activities=[
-                torch.profiler.ProfilerActivity.CUDA,
-            ],
-        ) as prof:
+
+        # CPU activity is needed on ROCm: CK surfaces the scheduler path through
+        # RECORD_FUNCTION rather than the HIP kernel symbol. Enabled everywhere
+        # for uniformity; it is harmless on CUDA.
+        profiler_activities = [
+            torch.profiler.ProfilerActivity.CPU,
+            torch.profiler.ProfilerActivity.CUDA,
+        ]
+
+        with torch.profiler.profile(activities=profiler_activities) as prof:
             ag_target, mm_target = torch.ops.symm_mem.fused_all_gather_matmul(
                 A_shard, [B], gather_dim=0, group_name=group_name
             )
@@ -979,9 +981,6 @@ class AsyncTPTest(MultiProcContinuousTest):
         torch.testing.assert_close(ag_target, ag_baseline)
         torch.testing.assert_close(mm_target[0], mm_baseline[0])
 
-    @skipIf(
-        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
-    )
     @skip_if_lt_x_gpu(2)
     @skipUnless(SM89OrLater, "Requires compute capability >= 8.9")
     @parametrize("gather_dim", [0, 1])
@@ -1068,9 +1067,7 @@ class AsyncTPTest(MultiProcContinuousTest):
             self.assertEqual(mm_output_0.stride(), mm_output_1.stride())
             self.assertEqual(mm_output_0.dtype, mm_output_1.dtype)
 
-    @skipIf(
-        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
-    )
+    @skip_if_rocm_multiprocess  # unrelated to AsyncTP: fused_matmul_reduce_scatter fails at ws>=8 on ROCm (scatter_dim=2); under investigation
     @skip_if_lt_x_gpu(2)
     @parametrize("scatter_dim", [0, 1, 2])
     def test_fused_matmul_reduce_scatter(self, scatter_dim: int) -> None:
@@ -1138,7 +1135,6 @@ class AsyncTPTest(MultiProcContinuousTest):
         torch.testing.assert_close(output_0, output_2, rtol=1e-2, atol=1e-2)
         self.assertEqual(output_0.stride(), output_2.stride())
 
-    @skip_if_rocm_multiprocess  # AsyncTP support changed _fused_scaled_matmul_reduce_scatter_fallback API, need more changes
     @skip_if_lt_x_gpu(2)
     @skipUnless(SM89OrLater, "Requires compute capability >= 8.9")
     @parametrize("scatter_dim", [0, 1])
@@ -1196,9 +1192,6 @@ class AsyncTPTest(MultiProcContinuousTest):
             )
         self.assertEqual(outputs[0], outputs[1])
 
-    @skipIf(
-        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
-    )
     @parametrize("dim", [0, 1, 2])
     def test_optimal_layout(self, dim: int) -> None:
         t = torch.rand(8, 64, 32, 16)
