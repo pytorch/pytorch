@@ -1623,13 +1623,19 @@ def CUDAExtension(name, sources, *args, **kwargs):
 
     if IS_HIP_EXTENSION:
         from .hipify import hipify_python
-        build_dir = os.getcwd()
+        # Resolve symlinks/junctions and Windows `subst` drive aliases so the
+        # build directory and the source paths use the same canonical form. On
+        # Windows CI the build runs under a `subst` drive (e.g. B:) while source
+        # paths may resolve to the real drive (e.g. C:); without this the
+        # `includes` scope below matches nothing and hipify silently skips the
+        # sources, leaving CUDA headers unhipified.
+        build_dir = os.path.realpath(os.getcwd())
         hipify_result = hipify_python.hipify(
             project_directory=build_dir,
             output_directory=build_dir,
             header_include_dirs=include_dirs,
             includes=[os.path.join(build_dir, '*')],  # limit scope to build_dir only
-            extra_files=[os.path.abspath(s) for s in sources],
+            extra_files=[os.path.realpath(s) for s in sources],
             show_detailed=True,
             is_pytorch_extension=True,
             hipify_extra_files_only=True,  # don't hipify everything in includes path
@@ -1637,7 +1643,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
 
         hipified_sources = set()
         for source in sources:
-            s_abs = os.path.abspath(source)
+            s_abs = os.path.realpath(source)
             hipified_s_abs = (hipify_result[s_abs].hipified_path if (s_abs in hipify_result and
                               hipify_result[s_abs].hipified_path is not None) else s_abs)
             # setup() arguments must *always* be /-separated paths relative to the setup.py directory,
