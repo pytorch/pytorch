@@ -1199,6 +1199,14 @@ class SequentialLR(LRScheduler):
 
         self._initial_step()
 
+    @override
+    def _initial_step(self) -> None:
+        """Initialize the scheduler subtree active at step 0."""
+        idx = bisect_right(self._milestones, 0)
+        scheduler = self._schedulers[idx]
+        scheduler._initial_step()
+        self._last_lr = scheduler.get_last_lr()
+
     def recursive_undo(self, sched=None) -> None:
         """
         Recursively undo any step performed by the initialization of
@@ -1211,14 +1219,6 @@ class SequentialLR(LRScheduler):
                 self.recursive_undo(s)
         elif hasattr(scheds, "last_epoch"):
             scheds.last_epoch -= 1
-
-    @override
-    def _initial_step(self) -> None:
-        """Initialize the scheduler subtree active at step 0."""
-        idx = bisect_right(self._milestones, 0)
-        scheduler = self._schedulers[idx]
-        scheduler._initial_step()
-        self._last_lr = scheduler.get_last_lr()
 
     @override
     def _update_lr(self, epoch: int | None = None, **kwargs: Any) -> None:
