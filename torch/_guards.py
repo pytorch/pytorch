@@ -15,7 +15,7 @@ from abc import abstractmethod
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Generic, NamedTuple, overload, TYPE_CHECKING, TypeVar
+from typing import Any, ClassVar, Generic, NamedTuple, overload, TYPE_CHECKING, TypeVar
 from typing_extensions import dataclass_transform
 
 import torch
@@ -206,6 +206,49 @@ class GuardSource(enum.Enum):
         )
 
 
+# Note [Guard provenance]
+#
+# GuardProvenance is the coarse, CLOSED classification of where a source chain
+# is ROOTED, answering the one question guard-serialization consumers
+# (torch._dynamo.package, torch._dynamo.aot_compile, torch.compiler.precompile)
+# keep needing: is this guard derived from the traced frame's inputs (so it is
+# dispatch-relevant and must be kept), or from the surrounding environment (so
+# an environment-invariant contract may drop it)?
+#
+# It is computed structurally, once, from the typed Source chain -- never by
+# parsing the rendered guard name. Rendered names embed input roots inside call
+# expressions (___tuple_iterator_getitem(L['it'], 0), ___from_numpy(L['x']),
+# type(L['x']), list(dict.keys(L['d']))[0], ...), so string classification
+# silently misfiles them; a dropped input guard then serves a stale
+# specialization with no error.
+#
+# Every ROOT Source class (a direct Source subclass; anything that is not a
+# ChainedSource) must declare ``_provenance``; ChainedSource delegates to its
+# root. This is deliberately fail-closed in both directions: an undeclared
+# root raises at classification time instead of defaulting, and
+# test/dynamo/test_sources.py enforces totality over every Source subclass so
+# a new source cannot land unclassified.
+class GuardProvenance(enum.Enum):
+    # Dispatch-relevant guards that a serialization consumer must keep: rooted
+    # at the traced frame's bindings (arguments, locals, cells), at a
+    # dynamo-installed weakref proxy for a traced runtime object
+    # (GlobalWeakRefSource), or at the shape env (whose SHAPE_ENV guard encodes
+    # symbolic constraints derived from the inputs).
+    INPUT = 0
+    # Rooted at a module globals dict at guard-check time, whoever installed the
+    # binding (user globals and imports both): part of the Python environment.
+    GLOBAL = 1
+    # Rooted at interpreter- or process-wide state (grad mode and friends, the
+    # torch-function mode stack, streams): part of the environment, but not
+    # reachable through any module's globals.
+    AMBIENT = 2
+    # Tracing-internal values with no user-visible runtime lookup IN GUARD
+    # CHECKS (synthetic and temp locals, ephemeral sources, materialized
+    # constants, recorded random values, backward state); their reconstruction
+    # bytecode may still load dynamo-installed globals.
+    SYNTHETIC = 3
+
+
 """
 Base class for a "GuardBuilder" role.
 
@@ -386,6 +429,14 @@ class Guard:
 
     def is_local(self) -> bool:
         return self.source.is_local()
+
+    @property
+    def provenance(self) -> GuardProvenance:
+        # See Note [Guard provenance]: the blessed way for serialization
+        # consumers to ask whether this guard is input-derived (dispatch
+        # relevant) or environment-derived, computed from the typed source
+        # chain rather than the rendered name.
+        return self.originating_source.provenance
 
     def create_fn_name(self) -> str:
         if isinstance(self.create_fn, functools.partial):
@@ -1396,6 +1447,10 @@ def dataclass_with_cached_hash(
 # TODO(voz): Consider a toplevel torch/_source.py
 @dataclass_with_cached_hash(frozen=True)
 class Source:
+    # Every ROOT source class must declare this; see Note [Guard provenance].
+    # ChainedSource delegates to its root instead.
+    _provenance: ClassVar[GuardProvenance | None] = None
+
     def is_dict_key(self) -> bool:
         return False
 
@@ -1416,6 +1471,17 @@ class Source:
     @functools.cached_property
     def guard_source(self) -> GuardSource:
         raise NotImplementedError
+
+    @property
+    def provenance(self) -> GuardProvenance:
+        # Fail-closed: a consumer classifying guards must never see a silent
+        # default for an unclassified root; see Note [Guard provenance].
+        if self._provenance is None:
+            raise NotImplementedError(
+                f"{type(self).__name__} must declare _provenance "
+                "(see Note [Guard provenance] in torch/_guards.py)"
+            )
+        return self._provenance
 
     @property
     def _name_template(self) -> str:
@@ -1482,6 +1548,10 @@ class ChainedSource(Source):
     @functools.cached_property
     def guard_source(self) -> GuardSource:
         return self.base.guard_source
+
+    @property
+    def provenance(self) -> GuardProvenance:
+        return self.get_base().provenance
 
     def get_base(self) -> Source:
         current: Source = self
