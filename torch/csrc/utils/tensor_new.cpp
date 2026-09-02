@@ -27,6 +27,7 @@
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
+#include <cstdint>
 #include <optional>
 
 #include <vector>
@@ -1626,6 +1627,22 @@ Tensor tensor_frombuffer(
       " bytes)");
 
   auto offset_buf = static_cast<char*>(buf) + offset;
+
+  // The required alignment is not always the element size: complex types are
+  // stored as a pair of reals and inherit the alignment of the underlying real
+  // type, so e.g. alignof(c10::complex<double>) is 8 while sizeof is 16.
+  // Checking against elsize would reject naturally aligned offsets that read
+  // correctly today.
+  const size_t alignment = c10::isComplexType(dtype) ? elsize / 2 : elsize;
+  TORCH_CHECK_VALUE(
+      reinterpret_cast<std::uintptr_t>(offset_buf) % alignment == 0,
+      "offset (",
+      offset,
+      " bytes) results in a data pointer that is not aligned to the required "
+      "alignment (",
+      alignment,
+      " bytes) for the requested dtype");
+
   auto options = TensorOptions().dtype(dtype).device(c10::kCPU);
 
   auto tensor = at::for_blob(offset_buf, static_cast<int64_t>(actual_count))
