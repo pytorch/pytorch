@@ -28,41 +28,23 @@ from cutlass.cute.nvgpu import cpasync
 
 WARP = 32
 
-# HARD bound on the per-thread unroll, enforced in TileMap. A tile of `vec * loads` elements
-# per thread folded with a STATIC trip count emits that whole loop at trace time, so COMPILE
-# TIME SCALES WITH it. Measured (fp32 sum, cold compile, one N per point):
-#
+# SAFETY bound on the per-thread unroll (vec * loads), enforced in TileMap: a static trip count is
+# emitted at trace time, so compile time scales with it, superlinearly past ~1300 ops.
 #   unrolled ops   12    80   320   640  1280  2560
 #   compile (s)  0.14  0.17  0.35  0.60  1.17  4.54
-#
-# so roughly 1 ms per unrolled element op, going superlinear past ~1300. A multi-field trait
-# multiplies the IR per element (Welford is 3 fields), so the effective cost is worse. Left
-# unbounded, a caller asking for N=4096 at tpr=1 emits 4096 element ops and compilation does
-# not finish in any reasonable time -- that is not a hypothetical, it wedged a sweep here.
-#
-# This is a SAFETY bound, deliberately looser than any perf gate. The point is that no caller
-# -- including a benchmark harness that bypasses the perf gates -- can silently blow up
-# compile time.
 MAX_UNROLL = 512
 
 
 def vec_size(N: int, itemsize: int) -> int:
-    """Elements per load instruction.
-
-    gcd rather than `16 // itemsize`: it makes vec divide N, which buys three things at
-    once -- no ragged tail inside a chunk, every chunk base a multiple of vec, and a row
-    stride (N*itemsize) that is a multiple of vec*itemsize, so every ROW start carries the
-    same alignment as the base pointer.
+    """Elements per load instruction. gcd, not `16 // itemsize`, so vec DIVIDES N: no ragged tail
+    in a chunk, and every chunk base and row start carries the base pointer's alignment.
     """
     return math.gcd(N, max(1, 16 // itemsize))
 
 
 def align_bytes(N: int, itemsize: int) -> int:
-    """Alignment to DECLARE on the input wrap so the DSL emits the wide load.
-
-    Not optional: `from_dlpack` otherwise assumes only the element's natural width and
-    silently emits narrow loads (measured 3x on the multirow shape). Safe by the `vec_size`
-    argument above, given a tensor whose base pointer is an allocation base.
+    """Alignment to DECLARE on the input wrap. Not optional: `from_dlpack` otherwise assumes the
+    element width and silently emits narrow loads, measured 3x on the multirow shape.
     """
     return vec_size(N, itemsize) * itemsize
 
@@ -131,10 +113,9 @@ def fold_row_rolled(
 ):
     """Fold row `r` across `tm.tpr` lanes with a RUNTIME chunk loop. Returns an acc tuple.
 
-    Each wave covers tpr*vec contiguous elements; this thread takes chunk (c*tpr + lane).
-    A wave that runs past the row's last chunk is handled by CLAMPING the chunk index and
-    passing valid=False to the trait, not by branching -- binding a dynamic value inside a
-    dynamic `if` is rejected by the DSL, and the trait already folds `valid` correctly.
+    Each wave covers tpr*vec contiguous elements and this thread takes chunk (c*tpr + lane). A wave
+    past the row's last chunk CLAMPS the index and passes valid=False rather than branching, which
+    the DSL rejects for a dynamic bind.
     """
     reduce_fn, acc_dt = trait.reduce, trait.acc
     acc = trait.init()
@@ -177,13 +158,8 @@ def smem_box_layout(N: int, threads: int):
     """Smem destination for a (threads, N) TMA box of whole rows: plain row-major.
 
     The bank conflict a whole-row read implies is dealt with in the ACCESS PATTERN (see
-    fold_smem_rotated), not here, because neither layout-side fix works -- both were built
-    and measured:
-      * an arbitrary XOR swizzle (row bits into the bank bits) is REJECTED by the atom
-        ("unable to partition input tensors for TMA"); TMA supports only the GEMM swizzle
-        family (32B/64B/128B), whose phase pattern does not de-conflict a whole-row read.
-      * a transposed (column-major) destination BUILDS AND RUNS BUT IS WRONG -- the transfer
-        cannot transpose, so logical (t, c) indexing then reads the wrong elements.
+    fold_smem_rotated) rather than the layout: TMA accepts only the GEMM swizzle family, whose phase
+    pattern does not de-conflict a whole-row read, and the transfer cannot transpose.
     """
     return cute.make_ordered_layout((threads, N), order=(1, 0))
 
@@ -192,17 +168,10 @@ def smem_box_layout(N: int, threads: int):
 def fold_smem_rotated(trait, sX, rb, N: cutlass.Constexpr):
     """Fold row `rb` of a staged (threads, N) smem tile. One thread per row, no lane merge.
 
-    Indexed LOGICALLY so the true column reaches the trait -- reading `vec` physically
-    adjacent words instead would hand an index trait (argmax) a permuted position.
-
-    ROTATE each thread's read order by its row index: at step c, thread t reads column
-    (c + t) % N. Thread t reads row t, so an unrotated row-major read puts every lane of a
-    warp in bank c % 32 -- a 32-way conflict, measured to cost MORE than the coalescing the
-    TMA staging buys (0.86-0.91x, a regression). The rotation is a swizzle in the ACCESS
-    PATTERN, which needs no layout support at all. Legal because this path carries a numeric
-    contract, not a bitwise one, and the true column still reaches the trait.
-
-    N is a power of two here (see kernel_rowtile.tma_ok), so the modulo is a mask.
+    Indexed LOGICALLY so the true column reaches the trait, and ROTATED by row index -- at step c
+    thread t reads column (c + t) % N. Thread t reads row t, so an unrotated read puts every lane in
+    one bank, a 32-way conflict costing more than TMA's coalescing buys. Legal because this path
+    carries a numeric contract, not a bitwise one; N is a power of two, so the modulo is a mask.
     """
     acc = trait.init()
     mask = const_expr(N - 1)
@@ -224,13 +193,9 @@ def fold_cols_rolled(
 ):
     """Accumulate DOWN the rows, keeping `vec` independent accumulators. For columns.
 
-    The transpose of every other fold here. A row reduction collapses a thread's fragment to
-    ONE accumulator and then merges lanes; a column reduction vectorizes along the CONTIGUOUS
-    (kept) axis, so each thread owns `vec` adjacent columns, carries one accumulator per
-    column, and never merges across lanes at all. The addressing is still a per-row wide load,
-    which is what makes it reachable from these same primitives.
-
-    State is a loop-carried TUPLE of acc tuples, one per column this thread owns.
+    The transpose of every other fold here: vectorized along the CONTIGUOUS (kept) axis, so a thread
+    owns `vec` adjacent columns and one accumulator each, and never merges across lanes. State is a
+    loop-carried TUPLE of acc tuples, one per column.
     """
     reduce_fn, acc_dt = trait.reduce, trait.acc
     accs = tuple(trait.init() for _ in range(vec))
