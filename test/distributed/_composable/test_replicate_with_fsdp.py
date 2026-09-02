@@ -93,7 +93,6 @@ class ReplicateTest(MultiProcContinuousTest):
                 "sharding_strategy": ["replicate", "fully_shard"],
             },
             self._test_replicate_transformer,
-            device=device,
         )
 
     def _composable_api_module_check(self, module, sharding_strategy):
@@ -102,7 +101,7 @@ class ReplicateTest(MultiProcContinuousTest):
         else:
             self.assertTrue("fully_shard" in _get_registry(module))
 
-    def _test_replicate_transformer(self, sharding_strategy, device=None):
+    def _test_replicate_transformer(self, sharding_strategy):
         model_args = ModelArgs()
 
         model = Transformer(model_args)
@@ -212,7 +211,8 @@ class ReplicateTest(MultiProcContinuousTest):
             device: Device to run the test on. typically designated by an identifier such as "cuda:0".
         """
 
-        device = torch.device(f"{device}:{self.rank % getattr(torch, device).device_count()}")
+        device_type = torch.device(device).type
+        device = torch.device(f"{device_type}:{self.rank}")
         model = Net().to(device)
         replicate_model = deepcopy(model)
 
@@ -241,7 +241,8 @@ class ReplicateTest(MultiProcContinuousTest):
             device: Device to run the test on. typically designated by an identifier such as "cuda:0".
         """
 
-        device = torch.device(f"{device}:{self.rank % getattr(torch, device).device_count()}")
+        device_type = torch.device(device).type
+        device = torch.device(f"{device_type}:{self.rank}")
         model = Net().to(device)
         replicate_model = deepcopy(model)
 
