@@ -2920,7 +2920,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return self
         return super().sq_inplace_concat_impl(tx, other)
 
-    def sq_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def _length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/4833e1cc666375454e4f86aff11b6587968b3333/Objects/typeobject.c#L9266
         res = self._vectorcall_method(tx, "__len__", [], {})
 
@@ -2940,8 +2940,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         return pynumber_as_ssize_t(tx, res, OverflowError)
 
+    def sq_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        if self.inherits_base_slot("__len__"):
+            return super().sq_length_impl(tx)
+        return self._length_impl(tx)
+
     # ref: https://github.com/python/cpython/blob/4833e1cc666375454e4f86aff11b6587968b3333/Objects/typeobject.c#L9368
-    mp_length_impl = sq_length_impl
+    def mp_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        if self.inherits_base_slot("__len__"):
+            return super().mp_length_impl(tx)
+        return self._length_impl(tx)
 
     def method_setattr_standard(
         self,
