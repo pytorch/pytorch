@@ -32,6 +32,20 @@ class Stream(torch._C._CudaStreamBase):
             mapped to the nearest valid priority (lowest for large positive numbers or
             highest for large negative numbers).
 
+    Attributes:
+        cuda_stream (int): Integer representation of the underlying
+            ``cudaStream_t`` handle (or ``hipStream_t`` on ROCm). This value is
+            intended for interoperability with native libraries. PyTorch owns
+            streams it allocates, so external code must not destroy this handle.
+
+    .. note::
+        ``stream_id`` is an internal PyTorch stream identifier and its encoding
+        is an implementation detail. For native interoperability, use
+        :attr:`cuda_stream`. To use a stream allocated by another library in
+        PyTorch, wrap its ``cudaStream_t`` pointer with :class:`ExternalStream`.
+        The external owner must keep that stream alive for as long as the
+        wrapper is in use.
+
     """
 
     def __new__(cls, device=None, priority=0, **kwargs):
@@ -144,8 +158,8 @@ class ExternalStream(Stream):
        being used.
 
     Args:
-        stream_ptr(int): Integer representation of the `cudaStream_t` value.
-            allocated externally.
+        stream_ptr(int): Integer representation of the externally allocated
+            ``cudaStream_t`` value.
         device(torch.device or int, optional): the device where the stream
             was originally allocated. If device is specified incorrectly,
             subsequent launches using this stream may fail.
