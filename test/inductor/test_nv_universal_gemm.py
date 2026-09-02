@@ -123,6 +123,98 @@ def _nvgemm_config(**overrides):
 class TestNVUniversalGemm(TestCase):
     """Test cases for NVIDIA Universal GEMM functionality."""
 
+    def test_compile_preserves_wrapped_cute_compile_protocol(self):
+        import cutlass.cute as cute
+
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            _compile_nvgemm_kernel,
+        )
+
+        original_compile = cute.compile
+
+        def monitored_compile(*args, **kwargs):
+            return original_compile(*args, **kwargs)
+
+        monitored_compile.__wrapped__ = original_compile
+
+        class FakeKernel:
+            def compile(inner_self, args):
+                self.assertIs(cute.compile, original_compile)
+                return args
+
+        with mock.patch.object(cute, "compile", monitored_compile):
+            marker = object()
+            self.assertIs(_compile_nvgemm_kernel(FakeKernel(), marker), marker)
+            self.assertIs(cute.compile, monitored_compile)
+
+    def test_compile_ignores_forwarded_getitem(self):
+        import cutlass.cute as cute
+
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            _compile_nvgemm_kernel,
+        )
+
+        original_compile = cute.compile
+
+        class ForwardingProxy:
+            def __init__(self, wrapped):
+                self.__wrapped__ = wrapped
+
+            def __call__(self, *args, **kwargs):
+                return self.__wrapped__(*args, **kwargs)
+
+            def __getattr__(self, name):
+                return getattr(self.__wrapped__, name)
+
+        proxy = ForwardingProxy(original_compile)
+        self.assertTrue(hasattr(proxy, "__getitem__"))
+        self.assertFalse(hasattr(type(proxy), "__getitem__"))
+
+        class FakeKernel:
+            def compile(inner_self, args):
+                self.assertIs(cute.compile, original_compile)
+                return args
+
+        with mock.patch.object(cute, "compile", proxy):
+            marker = object()
+            self.assertIs(_compile_nvgemm_kernel(FakeKernel(), marker), marker)
+            self.assertIs(cute.compile, proxy)
+
+    def test_compile_serializes_subscriptable_cute_compile(self):
+        import cutlass.cute as cute
+
+        from torch._inductor.codegen.nv_universal_gemm import nv_universal_gemm_kernel
+
+        class FakeLock:
+            held = False
+
+            def __enter__(inner_self):
+                inner_self.held = True
+
+            def __exit__(inner_self, exc_type, exc_value, traceback):
+                inner_self.held = False
+
+        class SubscriptableCompile:
+            def __getitem__(self, options):
+                return options
+
+        lock = FakeLock()
+
+        class FakeKernel:
+            def compile(inner_self, args):
+                self.assertTrue(lock.held)
+                return args
+
+        with (
+            mock.patch.object(cute, "compile", SubscriptableCompile()),
+            mock.patch.object(nv_universal_gemm_kernel, "_NVGEMM_COMPILE_LOCK", lock),
+        ):
+            marker = object()
+            self.assertIs(
+                nv_universal_gemm_kernel._compile_nvgemm_kernel(FakeKernel(), marker),
+                marker,
+            )
+
     def test_direct_epilogue_cache_signature_distinguishes_wrapped_tensors(self):
         from cutlass.operators.utils.tensor import TensorWrapper
 
