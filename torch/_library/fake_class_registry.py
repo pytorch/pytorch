@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import copy
+import inspect
 import logging
 from typing import Any, Protocol
 
@@ -9,6 +10,19 @@ from torch.utils._python_dispatch import _disable_current_modes
 
 
 log = logging.getLogger(__name__)
+
+
+def _member_can_be_resolved_lazily(cls: type[Any], name: str) -> bool:
+    for base in cls.__mro__:
+        base_dict = vars(base)
+        if name in base_dict.get("__annotations__", {}):
+            return True
+        if "__getattr__" in base_dict:
+            return True
+        getattribute = base_dict.get("__getattribute__")
+        if getattribute is not None and getattribute is not object.__getattribute__:
+            return True
+    return False
 
 
 class FakeScriptObject:
@@ -45,6 +59,44 @@ class FakeScriptObject:
         try:
             return super().__getattribute__(name)
         except AttributeError as e:
+            from torch._library.opaque_object import (
+                get_opaque_obj_info,
+                MemberType,
+            )
+
+            real_obj = object.__getattribute__(self, "real_obj")
+            opaque_info = get_opaque_obj_info(type(real_obj))
+            if opaque_info is not None and name in opaque_info.members:
+                member_type = opaque_info.members[name]
+                if member_type == MemberType.INLINED:
+                    try:
+                        member = inspect.getattr_static(type(real_obj), name)
+                    except AttributeError:
+                        with _disable_current_modes():
+                            try:
+                                return getattr(real_obj, name)
+                            except AttributeError as instance_member_error:
+                                raise AttributeError(
+                                    f"Opaque object of type '{self.script_class_name}' "
+                                    f"was specified to have member '{name}', but this "
+                                    "doesn't actually exist in the object."
+                                ) from instance_member_error
+                    if hasattr(member, "__get__"):
+                        return member.__get__(self, type(real_obj))
+                    return member
+
+                with _disable_current_modes():
+                    try:
+                        member = getattr(real_obj, name)
+                    except AttributeError as member_error:
+                        raise AttributeError(
+                            f"Opaque object of type '{self.script_class_name}' was "
+                            f"specified to have member '{name}', but this doesn't "
+                            "actually exist in the object."
+                        ) from member_error
+                object.__setattr__(self, name, member)
+                return member
+
             raise AttributeError(
                 f"Tried to call __getattr__ with attr '{name}' on a FakeScriptObject, "
                 "implying that you are calling this inside of a fake kernel. "
@@ -250,21 +302,20 @@ def maybe_to_fake_obj(
     x_type = type(x)
     if is_custom_class(x_type):
         type_name = OpaqueTypeStr if x is None else get_opaque_type_name(x_type)
-        fake_x_wrapped = FakeScriptObject(FakeOpaqueObject(), type_name, x)
-
-        # Set specified members onto the fake object
         opaque_info = get_opaque_obj_info(x_type)
         if opaque_info is None:
-            raise AssertionError(f"opaque_info for type {x_type} must not be None")
-        for attr_name in opaque_info.members:
-            with _disable_current_modes():
-                if not hasattr(x, attr_name):
-                    raise TypeError(
-                        f"Opaque object of type '{type_name}' was specified to have member "
-                        f"'{attr_name}', but this doesn't actually exist in the object."
-                    )
-                object.__setattr__(fake_x_wrapped, attr_name, getattr(x, attr_name))
-
+            raise RuntimeError(f"Opaque object type '{type_name}' is not registered.")
+        for name in opaque_info.members:
+            try:
+                inspect.getattr_static(x, name)
+            except AttributeError as member_error:
+                if _member_can_be_resolved_lazily(x_type, name):
+                    continue
+                raise TypeError(
+                    f"Opaque object of type '{type_name}' was specified to have "
+                    f"member '{name}', but this doesn't actually exist in the object."
+                ) from member_error
+        fake_x_wrapped = FakeScriptObject(FakeOpaqueObject(), type_name, x)
         return fake_x_wrapped
     else:
         # x.__obj_flatten__() could be calling some tensor operations inside but we don't
