@@ -3838,27 +3838,30 @@ class FakeTensorDispatchCache(TestCase):
             self.assertEqual(actual.untyped_storage().nbytes(), 0)
             self._assert_symbolic_cache_hit(before_hit, actual, expected)
 
-    def test_cache_symbolic_view_output_restores_view_bits(self):
-        cases = (
+    @parametrize(
+        "func,set_flag,flag_name,dtype",
+        (
             (aten._conj.default, torch._C._set_conj, "is_conj", torch.complex64),
             (aten._neg_view.default, torch._C._set_neg, "is_neg", torch.float32),
-        )
-        for func, set_flag, flag_name, dtype in cases:
-            with self.subTest(func=func):
-                fake_mode, x = self._symbolic_cache_input(dtype=dtype)
+        ),
+    )
+    def test_cache_symbolic_view_output_restores_view_bits(
+        self, func, set_flag, flag_name, dtype
+    ):
+        fake_mode, x = self._symbolic_cache_input(dtype=dtype)
 
-                with fake_mode:
-                    set_flag(x, True)
-                    FakeTensorMode.cache_clear()
-                    expected = func(x)
-                    before_hit = FakeTensorMode.cache_info()
-                    actual = func(x)
+        with fake_mode:
+            set_flag(x, True)
+            FakeTensorMode.cache_clear()
+            expected = func(x)
+            before_hit = FakeTensorMode.cache_info()
+            actual = func(x)
 
-                    self.assertEqual(
-                        getattr(actual, flag_name)(),
-                        getattr(expected, flag_name)(),
-                    )
-                    self._assert_symbolic_cache_hit(before_hit, actual, expected)
+            self.assertEqual(
+                getattr(actual, flag_name)(),
+                getattr(expected, flag_name)(),
+            )
+            self._assert_symbolic_cache_hit(before_hit, actual, expected)
 
     def test_cache_symbolic_contiguous_output_preserves_stride_backrefs(self):
         shape_env = ShapeEnv()
@@ -4534,6 +4537,9 @@ class FakeTensorDispatchCache(TestCase):
         FakeTensorMode.cache_clear()
         ep.run_decompositions({})
         self.assertBypasses("unrepresented symbol in output", 2)
+
+
+instantiate_parametrized_tests(FakeTensorDispatchCache)
 
 
 class FakeTensorPreferDeviceType(TestCase):
