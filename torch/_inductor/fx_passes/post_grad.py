@@ -68,6 +68,7 @@ from .micro_pipeline_tp import micro_pipeline_tp_pass
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reduced_atomic_contention import partitioned_scatter_optimization_pass
 from .reinplace import reinplace_inplaceable_ops
+from .signed_zero import mark_arg_reductions_with_unobservable_signed_zero
 from .split_cat import POST_GRAD_PATTERNS
 
 
@@ -483,6 +484,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         decompose_map_to_while_loop
     )
 
+    GraphTransformObserver(gm, "mark_signed_zero_unobservable").apply_graph_pass(
+        mark_arg_reductions_with_unobservable_signed_zero
+    )
     gm.recompile()
     gm.graph.lint()
 
