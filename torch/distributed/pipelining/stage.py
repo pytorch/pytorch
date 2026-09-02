@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import itertools
 import logging
 import operator
 import warnings
@@ -129,16 +130,65 @@ class _RecvInfo:
         return f"_RecvInfo(input={self.input_name}, source={self.source}, shape={buffer_shape}, meta={meta_type})"
 
 
-# Cache of per-direction P2P communicators, keyed (weakly) by the PP process
-# group they are derived from. Looped/V schedules construct several stage chunks
-# per rank that share one PP group; they must share the same forward/backward
-# comms (and issue the split_group collective only once) so creation stays
-# consistent and cheap across all ranks. Stage chunks are constructed serially
-# within a rank, so the first miss performs the split and the rest hit the cache.
-# The key is a weakref, so entries are
-# dropped automatically once the parent group is destroyed (e.g. via
-# destroy_process_group / reinitialization), avoiding stale dead communicators.
-_PP_DIRECTION_GROUP_CACHE: "weakref.WeakKeyDictionary[dist.ProcessGroup, tuple[dist.ProcessGroup, dist.ProcessGroup]]" = weakref.WeakKeyDictionary()
+_P2PTopology = tuple[int, ...]
+_P2PWarmupRound = tuple[tuple[int, int], ...]
+_P2PGroupCacheEntry = tuple[
+    dict[tuple[int, int], dist.ProcessGroup], tuple[_P2PWarmupRound, ...]
+]
+_PP_DIRECTION_GROUP_CACHE: weakref.WeakKeyDictionary[
+    dist.ProcessGroup, dict[_P2PTopology, _P2PGroupCacheEntry]
+] = weakref.WeakKeyDictionary()
+
+
+def _p2p_topology(
+    stage_index_to_group_rank: dict[int, int], group_size: int
+) -> _P2PTopology:
+    """Validate and return the physical-rank assignment for logical stages."""
+    stage_indices = set(stage_index_to_group_rank)
+    expected_indices = set(range(len(stage_index_to_group_rank)))
+    if stage_indices != expected_indices:
+        raise ValueError(
+            "Pipeline stage mapping must contain contiguous indices starting at 0"
+        )
+    topology = tuple(
+        stage_index_to_group_rank[stage_index]
+        for stage_index in range(len(expected_indices))
+    )
+    if any(rank < 0 or rank >= group_size for rank in topology):
+        raise ValueError(
+            f"Pipeline stage mapping contains a rank outside [0, {group_size})"
+        )
+    return topology
+
+
+def _p2p_edge_matchings(topology: _P2PTopology) -> tuple[_P2PWarmupRound, ...]:
+    """Partition used physical edges into deterministic directed matchings."""
+    remaining = sorted(
+        {
+            tuple(sorted((source, destination)))
+            for source, destination in itertools.pairwise(topology)
+            if source != destination
+        }
+    )
+    matchings: list[tuple[tuple[int, int], ...]] = []
+    while remaining:
+        used_ranks: set[int] = set()
+        matching: list[tuple[int, int]] = []
+        deferred: list[tuple[int, int]] = []
+        for edge in remaining:
+            if edge[0] in used_ranks or edge[1] in used_ranks:
+                deferred.append(edge)
+                continue
+            matching.append(edge)
+            used_ranks.update(edge)
+        matchings.append(tuple(matching))
+        remaining = deferred
+
+    rounds: list[_P2PWarmupRound] = []
+    for matching in matchings:
+        rounds.append(matching)
+        rounds.append(tuple((destination, source) for source, destination in matching))
+    return tuple(rounds)
 
 
 def _warn_if_eager_nccl(group: dist.ProcessGroup | None) -> None:
@@ -155,48 +205,62 @@ def _warn_if_eager_nccl(group: dist.ProcessGroup | None) -> None:
 
 def _build_p2p_direction_groups(
     group: dist.ProcessGroup | None,
-) -> tuple[dist.ProcessGroup, dist.ProcessGroup]:
-    """Create two communicators over the same ranks as ``group``, one per data-flow
-    direction: ``downstream`` carries traffic flowing ``r -> r+1`` (forward
-    activations) and ``upstream`` carries ``r -> r-1`` (backward gradients).
-
-    Pipeline P2P normally shares a single communicator for both directions, which
-    serializes every send/recv in one FIFO. Coalescing makes a single mixed
-    send+recv batch deadlock-free, but across *separate* batches (pipeline skew,
-    looped / V schedules, skip connections) the shared FIFO can still form a
-    dependency cycle and deadlock. Routing the two directions onto separate
-    communicators / streams removes that cross-batch coupling and restores
-    full-duplex bandwidth.
-
-    Uses ``split_group``, which is collective over ``group``'s own ranks (not the
-    whole world), so it composes with PP as a sub-axis of a larger device mesh.
-    Requires the default process group to be device-bound (e.g.
-    ``init_process_group(..., device_id=...)``), which ``split_group`` needs for
-    NCCL; torchcomms binds the device automatically.
-    """
+    stage_index_to_group_rank: dict[int, int],
+) -> tuple[dict[tuple[int, int], dist.ProcessGroup], tuple[_P2PWarmupRound, ...]]:
+    """Create communicators for the directed rank edges used by a schedule."""
     parent = group if group is not None else dist.distributed_c10d._get_default_group()
-    cached = _PP_DIRECTION_GROUP_CACHE.get(parent)
+    group_size = dist.get_world_size(parent)
+    topology = _p2p_topology(stage_index_to_group_rank, group_size)
+    cached = _PP_DIRECTION_GROUP_CACHE.get(parent, {}).get(topology)
     if cached is not None:
         return cached
 
-    split_ranks = [list(range(dist.get_world_size(parent)))]
-    # split_group splits the parent's communicator, so the default process group
-    # must be device-bound (NCCL) -- torchcomms binds the device automatically. If
-    # it is not, split_group raises its own device error.
-    downstream = dist.split_group(
-        parent_pg=group, split_ranks=split_ranks, group_desc="pp_p2p_downstream"
+    group_rank = dist.get_rank(parent)
+    rounds = _p2p_edge_matchings(topology)
+    groups: dict[tuple[int, int], dist.ProcessGroup] = {}
+    if str(dist.get_backend(parent)) == "fake":
+        for round_edges in rounds:
+            for edge in round_edges:
+                if group_rank in edge:
+                    groups[edge] = parent
+        _PP_DIRECTION_GROUP_CACHE.setdefault(parent, {})[topology] = (groups, rounds)
+        return groups, rounds
+
+    accelerator = torch.accelerator.current_accelerator()
+    if accelerator is None:
+        raise RuntimeError("Directed pipeline P2P requires an accelerator backend")
+    parent_backend_config = dist.BackendConfig(dist.get_backend_config(parent))
+    accelerator_backend = parent_backend_config.get_device_backend_map().get(
+        accelerator.type
     )
-    upstream = dist.split_group(
-        parent_pg=group, split_ranks=split_ranks, group_desc="pp_p2p_upstream"
+    if accelerator_backend is None:
+        raise RuntimeError(
+            f"Pipeline process group has no backend for {accelerator.type}"
+        )
+    for round_index, round_edges in enumerate(rounds):
+        child = dist.split_group(
+            parent_pg=parent,
+            split_ranks=[list(edge) for edge in round_edges],
+            group_desc=f"pp_p2p_round_{round_index}",
+            backend=f"{accelerator.type}:{accelerator_backend}",
+        )
+        local_edges = [edge for edge in round_edges if group_rank in edge]
+        if local_edges:
+            if len(local_edges) != 1:
+                raise AssertionError("P2P split round is not a matching")
+            if not isinstance(child, dist.ProcessGroup):
+                raise AssertionError(
+                    f"expected process group for edge {local_edges[0]}, "
+                    f"got {type(child)}"
+                )
+            groups[local_edges[0]] = child
+
+    logger.info(
+        "Pipeline P2P: using %d directed rank-edge split rounds",
+        len(rounds),
     )
-    # All parent ranks are members of the single split.
-    if not isinstance(downstream, dist.ProcessGroup):
-        raise AssertionError(f"expected dist.ProcessGroup, got {type(downstream)}")
-    if not isinstance(upstream, dist.ProcessGroup):
-        raise AssertionError(f"expected dist.ProcessGroup, got {type(upstream)}")
-    logger.info("Pipeline P2P: using per-direction (downstream/upstream) communicators")
-    _PP_DIRECTION_GROUP_CACHE[parent] = (downstream, upstream)
-    return downstream, upstream
+    _PP_DIRECTION_GROUP_CACHE.setdefault(parent, {})[topology] = (groups, rounds)
+    return groups, rounds
 
 
 class _PipelineStageBase(ABC):
@@ -242,27 +306,18 @@ class _PipelineStageBase(ABC):
 
         _warn_if_eager_nccl(group)
 
-        # Downstream (data flowing r -> r+1: forward activations) and upstream
-        # (r -> r-1: backward gradients) P2P communicators. Auto-enabled when
-        # TorchComms is in use (its split path is always available and the
-        # single-comm FIFO deadlock is most acute there); the config flag
+        # Directed physical rank-edge communicators. Auto-enabled when TorchComms
+        # is in use; the config flag
         # torch.distributed.config.pipeline_per_direction_p2p (env
         # TORCH_DISTRIBUTED_PIPELINE_PER_DIRECTION_P2P) force-enables it on other
-        # backends. When disabled both alias ``self.group`` so behavior is
-        # byte-for-byte unchanged.
+        # backends. When disabled every P2P op uses ``self.group``.
         self.p2p_per_direction = (
             dist_config.pipeline_per_direction_p2p
             or dist.distributed_c10d._use_torchcomms_enabled()
         )
-        self._downstream_group: dist.ProcessGroup | None
-        self._upstream_group: dist.ProcessGroup | None
-        if self.p2p_per_direction:
-            self._downstream_group, self._upstream_group = _build_p2p_direction_groups(
-                group
-            )
-        else:
-            self._downstream_group = group
-            self._upstream_group = group
+        self._p2p_direction_groups: dict[tuple[int, int], dist.ProcessGroup] = {}
+        self._p2p_direction_warmup_rounds: tuple[_P2PWarmupRound, ...] = ()
+        self._p2p_direction_topology: _P2PTopology | None = None
 
         self.dw_builder = dw_builder
 
@@ -318,6 +373,25 @@ class _PipelineStageBase(ABC):
         # DTensor support: consolidated stage metadata container
         # Contains inputs, outputs, input_grads, output_grads metadata
         self._stage_meta = _StageMeta()
+
+    def _configure_p2p_direction_groups(self) -> None:
+        """Create directed P2P groups from the schedule's final stage mapping."""
+        if not self.p2p_per_direction:
+            return
+        topology = _p2p_topology(self.stage_index_to_group_rank, self.group_size)
+        if (
+            self._p2p_direction_topology is not None
+            and self._p2p_direction_topology != topology
+        ):
+            raise RuntimeError(
+                "Pipeline stage mapping changed after P2P communicator initialization"
+            )
+        groups, rounds = _build_p2p_direction_groups(
+            self.group, self.stage_index_to_group_rank
+        )
+        self._p2p_direction_groups = groups
+        self._p2p_direction_warmup_rounds = rounds
+        self._p2p_direction_topology = topology
 
     @property
     def has_backward(self) -> bool:
@@ -443,16 +517,34 @@ class _PipelineStageBase(ABC):
             peer_rank,
         )
 
+    def _get_p2p_group(
+        self, source_stage: int, destination_stage: int
+    ) -> dist.ProcessGroup | None:
+        """Return the communicator for one directed logical-stage edge."""
+        if not self.p2p_per_direction:
+            return self.group
+        source_rank = self.stage_index_to_group_rank[source_stage]
+        destination_rank = self.stage_index_to_group_rank[destination_stage]
+        if source_rank == destination_rank:
+            raise RuntimeError(
+                "Same-rank pipeline stages must use local transfer, not P2P"
+            )
+        try:
+            return self._p2p_direction_groups[(source_rank, destination_rank)]
+        except KeyError as error:
+            raise RuntimeError(
+                "Missing directed pipeline communicator for group ranks "
+                f"{source_rank}->{destination_rank}"
+            ) from error
+
     def _get_recv_ops(
         self,
         recv_infos: tuple[_RecvInfo, ...],
-        group: dist.ProcessGroup | None,
+        destination_stage: int,
     ) -> list[dist.P2POp]:
         """
         Helper function shared by `get_fwd_recv_ops` and `get_bwd_recv_ops`.
-        Returns a list of ops that correspond to the recv infos. ``group`` is the
-        direction-specific communicator (downstream vs upstream); it equals
-        ``self.group`` unless per-direction P2P is enabled.
+        Returns a list of ops that correspond to the recv infos.
         """
         ops: list[dist.P2POp] = []
         for info in recv_infos:
@@ -468,7 +560,14 @@ class _PipelineStageBase(ABC):
             if info.source is None:
                 raise AssertionError("expected info.source to be not None")
             peer_global_rank = self._resolve_peer_global_rank(info.source)
-            ops.append(dist.P2POp(dist.irecv, info.buffer, peer_global_rank, group))
+            ops.append(
+                dist.P2POp(
+                    dist.irecv,
+                    info.buffer,
+                    peer_global_rank,
+                    self._get_p2p_group(info.source, destination_stage),
+                )
+            )
 
         return ops
 
@@ -567,7 +666,7 @@ class _PipelineStageBase(ABC):
         """
         recv_infos: tuple[_RecvInfo, ...] = self.args_recv_info[fwd_chunk_id]
 
-        return self._get_recv_ops(recv_infos, self._downstream_group)
+        return self._get_recv_ops(recv_infos, self.stage_index)
 
     def get_bwd_recv_ops(self, bwd_chunk_id: int) -> list[dist.P2POp]:
         """
@@ -578,7 +677,7 @@ class _PipelineStageBase(ABC):
             return []
 
         recv_infos = self.grad_recv_info[bwd_chunk_id]
-        return self._get_recv_ops(recv_infos, self._upstream_group)
+        return self._get_recv_ops(recv_infos, self.stage_index)
 
     def get_fwd_send_ops(self, fwd_chunk_id: int) -> list[dist.P2POp]:
         """
@@ -608,7 +707,7 @@ class _PipelineStageBase(ABC):
                         dist.isend,
                         send_tensor,
                         peer_global_rank,
-                        self._downstream_group,
+                        self._get_p2p_group(self.stage_index, dst),
                     )
                 )
 
@@ -690,7 +789,10 @@ class _PipelineStageBase(ABC):
                 peer_global_rank = self._resolve_peer_global_rank(grad_recv_stage)
                 ops.append(
                     dist.P2POp(
-                        dist.isend, send_tensor, peer_global_rank, self._upstream_group
+                        dist.isend,
+                        send_tensor,
+                        peer_global_rank,
+                        self._get_p2p_group(self.stage_index, grad_recv_stage),
                     )
                 )
             elif grad is None:
@@ -704,7 +806,12 @@ class _PipelineStageBase(ABC):
                 )
                 peer_global_rank = self._resolve_peer_global_rank(grad_recv_stage)
                 ops.append(
-                    dist.P2POp(dist.isend, send_tensor, peer_global_rank, self.group)
+                    dist.P2POp(
+                        dist.isend,
+                        send_tensor,
+                        peer_global_rank,
+                        self._get_p2p_group(self.stage_index, grad_recv_stage),
+                    )
                 )
         return ops
 
@@ -1220,26 +1327,31 @@ class _PipelineStageBase(ABC):
         from the previous stage.
         """
         ops: list[dist.P2POp] = []
-        next_stage_peer_rank = self.stage_index_to_group_rank.get(self.stage_index + 1)
-        prev_stage_peer_rank = self.stage_index_to_group_rank.get(self.stage_index - 1)
+        next_stage_peer = (
+            self._resolve_peer_global_rank(self.stage_index + 1)
+            if not self.is_last
+            else None
+        )
+        prev_stage_peer = (
+            self._resolve_peer_global_rank(self.stage_index - 1)
+            if not self.is_first
+            else None
+        )
 
-        # Separate recv buffers per direction: with per-direction P2P the
-        # downstream and upstream recvs run concurrently on different
-        # communicators/streams, so they must not share a buffer (concurrent
-        # writes = data race). The send buffer is only read, so it can be shared.
-        downstream_recv_tensor = torch.zeros(1, device=self.device, dtype=torch.float32)
-        upstream_recv_tensor = torch.zeros(1, device=self.device, dtype=torch.float32)
+        # Incoming edge groups may run concurrently, so each receive needs its
+        # own buffer. The send buffer is read-only and can be shared.
+        prev_recv_tensor = torch.zeros(1, device=self.device, dtype=torch.float32)
+        next_recv_tensor = torch.zeros(1, device=self.device, dtype=torch.float32)
         send_tensor = torch.tensor(
             self.stage_index, device=self.device, dtype=torch.float32
         )
-        # downstream traffic (r -> r+1: forward activations) -> downstream comm
         if not self.is_first:
             ops.append(
                 dist.P2POp(
                     dist.irecv,
-                    downstream_recv_tensor,
-                    group_peer=prev_stage_peer_rank,
-                    group=self._downstream_group,
+                    prev_recv_tensor,
+                    peer=prev_stage_peer,
+                    group=self._get_p2p_group(self.stage_index - 1, self.stage_index),
                 )
             )
         if not self.is_last:
@@ -1247,28 +1359,27 @@ class _PipelineStageBase(ABC):
                 dist.P2POp(
                     dist.isend,
                     send_tensor,
-                    group_peer=next_stage_peer_rank,
-                    group=self._downstream_group,
+                    peer=next_stage_peer,
+                    group=self._get_p2p_group(self.stage_index, self.stage_index + 1),
                 )
             )
 
-        # upstream traffic (r -> r-1: backward gradients) -> upstream comm
         if not self.is_first:
             ops.append(
                 dist.P2POp(
                     dist.isend,
                     send_tensor,
-                    group_peer=prev_stage_peer_rank,
-                    group=self._upstream_group,
+                    peer=prev_stage_peer,
+                    group=self._get_p2p_group(self.stage_index, self.stage_index - 1),
                 )
             )
         if not self.is_last:
             ops.append(
                 dist.P2POp(
                     dist.irecv,
-                    upstream_recv_tensor,
-                    group_peer=next_stage_peer_rank,
-                    group=self._upstream_group,
+                    next_recv_tensor,
+                    peer=next_stage_peer,
+                    group=self._get_p2p_group(self.stage_index + 1, self.stage_index),
                 )
             )
 
