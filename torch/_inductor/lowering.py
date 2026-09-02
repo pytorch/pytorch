@@ -8147,6 +8147,20 @@ def _current_node_uses_all_tuple_outputs(indices: tuple[int, ...]) -> bool:
     return all(index in used_indices for index in indices)
 
 
+def _value_only_signed_zero_unobservable() -> bool:
+    """True when only the value of the current max/min(dim) node is used and
+    fx_passes.signed_zero proved that the sign of that zero is unobservable."""
+    from .fx_passes.signed_zero import SIGNED_ZERO_UNOBSERVABLE
+
+    current_node = V.graph.current_node
+    return (
+        not config.strict_signed_zero
+        and current_node is not None
+        and bool(current_node.meta.get(SIGNED_ZERO_UNOBSERVABLE))
+        and not _current_node_uses_all_tuple_outputs((1,))
+    )
+
+
 @register_lowering(aten.any)
 def reduce_any(x, dim=None, keepdim=False):
     x = to_dtype(x, torch.bool)
@@ -8159,6 +8173,14 @@ def reduce_max(x, dim=None, keepdim=False):
         if is_triton(x) and x.get_dtype() != torch.bool:
             if _current_node_uses_all_tuple_outputs((0, 1)):
                 return reduce_argmax_with_value(x, axis=dim, keepdims=keepdim)
+            if _value_only_signed_zero_unobservable():
+                # Only the value is consumed and no use can observe the sign
+                # of a zero, so a plain amax is indistinguishable and avoids
+                # carrying the index accumulator.
+                return (
+                    reduce_amax(x, axis=dim, keepdims=keepdim),
+                    reduce_argmax(x, axis=dim, keepdims=keepdim),
+                )
             return (
                 reduce_argmax_value(x, axis=dim, keepdims=keepdim),
                 reduce_argmax(x, axis=dim, keepdims=keepdim),
@@ -8177,6 +8199,11 @@ def reduce_min(x, dim=None, keepdim=False):
         if is_triton(x) and x.get_dtype() != torch.bool:
             if _current_node_uses_all_tuple_outputs((0, 1)):
                 return reduce_argmin_with_value(x, axis=dim, keepdims=keepdim)
+            if _value_only_signed_zero_unobservable():
+                return (
+                    reduce_amin(x, axis=dim, keepdims=keepdim),
+                    reduce_argmin(x, axis=dim, keepdims=keepdim),
+                )
             return (
                 reduce_argmin_value(x, axis=dim, keepdims=keepdim),
                 reduce_argmin(x, axis=dim, keepdims=keepdim),

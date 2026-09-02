@@ -286,6 +286,48 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertIsNone(_re.search(r"\b__dunder_add_kernel_0\b", code))
         self.assertIsNotNone(_re.search(r"\b_dunder_add_kernel_0\b", code))
 
+    @requires_cuda_and_triton
+    def test_dim_max_min_value_uses_plain_reduction_when_sign_unobservable(self):
+        # The indexed reduction may be replaced by a plain amax/amin only when
+        # no use of the value can observe the sign of a zero.
+        cases = {
+            "softmax": (
+                lambda x, op: (x - op(x, -1, keepdim=True).values).exp().sum(-1),
+                True,
+            ),
+            "compare": (lambda x, op: (op(x, -1).values > 0).float(), True),
+            "int_cast": (lambda x, op: op(x, -1).values.to(torch.int32), True),
+            "returned": (lambda x, op: op(x, -1).values, False),
+            "reciprocal": (lambda x, op: 1.0 / op(x, -1).values, False),
+            "copysign": (
+                lambda x, op: torch.copysign(x, op(x, -1, keepdim=True).values),
+                False,
+            ),
+        }
+        for op, indexed_helper, value_helper in (
+            (torch.max, "max_with_index", "max2"),
+            (torch.min, "min_with_index", "min2"),
+        ):
+            for name, (fn, plain) in cases.items():
+                torch._dynamo.reset()
+                x = torch.randn(8, 4097, dtype=torch.bfloat16, device=GPU_TYPE)
+                with fresh_cache():
+                    actual, codes = run_and_get_code(
+                        torch.compile(lambda t: fn(t, op)), x
+                    )
+                self.assertEqual(actual, fn(x, op))
+                source = "\n".join(codes)
+                self.assertEqual(
+                    f"triton_helpers.{value_helper}" in source,
+                    plain,
+                    f"{op.__name__} {name}",
+                )
+                self.assertEqual(
+                    f"triton_helpers.{indexed_helper}" in source,
+                    not plain,
+                    f"{op.__name__} {name}",
+                )
+
     @inductor_config.patch(strict_signed_zero=True)
     @requires_cuda_and_triton
     def test_dim_max_min_reuse_argreduce_value(self):
