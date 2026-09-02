@@ -145,11 +145,12 @@ void ReturnRefCounter(const std::string& handle, uint64_t offset /* unused */) {
 CudaIPCSentData::CudaIPCSentData(
     std::string handle,
     uint64_t offset,
-    uint64_t* counter_ptr,
+    int64_t* counter_ptr,
     at::Device device)
-    : handle_(std::move(handle)),
-      offset_(offset),
-      counter_ptr_(counter_ptr),
+    : at::ipc::SentDataBase<int64_t, CudaCounterOps>(
+          std::move(handle),
+          offset,
+          counter_ptr),
       device_(device) {
 #if !defined(USE_ROCM)
   // CUDA have the unofficial limit on the number of recorded blocking
@@ -197,7 +198,7 @@ CudaIPCSentData::~CudaIPCSentData() {
   if (!CudaIPCGlobalEntities::alive) {
     original_ptr_.release_context();
   }
-  ReturnRefCounter(handle_, offset_);
+  ReturnRefCounter(handle(), offset());
 #if !defined(USE_ROCM)
   try {
     if (event_sync_required_) {
@@ -214,8 +215,8 @@ CudaIPCSentData::~CudaIPCSentData() {
 #endif
 }
 
-uint64_t CudaIPCSentData::counter_value() {
-  return *counter_ptr_;
+int64_t CudaIPCSentData::counter_value() {
+  return at::ipc::SentDataBase<int64_t, CudaCounterOps>::counter_value();
 }
 
 at::DataPtr GetNewRefCountedSentData(void* data, at::Device device) {
