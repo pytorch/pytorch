@@ -561,8 +561,13 @@ struct ExpandableSegment {
     if (end > handles_.size()) {
       handles_.resize(end);
     }
+    // On failure, release handles created so far; they were never cuMemMap'd,
+    // and unmapHandles's bulk cuMemUnmap must never see them as allocated.
+    size_t created = begin;
+    auto rollback =
+        c10::make_scope_exit([&] { releaseHandles(begin, created); });
     for (auto i : c10::irange(begin, end)) {
-      TORCH_INTERNAL_ASSERT(!handles_.at(i));
+      TORCH_INTERNAL_ASSERT(!handles_.at(i).active());
       CUmemGenericAllocationHandle handle = 0;
       CUmemAllocationProp prop = {};
       prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
@@ -597,46 +602,41 @@ struct ExpandableSegment {
       auto status =
           DriverAPI::get()->cuMemCreate_(&handle, segment_size_, &prop, 0);
 #endif
-      if (status != CUDA_SUCCESS) {
-        if (status == CUDA_ERROR_OUT_OF_MEMORY) {
-          {
-            size_t device_free = 0;
-            size_t device_total = 0;
-            (void)cudaMemGetInfo(&device_free, &device_total);
-            LOG(WARNING)
-                << "expandable_segments: memory mapping failed with OOM on device "
-                << static_cast<int>(device_) << " while trying to map "
-                << segment_size_ << " bytes (free: " << device_free
-                << ", total: " << device_total << ").";
-          }
-#ifdef USE_ROCM
-          // hipMemCreate above returned hipErrorOutOfMemory and treated it
-          // like a sticky runtime error. Which means we need to clear it.
-          // Unlike the corresponding CUDA Driver API.
-          (void)hipGetLastError();
-#endif
-          for (auto j : c10::irange(begin, i)) {
-            auto& maybe_handle = handles_.at(j);
-            TORCH_INTERNAL_ASSERT(maybe_handle.has_value());
-            auto h = *maybe_handle;
-            maybe_handle = std::nullopt;
-#ifdef USE_ROCM
-            C10_CUDA_CHECK(hipMemRelease(h.handle));
-#else
-            C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemRelease_(h.handle));
-#endif
-          }
-          trimHandles();
-          return rangeFromHandles(begin, begin);
+      if (status == CUDA_ERROR_OUT_OF_MEMORY) {
+        {
+          size_t device_free = 0;
+          size_t device_total = 0;
+          const cudaError_t info_status =
+              cudaMemGetInfo(&device_free, &device_total);
+          const std::string detail = (info_status == cudaSuccess)
+              ? " bytes (free: " + std::to_string(device_free) +
+                  ", total: " + std::to_string(device_total) + ")."
+              : std::string(" bytes; cudaMemGetInfo failed: ") +
+                  cudaGetErrorString(info_status) + ".";
+          LOG(WARNING)
+              << "expandable_segments: memory mapping failed with OOM on device "
+              << static_cast<int>(device_) << " while trying to map "
+              << segment_size_ << detail;
         }
 #ifdef USE_ROCM
-        C10_CUDA_CHECK(status);
-#else
-        C10_CUDA_DRIVER_CHECK(status);
+        // hipMemCreate above returned hipErrorOutOfMemory and treated it
+        // like a sticky runtime error. Which means we need to clear it.
+        // Unlike the corresponding CUDA Driver API.
+        (void)hipGetLastError();
 #endif
+        // rollback (scope_exit above) releases handles created so far.
+        return rangeFromHandles(begin, begin);
       }
-      handles_.at(i) = Handle{.handle = handle};
+      // Throws on any other error; rollback handles that too.
+#ifdef USE_ROCM
+      C10_CUDA_CHECK(status);
+#else
+      C10_CUDA_DRIVER_CHECK(status);
+#endif
+      handles_.at(i) = Handle(handle);
+      created = i + 1;
     }
+    rollback.release();
     mapAndSetAccess(begin, end);
     return rangeFromHandles(begin, end);
   }
@@ -685,18 +685,17 @@ struct ExpandableSegment {
 
     buf.write(reinterpret_cast<const char*>(&header), sizeof(ShareHeader));
     for (auto i : c10::irange(begin, end)) {
-      auto& maybe_handle = handles_.at(i);
-      TORCH_INTERNAL_ASSERT(maybe_handle.has_value());
-      auto& handle = *maybe_handle;
+      auto& handle = handles_.at(i);
+      TORCH_INTERNAL_ASSERT(handle.active());
       if (handle_type_ != Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
         if (!handle.shareable_handle) {
           int fd = 0;
 #ifdef USE_ROCM
           C10_CUDA_CHECK(hipMemExportToShareableHandle(
-              &fd, handle.handle, hipMemHandleTypePosixFileDescriptor, 0));
+              &fd, handle.get(), hipMemHandleTypePosixFileDescriptor, 0));
 #else
           C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemExportToShareableHandle_(
-              &fd, handle.handle, CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR, 0));
+              &fd, handle.get(), CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR, 0));
 #endif
           handle.shareable_handle = fd;
           LOG(INFO) << "use posix fd to share expandable segments.";
@@ -715,7 +714,7 @@ struct ExpandableSegment {
         if (!handle.shareable_handle) {
           CUmemFabricHandle fabric_handle;
           C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemExportToShareableHandle_(
-              &fabric_handle, handle.handle, CU_MEM_HANDLE_TYPE_FABRIC, 0));
+              &fabric_handle, handle.get(), CU_MEM_HANDLE_TYPE_FABRIC, 0));
           handle.shareable_handle = fabric_handle;
           LOG(INFO) << "use fabric handle to share expandable segments.";
         }
@@ -762,6 +761,11 @@ struct ExpandableSegment {
           "on the producer, or disable expandable_segments.");
     }
 #endif
+    // Zero would divide-by-zero in numSegments() below.
+    TORCH_CHECK(
+        header.segment_size != 0,
+        "expandable_segments IPC: received a zero segment_size in the share "
+        "header");
     auto segment = std::make_unique<ExpandableSegment>(
         device,
         std::nullopt,
@@ -778,6 +782,16 @@ struct ExpandableSegment {
 #define SYS_pidfd_getfd 438
 #endif
 #endif // !_WIN32
+    // num_handles is peer-controlled; bound it against the segment's own
+    // capacity before sizing reserve() with it.
+    TORCH_CHECK(
+        header.num_handles <= segment->max_handles_,
+        "expandable_segments IPC: share header claims ",
+        header.num_handles,
+        " handles, more than this segment's capacity of ",
+        segment->max_handles_);
+    std::vector<Handle> imported;
+    imported.reserve(header.num_handles);
     if (header.handle_type != Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
 #ifdef _WIN32
       TORCH_CHECK(
@@ -798,6 +812,8 @@ struct ExpandableSegment {
         auto myfd = syscall(SYS_pidfd_getfd, pidfd, fd, 0);
         if (myfd == -1) {
           auto err = errno;
+          // close_pidfd (scope_exit above) and `imported` (releases handles
+          // imported so far via ~Handle) both fire on this throw.
           TORCH_CHECK(
               err != ENOSYS,
               "The kernel on this machine does not support the pidfd_getfd syscall needed to use IPC for CUDA tensors when expandable_segments:True is set. "
@@ -829,7 +845,9 @@ struct ExpandableSegment {
             "}");
 #endif
         LOG(INFO) << "use posix fd to import expandable segments.";
-        segment->handles_.emplace_back(handle);
+        // close_myfd (scope_exit above) closes myfd; don't double-close it
+        // here.
+        imported.emplace_back(handle);
       }
 #endif // !_WIN32
     } else {
@@ -856,10 +874,12 @@ struct ExpandableSegment {
             get_nvml_fabric_info(device),
             "}");
         LOG(INFO) << "use fabric handle to import expandable segments.";
-        segment->handles_.emplace_back(handle);
+        imported.emplace_back(handle);
       }
 #endif
     }
+    // Publish after all imports succeed; `imported` releases on throw.
+    segment->handles_ = std::move(imported);
     segment->mapAndSetAccess(0, header.num_handles);
     return segment;
   }
@@ -976,31 +996,38 @@ struct ExpandableSegment {
   }
 
   void mapAndSetAccess(size_t begin, size_t end) {
+    // On failure, unmap the prefix and release the range.
+    size_t mapped = begin;
+    auto rollback = c10::make_scope_exit([&] {
+      if (mapped > begin) {
+#ifdef USE_ROCM
+        C10_CUDA_CHECK_WARN(hipMemUnmap(
+            ptr() + begin * segment_size_, (mapped - begin) * segment_size_));
+#else
+        C10_CUDA_DRIVER_WARN(DriverAPI::get()->cuMemUnmap_(
+            ptr_ + begin * segment_size_, (mapped - begin) * segment_size_));
+#endif
+      }
+      releaseHandles(begin, end);
+    });
     for (auto i : c10::irange(begin, end)) {
-      auto& maybe_handle = handles_.at(i);
-      TORCH_INTERNAL_ASSERT(maybe_handle.has_value());
+      auto& handle = handles_.at(i);
+      TORCH_INTERNAL_ASSERT(handle.active());
 #ifdef USE_ROCM
       C10_CUDA_CHECK(hipMemMap(
-          ptr() + i * segment_size_,
-          segment_size_,
-          0,
-          maybe_handle->handle,
-          0ULL));
+          ptr() + i * segment_size_, segment_size_, 0, handle.get(), 0ULL));
 #else
       C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemMap_(
-          ptr_ + i * segment_size_,
-          segment_size_,
-          0,
-          maybe_handle->handle,
-          0ULL));
+          ptr_ + i * segment_size_, segment_size_, 0, handle.get(), 0ULL));
 #endif
-      maybe_handle->mapped = true;
+      mapped = i + 1;
     }
-    mapped_size_ += (end - begin) * segment_size_;
     setAccess(device_, begin, end);
     for (auto p : peers_) {
       setAccess(p, begin, end);
     }
+    mapped_size_ += (end - begin) * segment_size_;
+    rollback.release();
   }
 
   void unmapHandles(size_t begin, size_t end) {
@@ -1017,49 +1044,37 @@ struct ExpandableSegment {
       cuda::CUDAGuard device_guard(device_);
       C10_CUDA_CHECK(cudaDeviceSynchronize());
     }
+    // Unmap the whole contiguous range in one call, then release each handle.
+#ifdef USE_ROCM
+    C10_CUDA_CHECK(hipMemUnmap(
+        ptr() + segment_size_ * begin, (end - begin) * segment_size_));
+#else
+    C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemUnmap_(
+        ptr_ + segment_size_ * begin, (end - begin) * segment_size_));
+#endif
+    releaseHandles(begin, end);
+  }
+  // Release handles in [begin, end) and trim; caller must unmap first.
+  void releaseHandles(size_t begin, size_t end) {
     for (auto i : c10::irange(begin, end)) {
-      auto& maybe_handle = handles_.at(i);
-      TORCH_INTERNAL_ASSERT(maybe_handle.has_value());
-      Handle h = *maybe_handle;
-      maybe_handle = std::nullopt;
-      if (h.mapped) {
-#ifdef USE_ROCM
-        C10_CUDA_CHECK(hipMemUnmap(ptr() + segment_size_ * i, segment_size_));
-#else
-        C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemUnmap_(
-            ptr_ + segment_size_ * i, segment_size_));
-#endif
-      }
-      if (h.shareable_handle) {
-#ifndef _WIN32
-        // shareable_handle also holds CUmemFabricHandle for fabric segments;
-        // std::get_if skips those (no fd to close) instead of throwing.
-        if (auto* fd = std::get_if<int>(&*h.shareable_handle)) {
-          close(*fd);
-        }
-#endif
-      }
-#ifdef USE_ROCM
-      C10_CUDA_CHECK(hipMemRelease(h.handle));
-#else
-      C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemRelease_(h.handle));
-#endif
+      handles_.at(i).release();
     }
     trimHandles();
   }
   void trimHandles() {
     auto it = std::ranges::find_if(
         std::views::reverse(handles_),
-        [](const std::optional<Handle>& opt) { return opt.has_value(); });
+        [](const Handle& h) { return h.active(); });
     handles_.erase(it.base(), handles_.end());
   }
   void forEachAllocatedRange(const std::function<void(size_t, size_t)>& fn) {
     size_t start = 0;
     for (auto i : c10::irange(handles_.size())) {
-      if (handles_.at(i) && (i == 0 || !handles_.at(i - 1))) {
+      if (handles_.at(i).active() && (i == 0 || !handles_.at(i - 1).active())) {
         start = i;
       }
-      if (handles_.at(i) && (i + 1 == handles_.size() || !handles_.at(i + 1))) {
+      if (handles_.at(i).active() &&
+          (i + 1 == handles_.size() || !handles_.at(i + 1).active())) {
         fn(start, i + 1);
       }
     }
@@ -1085,12 +1100,60 @@ struct ExpandableSegment {
   size_t segment_size_;
   size_t mapped_size_;
   size_t max_handles_;
+  // Move-only RAII owner; closes shareable_handle on free.
   struct Handle {
-    CUmemGenericAllocationHandle handle;
+    std::optional<CUmemGenericAllocationHandle> handle;
     std::optional<std::variant<int, CUmemFabricHandle>> shareable_handle;
-    // False for handles imported via fromShared but not yet cuMemMap'd, so
-    // unmapHandles can skip cuMemUnmap on ranges that were never mapped.
-    bool mapped = false;
+
+    Handle() = default;
+    explicit Handle(CUmemGenericAllocationHandle h) : handle(h) {}
+    Handle(const Handle&) = delete;
+    Handle& operator=(const Handle&) = delete;
+    Handle(Handle&& other) noexcept
+        : handle(std::exchange(other.handle, std::nullopt)),
+          shareable_handle(
+              std::exchange(other.shareable_handle, std::nullopt)) {}
+    Handle& operator=(Handle&& other) noexcept {
+      if (this == &other) {
+        return *this;
+      }
+      release();
+      handle = std::exchange(other.handle, std::nullopt);
+      shareable_handle = std::exchange(other.shareable_handle, std::nullopt);
+      return *this;
+    }
+    ~Handle() {
+      release();
+    }
+
+    // Whether this slot owns a physical handle.
+    bool active() const {
+      return handle.has_value();
+    }
+    // The owned physical handle; valid only when active().
+    CUmemGenericAllocationHandle get() const {
+      return handle.value();
+    }
+    // Free handle + shareable fd (caller must unmap first).
+    void release() noexcept {
+      if (!active()) {
+        return;
+      }
+#ifndef _WIN32
+      if (shareable_handle) {
+        if (const int* fd = std::get_if<int>(&*shareable_handle)) {
+          close(*fd);
+        }
+      }
+#endif
+#ifdef USE_ROCM
+      C10_CUDA_CHECK_WARN(hipMemRelease(*handle));
+#else
+      C10_CUDA_DRIVER_WARN(DriverAPI::get()->cuMemRelease_(*handle));
+#endif
+      handle = std::nullopt;
+      shareable_handle = std::nullopt;
+    }
   };
   struct ShareHeader {
     // All fields have in-class default initializers so that
@@ -1106,7 +1169,7 @@ struct ExpandableSegment {
     Expandable_Segments_Handle_Type handle_type =
         Expandable_Segments_Handle_Type::UNSPECIFIED;
   };
-  std::vector<std::optional<Handle>> handles_;
+  std::vector<Handle> handles_;
   // devices on which this memory should be mapped in addition
   // to the device where the physical memory lives (device_).
   std::vector<c10::DeviceIndex> peers_;
