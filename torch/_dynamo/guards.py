@@ -220,7 +220,15 @@ except ModuleNotFoundError:
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Iterator, KeysView, Sequence, Sized
+    from collections.abc import (
+        Collection,
+        Generator,
+        Iterable,
+        Iterator,
+        KeysView,
+        Sequence,
+        Sized,
+    )
 
     from sympy import Symbol
 
@@ -1394,6 +1402,12 @@ _DIM_MARKING_GATED_ATTRIBUTES = (
 _DIM_MARKING_GATE_ATTRIBUTES = frozenset(
     gate for gate, _ in _DIM_MARKING_GATED_ATTRIBUTES
 )
+# Tensor attributes carried by NAME whatever the guard tree says. Each is only
+# presence-tested -- the dim-marking gates by hasattr, _is_param by
+# nn.Parameter.__instancecheck__ on a wrapper-subclass Parameter -- so nothing
+# registers its value in the tree, and _keep could only say yes to it by
+# coincidence: True is interned.
+_PRESENCE_GATE_ATTRIBUTES = _DIM_MARKING_GATE_ATTRIBUTES | {"_is_param"}
 
 
 class GuardBuilder(GuardBuilderBase):
@@ -4314,14 +4328,37 @@ def _get_unsupported_types() -> tuple[type, ...]:
     return ret
 
 
-# Set while a precompile capture is running, to the leaves every LIVE guard
-# build produced. A rebuild from the artifact is compared against it, and a leaf
-# the live build never made means reconstruction lost something the guard reads.
-# Deliberately process-global rather than thread-local: a session legitimately
-# drives compilation from worker threads, and those builds belong to the
-# capture that opened the recording.
-_LIVE_LEAF_GUARDS: set[tuple[str, str]] | None = None
-_LIVE_LEAF_GUARDS_LOCK = threading.Lock()
+@functools.cache
+def _type_stand_in_types() -> tuple[type, ...]:
+    # The unsupported types a guard may still reach as a TYPE: each is rebuilt
+    # from a device alone, without touching the live object's state. Exact
+    # types, because TYPE_MATCH is exact and the rebuild is ``cls(device=...)``,
+    # which an ExternalStream or a user subclass need not accept.
+    return (torch.Generator, torch.Stream, torch.cuda.Stream)
+
+
+def _rebuild_type_stand_in(cls: type, device: torch.device) -> Any:
+    """A fresh ``cls`` on ``device``, in place of one a guard reads only as a type.
+
+    A Generator's or a Stream's state cannot be serialized, but a TYPE_MATCH
+    needs the type alone, so the artifact carries type and device and builds a
+    new object at load. For a stream this ALLOCATES a stream on that device at
+    load; for a CUDA device on a machine without CUDA the constructor raises,
+    so the load fails here rather than rebuilding a guard against a wrong type.
+    """
+    return cls(device=device)
+
+
+# The sinks of every precompile capture currently recording, each receiving the
+# leaves every LIVE guard build produces. A rebuild from the artifact is compared
+# against them, and a leaf the live build never made means reconstruction lost
+# something the guard reads. Deliberately process-global rather than
+# thread-local: a session legitimately drives compilation from worker threads,
+# and those builds belong to the capture that opened the recording. A list
+# rather than one set so that two overlapping sessions each see every build
+# instead of the later one hiding the earlier one's sink.
+_LIVE_LEAF_SINKS: list[set[tuple[str, str]]] = []
+_LIVE_LEAF_SINKS_LOCK = threading.Lock()
 
 
 def _attribute_link(source: Source) -> tuple[str, str] | None:
@@ -4377,16 +4414,22 @@ def _companion_attribute_guards(
 
 
 @contextlib.contextmanager
-def record_live_guard_leaves() -> Generator[set[tuple[str, str]], None, None]:
-    global _LIVE_LEAF_GUARDS
-    leaves: set[tuple[str, str]] = set()
-    with _LIVE_LEAF_GUARDS_LOCK:
-        previous, _LIVE_LEAF_GUARDS = _LIVE_LEAF_GUARDS, leaves
+def record_live_guard_leaves(
+    sink: set[tuple[str, str]] | None = None,
+) -> Generator[set[tuple[str, str]], None, None]:
+    leaves: set[tuple[str, str]] = set() if sink is None else sink
+    with _LIVE_LEAF_SINKS_LOCK:
+        _LIVE_LEAF_SINKS.append(leaves)
     try:
         yield leaves
     finally:
-        with _LIVE_LEAF_GUARDS_LOCK:
-            _LIVE_LEAF_GUARDS = previous
+        with _LIVE_LEAF_SINKS_LOCK:
+            # By identity, latest first: two sinks holding the same leaves
+            # compare EQUAL, and list.remove would close the wrong recording.
+            for i in range(len(_LIVE_LEAF_SINKS) - 1, -1, -1):
+                if _LIVE_LEAF_SINKS[i] is leaves:
+                    del _LIVE_LEAF_SINKS[i]
+                    break
 
 
 class _DropEveryRecord(logging.Filter):
@@ -4443,6 +4486,19 @@ def _is_interned_singleton(value: Any) -> bool:
     )
 
 
+# Every hook the pickle protocol consults. Compared by IDENTITY against object's
+# own slot: object grew a default __getstate__ in 3.11, so presence alone would
+# flag every class on those interpreters.
+_PICKLE_PROTOCOL_HOOKS = (
+    "__reduce__",
+    "__reduce_ex__",
+    "__getstate__",
+    "__setstate__",
+    "__getnewargs__",
+    "__getnewargs_ex__",
+)
+
+
 def _builds_its_own_pickle(cls: type) -> bool:
     """Whether ``cls`` decides its own reduction, so pruning would corrupt it.
 
@@ -4451,14 +4507,13 @@ def _builds_its_own_pickle(cls: type) -> bool:
     A class with its own __reduce__ or __getstate__ chooses what its arguments
     mean, and the sentinel then arrives as one of them -- a constructor argument,
     or a field its __setstate__ reads -- so the object reconstructs wrong instead
-    of merely losing an attribute nobody guards.
+    of merely losing an attribute nobody guards. The same holds for a
+    __setstate__ that reads a pruned field out of the default state, and for a
+    __getnewargs__ that feeds one to a validating __new__.
     """
-    return (
-        cls.__reduce__ is not object.__reduce__
-        or cls.__reduce_ex__ is not object.__reduce_ex__
-        # object grew a default __getstate__ in 3.11.
-        or getattr(cls, "__getstate__", None)
-        is not getattr(object, "__getstate__", None)
+    return any(
+        getattr(cls, name, None) is not getattr(object, name, None)
+        for name in _PICKLE_PROTOCOL_HOOKS
     )
 
 
@@ -4469,6 +4524,7 @@ class GuardsStatePickler(pickle.Pickler):
         empty_values: dict[int, Any],
         missing_values: dict[int, Any],
         *args: Any,
+        type_stand_ins: Collection[int] = frozenset(),
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -4477,6 +4533,10 @@ class GuardsStatePickler(pickle.Pickler):
         self.guard_tree_values = guard_tree_values
         self.empty_values = empty_values
         self.missing_values = missing_values
+        # Unsupported values every guard reaches only as a TYPE; see
+        # _type_stand_in_values. Empty by default, so a caller that has not
+        # checked the guards gets the refusal.
+        self.type_stand_ins = type_stand_ins
         # The object reducer_override was last handed, so a failure inside a
         # __reduce__ can be attributed to a value rather than only to a type.
         self.last_reduced: Any = None
@@ -4511,11 +4571,10 @@ class GuardsStatePickler(pickle.Pickler):
         for name, value in state.items():
             if is_fake and name in _FAKE_TENSOR_OWNED_ATTRIBUTES:
                 continue
-            # A dimension-marking gate is carried whatever the guard tree says:
-            # its value is never read, only hasattr-tested, so _keep can only
-            # say yes to it by coincidence -- True is interned -- and saying no
-            # drops the leaf that reads the attribute the gate gates.
-            if name in _DIM_MARKING_GATE_ATTRIBUTES:
+            # A presence gate is never read, only tested for, so saying no here
+            # drops what the gate gates: a dim-marking leaf, or the Parameter
+            # identity of a wrapper subclass.
+            if name in _PRESENCE_GATE_ATTRIBUTES:
                 carried[name] = value
                 continue
             if not self._keep(value):
@@ -5073,6 +5132,11 @@ class GuardsStatePickler(pickle.Pickler):
 
         elif isinstance(obj, _get_unsupported_types()):
             if id(obj) in self.guard_tree_values:
+                if id(obj) in self.type_stand_ins:
+                    # Only the type is guarded, so a fresh object of that type
+                    # on the same device answers the rebuilt guard exactly as
+                    # the live one would. The live object never gets pickled.
+                    return _rebuild_type_stand_in, (type(obj), obj.device)
                 # Substituting the sentinel for a value a guard READS is not a
                 # pruning, it is a lie: a TYPE_MATCH on a Generator rebuilds
                 # against type(_Missing()) and then never matches, so the
@@ -5341,6 +5405,55 @@ def _offending_value_path(
     return ""
 
 
+_UNRESOLVED_SOURCE = object()
+
+
+def _type_stand_in_values(
+    guards: Iterable[Guard], builder: GuardBuilder, guard_tree_values: dict[int, Any]
+) -> set[int]:
+    """ids of the unsupported values every guard reaches only as a type.
+
+    A TYPE_MATCH on a Generator or a Stream needs nothing but the type, so a
+    fresh object of the same type and device can stand in for it. Anything that
+    reads the VALUE cannot be answered that way: an EQUALS_MATCH on a stream
+    (Dynamo emits one for ``s == t`` and for ``s.cuda_stream``), or a guard on
+    an attribute the stand-in does not preserve, would be rebuilt against the
+    stand-in's state and compare live inputs to it. Only ``.device`` is
+    preserved, and only TYPE_MATCH may name the object itself; everything else
+    keeps the refusal. Walked from the guard's own source up through its bases,
+    so a read THROUGH the object counts even when the object is never guarded.
+    """
+    stand_in_types = _type_stand_in_types()
+    reads: dict[int, set[str]] = {}
+    for guard in guards:
+        source: Source | None = guard.originating_source
+        if source is None or not guard.name:
+            continue
+        child: Source | None = None
+        while source is not None:
+            try:
+                value = builder.get(source)
+            except Exception:
+                # A HASATTR on an absent attribute has no value; its base may.
+                value = _UNRESOLVED_SOURCE
+            if type(value) in stand_in_types:
+                kinds = reads.setdefault(id(value), set())
+                if child is None:
+                    kinds.add(guard.create_fn_name())
+                elif not (
+                    isinstance(child, (AttrSource, GenericAttrSource))
+                    and child.member == "device"
+                ):
+                    kinds.add("<value>")
+            child = source
+            source = source.base if isinstance(source, ChainedSource) else None
+    return {
+        i
+        for i, value in guard_tree_values.items()
+        if type(value) in stand_in_types and reads.get(i, set()) <= {"TYPE_MATCH"}
+    }
+
+
 def pickle_guards_state(
     state: GuardsState,
     builder: GuardBuilder,
@@ -5377,7 +5490,16 @@ def pickle_guards_state(
             # TODO See if we have lift this branch as the first one.
             # Prune more objects in pytree hierarchy.
             missing_values[id(leaf)] = leaf
-    pickler = GuardsStatePickler(guard_tree_values, empty_values, missing_values, buf)
+    type_stand_ins = _type_stand_in_values(
+        state.output_graph.guards, builder, guard_tree_values
+    )
+    pickler = GuardsStatePickler(
+        guard_tree_values,
+        empty_values,
+        missing_values,
+        buf,
+        type_stand_ins=type_stand_ins,
+    )
 
     # Snapshot the search roots before the pruning below empties global_scope.
     # The diagnostic that names the unpicklable value walks these, so pruning
@@ -5656,12 +5778,12 @@ class CheckFunctionManager:
                 }
             # Only from a LIVE build. Recording a reconstruction's leaves would
             # let a reconstruction bug whitelist itself.
-            if _LIVE_LEAF_GUARDS is not None and not output_graph.skip_guards_check:
+            if _LIVE_LEAF_SINKS and not output_graph.skip_guards_check:
                 fingerprint = serialization_builder.guard_manager.leaf_fingerprint()
-                with _LIVE_LEAF_GUARDS_LOCK:
-                    # Re-read: the recording may have closed while the walk ran.
-                    if _LIVE_LEAF_GUARDS is not None:
-                        _LIVE_LEAF_GUARDS.update(fingerprint)
+                with _LIVE_LEAF_SINKS_LOCK:
+                    # Re-read: a recording may have closed while the walk ran.
+                    for sink in _LIVE_LEAF_SINKS:
+                        sink.update(fingerprint)
 
             self.guard_manager = guard_manager
             self.compile_check_fn(builder, runtime_guards, guard_fail_fn)

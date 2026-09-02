@@ -306,6 +306,56 @@ class TestAOTCompileToPython(TestCase):
             ):
                 compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
 
+    def test_training_rejects_output_alias_wrapper(self):
+        # Two outputs that are views of one intermediate are regenerated from
+        # its base by the output_alias_wrapper, which the training composer does
+        # not splice yet. (A lone view is hidden via _unsafe_view instead.)
+        class _ViewOut(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l = torch.nn.Linear(4, 3)
+
+            def forward(self, x):
+                h = self.l(x)
+                return h.view(-1), h[0]
+
+        m = _ViewOut()
+        x = torch.randn(5, 4)
+        gm = _capture(m, x)
+        with (
+            torch.enable_grad(),
+            self.assertRaisesRegex(
+                NotImplementedError,
+                r"training source: \['output_alias_wrapper'\]",
+            ),
+        ):
+            compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
+
+    def test_training_rejects_out_of_graph_input_mutation(self):
+        # A tracked mutation of an input that requires grad cannot stay in the
+        # graph, so it is applied by the mutation_epilogue, which the training
+        # composer does not splice yet.
+        class _MutateInput(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l = torch.nn.Linear(4, 3)
+
+            def forward(self, x):
+                x.mul_(2)
+                return self.l(x)
+
+        m = _MutateInput()
+        x = torch.randn(5, 4, requires_grad=True).clone()
+        gm = _capture(m, x)
+        with (
+            torch.enable_grad(),
+            self.assertRaisesRegex(
+                NotImplementedError,
+                r"training source: \['mutation_epilogue'\]",
+            ),
+        ):
+            compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
+
     def test_training_forward_and_backward_do_not_share_names(self):
         # The two inductor modules are spliced into ONE namespace and both define
         # call / Runner / their kernels. A module resolves those as late-bound
@@ -809,6 +859,26 @@ class TestAOTCompileToPython(TestCase):
             t.join()
         self.assertEqual(sinks["a"], ["a_fn"])
         self.assertEqual(sinks["b"], ["b_fn"])
+
+    def test_nested_autograd_spec_sinks_exit_by_identity(self):
+        # Two nested, still-empty sinks compare equal, so an exit that removed
+        # by value would drop the OUTER sink: a spec built after the inner exit
+        # would be lost and the outer exit would raise ValueError.
+        import torch._dynamo
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            capture_autograd_compile_specs,
+        )
+
+        def f(x):
+            return (x * 2).sum()
+
+        with capture_autograd_compile_specs() as outer:
+            with capture_autograd_compile_specs() as inner:
+                pass
+            torch._dynamo.reset()
+            torch.compile(f, backend="aot_eager")(torch.randn(4, requires_grad=True))
+        self.assertEqual(inner, [])
+        self.assertEqual(len(outer), 1)
 
 
 @instantiate_parametrized_tests

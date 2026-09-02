@@ -105,7 +105,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        are lifted and the rest are the runtime inputs. Calls run under ordinary
        ``torch.no_grad()`` unless ``training=True``, even if the caller is in
        ``torch.inference_mode()``; the artifact records that mode and dispatches served
-       calls under it, whatever the caller's ambient grad mode.
+       calls under it, whatever the caller's ambient grad mode (see ``training``).
        Inference mode is a distinct guarded state and must be captured manually if needed.
        Tensors created inside inference mode remain inference tensors after that context is
        disabled, so they are rejected; create those inputs outside inference mode.
@@ -125,9 +125,13 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        graph-breaks or when several guarded/recompiled variants must be retained.
        The dynamo artifact carries one serialized guard tree per captured variant and
        rebuilds them at load, so a served call is dispatched to the first variant whose
-       guards pass and REFUSED when none do: a shape, dtype, device or value the
-       examples did not exercise raises rather than miscomputing (the guards that pin
-       shapes, values and branches are never dropped by the invariant policy). What it
+       guards pass; when none do, a standalone artifact REFUSES the call, and an installed
+       one (``SERVING_MODE = "installed"``) compiles it at serve time and counts it in
+       ``serve_time_compiles()`` -- unless the call is made under
+       ``torch._dynamo.precompile_package.serving()``, which refuses it instead. Either
+       way a shape, dtype, device or value the examples did not exercise is never served
+       by a captured graph (the guards that pin shapes, values and branches are never
+       dropped by the invariant policy). What it
        does not reproduce is the ``make_fx`` driver's param/buffer NAME check. The
        dynamo artifact records the grad mode it was captured under and dispatches
        under it, so the caller's ambient grad mode does not decide whether a call is
@@ -156,8 +160,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        the other raises. Parent directories are created.
    :param cache_path: Optional file to write ``cache`` to; see ``artifact_path``.
    :param require_complete: Refuse to produce an artifact whose capture was incomplete --
-       a call raised, a frame hit ``recompile_limit``, or a frame exercised during capture
-       produced no guarded code. Applies only to ``tracer="dynamo"``.
+       a call raised, no frame produced compiled code at all, a frame hit
+       ``recompile_limit``, a frame exercised during capture produced no guarded code, or
+       a frame was bypassed (its guards could not be serialized, so it would serve
+       nothing). Applies only to ``tracer="dynamo"``.
    :param require_no_risky_drops: Refuse to produce an artifact that dropped a guard which
        can affect dispatch. Nothing checks such a guard at load, so a different value can
        silently select the wrong graph instead of recompiling. Applies only to
@@ -166,7 +172,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        Off by default and deliberately so: every real model drops the identity guards
        precompile cannot serialize. Applies only to ``tracer="dynamo"``.
    :param training: Run the example calls with grad enabled, for a capture whose ``fn``
-       performs a backward.
+       performs a backward. The artifact serves under the captured mode, not the
+       caller's: a ``training=False`` artifact returns outputs with no autograd history
+       even inside ``torch.enable_grad()``, and a ``training=True`` artifact runs its
+       backward and accumulates ``.grad`` even inside the caller's ``torch.no_grad()``.
    :param keep_example_grads: Leave ``.grad`` exactly as the example calls left it.
        By default precompile snapshots and clears the example model's gradients before
        the calls and restores them afterwards, so capturing cannot double the gradients

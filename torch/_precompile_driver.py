@@ -543,8 +543,14 @@ def _build_multigraph_forward():
             # loader's __main__ is the file the frame was compiled from.
             _captured = SerializedCode.to_code_object(_frame["code"]).co_filename
             _running = getattr(_module, "__file__", None)
-            if _running is None or _os.path.realpath(_running) != _os.path.realpath(
-                _captured
+            # Compared only when both name a real file: a REPL, `python -c` or
+            # a notebook has no __file__, and a frame compiled there records a
+            # placeholder co_filename, so neither can identify another script.
+            if (
+                _running is not None
+                and _os.path.isfile(_running)
+                and _os.path.isfile(_captured)
+                and _os.path.realpath(_running) != _os.path.realpath(_captured)
             ):
                 raise PrecompileError(
                     f"precompile: the captured frame "
@@ -665,7 +671,7 @@ def _build_multigraph_forward():
                     if manager.check(f_locals):
                         return variant(*args, **kwargs)
                 why = _why_missed(bound, f_locals)
-            raise RuntimeError(
+            raise PrecompileError(
                 f"precompile: no captured variant of {target.co_name!r} matches this "
                 f"call. The artifact serves only what capture exercised; add an "
                 f"example covering it and recapture. Captured "
@@ -763,8 +769,14 @@ def _build_installed_forward():
             # serve it.
             _captured = _code_entry.python_code.co_filename
             _running = getattr(_module, "__file__", None)
-            if _running is None or _os.path.realpath(_running) != _os.path.realpath(
-                _captured
+            # Compared only when both name a real file: a REPL, `python -c` or
+            # a notebook has no __file__, and a frame compiled there records a
+            # placeholder co_filename, so neither can identify another script.
+            if (
+                _running is not None
+                and _os.path.isfile(_running)
+                and _os.path.isfile(_captured)
+                and _os.path.realpath(_running) != _os.path.realpath(_captured)
             ):
                 raise PrecompileError(
                     f"precompile: the captured frame "

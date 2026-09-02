@@ -8,10 +8,12 @@
         fn, example_inputs=[(model, x1), (model, x2)], tracer="dynamo"
     )
 
-``example_inputs`` is the only calling convention: a sequence of calls, each a tuple of
-positional arguments (or an ``ExampleInput`` when keywords are needed). ``tracer`` picks
-the capture front-end, and it is the ONLY thing that does -- ``make_fx`` takes exactly one
-call, ``dynamo`` takes as many as you want.
+``example_inputs`` is the calling convention: a sequence of calls, each a tuple of
+positional arguments (or an ``ExampleInput`` when keywords are needed). The 2.14 spelling
+``precompile(fn, *example_args)`` -- one call, positionally -- still works under a
+``FutureWarning``, and ``precompile.accumulate`` drives the calls from the caller's own
+loop instead. ``tracer`` picks the capture front-end, and it is the ONLY thing that does
+-- ``make_fx`` takes exactly one call, ``dynamo`` takes as many as you want.
 
 precompile captures your computation with ``make_fx`` (the default ``tracer``) -- a
 NON-STRICT trace of the ATen ops that run when ``fn`` executes once on the example
@@ -189,15 +191,17 @@ it.
 # 7. Both python_code and the cache are trusted, EXECUTABLE input to load(). The cache
 #    outer envelope is a plain {"artifact": bytes, ...} dict (read with
 #    weights_only=True) carrying a format/version + backend tag AND a code_hash
-#    (sha256 of the python_code it accelerates) that load() verifies (raising
-#    PrecompileError on mismatch). load() feeds those bytes to
+#    (sha256 of the python_code it accelerates) that load() verifies (a backend or
+#    tracer mismatch raises PrecompileError; a code_hash mismatch marks the cache
+#    STALE, so load() warns and runs python_code alone). load() feeds those bytes to
 #    torch.compiler.load_cache_artifacts to PRIME the inductor kernel caches, then always
 #    EXECs python_code -- with the caches primed the kernels load from the precompiled
 #    binaries instead of JIT-compiling. Both the cache priming (it unpickles) and the exec run
 #    code you supplied; treat both python_code and the cache like code you are about to
-#    run. The code_hash binds the cache to its python_code:
-#    load() rejects a (code, cache) pair from different precompile() calls (same
-#    backend) rather than silently running the cache's graph under foreign metadata.
+#    run. The code_hash binds the cache to its python_code: a (code, cache) pair from
+#    different precompile() calls (same backend), or torn between the two renames of
+#    a rewrite, is not primed from -- python_code is self-contained, so load() runs
+#    it alone rather than the cache's kernels under foreign metadata.
 #
 # self-contained: ``python_code`` runs on its own -- it inlines the composed graph
 # module (inductor: kernels JIT-compiled on first call, plus AOTAutograd's codegen'd
@@ -213,8 +217,8 @@ it.
 # artifact (artifact=None) but is still a full integrity-tagged envelope, and load()
 # always runs the graph inlined in python_code. The metadata
 # lives in one place (python_code); the envelope carries a code_hash (sha256 of
-# python_code) alongside the format/version + backend tag, so load() rejects a
-# (python_code, cache) pair that did not come from the same precompile() call.
+# python_code) alongside the format/version + backend tag, so load() ignores (warns
+# about) a cache that did not come from the same precompile() call as python_code.
 #
 # backend: "inductor" (default) lowers the captured graph through
 # torch._functorch.aot_autograd.compile_to_python (AOTAutograd + Inductor, emitting a
@@ -318,14 +322,17 @@ it.
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import inspect
 import io
 import logging
 import os
 import pickle
+import stat
 import sys
 import tempfile
+import threading
 import types
 import warnings
 from collections.abc import Callable, Mapping, Sequence
@@ -361,9 +368,10 @@ if TYPE_CHECKING:
 __all__: list[str] = []
 
 
-# Integrity tag baked into the cache envelope and verified by load() (with the
-# code_hash) to reject a foreign / mismatched cache; see Note [precompile programming
-# model], invariant 7.
+# Integrity tag baked into the cache envelope and verified by load(): a foreign
+# format/version or a stale code_hash means the cache is ignored and python_code runs
+# alone; a backend/tracer mismatch is refused. See Note [precompile programming model],
+# invariant 7.
 _CACHE_FORMAT = "torch.compiler.precompile"
 _CACHE_VERSION = 1
 
@@ -628,6 +636,9 @@ class AccumulatingCapture:
         self._calls = 0
         self._gate_error: PrecompileError | None = None
         self._warned_gate_messages: set[str] = set()
+        # A capture is one Dynamo session, which admits one call at a time; a
+        # handle shared across threads serializes them rather than refusing.
+        self._lock = threading.Lock()
 
     def __call__(self, *args: object, **kwargs: object) -> object:
         r"""Run one call of ``fn``, fold it into the capture, rewrite the artifact.
@@ -635,8 +646,12 @@ class AccumulatingCapture:
         The result is returned even when a gate refuses the rendered artifact:
         the call has already run, and its gradients have already moved. The
         files are then left as they were and the refusal is raised from
-        :meth:`close`.
+        :meth:`close`. Calls from several threads run one at a time.
         """
+        with self._lock:
+            return self._call_once(args, kwargs)
+
+    def _call_once(self, args: tuple[object, ...], kwargs: dict[str, object]) -> object:
         if self._closed:
             raise PrecompileError(
                 "this capture is closed; accumulate() again to start a new one."
@@ -1762,6 +1777,7 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         "POLICY_DROPPED_GUARDS",
         "DROPPED_GUARD_CODE",
         "DRIFTED_GUARDS",
+        "UNRENDERED_BACKENDS",
         "VARIANTS_WITHOUT_INPUT_GUARDS",
         "CAPTURE_GRAD_ENABLED",
     }
@@ -2117,6 +2133,12 @@ def _build_multigraph_python_source(
         f"VARIANTS_WITHOUT_INPUT_GUARDS = {summary.variants_without_input_guards!r}"
     )
     parts.append("")
+    parts.append("# (backend id, reason) for each compiled subgraph that could not be")
+    parts.append("# composed to readable source and so ships only in _BACKENDS below.")
+    parts.append(
+        f"UNRENDERED_BACKENDS = {[list(g) for g in summary.unrendered_backends]!r}"
+    )
+    parts.append("")
     if serving_mode == "installed":
         reachable = _reachable_frames(frames)
         dead = sorted(
@@ -2216,10 +2238,14 @@ def _build_multigraph_python_source(
         if len(rendered) < len(backends):
             parts.append(
                 f"#    ({len(backends) - len(rendered)} could not be rendered and "
-                f"stay in _BACKENDS)"
+                f"stay in _BACKENDS; UNRENDERED_BACKENDS above says which and why)"
             )
     else:
         parts.append("# 3. Compiled subgraphs -- OPAQUE")
+        if summary.unrendered_backends:
+            parts.append(
+                "#    (UNRENDERED_BACKENDS above says why each stays in _BACKENDS)"
+            )
     parts.append("#")
     parts.append("# base64(pickle) of the backend artifacts the frames call by name.")
     parts.append("# " + "=" * 70)
@@ -2321,6 +2347,34 @@ def _serving_mode(frames: list[dict[str, Any]]) -> str:
     return "installed" if unreachable else "standalone"
 
 
+def _reject_varargs(code: types.CodeType, name: str) -> None:
+    if code.co_flags & (inspect.CO_VARARGS | inspect.CO_VARKEYWORDS):
+        raise PrecompileError(
+            f"precompile cannot serve {name!r}: it takes *args or **kwargs, "
+            f"and the served call is bound to the entry's NAMED parameters only, so "
+            f"its guards could never match a call and every one would be refused. "
+            f"Give the entry an explicit signature, e.g. 'def step(model, x)'."
+        )
+
+
+def _reject_varargs_entry(fn: object) -> None:
+    """Refuse a *args / **kwargs entry BEFORE any example call runs.
+
+    _reject_uninstallable_entry makes the same check at render time, which on
+    the accumulate path surfaces only at close(), after every call has run and
+    moved its gradients. Resolve the code object the way capture does (a
+    module's forward, a bound method's function); anything capture itself
+    would refuse is left to it.
+    """
+    from torch._dynamo.precompile_package import _entry_fn_of
+
+    try:
+        entry_fn = _entry_fn_of(fn)
+    except TypeError:
+        return
+    _reject_varargs(entry_fn.__code__, getattr(entry_fn, "__qualname__", repr(fn)))
+
+
 def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> None:
     """Refuse a capture whose entry an installed artifact could not rebuild.
 
@@ -2341,9 +2395,7 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
         # never the problem. If Dynamo BYPASSED the frame, it recorded why --
         # say that, because the thin-wrapper advice below is then simply wrong.
         bypassed = [
-            code
-            for code in entry.codes
-            if code.bypassed and getattr(code, "bypass_reason", None)
+            code for code in entry.codes if code.bypassed and code.bypass_reason
         ]
         if bypassed:
             reasons = ", ".join(sorted({str(c.bypass_reason) for c in bypassed}))
@@ -2378,13 +2430,7 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
             f"precompile(step, example_inputs=[(model, x)]) with "
             f"'def step(model, x): return model(x)'."
         )
-    if code.co_flags & (inspect.CO_VARARGS | inspect.CO_VARKEYWORDS):
-        raise PrecompileError(
-            f"precompile cannot serve {entry.fn_name!r}: it takes *args or **kwargs, "
-            f"and the served call is bound to the entry's NAMED parameters only, so "
-            f"its guards could never match a call and every one would be refused. "
-            f"Give the entry an explicit signature, e.g. 'def step(model, x)'."
-        )
+    _reject_varargs(code, entry.fn_name)
     if entry_frames[0]["python_module"] == "__main__" and (
         code.co_filename not in _WARNED_MAIN_ENTRIES
     ):
@@ -2651,6 +2697,7 @@ class PrecompiledModule:
         forward: Callable[..., object],
         *,
         backend: str,
+        tracer: str = "make_fx",
     ) -> PrecompiledModule:
         """Build a runnable from load()'s reconstructed forward.
 
@@ -2661,7 +2708,7 @@ class PrecompiledModule:
         ``_module_positions``, ``_out_spec``, ...) stay at their defaults; inspect the
         artifact via python_code.
         """
-        obj = cls(None, backend=backend)  # type: ignore[arg-type]
+        obj = cls(None, backend=backend, tracer=tracer)  # type: ignore[arg-type]
         obj._loaded_forward = forward
         return obj
 
@@ -2769,6 +2816,12 @@ class PrecompiledModule:
             raise PrecompileError(
                 "this object is not runnable; build one with "
                 "torch.compiler.precompile.load(python_code, cache)."
+            )
+        if kwargs and self._tracer == "make_fx":
+            raise PrecompileError(
+                f"make_fx artifacts are positional-only; got keyword argument(s) "
+                f"{sorted(kwargs)}. Pass them positionally, or capture with "
+                f"tracer='dynamo', whose artifact binds keywords."
             )
         return self._loaded_forward(*args, **kwargs)
 
@@ -2919,33 +2972,43 @@ def _write_artifact(
     rewrites on every call and its promise is that the files on disk always
     load, so at hundreds of megabytes that window is what this is for.
     """
-    written = []
+    written: list[tuple[str, str | os.PathLike[str]]] = []
     try:
         for path, payload in ((cache_path, cache), (artifact_path, python_code)):
             parent = os.path.dirname(os.fspath(path))
             if parent:
                 os.makedirs(parent, exist_ok=True)
+            # The temp file has to sit beside its target: os.replace cannot
+            # cross devices, and a bare filename's target is the cwd, not
+            # mkstemp's default (the system tmp dir).
             fd, tmp = tempfile.mkstemp(
-                dir=parent or None, prefix=os.path.basename(path) + ".", suffix=".tmp"
+                dir=parent or ".", prefix=os.path.basename(path) + ".", suffix=".tmp"
             )
+            written.append((tmp, path))
+            # mkstemp opens 0600; keep an existing target's mode, else the 0644
+            # a plain open() gets under the default umask.
+            try:
+                perm = stat.S_IMODE(os.stat(path).st_mode)
+            except OSError:
+                perm = 0o644
             os.close(fd)
+            os.chmod(tmp, perm)
             mode, encoding = (
                 ("wb", None) if isinstance(payload, bytes) else ("w", "utf-8")
             )
-            written.append((tmp, path))
             with open(tmp, mode, encoding=encoding) as f:
                 f.write(payload)  # type: ignore[arg-type]
                 f.flush()
                 os.fsync(f.fileno())
+        for tmp, path in written:
+            os.replace(tmp, path)
     except BaseException:
+        # Whatever was not renamed into place -- a write failed, or the second
+        # replace did after the first succeeded -- must not stay behind.
         for tmp, _ in written:
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(tmp)
-            except OSError:
-                pass
         raise
-    for tmp, path in written:
-        os.replace(tmp, path)
 
 
 def _read_artifact(
@@ -3092,36 +3155,43 @@ class _PrecompileApi:
         inference mode. The dynamo artifact records that mode (``CAPTURE_GRAD_ENABLED``)
         and dispatches every served call under it, as the make_fx drivers run under
         ``no_grad``, so the caller's ambient grad mode does not decide whether a call is
-        served. Inputs and module parameters/buffers created inside inference mode are
-        rejected because they remain inference tensors after the ambient mode is disabled.
+        served -- nor what it does: a ``training=False`` artifact returns outputs with no
+        autograd history even inside ``torch.enable_grad()``, and a ``training=True``
+        artifact runs its backward and accumulates ``.grad`` even inside the caller's
+        ``torch.no_grad()``. Inputs and module parameters/buffers created inside
+        inference mode are rejected because they remain inference tensors after the
+        ambient mode is disabled.
 
         Capture is execution-driven, not an exhaustive analysis of ``fn``. A complete
         summary covers the calls that ran successfully; unexecuted paths and values are not
         present. precompile refuses known gaps and risky dropped guards by default (the
-        stricter ``require_no_dropped_guards`` is off). An uncovered runtime call
-        raises: the artifact serves only what capture exercised.
+        stricter ``require_no_dropped_guards`` is off). The artifact serves only what
+        capture exercised: a standalone artifact refuses an uncovered runtime call, and
+        an installed one (``SERVING_MODE = "installed"``) compiles it at serve time and
+        counts it in ``serve_time_compiles()``, unless the call is made under
+        ``torch._dynamo.precompile_package.serving()``, which refuses it instead.
 
         Which arguments apply depends on the tracer; passing one where it does not
         apply raises ``ValueError``. The guard filter controls serialization only;
         runtime capture guards are retained.
 
-        ==============================  ================  ==========================
-        argument                        ``make_fx``       ``dynamo``
-        ==============================  ================  ==========================
-        ``backend``                     yes               yes
-        ``example_inputs``              exactly one call  any number, kwargs allowed
-        ``training``                    yes               yes
-        ``decompositions``              yes               no
-        ``artifact_path``/``cache_path``  no              yes
-        ``guard_filter_fn``             no                yes
-        ``recompile_limit``             no                yes (default 256)
-        ``dynamic``                     no                yes
-        ``invariants``                  no                yes
-        ``require_complete``            no                yes
-        ``require_no_risky_drops``      no                yes
-        ``require_no_dropped_guards``   no                yes
-        ``keep_example_grads``          no                yes
-        ==============================  ================  ==========================
+        ================================  ================  ==========================
+        argument                          ``make_fx``       ``dynamo``
+        ================================  ================  ==========================
+        ``backend``                       yes               yes
+        ``example_inputs``                exactly one call  any number, kwargs allowed
+        ``training``                      yes               yes
+        ``decompositions``                yes               no
+        ``artifact_path``/``cache_path``  no                yes
+        ``guard_filter_fn``               no                yes
+        ``recompile_limit``               no                yes (default 256)
+        ``dynamic``                       no                yes
+        ``invariants``                    no                yes
+        ``require_complete``              no                yes
+        ``require_no_risky_drops``        no                yes
+        ``require_no_dropped_guards``     no                yes
+        ``keep_example_grads``            no                yes
+        ================================  ================  ==========================
 
         .. note::
 
@@ -3289,6 +3359,18 @@ class _PrecompileApi:
                     f"argument(s) AND example_inputs; the example call goes in one "
                     f"place: precompile(fn, example_inputs=[(arg0, arg1)])."
                 )
+            # A list of tuples or an ExampleInput passed positionally is
+            # example_inputs missing its keyword, not a 2.14-style example call.
+            only = example_args[0] if len(example_args) == 1 else None
+            if isinstance(only, ExampleInput) or (
+                isinstance(only, (list, tuple))
+                and len(only) > 0
+                and all(isinstance(call, (tuple, ExampleInput)) for call in only)
+            ):
+                raise TypeError(
+                    f"precompile got a {type(only).__name__} of example calls "
+                    f"positionally; pass it as example_inputs=... instead."
+                )
             warnings.warn(
                 "precompile(fn, *example_args) is deprecated; pass the example call "
                 "as example_inputs=[(arg0, arg1)], which also takes several calls "
@@ -3305,6 +3387,8 @@ class _PrecompileApi:
             raise ValueError(
                 f"precompile tracer must be 'make_fx' or 'dynamo', got {tracer!r}."
             )
+        if tracer == "dynamo":
+            _reject_varargs_entry(fn)
         # Deliberately not `not example_inputs`: a one-element tensor is falsy
         # and a multi-element one is not even boolable, so the likeliest mistake
         # -- passing the tensors instead of a sequence of calls -- has to reach
@@ -3538,6 +3622,7 @@ class _PrecompileApi:
             who="precompile.accumulate",
             neither="both are required; the capture writes them on every call",
         )
+        _reject_varargs_entry(fn)
         from torch._dynamo.exc import PackageError
         from torch._dynamo.precompile_package import precompile_accumulate
 
@@ -3654,9 +3739,10 @@ class _PrecompileApi:
         # weights_only=True is safe (plain str/int/bytes dict). The inner artifact bytes
         # are the inductor save_cache_artifacts bundle, used below to prime the kernel
         # caches. The cache is acceleration only, so an unreadable envelope or a FORMAT /
-        # VERSION mismatch degrades to JIT'ing from python_code rather than crashing. A
-        # BACKEND or CODE_HASH mismatch is different -- it signals a wrong (python_code,
-        # cache) pairing -- so it hard-fails rather than running under foreign metadata.
+        # VERSION mismatch degrades to JIT'ing from python_code rather than crashing, and
+        # so does a CODE_HASH mismatch (a stale cache; warned about below). A BACKEND or
+        # TRACER mismatch is different -- it signals a wrong (python_code, cache) pairing
+        # -- so it hard-fails rather than running under foreign metadata.
         artifact = None
         try:
             blob = torch.load(io.BytesIO(cache), weights_only=True)
@@ -3766,7 +3852,7 @@ class _PrecompileApi:
                 forward._rebind(fn)
             forward._prepare(cast(str, meta["_PACKAGE"]))
             return PrecompiledCallable(forward)
-        return PrecompiledModule._from_loaded(forward, backend=backend)
+        return PrecompiledModule._from_loaded(forward, backend=backend, tracer=tracer)
 
 
 precompile = _PrecompileApi()
