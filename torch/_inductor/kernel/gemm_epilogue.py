@@ -26,7 +26,7 @@ GemmReductionType = Literal["sum", "mean", "prod", "max", "min"]
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class GemmEpiloguePlan:
     source: str | None = None
-    is_cutedsl: bool = False
+    is_evt_fallback: bool = False
     reads: tuple[str, ...] = ()
     writes: tuple[str, ...] = ()
     renames: dict[str, Any] = dataclasses.field(default_factory=dict)
