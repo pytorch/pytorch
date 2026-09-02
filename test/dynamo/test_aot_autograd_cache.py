@@ -3493,6 +3493,38 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 4)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 2)
 
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_region_activation_memory_budget_partial_coverage_graph_break_cache(
+        self,
+    ):
+        def fn(x):
+            with torch.autograd.graph.region_activation_memory_budget(
+                0.3, require_full_coverage=False
+            ):
+                x = (x + 1).relu()
+                torch._dynamo.graph_break()
+                x = (x * 2).relu()
+            return (x + 3).relu()
+
+        with fresh_cache():
+            compiled = torch.compile(fn, backend="inductor")
+            x = torch.randn(10, 10, requires_grad=True)
+            compiled(x).sum().backward()
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+            self._clear_dynamo_and_codecache()
+
+            compiled = torch.compile(fn, backend="inductor")
+            x = torch.randn(10, 10, requires_grad=True)
+            compiled(x).sum().backward()
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 2)
+
 
 @functorch_config.patch({"bundled_autograd_cache": True})
 class AOTAutogradCacheBundledTests(AOTAutogradCacheTests):
@@ -3621,6 +3653,32 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         low_again = self.gen_cache_key(make_fn(0.2), config)
         self.assertNotEqual(low, high)
         self.assertEqual(low, low_again)
+
+    def test_region_activation_memory_budget_coverage_cache_key(self):
+        def full_coverage(require_full_coverage):
+            def fn(x):
+                with torch.autograd.graph.region_activation_memory_budget(
+                    0.2, require_full_coverage=require_full_coverage
+                ):
+                    return x.sin().cos()
+
+            return fn
+
+        def partial_coverage(x):
+            x = x.sin()
+            with torch.autograd.graph.region_activation_memory_budget(
+                0.2, require_full_coverage=False
+            ):
+                return x.cos()
+
+        config = self.default_config()
+        strict = self.gen_cache_key(full_coverage(True), config)
+        permissive = self.gen_cache_key(full_coverage(False), config)
+        partial = self.gen_cache_key(partial_coverage, config)
+        partial_again = self.gen_cache_key(partial_coverage, config)
+        self.assertNotEqual(strict, permissive)
+        self.assertNotEqual(permissive, partial)
+        self.assertEqual(partial, partial_again)
 
     def test_runtime_only_configs_do_not_change_key(self):
         def fn(x):
