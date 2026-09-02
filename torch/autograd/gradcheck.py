@@ -1798,7 +1798,16 @@ If the test
 
 
 def _run_slow_mode_and_get_error(
-    func, tupled_inputs, outputs, input_idx, output_idx, rtol, atol, eps, is_forward_ad
+    func,
+    tupled_inputs,
+    outputs,
+    input_idx,
+    output_idx,
+    rtol,
+    atol,
+    eps,
+    is_forward_ad,
+    equal_nan=False,
 ):
     # Compute jacobians in slow mode for better error message
     if is_forward_ad:
@@ -1838,7 +1847,9 @@ def _run_slow_mode_and_get_error(
     # Assume jacobians are non-empty and have the same shape
     slow_max_diff = (slow_numerical - slow_analytical).abs().max()
 
-    slow_allclose = torch.allclose(slow_analytical, slow_numerical, rtol, atol)
+    slow_allclose = torch.allclose(
+        slow_analytical, slow_numerical, rtol, atol, equal_nan
+    )
     msg = (
         "\nThe above quantities relating the numerical and analytical jacobians are computed \n"
         "in fast mode. See: https://github.com/pytorch/pytorch/issues/53876 for more background \n"
@@ -1921,7 +1932,16 @@ def _check_analytical_numerical_equal(
                 a, n.to(a.device), rtol, updated_atol, equal_nan
             ):
                 jacobians_str = _run_slow_mode_and_get_error(
-                    func, tupled_inputs, outputs, i, j, rtol, atol, eps, is_forward_ad
+                    func,
+                    tupled_inputs,
+                    outputs,
+                    i,
+                    j,
+                    rtol,
+                    atol,
+                    eps,
+                    is_forward_ad,
+                    equal_nan,
                 )
                 raise GradcheckError(
                     _get_notallclose_msg(
