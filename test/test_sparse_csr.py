@@ -2403,6 +2403,75 @@ class TestSparseCSR(TestCase):
             for m, n in itertools.product([3, 5], [3, 5]):
                 run_test(m, n, index_dtype)
 
+    @parametrize("blocksize", [(1, 1), (2, 2), (2, 3)])
+    @parametrize("index_dtype", [torch.int32, torch.int64])
+    @parametrize("layout", [subtest(torch.sparse_bsr, name='SparseBSR'), subtest(torch.sparse_bsc, name='SparseBSC')])
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_sparse_add_blocked(self, device, dtype, layout, index_dtype, blocksize):
+        m, n = 6, 12
+        total_blocks = (m // blocksize[0]) * (n // blocksize[1])
+        compressed_indices_method, plain_indices_method = sparse_compressed_indices_methods[layout]
+
+        def gen(nblocks):
+            # genSparseCompressedTensor counts nnz in elements, not blocks
+            nnz = nblocks * blocksize[0] * blocksize[1]
+            return self.genSparseCompressedTensor([m, n], nnz, layout=layout, device=device, dtype=dtype, index_dtype=index_dtype, blocksize=blocksize)
+
+        def check(s1, s2, alpha, out=None):
+            expected = torch.add(s1.to_dense(), s2.to_dense(), alpha=alpha)
+            actual = torch.add(s1, s2, alpha=alpha, out=out)
+            self.assertEqual(actual.layout, layout)
+            self.assertEqual(compressed_indices_method(actual).dtype, index_dtype)
+            self.assertEqual(plain_indices_method(actual).dtype, index_dtype)
+            self.assertEqual(actual, expected)
+            if out is not None:
+                self.assertEqual(out, expected)
+
+        a = gen(total_blocks // 2)
+        b = gen(total_blocks // 3)
+        empty = gen(0)
+
+        for alpha in (1.0, 0.0, -1.5):
+            check(a, a, alpha)
+            check(a, a.clone(), alpha)
+            check(a, b, alpha)
+            check(a, empty, alpha)
+            check(empty, b, alpha)
+            check(empty, empty, alpha)
+            check(a, b, alpha, out=gen(1))
+
+        # in-place: the result pattern is the union, so nnz may grow
+        c = a.clone()
+        c.add_(b, alpha=-1.5)
+        self.assertEqual(c, a.to_dense() - 1.5 * b.to_dense())
+
+        # operand with non-contiguous values
+        nc_values = b.values().transpose(-2, -1).contiguous().transpose(-2, -1)
+        b_nc = torch.sparse_compressed_tensor(
+            compressed_indices_method(b), plain_indices_method(b), nc_values, b.shape, layout=layout)
+        if blocksize != (1, 1):
+            self.assertFalse(b_nc.values().is_contiguous())
+        check(a, b_nc, 1.0)
+
+    @parametrize("layout", [subtest(torch.sparse_bsr, name='SparseBSR'), subtest(torch.sparse_bsc, name='SparseBSC')])
+    @dtypes(torch.float32)
+    def test_sparse_add_blocked_errors(self, device, dtype, layout):
+        def gen(size, nblocks, blocksize, this_layout=layout):
+            nnz = nblocks * blocksize[0] * blocksize[1]
+            return self.genSparseCompressedTensor(size, nnz, layout=this_layout, device=device, dtype=dtype, index_dtype=torch.int64, blocksize=blocksize)
+
+        a = gen([4, 4], 2, (2, 2))
+        with self.assertRaisesRegex(RuntimeError, "expected both operands to have the same block size"):
+            torch.add(a, gen([4, 4], 2, (1, 1)))
+
+        flipped = {torch.sparse_bsr: torch.sparse_bsc, torch.sparse_bsc: torch.sparse_bsr}[layout]
+        with self.assertRaisesRegex(RuntimeError, "expected both operands to have the same layout"):
+            torch.add(a, gen([4, 4], 2, (2, 2), this_layout=flipped))
+
+        batched = gen([2, 4, 4], 2, (2, 2))
+        with self.assertRaisesRegex(RuntimeError, "batched inputs are not supported"):
+            torch.add(batched, batched.clone())
+
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_sparse_add_errors(self, device, dtype):
         def run_test(index_type):
