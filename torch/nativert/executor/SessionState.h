@@ -9,16 +9,12 @@
 
 namespace torch::nativert {
 
-static_assert(
-    alignof(std::uint_fast32_t) >=
-    std::atomic_ref<std::uint_fast32_t>::required_alignment);
-
 class SessionState {
  public:
   explicit SessionState(
       ExecutionFrame& frame,
-      c10::FastMap<const Node*, std::uint_fast32_t> producers = {})
-      : producers_(std::move(producers)), frame_(frame) {}
+      const c10::FastMap<const Node*, std::uint_fast32_t>& producers = {})
+      : producers_(producers.begin(), producers.end()), frame_(frame) {}
 
   C10_ALWAYS_INLINE void wait() {
     auto outstanding = workOutstanding_.load(std::memory_order_seq_cst);
@@ -44,14 +40,12 @@ class SessionState {
 
   C10_ALWAYS_INLINE /* producersRemaining == 0 */ bool decrementProducers(
       const Node* node) {
-    auto producerCount =
-        std::atomic_ref<std::uint_fast32_t>(producers_.at(node));
-    return producerCount.fetch_sub(1, std::memory_order_seq_cst) == 1;
+    return producers_.at(node).fetch_sub(1, std::memory_order_seq_cst) == 1;
   }
 
  private:
   std::atomic_uint_fast32_t workOutstanding_;
-  c10::FastMap<const Node*, std::uint_fast32_t> producers_;
+  c10::FastMap<const Node*, std::atomic_uint_fast32_t> producers_;
 
   ExecutionFrame& frame_;
 };
