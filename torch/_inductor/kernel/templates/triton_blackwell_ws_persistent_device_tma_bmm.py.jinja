@@ -8,11 +8,13 @@
         return
 
     stride_ab = {{stride("A", 0)}}
+    stride_bb = {{stride("B", 0)}}
+
     stride_am = {{stride("A", 1)}}
     stride_ak = {{stride("A", 2)}}
-    stride_bb = {{stride("B", 0)}}
     stride_bk = {{stride("B", 1)}}
     stride_bn = {{stride("B", 2)}}
+
     a_base = A + batch * stride_ab
     b_base = B + batch * stride_bb
 
@@ -60,12 +62,10 @@
         accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
         for ki in range(k_tiles):
             offs_k = (ki * BLOCK_K).to(tl.int32)
-            a = tl.load_tensor_descriptor(
-                a_desc,
+            a = a_desc.load(
                 [offs_am, offs_k] if A_ROW_MAJOR else [offs_k, offs_am],
             )
-            b = tl.load_tensor_descriptor(
-                b_desc,
+            b = b_desc.load(
                 [offs_k, offs_bn] if B_ROW_MAJOR else [offs_bn, offs_k],
             )
             accumulator += tl.dot(
