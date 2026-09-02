@@ -51,6 +51,10 @@ if TYPE_CHECKING:
     # frames to the frame evaluator rather than dispatching them itself.
     _PACKAGE: str = ""
     _ENTRY_BINDING: str = ""
+    # The grad mode the dynamo capture ran under; both dynamo drivers dispatch
+    # under it, the way the make_fx drivers run under no_grad. Absent (None) on
+    # artifacts written before it, which dispatch in the ambient mode.
+    CAPTURE_GRAD_ENABLED: bool | None = None
     NUM_POSITIONAL_ARGS: int = 0
     PARAM_NAMES: list[str] = []
     BUFFER_NAMES: list[str] = []
@@ -448,7 +452,9 @@ def _build_multigraph_forward():
     hear about.
     """
     import base64
+    import contextlib
     import importlib
+    import os as _os
     import pickle
     import sys as _sys
     import types
@@ -459,15 +465,49 @@ def _build_multigraph_forward():
         load_guards_state,
         SerializedCode,
     )
+    from torch._precompile import PrecompileError
 
     produced_on = globals().get("_DYNAMO_PYTHON_VERSION")
     if produced_on is not None and tuple(produced_on) != _sys.version_info[:2]:
         # marshal only REJECTS a foreign blob across the 3.10 -> 3.11 layout
         # change; between 3.11 and 3.14 it loads and then segfaults when the
         # code object runs, so the version has to be checked explicitly.
-        raise ValueError(
-            f"artifact was produced on Python {produced_on[0]}.{produced_on[1]}"
+        raise PrecompileError(
+            f"precompile: artifact was produced on Python "
+            f"{produced_on[0]}.{produced_on[1]}, this is Python "
+            f"{_sys.version_info[0]}.{_sys.version_info[1]}; it inlines "
+            f"marshalled bytecode, so recapture under this interpreter."
         )
+
+    # A dynamo artifact carries Dynamo internals in its opaque blobs, so it is
+    # locked to the build that made it. Say so, rather than letting the mismatch
+    # surface as whatever import or attribute error happens to come first.
+    produced_by = globals().get("TORCH_VERSION")
+    if produced_by is not None and produced_by != torch.__version__:
+        raise PrecompileError(
+            f"precompile: artifact was produced by torch {produced_by}, "
+            f"this is torch {torch.__version__}; recapture under this build."
+        )
+
+    # The graphs below were captured with these functions inlined into them, so
+    # their current source has to be the source that was traced. The installed
+    # mode gets this check from CompilePackage; here it is the artifact's own.
+    from torch._dynamo.package import _hash_sourcelines
+
+    for _module, _first, _last, _checksum in globals().get("INLINED_SOURCES", ()):
+        try:
+            _actual = _hash_sourcelines(importlib.import_module(_module), _first, _last)
+        except (ImportError, OSError) as e:
+            raise PrecompileError(
+                f"precompile: cannot check the source of {_module!r}, which the "
+                f"captured graphs inlined ({type(e).__name__}: {e}). It has to be "
+                f"importable, with source, on the machine that loads the artifact."
+            ) from e
+        if _actual != _checksum:
+            raise PrecompileError(
+                f"precompile: source code changes detected for {_module} "
+                f"(line {_first} - line {_last}); recapture the artifact"
+            )
 
     frames = pickle.loads(base64.b64decode(_FRAMES))
     backends = pickle.loads(base64.b64decode(_BACKENDS)) if _BACKENDS else {}
@@ -475,24 +515,68 @@ def _build_multigraph_forward():
     # One namespace for the whole artifact. Every name the transformed bytecode
     # can reach lives here: the compiled subgraphs, Dynamo's synthetic import
     # aliases, the plain globals it read, and the resume dispatchers bound
-    # below. It is this module's own dict, never the user's.
-    ns = globals()
+    # below. It is the artifact's, never the user's module dict.
+    #
+    # A COPY of this module's globals rather than the dict itself. The rendered
+    # inductor source was exec'd into this module and brought its own names with
+    # it -- `device` among them -- and binding the frames to the live dict would
+    # let those shadow a user global of the same name, which their guards were
+    # written against, so every variant would miss. The kernels keep resolving
+    # through the real module dict via their own __globals__, so seeding a copy
+    # separates the two without moving anything out from under them.
+    ns = dict(globals())
     # Seed from the module each frame was compiled in: its bytecode reads that
     # module's globals by name, and its guards were written against them. This
     # is a READ -- the artifact binds its own names here, never in the user's
     # module, so loading mutates nothing and there is nothing to unload. The
     # values are therefore as of load time; a global rebound afterwards is not
     # seen, which for a frozen artifact is the intended reading.
+    #
+    # The user's value wins over the artifact's own, but the FIRST frame's
+    # module wins among several, which is the flattening this one namespace has
+    # always done.
+    _seeded = set()
     for _frame in frames:
-        _module = _sys.modules.get(_frame["python_module"])
+        _module_name = _frame["python_module"]
+        _module = _sys.modules.get(_module_name)
         if _module is None:
             try:
-                _module = importlib.import_module(_frame["python_module"])
-            except ImportError:
-                _module = None
-        if _module is not None:
-            for _k, _v in vars(_module).items():
-                ns.setdefault(_k, _v)
+                _module = importlib.import_module(_module_name)
+            except ImportError as e:
+                raise PrecompileError(
+                    f"precompile: the captured frame "
+                    f"{SerializedCode.to_code_object(_frame['code']).co_name!r} "
+                    f"reads the globals of module {_module_name!r}, which cannot "
+                    f"be imported here ({e}). Make it importable on the loading "
+                    f"machine, or recapture from an importable module."
+                ) from e
+        if _module_name == "__main__":
+            # __main__ names whatever script is RUNNING, so a frame compiled in
+            # one script would read another's globals: refuse unless the
+            # loader's __main__ is the file the frame was compiled from.
+            _captured = SerializedCode.to_code_object(_frame["code"]).co_filename
+            _running = getattr(_module, "__file__", None)
+            # Compared only when both name a real file: a REPL, `python -c` or
+            # a notebook has no __file__, and a frame compiled there records a
+            # placeholder co_filename, so neither can identify another script.
+            if (
+                _running is not None
+                and _os.path.isfile(_running)
+                and _os.path.isfile(_captured)
+                and _os.path.realpath(_running) != _os.path.realpath(_captured)
+            ):
+                raise PrecompileError(
+                    f"precompile: the captured frame "
+                    f"{SerializedCode.to_code_object(_frame['code']).co_name!r} "
+                    f"was compiled in __main__ ({_captured}), and this process's "
+                    f"__main__ is {_running}; the frame reads its module's "
+                    f"globals, which only that script has. Capture from a "
+                    f"function defined in an importable module."
+                )
+        for _k, _v in vars(_module).items():
+            if _k not in _seeded:
+                _seeded.add(_k)
+                ns[_k] = _v
     # The artifact's own names win over anything seeded above.
     for _backend_id, _artifact in backends.items():
         ns[_backend_id] = torch._dynamo.disable(_artifact.after_deserialization())
@@ -516,6 +600,32 @@ def _build_multigraph_forward():
     entry_binding = (
         pickle.loads(base64.b64decode(_ENTRY_BINDING)) if _ENTRY_BINDING else {}
     )
+    # Capture pinned the grad mode -- no_grad, or enable_grad for a training
+    # capture -- and GRAD_MODE is a guard, so a call made in the other mode
+    # would miss every variant. Dispatch under the captured mode instead, the
+    # way the make_fx drivers run under no_grad. An artifact written before
+    # this was recorded dispatches in the ambient mode.
+    _grad_enabled = globals().get("CAPTURE_GRAD_ENABLED")
+
+    def _grad_mode():
+        if _grad_enabled is None:
+            return contextlib.nullcontext()
+        return torch.set_grad_enabled(_grad_enabled)
+
+    def _why_missed(bound, f_locals):
+        # The first failing check per variant, or the exception the check
+        # raised; capped so a frame with many variants stays readable.
+        reasons = []
+        for _index, (manager, _) in enumerate(bound[:4]):
+            try:
+                _parts = manager.check_verbose(f_locals).verbose_code_parts
+                _reason = _parts[0] if _parts else "no failing check reported"
+            except Exception as e:
+                _reason = f"{type(e).__name__}: {e}"
+            reasons.append(f"variant {_index}: {_reason}")
+        if len(bound) > 4:
+            reasons.append(f"... {len(bound) - 4} more variant(s)")
+        return " | ".join(reasons)
 
     def _make_dispatcher(frame):
         target = SerializedCode.to_code_object(frame["code"])
@@ -556,20 +666,29 @@ def _build_multigraph_forward():
             # a guard written against a defaulted argument has nothing to bind to
             # otherwise, and every variant misses on a call that omitted it.
             if entry_defaults:
-                for name, value in zip(arg_names[len(args) :], entry_defaults):
+                # __defaults__ aligns with the LAST len(defaults) parameters,
+                # not with whatever this call left off, so anchor it at the tail
+                # of arg_names. Anchoring at len(args) instead shifts every
+                # default one slot left for each argument passed positionally
+                # past the first defaulted one.
+                for name, value in zip(
+                    arg_names[-len(entry_defaults) :], entry_defaults
+                ):
                     f_locals.setdefault(name, value)
             if entry_kwdefaults:
                 for name, value in entry_kwdefaults.items():
                     f_locals.setdefault(name, value)
             f_locals.update(kwargs)
-            for manager, variant in bound:
-                if manager.check(f_locals):
-                    return variant(*args, **kwargs)
-            raise RuntimeError(
+            with _grad_mode():
+                for manager, variant in bound:
+                    if manager.check(f_locals):
+                        return variant(*args, **kwargs)
+                why = _why_missed(bound, f_locals)
+            raise PrecompileError(
                 f"precompile: no captured variant of {target.co_name!r} matches this "
                 f"call. The artifact serves only what capture exercised; add an "
                 f"example covering it and recapture. Captured "
-                f"{len(variants)} variant(s)."
+                f"{len(variants)} variant(s). First failing check: {why}"
             )
 
         if is_entry and target.co_freevars:
@@ -615,7 +734,7 @@ def _build_multigraph_forward():
         elif _frame["is_entry"]:
             entry = dispatcher
     if entry is None:
-        raise ValueError("artifact has no entry frame")
+        raise PrecompileError("precompile: artifact has no entry frame")
     return entry
 
 
@@ -651,14 +770,28 @@ def _build_installed_forward():
     def _entry_function():
         # The entry records no qualname to resolve -- it is the callable handed
         # to precompile, not something reached from a module -- so rebuild a
-        # function around its code object. Capture refuses an entry whose
-        # closure or defaults this could not reproduce, and load(fn=...) lets a
-        # caller supply the real function instead.
+        # function around its code object. A code object carries neither
+        # defaults nor closure values, so they come back from the artifact the
+        # same way the standalone driver's _bind takes them; without them a
+        # defaulted parameter is simply absent at the served call and every
+        # guard misses. load(fn=...) lets a caller supply the real function.
         code_entry = cache_entry.dynamo.codes[0]
         code = SerializedCode.to_code_object(code_entry.python_code)
-        return types.FunctionType(
-            code, sys.modules[code_entry.python_module].__dict__, code.co_name
+        binding = (
+            pickle.loads(base64.b64decode(_ENTRY_BINDING)) if _ENTRY_BINDING else {}
         )
+        cells = binding.get("closure")
+        f = types.FunctionType(
+            code,
+            sys.modules[code_entry.python_module].__dict__,
+            code.co_name,
+            binding.get("defaults"),
+            tuple(types.CellType(value) for value in cells) if cells else None,
+        )
+        kwdefaults = binding.get("kwdefaults")
+        if kwdefaults:
+            f.__kwdefaults__ = dict(kwdefaults)
+        return f
 
     def _serve(fn):
         from torch._dynamo.precompile_context import PrecompileContext
@@ -671,4 +804,6 @@ def _build_installed_forward():
             PrecompileContext.record_artifact(_backend)
         return serve_cache_entry(fn, cache_entry, backend=BACKEND)
 
-    return _InstalledArtifact(_serve, _entry_function)
+    return _InstalledArtifact(
+        _serve, _entry_function, grad_enabled=globals().get("CAPTURE_GRAD_ENABLED")
+    )

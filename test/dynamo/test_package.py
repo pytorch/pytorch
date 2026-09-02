@@ -9,6 +9,8 @@ import gc
 import importlib
 import inspect
 import itertools
+import json
+import logging
 import math
 import math as _precompile_stdlib_alias
 import os
@@ -1157,6 +1159,34 @@ class TestPackage(torch._inductor.test_case.TestCase):
         torch._dynamo.reset()
         PrecompileContext.clear()
 
+    def test_graph_has_dynamic_shapes_reads_example_value(self):
+        # A Dynamo graph stashes its fake values under "example_value", not
+        # "val"; reading only "val" would call a dynamic graph static.
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            _graph_has_dynamic_shapes,
+        )
+
+        graphs = []
+
+        def backend(gm, example_inputs):
+            graphs.append(gm)
+            return gm.forward
+
+        def fn(x):
+            return x + 1
+
+        for dynamic in (False, True):
+            torch._dynamo.reset()
+            torch.compile(fn, backend=backend, dynamic=dynamic)(torch.randn(3))
+        static, dynamic = graphs
+        for gm in (static, dynamic):
+            for node in gm.graph.nodes:
+                node.meta.pop("val", None)
+                if node.op == "placeholder":
+                    self.assertIn("example_value", node.meta)
+        self.assertFalse(_graph_has_dynamic_shapes(static))
+        self.assertTrue(_graph_has_dynamic_shapes(dynamic))
+
     def test_guarded_code_records_backend_ids_from_bytecode(self):
         def fn(x):
             return x + 1
@@ -1606,6 +1636,62 @@ def add(x, y):
 
         torch._dynamo.reset()
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_rewrapping_a_function_shares_its_installed_package(self):
+        # Each torch.compile wrapper used to load and install the artifact for
+        # itself, stacking one precompile entry per wrap on the code object.
+        from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+
+        def fn(x):
+            return x.sin() + 1
+
+        x = torch.randn(3)
+        torch.compile(fn, backend="inductor")(x)
+        self._save_and_reload(expected_backends=1, expected_dynamo=1)
+
+        wrappers = [torch.compile(fn, backend="inductor") for _ in range(4)]
+        self.assertEqual(wrappers[0](x), fn(x))
+        package = dynamo_package.live_package(fn, -1)
+        self.assertIsNotNone(package)
+        # install() assigns the loaded frame a compile id; serving assigns none.
+        total_frames = torch._dynamo.convert_frame.FRAME_COUNTER
+        for index in range(1, 4):
+            self.assertEqual(wrappers[index](x), fn(x))
+            self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 1)
+            self.assertIs(dynamo_package.live_package(fn, -1), package)
+        self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
+        counters = torch._dynamo.utils.counters["dynamo_cache"]
+        self.assertEqual(counters["dynamo_cache_hit"], 1)
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_dropping_every_wrapper_releases_the_precompile_entries(self):
+        from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+
+        def fn(x):
+            return x.sin() + 1
+
+        x = torch.randn(3)
+        torch.compile(fn, backend="inductor")(x)
+        self._save_and_reload(expected_backends=1, expected_dynamo=1)
+
+        wrappers = [torch.compile(fn, backend="inductor") for _ in range(2)]
+        wrappers[0](x)
+        wrappers[1](x)
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 1)
+
+        wrappers.pop()
+        gc.collect()
+        total_frames = torch._dynamo.convert_frame.FRAME_COUNTER
+        self.assertEqual(wrappers[0](x), fn(x))
+        self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 1)
+
+        del wrappers
+        gc.collect()
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+        self.assertIsNone(dynamo_package.live_package(fn, -1))
+
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @parametrize("isolate_recompiles", (False, True))
@@ -2065,6 +2151,46 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
     def path(self, name="artifact.pt"):
         """An artifact FILE inside this test's scratch dir; save() writes files."""
         return os.path.join(self.dir(), name)
+
+    def test_recompile_limit_emits_dynamo_cache_truncated_artifact(self):
+        # A production job only sees the capture through tlparse, so hitting
+        # the limit under a package has to leave a structured-trace record.
+        class Capture(logging.Handler):
+            def __init__(self):
+                super().__init__()
+                self.records = []
+
+            def emit(self, record):
+                self.records.append(record)
+
+        trace_log = logging.getLogger("torch.__trace")
+        handler = Capture()
+        old_level = trace_log.level
+        trace_log.setLevel(logging.DEBUG)
+        trace_log.addHandler(handler)
+        try:
+            session = precompile_capture(
+                PrecompileSelfAct(torch.relu),
+                backend="eager",
+                dynamic=False,
+                recompile_limit=2,
+            )
+            with session as compiled, torch.no_grad():
+                for n in (3, 4, 5, 6):
+                    compiled(torch.randn(n, 4))
+        finally:
+            trace_log.removeHandler(handler)
+            trace_log.setLevel(old_level)
+        self.assertTrue(session.summary().truncated)
+        truncated = [
+            json.loads(record.payload)
+            for record in handler.records
+            if record.metadata.get("artifact", {}).get("name")
+            == "dynamo_cache_truncated"
+        ]
+        self.assertEqual(len(truncated), 1)
+        self.assertEqual(truncated[0]["reason"], "hit recompile_limit")
+        self.assertIn("forward", truncated[0]["function"])
 
     @parametrize("backend", ("eager", "inductor"))
     def test_graph_breaks_and_recompiles_round_trip(self, backend):
@@ -2972,7 +3098,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
 
             package = loaded._package
-            installed = package._installed_precompile_codes
+            installed = package._region_install.codes
             entryless = [c for c in installed if not _debug_get_precompile_entries(c)]
             self.assertTrue(entryless, "no entryless installed code to guard against")
             self.assertIs(installed[0], entryless[0])  # the naive rule's victim
@@ -3341,7 +3467,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         eval_frame = torch._C._dynamo.eval_frame
         real_reset = eval_frame._reset_precompile_entries_for_owner
         shared_code = shared.SharedBlock.forward.__code__
-        self.assertIn(shared_code, loaded_a._package._installed_precompile_codes)
+        self.assertIn(shared_code, loaded_a._package._region_install.codes)
         at_shared_reset = threading.Event()
         allow_reset = threading.Event()
         b_waiting_for_lock = threading.Event()
@@ -4034,7 +4160,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         )
         installed = [
             code
-            for code in loaded._package._installed_precompile_codes
+            for code in loaded._package._region_install.codes
             if code.co_name.startswith("torch_dynamo_resume_in")
         ]
         self.assertTrue(installed, "expected resume frames to be installed")
@@ -4931,7 +5057,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         torch._dynamo.reset()
         loaded = precompile_load(PrecompileEmptyGraph(), self.path(), backend="eager")
         code = PrecompileEmptyGraph.forward.__code__
-        self.assertIn(code, loaded._package._region_skipped_codes)
+        self.assertIn(code, loaded._package._region_install.skipped_codes)
         self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.DEFAULT)
         self.assertEqual(
             get_code_region_exec_strategy(
@@ -4941,7 +5067,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         )
 
         loaded.unload()
-        self.assertEqual(loaded._package._region_skipped_codes, [])
+        self.assertEqual(loaded._package._region_install.skipped_codes, [])
         self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.DEFAULT)
 
     def test_unload_preserves_a_preexisting_skip_strategy(self):
@@ -4955,7 +5081,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         torch._dynamo.eval_frame.skip_code(code)
 
         loaded = precompile_load(PrecompileEmptyGraph(), self.path(), backend="eager")
-        self.assertIn(code, loaded._package._region_skipped_codes)
+        self.assertIn(code, loaded._package._region_install.skipped_codes)
         loaded.unload()
         self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.SKIP)
 
