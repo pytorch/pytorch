@@ -1341,19 +1341,19 @@ class TestFSDPMiscWorldSize1(FSDPTestMultiThread):
 instantiate_device_type_tests(
     TestFSDPMiscMultiThread,
     globals(),
-    only_for=("cuda", "hpu", "xpu", "privateuse1"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestFSDPMiscMultiProcess,
     globals(),
-    only_for=("cuda", "hpu", "xpu", "privateuse1"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestFSDPMiscWorldSize1,
     globals(),
-    only_for=("cuda", "hpu", "xpu", "privateuse1"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 
