@@ -1579,6 +1579,31 @@ class DisableContext(_TorchDynamoContext):
         return (self.__class__, ())
 
 
+def _backend_emits_native_code(backend: str | Callable[..., Any] | None) -> bool:
+    """
+    Whether artifacts of this backend carry a CPU codegen target to protect.
+
+    get_compiler_fn erases the name, and torch.compile hands over a
+    _TorchCompileWrapper rather than the string the user wrote, so the name is
+    recovered from the wrapper, then from the registry (a registered callable
+    passed directly, e.g. optimize(eager)), then from __name__. A callable that
+    yields no name is assumed to emit native code: a false rejection at load is
+    recoverable and silently running a kernel built for another ISA is not.
+    """
+    from torch._dynamo.package import emits_native_code
+
+    from .backends.registry import _COMPILER_FNS
+
+    if isinstance(backend, str):
+        return emits_native_code(backend)
+    name = getattr(backend, "compiler_name", None)
+    if name is None:
+        name = next((n for n, fn in _COMPILER_FNS.items() if fn is backend), None)
+    if name is None:
+        name = getattr(backend, "__name__", None)
+    return name is None or emits_native_code(name)
+
+
 def _optimize_catch_errors(
     compile_fn: convert_frame.ConvertFrameProtocol,
     hooks: Hooks,
@@ -1886,13 +1911,7 @@ def _optimize(
             dynamic_shapes=dynamic_shapes,
         )
 
-    # get_compiler_fn erases the name, and torch.compile hands us a
-    # _TorchCompileWrapper rather than the string the user wrote.
-    from torch._dynamo.package import emits_native_code as _emits_native_code
-
-    emits_native_code = _emits_native_code(
-        str(getattr(backend, "compiler_name", backend))
-    )
+    emits_native_code = _backend_emits_native_code(backend)
     backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
@@ -2842,13 +2861,7 @@ def _optimize_assert(
     Used for fullgraph=True and export, since we must always error on graph breaks and ignore
     symbolic_convert.error_on_graph_break. Can also be used for testing.
     """
-    # get_compiler_fn erases the name, and torch.compile hands us a
-    # _TorchCompileWrapper rather than the string the user wrote.
-    from torch._dynamo.package import emits_native_code as _emits_native_code
-
-    emits_native_code = _emits_native_code(
-        str(getattr(backend, "compiler_name", backend))
-    )
+    emits_native_code = _backend_emits_native_code(backend)
     backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager

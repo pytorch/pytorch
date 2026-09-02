@@ -4137,33 +4137,17 @@ class _Missing:
         return _Missing()
 
 
-def _reaches(container: object, target: object) -> bool:
-    """Whether ``container`` holds ``target`` directly.
-
-    Only one level: a decorator stores its wrapper straight into the wrapper's
-    own __dict__, defaults or closure, and that is the shape that recurses.
-    A reference buried inside a user object would need a full traversal, which
-    would have to run arbitrary __iter__ on values the pickler has not vetted.
-    """
-    if container is target:
-        return True
-    if isinstance(container, dict):
-        return any(value is target for value in container.values())
-    if isinstance(container, (tuple, list)):
-        return any(value is target for value in container)
-    return False
-
-
 @dataclasses.dataclass(frozen=True)
 class _DeferredFunctionState:
-    """What a reconstructed function cannot receive through its reduce args.
+    """Everything a reconstructed function receives after it exists.
 
-    A decorator that gives its wrapper a call counter, a cache attribute or a
-    recursive default writes the wrapper into its own closure, __dict__ or
-    __defaults__. Those all travel in the reduce args, which pickle saves
-    BEFORE memoizing the function, so the reference re-enters the reducer and
-    recurses. Whatever reaches the function is moved here instead and applied
-    by _apply_function_state once the pickle exists.
+    pickle saves an object's reduce ARGS before memoizing the object, so a
+    reference from those args back to the function -- a decorator's call counter
+    on its own wrapper, a recursive default, or a second function that closes
+    over this one and is held in its __dict__ -- re-enters the reducer and
+    recurses until RecursionError. So none of it travels in args: state is
+    applied by _apply_function_state once the pickle exists, and by then every
+    such reference resolves to the function already built.
     """
 
     guarded_globals: dict[str, object] | None = None
@@ -4180,44 +4164,6 @@ class _DeferredFunctionState:
             or self.kwdefaults is not None
             or self.attributes
         )
-
-
-# A reconstructed FakeTensor keeps its own bookkeeping in __dict__ alongside
-# anything the user hung there. Re-serializing one must not carry these across:
-# the reconstructor sets them itself, and carrying them would accrete a fresh
-# copy of each on every round trip.
-_FAKE_TENSOR_OWNED_ATTRIBUTES = frozenset(
-    {
-        "_fake_device",
-        "fake_mode",
-        "constant",
-        "pytype",
-        "dispatch_keys",
-        "real_tensor",
-        "_nonzero_memo",
-        "_nonzero_memo_vc",
-        "_nonzero_memo_epoch",
-        "_item_memo",
-        "_item_memo_vc",
-        "_item_memo_epoch",
-        "_unique_memo",
-        "_unique_memo_vc",
-        "_unique_memo_epoch",
-        "_unique_consecutive_memo",
-        "_unique_consecutive_memo_vc",
-        "_unique_consecutive_memo_epoch",
-        "_nested_int_memo",
-        "_nested_int_memo_vc",
-        "_nested_int_memo_epoch",
-    }
-)
-
-# The subset a reconstructed FakeTensor genuinely needs to BE one. A user
-# attribute of the same name would overwrite it, so those are refused by name
-# rather than left to fail somewhere inside the rebuild.
-_FAKE_TENSOR_RESERVED_ATTRIBUTES = frozenset(
-    {"_fake_device", "fake_mode", "pytype", "dispatch_keys"}
-)
 
 
 @functools.cache
@@ -4249,6 +4195,9 @@ class GuardsStatePickler(pickle.Pickler):
         self.guard_tree_values = guard_tree_values
         self.empty_values = empty_values
         self.missing_values = missing_values
+        # Cells kept in a reconstructed function's closure: reduced empty, filled
+        # from that function's state so a self-reference cannot recurse.
+        self.deferred_cells: set[int] = set()
 
     @classmethod
     def _unpickle_module(cls, state: Any) -> torch.nn.Module:
@@ -4392,19 +4341,17 @@ class GuardsStatePickler(pickle.Pickler):
         code: types.CodeType,
         module: str,
         qualname: str,
-        argdefs: tuple[object, ...] | None,
+        name: str,
         closure: tuple[types.CellType, ...] | None,
-        kwdefaults: dict[str, object] | None = None,
-        name: str | None = None,
-        attributes: dict[str, object] | None = None,
-        guarded_globals: dict[str, object] | None = None,
-        snapshot_globals: bool = False,
+        snapshot_globals: bool,
+        doc: str | None = None,
     ) -> types.FunctionType:
         if snapshot_globals:
             # Deliberately no import_module here: the snapshot IS the scope, and
             # importing a module only to discard it is a load-time failure mode
-            # this branch does not otherwise have.
-            f_globals: dict[str, Any] = dict(guarded_globals or {})
+            # this branch does not otherwise have. The snapshot arrives with the
+            # rest of the deferred state.
+            f_globals: dict[str, Any] = {}
         else:
             # NB obj.__module__ is not reliably the module the function LIVES in
             # -- functools.wraps copies it from the wrapped function -- so this
@@ -4412,17 +4359,13 @@ class GuardsStatePickler(pickle.Pickler):
             # guard walks __globals__, since one that does registers the dict
             # and forces the snapshot above.
             f_globals = importlib.import_module(module).__dict__
-        fn = types.FunctionType(
-            code,
-            f_globals,
-            name if name is not None else code.co_name,
-            argdefs,
-            closure,
-        )
+        fn = types.FunctionType(code, f_globals, name, None, closure)
         fn.__qualname__ = qualname
-        fn.__kwdefaults__ = kwdefaults
-        if attributes:
-            fn.__dict__.update(attributes)
+        # FunctionType reads __module__ out of f_globals["__name__"], which the
+        # snapshot scope above does not have, so a guard on fn.__module__ used to
+        # rebuild against None.
+        fn.__module__ = module
+        fn.__doc__ = doc
         return fn
 
     def _keep(self, value: object) -> bool:
@@ -4438,38 +4381,26 @@ class GuardsStatePickler(pickle.Pickler):
         """
         return id(value) in self.guard_tree_values
 
-    def _reduce_cell(self, cell: types.CellType) -> types.CellType:
-        """Carry a closure cell, or replace it with a sentinel one.
+    @classmethod
+    def _unpickle_empty_cell(cls) -> types.CellType:
+        return types.CellType()
 
-        A carried cell is passed through UNCHANGED so that two functions
-        closing over the same variable still share it after reload, and so that
-        pickle can memoize it. Only a dropped cell is rebuilt.
-
-        An EMPTY cell -- a free variable a decorator only assigns on a path that
-        did not run -- has no contents to read at all, so presence is checked
-        before identity. Reading it unconditionally raised ValueError here,
-        which reaches the caller as a package bypass.
-        """
-        try:
-            contents = cell.cell_contents
-        except ValueError:
-            return type(self)._unpickle_cell(_Missing("empty function closure"))
-        if self._keep(cell) or self._keep(contents):
-            return cell
-        return type(self)._unpickle_cell(_Missing("unguarded function closure"))
+    def _dropped_cell(self, reason: str) -> types.CellType:
+        """A stand-in for a closure cell whose contents must not travel."""
+        return type(self)._unpickle_cell(_Missing(reason))
 
     @staticmethod
     def _apply_function_state(
         fn: types.FunctionType, state: _DeferredFunctionState
     ) -> None:
-        """Apply the pieces of a reconstructed function that reach the function.
+        """Apply everything a reconstructed function receives after it exists.
 
-        pickle memoizes an object only after saving its reduce ARGS, so
-        anything in args holding a reference back to the function being reduced
-        recurses until RecursionError. State is applied after memoization, so
-        those references resolve to the pickle already built. Everything here
-        is settable post-construction; __closure__ is not, which is why a
-        deferred cell is built empty in args and filled by contents here.
+        pickle memoizes an object only after saving its reduce ARGS, so anything
+        in args holding a reference back to the function being reduced recurses
+        until RecursionError. State is applied after memoization, so those
+        references resolve to the pickle already built. Everything here is
+        settable post-construction; __closure__ is not, which is why a cell
+        arrives empty in args and is filled with its contents here.
         """
         if state.guarded_globals:
             fn.__globals__.update(state.guarded_globals)
@@ -4529,12 +4460,15 @@ class GuardsStatePickler(pickle.Pickler):
             if not kwdefaults and not keep_kwdefaults:
                 kwdefaults = None
 
-        # Anything below that holds obj itself has to travel in STATE rather
-        # than in the reduce args: pickle memoizes obj only after saving its
-        # args, so a self-reference in args re-enters the reducer and recurses.
-        # A decorator writing a counter or a cache onto its own wrapper is the
-        # ordinary way this happens, and functools.wraps makes such a wrapper
-        # exactly the fqn-mismatched shape this reducer exists to rebuild.
+        # Everything below travels in STATE rather than in the reduce args, and
+        # unconditionally: pickle memoizes obj only after saving its args, so
+        # ANY path from an arg back to obj re-enters the reducer and recurses.
+        # A self-reference is the obvious one -- a decorator writing a counter
+        # onto its own wrapper -- but two kept functions referring to each other
+        # do it across the pair, which no per-value check can see from here.
+        # Only the cells themselves stay in args, because __closure__ is
+        # read-only after construction; they arrive empty and the state setter
+        # fills their contents.
         deferred_cells: list[tuple[int, object]] = []
         closure = obj.__closure__
         if closure is not None:
@@ -4543,16 +4477,18 @@ class GuardsStatePickler(pickle.Pickler):
                 try:
                     contents = cell.cell_contents
                 except ValueError:
-                    rebuilt.append(self._reduce_cell(cell))
+                    # A free variable a decorator only assigns on a path that
+                    # did not run: nothing to read, so nothing to carry.
+                    rebuilt.append(self._dropped_cell("empty function closure"))
                     continue
-                if contents is obj and (self._keep(cell) or self._keep(contents)):
-                    # __closure__ is read-only after construction, so unlike the
-                    # rest this cannot simply move to state: build the cell empty
-                    # and let the state setter fill its contents.
-                    rebuilt.append(types.CellType())
+                if self._keep(cell) or self._keep(contents):
+                    # The cell object itself is kept so that two functions
+                    # closing over one variable still share one cell after load.
+                    self.deferred_cells.add(id(cell))
+                    rebuilt.append(cell)
                     deferred_cells.append((index, contents))
                 else:
-                    rebuilt.append(self._reduce_cell(cell))
+                    rebuilt.append(self._dropped_cell("unguarded function closure"))
             closure = tuple(rebuilt)
 
         attributes = (
@@ -4562,27 +4498,21 @@ class GuardsStatePickler(pickle.Pickler):
                 name: value for name, value in obj.__dict__.items() if self._keep(value)
             }
         )
-        deferred_defaults = defaults if _reaches(defaults, obj) else None
-        deferred_kwdefaults = kwdefaults if _reaches(kwdefaults, obj) else None
-        deferred_attributes = attributes if _reaches(attributes, obj) else None
         state = _DeferredFunctionState(
             guarded_globals=guarded_globals,
             cell_contents=tuple(deferred_cells),
-            defaults=deferred_defaults,
-            kwdefaults=deferred_kwdefaults,
-            attributes=deferred_attributes,
+            defaults=defaults,
+            kwdefaults=kwdefaults,
+            attributes=attributes,
         )
         args = (
             obj.__code__,
             obj.__module__,
             obj.__qualname__,
-            None if deferred_defaults is not None else defaults,
-            closure,
-            None if deferred_kwdefaults is not None else kwdefaults,
             obj.__name__,
-            None if deferred_attributes is not None else attributes,
-            None,
+            closure,
             snapshot_globals,
+            obj.__doc__,
         )
         if not state:
             return type(self)._unpickle_nested_function, args
@@ -4765,12 +4695,17 @@ class GuardsStatePickler(pickle.Pickler):
             if func is not inner_func:
                 return type(self)._unpickle_bound_method, (func, method_self)
 
-        elif isinstance(obj, type((lambda x: lambda: x)(0).__closure__[0])):  # type: ignore[index] # noqa: PLC3002
+        elif isinstance(obj, types.CellType):
+            if id(obj) in self.deferred_cells:
+                # A cell in some reconstructed function's closure: it travels so
+                # that sharing survives, but its CONTENTS come back through that
+                # function's state, because saving them here -- inside the
+                # function's args -- is what recurses.
+                return type(self)._unpickle_empty_cell, ()
             # An EMPTY cell -- a free variable only assigned on a path that
             # did not run -- has nothing to read, and reading it raised
             # ValueError out of here, which reaches the caller as a package
-            # bypass. _reduce_cell handles the cells it builds; this is the
-            # path a cell reached directly takes.
+            # bypass.
             try:
                 contents = obj.cell_contents
             except ValueError:
@@ -4884,14 +4819,20 @@ def pickle_guards_state(
 
     try:
         pickler.dump(state)
+    except RecursionError:
+        # Not a user's serialization limitation: either a reducer failed to
+        # break a cycle in the state, or the pickler recursed on depth it should
+        # have flattened. Both are ours, and a bypass would hide them behind a
+        # model that silently runs eager.
+        raise
     except torch._dynamo.exc.TorchDynamoException:
         # Dynamo steers compilation with exceptions -- RestartAnalysis,
         # SkipFrame, Unsupported, ObservedException -- and all of them derive
         # from TorchDynamoException, which derives from RuntimeError. Pickling
-        # runs user __reduce__, __getstate__ and property getters, so a value
-        # whose getter is itself traced can raise one here. Rewriting a restart
-        # into a package bypass means the restart never happens, so the whole
-        # family propagates; PackageError is in it and keeps its old meaning.
+        # runs user __reduce__, __getstate__ and property getters, any of which
+        # may call a COMPILED callable, and one of these coming back out of that
+        # call belongs to the frame being compiled there: rewriting it into a
+        # package bypass means the restart or the graph break never happens.
         raise
     except Exception as e:
         # Deliberately broad, including AssertionError. It is tempting to let
