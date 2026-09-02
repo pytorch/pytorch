@@ -87,6 +87,17 @@ class PrecompileSummary:
     # them, so the slot tuples stay the identity the policy compares on.
     dropped_guard_code: tuple[tuple[str, str, str], ...] = ()
     capture_errors: tuple[str, ...] = ()
+    # Variants whose serialized guards, after every drop, no longer check
+    # anything rooted at a call argument: only global-state and unmodelled
+    # leaves survived. Such a variant is served to any call that reaches its
+    # frame. Not a gate, because a frame with no tensor arguments legitimately
+    # looks like this; reported so a capture that lost its input checks is
+    # not mistaken for one that had none.
+    variants_without_input_guards: int = 0
+    # (leaf class, rendered check) for every guard that rebuilt from its own
+    # pickle into a check the live capture never made; see
+    # PrecompileSession._report_guard_drift. Each will miss at serve time.
+    drifted_guards: tuple[tuple[str, str], ...] = ()
 
     @property
     def complete(self) -> bool:
@@ -141,9 +152,15 @@ class PrecompileSummary:
             base += f", {len(self.bypassed)} BYPASSED: {list(self.bypassed)}"
         if self.capture_errors:
             base += f", {len(self.capture_errors)} CAPTURE ERROR(S)"
+        if self.variants_without_input_guards:
+            base += f", {self.variants_without_input_guards} variant(s) with NO input guards"
+        if self.drifted_guards:
+            base += f", {len(self.drifted_guards)} DRIFTED guard(s)"
         return base
 
 
+# Exported from torch.compiler, so pickling and Sphinx anchor them there.
+ExampleInput.__module__ = "torch.compiler"
 GuardFact.__module__ = "torch.compiler"
 FrameInvariants.__module__ = "torch.compiler"
 PrecompileSummary.__module__ = "torch.compiler"

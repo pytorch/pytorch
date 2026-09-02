@@ -9,6 +9,8 @@ import gc
 import importlib
 import inspect
 import itertools
+import json
+import logging
 import math
 import math as _precompile_stdlib_alias
 import os
@@ -39,6 +41,7 @@ from torch._dynamo.package import (
     CompilePackage,
     DiskDynamoStore,
     DynamoCache,
+    InMemoryDynamoStore,
     SystemInfo,
 )
 from torch._dynamo.precompile_context import PrecompileContext
@@ -1195,6 +1198,111 @@ class TestPackage(torch._inductor.test_case.TestCase):
 
         cache_entry = package.cache_entry()
         self.assertEqual(cache_entry.codes[0].backend_ids, [backend_id])
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_cpu_codegen_config_change_bypasses_the_frame(self):
+        # The codegen target is probed once per package. A frame compiled after
+        # inductor's CPU config moved used to raise out of the compile as an
+        # InternalTorchDynamoError; it is dropped from the artifact instead.
+        def fn(x):
+            return x.sin() + 1
+
+        compiled = torch.compile(fn, backend="inductor", dynamic=False)
+        compiled(torch.randn(3))
+        entry = PrecompileContext._dynamo_cache_entries[
+            CompilePackage.source_id_from_fn(fn)
+        ]
+        recorded = entry.system_info.cpu_codegen_target
+        if recorded is None:
+            raise unittest.SkipTest("no C++ toolchain: no CPU codegen target recorded")
+        self.assertFalse(entry.codes[0].bypassed)
+
+        with torch._inductor.config.patch({"cpp.simdlen": 256}):
+            compiled(torch.randn(4))
+        self.assertTrue(entry.codes[0].bypassed)
+        self.assertIn("CPU codegen target changed", entry.codes[0].bypass_reason)
+        self.assertEqual(entry.system_info.cpu_codegen_target, recorded)
+
+    def test_loaded_cache_entry_is_not_mutated_by_a_recompile(self):
+        # initialize() must work on its own copy of the entry: the store keeps
+        # the original, and a recompile on the loaded package appends a guarded
+        # code whose backend the store never had.
+        store = InMemoryDynamoStore()
+
+        def fn(x):
+            return x + 1
+
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize("eager", dynamic=False, package=package)(
+            fn
+        )
+        compiled_fn(torch.randn(3))
+        for backend_id, backend in package.cached_backends.items():
+            store.record_eager_backend(backend_id, backend)
+        store.save_package(package, "key")
+        stored = store.packages["key"].dynamo
+        self.assertEqual(len(stored.codes[0].guarded_codes), 1)
+
+        torch._dynamo.reset()
+        loaded, backends = store.load_package(fn, "key")
+        loaded.install(backends)
+        compiled_fn = torch._dynamo.optimize("eager", dynamic=False, package=loaded)(fn)
+        compiled_fn(torch.randn(3))
+        compiled_fn(torch.randn(4))
+        self.assertEqual(len(loaded.cache_entry().codes[0].guarded_codes), 2)
+        self.assertEqual(len(stored.codes[0].guarded_codes), 1)
+
+    def test_prepare_then_install_round_trip(self):
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3, 2)
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize("eager", package=package)(fn)
+        expected = compiled_fn(x)
+        for backend_id, backend in package.cached_backends.items():
+            ctx.record_eager_backend(backend_id, backend)
+        ctx.save_package(package, self.path())
+
+        torch._dynamo.reset()
+        package, backends = ctx.load_package(fn, self.path())
+        package.prepare(backends)
+        self.assertIsNotNone(package._prepared)
+        package.install(backends)
+        self.assertIsNone(package._prepared)
+        compiled_fn = torch._dynamo.optimize("eager", package=package)(fn)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled_fn(x), expected)
+
+    def test_graph_has_dynamic_shapes_reads_example_value(self):
+        # A Dynamo graph stashes its fake values under "example_value", not
+        # "val"; reading only "val" would call a dynamic graph static.
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            _graph_has_dynamic_shapes,
+        )
+
+        graphs = []
+
+        def backend(gm, example_inputs):
+            graphs.append(gm)
+            return gm.forward
+
+        def fn(x):
+            return x + 1
+
+        for dynamic in (False, True):
+            torch._dynamo.reset()
+            torch.compile(fn, backend=backend, dynamic=dynamic)(torch.randn(3))
+        static, dynamic = graphs
+        for gm in (static, dynamic):
+            for node in gm.graph.nodes:
+                node.meta.pop("val", None)
+                if node.op == "placeholder":
+                    self.assertIn("example_value", node.meta)
+        self.assertFalse(_graph_has_dynamic_shapes(static))
+        self.assertTrue(_graph_has_dynamic_shapes(dynamic))
 
     @unittest.expectedFailure  # FUNCTION_MATCH guard not serializable today
     def test_nn_module(self):
@@ -4737,6 +4845,46 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertGreater(summary.guarded_codes, 0)
         self.assertEqual(summary.uncovered_frames, ())
 
+    def test_recompile_limit_emits_dynamo_cache_truncated_artifact(self):
+        # A production job only sees the capture through tlparse, so hitting
+        # the limit under a package has to leave a structured-trace record.
+        class Capture(logging.Handler):
+            def __init__(self):
+                super().__init__()
+                self.records = []
+
+            def emit(self, record):
+                self.records.append(record)
+
+        trace_log = logging.getLogger("torch.__trace")
+        handler = Capture()
+        old_level = trace_log.level
+        trace_log.setLevel(logging.DEBUG)
+        trace_log.addHandler(handler)
+        try:
+            session = precompile_capture(
+                PrecompileSelfAct(torch.relu),
+                backend="eager",
+                dynamic=False,
+                recompile_limit=2,
+            )
+            with session as compiled, torch.no_grad():
+                for n in (3, 4, 5, 6):
+                    compiled(torch.randn(n, 4))
+        finally:
+            trace_log.removeHandler(handler)
+            trace_log.setLevel(old_level)
+        self.assertTrue(session.summary().truncated)
+        truncated = [
+            json.loads(record.payload)
+            for record in handler.records
+            if record.metadata.get("artifact", {}).get("name")
+            == "dynamo_cache_truncated"
+        ]
+        self.assertEqual(len(truncated), 1)
+        self.assertEqual(truncated[0]["reason"], "hit recompile_limit")
+        self.assertIn("forward", truncated[0]["function"])
+
     def test_precompile_entries_are_region_scoped_in_both_directions(self):
         # Two rails that pull against each other, so neither can be "fixed" by
         # loosening the other. A precompile entry installed for the DEFAULT
@@ -4763,7 +4911,11 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             isolated = torch._dynamo.optimize(
                 "eager", dynamic=False, isolate_recompiles=True
             )(model)
-            with torch.no_grad(), serving(), self.assertRaises(RecompileError):
+            with (
+                torch.no_grad(),
+                serving(),
+                self.assertRaisesRegex(RecompileError, "Detected recompile"),
+            ):
                 isolated(x)
         finally:
             package.uninstall()

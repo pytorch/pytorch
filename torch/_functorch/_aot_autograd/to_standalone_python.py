@@ -40,6 +40,7 @@ eager / compiled path would error -- an intentional trade-off, not a numerics bu
 from __future__ import annotations
 
 import ast
+import contextlib
 import re
 import threading
 from typing import Any, TYPE_CHECKING
@@ -52,6 +53,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
 
     from torch.fx import GraphModule
+
+    from .runtime_wrappers import AOTDispatchAutogradCompileSpec
 
 
 # Serializes compile_to_python: the wrapper-source capture is thread-local, but the
@@ -293,6 +296,22 @@ def _module_level_names(tree: ast.Module) -> set[str]:
     return names
 
 
+# A chain wrapper references the inner it wraps via one of these globals
+# (subclass/dedup use ``compiled_fn``; the functionalized-RNG wrapper uses
+# ``_compiled_fn_``). The orchestration takes its inner as a call-time arg, not a
+# global, so it is never a chain wrapper. MAINTAINERS: if AOTAutograd adds a
+# forward chain wrapper that names its inner via a new global, add that name here,
+# otherwise inner-call/chain-head detection silently bypasses it.
+_INNER_NAMES = ("compiled_fn", "_compiled_fn_")
+
+
+def _inner_ref(g: GeneratedSource) -> Any:
+    for nm in _INNER_NAMES:
+        if nm in g.globals_dict:
+            return g.globals_dict[nm]
+    return None
+
+
 def _compose_standalone_module(
     inner_python: str, captured: list[GeneratedSource], inner_call_obj: Any
 ) -> str:
@@ -403,20 +422,6 @@ def _compose_standalone_module(
     # fails loudly if that ever stops holding (the old ``_wrapper_{i}`` scheme could carry
     # multiple same-named wrappers in private exec namespaces; inlining deliberately cannot).
     fn_id_to_name = {id(g.fn): g.fn_name for g in non_orch}
-
-    # A chain wrapper references the inner it wraps via one of these globals
-    # (subclass/dedup use ``compiled_fn``; the functionalized-RNG wrapper uses
-    # ``_compiled_fn_``). The orchestration takes its inner as a call-time arg, not a
-    # global, so it is never a chain wrapper. MAINTAINERS: if AOTAutograd adds a
-    # forward chain wrapper that names its inner via a new global, add that name here,
-    # otherwise inner-call/chain-head detection silently bypasses it.
-    _INNER_NAMES = ("compiled_fn", "_compiled_fn_")
-
-    def _inner_ref(g: GeneratedSource) -> Any:
-        for nm in _INNER_NAMES:
-            if nm in g.globals_dict:
-                return g.globals_dict[nm]
-        return None
 
     # The inner Inductor call is AUTHORITATIVE: it is the placeholder object the capture
     # pass returned (threaded in as ``inner_call_obj``), NOT inferred from capture order.
@@ -877,54 +882,54 @@ def namespace_module_names(sources: Sequence[str]) -> list[str]:
     out: list[str] = []
     for slot, source in enumerate(sources):
         tree = ast.parse(source)
-        imported: set[str] = set()
-        defined: set[str] = set()
-        headers: list[tuple[int, str]] = []
-        for node in tree.body:
-            if isinstance(node, (ast.Import, ast.ImportFrom)):
-                for alias in node.names:
-                    imported.add((alias.asname or alias.name).split(".")[0])
-            elif isinstance(
-                node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-            ):
-                defined.add(node.name)
-                headers.append((node.lineno, node.name))
-            elif isinstance(node, ast.Assign):
-                for target in node.targets:
-                    if isinstance(target, ast.Name):
-                        defined.add(target.id)
-            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-                defined.add(node.target.id)
-        targets = defined - imported
+        imported = {
+            (alias.asname or alias.name).split(".")[0]
+            for node in tree.body
+            if isinstance(node, (ast.Import, ast.ImportFrom))
+            for alias in node.names
+        }
+        targets = _module_level_names(tree) - imported
         if not targets:
             out.append(source)
             continue
         suffix = f"_s{slot}"
-        edits: dict[int, list[tuple[int, int, str]]] = {}
-        for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Name)
-                and node.id in targets
-                and node.end_col_offset is not None
-            ):
-                edits.setdefault(node.lineno, []).append(
-                    (node.col_offset, node.end_col_offset, node.id + suffix)
-                )
-        lines = source.split("\n")
-        for lineno, name in headers:
-            if name not in targets:
-                continue
-            found = re.search(rf"\b{re.escape(name)}\b", lines[lineno - 1])
+        # AST column offsets are UTF-8 byte offsets, so splice on the encoded line.
+        lines = [line.encode("utf-8") for line in source.split("\n")]
+        edits: dict[int, set[tuple[int, int, str]]] = {}
+
+        def _edit(lineno: int, begin: int, end: int, name: str) -> None:
+            edits.setdefault(lineno, set()).add((begin, end, name + suffix))
+
+        def _edit_first_match(lineno: int, begin: int, name: str) -> None:
+            # A def/class name and a global/nonlocal declaration have no Name node
+            # of their own; each is the first whole word matching ``name`` after
+            # the statement's start column.
+            found = re.search(
+                rb"\b%s\b" % re.escape(name.encode()), lines[lineno - 1][begin:]
+            )
             if found is not None:
-                edits.setdefault(lineno, []).append(
-                    (found.start(), found.end(), name + suffix)
-                )
+                _edit(lineno, begin + found.start(), begin + found.end(), name)
+
+        for node in tree.body:
+            if (
+                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                and node.name in targets
+            ):
+                _edit_first_match(node.lineno, node.col_offset, node.name)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name):
+                if node.id in targets and node.end_col_offset is not None:
+                    _edit(node.lineno, node.col_offset, node.end_col_offset, node.id)
+            elif isinstance(node, (ast.Global, ast.Nonlocal)):
+                for name in node.names:
+                    if name in targets:
+                        _edit_first_match(node.lineno, node.col_offset, name)
         for lineno, spans in edits.items():
             line = lines[lineno - 1]
-            for begin, finish, text in sorted(spans, reverse=True):
-                line = line[:begin] + text + line[finish:]
+            for begin, end, text in sorted(spans, reverse=True):
+                line = line[:begin] + text.encode("utf-8") + line[end:]
             lines[lineno - 1] = line
-        out.append("\n".join(lines))
+        out.append(b"\n".join(lines).decode("utf-8"))
     return out
 
 
@@ -932,9 +937,7 @@ def _compose_training_module(
     fw_python: str,
     bw_python: str,
     captured: list[GeneratedSource],
-    fw_call_obj: Any,
-    bw_call_obj: Any,
-    spec: Any,
+    spec: AOTDispatchAutogradCompileSpec,
 ) -> str:
     """Compose a FORWARD and BACKWARD lowering into one standalone module.
 
@@ -945,10 +948,9 @@ def _compose_training_module(
     ``backward_prologue`` / ``backward_epilogue`` beside them), but the class
     holding them is ordinary Python, so the composer emits it.
 
-    Both inductor modules are spliced at module level and each one's entry is
-    snapshotted immediately, because the second block rebinds ``call`` /
-    ``Runner`` / the kernels that the first block's code resolves as late-bound
-    globals.
+    Both inductor modules are spliced at module level, renamed per module by
+    ``namespace_module_names`` because each defines ``call`` / ``Runner`` / its
+    kernels and resolves them as late-bound globals when invoked.
     """
 
     from . import runtime_wrappers as _rw
@@ -967,21 +969,27 @@ def _compose_training_module(
     by_name: dict[str, list[GeneratedSource]] = {}
     for gen in captured:
         by_name.setdefault(gen.artifact_name, []).append(gen)
-    missing = [
-        name
-        for name in (
-            "backward_prologue",
-            "backward_epilogue",
-            "compiled_function_forward",
-            "compiled_function_backward",
-            "runtime_wrapper_orchestration",
-        )
-        if name not in by_name
-    ]
+    required = (
+        "backward_prologue",
+        "backward_epilogue",
+        "compiled_function_forward",
+        "compiled_function_backward",
+        "runtime_wrapper_orchestration",
+    )
+    missing = [name for name in required if name not in by_name]
     if missing:
         raise NotImplementedError(
             f"aot_autograd.compile_to_python: the training compose expects "
             f"AOTAutograd to codegen {missing}, which this graph did not produce."
+        )
+    # Only the wrappers spliced below are wired into the emitted class; any other
+    # active wrapper (functionalized RNG, dedup, synthetic base, debug assert,
+    # effect tokens, ...) would otherwise be dropped from the artifact silently.
+    unsupported = sorted(set(by_name) - {*required, "compiled_fn_wrapper"})
+    if unsupported:
+        raise NotImplementedError(
+            "aot_autograd.compile_to_python cannot yet compose these runtime "
+            f"wrappers into standalone training source: {unsupported}."
         )
 
     imports: set[str] = set()
@@ -1140,63 +1148,87 @@ def call(flat_inputs):  # noqa: F811
     return "\n".join(parts)
 
 
-def _graph_differentiates(gm: GraphModule) -> bool:
-    """Whether a single dense graph carries a backward inside it.
+def _select_autograd_spec(
+    specs: Sequence[AOTDispatchAutogradCompileSpec],
+    captured: Sequence[GeneratedSource],
+    fw_placeholder: Any,
+) -> AOTDispatchAutogradCompileSpec:
+    """The spec whose forward is the captured inner forward. AOTAutograd may have
+    wrapped that placeholder in codegen'd chain wrappers (functionalized RNG,
+    effect tokens), so follow each wrapper's inner reference back to it."""
+    wrappers = {id(g.fn): g for g in captured}
 
-    A graph traced through a ``.backward()`` / ``torch.autograd.grad`` call has
-    the backward ops inlined rather than split into a joint, so it reaches this
-    layer looking like a forward. It is not one, and lowering it as inference
-    picks layouts the training path would not.
+    def _wraps_placeholder(fn: Any) -> bool:
+        seen: set[int] = set()
+        while fn is not None and id(fn) not in seen:
+            if fn is fw_placeholder:
+                return True
+            seen.add(id(fn))
+            wrapper = wrappers.get(id(fn))
+            fn = _inner_ref(wrapper) if wrapper is not None else None
+        return False
 
-    Matching on the op NAME is sufficient rather than sloppy: the only thing
-    ``is_inference`` changes here is inductor's layout decision, and
-    ``GraphLowering.decide_layout_opt`` returns early unless the graph contains
-    convolutions -- whose backward is a named ``convolution_backward``. A
-    Linear's backward decomposes to ``mm``/``t`` and would not match, but such a
-    graph has no conv for layout optimization to act on either.
-    """
-    return any("backward" in str(node.target) for node in gm.graph.nodes)
+    matches = [s for s in specs if _wraps_placeholder(s.compiled_fw_func)]
+    if len(matches) != 1:
+        raise NotImplementedError(
+            "aot_autograd.compile_to_python: expected exactly one AOTAutograd "
+            f"autograd spec for the captured forward, matched {len(matches)} of "
+            f"{len(specs)}."
+        )
+    return matches[0]
 
 
 def _restride_backward_placeholders(
     bw_gm: GraphModule,
-    fwd_output_strides: Sequence[tuple[int, ...] | None],
-    spec: Any,
+    fwd_output_strides: Sequence[tuple[str, ...] | None],
+    spec: AOTDispatchAutogradCompileSpec,
 ) -> None:
     """Restride the backward's saved-activation inputs to what the forward chose.
 
     Layout optimization lets the compiled forward hand back e.g. channels-last
     saved activations, so the backward must be lowered against those strides
-    rather than the eager ones its joint trace carries. torch.compile does this
-    in ``_aot_stage2b_bw_compile`` with strides reported out of the forward's
-    lowering; this is the same restride against the strides
-    ``_inductor_compile_to_python`` now reports.
+    rather than the eager ones its joint trace carries; this mirrors
+    ``_aot_stage2b_bw_compile``. The strides arrive as expression strings over
+    the graph's shape symbols (see ``set_tracing_context_output_strides``), so
+    they are rebuilt in the graph's ShapeEnv and compared under
+    ``suppress_guards`` so a dynamic dim is not specialized by the comparison.
 
     The rewrite lands on ``node.meta["val"]``, NOT on an example-inputs list:
     ``inductor.compile_to_python`` rebuilds its fakes from the placeholders'
-    metadata and ignores the inputs it is handed, so restriding a list is a
-    silent no-op through that entry point.
+    metadata and ignores the inputs it is handed.
     """
     import torch
+    from torch._guards import detect_fake_mode
+    from torch.fx.experimental.symbolic_shapes import guard_or_true
 
     if not fwd_output_strides:
         return
     # Which of the forward's outputs are the saved activations, and where they
     # sit among the backward's inputs, are both recorded -- guessing positionally
-    # restrides the wrong placeholder and asserts (or miscomputes) at runtime.
-    meta = spec.fw_metadata
-    saved = list(fwd_output_strides[meta.tensors_saved_for_backwards_slice])
+    # restrides the wrong placeholder.
+    saved = list(fwd_output_strides[spec.fw_metadata.tensors_saved_for_backwards_slice])
     num_symints = spec.num_symints_saved_for_bw
     placeholders = [n for n in bw_gm.graph.nodes if n.op == "placeholder"]
-    for index, node in enumerate(placeholders):
-        val = node.meta.get("val")
+    vals = [n.meta.get("val") for n in placeholders]
+    fake_mode = detect_fake_mode(vals)
+    shape_env = fake_mode.shape_env if fake_mode is not None else None
+    suppress = (
+        shape_env.suppress_guards if shape_env is not None else contextlib.nullcontext
+    )
+    for index, (node, val) in enumerate(zip(placeholders, vals)):
         if not isinstance(val, torch.Tensor):
             continue
         offset = index - num_symints
-        if not (0 <= offset < len(saved)) or not saved[offset]:
+        exprs = saved[offset] if 0 <= offset < len(saved) else None
+        if exprs is None or len(exprs) != val.dim():
             continue
-        real = tuple(int(s) for s in saved[offset])
-        if len(real) == val.dim() and tuple(val.stride()) != real:
+        real: list[Any] = [
+            int(e) if shape_env is None else shape_env.deserialize_symexpr(e)
+            for e in exprs
+        ]
+        with suppress():
+            different = any(guard_or_true(a != b) for a, b in zip(val.stride(), real))
+        if different:
             node.meta["val"] = val.as_strided(val.size(), real)
 
 
@@ -1240,6 +1272,7 @@ def compile_to_python(
     )
     from torch.fx.graph_module import _share_torchbind_and_process_group_on_deepcopy
 
+    from .runtime_wrappers import capture_autograd_compile_specs
     from .utils import make_boxed_func
 
     # Validate up front: this layer dereferences ``gm.graph`` (the effectful-op scan
@@ -1281,17 +1314,6 @@ def compile_to_python(
         # compile-time token and never runs.
         captured: list[GeneratedSource] = []
         dense: dict[str, Any] = {}
-        # The training compose needs AOTAutograd's own spec (fw_metadata, RNG
-        # state, disable_amp, the saved/symint counts). It is built during the
-        # capture pass and not otherwise reachable from out here.
-        from . import runtime_wrappers as _rw
-
-        factory = _rw._AOTDispatchAutogradFunctionFactory
-        _orig_build = factory.build
-
-        def _grab_spec(self):  # type: ignore[no-untyped-def]
-            dense["spec"] = self.spec
-            return _orig_build(self)
 
         def _capture_inner_compile(dense_gm, dense_inputs, **kwargs):
             # A training graph reaches this TWICE -- once for the forward, once
@@ -1305,6 +1327,11 @@ def compile_to_python(
                     f"AOTAutograd lowering emits more than one inner {slot} graph."
                 )
             dense[slot] = dense_gm
+            # compile_fx decides is_inference from AOTAutograd's dispatch (a graph
+            # none of whose outputs requires grad takes the inference path even if
+            # it differentiates internally); the step-2 lowering must agree with
+            # it, so record the decision rather than re-derive it from the graph.
+            dense[slot + "_is_inference"] = kwargs.get("is_inference", False)
             # Retain the placeholder's IDENTITY: it is the authoritative inner call the
             # runtime-wrapper chain closes over. The composer needs it to tell the inner
             # call apart from the orchestration's own outer closure (both surface as a
@@ -1312,8 +1339,6 @@ def compile_to_python(
             # separates INNER wrappers from the OUTER dedup / synthetic-base wrappers.
             placeholder = make_boxed_func(dense_gm.forward)
             dense[slot + "_placeholder"] = placeholder
-            if slot == "gm":
-                dense["placeholder"] = placeholder
             return placeholder
 
         # Drive inductor's own ``compile_fx`` (i.e. its exact AOTAutograd invocation --
@@ -1332,75 +1357,58 @@ def compile_to_python(
         shapes_mode = (
             "from_graph" if _graph_has_dynamic_shapes(gm) else "from_example_inputs"
         )
-        factory.build = _grab_spec  # type: ignore[method-assign]
-        try:
-            with (
-                torch.enable_grad() if grad_enabled else torch.no_grad(),
-                _standalone_context(gm, shapes_mode, aot=False),
-                capture_generated_sources(captured),
-            ):
-                with _share_torchbind_and_process_group_on_deepcopy():
-                    gm_owned = copy.deepcopy(gm)
-                compile_fx(
-                    gm_owned,
-                    example_inputs,
-                    # Placeholder returns a boxed callable, not a full OutputCode;
-                    # AOTAutograd only wraps it (never inductor-post-compiles it), so
-                    # this is fine at runtime.
-                    inner_compile=_capture_inner_compile,  # pyrefly: ignore[bad-argument-type]
-                    ignore_shape_env=_resolve_ignore_shape_env(shapes_mode),
-                )
-        finally:
-            factory.build = _orig_build  # type: ignore[method-assign]
+        # The training compose needs AOTAutograd's own spec (fw_metadata, RNG
+        # state, disable_amp, the saved/symint counts), which only exists inside
+        # the capture pass; the thread-local sink records every one it builds.
+        with (
+            torch.enable_grad() if grad_enabled else torch.no_grad(),
+            _standalone_context(gm, shapes_mode, aot=False),
+            capture_generated_sources(captured),
+            capture_autograd_compile_specs() as specs,
+        ):
+            with _share_torchbind_and_process_group_on_deepcopy():
+                gm_owned = copy.deepcopy(gm)
+            compile_fx(
+                gm_owned,
+                example_inputs,
+                # Placeholder returns a boxed callable, not a full OutputCode;
+                # AOTAutograd only wraps it (never inductor-post-compiles it), so
+                # this is fine at runtime.
+                inner_compile=_capture_inner_compile,  # pyrefly: ignore[bad-argument-type]
+                ignore_shape_env=_resolve_ignore_shape_env(shapes_mode),
+            )
         if "gm" not in dense:
             raise RuntimeError(
                 "aot_autograd.compile_to_python: AOTAutograd never reached the inner "
                 "forward compiler, so no dense graph was captured."
             )
 
-        # Lower the FORWARD first and take the strides inductor actually chose,
-        # then restride the backward's placeholders to match before lowering it.
-        # This is the fw->bw coupling torch.compile gets from
-        # TracingContext.report_output_strides (graph_compile.py:2841) and feeds
-        # to _aot_stage2b_bw_compile; a capture pass that never lowers cannot
-        # observe it, and two independently-lowered graphs then disagree about
-        # layout -- loudly on a conv net, silently if size asserts are off.
-        # Two different questions, and conflating them is a real bug. Whether
-        # there is a JOINT decides what to compose; whether the computation
-        # DIFFERENTIATES decides what to tell inductor. A make_fx-style graph
-        # that differentiates inline has no joint but is not inference, and
-        # inductor's decide_layout_opt takes a different branch for inference:
-        # it converts a conv to channels-last, so cuDNN serves a TF32 NHWC
-        # kernel where the same computation under torch.compile gets fp32 NCHW
-        # -- a silent ~2e-4 relative difference in the gradients.
+        # The forward is lowered first so the strides inductor chose for the
+        # saved activations can restride the backward's placeholders before it
+        # is lowered -- the fw->bw coupling torch.compile gets from
+        # TracingContext.report_output_strides, which the capture pass (never
+        # lowering) cannot observe.
         has_joint = "bw" in dense
-        differentiates = has_joint or _graph_differentiates(dense["gm"])
-        fwd_output_strides: list[tuple[int, ...] | None] = []
+        fwd_output_strides: list[tuple[str, ...] | None] = []
         inner_python, cache = _inductor_compile_to_python(
             dense["gm"],
             example_inputs,
             options=options,
-            is_inference=not differentiates,
-            output_strides=fwd_output_strides,
+            is_inference=dense["gm_is_inference"],
+            output_strides=fwd_output_strides if has_joint else None,
         )
         if not has_joint:
             source = _compose_standalone_module(
-                inner_python, captured, dense["placeholder"]
+                inner_python, captured, dense["gm_placeholder"]
             )
             return source, cache
 
-        _restride_backward_placeholders(dense["bw"], fwd_output_strides, dense["spec"])
+        spec = _select_autograd_spec(specs, captured, dense["gm_placeholder"])
+        _restride_backward_placeholders(dense["bw"], fwd_output_strides, spec)
         bw_python, _ = _inductor_compile_to_python(
-            dense["bw"], [], options=options, is_inference=False
+            dense["bw"], [], options=options, is_inference=False, is_backward=True
         )
-        source = _compose_training_module(
-            inner_python,
-            bw_python,
-            captured,
-            dense["placeholder"],
-            dense["bw_placeholder"],
-            dense["spec"],
-        )
+        source = _compose_training_module(inner_python, bw_python, captured, spec)
     return source, cache
 
 

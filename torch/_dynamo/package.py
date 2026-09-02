@@ -11,6 +11,7 @@ from a different process or host.
 import abc
 import ast
 import contextlib
+import copy
 import dataclasses
 import functools
 import hashlib
@@ -392,13 +393,17 @@ def _resume_global_renames(
     processes, or one artifact loaded twice to serve two model instances --
     and both then hash to a single name. The token, unique to the loaded
     package, is what separates those; the digest stays so the name still says
-    which code it belongs to.
+    which code it belongs to. It hashes the bytecode and the name tables only:
+    pickling the whole SerializedCode is not reproducible across processes
+    (frozenset constants pickle in hash order).
     """
     renames: dict[str, str] = {}
     for entry in entries:
         if not entry.install_to_global:
             continue
-        digest = hashlib.sha256(pickle.dumps(entry.python_code)).hexdigest()[:16]
+        code = entry.python_code
+        projection = code.co_code + "\0".join(code.co_names + code.co_varnames).encode()
+        digest = hashlib.sha256(projection).hexdigest()[:16]
         for name in entry.function_names:
             renames[name] = f"{name}_{digest}_{install_token}"
     return renames
@@ -631,7 +636,6 @@ def _current_cpu_codegen_target() -> _CpuCodegenTarget | None:
     have produced nor be about to run an inductor CPU kernel, so there is no
     baked vector width to protect.
     """
-    from torch._inductor import config as inductor_config
     from torch._inductor.cpu_vec_isa import pick_vec_isa
 
     try:
@@ -644,11 +648,23 @@ def _current_cpu_codegen_target() -> _CpuCodegenTarget | None:
         )
         return None
 
+    env, simdlen, march = _cpu_codegen_config()
     return (
         platform.machine(),
         torch.backends.cpu.get_cpu_capability(),
-        os.environ.get("ATEN_CPU_CAPABILITY"),
+        env,
         vec_isa,
+        simdlen,
+        march,
+    )
+
+
+def _cpu_codegen_config() -> tuple[str | None, int | None, str | None]:
+    """The process-mutable inputs of the codegen target, cheap to read."""
+    from torch._inductor import config as inductor_config
+
+    return (
+        os.environ.get("ATEN_CPU_CAPABILITY"),
         inductor_config.cpp.simdlen,
         inductor_config.cpp.march,
     )
@@ -667,10 +683,17 @@ _NO_NATIVE_CODE_BACKENDS = frozenset(
         "aot_eager_decomp_partition_crossref",
         "aot_eager_decomp_partition_with_mode",
         "aot_eager_default_partitioner",
+        "aot_ts",
+        "cudagraphs",
         "eager",
         "eager_debug",
         "eager_noexcept",
+        "non_leaf_compile_error_TESTING_ONLY",
         "pre_dispatch_eager",
+        "relu_accuracy_error_TESTING_ONLY",
+        "relu_compile_error_TESTING_ONLY",
+        "relu_runtime_error_TESTING_ONLY",
+        "ts",
     }
 )
 
@@ -825,10 +848,8 @@ class _DynamoCacheEntry:
 
     def check_versions(self) -> None:
         """Check if the current system is compatible with the system used to create this cache entry."""
-        device_types = getattr(self, "device_types", None) or frozenset(
-            (self.device_type,)
-        )
-        check_codegen = getattr(self, "requires_native_backend_compatibility", True)
+        device_types = self.device_types or frozenset((self.device_type,))
+        check_codegen = self.requires_native_backend_compatibility
         # Determining the codegen target runs the C++ toolchain, so only pay for
         # it when this artifact actually records one to compare against.
         current_system_info = SystemInfo.current(
@@ -853,9 +874,7 @@ class _DynamoCacheEntry:
             "fn_name": self.fn_name,
             "fn_first_lineno": self.fn_first_lineno,
             "device_type": self.device_type,
-            "device_types": sorted(
-                getattr(self, "device_types", None) or frozenset((self.device_type,))
-            ),
+            "device_types": sorted(self.device_types or frozenset((self.device_type,))),
             "backend_ids": list(self.backend_ids),
         }
 
@@ -1036,6 +1055,7 @@ class CompilePackage:
         self._uncovered_frames: set[str] = set()
         self._device_types: set[str] = set()
         self._system_info: SystemInfo | None = None
+        self._cpu_codegen_probed = False
         self._default_requires_native_backend_compatibility = (
             requires_native_backend_compatibility
         )
@@ -1077,6 +1097,7 @@ class CompilePackage:
         self._codes = {}
         self._device_types = set()
         self._system_info = None
+        self._cpu_codegen_probed = False
         self._requires_native_backend_compatibility = (
             self._default_requires_native_backend_compatibility
         )
@@ -1088,6 +1109,12 @@ class CompilePackage:
         if self._innermost_fn is None:
             raise AssertionError("innermost_fn returned None")
         if dynamo is not None:
+            # self._codes binds the entry's own per-code records and a later
+            # recompile appends to them, so a caller that keeps the entry (a
+            # store, or a second serve of one artifact) would see the new
+            # backend ids written back into it. bytes are atomic to deepcopy,
+            # so this copies the record structure, not the guard payloads.
+            dynamo = copy.deepcopy(dynamo)
             if not isinstance(dynamo, _DynamoCacheEntry):
                 raise AssertionError(f"Expected _DynamoCacheEntry, got {type(dynamo)}")
             dynamo.check_versions()
@@ -1109,12 +1136,10 @@ class CompilePackage:
             # Restore the complete device coverage and compile-time system
             # requirements recorded by the artifact. Written last so a failed
             # load cannot leak them into a cold-cache fallback on this object.
-            self._device_types = set(
-                getattr(dynamo, "device_types", None) or (dynamo.device_type,)
-            )
+            self._device_types = set(dynamo.device_types or (dynamo.device_type,))
             self._system_info = dynamo.system_info
-            self._requires_native_backend_compatibility = getattr(
-                dynamo, "requires_native_backend_compatibility", True
+            self._requires_native_backend_compatibility = (
+                dynamo.requires_native_backend_compatibility
             )
         else:
             module_name = (
@@ -1266,20 +1291,35 @@ class CompilePackage:
         needs_cpu_codegen = (
             self._requires_native_backend_compatibility and "cpu" in device_types
         )
-        current = SystemInfo.current(cpu_codegen=needs_cpu_codegen)
         if self._system_info is None:
-            self._system_info = current
+            self._system_info = SystemInfo.current(cpu_codegen=needs_cpu_codegen)
+            self._cpu_codegen_probed = needs_cpu_codegen
         elif needs_cpu_codegen:
-            if self._system_info.cpu_codegen_target is None:
+            # The toolchain runs at most once per package. Later CPU frames only
+            # re-read the config the probe depends on, and a frame compiled
+            # after that config moved is dropped from the artifact rather than
+            # failing the compile: the guards do not capture inductor config,
+            # so the variant would otherwise serve a kernel built for another
+            # vector width.
+            recorded = self._system_info.cpu_codegen_target
+            if recorded is None and not self._cpu_codegen_probed:
                 self._system_info = dataclasses.replace(
-                    self._system_info, cpu_codegen_target=current.cpu_codegen_target
+                    self._system_info,
+                    cpu_codegen_target=_current_cpu_codegen_target(),
                 )
-            elif self._system_info.cpu_codegen_target != current.cpu_codegen_target:
-                raise RuntimeError(
+                self._cpu_codegen_probed = True
+            elif recorded is not None and _cpu_codegen_config() != (
+                recorded[2],
+                recorded[4],
+                recorded[5],
+            ):
+                reason = (
                     "CPU codegen target changed during precompile capture: "
-                    f"first={self._system_info.cpu_codegen_target}, "
-                    f"current={current.cpu_codegen_target}"
+                    f"recorded={recorded}, current config={_cpu_codegen_config()}"
                 )
+                logger.warning("%s; bypassing this frame", reason)
+                if self.has_current_entry():
+                    self.bypass_current_entry(reason=reason)
         self._device_types.update(device_types)
 
     def has_current_entry(self) -> bool:
@@ -1618,7 +1658,7 @@ class CompilePackage:
         )
 
     def reset_after_failed_install(self) -> None:
-        """Make an install-clean package reusable for a cold-cache fallback."""
+        """Make a package whose load or install raised reusable for a cold-cache fallback."""
         with _PACKAGE_INSTALL_LOCK:
             if (
                 self._installed_globals
@@ -1626,7 +1666,11 @@ class CompilePackage:
                 or self._skipped_codes
                 or self._region_skipped_codes
             ):
-                raise AssertionError("failed install left package state installed")
+                # Already on an error path, so recover rather than raise.
+                logger.warning(
+                    "failed install left package state installed; uninstalling"
+                )
+                self._uninstall()
             self._initialized = False
 
     def prepare(self, backends: dict[_BackendId, Any]) -> None:
@@ -1820,6 +1864,9 @@ class CompilePackage:
                     ):
                         _, separator, suffix = builtin_dict_name.rpartition("_")
                         if separator and suffix.isdigit():
+                            # Process-global side effect: every install bumps
+                            # unique_id() past this suffix so a later compile
+                            # cannot mint the same name.
                             _reserve_unique_id_through(int(suffix))
                         # A pre-reset compile's CleanupHook may still own this
                         # name even when we're about to leave its value alone
