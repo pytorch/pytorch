@@ -609,6 +609,42 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             actual = compiled_fn(*inputs)
             self.assertEqual(expected, actual)
 
+    def test_aot_compile_fn_calling_a_helper_with_an_empty_closure_cell(self):
+        # A nested helper the compiled function closes over travels in the
+        # runtime env. A free variable of the helper only assigned on a path
+        # that did not run has an EMPTY cell, which the pickler used to read
+        # and fail on. (The compiled function itself cannot have one: capture
+        # reads all of its cells up front.)
+        def outer():
+            def helper(x):
+                if x is None:
+                    return unset
+                return x + 1
+
+            if helper is None:
+                unset = 1
+            return helper
+
+        helper = outer()
+
+        def fn(x):
+            return helper(x) * 2
+
+        def backend(gm, example_inputs):
+            return CustomCompiledFunction(gm, example_inputs)
+
+        inputs = (torch.randn(3),)
+        expected = fn(*inputs)
+        compiled_fn = torch.compile(fn, fullgraph=True, backend=backend).aot_compile(
+            (inputs, {})
+        )
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with open(self.path(), "rb") as f:
+                compiled_fn = torch.compiler.load_compiled_function(f)
+            self.assertEqual(expected, compiled_fn(*inputs))
+
     def test_aot_compile_autocast_guard_reload(self):
         def fn(x):
             return x + 1 * x
@@ -1809,18 +1845,22 @@ from user code:
         finally:
             c10d.destroy_process_group()
 
+
+class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
     def test_pickler_rebuilds_a_nested_function_faithfully(self):
         # The pickler passed __qualname__ where FunctionType wants __name__, so
-        # a reloaded function reported the dotted qualname as its __name__. And
-        # it read cell_contents unguarded, so a free variable only assigned on a
-        # path that did not run raised ValueError out of the pickler.
+        # a reloaded function reported the dotted qualname as its __name__; it
+        # read cell_contents unguarded, so a free variable only assigned on a
+        # path that did not run raised ValueError out of the pickler; and it
+        # dropped __kwdefaults__ and __dict__ outright.
         from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
 
         def outer():
-            def inner():
+            def inner(*, k=1):
                 return unset
 
             inner.__name__ = "renamed"
+            inner.tag = 2.0
             if inner is None:
                 unset = 1  # never runs, so the cell inner closes over stays empty
             return inner
@@ -1832,6 +1872,8 @@ from user code:
         out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
         self.assertEqual(out.__name__, "renamed")
         self.assertEqual(out.__qualname__, fn.__qualname__)
+        self.assertEqual(out.__kwdefaults__, {"k": 1})
+        self.assertEqual(out.tag, 2.0)
         self.assertRaises(ValueError, lambda: out.__closure__[0].cell_contents)
 
 
