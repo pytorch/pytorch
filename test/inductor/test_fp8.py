@@ -113,10 +113,6 @@ def _prepare_blockwise_scale(
     # padded to a multiple of 4 before the transpose).
     if (block_outer, block_inner) == (1, 128):
         out = inverse_scale.t().contiguous().t()
-        # cuBLAS blockwise 1x128 expects scale_b (the weight scale) to have
-        # outer-dim-major layout with shape [N, K/128] (outer = weight's
-        # output dim N). The scale describes w's N dimension regardless of
-        # whether w is transposed to w.t() before being passed to scaled_mm.
         return out
     pad_amount = (-inverse_scale.shape[-1]) % 4
     if pad_amount:
@@ -1152,9 +1148,7 @@ class TestFP8Lowering(TestCase):
     @parametrize(
         "shape",
         (
-            # The DISABLED bot skips parametrizations by index, so new shapes go
-            # on the end; inserting ahead of these redirects those skips onto
-            # unrelated shapes.
+            # New shapes go on the end: the DISABLED bot skips by index.
             (16, 256, 256),
             (1024, 512, 1024),
             (2048, 4096, 4096),

@@ -10,8 +10,6 @@
     stride_bn = {{stride("B", 1)}}
     stride_scale_a = {{stride("A_inverse_scale", 0)}}
     stride_scale_b = {{stride("B_inverse_scale", 0)}}
-    # cuBLAS 1x128 blockwise scales are outer-dim-major (stride (1, {M,N})), so
-    # the K-blocks dimension is not contiguous; plumb its real stride.
     stride_scale_a_col = {{stride("A_inverse_scale", 1)}}
     stride_scale_b_col = {{stride("B_inverse_scale", 1)}}
 
@@ -126,7 +124,6 @@
 
             a_scaled = a * scale_a_block
             b_scaled = b * scale_b_block
-            # fp32 operands, so tl.dot would default to tf32; see get_main_loop_dot_precision.
             accumulator = tl.dot(a_scaled, b_scaled.T, accumulator, input_precision=DOT_PRECISION)
 
         offs_cm = offs_am + tl.arange(0, BLOCK_M)
@@ -158,9 +155,6 @@ def blockwise1xTILESIZE_scaling(
     TILE_SIZE: tl.constexpr,
 ):
     row_offs_scale = pid * BLOCK_lhs + tl.arange(0, BLOCK_lhs)
-    # Tile ki starts at K column ki * BLOCK_K; the scale block column is that
-    # divided by TILE_SIZE. cdiv would round up for BLOCK_K < TILE_SIZE, advancing
-    # the column every tile instead of every TILE_SIZE/BLOCK_K tiles.
     col_offs_scale = ki * BLOCK_K // TILE_SIZE + tl.arange(0, (BLOCK_K + TILE_SIZE - 1) // TILE_SIZE)
     ptrs = scale + row_offs_scale[:, None] * scale_stride + col_offs_scale[None, :] * scale_stride_col
     mask = (row_offs_scale[:, None] < lhs_size) & (col_offs_scale[None, :] < k_blocks)
@@ -193,20 +187,12 @@ def blockwise128x128_scaling(
     MIN_BLOCK_TILE_lhs: tl.constexpr,
     MIN_BLOCK_TILE_K: tl.constexpr,
 ):
-    # Tile pid starts at row pid * BLOCK_lhs; the scale block row is that divided
-    # by the 128-row scale block. cdiv would collapse to 1 for BLOCK_lhs < 128,
-    # mapping distinct tiles that share a scale block to different blocks.
     row_offs_scale = pid * BLOCK_lhs // 128 + tl.arange(0, (BLOCK_lhs + 128 - 1) // 128)
     col_offs_scale = ki * BLOCK_K // 128 + tl.arange(0, (BLOCK_K + 128 - 1) // 128)
     ptrs = scale + row_offs_scale[:, None] * scale_stride + col_offs_scale[None, :] * scale_stride_col
     mask = (row_offs_scale[:, None] < lhs_blocks) & (col_offs_scale[None, :] < k_blocks)
     scale_block = tl.load(ptrs, mask=mask, other=1.0)
 
-    # Interleave block and intra-block axes as (lhs_block, lhs_tile, k_block,
-    # k_tile) so the row-major reshape keeps each scale over its own 128x128
-    # square. Grouping as (lhs_block, k_block, ...) instead would emit a whole
-    # block's copies contiguously, smearing one scale across a row stripe when a
-    # tile spans multiple K-blocks (e.g. BLOCK_K=256).
     scale_expanded = scale_block[:, None, :, None]
     scale_expanded = tl.broadcast_to(
         scale_expanded,

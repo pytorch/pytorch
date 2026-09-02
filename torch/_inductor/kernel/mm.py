@@ -1034,14 +1034,9 @@ def _is_blockwise1xTILESIZE_scaling(
     tile_size: int,
     transpose: bool,
 ) -> bool:
-    # The Triton template reads scale as [out_size, k_blocks] (output dim as rows,
-    # contracting-dim blocks as cols). This predicate runs twice: once on the raw
-    # op input and once on the normalized kernel input, so for scale_b it must
-    # accept both layouts (like _is_blockwise128x128_scaling).
-    # - scale_a (A [M,K], transpose=False): [M, ceil(K/tile)] for both v1 and v2.
-    # - scale_b (B=w.t() [K,N], transpose=True):
-    #     v1 torch._scaled_mm passes [ceil(K/tile), N]; _normalize_blockwise_scale
-    #     transposes it to the template's [N, ceil(K/tile)], which v2 already uses.
+    # scale_a is [M, ceil(K/tile)]. scale_b is [N, ceil(K/tile)] as the template
+    # reads it, or [ceil(K/tile), N] as v1 torch._scaled_mm passes it; this runs
+    # on both the raw and the normalized input, so accept either.
     sizevars = V.graph.sizevars
     if not transpose:
         return sizevars.statically_known_equals(
@@ -1130,18 +1125,10 @@ def _normalize_blockwise_scale(
     transpose: bool = False,
     v1_scale_layout: bool = False,
 ) -> Any:
-    # Convert cuBLAS blockwise scale layouts to the layout the Triton template
-    # expects, so the template stays backend-agnostic.
-    #
-    # For BlockWise128x128, cuBLAS produces [k_blocks_padded_to_4, out_blocks]
-    # while Triton expects [out_blocks, k_blocks]. We transpose and strip the
-    # K-dim padding.
-    #
-    # For BlockWise1x128, torch._scaled_mm (v1) passes scale_b as
-    # [ceil(K/128), N] while the template reads [N, ceil(K/128)] (the layout
-    # _scaled_mm_v2 already supplies). Transpose the v1 layout without a copy.
-    # The caller passes the ABI rather than us inferring it: when N == ceil(K/128)
-    # the scale is square and the two layouts are indistinguishable by shape.
+    # Rewrite a cuBLAS scale into the [out, k_blocks] the template reads: the
+    # 128x128 layout is transposed and K-padded, v1's 1x128 scale_b is transposed.
+    # The caller passes the ABI because at N == ceil(K/128) the scale is square
+    # and the two layouts have the same shape.
     if transpose and v1_scale_layout and scale_option == ScalingType.BlockWise1x128:
         return PermuteView.create(scale, (1, 0))
 
@@ -1199,12 +1186,7 @@ def is_desired_scaling(
 
 
 def get_main_loop_dot_precision(device_type: str) -> str:
-    # The template scales the operands before the dot, making them fp32, where
-    # tl.dot defaults to tf32 and drops most of the fp8 mantissa. ALLOW_TF32 is
-    # not the control here: it tracks fp32_precision, which is about fp32 matmuls.
-    # tf32x3 recovers the accuracy at ~3x tf32 where ieee costs ~10x, but only
-    # CUDA accepts it (ROCm allows ieee/bf16x3/bf16x6). Template kwargs render
-    # verbatim into the kernel source, so the quotes are part of the value.
+    # Quotes are part of the value: template kwargs render verbatim.
     return '"tf32x3"' if device_type == "cuda" else '"ieee"'
 
 
@@ -1318,12 +1300,6 @@ def tuned_scaled_mm_v2(
     ):
         return fallback()
 
-    # BlockWise128x128 cuBLAS scales pad the K-dim blocks to a multiple of 4.
-    # _normalize_blockwise_scale strips that pad, but only when the relevant
-    # shapes are statically known; with a dynamic K or output dim (M for A,
-    # N for B) it cannot prove the cuBLAS layout and no-ops, handing the padded
-    # layout to the Triton template, which indexes it unpadded. Defer to the
-    # eager op, which handles the cuBLAS layout natively.
     def _is_dynamic(sz) -> bool:
         return PythonWrapperCodegen.statically_known_int_or_none(sz) is None
 
@@ -1401,9 +1377,6 @@ def tuned_scaled_mm_v2(
     ):
         overriders = dict(USE_FAST_ACCUM=use_fast_accum)
 
-        # Normalize blockwise scales to the layout the Triton template expects,
-        # so the template stays backend-agnostic. The aten path (torch._scaled_mm)
-        # keeps the original cuBLAS layout.
         scale_a_triton = _normalize_blockwise_scale(scale_a_real, mat_a, scale_option_a)
         scale_b_triton = _normalize_blockwise_scale(
             scale_b_real, mat_b, scale_option_b, transpose=True
@@ -1617,9 +1590,6 @@ def tuned_scaled_mm(
             mat_a, mat_b, scale_a_size, scale_b_size
         )
 
-        # Normalize blockwise scales to the layout the Triton template expects,
-        # so the template stays backend-agnostic. The aten path (torch._scaled_mm)
-        # keeps the original cuBLAS layout.
         scale_a_triton = _normalize_blockwise_scale(scale_a_real, mat_a, scale_option_a)
         scale_b_triton = _normalize_blockwise_scale(
             scale_b_real,
