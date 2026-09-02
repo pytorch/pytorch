@@ -25,13 +25,15 @@ and with CONTRIBUTING.md, which states them for users:
   * TORCH_CUDA_ARCH_LIST names no exportable arch (export.EXPORTABLE_ARCHES);
     with it unset, on-device export runs if a supported GPU is present
 
-Two different processes, gated by skip list.
+Two modes, split by the skip list.
 
-  * Before: No stage-2, normal wheel without AOT artifacts
+  * Before: no stage-2 work, so a normal wheel with the generated stubs in place
+    but no kernels behind them
   * After: stage 2 exports and embeds, runtimes required to progress, failures
     fail the build.
 
-TORCH_NATIVE_AOT=0 opts out at any point.
+TORCH_NATIVE_AOT=0 opts out, and every entry point honours it; it is expected to
+stay constant across a build's phases.
 
 Assumes the torch it finds installed is the one this tree just built, which every
 caller above arranges, and verifies that rather than repairing it.
@@ -535,6 +537,74 @@ def _backend() -> str:
     return "rocm" if _torch_probe("torch.version.hip is not None") else "cuda"
 
 
+def _cache_entries() -> dict[str, tuple[str, str]]:
+    """This build's cache as name -> (TYPE=value, the doc line above it).
+
+    Last assignment wins, as in _cmake_cache_value. The doc line names the source of an
+    entry EnvVarForwarding wrote ("From environment", "From env <NAME>").
+    """
+    entries: dict[str, tuple[str, str]] = {}
+    doc = ""
+    try:
+        with open(os.path.join(BUILD_DIR, "CMakeCache.txt"), errors="replace") as f:
+            for line in f:
+                line = line.rstrip("\n")
+                if line.startswith("//"):
+                    doc = line[2:]
+                    continue
+                key, sep, value = line.partition("=")
+                if sep and not line.startswith("#") and ":" in key:
+                    name, _, kind = key.partition(":")
+                    entries[name] = (f"{kind}={value}", doc)
+                doc = ""
+    except OSError:
+        return {}
+    return entries
+
+
+def _refuse_cache_drift(before: dict[str, tuple[str, str]]) -> None:
+    """Refuse a reconfigure that changed this build's configuration.
+
+    EnvVarForwarding FORCEs every BUILD_*/USE_*/CMAKE_* environment variable (and the
+    names in its alias lists, TORCH_CUDA_ARCH_LIST among them) into the cache whenever
+    it differs from the cached value, so a stage-2 run in a different environment than
+    the build silently relinks torch_cuda against other settings. New entries are fine;
+    a changed one is not.
+    """
+    drift = [
+        (name, before[name][0], value, doc)
+        for name, (value, doc) in _cache_entries().items()
+        if name in before and before[name][0] != value
+    ]
+    if not drift:
+        return
+    changed = "\n".join(
+        f"  {name}: {old} -> {new}" + (f" ({doc})" if doc else "")
+        for name, old, new, doc in drift
+    )
+    raise RuntimeError(
+        f"native-AOT stage 2: reconfiguring {BUILD_DIR} changed this build's "
+        f"configuration, so torch_cuda would be relinked against different settings "
+        f"than the rest of this install:\n{changed}\n"
+        f"Run stage 2 in the same environment as the build (the CI shells and "
+        f"`spin develop` do), or re-run the build with the settings you want."
+    )
+
+
+def _cmake_for_this_build() -> str:
+    """The cmake that configured this build tree, else cmake from PATH.
+
+    Recorded as CMAKE_COMMAND, and not necessarily on PATH: a build uses whatever cmake
+    its environment had, often a pip wheel's rather than /usr/local/bin/cmake.
+    """
+    cached = _cmake_cache_value("CMAKE_COMMAND")
+    if cached and os.path.exists(cached):
+        return cached
+    if cached:
+        _report(f"{cached} configured this build but is gone; using cmake from PATH")
+    return "cmake"
+
+
 def _run_child(cmd: list[str], what: str, **kw: object) -> None:
     """Run one of stage 2's own steps, naming the step and a signal death on failure,
     neither of which check_call reports. The child's own output is inherited."""
@@ -719,18 +789,15 @@ def main(argv: list[str] | None = None) -> int:
     # TORCH_NATIVE_AOT=0 is a kill switch even on the binary-build path.
     if _opted_out():
         return 0  # _opted_out() reports the value and where it came from
-    # --wheel means the caller installed torch on the line above, so "not importable"
-    # is a broken build rather than "not applicable".
+    # --wheel means torch was installed on the line above, so "not importable" is a
+    # broken build, not "not applicable"; hence ahead of the gates that need torch.
     if args.wheel and not _torch_probe("True"):
         raise RuntimeError(
             "native-AOT stage 2: --wheel was given, so torch was just installed, "
             "but it does not import (stderr above). Refusing to patch a wheel "
-            "without kernels. Fix the install, or do not pass --wheel for a build "
-            "where a plain `import torch` cannot work -- the ASan and TSan images "
-            "need LD_PRELOAD or a different interpreter, which is why the CI "
-            "shells guard this call with a CUDA check. TORCH_NATIVE_AOT=0 does "
-            "exempt it, and nothing else does: every other gate needs torch to "
-            "decide, so this refusal stays ahead of them."
+            "without kernels. Fix the install, or drop --wheel for a build where "
+            "`import torch` cannot work (the ASan and TSan images need LD_PRELOAD "
+            "or a different interpreter). TORCH_NATIVE_AOT=0 also exempts it."
         )
     # ...and only then that it exists, so a typo costs a second rather than a full
     # export, reconfigure, relink and copy.
@@ -787,12 +854,16 @@ def main(argv: list[str] | None = None) -> int:
             f"TORCH_NATIVE_AOT=0 to skip stage 2."
         )
     _report("reconfiguring to pick up the generated CMake")
+    # The cmake that configured this tree, and its cache as it stands, so the
+    # reconfigure can be held to both (see _refuse_cache_drift).
+    cmake_exe = _cmake_for_this_build()
+    cache_before = _cache_entries()
     # Captured because CMake prints its failure context on stdout, and the STATUS line
     # the generated file emits is the only pre-relink evidence that it will embed.
     # --log-level, because that marker is a message(STATUS) and a cached
     # CMAKE_MESSAGE_LOG_LEVEL=WARNING (EnvVarForwarding FORCEs it) would hide it.
     configure = subprocess.run(
-        ["cmake", "--log-level=STATUS", "-S", REPO, "-B", BUILD_DIR],
+        [cmake_exe, "--log-level=STATUS", "-S", REPO, "-B", BUILD_DIR],
         capture_output=True,
         text=True,
     )
@@ -803,6 +874,8 @@ def main(argv: list[str] | None = None) -> int:
             f"native-AOT stage 2: reconfiguring {BUILD_DIR} failed (exit "
             f"{configure.returncode}, output above)."
         )
+    # Ahead of the relink, so a drifting configure cannot reach the installed torch.
+    _refuse_cache_drift(cache_before)
     from tools.native_aot.gen_aot_lib import EMBED_STATUS
 
     if EMBED_STATUS not in configure.stdout:
@@ -819,12 +892,12 @@ def main(argv: list[str] | None = None) -> int:
     # The copy below matches it only because the CMake sets BUILD_WITH_INSTALL_RPATH.
     _report("relinking torch_cuda with embedded kernels")
     # pyproject.toml aliases MAX_JOBS only inside scikit-build-core's subprocess.
-    relink = ["cmake", "--build", ".", "--target", "torch_cuda"]
+    relink = [cmake_exe, "--build", ".", "--target", "torch_cuda"]
     jobs = os.getenv("MAX_JOBS") or os.getenv("CMAKE_BUILD_PARALLEL_LEVEL")
     if jobs and jobs.isdigit():
         relink += ["--parallel", jobs]
-    # Taken across the relink, for the size delta reported below.
     built = os.path.join(BUILD_DIR, "lib", "libtorch_cuda.so")
+    # Taken across the relink, for the size delta reported below.
     before = os.path.getsize(built) if os.path.exists(built) else 0
     _run_child(relink, "relinking torch_cuda", cwd=BUILD_DIR)
 

@@ -4456,6 +4456,8 @@ class TestRelinkNeverStrandsTheInstalledTorch(unittest.TestCase):
         built=True,
         installed=True,
         grew=0,
+        cache_after=None,
+        cmake_command=None,
     ):
         """main() with every child faked, so the ORDER is the production one.
 
@@ -4464,11 +4466,13 @@ class TestRelinkNeverStrandsTheInstalledTorch(unittest.TestCase):
         dir), `argv` (the reconfigure's command line), `include` (the emitted CMake)
         and `reported` (stderr); one keyword per arm of main()."""
         children = []
+        commands = []
         patched = []
         argv = []
         kwargs = {}
 
         def fake_call(cmd, **kw):
+            commands.append(list(cmd))
             children.append(os.path.basename(str(cmd[1])) if len(cmd) > 1 else cmd[0])
             if grew and "--target" in cmd:
                 with open(os.path.join(build, "lib", "libtorch_cuda.so"), "wb") as f:
@@ -4477,8 +4481,12 @@ class TestRelinkNeverStrandsTheInstalledTorch(unittest.TestCase):
 
         def fake_run(cmd, **kw):
             children.append("reconfigure")
+            commands.append(list(cmd))
             argv.append(list(cmd))
             kwargs.update(kw)
+            if cache_after is not None:
+                with open(os.path.join(build, "CMakeCache.txt"), "w") as f:
+                    f.write(cache_after)
             out = (
                 "-- native-AOT: embedding 1 object(s)\n" if configure_embeds else "--\n"
             )
@@ -4514,6 +4522,8 @@ class TestRelinkNeverStrandsTheInstalledTorch(unittest.TestCase):
             if cache:
                 with open(os.path.join(build, "CMakeCache.txt"), "w") as f:
                     f.write("CUDAToolkit_VERSION_MAJOR:STRING=13\n")
+                    if cmake_command:
+                        f.write(f"CMAKE_COMMAND:INTERNAL={cmake_command}\n")
             for obj, name, value in (
                 (build_stage2, "BUILD_DIR", build),
                 (build_stage2, "NATIVE_AOT_ARTIFACTS_DIR", art),
@@ -4556,6 +4566,7 @@ class TestRelinkNeverStrandsTheInstalledTorch(unittest.TestCase):
                 outcome=outcome,
                 content=content,
                 children=children,
+                commands=commands,
                 listing=sorted(os.listdir(libdir)),
                 argv=argv[-1] if argv else [],
                 kwargs=kwargs,
@@ -4678,6 +4689,32 @@ class TestRelinkNeverStrandsTheInstalledTorch(unittest.TestCase):
             # ...and BOTH streams are captured, or configure.stdout is None and the
             # `in` test below raises TypeError.
             self.assertIs(run.kwargs.get("capture_output"), True)
+
+    def test_a_reconfigure_that_changes_the_cache_is_refused(self):
+        # EnvVarForwarding FORCEs env vars into the cache, so a stage-2 run in another
+        # environment would relink torch_cuda against different settings.
+        drifted = "//From environment\nCUDAToolkit_VERSION_MAJOR:STRING=12\n"
+        with self._main(cache_after=drifted) as run:
+            self.assertIn("changed this build's configuration", run.outcome)
+            self.assertIn("CUDAToolkit_VERSION_MAJOR", run.outcome)
+            self.assertIn("From environment", run.outcome)
+            # Refused BEFORE the relink, so nothing reached the installed torch.
+            self.assertNotIn("--build", run.children)
+        self.assertEqual(run.content, self.OLD)
+
+    def test_cache_entries_the_reconfigure_adds_are_not_drift(self):
+        # Only a CHANGED value is drift: a reconfigure legitimately adds entries.
+        grown = "CUDAToolkit_VERSION_MAJOR:STRING=13\nNEW_ENTRY:BOOL=ON\n"
+        with self._main(cache_after=grown) as run:
+            self.assertEqual(run.outcome, "returned 0")
+        self.assertEqual(run.content, self.NEW)
+
+    def test_both_children_run_the_cmake_that_configured_the_build(self):
+        # CMAKE_COMMAND is often a pip wheel's cmake, not the one on PATH.
+        with self._main(cmake_command=sys.executable) as run:
+            self.assertEqual(run.outcome, "returned 0")
+        cmakes = [c[0] for c in run.commands if c[1].startswith("--")]
+        self.assertEqual(cmakes, [sys.executable, sys.executable], run.commands)
 
     def test_the_wheel_is_patched_with_the_relinked_library(self):
         # Nothing downstream re-checks the wheel: the AOT tests skip without kernels.
