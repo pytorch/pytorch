@@ -236,12 +236,12 @@ bool _is_windows_os() {
 namespace torch::inductor {
 
 namespace {
-const nlohmann::json& load_json_file(const std::string& json_path) {
+nlohmann::json load_json_file(const std::string& json_path) {
   TORCH_CHECK(fs::exists(json_path), "File not found: ", json_path);
 
   std::ifstream json_file(json_path);
   TORCH_CHECK(json_file.is_open());
-  static nlohmann::json json_obj;
+  nlohmann::json json_obj;
   json_file >> json_obj;
 
   return json_obj;
