@@ -609,14 +609,14 @@ class TestFlyDSLTemplate(TestCase):
         m = 64
         n = 40
         # HTI halves the 128 tile, covering 64-, 128-, and 256-row LDS layouts.
-        block_warps = 2 if use_half_tile_interleaved or tile_size == 64 else 4
+        waves = 2 if use_half_tile_interleaved or tile_size == 64 else 4
         gemm_config = asdict(
             flydsl_heuristics.FlyDSLGemmConfig(
                 TILE_M=tile_size,
                 TILE_N=tile_size,
                 TILE_K=tile_k,
-                BLOCK_M_WARPS=block_warps,
-                BLOCK_N_WARPS=block_warps,
+                M_WAVES=waves,
+                N_WAVES=waves,
                 USE_HALF_TILE_INTERLEAVED=use_half_tile_interleaved,
             )
         )

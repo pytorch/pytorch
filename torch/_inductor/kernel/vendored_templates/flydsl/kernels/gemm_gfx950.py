@@ -76,9 +76,9 @@ class AsyncLoadOperand:
 
 def make_gemm_gfx950_param(
     dtype_id: int = GEMM_DTYPE_BF16,
-    block_m: int = 256,
-    block_n: int = 256,
-    block_k: int = 64,
+    tile_m: int = 256,
+    tile_n: int = 256,
+    tile_k: int = 64,
     stages: int = 2,
     m_waves: int = 2,
     n_waves: int = 4,
@@ -93,6 +93,8 @@ def make_gemm_gfx950_param(
     mma_n: int = 16,
     mma_k: int = 32,
 ) -> GemmGfx950Param:
+    # Keep the kernel implementation's internal block terminology unchanged.
+    block_m, block_n, block_k = tile_m, tile_n, tile_k
     if dtype_id not in (GEMM_DTYPE_BF16, GEMM_DTYPE_FP16):
         raise ValueError(f"unsupported dtype_id={dtype_id}")
     if block_m <= 0 or block_n <= 0 or block_k <= 0 or stages <= 0:
@@ -1157,9 +1159,9 @@ def gemm_gfx950(
     )
 
 
-def infer_has_k_tail(k: int, block_k: int, stages: int):
-    k_tiles = (k + block_k - 1) // block_k
-    return (k % block_k != 0) or (k_tiles < stages - 1)
+def infer_has_k_tail(k: int, tile_k: int, stages: int):
+    k_tiles = (k + tile_k - 1) // tile_k
+    return (k % tile_k != 0) or (k_tiles < stages - 1)
 
 
 def make_gemm_param_and_validate(m, n, k, kwargs):
