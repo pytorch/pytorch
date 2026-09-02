@@ -359,6 +359,7 @@ class Benchmarker:
         self: Self,
         _callable: Callable[[], Any],
         grad_to_none: list[torch.Tensor] | None = None,
+        cudagraph_unroll: int | None = None,
         **kwargs: Any,
     ) -> float:
         """Benchmark a GPU callable using CUDA graph capture and replay.
@@ -367,6 +368,11 @@ class Benchmarker:
         which eliminates kernel launch overhead for fair comparison between different
         implementations.
         """
+        if cudagraph_unroll is None:
+            cudagraph_unroll = inductor_config.autotune_cudagraph_unroll
+        if cudagraph_unroll < 1:
+            raise ValueError("cudagraph_unroll must be at least 1")
+
         # Warmup
         torch.cuda.synchronize()
         _callable()
@@ -386,16 +392,20 @@ class Benchmarker:
         with torch.cuda.graph(
             cuda_graph, stream=stream, capture_error_mode="thread_local"
         ):
-            if grad_to_none is not None:
-                for x in grad_to_none:
-                    x.grad = None
-            _callable()
+            for _ in range(cudagraph_unroll):
+                if grad_to_none is not None:
+                    for x in grad_to_none:
+                        x.grad = None
+                _callable()
 
         torch.cuda.current_stream().wait_stream(stream)
         torch.cuda.synchronize()
 
         # grad clearing is captured in the graph, don't pass it through.
-        return self.benchmark_gpu(cuda_graph.replay, **kwargs)
+        result = self.benchmark_gpu(cuda_graph.replay, **kwargs)
+        if isinstance(result, list):
+            return [timing / cudagraph_unroll for timing in result]  # type: ignore[return-value]
+        return result / cudagraph_unroll
 
 
 # Make built-in defaults explicit via the registry
@@ -616,6 +626,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         self: Self,
         _callable: Callable[[], Any],
         grad_to_none: list[torch.Tensor] | None = None,
+        cudagraph_unroll: int | None = None,
         **kwargs: Any,
     ) -> float:
         # Prevent benchmark_gpu from re-entering this method
@@ -623,7 +634,10 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         self._in_cudagraph_benchmark = True
         try:
             result = super().benchmark_gpu_with_cuda_graph(
-                _callable, grad_to_none=grad_to_none, **kwargs
+                _callable,
+                grad_to_none=grad_to_none,
+                cudagraph_unroll=cudagraph_unroll,
+                **kwargs,
             )
         finally:
             self._in_cudagraph_benchmark = False

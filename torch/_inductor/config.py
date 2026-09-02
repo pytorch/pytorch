@@ -573,6 +573,14 @@ autotune_cudagraph_benchmarking: bool = (
     os.environ.get("TORCHINDUCTOR_AUTOTUNE_CUDAGRAPH_BENCHMARKING") == "1"
 )
 
+# Number of callable invocations captured in each CUDA graph used for
+# autotuning. Replaying a graph has a fixed launch cost which can dominate
+# sub-10us kernels and change their relative ordering. Capturing multiple
+# invocations amortizes that cost; timings are normalized per invocation.
+autotune_cudagraph_unroll = int(
+    os.environ.get("TORCHINDUCTOR_AUTOTUNE_CUDAGRAPH_UNROLL", "1")
+)
+
 
 # Modifies the number of autotuning choices displayed, set to None for all
 def _autotune_num_choices_displayed_default() -> int | None:
