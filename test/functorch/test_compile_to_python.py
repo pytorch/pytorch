@@ -246,8 +246,9 @@ class TestAOTCompileToPython(TestCase):
         )
 
     @skipIfTorchDynamo(
-        "the served _CompiledFunction sets boxed_grads_call=True, which compiled "
-        "autograd rejects; a feature limitation, see the module's not-covered list"
+        "the emitted _CompiledFunction refuses compiled autograd with "
+        "NotImplementedError (no fx bw_module to inline); a feature limitation, "
+        "see the module's not-covered list"
     )
     def test_training_graph_composes_forward_and_backward(self):
         # grad_enabled with inputs that require grad makes AOTAutograd emit a
@@ -280,6 +281,26 @@ class TestAOTCompileToPython(TestCase):
         out.sum().backward()
         for name, param in m.named_parameters():
             self.assertEqual(param.grad, expected[name])
+
+    def test_training_backward_under_compiled_autograd_raises_not_implemented(self):
+        # Compiled autograd reads _lazy_backward_info off the forward class before
+        # anything else and, on None, blames AOTAutogradCache -- advice that cannot
+        # apply to a source artifact. The emitted class refuses with its own reason.
+        m = torch.nn.Linear(4, 3)
+        x = torch.randn(5, 4)
+        gm = _capture(m, x)
+        with torch.enable_grad():
+            src, _cache = compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
+        out = _exec(src)(_flat_inputs(m, x))
+        out = out[0] if isinstance(out, (list, tuple)) else out
+        with (
+            torch._dynamo.compiled_autograd._enable(lambda gm: gm),
+            self.assertRaisesRegex(
+                NotImplementedError,
+                "compiled autograd is not supported for a standalone training artifact",
+            ),
+        ):
+            out.sum().backward()
 
     def test_training_forward_and_backward_do_not_share_names(self):
         # The two inductor modules are spliced into ONE namespace and both define
@@ -386,19 +407,21 @@ class TestAOTCompileToPython(TestCase):
         expected = [n for n in vars(real) if not n.startswith("__")]
         self.assertIn("_compiled_autograd_key", expected)
         for name in expected:
-            self.assertTrue(hasattr(emitted, name), f"missing {name}")
+            self.assertIn(name, dir(emitted), f"missing {name}")
         self.assertIs(emitted.compiled_fw, ns["_inner_call_fw"])
         self.assertIs(emitted.compiled_bw, ns["_inner_call_bw"])
         self.assertIsNone(emitted.maybe_subclass_metadata)
-        self.assertIsNone(emitted._lazy_backward_info)
+        with self.assertRaisesRegex(NotImplementedError, "compiled autograd"):
+            emitted._lazy_backward_info
         self.assertEqual(emitted.num_symints_saved_for_bw, 0)
         self.assertEqual(
             emitted.metadata.num_forward_returns, real.metadata.num_forward_returns
         )
 
     @skipIfTorchDynamo(
-        "the served _CompiledFunction sets boxed_grads_call=True, which compiled "
-        "autograd rejects; a feature limitation, see the module's not-covered list"
+        "the emitted _CompiledFunction refuses compiled autograd with "
+        "NotImplementedError (no fx bw_module to inline); a feature limitation, "
+        "see the module's not-covered list"
     )
     @functorch_config.patch(donated_buffer=True)
     def test_training_donated_buffer_retain_graph_raises_like_torch_compile(self):
@@ -433,15 +456,14 @@ class TestAOTCompileToPython(TestCase):
 
     def test_training_artifact_execs_in_fresh_process(self):
         # The artifact's imports are only exercised in a process where nothing has
-        # imported dynamo yet: the runtime helpers must come through the
-        # standalone_runtime surface, after ``import torch``, or the cold import of
-        # runtime_wrappers trips its circular import with _dynamo.
+        # imported torch yet: a cold ``from ...runtime_wrappers import`` is a
+        # circular import with _dynamo only when it is the first torch import, so
+        # the invariant is that ``import torch`` comes first.
         m = torch.nn.Linear(4, 3)
         x = torch.randn(5, 4)
         gm = _capture(m, x)
         with torch.enable_grad():
             src, _cache = compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
-        self.assertNotIn("runtime_wrappers import", src)
         imports = [l for l in src.splitlines() if l.startswith(("import", "from"))]
         self.assertEqual(imports[0], "import torch")
         with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as fh:
@@ -505,8 +527,9 @@ class TestAOTCompileToPython(TestCase):
 
     @unittest.skipIf(not HAS_GPU, "requires gpu")
     @skipIfTorchDynamo(
-        "the served _CompiledFunction sets boxed_grads_call=True, which compiled "
-        "autograd rejects; a feature limitation, see the module's not-covered list"
+        "the emitted _CompiledFunction refuses compiled autograd with "
+        "NotImplementedError (no fx bw_module to inline); a feature limitation, "
+        "see the module's not-covered list"
     )
     def test_training_conv_restride_matches_eager(self):
         # Conv nets are what the backward restride exists for: inductor's

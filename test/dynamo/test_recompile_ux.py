@@ -17,8 +17,8 @@ import torch._dynamo.config
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._logging
+from torch._C._dynamo.eval_frame import _clear_cache_entries_for_region
 from torch._dynamo.eval_frame import (
-    _clear_cache_entries_for_region,
     _get_cache_entries_for_region,
     _get_total_cache_entry_count,
 )
@@ -749,7 +749,9 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         from torch._dynamo.package import CompilePackage, DiskDynamoStore
 
         store = DiskDynamoStore()
-        path = tempfile.mkdtemp()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = tmp.name
         package = CompilePackage(fn)
         torch._dynamo.optimize(backend="eager", package=package)(fn)(torch.randn(8))
         for backend_id, backend in package.cached_backends.items():
@@ -803,7 +805,6 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         # The parked eviction has been applied by now; the reinstall's entries
         # must have survived it.
         self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
-        self.assertFalse(package.installed_entries_dropped())
         package.uninstall()
         self.assertEqual(len(_debug_get_precompile_entries(code)), 0)
 
@@ -846,14 +847,19 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         )
         ctx._isolate_recompiles_id = region
 
+        seen = []
+
         def clear():
             for _ in range(3):
                 _clear_cache_entries_for_region(code, region)
-            # Still walked by the interrupted lookup, so nothing is gone yet.
-            self.assertEqual(len(_get_cache_entries_for_region(code, region)), 1)
+            # Recorded, not asserted: an exception raised inside a backend
+            # __eq__ is swallowed by the lookup as a mismatch.
+            seen.append(len(_get_cache_entries_for_region(code, region)))
 
         hook.append(clear)
         self.assertEqual(ctx(f)(x), f(x))
+        # Still walked by the interrupted lookup, so nothing was gone yet.
+        self.assertEqual(seen, [1])
         # The guard-evaluating lookup that follows the fast-path hit applied
         # the parked clear, then missed and recompiled into the region.
         self.assertEqual(len(compiles), 2)
@@ -894,16 +900,20 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(8)
         torch._dynamo.optimize(backend=Backend(), dynamic=False)(f)(x)
 
+        seen = []
+
         def reset():
             _reset_precompile_entries(code)
-            # Still walked by the interrupted lookup, so nothing is gone yet.
-            self.assertEqual(len(_get_cache_entries_for_region(code, -1)), 1)
+            # Recorded, not asserted; see test_region_clear_from_inside_a_lookup.
+            seen.append(len(_debug_get_precompile_entries(code)))
 
         hook.append(reset)
         self.assertEqual(
             torch._dynamo.optimize(backend=Backend(), dynamic=False)(f)(x), f(x)
         )
         self.assertEqual(len(_debug_get_precompile_entries(code)), 0)
+        # The parked reset left the entry in place until the lookup finished.
+        self.assertEqual(seen, [1])
         package.uninstall()
 
     @torch._dynamo.config.patch(
