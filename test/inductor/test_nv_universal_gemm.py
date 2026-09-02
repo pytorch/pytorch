@@ -148,6 +148,39 @@ class TestNVUniversalGemm(TestCase):
             self.assertIs(_compile_nvgemm_kernel(FakeKernel(), marker), marker)
             self.assertIs(cute.compile, monitored_compile)
 
+    def test_compile_ignores_forwarded_getitem(self):
+        import cutlass.cute as cute
+
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            _compile_nvgemm_kernel,
+        )
+
+        original_compile = cute.compile
+
+        class ForwardingProxy:
+            def __init__(self, wrapped):
+                self.__wrapped__ = wrapped
+
+            def __call__(self, *args, **kwargs):
+                return self.__wrapped__(*args, **kwargs)
+
+            def __getattr__(self, name):
+                return getattr(self.__wrapped__, name)
+
+        proxy = ForwardingProxy(original_compile)
+        self.assertTrue(hasattr(proxy, "__getitem__"))
+        self.assertFalse(hasattr(type(proxy), "__getitem__"))
+
+        class FakeKernel:
+            def compile(inner_self, args):
+                self.assertIs(cute.compile, original_compile)
+                return args
+
+        with mock.patch.object(cute, "compile", proxy):
+            marker = object()
+            self.assertIs(_compile_nvgemm_kernel(FakeKernel(), marker), marker)
+            self.assertIs(cute.compile, proxy)
+
     def test_compile_serializes_subscriptable_cute_compile(self):
         import cutlass.cute as cute
 
@@ -224,6 +257,61 @@ class TestNVUniversalGemm(TestCase):
             ),
         }
         self.assertEqual(len(signatures), 7)
+
+    def test_nvgemm_cache_key_distinguishes_epilogue_source(self):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            _create_gemm_cache_key,
+            _make_disk_config_key,
+        )
+
+        inputs = (torch.empty_strided((4, 4), (4, 1)),) * 2
+        out = torch.empty_strided((4, 4), (4, 1))
+        kwargs = {"has_epilogue": True, "aux_tensors": ()}
+        self.assertNotEqual(
+            _create_gemm_cache_key(inputs, out, epilogue_source="first", **kwargs),
+            _create_gemm_cache_key(inputs, out, epilogue_source="second", **kwargs),
+        )
+        self.assertNotEqual(
+            _make_disk_config_key(
+                "kernel", "GEMM", torch.float32, epilogue_source="first"
+            ),
+            _make_disk_config_key(
+                "kernel", "GEMM", torch.float32, epilogue_source="second"
+            ),
+        )
+
+    def test_nvgemm_precompile_metadata_includes_output_scale(self):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
+            NVUniversalGemmScheduling,
+        )
+
+        def node(name, size, stride, dtype):
+            result = MagicMock()
+            result.get_name.return_value = name
+            result.get_size.return_value = size
+            result.get_stride.return_value = stride
+            result.get_dtype.return_value = dtype
+            return result
+
+        kernel = MagicMock()
+        kernel._template_input_args = [
+            ("in_ptr0", node("input", (4, 4), (4, 1), torch.float16))
+        ]
+        kernel.output_scale_node = node("alpha", (), (), torch.float32)
+        ctb = MagicMock()
+        ctb.layout.size = (4, 4)
+        ctb.layout.stride = (4, 1)
+        ctb.layout.dtype = torch.float16
+        ctb.layout.device = torch.device("cuda:0")
+        ctb.kernel_metadata = {}
+
+        scheduling = NVUniversalGemmScheduling.__new__(NVUniversalGemmScheduling)
+        with mock.patch.object(torch.cuda, "is_available", return_value=False):
+            metadata = scheduling._build_precompile_metadata(kernel, ctb)
+
+        self.assertEqual(metadata["precompile_shapes"]["alpha"], [])
+        self.assertEqual(metadata["precompile_strides"]["alpha"], [])
+        self.assertEqual(metadata["precompile_dtypes"]["alpha"], "float32")
 
     def test_direct_epilogue_schema_separates_local_reduce_result(self):
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
@@ -379,9 +467,7 @@ class TestNVUniversalGemm(TestCase):
         ):
             compiled = torch.compile(scaled_mm)
             result, (code,) = run_and_get_code(compiled, a, b, scale_a, scale_b, alpha)
-            torch.testing.assert_close(
-                result, expected, equal_nan=True, atol=1.0, rtol=2e-2
-            )
+            self.assertEqual(result, expected, equal_nan=True, atol=1.0, rtol=2e-2)
 
             graph = torch.cuda.CUDAGraph()
             with torch.cuda.graph(graph):
@@ -391,9 +477,7 @@ class TestNVUniversalGemm(TestCase):
             graph.replay()
             torch.cuda.synchronize()
 
-        torch.testing.assert_close(
-            graph_result, expected, equal_nan=True, atol=1.0, rtol=2e-2
-        )
+        self.assertEqual(graph_result, expected, equal_nan=True, atol=1.0, rtol=2e-2)
         self.assertIn("swap_ab=True", code)
         self.assertIn("output_scale=", code)
         self.assertNotIn("CuTeDSLEpilogueArguments", code)
@@ -450,12 +534,77 @@ class TestNVUniversalGemm(TestCase):
             result, (code,) = run_and_get_code(compiled, a, b, scale_a, scale_b, alpha)
 
         for actual, reference in zip(result, expected):
-            torch.testing.assert_close(
-                actual, reference, equal_nan=True, atol=1.0, rtol=2e-2
-            )
+            self.assertEqual(actual, reference, equal_nan=True, atol=1.0, rtol=2e-2)
         self.assertEqual(counters["inductor"]["scaled_mm_output_scale_fused"], 1)
         self.assertIn("output_scale=", code)
         self.assertNotIn("triton_poi_fused_mul", code)
+
+    @parametrize("shape", ((1,), (1, 1, 1)))
+    def test_scaled_mm_output_scale_preserves_singleton_tensor_semantics(self, shape):
+        m, n, k = 32, 512, 512
+        a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
+        alpha = torch.rand(shape, device="cuda")
+
+        def scaled_mm(a, b, scale_a, scale_b, alpha):
+            return (
+                torch._scaled_mm(
+                    a,
+                    b,
+                    scale_a=scale_a,
+                    scale_b=scale_b,
+                    out_dtype=torch.bfloat16,
+                )
+                * alpha
+            )
+
+        expected = scaled_mm(a, b, scale_a, scale_b, alpha)
+        torch._dynamo.reset()
+        with config.patch(_nvgemm_config(compile_threads=1)):
+            result, code = run_and_get_code(
+                torch.compile(scaled_mm), a, b, scale_a, scale_b, alpha
+            )
+
+        self.assertEqual(result, expected, atol=1.0, rtol=2e-2)
+        self.assertEqual(result.shape, expected.shape)
+        self.assertEqual(result.dtype, expected.dtype)
+        self.assertNotIn("output_scale=", "\n".join(code))
+
+    def test_scaled_mm_output_scale_fallback_preserves_multiply(self):
+        import torch._inductor.codegen.nv_universal_gemm as nvgemm
+
+        m, n, k = 32, 512, 512
+        a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
+        alpha = torch.rand((), device="cuda")
+
+        def scaled_mm(a, b, scale_a, scale_b, alpha):
+            return (
+                torch._scaled_mm(
+                    a,
+                    b,
+                    scale_a=scale_a,
+                    scale_b=scale_b,
+                    out_dtype=torch.bfloat16,
+                )
+                * alpha
+            )
+
+        expected = scaled_mm(a, b, scale_a, scale_b, alpha)
+        torch._dynamo.reset()
+        with (
+            config.patch(
+                _nvgemm_config(
+                    max_autotune_gemm_backends="ATEN,NVGEMM", compile_threads=1
+                )
+            ),
+            mock.patch.object(nvgemm, "add_nv_universal_scaled_gemm_choices"),
+        ):
+            result, code = run_and_get_code(
+                torch.compile(scaled_mm), a, b, scale_a, scale_b, alpha
+            )
+
+        self.assertEqual(result, expected, atol=1.0, rtol=2e-2)
+        self.assertNotIn("output_scale=", "\n".join(code))
+        self.assertIn("triton_poi", "\n".join(code))
 
     def test_scaled_mm_scale_result_is_ignored_for_bfloat16_output(self):
         m, n, k = 32, 512, 512
@@ -574,7 +723,6 @@ class TestNVUniversalGemm(TestCase):
 
         from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
             _args_query_candidates,
-            DENSE_EFC_TILE_NS,
         )
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
             _create_gemm_arguments,
@@ -591,7 +739,7 @@ class TestNVUniversalGemm(TestCase):
             if "VendoredDenseGemmEFCOperator" in kernel.metadata.operator_name
         }
 
-        self.assertTrue(set(DENSE_EFC_TILE_NS).issubset(tile_ns))
+        self.assertTrue({64, 128, 160, 192, 224, 256}.issubset(tile_ns))
 
     def test_efc_epilogue_lookup_no_deadlock(self):
         """get_efc_kernel_with_epilogue holds _cache_lock and, when the base EFC
@@ -1202,6 +1350,32 @@ class TestNVUniversalGemm(TestCase):
 class TestNVUniversalGemmHeuristics(TestCase):
     """Unit tests for NVUniversalGemmHeuristics without requiring actual libraries."""
 
+    def test_atomic_reduction_fusion_hooks(self):
+        from torch._inductor.codegen.cuda_combined_scheduling import (
+            CUDACombinedScheduling,
+        )
+
+        scheduling = CUDACombinedScheduling.__new__(CUDACombinedScheduling)
+        nvgemm = MagicMock()
+        triton = MagicMock()
+        scheduling._nv_universal_gemm_scheduling = nvgemm
+        scheduling._triton_scheduling = triton
+        node1, node2 = MagicMock(), MagicMock()
+
+        nvgemm.has_conflicting_epilogue_reductions.return_value = True
+        self.assertFalse(scheduling.can_fuse_reduction_pair(node1, node2))
+
+        nvgemm.get_fusion_pair_priority.return_value = 1
+        self.assertEqual(scheduling.get_fusion_pair_priority(node1, node2), 1)
+        triton.get_fusion_pair_priority.assert_not_called()
+
+        nvgemm.get_fusion_pair_priority.return_value = 2
+        triton.get_fusion_pair_priority.return_value = 4
+        self.assertEqual(scheduling.get_fusion_pair_priority(node1, node2), 6)
+
+        nvgemm.has_nvgemm_bool_output.side_effect = (False, True)
+        self.assertFalse(scheduling.can_fuse_horizontal(node1, node2))
+
     def test_grouped_reduction_affine_index_rejects_offset(self):
         from torch._inductor.codegen.nv_universal_gemm.epilogue_lowering import (
             _matches_affine_index,
@@ -1244,6 +1418,41 @@ class TestNVUniversalGemmHeuristics(TestCase):
         )
         with self.assertRaisesRegex(NotImplementedError, "one logical element"):
             LoopIRCuteDSLCodegen.source_from_expression("gemm", source, "source")
+
+    def test_epilogue_rejects_remapped_same_shape_load(self):
+        from torch._inductor.kernel.loop_ir_cutedsl_codegen import LoopIRCuteDSLCodegen
+        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
+            GemmEpilogueIRAnalysis,
+            GemmEpilogueIRExpression as Expr,
+            GemmEpilogueIRStore,
+        )
+
+        i, j = sympy.symbols("i j", integer=True)
+        buffers = {name: MagicMock() for name in ("gemm", "other", "out")}
+        for buffer in buffers.values():
+            buffer.get_size.return_value = (4, 4)
+            buffer.get_stride.return_value = (4, 1)
+            buffer.get_layout.return_value.offset = 0
+        graph = MagicMock(graph_inputs={})
+        graph.get_buffer.side_effect = buffers.get
+        graph.sizevars.statically_known_equals.side_effect = lambda a, b: a == b
+        analysis = GemmEpilogueIRAnalysis(
+            {
+                "out": GemmEpilogueIRStore(
+                    4 * i + j,
+                    Expr("load", ("other", i + 4 * j, None)),
+                )
+            },
+            index_vars={"out": (i, j)},
+        )
+
+        with (
+            V.set_graph_handler(graph),
+            self.assertRaisesRegex(NotImplementedError, "remapped tensor loads"),
+        ):
+            LoopIRCuteDSLCodegen("gemm", OrderedSet())._validate_load_indices(
+                analysis, "out"
+            )
 
     def test_output_scale_rejects_value_changing_cast(self):
         from torch._inductor.kernel.loop_ir_cutedsl_codegen import LoopIRCuteDSLCodegen
@@ -2359,7 +2568,10 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             result, code_list = run_and_get_code(torch.compile(fn), a, b)
 
         code = "\n".join(code_list)
-        self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
+        expected = fn(a, b)
+        self.assertEqual(result, expected, atol=1e-2, rtol=1e-2)
+        self.assertEqual(result[1].stride(), expected[1].stride())
+        result[1].view(-1)
         self.assertIn("VendoredDenseGemmEFCOperator", code)
         self.assertIn("swap_ab=True", code)
         self.assertIn(f"axis={1 - axis}", code)
@@ -3001,7 +3213,10 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             )
 
         code = "\n".join(code_list)
-        self.assertEqual(result, fn(a, b, scale_a, scale_b), atol=2e-2, rtol=2e-2)
+        expected = fn(a, b, scale_a, scale_b)
+        self.assertEqual(result, expected, atol=2e-2, rtol=2e-2)
+        self.assertEqual(result[1].stride(), expected[1].stride())
+        result[1].view(-1)
         self.assertIn("VendoredDenseBlockScaledGemmEFC", code)
         self.assertIn("swap_ab=True", code)
         self.assertIn(f"axis={1 - axis}", code)
@@ -3283,6 +3498,20 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         result, code, epilogue_fused = self._compile_and_check(fn, a, b, bias)
         torch.testing.assert_close(result, fn(a, b, bias), atol=1e-2, rtol=1e-2)
         self.assertTrue(epilogue_fused, "bias+relu was NOT fused into epilogue")
+
+    def test_epilogue_with_remapped_aux_input_falls_back(self):
+        dtype = torch.bfloat16
+        a = torch.randn(self.M, self.K, device="cuda", dtype=dtype)
+        b = torch.randn(self.K, self.N, device="cuda", dtype=dtype)
+        bias = torch.randn(self.N, self.M, device="cuda", dtype=dtype)
+
+        def fn(a, b, bias):
+            return (a @ b).float() + bias.T
+
+        result, code, epilogue_fused = self._compile_and_check(fn, a, b, bias)
+        self.assertEqual(result, fn(a, b, bias), atol=1e-2, rtol=1e-2)
+        self.assertFalse(epilogue_fused)
+        self.assertIn("triton_poi", code)
 
     @parametrize(
         "bias_shape",

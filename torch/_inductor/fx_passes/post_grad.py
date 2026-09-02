@@ -2124,8 +2124,8 @@ def _can_fold_scaled_mm_output_scale(match: Match) -> bool:
 
     Restrict this rewrite to the NVGEMM path: other scaled-mm backends do not
     uniformly expose ``scale_result`` through Inductor yet.  The vendored
-    Blackwell block-scaled kernel consumes one FP32 value through its alpha
-    argument, including 0-D and all-ones-shaped tensors.
+    Blackwell block-scaled kernel consumes a 0-D FP32 tensor through its alpha
+    argument without changing the GEMM result shape or dtype.
     """
     if not (config.max_autotune or config.max_autotune_gemm):
         return False
@@ -2142,7 +2142,7 @@ def _can_fold_scaled_mm_output_scale(match: Match) -> bool:
         isinstance(scale_val, torch.Tensor)
         and scale_val.device.type == "cuda"
         and scale_val.dtype == torch.float32
-        and scale_val.numel() == 1
+        and scale_val.ndim == 0
     ):
         return False
 

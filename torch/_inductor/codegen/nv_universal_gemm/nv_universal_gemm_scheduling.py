@@ -941,11 +941,6 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                 reduction_plan = self._schedule_reduction_plan(
                     epilogue_program, swap_ab
                 )
-                if swap_ab and reduction_plan is not None:
-                    for name in reduction_plan.auxiliary_outputs:
-                        buffer = V.graph.get_buffer(name)
-                        if len(buffer.get_size()) == 2:
-                            buffer.get_layout().stride = [1, buffer.get_size()[0]]
                 if feeds_main:
                     if reduction_plan is None:
                         raise AssertionError("expected feed-main reduction plan")
@@ -1107,6 +1102,17 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                 precompile_shapes[param_name] = [int(s) for s in size]
                 stride = input_node.get_stride()
                 precompile_strides[param_name] = [int(s) for s in stride]
+                precompile_dtypes[param_name] = str(
+                    input_node.get_dtype()
+                ).removeprefix("torch.")
+
+            if kernel.output_scale_node is not None:
+                input_node = kernel.output_scale_node
+                param_name = input_node.get_name()
+                precompile_shapes[param_name] = [int(s) for s in input_node.get_size()]
+                precompile_strides[param_name] = [
+                    int(s) for s in input_node.get_stride()
+                ]
                 precompile_dtypes[param_name] = str(
                     input_node.get_dtype()
                 ).removeprefix("torch.")
