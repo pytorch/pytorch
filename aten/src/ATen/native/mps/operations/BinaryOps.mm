@@ -12,9 +12,6 @@
 #else
 #include <ATen/ops/add_native.h>
 #include <ATen/ops/div_native.h>
-#include <ATen/ops/logical_and_native.h>
-#include <ATen/ops/logical_or_native.h>
-#include <ATen/ops/logical_xor_native.h>
 #include <ATen/ops/pow.h>
 #include <ATen/ops/pow_native.h>
 #include <ATen/ops/result_type.h>
@@ -183,19 +180,6 @@ static void add_sub_lerp_template(const Tensor& self,
 
 } // namespace mps
 
-#define CREATE_MPS_BINARY_COMPARISON_OP_FUNC(func_out, func_stub, other_type)                               \
-  Tensor& func_out(const Tensor& self, const other_type& other, Tensor& output) {                           \
-    mps::binaryOp##other_type(                                                                              \
-        self, other, output, #func_stub, ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) { \
-          MPSGraph* mpsGraph = cachedGraph->graph();                                                        \
-          return [mpsGraph func_stub##                                                                      \
-              WithPrimaryTensor:mps::castMPSTensor(mpsGraph, primaryCastTensor, ScalarType::Bool)           \
-                secondaryTensor:mps::castMPSTensor(mpsGraph, secondaryCastTensor, ScalarType::Bool)         \
-                           name:nil];                                                                       \
-        });                                                                                                 \
-    return output;                                                                                          \
-  }
-
 #define CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(func_out, func_stub, other_type)                               \
   TORCH_IMPL_FUNC(func_out)(const Tensor& self, const other_type& other, const Tensor& output) {            \
     mps::binaryOp##other_type(                                                                              \
@@ -209,9 +193,6 @@ static void add_sub_lerp_template(const Tensor& self,
 
 // Arithmetic Binary Ops
 CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(pow_tensor_tensor_out_mps, power, Tensor);
-CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_and_out_mps, logicalAND, Tensor);
-CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_or_out_mps, logicalOR, Tensor);
-CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_xor_out_mps, logicalXOR, Tensor);
 
 TORCH_IMPL_FUNC(add_out_mps)(const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& output) {
   mps::add_sub_lerp_template(self, other, alpha, output, "add");

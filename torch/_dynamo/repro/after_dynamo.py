@@ -54,7 +54,7 @@ from .. import config
 from ..backends.registry import CompilerFn, lookup_backend, register_debug_backend
 from ..debug_utils import clone_inputs_retaining_gradness
 from ..types import CompilerConfigProvider
-from . import ReproOptions
+from . import _minifier_sanity_guard, ReproOptions
 
 
 log = logging.getLogger(__name__)
@@ -340,7 +340,6 @@ def dynamo_minifier_backend(
     try:
         compiled_gm = compiler_fn(gm, example_inputs)
         run_fwd_maybe_bwd(compiled_gm, example_inputs)  # type: ignore[arg-type]
-        raise ValueError("No issue was detected")
     except Exception as exc:
         orig_failure = str(exc)
         log.warning(
@@ -355,12 +354,16 @@ def dynamo_minifier_backend(
             compiler_fn=compiler_fn,
             orig_failure=orig_failure,
         )
-        minifier(
-            gm,
-            example_inputs,
-            module_fails=fails_fn,
-            dump_state=dump_state_fn,
-        )
+        with _minifier_sanity_guard() as sanity:
+            minifier(
+                gm,
+                example_inputs,
+                module_fails=fails_fn,
+                dump_state=dump_state_fn,
+            )
+        sanity.raise_if_failed(exc)
+    else:
+        raise ValueError("No issue was detected")
     return gm
 
 
@@ -386,12 +389,14 @@ def dynamo_accuracy_minifier_backend(
             compiler_fn=compiler_fn,  # type: ignore[arg-type]
         )
         dump_state_fn(fx.GraphModule(gm, copy.deepcopy(gm.graph)), example_inputs)
-        minifier(
-            gm,
-            example_inputs,
-            module_fails=fails_fn,
-            dump_state=dump_state_fn,
-        )
+        with _minifier_sanity_guard() as sanity:
+            minifier(
+                gm,
+                example_inputs,
+                module_fails=fails_fn,
+                dump_state=dump_state_fn,
+            )
+        sanity.raise_if_failed(AccuracyError("Bad accuracy detected."))
     else:
         log.error("Input graph does not fail accuracy testing")
     return gm
@@ -401,7 +406,7 @@ def backend_fails(
     gm: fx.GraphModule,
     example_inputs: Sequence[Any],
     compiler_fn: CompilerFn,
-    orig_failure: Sequence[Any],
+    orig_failure: str,
 ) -> bool:
     """
     Minifier uses this function to identify if the minified graph module fails
