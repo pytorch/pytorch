@@ -66,14 +66,10 @@ def row_config(N: int, dtype_width: int, nfields: int = 1, hw=None) -> "_RowConf
     # needs more threads", which tracks smem capacity, so scaling them by hw.smem_scale
     # keeps the rule correct on other GPUs (1.0 on B200 -> the anchors reproduce exactly).
     #
-    # nfields is ACCEPTED (signature parity + autotuner key) but deliberately NOT acted
-    # on. The nfields sweep confirmed wide-accumulator traits (var nf=3) prefer a
-    # different config, BUT the fp32 and bf16 optima move in OPPOSITE directions (fp32
-    # var wants larger tpr / smaller nt; bf16 var the reverse), so no single scalar
-    # rule serves both -- a measured `eff = N*nfields` fit REGRESSED bf16 var to ~0.92x
-    # while helping fp32. Until a per-(dtype, nfields) table is characterized densely
-    # enough to interpolate, nfields is left to the autotuner (which measures per key and
-    # cannot regress). nf=1 (sum/mean/prod/norm/...) is unaffected and keeps its picks.
+    # nfields is ACCEPTED (signature parity + autotuner key) but deliberately NOT acted on: a
+    # wide-accumulator trait does prefer a different config, but the fp32 and bf16 optima move in
+    # OPPOSITE directions, so no single scalar rule serves both. Left to the autotuner, which
+    # measures per key.
     # The ragged-N correctness clamp (tpr -> nt when the row tile isn't a clean vec*tpr
     # multiple) is applied at USE in RowReduce, not here -- it is a correctness invariant.
     smem = 1.0 if hw is None else hw.smem_scale
@@ -88,26 +84,15 @@ def row_config(N: int, dtype_width: int, nfields: int = 1, hw=None) -> "_RowConf
 
 
 def single_row_config(N: int, dtype_width: int, nfields: int = 1, hw=None):
-    # Occupancy override for a ONE-ROW launch (the reduce-all one-shot), or None when the
-    # ladder's pick already stands (the caller then passes no override at all, keeping the
-    # default path -- including its ragged-N bucket gate -- untouched).
+    # Occupancy override for a ONE-ROW launch (the reduce-all one-shot), or None to leave the
+    # ladder's pick standing. The ladder's small tpr exists so nt//tpr ROWS pack per block; with one
+    # row there is nothing to pack and the GPU runs a fraction of one CTA. So give that row the
+    # widest LADDER RUNG it can feed, one row per block.
     #
-    # The ladder's small tpr exists so that nt//tpr ROWS pack into each block -- with a
-    # single row there is nothing to pack, and the pick instead leaves the whole GPU running
-    # a fraction of one CTA (128 threads at N=4096). Give that row the widest LADDER RUNG it
-    # can FEED instead (one thread per vector load), one row per block.
-    #
-    # Pick from _TPR_RUNGS rather than computing a width: tpr here is both the reduce-tree
-    # width and the block size, so it must be a power of two AND a warp multiple. Computing
-    # it got that wrong twice -- N//vec gave 50 threads for a 100-element fp64 row (not a
-    # warp multiple at all), and warp-rounding gave tpr=96, three warps, which silently
-    # returned a WRONG variance for a 400-element fp32 reduce-all. Rungs are valid by
-    # construction, and a row too narrow for one warp keeps the ladder's pick.
-    #
-    # MEASURED (M=1, bf16, vs ATen): var_mean 0.53-0.93x -> 1.47-1.62x for N=1024..4096;
-    # max.dim, aminmax and sum match or improve at every N from 64 to 16384. A flat
-    # tpr=nt=256 also fixes mid-N but REGRESSES N<=256 (0.76x on var_mean), which is why
-    # this feeds the row rather than maxing it out.
+    # From _TPR_RUNGS, not a computed width: tpr is both the reduce-tree width and the block size, so
+    # it must be a power of two AND a warp multiple -- a computed width silently returned a wrong
+    # variance. MEASURED (M=1, bf16, vs ATen): var_mean 0.53-0.93x -> 1.47-1.62x at N=1024..4096,
+    # with max.dim, aminmax and sum matching or improving from N=64 to 16384.
     cfg = row_config(N, dtype_width, nfields, hw)
     vec = math.gcd(N, 128 // dtype_width)
     feedable = min(_TPR_MAX, N // max(1, vec))  # vector loads this row can issue
