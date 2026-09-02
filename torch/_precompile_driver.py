@@ -562,6 +562,7 @@ def _build_dynamo_forward():
             )
 
         tensors = []
+        component_owner = {}
         for value in instance_values(values):
             if not isinstance(value, torch.Tensor):
                 continue
@@ -573,6 +574,13 @@ def _build_dynamo_forward():
                 unsupported_layout(component)
                 if component.layout in sparse_layouts:
                     continue
+                # The same inner tensor reached from two DISTINCT wrappers is
+                # aliasing the serialized guards cannot express (the snapshot
+                # rebuilds each wrapper's inner tensors), unlike the same
+                # tensor object passed twice.
+                owner = component_owner.setdefault(id(component), id(value))
+                if owner != id(value):
+                    return True
                 tensors.append(component)
         if len(tensors) < 2:
             return False

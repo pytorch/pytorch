@@ -28,10 +28,14 @@ By default, when a differentiable output of a compiled region is not used by
 the loss, AOTAutograd materializes its missing output gradient as zeros and
 runs the corresponding backward computation, so independent inputs that only
 affect that output receive zero gradients where eager autograd leaves
-``.grad = None``. The opt-in config below makes ``torch.compile`` match eager
-autograd instead: such inputs receive ``.grad = None``, their backward
+``.grad = None``. The opt-in config below makes ``torch.compile`` follow eager
+autograd for such inputs instead: they receive ``.grad = None``, their backward
 computation is pruned, and ``torch.autograd.grad(..., allow_unused=False)``
-raises the same error as it does in eager mode. The setting is captured when
+raises the same error as it does in eager mode. One documented divergence
+remains: a custom ``autograd.Function`` whose backward is linear in the pruned
+tangent (eager runs it on materialized zeros and accumulates a zero gradient)
+yields ``.grad = None`` here unless the backward could be re-traced, in which
+case it yields a real zero tensor; the two are numerically equivalent. The setting is captured when
 the function is compiled (the first call below), not when it runs, so enable it
 around the compile; toggling it afterwards does not change an already-compiled
 function, and Dynamo does not recompile on functorch config changes:

@@ -42,6 +42,8 @@ If your security advisory is closed because it falls into one of these categorie
 ### Untrusted models
 Be careful when running untrusted models. This classification includes models created by unknown developers or utilizing data obtained from unknown sources[^data-poisoning-sources].
 
+`torch.compiler.precompile` artifacts are programs too. `torch.compiler.precompile.load` executes the artifact's Python source (and, for `tracer="dynamo"` artifacts, unpickles the Dynamo state it embeds and the compiled-kernel cache bundle), so loading an artifact runs code with the privileges of the user running PyTorch, and the `weights_only` protections of `torch.load` do not apply. Artifacts are meant to be produced by your own capture and stored where you control them; only load artifacts your own infrastructure produced.
+
 **Prefer to execute untrusted models within a secure, isolated environment such as a sandbox** (e.g., containers, virtual machines). This helps protect your system from potentially malicious code. You can find further details and instructions in [this page](https://developers.google.com/code-sandboxing).
 
 **Be mindful of risky model formats**. Give preference to share and load weights with the appropriate format for your use case. [Safetensors](https://huggingface.co/docs/safetensors/en/index) gives the most safety but is the most restricted in what it supports. [`torch.load`](https://pytorch.org/docs/stable/generated/torch.load.html#torch.load) has a significantly larger surface of attack but is more flexible in what it can serialize. See the documentation for more details.
@@ -85,8 +87,6 @@ PyTorch can be used for distributed computing, and as such there is a `torch.dis
 For performance reasons, none of the PyTorch Distributed primitives (including c10d, RPC, and TCPStore) include any authorization protocol and will send messages unencrypted. They accept connections from anywhere, and execute the workload sent without performing any checks. Therefore, if you run a PyTorch Distributed program on your network, anybody with access to the network can execute arbitrary code with the privileges of the user running PyTorch.
 
 This same trust assumption extends to distributed checkpoints. Distributed Checkpointing (`torch.distributed.checkpoint`), including the format-conversion utilities in `torch.distributed.checkpoint.format_utils` (e.g. `torch_save_to_dcp` and `BroadcastingTorchSaveReader`), is meant to save and restore the state of a trusted distributed job to and from storage that you control. Checkpoints are produced by your own training job and read back from a trusted store; they are not artifacts you download from the internet or accept from untrusted third parties. Because a checkpoint is always assumed to come from a trusted source, the `weights_only` protections of `torch.load` do not apply here, and loading a checkpoint -- like any other distributed operation -- may execute arbitrary code with the privileges of the user running PyTorch. Only load checkpoints that your own infrastructure produced and stored.
-
-The same applies to `torch.compiler.precompile` artifacts. `torch.compiler.precompile.load` executes the artifact's Python source and unpickles the Dynamo state it embeds, so loading an artifact runs code with the privileges of the user running PyTorch. Artifacts are meant to be produced by your own capture and stored where you control them; only load artifacts your own infrastructure produced.
 
 ## Backporting Security Fixes
 

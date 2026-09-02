@@ -868,7 +868,7 @@ def compile_to_python(
     from torch._guards import detect_fake_mode, tracing, TracingContext
     from torch.compiler._cache import CacheArtifactManager
 
-    from .compile_fx import compile_fx_inner
+    from .compile_fx import _recursive_record_user_visible_output_idxs, compile_fx_inner
     from .virtualized import V
 
     # Own a copy: the collective rewrites and inductor may mutate the graph, and ``gm`` may
@@ -888,14 +888,22 @@ def compile_to_python(
     # there is no separate dynamic-shapes knob.
     fake_inputs = _placeholder_fake_inputs(gm)
     output_node = gm.graph.find_nodes(op="output")[-1]
-    outputs = list(output_node.args[0]) if output_node.args else []
+    outputs = output_node.args[0] if output_node.args else ()
+    if isinstance(outputs, torch.fx.Node):
+        outputs = (outputs,)
+    outputs = list(outputs)
     if num_user_visible_outputs is not None:
+        # The caller's prefix; for a training forward this is num_forward,
+        # which also spans mutated-input returns and intermediate bases (a
+        # superset of what compile_fx pins, so strictly more conservative).
         outputs = outputs[:num_user_visible_outputs]
     # Like compile_fx's marking, only tensor outputs are user visible; None and
-    # symbolic-int outputs carry no layout.
+    # symbolic-int outputs carry no layout. Nested invoke_subgraph subgraphs
+    # get the same treatment compile_fx gives them.
     output_node.meta["user_visible_output_idxs"] = [
         idx for idx, out in enumerate(outputs) if isinstance(out, torch.fx.Node)
     ]
+    _recursive_record_user_visible_output_idxs(gm)
     fake_mode = detect_fake_mode(fake_inputs)
     if fake_mode is None:
         raise RuntimeError(

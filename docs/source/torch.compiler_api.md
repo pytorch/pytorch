@@ -51,7 +51,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 % intentionally omitted from the autosummary block above.
 
 ```{eval-rst}
-.. py:function:: precompile(fn, /, *example_args, example_inputs=None, backend="inductor", tracer="make_fx", decompositions=None, recompile_limit=None, dynamic=None)
+.. py:function:: precompile(fn, *example_args, example_inputs=None, backend="inductor", tracer="make_fx", decompositions=None, recompile_limit=None, dynamic=None)
 
    Ahead-of-time precompile ``fn`` against example inputs, returning a self-contained,
    runnable Python source string plus an acceleration cache as ``(python_code, cache)``.
@@ -331,4 +331,6 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        different-build envelope) also degrades to JIT'ing from ``python_code``.
 
 .. autoexception:: torch.compiler.PrecompileError
+
+.. autoclass:: torch.compiler.precompile.StateSummary
 ```

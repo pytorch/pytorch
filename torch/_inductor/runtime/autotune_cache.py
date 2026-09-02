@@ -733,12 +733,19 @@ def _restore_degraded_kwargs(
         candidates = [cfg.kwargs[key] for cfg in configs if key in cfg.kwargs]
         if not any(_json_config_value(val) != val for val in candidates):
             continue
-        for val in candidates:
-            if _json_config_value(val) == cached:
-                best_config[key] = val
-                break
-        else:
+        matches = [val for val in candidates if _json_config_value(val) == cached]
+        if not matches:
             return False
+        # The typed value is only recoverable if every candidate that
+        # serializes to the cached value agrees on it (Mode.A vs its raw 1
+        # would both serialize to 1); otherwise the choice would depend on
+        # candidate order.
+        if any(
+            val != matches[0] or type(val) is not type(matches[0])
+            for val in matches[1:]
+        ):
+            return False
+        best_config[key] = matches[0]
     return True
 
 

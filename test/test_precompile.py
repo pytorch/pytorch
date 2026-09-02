@@ -76,6 +76,22 @@ def _precompile_dynamo_dynamic(x):
 
 
 _PRECOMPILE_GLOBAL_LIST = [1, 2]
+_PRECOMPILE_ATEN = torch.ops.aten
+_PRECOMPILE_COUNTER = 0
+
+
+def _precompile_bump_counter():
+    global _PRECOMPILE_COUNTER
+    _PRECOMPILE_COUNTER += 1
+
+
+def _precompile_dynamo_mutates_global_via_helper(x):
+    _precompile_bump_counter()
+    return x + 1
+
+
+def _precompile_dynamo_returns_aten_namespace(x):
+    return x + 1, _PRECOMPILE_ATEN
 
 
 def _precompile_dynamo_returns_type(x):
@@ -1897,6 +1913,18 @@ class TestPrecompile(TestCase):
         loaded = torch.compiler.precompile.load(code, cache)
         x, y = TwoTensor(a, b), TwoTensor(c, d)
         self.assertEqual(loaded(x, y), x + y)
+        # The same inner tensor object reached from two DISTINCT wrappers is
+        # aliasing the serialized guards cannot express (the snapshot rebuilds
+        # each wrapper's inner tensors), so it is rejected like shared storage.
+        with self.assertRaisesRegex(PrecompileError, "overlap"):
+            torch.compiler.precompile(
+                add,
+                example_inputs=[(TwoTensor(a, b), TwoTensor(a, d))],
+                tracer="dynamo",
+                backend="eager",
+            )
+        with self.assertRaisesRegex(PrecompileError, "overlap"):
+            loaded(TwoTensor(a, b), TwoTensor(a, d))
         buf = torch.randn(8)
         d_off = torch.randn(8)[4:]  # TwoTensor requires equal storage offsets
         with self.assertRaisesRegex(PrecompileError, "overlap"):
@@ -1936,6 +1964,32 @@ class TestPrecompile(TestCase):
             loaded = torch.compiler.precompile.load(code, cache)
             x = torch.randn(3)
             self.assertEqual(loaded(x), fn(x))
+
+    def test_tracer_dynamo_rejects_non_importable_module_global(self):
+        # torch.ops.aten is a ModuleType that is not importable under its
+        # __name__ in another process; recording it as an import source would
+        # only move the failure to a ModuleNotFoundError at serve time.
+        with self.assertRaisesRegex(
+            PrecompileError, "not importable as 'torch.ops.aten'"
+        ):
+            torch.compiler.precompile(
+                _precompile_dynamo_returns_aten_namespace,
+                example_inputs=[(torch.randn(3),)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_rejects_global_mutation_via_inlined_helper(self):
+        # `global COUNTER` inside an inlined callee reaches the residual
+        # bytecode as an attribute store on the imported module, which the
+        # served artifact would apply to the SERVING process's module.
+        with self.assertRaisesRegex(PrecompileError, "assigns .*_PRECOMPILE_COUNTER"):
+            torch.compiler.precompile(
+                _precompile_dynamo_mutates_global_via_helper,
+                example_inputs=[(torch.randn(3),)],
+                tracer="dynamo",
+                backend="eager",
+            )
 
     def test_tracer_dynamo_rejects_irreproducible_residual_global(self):
         # A non-module global the served bytecode would read cannot be rebuilt
@@ -2706,6 +2760,57 @@ class TestPrecompile(TestCase):
         # A wrong-typed cache is a programming error, not a corrupt envelope.
         with self.assertRaisesRegex(TypeError, "expects cache as bytes"):
             torch.compiler.precompile.load("code", "not-bytes")
+
+    def test_load_accepts_bytes_like_cache(self):
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_torch_sin,
+            example_inputs=[(torch.randn(3),)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        x = torch.randn(3)
+        for view in (bytearray(cache), memoryview(cache)):
+            self.assertEqual(
+                torch.compiler.precompile.load(code, view)(x), torch.sin(x)
+            )
+
+    def test_precompile_accepts_fn_as_keyword(self):
+        # v2.14.0 shipped precompile(fn, ...) with fn keyword-able; keep it so.
+        loaded = torch.compiler.precompile.load(
+            *torch.compiler.precompile(
+                fn=_precompile_dynamo_torch_sin,
+                example_inputs=[(torch.randn(3),)],
+                tracer="dynamo",
+                backend="eager",
+            )
+        )
+        x = torch.randn(3)
+        self.assertEqual(loaded(x), torch.sin(x))
+
+    def test_state_summary_is_public(self):
+        summary_type = torch.compiler.precompile.StateSummary
+        self.assertEqual(summary_type.__module__, "torch.compiler")
+        self.assertEqual(summary_type.__qualname__, "precompile.StateSummary")
+        summary = summary_type(1, 2, 3, 4, 0, ())
+        self.assertTrue(repr(summary).startswith("StateSummary("))
+        self.assertEqual(pickle.loads(pickle.dumps(summary)), summary)
+
+    def test_tracer_dynamo_requires_grad_dispatch_under_no_grad(self):
+        # requires_grad is guarded per input, and that holds under an ambient
+        # no_grad too: a variant captured on a requires_grad=False example does
+        # not serve a requires_grad=True input, even though eager semantics
+        # coincide there (documented on precompile.__call__).
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_torch_sin,
+            example_inputs=[(torch.randn(3),)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        with torch.no_grad():
+            self.assertEqual(loaded(torch.randn(3)).shape, (3,))
+            with self.assertRaisesRegex(PrecompileError, "no captured Dynamo variant"):
+                loaded(torch.randn(3, requires_grad=True))
 
     def test_load_from_paths_reads_bytes_verbatim(self):
         # code_hash is over the artifact's UTF-8 bytes; a text-mode read would
