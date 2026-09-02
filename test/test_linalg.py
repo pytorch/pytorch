@@ -8847,6 +8847,22 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
+    @dtypes(torch.float64)
+    def test_lu_solve_invalid_pivots(self, device, dtype):
+        # Out-of-range pivots must raise a clear error on all backends rather
+        # than reading out of bounds (an illegal memory access on CUDA).
+        # Regression test for https://github.com/pytorch/pytorch/issues/189669
+        LU = torch.eye(3, dtype=dtype, device=device).unsqueeze(0)
+        B = torch.ones((1, 3, 3), dtype=dtype, device=device)
+        too_large = torch.full((1, 3), 2147480000, dtype=torch.int32, device=device)
+        with self.assertRaisesRegex(RuntimeError, "smaller or equal to"):
+            torch.linalg.lu_solve(LU, too_large, B)
+        too_small = torch.zeros((1, 3), dtype=torch.int32, device=device)
+        with self.assertRaisesRegex(RuntimeError, "greater or equal to 1"):
+            torch.linalg.lu_solve(LU, too_small, B)
+
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
