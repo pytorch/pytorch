@@ -11,6 +11,8 @@ import torch._inductor.fx_passes.group_batch_fusion
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_cuda import BF16X9_SUPPORTED
+from torch.testing._internal.common_utils import recover_orig_fp32_precision
 from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
 
 
@@ -381,6 +383,27 @@ class TestGroupBatchFusion(TestCase):
                 4,
             )
             counters.clear()
+
+    @requires_gpu()
+    @unittest.skipUnless(
+        BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
+    )
+    @recover_orig_fp32_precision
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={},
+        post_grad_fusion_options={"group_linear": {"require_fbgemm": False}},
+    )
+    def test_bfx9_skips_group_linear_fusion(self):
+        torch.backends.cuda.matmul.fp32_precision = "bfx9"
+        inputs = (torch.randn(10, 10, device=GPU_TYPE),)
+        for has_bias in (False, True):
+            with self.subTest(has_bias=has_bias):
+                counters.clear()
+                module = MyModule(10, has_bias).to(GPU_TYPE)
+                expected = module(*inputs)
+                actual = torch.compile(module)(*inputs)
+                self.assertEqual(actual, expected)
+                self.assertEqual(counters["inductor"]["group_linear"], 0)
 
     @requires_gpu()
     @unittest.skipIf(not has_fbgemm, "requires fbgemm")
