@@ -182,6 +182,29 @@ def _sparse_coo_collate(b):
     return lst
 
 
+def _xpu_ipc_recv_tensor_metadata(input_queue, output_queue):
+    tensor = input_queue.get(timeout=JOIN_TIMEOUT)
+    output_queue.put(
+        {
+            "device_type": tensor.device.type,
+            "device_index": tensor.device.index,
+            "storage_offset": tensor.storage_offset(),
+            "shape": tuple(tensor.shape),
+            "values": tensor.cpu().tolist(),
+        }
+    )
+
+
+def _xpu_ipc_consume_many_tensors(input_queue, output_queue):
+    checksums = []
+    while True:
+        tensor = input_queue.get(timeout=JOIN_TIMEOUT)
+        if tensor is None:
+            break
+        checksums.append(int(tensor.sum().item()))
+    output_queue.put(checksums)
+
+
 @unittest.skipIf(
     TEST_WITH_TSAN,
     "Fails with TSAN with the following error: starting new threads after multi-threaded "
@@ -3260,6 +3283,71 @@ class TestDataLoaderDeviceType(TestCase):
         for batch in loader:
             self.assertEqual(batch.device.type, "xpu")
             self.assertEqual(batch.size(0), 1)
+            self.assertEqual(batch, dataset.pop(0).unsqueeze(0))
+
+    @unittest.skipIf(not TEST_XPU_IPC, "XPU IPC not available")
+    @onlyXPU
+    def test_xpu_ipc_nonzero_storage_offset_view_roundtrip(self, device):
+        xpu_device = torch.device(device)
+        ctx = torch.multiprocessing.get_context("spawn")
+        input_queue = ctx.Queue()
+        output_queue = ctx.Queue()
+        proc = ctx.Process(
+            target=_xpu_ipc_recv_tensor_metadata,
+            args=(input_queue, output_queue),
+        )
+        proc.start()
+        try:
+            base = torch.arange(64, device=xpu_device, dtype=torch.float32)
+            view = base[5:37]
+            input_queue.put(view)
+            result = output_queue.get(timeout=JOIN_TIMEOUT)
+            self.assertEqual(result["device_type"], "xpu")
+            self.assertEqual(result["storage_offset"], 5)
+            self.assertEqual(result["shape"], tuple(view.shape))
+            self.assertEqual(result["values"], view.cpu().tolist())
+        finally:
+            input_queue.close()
+            input_queue.join_thread()
+            output_queue.close()
+            output_queue.join_thread()
+            proc.join(JOIN_TIMEOUT)
+            if proc.is_alive():
+                proc.terminate()
+            self.assertEqual(proc.exitcode, 0)
+
+    @unittest.skipIf(not TEST_XPU_IPC, "XPU IPC not available")
+    @onlyXPU
+    def test_xpu_ipc_multi_device_import_explicit(self, device):
+        if torch.xpu.device_count() < 2:
+            self.skipTest("requires at least 2 XPU devices")
+
+        source_device = torch.device("xpu:1")
+        ctx = torch.multiprocessing.get_context("spawn")
+        input_queue = ctx.Queue()
+        output_queue = ctx.Queue()
+        proc = ctx.Process(
+            target=_xpu_ipc_recv_tensor_metadata,
+            args=(input_queue, output_queue),
+        )
+        proc.start()
+        try:
+            tensor = torch.arange(32, device=source_device, dtype=torch.float32)
+            input_queue.put(tensor)
+            result = output_queue.get(timeout=JOIN_TIMEOUT)
+            self.assertEqual(result["device_type"], "xpu")
+            self.assertEqual(result["device_index"], 1)
+            self.assertEqual(result["shape"], tuple(tensor.shape))
+            self.assertEqual(result["values"], tensor.cpu().tolist())
+        finally:
+            input_queue.close()
+            input_queue.join_thread()
+            output_queue.close()
+            output_queue.join_thread()
+            proc.join(JOIN_TIMEOUT)
+            if proc.is_alive():
+                proc.terminate()
+            self.assertEqual(proc.exitcode, 0)
 
     @unittest.skipIf(not TEST_XPU_IPC, "XPU IPC not available")
     @onlyXPU
@@ -3289,7 +3377,7 @@ class TestDataLoaderDeviceType(TestCase):
     @onlyXPU
     def test_xpu_ipc_device_context_safety(self, device):
         xpu_device = torch.device(device)
-        dataset = [torch.randn(32, device=xpu_device) for _ in range(10)]
+        dataset = [torch.arange(32, device=xpu_device, dtype=torch.float32) + i for i in range(10)]
 
         loader = DataLoader(
             dataset,
@@ -3300,41 +3388,56 @@ class TestDataLoaderDeviceType(TestCase):
         )
 
         expected_index = torch.xpu.current_device()
-        for batch in loader:
+        for index, batch in enumerate(loader):
             self.assertEqual(batch.device.index, expected_index)
             self.assertEqual(batch.device.type, "xpu")
             result = batch * 2.0
             self.assertEqual(result.device, batch.device)
+            self.assertEqual(batch, dataset[index].unsqueeze(0))
 
     @unittest.skipIf(not TEST_XPU_IPC, "XPU IPC not available")
     @onlyXPU
-    def test_xpu_ipc_storage_pickle_same_process_smoke(self, device):
+    def test_xpu_ipc_storage_roundtrip_cross_process(self, device):
         xpu_device = torch.device(device)
-        tensor = torch.arange(16, device=xpu_device, dtype=torch.float32).reshape(4, 4)
-
-        storage = tensor.storage()
-        restored_storage = pickle.loads(pickle.dumps(storage))
-
-        self.assertEqual(restored_storage, storage)
-
-        restored_tensor = torch.empty(0, device=xpu_device, dtype=tensor.dtype)
-        restored_tensor = restored_tensor.set_(
-            restored_storage,
-            0,
-            tensor.size(),
-            tensor.stride(),
+        ctx = torch.multiprocessing.get_context("spawn")
+        input_queue = ctx.Queue()
+        output_queue = ctx.Queue()
+        proc = ctx.Process(
+            target=_xpu_ipc_recv_tensor_metadata,
+            args=(input_queue, output_queue),
         )
-        self.assertEqual(restored_tensor, tensor)
+        proc.start()
+        try:
+            tensor = torch.arange(16, device=xpu_device, dtype=torch.float32).reshape(4, 4)
+            input_queue.put(tensor)
+            del tensor
+            gc.collect()
+            torch.xpu.empty_cache()
+            result = output_queue.get(timeout=JOIN_TIMEOUT)
+            expected = torch.arange(16, dtype=torch.float32).reshape(4, 4)
+            self.assertEqual(result["device_type"], "xpu")
+            self.assertEqual(result["shape"], tuple(expected.shape))
+            self.assertEqual(result["values"], expected.tolist())
+        finally:
+            input_queue.close()
+            input_queue.join_thread()
+            output_queue.close()
+            output_queue.join_thread()
+            proc.join(JOIN_TIMEOUT)
+            if proc.is_alive():
+                proc.terminate()
+            self.assertEqual(proc.exitcode, 0)
 
     @unittest.skipIf(not TEST_XPU_IPC, "XPU IPC not available")
     @onlyXPU
-    def test_xpu_ipc_queue_roundtrip_file_system_strategy(self, device):
+    def test_xpu_ipc_queue_roundtrip_under_file_system_strategy(self, device):
         original_strategy = torch.multiprocessing.get_sharing_strategy()
         xpu_device = torch.device(device)
         ctx = torch.multiprocessing.get_context("spawn")
         queue = ctx.Queue()
 
         try:
+            # CPU sharing strategy should not change the XPU IPC data path.
             torch.multiprocessing.set_sharing_strategy("file_system")
             tensor = torch.arange(8, device=xpu_device, dtype=torch.int64)
             queue.put(tensor)
@@ -3369,6 +3472,43 @@ class TestDataLoaderDeviceType(TestCase):
                         queue.join_thread()
         finally:
             torch.multiprocessing.set_sharing_strategy(original_strategy)
+
+    @unittest.skipIf(not TEST_XPU_IPC, "XPU IPC not available")
+    @onlyXPU
+    def test_xpu_ipc_handle_pressure_and_lifetime_reclamation(self, device):
+        xpu_device = torch.device(device)
+        ctx = torch.multiprocessing.get_context("spawn")
+        input_queue = ctx.Queue()
+        output_queue = ctx.Queue()
+        proc = ctx.Process(
+            target=_xpu_ipc_consume_many_tensors,
+            args=(input_queue, output_queue),
+        )
+        proc.start()
+        try:
+            expected_checksums = []
+            num_tensors = 128
+            for i in range(num_tensors):
+                tensor = torch.full((512,), float(i), device=xpu_device)
+                expected_checksums.append(int(tensor.sum().item()))
+                input_queue.put(tensor)
+                del tensor
+
+            gc.collect()
+            torch.xpu.empty_cache()
+            input_queue.put(None)
+
+            observed_checksums = output_queue.get(timeout=JOIN_TIMEOUT)
+            self.assertEqual(observed_checksums, expected_checksums)
+        finally:
+            input_queue.close()
+            input_queue.join_thread()
+            output_queue.close()
+            output_queue.join_thread()
+            proc.join(JOIN_TIMEOUT)
+            if proc.is_alive():
+                proc.terminate()
+            self.assertEqual(proc.exitcode, 0)
 
 
 class IntegrationTestDataLoaderDataPipe(TestCase):
