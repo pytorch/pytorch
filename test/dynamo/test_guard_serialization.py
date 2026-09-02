@@ -104,6 +104,16 @@ class MyClassNotSerializable:
         return x + 1
 
 
+class RaisesPicklingErrorOnReduce:
+    def __reduce_ex__(self, protocol):
+        raise pickle.PicklingError("reducer refused")
+
+
+class RaisesAttributeErrorOnReduce:
+    def __reduce_ex__(self, protocol):
+        raise AttributeError("reducer refused")
+
+
 class Inputs:
     def __init__(self, x, unused):
         self.x = x
@@ -561,15 +571,17 @@ class TestGuardSerialization(TestGuardSerializationBase):
         ref, loaded = self._test_serialization(types_, fn, p, d)
         p_new = torch.randn(4, requires_grad=True)
         self._test_check_fn(ref, loaded, {"d": d, "p": p_new}, True)
+        p_bad = torch.randn(5, requires_grad=True)
+        self._test_check_fn(ref, loaded, {"d": d, "p": p_bad}, False)
 
     def test_grad_metadata_guard_round_trips(self):
         # Reading x.grad installs a guard on the grad tensor (via GradSource),
-        # so the serialized/loaded guard must actually carry the grad. A grad's
-        # shape/dtype is owner-locked (the .grad setter rejects mismatches), so
-        # the independent axis is presence: the loaded guard must accept a
-        # candidate that has a matching grad and reject one with no grad. If the
-        # meta reduction dropped or corrupted the grad, the accept case below
-        # would spuriously fail.
+        # which also registers the grad in the guard tree, so this passes with
+        # or without the upfront grad registration; it covers the GradSource
+        # guard itself. A grad's shape/dtype is owner-locked (the .grad setter
+        # rejects mismatches), so the independent axis is presence: the loaded
+        # guard must accept a candidate that has a matching grad and reject one
+        # with no grad.
         def f(x):
             return x.grad + 1
 
@@ -621,19 +633,66 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ref, loaded, {"x": torch.randn(5, requires_grad=True)}, False
         )
 
-    def test_sparse_grad_serialization_raises(self):
-        # A non-strided grad (sparse COO/CSR, e.g. from embedding backward)
-        # cannot survive the meta round-trip, so serializing a guard on such a
-        # tensor must fail loudly rather than silently substituting a dense grad
-        # whose metadata would mismatch the real one at guard-check time.
+    def test_sparse_grad_serializes_as_none(self):
+        # A non-strided grad (sparse COO, e.g. from nn.Embedding(sparse=True))
+        # loses its layout in the meta round-trip. Dynamo cannot trace a sparse
+        # grad, so no guard ever inspects one; the guard on the owner must still
+        # serialize (carrying grad=None) and accept the same candidates as the
+        # in-process guard.
         def f(x):
             return x + 1
 
         x = torch.randn(4, requires_grad=True)
         x.grad = torch.randn(4).to_sparse()
-        self.assertNotEqual(x.grad.layout, torch.strided)
-        with self.assertRaisesRegex(PackageError, "does not preserve it"):
-            self._test_serialization("TENSOR_MATCH", f, x)
+        ref, loaded = self._test_serialization("TENSOR_MATCH", f, x)
+        sparse_ok = torch.randn(4, requires_grad=True)
+        sparse_ok.grad = torch.randn(4).to_sparse()
+        dense_ok = torch.randn(4, requires_grad=True)
+        dense_ok.grad = torch.randn(4)
+        for candidate in (sparse_ok, dense_ok, torch.randn(4, requires_grad=True)):
+            self._test_check_fn(ref, loaded, {"x": candidate}, True)
+        self._test_check_fn(
+            ref, loaded, {"x": torch.randn(5, requires_grad=True)}, False
+        )
+
+    def test_module_parameter_grad_round_trips(self):
+        # The common production shape: a module whose parameters carry grads
+        # from a previous step, guarded through AttrSource chains.
+        def fn(m, x):
+            return m.linear(x)
+
+        m = GlobalNestedModule()
+        m.linear(torch.randn(3, 10)).sum().backward()
+        self.assertIsNotNone(m.linear.weight.grad)
+        ref, loaded = self._test_serialization(
+            "TENSOR_MATCH", fn, m, torch.randn(3, 10)
+        )
+        self._test_check_fn(ref, loaded, {"m": m, "x": torch.randn(3, 10)}, True)
+        m_fresh = GlobalNestedModule()
+        self._test_check_fn(ref, loaded, {"m": m_fresh, "x": torch.randn(3, 10)}, True)
+        self._test_check_fn(ref, loaded, {"m": m, "x": torch.randn(3, 11)}, False)
+
+    def test_grad_of_grad_round_trips(self):
+        # create_graph=True gives x.grad its own autograd history; the guard on
+        # x.grad (GradSource) checks requires_grad, so the serialized grad must
+        # carry it: accept a candidate whose grad was also built with
+        # create_graph, reject one whose grad is a plain leaf.
+        def f(x):
+            return x.grad + 1
+
+        def with_graph_grad():
+            t = torch.randn(4, requires_grad=True)
+            (t * t).sum().backward(create_graph=True)
+            return t
+
+        x = with_graph_grad()
+        self.assertTrue(x.grad.requires_grad)
+        ref, loaded = self._test_serialization("TENSOR_MATCH", f, x)
+        self._test_check_fn(ref, loaded, {"x": with_graph_grad()}, True)
+        plain = torch.randn(4, requires_grad=True)
+        (plain * plain).sum().backward()
+        self.assertFalse(plain.grad.requires_grad)
+        self._test_check_fn(ref, loaded, {"x": plain}, False)
 
     def test_not_present_in_generic_dict(self):
         class Module(torch.nn.Module):
@@ -747,9 +806,28 @@ class TestGuardSerialization(TestGuardSerializationBase):
             # branch that would graph-break this simplified harness.
             return x + len(type(lk).__name__)
 
-        with self.assertRaisesRegex(PackageError, "cannot pickle") as cm:
+        with self.assertRaises(PackageError) as cm:
             self._test_serialization("TYPE_MATCH", fn, torch.randn(3), threading.Lock())
         self.assertIsInstance(cm.exception.__cause__, TypeError)
+
+    def _check_reducer_error_arm(self, value, exc_type):
+        # The other two arms of the pickle-dump catch: a value whose reducer
+        # raises PicklingError or AttributeError must also surface as the typed
+        # PackageError chained to the original exception.
+        def fn(x, v):
+            return x + len(type(v).__name__)
+
+        with self.assertRaises(PackageError) as cm:
+            self._test_serialization("TYPE_MATCH", fn, torch.randn(3), value)
+        self.assertIsInstance(cm.exception.__cause__, exc_type)
+
+    def test_strict_pickling_error_guard_value_raises_typed(self):
+        self._check_reducer_error_arm(
+            RaisesPicklingErrorOnReduce(), pickle.PicklingError
+        )
+
+    def test_strict_attribute_error_guard_value_raises_typed(self):
+        self._check_reducer_error_arm(RaisesAttributeErrorOnReduce(), AttributeError)
 
     def test_tensor_subclass_metadata_match(self):
         class LocalSubclass(torch.Tensor):
@@ -1318,9 +1396,15 @@ class TestGuardSerialization(TestGuardSerializationBase):
             fn, torch.randn(3), threading.Lock()
         )
         self.assertIsInstance(cause, torch._dynamo.exc.PackageError)
-        self.assertIn("cannot pickle", str(cause))
         self.assertIsInstance(cause.__cause__, TypeError)
+        # Both links are stripped: the leaf TypeError is the one holding the
+        # pickle/reducer frames that would pin the GuardBuilder.
         self.assertIsNone(cause.__traceback__)
+        self.assertIsNone(cause.__cause__.__traceback__)
+        if sys.version_info >= (3, 11):
+            self.assertTrue(
+                any("Guard serialization traceback" in n for n in cause.__notes__)
+            )
 
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_id_match_with_config(self):
