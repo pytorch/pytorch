@@ -18,6 +18,7 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 import torch
+from torch._inductor import config
 from torch._inductor.kernel.gemm_epilogue_codegen import get_cutedsl_epilogue_schema
 from torch.utils._ordered_set import OrderedSet
 
@@ -343,11 +344,12 @@ def _blockscaled_provider_classes() -> list[Any]:
 
 
 @functools.cache
-def _blockscaled_operators() -> tuple:
-    """Generate the architecture-neutral block-scaled operator pool."""
+def _blockscaled_operators(prefetch_mode: str) -> tuple:
+    """Generate the block-scaled operator pool for one prefetch mode."""
     ops: list[Any] = []
-    for cls in _blockscaled_provider_classes():
-        ops.extend(cls.generate_operators(lambda md: True, args=None))
+    with config.patch(nvgemm_prefetch=prefetch_mode):
+        for cls in _blockscaled_provider_classes():
+            ops.extend(cls.generate_operators(lambda md: True, args=None))
     return tuple(ops)
 
 
@@ -390,7 +392,7 @@ def _scaled_metadata_type_signature(metadata: Any) -> tuple:
 
 
 @functools.cache
-def _blockscaled_manifest(cc: int, type_signature: tuple):
+def _blockscaled_manifest(cc: int, type_signature: tuple, prefetch_mode: str):
     """Build a block-scaled manifest for one operand type recipe.
 
     The provider set is generated without a concrete target to preserve its
@@ -403,7 +405,7 @@ def _blockscaled_manifest(cc: int, type_signature: tuple):
     manifest.add_operators(
         [
             op
-            for op in _blockscaled_operators()
+            for op in _blockscaled_operators(prefetch_mode)
             if _scaled_metadata_type_signature(op.metadata) == type_signature
         ]
     )
@@ -424,7 +426,9 @@ def _scaled_candidates(args: Any, cc: int, efc_only: bool) -> list[Any]:
         VendoredDenseBlockScaledGemmKernel,
     )
 
-    manifest = _blockscaled_manifest(cc, _scaled_operand_type_signature(args))
+    manifest = _blockscaled_manifest(
+        cc, _scaled_operand_type_signature(args), config.nvgemm_prefetch
+    )
     if manifest.operators:
         out = manifest.filter_operators(
             args=args,
