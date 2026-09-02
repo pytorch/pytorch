@@ -232,6 +232,33 @@ class TestGpuWrapper(InductorTestCase):
             _, code = test_torchinductor.run_and_get_cpp_code(compiled, x, 3)
         self.assertIn("torch.tensor(arg, device='cpu')", code)
 
+    def test_cpp_wrapper_mix_order_reduction(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+        from torch._dynamo.utils import same
+        from torch._inductor import metrics
+        from torch._inductor.utils import fresh_cache
+
+        def f(x):
+            return x.sum(dim=-1), x.sum(dim=0)
+
+        x = torch.randn(32768, 768, device=self.device)
+        metrics.reset()
+        with (
+            fresh_cache(),
+            config.patch(
+                {
+                    "cpp_wrapper": True,
+                    "triton.mix_order_reduction": True,
+                    "triton.cooperative_reductions": False,
+                }
+            ),
+        ):
+            result = torch.compile(f)(x)
+
+        self.assertTrue(same(f(x), result, tol=1e-2))
+        self.assertTrue(metrics.codegen_mix_order_reduction)
+
     @config.patch(implicit_fallbacks=True)
     def test_fbcode_custom_op_fallback_python_arg_helpers(self):
         if not RUN_GPU:
