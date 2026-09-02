@@ -33,12 +33,8 @@ Two different processes, gated by skip list.
 
 TORCH_NATIVE_AOT=0 opts out at any point.
 
-Assumes the torch it finds installed is the one this tree just built: both CI shells
-install the wheel on the line above, and `spin develop` chains this after its own
-install. Stage 2 verifies that rather than repairing it -- the reconfigure must report
-embedding before anything is relinked, and the relinked library must report its
-kernels before this exits -- and a failure past that point says to reinstall rather
-than keeping a restore copy.
+Assumes the torch it finds installed is the one this tree just built, which every
+caller above arranges, and verifies that rather than repairing it.
 """
 
 import glob
@@ -57,9 +53,8 @@ BUILD_DIR = os.path.join(REPO, "build")
 # directory: a contract with cmake/Codegen.cmake, so the path is spelled once.
 # Joined onto BUILD_DIR at call time, like _cmake_cache_value, so a test can move it.
 ARCH_LIST_RECORD = os.path.join("native_aot", "arch_list.txt")
-# Where caffe2/CMakeLists.txt include()s native_aot.cmake from, spelled there as
-# ${CMAKE_BINARY_DIR}/native_aot: the generator writes the file here, so a change
-# on either side has to move both.
+# Where caffe2/CMakeLists.txt include()s native_aot.cmake from, as
+# ${CMAKE_BINARY_DIR}/native_aot: a change on either side has to move both.
 NATIVE_AOT_ARTIFACTS_DIR = os.path.join(BUILD_DIR, "native_aot")
 # See export.py: as a script sys.path[0] is this directory, so the repo root
 # has to go on the path for `tools.native_aot` to import from any cwd. Appended,
@@ -541,13 +536,8 @@ def _backend() -> str:
 
 
 def _run_child(cmd: list[str], what: str, **kw: object) -> None:
-    """Run one of stage 2's own steps, framing a failure the way everything else here
-    does.
-
-    check_call's CalledProcessError names neither the step nor a signal death, and a
-    32-way export is what an OOM killer reaches for first -- the same reason
-    _report_probe_failure exists for the cheap probes. The child's own output is
-    inherited, so it has already been printed."""
+    """Run one of stage 2's own steps, naming the step and a signal death on failure,
+    neither of which check_call reports. The child's own output is inherited."""
     code = subprocess.call(cmd, **kw)  # type: ignore[arg-type]
     if code == 0:
         return
@@ -562,21 +552,16 @@ def _run_child(cmd: list[str], what: str, **kw: object) -> None:
 def _installed_lib_dir() -> str:
     """The lib/ directory of the INSTALLED torch package.
 
-    Anchored on the compiled _C extension, not torch.__file__: an editable
-    redirect install serves Python from the source tree while the compiled
-    artifacts live in site-packages (as _load_dll_libraries does). In a
-    subprocess like every torch touch here, and trusted on non-empty output even
-    if that process then dies in teardown -- the path is printed first."""
+    Anchored on the compiled _C extension, not torch.__file__: an editable install
+    serves Python from the source tree while the artifacts live in site-packages."""
     code = (
         "import importlib.util, os\n"
         "spec = importlib.util.find_spec('torch._C')\n"
         "if spec is not None and spec.origin:\n"
         "    print('NAOT_VALUE:' + os.path.dirname(spec.origin), flush=True)\n"
     )
-    # Through _run_probe like every other torch touch here: find_spec imports the
-    # PARENT package, so this IS a full `import torch` -- unbounded it hangs against
-    # a wedged driver, and it runs immediately after a MAX_JOBS relink, where a fork
-    # can fail with EAGAIN and the message below never got to print.
+    # find_spec imports the PARENT package, so this is a full `import torch`: bounded
+    # and guarded through _run_probe like every other one here.
     probe = _run_probe(code, "find_spec('torch._C')")
     if probe is not None:
         # Marked rather than taking stdout whole: this is joined into a path, so any
@@ -600,21 +585,16 @@ def _installed_lib_dir() -> str:
 def _copied_member(info: zipfile.ZipInfo) -> zipfile.ZipInfo:
     """A ZipInfo for a member copied into a new archive.
 
-    Field by field rather than handing zipfile the source's: `info.extra` is the
-    central-directory blob, whose ZIP64 field records the header offset in the source
-    archive, and zipfile strips it only when it writes a fresh one. Past zipfile's
-    ZIP64_LIMIT (2 GiB, not 4) a copy would inherit stale offsets, producing an archive
-    pip and unzip read happily and `uv` refuses."""
+    Field by field, not the source's ZipInfo: `info.extra` carries its ZIP64 header
+    offset, so above zipfile's ZIP64_LIMIT (2 GiB) a copy inherits stale offsets."""
     out = zipfile.ZipInfo(info.filename, info.date_time)
     out.compress_type = info.compress_type
     out.external_attr = info.external_attr
     out.internal_attr = info.internal_attr
     out.create_system = info.create_system
     out.comment = info.comment
-    # file_size as well, and this one is load-bearing: ZipFile.open(..., "w")
-    # decides whether to write a ZIP64 header from it, so a fresh ZipInfo left at 0
-    # raises "File size unexpectedly exceeded ZIP64 limit" for the very members
-    # above the limit that this exists to copy correctly.
+    # file_size decides whether open(..., "w") writes a ZIP64 header, so left at 0 it
+    # raises on exactly the members above the limit.
     out.file_size = info.file_size
     return out
 
@@ -623,9 +603,7 @@ def _write_hashed(dst: zipfile.ZipFile, info: zipfile.ZipInfo, path: str) -> str
     """Stream `path` into `dst` as `info`; return its RECORD `sha256=...,size` fields.
 
     Hashed from the bytes actually archived, in the same pass: a second read would
-    double a ~400 MiB read and leave a window in which another writer of build/lib
-    could make the RECORD disagree with the member it describes, which pip does not
-    verify."""
+    double a ~400 MiB read."""
     import base64
     import hashlib
 
@@ -642,13 +620,11 @@ def _write_hashed(dst: zipfile.ZipFile, info: zipfile.ZipInfo, path: str) -> str
 
 
 def patch_wheel(wheel_path: str, lib_path: str) -> None:
-    """Replace torch/lib/libtorch_cuda.so inside an already-built wheel and fix
-    its RECORD entry.
+    """Replace torch/lib/libtorch_cuda.so inside an already-built wheel and fix its
+    RECORD entry.
 
-    Member-by-member with zipfile rather than shelling out: the zip CLI is absent
-    from the manywheel images, and repair_wheel.py already had to move off
-    `wheel pack` for emitting invalid ZIP64 above 4GB (pytorch#189748), which a
-    CUDA wheel with embedded kernels exceeds.
+    zipfile, not the zip CLI (absent from the manywheel images) or `wheel pack`, which
+    emits invalid ZIP64 above 4GB (pytorch#189748).
     """
 
     lib_rel = "torch/lib/libtorch_cuda.so"
@@ -668,9 +644,7 @@ def patch_wheel(wheel_path: str, lib_path: str) -> None:
         raise RuntimeError(f"{wheel_path}: RECORD has no entry for {lib_rel}")
 
     # Rebuilt beside the original and renamed over it, so an interrupted rewrite
-    # cannot leave a half-written wheel in place of a valid one. The PID is in the
-    # name, as in gen_aot_lib._write_atomic: two concurrent stage-2 runs would
-    # otherwise share one temporary path.
+    # cannot replace a valid wheel.
     tmp_whl = f"{wheel_path}.naot.{os.getpid()}.tmp"
     try:
         with (
@@ -679,25 +653,21 @@ def patch_wheel(wheel_path: str, lib_path: str) -> None:
         ):
             entry = ""
             for info in src.infolist():
-                # The RECORD last, once the digest is known; everything else keeps
-                # its position, so replacing the library does not move every member
-                # after it (which is what made a stale ZIP64 offset observable) and
-                # .dist-info stays where an archiver expects it.
+                # The RECORD last, once the digest is known; every other member
+                # keeps its position, so .dist-info stays where archivers expect it.
                 if info.filename == record_rel:
                     continue
                 out = _copied_member(info)
                 if info.filename == lib_rel:
                     entry = _write_hashed(dst, out, lib_path)
                     continue
-                # Streamed, not read()+writestr(): several members run to
-                # hundreds of MiB, and the read form holds each whole in
-                # memory twice, on a machine already running a link.
+                # Streamed, not read()+writestr(): several members run to hundreds
+                # of MiB and the read form holds each twice.
                 with src.open(info) as s, dst.open(out, "w") as d:
                     shutil.copyfileobj(s, d)
             record_lines[lib_line] = f"{lib_rel},{entry}"
-            # The RECORD keeps its original compression: writestr() with a plain name
-            # would take the ZipFile default, which dst has none of, and store this one
-            # member uncompressed.
+            # The RECORD keeps its original compression: writestr() with a plain
+            # name would take dst's default, which is none, and store it uncompressed.
             dst.writestr(
                 _copied_member(src.getinfo(record_rel)),
                 "\n".join(record_lines) + "\n",
@@ -711,16 +681,10 @@ def patch_wheel(wheel_path: str, lib_path: str) -> None:
 def _invalidate_stale_include() -> None:
     """Stop this build tree from embedding what a PREVIOUS run wired up.
 
-    caffe2/CMakeLists.txt include()s the generated file unconditionally, so a
-    native_aot.cmake left in build/native_aot is linked by every later configure --
-    including one this gate has just declined. .ci/manywheel/build_all.sh shares a
-    single build/ across eight interpreters, so the wheel for an interpreter with no
-    DSL runtime was shipping the previous interpreter's objects, with none of the
-    checks in main() having run for it.
-
-    OVERWRITTEN rather than deleted: CMake registers an include()d file as a
-    configure dependency only if it existed at configure time, so removing it stops
-    a later generation from being picked up at all."""
+    caffe2/CMakeLists.txt include()s the generated file unconditionally, and
+    .ci/manywheel/build_all.sh shares one build/ across eight interpreters. OVERWRITTEN
+    rather than deleted: CMake registers an include()d file as a configure dependency
+    only if it existed at configure time."""
     from tools.native_aot.gen_aot_lib import CMAKE_INCLUDE, write_nothing_to_embed
 
     art = NATIVE_AOT_ARTIFACTS_DIR
@@ -751,16 +715,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.print_verdict:
         print("RUN" if should_run() else "SKIP", flush=True)
         return 0
-    # An EXPLICIT opt-out first, and only that: it is read from the environment and
-    # the CMake cache, so it needs no torch, and honouring it keeps
-    # TORCH_NATIVE_AOT=0 a real kill switch on the binary-build path -- which no
-    # pull-request CI exercises, so a failure there first appears in the nightly
-    # matrix. Every other gate stays behind the refusal below.
+    # The explicit opt-out first, and only that: it needs no torch, so
+    # TORCH_NATIVE_AOT=0 is a kill switch even on the binary-build path.
     if _opted_out():
         return 0  # _opted_out() reports the value and where it came from
-    # --wheel means the caller installed torch on the line above, so "not
-    # importable" is a broken build rather than "not applicable". Degrading it to
-    # a skip shipped a green, kernel-free release wheel.
+    # --wheel means the caller installed torch on the line above, so "not importable"
+    # is a broken build rather than "not applicable".
     if args.wheel and not _torch_probe("True"):
         raise RuntimeError(
             "native-AOT stage 2: --wheel was given, so torch was just installed, "
@@ -784,9 +744,8 @@ def main(argv: list[str] | None = None) -> int:
     art = NATIVE_AOT_ARTIFACTS_DIR
     _report("exporting kernels")
     export = [py, os.path.join(HERE, "export.py"), "--out-dir", art]
-    # Read ONCE and used by both children below, so they cannot be told different
-    # arch lists. Into the export child's ENVIRONMENT even when this build only had
-    # it as a cache entry, or export compiles for a list generation never hears of.
+    # Read ONCE for both children below, so they cannot be told different arch lists,
+    # and into the export child's environment even if this build only cached it.
     arch_list = _arch_list()
     env = dict(os.environ)
     if arch_list:
@@ -797,9 +756,8 @@ def main(argv: list[str] | None = None) -> int:
     # The archive the generator names in the CMake it emits.
     if archive := _dsl_runtime_archive():
         gen += ["--dsl-runtime", archive]
-    # Name the arches THIS build targets, so a tree left by a build with a
-    # different TORCH_CUDA_ARCH_LIST is ignored rather than shipped. Omitted for an
-    # on-device export, where export and generation resolve the arch identically.
+    # Name the arches THIS build targets, so a tree left by a build with a different
+    # TORCH_CUDA_ARCH_LIST is ignored. Omitted for an on-device export.
     if arch_list:
         from tools.native_aot import export as export_mod
 
@@ -808,30 +766,19 @@ def main(argv: list[str] | None = None) -> int:
         gen += ["--archs", *export_mod.archs_from_cuda_arch_list(arch_list)]
         gen += ["--arch-list", arch_list]
     _run_child(gen, "generating stub sources", cwd=REPO)
-    # Nothing generated is legitimate: no declaration ships kernels for the arch
-    # this build targets. Stop rather than relink an unchanged library and then
-    # assert kernels are in it, which would fail a build that did what was asked.
+    # Nothing generated is legitimate: no declaration ships kernels for this arch.
+    # Stop rather than relink unchanged and then assert kernels are in it.
     sources = glob.glob(os.path.join(art, "*", "aot_*.cpp"))
     if not sources:
         _report("no declaration ships kernels for this build; nothing embedded")
         return 0
-    # The count here and the size DELTA after the relink, rather than adding up what
-    # the generated CMake lists: parsing that file truncated at the first ")" in it,
-    # so a checkout under a directory like "pytorch (copy)" reported embedding
-    # nothing immediately before the build embedded megabytes. The delta is what the
-    # line is for anyway -- these bytes scale with declarations x precompile points x
-    # arches, and one added arch can grow a wheel by tens of MiB.
+    # The count, and the size delta after the relink, rather than parsing the generated
+    # CMake: these bytes scale with declarations x precompile points x arches.
     _report(f"embedding kernels from {len(sources)} generated source(s)")
-    # Reconfigure before relinking, explicitly: the generated file registers itself in
-    # CMAKE_CONFIGURE_DEPENDS, but only from the reconfigure that first reads it, and
-    # the build.ninja on disk predates this generation. Without it the relink silently
-    # omits the kernels.
-    # BEFORE the reconfigure, and keyed on the CACHE, not the directory: `cmake -B`
-    # on a directory that does not exist exits 0 and configures FROM SCRATCH -- with
-    # none of scikit-build-core's -D flags and none of the cache the shipped libtorch
-    # was built from -- and the relink and copy below would then put that library
-    # over the installed torch. Checked here rather than after the reconfigure, where
-    # the directory always exists by construction and the guard could never fire.
+    # Reconfigure explicitly: the generated file registers itself in
+    # CMAKE_CONFIGURE_DEPENDS only from the reconfigure that first reads it.
+    # Keyed on the CACHE, not the directory: `cmake -B` on a missing directory exits 0
+    # and configures FROM SCRATCH, without scikit-build-core's -D flags.
     if not os.path.exists(os.path.join(BUILD_DIR, "CMakeCache.txt")):
         raise RuntimeError(
             f"native-AOT stage 2: {BUILD_DIR} holds no CMakeCache.txt, so it is not "
@@ -840,19 +787,10 @@ def main(argv: list[str] | None = None) -> int:
             f"TORCH_NATIVE_AOT=0 to skip stage 2."
         )
     _report("reconfiguring to pick up the generated CMake")
-    # Output CAPTURED, for two reasons. CMake prints most of its failure context on
-    # stdout, so DEVNULL left a failing configure with nothing to read; and the STATUS
-    # line the generated file emits is the only pre-relink evidence that the build
-    # agrees it should embed. Requiring it here keeps every state where the two sides
-    # disagree from reaching the relink, and therefore from reaching the copy over the
-    # installed torch.
-    # --log-level, because the marker below is a message(STATUS): EnvVarForwarding
-    # forwards every CMAKE_* environment variable into the cache with FORCE, so
-    # CMAKE_MESSAGE_LOG_LEVEL=WARNING (quietening configure output) hides it -- and
-    # then persists in the cache after the variable is gone. Stage 2 would fail the
-    # build advising -DTORCH_NATIVE_AOT=1, which is not the problem. The flag wins
-    # over the cached value, and this output is captured, so nothing a user reads
-    # gets noisier.
+    # Captured because CMake prints its failure context on stdout, and the STATUS line
+    # the generated file emits is the only pre-relink evidence that it will embed.
+    # --log-level, because that marker is a message(STATUS) and a cached
+    # CMAKE_MESSAGE_LOG_LEVEL=WARNING (EnvVarForwarding FORCEs it) would hide it.
     configure = subprocess.run(
         ["cmake", "--log-level=STATUS", "-S", REPO, "-B", BUILD_DIR],
         capture_output=True,
@@ -877,16 +815,10 @@ def main(argv: list[str] | None = None) -> int:
             f"2 was told to run. Reconfigure with -DTORCH_NATIVE_AOT=1, or set "
             f"TORCH_NATIVE_AOT=0 to skip stage 2 entirely."
         )
-    # Relink JUST torch_cuda: `--target install` walks the whole install manifest
-    # (~15 min) where this is seconds. The hand copy below is then byte-identical
-    # to what install writes, but ONLY because the generated CMake sets
-    # BUILD_WITH_INSTALL_RPATH -- otherwise install rewrites RPATH and the copy
-    # ships the builder's build/lib instead of $ORIGIN. One mechanism; do not move
-    # either half alone.
+    # Relink JUST torch_cuda: `--target install` walks the whole manifest (~15 min).
+    # The copy below matches it only because the CMake sets BUILD_WITH_INSTALL_RPATH.
     _report("relinking torch_cuda with embedded kernels")
-    # pyproject.toml aliases MAX_JOBS only inside scikit-build-core's own
-    # subprocess, so this relink otherwise ran at ninja's default (ncpu+2) while
-    # each generated .cpp pulls the whole ATen/CUDA header set.
+    # pyproject.toml aliases MAX_JOBS only inside scikit-build-core's subprocess.
     relink = ["cmake", "--build", ".", "--target", "torch_cuda"]
     jobs = os.getenv("MAX_JOBS") or os.getenv("CMAKE_BUILD_PARALLEL_LEVEL")
     if jobs and jobs.isdigit():
@@ -900,19 +832,15 @@ def main(argv: list[str] | None = None) -> int:
         raise RuntimeError(f"expected relinked library at {built}")
     installed = os.path.join(_installed_lib_dir(), "libtorch_cuda.so")
     if not os.path.exists(installed):
-        # Refuse to create it: _installed_lib_dir found *a* torch, and writing a
-        # library into a layout that never had one means we are pointed at the
-        # wrong environment.
+        # Refuse to create it: _installed_lib_dir found *a* torch, so a layout that
+        # never held the library means we are pointed at the wrong environment.
         raise RuntimeError(
             f"native-AOT stage 2: {installed} does not exist, so the torch on "
             f"sys.path is not the one this tree built. Install the wheel from "
             f"this build first, or set TORCH_NATIVE_AOT=0."
         )
-    # Temp file + rename: copying in place truncates a library other processes may
-    # be mapping, and a failure part-way (ENOSPC, EPERM on a root-owned
-    # site-packages) would leave a torch that cannot import at all. ONE os.replace,
-    # so `installed` never stops existing, and the pid is in the staging name so a
-    # hand run beside `spin develop` cannot write into the other's copy.
+    # Temp file + rename: copying in place truncates a library others may be mapping,
+    # and one os.replace means `installed` never stops existing.
     staged = f"{installed}.naot.{os.getpid()}.tmp"
     try:
         shutil.copy2(built, staged)
@@ -926,13 +854,7 @@ def main(argv: list[str] | None = None) -> int:
         f"({grew:+d} MiB of embedded kernels)"
     )
     # Size is not evidence: this script's artifacts dir must agree with the one
-    # caffe2/CMakeLists.txt include()s, and a mismatch lets the relink succeed
-    # while embedding nothing -- a kernel-free wheel with a green build.
-    #
-    # Verified, not repaired, and no restore copy is kept: the reconfigure above has
-    # already refused every disagreement a restore could undo, and a restore of its own
-    # can fail inside this handler, discarding the real message or leaving a stray
-    # ~400 MiB library in site-packages that no RECORD lists.
+    # caffe2/CMakeLists.txt include()s, or the relink embeds nothing and still exits 0.
     if not _torch_probe("torch._native._native_aot_embedded()"):
         raise RuntimeError(
             "native-AOT stage 2: relinked libtorch_cuda reports no embedded "
