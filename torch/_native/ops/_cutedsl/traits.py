@@ -1,43 +1,24 @@
-# CuTeDSL trait library for native reductions: the trait protocol + cross-thread
-# reduce helpers (warp_reduce / block_reduce). Shared machinery under _cutedsl/ so
-# future pointwise ops can reuse the same abstractions. The kernels and the aten
-# overrides live in ../reductions/.
+# CuTeDSL trait library for native reductions: the trait protocol plus the cross-thread reduce
+# helpers (warp_reduce / block_reduce). Under _cutedsl/ so pointwise ops can reuse it; the kernels
+# and overrides live in ../reductions/.
 #
-# Input is 2D (M, N); reduce along the contiguous last axis, producing one
-# output per row. One CTA handles one row; the whole reduction fits in a block
-# via warp-shuffle butterfly + a shared-memory block reduce.
+# THREE value methods, and the split is what lets any trait ride any fold order:
+#   leaf(val, idx)               one ELEMENT as a standalone accumulator
+#   combine(a, b)                merge two accumulators; associative, so a fold may re-associate
+#   reduce(acc, val, idx, valid) the SERIAL update, which may use a cheaper online formula
+# A tree fold cannot use `reduce` -- it needs each contribution separately -- so anything that
+# TRANSFORMS an element must say so in `leaf`, or a tree order silently folds raw values.
 #
-# THREE value methods, and the split between them is what lets any trait ride any fold order:
-#   leaf(val, idx) -> one ELEMENT as a standalone accumulator (|x|**p for a norm, a 0/1 flag
-#                     for all/any, (value, position) for argmax, (x, 0, 1) for Welford).
-#   combine(a, b)  -> merge two accumulators. Associative, so a fold may associate freely.
-#   reduce(acc, val, idx, valid) -> the SERIAL update, which fuses the two for the rolled
-#                     folds and may use a cheaper online formula (Welford's is not combine's).
-# A tree fold cannot use `reduce`: it needs each contribution on its own before it can pair
-# them up. Anything that transforms an element therefore has to say so in `leaf`, or a tree
-# order silently folds raw values (this was a real bug -- norm became a plain sum).
+# The ACCUMULATOR DTYPE is a parameter (`acc`), threaded through fdtypes and every literal, with the
+# identity taken from the dtype via _zero/_one/_pos_id/_neg_id so it is correct for any acc type. An
+# index field is Int32, or Int64 when the reduced extent can exceed 2^31.
 #
-# ACCUMULATOR DTYPE is a PARAMETER (`acc`, default Float32). Every trait threads it
-# through fdtypes + its init/reduce/combine/project literals so the SAME trait can
-# accumulate in fp32 (fp16/bf16/fp32 inputs) or a wider type (fp64) -- and, later,
-# integer/complex accumulators. The accumulator identity (0 / 1 / +-inf) is taken
-# from the dtype via _zero/_one/_pos_id/_neg_id so it is correct for any acc dtype
-# (e.g. ints have no inf; they will supply min/max int instead). The argmax/argmin
-# INDEX field is Int32 by default (a position, not an accumuland) and Int64 when the
-# reduced extent can exceed 2^31 -- both threaded via the trait's `idx` parameter.
-#
-# Discovered cute intrinsics (the productive ones):
-#   scalar select  : Python ternary (a if pred else b) INSIDE a @cute.jit body;
-#                    the jit preprocessor lowers it to a select. It does NOT
-#                    lower inside plain (undecorated) callees, so every trait
-#                    value-method is @cute.jit.
-#   isnan(x)       : x != x  (Boolean SSA)
-#   -inf           : -<acc>.inf
-#   abs            : cute.math.absf
-#   pow / sqrt     : cute.math.exp/log for x**p; cute.math.sqrt for sqrt
-#   fmax           : cute.arch.fmax  (NaN-SUPPRESSING: returns the non-NaN arg,
-#                    so argmax NaN handling is done explicitly via x != x)
-#   butterfly shfl : cute.arch.shuffle_sync_bfly(value, offset=...)
+# DSL idioms this file relies on:
+#   scalar select  a Python ternary INSIDE a @cute.jit body; it does NOT lower in an undecorated
+#                  callee, which is why every trait value-method is @cute.jit
+#   isnan(x)       x != x        -inf   -<acc>.inf        abs   cute.math.absf
+#   fmax           cute.arch.fmax is NaN-SUPPRESSING, so NaN handling is explicit via x != x
+#   butterfly      cute.arch.shuffle_sync_bfly(value, offset=...)
 
 import cutlass
 import cutlass.cute as cute
