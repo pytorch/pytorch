@@ -1048,8 +1048,12 @@ struct ExpandableSegment {
     trimHandles();
   }
   void trimHandles() {
-    auto it = std::ranges::find_if(
-        std::views::reverse(handles_),
+    // platform010 (clang-15 + libstdc++ 11.x) rejects std::views::reverse
+    // over this container, so use explicit reverse iterators instead.
+    // NOLINTNEXTLINE(modernize-use-ranges)
+    auto it = std::find_if(
+        handles_.rbegin(),
+        handles_.rend(),
         [](const std::optional<Handle>& opt) { return opt.has_value(); });
     handles_.erase(it.base(), handles_.end());
   }
@@ -2483,8 +2487,14 @@ class DeviceCachingAllocator {
     if (graph_reuse_context.find(info.capture_id) ==
         graph_reuse_context.end()) {
       bool found = false;
-      // Search allocation_scopes_ in LIFO order.
-      for (auto& [pool_id, scope] : std::views::reverse(allocation_scopes_)) {
+      // Search allocation_scopes_ in LIFO order. platform010 (clang-15 +
+      // libstdc++ 11.x) rejects std::views::reverse over this container, so
+      // use explicit reverse iterators instead.
+      // NOLINTNEXTLINE(modernize-loop-convert)
+      for (auto it = allocation_scopes_.rbegin();
+           it != allocation_scopes_.rend();
+           ++it) {
+        auto& [pool_id, scope] = *it;
         if (scope(stream)) {
           auto graph_pool = graph_pools.find(pool_id);
           TORCH_INTERNAL_ASSERT(
@@ -3790,8 +3800,14 @@ class DeviceCachingAllocator {
     // warmup). When non-empty we route allocations into the matching private
     // pool. It is usually empty, so we can short-circuit on the common path.
     if (C10_UNLIKELY(!allocation_scopes_.empty())) {
-      // Search allocation_scopes_ in LIFO order.
-      for (auto& [pool_id, scope] : std::views::reverse(allocation_scopes_)) {
+      // Search allocation_scopes_ in LIFO order. platform010 (clang-15 +
+      // libstdc++ 11.x) rejects std::views::reverse over this container, so
+      // use explicit reverse iterators instead.
+      // NOLINTNEXTLINE(modernize-loop-convert)
+      for (auto it = allocation_scopes_.rbegin();
+           it != allocation_scopes_.rend();
+           ++it) {
+        auto& [pool_id, scope] = *it;
         if (scope(stream)) {
           auto it1 = graph_pools.find(pool_id);
           TORCH_INTERNAL_ASSERT(it1 != graph_pools.end());
