@@ -1969,7 +1969,9 @@ def _compile(
                     # specific-guard cause) so package consumers can handle it
                     # without matching message text.
                     raise exc.PackageError(
-                        "check_fn.guards_state must not be None"
+                        "Failed to serialize guards for this compiled code; it "
+                        "cannot be saved to the package. See the chained cause "
+                        "for the specific guard that could not be serialized."
                     ) from check_fn.guards_serialization_failure
                 # No recorded failure: a None guards_state here is an internal
                 # invariant violation, not a user-facing serialization error.

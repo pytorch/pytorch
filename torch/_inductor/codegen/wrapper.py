@@ -204,15 +204,30 @@ def _constexpr_constructor_items(value: Any) -> list[tuple[str | None, Any]] | N
     # fields. Containers never get here: _constexpr_source_impl handles or
     # declines them first.
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        fields = dataclasses.fields(value)
-        return [(f.name, getattr(value, f.name)) for f in fields if f.repr]
+        fields = [f for f in dataclasses.fields(value) if f.repr]
+        # A repr-visible field the constructor does not accept cannot be
+        # rendered as a keyword argument; decline instead of emitting a call
+        # that only fails in _verify_constexpr_source.
+        if not all(f.init for f in fields):
+            return None
+        return [(f.name, getattr(value, f.name)) for f in fields]
     attrs_fields = getattr(type(value), "__attrs_attrs__", None)
     if attrs_fields is not None:
         # attrs permits callable repr formatters, so only False hides a field.
+        fields = [
+            field for field in attrs_fields if getattr(field, "repr", True) is not False
+        ]
+        if not all(getattr(field, "init", True) for field in fields):
+            return None
+        # attrs strips leading underscores from private field names to form the
+        # __init__ parameter (exposed as Attribute.alias since attrs 22.2), so
+        # the keyword must use the alias, not the attribute name.
         return [
-            (field.name, getattr(value, field.name))
-            for field in attrs_fields
-            if getattr(field, "repr", True) is not False
+            (
+                getattr(field, "alias", None) or field.name.lstrip("_"),
+                getattr(value, field.name),
+            )
+            for field in fields
         ]
     repr_args = getattr(value, "__repr_args__", None)
     if callable(repr_args):
@@ -481,13 +496,10 @@ def _verify_constexpr_source(
 
 
 def _constexpr_decline_detail(value: Any) -> str:
-    # Name the fix when the cause is a definition scope the generated module
-    # cannot import from: __main__ (the running script) or a function body.
-    if isinstance(value, float) and math.isnan(value):
-        return (
-            " NaN constexprs are rejected because autotune config matching "
-            "compares constants by equality."
-        )
+    # Name the fix when the cause is a NaN (anywhere in the value, since a
+    # nested NaN declines the whole value) or a definition scope the generated
+    # module cannot import from: __main__ (the running script) or a function
+    # body.
     seen: OrderedSet[int] = OrderedSet()
     worklist = [value]
     while worklist:
@@ -495,6 +507,11 @@ def _constexpr_decline_detail(value: Any) -> str:
         if id(item) in seen:
             continue
         seen.add(id(item))
+        if isinstance(item, float) and math.isnan(item):
+            return (
+                " NaN constexprs are rejected because autotune config matching "
+                "compares constants by equality."
+            )
         cls = type(item)
         if "<locals>" in cls.__qualname__:
             return (
