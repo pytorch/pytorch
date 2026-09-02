@@ -234,6 +234,77 @@ We provide a filesystem based storage layer:
   :members:
 ```
 
+For object stores and other non-POSIX backends, DCP also ships an
+[fsspec](https://filesystem-spec.readthedocs.io/) backed storage layer.
+`FsspecReader` and `FsspecWriter` accept any URL that fsspec can resolve
+(for example `s3://bucket/path`) and forward any extra keyword arguments to
+`fsspec.core.url_to_fs`. For an `s3://` URL those arguments reach the
+[s3fs](https://s3fs.readthedocs.io/) filesystem, which is how you point DCP at
+Amazon S3 or any S3-compatible object store (for example Backblaze B2,
+Cloudflare R2, or MinIO) by setting credentials and, for a non-AWS store, a
+custom endpoint. Install the matching backend first (`pip install s3fs`).
+
+```{eval-rst}
+.. autoclass:: torch.distributed.checkpoint.FsspecReader
+  :members:
+```
+
+```{eval-rst}
+.. autoclass:: torch.distributed.checkpoint.FsspecWriter
+  :members:
+```
+
+s3fs reads credentials from the standard AWS environment variables:
+
+```bash
+export AWS_ACCESS_KEY_ID="..."
+export AWS_SECRET_ACCESS_KEY="..."
+```
+
+For a non-AWS S3-compatible store, also pass its endpoint through the s3fs
+`client_kwargs` argument (AWS S3 needs no endpoint):
+
+```python
+import torch.distributed.checkpoint as dcp
+from torch.distributed.checkpoint import FsspecWriter
+
+writer = FsspecWriter(
+    "s3://my-bucket/run-42/step-1000",
+    client_kwargs={"endpoint_url": "https://your-s3-endpoint.example.com"},
+)
+dcp.save(state_dict=app_state, storage_writer=writer)
+```
+
+Credentials can also be passed explicitly instead of through the environment,
+using the s3fs `key` and `secret` arguments:
+
+```python
+import os
+import torch.distributed.checkpoint as dcp
+from torch.distributed.checkpoint import FsspecWriter
+
+writer = FsspecWriter(
+    "s3://my-bucket/run-42/step-1000",
+    client_kwargs={"endpoint_url": "https://your-s3-endpoint.example.com"},
+    key=os.environ["AWS_ACCESS_KEY_ID"],
+    secret=os.environ["AWS_SECRET_ACCESS_KEY"],
+)
+dcp.save(state_dict=app_state, storage_writer=writer)
+```
+
+`FsspecReader` takes the same arguments for distributed loads:
+
+```python
+import torch.distributed.checkpoint as dcp
+from torch.distributed.checkpoint import FsspecReader
+
+reader = FsspecReader(
+    "s3://my-bucket/run-42/step-1000",
+    client_kwargs={"endpoint_url": "https://your-s3-endpoint.example.com"},
+)
+dcp.load(state_dict=app_state, storage_reader=reader)
+```
+
 We also provide other storage layers, including ones to interact with HuggingFace safetensors:
 
 .. autoclass:: torch.distributed.checkpoint.HuggingFaceStorageReader
