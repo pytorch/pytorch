@@ -1024,6 +1024,14 @@ def get_key_index_source(source: Any, index: Any) -> str:
     return f"list(dict.keys({source}))[{index}]"
 
 
+def local_type_error_detail(obj: object) -> str:
+    return (
+        f"Type {type(obj)} for object {obj} cannot be saved into torch.compile() "
+        "package since it's defined in local scope. Please define the class at "
+        "global scope (top level of a module)."
+    )
+
+
 def should_optimize_getattr_on_nn_module(value: object) -> bool:
     return isinstance(value, torch.nn.Module)
 
@@ -4365,16 +4373,18 @@ class GuardsStatePickler(pickle.Pickler):
             # way the tensor itself is (as a meta tensor). Grads of tensors
             # known upfront are registered in pickle_guards_state (ordering vs
             # pickle memoization matters there); this covers tensors discovered
-            # mid-dump, e.g. wrapper subclass inner tensors.
-            if isinstance(obj.grad, torch.Tensor):
-                self.guard_tree_values.setdefault(id(obj.grad), obj.grad)
-                self.missing_values.pop(id(obj.grad), None)
+            # mid-dump, e.g. wrapper subclass inner tensors. Reading .grad on a
+            # non-leaf that does not retain grad warns, so gate it.
+            grad = obj.grad if obj.is_leaf or obj.retains_grad else None
+            if isinstance(grad, torch.Tensor):
+                self.guard_tree_values.setdefault(id(grad), grad)
+                self.missing_values.pop(id(grad), None)
             return type(self)._unpickle_tensor, (
                 torch.empty_like(obj, device="meta", requires_grad=obj.requires_grad),
                 obj.device,
                 pytype,
                 torch._C._dispatch_keys(obj).raw_repr(),
-                obj.grad,
+                grad,
             )
 
         elif isinstance(obj, torch.nn.Module):
@@ -4502,11 +4512,7 @@ class GuardsStatePickler(pickle.Pickler):
             return type(self)._unpickle_sdp_backend, (obj.name,)
 
         if type(obj).__qualname__ != type(obj).__name__ and not isinstance(obj, tuple):
-            raise torch._dynamo.exc.PackageError(
-                f"Type {type(obj)} for object {obj} cannot be saved "
-                + "into torch.compile() package since it's defined in local scope. "
-                + "Please define the class at global scope (top level of a module)."
-            )
+            raise torch._dynamo.exc.PackageError(local_type_error_detail(obj))
 
         if (
             inspect.isclass(obj)
@@ -4556,7 +4562,6 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
         guard_type=guard.create_fn_name(),
         derived_guard_types=(tuple(guard.guard_types) if guard.guard_types else ()),
         is_global=is_global,
-        provenance=guard.provenance,
         orig_guard=guard,
     )
 
@@ -4591,7 +4596,8 @@ def pickle_guards_state(
     # be memoized as _Missing if pickled before its owner tensor.
     worklist = [v for v in guard_tree_values.values() if isinstance(v, torch.Tensor)]
     while worklist:
-        grad = worklist.pop().grad
+        t = worklist.pop()
+        grad = t.grad if t.is_leaf or t.retains_grad else None
         if isinstance(grad, torch.Tensor) and id(grad) not in guard_tree_values:
             guard_tree_values[id(grad)] = grad
             missing_values.pop(id(grad), None)
@@ -4613,8 +4619,14 @@ def pickle_guards_state(
 
     try:
         pickler.dump(state)
-    except (AttributeError, TypeError, pickle.PicklingError) as e:
-        raise torch._dynamo.exc.PackageError(str(e)) from e
+    except torch._dynamo.exc.PackageError:
+        raise
+    except Exception as e:
+        # dump runs user code (__getstate__/__reduce__ of guarded objects), so
+        # any exception type can surface here.
+        raise torch._dynamo.exc.PackageError(
+            f"Failed to pickle guard state: {e}"
+        ) from e
     return buf.getvalue()
 
 
@@ -4808,10 +4820,6 @@ class CheckFunctionManager:
             CompileEventLogger.increment_toplevel("guard_latency_us", int(latency))
 
         self.guards_state: bytes | None = None
-        # Typed record of why guards_state is None: the swallowed PackageError
-        # (a GuardSerializationError names the exact guard). Consumers must
-        # chain or inspect this instead of matching message text.
-        self.guards_serialization_failure: exc.PackageError | None = None
         if save_guards:
             from torch._dynamo.output_graph import OutputGraphCommon
 
@@ -4826,27 +4834,9 @@ class CheckFunctionManager:
             except exc.PackageError as e:
                 if torch._dynamo.config.strict_precompile or strict_error:
                     raise e
-                # Format the traceback BEFORE stripping it from the stored
-                # exception chain: a live __traceback__ pins the guard-build
-                # frames (builder, output_graph, the user scopes they hold) on
-                # this long-lived object, defeating the cleanup below (see the
-                # NB comment there).
-                formatted_traceback = traceback.format_exc().split("\n")
-                stripped: set[int] = set()
-                pending: list[BaseException] = [e]
-                while pending:
-                    link = pending.pop()
-                    if id(link) in stripped:
-                        continue
-                    stripped.add(id(link))
-                    link.__traceback__ = None
-                    for nxt in (link.__cause__, link.__context__):
-                        if nxt is not None:
-                            pending.append(nxt)
-                self.guards_serialization_failure = e
                 self.output_graph.bypass_package(
                     f"Guard evaluation failed: {str(e)}",
-                    traceback=formatted_traceback,
+                    traceback=traceback.format_exc().split("\n"),
                 )
 
         # TODO: don't do the string rep, do something more structured here
@@ -4893,18 +4883,12 @@ class CheckFunctionManager:
                     # Only call builder.get again if we know we're going to throw
                     obj = builder.get(guard)
                     raise torch._dynamo.exc.GuardSerializationError(
-                        guard_type,
-                        guard.name or "",
-                        f"Type {type(obj)} for object {obj} cannot be saved "
-                        "into torch.compile() package since it's defined in local scope. "
-                        "Please define the class at global scope (top level of a module).",
+                        guard_type, guard.name, local_type_error_detail(obj)
                     )
             elif (
                 guard_type in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
             ):
-                raise torch._dynamo.exc.GuardSerializationError(
-                    guard_type, guard.name or ""
-                )
+                raise torch._dynamo.exc.GuardSerializationError(guard_type, guard.name)
             elif failed := next(
                 (
                     i
@@ -4914,9 +4898,7 @@ class CheckFunctionManager:
                 None,
             ):
                 # Just raise the first failed guard name
-                raise torch._dynamo.exc.GuardSerializationError(
-                    failed, guard.name or ""
-                )
+                raise torch._dynamo.exc.GuardSerializationError(failed, guard.name)
 
         builtins_dict_name = output_graph.name_of_builtins_dict_key_in_fglobals or ""
         used_global_vars = set()

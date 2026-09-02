@@ -3950,6 +3950,17 @@ orig_code_map = ExactWeakKeyDictionary()
 # keep a record of code_obj -> list of guard failure reasons for logging
 guard_failures: collections.defaultdict[Any, list[Any]] = collections.defaultdict(list)
 
+
+def clear_guard_failures_for_code(code: types.CodeType) -> None:
+    """Drop the recompile-reason log kept for ``code``.
+
+    The registry strong-keys the code object, so a caller tearing down a private
+    compile session (torch.compiler.precompile) uses this to let the session be
+    collected without a full torch._dynamo.reset().
+    """
+    guard_failures.pop(code, None)
+
+
 # Keep a record of graph break reasons for logging
 graph_break_reasons: list[torch._dynamo.output_graph.GraphCompileReason] = []
 

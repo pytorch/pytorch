@@ -5722,5 +5722,230 @@ class TestAutotuneCacheExtraOptions(TestCase):
         self.assertNotIn("extra_options", saved_data)
 
 
+@instantiate_parametrized_tests
+class TestAutotuneCacheConfigValues(TestCase):
+    """Round-tripping of user-autotune config kwargs that JSON cannot represent
+    faithfully (Enum members, tuples) through the autotune cache."""
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_autotune_cache_matches_enum_config_kwargs(self):
+        import plistlib
+
+        import triton
+
+        from torch._inductor.runtime.autotune_cache import (
+            _config_json_cacheable,
+            _json_config_value,
+            _load_cached_autotuning,
+        )
+
+        cfg = triton.Config(
+            {"MODE": plistlib.FMT_XML, "BLOCK": 64},
+            num_warps=4,
+            num_stages=2,
+        )
+        self.assertTrue(_config_json_cacheable(cfg))
+        data = {key: _json_config_value(val) for key, val in cfg.kwargs.items()}
+        data.update({"num_warps": 4, "num_stages": 2, "configs_hash": "h"})
+        best = json.loads(json.dumps(data))  # must be JSON-representable
+        self.assertIs(_load_cached_autotuning(best, "h", [cfg], {}), cfg)
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    @parametrize("via_enum", (True, False))
+    def test_autotune_cache_declines_non_json_config_kwargs(self, via_enum):
+        from enum import Enum
+
+        import triton
+
+        from torch._inductor.runtime.autotune_cache import (
+            _config_json_cacheable,
+            AutotuneCache,
+        )
+
+        class SetMode(Enum):
+            PAIR = frozenset({1, 2})
+
+        value = SetMode.PAIR if via_enum else {1, 2}
+        cfg = triton.Config({"MODE": value, "BLOCK": 64}, num_warps=4, num_stages=2)
+        self.assertFalse(_config_json_cacheable(cfg))
+        # save() must skip such a config entirely, warning once per process. A
+        # bare instance suffices: the gate returns before any cache state is
+        # touched, so if the gate were removed this call would fail on the
+        # missing attributes.
+        cache = object.__new__(AutotuneCache)
+        with mock.patch("torch._inductor.runtime.autotune_cache.warning_once") as warn:
+            self.assertIsNone(cache.save(cfg, time_taken_ns=0))
+            self.assertIsNone(cache.save(cfg, time_taken_ns=0))
+        self.assertEqual(warn.call_count, 2)
+        self.assertEqual(warn.call_args_list[0], warn.call_args_list[1])
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_autotune_cache_matches_tuple_config_kwargs(self):
+        # Tuple kwargs (directly or as an Enum's value) serialize as JSON
+        # lists; warm load must match the stored list back to the tuple-kwarg
+        # candidate and return that exact Config object so the kernel sees a
+        # real tuple, not the degraded list.
+        from enum import Enum
+
+        import triton
+
+        from torch._inductor.remote_cache import LocalAutotuneCache
+        from torch._inductor.runtime.autotune_cache import (
+            _config_json_cacheable,
+            _load_cached_autotuning,
+            AutotuneCache,
+        )
+
+        class TupleMode(Enum):
+            PAIR = (1, 2)
+
+        kw = {"MODE": TupleMode.PAIR, "SHAPE": (2, 3), "NEST": [(1,)], "BLOCK": 64}
+        cfg = triton.Config(dict(kw), num_warps=4, num_stages=2)
+        self.assertTrue(_config_json_cacheable(cfg))
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            key = os.path.join(tmpdir, "kernel.best_config")
+            local_cache = LocalAutotuneCache("local-autotune")
+            cache = AutotuneCache(configs_hash="h", local_cache=(local_cache, key))
+            cache.save(cfg, time_taken_ns=0)
+            best = local_cache.get(key)
+        self.assertIsNotNone(best)
+        self.assertEqual(best["SHAPE"], [2, 3])
+        loaded = _load_cached_autotuning(best, "h", [cfg], {})
+        self.assertIs(loaded, cfg)
+        self.assertEqual(loaded.kwargs, kw)
+        self.assertIs(loaded.kwargs["MODE"], TupleMode.PAIR)
+        self.assertIs(type(loaded.kwargs["SHAPE"]), tuple)
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_autotune_cache_degraded_no_match_reautotunes(self):
+        # A stored winner matching no candidate normally reconstructs (it may
+        # be a dynamically added config), but when some candidate kwarg
+        # degrades under the JSON round-trip (tuple -> list) the miss may be a
+        # serialization artifact and reconstruction would bake the degraded
+        # value into the kernel; warm load must re-autotune instead.
+        from enum import Enum
+
+        import triton
+
+        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+
+        cfg = triton.Config({"SHAPE": (2, 3), "BLOCK": 64}, num_warps=4, num_stages=2)
+        data = {"SHAPE": [4, 5], "BLOCK": 32, "num_warps": 4, "num_stages": 2}
+        data["configs_hash"] = "h"
+        best = json.loads(json.dumps(data))
+        self.assertIsNone(_load_cached_autotuning(best, "h", [cfg], {}))
+
+        # A plain Enum kwarg (identity __eq__) is degraded too; IntEnum and
+        # str-mixin members ==-match their unwrapped values and are not.
+        class Mode(Enum):
+            A = 1
+
+        cfg_enum = triton.Config({"MODE": Mode.A}, num_warps=4, num_stages=2)
+        data = {"MODE": 3, "num_warps": 4, "num_stages": 2, "configs_hash": "h"}
+        best = json.loads(json.dumps(data))
+        self.assertIsNone(_load_cached_autotuning(best, "h", [cfg_enum], {}))
+
+        # Without degraded candidate kwargs the same miss still reconstructs.
+        plain = triton.Config({"BLOCK": 64}, num_warps=4, num_stages=2)
+        data = {"BLOCK": 32, "num_warps": 4, "num_stages": 2, "configs_hash": "h"}
+        best = json.loads(json.dumps(data))
+        loaded = _load_cached_autotuning(best, "h", [plain], {})
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded.kwargs, {"BLOCK": 32})
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_autotune_cache_saves_container_enum_config_kwargs(self):
+        # Enum members nested inside list/dict kwargs pass _config_json_cacheable
+        # (which recurses), so _json_config_value must unwrap them recursively
+        # too: otherwise save() hands raw Enum members to json.dumps and the
+        # resulting TypeError aborts the run. A plain Enum (not IntEnum, which
+        # json serializes as its int) exercises this.
+        from enum import Enum
+
+        import triton
+
+        from torch._inductor.remote_cache import LocalAutotuneCache
+        from torch._inductor.runtime.autotune_cache import (
+            _config_json_cacheable,
+            _json_config_value,
+            _load_cached_autotuning,
+            AutotuneCache,
+        )
+
+        class Mode(Enum):
+            A = 1
+            B = 2
+
+        kwargs = {"MODES": [Mode.A], "TABLE": {"m": Mode.A}, "BLOCK": 64}
+        cfg = triton.Config(dict(kwargs), num_warps=4, num_stages=2)
+        self.assertTrue(_config_json_cacheable(cfg))
+        data = {key: _json_config_value(val) for key, val in cfg.kwargs.items()}
+        self.assertEqual(data, {"MODES": [1], "TABLE": {"m": 1}, "BLOCK": 64})
+        json.dumps(data)  # anything cacheable must serialize
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            key = os.path.join(tmpdir, "kernel.best_config")
+            local_cache = LocalAutotuneCache("local-autotune")
+            cache = AutotuneCache(configs_hash="h", local_cache=(local_cache, key))
+            cache.save(cfg, time_taken_ns=0)
+            best = local_cache.get(key)
+        self.assertIsNotNone(best)
+        # Warm load must match back to the original config, keeping the real
+        # Enum members rather than the degraded JSON values.
+        loaded = _load_cached_autotuning(best, "h", [cfg], {})
+        self.assertIs(loaded, cfg)
+        self.assertEqual(loaded.kwargs, kwargs)
+        self.assertIs(loaded.kwargs["MODES"][0], Mode.A)
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_autotune_cache_ambiguous_match_reautotunes(self):
+        # Enum unwrapping makes MODE=Mode.A and MODE=1 serialize identically, so
+        # a cached winner matches both candidates. Reconstructing would bake the
+        # raw JSON value even when the winner was the Enum member (plain Enum
+        # __eq__ is identity, a silent semantic flip); re-autotune instead.
+        from enum import Enum
+
+        import triton
+
+        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+
+        class Mode(Enum):
+            A = 1
+
+        cfg_enum = triton.Config({"MODE": Mode.A}, num_warps=4, num_stages=2)
+        cfg_raw = triton.Config({"MODE": 1}, num_warps=4, num_stages=2)
+        data = {"MODE": 1, "num_warps": 4, "num_stages": 2, "configs_hash": "h"}
+        best = json.loads(json.dumps(data))
+        self.assertIsNone(_load_cached_autotuning(best, "h", [cfg_enum, cfg_raw], {}))
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_autotune_cache_multi_match_without_enums_reconstructs(self):
+        # Multiple value-identical matches carry no Enum-vs-raw ambiguity
+        # (duplicate identical configs, or a config whose kwargs are a subset
+        # of the saved best); warm load must fall through to reconstruction
+        # rather than silently re-autotuning on every run.
+        import triton
+
+        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+
+        dup = [triton.Config({"BLOCK": 64}, num_warps=4, num_stages=2) for _ in "ab"]
+        data = {"BLOCK": 64, "num_warps": 4, "num_stages": 2, "configs_hash": "h"}
+        loaded = _load_cached_autotuning(json.loads(json.dumps(data)), "h", dup, {})
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded.kwargs, {"BLOCK": 64})
+        self.assertEqual(loaded.num_warps, 4)
+        self.assertEqual(loaded.num_stages, 2)
+
+        subset = [
+            triton.Config({"BLOCK": 64}, num_warps=4, num_stages=2),
+            triton.Config({"BLOCK": 64, "SPLIT": 2}, num_warps=4, num_stages=2),
+        ]
+        data["SPLIT"] = 2
+        loaded = _load_cached_autotuning(json.loads(json.dumps(data)), "h", subset, {})
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded.kwargs, {"BLOCK": 64, "SPLIT": 2})
+
+
 if __name__ == "__main__":
     run_tests()

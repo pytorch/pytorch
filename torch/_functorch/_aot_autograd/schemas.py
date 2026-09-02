@@ -1478,23 +1478,55 @@ class AOTGraphCapture:  # Produced by aot_stage1_graph_capture
     # Metadata about subclass inputs/outputs in the graph trace.
     maybe_subclass_meta: Any
 
-    # Inputs needed to retrace a backward after runtime reveals which forward
-    # output tangents are undefined. This remains compile-time-only state and is
-    # deliberately excluded from AOTAutograd cache entries.
-    autograd_trace_info: AOTAutogradTraceInfo | None = None
+    # Snapshot of the joint trace's inputs, taken only when
+    # aot_autograd_prune_unused_outputs is on and the backward may be retraced
+    # at runtime (see can_retrace_backward in aot_stage1_graph_capture).
+    autograd_joint_trace_inputs: AOTAutogradJointTraceInputs | None = None
 
 
 @dataclass
-class AOTAutogradTraceInfo:
+class AOTAutogradJointTraceInputs:
+    """What aot_stage1_graph_capture traced the joint from, snapshotted before
+    the trace (tracing mutates fw_metadata and re-detaches the example inputs).
+
+    flat_fn is the wrapped callable AOTAutograd traced; the retrace gate only
+    admits callables whose unwrapped form is an fx.GraphModule, so re-running
+    it at backward time replays captured ops rather than user Python.
+    flat_args are detached copies of the fake example inputs with requires_grad
+    preserved. fw_metadata is a shallow copy with copied containers, so the
+    retrace can null traced_tangents without touching the live metadata.
+    autocast_state is _autocast_fingerprint() at trace time; the retrace
+    declines when the backward-time state differs.
+    """
+
     flat_fn: TraceFn
     flat_args: list[FxValue]
     flat_args_descs: list[AOTInput]
     fw_metadata: ViewAndMutationMeta
-    partition_fn: Callable[..., Any] | None = None
-    original_fw_module: torch.fx.GraphModule | None = None
-    # Ambient autocast state at joint-trace time; the backward-time retrace
-    # bails when the caller's autocast state diverges from it.
-    autocast_state: tuple[Any, ...] | None = None
+    autocast_state: tuple[Any, ...]
+
+
+@dataclass
+class AOTAutogradTraceInfo:
+    """Everything _retrace_backward_for_undefined_grad_outputs needs to
+    re-derive a backward for a runtime pattern of undefined output tangents.
+
+    Built by aot_stage2_autograd once the joint has been partitioned, so every
+    field is populated at construction. It hangs off
+    AutogradLazyBackwardCompileInfo for the lifetime of the compiled autograd
+    function and retains the traced callable, fake inputs, forward module and
+    metadata. It is compile-time-only state that never enters AOTAutograd cache
+    entries: a cache hit has no trace info and falls back to structural
+    specialization or zero materialization.
+    """
+
+    joint_trace: AOTAutogradJointTraceInputs
+    partition_fn: Callable[..., Any]
+    original_fw_module: torch.fx.GraphModule
+    # One key per backward placeholder (see _backward_placeholder_key),
+    # snapshotted here because the AOT cache strips node.meta from the live
+    # backward module when it serializes it.
+    bw_placeholder_keys: tuple[tuple[str, str], ...]
 
 
 FakifiedFlatArgs = NewType("FakifiedFlatArgs", list[Any])

@@ -2132,6 +2132,13 @@ class triton:
         os.environ.get("TORCHINDUCTOR_UNIQUE_USER_KERNEL_NAMES", "0") == "1"
     )
 
+    # Bake plain (non-IntEnum/str-mixin) Enum constexprs of user-defined Triton
+    # kernels as their underlying values instead of as the members themselves,
+    # as inductor did before Enum members were rendered faithfully. An escape
+    # hatch for kernels written against the old rendering (e.g. branching on
+    # MODE == 1 while launched with MODE=Mode.A).
+    unwrap_plain_enum_constexpr: bool = False
+
     # should we put op names in kernel names
     # "torch": Maps to the fx op in the Dynamo graph (module name, method name, etc.)
     # "original_aten": Maps to the highest-level aten op (i.e. pre-decompositions)

@@ -39,6 +39,7 @@ from typing_extensions import override
 import torch
 from torch._guards import CompileContext
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._logging import warning_once
 from torch.compiler._cache import (
     CacheArtifact,
     CacheArtifactFactory,
@@ -334,13 +335,19 @@ class AutotuneCache:
             # Only genuinely unserializable kwargs (sets, NaN, arbitrary
             # objects) land here; see _config_json_cacheable. Skipped configs
             # are also absent from the bundled/mega caches, so this kernel
-            # re-autotunes on every cold process; name the cache entry so the
-            # recurring cost is attributable.
+            # re-autotunes on every cold process.
             cache_id = (self.local_cache or self.remote_cache or (None, "<unknown>"))[1]
-            log.warning(
+            log.debug(
                 "Skipping autotune cache save for %s: a config kwarg is not "
                 "JSON-serializable",
                 cache_id,
+            )
+            warning_once(
+                log,
+                "Skipping the autotune cache for kernels whose config kwargs are "
+                "not JSON-serializable (sets, NaN, arbitrary objects); they "
+                "re-autotune on every cold process. Enable debug logging for "
+                "torch._inductor.runtime.autotune_cache to see which kernels.",
             )
             return
         data: dict[str, JsonDataTy] = {

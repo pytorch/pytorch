@@ -740,7 +740,6 @@ def compile_to_python(
     options: dict[str, Any] | None = None,
     is_inference: bool = True,
     is_backward: bool = False,
-    output_strides: list[tuple[str, ...] | None] | None = None,
 ) -> tuple[str, bytes | None]:
     """Compile ``gm`` and return ``(inner_python, cache)`` -- the INNER half of the
     backend contract behind ``torch.compiler.precompile``.
@@ -759,10 +758,9 @@ def compile_to_python(
     composes AOTAutograd's codegen'd runtime wrappers around the result.
     Callers must run ``call`` under ``torch.no_grad()`` (the kernels use out= ops).
     ``is_inference`` selects Inductor's inference or training layout heuristics, while
-    ``is_backward`` enables backward-specific lowering constraints. If ``output_strides``
-    is provided, it is extended with the layouts selected for the graph outputs so an
-    AOTAutograd backward can be lowered against the forward's actual saved-activation
-    layouts.
+    ``is_backward`` enables backward-specific lowering constraints. The AOT layer's
+    forward lowering uses ``_compile_to_python_impl`` instead, which also returns the
+    output strides Inductor chose.
 
     Caller preconditions (this layer does not re-derive them):
 
@@ -805,6 +803,29 @@ def compile_to_python(
     max_autotune benchmark lowerings (which compile to their own modules during
     autotuning) never become the returned graph, so nothing needs to be filtered out.
     """
+    inner_python, cache, _ = _compile_to_python_impl(
+        gm,
+        example_inputs,
+        options=options,
+        is_inference=is_inference,
+        is_backward=is_backward,
+    )
+    return inner_python, cache
+
+
+def _compile_to_python_impl(
+    gm: GraphModule,
+    example_inputs: Sequence[InputType],
+    *,
+    options: dict[str, Any] | None,
+    is_inference: bool,
+    is_backward: bool,
+) -> tuple[str, bytes | None, list[tuple[str, ...] | None]]:
+    """``compile_to_python`` plus, as a third element, the strides Inductor CHOSE for
+    the graph outputs, which only exist once it has lowered. A training backward has to
+    be compiled against the forward's actual saved-activation layouts -- layout
+    optimization is free to hand back channels-last activations -- and this is the AOT
+    layer's only channel to them, since it never sees the CompiledFxGraph."""
     if not isinstance(gm, torch.fx.GraphModule):
         raise TypeError(
             f"compile_to_python expects a post-AOTAutograd torch.fx.GraphModule, "
@@ -906,16 +927,10 @@ def compile_to_python(
             boxed_forward_device_index=BoxedDeviceIndex(None),
         )
         artifacts = torch.compiler.save_cache_artifacts()
-    if output_strides is not None:
-        # The strides Inductor CHOSE for this graph's outputs, which only exist
-        # once it has lowered. A training backward has to be compiled against
-        # the forward's actual choices -- layout optimization is free to hand
-        # back channels-last saved activations -- and this is the only channel
-        # for that, since the caller cannot see the CompiledFxGraph.
-        output_strides.extend(getattr(compiled_graph, "output_strides", None) or [])
+    output_strides = list(getattr(compiled_graph, "output_strides", None) or [])
     inner_python = _runnable_source(compiled_graph, gm, allow_passthrough=is_backward)
     cache = _acceleration_cache_bytes(artifacts)
-    return inner_python, cache
+    return inner_python, cache, output_strides
 
 
 def autograd_cache_key(

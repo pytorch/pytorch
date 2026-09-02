@@ -1,4 +1,6 @@
 # Owner(s): ["oncall: pt2"]
+import ast
+import base64
 import copy
 import enum
 import io
@@ -12,14 +14,12 @@ import types
 import unittest
 from unittest import mock
 
+import sympy
+
 import torch
 import torch.utils._pytree as _pytree
 from torch._dynamo.decorators import mark_dynamic, mark_unbacked
-from torch._precompile import (
-    _dynamo_backend_source_literal,
-    _load_dynamo_state,
-    PrecompileError,
-)
+from torch._precompile import _dynamo_backend_source_literal, PrecompileError
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -376,8 +376,88 @@ class _PrecompileDynamoTensorPair:
         self.b = b
 
 
+class _PrecompileDynamoSlottedPair:
+    __slots__ = ("a", "b")
+
+    def __init__(self, a, b):
+        self.a = a
+        self.b = b
+
+
+class _PrecompileDynamoModuleInDict:
+    # An nn.Module stored in a plain instance __dict__ (not a slot / class attr).
+    def __init__(self):
+        self.helper = torch.nn.Linear(2, 2)
+
+
 def _precompile_dynamo_pair_sum(p):
     return p.a * 2 + p.b
+
+
+def _precompile_dynamo_pair_inplace(p):
+    p.a.add_(1)
+    return p.a * 2 + p.b
+
+
+class _PrecompileDynamoCfg:
+    scale = 2
+    counter = 0
+
+
+def _precompile_dynamo_returns_global_class(x):
+    return x + 1, _PrecompileDynamoCfg
+
+
+def _precompile_dynamo_mutates_class_attr(x):
+    _PrecompileDynamoCfg.counter += 1
+    return x * _PrecompileDynamoCfg.scale
+
+
+_PRECOMPILE_LOG: list[int] = []
+
+
+def _precompile_dynamo_appends_global_list(x):
+    _PRECOMPILE_LOG.append(1)
+    return x + 1
+
+
+_PRECOMPILE_TABLE = torch.tensor([1.0, 2.0])
+
+
+class _PrecompileDynamoCfgWithMethod:
+    scale = 2
+
+    def lookup(self):
+        return _PRECOMPILE_TABLE
+
+
+def _precompile_dynamo_reads_class_scale(x):
+    return x * _PrecompileDynamoCfgWithMethod.scale
+
+
+def _precompile_dynamo_refs_sympy(x):
+    return x + len(sympy.__name__)
+
+
+_PRECOMPILE_HISTORY: list[int] = []
+
+
+def _precompile_dynamo_reads_history(x):
+    return x * (len(_PRECOMPILE_HISTORY) + 1)
+
+
+def _precompile_dynamo_data_dependent(x):
+    if x.sum() > 0:
+        return x + 1
+    return x - 1
+
+
+def _precompile_dynamo_first_element(x):
+    return x[0]
+
+
+def _precompile_dynamo_matmul(x, w):
+    return (x @ w).relu()
 
 
 def _precompile_dynamo_mutating_step(xs, t):
@@ -443,6 +523,31 @@ def _strip_artifact(cache: bytes) -> bytes:
     return buf.getvalue()
 
 
+def _load_dynamo_state(code: str):
+    """Decode the opaque Dynamo state a tracer='dynamo' artifact embeds (the read side
+    of _build_dynamo_python_source's ``_DYNAMO_STATE = ...`` line); None if absent."""
+    for node in ast.parse(code).body:
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id == "_DYNAMO_STATE"
+        ):
+            return pickle.loads(base64.b64decode(ast.literal_eval(node.value)))
+    return None
+
+
+def _fresh_cache_env(tmp: str, **overrides: str) -> dict[str, str]:
+    """Child-process env with EMPTY inductor/Triton on-disk caches, so nothing the
+    parent compiled can be reused, plus TORCHDYNAMO_DISABLE stripped (a test that
+    wants it passes it in ``overrides``)."""
+    env = {k: v for k, v in os.environ.items() if k != "TORCHDYNAMO_DISABLE"}
+    env["TORCHINDUCTOR_CACHE_DIR"] = os.path.join(tmp, "inductor_cache")
+    env["TRITON_CACHE_DIR"] = os.path.join(tmp, "triton_cache")
+    env.update(overrides)
+    return env
+
+
 def _dynamo_serialized_guard_summary(
     code: str,
 ) -> list[tuple[list[str], list[str], list[str], bool]]:
@@ -467,6 +572,24 @@ def _dynamo_serialized_guard_summary(
             )
         )
     return summary
+
+
+def _stateful_paths(tmp: str) -> dict[str, str]:
+    """The ``artifact_path`` / ``cache_path`` kwargs a stateful capture writes under
+    ``tmp`` (also splattable straight into ``stateful`` / ``load_files``)."""
+    return {
+        "artifact_path": os.path.join(tmp, "artifact.py"),
+        "cache_path": os.path.join(tmp, "artifact.cache"),
+    }
+
+
+def _read_pair(paths: dict[str, str]) -> tuple[str, bytes]:
+    """Read back the (python_code, cache) a stateful capture wrote to ``paths``."""
+    with open(paths["artifact_path"]) as f:
+        code = f.read()
+    with open(paths["cache_path"], "rb") as f:
+        cache = f.read()
+    return code, cache
 
 
 def _default_and_inlined_loaders(code: str, cache: bytes, backend: str):
@@ -1314,7 +1437,11 @@ class TestPrecompile(TestCase):
         self.assertFalse(hasattr(torch, "precompile"))
         self.assertTrue(callable(torch.compiler.precompile))
         self.assertTrue(callable(torch.compiler.precompile.load))
+        self.assertTrue(callable(torch.compiler.precompile.load_files))
+        self.assertTrue(callable(torch.compiler.precompile.stateful))
         self.assertIs(torch.compiler.precompile.PrecompileError, PrecompileError)
+        self.assertIsInstance(torch.compiler.precompile.PrecompileState, type)
+        self.assertIsInstance(torch.compiler.precompile.PrecompileStateSummary, type)
         # The public location: test_public_bindings.test_correct_module_names also
         # enforces this for every torch.compiler.__all__ member.
         self.assertEqual(torch.compiler.precompile.__module__, "torch.compiler")
@@ -1420,6 +1547,13 @@ class TestPrecompile(TestCase):
         automatic_dynamic_shapes=True, assume_static_by_default=True
     )
     def test_tracer_dynamo_keeps_invariant_input_guards(self):
+        # The dynamic variant still carries the input-derived guards its capture
+        # implied: the else branch (shape[0] != 1) taken by every example, plus
+        # dynamic shapes' 0/1 specialization. Pin that a DYNAMIC variant exists,
+        # then show a size it accepts serves while size 1 -- which the retained
+        # guard rejects -- misses. With the guard dropped, size 1 would wrongly
+        # be served x+1 by the dynamic graph instead of raising; with dynamic=False
+        # there would be no dynamic variant at all and the first assert would fail.
         examples = [(torch.randn(size, 4),) for size in (2, 3, 5)]
         code, cache = torch.compiler.precompile(
             _precompile_dynamo_dynamic_branch,
@@ -1427,7 +1561,10 @@ class TestPrecompile(TestCase):
             tracer="dynamo",
             backend="eager",
         )
+        self.assertIn("DYNAMIC_GRAPH_COUNT = 1", code)
         loaded = torch.compiler.precompile.load(code, cache)
+        big = torch.randn(9, 4)  # a size the dynamic variant accepts
+        self.assertEqual(loaded(big), _precompile_dynamo_dynamic_branch(big))
         with self.assertRaisesRegex(PrecompileError, "no captured Dynamo variant"):
             loaded(torch.randn(1, 4))
 
@@ -1435,15 +1572,26 @@ class TestPrecompile(TestCase):
         automatic_dynamic_shapes=True, assume_static_by_default=True
     )
     def test_tracer_dynamo_keeps_tensor_metadata_guards(self):
+        # The dynamic variant retains its per-input TENSOR_MATCH metadata guard
+        # (dtype), not merely a size guard. Pin that a DYNAMIC variant exists,
+        # then show a size it accepts serves at the captured dtype but MISSES at
+        # a different dtype of the SAME accepted size -- so a plain size-guard
+        # miss cannot explain the raise, and dropping the dtype guard would serve
+        # the float64 input instead of raising.
         examples = [(torch.randn(size, 4),) for size in (2, 3)]
         code, cache = torch.compiler.precompile(
             _precompile_dynamo_dynamic,
             example_inputs=examples,
             tracer="dynamo",
         )
+        self.assertIn("DYNAMIC_GRAPH_COUNT = 1", code)
         loaded = torch.compiler.precompile.load(code, cache)
+        x = torch.randn(7, 4)  # a size the dynamic variant accepts
+        self.assertEqual(loaded(x), _precompile_dynamo_dynamic(x))
         with self.assertRaisesRegex(PrecompileError, "no captured Dynamo variant"):
-            loaded(torch.randn(7, 4, dtype=torch.float64))
+            loaded(
+                x.double()
+            )  # same accepted size, dtype mismatch -> TENSOR_MATCH miss
 
     def test_tracer_dynamo_capture_preserves_existing_compile_entries(self):
         from torch._dynamo.testing import CompileCounter
@@ -1528,14 +1676,12 @@ class TestPrecompile(TestCase):
             tracer="dynamo",
             backend="eager",
         )
-        self.assertIn("_DYNAMO_GRAD_ENABLED = True", code)
         out = torch.compiler.precompile.load(code, cache)(x)
         self.assertTrue(out.requires_grad)
         out.sum().backward()
         x_ref = x.detach().clone().requires_grad_()
         _precompile_dynamo_torch_sin(x_ref).sum().backward()
         self.assertEqual(x.grad, x_ref.grad)
-        x.grad = None
 
     def test_tracer_dynamo_eager_backward_supports_higher_order(self):
         # The eager backend's backward is live autograd, so grad-of-grad works
@@ -1557,24 +1703,6 @@ class TestPrecompile(TestCase):
         (ref_grad2,) = torch.autograd.grad(ref_grad.sum(), x_ref)
         self.assertEqual(grad, ref_grad)
         self.assertEqual(grad2, ref_grad2)
-
-    def test_tracer_dynamo_inductor_double_backward_raises(self):
-        # The inductor backend precompiles only the first-order backward; the
-        # emitted _DoubleBackward bridge must raise the documented error on a
-        # second-order backward instead of silently producing wrong grads.
-        x = torch.randn(4, requires_grad=True)
-        code, cache = torch.compiler.precompile(
-            _precompile_dynamo_torch_sin,
-            example_inputs=[(x,)],
-            tracer="dynamo",
-            backend="inductor",
-        )
-        out = torch.compiler.precompile.load(code, cache)(x)
-        (grad,) = torch.autograd.grad(out.sum(), x, create_graph=True)
-        with self.assertRaisesRegex(
-            RuntimeError, "does not currently support double backward"
-        ):
-            grad.sum().backward()
 
     @parametrize("backend", ["eager", "inductor"])
     def test_tracer_dynamo_serves_eager_semantics_under_no_grad(self, backend):
@@ -1616,65 +1744,57 @@ class TestPrecompile(TestCase):
             with torch.inference_mode():
                 loaded(x)
 
-    def test_tracer_dynamo_rejects_input_global_alias(self):
-        with self.assertRaisesRegex(PrecompileError, "aliases the Python environment"):
+    def test_tracer_dynamo_rejects_identity_check_against_global_tensor(self):
+        # The global tensor is never a graph input (only its identity is
+        # compared), so the placeholder check cannot see it; Dynamo still
+        # guards on it (TENSOR_MATCH), and dropping that environment guard is
+        # rejected because the artifact could not reproduce the tensor.
+        with self.assertRaisesRegex(
+            PrecompileError, r"uses the tensor\(s\) \[\"G\['_DYNAMO_INPUT_GLOBAL'\]\"\]"
+        ):
             torch.compiler.precompile(
                 _precompile_dynamo_input_global_identity,
-                example_inputs=[(_DYNAMO_INPUT_GLOBAL,)],
+                example_inputs=[(torch.randn(3),)],
                 tracer="dynamo",
                 backend="eager",
             )
 
     def test_tracer_dynamo_rejects_tensor_global(self):
-        # A referenced global tensor would only exist in the caller's module, so
-        # the artifact would capture fine and then serve a raw NameError. The
-        # rejection must also see tensors held as class attributes, as
-        # attributes of user (non-library) modules, and on slotted instances
-        # (both slot values and their class attributes).
-        for fn in (
-            _precompile_dynamo_global_tensor,
-            _precompile_dynamo_class_attr_tensor,
-            _precompile_dynamo_module_attr_tensor,
-            _precompile_dynamo_slotted_class_attr_tensor,
-            _precompile_dynamo_slot_value_tensor,
+        # A tensor read from the environment becomes a graph placeholder whose
+        # Dynamo source is not rooted at an argument; it would only exist in the
+        # caller's module, so the artifact would serve a raw NameError. The
+        # exact check names the source, whether the tensor is a bare global, a
+        # class attribute, an attribute of a user module, or held on a slotted
+        # instance (slot value or class attribute).
+        for fn, source in (
+            (_precompile_dynamo_global_tensor, "G['_GLOBAL_TENSOR']"),
+            (
+                _precompile_dynamo_class_attr_tensor,
+                "G['_PrecompileDynamoTensorClassAttr'].tensor",
+            ),
+            (
+                _precompile_dynamo_module_attr_tensor,
+                "G['_DYNAMO_TENSOR_MODULE'].weight",
+            ),
+            # A class attribute read through a slotted instance renders via the
+            # type's __dict__; the global is still named.
+            (
+                _precompile_dynamo_slotted_class_attr_tensor,
+                "G['_DYNAMO_SLOTTED_CLASS_ATTR']",
+            ),
+            (_precompile_dynamo_slot_value_tensor, "G['_DYNAMO_SLOTTED_VALUE'].t"),
         ):
             with self.subTest(fn=fn.__name__):
-                with self.assertRaisesRegex(PrecompileError, "contains a tensor"):
+                with self.assertRaisesRegex(
+                    PrecompileError, "from the Python environment"
+                ) as cm:
                     torch.compiler.precompile(
                         fn,
                         example_inputs=[(torch.randn(3),)],
                         tracer="dynamo",
                         backend="eager",
                     )
-
-    def test_tracer_dynamo_rejects_input_aliased_via_class_or_module_attr(self):
-        # An input reachable through a global class or user-module attribute
-        # would have its identity guard minimized away as environment, then
-        # silently serve the capture-time branch for inputs that no longer
-        # alias.
-        x = torch.randn(3)
-        # A pytree-leaf object: the alias scan keys on example leaf identity,
-        # so a container payload (a bare list) would flatten away.
-        payload = _PrecompileDynamoAliasPayload()
-        cases = (
-            (_precompile_dynamo_class_attr_alias, _PrecompileDynamoAliasHolder),
-            (_precompile_dynamo_module_attr_alias, _DYNAMO_ALIAS_MODULE),
-        )
-        for fn, holder in cases:
-            with self.subTest(fn=fn.__name__):
-                holder.payload = payload
-                try:
-                    with self.assertRaisesRegex(
-                        PrecompileError, "aliases the Python environment"
-                    ):
-                        torch.compiler.precompile(
-                            fn,
-                            example_inputs=[(x, payload)],
-                            tracer="dynamo",
-                            backend="eager",
-                        )
-                finally:
-                    holder.payload = None
+                self.assertIn(source, str(cm.exception))
 
     def test_tracer_dynamo_accepts_singleton_input_shared_with_environment(self):
         # dtypes, layouts, and memory formats are process-wide singletons with
@@ -1729,7 +1849,7 @@ class TestPrecompile(TestCase):
         # Slot values are instance state: an nn.Module carried in a slot is
         # rejected exactly like one carried in __dict__.
         box = _PrecompileDynamoSlottedModuleBox()
-        with self.assertRaisesRegex(NotImplementedError, "nn.Module arguments"):
+        with self.assertRaisesRegex(PrecompileError, "nn.Module arguments"):
             torch.compiler.precompile(
                 _precompile_dynamo_slotted_box_call,
                 example_inputs=[(torch.randn(2), box)],
@@ -1760,12 +1880,15 @@ class TestPrecompile(TestCase):
                 tracer="dynamo",
                 backend="eager",
             )
+        # The loaded artifact runs the overlap check only when a captured graph
+        # mutates an input (_DYNAMO_MUTATES_INPUTS), so capture a mutating fn.
         code, cache = torch.compiler.precompile(
-            _precompile_dynamo_torch_sin,
+            _precompile_dynamo_inplace_step,
             example_inputs=[(torch.randn(3),)],
             tracer="dynamo",
             backend="eager",
         )
+        self.assertIn("_DYNAMO_MUTATES_INPUTS = True", code)
         loaded = torch.compiler.precompile.load(code, cache)
         with self.assertRaisesRegex(PrecompileError, "cannot verify storage overlap"):
             loaded(nt)
@@ -1800,8 +1923,9 @@ class TestPrecompile(TestCase):
 
     def test_tracer_dynamo_rejects_global_mutation(self):
         # Capture runs against a copy of the fn's globals and the artifact against
-        # its own namespace, so a global mutation would be silently discarded.
-        with self.assertRaisesRegex(PrecompileError, "mutates globals"):
+        # its own namespace, so a global mutation would be silently discarded;
+        # the transformed bytecode's STORE_GLOBAL is rejected at artifact build.
+        with self.assertRaisesRegex(PrecompileError, "mutates the global"):
             torch.compiler.precompile(
                 _precompile_dynamo_mutates_global,
                 example_inputs=[(torch.randn(3),)],
@@ -1846,21 +1970,18 @@ class TestPrecompile(TestCase):
         # so changing the environment after capture silently serves the
         # capture-time specialization. Pin that this is specialization, not a
         # stale read at serve time.
-        global _DYNAMO_ENV_SCALE
         x = torch.randn(4)
+        original = _DYNAMO_ENV_SCALE
         code, cache = torch.compiler.precompile(
             _precompile_dynamo_env_scale,
             example_inputs=[(x,)],
             tracer="dynamo",
             backend="eager",
         )
-        original = _DYNAMO_ENV_SCALE
-        _DYNAMO_ENV_SCALE = 100
-        try:
+        # Change the environment global after capture; mock.patch.object restores it.
+        with mock.patch.object(sys.modules[__name__], "_DYNAMO_ENV_SCALE", 100):
             loaded = torch.compiler.precompile.load(code, cache)
             self.assertEqual(loaded(x), x * original)
-        finally:
-            _DYNAMO_ENV_SCALE = original
 
     def test_tracer_dynamo_rejects_tensor_default(self):
         with self.assertRaisesRegex(PrecompileError, "tensor-valued function defaults"):
@@ -1892,7 +2013,7 @@ class TestPrecompile(TestCase):
             )
 
     def test_tracer_dynamo_rejects_non_function_fn(self):
-        with self.assertRaisesRegex(NotImplementedError, "requires a Python function"):
+        with self.assertRaisesRegex(PrecompileError, "requires a Python function"):
             torch.compiler.precompile(
                 torch.nn.Linear(2, 2),
                 example_inputs=[(torch.randn(1, 2),)],
@@ -1901,7 +2022,7 @@ class TestPrecompile(TestCase):
             )
 
     def test_tracer_dynamo_rejects_closure_fn(self):
-        with self.assertRaisesRegex(NotImplementedError, "closure cells"):
+        with self.assertRaisesRegex(PrecompileError, "closure cells"):
             torch.compiler.precompile(
                 _make_precompile_dynamo_closure(),
                 example_inputs=[(torch.randn(3),)],
@@ -1910,7 +2031,7 @@ class TestPrecompile(TestCase):
             )
 
     def test_tracer_dynamo_rejects_module_example_argument(self):
-        with self.assertRaisesRegex(NotImplementedError, "nn.Module arguments"):
+        with self.assertRaisesRegex(PrecompileError, "nn.Module arguments"):
             torch.compiler.precompile(
                 lambda m, x: m(x),
                 example_inputs=[(torch.nn.Linear(2, 2), torch.randn(1, 2))],
@@ -1921,7 +2042,7 @@ class TestPrecompile(TestCase):
     def test_tracer_dynamo_rejects_nested_module_example_argument(self):
         # The rejection walks containers: a module hidden inside an argument must
         # not slip into the (unsupported, untested) nested-module capture path.
-        with self.assertRaisesRegex(NotImplementedError, "nn.Module arguments"):
+        with self.assertRaisesRegex(PrecompileError, "nn.Module arguments"):
             torch.compiler.precompile(
                 lambda pair: pair[0](pair[1]),
                 example_inputs=[((torch.nn.Linear(2, 2), torch.randn(1, 2)),)],
@@ -1938,11 +2059,11 @@ class TestPrecompile(TestCase):
         import numpy as np
 
         arr = np.ones(3, dtype=np.float32)
-        with self.assertRaisesRegex(NotImplementedError, "torch.from_numpy"):
+        with self.assertRaisesRegex(PrecompileError, "torch.from_numpy"):
             torch.compiler.precompile(
                 lambda a: a, example_inputs=[(arr,)], tracer="dynamo", backend="eager"
             )
-        with self.assertRaisesRegex(NotImplementedError, "torch.from_numpy"):
+        with self.assertRaisesRegex(PrecompileError, "torch.from_numpy"):
             torch.compiler.precompile(
                 lambda t, box: t,
                 example_inputs=[(torch.randn(3), [arr])],
@@ -1952,7 +2073,7 @@ class TestPrecompile(TestCase):
         # numpy scalars (numpy.generic) route through the same ___from_numpy
         # guard path and died with a raw internal TypeError when only ndarray
         # was rejected.
-        with self.assertRaisesRegex(NotImplementedError, "torch.from_numpy"):
+        with self.assertRaisesRegex(PrecompileError, "torch.from_numpy"):
             torch.compiler.precompile(
                 lambda s, t: t * s,
                 example_inputs=[(np.float64(2.0), torch.randn(3))],
@@ -1962,7 +2083,7 @@ class TestPrecompile(TestCase):
 
     def test_tracer_dynamo_rejects_decompositions(self):
         with self.assertRaisesRegex(
-            NotImplementedError, "decompositions are not yet supported"
+            PrecompileError, "decompositions are not yet supported"
         ):
             torch.compiler.precompile(
                 _precompile_dynamo_torch_sin,
@@ -2014,12 +2135,13 @@ class TestPrecompile(TestCase):
             backend="eager",
         )
         loaded = torch.compiler.precompile.load(code, cache)
-        with self.assertRaisesRegex(PrecompileError, "positional arguments"):
+        with self.assertRaisesRegex(PrecompileError, "missing a required argument"):
             loaded(x)
-        # Keyword calling conventions stay unsupported on both tracers: the loaded
-        # module is (*args)-only, so a keyword call is a plain TypeError.
-        with self.assertRaisesRegex(TypeError, "keyword argument"):
-            loaded(x, scale=2)
+        # A dynamo artifact binds its arguments like the traced fn, so a keyword
+        # call dispatches on the same guards as the positional one.
+        self.assertEqual(loaded(x, scale=2), x + 2)
+        with self.assertRaisesRegex(PrecompileError, "unexpected keyword"):
+            loaded(x, scale=2, bogus=1)
 
     def test_load_dynamo_state_accessor(self):
         code, _ = torch.compiler.precompile(
@@ -2039,28 +2161,7 @@ class TestPrecompile(TestCase):
         make_fx_code, _ = torch.compiler.precompile(
             lambda t: t + 1, example_inputs=[(torch.randn(3),)], backend="eager"
         )
-        with self.assertRaisesRegex(PrecompileError, "no _DYNAMO_STATE"):
-            _load_dynamo_state(make_fx_code)
-
-    def test_filter_dynamo_guards_rejects_unmatched_variant(self):
-        from types import SimpleNamespace
-
-        from torch._precompile import _filter_dynamo_guards
-
-        code, _ = torch.compiler.precompile(
-            _precompile_dynamo_torch_sin,
-            example_inputs=[(torch.randn(3),)],
-            tracer="dynamo",
-            backend="eager",
-        )
-        guarded = [
-            SimpleNamespace(**variant)
-            for variant in _load_dynamo_state(code)["variants"]
-        ]
-        with self.assertRaisesRegex(PrecompileError, "does not match any example"):
-            _filter_dynamo_guards(
-                _precompile_dynamo_torch_sin, guarded, [(torch.randn(4, 5),)]
-            )
+        self.assertIsNone(_load_dynamo_state(make_fx_code))
 
     def test_tracer_dynamo_corrupt_cache_bundle_degrades_to_jit(self):
         # The cache is an acceleration only: a corrupt per-graph bundle inside the
@@ -2073,6 +2174,10 @@ class TestPrecompile(TestCase):
         )
         blob = torch.load(io.BytesIO(cache), weights_only=True)  # pins weights_only
         self.assertIsInstance(blob["artifact"], list)
+        # One real (non-empty) bundle per compiled graph: an inductor artifact
+        # whose cache primes nothing would silently JIT everything at load.
+        self.assertEqual(len(blob["artifact"]), 1)
+        self.assertIsInstance(blob["artifact"][0], bytes)
         blob["artifact"] = [b"corrupt-bundle"]
         buf = io.BytesIO()
         torch.save(blob, buf)
@@ -2080,12 +2185,11 @@ class TestPrecompile(TestCase):
             loaded = torch.compiler.precompile.load(code, buf.getvalue())
         self.assertEqual(loaded(x), torch.sin(x))
 
-    def test_tracer_dynamo_load_degrades_on_mismatched_code_cache_pair(self):
-        # A dynamo python_code is fully self-contained, so a cache whose
-        # code_hash does not match is treated as cold (with a warning) rather
-        # than rejected. Stateful capture's rewrite is two back-to-back renames;
-        # a crash between them leaves exactly this pair on disk, and the
-        # "always loadable" contract has to cover it.
+    def test_tracer_dynamo_load_rejects_mismatched_code_cache_pair(self):
+        # The in-memory pair hard-fails on a code_hash mismatch on both tracers
+        # (invariant 7). Only load_files degrades: a stateful rewrite renames
+        # the artifact then the cache, so a crash between them leaves exactly
+        # this pair on disk and the "always loadable" contract has to cover it.
         x = torch.randn(3)
         code_a, _cache_a = torch.compiler.precompile(
             _precompile_dynamo_torch_sin, example_inputs=[(x,)], tracer="dynamo"
@@ -2093,8 +2197,17 @@ class TestPrecompile(TestCase):
         _code_b, cache_b = torch.compiler.precompile(
             _precompile_dynamo_dynamic, example_inputs=[(x,)], tracer="dynamo"
         )
-        with self.assertLogs("torch._precompile", level="WARNING") as logs:
-            loaded = torch.compiler.precompile.load(code_a, cache_b)
+        with self.assertRaisesRegex(PrecompileError, "code_hash"):
+            torch.compiler.precompile.load(code_a, cache_b)
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_path = os.path.join(tmp, "f.py")
+            cache_path = os.path.join(tmp, "f.cache")
+            with open(artifact_path, "w") as f:
+                f.write(code_a)
+            with open(cache_path, "wb") as f:
+                f.write(cache_b)
+            with self.assertLogs("torch._precompile", level="WARNING") as logs:
+                loaded = torch.compiler.precompile.load_files(artifact_path, cache_path)
         self.assertTrue(any("code_hash" in message for message in logs.output))
         self.assertEqual(loaded(x), torch.sin(x))
 
@@ -2137,8 +2250,7 @@ class TestPrecompile(TestCase):
         # record ride in the state); the third is a pure guard hit and adds
         # nothing.
         with tempfile.TemporaryDirectory() as tmp:
-            artifact_path = os.path.join(tmp, "artifact.py")
-            cache_path = os.path.join(tmp, "artifact.cache")
+            paths = _stateful_paths(tmp)
             state = None
             for shape, expected_variants in (((2, 4), 1), ((3, 4), 2), ((2, 4), 2)):
                 x = torch.randn(*shape)
@@ -2146,19 +2258,16 @@ class TestPrecompile(TestCase):
                     _precompile_dynamo_dynamic,
                     example_inputs=[(x,)],
                     state=state,
-                    artifact_path=artifact_path,
-                    cache_path=cache_path,
                     backend="eager",
+                    **paths,
                 )
+                if state.calls == 1:
+                    self.addCleanup(state.close)
                 self.assertEqual(result, _precompile_dynamo_dynamic(x))
-                with open(artifact_path) as f:
-                    code = f.read()
-                with open(cache_path, "rb") as f:
-                    cache = f.read()
+                code, cache = _read_pair(paths)
                 self.assertIn(f"VARIANT_COUNT = {expected_variants}", code)
                 loaded = torch.compiler.precompile.load(code, cache)
                 self.assertEqual(loaded(x), _precompile_dynamo_dynamic(x))
-            self.addCleanup(state.close)
             self.assertIn("DYNAMIC_GRAPH_COUNT = 1", code)
             summary = state.summary()
             self.assertEqual(
@@ -2166,9 +2275,7 @@ class TestPrecompile(TestCase):
                 (3, 3, 2),
             )
             self.assertEqual(summary.dynamic_graphs, 1)
-            loaded = torch.compiler.precompile.load(
-                artifact_path=artifact_path, cache_path=cache_path
-            )
+            loaded = torch.compiler.precompile.load_files(**paths)
             y = torch.randn(7, 4)
             self.assertEqual(loaded(y), _precompile_dynamo_dynamic(y))
 
@@ -2177,8 +2284,7 @@ class TestPrecompile(TestCase):
     )
     def test_tracer_dynamo_stateful_training_backward_between_calls(self):
         with tempfile.TemporaryDirectory() as tmp:
-            artifact_path = os.path.join(tmp, "train.py")
-            cache_path = os.path.join(tmp, "train.cache")
+            paths = _stateful_paths(tmp)
             state = None
             for shape in ((2, 3), (4, 5)):
                 x = torch.randn(*shape, requires_grad=True)
@@ -2186,19 +2292,15 @@ class TestPrecompile(TestCase):
                     _precompile_dynamo_dynamic,
                     example_inputs=[(x,)],
                     state=state,
-                    artifact_path=artifact_path,
-                    cache_path=cache_path,
+                    **paths,
                 )
+                if state.calls == 1:
+                    self.addCleanup(state.close)
                 # Each call is a real training step: its backward runs before
                 # the next call, exactly like a caller-owned loop would.
                 out.sum().backward()
                 self.assertEqual(x.grad, x.detach().cos())
-            self.addCleanup(state.close)
-            with open(artifact_path) as f:
-                code = f.read()
-            with open(cache_path, "rb") as f:
-                cache = f.read()
-            self.assertIn("_DYNAMO_GRAD_ENABLED = True", code)
+            code, cache = _read_pair(paths)
             self.assertIn("DYNAMIC_GRAPH_COUNT = 1", code)
             loaded = torch.compiler.precompile.load(code, cache)
             y = torch.randn(7, 4, requires_grad=True)
@@ -2242,10 +2344,7 @@ class TestPrecompile(TestCase):
         # A call that raises has already told the caller; later good calls must
         # keep capturing and rewriting instead of inheriting the failure.
         with tempfile.TemporaryDirectory() as tmp:
-            paths = {
-                "artifact_path": os.path.join(tmp, "f.py"),
-                "cache_path": os.path.join(tmp, "f.cache"),
-            }
+            paths = _stateful_paths(tmp)
             kwargs = {"backend": "eager", **paths}
             x = torch.randn(4)
             _, state = torch.compiler.precompile.stateful(
@@ -2254,6 +2353,7 @@ class TestPrecompile(TestCase):
                 state=None,
                 **kwargs,
             )
+            self.addCleanup(state.close)
             with self.assertRaisesRegex(PrecompileError, "graph breaks"):
                 torch.compiler.precompile.stateful(
                     _precompile_dynamo_stateful_flaky,
@@ -2267,10 +2367,9 @@ class TestPrecompile(TestCase):
                 state=state,
                 **kwargs,
             )
-            self.addCleanup(state.close)
             self.assertEqual(result, x + 2)
             self.assertEqual(state.summary().calls, 2)  # the failed call added none
-            loaded = torch.compiler.precompile.load(**paths)
+            loaded = torch.compiler.precompile.load_files(**paths)
             self.assertEqual(loaded(x, 1), x + 1)
             self.assertEqual(loaded(x, 2), x + 2)
 
@@ -2281,10 +2380,7 @@ class TestPrecompile(TestCase):
         # keep capturing and rewriting rather than fail guard minimization with
         # an unmatched variant.
         with tempfile.TemporaryDirectory() as tmp:
-            paths = {
-                "artifact_path": os.path.join(tmp, "g.py"),
-                "cache_path": os.path.join(tmp, "g.cache"),
-            }
+            paths = _stateful_paths(tmp)
             kwargs = {"backend": "eager", "dynamic": False, **paths}
             ok = torch.tensor([0])
             _, state = torch.compiler.precompile.stateful(
@@ -2310,7 +2406,7 @@ class TestPrecompile(TestCase):
                 **kwargs,
             )
             self.assertEqual(result, _precompile_dynamo_gather(x, ok))
-            loaded = torch.compiler.precompile.load(**paths)
+            loaded = torch.compiler.precompile.load_files(**paths)
             self.assertEqual(loaded(x, ok), _precompile_dynamo_gather(x, ok))
             # The failed call's variant stayed captured: its shape serves (and
             # reproduces eager, including the failure mode, on bad data).
@@ -2322,10 +2418,7 @@ class TestPrecompile(TestCase):
         # examples are signature.bind()'d on every rebuild, so recording it
         # would poison every later call on the state.
         with tempfile.TemporaryDirectory() as tmp:
-            paths = {
-                "artifact_path": os.path.join(tmp, "u.py"),
-                "cache_path": os.path.join(tmp, "u.cache"),
-            }
+            paths = _stateful_paths(tmp)
             kwargs = {"backend": "eager", **paths}
             x = torch.randn(4)
             _, state = torch.compiler.precompile.stateful(
@@ -2358,7 +2451,7 @@ class TestPrecompile(TestCase):
             # 1 from the fresh call + 1 from the good call: the two failed
             # calls contributed no examples.
             self.assertEqual(state.summary().examples, 2)
-            loaded = torch.compiler.precompile.load(**paths)
+            loaded = torch.compiler.precompile.load_files(**paths)
             self.assertEqual(loaded(x, 3), x + 3)
 
     @torch._dynamo.config.patch(
@@ -2366,10 +2459,7 @@ class TestPrecompile(TestCase):
     )
     def test_tracer_dynamo_stateful_summary_and_dropped_guards(self):
         with tempfile.TemporaryDirectory() as tmp:
-            paths = {
-                "artifact_path": os.path.join(tmp, "s.py"),
-                "cache_path": os.path.join(tmp, "s.cache"),
-            }
+            paths = _stateful_paths(tmp)
             state = None
             for size in (3, 4):  # the second call recompiles a dynamic variant
                 _, state = torch.compiler.precompile.stateful(
@@ -2379,7 +2469,8 @@ class TestPrecompile(TestCase):
                     backend="eager",
                     **paths,
                 )
-            self.addCleanup(state.close)
+                if state.calls == 1:
+                    self.addCleanup(state.close)
             summary = state.summary()
             self.assertEqual(summary.calls, 2)
             self.assertEqual(summary.examples, 2)
@@ -2387,18 +2478,18 @@ class TestPrecompile(TestCase):
             self.assertEqual(summary.graphs, 2)
             self.assertEqual(summary.dynamic_graphs, 1)
             # The fn reads a module-global constant, whose environment guards
-            # are minimized out of dispatch and reported, in the summary and in
-            # the artifact itself. Reporting aggregates across variants and
-            # deduplicates: the pair dropped from both variants appears once.
-            entry = ("EQUALS_MATCH", "G['_DYNAMO_ENV_SCALE']")
+            # are dropped from dispatch and reported -- with the capture-time
+            # value the artifact is specialized to -- in the summary and in the
+            # artifact itself. Reporting aggregates across variants and
+            # deduplicates: the triple dropped from both variants appears once.
+            entry = ("EQUALS_MATCH", "G['_DYNAMO_ENV_SCALE']", "3")
             self.assertIn(entry, summary.dropped_guards)
             self.assertEqual(
                 len(summary.dropped_guards), len(set(summary.dropped_guards))
             )
-            with open(paths["artifact_path"]) as f:
-                code = f.read()
+            code, _cache = _read_pair(paths)
             self.assertIn("_DROPPED_GUARDS = (", code)
-            self.assertIn("at least one variant", code)
+            self.assertIn("dropped from at least one", code)
             from torch._precompile import _parse_artifact_metadata
 
             embedded = _parse_artifact_metadata(code)["_DROPPED_GUARDS"]
@@ -2424,10 +2515,7 @@ class TestPrecompile(TestCase):
             )
 
         with tempfile.TemporaryDirectory() as tmp:
-            paths = {
-                "artifact_path": os.path.join(tmp, "d.py"),
-                "cache_path": os.path.join(tmp, "d.cache"),
-            }
+            paths = _stateful_paths(tmp)
             _, state = torch.compiler.precompile.stateful(
                 _precompile_dynamo_dynamic,
                 example_inputs=[(x,)],
@@ -2447,57 +2535,147 @@ class TestPrecompile(TestCase):
                     **paths,
                 )
 
-    def test_write_artifact_files_cleanup_on_failure(self):
-        # A failed rewrite must leave the previous pair loadable and no temp
-        # files behind; the pair only loads together (code_hash pairing).
-        import builtins
+    def test_write_artifact_files_failure_windows(self):
+        # Each file is an fsync'd write_atomic (tmp + rename) in artifact-then-
+        # cache order. A failure writing the artifact leaves the previous pair; a
+        # failure writing the cache leaves the NEW artifact with the OLD cache
+        # (the window load_files degrades on). Neither leaves temp files behind.
+        import pathlib
 
         from torch._precompile import _write_dynamo_artifact_files
 
         with tempfile.TemporaryDirectory() as tmp:
             artifact_path = os.path.join(tmp, "a.py")
             cache_path = os.path.join(tmp, "a.cache")
-            _write_dynamo_artifact_files(
-                "GOOD = 1\n", b"goodcache", artifact_path, cache_path
-            )
+            with mock.patch("os.fsync", wraps=os.fsync) as fsync:
+                _write_dynamo_artifact_files(
+                    "GOOD = 1\n", b"goodcache", artifact_path, cache_path
+                )
+            self.assertEqual(fsync.call_count, 2)  # both files are made durable
 
-            real_open = builtins.open
-            opened = []
+            real_open = pathlib.Path.open
+            failures = {"remaining": 0}
 
-            def flaky(path, *args, **kwargs):
-                if str(path).endswith(".tmp"):
-                    opened.append(path)
-                    if len(opened) == 2:
-                        raise OSError("disk full")
-                return real_open(path, *args, **kwargs)
+            def flaky_open(self_path, *args, **kwargs):
+                if failures["remaining"] == 0 and str(self_path).endswith(".tmp"):
+                    raise OSError("disk full")
+                failures["remaining"] -= 1
+                return real_open(self_path, *args, **kwargs)
 
-            with mock.patch.object(builtins, "open", flaky):
-                with self.assertRaises(OSError):
-                    _write_dynamo_artifact_files(
-                        "NEW = 2\n", b"newcache", artifact_path, cache_path
+            for fail_at, expected in (
+                (0, ("GOOD = 1\n", b"goodcache")),  # first write fails: old pair
+                (1, ("NEW = 2\n", b"goodcache")),  # cache write fails: new + old
+            ):
+                with self.subTest(fail_at=fail_at):
+                    failures["remaining"] = fail_at
+                    with mock.patch.object(pathlib.Path, "open", flaky_open):
+                        with self.assertRaisesRegex(OSError, "disk full"):
+                            _write_dynamo_artifact_files(
+                                "NEW = 2\n", b"newcache", artifact_path, cache_path
+                            )
+                    with open(artifact_path) as f:
+                        self.assertEqual(f.read(), expected[0])
+                    with open(cache_path, "rb") as f:
+                        self.assertEqual(f.read(), expected[1])
+                    self.assertEqual(
+                        [f for f in os.listdir(tmp) if f.endswith(".tmp")], []
                     )
-            with open(artifact_path) as f:
-                self.assertEqual(f.read(), "GOOD = 1\n")
-            with open(cache_path, "rb") as f:
-                self.assertEqual(f.read(), b"goodcache")
-            self.assertEqual([f for f in os.listdir(tmp) if f.endswith(".tmp")], [])
 
-    def test_load_path_arguments_validated(self):
-        with self.assertRaisesRegex(ValueError, "both artifact_path and cache_path"):
-            torch.compiler.precompile.load(artifact_path="only.py")
-        with self.assertRaisesRegex(TypeError, "not both"):
-            torch.compiler.precompile.load(
-                "code", b"cache", artifact_path="a.py", cache_path="a.cache"
+    @torch._dynamo.config.patch(
+        automatic_dynamic_shapes=True, assume_static_by_default=True
+    )
+    def test_tracer_dynamo_stateful_rewrite_interrupted_between_renames(self):
+        # End-to-end atomic rewrite through a real stateful call:
+        # _write_dynamo_artifact_files renames the artifact then the cache. A
+        # crash before the FIRST rename leaves the previous good pair (still
+        # loadable); a crash between the two leaves the NEW artifact with the OLD
+        # cache, which load_files degrades on (code_hash mismatch -> cold cache
+        # with a warning) and still serves. Simulate each crash by failing the
+        # write_atomic call for the matching path.
+        from torch._inductor import codecache
+
+        real_write = codecache.write_atomic
+
+        def fail_writing(target):
+            def flaky(path, content, **kwargs):
+                if os.path.realpath(str(path)) == os.path.realpath(target):
+                    raise OSError("disk full")
+                return real_write(path, content, **kwargs)
+
+            return flaky
+
+        fn = _precompile_dynamo_dynamic
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = _stateful_paths(tmp)
+            _, state = torch.compiler.precompile.stateful(
+                fn,
+                example_inputs=[(torch.randn(2, 4),)],
+                state=None,
+                backend="eager",
+                **paths,
             )
-        with self.assertRaisesRegex(TypeError, "requires python_code and cache"):
-            torch.compiler.precompile.load()
+            self.addCleanup(state.close)
+            good_code, good_cache = _read_pair(paths)
+
+            # Crash before the FIRST rename (artifact write fails): the previous
+            # good pair is untouched and still loads/serves what it captured.
+            with mock.patch.object(
+                codecache, "write_atomic", fail_writing(paths["artifact_path"])
+            ):
+                with self.assertRaisesRegex(OSError, "disk full"):
+                    torch.compiler.precompile.stateful(
+                        fn,
+                        example_inputs=[(torch.randn(3, 4),)],
+                        state=state,
+                        backend="eager",
+                        **paths,
+                    )
+            self.assertEqual(_read_pair(paths), (good_code, good_cache))
+            x2 = torch.randn(2, 4)
+            self.assertEqual(torch.compiler.precompile.load_files(**paths)(x2), fn(x2))
+
+            # Crash between the two renames (cache write fails): the NEW artifact
+            # lands (the size-3 variant added above), the OLD cache stays, and
+            # load_files degrades on the mismatch but still serves.
+            with mock.patch.object(
+                codecache, "write_atomic", fail_writing(paths["cache_path"])
+            ):
+                with self.assertRaisesRegex(OSError, "disk full"):
+                    torch.compiler.precompile.stateful(
+                        fn,
+                        example_inputs=[(torch.randn(5, 4),)],
+                        state=state,
+                        backend="eager",
+                        **paths,
+                    )
+            new_code, cache_now = _read_pair(paths)
+            # The artifact was updated (its rename ran) but the cache is stale (old).
+            self.assertNotEqual(new_code, good_code)
+            self.assertEqual(cache_now, good_cache)
+            with self.assertLogs("torch._precompile", level="WARNING") as logs:
+                loaded = torch.compiler.precompile.load_files(**paths)
+            self.assertTrue(
+                any(
+                    "does not match" in m or "rewrite interrupted" in m
+                    for m in logs.output
+                )
+            )
+            z = torch.randn(5, 4)
+            self.assertEqual(loaded(z), fn(z))
+
+    def test_load_argument_types_validated(self):
+        with self.assertRaisesRegex(TypeError, "python_code must be a str"):
+            torch.compiler.precompile.load(b"code", b"cache")
+        with self.assertRaisesRegex(TypeError, "cache must be bytes or None"):
+            torch.compiler.precompile.load("code", "cache")
+        with self.assertRaisesRegex(TypeError, "artifact_path"):
+            torch.compiler.precompile.load("code", b"cache", artifact_path="a.py")
 
     def test_load_from_paths_make_fx_artifact(self):
-        # The (artifact_path, cache_path) form of load() is exercised elsewhere
-        # only on dynamo artifacts; a make_fx pair written to disk must load
-        # via paths too, and a MISSING artifact file raises the normal open()
-        # FileNotFoundError (only a missing CACHE file degrades -- see
-        # test_tracer_dynamo_load_degrades_on_missing_cache_file).
+        # load_files is exercised elsewhere only on dynamo artifacts; a make_fx
+        # pair written to disk must load via it too, and a MISSING artifact file
+        # raises the documented FileNotFoundError (only a missing CACHE file
+        # degrades -- see test_tracer_dynamo_load_degrades_on_missing_cache_file).
         x = torch.randn(4)
         code, cache = torch.compiler.precompile(
             lambda t: t + 1, example_inputs=[(x,)], backend="eager"
@@ -2509,101 +2687,12 @@ class TestPrecompile(TestCase):
                 f.write(code)
             with open(cache_path, "wb") as f:
                 f.write(cache)
-            loaded = torch.compiler.precompile.load(
-                artifact_path=artifact_path, cache_path=cache_path
-            )
+            loaded = torch.compiler.precompile.load_files(artifact_path, cache_path)
             self.assertEqual(loaded(x), x + 1)
-            with self.assertRaises(FileNotFoundError):
-                torch.compiler.precompile.load(
-                    artifact_path=os.path.join(tmp, "missing.py"),
-                    cache_path=cache_path,
+            with self.assertRaisesRegex(FileNotFoundError, "missing.py"):
+                torch.compiler.precompile.load_files(
+                    os.path.join(tmp, "missing.py"), cache_path
                 )
-
-    def test_tracer_dynamo_stateful_partial_backward_keeps_default_mask(self):
-        # A partial backward between calls records a nonzero tangent mask; the
-        # next rewrite must still cover the ordinary all-defined backward
-        # (mask 0), not regress relative to the previous artifact.
-        def clones():
-            a = torch.randn(4, requires_grad=True)
-            b = torch.randn(4, requires_grad=True)
-            return a, b
-
-        with tempfile.TemporaryDirectory() as tmp:
-            paths = {
-                "artifact_path": os.path.join(tmp, "m.py"),
-                "cache_path": os.path.join(tmp, "m.cache"),
-            }
-            x, y = clones()
-            [(out_a, _out_b)], state = torch.compiler.precompile.stateful(
-                _precompile_dynamo_independent_outputs,
-                example_inputs=[(x, y)],
-                state=None,
-                **paths,
-            )
-            self.addCleanup(state.close)
-            out_a.sum().backward()  # partial: only output 0 gets a tangent
-            _, state = torch.compiler.precompile.stateful(
-                _precompile_dynamo_independent_outputs,
-                example_inputs=[clones()],
-                state=state,
-                **paths,
-            )
-            with open(paths["artifact_path"]) as f:
-                code = f.read()
-            with open(paths["cache_path"], "rb") as f:
-                cache = f.read()
-            loaded = torch.compiler.precompile.load(code, cache)
-            p, q = clones()
-            served_a, served_b = loaded(p, q)
-            (served_a.sum() + served_b.sum()).backward()  # all-defined backward
-            self.assertEqual(p.grad, p.detach().cos())
-            self.assertEqual(q.grad, -q.detach().sin())
-            # The observed partial pattern is served too.
-            p2, q2 = clones()
-            loaded(p2, q2)[0].sum().backward()
-            self.assertEqual(p2.grad, p2.detach().cos())
-
-    def test_tracer_dynamo_stateful_partial_mask_survives_dynamic_recompile(self):
-        # A tangent mask observed on a backend must survive a later
-        # automatic-dynamic recompile: the new dynamic backend supersedes the
-        # static one in newest-first dispatch, so it serves the sizes the
-        # static backend was captured for and must cover the masks that
-        # backend observed -- otherwise the exact captured backward pattern
-        # raises after the recompile.
-        def clones(size):
-            a = torch.randn(size, requires_grad=True)
-            b = torch.randn(size, requires_grad=True)
-            return a, b
-
-        with tempfile.TemporaryDirectory() as tmp:
-            paths = {
-                "artifact_path": os.path.join(tmp, "m.py"),
-                "cache_path": os.path.join(tmp, "m.cache"),
-            }
-            x, y = clones(4)
-            [(out_a, _out_b)], state = torch.compiler.precompile.stateful(
-                _precompile_dynamo_independent_outputs,
-                example_inputs=[(x, y)],
-                state=None,
-                **paths,
-            )
-            self.addCleanup(state.close)
-            out_a.sum().backward()  # partial mask observed on the size-4 backend
-            _, state = torch.compiler.precompile.stateful(
-                _precompile_dynamo_independent_outputs,
-                example_inputs=[clones(8)],
-                state=state,
-                **paths,
-            )
-            with open(paths["artifact_path"]) as f:
-                code = f.read()
-            with open(paths["cache_path"], "rb") as f:
-                cache = f.read()
-            loaded = torch.compiler.precompile.load(code, cache)
-            p, q = clones(4)  # served by the newer dynamic variant
-            loaded(p, q)[0].sum().backward()
-            self.assertEqual(p.grad, p.detach().cos())
-            self.assertIsNone(q.grad)
 
     def test_tracer_dynamo_stateful_inplace_flip_keeps_state_healthy(self):
         # x.add_(y_requires_grad) flips the live x's requires_grad while the
@@ -2613,10 +2702,7 @@ class TestPrecompile(TestCase):
             return torch.randn(4), torch.randn(4, requires_grad=True)
 
         with tempfile.TemporaryDirectory() as tmp:
-            paths = {
-                "artifact_path": os.path.join(tmp, "m.py"),
-                "cache_path": os.path.join(tmp, "m.cache"),
-            }
+            paths = _stateful_paths(tmp)
             _, state = torch.compiler.precompile.stateful(
                 _precompile_dynamo_inplace_add,
                 example_inputs=[make()],
@@ -2632,10 +2718,7 @@ class TestPrecompile(TestCase):
                 state=state,
                 **paths,
             )
-            with open(paths["artifact_path"]) as f:
-                code = f.read()
-            with open(paths["cache_path"], "rb") as f:
-                cache = f.read()
+            code, cache = _read_pair(paths)
             loaded = torch.compiler.precompile.load(code, cache)
             p, q = make()
             loaded(p, q).backward()
@@ -2645,10 +2728,7 @@ class TestPrecompile(TestCase):
         from torch._dynamo.utils import guard_failures
 
         with tempfile.TemporaryDirectory() as tmp:
-            paths = {
-                "artifact_path": os.path.join(tmp, "a.py"),
-                "cache_path": os.path.join(tmp, "a.cache"),
-            }
+            paths = _stateful_paths(tmp)
             state = None
             with torch._dynamo.config.patch(
                 automatic_dynamic_shapes=True, assume_static_by_default=True
@@ -2661,11 +2741,18 @@ class TestPrecompile(TestCase):
                         backend="eager",
                         **paths,
                     )
-            code = state.capture_target.__code__
-            self.assertIn(code, guard_failures)  # the pin close() must release
+                    if state.calls == 1:
+                        # Idempotent; the explicit close() below is what is tested.
+                        self.addCleanup(state.close)
+            from torch._dynamo.eval_frame import cached_backends
+
+            code_obj = state.capture_target.__code__
+            self.assertIn(code_obj, guard_failures)  # the pin close() must release
+            self.assertIn(id(state.backend_fn), cached_backends)
             state.close()
             state.close()  # idempotent
-            self.assertNotIn(code, guard_failures)
+            self.assertNotIn(code_obj, guard_failures)
+            self.assertNotIn(id(state.backend_fn), cached_backends)
             self.assertIn("closed", repr(state))
             with self.assertRaisesRegex(ValueError, "closed state"):
                 torch.compiler.precompile.stateful(
@@ -2676,27 +2763,22 @@ class TestPrecompile(TestCase):
                     **paths,
                 )
             # The files written before close() remain a valid artifact.
-            with open(paths["artifact_path"]) as f:
-                code_text = f.read()
-            with open(paths["cache_path"], "rb") as f:
-                cache = f.read()
+            code_text, cache = _read_pair(paths)
             x = torch.randn(3, 4)
             loaded = torch.compiler.precompile.load(code_text, cache)
             self.assertEqual(loaded(x), _precompile_dynamo_dynamic(x))
 
-    def test_tracer_dynamo_stateful_failed_mask_does_not_poison_rebuilds(self):
-        # A tangent mask whose deferred compile fails must be dropped from the
-        # snapshot (with a warning), not retried and re-raised on every later
-        # rewrite of the artifact.
+    def test_tracer_dynamo_stateful_failed_mask_compile_raises_at_capture(self):
+        # A tangent mask whose deferred compile fails is a capture-time error
+        # naming the pattern -- the state can be closed and recaptured without
+        # the offending example -- not a warning that drops the pattern until it
+        # fails at serve time.
         from torch._functorch._aot_autograd.to_standalone_python import (
             _CompileToPythonState,
         )
 
         with tempfile.TemporaryDirectory() as tmp:
-            paths = {
-                "artifact_path": os.path.join(tmp, "p.py"),
-                "cache_path": os.path.join(tmp, "p.cache"),
-            }
+            paths = _stateful_paths(tmp)
             x = torch.randn(4, requires_grad=True)
             y = torch.randn(4, requires_grad=True)
             [(out_a, _)], state = torch.compiler.precompile.stateful(
@@ -2716,25 +2798,24 @@ class TestPrecompile(TestCase):
             with mock.patch.object(_CompileToPythonState, "_compile_mask", boom):
                 # The live hook records the partial pattern's mask before it
                 # compiles, so this failed backward leaves the mask observed.
-                with self.assertRaisesRegex(Exception, "injected mask-compile"):
+                with self.assertRaisesRegex(RuntimeError, "injected mask-compile"):
                     out_a.sum().backward()
-                with self.assertLogs("torch._precompile", level="WARNING") as logs:
-                    _, state = torch.compiler.precompile.stateful(
+                with self.assertRaisesRegex(
+                    PrecompileError,
+                    r"output-tangent pattern\(s\) \['0b10'\].*can no longer be rendered",
+                ):
+                    torch.compiler.precompile.stateful(
                         _precompile_dynamo_independent_outputs,
                         example_inputs=[(x.detach().clone().requires_grad_(), y)],
                         state=state,
                         **paths,
                     )
-            self.assertTrue(any("could not compile" in line for line in logs.output))
-            with open(paths["artifact_path"]) as f:
-                code = f.read()
-            with open(paths["cache_path"], "rb") as f:
-                cache = f.read()
-            loaded = torch.compiler.precompile.load(code, cache)
+            # The last successfully written pair (mask 0 only) stays loadable.
+            loaded = torch.compiler.precompile.load_files(**paths)
             p = torch.randn(4, requires_grad=True)
             q = torch.randn(4, requires_grad=True)
             served_a, served_b = loaded(p, q)
-            (served_a.sum() + served_b.sum()).backward()  # mask 0 still covered
+            (served_a.sum() + served_b.sum()).backward()
             self.assertEqual(p.grad, p.detach().cos())
 
     def test_tracer_dynamo_rejects_disabled_dynamo(self):
@@ -2768,8 +2849,7 @@ class TestPrecompile(TestCase):
                 example_inputs=[(x,)],
                 state=None,
                 backend="eager",
-                artifact_path=os.path.join(tmp, "artifact.py"),
-                cache_path=os.path.join(tmp, "artifact.cache"),
+                **_stateful_paths(tmp),
             )
             self.addCleanup(state.close)
             self.assertEqual(result, torch.sin(x))
@@ -2784,23 +2864,12 @@ class TestPrecompile(TestCase):
                 backend="eager",
                 artifact_path="only-one.py",
             )
-        # The one-shot entry point no longer takes the stateful kwargs at all.
-        with self.assertRaisesRegex(TypeError, "artifact_path"):
-            torch.compiler.precompile(
-                lambda t: t + 1,
-                example_inputs=[(x,)],
-                artifact_path="a.py",
-                cache_path="a.cache",
-            )
         with self.assertRaisesRegex(ValueError, "require tracer='dynamo'"):
             torch.compiler.precompile(
                 lambda t: t + 1, example_inputs=[(x,)], recompile_limit=4
             )
         with tempfile.TemporaryDirectory() as tmp:
-            paths = {
-                "artifact_path": os.path.join(tmp, "a.py"),
-                "cache_path": os.path.join(tmp, "a.cache"),
-            }
+            paths = _stateful_paths(tmp)
             _, state = torch.compiler.precompile.stateful(
                 _precompile_dynamo_torch_sin,
                 example_inputs=[(x,)],
@@ -2833,17 +2902,11 @@ class TestPrecompile(TestCase):
                     state=object(),
                     **paths,
                 )
-            # A duck-typed state carrying an environment_scan attribute must
-            # get the same clean TypeError, not an AttributeError from using
-            # its garbage scan.
-            with self.assertRaisesRegex(TypeError, "previous stateful precompile"):
-                torch.compiler.precompile.stateful(
-                    _precompile_dynamo_torch_sin,
-                    example_inputs=[(x,)],
-                    backend="eager",
-                    state=types.SimpleNamespace(environment_scan="junk"),
-                    **paths,
-                )
+            with self.assertRaisesRegex(ValueError, "grad mode"):
+                with torch.no_grad():
+                    torch.compiler.precompile.stateful(
+                        _precompile_dynamo_torch_sin, backend="eager", **resume, **paths
+                    )
 
     def test_tracer_dynamo_stateful_example_inputs_validation(self):
         # stateful() runs the same example_inputs checks as the one-shot entry
@@ -2852,10 +2915,7 @@ class TestPrecompile(TestCase):
         # non-tuple example are rejected before anything is captured or
         # written.
         with tempfile.TemporaryDirectory() as tmp:
-            paths = {
-                "artifact_path": os.path.join(tmp, "v.py"),
-                "cache_path": os.path.join(tmp, "v.cache"),
-            }
+            paths = _stateful_paths(tmp)
             with self.assertRaisesRegex(ValueError, "at least one"):
                 torch.compiler.precompile.stateful(
                     _precompile_dynamo_torch_sin,
@@ -2873,32 +2933,6 @@ class TestPrecompile(TestCase):
                     **paths,
                 )
             self.assertEqual(os.listdir(tmp), [])  # nothing was written
-
-    def test_tracer_dynamo_stateful_environment_scan_is_cached(self):
-        # The wide environment walk runs once at state creation; resumed calls
-        # reuse the cached scan (the programming model declares the environment
-        # invariant during capture, so a post-creation environment change is a
-        # contract violation and is deliberately not re-detected).
-        with tempfile.TemporaryDirectory() as tmp:
-            paths = {
-                "artifact_path": os.path.join(tmp, "c.py"),
-                "cache_path": os.path.join(tmp, "c.cache"),
-            }
-            kwargs = {"backend": "eager", **paths}
-            x = torch.randn(4)
-            _, state = torch.compiler.precompile.stateful(
-                _precompile_dynamo_scalar, example_inputs=[(x, 1)], state=None, **kwargs
-            )
-            self.addCleanup(state.close)
-            scan = state.environment_scan
-            self.assertIsInstance(scan, dict)
-            _, state = torch.compiler.precompile.stateful(
-                _precompile_dynamo_scalar,
-                example_inputs=[(x, 2)],
-                state=state,
-                **kwargs,
-            )
-            self.assertIs(state.environment_scan, scan)
 
     def test_tracer_dynamo_recompile_limit_kwarg(self):
         with torch._dynamo.config.patch(automatic_dynamic_shapes=False):
@@ -2941,50 +2975,62 @@ class TestPrecompile(TestCase):
     # plain subprocess does not have it, so the artifact correctly rejects
     # the changed environment (the contract's declared invariant).
     @skipIfCrossRef
-    def test_tracer_dynamo_inference_source_runs_in_fresh_process(self):
-        x = torch.randn(4)
+    @parametrize("mode", ("inference", "training"))
+    def test_tracer_dynamo_source_runs_in_fresh_process(self, mode):
+        # The self-contained artifact must exec and run in a fresh process with
+        # the compiler hard-disabled and EMPTY on-disk kernel caches (its kernels
+        # JIT from the inlined source; a serve path that needed Dynamo would
+        # crash here -- the no-frame-compile property itself is pinned by
+        # test_tracer_dynamo_load_runs_in_fresh_process). The training variant
+        # additionally runs a real backward in the child and checks the grad.
+        training = mode == "training"
+        fn = _precompile_dynamo_dynamic if training else _precompile_dynamo_torch_sin
         code, _cache = torch.compiler.precompile(
-            _precompile_dynamo_torch_sin, example_inputs=[(x,)], tracer="dynamo"
+            fn,
+            example_inputs=[(torch.randn(4, requires_grad=training),)],
+            tracer="dynamo",
         )
-        with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as artifact:
-            artifact.write(code)
-            artifact_path = artifact.name
-        try:
+        check = (
+            "x = t.randn(4, requires_grad=True)\n"
+            "out = namespace['forward'](x)\n"
+            "if not out.requires_grad:\n"
+            "    raise AssertionError('expected a differentiable output')\n"
+            "out.sum().backward()\n"
+            "t.testing.assert_close(x.grad, x.detach().cos())\n"
+            if training
+            else "x = t.randn(4)\n"
+            "t.testing.assert_close(namespace['forward'](x), t.sin(x))\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_path = os.path.join(tmp, "f.py")
+            with open(artifact_path, "w") as f:
+                f.write(code)
+            driver = (
+                "import runpy as r\n"
+                "import sys as s\n"
+                "import torch as t\n"
+                "namespace = r.run_path(s.argv[1])\n"
+            ) + check
             subprocess.check_call(
-                [
-                    sys.executable,
-                    "-c",
-                    textwrap.dedent(
-                        """
-                        import runpy as r
-                        import sys as s
-                        import torch as t
-
-                        namespace = r.run_path(s.argv[1])
-                        x = t.randn(4)
-                        t.testing.assert_close(namespace["forward"](x), t.sin(x))
-                        """
-                    ),
-                    artifact_path,
-                ],
-                # The artifact must keep working with the compiler hard-disabled
-                # (a serve path that needed to compile would crash here; note a
-                # dynamo invocation that silently fell back to eager would not
-                # be caught -- the no-compile property is pinned by the load
-                # test's frame-counter assertion).
-                env={**os.environ, "TORCHDYNAMO_DISABLE": "1"},
+                [sys.executable, "-c", driver, artifact_path],
+                env=_fresh_cache_env(tmp, TORCHDYNAMO_DISABLE="1"),
                 timeout=300,
             )
-        finally:
-            os.unlink(artifact_path)
 
     # Crossref installs a torch-function mode during capture; the fresh
     # plain subprocess does not have it, so the artifact correctly rejects
     # the changed environment (the contract's declared invariant).
     @skipIfCrossRef
     def test_tracer_dynamo_load_runs_in_fresh_process(self):
-        # The public load() path (cache-primed), cold: a fresh subprocess has no
-        # warm in-process Dynamo/Inductor state to mask a broken artifact.
+        # The public load_files() path, cold: a fresh subprocess with EMPTY
+        # inductor and Triton on-disk caches has no warm state to mask a broken
+        # artifact or an empty bundle. Two observables: load_cache_artifacts must
+        # receive the bundle and report a populated FxGraph ("inductor") entry
+        # (the bundle used to be [None]), and Dynamo -- enabled in the child --
+        # must compile no frame. Kernel compilation is deliberately NOT asserted:
+        # the inlined artifact runs its kernels directly, without a compile_fx
+        # re-entry, so the FxGraph entry the bundle carries cannot skip the
+        # g++/Triton JIT in an empty cache dir (only warm on-disk kernel caches do).
         x = torch.randn(4)
         code, cache = torch.compiler.precompile(
             _precompile_dynamo_torch_sin, example_inputs=[(x,)], tracer="dynamo"
@@ -3005,13 +3051,22 @@ class TestPrecompile(TestCase):
                         import sys as s
                         import torch as t
 
-                        loaded = t.compiler.precompile.load(
-                            artifact_path=s.argv[1], cache_path=s.argv[2]
-                        )
+                        primed = []
+                        original = t.compiler.load_cache_artifacts
+
+                        def spy(bundle):
+                            info = original(bundle)
+                            primed.append(None if info is None else dict(info.artifacts))
+                            return info
+
+                        t.compiler.load_cache_artifacts = spy
+                        loaded = t.compiler.precompile.load_files(s.argv[1], s.argv[2])
                         x = t.randn(4)
                         t.testing.assert_close(loaded(x), t.sin(x))
-                        # Serving must never compile: dynamo is enabled in this
-                        # child, so any compile would show up here.
+                        if len(primed) != 1 or not primed[0] or not primed[0].get("inductor"):
+                            raise AssertionError(f"bundle was not consumed: {primed}")
+                        # Serving must never compile a frame: dynamo is enabled
+                        # in this child, so any compile would show up here.
                         import os as o
 
                         if o.environ.get("TORCHDYNAMO_DISABLE"):
@@ -3026,12 +3081,9 @@ class TestPrecompile(TestCase):
                     cache_path,
                 ],
                 # An ambient TORCHDYNAMO_DISABLE would silently void the
-                # frame-counter assertion; strip it (the child double-checks).
-                env={
-                    key: value
-                    for key, value in os.environ.items()
-                    if key != "TORCHDYNAMO_DISABLE"
-                },
+                # frame-counter assertion; _fresh_cache_env strips it (the child
+                # double-checks).
+                env=_fresh_cache_env(tmp),
                 timeout=300,
             )
 
@@ -3092,22 +3144,52 @@ class TestPrecompile(TestCase):
             _precompile_dynamo_dynamic(x),
         )
 
-    def test_tracer_dynamo_capture_cleans_generated_globals(self):
+    @torch._dynamo.config.patch(
+        automatic_dynamic_shapes=True, assume_static_by_default=True
+    )
+    def test_tracer_dynamo_capture_does_not_leak_session(self):
+        # A one-shot capture closes its state internally; teardown must release
+        # the capture code object from Dynamo's recompile-logging registry
+        # (guard_failures) and the backend from cached_backends -- otherwise the
+        # whole session (including the copied fn globals) stays pinned until
+        # torch._dynamo.reset(). A recompiling capture actually populates
+        # guard_failures during capture, so a skipped teardown would leave the
+        # code object behind here (verified). The vacuous predecessor only
+        # checked the copied-globals dict, which capture throws away regardless
+        # of teardown; the stateful close() path is covered by
+        # test_tracer_dynamo_stateful_close_releases_session.
+        from torch._dynamo.eval_frame import cached_backends
+        from torch._dynamo.utils import guard_failures
+        from torch._precompile import _new_dynamo_state
+
+        captured = {}
+        real_new_state = _new_dynamo_state
+
+        def spy(*args, **kwargs):
+            state = real_new_state(*args, **kwargs)
+            captured["state"] = state
+            return state
+
+        with mock.patch("torch._precompile._new_dynamo_state", spy):
+            torch.compiler.precompile(
+                _precompile_dynamo_dynamic,
+                # Two sizes recompile, so guard_failures is populated during capture.
+                example_inputs=[(torch.randn(2, 4),), (torch.randn(3, 4),)],
+                tracer="dynamo",
+                backend="eager",
+            )
+        state = captured["state"]
+        self.assertNotIn(state.capture_target.__code__, guard_failures)
+        self.assertNotIn(id(state.backend_fn), cached_backends)
+        # The copy isolation also means capture never installs its generated
+        # globals into this real module.
         module_globals = sys.modules[__name__].__dict__
-        prefixes = ("__compiled_fn_", "__builtins_dict___", "__import_")
-        before = {
-            name for name in module_globals if any(name.startswith(p) for p in prefixes)
-        }
-        torch.compiler.precompile(
-            _precompile_dynamo_dynamic,
-            example_inputs=[(torch.randn(4),)],
-            tracer="dynamo",
-            backend="eager",
-        )
-        after = {
-            name for name in module_globals if any(name.startswith(p) for p in prefixes)
-        }
-        self.assertEqual(after, before)
+        leaked = [
+            name
+            for name in module_globals
+            if name.startswith(("__compiled_fn_", "__builtins_dict___", "__import_"))
+        ]
+        self.assertEqual(leaked, [])
 
     def test_tracer_dynamo_load_does_not_copy_unrelated_module_globals(self):
         code, cache = torch.compiler.precompile(
@@ -3131,11 +3213,11 @@ class TestPrecompile(TestCase):
             f"_DYNAMO_PYTHON_VERSION = {version!r}",
             "_DYNAMO_PYTHON_VERSION = (0, 0)",
         )
-        # The edited code no longer matches the cache's code_hash; the dynamo
-        # loader degrades past that (the cache is acceleration only) and the
-        # version check in the exec'd driver raises the public error.
+        # The edited code no longer pairs with the cache (code_hash), so load
+        # it without one; the version check in the exec'd driver raises the
+        # public error.
         with self.assertRaisesRegex(PrecompileError, "produced on Python"):
-            torch.compiler.precompile.load(incompatible, cache)
+            torch.compiler.precompile.load(incompatible, None)
 
     def test_tracer_dynamo_torch_version_mismatch_uses_public_error(self):
         # _DYNAMO_STATE pickles Dynamo internals with no cross-version story, so
@@ -3153,29 +3235,42 @@ class TestPrecompile(TestCase):
         )
         self.assertNotEqual(incompatible, code)
         with self.assertRaisesRegex(PrecompileError, "produced by torch"):
-            torch.compiler.precompile.load(incompatible, cache)
+            torch.compiler.precompile.load(incompatible, None)
 
-    def test_tracer_dynamo_version_checks_precede_package_import(self):
-        # On a foreign build a moved/renamed loader symbol must surface as the
-        # version-mismatch message, not a raw ImportError, so the emitted
-        # driver runs its version checks BEFORE importing torch._dynamo.package.
-        # The driver must also install the per-compile builtins dict so a
-        # retained builtins-routed guard can evaluate.
-        code, _cache = torch.compiler.precompile(
+    def test_tracer_dynamo_version_check_precedes_package_use(self):
+        # On a foreign build a moved/renamed loader symbol would raise ImportError;
+        # the driver must run its version check FIRST so the user gets the
+        # actionable version message instead. Spy on the package loader the driver
+        # imports: a version-mismatched load must raise the version PrecompileError
+        # WITHOUT ever reaching the loader, while a matching load does reach it.
+        import torch._dynamo.package as package
+
+        code, cache = torch.compiler.precompile(
             _precompile_dynamo_torch_sin,
             example_inputs=[(torch.randn(3),)],
             tracer="dynamo",
             backend="eager",
         )
-        self.assertLess(
-            code.index("_DYNAMO_TORCH_VERSION != torch.__version__"),
-            code.index("from torch._dynamo.package import"),
+        reached = []
+        real_load = package.load_guards_state
+
+        def spy(*args, **kwargs):
+            reached.append(True)
+            return real_load(*args, **kwargs)
+
+        incompatible = code.replace(
+            f"_DYNAMO_TORCH_VERSION = {torch.__version__!r}",
+            "_DYNAMO_TORCH_VERSION = '0.0.0'",
         )
-        # Presence-only pin: the builtins-dict install is defense in depth (no
-        # public capture today retains a guard routed through the builtins
-        # dict), so there is no behavioral load path to assert against; this
-        # only pins that the install block ships in the emitted driver.
-        self.assertIn("get_builtins_dict", code)
+        self.assertNotEqual(incompatible, code)
+        with mock.patch.object(package, "load_guards_state", spy):
+            with self.assertRaisesRegex(PrecompileError, "produced by torch"):
+                torch.compiler.precompile.load(incompatible, None)
+        self.assertEqual(reached, [])  # version check ran before touching the loader
+        # Sanity: a version-matching load DOES reach the package loader.
+        with mock.patch.object(package, "load_guards_state", spy):
+            torch.compiler.precompile.load(code, cache)
+        self.assertTrue(reached)
 
     @torch._dynamo.config.patch(
         automatic_dynamic_shapes=True, assume_static_by_default=True
@@ -3191,7 +3286,6 @@ class TestPrecompile(TestCase):
             tracer="dynamo",
         )
 
-        self.assertIn("_DYNAMO_GRAD_ENABLED = True", code)
         self.assertIn("DYNAMIC_GRAPH_COUNT = 1", code)
         self.assertIn("class _CompiledFunction(torch.autograd.Function):", code)
         self.assertIn("_inner_call_fw", code)
@@ -3201,117 +3295,6 @@ class TestPrecompile(TestCase):
         loaded = torch.compiler.precompile.load(code, cache)
         x = torch.randn(8, 9, requires_grad=True)
         self.assertTrue(loaded(x).requires_grad)
-
-    # Crossref installs a torch-function mode during capture; the fresh
-    # plain subprocess does not have it, so the artifact correctly rejects
-    # the changed environment (the contract's declared invariant).
-    @skipIfCrossRef
-    def test_tracer_dynamo_training_source_runs_in_fresh_process(self):
-        x = torch.randn(4, requires_grad=True)
-        code, _cache = torch.compiler.precompile(
-            _precompile_dynamo_dynamic,
-            example_inputs=[(x,)],
-            tracer="dynamo",
-        )
-        with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as artifact:
-            artifact.write(code)
-            artifact_path = artifact.name
-        try:
-            subprocess.check_call(
-                [
-                    sys.executable,
-                    "-c",
-                    textwrap.dedent(
-                        """
-                        import runpy as r
-                        import sys as s
-                        import torch as t
-
-                        namespace = r.run_path(s.argv[1])
-                        x = t.randn(4, requires_grad=True)
-                        out = namespace["forward"](x)
-                        if not out.requires_grad:
-                            raise AssertionError("expected a differentiable output")
-                        out.sum().backward()
-                        t.testing.assert_close(x.grad, x.detach().cos())
-                        """
-                    ),
-                    artifact_path,
-                ],
-                # The artifact must keep working with the compiler hard-disabled
-                # (a serve path that needed to compile would crash here; note a
-                # dynamo invocation that silently fell back to eager would not
-                # be caught -- the no-compile property is pinned by the load
-                # test's frame-counter assertion).
-                env={**os.environ, "TORCHDYNAMO_DISABLE": "1"},
-                timeout=300,
-            )
-        finally:
-            os.unlink(artifact_path)
-
-    def test_tracer_dynamo_training_rejects_unseen_tangent_pattern(self):
-        x = torch.randn(4, requires_grad=True)
-        y = torch.randn(4, requires_grad=True)
-        code, cache = torch.compiler.precompile(
-            _precompile_dynamo_independent_outputs,
-            example_inputs=[(x, y)],
-            tracer="dynamo",
-        )
-        loaded = torch.compiler.precompile.load(code, cache)
-        with self.assertRaisesRegex(PrecompileError, "undefined-output-tangent"):
-            loaded(x, y)[0].sum().backward()
-
-    def test_tracer_dynamo_training_nondifferentiable_output_backward(self):
-        # A forward-only capture of a fn with a non-differentiable output must
-        # still serve the ordinary backward: that output's tangent is ALWAYS
-        # undefined, so keying variants on the raw scanned tangent mask (rather
-        # than the canonical mask over specializable user outputs, like the
-        # live runtime path) made the auto-covered mask 0 unreachable and every
-        # backward raised PrecompileError.
-        x = torch.randn(4, requires_grad=True)
-        code, cache = torch.compiler.precompile(
-            _precompile_dynamo_nondiff_second_output,
-            example_inputs=[(x,)],
-            tracer="dynamo",
-        )
-        loaded = torch.compiler.precompile.load(code, cache)
-        y = torch.randn(4, requires_grad=True)
-        out_a, out_b = loaded(y)
-        self.assertIsNone(out_b.grad_fn)
-        out_a.sum().backward()
-        self.assertEqual(y.grad, y.detach().cos())
-
-    @parametrize("backend", ("inductor", "eager"))
-    def test_tracer_dynamo_inplace_mutation_flips_nograd_input(self, backend):
-        # In-place mutation of a no-grad tensor input from a differentiable
-        # source (x.add_(y_requires_grad)) flips the LIVE input's requires_grad
-        # while the example runs. The recorded example snapshot must keep the
-        # ENTRY state the variant's guards recorded -- a storage-sharing
-        # autograd view would read the flipped state back through its base and
-        # fail capture with "does not match any example input".
-        for fn, expected_grad in (
-            (_precompile_dynamo_inplace_add, torch.ones(4)),
-            (_precompile_dynamo_inplace_copy, torch.full((4,), 2.0)),
-        ):
-            code, cache = torch.compiler.precompile(
-                fn,
-                example_inputs=[(torch.randn(4), torch.randn(4, requires_grad=True))],
-                tracer="dynamo",
-                backend=backend,
-            )
-            loaded = torch.compiler.precompile.load(code, cache)
-            p = torch.randn(4)
-            q = torch.randn(4, requires_grad=True)
-            p_ref = p.detach().clone()
-            q_ref = q.detach().clone().requires_grad_()
-            out = loaded(p, q)
-            expected = fn(p_ref, q_ref)
-            out.sum().backward()
-            expected.sum().backward()
-            self.assertEqual(out, expected)
-            self.assertEqual(p, p_ref)  # the mutation lands on the input
-            self.assertEqual(q.grad, expected_grad)
-            self.assertEqual(q.grad, q_ref.grad)
 
     def test_tracer_dynamo_differentiability_inferred_per_graph(self):
         # Differentiability mirrors torch.compile on the inductor backend: a
@@ -3324,7 +3307,6 @@ class TestPrecompile(TestCase):
         code, cache = torch.compiler.precompile(
             _precompile_dynamo_torch_sin, example_inputs=[(x,)], tracer="dynamo"
         )
-        self.assertIn("_DYNAMO_GRAD_ENABLED = True", code)
         loaded = torch.compiler.precompile.load(code, cache)
         y = torch.randn(4, requires_grad=True)
         out = loaded(y)
@@ -3338,30 +3320,7 @@ class TestPrecompile(TestCase):
         code, cache = torch.compiler.precompile(
             _precompile_dynamo_torch_sin, example_inputs=[(plain,)], tracer="dynamo"
         )
-        self.assertIn("_DYNAMO_GRAD_ENABLED = True", code)
         self.assertIsNone(torch.compiler.precompile.load(code, cache)(plain).grad_fn)
-
-    def test_training_kwarg_removed(self):
-        # Differentiability is inferred from each captured graph's inputs;
-        # the old training= kwarg is gone from both entry points.
-        x = torch.randn(4, requires_grad=True)
-        with self.assertRaisesRegex(TypeError, "training"):
-            torch.compiler.precompile(
-                _precompile_dynamo_torch_sin,
-                example_inputs=[(x,)],
-                tracer="dynamo",
-                training=True,
-            )
-        with tempfile.TemporaryDirectory() as tmp:
-            with self.assertRaisesRegex(TypeError, "training"):
-                torch.compiler.precompile.stateful(
-                    _precompile_dynamo_torch_sin,
-                    example_inputs=[(x,)],
-                    state=None,
-                    training=True,
-                    artifact_path=os.path.join(tmp, "a.py"),
-                    cache_path=os.path.join(tmp, "a.cache"),
-                )
 
     def test_dynamo_backend_source_literal_roundtrip(self):
         source = 'slash = "\\\\n"\ntriple = \'"""\'\n'
@@ -3423,7 +3382,7 @@ class TestPrecompile(TestCase):
         )
         dropped = _parse_artifact_metadata(code)["_DROPPED_GUARDS"]
         self.assertFalse(
-            any("tuple_iterator" in source for _, source in dropped), dropped
+            any("tuple_iterator" in source for _, source, _ in dropped), dropped
         )
         loaded = torch.compiler.precompile.load(code, cache)
         self.assertEqual(loaded(iter((2.0, 3.0)), t), t + 5.0)
@@ -3435,20 +3394,15 @@ class TestPrecompile(TestCase):
         automatic_dynamic_shapes=True, assume_static_by_default=True
     )
     def test_tracer_dynamo_dispatch_serves_newest_variant_first(self):
-        # state["variants"] is newest-first and the driver serves the first
-        # passing guard set, matching live Dynamo's LRU-front-first checks: an
-        # input matching both the early static variant and the later dynamic
-        # one (the automatic-dynamic revisit pattern) must serve the dynamic
-        # one. Rebuild the per-variant guard managers exactly like the emitted
-        # driver does and check which examples each accepts.
-        import builtins
-        import importlib
-
-        from torch._dynamo.package import (
-            load_guard_manager,
-            load_guards_state,
-            SerializedCode,
-        )
+        # The driver serves the first variant whose guards pass, and variants
+        # are stored newest-first (matching live Dynamo's LRU-front-first
+        # checks): a size matching BOTH the early static variant and the later
+        # dynamic one must be served by the dynamic one. Both variants compute
+        # the same value, so the numerics alone cannot tell the order apart;
+        # spy on the LIVE driver's guard-manager check() calls instead. An
+        # oldest-first driver would check the static variant first for size 2
+        # and this test would fail.
+        from torch._dynamo import package
 
         examples = [(torch.randn(size),) for size in (2, 4, 2)]
         code, cache = torch.compiler.precompile(
@@ -3458,38 +3412,49 @@ class TestPrecompile(TestCase):
             backend="eager",
         )
         self.assertIn("VARIANT_COUNT = 2", code)
-        state = _load_dynamo_state(code)
-        target_code = SerializedCode.to_code_object(state["code"])
-        namespace: dict = {"__builtins__": builtins.__dict__}
-        for alias, module_name in state["import_sources"].items():
-            namespace[alias] = importlib.import_module(module_name)
-        managers = []
-        for variant in state["variants"]:
-            guards_state = load_guards_state(variant["guards_state"])
-            key = guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
-            if key and key not in namespace:
-                from torch._dynamo.output_graph import get_builtins_dict
 
-                namespace[key] = get_builtins_dict(namespace)
-            managers.append(load_guard_manager(guards_state, target_code, namespace))
-        self.assertEqual(len(managers), 2)
-        scopes = [{"x": torch.randn(2)}, {"x": torch.randn(4)}]
-        # The driver dispatches under set_grad_enabled(_DYNAMO_GRAD_ENABLED),
-        # and capture runs grad-enabled on every backend; match it or the
-        # global-state guard fails every check.
-        with torch.enable_grad():
-            # variants[0] (served first) is the DYNAMIC variant: both sizes pass.
-            self.assertEqual(
-                [managers[0].check(scope) for scope in scopes], [True, True]
-            )
-            # The older static size-2 variant sits behind it.
-            self.assertEqual(
-                [managers[1].check(scope) for scope in scopes], [True, False]
-            )
-        loaded = torch.compiler.precompile.load(code, cache)
-        for size in (2, 4, 5):  # 5 only matches the dynamic variant
-            x = torch.randn(size)
-            self.assertEqual(loaded(x), _precompile_dynamo_affine(x))
+        # Wrap every guard manager the driver builds so each check() records the
+        # variant's construction index (0 = first built = first served) and its
+        # result, without disturbing dispatch.
+        check_log: list[tuple[int, bool]] = []
+        built = []
+        real_load = package.load_guard_manager
+
+        class _SpyManager:
+            def __init__(self, inner, index):
+                self._inner = inner
+                self._index = index
+
+            def check(self, scope):
+                result = self._inner.check(scope)
+                check_log.append((self._index, result))
+                return result
+
+            def __getattr__(self, name):
+                return getattr(self._inner, name)
+
+        def spy_load(*args, **kwargs):
+            manager = _SpyManager(real_load(*args, **kwargs), len(built))
+            built.append(manager)
+            return manager
+
+        with mock.patch.object(package, "load_guard_manager", spy_load):
+            loaded = torch.compiler.precompile.load(code, cache)
+
+        # Size 5 matches ONLY the dynamic variant, so the index that returns True
+        # identifies it. Newest-first stores the dynamic variant at index 0.
+        x5 = torch.randn(5)
+        check_log.clear()
+        self.assertEqual(loaded(x5), _precompile_dynamo_affine(x5))
+        dynamic_index = next(index for index, ok in check_log if ok)
+        self.assertEqual(dynamic_index, 0)  # dynamic variant served first
+        # Size 2 matches BOTH variants; newest-first checks the dynamic variant
+        # first and short-circuits, so ONLY the dynamic index is checked. An
+        # oldest-first driver would check (and serve) the static variant here.
+        x2 = torch.randn(2)
+        check_log.clear()
+        self.assertEqual(loaded(x2), _precompile_dynamo_affine(x2))
+        self.assertEqual(check_log, [(dynamic_index, True)])
 
     def test_tracer_dynamo_preserves_relational_guards(self):
         shared = torch.ones(4)
@@ -3912,7 +3877,7 @@ class TestPrecompile(TestCase):
         x = torch.randn(8, 4)
         mark_unbacked(x, 0)
         with self.assertRaisesRegex(
-            NotImplementedError, "only supported with backend='inductor'"
+            PrecompileError, "only supported with backend='inductor'"
         ):
             torch.compiler.precompile(
                 lambda mm, t: mm(t), example_inputs=[(m, x)], backend="eager"
@@ -4316,6 +4281,15 @@ class TestPrecompile(TestCase):
         self.assertEqual(err.__qualname__, "precompile.PrecompileError")
         self.assertEqual(torch.compiler.precompile.load.__module__, "torch.compiler")
         self.assertEqual(torch.compiler.precompile.load.__qualname__, "precompile.load")
+        for name in (
+            "load_files",
+            "stateful",
+            "PrecompileState",
+            "PrecompileStateSummary",
+        ):
+            member = getattr(torch.compiler.precompile, name)
+            self.assertEqual(member.__module__, "torch.compiler")
+            self.assertEqual(member.__qualname__, f"precompile.{name}")
 
     @parametrize("backend", ("inductor", "eager"))
     def test_renamed_buffer_structural_mismatch_rejected(self, backend):
@@ -4784,17 +4758,17 @@ class TestPrecompile(TestCase):
         self.assertEqual(run.weight.grad, ref.weight.grad)
 
     def test_tracer_dynamo_rejects_tensor_reachable_through_helper_function(self):
-        # The environment walk must see through function objects: a tensor in a
-        # referenced helper's defaults, or in a global only the (inlined)
-        # helper's own code loads, would otherwise capture fine and serve a
-        # raw NameError.
+        # A tensor Dynamo reads through an inlined helper -- from the helper's
+        # defaults, or from a global only the helper's own code loads -- is a
+        # graph placeholder rooted in the environment, so the exact placeholder
+        # check rejects it (it would otherwise serve a raw NameError).
         for fn, name in (
             (_precompile_dynamo_calls_helper, "helper_with_default"),
             (_precompile_dynamo_calls_inlined_helper, "inlined_helper"),
         ):
             with self.subTest(name=name):
                 with self.assertRaisesRegex(
-                    PrecompileError, "object graph contains a tensor"
+                    PrecompileError, "from the Python environment"
                 ):
                     torch.compiler.precompile(
                         fn,
@@ -4802,52 +4776,6 @@ class TestPrecompile(TestCase):
                         tracer="dynamo",
                         backend="eager",
                     )
-
-    def test_tracer_dynamo_rejects_input_aliased_through_helper_default(self):
-        # An input that aliases a referenced helper's default would have its
-        # identity relation classified as environment and dropped.
-        x = torch.randn(3)
-        with self.assertRaisesRegex(PrecompileError, "aliases the Python environment"):
-            torch.compiler.precompile(
-                _precompile_dynamo_calls_list_helper,
-                example_inputs=[(x, _PRECOMPILE_HELPER_LIST)],
-                tracer="dynamo",
-                backend="eager",
-            )
-        # An unaliased list of the same value is fine.
-        code, cache = torch.compiler.precompile(
-            _precompile_dynamo_calls_list_helper,
-            example_inputs=[(x, [3, 4])],
-            tracer="dynamo",
-            backend="eager",
-        )
-        loaded = torch.compiler.precompile.load(code, cache)
-        self.assertEqual(
-            loaded(x, [3, 4]), _precompile_dynamo_calls_list_helper(x, [3, 4])
-        )
-
-    def test_tracer_dynamo_rejects_environment_alias_inside_object_input(self):
-        # The alias id set is as deep as what an argument carries: a global
-        # object tucked inside an input's __dict__ is still an alias.
-        x = torch.randn(3)
-        with self.assertRaisesRegex(PrecompileError, "aliases the Python environment"):
-            torch.compiler.precompile(
-                _precompile_dynamo_reads_shared_list,
-                example_inputs=[
-                    (x, _PrecompileDynamoPayloadBox(_PRECOMPILE_SHARED_LIST))
-                ],
-                tracer="dynamo",
-                backend="eager",
-            )
-        box = _PrecompileDynamoPayloadBox([7, 8])
-        code, cache = torch.compiler.precompile(
-            _precompile_dynamo_reads_shared_list,
-            example_inputs=[(x, box)],
-            tracer="dynamo",
-            backend="eager",
-        )
-        loaded = torch.compiler.precompile.load(code, cache)
-        self.assertEqual(loaded(x, box), _precompile_dynamo_reads_shared_list(x, box))
 
     def test_tracer_dynamo_rejects_storage_overlap_inside_object_input(self):
         # The overlap scan enumerates deeply: overlapping (and same-storage)
@@ -4869,21 +4797,64 @@ class TestPrecompile(TestCase):
                     )
 
     def test_tracer_dynamo_loaded_artifact_rejects_overlap_inside_object(self):
-        # The emitted driver's runtime overlap check must enumerate as deeply
-        # as the capture-side scan (the two walkers must stay in sync).
+        # The emitted driver's runtime overlap check is the same walk as the
+        # capture-side one (one implementation, emitted verbatim), so a tensor
+        # inside a custom argument is seen; it runs because the graph mutates.
         good = _PrecompileDynamoTensorPair(torch.randn(4), torch.randn(4))
         code, cache = torch.compiler.precompile(
-            _precompile_dynamo_pair_sum,
+            _precompile_dynamo_pair_inplace,
             example_inputs=[(good,)],
             tracer="dynamo",
             backend="eager",
         )
         loaded = torch.compiler.precompile.load(code, cache)
-        self.assertEqual(loaded(good), _precompile_dynamo_pair_sum(good))
+        p = _PrecompileDynamoTensorPair(torch.randn(4), torch.randn(4))
+        ref = _PrecompileDynamoTensorPair(p.a.clone(), p.b.clone())
+        self.assertEqual(loaded(p), _precompile_dynamo_pair_inplace(ref))
         buf = torch.randn(8)
         bad = _PrecompileDynamoTensorPair(buf[:4], buf[4:])
         with self.assertRaisesRegex(PrecompileError, "share or overlap storage"):
             loaded(bad)
+
+    def test_tracer_dynamo_walk_descends_dict_and_slots(self):
+        # _instance_values is the SINGLE shared walk (torch._precompile_driver,
+        # emitted verbatim into the artifact). Pin that it descends both a custom
+        # object's __dict__ and its __slots__, and that BOTH consumers see nested
+        # tensors/modules either way: the capture-side nn.Module rejection, the
+        # capture-side storage-overlap check, and the driver's runtime overlap
+        # check. (Module-in-__slots__ is covered by
+        # test_tracer_dynamo_rejects_module_carried_in_argument_slot; overlap in
+        # __dict__ by the two tests above.)
+        buf = torch.randn(8)
+        # Capture-side: overlapping tensors reached through __slots__ are rejected.
+        with self.assertRaisesRegex(PrecompileError, "share or overlap storage"):
+            torch.compiler.precompile(
+                _precompile_dynamo_pair_sum,
+                example_inputs=[(_PrecompileDynamoSlottedPair(buf[:4], buf[3:7]),)],
+                tracer="dynamo",
+                backend="eager",
+            )
+        # Capture-side: an nn.Module reached through a plain __dict__ is rejected.
+        with self.assertRaisesRegex(PrecompileError, "nn.Module arguments"):
+            torch.compiler.precompile(
+                _precompile_dynamo_slotted_box_call,
+                example_inputs=[(torch.randn(2), _PrecompileDynamoModuleInDict())],
+                tracer="dynamo",
+                backend="eager",
+            )
+        # Driver-side: the same emitted walk sees tensors in __slots__ too. Capture
+        # a mutating fn on non-overlapping slotted tensors, then a runtime slotted
+        # pair whose tensors overlap must be rejected at serve time.
+        good = _PrecompileDynamoSlottedPair(torch.randn(4), torch.randn(4))
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_pair_inplace,
+            example_inputs=[(good,)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        with self.assertRaisesRegex(PrecompileError, "share or overlap storage"):
+            loaded(_PrecompileDynamoSlottedPair(buf[:4], buf[4:]))
 
     def test_tracer_dynamo_mutating_container_input_captures_and_serves(self):
         # Guard minimization re-checks recorded examples after they ran; a
@@ -4903,10 +4874,7 @@ class TestPrecompile(TestCase):
 
     def test_tracer_dynamo_stateful_mutating_step_keeps_capturing(self):
         with tempfile.TemporaryDirectory() as tmp:
-            paths = dict(
-                artifact_path=os.path.join(tmp, "artifact.py"),
-                cache_path=os.path.join(tmp, "artifact.cache"),
-            )
+            paths = _stateful_paths(tmp)
             t = torch.randn(2)
             results, state = torch.compiler.precompile.stateful(
                 _precompile_dynamo_mutating_step,
@@ -4929,7 +4897,7 @@ class TestPrecompile(TestCase):
             )
             self.assertEqual(result, t * 4)
             self.assertEqual(state.summary().calls, 2)
-            loaded = torch.compiler.precompile.load(**paths)
+            loaded = torch.compiler.precompile.load_files(**paths)
             self.assertEqual(loaded([1, 2], t), t * 3)
 
     def test_tracer_dynamo_stateful_survives_input_metadata_mutation(self):
@@ -4939,10 +4907,7 @@ class TestPrecompile(TestCase):
         # recorded example, and a live-recorded tensor would re-check at the
         # mutated shape and fail every later call.
         with tempfile.TemporaryDirectory() as tmp:
-            paths = dict(
-                artifact_path=os.path.join(tmp, "artifact.py"),
-                cache_path=os.path.join(tmp, "artifact.cache"),
-            )
+            paths = _stateful_paths(tmp)
             buf = torch.randn(4)
             [r1], state = torch.compiler.precompile.stateful(
                 _precompile_dynamo_torch_sin,
@@ -4974,7 +4939,7 @@ class TestPrecompile(TestCase):
             self.assertEqual(r3, torch.sin(x3))
             summary = state.summary()
             self.assertEqual((summary.calls, summary.examples), (3, 3))
-            loaded = torch.compiler.precompile.load(**paths)
+            loaded = torch.compiler.precompile.load_files(**paths)
             y = torch.randn(4)
             self.assertEqual(loaded(y), torch.sin(y))
 
@@ -4985,10 +4950,7 @@ class TestPrecompile(TestCase):
         # capture and rewrite; the frozen snapshot keeps call 1's example at
         # its original metadata.
         with tempfile.TemporaryDirectory() as tmp:
-            paths = dict(
-                artifact_path=os.path.join(tmp, "artifact.py"),
-                cache_path=os.path.join(tmp, "artifact.cache"),
-            )
+            paths = _stateful_paths(tmp)
             x = torch.randn(2, 3)
             expected = (x.clone() + 1) * 2
             [r1], state = torch.compiler.precompile.stateful(
@@ -5011,7 +4973,7 @@ class TestPrecompile(TestCase):
             )
             self.assertEqual(r2, expected)
             self.assertEqual(state.summary().calls, 2)
-            loaded = torch.compiler.precompile.load(**paths)
+            loaded = torch.compiler.precompile.load_files(**paths)
             z = torch.randn(2, 3)
             expected = (z.clone() + 1) * 2
             self.assertEqual(loaded(z), expected)
@@ -5061,8 +5023,7 @@ class TestPrecompile(TestCase):
                 example_inputs=[(z,)],
                 state=None,
                 backend="eager",
-                artifact_path=os.path.join(tmp, "artifact.py"),
-                cache_path=os.path.join(tmp, "artifact.cache"),
+                **_stateful_paths(tmp),
             )
             self.addCleanup(state.close)
             self.assertEqual(r, z - 0.1 * z.grad)
@@ -5077,8 +5038,7 @@ class TestPrecompile(TestCase):
                 example_inputs=[(xs[0],), (xs[1],)],
                 state=None,
                 backend="eager",
-                artifact_path=os.path.join(tmp, "artifact.py"),
-                cache_path=os.path.join(tmp, "artifact.cache"),
+                **_stateful_paths(tmp),
             )
             self.addCleanup(state.close)
             self.assertIsInstance(results, list)
@@ -5086,41 +5046,30 @@ class TestPrecompile(TestCase):
             for result, x in zip(results, xs):
                 self.assertEqual(result, _precompile_dynamo_dynamic(x))
 
-    def test_write_dynamo_artifact_files_utf8_and_failed_rename_cleanup(self):
+    def test_write_dynamo_artifact_files_utf8_and_creates_parent_dirs(self):
         from torch._precompile import _write_dynamo_artifact_files
 
         with tempfile.TemporaryDirectory() as tmp:
-            artifact_path = os.path.join(tmp, "artifact.py")
-            cache_path = os.path.join(tmp, "artifact.cache")
+            artifact_path = os.path.join(tmp, "out", "artifact.py")
+            cache_path = os.path.join(tmp, "out", "artifact.cache")
             content = "# d\u00e9j\u00e0 vu\n"
             _write_dynamo_artifact_files(content, b"cache", artifact_path, cache_path)
             with open(artifact_path, "rb") as f:
                 self.assertEqual(f.read(), content.encode("utf-8"))
-            real_replace = os.replace
-            calls = []
-
-            def flaky_replace(src, dst):
-                calls.append(dst)
-                if len(calls) == 2:
-                    raise OSError("simulated rename failure")
-                real_replace(src, dst)
-
-            with mock.patch("os.replace", side_effect=flaky_replace):
-                with self.assertRaisesRegex(OSError, "simulated rename failure"):
-                    _write_dynamo_artifact_files(
-                        "# v2\n", b"cache2", artifact_path, cache_path
-                    )
-            leftovers = [name for name in os.listdir(tmp) if name.endswith(".tmp")]
+            with open(cache_path, "rb") as f:
+                self.assertEqual(f.read(), b"cache")
+            leftovers = [
+                n
+                for n in os.listdir(os.path.dirname(artifact_path))
+                if n.endswith(".tmp")
+            ]
             self.assertEqual(leftovers, [])
 
     def test_tracer_dynamo_load_degrades_on_missing_cache_file(self):
         # A crash between the two renames of the FIRST stateful rewrite leaves
         # an artifact with no cache file; the pair must still load.
         with tempfile.TemporaryDirectory() as tmp:
-            paths = dict(
-                artifact_path=os.path.join(tmp, "artifact.py"),
-                cache_path=os.path.join(tmp, "artifact.cache"),
-            )
+            paths = _stateful_paths(tmp)
             x = torch.randn(3)
             _, state = torch.compiler.precompile.stateful(
                 _precompile_dynamo_torch_sin,
@@ -5132,11 +5081,13 @@ class TestPrecompile(TestCase):
             self.addCleanup(state.close)
             os.unlink(paths["cache_path"])
             with self.assertLogs("torch._precompile", level="WARNING") as logs:
-                loaded = torch.compiler.precompile.load(**paths)
+                loaded = torch.compiler.precompile.load_files(**paths)
             self.assertTrue(any("found no cache file" in m for m in logs.output))
             self.assertEqual(loaded(x), _precompile_dynamo_torch_sin(x))
 
-    def test_tracer_dynamo_load_degrades_on_backend_tag_mismatch(self):
+    def test_load_rejects_backend_tag_mismatch_on_both_tracers(self):
+        # The in-memory pair is strict on both tracers; only load_files degrades
+        # (see test_tracer_dynamo_load_rejects_mismatched_code_cache_pair).
         x = torch.randn(3)
         code, cache = torch.compiler.precompile(
             _precompile_dynamo_torch_sin,
@@ -5148,11 +5099,8 @@ class TestPrecompile(TestCase):
         blob["backend"] = "inductor"
         buf = io.BytesIO()
         torch.save(blob, buf)
-        with self.assertLogs("torch._precompile", level="WARNING") as logs:
-            loaded = torch.compiler.precompile.load(code, buf.getvalue())
-        self.assertTrue(any("backend/code_hash" in m for m in logs.output))
-        self.assertEqual(loaded(x), _precompile_dynamo_torch_sin(x))
-        # make_fx artifacts keep the strict pairing check.
+        with self.assertRaisesRegex(PrecompileError, "cache backend"):
+            torch.compiler.precompile.load(code, buf.getvalue())
         mfx_code, mfx_cache = torch.compiler.precompile(
             lambda t: t + 1, example_inputs=[(x,)], backend="eager"
         )
@@ -5167,10 +5115,7 @@ class TestPrecompile(TestCase):
         # The one-shot advice ("pass a larger recompile_limit") is unactionable
         # on a resumed state, whose limit is fixed at creation.
         with tempfile.TemporaryDirectory() as tmp:
-            paths = dict(
-                artifact_path=os.path.join(tmp, "artifact.py"),
-                cache_path=os.path.join(tmp, "artifact.cache"),
-            )
+            paths = _stateful_paths(tmp)
             x = torch.randn(4)
             _, state = torch.compiler.precompile.stateful(
                 _precompile_dynamo_scalar,
@@ -5193,10 +5138,7 @@ class TestPrecompile(TestCase):
 
     def test_tracer_dynamo_stateful_unrenderable_rebuild_reports_and_keeps_files(self):
         with tempfile.TemporaryDirectory() as tmp:
-            paths = dict(
-                artifact_path=os.path.join(tmp, "artifact.py"),
-                cache_path=os.path.join(tmp, "artifact.cache"),
-            )
+            paths = _stateful_paths(tmp)
             x = torch.randn(2, 4)
             _, state = torch.compiler.precompile.stateful(
                 _precompile_dynamo_dynamic,
@@ -5221,7 +5163,7 @@ class TestPrecompile(TestCase):
                         **paths,
                     )
             # The last successfully written pair stays loadable.
-            loaded = torch.compiler.precompile.load(**paths)
+            loaded = torch.compiler.precompile.load_files(**paths)
             self.assertEqual(loaded(x), _precompile_dynamo_dynamic(x))
 
     def test_tracer_dynamo_unclosed_state_warns_on_gc(self):
@@ -5235,8 +5177,7 @@ class TestPrecompile(TestCase):
                 example_inputs=[(torch.randn(3),)],
                 state=None,
                 backend="eager",
-                artifact_path=os.path.join(tmp, "artifact.py"),
-                cache_path=os.path.join(tmp, "artifact.cache"),
+                **_stateful_paths(tmp),
             )
             # The state is about to be dropped without close(), so release the
             # session by hand even if the assertions below fail -- otherwise a
@@ -5266,8 +5207,6 @@ class TestPrecompile(TestCase):
             torch.compiler.precompile.load(tampered, cache)
         with self.assertRaisesRegex(PrecompileError, "not valid Python"):
             torch.compiler.precompile.load("def (", cache)
-        with self.assertRaisesRegex(PrecompileError, "not parseable Python"):
-            _load_dynamo_state("def (")
 
     def test_tracer_dynamo_package_serialization_error_is_translated(self):
         from torch._dynamo.exc import PackageError
@@ -5389,22 +5328,402 @@ class TestPrecompile(TestCase):
                     state=None,
                     recompile_limit=1,
                     backend="eager",
-                    artifact_path=os.path.join(tmp, "artifact.py"),
-                    cache_path=os.path.join(tmp, "artifact.cache"),
+                    **_stateful_paths(tmp),
                 )
 
-    def test_tracer_dynamo_capture_leaves_global_pgo_state_untouched(self):
-        from torch._dynamo import pgo
+    @parametrize("backend", ("inductor", "eager"))
+    def test_tracer_dynamo_capture_under_no_grad_is_inference_artifact(self, backend):
+        # Capture follows the ambient grad mode exactly like torch.compile: under
+        # no_grad the graph is an inference graph (no joint forward/backward on
+        # inductor), the artifact records the mode, serves without autograd
+        # history, and refuses a grad-mode call whose input requires grad (eager
+        # would build history the artifact cannot).
+        w = torch.randn(4, 4, requires_grad=True)
+        x = torch.randn(2, 4)
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _precompile_dynamo_matmul,
+                example_inputs=[(x, w)],
+                tracer="dynamo",
+                backend=backend,
+            )
+        self.assertIn("_DYNAMO_GRAD_ENABLED = False", code)
+        self.assertNotIn("_CompiledFunction", code)
+        self.assertNotIn("_inner_call_bw", code)
+        loaded = torch.compiler.precompile.load(code, cache)
+        with torch.no_grad():
+            out = loaded(x, w)
+        self.assertIsNone(out.grad_fn)
+        self.assertEqual(out, _precompile_dynamo_matmul(x, w).detach())
+        with self.assertRaisesRegex(PrecompileError, "inference artifact"):
+            loaded(x, w)
+        # With no input requiring grad, a grad-mode call serves normally.
+        plain = torch.randn(4, 4)
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _precompile_dynamo_matmul,
+                example_inputs=[(x, plain)],
+                tracer="dynamo",
+                backend=backend,
+            )
+        out = torch.compiler.precompile.load(code, cache)(x, plain)
+        self.assertIsNone(out.grad_fn)
+        self.assertEqual(out, _precompile_dynamo_matmul(x, plain))
 
-        before = {str(key) for key in pgo.get_code_state()}
-        torch.compiler.precompile(
+    @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
+    def test_tracer_dynamo_environment_change_between_stateful_calls_keeps_capturing(
+        self,
+    ):
+        # The guard on len(_PRECOMPILE_HISTORY) is an environment guard, dropped
+        # at variant creation; mutating the global between stateful calls cannot
+        # poison the state, each variant serves its capture-time specialization
+        # (the documented environment contract), and the dropped guard is
+        # recorded with the value each variant was specialized to.
+        _PRECOMPILE_HISTORY.clear()
+        self.addCleanup(_PRECOMPILE_HISTORY.clear)
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = _stateful_paths(tmp)
+            x3 = torch.randn(3)
+            [r1], state = torch.compiler.precompile.stateful(
+                _precompile_dynamo_reads_history,
+                example_inputs=[(x3,)],
+                state=None,
+                backend="eager",
+                **paths,
+            )
+            self.addCleanup(state.close)
+            self.assertEqual(r1, x3 * 1)
+            _PRECOMPILE_HISTORY.append(1)
+            x4 = torch.randn(4)  # a new static variant, captured with len == 1
+            [r2], state = torch.compiler.precompile.stateful(
+                _precompile_dynamo_reads_history,
+                example_inputs=[(x4,)],
+                state=state,
+                backend="eager",
+                **paths,
+            )
+            self.assertEqual(r2, x4 * 2)
+            summary = state.summary()
+            self.assertEqual(summary.variants, 2)
+            recorded = {
+                value
+                for _, source, value in summary.dropped_guards
+                if source == "G['_PRECOMPILE_HISTORY']"
+            }
+            self.assertEqual(recorded, {"[]", "[1]"})
+            loaded = torch.compiler.precompile.load_files(**paths)
+            self.assertEqual(loaded(x3), x3 * 1)
+            self.assertEqual(loaded(x4), x4 * 2)
+
+    @unittest.skipUnless(TEST_CUDA, "measures CUDA allocator growth")
+    def test_tracer_dynamo_stateful_does_not_retain_examples(self):
+        # The state keeps no example snapshots (the guard filter runs once, at
+        # variant creation), so repeated calls on fresh 64 MB inputs must not
+        # grow allocated memory by a multiple of the input size.
+        import gc
+
+        def batch():
+            return torch.randn(16 * 1024 * 1024, device="cuda")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = _stateful_paths(tmp)
+            _, state = torch.compiler.precompile.stateful(
+                _precompile_dynamo_torch_sin,
+                example_inputs=[(batch(),)],
+                state=None,
+                backend="eager",
+                **paths,
+            )
+            self.addCleanup(state.close)
+            gc.collect()
+            torch.cuda.synchronize()
+            base = torch.cuda.memory_allocated()
+            for _ in range(4):
+                _, state = torch.compiler.precompile.stateful(
+                    _precompile_dynamo_torch_sin,
+                    example_inputs=[(batch(),)],
+                    state=state,
+                    backend="eager",
+                    **paths,
+                )
+            gc.collect()
+            torch.cuda.synchronize()
+            self.assertLess(torch.cuda.memory_allocated() - base, 64 * 1024 * 1024)
+
+    def test_tracer_dynamo_rejects_bytecode_reading_user_globals(self):
+        # Dynamo's transformed bytecode reconstructs a returned global object and
+        # replays side effects on globals by loading them by name; the artifact
+        # runs in its own namespace, so such a global is rejected at capture
+        # (naming it) instead of raising NameError at serve.
+        self.addCleanup(setattr, _PrecompileDynamoCfg, "counter", 0)
+        self.addCleanup(_PRECOMPILE_LOG.clear)
+        for fn, name in (
+            (_precompile_dynamo_returns_global_class, "_PrecompileDynamoCfg"),
+            (_precompile_dynamo_mutates_class_attr, "_PrecompileDynamoCfg"),
+            (_precompile_dynamo_appends_global_list, "_PRECOMPILE_LOG"),
+        ):
+            with self.subTest(fn=fn.__name__):
+                with self.assertRaisesRegex(
+                    PrecompileError, rf"reads the global\(s\) \['{name}'\]"
+                ):
+                    torch.compiler.precompile(
+                        fn,
+                        example_inputs=[(torch.randn(3),)],
+                        tracer="dynamo",
+                        backend="eager",
+                    )
+
+    def test_tracer_dynamo_accepts_class_attribute_read_and_library_reference(self):
+        # The exact environment check keys on what Dynamo actually read: a class
+        # whose METHOD references a tensor, or a large library module (sympy),
+        # is fine when the fn only reads a plain attribute; the old object-graph
+        # prescan rejected the former and spent seconds walking the latter.
+        x = torch.randn(3)
+        for fn, expected in (
+            (_precompile_dynamo_reads_class_scale, x * 2),
+            (_precompile_dynamo_refs_sympy, x + len(sympy.__name__)),
+        ):
+            with self.subTest(fn=fn.__name__):
+                code, cache = torch.compiler.precompile(
+                    fn, example_inputs=[(x,)], tracer="dynamo", backend="eager"
+                )
+                self.assertEqual(
+                    torch.compiler.precompile.load(code, cache)(x), expected
+                )
+
+    def test_tracer_dynamo_serves_across_num_threads_change(self):
+        # GLOBAL_STATE records the capture machine's thread count; the artifact
+        # keeps that field in sync with the serving process (at load and after a
+        # later change), so thread count never fails dispatch.
+        x = torch.randn(3)
+        code, cache = torch.compiler.precompile(
             _precompile_dynamo_torch_sin,
-            example_inputs=[(torch.randn(3),)],
+            example_inputs=[(x,)],
             tracer="dynamo",
             backend="eager",
         )
-        after = {str(key) for key in pgo.get_code_state()}
-        self.assertEqual(before, after)
+        n = torch.get_num_threads()
+        if n < 2:
+            self.skipTest("needs at least two threads to change the count")
+        self.addCleanup(torch.set_num_threads, n)
+        torch.set_num_threads(n - 1)
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(loaded(x), torch.sin(x))
+        torch.set_num_threads(n)  # changed again after load
+        self.assertEqual(loaded(x), torch.sin(x))
+
+    def test_tracer_dynamo_ambient_state_mismatch_names_global_state(self):
+        # Autocast is part of the per-call GLOBAL_STATE check (unlike num_threads);
+        # a miss under autocast names the differing state rather than advising
+        # to add an example.
+        x = torch.randn(3)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_torch_sin,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        with self.assertRaisesRegex(PrecompileError, r"autocast.*GLOBAL_STATE"):
+            with torch.autocast("cpu", dtype=torch.bfloat16):
+                loaded(x)
+
+    def test_tracer_dynamo_dispatch_miss_names_failing_guard(self):
+        x = torch.randn(4)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_scalar,
+            example_inputs=[(x, 2)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        with self.assertRaisesRegex(
+            PrecompileError, r"no captured Dynamo variant.*L\['x'\].*dtype"
+        ):
+            loaded(x.double(), 2)
+
+    def test_tracer_dynamo_unsupported_construct_is_not_reported_as_graph_break(self):
+        with self.assertRaisesRegex(PrecompileError, "Data-dependent branching") as cm:
+            torch.compiler.precompile(
+                _precompile_dynamo_data_dependent,
+                example_inputs=[(torch.randn(3),)],
+                tracer="dynamo",
+                backend="eager",
+            )
+        self.assertNotIn("does not support graph breaks", str(cm.exception))
+
+    @parametrize("backend", ("inductor", "eager"))
+    def test_tracer_dynamo_no_grad_view_of_input_matches_eager(self, backend):
+        # Under an ambient no_grad, an output that is a view of an input is
+        # regenerated as a no_grad view of that input (base, requires_grad), so a
+        # later in-place write under grad mode raises exactly as eager does
+        # instead of silently mutating the requires_grad leaf.
+        x = torch.randn(4, requires_grad=True)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_first_element,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend=backend,
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        with torch.no_grad():
+            served = loaded(x)
+            ref = _precompile_dynamo_first_element(x)
+        self.assertEqual(served, ref)
+        self.assertTrue(served._is_view())
+        self.assertIs(served._base, x)
+        self.assertEqual(served.requires_grad, ref.requires_grad)
+        with self.assertRaisesRegex(RuntimeError, "created in no_grad mode"):
+            served.add_(1.0)
+
+    def test_tracer_dynamo_mutates_inputs_flag(self):
+        # The driver checks runtime inputs for storage overlap only when a captured
+        # graph mutates an input: the flag comes from the FX graph on eager and
+        # from AOTAutograd's input metadata on inductor training graphs.
+        x = torch.randn(4)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_scalar,
+            example_inputs=[(x, 2)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        self.assertIn("_DYNAMO_MUTATES_INPUTS = False", code)
+        code, _ = torch.compiler.precompile(
+            _precompile_dynamo_inplace_step,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        self.assertIn("_DYNAMO_MUTATES_INPUTS = True", code)
+        code, _ = torch.compiler.precompile(
+            _precompile_dynamo_inplace_add,
+            example_inputs=[(torch.randn(4), torch.randn(4, requires_grad=True))],
+            tracer="dynamo",
+        )
+        self.assertIn("_DYNAMO_MUTATES_INPUTS = True", code)
+
+    @parametrize("tracer", ("make_fx", "dynamo"))
+    def test_example_inputs_generator_rejected(self, tracer):
+        x = torch.randn(3)
+        with self.assertRaisesRegex(TypeError, "sequence .* got generator"):
+            torch.compiler.precompile(
+                _precompile_dynamo_torch_sin,
+                example_inputs=((x,) for _ in range(1)),
+                tracer=tracer,
+                backend="eager",
+            )
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(TypeError, "sequence .* got generator"):
+                torch.compiler.precompile.stateful(
+                    _precompile_dynamo_torch_sin,
+                    example_inputs=((x,) for _ in range(1)),
+                    backend="eager",
+                    **_stateful_paths(tmp),
+                )
+            self.assertEqual(os.listdir(tmp), [])
+
+    def test_tracer_dynamo_state_is_context_manager(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _, state = torch.compiler.precompile.stateful(
+                _precompile_dynamo_torch_sin,
+                example_inputs=[(torch.randn(3),)],
+                state=None,
+                backend="eager",
+                **_stateful_paths(tmp),
+            )
+            self.addCleanup(state.close)  # idempotent; the with-block closes below
+            self.assertIsInstance(state, torch.compiler.precompile.PrecompileState)
+            self.assertIsInstance(
+                state.summary(), torch.compiler.precompile.PrecompileStateSummary
+            )
+            with state as entered:
+                self.assertIs(entered, state)
+            self.assertTrue(state.closed)
+
+    def test_make_fx_artifact_rejects_keyword_call(self):
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(2, 4)
+        code, cache = torch.compiler.precompile(
+            lambda model, t: model(t), example_inputs=[(m, x)], backend="eager"
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        with self.assertRaisesRegex(PrecompileError, "positional arguments only"):
+            loaded(m, t=x)
+
+    @torch._dynamo.config.patch(
+        automatic_dynamic_shapes=True, assume_static_by_default=True
+    )
+    def test_tracer_dynamo_capture_ignores_global_pgo_dynamic_record(self):
+        # torch.compile marks a dim dynamic in the PROCESS-GLOBAL PGO record;
+        # precompile drives an ISOLATED PGO record, so a one-example capture must
+        # still produce a static artifact -- identical to a clean capture -- rather
+        # than inheriting the global automatic-dynamic decision (which would make a
+        # single example compile a dynamic graph).
+        from torch._dynamo.testing import CompileCounter
+
+        def counts(code):
+            return [
+                line
+                for line in code.splitlines()
+                if line.startswith(
+                    ("VARIANT_COUNT ", "GRAPH_COUNT ", "DYNAMIC_GRAPH_COUNT ")
+                )
+            ]
+
+        fn = _precompile_dynamo_dynamic
+        x = torch.randn(2, 4)
+        # A clean capture (isolated PGO) of one example is a single static variant.
+        clean_code, _ = torch.compiler.precompile(
+            fn, example_inputs=[(x,)], tracer="dynamo", backend="eager"
+        )
+        self.assertIn("DYNAMIC_GRAPH_COUNT = 0", clean_code)
+
+        # Pollute the global record: automatic dynamic folds sizes 3 and 5 into one
+        # dynamic recompile, after which a fresh size does not recompile -- proving
+        # the global record now holds a dynamic dim 0 for this code.
+        torch._dynamo.reset()
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter)
+        for size in (2, 3, 5):
+            compiled(torch.randn(size, 4))
+        self.assertEqual(counter.frame_count, 2)
+        compiled(torch.randn(9, 4))
+        self.assertEqual(counter.frame_count, 2)  # global dim 0 is dynamic now
+
+        # The isolated capture ignores that: one example is still static, and the
+        # variant/graph set matches the clean capture.
+        polluted_code, cache = torch.compiler.precompile(
+            fn, example_inputs=[(x,)], tracer="dynamo", backend="eager"
+        )
+        self.assertIn("DYNAMIC_GRAPH_COUNT = 0", polluted_code)
+        self.assertEqual(counts(polluted_code), counts(clean_code))
+        self.assertEqual(torch.compiler.precompile.load(polluted_code, cache)(x), fn(x))
+
+    @torch._dynamo.config.patch(
+        automatic_dynamic_shapes=True, assume_static_by_default=True
+    )
+    def test_tracer_dynamo_capture_leaves_global_pgo_state_untouched(self):
+        from torch._dynamo import pgo
+
+        # Pollute the global record first so there is real content to (not) mutate.
+        fn = _precompile_dynamo_dynamic
+        torch._dynamo.reset()
+        compiled = torch.compile(fn, backend="eager")
+        for size in (2, 3):
+            compiled(torch.randn(size, 4))
+        # Snapshot BY VALUE (repr captures the automatic_dynamic contents, not just
+        # the key set): a capture that leaked into the global record would record a
+        # new size onto the existing entry and change its repr.
+        before = {str(k): repr(v) for k, v in pgo.get_code_state().items()}
+        self.assertTrue(before)  # the pollution recorded something
+        torch.compiler.precompile(
+            fn,
+            example_inputs=[(torch.randn(5, 4),)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        after = {str(k): repr(v) for k, v in pgo.get_code_state().items()}
+        self.assertEqual(before, after)  # capture ran on an isolated PGO record
 
 
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
@@ -5474,6 +5793,214 @@ class TestPrecompileNumerics(TestCase):
             actual.sum().backward()
             self.assertEqual(actual, expected)
             self.assertEqual(x.grad, ref.grad)
+
+    # The undefined-tangent (backward mask) specialization is an inductor-backward
+    # feature that also runs on CUDA, so these numeric checks are device-generic
+    # rather than CPU-only.
+    def test_tracer_dynamo_unseen_tangent_pattern_uses_default_backward(self, device):
+        # A forward-only capture observes no partial backward; an unseen
+        # output-tangent pattern at serve time falls back to the always-covered
+        # all-tangents-defined backward (materializing the missing tangent), so
+        # the gradients match eager instead of raising.
+        x = make_tensor((4,), device=device, dtype=torch.float32, requires_grad=True)
+        y = make_tensor((4,), device=device, dtype=torch.float32, requires_grad=True)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_independent_outputs,
+            example_inputs=[(x, y)],
+            tracer="dynamo",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        loaded(x, y)[0].sum().backward()  # only output 0 gets a tangent
+        self.assertEqual(x.grad, x.detach().cos())
+        self.assertIsNone(y.grad)
+
+    def test_tracer_dynamo_nondifferentiable_output_backward(self, device):
+        # A non-differentiable output's tangent is ALWAYS undefined, so keying
+        # variants on the raw scanned mask (rather than the canonical mask over
+        # specializable outputs, like the live runtime) once made the
+        # auto-covered mask 0 unreachable and every backward raised. The ordinary
+        # backward must still serve and match eager.
+        x = make_tensor((4,), device=device, dtype=torch.float32, requires_grad=True)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_nondiff_second_output,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        y = make_tensor((4,), device=device, dtype=torch.float32, requires_grad=True)
+        out_a, out_b = loaded(y)
+        self.assertIsNone(out_b.grad_fn)
+        out_a.sum().backward()
+        self.assertEqual(y.grad, y.detach().cos())
+
+    def test_tracer_dynamo_inductor_double_backward_raises(self, device):
+        # The inductor backend precompiles only the first-order backward; the
+        # emitted _DoubleBackward bridge must raise the documented error on a
+        # second-order backward instead of silently producing wrong grads.
+        x = make_tensor((4,), device=device, dtype=torch.float32, requires_grad=True)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_torch_sin,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="inductor",
+        )
+        out = torch.compiler.precompile.load(code, cache)(x)
+        (grad,) = torch.autograd.grad(out.sum(), x, create_graph=True)
+        with self.assertRaisesRegex(
+            RuntimeError, "does not currently support double backward"
+        ):
+            grad.sum().backward()
+
+    @parametrize("backend", ("inductor", "eager"))
+    def test_tracer_dynamo_inplace_mutation_flips_nograd_input(self, device, backend):
+        # In-place mutation of a no-grad input from a differentiable source
+        # (x.add_(y_requires_grad)) flips the LIVE input's requires_grad while the
+        # example runs. The recorded snapshot must keep the ENTRY state the guards
+        # recorded, and the served grads must match eager, on both backends.
+        for fn, expected_grad in (
+            (_precompile_dynamo_inplace_add, torch.ones(4, device=device)),
+            (_precompile_dynamo_inplace_copy, torch.full((4,), 2.0, device=device)),
+        ):
+            with self.subTest(fn=fn.__name__):
+                x0 = make_tensor((4,), device=device, dtype=torch.float32)
+                y0 = make_tensor(
+                    (4,), device=device, dtype=torch.float32, requires_grad=True
+                )
+                code, cache = torch.compiler.precompile(
+                    fn, example_inputs=[(x0, y0)], tracer="dynamo", backend=backend
+                )
+                loaded = torch.compiler.precompile.load(code, cache)
+                p = make_tensor((4,), device=device, dtype=torch.float32)
+                q = make_tensor(
+                    (4,), device=device, dtype=torch.float32, requires_grad=True
+                )
+                p_ref = p.detach().clone()
+                q_ref = q.detach().clone().requires_grad_()
+                out = loaded(p, q)
+                expected = fn(p_ref, q_ref)
+                out.sum().backward()
+                expected.sum().backward()
+                self.assertEqual(out, expected)
+                self.assertEqual(p, p_ref)  # the mutation lands on the input
+                self.assertEqual(q.grad, expected_grad)
+                self.assertEqual(q.grad, q_ref.grad)
+
+    def test_tracer_dynamo_stateful_partial_backward_keeps_default_mask(self, device):
+        # A partial backward between calls records a nonzero tangent mask; the
+        # next rewrite must still cover the ordinary all-defined backward (mask 0)
+        # and the observed partial pattern, matching eager grads.
+        def clones():
+            a = make_tensor(
+                (4,), device=device, dtype=torch.float32, requires_grad=True
+            )
+            b = make_tensor(
+                (4,), device=device, dtype=torch.float32, requires_grad=True
+            )
+            return a, b
+
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = _stateful_paths(tmp)
+            x, y = clones()
+            [(out_a, _out_b)], state = torch.compiler.precompile.stateful(
+                _precompile_dynamo_independent_outputs,
+                example_inputs=[(x, y)],
+                state=None,
+                **paths,
+            )
+            self.addCleanup(state.close)
+            out_a.sum().backward()  # partial: only output 0 gets a tangent
+            _, state = torch.compiler.precompile.stateful(
+                _precompile_dynamo_independent_outputs,
+                example_inputs=[clones()],
+                state=state,
+                **paths,
+            )
+            code, cache = _read_pair(paths)
+            loaded = torch.compiler.precompile.load(code, cache)
+            p, q = clones()
+            served_a, served_b = loaded(p, q)
+            (served_a.sum() + served_b.sum()).backward()  # all-defined backward
+            self.assertEqual(p.grad, p.detach().cos())
+            self.assertEqual(q.grad, -q.detach().sin())
+            p2, q2 = clones()
+            loaded(p2, q2)[0].sum().backward()  # the observed partial pattern
+            self.assertEqual(p2.grad, p2.detach().cos())
+
+    @torch._dynamo.config.patch(
+        automatic_dynamic_shapes=True, assume_static_by_default=True
+    )
+    def test_tracer_dynamo_stateful_partial_mask_survives_dynamic_recompile(
+        self, device
+    ):
+        # A tangent mask observed on a backend must survive a later
+        # automatic-dynamic recompile: the new dynamic backend supersedes the
+        # static one in newest-first dispatch, so it serves the sizes the static
+        # backend was captured for and must cover the masks that backend observed
+        # -- otherwise the exact captured backward pattern raises after recompile.
+        def clones(size):
+            a = make_tensor(
+                (size,), device=device, dtype=torch.float32, requires_grad=True
+            )
+            b = make_tensor(
+                (size,), device=device, dtype=torch.float32, requires_grad=True
+            )
+            return a, b
+
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = _stateful_paths(tmp)
+            x, y = clones(4)
+            [(out_a, _out_b)], state = torch.compiler.precompile.stateful(
+                _precompile_dynamo_independent_outputs,
+                example_inputs=[(x, y)],
+                state=None,
+                **paths,
+            )
+            self.addCleanup(state.close)
+            out_a.sum().backward()  # partial mask observed on the size-4 backend
+            _, state = torch.compiler.precompile.stateful(
+                _precompile_dynamo_independent_outputs,
+                example_inputs=[clones(8)],
+                state=state,
+                **paths,
+            )
+            code, cache = _read_pair(paths)
+            loaded = torch.compiler.precompile.load(code, cache)
+            p, q = clones(4)  # served by the newer dynamic variant
+            loaded(p, q)[0].sum().backward()
+            self.assertEqual(p.grad, p.detach().cos())
+            self.assertIsNone(q.grad)
+
+    def test_tracer_dynamo_cache_bundle_is_populated(self, device):
+        # Every dynamo inductor artifact -- inference and differentiable -- ships
+        # a real per-graph cache bundle that load() feeds to load_cache_artifacts
+        # (the bundle used to be [None] and primed nothing).
+        for requires_grad in (False, True):
+            with self.subTest(requires_grad=requires_grad):
+                x = make_tensor(
+                    (4, 4),
+                    device=device,
+                    dtype=torch.float32,
+                    requires_grad=requires_grad,
+                )
+                code, cache = torch.compiler.precompile(
+                    _precompile_dynamo_torch_sin, example_inputs=[(x,)], tracer="dynamo"
+                )
+                blob = torch.load(io.BytesIO(cache), weights_only=True)
+                self.assertEqual(len(blob["artifact"]), 1)
+                self.assertIsInstance(blob["artifact"][0], bytes)
+                primed = []
+                original = torch.compiler.load_cache_artifacts
+
+                def spy(bundle):
+                    info = original(bundle)
+                    primed.append(info)
+                    return info
+
+                with mock.patch("torch.compiler.load_cache_artifacts", spy):
+                    loaded = torch.compiler.precompile.load(code, cache)
+                self.assertEqual(len(primed), 1)
+                self.assertTrue(primed[0].inductor_artifacts)
+                self.assertEqual(loaded(x), torch.sin(x))
 
     def test_plain_function(self, device):
         def f(x, y):

@@ -414,6 +414,15 @@ def _reset_guarded_backend_cache() -> None:
     cached_backends.clear()
 
 
+def remove_cached_backend(backend: Callable[..., Any]) -> None:
+    """Forget ``backend`` from the registry that torch._dynamo.reset resets.
+
+    For a caller tearing down a private compile session (torch.compiler.precompile)
+    whose backend must not stay pinned until the next full reset.
+    """
+    cached_backends.pop(id(innermost_backend(backend)), None)
+
+
 DONT_WRAP_FILES = {
     # For tracing into fx modules
     inspect.getsourcefile(GraphModule),

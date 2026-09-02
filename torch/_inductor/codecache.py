@@ -575,6 +575,7 @@ def write_atomic(
     content: str | bytes,
     make_dirs: bool = False,
     encode_utf_8: bool = False,
+    fsync: bool = False,
 ) -> None:
     # Write into temporary file first to avoid conflicts between threads
     # Avoid using a named temporary file, as those have restricted permissions
@@ -587,6 +588,11 @@ def write_atomic(
     write_mode = "w" if isinstance(content, str) else "wb"
     with tmp_path.open(write_mode, encoding="utf-8" if encode_utf_8 else None) as f:
         f.write(content)
+        if fsync:
+            # Durable before the rename: a crash cannot leave the renamed file
+            # truncated on disk.
+            f.flush()
+            os.fsync(f.fileno())
     try:
         tmp_path.rename(target=path)
     except FileExistsError:
