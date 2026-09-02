@@ -570,11 +570,11 @@ class _InstalledArtifact:
                     from torch._dynamo.precompile_context import PrecompileContext
 
                     fn = self._entry_factory() if self._fn is None else self._fn
-                    # Backend keys are content hashes, so an ambient
-                    # caching_precompile run on the same graph (or another handle
-                    # on this artifact) files under the same keys. _serve records
-                    # only absent keys; remember which those were so unload takes
-                    # back exactly what this install added.
+                    # Backend keys are per-capture uuids, so only another handle
+                    # on this very artifact (or the same entry loaded through
+                    # DynamoStore) can already hold them, with identical content.
+                    # _serve records only absent keys; remember which those were
+                    # so unload takes back exactly what this install added.
                     present = {
                         k
                         for k in self._backend_keys

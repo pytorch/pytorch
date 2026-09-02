@@ -767,11 +767,12 @@ def _build_installed_forward():
         from torch._dynamo.precompile_context import PrecompileContext
         from torch._dynamo.precompile_package import serve_cache_entry
 
-        # The backends have to be in the context before install deserializes
-        # them, the same thing DynamoStore.load_cache_entry does for the path
-        # form of this artifact. Keys are content hashes, so one an ambient
-        # caching_precompile run (or another handle on this artifact) already
-        # filed is equivalent and stays theirs; only absent keys are recorded.
+        # Recorded so a later save of this entry finds its backends, the same
+        # thing DynamoStore.load_cache_entry does for the path form of this
+        # artifact; install itself reads cache_entry.backends directly. Keys are
+        # per-capture uuids, so a key already present belongs to another handle
+        # on this same artifact and holds identical content: it stays theirs, and
+        # only absent keys are recorded.
         for _backend in cache_entry.backends.values():
             if PrecompileContext.serialize_artifact_by_key(_backend.key) is None:
                 PrecompileContext.record_artifact(_backend)

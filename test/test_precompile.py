@@ -4071,10 +4071,10 @@ class TestPrecompile(TestCase):
                 fresh.unload()
 
     def test_installed_artifact_unload_leaves_another_owners_artifacts(self):
-        # Backend keys are content hashes, so an ambient caching_precompile run
-        # on the same graph files under the very keys this artifact carries.
-        # unload() takes back only what this install put there: neither a key
-        # someone else had already filed nor one re-filed while installed.
+        # Backend keys are per-capture uuids, so only another handle on this
+        # artifact can legitimately hold them; a foreign object filed under one
+        # stands in for that here. unload() takes back only what this install
+        # put there: neither a key already filed nor one re-filed while installed.
         from torch._dynamo.precompile_context import EagerCacheArtifact
 
         code, cache = torch.compiler.precompile.artifact(
@@ -4129,6 +4129,8 @@ class TestPrecompile(TestCase):
         torch._dynamo.reset()
         a = torch.compiler.precompile.load(code, cache)
         b = torch.compiler.precompile.load(code, cache)
+        self.addCleanup(a.unload)
+        self.addCleanup(b.unload)
         keys = list(a._compiled._backend_keys)
         for key in keys:
             PrecompileContext.take_artifact(key)
