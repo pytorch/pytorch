@@ -1601,6 +1601,7 @@ class PrecompileSession:
                         runtime_global_scope=None,
                         guard_build_local_state=getattr(loaded, "local_state", None),
                         save_guards=True,
+                        explicit_capture=True,
                         # The pickle holds only guards that already survived the
                         # default and user filters, so the policy is the whole
                         # filter here; and a failure is an internal bug, not
