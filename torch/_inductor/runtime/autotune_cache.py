@@ -39,7 +39,6 @@ from typing_extensions import override
 import torch
 from torch._guards import CompileContext
 from torch._inductor.runtime.runtime_utils import cache_dir
-from torch._logging import warning_once
 from torch.compiler._cache import (
     CacheArtifact,
     CacheArtifactFactory,
@@ -335,19 +334,13 @@ class AutotuneCache:
             # Only genuinely unserializable kwargs (sets, NaN, arbitrary
             # objects) land here; see _config_json_cacheable. Skipped configs
             # are also absent from the bundled/mega caches, so this kernel
-            # re-autotunes on every cold process.
+            # re-autotunes on every cold process; name the cache entry so the
+            # recurring cost is attributable.
             cache_id = (self.local_cache or self.remote_cache or (None, "<unknown>"))[1]
-            log.debug(
+            log.warning(
                 "Skipping autotune cache save for %s: a config kwarg is not "
                 "JSON-serializable",
                 cache_id,
-            )
-            warning_once(
-                log,
-                "Skipping the autotune cache for kernels whose config kwargs are "
-                "not JSON-serializable (sets, NaN, arbitrary objects); they "
-                "re-autotune on every cold process. Enable debug logging for "
-                "torch._inductor.runtime.autotune_cache to see which kernels.",
             )
             return
         data: dict[str, JsonDataTy] = {
@@ -794,26 +787,31 @@ def _load_cached_autotuning(
             # pyrefly: ignore [missing-attribute]
             and cfg.num_stages == best_config.get("num_stages")
         ]
-        if len(matching_configs) == 1:
-            matched_config = matching_configs[0]
+        if matching_configs:
+            first = matching_configs[0]
             # pyrefly: ignore [missing-attribute]
-            matched_config.extra_options = extra_options
-            return matched_config
-        if len(matching_configs) > 1 and any(
-            _json_config_value(val) != val
-            for cfg in matching_configs
-            # pyrefly: ignore [missing-attribute]
-            for val in cfg.kwargs.values()
-        ):
-            # Enum unwrapping can make distinct candidates (e.g. MODE=Mode.A vs
-            # MODE=1) serialize identically; reconstruction below would
-            # arbitrarily bake the raw JSON value even when the winner was the
-            # Enum member. Re-autotune, but only when unwrapping actually
-            # changed some matching kwarg (plain Enums; IntEnum/str-mixin
-            # members ==-match their unwrapped values, so they are safe).
-            # Value-identical multi-matches (duplicate configs, subset kwargs)
-            # fall through to reconstruction below, as before the Enum guard.
-            return None
+            if all(cfg.kwargs == first.kwargs for cfg in matching_configs[1:]):
+                # A unique match, or duplicates that are interchangeable (equal
+                # before JSON serialization too, so no tuple/Enum degradation
+                # is hidden behind the match). Return the real candidate so
+                # non-JSON kwarg values (tuples, Enum members) survive.
+                # pyrefly: ignore [missing-attribute]
+                first.extra_options = extra_options
+                return first
+            if any(
+                _json_config_value(val) != val
+                for cfg in matching_configs
+                # pyrefly: ignore [missing-attribute]
+                for val in cfg.kwargs.values()
+            ):
+                # Distinct candidates that serialize identically (MODE=Mode.A
+                # vs MODE=1 under Enum unwrapping): reconstruction below would
+                # arbitrarily bake the raw JSON value even when the winner was
+                # the Enum member, so re-autotune. IntEnum/str-mixin members
+                # ==-match their unwrapped values and are not degraded.
+                return None
+            # Subset-kwarg matches with JSON-stable values fall through to
+            # reconstruction, as before the Enum guard.
     if any(
         _json_config_value(val) != val
         for cfg in configs

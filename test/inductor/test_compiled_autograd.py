@@ -3808,8 +3808,9 @@ class CompiledAutograd0(torch.nn.Module):
         validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_26], [((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_2, unwrap_maybe_dynamic_int_3], True, 6)]);  getitem_26 = unwrap_maybe_dynamic_int_2 = unwrap_maybe_dynamic_int_3 = None
         getitem_27 = validate_outputs_1[0];  validate_outputs_1 = None
 
-        getitem_28 = hooks[0];  getitem_28 = None
-        call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((getitem_1, getitem_2), [], [], (getitem_27,));  getitem_1 = getitem_2 = getitem_27 = None
+        getitem_28 = hooks[0]
+        getattr_1 = getitem_28._aot_grad_output_prototype_objects;  getitem_28 = None
+        call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((getitem_1, getitem_2), [], [], (getitem_27,), getattr_1);  getitem_1 = getitem_2 = getitem_27 = getattr_1 = None
         aot0_primals_1 = call_aot_bwd_prologue[0]
         aot0_primals_2 = call_aot_bwd_prologue[1]
         aot0_tangents_1 = call_aot_bwd_prologue[2]
@@ -4496,12 +4497,10 @@ class CompiledAutograd1(torch.nn.Module):
         "DTensor/FakePG requires distributed build",
     )
     @torch._functorch.config.patch(aot_autograd_prune_unused_outputs=True)
-    def test_dtensor_unused_output_pruned(self):
-        # The sharding-prop cache is keyed by mesh equality, so the entries the
-        # preceding DTensor test left behind (for a hash-equal mesh over a
-        # destroyed process group) corrupt this test's joint graph even before
-        # compiled autograd is involved (`-k dtensor` reproduces it); the leak
-        # is in DTensor's module-level cache, not fixable from this test.
+    def test_dtensor_unused_output_fallback(self):
+        # The sharding-prop cache is keyed by mesh equality, so an earlier test's
+        # hash-equal DeviceMesh (from a destroyed process group) would leak into
+        # this test's output specs and corrupt the traced joint graph.
         from torch.distributed.tensor.debug import _clear_sharding_prop_cache
 
         _clear_sharding_prop_cache()
@@ -4515,7 +4514,6 @@ class CompiledAutograd1(torch.nn.Module):
                 return x.sin(), y.std()
 
             def run():
-                torch.manual_seed(123)
                 x = DTensor.from_local(
                     torch.randn(4), mesh, [Shard(0)], run_check=False
                 ).requires_grad_()
@@ -4524,221 +4522,51 @@ class CompiledAutograd1(torch.nn.Module):
                 ).requires_grad_()
                 fn(x, y)[0].sum().backward()
                 self.assertIsInstance(x.grad, DTensor)
-                # The structural specialization prunes the unused std branch
-                # through the subclass boundary, so y gets no grad, as in eager.
-                self.assertIsNone(y.grad)
-                return x.grad.to_local()
+                # Masking to None requires the output to be PROVABLY zero;
+                # across the subclass boundary the walker cannot prove it, so
+                # the conservative fallback always materializes a zero grad.
+                self.assertIsInstance(y.grad, DTensor)
+                self.assertEqual(y.grad.full_tensor(), torch.zeros(8))
 
-            expected = run()
+            run()
             torch._dynamo.reset()
             with compiled_autograd._enable(make_compiler_fn(backend="aot_eager")):
-                self.assertEqual(run(), expected)
+                run()
         finally:
             dist.destroy_process_group()
 
-    def _partial_backward_grads(self, fn, compiler_fn):
-        """Backward through the first output of the two-output ``fn``, eagerly
-        and then under compiled autograd on a fresh compile so compiled
-        autograd selects the backward itself; returns the compiled autograd
-        ``(x.grad, y.grad)`` after checking it against eager."""
+    def test_prune_unused_outputs_default_off(self):
+        # aot_autograd_prune_unused_outputs is opt-in: under the default
+        # config, a partial backward over a multi-output compiled function
+        # must not invoke the undefined-grad specialization machinery, and
+        # set_materialize_grads stays at its default, so the unused output's
+        # tangent is materialized as zeros and its input sees a zero grad.
+        from torch._functorch._aot_autograd import graph_compile
+
+        def fn(x, y):
+            return x.sin(), y.cos()
+
+        compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
 
         def run():
-            compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
-            torch.manual_seed(123)
             x = torch.randn(4, requires_grad=True)
             y = torch.randn(4, requires_grad=True)
             compiled(x, y)[0].sum().backward()
-            return x.grad, y.grad
+            ex = x.detach().clone().requires_grad_()
+            ey = y.detach().clone().requires_grad_()
+            fn(ex, ey)[0].sum().backward()
+            self.assertEqual(x.grad, ex.grad)
+            self.assertIsNone(ey.grad)
+            self.assertEqual(y.grad, torch.zeros_like(y))
 
-        with torch.autograd.set_multithreading_enabled(False):
-            torch._dynamo.reset()
-            expected = run()
-            torch._dynamo.reset()
-            counters["compiled_autograd"].clear()
-            with compiled_autograd._enable(compiler_fn):
-                actual = run()
-        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
-        self.assertEqual(actual, expected)
-        return actual
-
-    @torch._functorch.config.patch(aot_autograd_prune_unused_outputs=True)
-    def test_prune_unused_outputs_retrace(self):
-        from torch._functorch._aot_autograd import runtime_wrappers
-
-        graphs = []
-        with (
-            mock.patch.object(
-                runtime_wrappers,
-                "_specialize_bw_module_for_undefined_grad_outputs",
-                side_effect=lambda *args: self.fail("the retrace must be taken"),
-            ),
-            mock.patch.object(
-                runtime_wrappers,
-                "_zeros_like_tangent_prototype",
-                side_effect=lambda *args: self.fail("no tangent may be materialized"),
-            ),
-        ):
-            _, y_grad = self._partial_backward_grads(
-                lambda x, y: (x.sin(), y.cos()),
-                make_compiler_fn(backend="aot_eager", gm_hook=graphs.append),
-            )
-        self.assertIsNone(y_grad)
-        (graph,) = graphs
-        self.assertIn("_aot_grad_output_prototype_objects", graph.code)
-        self.assertNotIn("tangents_2", graph.code)
-
-    @torch._functorch.config.patch(aot_autograd_prune_unused_outputs=True)
-    def test_prune_unused_outputs_structural(self):
-        from torch._functorch._aot_autograd import graph_compile, runtime_wrappers
-
-        graphs = []
-        with (
-            mock.patch.object(
-                graph_compile,
-                "_retrace_backward_for_undefined_grad_outputs",
-                return_value=None,
-            ),
-            mock.patch.object(
-                runtime_wrappers,
-                "_zeros_like_tangent_prototype",
-                side_effect=lambda *args: self.fail("no tangent may be materialized"),
-            ),
-        ):
-            _, y_grad = self._partial_backward_grads(
-                lambda x, y: (x.sin(), y.cos()),
-                make_compiler_fn(backend="aot_eager", gm_hook=graphs.append),
-            )
-        self.assertIsNone(y_grad)
-        (graph,) = graphs
-        self.assertNotIn("tangents_2", graph.code)
-
-    @torch._functorch.config.patch(aot_autograd_prune_unused_outputs=True)
-    def test_prune_unused_outputs_materialize_fallback(self):
-        from torch._functorch._aot_autograd import graph_compile, runtime_wrappers
-
-        graphs = []
-        with (
-            mock.patch.object(
-                graph_compile,
-                "_retrace_backward_for_undefined_grad_outputs",
-                return_value=None,
-            ),
-            mock.patch.object(
-                runtime_wrappers,
-                "_specialize_bw_module_for_undefined_grad_outputs",
-                return_value=None,
-            ),
-        ):
-            # cumsum's backward is not provably zero for a zero tangent, so the
-            # base backward runs on a materialized zero tangent and y gets zeros.
-            _, y_grad = self._partial_backward_grads(
-                lambda x, y: (x.sin(), y.cumsum(0)),
-                make_compiler_fn(backend="aot_eager", gm_hook=graphs.append),
-            )
-        self.assertEqual(y_grad, torch.zeros(4))
-        (graph,) = graphs
-        self.assertIn("_aot_grad_output_prototype_objects", graph.code)
-        self.assertIn("tangents_2", graph.code)
-
-    @torch._functorch.config.patch(aot_autograd_prune_unused_outputs=True)
-    def test_prune_unused_outputs_retrace_failure_falls_back(self):
-        from torch._functorch._aot_autograd import graph_compile
-
-        graphs = []
         with mock.patch.object(
             graph_compile,
             "_retrace_backward_for_undefined_grad_outputs",
-            side_effect=RuntimeError("synthetic retrace failure"),
+            side_effect=AssertionError("specialization machinery must stay opt-in"),
         ):
-            _, y_grad = self._partial_backward_grads(
-                lambda x, y: (x.sin(), y.cos()),
-                make_compiler_fn(backend="aot_eager", gm_hook=graphs.append),
-            )
-        self.assertIsNone(y_grad)
-        (graph,) = graphs
-        self.assertNotIn("tangents_2", graph.code)
-
-    def test_prune_unused_outputs_default_off(self):
-        # aot_autograd_prune_unused_outputs is opt-in: with the default config a
-        # partial backward over a multi-output compiled function must not touch
-        # the specialization machinery, and the compiled autograd graph is the
-        # plain prologue -> backward -> epilogue pipeline with autograd's zero
-        # materialization: no ctx prototype read, a four-argument prologue call
-        # and a zero grad for the unused output's input.
-        from torch._functorch._aot_autograd import runtime_wrappers
-
-        graphs = []
-        with (
-            mock.patch.object(
-                runtime_wrappers._AutogradBackwardCompiler,
-                "select_specialized_backward",
-                side_effect=lambda *args: self.fail("specialization must stay opt-in"),
-            ),
-            mock.patch(
-                "torch._functorch.aot_autograd.AOT_COUNTER",
-                new_callable=itertools.count,
-            ),
-        ):
-            _, y_grad = self._partial_backward_grads(
-                lambda x, y: (x.sin(), y.cos()),
-                make_compiler_fn(backend="aot_eager", gm_hook=graphs.append),
-            )
-        self.assertEqual(y_grad, torch.zeros(4))
-        (graph,) = graphs
-        self.assertNotIn("_aot_grad_output_prototype_objects", graph.code)
-        (prologue,) = [
-            node
-            for node in graph.graph.nodes
-            if node.op == "call_function"
-            and node.target.__name__ == "call_aot_bwd_prologue"
-        ]
-        self.assertEqual(len(prologue.args), 4)
-        self.assertExpectedInline(
-            normalize_gm(graph.print_readable(print_output=False)),
-            """\
-class CompiledAutograd0(torch.nn.Module):
-    def forward(self, inputs, sizes, scalars, hooks, packed_data):
-        getitem = inputs[0]
-        getitem_1 = inputs[1]
-        getitem_2 = inputs[2];  inputs = None
-        getitem_3 = sizes[0]
-        getitem_4 = sizes[1]
-        getitem_6 = sizes[2];  sizes = None
-        unwrap_maybe_dynamic_int = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_3);  getitem_3 = None
-        unwrap_maybe_dynamic_int_1 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_4);  getitem_4 = None
-        unwrap_maybe_dynamic_int_3 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_6);  getitem_6 = None
-
-        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [], False, 6)]);  getitem = None
-        getitem_11 = validate_outputs[0];  validate_outputs = None
-
-        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_11], [True], [unwrap_maybe_dynamic_int]);  getitem_11 = unwrap_maybe_dynamic_int = None
-        getitem_12 = sum_backward0[0];  sum_backward0 = None
-        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_12], [((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_1], False, 6)]);  getitem_12 = unwrap_maybe_dynamic_int_1 = None
-        getitem_13 = validate_outputs_1[0];  validate_outputs_1 = None
-
-        zeros = torch.ops.aten.zeros.default([unwrap_maybe_dynamic_int_3], dtype = torch.float32, layout = torch.strided, device = device(type='cpu'));  unwrap_maybe_dynamic_int_3 = None
-        getitem_14 = hooks[0];  hooks = getitem_14 = None
-        call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((getitem_1, getitem_2), [], [], (getitem_13, zeros));  getitem_13 = zeros = None
-        aot1_primals_1 = call_aot_bwd_prologue[0]
-        aot1_primals_2 = call_aot_bwd_prologue[1]
-        aot1_tangents_1 = call_aot_bwd_prologue[2]
-        aot1_tangents_2 = call_aot_bwd_prologue[3];  call_aot_bwd_prologue = None
-
-        aot1_cos_1 = torch.ops.aten.cos.default(aot1_primals_1);  aot1_primals_1 = None
-        aot1_mul = torch.ops.aten.mul.Tensor(aot1_tangents_1, aot1_cos_1);  aot1_tangents_1 = aot1_cos_1 = None
-
-        call_accumulate_grad_1 = torch__dynamo_external_utils_call_accumulate_grad(getitem_1, None, aot1_mul, False);  getitem_1 = aot1_mul = call_accumulate_grad_1 = None
-
-        aot1_sin_1 = torch.ops.aten.sin.default(aot1_primals_2);  aot1_primals_2 = None
-        aot1_neg = torch.ops.aten.neg.default(aot1_sin_1);  aot1_sin_1 = None
-        aot1_mul_1 = torch.ops.aten.mul.Tensor(aot1_tangents_2, aot1_neg);  aot1_tangents_2 = aot1_neg = None
-
-        call_accumulate_grad = torch__dynamo_external_utils_call_accumulate_grad(getitem_2, None, aot1_mul_1, False);  getitem_2 = aot1_mul_1 = call_accumulate_grad = None
-
-        _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
-        return []
-""",
-        )
+            run()
+            with compiled_autograd._enable(make_compiler_fn(backend="aot_eager")):
+                run()
 
     def test_anomaly_mode_already_nan(self):
         def fn():

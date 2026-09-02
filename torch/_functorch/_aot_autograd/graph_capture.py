@@ -201,18 +201,24 @@ class _GraphCaptureTracingResult:
     maybe_subclass_meta: SubclassMeta | None
 
 
-def _detach_traced_inputs(
-    flat_args: Any, *, preserve_requires_grad: bool = False
-) -> Any:
-    copy_item_memo = detect_fake_mode() is not None
+def _detach_traced_inputs(flat_args: Any) -> Any:
+    if detect_fake_mode():
+        detach_tensor = _detach_and_copy_item_memo
+    else:
 
-    def detach_tensor(t: torch.Tensor) -> torch.Tensor:
-        detached = _detach_and_copy_item_memo(t) if copy_item_memo else t.detach()
-        if preserve_requires_grad:
-            detached.requires_grad_(t.requires_grad)
-        return detached
+        def detach_tensor(t: torch.Tensor) -> torch.Tensor:
+            return t.detach()
 
     return pytree.tree_map_only(torch.Tensor, detach_tensor, flat_args)
+
+
+def _clone_traced_inputs_for_autograd(flat_args: Any) -> Any:
+    def clone_tensor(t: torch.Tensor) -> torch.Tensor:
+        detached = _detach_and_copy_item_memo(t) if detect_fake_mode() else t.detach()
+        detached.requires_grad_(t.requires_grad)
+        return detached
+
+    return pytree.tree_map_only(torch.Tensor, clone_tensor, flat_args)
 
 
 def _prepare_graph_capture_tracing(

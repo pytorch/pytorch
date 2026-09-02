@@ -40,38 +40,32 @@ the model(s) included in each tuple, e.g.
 `precompile(lambda model, x: model(x), example_inputs=[(model, x)])` -- and lowers it to
 a self-contained, runnable Python source string plus an acceleration cache. Reload the
 artifact with `torch.compiler.precompile.load`; since no weights are baked in, you pass
-the model again at runtime. The optional `tracer="dynamo"` path accepts several example
+the model again at runtime. The `tracer` argument selects the capture front-end and
+defaults to `"make_fx"`: a non-strict trace of a single `example_inputs` tuple, so
+control flow and shapes are specialized to that one example. The optional
+`tracer="dynamo"` path instead accepts several example
 tuples and retains the guarded recompilations they trigger, including automatically
-dynamic graphs. It retains guards derived from explicit inputs, drops (and records) the
-guards on module globals, and treats that Python environment as an unchecked invariant
-between capture and runtime; changing a global can silently run a specialization
-captured for the old value. Ambient torch state (autocast, default dtype, deterministic
-algorithms, torch-function state) is still checked on every call, grad mode is pinned
-to the capture-time mode, and the thread count is not checked. Initial
+dynamic graphs. It retains guards derived from explicit inputs and treats the Python
+environment as an unchecked invariant between capture and runtime; changing that
+environment can silently run a specialization captured for the old state. Initial
 support is for Python functions with positional tensor/scalar arguments and containers
 of those values; graph breaks, closures, `nn.Module`, and numpy array/scalar arguments
 are not supported yet.
-Every tensor must arrive through the function's arguments (a tensor read from a global
-or class attribute is rejected, naming it), functions whose transformed bytecode reads
-or mutates module globals are rejected, and so are distinct tensor inputs sharing or
-overlapping storage (the same tensor object may be passed more than once).
-Capture runs under the caller's ambient grad mode and each captured Dynamo graph's
-differentiability is inferred from its inputs, mirroring `torch.compile`: under grad
-mode, `requires_grad` inputs yield differentiable graphs whose served outputs retain a
-`grad_fn` and can be passed to `backward()`, and no-grad inputs yield inference graphs;
-a capture under `torch.no_grad()` yields an inference artifact that must be served
-under `torch.no_grad()` when an input requires grad. On the Inductor backend the
-backward is precompiled (readable forward and
-backward code, working across captured recompilations, with backward variants
-specialized to the output-tangent patterns observed during capture and the ordinary
-all-tangents-defined backward always covered as the fallback for unseen patterns); on
-the eager backend the backward is live eager autograd through the
+Globals whose object graph contains a tensor and functions that mutate globals are
+rejected, as are distinct tensor inputs sharing or overlapping storage (the same
+tensor object may be passed more than once).
+Each captured Dynamo graph's differentiability is inferred from its inputs, mirroring
+`torch.compile`: `requires_grad` inputs yield differentiable graphs whose served outputs
+retain a `grad_fn` and can be passed to `backward()`; no-grad inputs yield inference
+graphs. On the Inductor backend the backward is precompiled (readable forward and
+backward code, working across captured recompilations, rejecting output-tangent
+patterns not observed during capture -- the ordinary all-tangents-defined pattern is
+always covered); on the eager backend the backward is live eager autograd through the
 emitted ops, neither captured nor specialized. The sibling entry point
 `torch.compiler.precompile.stateful` captures incrementally: each call runs
 its example tuples for real inside a loop the caller owns, returns a list of that call's
-per-example results plus a `PrecompileState` to pass back in, and rewrites an
-always-loadable artifact on disk (reload it with `torch.compiler.precompile.load_files`);
-use `with state:` or call `state.close()` when done capturing. See
+per-example results plus an opaque `state` to pass back in, and rewrites an
+always-loadable artifact on disk; call `state.close()` when done capturing. See
 the {ref}`API reference <torch.compiler_api>` for details.
 
 :::{warning}

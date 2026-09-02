@@ -1,31 +1,11 @@
 import dataclasses
-from enum import Enum, Flag, IntEnum
+from enum import IntEnum
 from types import SimpleNamespace
 from typing import ClassVar, NamedTuple
 
 
 class UserDefinedTritonKernelConfigMode(IntEnum):
     FAST = 1
-
-
-class UserDefinedTritonKernelPlainMode(Enum):
-    # A plain Enum: members are not interchangeable with their values.
-    ADD = 1
-    MUL = 2
-
-
-class UserDefinedTritonKernelPermission(Flag):
-    READ = 1
-    WRITE = 2
-
-
-class UserDefinedTritonKernelPlainReprConfig:
-    # Not a dataclass: identity equality, but a constructor-style repr.
-    def __init__(self, offset):
-        self.offset = offset
-
-    def __repr__(self):
-        return f"{type(self).__qualname__}(offset={self.offset!r})"
 
 
 @dataclasses.dataclass(frozen=True)

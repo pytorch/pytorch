@@ -62,7 +62,7 @@ from .autograd_cache import (
 )
 from .descriptors import AOTOutput, PlainAOTOutput
 from .graph_capture import (
-    _detach_traced_inputs,
+    _clone_traced_inputs_for_autograd,
     aot_dispatch_autograd_graph,
     aot_dispatch_base_graph,
 )
@@ -87,7 +87,6 @@ from .runtime_wrappers import (
     SerializableCompiledFunction,
 )
 from .schemas import (
-    AOTAutogradJointTraceInputs,
     AOTAutogradTraceInfo,
     AOTConfig,
     AOTGraphCapture,
@@ -95,6 +94,7 @@ from .schemas import (
     FlatFn,
     FxValue,
     MutationType,
+    SubclassCreationMeta,
     SubclassMeta,
     ViewAndMutationMeta,
 )
@@ -205,8 +205,15 @@ def _create_wrappers_for_dispatch(needs_autograd: bool) -> list[CompilerWrapper]
 def _clone_fw_metadata_for_retrace(
     metadata: ViewAndMutationMeta,
 ) -> ViewAndMutationMeta:
-    # Subclass creation metas are shared, not cloned: the retrace is gated on
-    # requires_subclass_dispatch being False, so nothing rewrites them.
+    def clone_subclass_meta(meta: Any) -> Any:
+        if not isinstance(meta, SubclassCreationMeta):
+            return meta
+        cloned = copy.copy(meta)
+        cloned.attrs = {
+            name: clone_subclass_meta(attr) for name, attr in meta.attrs.items()
+        }
+        return cloned
+
     cloned = copy.copy(metadata)
     for field in dataclasses.fields(metadata):
         value = getattr(metadata, field.name)
@@ -216,6 +223,15 @@ def _clone_fw_metadata_for_retrace(
             setattr(cloned, field.name, dict(value))
         elif isinstance(value, set):
             setattr(cloned, field.name, set(value))
+    cloned.subclass_inp_meta = [
+        clone_subclass_meta(meta) for meta in metadata.subclass_inp_meta
+    ]
+    cloned.subclass_fw_graph_out_meta = [
+        clone_subclass_meta(meta) for meta in metadata.subclass_fw_graph_out_meta
+    ]
+    cloned.subclass_tangent_meta = [
+        clone_subclass_meta(meta) for meta in metadata.subclass_tangent_meta
+    ]
     return cloned
 
 
@@ -265,25 +281,21 @@ def aot_stage1_graph_capture(
     aot_state.fw_metadata.deterministic = torch.are_deterministic_algorithms_enabled()
     updated_flat_args: list[Any] | tuple[list[Any], list[Any]]
 
-    autograd_joint_trace_inputs = None
+    autograd_trace_info = None
     # The retrace machinery is only consulted when unused-output pruning is
     # active; cloning inputs, deep-copying metadata, and retaining the original
     # forward module for every training graph is pure overhead otherwise.
     if (
-        config.aot_autograd_prune_unused_outputs
+        aot_config.prune_unused_outputs
         and aot_state.needs_autograd
         and not aot_config.pre_dispatch
     ):
         unwrapped_flat_fn = flat_fn
         while hasattr(unwrapped_flat_fn, "__wrapped__"):
             unwrapped_flat_fn = unwrapped_flat_fn.__wrapped__
-        # The retrace re-runs flat_fn at backward time, so it is only admitted
-        # for fx.GraphModule callables (Dynamo graphs, aot_module_simplified),
-        # whose re-execution replays captured ops: an arbitrary Python callable
-        # (aot_function, allow_in_graph) could observe state that changed
-        # since the forward and silently produce a different graph.
-        is_graph_module = isinstance(unwrapped_flat_fn, torch.fx.GraphModule)
-        has_dynamo_autograd_function = is_graph_module and any(
+        has_dynamo_autograd_function = isinstance(
+            unwrapped_flat_fn, torch.fx.GraphModule
+        ) and any(
             node.op == "call_function"
             and node.target is torch.ops.higher_order.autograd_function_apply
             for module in unwrapped_flat_fn.modules()
@@ -296,8 +308,7 @@ def aot_stage1_graph_capture(
         # These cases must use structural specialization or the existing materialization
         # fallback because the forward cannot safely be rerun to retrace the joint graph.
         can_retrace_backward = (
-            is_graph_module
-            and not any(
+            not any(
                 isinstance(wrapper, AOTSyntheticBaseWrapper)
                 and wrapper.needs_post_compile
                 for wrapper in wrappers
@@ -310,14 +321,12 @@ def aot_stage1_graph_capture(
             and not has_dynamo_autograd_function
         )
         if can_retrace_backward:
-            autograd_joint_trace_inputs = AOTAutogradJointTraceInputs(
+            autograd_trace_info = AOTAutogradTraceInfo(
                 flat_fn=flat_fn,
-                flat_args=_detach_traced_inputs(
-                    aot_state.flat_args, preserve_requires_grad=True
-                ),
+                flat_args=_clone_traced_inputs_for_autograd(aot_state.flat_args),
                 flat_args_descs=list(aot_state.flat_args_descs),
                 fw_metadata=_clone_fw_metadata_for_retrace(aot_state.fw_metadata),
-                autocast_state=_autocast_fingerprint(),
+                autocast_state=_autocast_fingerprint(aot_state.flat_args),
             )
 
     with maybe_skip_decompose(aot_config) as graph_capture_aot_config:
@@ -366,7 +375,7 @@ def aot_stage1_graph_capture(
         updated_flat_args=updated_flat_args,
         updated_flat_args_descs=updated_flat_args_descs,
         maybe_subclass_meta=maybe_subclass_meta,
-        autograd_joint_trace_inputs=autograd_joint_trace_inputs,
+        autograd_trace_info=autograd_trace_info,
     )
 
 
@@ -2425,13 +2434,19 @@ def _backward_placeholder_key(node: torch.fx.Node) -> tuple[str, str]:
     return "name", str(node.target)
 
 
-def _autocast_fingerprint() -> tuple[Any, ...]:
-    # _autocast_supported_devices is the complete list of device types autocast
-    # can be enabled for, so this covers devices the traced region moves
-    # activations to even when no input lives there.
+def _autocast_fingerprint(flat_args: Sequence[Any]) -> tuple[Any, ...]:
+    # Cover every autocast-capable device type, not just the input tensors'
+    # devices: the traced region can move activations to a device that never
+    # appears among the inputs, and autocast state there must still decline
+    # the retrace when it diverges.
+    device_types = set(torch._C._autocast_supported_devices())
+    for arg in flat_args:
+        if isinstance(arg, torch.Tensor):
+            device_types.add(arg.device.type)
     per_device = tuple(
         (dev, torch.is_autocast_enabled(dev), torch.get_autocast_dtype(dev))
-        for dev in sorted(torch._C._autocast_supported_devices())
+        for dev in sorted(device_types)
+        if torch._C._is_autocast_available(dev)
     )
     return (torch.is_autocast_cache_enabled(), per_device)
 
@@ -2467,22 +2482,29 @@ def _retrace_backward_for_undefined_grad_outputs(
         if decline_reason is not None:
             decline_reason.append(reason)
 
-    joint_trace = trace_info.joint_trace
+    if trace_info.partition_fn is None or trace_info.original_fw_module is None:
+        declined("the partition function or original forward module was not captured")
+        return None
     # The joint trace was autocast-dispatched under the compile-time autocast
     # state; retracing under a diverged ambient state produces graphs whose
     # dtypes silently differ, which the name-only ABI check below cannot see.
     # The cache-enabled bit is recreated instead of compared: dynamo disables
     # the autocast cache while tracing (e.g. compiled autograd backward), and
     # the bit cannot change the retraced graph's dtypes.
-    autocast_cache_enabled, per_device_autocast_state = joint_trace.autocast_state
-    if per_device_autocast_state != _autocast_fingerprint()[1]:
+    if trace_info.autocast_state is None:
+        # The sole AOTAutogradTraceInfo constructor always records autocast_state
+        # (_autocast_fingerprint never returns None), so a None here is a bug,
+        # not a declinable runtime condition.
+        raise AssertionError("autocast_state is always captured at trace time")
+    autocast_cache_enabled, per_device_autocast_state = trace_info.autocast_state
+    if per_device_autocast_state != _autocast_fingerprint(trace_info.flat_args)[1]:
         declined(
             "the backward retrace was declined because autocast state at "
             "backward time differs from capture time"
         )
         return None
 
-    metadata = _clone_fw_metadata_for_retrace(joint_trace.fw_metadata)
+    metadata = _clone_fw_metadata_for_retrace(trace_info.fw_metadata)
     undefined = set(undefined_grad_out_indices)
     for index, grad_out_index in enumerate(_grad_output_surviving_indices(metadata)):
         if grad_out_index not in undefined:
@@ -2499,23 +2521,21 @@ def _retrace_backward_for_undefined_grad_outputs(
     # ops and constants materialized while rerunning the forward (and autograd
     # backward formulas under it) produce real tensors that leak into the fake
     # trace and fail fake tensor dispatch.
-    fake_mode = detect_fake_mode(joint_trace.flat_args)
-    # PhiloxStateTracker resets process-global class state, so only enter it
-    # when RNG functionalization actually consults it.
+    fake_mode = detect_fake_mode(trace_info.flat_args)
     with (
         torch.enable_grad(),
         torch.autograd.set_multithreading_enabled(False),
         preserve_rng_state(),
         _set_autocast_cache_enabled(autocast_cache_enabled),
         fake_mode if fake_mode is not None else nullcontext(),
-        PhiloxStateTracker() if config.functionalize_rng_ops else nullcontext(),
+        PhiloxStateTracker(),
         torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing(),
         maybe_skip_decompose(retrace_config) as graph_capture_config,
     ):
         graph, joint_inputs, _, maybe_subclass_meta = aot_dispatch_autograd_graph(
-            joint_trace.flat_fn,
-            _detach_traced_inputs(joint_trace.flat_args, preserve_requires_grad=True),
-            list(joint_trace.flat_args_descs),
+            trace_info.flat_fn,
+            _clone_traced_inputs_for_autograd(trace_info.flat_args),
+            list(trace_info.flat_args_descs),
             graph_capture_config,
             fw_metadata=metadata,
         )
@@ -2567,32 +2587,30 @@ def _retrace_backward_for_undefined_grad_outputs(
         retraced_fw_outputs[: metadata.num_forward],
     ):
         if isinstance(original, torch.fx.Node) and isinstance(retraced, torch.fx.Node):
-            if original.name != retraced.name:
+            # Compare the structural desc/name key used for the saved-activation
+            # placeholders rather than raw node.name, which is a codegen counter
+            # (add vs add_1) that diverges across otherwise-identical retraces.
+            if _backward_placeholder_key(original) != _backward_placeholder_key(
+                retraced
+            ):
                 declined(abi_changed)
                 return None
         elif original != retraced:
             declined(abi_changed)
             return None
 
-    # Match retraced placeholders to the original backward's by the keys
-    # snapshotted at compile time: the live module's node.meta may since have
-    # been stripped by the AOT cache, which would leave the original side keyed
-    # by name only while the retraced side still carries descs.
-    num_original_placeholders = len(
-        original_bw_module.graph.find_nodes(op="placeholder")
-    )
-    if num_original_placeholders != len(original_placeholder_list) or (
-        num_original_placeholders != len(trace_info.bw_placeholder_keys)
-    ):
+    original_placeholders = original_bw_module.graph.find_nodes(op="placeholder")
+    if len(original_placeholders) != len(original_placeholder_list):
         raise AssertionError(
-            "expected the original backward placeholders, their inputs and "
-            "their snapshotted keys to line up"
+            "expected the original backward placeholders and inputs to line up"
         )
-    original_by_key: dict[tuple[str, str], list[tuple[int, Any]]] = defaultdict(list)
-    for index, (key, value) in enumerate(
-        zip(trace_info.bw_placeholder_keys, original_placeholder_list)
+    original_by_key: dict[tuple[str, str], list[tuple[int, torch.fx.Node, Any]]] = (
+        defaultdict(list)
+    )
+    for index, (node, value) in enumerate(
+        zip(original_placeholders, original_placeholder_list)
     ):
-        original_by_key[key].append((index, value))
+        original_by_key[_backward_placeholder_key(node)].append((index, node, value))
 
     for node in list(bw_module.graph.find_nodes(op="placeholder")):
         if not node.users and "val" not in node.meta:
@@ -2607,18 +2625,44 @@ def _retrace_backward_for_undefined_grad_outputs(
                 "the retraced backward needs an input the compiled forward did not save"
             )
             return None
-        index, value = matches.pop(0)
+        index, original_node, value = matches.pop(0)
         kept_arg_indices.append(index)
         placeholder_list.append(value)
-        # The compiled backward is lowered against the original placeholder
-        # values (compiled autograd passes placeholder indices instead and
-        # keeps the retraced vals).
-        if isinstance(value, (torch.Tensor, torch.SymInt, torch.SymFloat)):
-            node.meta["val"] = value
+        if "val" in original_node.meta:
+            node.meta["val"] = original_node.meta["val"]
 
     bw_module.graph.lint()
     bw_module.recompile()
     return bw_module, placeholder_list, tuple(kept_arg_indices)
+
+
+def retrace_backward_handling_errors(
+    retrace: Callable[[], Any],
+    decline_reasons: list[str],
+    specialization_indices: Sequence[int],
+) -> Any:
+    """Run a backward-retrace thunk with the shared decline policy.
+
+    Used identically by the live runtime, compiled-autograd, and standalone
+    retrace sites: a PrecompileError propagates (precompile requires a portable
+    backward), any other exception declines to structural specialization by
+    returning None.
+    """
+    try:
+        return retrace()
+    except Exception as e:
+        from torch._precompile import PrecompileError
+
+        if isinstance(e, PrecompileError):
+            raise
+        log.warning(
+            "Backward retrace for undefined grad outputs %s failed; "
+            "falling back to structural specialization",
+            tuple(specialization_indices),
+            exc_info=True,
+        )
+        decline_reasons.append("the backward retrace raised")
+        return None
 
 
 def _aot_stage2b_bw_compile(
@@ -2840,17 +2884,9 @@ def aot_stage2_autograd(
         fw_compiler,
     )
 
-    autograd_trace_info = None
-    if aot_graph_capture.autograd_joint_trace_inputs is not None:
-        autograd_trace_info = AOTAutogradTraceInfo(
-            joint_trace=aot_graph_capture.autograd_joint_trace_inputs,
-            partition_fn=partition_fn,
-            original_fw_module=fw_module,
-            bw_placeholder_keys=tuple(
-                _backward_placeholder_key(node)
-                for node in bw_module.graph.find_nodes(op="placeholder")
-            ),
-        )
+    if aot_graph_capture.autograd_trace_info is not None:
+        aot_graph_capture.autograd_trace_info.partition_fn = partition_fn
+        aot_graph_capture.autograd_trace_info.original_fw_module = fw_module
 
     lazy_backward_info, compiled_bw_func = _aot_stage2b_bw_compile(
         bw_module,
@@ -2860,7 +2896,7 @@ def aot_stage2_autograd(
         num_symints_saved_for_bw,
         aot_config,
         bw_compiler,
-        autograd_trace_info=autograd_trace_info,
+        autograd_trace_info=aot_graph_capture.autograd_trace_info,
     )
 
     try_save_cache_entry, entry = _cache_autograd_info(
@@ -2936,7 +2972,6 @@ def _aot_stage2c_make_autograd_function(
         aot_config=aot_config,
         fw_metadata=fw_metadata,
         try_save_cache_entry=try_save_cache_entry,
-        prune_unused_outputs=config.aot_autograd_prune_unused_outputs,
     )
     compiled_fn = AOTDispatchAutograd.post_compile(compile_spec)
 

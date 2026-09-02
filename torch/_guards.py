@@ -222,44 +222,30 @@ class GuardSource(enum.Enum):
 # silently misfiles them; a dropped input guard then serves a stale
 # specialization with no error.
 #
-# A ROOT is any Source class that is not a ChainedSource, however deep in the
-# class hierarchy; ChainedSource delegates to the root of its chain. Every root
-# must declare ``_provenance``. It is an inherited class attribute, so an
-# indirect subclass of LocalSource is INPUT unless it overrides. This is
-# deliberately fail-closed in both directions: an undeclared root raises at
-# classification time instead of defaulting, and test/dynamo/test_sources.py
-# enforces totality over every Source subclass so a new source cannot land
-# unclassified.
-#
-# A guard's provenance is that of Guard.originating_source. Guards that
-# reference more than one source (DUPLICATE_INPUT's source_b, SHAPE_ENV's
-# aggregated symbol sources) are classified by their originating source alone;
-# make_dupe_guard in torch/_dynamo/guards.py only pairs two sources from the
-# same side of the local/global split, so a DUPLICATE_INPUT never pairs a
-# frame-rooted source with an environment-rooted one.
-#
-# INPUT is about dispatch, not about the frame's argument list: closure cells
-# the frame dereferences (LocalSource(is_derefed_cell_contents=True)) are INPUT
-# here although LocalSource.is_input is False for them.
+# Every ROOT Source class (a direct Source subclass; anything that is not a
+# ChainedSource) must declare ``_provenance``; ChainedSource delegates to its
+# root. This is deliberately fail-closed in both directions: an undeclared
+# root raises at classification time instead of defaulting, and
+# test/dynamo/test_sources.py enforces totality over every Source subclass so
+# a new source cannot land unclassified.
 class GuardProvenance(enum.Enum):
-    # Rooted at the traced frame's bindings (arguments, locals, cells) or at
-    # the ShapeEnvSource behind the SHAPE_ENV guard (dynamic-shape dispatch
-    # over input sizes): dispatch-relevant; serialization consumers must keep
-    # these. Also GlobalWeakRefSource: the compiled bytecode dereferences that
-    # dynamo-installed weakref at runtime, so its liveness guard is kept
-    # conservatively (dropping it would run code against a dead weakref).
+    # Dispatch-relevant guards that a serialization consumer must keep: rooted
+    # at the traced frame's bindings (arguments, locals, cells), at a
+    # dynamo-installed weakref proxy for a traced runtime object
+    # (GlobalWeakRefSource), or at the shape env (whose SHAPE_ENV guard encodes
+    # symbolic constraints derived from the inputs).
     INPUT = 0
-    # Rooted at module globals (including imports): part of the Python
-    # environment.
+    # Rooted at a module globals dict at guard-check time, whoever installed the
+    # binding (user globals and imports both): part of the Python environment.
     GLOBAL = 1
-    # Rooted at interpreter- or process-wide state (grad mode and friends,
-    # torch-function mode stack, streams, backward state): part of the
-    # environment, but not reachable through any module's globals.
+    # Rooted at interpreter- or process-wide state (grad mode and friends, the
+    # torch-function mode stack, streams): part of the environment, but not
+    # reachable through any module's globals.
     AMBIENT = 2
     # Tracing-internal values with no user-visible runtime lookup IN GUARD
     # CHECKS (synthetic and temp locals, ephemeral sources, materialized
-    # constants, recorded random values); their reconstruction bytecode may
-    # still load dynamo-installed globals.
+    # constants, recorded random values, backward state); their reconstruction
+    # bytecode may still load dynamo-installed globals.
     SYNTHETIC = 3
 
 

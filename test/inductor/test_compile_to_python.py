@@ -482,23 +482,6 @@ class TestInductorCompileToPythonContract(TestCase):
         with fresh_cache(), torch.no_grad():
             self.assertEqual(load_from_python(src, cache)(_flat_inputs(m, x))[0], m(x))
 
-    def test_passthrough_source_renders_nonfinite_floats(self):
-        # repr(float("inf")) is "inf", which is not valid Python source; the
-        # passthrough renderer must spell nonfinite floats as float(...) calls.
-        import math
-
-        from torch._inductor.standalone_compile import _passthrough_source
-
-        gm = torch.fx.symbolic_trace(lambda x: (x, float("inf"), float("nan")))
-        source = _passthrough_source(gm)
-        namespace = {}
-        exec(source, namespace)
-        x = torch.randn(2)
-        out = namespace["call"]([x])
-        self.assertIs(out[0], x)
-        self.assertEqual(out[1], float("inf"))
-        self.assertTrue(math.isnan(out[2]))
-
     def test_no_cache_when_caches_disabled(self):
         # With caches disabled there is no saveable artifact, so cache is None; the source
         # still runs (the kernels JIT-compile from it on first call).

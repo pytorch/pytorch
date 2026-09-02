@@ -348,18 +348,14 @@ def aot_compile_fullgraph(
 
         if not hooks.guard_filter_fn:
             from torch._dynamo.types import GuardFilterEntry
-            from torch._guards import GuardProvenance
 
             def new_guard_filter_fn(
                 guard_entries: Sequence[GuardFilterEntry],
             ) -> Sequence[bool]:
-                # The Python environment (module globals and imports) is the
-                # caller's invariant, so drop guards rooted there by
-                # provenance; is_global would keep ImportSource-rooted ones.
                 return [
                     (
                         not (
-                            g.provenance is GuardProvenance.GLOBAL
+                            g.is_global
                             or g.guard_type
                             in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
                         )
@@ -441,6 +437,9 @@ def aot_compile_fullgraph(
             )
 
         if check_fn.guards_state is None:
+            # Defensive: build_guards above runs with strict_error=True, so a
+            # serialization failure raises there directly (no swallowed cause to
+            # chain to); reaching here means guards_state came back None anyway.
             raise AssertionError("guards_state must not be None")
 
         source_info = SourceInfo(inlined_sources=set())

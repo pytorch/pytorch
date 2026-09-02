@@ -9,7 +9,6 @@ import multiprocessing
 import os
 import re
 import sys
-import threading
 from concurrent.futures import (
     Future,
     ThreadPoolExecutor,
@@ -60,7 +59,6 @@ from torch._inductor.runtime.compile_tasks import (
 )
 from torch._inductor.utils import clear_on_fresh_cache
 from torch._inductor.virtualized import V
-from torch._logging import warning_once
 from torch._utils_internal import log_triton_builds
 from torch.hub import _Faketqdm, tqdm
 from torch.utils._ordered_set import OrderedSet
@@ -88,15 +86,17 @@ size_hints_regex = re.compile(
 )
 
 # Matches the module imports that user-defined-Triton constexpr rendering
-# (torch/_inductor/codegen/wrapper.py, _ConstexprRenderer.module_ref) emits
-# into generated kernel source.
+# (torch/_inductor/codegen/wrapper.py, _constexpr_module_ref) emits into
+# generated kernel source.
 _constexpr_module_import_re = re.compile(
     r"^import ([\w.]+) as __inductor_constexpr_module_\d+$", re.MULTILINE
 )
+# Matches the root-name imports emitted for object-valued constexpr parameter
+# defaults (define_user_defined_triton_kernel), e.g. `from m import Cfg as Cfg`.
+_constexpr_root_import_re = re.compile(
+    r"^from ([\w.]+) import (\w+) as \2$", re.MULTILINE
+)
 _worker_missing_module_re = re.compile(r"No module named '([^']+)'")
-# Constexpr modules a compile worker failed to import (see AsyncCompile.triton):
-# kernels referencing them skip the worker pool and compile in-process.
-_worker_unimportable_modules: OrderedSet[str] = OrderedSet()
 
 
 def _constexpr_module_missing_in_worker(
@@ -116,11 +116,15 @@ def _constexpr_module_missing_in_worker(
     else:
         if "ModuleNotFoundError" not in error:
             return None
-        missing = _worker_missing_module_re.search(error)
-        name = missing.group(1) if missing else None
+        # A formatted traceback lists chained exceptions oldest first; the
+        # last "No module named" is the error that actually propagated.
+        missing = _worker_missing_module_re.findall(error)
+        name = missing[-1] if missing else None
     if name is None:
         return None
-    for module in _constexpr_module_import_re.findall(source_code):
+    modules = _constexpr_module_import_re.findall(source_code)
+    modules += [module for module, _ in _constexpr_root_import_re.findall(source_code)]
+    for module in modules:
         if module == name or module.startswith(name + "."):
             return module
     return None
@@ -539,13 +543,6 @@ class AsyncCompile:
                 return future.result()
 
         # Cache miss
-        if is_parallel and any(
-            module in _worker_unimportable_modules
-            for module in _constexpr_module_import_re.findall(source_code)
-        ):
-            return self._compile_triton_in_process(
-                kernel_name, source_code, load_kernel, compile_id, is_backward
-            )
         if is_parallel:
             # Ensure libdevice path is set in os.environ before passing to workers
             _set_triton_libdevice_path()
@@ -589,56 +586,45 @@ class AsyncCompile:
                 extra_config,
             )
 
-            # LambdaFuture.result() re-runs this on every call and task.result()
-            # re-raises the same worker exception each time; memoize the fallback
-            # kernel under a lock (the future is shared across threads) so
-            # re-entry neither recompiles nor re-warns.
-            fallback_lock = threading.Lock()
+            # LambdaFuture.result() does not memoize, and task.result()
+            # re-raises the same worker exception on every call; cache the
+            # fallback kernel so re-entry neither recompiles nor re-warns.
             fallback_kernel: CachingAutotuner | None = None
 
             def get_result() -> CachingAutotuner:
                 nonlocal fallback_kernel
-                with fallback_lock:
-                    if fallback_kernel is not None:
-                        return fallback_kernel
-                    try:
-                        kernel, elapsed_us = task.result()
-                    except (SubprocException, ModuleNotFoundError) as e:
-                        # The subprocess pool wraps worker failures in
-                        # SubprocException; spawn/fork pools re-raise the
-                        # worker's ModuleNotFoundError directly.
-                        error = e.details if isinstance(e, SubprocException) else e
-                        module = _constexpr_module_missing_in_worker(source_code, error)
-                        if module is None:
-                            if isinstance(e, SubprocException):
-                                raise e.with_name(kernel_name) from e
-                            raise
-                        # The parent validated this import at codegen time, so
-                        # only the worker's stale module search path is at
-                        # fault; compile in-process instead of failing the
-                        # compile, and skip the pool for later kernels that
-                        # reference the module.
-                        _worker_unimportable_modules.add(module)
-                        warning_once(
-                            log,
-                            "Compile workers cannot import module %r, referenced "
-                            "by a constexpr of a user-defined Triton kernel; "
-                            "workers snapshot PYTHONPATH when the pool spawns. "
-                            "Kernels referencing it fall back to in-process "
-                            "compilation. Make the module importable at worker "
-                            "startup (installed or on PYTHONPATH before compile) "
-                            "to keep parallel compile.",
-                            module,
-                        )
-                        CompiledTritonKernels.remove_future(source_code)
-                        fallback_kernel = self._compile_triton_in_process(
-                            kernel_name,
-                            source_code,
-                            load_kernel,
-                            compile_id,
-                            is_backward,
-                        )
-                        return fallback_kernel
+                if fallback_kernel is not None:
+                    return fallback_kernel
+                try:
+                    kernel, elapsed_us = task.result()
+                except (SubprocException, ModuleNotFoundError) as e:
+                    # The subprocess pool wraps worker failures in
+                    # SubprocException; spawn/fork pools re-raise the worker's
+                    # ModuleNotFoundError directly.
+                    error = e.details if isinstance(e, SubprocException) else e
+                    module = _constexpr_module_missing_in_worker(source_code, error)
+                    if module is None:
+                        if isinstance(e, SubprocException):
+                            raise e.with_name(kernel_name) from e
+                        raise
+                    # The parent validated this import at codegen time, so only
+                    # the worker's stale module search path is at fault; compile
+                    # in-process instead of failing the whole compile.
+                    log.warning(
+                        "Compile worker could not import module %r referenced by "
+                        "a constexpr of Triton kernel %s; workers snapshot "
+                        "PYTHONPATH when the pool spawns. Falling back to "
+                        "in-process compilation. Make the module importable at "
+                        "worker startup (installed or on PYTHONPATH before "
+                        "compile) to keep parallel compile.",
+                        module,
+                        kernel_name,
+                    )
+                    CompiledTritonKernels.remove_future(source_code)
+                    fallback_kernel = self._compile_triton_in_process(
+                        kernel_name, source_code, load_kernel, compile_id, is_backward
+                    )
+                    return fallback_kernel
 
                 # Now that we've compiled, we should clear the future
                 # so it can't be used again
