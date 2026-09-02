@@ -47,7 +47,6 @@ if TYPE_CHECKING:
 
 from ..ops_handler import registered_pointwise_ops, WrapperHandler
 from ..optimize_indexing import (
-    annotate_range_implied_vars,
     convert_index_expr_to_value_expr,
     indexing_dtype_strength_reduction,
 )
@@ -1276,22 +1275,35 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         raise NotImplementedError("NYI: call_kernel")
 
     @contextlib.contextmanager
-    def mask_loads(self, mask: str | OpsWrapper, value: int | float) -> Iterator[str]:
-        """Context manager to add an additional mask to tl.load/store"""
+    def mask_loads(
+        self,
+        mask: str | OpsWrapper,
+        value: int | float,
+        implied_masks: OrderedSet[str] | None = None,
+    ) -> Iterator[str]:
+        """
+        Context manager to add an additional mask to tl.load/store.
+        ``implied_masks`` are range masks that ``mask`` proves, so
+        filter_masks drops them inside the region.
+        """
         prior = self._load_mask
         prior_val = self._load_other
+        prior_implied = self._load_mask_implies
         if prior:
             mask = ops.logical_and(mask, prior)
 
         mask = OpsWrapper._unwrap(mask)
         self._load_mask = mask
         self._load_other = value
+        if implied_masks:
+            self._load_mask_implies = prior_implied | implied_masks
         try:
             # TODO(jansel): do we need a reshape here?
             yield mask
         finally:
             self._load_mask = prior
             self._load_other = prior_val
+            self._load_mask_implies = prior_implied
 
     def get_strides_of_load(self, index: sympy.Expr) -> dict[sympy.Symbol, sympy.Expr]:
         """
@@ -4232,7 +4244,6 @@ class SIMDScheduling(BaseScheduling):
     def _prepare_loop_body(body) -> None:
         indexing_dtype_strength_reduction(body)
         convert_index_expr_to_value_expr(body)
-        annotate_range_implied_vars(body)
 
     def _codegen_node_schedule_body(self, node_schedule, kernel) -> None:
         """Run a node schedule into ``kernel``: collect indexing, then emit.

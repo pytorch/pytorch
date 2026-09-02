@@ -14,7 +14,7 @@ import operator
 import os
 import textwrap
 from abc import abstractmethod
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from functools import lru_cache
 from typing import Any, cast, TYPE_CHECKING, TypeVar
 
@@ -50,6 +50,7 @@ from ..async_compile import AsyncCompile
 from ..codecache import code_hash, get_path, PyCodeCache, write_atomic
 from ..debug import set_kernel_post_grad_provenance_tracing
 from ..ops_handler import DefaultHandler
+from ..optimize_indexing import range_implied_indices
 from ..runtime import triton_heuristics
 from ..runtime.benchmarking import benchmarker
 from ..runtime.hints import (
@@ -97,7 +98,7 @@ from ..utils import (
     triton_version_uses_attrs_dict,
     upcast_compute_type,
 )
-from ..virtualized import _ops as ops, OpsWrapper, ReductionType, StoreMode, V
+from ..virtualized import _ops as ops, ReductionType, StoreMode, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
 from .block_analysis import BlockPatternMatcher
 from .common import (
@@ -2592,9 +2593,7 @@ class TritonKernelOverrides(TritonOverrides):
         value = None if need_where else other
 
         with V.kernel.mask_loads(
-            mask,
-            value=value,
-            redundant_masks=V.kernel._range_implied_masks(),
+            mask, value=value, implied_masks=V.kernel._range_implied_masks()
         ) as new_mask:
             result = body()
 
@@ -3370,7 +3369,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._op_trace_cse_names: dict[str, str] = {}
         self._op_trace_symbol_names: dict[sympy.Symbol, sympy.Symbol] = {}
         self._op_trace_symbol_counts: collections.Counter[str] = collections.Counter()
-        self._redundant_load_masks: OrderedSet[str] = OrderedSet()
 
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints = OrderedSet[AutotuneHint]()
@@ -3405,41 +3403,23 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def _range_implied_masks(self) -> OrderedSet[str]:
         """
         Range masks the masked op being interpreted makes redundant: its
-        predicate proves each var in ``LoopBody.range_implied_vars`` is in
-        range, so when such a var is a whole range tree root, the root's mask
-        is implied.
+        predicate proves an iteration var is in range (range_implied_indices)
+        and that var is a whole range tree root of this kernel.
         """
         result = OrderedSet[str]()
-        interpreter = V.interpreter
-        body = getattr(interpreter, "loop_body", None)
+        body = getattr(V.interpreter, "loop_body", None)
         if body is None:
             return result
-        for var in body.range_implied_vars.get(interpreter.current_node, ()):
-            entry = self.range_tree_nodes.get(body.var_substitution[var])
+        sizevars = V.graph.sizevars
+        for name in range_implied_indices(body, V.interpreter.current_node):
+            entry = self.range_tree_nodes.get(body.indexing[name])
             if (
                 entry is not None
-                and V.graph.sizevars.statically_known_equals(entry.divisor, 1)
-                and V.graph.sizevars.statically_known_equals(
-                    entry.length, entry.root.numel
-                )
+                and sizevars.statically_known_equals(entry.divisor, 1)
+                and sizevars.statically_known_equals(entry.length, entry.root.numel)
             ):
                 result.add(entry.root.mask_name())
         return result
-
-    @contextlib.contextmanager
-    def mask_loads(
-        self,
-        mask: str | OpsWrapper | TritonCSEVariable,
-        value: int | float,
-        redundant_masks: OrderedSet[str] | None = None,
-    ) -> Iterator[Any]:
-        prior = self._redundant_load_masks
-        self._redundant_load_masks = prior | (redundant_masks or OrderedSet())
-        try:
-            with super().mask_loads(mask, value) as new_mask:
-                yield new_mask
-        finally:
-            self._redundant_load_masks = prior
 
     def indexing_size_str(self, i: int) -> str:
         sizes = ["None"] * self.triton_tensor_ndim()
@@ -8056,13 +8036,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             raise AssertionError(f"expected xtree prefix 'x', got {xtree.prefix!r}")
         return self._has_constant_mask(xtree)
 
-    def filter_masks(self, mask_vars: OrderedSet[Any]) -> None:
+    def filter_masks(self, mask_vars: OrderedSet[str]) -> None:
         for tree in self.range_trees:
             if self._has_constant_mask(tree):
                 mask_vars.discard(tree.mask_name())
 
         mask_vars.discard("None")
-        mask_vars.difference_update(self._redundant_load_masks)
+        mask_vars.difference_update(self._load_mask_implies)
 
     @cache_on_self
     def get_reduction_prefixes(self) -> list[str]:
