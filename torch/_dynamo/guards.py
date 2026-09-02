@@ -4367,26 +4367,21 @@ class GuardsStatePickler(FunctionPicklerBase):
 
         See Note [Reconstructing a function a guard is rooted at].
         """
-        snapshot = (
-            self._globals_snapshot(obj.__globals__)
-            if self._keep(obj.__globals__)
-            else None
-        )
+        snapshot = None
+        if self._keep(obj.__globals__):
+            snapshot = self._globals_snapshot(obj.__globals__)
         # A registered container is carried verbatim; otherwise it keeps its
         # shape -- length, keys -- and only unguarded values become sentinels, so
         # a guard reading the container's structure still rebuilds against it.
         defaults = obj.__defaults__
         if defaults is not None and not self._keep(defaults):
-            defaults = tuple(
-                self._prune(value, "unguarded function default") for value in defaults
-            )
+            reason = "unguarded function default"
+            defaults = tuple(self._prune(v, reason) for v in defaults)
 
         kwdefaults = obj.__kwdefaults__
         if kwdefaults is not None and not self._keep(kwdefaults):
-            kwdefaults = {
-                name: self._prune(value, "unguarded function kwdefault")
-                for name, value in kwdefaults.items()
-            }
+            reason = "unguarded function kwdefault"
+            kwdefaults = {k: self._prune(v, reason) for k, v in kwdefaults.items()}
 
         closure = obj.__closure__
         if closure is not None:
@@ -4684,9 +4679,13 @@ def pickle_guards_state(
 
     # Whatever dump raises, some guarded value cannot be serialized. That is a
     # package bypass, or an error under strict_precompile, never a compiler
-    # crash; the cause stays chained for debugging.
+    # crash; the cause stays chained for debugging. RecursionError is the
+    # exception: a cycle the reducers did not route through pickle state is a
+    # pickler bug, not an unserializable value, so it stays loud.
     try:
         pickler.dump(state)
+    except RecursionError:
+        raise
     except Exception as e:
         raise torch._dynamo.exc.PackageError(str(e)) from e
     return buf.getvalue()

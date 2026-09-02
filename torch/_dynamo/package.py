@@ -146,8 +146,11 @@ class FunctionPicklerBase(pickle.Pickler):
         return types.CellType()
 
     @staticmethod
-    def _set_cell_contents(cell: types.CellType, contents: Any) -> None:
-        cell.cell_contents = contents
+    def _set_cell_contents(cell: types.CellType, state: tuple[Any]) -> None:
+        # The contents travel wrapped in a 1-tuple: pickle skips the state step
+        # entirely when the state object is None, and None is an ordinary cell
+        # value that must not come back as an empty cell.
+        cell.cell_contents = state[0]
 
     @classmethod
     def _build_function(
@@ -205,7 +208,7 @@ class FunctionPicklerBase(pickle.Pickler):
         return (
             type(self)._unpickle_empty_cell,
             (),
-            contents,
+            (contents,),
             None,
             None,
             type(self)._set_cell_contents,

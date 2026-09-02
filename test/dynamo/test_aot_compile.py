@@ -609,18 +609,25 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             actual = compiled_fn(*inputs)
             self.assertEqual(expected, actual)
 
-    def test_aot_compile_fn_calling_a_helper_with_an_empty_closure_cell(self):
+    def test_aot_compile_reloads_a_runtime_env_helper_faithfully(self):
         # A nested helper the compiled function closes over travels in the
-        # runtime env. A free variable of the helper only assigned on a path
-        # that did not run has an EMPTY cell, which the pickler used to read
-        # and fail on. (The compiled function itself cannot have one: capture
-        # reads all of its cells up front.)
+        # runtime env and is rebuilt from its code object at load. Everything
+        # it holds has to survive: an EMPTY cell (a free variable only assigned
+        # on a path that did not run) failed the pickler, a None-valued cell
+        # came back empty, and __kwdefaults__ and __dict__ were dropped. (The
+        # compiled function itself cannot have an empty cell: capture reads all
+        # of its cells up front.)
         def outer():
-            def helper(x):
+            scale = None
+
+            def helper(x, *, k=2):
                 if x is None:
                     return unset
-                return x + 1
+                if scale is None:
+                    x = x + 1
+                return x * k
 
+            helper.tag = 2.0
             if helper is None:
                 unset = 1
             return helper
@@ -644,6 +651,13 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             with open(self.path(), "rb") as f:
                 compiled_fn = torch.compiler.load_compiled_function(f)
             self.assertEqual(expected, compiled_fn(*inputs))
+        (cell,) = compiled_fn._artifacts.runtime_env.closure
+        loaded = cell.cell_contents
+        cells = dict(zip(loaded.__code__.co_freevars, loaded.__closure__))
+        self.assertRaises(ValueError, lambda: cells["unset"].cell_contents)
+        self.assertIsNone(cells["scale"].cell_contents)
+        self.assertEqual(loaded.__kwdefaults__, {"k": 2})
+        self.assertEqual(loaded.tag, 2.0)
 
     def test_aot_compile_autocast_guard_reload(self):
         def fn(x):
@@ -1856,8 +1870,10 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
 
         def outer():
+            scale = None
+
             def inner(*, k=1):
-                return unset
+                return unset, scale
 
             inner.__name__ = "renamed"
             inner.tag = 2.0
@@ -1866,7 +1882,8 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
             return inner
 
         fn = outer()
-        self.assertRaises(ValueError, lambda: fn.__closure__[0].cell_contents)
+        cells = dict(zip(fn.__code__.co_freevars, fn.__closure__))
+        self.assertRaises(ValueError, lambda: cells["unset"].cell_contents)
         buf = io.BytesIO()
         AOTCompilePickler({}, buf).dump(fn)
         out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
@@ -1874,7 +1891,11 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         self.assertEqual(out.__qualname__, fn.__qualname__)
         self.assertEqual(out.__kwdefaults__, {"k": 1})
         self.assertEqual(out.tag, 2.0)
-        self.assertRaises(ValueError, lambda: out.__closure__[0].cell_contents)
+        cells = dict(zip(out.__code__.co_freevars, out.__closure__))
+        self.assertRaises(ValueError, lambda: cells["unset"].cell_contents)
+        # A None-valued cell is not an empty one: bare None as reduce state is
+        # skipped by pickle, so it used to come back empty.
+        self.assertIsNone(cells["scale"].cell_contents)
 
 
 class TestTritonKernelSerialization(torch._inductor.test_case.TestCase):
