@@ -1,0 +1,120 @@
+{{def_kernel("A", "B")}}
+    BATCH = {{size("A", 0)}}
+    M = {{size("A", 1)}}
+    N = {{size("B", 2)}}
+    K = {{size("A", 2)}}
+    batch = (tl.program_id(1) + tl.program_id(2) * tl.num_programs(1)).to(tl.int32)
+    if batch >= BATCH or M * N == 0:
+        return
+
+    stride_ab = {{stride("A", 0)}}
+    stride_am = {{stride("A", 1)}}
+    stride_ak = {{stride("A", 2)}}
+    stride_bb = {{stride("B", 0)}}
+    stride_bk = {{stride("B", 1)}}
+    stride_bn = {{stride("B", 2)}}
+    a_base = A + batch * stride_ab
+    b_base = B + batch * stride_bb
+
+    # A logical rank-3 BMM is represented by one rank-2 descriptor per batch.
+    # This supports arbitrary/zero batch strides and keeps the descriptor-load
+    # shape compatible with today's rank-2 Transform2CTALoads implementation.
+    a_desc = triton.language.make_tensor_descriptor(
+        base=a_base,
+        shape=[M, K] if A_ROW_MAJOR else [K, M],
+        strides=[stride_am, 1] if A_ROW_MAJOR else [stride_ak, 1],
+        block_shape=[BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [BLOCK_K, BLOCK_M],
+    )
+    b_desc = triton.language.make_tensor_descriptor(
+        base=b_base,
+        shape=[K, N] if B_ROW_MAJOR else [N, K],
+        strides=[stride_bk, 1] if B_ROW_MAJOR else [stride_bn, 1],
+        block_shape=[BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
+    )
+
+    start_pid = tl.program_id(0)
+    grid_m = tl.cdiv(M, BLOCK_M)
+    grid_n = tl.cdiv(N, BLOCK_N)
+    num_tiles = grid_m * grid_n
+    num_pid_in_group = GROUP_M * grid_n
+    k_tiles = tl.cdiv(K, BLOCK_K)
+    tile_id_c = start_pid - NUM_SMS
+
+    for tile_id in tl.range(
+        start_pid,
+        num_tiles,
+        NUM_SMS,
+        flatten=FLATTEN,
+        warp_specialize=WARP_SPECIALIZE,
+        data_partition_factor=DATA_PARTITION_FACTOR,
+        separate_epilogue_store=SEPARATE_EPILOGUE_STORE,
+    ):
+        pid_m, pid_n = _blackwell_bmm_pid(
+            tile_id, num_pid_in_group, grid_m, GROUP_M
+        )
+        offs_am = (pid_m * BLOCK_M).to(tl.int32)
+        offs_bn = (pid_n * BLOCK_N).to(tl.int32)
+        accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
+        for ki in range(k_tiles):
+            offs_k = (ki * BLOCK_K).to(tl.int32)
+            a = tl.load_tensor_descriptor(
+                a_desc,
+                [offs_am, offs_k] if A_ROW_MAJOR else [offs_k, offs_am],
+            )
+            b = tl.load_tensor_descriptor(
+                b_desc,
+                [offs_k, offs_bn] if B_ROW_MAJOR else [offs_bn, offs_k],
+            )
+            accumulator += tl.dot(
+                a if A_ROW_MAJOR else a.T,
+                b if B_ROW_MAJOR else b.T,
+                allow_tf32=ALLOW_TF32,
+            )
+
+        tile_id_c += NUM_SMS
+        pid_m, pid_n = _blackwell_bmm_pid(
+            tile_id_c, num_pid_in_group, grid_m, GROUP_M
+        )
+        offs_cm = pid_m * BLOCK_M
+        offs_cn = pid_n * BLOCK_N
+        subtiles = _blackwell_bmm_subtiles(
+            accumulator, BLOCK_M, BLOCK_N, EPILOGUE_SUBTILE
+        )
+        for i in tl.static_range(EPILOGUE_SUBTILE):
+            offs_cn_i = offs_cn + i * (BLOCK_N // EPILOGUE_SUBTILE)
+            rm = offs_cm + tl.arange(0, BLOCK_M)[:, None]
+            rn = offs_cn_i + tl.arange(0, BLOCK_N // EPILOGUE_SUBTILE)[None, :]
+            mask = (rm < M) & (rn < N)
+            {{store_output(
+                ("batch", "rm", "rn"),
+                "subtiles[i]",
+                "mask",
+                indent_width=12,
+                val_shape=("BLOCK_M", "BLOCK_N // EPILOGUE_SUBTILE")
+            )}}
+
+
+@triton.jit
+def _blackwell_bmm_pid(tile_id, num_pid_in_group, grid_m, GROUP_M: tl.constexpr):
+    group_id = tile_id // num_pid_in_group
+    first_pid_m = group_id * GROUP_M
+    group_m = min(grid_m - first_pid_m, GROUP_M)
+    pid_m = first_pid_m + tile_id % group_m
+    pid_n = (tile_id % num_pid_in_group) // group_m
+    return pid_m, pid_n
+
+
+@triton.jit
+def _blackwell_bmm_subtiles(
+    acc,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    SUBTILE_FACTOR: tl.constexpr,
+):
+    if SUBTILE_FACTOR == 1:
+        return (acc,)
+    else:
+        tl.static_assert(SUBTILE_FACTOR == 2)
+        acc = tl.reshape(acc, (BLOCK_M, 2, BLOCK_N // 2))
+        acc = tl.permute(acc, (0, 2, 1))
+        return tl.split(acc)
