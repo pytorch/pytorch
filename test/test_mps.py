@@ -3671,6 +3671,15 @@ class TestMPS(TestCaseMPS):
 
         helper((2, 8, 4, 5))
 
+        # Regression for complex half pow: the polar form exp(y*log(x)) must be
+        # evaluated in float, otherwise moderately large magnitudes overflow half
+        # (e.g. (300+0j)**1 -> NaN). TODO: migrate to the pow OpInfo once chalf is
+        # in its dtype list.
+        base = torch.tensor([300 + 0j, 200 + 200j, 3 + 4j], dtype=torch.chalf, device='mps')
+        exp = torch.tensor([1 + 0j, 1 + 0j, 1.5 + 0j], dtype=torch.chalf, device='mps')
+        ref = torch.pow(base.cpu().to(torch.cfloat), exp.cpu().to(torch.cfloat))
+        self.assertEqual(torch.pow(base, exp).cpu().to(torch.cfloat), ref, atol=1e-2, rtol=1e-2)
+
     # Test addcmul
     def test_addcmul(self):
         def helper(shape, value, xtype=torch.float32, ytype=None, ztype=None):
@@ -12092,7 +12101,7 @@ class TestPad(TestCaseMPS):
         helper((1, 2, 2, 2, 2), (0, 1), nn.ConstantPad3d)
 
     def test_constant_pad_nd_preserves_memory_format(self):
-        nchw_tensor = torch.rand((1, 2, 5, 3))
+        nchw_tensor = torch.rand((1, 2, 5, 3), device="mps")
         nchw_padded = torch.constant_pad_nd(nchw_tensor, [1, 2], 0.5)
         self.assertTrue(nchw_padded.is_contiguous(memory_format=torch.contiguous_format))
 
@@ -16417,6 +16426,11 @@ class TestConsistency(TestCaseMPS):
         if dtype == torch.complex64:
             if op.name == "mv":
                 return (2e-5, 1e-5)
+            # Complex pow uses the float32 polar form exp(y*log(x)); its
+            # precise:: transcendentals round differently than CPU libm, and
+            # the phase error is amplified by the result magnitude.
+            if op.name in ("pow", "__rpow__"):
+                return (1e-4, 3e-5)
         return (None, None)
 
     # Used for accept mode only

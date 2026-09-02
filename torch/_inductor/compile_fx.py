@@ -2598,8 +2598,11 @@ def get_cpp_wrapper_config(log_cudagraph_skip: bool = True) -> dict[str, object]
     autotune_at_compile_time = (
         config.triton.autotune_at_compile_time
         if config.triton.autotune_at_compile_time is not None
-        # Default to True for AOTI. Subject to change in future.
-        else has_triton() and V.aot_compilation
+        # Default to True for AOTI when an accelerator or the selected CPU
+        # Triton backend is available. Subject to change in future.
+        else (
+            has_triton(include_cpu=config.cpu_backend == "triton") and V.aot_compilation
+        )
     )
     return {
         "triton.autotune_at_compile_time": autotune_at_compile_time,

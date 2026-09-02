@@ -44,6 +44,7 @@ from torch.testing._internal.common_cuda import (
     has_device_side_assert,
     PLATFORM_SUPPORTS_GREEN_CONTEXT,
     PLATFORM_SUPPORTS_WORKQUEUE_CONFIG,
+    ROCM_VERSION,
     SM70OrLater,
     SM89OrLater,
     TEST_CUDNN,
@@ -547,6 +548,22 @@ print(t.is_pinned())
             torch.cuda.memory._set_memory_metadata("metadata test")
         self.assertEqual(torch.cuda.memory._get_memory_metadata(), "")
 
+    def test_memory_metadata_dict(self):
+        if not torch._C._cuda_memoryMetadataSupported():
+            self.skipTest("backend does not support user metadata")
+        try:
+            # dicts are serialized to compact JSON; get returns the string form
+            torch.cuda.memory._set_memory_metadata({"step": 3, "phase": "fwd"})
+            got = torch.cuda.memory._get_memory_metadata()
+            self.assertEqual(json.loads(got), {"step": 3, "phase": "fwd"})
+            # get/set round-trips the string form unchanged
+            torch.cuda.memory._set_memory_metadata(got)
+            self.assertEqual(torch.cuda.memory._get_memory_metadata(), got)
+            with self.assertRaises(TypeError):
+                torch.cuda.memory._set_memory_metadata({"bad": object()})
+        finally:
+            torch.cuda.memory._set_memory_metadata("")
+
     def test_memory_stats(self):
         gc.collect()
         torch.cuda.empty_cache()
@@ -863,7 +880,6 @@ print(t.is_pinned())
             else:
                 # ROCm logic is less so, it's cublaslt for some Instinct, cublas for all else
                 # Mirror CUDAHooks::getHipblasltPreferredArchs in CUDAHooks.cpp
-                ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split(".")[:2])
                 archs = ["gfx90a", "gfx942", "gfx1200", "gfx1201", "gfx950"]
                 if ROCM_VERSION >= (7, 13):
                     archs.extend(["gfx1100", "gfx1101", "gfx1151"])
@@ -5112,6 +5128,42 @@ exit(2)
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    def test_graph_make_graphed_callables_freed_by_refcount(self):
+        # Dropping a graphed callable must free its CUDAGraphs right there rather than
+        # leaving them for the cyclic collector: freeing one runs cudaGraphDestroy and
+        # releasePool, which are illegal while some unrelated stream is capturing, and
+        # the collector picks its own moment to run.
+        def live_graphs():
+            return sum(
+                1 for o in gc.get_objects() if isinstance(o, torch.cuda.CUDAGraph)
+            )
+
+        def graph_and_drop(as_module):
+            # Everything the callable owns goes out of scope when this returns.
+            module = torch.nn.Linear(8, 8, device="cuda")
+            x = torch.randn(4, 8, device="cuda", requires_grad=True)
+            target = module if as_module else (lambda t: module(t))
+            torch.cuda.make_graphed_callables(target, (x,), num_warmup_iters=3)
+
+        for as_module in (True, False):
+            gc.collect()
+            before = live_graphs()
+            gc.disable()
+            try:
+                graph_and_drop(as_module)
+                self.assertEqual(
+                    live_graphs() - before,
+                    0,
+                    f"graphed callable (as_module={as_module}) left CUDAGraphs "
+                    "reachable only through a reference cycle",
+                )
+            finally:
+                gc.enable()
+                gc.collect()
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     def test_graph_make_graphed_callables_same_pool(self):
         torch.manual_seed(5)
         torch.cuda.manual_seed(5)
@@ -5949,6 +6001,39 @@ class TestResizeStorageWithAddr(TestCase):
         self.assertEqual(t.untyped_storage().nbytes(), original_size)
         self.assertEqual(t.untyped_storage().data_ptr(), original_ptr)
         self.assertNotEqual(other.untyped_storage().data_ptr(), original_ptr)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "CUDAMallocAsync does not support exact-address allocation",
+    )
+    def test_resize_storage_with_addr_metadata_tag(self):
+        # mallocWithAddress tags its trace entries via internal_metadata,
+        # leaving the user-set metadata (possibly JSON) verbatim
+        pool = torch.cuda.MemPool()
+        with torch.cuda.use_mem_pool(pool):
+            other = torch.empty(294, dtype=torch.uint8, device="cuda")
+            t = torch.empty(4096, dtype=torch.uint8, device="cuda")
+        original_ptr = t.untyped_storage().data_ptr()
+        original_size = t.untyped_storage().nbytes()
+        t.untyped_storage().resize_(0)
+        other.untyped_storage().resize_(0)
+        try:
+            torch.cuda.memory._record_memory_history(context=None)
+            torch.cuda.memory._set_memory_metadata({"phase": "resize"})
+            with torch.cuda.use_mem_pool(pool):
+                t.untyped_storage()._resize_with_addr_(original_size, original_ptr)
+            device = torch.cuda.current_device()
+            trace = torch.cuda.memory._snapshot()["device_traces"][device]
+            tag = "mallocWithAddress"
+            tagged = [e for e in trace if e.get("internal_metadata") == tag]
+            self.assertTrue(tagged)
+            for e in tagged:
+                self.assertEqual(json.loads(e["user_metadata"]), {"phase": "resize"})
+            for e in trace:
+                self.assertNotIn("mallocWithAddress", e["user_metadata"])
+        finally:
+            torch.cuda.memory._set_memory_metadata("")
+            torch.cuda.memory._record_memory_history(None)
 
     def test_resize_storage_negative_size_raises(self):
         # A negative requested storage size must be rejected, not silently

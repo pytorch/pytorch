@@ -9209,8 +9209,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @skipCUDAIf(
-        TEST_WITH_ROCM and (torch.version.hip is None or
-            tuple(int(x) for x in torch.version.hip.split(".")[:2]) < (7, 14)),
+        TEST_WITH_ROCM and ROCM_VERSION < (7, 14),
         "hipsolverDnXsytrs requires ROCm >= 7.14"
     )
     @dtypes(*floating_and_complex_types())
