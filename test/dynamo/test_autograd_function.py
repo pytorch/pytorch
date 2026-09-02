@@ -885,6 +885,28 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         after = compiled_model(*args, **kwargs)
         self.assertEqual(before, after)
 
+    def test_context_mark_dirty_rejects_kwargs(self):
+        # mark_dirty (and mark_non_differentiable) reach ctx via a
+        # tp_methods Method handler; the handler's own arity check (kwargs
+        # are not part of the real *args-only signature) must still fire.
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                x.mul_(3)
+                ctx.mark_dirty(x, unexpected=True)
+                return x
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+        def fn(x):
+            return Foo.apply(x.clone())
+
+        x = torch.randn(3, requires_grad=True)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+
     def test_mark_dirty_discarded_output_grad(self):
         class TimesThreeInplace(torch.autograd.Function):
             @staticmethod
