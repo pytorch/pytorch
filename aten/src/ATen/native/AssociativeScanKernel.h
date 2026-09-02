@@ -26,9 +26,9 @@ using associative_scan_tensor_list_fn = void (*)(
     const std::vector<TensorBase>& self,
     const std::string& combine_mode);
 
-DECLARE_DISPATCH(associative_scan_fn, associative_scan_stub);
+DECLARE_DISPATCH(associative_scan_fn, associative_scan_stub)
 DECLARE_DISPATCH(
     associative_scan_tensor_list_fn,
-    associative_scan_tensor_list_stub);
+    associative_scan_tensor_list_stub)
 
 } // namespace at::native
