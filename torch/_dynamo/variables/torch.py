@@ -207,18 +207,11 @@ def _get_privateuse1_autocast() -> Any:
 
 
 def _is_privateuse1_autocast(value: Any) -> bool:
-    privateuse1_autocast = _get_privateuse1_autocast()
-    if value is privateuse1_autocast:
-        return privateuse1_autocast is not None
-    if not isinstance(value, type) or not isinstance(privateuse1_autocast, type):
+    if not isinstance(value, type) or not issubclass(
+        value, torch.amp.autocast_mode.autocast
+    ):
         return False
-    try:
-        return (
-            inspect.getfile(value) == inspect.getfile(privateuse1_autocast)
-            and value.__qualname__ == privateuse1_autocast.__qualname__
-        )
-    except (TypeError, OSError):
-        return False
+    return value is _get_privateuse1_autocast()
 
 
 REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(

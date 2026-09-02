@@ -3,7 +3,7 @@
 import torch
 import torch._dynamo
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._dynamo.testing import CompileCounterWithBackend
+from torch._dynamo.testing import CompileCounterWithBackend, EagerAndRecordGraphs
 
 
 class TestBackendRegistration(TestCase):
@@ -175,6 +175,30 @@ class TestGraphBreaks(TestCase):
 
 
 class TestAutocast(TestCase):
+    def test_compile_with_backend_autocast(self):
+        backend = EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def fn(x, y):
+            with torch.openreg.amp.autocast():
+                return torch.mm(x, y)
+
+        x = torch.randn(2, 3, device="openreg")
+        y = torch.randn(3, 3, device="openreg")
+        result = fn(x, y)
+        self.assertEqual(result.dtype, torch.float16)
+
+        enter_autocast_nodes = [
+            node
+            for node in backend.graphs[0].graph.nodes
+            if node.target is torch.amp._enter_autocast
+        ]
+        self.assertEqual(len(enter_autocast_nodes), 1)
+        self.assertEqual(
+            enter_autocast_nodes[0].args,
+            ("openreg", torch.float16, True, True),
+        )
+
     def test_compile_with_autocast(self):
         @torch.compile(backend="openreg")
         def fn(x, y):
