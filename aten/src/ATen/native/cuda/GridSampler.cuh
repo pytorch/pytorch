@@ -351,8 +351,8 @@ scalar_t pixel_source_index(scalar_t x, index_t size,
     x = ::min(static_cast<scalar_t>(size - 1),
               ::max(x, static_cast<scalar_t>(0)));
   } else if (padding_mode == GridSamplerPadding::Reflection) {
-    // the two bounds reflect_coordinates halves, reached without doubling an
-    // extent a scalar_t may not represent
+    // the bounds reflect_coordinates halves, reached without doubling an extent
+    // the type may not represent
     const scalar_t low =
         align_corners ? static_cast<scalar_t>(0) : static_cast<scalar_t>(-0.5);
     const scalar_t span = static_cast<scalar_t>(align_corners ? size - 1 : size);
@@ -393,8 +393,8 @@ scalar_t pixel_source_index_set_grad(scalar_t x, index_t size,
     x = ::min(static_cast<scalar_t>(size - 1),
               ::max(x, static_cast<scalar_t>(0)));
   } else if (padding_mode == GridSamplerPadding::Reflection) {
-    // the two bounds reflect_coordinates halves, reached without doubling an
-    // extent a scalar_t may not represent
+    // the bounds reflect_coordinates halves, reached without doubling an extent
+    // the type may not represent
     const scalar_t low =
         align_corners ? static_cast<scalar_t>(0) : static_cast<scalar_t>(-0.5);
     const scalar_t span = static_cast<scalar_t>(align_corners ? size - 1 : size);
@@ -562,10 +562,9 @@ void resolve_cubic_taps(
   }
   #pragma unroll 4
   for (int i = 0; i < 4; ++i) {
-    // the comparison decides, not the cast: a coordinate that is not
-    // finite fails both sides, where converting it is undefined. Above the
-    // range where the coordinate type holds every integer the bound is the
-    // conservative one
+    // the comparison decides, not the cast: a coordinate that is not finite
+    // fails both sides, where converting it is undefined. Where the type runs
+    // out of integers the bound stays conservative
     const coord_t tap = compute_coordinates_sized(
         base - 1 + i, size, padding_mode, align_corners);
     indices[i] = (tap >= 0 && tap < static_cast<coord_t>(size))
@@ -595,10 +594,9 @@ void resolve_cubic_taps(
   }
   #pragma unroll 4
   for (int i = 0; i < 4; ++i) {
-    // the comparison decides, not the cast: a coordinate that is not
-    // finite fails both sides, where converting it is undefined. Above the
-    // range where the coordinate type holds every integer the bound is the
-    // conservative one
+    // the comparison decides, not the cast: a coordinate that is not finite
+    // fails both sides, where converting it is undefined. Where the type runs
+    // out of integers the bound stays conservative
     const coord_t tap = compute_coordinates_sized(
         base - 1 + i, size, padding_mode, align_corners);
     indices[i] = (tap >= 0 && tap < static_cast<coord_t>(size))

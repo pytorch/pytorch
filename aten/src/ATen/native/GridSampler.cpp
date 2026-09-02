@@ -103,8 +103,8 @@ namespace {
       x = std::min(static_cast<coord_t>(size - 1),
                    std::max(x, static_cast<coord_t>(0)));
     } else if (padding_mode == GridSamplerPadding::Reflection) {
-      // the two bounds reflect_coordinates halves, reached without doubling an
-      // extent a coord_t may not represent
+      // the bounds reflect_coordinates halves, reached without doubling an extent
+      // the type may not represent
       const coord_t low =
           align_corners ? static_cast<coord_t>(0) : static_cast<coord_t>(-0.5);
       const coord_t span = static_cast<coord_t>(align_corners ? size - 1 : size);
@@ -143,8 +143,8 @@ namespace {
       x = std::min(static_cast<coord_t>(size - 1),
                    std::max(x, static_cast<coord_t>(0)));
     } else if (padding_mode == GridSamplerPadding::Reflection) {
-      // the two bounds reflect_coordinates halves, reached without doubling an
-      // extent a coord_t may not represent
+      // the bounds reflect_coordinates halves, reached without doubling an extent
+      // the type may not represent
       const coord_t low =
           align_corners ? static_cast<coord_t>(0) : static_cast<coord_t>(-0.5);
       const coord_t span = static_cast<coord_t>(align_corners ? size - 1 : size);
@@ -239,8 +239,8 @@ namespace {
       const coord_t tap =
           compute_coordinates_sized(base - 1 + i, size, padding_mode, align_corners);
       // the comparison decides, not the cast: a coordinate that is not finite fails
-      // both sides, where converting it is undefined. Above the range where the
-      // coordinate type holds every integer the bound is the conservative one
+      // both sides, where converting it is undefined. Where the type runs out of
+      // integers the bound stays conservative
       indices[i] = (tap >= 0 && tap < static_cast<coord_t>(size))
           ? static_cast<index_t>(tap)
           : static_cast<index_t>(-1);
@@ -269,8 +269,8 @@ namespace {
       const coord_t tap =
           compute_coordinates_sized(base - 1 + i, size, padding_mode, align_corners);
       // the comparison decides, not the cast: a coordinate that is not finite fails
-      // both sides, where converting it is undefined. Above the range where the
-      // coordinate type holds every integer the bound is the conservative one
+      // both sides, where converting it is undefined. Where the type runs out of
+      // integers the bound stays conservative
       indices[i] = (tap >= 0 && tap < static_cast<coord_t>(size))
           ? static_cast<index_t>(tap)
           : static_cast<index_t>(-1);
@@ -285,10 +285,11 @@ namespace {
                                   double cubic_coeff_a) {
     // See NOTE [ grid_sampler Native Functions ].
     // Add checks here in case this is called instead of grid_sampler.
-    // coord_t places a sample (the grid's own arithmetic, so the historic
-    // instantiations keep their exact behaviour), opmath_t blends its taps.
+    // coord_t places a sample. A pixel coordinate is an index, which a half grid
+    // cannot hold past 2048, so it goes in the accumulate type; the normalized
+    // instantiations keep grid_t. opmath_t blends the taps.
     using opmath_t = at::opmath_type<scalar_t>;
-    using coord_t = grid_t;
+    using coord_t = std::conditional_t<pixel_coords, at::opmath_type<grid_t>, grid_t>;
     check_grid_sampler_common(input, grid);
     check_grid_sampler_3d(input, grid);
 
@@ -843,7 +844,8 @@ namespace {
     // See NOTE [ grid_sampler Native Functions ].
     // Add checks here in case this is called instead of grid_sampler.
     using opmath_t = at::opmath_type<scalar_t>;
-    using coord_t = grid_t;
+    // see the note on coord_t in grid_sampler_3d_cpu_impl
+    using coord_t = std::conditional_t<pixel_coords, at::opmath_type<grid_t>, grid_t>;
     check_grid_sampler_common(input, grid);
     check_grid_sampler_3d(input, grid);
 
