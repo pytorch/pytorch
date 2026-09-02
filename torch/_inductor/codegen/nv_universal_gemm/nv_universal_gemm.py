@@ -26,6 +26,7 @@ from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
     _current_target_sm,
     _get_scaled_gemm_modes,
     _make_disk_config_key,
+    _NVGEMM_BIAS_ADD_EPILOGUE_FINGERPRINT,
     _NVGEMM_BIAS_ADD_EPILOGUE_SOURCE,
     _rewrap_efc_compiled_obj,
     _unwrap_efc_compiled_obj,
@@ -282,7 +283,11 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
 
         kernel_name = self.kernel.metadata.operator_name
         cache_key = _create_gemm_cache_key(
-            gemm_tensors, out, has_epilogue=True, aux_tensors=(bias,)
+            gemm_tensors,
+            out,
+            has_epilogue=True,
+            aux_tensors=(bias,),
+            epilogue_source=_NVGEMM_BIAS_ADD_EPILOGUE_FINGERPRINT,
         )
         dev_idx = gemm_tensors[0].device.index or 0
         disk_config_key = _make_disk_config_key(
@@ -293,6 +298,7 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
             self.scale_type_b,
             self.swizzle_type_a,
             self.swizzle_type_b,
+            _NVGEMM_BIAS_ADD_EPILOGUE_FINGERPRINT,
         )
 
         def disk_fallback(kernel):
@@ -316,7 +322,7 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
             self.accumulator_type,
             kernel_name=kernel_name,
             epilogue_args=epilogue_args,
-            epilogue_source="nvgemm_addmm_bias_v2",
+            epilogue_source=_NVGEMM_BIAS_ADD_EPILOGUE_FINGERPRINT,
             fallback_fn=disk_fallback,
             base_kernel=self.kernel,
         )

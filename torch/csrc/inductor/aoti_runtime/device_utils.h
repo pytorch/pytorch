@@ -5,6 +5,8 @@
 // C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
 // applies to other files under torch/csrc/inductor/aoti_runtime/.
 
+#include <torch/csrc/inductor/aoti_runtime/utils.h>
+
 #ifdef USE_CUDA
 
 // FIXME: Currently, CPU and CUDA backend are mutually exclusive.
@@ -14,14 +16,12 @@
 #include <cuda.h>
 #include <cuda_runtime_api.h>
 
-#define AOTI_RUNTIME_CUDA_CHECK(EXPR)                      \
-  do {                                                     \
-    const cudaError_t code = EXPR;                         \
-    const char* msg = cudaGetErrorString(code);            \
-    if (code != cudaSuccess) {                             \
-      throw std::runtime_error(                            \
-          std::string("CUDA error: ") + std::string(msg)); \
-    }                                                      \
+#define AOTI_RUNTIME_CUDA_CHECK(EXPR)                            \
+  do {                                                           \
+    const cudaError_t code = EXPR;                               \
+    AOTI_RUNTIME_CHECK(                                          \
+        code == cudaSuccess,                                     \
+        std::string("CUDA error: ") + cudaGetErrorString(code)); \
   } while (0)
 
 namespace torch::aot_inductor {
@@ -40,7 +40,7 @@ using DeviceStreamType = cudaStream_t;
     if (status != ZE_RESULT_SUCCESS) {                                    \
       std::stringstream ss;                                               \
       ss << "L0 runtime error: " << std::hex << std::uppercase << status; \
-      throw std::runtime_error(std::move(ss).str());                      \
+      AOTI_RUNTIME_CHECK(false, std::move(ss).str());                     \
     }                                                                     \
   } while (0)
 
@@ -52,11 +52,8 @@ using DeviceStreamType = sycl::queue*;
 
 #else
 
-#define AOTI_RUNTIME_CPU_CHECK(EXPR)               \
-  bool ok = EXPR;                                  \
-  if (!ok) {                                       \
-    throw std::runtime_error("CPU runtime error"); \
-  }
+#define AOTI_RUNTIME_CPU_CHECK(EXPR) \
+  AOTI_RUNTIME_CHECK(EXPR, "CPU runtime error")
 
 namespace torch::aot_inductor {
 
