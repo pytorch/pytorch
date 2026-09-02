@@ -1,18 +1,11 @@
-# Shared CuteDSL launch glue: torch <-> cute tensor wrapping, stream handle, and
-# the EnableTVMFFI-compiled launcher. Reused by all CuteDSL native ops (reductions
-# today, pointwise later) -- the host-overhead-minimizing path established by the
-# pointwise/reduction experiment.
-#
-# Three host-overhead levers, all measured on B200 (see the experiment notes):
-#   - enable_tvm_ffi=True on from_dlpack: ~0.8us vs ~3.6us for the __dlpack__()
-#     capsule roundtrip (takes torch's fast C exchange).
-#   - options="--enable-tvm-ffi" on cute.compile: per-compile arg-passing convention
-#     that skips the per-arg get_c_pointers marshalling (~30% off the launch
-#     dispatch). Equivalent to the cute.compile[EnableTVMFFI] typed form.
-#   - _stream via _cuda_getCurrentRawStream: the raw cudaStream_t POINTER in ~0.07us
-#     (vs ~2.7us for the torch.cuda.current_stream() wrapper) AND it correctly
-#     tracks the CUDA-graph capture stream. Do NOT use _cuda_getCurrentStream(dev)[0]
-#     (a packed stream id, not a pointer -- deadlocks graph capture).
+# Shared CuteDSL launch glue: torch <-> cute tensor wrapping, stream handle, and the
+# EnableTVMFFI-compiled launcher, reused by every CuteDSL native op. Three host-overhead levers,
+# measured on B200:
+#   enable_tvm_ffi=True on from_dlpack        ~0.8us against ~3.6 for the __dlpack__() capsule
+#   options="--enable-tvm-ffi" on cute.compile  skips per-arg marshalling, ~30% off the dispatch
+#   _stream via _cuda_getCurrentRawStream     the raw cudaStream_t in ~0.07us against ~2.7, and it
+#     tracks the graph-capture stream. NOT _cuda_getCurrentStream(dev)[0], a packed id rather than a
+#     pointer, which deadlocks capture.
 
 import cuda.bindings.driver as cuda  # pyrefly: ignore[missing-import]
 import cutlass
