@@ -31,7 +31,7 @@ from torch.testing._internal.common_device_type import (
     requires_capabilities,
 )
 from torch.testing._internal.common_distributed import requires_world_size
-from torch.testing._internal.common_fsdp import FSDPTestContinuous
+from torch.testing._internal.common_fsdp import DISTRIBUTED_BACKEND, FSDPTestContinuous
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -112,7 +112,14 @@ class TPFSDPIntegrationTestBase(FSDPTestContinuous):
 
     @classmethod
     def backend_str(cls) -> str:
-        return dist.get_default_backend_for_device(cls._resolved_device_type())
+        try:
+            return dist.get_default_backend_for_device(cls._resolved_device_type())
+        except ValueError:
+            # Devices without a registered default backend (e.g. ``hpu`` unless
+            # the vendor extension registers ``hccl`` via ``register_backend``):
+            # fall back to the historical ``common_fsdp`` ``DISTRIBUTED_BACKEND``
+            # ("hccl" on HPU), preserving the pre-refactor behavior.
+            return DISTRIBUTED_BACKEND
 
     @property
     def world_size(self) -> int:
