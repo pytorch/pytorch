@@ -29,7 +29,6 @@ import io
 import itertools
 import logging
 import math
-import pickle
 import sys
 import textwrap
 import traceback
@@ -75,6 +74,7 @@ from torch._C._dynamo.guards import (
     TypeGuardAccessor,
     TypeMROGuardAccessor,
 )
+from torch._dynamo.package import FunctionPicklerBase, SerializedCode
 from torch._dynamo.source import (
     get_global_source_name,
     get_local_source_name,
@@ -221,7 +221,6 @@ if TYPE_CHECKING:
 
     from torch._C import DispatchKeySet
     from torch._dynamo.output_graph import OutputGraphCommon, OutputGraphGuardsState
-    from torch._dynamo.package import SerializedCode
     from torch.utils._python_dispatch import TraceableWrapperSubclass
 
 T = TypeVar("T")
@@ -4151,7 +4150,7 @@ def _get_unsupported_types() -> tuple[type, ...]:
     return ret
 
 
-class GuardsStatePickler(pickle.Pickler):
+class GuardsStatePickler(FunctionPicklerBase):
     def __init__(
         self,
         guard_tree_values: dict[int, Any],
@@ -4226,10 +4225,6 @@ class GuardsStatePickler(pickle.Pickler):
         return out
 
     @classmethod
-    def _unpickle_python_module(cls, alias: str) -> types.ModuleType:
-        return importlib.import_module(alias)
-
-    @classmethod
     def _unpickle_dispatch_key_set(cls, raw_repr: int) -> torch._C.DispatchKeySet:
         return torch._C.DispatchKeySet.from_raw_repr(raw_repr)
 
@@ -4278,23 +4273,10 @@ class GuardsStatePickler(pickle.Pickler):
     def _unpickle_op(cls, namespace: str, opname: str, overloadname: str) -> Any:
         return getattr(getattr(getattr(torch.ops, namespace), opname), overloadname)
 
-    @classmethod
-    def _unpickle_bound_method(cls, func: Any, base: Any) -> Any:
-        return types.MethodType(func, base)
-
     @staticmethod
     def _unpickle_sdp_backend(name: str) -> torch.nn.attention.SDPBackend:
         # Reconstruct from the Python-facing enum namespace
         return getattr(torch.nn.attention.SDPBackend, name)
-
-    @classmethod
-    def _unpickle_cell(cls, val: Any) -> Any:
-        def _() -> Any:
-            return val
-
-        if _.__closure__ is None:
-            raise AssertionError("Closure must not be None when unpickling cell")
-        return _.__closure__[0]
 
     @classmethod
     def _unpickle_named_tuple_type(
@@ -4302,59 +4284,6 @@ class GuardsStatePickler(pickle.Pickler):
     ) -> type[NamedTuple]:
         # pyrefly: ignore [bad-return]
         return collections.namedtuple(name, fields)
-
-    @classmethod
-    def _unpickle_code(cls, serialized_code: SerializedCode) -> types.CodeType:
-        from torch._dynamo.package import SerializedCode
-
-        return SerializedCode.to_code_object(serialized_code)
-
-    @classmethod
-    def _unpickle_empty_cell(cls) -> types.CellType:
-        return types.CellType()
-
-    @classmethod
-    def _build_function(
-        cls,
-        f_globals: dict[str, Any],
-        module: str,
-        code: types.CodeType,
-        qualname: str,
-        argdefs: tuple[object, ...] | None,
-        closure: tuple[types.CellType, ...] | None,
-        kwdefaults: dict[str, object] | None,
-        name: str,
-        attributes: dict[str, object],
-    ) -> types.FunctionType:
-        fn = types.FunctionType(code, f_globals, name, argdefs, closure)
-        # FunctionType derives __module__ from f_globals["__name__"], so any
-        # scope that is not the real module dict leaves it None and a guard
-        # rooted at fn.__module__ rebuilds against that.
-        fn.__module__ = module
-        fn.__qualname__ = qualname
-        fn.__kwdefaults__ = kwdefaults
-        fn.__dict__.update(attributes)
-        return fn
-
-    @classmethod
-    def _unpickle_function_from_module(
-        cls, module: str, *args: Any
-    ) -> types.FunctionType:
-        # NB module is not reliably where the function LIVES -- functools.wraps
-        # copies __module__ from the wrapped function -- so this scope can belong
-        # to a different file. Reached only when no guard walks __globals__: one
-        # that does registers the dict, which routes to the snapshot variant.
-        f_globals = importlib.import_module(module).__dict__
-        return cls._build_function(f_globals, module, *args)
-
-    @classmethod
-    def _unpickle_function_from_snapshot(
-        cls, module: str, *args: Any
-    ) -> types.FunctionType:
-        # The scope arrives as pickle STATE, through _apply_function_globals.
-        # Deliberately no import_module fallback: importing a module only to
-        # discard its dict is a load-time failure mode this branch is free of.
-        return cls._build_function({}, module, *args)
 
     # Note [Reconstructing a function a guard is rooted at]
     #
@@ -4365,26 +4294,18 @@ class GuardsStatePickler(pickle.Pickler):
     # right for one nothing depends on. When a guard's source walks THROUGH it,
     # evaluating that source against the sentinel raises while the guard manager
     # is still being built and the whole load fails, so it is rebuilt from its
-    # code object instead.
+    # code object instead (FunctionPicklerBase._reduce_function).
     #
     # Rebuilding drags along whatever the function holds -- closure cells,
     # defaults, attributes, and the module scope its body reads -- and carrying
     # all of that would let an unpicklable neighbour fail a package that never
     # needed it. So only values some guard tree node references are carried
-    # (_keep) and the rest become sentinels. Two consequences worth knowing:
-    #
-    #   - A registered CONTAINER is carried verbatim rather than pruned per
-    #     element. A guard on the __defaults__ tuple or __kwdefaults__ dict
-    #     itself -- what wrap_listlike's EQUALS_MATCH registers -- rebakes its
-    #     comparison constant from the reconstructed function at load, so a
-    #     pruned element would make that guard fail forever with no load error.
-    #   - The globals snapshot travels as pickle STATE, never as a reduce arg.
-    #     pickle memoizes an object only after saving its reduce args, so a
-    #     snapshot passed as an arg that reaches back to the function -- the
-    #     ordinary `wrapped = deco(base)` at module scope, or two wrappers
-    #     referencing each other -- recurses until RecursionError. State is
-    #     applied after memoization, so those references resolve to the pickle
-    #     already built.
+    # (_keep) and the rest become sentinels. A registered CONTAINER is carried
+    # verbatim rather than pruned per element: a guard on the __defaults__ tuple
+    # or __kwdefaults__ dict itself -- what wrap_listlike's SEQUENCE_LENGTH and
+    # CONSTANT_MATCH register -- rebakes its comparison constant from the
+    # reconstructed function at load, so a pruned element would make that guard
+    # fail forever with no load error.
 
     def _keep(self, value: object) -> bool:
         """Whether a value a reconstructed function holds has to be carried.
@@ -4426,15 +4347,9 @@ class GuardsStatePickler(pickle.Pickler):
             self._globals_snapshots[id(f_globals)] = snapshot
         return snapshot
 
-    def _reduce_cell(self, cell: types.CellType) -> types.CellType:
-        """Carry a closure cell, or replace it with a sentinel one.
-
-        A carried cell is passed through UNCHANGED so that two functions closing
-        over the same variable still share it after reload, and so that pickle
-        can memoize it. Only a dropped cell is rebuilt. An EMPTY cell has no
-        contents to prune, so it is always carried -- reducer_override rebuilds
-        it empty.
-        """
+    def _prune_cell(self, cell: types.CellType) -> types.CellType:
+        # A carried cell passes through UNCHANGED so pickle memoizes it and two
+        # functions closing over one variable still share it after reload.
         if self._keep(cell):
             return cell
         try:
@@ -4443,43 +4358,31 @@ class GuardsStatePickler(pickle.Pickler):
             return cell
         if self._keep(contents):
             return cell
-        return type(self)._unpickle_cell(self._missing("unguarded function closure"))
-
-    @staticmethod
-    def _apply_function_globals(
-        fn: types.FunctionType, guarded_globals: dict[str, object]
-    ) -> None:
-        fn.__globals__.update(guarded_globals)
+        return types.CellType(self._missing("unguarded function closure"))
 
     def _reduce_function_by_value(self, obj: types.FunctionType) -> tuple[Any, ...]:
-        """Pickle a function by value rather than by reference.
+        """Pickle a function by value, pruned to what some guard reads.
 
         See Note [Reconstructing a function a guard is rooted at].
         """
-        snapshot = (
-            self._globals_snapshot(obj.__globals__)
-            if self._keep(obj.__globals__)
-            else None
-        )
-        # A registered container is carried verbatim; otherwise it keeps its
-        # shape -- length, keys -- and only unguarded values become sentinels, so
-        # a guard reading the container's structure still rebuilds against it.
+        snapshot = None
+        if self._keep(obj.__globals__):
+            snapshot = self._globals_snapshot(obj.__globals__)
+        # An unregistered container keeps its shape; see the Note for why a
+        # registered one is carried verbatim.
         defaults = obj.__defaults__
         if defaults is not None and not self._keep(defaults):
-            defaults = tuple(
-                self._prune(value, "unguarded function default") for value in defaults
-            )
+            reason = "unguarded function default"
+            defaults = tuple(self._prune(v, reason) for v in defaults)
 
         kwdefaults = obj.__kwdefaults__
         if kwdefaults is not None and not self._keep(kwdefaults):
-            kwdefaults = {
-                name: self._prune(value, "unguarded function kwdefault")
-                for name, value in kwdefaults.items()
-            }
+            reason = "unguarded function kwdefault"
+            kwdefaults = {k: self._prune(v, reason) for k, v in kwdefaults.items()}
 
         closure = obj.__closure__
         if closure is not None:
-            closure = tuple(self._reduce_cell(cell) for cell in closure)
+            closure = tuple(self._prune_cell(cell) for cell in closure)
         # An unregistered __dict__ drops its unguarded keys outright: unlike a
         # signature, it holds whatever a decorator happened to stash, and no
         # guard can read a structure nothing registered.
@@ -4489,25 +4392,13 @@ class GuardsStatePickler(pickle.Pickler):
             for name, value in obj.__dict__.items()
             if keep_attributes or self._keep(value)
         }
-        args = (
-            obj.__module__,
-            obj.__code__,
-            obj.__qualname__,
-            defaults,
-            closure,
-            kwdefaults,
-            obj.__name__,
-            attributes,
-        )
-        if snapshot is None:
-            return type(self)._unpickle_function_from_module, args
-        return (
-            type(self)._unpickle_function_from_snapshot,
-            args,
-            snapshot,
-            None,
-            None,
-            type(self)._apply_function_globals,
+        return self._reduce_function(
+            obj,
+            defaults=defaults,
+            kwdefaults=kwdefaults,
+            closure=closure,
+            attributes=attributes,
+            globals_snapshot=snapshot,
         )
 
     # pyrefly: ignore [bad-override]
@@ -4520,8 +4411,6 @@ class GuardsStatePickler(pickle.Pickler):
             return type(obj).__new__, (type(obj),)
 
         if inspect.iscode(obj):
-            from torch._dynamo.package import SerializedCode
-
             return type(self)._unpickle_code, (SerializedCode.from_code_object(obj),)
 
         if id(obj) in self.missing_values:
@@ -4675,24 +4564,12 @@ class GuardsStatePickler(pickle.Pickler):
                         return _Missing, ("fqn mismatch",)
                     return self._reduce_function_by_value(obj)
         elif inspect.ismethod(obj):
-            func = obj.__func__
-            method_self = obj.__self__
-            inner_func = getattr(method_self, func.__name__)
-            if inspect.ismethod(inner_func):
-                inner_func = inner_func.__func__
-            if func is not inner_func:
-                return type(self)._unpickle_bound_method, (func, method_self)
+            reduced = self._reduce_bound_method(obj)
+            if reduced is not None:
+                return reduced
 
-        elif isinstance(obj, type((lambda x: lambda: x)(0).__closure__[0])):  # type: ignore[index] # noqa: PLC3002
-            # An EMPTY cell -- a free variable only assigned on a path that did
-            # not run -- has nothing to read, so rebuild it empty rather than
-            # reading it. This is the single place that knows how; _reduce_cell
-            # carries such a cell through to here.
-            try:
-                contents = obj.cell_contents
-            except ValueError:
-                return type(self)._unpickle_empty_cell, ()
-            return type(self)._unpickle_cell, (contents,)
+        elif isinstance(obj, types.CellType):
+            return self._reduce_cell(obj)
 
         if hasattr(torch.distributed, "distributed_c10d") and isinstance(
             obj, torch.distributed.distributed_c10d.Work
@@ -4800,9 +4677,15 @@ def pickle_guards_state(
         state.output_graph.guard_on_key_order = set()
         state.output_graph.global_scope = {}
 
+    # Anything dump raises means a guarded value cannot be serialized, which is
+    # a bypass (an error under strict_precompile), never a compiler crash. A
+    # RecursionError is a cycle the reducers did not route through pickle
+    # state, i.e. a pickler bug, so it stays loud.
     try:
         pickler.dump(state)
-    except (AttributeError, TypeError, pickle.PicklingError) as e:
+    except RecursionError:
+        raise
+    except Exception as e:
         raise torch._dynamo.exc.PackageError(str(e)) from e
     return buf.getvalue()
 
@@ -4825,6 +4708,7 @@ class CheckFunctionManager:
             [Sequence[GuardFilterEntry]], Sequence[bool]
         ]
         | None = None,
+        explicit_capture: bool = False,
         shape_code_parts: ShapeCodeParts | None = None,
         runtime_global_scope: dict[str, Any] | None = None,
         save_guards: bool = False,
@@ -4861,12 +4745,9 @@ class CheckFunctionManager:
             log.warning("guard_nn_modules is turned off using justknobs killswitch")
 
         # TODO Be more explicit about the behavior for the users.
-        # An explicit package supplies a separate serialization filter. Ambient
+        # An explicit capture supplies a separate serialization filter. Ambient
         # caching-precompile mode must not rewrite that package's live guards.
-        if (
-            torch._dynamo.config.caching_precompile
-            and serialization_guard_filter_fn is None
-        ):
+        if torch._dynamo.config.caching_precompile and not explicit_capture:
             _guard_filter_fn = guard_filter_fn or (lambda gs: [True for g in gs])
 
             def guard_filter_fn(guards: Sequence[GuardFilterEntry]) -> Sequence[bool]:
@@ -4956,7 +4837,7 @@ class CheckFunctionManager:
             runtime_guards = (
                 apply_filter(guard_filter_fn) if guard_filter_fn else all_guards
             )
-            runtime_save_guards = save_guards and serialization_guard_filter_fn is None
+            runtime_save_guards = save_guards and not explicit_capture
             builder, guard_manager = self.build_guards(
                 runtime_guards,
                 existing_diff_guard_sources,
@@ -4968,7 +4849,11 @@ class CheckFunctionManager:
 
             serialized_guards = runtime_guards
             serialization_builder = builder
-            if save_guards and serialization_guard_filter_fn is not None:
+            if save_guards and explicit_capture:
+                if serialization_guard_filter_fn is None:
+                    raise AssertionError(
+                        "explicit capture requires a serialization guard filter"
+                    )
                 serialized_guards = apply_filter(serialization_guard_filter_fn)
                 serialization_builder, _ = self.build_guards(
                     serialized_guards,

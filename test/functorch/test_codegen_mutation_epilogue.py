@@ -87,9 +87,9 @@ class TestCodegenMutationEpilogue(TestCase):
             "Expected mutation_epilogue codegen artifact to be emitted",
         )
         # The write-back goes through _replay_input_mutation rather than a bare
-        # copy_: a view created inside a custom autograd Function has to be
-        # written under no_grad with its version counter preserved, which the
-        # helper decides from the creation meta at runtime.
+        # copy_: a view created inside a custom autograd Function is written
+        # under no_grad with its version counter preserved, which the helper
+        # decides from the creation meta at runtime.
         self.assertIn("_replay_input_mutation", captured[0])
 
     def test_multiple_data_mutations(self):
