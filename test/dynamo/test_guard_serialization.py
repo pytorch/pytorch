@@ -559,6 +559,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             self._test_serialization("TYPE_MATCH", fn, m, torch.randn(3))
         self.assertIsInstance(cm.exception, torch._dynamo.exc.GuardSerializationError)
         self.assertEqual(cm.exception.guard_type, "TYPE_MATCH")
+        self.assertEqual(cm.exception.guard_name, "L['m']")
 
         m = GlobalModule()
         ref, loaded = self._test_serialization("TYPE_MATCH", fn, m, torch.randn(3))
@@ -598,6 +599,25 @@ class TestGuardSerialization(TestGuardSerializationBase):
                 check_leaf_guards(child_mgr)
 
         check_leaf_guards(ref.root)
+
+    def test_strict_unpicklable_guard_value_raises_typed(self):
+        # Strict-path counterpart of
+        # test_nonstrict_unpicklable_guard_state_failure_is_typed: an
+        # unpicklable guarded value (thread lock) must raise PackageError
+        # directly from the underlying "cannot pickle" TypeError, exercising
+        # the pickle-dump catch that reclassifies only genuine unserializable
+        # values (a TypeError of any other shape now surfaces as a bug).
+        import threading
+
+        def fn(x, lk):
+            # Reference lk's type (installs a TYPE_MATCH guard on the lock, so
+            # the lock value lands in the guard tree) without a data-dependent
+            # branch that would graph-break this simplified harness.
+            return x + len(type(lk).__name__)
+
+        with self.assertRaisesRegex(PackageError, "cannot pickle") as cm:
+            self._test_serialization("TYPE_MATCH", fn, torch.randn(3), threading.Lock())
+        self.assertIsInstance(cm.exception.__cause__, TypeError)
 
     def test_tensor_subclass_metadata_match(self):
         class LocalSubclass(torch.Tensor):
