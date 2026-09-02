@@ -60,6 +60,9 @@ log = logging.getLogger(__name__)
 _NVGEMM_BIAS_ADD_EPILOGUE_SOURCE = (
     "def _epilogue_fn(accum, bias):\n    D = accum + bias\n    return D"
 )
+_NVGEMM_BIAS_ADD_EPILOGUE_FINGERPRINT = hashlib.sha256(
+    _NVGEMM_BIAS_ADD_EPILOGUE_SOURCE.encode()
+).hexdigest()
 
 
 def _local_reduce_source_constant(field: str) -> str:
@@ -201,6 +204,7 @@ def _make_disk_config_key(
     scale_type_b: Any | None = None,
     swizzle_type_a: Any | None = None,
     swizzle_type_b: Any | None = None,
+    epilogue_source: str = "",
 ) -> tuple:
     return (
         kernel_name,
@@ -210,6 +214,7 @@ def _make_disk_config_key(
         str(scale_type_b),
         str(swizzle_type_a),
         str(swizzle_type_b),
+        epilogue_source,
         _nvgemm_source_fingerprint(),
     )
 
@@ -439,11 +444,15 @@ def _worker_nvgemm_autotuning_precompile(
         epilogue_args = CuTeDSLEpilogueArguments(
             _NVGEMM_BIAS_ADD_EPILOGUE_SOURCE, bias=bias, D=out
         )
-        epilogue_source = "nvgemm_addmm_bias_v2"
+        epilogue_source = _NVGEMM_BIAS_ADD_EPILOGUE_FINGERPRINT
         aux_tensors = (bias,)
 
     cache_key = _create_gemm_cache_key(
-        input_tensors, out, has_epilogue=has_bias_epilogue, aux_tensors=aux_tensors
+        input_tensors,
+        out,
+        has_epilogue=has_bias_epilogue,
+        aux_tensors=aux_tensors,
+        epilogue_source=epilogue_source,
     )
     dev_idx = input_tensors[0].device.index or 0
     disk_config_key = _make_disk_config_key(
@@ -454,6 +463,7 @@ def _worker_nvgemm_autotuning_precompile(
         scale_type_b,
         swizzle_type_a,
         swizzle_type_b,
+        epilogue_source,
     )
     disk_fn_cache: dict = {}
 
@@ -688,6 +698,7 @@ def _create_gemm_cache_key(
     *,
     has_epilogue: bool = False,
     aux_tensors: tuple = (),
+    epilogue_source: str = "",
     epilogue_specialization: tuple = (),
 ):
     cache_key = tuple(s for t in input_tensors for s in _tensor_sig(t))
@@ -695,7 +706,13 @@ def _create_gemm_cache_key(
 
     if has_epilogue:
         aux_sig = tuple(_tensor_sig(t) for t in aux_tensors)
-        return (*cache_key, "epilogue", aux_sig, epilogue_specialization)
+        return (
+            *cache_key,
+            "epilogue",
+            epilogue_source,
+            aux_sig,
+            epilogue_specialization,
+        )
     return cache_key
 
 
@@ -931,6 +948,7 @@ def _nvgemm_run(
         out,
         has_epilogue=has_epilogue,
         aux_tensors=aux_tensors,
+        epilogue_source=epilogue_source,
         epilogue_specialization=epilogue_specialization,
     )
     dev_idx = input_tensors[0].device.index or 0
@@ -1176,21 +1194,15 @@ class NVUniversalGemmKernelWrapper:
 def _build_bias_epilogue(bias_name: str, out_name: str) -> GemmEpiloguePlan:
     """Build the epilogue fields for an addmm bias-add (``accum + bias``).
 
-    Uses the bias buffer name as the epilogue-fn parameter, matching
-    CutlassEVTCodegen's convention. This deliberately avoids the name ``C``:
-    cutlass.operators' LoadSrcImpl claims any epilogue param named ``C`` whose
-    shape equals the output (ignoring stride), which shadows the row/column
-    broadcast impls and silently mis-reads a broadcast (1D) bias.
+    The stable ``bias`` parameter keeps runtime and precompile cache identities
+    aligned. It also avoids ``C``, which cutlass.operators reserves for a
+    same-shaped source and can misclassify broadcast biases.
     """
     return GemmEpiloguePlan(
-        source=(
-            f"def _epilogue_fn(accum, {bias_name}):\n"
-            f"    D = accum + {bias_name}\n"
-            f"    return D"
-        ),
+        source=_NVGEMM_BIAS_ADD_EPILOGUE_SOURCE,
         is_evt_fallback=False,
         reads=(bias_name,),
-        renames={bias_name: bias_name, "D": out_name},
+        renames={"bias": bias_name, "D": out_name},
     )
 
 
@@ -1379,6 +1391,7 @@ class NVUniversalGemmKernel(Kernel):
 
         # -- Epilogue function definition (must be module-level for cutlass.operators) --
         epilogue_fn_code = self.epilogue.source
+        epilogue_source_hash = ""
         if has_epilogue and epilogue_fn_code is not None:
             epilogue_source_hash = hashlib.sha256(epilogue_fn_code.encode()).hexdigest()
             code.writeline(f'_EPILOGUE_FN_SOURCE = "{epilogue_source_hash}"')
@@ -1402,6 +1415,7 @@ class NVUniversalGemmKernel(Kernel):
                 self.scale_type_b,
                 self.swizzle_type_a,
                 self.swizzle_type_b,
+                epilogue_source_hash,
             )
         )
         code.writeline(

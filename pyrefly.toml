@@ -31,6 +31,7 @@ project-excludes = [
   "torch/include/**",
   "torch/csrc/**",
   "torch/distributed/elastic/agent/server/api.py",
+  "torch/distributed/nccl4py_backend.py",
   "torch/testing/_internal/**",
   "torch/distributed/fsdp/fully_sharded_data_parallel.py",
   "torch/ao/quantization/pt2e/_affine_quantization.py",
@@ -186,57 +187,7 @@ unannotated-return = true
 unannotated-parameter = true
 
 [[sub-config]]
-matches = "torch/_numpy/linalg.py"
-[sub-config.errors]
-implicit-import = false
-implicit-any = true
-bad-param-name-override = false
-unannotated-return = true
-unannotated-parameter = true
-unannotated-attribute = true
-
-[[sub-config]]
-matches = "torch/_numpy/_reductions_impl.py"
-[sub-config.errors]
-implicit-import = false
-implicit-any = true
-bad-param-name-override = false
-unannotated-return = true
-unannotated-parameter = true
-unannotated-attribute = true
-
-[[sub-config]]
-matches = "torch/_numpy/fft.py"
-[sub-config.errors]
-implicit-import = false
-implicit-any = true
-bad-param-name-override = false
-unannotated-return = true
-unannotated-parameter = true
-unannotated-attribute = true
-
-[[sub-config]]
-matches = "torch/_numpy/_dtypes.py"
-[sub-config.errors]
-implicit-import = false
-implicit-any = true
-bad-param-name-override = false
-unannotated-return = true
-unannotated-parameter = true
-unannotated-attribute = true
-
-[[sub-config]]
-matches = "torch/_numpy/_normalizations.py"
-[sub-config.errors]
-implicit-import = false
-implicit-any = true
-bad-param-name-override = false
-unannotated-return = true
-unannotated-parameter = true
-unannotated-attribute = true
-
-[[sub-config]]
-matches = "torch/_numpy/_util.py"
+matches = "torch/_numpy/**"
 [sub-config.errors]
 implicit-import = false
 implicit-any = true
@@ -387,116 +338,6 @@ unannotated-attribute = true
 
 [[sub-config]]
 matches = "torch/_inductor/fx_passes/serialized_patterns/**"
-[sub-config.errors]
-implicit-import = false
-implicit-any = true
-bad-param-name-override = false
-unannotated-return = true
-unannotated-parameter = true
-unannotated-attribute = true
-
-[[sub-config]]
-matches = "torch/_numpy/__init__.py"
-[sub-config.errors]
-implicit-import = false
-implicit-any = true
-bad-param-name-override = false
-unannotated-return = true
-unannotated-parameter = true
-unannotated-attribute = true
-
-[[sub-config]]
-matches = "torch/_numpy/_casting_dicts.py"
-[sub-config.errors]
-implicit-import = false
-implicit-any = true
-bad-param-name-override = false
-unannotated-return = true
-unannotated-parameter = true
-unannotated-attribute = true
-
-[[sub-config]]
-matches = "torch/_numpy/_getlimits.py"
-[sub-config.errors]
-implicit-import = false
-implicit-any = true
-bad-param-name-override = false
-unannotated-return = true
-unannotated-parameter = true
-unannotated-attribute = true
-
-[[sub-config]]
-matches = "torch/_numpy/_binary_ufuncs_impl.py"
-[sub-config.errors]
-implicit-import = false
-implicit-any = true
-bad-param-name-override = false
-unannotated-return = true
-unannotated-parameter = true
-unannotated-attribute = true
-
-[[sub-config]]
-matches = "torch/_numpy/_unary_ufuncs_impl.py"
-[sub-config.errors]
-implicit-import = false
-implicit-any = true
-bad-param-name-override = false
-unannotated-return = true
-unannotated-parameter = true
-unannotated-attribute = true
-
-[[sub-config]]
-matches = "torch/_numpy/_funcs.py"
-[sub-config.errors]
-implicit-import = false
-implicit-any = true
-bad-param-name-override = false
-unannotated-return = true
-unannotated-parameter = true
-unannotated-attribute = true
-
-[[sub-config]]
-matches = "torch/_numpy/_dtypes_impl.py"
-[sub-config.errors]
-implicit-import = false
-implicit-any = true
-bad-param-name-override = false
-unannotated-return = true
-unannotated-parameter = true
-unannotated-attribute = true
-
-[[sub-config]]
-matches = "torch/_numpy/random.py"
-[sub-config.errors]
-implicit-import = false
-implicit-any = true
-bad-param-name-override = false
-unannotated-return = true
-unannotated-parameter = true
-unannotated-attribute = true
-
-[[sub-config]]
-matches = "torch/_numpy/_ufuncs.py"
-[sub-config.errors]
-implicit-import = false
-implicit-any = true
-bad-param-name-override = false
-unannotated-return = true
-unannotated-parameter = true
-unannotated-attribute = true
-
-[[sub-config]]
-matches = "torch/_numpy/_ndarray.py"
-[sub-config.errors]
-implicit-import = false
-implicit-any = true
-bad-param-name-override = false
-unannotated-return = true
-unannotated-parameter = true
-unannotated-attribute = true
-
-[[sub-config]]
-matches = "torch/_numpy/_funcs_impl.py"
 [sub-config.errors]
 implicit-import = false
 implicit-any = true
