@@ -2269,6 +2269,19 @@ class triton:
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
     )
 
+    # Experimental Blackwell partial template with divisor-free aligned K
+    # partitions.  Kept opt-in until complete-plan coverage is broader.
+    enable_blackwell_decompose_k_partial = (
+        os.environ.get("TORCHINDUCTOR_ENABLE_BLACKWELL_DECOMPOSE_K_PARTIAL", "0")
+        == "1"
+    )
+
+    # Experimental logical rank-3 Blackwell BMM template.  The initial route
+    # offers only one 1CTA plan; 2CTA uses a flattened-output subgraph adapter.
+    enable_blackwell_bmm_template = (
+        os.environ.get("TORCHINDUCTOR_ENABLE_BLACKWELL_BMM_TEMPLATE", "0") == "1"
+    )
+
     # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
     # If set to true, will generate PDL code on devices that support it.
     # If set to false, will never generate PDL code.
