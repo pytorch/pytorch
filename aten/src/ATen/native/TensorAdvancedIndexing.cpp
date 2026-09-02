@@ -1559,6 +1559,14 @@ static void check_indexarray_range(
   }
 }
 
+// __builtin_prefetch is a GCC/Clang builtin; MSVC lacks it. Provide a portable
+// no-op fallback so this translation unit still compiles on Windows.
+#if defined(__GNUC__) || defined(__clang__)
+#define AT_INDEX_SELECT_PREFETCH(addr) __builtin_prefetch((addr), 0, 0)
+#else
+#define AT_INDEX_SELECT_PREFETCH(addr) ((void)0)
+#endif
+
 static Tensor& index_select_out_cpu_dim1_(
     Tensor& result_contig,
     const Tensor& self,
@@ -1603,20 +1611,30 @@ static Tensor& index_select_out_cpu_dim1_(
           // outer_dims_product specifies how many times we repeat inner
           // dimensions, so we just iterate over it to cover all outer
           // dimensions.
+          // Prefetch the randomly-gathered source read this many iterations
+          // ahead to hide its cache-miss latency behind the current copy.
+          constexpr int64_t kPrefetchDistance = 8;
           for (const auto batch : c10::irange(outer_dims_product)) {
+            const auto* src_batch_base = src_base + batch * src_batch_bytesize;
+            auto* dst_batch_base = out + batch * gathered_batch_bytesize;
             for (const auto i : c10::irange(N)) {
-              auto idx = idxs[i];
-              auto src =
-                  src_base + batch * src_batch_bytesize + idx * block_bytesize;
-              auto dst =
-                  out + batch * gathered_batch_bytesize + i * block_bytesize;
-              memcpy(dst, src, block_bytesize);
+              if (i + kPrefetchDistance < N) {
+                AT_INDEX_SELECT_PREFETCH(
+                    src_batch_base +
+                    idxs[i + kPrefetchDistance] * block_bytesize);
+              }
+              memcpy(
+                  dst_batch_base + i * block_bytesize,
+                  src_batch_base + idxs[i] * block_bytesize,
+                  block_bytesize);
             }
           }
         }
       });
   return result_contig;
 }
+
+#undef AT_INDEX_SELECT_PREFETCH
 
 Tensor& index_select_out_cpu_(
     const Tensor& self,
