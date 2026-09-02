@@ -4734,7 +4734,7 @@ class InstructionTranslatorBase(
                 )
             kw_names = kw_names.as_python_constant()
         else:
-            kw_names = self.kw_names.value if self.kw_names else ()
+            kw_names = self.kw_names.as_python_constant() if self.kw_names else ()
 
         if inst.arg is None:
             raise AssertionError("expected inst.arg is not None to be true")

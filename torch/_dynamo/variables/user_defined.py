@@ -1128,6 +1128,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # copy.replace(ns) resolves type(ns).__replace__ and calls it with
             # the instance as the sole positional argument.
             return args[0].call_method(tx, name, [*args[1:]], kwargs)
+        elif (
+            args
+            and isinstance(
+                inspect.getattr_static(self.value, name, None),
+                (types.WrapperDescriptorType, types.MethodDescriptorType),
+            )
+            and any(name in klass.__dict__ for klass in self.value.__mro__)
+        ):
+            if isinstance(args[0], UserDefinedObjectVariable):
+                return args[0].call_base_method(tx, name, args[1:], kwargs)
+            return args[0].call_method(tx, name, args[1:], kwargs)
         elif name == "__len__" and len(args) == 1 and not kwargs:
             from .object_protocol import generic_size
 
