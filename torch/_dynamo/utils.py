@@ -2573,6 +2573,7 @@ def copy_dynamo_tensor_attributes(src: torch.Tensor, dst: torch.Tensor) -> None:
     _copy_dynamo_attr(src, dst, "_dynamo_shape_ids")
     _copy_dynamo_attr(src, dst, "_dynamo_strict_unbacked_indices")
     _copy_dynamo_attr(src, dst, "_dynamo_weak_dynamic_indices")
+    _copy_dynamo_attr(src, dst, "_dynamo_dynamic_range")
     _copy_dynamo_attr(src, dst, "_dynamo_propagated_dynamic_indices")
     _copy_dynamo_attr(src, dst, "_has_dynamo_dim_marking")
 
@@ -3004,14 +3005,6 @@ def is_int_specialization_case(value: Any, source: Any) -> bool:
         )
         or (
             source.guard_source.is_unspecialized_nn_module()
-            and not config.allow_unspec_int_on_nn_module
-        )
-        # FSDP-managed modules skip guards (config.skip_fsdp_guards), but their
-        # int attributes should still statically specialize like any other nn
-        # module attribute; otherwise dynamic=True turns model structure (e.g.
-        # num_heads, head_dim) into symbols and destroys Inductor fusion.
-        or (
-            source.guard_source.is_fsdp_module()
             and not config.allow_unspec_int_on_nn_module
         )
         or is_from_defaults(source)
