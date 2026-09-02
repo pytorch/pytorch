@@ -3027,7 +3027,8 @@ class _AutogradBackwardCompiler:
                 )
 
 
-class KeptTangentInfo(typing.NamedTuple):
+@dataclass(frozen=True)
+class KeptTangentInfo:
     """Compile-time description of the tangent slots the backward prologue keeps.
 
     One of these is built per backward prologue and passed (as a single shared
@@ -3553,7 +3554,6 @@ class _AOTDispatchAutogradFunctionFactory:
                 buf.writeline(
                     f"_dealias_marked_returns(raw_returns, {_non_diff_indices!r})"
                 )
-            if _non_diff_indices:
                 checks = " + ".join(
                     f"([raw_returns[{i}]] if isinstance(raw_returns[{i}], Tensor) else [])"
                     for i in _non_diff_indices
@@ -3807,7 +3807,7 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
         tangent_desc: Any | None,
         compile_id_str: str | None,
         tangent_stack_trace: str | None,
-        kept_tangent_info: "KeptTangentInfo | None",
+        kept_tangent_info: KeptTangentInfo | None,
     ) -> RuntimeError:
         """Explain a kept tangent slot that arrived as a non-Tensor (in practice None).
 
@@ -3942,7 +3942,7 @@ with this message.
         tangent_desc: Any | None = None,
         compile_id_str: str | None = None,
         tangent_stack_trace: str | None = None,
-        kept_tangent_info: "KeptTangentInfo | None" = None,
+        kept_tangent_info: KeptTangentInfo | None = None,
     ) -> tuple[Any, list[Any]]:
         if not isinstance(x, torch.Tensor):
             # Every top-level call comes from the backward prologue, which only

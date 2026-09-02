@@ -16,7 +16,12 @@ import torch
 import torch.fx
 from torch._dynamo.convert_frame import GraphRuntimeEnv
 from torch._dynamo.graph_utils import _graph_device_types
-from torch._dynamo.package import emits_native_code, SystemInfo
+from torch._dynamo.package import (
+    emits_native_code,
+    FunctionPicklerBase,
+    SerializedCode,
+    SystemInfo,
+)
 
 from . import convert_frame
 from .aot_compile_types import (
@@ -28,7 +33,7 @@ from .hooks import Hooks
 
 if TYPE_CHECKING:
     from .guards import GuardManagerWrapper
-    from .package import SerializedCode, SourceInfo
+    from .package import SourceInfo
 
 
 log = logging.getLogger(__name__)
@@ -60,12 +65,6 @@ class CompileArtifacts:
     # still emits native CPU code, so compatibility must see the full set.
     device_types: frozenset[str] = frozenset()
 
-    @property
-    def emits_native_code(self) -> bool:
-        from torch._dynamo.package import emits_native_code
-
-        return emits_native_code(self.backend_name)
-
     def check_compatibility(self) -> None:
         # The CACHED info is the receiver, matching _DynamoCacheEntry: the skip
         # for an artifact predating cpu_codegen_target keys off self, and every
@@ -77,7 +76,7 @@ class CompileArtifacts:
         device_types = getattr(self, "device_types", None) or frozenset(
             (self.device_type,)
         )
-        check_codegen = self.emits_native_code
+        check_codegen = emits_native_code(self.backend_name)
         current = SystemInfo.current(
             cpu_codegen=(
                 check_codegen
@@ -91,7 +90,7 @@ class CompileArtifacts:
             )
 
 
-class AOTCompilePickler(pickle.Pickler):
+class AOTCompilePickler(FunctionPicklerBase):
     def __init__(self, external_data: dict[str, object], buf: io.BytesIO) -> None:
         super().__init__(buf)
         self.external_data = external_data
@@ -109,91 +108,28 @@ class AOTCompilePickler(pickle.Pickler):
         else:
             return None
 
-    @classmethod
-    def _unpickle_cell(cls, val: object) -> object:
-        def _() -> object:
-            return val
-
-        if _.__closure__ is None:
-            raise AssertionError("closure must not be None")
-        return _.__closure__[0]
-
-    @classmethod
-    # pyrefly: ignore [implicit-any]
-    def _unpickle_bound_method(cls, func: Callable, base: object) -> types.MethodType:
-        return types.MethodType(func, base)
-
-    @classmethod
-    def _unpickle_module(cls, name: str) -> types.ModuleType:
-        return importlib.import_module(name)
-
-    @classmethod
-    def _unpickle_code(cls, serialized_code: "SerializedCode") -> types.CodeType:
-        from torch._dynamo.package import SerializedCode
-
-        return SerializedCode.to_code_object(serialized_code)
-
-    @classmethod
-    def _unpickle_empty_cell(cls) -> types.CellType:
-        return types.CellType()
-
-    @classmethod
-    def _unpickle_nested_function(
-        cls,
-        code: types.CodeType,
-        module: str,
-        qualname: str,
-        argdefs: tuple[object, ...] | None,
-        closure: tuple[types.CellType, ...] | None,
-        name: str,
-    ) -> types.FunctionType:
-        f_globals = importlib.import_module(module).__dict__
-        fn = types.FunctionType(code, f_globals, name, argdefs, closure)
-        fn.__qualname__ = qualname
-        return fn
-
     # pyrefly: ignore [bad-override]
     def reducer_override(self, obj: Any) -> Any:
-        if isinstance(obj, type((lambda x: lambda: x)(0).__closure__[0])):  # type: ignore[index] # noqa: PLC3002
-            # An empty cell -- a free variable only assigned on a path that did
-            # not run -- has nothing to read, so rebuild it empty instead of
-            # letting the ValueError out of the pickler.
-            try:
-                contents = obj.cell_contents
-            except ValueError:
-                return type(self)._unpickle_empty_cell, ()
-            return type(self)._unpickle_cell, (contents,)
+        if isinstance(obj, types.CellType):
+            return self._reduce_cell(obj)
         elif inspect.iscode(obj):
-            from torch._dynamo.package import SerializedCode
-
             return type(self)._unpickle_code, (SerializedCode.from_code_object(obj),)
-
         elif inspect.ismodule(obj):
-            return type(self)._unpickle_module, (obj.__name__,)
+            return type(self)._unpickle_python_module, (obj.__name__,)
         elif inspect.ismethod(obj):
-            """
-            By default, pickle will call getattr() directly on the self object
-            for pickling bounded methods, this is not what we want, instead we
-            always want to serialize the original function and the self object
-            in their original form.
-            """
-            func = obj.__func__
-            method_self = obj.__self__
-            inner_func = getattr(method_self, func.__name__)
-            if inspect.ismethod(inner_func):
-                inner_func = inner_func.__func__
-            if func is not inner_func:
-                return type(self)._unpickle_bound_method, (func, method_self)
-        elif inspect.isfunction(obj):
-            if "<locals>" in obj.__qualname__:
-                return type(self)._unpickle_nested_function, (
-                    obj.__code__,
-                    obj.__module__,
-                    obj.__qualname__,
-                    obj.__defaults__,
-                    obj.__closure__,
-                    obj.__name__,
-                )
+            reduced = self._reduce_bound_method(obj)
+            if reduced is not None:
+                return reduced
+        elif inspect.isfunction(obj) and "<locals>" in obj.__qualname__:
+            # The runtime env has to RUN this function, so unlike the guard
+            # pickler nothing it holds is pruned.
+            return self._reduce_function(
+                obj,
+                defaults=obj.__defaults__,
+                kwdefaults=obj.__kwdefaults__,
+                closure=obj.__closure__,
+                attributes=obj.__dict__,
+            )
 
         return NotImplemented
 
@@ -363,6 +299,7 @@ class AOTCompiledFunction:
         data: bytes,
         f_globals: dict[str, object] | None = None,
         external_closure_data: dict[str, Any] | None = None,
+        *,
         guard_globals: dict[str, object] | None = None,
     ) -> "AOTCompiledFunction":
         from torch._dynamo.package import SerializedCode
