@@ -256,20 +256,16 @@ def module_scope_wrapper(func, const_name):
     return wrapper
 
 
-def _module_scope_base_a(x):
+def _scope_base_a(x):
     return x * 2
 
 
-def _module_scope_base_b(x):
+def _scope_base_b(x):
     return x * 3
 
 
-MODULE_SCOPE_WRAPPED_A = module_scope_wrapper(
-    _module_scope_base_a, "MODULE_SCOPE_CONST"
-)
-MODULE_SCOPE_WRAPPED_B = module_scope_wrapper(
-    _module_scope_base_b, "MODULE_SCOPE_CONST_B"
-)
+MODULE_SCOPE_WRAPPED_A = module_scope_wrapper(_scope_base_a, "MODULE_SCOPE_CONST")
+MODULE_SCOPE_WRAPPED_B = module_scope_wrapper(_scope_base_b, "MODULE_SCOPE_CONST_B")
 
 
 # --- a wrapper that reaches itself through its closure and its __dict__ -----
@@ -888,10 +884,9 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertTrue(_cell_is_empty(pickle.loads(buf.getvalue())["cell"]))
 
     def test_reduce_handles_an_empty_closure_cell(self):
-        # A free variable a decorator only assigns on a path that did not run
-        # has no contents; reading it raised ValueError out of the reducer,
-        # which reaches the caller as a package bypass. It has to come back
-        # empty: a cell holding a sentinel reads as an assigned variable.
+        # Reading an EMPTY cell raised ValueError out of the reducer. It has to
+        # come back empty: a cell holding a sentinel reads as an assigned
+        # variable. See FunctionPicklerBase._reduce_cell.
         wrapped = EMPTY_CELL_WRAPPED
         empty = [i for i, c in enumerate(wrapped.__closure__) if _cell_is_empty(c)]
         self.assertEqual(len(empty), 1)
@@ -1160,13 +1155,11 @@ class TestGuardSerialization(TestGuardSerializationBase):
         with self.assertRaisesRegex(PackageError, "guarded default cannot pickle"):
             self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
 
-    @parametrize("guard_type,module_cls,mutation", FQN_MISMATCH_CASES)
-    def test_guard_rooted_at_fqn_mismatched_function(
-        self, guard_type, module_cls, mutation
-    ):
+    @parametrize("guard_type,cls,mutation", FQN_MISMATCH_CASES)
+    def test_guard_rooted_at_fqn_mismatched_function(self, guard_type, cls, mutation):
         # The undecorated function the guard is rooted at is rebuilt by value
         # (see DecoratedForwardModule), with whatever the guard reads intact.
-        mod = module_cls()
+        mod = cls()
         ref, loaded = self._test_serialization(guard_type, mod, torch.randn(3))
         inner = type(mod).forward.__wrapped__
         inputs = {"self": mod, "x": torch.randn(3), "func": inner}

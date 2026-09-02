@@ -552,9 +552,12 @@ def add(x, y):
         self.assertEqual(entry["backend_ids"], [])
         torch._dynamo.reset()
         PrecompileContext.clear()
+        # Wrapping is what reloads the cache; the bypassed entry installs nothing.
+        compiled = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
-        with self.assertLogs("torch._dynamo", level="WARNING"):
-            self.assertEqual(torch.compile(fn)(x), expected)  # noqa: UNSPECIFIED_BACKEND
+        with self.assertLogs("torch._dynamo", level="WARNING") as logs:
+            self.assertEqual(compiled(x), expected)
+        self.assertTrue(any("package bypass" in line for line in logs.output))
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)

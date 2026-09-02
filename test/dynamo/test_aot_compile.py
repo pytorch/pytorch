@@ -612,11 +612,10 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
     def test_aot_compile_reloads_a_runtime_env_helper_faithfully(self):
         # A nested helper the compiled function closes over travels in the
         # runtime env and is rebuilt from its code object at load. Everything
-        # it holds has to survive: an EMPTY cell (a free variable only assigned
-        # on a path that did not run) failed the pickler, a None-valued cell
-        # came back empty, and __kwdefaults__ and __dict__ were dropped. (The
-        # compiled function itself cannot have an empty cell: capture reads all
-        # of its cells up front.)
+        # it holds has to survive: an EMPTY cell failed the pickler, a None
+        # cell came back empty, and __kwdefaults__ and __dict__ were dropped;
+        # see FunctionPicklerBase. (The compiled function itself cannot have an
+        # empty cell: capture reads all of its cells up front.)
         def outer():
             scale = None
 
@@ -1864,9 +1863,8 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
     def test_pickler_rebuilds_a_nested_function_faithfully(self):
         # The pickler passed __qualname__ where FunctionType wants __name__, so
         # a reloaded function reported the dotted qualname as its __name__; it
-        # read cell_contents unguarded, so a free variable only assigned on a
-        # path that did not run raised ValueError out of the pickler; and it
-        # dropped __kwdefaults__ and __dict__ outright.
+        # read cell_contents unguarded, so an EMPTY cell raised ValueError out
+        # of the pickler; and it dropped __kwdefaults__ and __dict__ outright.
         from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
 
         def outer():
@@ -1893,7 +1891,6 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         self.assertEqual(out.tag, 2.0)
         cells = dict(zip(out.__code__.co_freevars, out.__closure__))
         self.assertRaises(ValueError, lambda: cells["unset"].cell_contents)
-        # None is a value, not an empty cell.
         self.assertIsNone(cells["scale"].cell_contents)
 
 

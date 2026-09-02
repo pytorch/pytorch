@@ -171,9 +171,7 @@ class FunctionPicklerBase(pickle.Pickler):
         return fn
 
     @classmethod
-    def _unpickle_function_from_module(
-        cls, module: str, *args: Any
-    ) -> types.FunctionType:
+    def _unpickle_fn_from_module(cls, module: str, *args: Any) -> types.FunctionType:
         # NB module is not reliably where the function LIVES -- functools.wraps
         # copies __module__ from the wrapped function -- so this scope can belong
         # to a different file. A pickler that guards __globals__ sends the
@@ -182,9 +180,7 @@ class FunctionPicklerBase(pickle.Pickler):
         return cls._build_function(f_globals, module, *args)
 
     @classmethod
-    def _unpickle_function_from_snapshot(
-        cls, module: str, *args: Any
-    ) -> types.FunctionType:
+    def _unpickle_fn_from_snapshot(cls, module: str, *args: Any) -> types.FunctionType:
         # The scope arrives as pickle STATE, through _apply_function_state.
         # Deliberately no import_module fallback: importing a module only to
         # discard its dict is a load-time failure mode this branch is free of.
@@ -238,9 +234,9 @@ class FunctionPicklerBase(pickle.Pickler):
     ) -> tuple[Any, ...]:
         args = (fn.__module__, fn.__code__, fn.__qualname__, fn.__name__, closure)
         if globals_snapshot is None:
-            unpickle = type(self)._unpickle_function_from_module
+            unpickle = type(self)._unpickle_fn_from_module
         else:
-            unpickle = type(self)._unpickle_function_from_snapshot
+            unpickle = type(self)._unpickle_fn_from_snapshot
         state = (defaults, kwdefaults, attributes, globals_snapshot)
         return unpickle, args, state, None, None, type(self)._apply_function_state
 
@@ -938,9 +934,10 @@ class CompilePackage:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in bypass_current_entry")
         self._current_entry.bypassed = True
-        # A bypassed entry is never installed, so backends it already registered
+        # A bypassed entry is never installed, so what it already registered
         # would only be serialized for nothing.
         self._current_entry.backend_ids.clear()
+        self._current_entry.guarded_codes.clear()
 
     def add_resume_function(
         self,
