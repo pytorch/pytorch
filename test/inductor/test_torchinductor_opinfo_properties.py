@@ -48,6 +48,7 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
     onlyCUDA,
     ops,
+    onlyAccelerator,
 )
 from torch.testing._internal.common_methods_invocations import (
     binary_ufuncs,
@@ -64,7 +65,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    TEST_XPU,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.opinfo.core import _filter_unary_elementwise_tensor

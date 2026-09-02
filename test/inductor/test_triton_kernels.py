@@ -6191,7 +6191,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         self.assertEqual(status[-1], False)
         self.assertEqual(z, (x + y) * 2)
 
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @unittest.skipIf(not HAS_GPU_AND_TRITON, "requires GPU and Triton")
     def test_wrap_triton_triton_interpret_eager(self):
         script = """
 import os
@@ -6201,6 +6201,7 @@ import torch
 import triton
 import triton.language as tl
 from torch.library import wrap_triton
+from torch.testing._internal.inductor_utils import GPU_TYPE
 
 
 @triton.jit
@@ -6262,7 +6263,7 @@ def autotuned_add(x, y):
     return output
 
 
-x = torch.randn(1024, device="cuda")
+x = torch.randn(1024, device=GPU_TYPE)
 torch.testing.assert_close(add(x, x), x + x)
 torch.testing.assert_close(autotuned_add(x, x), x + x)
 
