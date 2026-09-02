@@ -1727,17 +1727,32 @@ def forward(self, primals_1):
     def test_unused_differentiable_outputs_retrace_with_dropout(self):
         # The backward-time retrace runs the inductor partition_fn, whose RNG
         # replacement passes need inductor's virtualized fake mode.
+        import torch._functorch._aot_autograd.graph_compile as graph_compile
+
         def fn(x, y):
             return torch.nn.functional.dropout(x.sin(), p=0.5, training=True), y.cos()
+
+        # Correct grads alone do not prove the retrace ran: a declined retrace
+        # falls back to structural specialization, which yields the same grads.
+        # Spy on the shared retrace entry point to assert the retrace succeeded.
+        retrace_outcomes = []
+        orig = graph_compile.retrace_backward_handling_errors
+
+        def spy(retrace, decline_reasons, specialization_indices):
+            result = orig(retrace, decline_reasons, specialization_indices)
+            retrace_outcomes.append((result is not None, list(decline_reasons)))
+            return result
 
         torch._dynamo.reset()
         compiled_fn = torch.compile(fn, backend="inductor")
         x = torch.randn(8, requires_grad=True)
         y = torch.randn(8, requires_grad=True)
         out = compiled_fn(x, y)
-        out[0].sum().backward()
+        with patch.object(graph_compile, "retrace_backward_handling_errors", spy):
+            out[0].sum().backward()
         self.assertIsNotNone(x.grad)
         self.assertIsNone(y.grad)
+        self.assertEqual(retrace_outcomes, [(True, [])])
 
     @torch._functorch.config.patch(aot_autograd_prune_unused_outputs=True)
     def test_unused_differentiable_outputs_retrace_failure_falls_back(self):
@@ -6484,6 +6499,62 @@ def forward(self, tangents_1):
         _dealias_marked_returns(returns, [1, 2])
         self.assertIs(returns[1], marker)
         self.assertIsNot(returns[2], shared)
+
+        # An unmarked slot already wrapped in TensorAlias (aliased output or
+        # metadata-mutated input) still collides through the wrapper.
+        from torch._functorch._aot_autograd.schemas import TensorAlias
+
+        wrapped = TensorAlias(shared)
+        returns = [wrapped, shared]
+        _dealias_marked_returns(returns, [1])
+        self.assertIs(returns[0], wrapped)
+        self.assertIsNot(returns[1], shared)
+
+        # Two marked slots sharing one object with no unmarked partner are
+        # left alone: marking either marks both, and both are meant to be.
+        returns = [shared, shared]
+        _dealias_marked_returns(returns, [0, 1])
+        self.assertIs(returns[0], shared)
+        self.assertIs(returns[1], shared)
+
+    def test_non_differentiable_output_duplicated(self):
+        # Two detached slots plus the differentiable one all fold to one
+        # TensorImpl under inductor; both marked slots must be detached off.
+        def f(x):
+            h = x * 2
+            return h * 1, h.detach(), h.detach()
+
+        x = torch.randn(4, requires_grad=True)
+        ref_out, _, _ = f(x)
+        ref_out.sum().backward()
+        ref_grad, x.grad = x.grad, None
+        out, d1, d2 = torch.compile(f, backend="inductor")(x)
+        self.assertFalse(d1.requires_grad)
+        self.assertFalse(d2.requires_grad)
+        out.sum().backward()
+        self.assertEqual(x.grad, ref_grad)
+
+    def test_non_differentiable_output_with_mutated_input(self):
+        # A data-mutated input occupies a leading raw_returns slot (marked
+        # non-differentiable when it does not require grad) alongside a
+        # detached view of it; neither marking may leak onto the
+        # differentiable output.
+        def f(x, y):
+            y.mul_(2)
+            return x * 2 + y, y.detach()
+
+        x = torch.randn(4, requires_grad=True)
+        y = torch.randn(4)
+        y_ref = y.clone()
+        ref_out, _ = f(x, y_ref)
+        ref_out.sum().backward()
+        ref_grad, x.grad = x.grad, None
+        out, detached = torch.compile(f, backend="inductor")(x, y)
+        self.assertEqual(y, y_ref)
+        self.assertFalse(detached.requires_grad)
+        self.assertEqual(detached, y)
+        out.sum().backward()
+        self.assertEqual(x.grad, ref_grad)
 
 
 def extract_graph(fx_g, _, graph_cell):

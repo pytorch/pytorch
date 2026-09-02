@@ -2787,23 +2787,44 @@ def _write_dynamo_artifact_files(
     # the OLD cache, which load() degrades on (code_hash mismatch -> cold cache
     # with a warning) and the next successful rewrite repairs.
     import os
-    import tempfile
+    import stat
+    import uuid
 
     renames = []
+    dirs_to_sync = set()
     try:
         for path, data in (
             (artifact_path, python_code.encode("utf-8")),
             (cache_path, cache),
         ):
             parent = os.path.dirname(os.fspath(path)) or "."
-            os.makedirs(parent, exist_ok=True)
-            # mkstemp in the SAME directory so os.replace is an atomic same-
-            # filesystem rename and the temp name cannot collide (a pid-based
-            # name races a recycled pid or a second write from this process).
-            fd, tmp = tempfile.mkstemp(
-                dir=parent, prefix=os.path.basename(path) + ".", suffix=".tmp"
-            )
+            missing = []
+            ancestor = os.path.abspath(parent)
+            while not os.path.isdir(ancestor):
+                missing.append(ancestor)
+                ancestor = os.path.dirname(ancestor)
+            if missing:
+                os.makedirs(parent, exist_ok=True)
+                # Each freshly created directory is a new entry in its own
+                # parent that is not durable until that parent is fsynced.
+                dirs_to_sync.update(os.path.dirname(d) for d in missing)
+            dirs_to_sync.add(parent)
+            # Create the temp file in the SAME directory so os.replace is an
+            # atomic same-filesystem rename. A random name plus O_EXCL keeps it
+            # collision-free (a pid-based name races a recycled pid or a second
+            # write from this process). Unlike tempfile.mkstemp, which forces
+            # 0o600, the umask-derived 0o666 default (or the existing file's
+            # mode, below) is what a plain open(path, "w") would have produced:
+            # os.replace carries the temp file's mode onto the destination, so
+            # an artifact meant to be readable by other users must not silently
+            # become owner-only on every rewrite.
+            tmp = f"{path}.{uuid.uuid4().hex}.tmp"
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
             renames.append((tmp, path))
+            try:
+                os.chmod(tmp, stat.S_IMODE(os.stat(path).st_mode))
+            except FileNotFoundError:
+                pass
             with os.fdopen(fd, "wb") as f:
                 f.write(data)
                 f.flush()
@@ -2813,8 +2834,8 @@ def _write_dynamo_artifact_files(
         # A rename is not durable until the parent directory entry is fsynced;
         # without this a crash right after os.replace can lose the new name and
         # resurrect nothing, widening the mismatch window the scheme bounds.
-        for parent in {os.path.dirname(os.fspath(path)) or "." for _, path in renames}:
-            dir_fd = os.open(parent, os.O_RDONLY)
+        for directory in sorted(dirs_to_sync):
+            dir_fd = os.open(directory, os.O_RDONLY)
             try:
                 os.fsync(dir_fd)
             finally:

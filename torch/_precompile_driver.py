@@ -649,7 +649,16 @@ def _build_dynamo_forward():
                     # attribute a differently-typed argument lacks) is a
                     # non-match, not a hard failure: fall through so a later
                     # variant can match and, failing that, the actionable
-                    # no-match error below fires.
+                    # no-match error below fires. Keep the traceback reachable
+                    # for diagnosing a variant that unexpectedly never matches.
+                    import logging
+
+                    logging.getLogger("torch._precompile").debug(
+                        "precompile: guard check of a captured variant of %r raised; "
+                        "treating it as a non-match",
+                        target.co_name,
+                        exc_info=True,
+                    )
                     continue
                 if matched:
                     result = function(*args)

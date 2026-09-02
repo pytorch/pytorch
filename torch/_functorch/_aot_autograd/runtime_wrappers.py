@@ -2767,45 +2767,6 @@ _GradOutputPrototypeType = (
 )
 
 
-def _dealias_marked_returns(raw_returns: list[Any], marked: Sequence[int]) -> None:
-    """Give each slot about to be marked non-differentiable its own TensorImpl.
-
-    mark_non_differentiable is keyed on TensorImpl, so marking one slot marks
-    EVERY returned slot holding that same object, and with
-    ctx._materialize_non_diff_grads = False a slot marked this way is handed a
-    None instead of zeros. Backends are free to return one object in two slots
-    -- inductor lowers aten.detach to a no-op, and h*1 / h+0 fold away -- so
-    `return h * 1, h.detach()` marks the differentiable output too and drops
-    the gradient, and `return y[:2], y[2:], y.detach()` marks y's intermediate
-    base, which the backward requires a tangent for.
-
-    Substituting an alias is only correct because the slot is one we are about
-    to declare non-differentiable anyway; slots that stay differentiable keep
-    their identity.
-    """
-    if not marked:
-        return
-    # This runs on every forward of every compiled autograd function and almost
-    # never fires, so index the marked slots -- usually one or two -- and probe
-    # the rest against them, rather than indexing all of raw_returns.
-    marked_positions: dict[int, list[int]] = {}
-    for i in marked:
-        x = raw_returns[i]
-        if isinstance(x, torch.Tensor):
-            marked_positions.setdefault(id(x), []).append(i)
-    if not marked_positions:
-        return
-    marked_set = set(marked)
-    collide: set[int] = set()
-    for j, o in enumerate(raw_returns):
-        if j not in marked_set:
-            hits = marked_positions.get(id(o))
-            if hits is not None:
-                collide.update(hits)
-    for i in collide:
-        raw_returns[i] = raw_returns[i].detach()
-
-
 class KeptTangentInfo(typing.NamedTuple):
     """Runtime-safe metadata for tangent slots retained by the backward prologue."""
 
@@ -4135,7 +4096,10 @@ def _dealias_marked_returns(raw_returns: list[Any], marked: Sequence[int]) -> No
 
     ``marked`` may name slots that are not tensors: the ahead-of-time codegen
     path selects indices by output metadata and does not pre-filter, so
-    non-tensor slots are simply skipped here.
+    non-tensor slots are simply skipped here. Unmarked slots may already be
+    wrapped in TensorAlias (aliased outputs and metadata-mutated inputs); the
+    probe looks through the wrapper since marking is keyed on the TensorImpl
+    inside it.
     """
     if not marked:
         return
@@ -4154,6 +4118,8 @@ def _dealias_marked_returns(raw_returns: list[Any], marked: Sequence[int]) -> No
     collide: set[int] = set()
     for j, o in enumerate(raw_returns):
         if j not in marked_set:
+            if isinstance(o, TensorAlias):
+                o = o.alias
             hits = marked_positions.get(id(o))
             if hits is not None:
                 collide.update(hits)
@@ -4341,15 +4307,19 @@ def _prune_runtime_args_in_place(
 
 @dataclass
 class _AutogradBackwardCompiler:
-    # Thread-safety: the specialization caches below (specialized_compiled_bws,
-    # pruned_backward_output_indices, materialize_fallback_masks) are keyed by a
-    # specialization mask and are populate-once and idempotent -- the compiled
-    # backward for a given mask is deterministic. Concurrent backwards on the same
-    # compiled function (multithreaded autograd) may redundantly compute the same
-    # entry, but the outcome is correct regardless of interleaving: each key maps
-    # to one value and a duplicate insert overwrites it with an equivalent one, so
-    # the hot cache-hit path takes no lock. _prepare_lazy_backward_context is the
-    # exception -- its mutations are not idempotent -- and takes _prepare_lock.
+    # Thread-safety: the caches below (compiled_bw, specialized_compiled_bws,
+    # pruned_backward_output_indices, materialize_fallback_masks) are filled
+    # without a lock. Concurrent backwards on the same compiled function
+    # (multithreaded autograd) may redundantly compile the same entry; that is
+    # tolerated because the compiled backward for a given mask is deterministic,
+    # so any interleaving of inserts leaves an equivalent value. The caches are
+    # NOT populate-once: _prepare_lazy_backward_context drops compiled_bw and
+    # specialized_compiled_bws (under _prepare_lock) when saved_tensors_use_once
+    # flips and the donated-buffer backwards must be recompiled. Lock-free
+    # readers in get_or_compile therefore read each cache field exactly once
+    # into a local (single attribute read, dict.get) so that a concurrent clear
+    # is observed as a miss-and-recompile, never as a KeyError or a None
+    # backward handed to the caller.
     compiled_bw: Callable[..., Any] | None
     lazy_backward_info: (
         AutogradLazyBackwardCompileInfo | CachedAutogradLazyBackwardCompileInfo | None
@@ -4435,13 +4405,14 @@ class _AutogradBackwardCompiler:
         specialization_key = _specializable_user_grad_output_mask(
             self.fw_metadata, undefined_grad_out_indices
         )
-        if not specialization_key and self.compiled_bw is not None:
-            return self.compiled_bw, all_args, ()
+        # Single reads per cache field: see the thread-safety note on the class.
+        base_bw = self.compiled_bw
+        if not specialization_key and base_bw is not None:
+            return base_bw, all_args, ()
 
-        if specialization_key in self.specialized_compiled_bws:
-            compiled_bw, kept_arg_indices = self.specialized_compiled_bws[
-                specialization_key
-            ]
+        specialized_entry = self.specialized_compiled_bws.get(specialization_key)
+        if specialized_entry is not None:
+            compiled_bw, kept_arg_indices = specialized_entry
             _prune_runtime_args_in_place(all_args, kept_arg_indices)
             return compiled_bw, all_args, ()
 
@@ -4449,10 +4420,10 @@ class _AutogradBackwardCompiler:
             raise AssertionError("lazy_backward_info must not be None")
 
         if specialization_key and not self.can_specialize_undefined_grad_outputs():
-            if self.compiled_bw is None:
+            if base_bw is None:
                 raise AssertionError("compiled_bw must not be None")
             return (
-                self.compiled_bw,
+                base_bw,
                 all_args,
                 self.get_pruned_backward_output_indices(undefined_grad_out_indices),
             )
@@ -4460,6 +4431,8 @@ class _AutogradBackwardCompiler:
         bw_compiler = self.bw_compiler
         if isinstance(self.lazy_backward_info, AutogradLazyBackwardCompileInfo):
             self._prepare_lazy_backward_context(saved_tensors_use_once)
+            # May have dropped the donated-buffer backwards; re-snapshot.
+            base_bw = self.compiled_bw
             bw_module = typing.cast(
                 torch.fx.GraphModule, self.lazy_backward_info.bw_module
             )
@@ -4472,10 +4445,10 @@ class _AutogradBackwardCompiler:
             # e.g. the very first backward off a cache-loaded artifact. A cached
             # backward cannot be re-traced for specialization, so fall back to the
             # base compiled backward and only prune outputs structurally.
-            if self.compiled_bw is None:
+            if base_bw is None:
                 raise AssertionError("compiled_bw must not be None")
             return (
-                self.compiled_bw,
+                base_bw,
                 all_args,
                 self.get_pruned_backward_output_indices(undefined_grad_out_indices),
             )
@@ -4490,7 +4463,7 @@ class _AutogradBackwardCompiler:
 
         if (
             specialization_key in self.materialize_fallback_masks
-            and self.compiled_bw is not None
+            and base_bw is not None
         ):
             memo_indices = _bitmask_to_indices(specialization_key)
             if all(
@@ -4507,7 +4480,7 @@ class _AutogradBackwardCompiler:
                     grad_output_prototype_objects,
                 )
                 return (
-                    self.compiled_bw,
+                    base_bw,
                     all_args,
                     self.get_pruned_backward_output_indices(undefined_grad_out_indices),
                 )
@@ -4596,9 +4569,9 @@ class _AutogradBackwardCompiler:
                 )
                 self.materialize_fallback_masks.add(specialization_key)
                 specialization_key = 0
-                if self.compiled_bw is not None:
+                if base_bw is not None:
                     return (
-                        self.compiled_bw,
+                        base_bw,
                         all_args,
                         self.get_pruned_backward_output_indices(
                             undefined_grad_out_indices

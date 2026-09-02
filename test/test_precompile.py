@@ -4,6 +4,7 @@ import enum
 import io
 import os
 import pickle
+import stat
 import subprocess
 import sys
 import tempfile
@@ -1500,6 +1501,38 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "no captured Dynamo variant"):
             loaded(torch.randn(7, 4, dtype=torch.float64))
 
+    def test_tracer_dynamo_raising_guard_is_logged_non_match(self):
+        # A guard that raises during check is treated as a non-match so a later
+        # variant can be tried; the swallowed exception must still be reachable
+        # at DEBUG for diagnosing a variant that never matches.
+        from torch._dynamo import package as dynamo_package
+
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_dynamic,
+            example_inputs=[(torch.randn(2, 4),)],
+            tracer="dynamo",
+        )
+        real_load_guard_manager = dynamo_package.load_guard_manager
+
+        class RaisingManager:
+            def check(self, scope):
+                raise RuntimeError("injected guard failure")
+
+        def raising_load_guard_manager(*args, **kwargs):
+            real_load_guard_manager(*args, **kwargs)
+            return RaisingManager()
+
+        with mock.patch.object(
+            dynamo_package, "load_guard_manager", raising_load_guard_manager
+        ):
+            loaded = torch.compiler.precompile.load(code, cache)
+        with self.assertLogs("torch._precompile", level="DEBUG") as logs:
+            with self.assertRaisesRegex(PrecompileError, "no captured Dynamo variant"):
+                loaded(torch.randn(2, 4))
+        self.assertEqual(len(logs.records), 1)
+        self.assertIn("treating it as a non-match", logs.output[0])
+        self.assertIn("injected guard failure", logs.output[0])
+
     def test_tracer_dynamo_capture_preserves_existing_compile_entries(self):
         from torch._dynamo.testing import CompileCounter
 
@@ -2528,8 +2561,8 @@ class TestPrecompile(TestCase):
     def test_write_artifact_files_cleanup_on_failure(self):
         # A failed rewrite must leave the previous pair loadable and no temp
         # files behind; the pair only loads together (code_hash pairing). The
-        # rewrite goes through tempfile.mkstemp + os.replace, so inject the
-        # failure there rather than at builtins.open.
+        # rewrite creates its temp files with os.open(O_EXCL) + os.replace, so
+        # inject the failure there rather than at builtins.open.
         from torch._precompile import _write_dynamo_artifact_files
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -2539,19 +2572,20 @@ class TestPrecompile(TestCase):
                 "GOOD = 1\n", b"goodcache", artifact_path, cache_path
             )
 
-            real_mkstemp = tempfile.mkstemp
+            real_open = os.open
             created = []
 
-            def flaky(*args, **kwargs):
+            def flaky(path, flags, *args, **kwargs):
                 # Fail creating the SECOND temp (the cache), after the first
                 # temp is written but before either rename, so the previous
                 # pair must survive intact.
-                created.append(1)
-                if len(created) == 2:
-                    raise OSError("disk full")
-                return real_mkstemp(*args, **kwargs)
+                if flags & os.O_EXCL:
+                    created.append(path)
+                    if len(created) == 2:
+                        raise OSError("disk full")
+                return real_open(path, flags, *args, **kwargs)
 
-            with mock.patch.object(tempfile, "mkstemp", flaky):
+            with mock.patch.object(os, "open", flaky):
                 with self.assertRaisesRegex(OSError, "disk full"):
                     _write_dynamo_artifact_files(
                         "NEW = 2\n", b"newcache", artifact_path, cache_path
@@ -5222,6 +5256,54 @@ class TestPrecompile(TestCase):
                     )
             leftovers = [name for name in os.listdir(tmp) if name.endswith(".tmp")]
             self.assertEqual(leftovers, [])
+
+    def test_write_dynamo_artifact_files_mode_and_new_dir_durability(self):
+        from torch._precompile import _write_dynamo_artifact_files
+
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = os.path.join(tmp, "nested", "dir")
+            artifact_path = os.path.join(parent, "a.py")
+            cache_path = os.path.join(parent, "a.cache")
+            opened = {}
+            synced = []
+            real_open, real_fsync = os.open, os.fsync
+
+            def spy_open(path, flags, *args, **kwargs):
+                fd = real_open(path, flags, *args, **kwargs)
+                opened[fd] = os.fspath(path)
+                return fd
+
+            def spy_fsync(fd):
+                synced.append(opened.get(fd))
+                real_fsync(fd)
+
+            with (
+                mock.patch.object(os, "open", spy_open),
+                mock.patch.object(os, "fsync", spy_fsync),
+            ):
+                _write_dynamo_artifact_files("A = 1\n", b"c", artifact_path, cache_path)
+            # The rename is durable only once the directory holding the entry is
+            # fsynced; when the write created the directory chain, every
+            # directory that gained a new entry (down to the existing root) must
+            # be fsynced too, or a crash can lose the whole new subtree.
+            self.assertIn(parent, synced)
+            self.assertIn(os.path.dirname(parent), synced)
+            self.assertIn(tmp, synced)
+            # A fresh artifact gets the umask-derived mode open(path, "w") would
+            # give it, not the owner-only 0o600 tempfile.mkstemp forces, so a
+            # shared cache directory stays readable by other users.
+            umask = os.umask(0)
+            os.umask(umask)
+            for path in (artifact_path, cache_path):
+                self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o666 & ~umask)
+            # A rewrite preserves the mode an operator set on the existing file.
+            os.chmod(artifact_path, 0o640)
+            os.chmod(cache_path, 0o604)
+            _write_dynamo_artifact_files("A = 2\n", b"c2", artifact_path, cache_path)
+            self.assertEqual(stat.S_IMODE(os.stat(artifact_path).st_mode), 0o640)
+            self.assertEqual(stat.S_IMODE(os.stat(cache_path).st_mode), 0o604)
+            with open(artifact_path) as f:
+                self.assertEqual(f.read(), "A = 2\n")
 
     def test_tracer_dynamo_load_degrades_on_missing_cache_file(self):
         # A crash between the two renames of the FIRST stateful rewrite leaves
