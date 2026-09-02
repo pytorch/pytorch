@@ -625,9 +625,25 @@ class TestGuardSerialization(TestGuardSerializationBase):
             # branch that would graph-break this simplified harness.
             return x + len(type(lk).__name__)
 
-        with self.assertRaises(PackageError) as cm:
+        with self.assertRaisesRegex(PackageError, "_thread.lock") as cm:
             self._test_serialization("TYPE_MATCH", fn, torch.randn(3), threading.Lock())
         self.assertIsInstance(cm.exception.__cause__, TypeError)
+
+    def test_symint_guard_value_raises_typed(self):
+        # The SymInt reducer arm raises the typed PackageError directly (pickle
+        # propagates reducer exceptions unchanged), not a RuntimeError that would
+        # escape the non-strict swallow as InternalTorchDynamoError.
+        import io
+
+        from torch._dynamo.guards import GuardsStatePickler
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        symint = shape_env.create_symintnode(
+            shape_env.create_symbol(3, LocalSource("x")), hint=3
+        )
+        with self.assertRaisesRegex(PackageError, "Cannot serialize SymInt"):
+            GuardsStatePickler({}, {}, {}, io.BytesIO()).dump(symint)
 
     def _check_reducer_error_arm(self, value, exc_type):
         # The other two arms of the pickle-dump catch: a value whose reducer
@@ -636,7 +652,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         def fn(x, v):
             return x + len(type(v).__name__)
 
-        with self.assertRaises(PackageError) as cm:
+        with self.assertRaisesRegex(PackageError, "reducer refused") as cm:
             self._test_serialization("TYPE_MATCH", fn, torch.randn(3), value)
         self.assertIsInstance(cm.exception.__cause__, exc_type)
 

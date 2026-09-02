@@ -234,11 +234,13 @@ class GuardSource(enum.Enum):
 class GuardProvenance(enum.Enum):
     """Where a guard's source chain is rooted.
 
-    Exposed to ``guard_filter_fn`` callbacks through
-    ``GuardFilterEntry.provenance`` so a filter can classify guards
-    structurally instead of parsing rendered guard names. Every root
-    ``Source`` declares exactly one member; chained sources inherit their
-    root's. See Note [Guard provenance] in ``torch/_guards.py``.
+    Exposed to ``guard_filter_fn`` callbacks (the ``torch.compile`` option
+    documented under "Reducing guard overhead" in the torch.compile
+    programming model) as the ``provenance`` field of each entry the callback
+    receives, so a filter can classify guards structurally instead of parsing
+    rendered guard names. Every root ``Source`` declares exactly one member;
+    chained sources inherit their root's. See Note [Guard provenance] in
+    ``torch/_guards.py``.
 
     ``INPUT``
         Dispatch-relevant guards a serialization consumer must keep: rooted at
@@ -247,10 +249,10 @@ class GuardProvenance(enum.Enum):
         shape env (whose SHAPE_ENV guard encodes symbolic constraints derived
         from the inputs).
     ``GLOBAL``
-        Rooted at a module globals dict at guard-check time, whoever installed
-        the binding (user globals and imports both): part of the Python
-        environment, and the one category a consumer may drop wholesale under
-        an environment-invariant contract.
+        Rooted in the Python module environment: a binding looked up in a
+        module's globals dict at guard-check time (whoever installed it), or an
+        imported module looked up through ``__import__``. The one category a
+        consumer may drop wholesale under an environment-invariant contract.
     ``AMBIENT``
         Rooted at interpreter- or process-wide state not reachable through any
         module's globals. This covers both process-wide configuration
@@ -262,9 +264,10 @@ class GuardProvenance(enum.Enum):
     ``SYNTHETIC``
         Tracing-internal roots that are not part of the Python environment
         (synthetic and temp locals, ephemeral sources, materialized constants,
-        recorded random values, backward state). Some still render real guard
-        expressions; the point is that they are never droppable environment
-        state, so a drop policy must keep them.
+        recorded random values, backward state). Today none of them produces a
+        guard that survives to a filter; the member exists so that if one ever
+        does, it is classified as non-environment state a drop policy must
+        keep rather than defaulting into a droppable category.
     """
 
     INPUT = 0
