@@ -2254,7 +2254,10 @@ test_torchtitan() {
   local ci_built_versions
   ci_built_versions=$(get_pkg_versions torch torchao torchcomms)
 
-  pip_install helion
+  # fla (flash-linear-attention) is imported by qwen3_5 at model-build time;
+  # torchtitan's own CI image installs it, this one does not. Unpinned to match
+  # torchtitan's own requirements-vlm.txt:5.
+  pip_install helion flash-linear-attention
 
   pushd torchtitan
   pip_install -e .
