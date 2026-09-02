@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import dataclasses
 import logging
+import math
 from typing import TYPE_CHECKING
 
 import torch
@@ -71,8 +72,12 @@ bmm_template = TritonTemplate(
 @SymbolicGridFn
 def blackwell_bmm_grid(b, m, n, meta, *, cdiv, max, min):
     grid_m = cdiv(m, meta["BLOCK_M"])
+    if meta["TWO_CTAS"]:
+        grid_m = cdiv(grid_m, 2) * 2
     tiles = grid_m * cdiv(n, meta["BLOCK_N"])
     grid_x = min(meta["NUM_SMS"], tiles)
+    if meta["TWO_CTAS"]:
+        grid_x = grid_x // 2 * 2
     max_y_grid = get_max_y_grid()
     grid_z = max(cdiv(b, max_y_grid), 1)
     return (grid_x, cdiv(b, grid_z), grid_z)
@@ -94,6 +99,7 @@ class BlackwellBMMConfig:
     block_k: int
     num_stages: int
     epilogue_subtile: int = 1
+    two_ctas: bool = False
 
 
 def append_blackwell_bmm_choice(
@@ -110,7 +116,9 @@ def append_blackwell_bmm_choice(
     batch_b, k_b, n = map(int, mat2.get_size())
     if batch != batch_b or k != k_b:
         raise NotImplementedError("Blackwell BMM does not broadcast logical batches")
-    if list(map(int, layout.size)) != [batch, m, n]:
+    output_size = list(map(int, layout.size))
+    flattened_output = output_size == [batch * m, n]
+    if output_size != [batch, m, n] and not flattened_output:
         raise NotImplementedError("unexpected Blackwell BMM output layout")
     a_row_major = mat1.get_stride()[2] == 1
     a_col_major = mat1.get_stride()[1] == 1
@@ -120,6 +128,14 @@ def append_blackwell_bmm_choice(
         raise NotImplementedError(
             "Blackwell BMM requires one contiguous matrix dimension"
         )
+    m_tiles = math.ceil(m / config.block_m)
+    if config.two_ctas:
+        if not flattened_output:
+            raise NotImplementedError(
+                "2CTA Blackwell BMM requires a flattened rank-2 output descriptor"
+            )
+        if m_tiles % 2:
+            raise NotImplementedError("2CTA Blackwell BMM requires two useful M peers")
     kwargs = {
         "BLOCK_M": config.block_m,
         "BLOCK_N": config.block_n,
@@ -135,18 +151,22 @@ def append_blackwell_bmm_choice(
         "DATA_PARTITION_FACTOR": 1,
         "SEPARATE_EPILOGUE_STORE": True,
         "EPILOGUE_SUBTILE": config.epilogue_subtile,
+        "TWO_CTAS": config.two_ctas,
+        "FLATTEN_OUTPUT": flattened_output,
         "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),
         # Keep the output a normal logical rank-3 tensor.  Until 2CTA output
         # transformation supports rank-3 descriptors, use the generic pointer
         # store emitted by store_output.
-        "tma_store": False,
+        "tma_store": flattened_output,
         "transpose_discontiguous_tensor_descriptors_override": True,
     }
+    if config.two_ctas:
+        kwargs["ctas_per_cga"] = (2, 1, 1)
     error = blackwell_bmm_template.maybe_append_choice(
         choices,
         input_nodes=input_nodes,
         layout=layout,
-        call_sizes=layout.size,
+        call_sizes=[batch, m, n],
         num_stages=config.num_stages,
         num_warps=8,
         **kwargs,
