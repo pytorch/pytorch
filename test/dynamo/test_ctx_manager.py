@@ -776,6 +776,7 @@ class GraphModule(torch.nn.Module):
             torch.set_autocast_enabled("cpu", True)
             torch.set_autocast_dtype("cpu", torch.bfloat16)
             torch.set_autocast_cache_enabled(True)
+            torch.autocast_increment_nesting()
             x = x @ y
             torch.autocast_decrement_nesting()
             torch.clear_autocast_cache()
@@ -799,12 +800,6 @@ class GraphModule(torch.nn.Module):
             torch.set_autocast_enabled("cpu", prev_enabled)
             torch.set_autocast_dtype("cpu", prev_dtype)
             torch.set_autocast_cache_enabled(prev_cache)
-            # f() decrements the nesting counter with no matching increment and
-            # runs twice above, so the counter is left at -2. A negative counter
-            # stops autocast.__exit__ from ever reaching 0, so it never clears
-            # the weight cache, and later tests in this file see stale casts.
-            torch.autocast_increment_nesting()
-            torch.autocast_increment_nesting()
 
     def test__enter__exit_autocast_function_mode(self):
         class FunctionCount(torch.overrides.TorchFunctionMode):
