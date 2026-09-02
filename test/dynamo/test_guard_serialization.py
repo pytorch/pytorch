@@ -380,12 +380,27 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
                 if key in kwargs and isinstance(kwargs[key], Iterator):
                     self._frame_state.f_locals[key] = kwargs[key]
 
+        wanted = guard_type if isinstance(guard_type, tuple) else (guard_type,)
+
         def guard_filter_fn(guards):
-            ret = [
-                g.guard_type == guard_type or guard_type in g.derived_guard_types
-                for g in guards
-            ]
-            self.assertTrue(any(ret))
+            # Single pass: record which requested types each guard satisfies so
+            # we build the keep mask and the per-type coverage check together.
+            matched_types = set()
+            ret = []
+            for g in guards:
+                hits = {
+                    t for t in wanted if g.guard_type == t or t in g.derived_guard_types
+                }
+                matched_types |= hits
+                ret.append(bool(hits))
+            # Each requested type must match at least one guard: a test that
+            # names two types relies on both being emitted (e.g. the grad
+            # ordering tests need the dict's TYPE_MATCH to put it in the
+            # serialized scope), and a bare any(ret) would let one silently
+            # disappear.
+            missing = [t for t in wanted if t not in matched_types]
+            if missing:
+                raise AssertionError(f"no guard matched requested type {missing[0]!r}")
             return ret
 
         ref_gm = None
@@ -502,6 +517,50 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ref, loaded, {"x": torch.randn(2, dtype=torch.float64)}, False
         )
         self._test_check_fn(ref, loaded, {"x": None}, False)
+
+    def test_tensor_match_populated_grad(self):
+        def f(x: torch.Tensor):
+            return x + 1
+
+        x = torch.randn(4, requires_grad=True)
+        (x * 2).sum().backward()
+        self.assertIsInstance(x.grad, torch.Tensor)
+        ref, loaded = self._test_serialization("TENSOR_MATCH", f, x)
+        x_ok = torch.randn(4, requires_grad=True)
+        x_bad = torch.randn(5, requires_grad=True)
+        self._test_check_fn(ref, loaded, {"x": x_ok}, True)
+        self._test_check_fn(ref, loaded, {"x": x_bad}, False)
+
+    def test_tensor_grad_aliased_by_unguarded_local(self):
+        # p.grad is also a leaf of d, whose TYPE_MATCH guard never visits the
+        # dict values. With d first in f_locals, the grad is pickled (and
+        # memoized by pickle) as _Missing before p is reduced unless it is
+        # registered in guard_tree_values upfront.
+        def fn(d, p):
+            return p * 1 + len(d)
+
+        p = torch.randn(4, requires_grad=True)
+        (p * 2).sum().backward()
+        d = {"x": p.grad}
+        types_ = ("TENSOR_MATCH", "TYPE_MATCH")
+        ref, loaded = self._test_serialization(types_, fn, d, p)
+        p_new = torch.randn(4, requires_grad=True)
+        self._test_check_fn(ref, loaded, {"d": d, "p": p_new}, True)
+        p_bad = torch.randn(5, requires_grad=True)
+        self._test_check_fn(ref, loaded, {"d": d, "p": p_bad}, False)
+
+    def test_tensor_grad_aliased_by_unguarded_local_swapped(self):
+        # Same as above but with p pickled before d.
+        def fn(p, d):
+            return p * 1 + len(d)
+
+        p = torch.randn(4, requires_grad=True)
+        (p * 2).sum().backward()
+        d = {"x": p.grad}
+        types_ = ("TENSOR_MATCH", "TYPE_MATCH")
+        ref, loaded = self._test_serialization(types_, fn, p, d)
+        p_new = torch.randn(4, requires_grad=True)
+        self._test_check_fn(ref, loaded, {"d": d, "p": p_new}, True)
 
     def test_not_present_in_generic_dict(self):
         class Module(torch.nn.Module):

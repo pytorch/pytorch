@@ -4371,6 +4371,15 @@ class GuardsStatePickler(pickle.Pickler):
             ):
                 pytype = obj.pytype if obj.pytype is not None else torch.Tensor
 
+            # The grad rides along with its tensor, so serialize it the same
+            # way the tensor itself is (as a meta tensor). Grads of tensors
+            # known upfront are registered in pickle_guards_state (ordering vs
+            # pickle memoization matters there); this covers tensors discovered
+            # mid-dump, e.g. wrapper subclass inner tensors.
+            grad = obj.grad
+            if isinstance(grad, torch.Tensor):
+                self.guard_tree_values.setdefault(id(grad), grad)
+                self.missing_values.pop(id(grad), None)
             return type(self)._unpickle_tensor, (
                 torch.empty_like(obj, device="meta", requires_grad=obj.requires_grad),
                 obj.device,
@@ -4586,6 +4595,19 @@ def pickle_guards_state(
             # TODO See if we have lift this branch as the first one.
             # Prune more objects in pytree hierarchy.
             missing_values[id(leaf)] = leaf
+
+    # A guarded tensor's .grad serializes as a meta tensor alongside its owner
+    # (see reducer_override). Register grads upfront: pickle memoizes by object
+    # id, so a grad that is also an unguarded local-scope leaf would otherwise
+    # be memoized as _Missing if pickled before its owner tensor.
+    worklist = [v for v in guard_tree_values.values() if isinstance(v, torch.Tensor)]
+    while worklist:
+        grad = worklist.pop().grad
+        if isinstance(grad, torch.Tensor) and id(grad) not in guard_tree_values:
+            guard_tree_values[id(grad)] = grad
+            missing_values.pop(id(grad), None)
+            worklist.append(grad)
+
     pickler = GuardsStatePickler(guard_tree_values, empty_values, missing_values, buf)
 
     if all(
