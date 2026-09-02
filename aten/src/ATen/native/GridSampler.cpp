@@ -44,7 +44,9 @@ namespace {
   // the wrong voxel. A tap the padding drops takes a negative index and contributes a zero value
   // while keeping its coefficient, which is what get_value_bounded does in 4-D. The bounds are
   // taken on the coordinate where 4-D takes them on the truncated index; the two agree because
-  // compute_coordinates sends an integer to an integer in every padding mode.
+  // compute_coordinates sends an integer to an integer in every padding mode. Where a scalar_t
+  // runs out of integers the bound stays conservative: it drops taps at the top of an extent
+  // rather than admitting one past the end.
   template <typename scalar_t, typename index_t>
   static inline void resolve_cubic_taps(
       scalar_t coord,
