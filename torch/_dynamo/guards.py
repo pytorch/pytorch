@@ -4205,6 +4205,7 @@ class GuardsStatePickler(pickle.Pickler):
         dispatch_keys_raw: int,
         ctx: Any,
         inner_data: list[tuple[str, Any]],
+        grad: torch.Tensor | None,
     ) -> torch.Tensor:
         inner_tensors = dict(inner_data)
 
@@ -4219,6 +4220,7 @@ class GuardsStatePickler(pickle.Pickler):
         )
         out.pytype = pytype
         out.dispatch_keys = torch._C.DispatchKeySet.from_raw_repr(dispatch_keys_raw)
+        out.grad = grad
         return out
 
     @classmethod
@@ -4340,10 +4342,31 @@ class GuardsStatePickler(pickle.Pickler):
             if id(obj) not in self.guard_tree_values:
                 return _Missing, ("tensor guard tree",)
 
+            # The grad rides along with its tensor and is serialized the same
+            # way (reduced to a meta tensor), for both plain tensors and wrapper
+            # subclasses. Register it up front -- before either return path --
+            # so it survives pickle-memoization pruning, and use this local in
+            # the reduce tuple rather than re-reading obj.grad (a subclass may
+            # route .grad through a descriptor returning a fresh object, whose
+            # id would then miss the registration above).
+            # A non-strided grad (sparse COO/CSR, e.g. from embedding backward)
+            # cannot survive the meta round-trip -- empty_like on meta drops the
+            # layout -- so reject it rather than silently substituting a dense
+            # grad whose metadata would mismatch the real one at guard-check time.
+            grad = obj.grad
+            if isinstance(grad, torch.Tensor):
+                if grad.layout != torch.strided:
+                    raise torch._dynamo.exc.PackageError(
+                        "Cannot serialize a guard on a tensor whose .grad has "
+                        f"layout {grad.layout} (e.g. a sparse grad from embedding "
+                        "backward): the meta round-trip does not preserve it."
+                    )
+                self.guard_tree_values.setdefault(id(grad), grad)
+                self.missing_values.pop(id(grad), None)
+
             if is_traceable_wrapper_subclass(obj):
-                # inner_data is a list of tuples of:
-                #   (inner attr name, unpickle func, tuple of func inputs)
-                # This supports traceable wrapper subclass inner tensors.
+                # inner_data is a list of (inner attr name, inner tensor/value)
+                # tuples; this supports traceable wrapper subclass inner tensors.
                 inner_data = []
                 attrs, ctx = obj.__tensor_flatten__()
                 # recursively call for inner tensor components
@@ -4360,6 +4383,7 @@ class GuardsStatePickler(pickle.Pickler):
                     torch._C._dispatch_keys(obj).raw_repr(),
                     ctx,
                     inner_data,
+                    grad,
                 )
 
             # For FakeTensors, use pytype if set, otherwise default to
@@ -4371,25 +4395,12 @@ class GuardsStatePickler(pickle.Pickler):
             ):
                 pytype = obj.pytype if obj.pytype is not None else torch.Tensor
 
-            # The grad rides along with its tensor, so serialize it the same
-            # way the tensor itself is (as a meta tensor). Grads of tensors
-            # known upfront are registered in pickle_guards_state (ordering vs
-            # pickle memoization matters there); this covers tensors discovered
-            # mid-dump, e.g. wrapper subclass inner tensors.
-            # NB: the grad is reduced through the same meta path as any other
-            # guarded tensor, so a non-strided grad layout (sparse COO/CSR,
-            # e.g. from embedding backward) is not faithfully round-tripped --
-            # empty_like on meta does not preserve it. Strided grads are fine.
-            grad = obj.grad
-            if isinstance(grad, torch.Tensor):
-                self.guard_tree_values.setdefault(id(grad), grad)
-                self.missing_values.pop(id(grad), None)
             return type(self)._unpickle_tensor, (
                 torch.empty_like(obj, device="meta", requires_grad=obj.requires_grad),
                 obj.device,
                 pytype,
                 torch._C._dispatch_keys(obj).raw_repr(),
-                obj.grad,
+                grad,
             )
 
         elif isinstance(obj, torch.nn.Module):
@@ -4631,15 +4642,15 @@ def pickle_guards_state(
 
     try:
         pickler.dump(state)
-    except (AttributeError, pickle.PicklingError) as e:
-        raise torch._dynamo.exc.PackageError(str(e)) from e
-    except TypeError as e:
-        # pickle raises TypeError("cannot pickle '...' object") for a genuinely
-        # unserializable value (thread locks, generators, ...). A TypeError of
-        # any other shape is a bug in a reducer, not an unserializable guard,
-        # so let it surface instead of masking it as a serialization failure.
-        if "cannot pickle" not in str(e):
-            raise
+    except (AttributeError, pickle.PicklingError, TypeError) as e:
+        # Any failure to pickle the guard state means these guards cannot be
+        # serialized, so surface it as the typed PackageError uniformly rather
+        # than branching on the exception's message text: pickle spells an
+        # unserializable value as TypeError("cannot pickle '...'"), PicklingError,
+        # or AttributeError depending on the value and the reducer, and matching
+        # a CPython-internal substring silently regressed to InternalTorchDynamoError
+        # whenever the wording drifted. A bug inside a reducer that raises one of
+        # these is still fully diagnosable: it is preserved as __cause__.
         raise torch._dynamo.exc.PackageError(str(e)) from e
     return buf.getvalue()
 
