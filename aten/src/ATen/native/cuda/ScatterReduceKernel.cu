@@ -3,6 +3,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/ceil_div.h>
+#include <ATen/native/cuda/MemoryAccess.cuh>
 #include <c10/macros/Macros.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Exception.h>
@@ -38,56 +39,104 @@ __device__ __forceinline__ void async_wait_group_0() {
   asm volatile("cp.async.wait_group 0;" ::: "memory");
 }
 
-#define DEFINE_VECTOR_RED16(name, op, type)                                  \
-  template <int vec_size>                                                     \
-  __device__ __forceinline__ void name(void* dst, const uint32_t* src) {     \
-    if constexpr (vec_size == 8) {                                           \
-      uint32_t x0 = src[0], x1 = src[1], x2 = src[2], x3 = src[3];          \
-      asm volatile(                                                          \
-          "{ .reg .b16 h<9>;\n"                                             \
-          "mov.b32 {h1, h2}, %1;\n"                                        \
-          "mov.b32 {h3, h4}, %2;\n"                                        \
-          "mov.b32 {h5, h6}, %3;\n"                                        \
-          "mov.b32 {h7, h8}, %4;\n"                                        \
-          "red.relaxed.gpu.global." op ".noftz.v8." type                   \
-          " [%0], {h1, h2, h3, h4, h5, h6, h7, h8};\n"                      \
-          "}"                                                               \
-          : : "l"(dst), "r"(x0), "r"(x1), "r"(x2), "r"(x3) : "memory"); \
-    } else if constexpr (vec_size == 4) {                                    \
-      uint32_t x0 = src[0], x1 = src[1];                                    \
-      asm volatile(                                                          \
-          "{ .reg .b16 h<5>;\n"                                             \
-          "mov.b32 {h1, h2}, %1;\n"                                        \
-          "mov.b32 {h3, h4}, %2;\n"                                        \
-          "red.relaxed.gpu.global." op ".noftz.v4." type                   \
-          " [%0], {h1, h2, h3, h4};\n"                                     \
-          "}"                                                               \
-          : : "l"(dst), "r"(x0), "r"(x1) : "memory");                    \
-    } else {                                                                 \
-      static_assert(vec_size == 2,                                           \
-                    "only v8, v4, and v2 reductions are supported");       \
-      uint32_t x0 = src[0];                                                  \
-      asm volatile(                                                          \
-          "{ .reg .b16 h<3>;\n"                                             \
-          "mov.b32 {h1, h2}, %1;\n"                                        \
-          "red.relaxed.gpu.global." op ".noftz.v2." type                   \
-          " [%0], {h1, h2};\n"                                             \
-          "}"                                                               \
-          : : "l"(dst), "r"(x0) : "memory");                              \
-    }                                                                        \
+#define VECTOR_RED16(op, type)                                               \
+  if constexpr (N == 8) {                                                    \
+    const uint32_t x0 = vec.u32[0];                                          \
+    const uint32_t x1 = vec.u32[1];                                          \
+    const uint32_t x2 = vec.u32[2];                                          \
+    const uint32_t x3 = vec.u32[3];                                          \
+    asm volatile(                                                             \
+        "{ .reg .b16 h<9>;\n"                                              \
+        "mov.b32 {h1, h2}, %1;\n"                                         \
+        "mov.b32 {h3, h4}, %2;\n"                                         \
+        "mov.b32 {h5, h6}, %3;\n"                                         \
+        "mov.b32 {h7, h8}, %4;\n"                                         \
+        "red.relaxed.gpu.global." op ".noftz.v8." type                     \
+        " [%0], {h1, h2, h3, h4, h5, h6, h7, h8};\n"                       \
+        "}"                                                                  \
+        : : "l"(dst), "r"(x0), "r"(x1), "r"(x2), "r"(x3) : "memory");   \
+  } else if constexpr (N == 4) {                                             \
+    const uint32_t x0 = vec.u32[0];                                          \
+    const uint32_t x1 = vec.u32[1];                                          \
+    asm volatile(                                                             \
+        "{ .reg .b16 h<5>;\n"                                              \
+        "mov.b32 {h1, h2}, %1;\n"                                         \
+        "mov.b32 {h3, h4}, %2;\n"                                         \
+        "red.relaxed.gpu.global." op ".noftz.v4." type                     \
+        " [%0], {h1, h2, h3, h4};\n"                                      \
+        "}"                                                                  \
+        : : "l"(dst), "r"(x0), "r"(x1) : "memory");                      \
+  } else {                                                                    \
+    static_assert(N == 2, "only v8, v4, and v2 reductions are supported"); \
+    const uint32_t x0 = vec.u32;                                             \
+    asm volatile(                                                             \
+        "{ .reg .b16 h<3>;\n"                                              \
+        "mov.b32 {h1, h2}, %1;\n"                                         \
+        "red.relaxed.gpu.global." op ".noftz.v2." type                     \
+        " [%0], {h1, h2};\n"                                              \
+        "}"                                                                  \
+        : : "l"(dst), "r"(x0) : "memory");                               \
   }
 
-DEFINE_VECTOR_RED16(red_f16_max, "max", "f16")
-DEFINE_VECTOR_RED16(red_f16_min, "min", "f16")
-DEFINE_VECTOR_RED16(red_bf16_max, "max", "bf16")
-DEFINE_VECTOR_RED16(red_bf16_min, "min", "bf16")
+#define DEFINE_VECTOR_RED16(name, op)                                        \
+  template <int Alignment, typename scalar_t>                                \
+  __device__ __forceinline__ void name(                                       \
+      scalar_t* dst,                                                          \
+      const at::native::memory::Vec<Alignment>& vec) {                       \
+    constexpr int N = Alignment / sizeof(scalar_t);                          \
+    if constexpr (std::is_same_v<scalar_t, c10::Half>) {                     \
+      VECTOR_RED16(op, "f16")                                                \
+    } else {                                                                  \
+      static_assert(std::is_same_v<scalar_t, c10::BFloat16>);                \
+      VECTOR_RED16(op, "bf16")                                               \
+    }                                                                         \
+  }
+
+DEFINE_VECTOR_RED16(atomicMaxVec, "max")
+DEFINE_VECTOR_RED16(atomicMinVec, "min")
 #undef DEFINE_VECTOR_RED16
+#undef VECTOR_RED16
 
 } // namespace scatter_reduce
 #endif
 
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && \
+    defined(__CUDA_ARCH__) && \
+    ((CUDA_VERSION >= 12080 && __CUDA_ARCH__ >= 900) || \
+     (__CUDA_ARCH__ >= 800 && __CUDA_ARCH__ < 900))
+#if CUDA_VERSION >= 12080 && __CUDA_ARCH__ >= 900
+#define SCATTER_REDUCE_ASYNC_COPY scatter_reduce::async_copy
+#define SCATTER_REDUCE_COMMIT_GROUP scatter_reduce::async_commit_group
+#define SCATTER_REDUCE_WAIT_GROUP_0 scatter_reduce::async_wait_group_0
+#define SCATTER_REDUCE_ATOMIC_MAX scatter_reduce::atomicMaxVec
+#define SCATTER_REDUCE_ATOMIC_MIN scatter_reduce::atomicMinVec
+#else
+#define SCATTER_REDUCE_ASYNC_COPY ampere_scatter_reduce::async_copy
+#define SCATTER_REDUCE_COMMIT_GROUP ampere_scatter_reduce::commit_group
+#define SCATTER_REDUCE_WAIT_GROUP_0 ampere_scatter_reduce::wait_group_0
+#define SCATTER_REDUCE_ATOMIC_MAX ampere_scatter_reduce::atomicMaxVec
+#define SCATTER_REDUCE_ATOMIC_MIN ampere_scatter_reduce::atomicMinVec
+#endif
+#endif
+
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && \
+    defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800 && __CUDA_ARCH__ < 900
+namespace ampere_scatter_reduce {
+template <int bytes>
+__device__ __forceinline__ void async_copy(void*, const void*);
+__device__ __forceinline__ void commit_group();
+__device__ __forceinline__ void wait_group_0();
+template <int Alignment, typename scalar_t>
+__device__ __forceinline__ void atomicMaxVec(
+    scalar_t*, const at::native::memory::Vec<Alignment>&);
+template <int Alignment, typename scalar_t>
+__device__ __forceinline__ void atomicMinVec(
+    scalar_t*, const at::native::memory::Vec<Alignment>&);
+} // namespace ampere_scatter_reduce
+#endif
+
 template <typename scalar_t, typename index_t, bool is_max, int vec_size>
-__global__ void vectorized_scatter_reduce_minmax_kernel(
+__global__ void scatter_reduce_minmax_kernel(
     scalar_t* __restrict__ self_data,
     const scalar_t* __restrict__ src_data,
     const index_t* __restrict__ idx,
@@ -98,8 +147,10 @@ __global__ void vectorized_scatter_reduce_minmax_kernel(
     int64_t src_stride,
     int entries_per_block,
     int tile_elems) {
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && \
-    defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && \
+    defined(__CUDA_ARCH__) && \
+    ((CUDA_VERSION >= 12080 && __CUDA_ARCH__ >= 900) || \
+     (__CUDA_ARCH__ >= 800 && __CUDA_ARCH__ < 900))
   extern __shared__ char smem_raw[];
   constexpr int threads_per_entry = C10_WARP_SIZE;
   constexpr int copy_bytes = vec_size * sizeof(scalar_t);
@@ -126,54 +177,46 @@ __global__ void vectorized_scatter_reduce_minmax_kernel(
   if (off < D) {
     int vector_off = off + lane * vec_size;
     if (vector_off < D) {
-      scatter_reduce::async_copy<copy_bytes>(
+      SCATTER_REDUCE_ASYNC_COPY<copy_bytes>(
           buf0 + lane * vec_size, src_entry + vector_off);
     }
-    scatter_reduce::async_commit_group();
+    SCATTER_REDUCE_COMMIT_GROUP();
   }
   for (; off < D; off += gridDim.y * tile_elems, ++phase) {
     int cur = phase & 1;
-    scatter_reduce::async_wait_group_0();
+    SCATTER_REDUCE_WAIT_GROUP_0();
     __syncwarp();
 
     int next_off = off + gridDim.y * tile_elems;
     if (next_off < D) {
       int next_vector_off = next_off + lane * vec_size;
       if (next_vector_off < D) {
-        scatter_reduce::async_copy<copy_bytes>(
+        SCATTER_REDUCE_ASYNC_COPY<copy_bytes>(
             buf0 + (cur ^ 1) * tile_elems + lane * vec_size,
             src_entry + next_vector_off);
       }
-      scatter_reduce::async_commit_group();
+      SCATTER_REDUCE_COMMIT_GROUP();
     }
 
     int vector_off = off + lane * vec_size;
     if (vector_off < D) {
-      const uint32_t* src_vector = reinterpret_cast<const uint32_t*>(
+      const auto& vec = *reinterpret_cast<const at::native::memory::Vec<copy_bytes>*>(
           buf0 + cur * tile_elems + lane * vec_size);
-      if constexpr (std::is_same_v<scalar_t, c10::Half>) {
-        if constexpr (is_max) {
-          scatter_reduce::red_f16_max<vec_size>(dst_entry + vector_off, src_vector);
-        } else {
-          scatter_reduce::red_f16_min<vec_size>(dst_entry + vector_off, src_vector);
-        }
+      if constexpr (is_max) {
+        SCATTER_REDUCE_ATOMIC_MAX<copy_bytes>(dst_entry + vector_off, vec);
       } else {
-        if constexpr (is_max) {
-          scatter_reduce::red_bf16_max<vec_size>(dst_entry + vector_off, src_vector);
-        } else {
-          scatter_reduce::red_bf16_min<vec_size>(dst_entry + vector_off, src_vector);
-        }
+        SCATTER_REDUCE_ATOMIC_MIN<copy_bytes>(dst_entry + vector_off, vec);
       }
     }
   }
 #else
   CUDA_KERNEL_ASSERT(
-      false && "vectorized_scatter_reduce_minmax_kernel requires sm_90+");
+      false && "scatter_reduce_minmax_kernel requires sm_80+");
 #endif
 }
 
 template <typename scalar_t, typename index_t, bool is_max, int vec_size>
-void vectorized_scatter_reduce_minmax_kernel_launch(
+void scatter_reduce_minmax_kernel_launch(
     scalar_t* self_data,
     const scalar_t* src_data,
     index_t* idx,
@@ -182,7 +225,7 @@ void vectorized_scatter_reduce_minmax_kernel_launch(
     int64_t self_dim_size,
     int64_t self_stride_bytes,
     int64_t src_stride_bytes) {
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12080
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   constexpr int max_threads = 256;
   constexpr int threads_per_entry = C10_WARP_SIZE;
   constexpr int entries_per_block = max_threads / threads_per_entry;
@@ -198,7 +241,7 @@ void vectorized_scatter_reduce_minmax_kernel_launch(
   int smem = entries_per_block * 2 * tile_elems * static_cast<int>(sizeof(scalar_t));
   dim3 grid = {static_cast<uint32_t>(grid_x), grid_y, 1};
 
-  vectorized_scatter_reduce_minmax_kernel<scalar_t, index_t, is_max, vec_size>
+  scatter_reduce_minmax_kernel<scalar_t, index_t, is_max, vec_size>
       <<<grid, max_threads, smem, at::cuda::getCurrentCUDAStream()>>>(
           self_data,
           src_data,
@@ -212,31 +255,37 @@ void vectorized_scatter_reduce_minmax_kernel_launch(
           tile_elems);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 #else
-  TORCH_CHECK(false, "vectorized scatter min/max requires CUDA 12.8+ and NVIDIA GPU");
+  TORCH_CHECK(false, "vectorized scatter min/max requires CUDA 11+ and NVIDIA GPU");
 #endif
 }
 
-#define INSTANTIATE_VECTOR_SCATTER_REDUCE_MINMAX(scalar_t, index_t, is_max) \
-  template void vectorized_scatter_reduce_minmax_kernel_launch<             \
+#define INSTANTIATE_SCATTER_REDUCE_MINMAX(scalar_t, index_t, is_max) \
+  template void scatter_reduce_minmax_kernel_launch<                        \
       scalar_t, index_t, is_max, 8>(                                         \
       scalar_t*, const scalar_t*, index_t*, int, int, int64_t, int64_t, int64_t); \
-  template void vectorized_scatter_reduce_minmax_kernel_launch<             \
+  template void scatter_reduce_minmax_kernel_launch<                        \
       scalar_t, index_t, is_max, 4>(                                         \
       scalar_t*, const scalar_t*, index_t*, int, int, int64_t, int64_t, int64_t); \
-  template void vectorized_scatter_reduce_minmax_kernel_launch<             \
+  template void scatter_reduce_minmax_kernel_launch<                        \
       scalar_t, index_t, is_max, 2>(                                         \
       scalar_t*, const scalar_t*, index_t*, int, int, int64_t, int64_t, int64_t);
 
-#define INSTANTIATE_VECTOR_SCATTER_REDUCE_MINMAX_INDEX(scalar_t, index_t) \
-  INSTANTIATE_VECTOR_SCATTER_REDUCE_MINMAX(scalar_t, index_t, true)       \
-  INSTANTIATE_VECTOR_SCATTER_REDUCE_MINMAX(scalar_t, index_t, false)
+#define INSTANTIATE_SCATTER_REDUCE_MINMAX_INDEX(scalar_t, index_t) \
+  INSTANTIATE_SCATTER_REDUCE_MINMAX(scalar_t, index_t, true)       \
+  INSTANTIATE_SCATTER_REDUCE_MINMAX(scalar_t, index_t, false)
 
-INSTANTIATE_VECTOR_SCATTER_REDUCE_MINMAX_INDEX(c10::Half, int64_t)
-INSTANTIATE_VECTOR_SCATTER_REDUCE_MINMAX_INDEX(c10::Half, int32_t)
-INSTANTIATE_VECTOR_SCATTER_REDUCE_MINMAX_INDEX(c10::BFloat16, int64_t)
-INSTANTIATE_VECTOR_SCATTER_REDUCE_MINMAX_INDEX(c10::BFloat16, int32_t)
-#undef INSTANTIATE_VECTOR_SCATTER_REDUCE_MINMAX_INDEX
-#undef INSTANTIATE_VECTOR_SCATTER_REDUCE_MINMAX
+INSTANTIATE_SCATTER_REDUCE_MINMAX_INDEX(c10::Half, int64_t)
+INSTANTIATE_SCATTER_REDUCE_MINMAX_INDEX(c10::Half, int32_t)
+INSTANTIATE_SCATTER_REDUCE_MINMAX_INDEX(c10::BFloat16, int64_t)
+INSTANTIATE_SCATTER_REDUCE_MINMAX_INDEX(c10::BFloat16, int32_t)
+#undef INSTANTIATE_SCATTER_REDUCE_MINMAX_INDEX
+#undef INSTANTIATE_SCATTER_REDUCE_MINMAX
+
+#undef SCATTER_REDUCE_ASYNC_COPY
+#undef SCATTER_REDUCE_COMMIT_GROUP
+#undef SCATTER_REDUCE_WAIT_GROUP_0
+#undef SCATTER_REDUCE_ATOMIC_MAX
+#undef SCATTER_REDUCE_ATOMIC_MIN
 
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && \
     defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800 && __CUDA_ARCH__ < 900
@@ -299,8 +348,9 @@ __device__ __forceinline__ uint16_t half_reduce_bits(
 }
 
 template <bool is_max>
-__device__ __forceinline__ void atomic_reduce_half2(
-    c10::Half* dst, uint32_t value_bits) {
+__device__ __forceinline__ void atomicReduceVec2(
+    c10::Half* dst,
+    uint32_t value_bits) {
   auto* address = reinterpret_cast<uint32_t*>(dst);
   uint32_t old = *address;
   uint32_t assumed;
@@ -355,8 +405,9 @@ __device__ __forceinline__ uint16_t bfloat16_reduce_bits(
 }
 
 template <bool is_max>
-__device__ __forceinline__ void atomic_reduce_bfloat162(
-    c10::BFloat16* dst, uint32_t value_bits) {
+__device__ __forceinline__ void atomicReduceVec2(
+    c10::BFloat16* dst,
+    uint32_t value_bits) {
   auto* address = reinterpret_cast<uint32_t*>(dst);
   uint32_t old = *address;
   uint32_t assumed;
@@ -376,162 +427,27 @@ __device__ __forceinline__ void atomic_reduce_bfloat162(
   } while (old != assumed);
 }
 
+#define DEFINE_PACKED_CAS_REDUCE(name, is_max)                               \
+  template <int Alignment, typename scalar_t>                                \
+  __device__ __forceinline__ void name(                                       \
+      scalar_t* dst,                                                          \
+      const at::native::memory::Vec<Alignment>& vec) {                       \
+    constexpr int N = Alignment / sizeof(scalar_t);                          \
+    static_assert(std::is_same_v<scalar_t, c10::Half> ||                     \
+                  std::is_same_v<scalar_t, c10::BFloat16>);                  \
+    static_assert(N % 2 == 0, "packed CAS requires pairs of 16-bit values");\
+    const uint32_t* values = reinterpret_cast<const uint32_t*>(&vec);        \
+    _Pragma("unroll")                                                        \
+    for (int i = 0; i < N / 2; ++i) {                                        \
+      atomicReduceVec2<is_max>(dst + 2 * i, values[i]);                      \
+    }                                                                         \
+  }
+
+DEFINE_PACKED_CAS_REDUCE(atomicMaxVec, true)
+DEFINE_PACKED_CAS_REDUCE(atomicMinVec, false)
+#undef DEFINE_PACKED_CAS_REDUCE
+
 } // namespace ampere_scatter_reduce
 #endif
-
-template <typename scalar_t, typename index_t, bool is_max>
-__global__ void ampere_scatter_reduce_minmax_kernel(
-    scalar_t* __restrict__ self_data,
-    const scalar_t* __restrict__ src_data,
-    const index_t* __restrict__ idx,
-    int num_ind,
-    int D,
-    int64_t self_dim_size,
-    int64_t self_stride,
-    int64_t src_stride,
-    int entries_per_block,
-    int tile_elems) {
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && \
-    defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800 && __CUDA_ARCH__ < 900
-  extern __shared__ char smem_raw[];
-  constexpr int threads_per_entry = C10_WARP_SIZE;
-  constexpr int vec_size = 16 / sizeof(scalar_t);
-  constexpr int copy_bytes = 16;
-  const int entry_in_block = threadIdx.x / threads_per_entry;
-  const int lane = threadIdx.x - entry_in_block * threads_per_entry;
-  const int entry_id = blockIdx.x * entries_per_block + entry_in_block;
-  if (entry_id >= num_ind) {
-    return;
-  }
-
-  const int64_t ind = idx[entry_id];
-  CUDA_KERNEL_ASSERT_VERBOSE(
-      ind >= 0 && ind < self_dim_size && "ampere scatter min/max index out of bounds",
-      "Expected 0 <= index < self_dim_size(%ld), but got index = %ld",
-      self_dim_size,
-      ind);
-  const scalar_t* src_entry = src_data + static_cast<int64_t>(entry_id) * src_stride;
-  scalar_t* dst_entry = self_data + ind * self_stride;
-  scalar_t* buffer = reinterpret_cast<scalar_t*>(smem_raw) +
-      entry_in_block * 2 * tile_elems;
-
-  int off = blockIdx.y * tile_elems;
-  int phase = 0;
-  if (off < D) {
-    const int vector_off = off + lane * vec_size;
-    if (vector_off < D) {
-      ampere_scatter_reduce::async_copy<copy_bytes>(
-          buffer + lane * vec_size, src_entry + vector_off);
-    }
-    ampere_scatter_reduce::commit_group();
-  }
-
-  for (; off < D; off += gridDim.y * tile_elems, ++phase) {
-    const int cur = phase & 1;
-    ampere_scatter_reduce::wait_group_0();
-    __syncwarp();
-
-    const int next_off = off + gridDim.y * tile_elems;
-    if (next_off < D) {
-      const int next_vector_off = next_off + lane * vec_size;
-      if (next_vector_off < D) {
-        ampere_scatter_reduce::async_copy<copy_bytes>(
-            buffer + (cur ^ 1) * tile_elems + lane * vec_size,
-            src_entry + next_vector_off);
-      }
-      ampere_scatter_reduce::commit_group();
-    }
-
-    const int vector_off = off + lane * vec_size;
-    if (vector_off < D) {
-      const int count = min(vec_size, D - vector_off);
-      scalar_t* values = buffer + cur * tile_elems + lane * vec_size;
-      if constexpr (std::is_same_v<scalar_t, c10::Half>) {
-        const uint32_t* packed_values =
-            reinterpret_cast<const uint32_t*>(values);
-#pragma unroll
-        for (int j = 0; j < vec_size / 2; ++j) {
-          if (2 * j < count) {
-            ampere_scatter_reduce::atomic_reduce_half2<is_max>(
-                dst_entry + vector_off + 2 * j, packed_values[j]);
-          }
-        }
-      } else if constexpr (std::is_same_v<scalar_t, c10::BFloat16>) {
-        const uint32_t* packed_values =
-            reinterpret_cast<const uint32_t*>(values);
-#pragma unroll
-        for (int j = 0; j < vec_size / 2; ++j) {
-          if (2 * j < count) {
-            ampere_scatter_reduce::atomic_reduce_bfloat162<is_max>(
-                dst_entry + vector_off + 2 * j, packed_values[j]);
-          }
-        }
-      }
-    }
-  }
-#else
-  CUDA_KERNEL_ASSERT(false && "Ampere scatter min/max requires sm_80+");
-#endif
-}
-
-template <typename scalar_t, typename index_t, bool is_max>
-void ampere_scatter_reduce_minmax_kernel_launch(
-    scalar_t* self_data,
-    const scalar_t* src_data,
-    index_t* idx,
-    int num_ind,
-    int D,
-    int64_t self_dim_size,
-    int64_t self_stride_bytes,
-    int64_t src_stride_bytes) {
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 11000
-  constexpr int max_threads = 256;
-  constexpr int threads_per_entry = C10_WARP_SIZE;
-  constexpr int entries_per_block = max_threads / threads_per_entry;
-  constexpr int tile_elems = C10_WARP_SIZE * (16 / sizeof(scalar_t));
-  constexpr int min_tiles_per_block = 4;
-  const int num_tiles = at::ceil_div(D, tile_elems);
-  const int grid_x = at::ceil_div(num_ind, entries_per_block);
-  const uint32_t grid_y = std::min(
-      static_cast<uint32_t>(std::max(1, num_tiles / min_tiles_per_block)),
-      static_cast<uint32_t>(at::cuda::getCurrentDeviceProperties()->maxGridSize[1]));
-  const int64_t self_stride = self_stride_bytes / sizeof(scalar_t);
-  const int64_t src_stride = src_stride_bytes / sizeof(scalar_t);
-  const int smem = entries_per_block * 2 * tile_elems * static_cast<int>(sizeof(scalar_t));
-  dim3 grid = {static_cast<uint32_t>(grid_x), grid_y, 1};
-
-  ampere_scatter_reduce_minmax_kernel<scalar_t, index_t, is_max>
-      <<<grid, max_threads, smem, at::cuda::getCurrentCUDAStream()>>>(
-          self_data,
-          src_data,
-          idx,
-          num_ind,
-          D,
-          self_dim_size,
-          self_stride,
-          src_stride,
-          entries_per_block,
-          tile_elems);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
-#else
-  TORCH_CHECK(false, "Ampere scatter min/max requires CUDA 11+ and NVIDIA GPU");
-#endif
-}
-
-#define INSTANTIATE_AMPERE_SCATTER_REDUCE_MINMAX(scalar_t, index_t, is_max) \
-  template void ampere_scatter_reduce_minmax_kernel_launch<                 \
-      scalar_t, index_t, is_max>(                                             \
-      scalar_t*, const scalar_t*, index_t*, int, int, int64_t, int64_t, int64_t);
-
-#define INSTANTIATE_AMPERE_SCATTER_REDUCE_MINMAX_INDEX(scalar_t, index_t) \
-  INSTANTIATE_AMPERE_SCATTER_REDUCE_MINMAX(scalar_t, index_t, true)       \
-  INSTANTIATE_AMPERE_SCATTER_REDUCE_MINMAX(scalar_t, index_t, false)
-
-INSTANTIATE_AMPERE_SCATTER_REDUCE_MINMAX_INDEX(c10::Half, int64_t)
-INSTANTIATE_AMPERE_SCATTER_REDUCE_MINMAX_INDEX(c10::Half, int32_t)
-INSTANTIATE_AMPERE_SCATTER_REDUCE_MINMAX_INDEX(c10::BFloat16, int64_t)
-INSTANTIATE_AMPERE_SCATTER_REDUCE_MINMAX_INDEX(c10::BFloat16, int32_t)
-#undef INSTANTIATE_AMPERE_SCATTER_REDUCE_MINMAX_INDEX
-#undef INSTANTIATE_AMPERE_SCATTER_REDUCE_MINMAX
 
 } // namespace at::native

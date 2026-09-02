@@ -1405,10 +1405,8 @@ void index_reduce_func_cuda_impl(
       row_size_supported && device_major >= 8 && dim == 0 && numIndex > 0 && index.dim() == 1 &&
       indContig && source_.dim() > 0 &&
       source_.size(0) == static_cast<int64_t>(numIndex)) {
-    std::vector<int64_t> idx_shape(source_.dim(), 1);
-    idx_shape[0] = static_cast<int64_t>(numIndex);
     self_.scatter_reduce_(
-        0, index.view(idx_shape).expand_as(source_), source_,
+        0, index.view({static_cast<int64_t>(numIndex), 1}).expand_as(source_), source_,
         reduce == ReductionType::MAX ? "amax" : "amin", /*include_self=*/true);
     return;
   }
