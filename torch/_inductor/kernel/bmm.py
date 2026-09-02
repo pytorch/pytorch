@@ -159,7 +159,7 @@ def append_blackwell_bmm_choice(
     }
     if config.two_ctas:
         kwargs["ctas_per_cga"] = (2, 1, 1)
-    error = blackwell_ws_persistent_tma_bmm_template.maybe_append_choice(
+    blackwell_ws_persistent_tma_bmm_template.maybe_append_choice(
         choices,
         input_nodes=input_nodes,
         layout=layout,
@@ -168,8 +168,6 @@ def append_blackwell_bmm_choice(
         num_warps=8,
         **kwargs,
     )
-    if error is not None:
-        raise error
 
 aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out", op_overload=aten.bmm.out)
 aten_bmm_dtype = ExternKernelChoice(
