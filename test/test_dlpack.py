@@ -443,7 +443,7 @@ class TestTorchDlPack(TestCase):
     @onlyNativeDeviceTypes
     def test_automatically_select_in_creation(self, device):
         # Create a new tensor, and wrap it using TensorDLPackWrapper.
-        tensor = torch.rand(10)
+        tensor = torch.rand(10, device=device)
         wrap = TensorDLPackWrapper(tensor)
         # Create a new tensor from the wrapper.
         # This should identify that the wrapper class provides the DLPack methods
