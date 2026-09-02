@@ -16,7 +16,7 @@ template <typename T>
 struct is_complex<std::complex<T>> : public std::true_type {};
 
 template <typename T>
-struct is_complex<c10::complex<T>> : public std::true_type {};
+struct is_complex<complex<T>> : public std::true_type {};
 
 // Extract double from std::complex<double>; is identity otherwise
 // TODO: Write in more idiomatic C++17
@@ -29,7 +29,7 @@ struct scalar_value_type<std::complex<T>> {
   using type = T;
 };
 template <typename T>
-struct scalar_value_type<c10::complex<T>> {
+struct scalar_value_type<complex<T>> {
   using type = T;
 };
 
@@ -38,10 +38,10 @@ HIDDEN_NAMESPACE_END(torch, headeronly)
 namespace std {
 
 template <typename T>
-class numeric_limits<c10::complex<T>> : public numeric_limits<T> {};
+class numeric_limits<::torch::headeronly::complex<T>> : public numeric_limits<T> {};
 
 template <typename T>
-bool isnan(const c10::complex<T>& v) {
+bool isnan(const ::torch::headeronly::complex<T>& v) {
   return std::isnan(v.real()) || std::isnan(v.imag());
 }
 

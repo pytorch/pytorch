@@ -101,5 +101,17 @@ TEST(TestMath, TestIsReducedFloatingPoint) {
   EXPECT_TRUE(std::isnan(static_cast<float>(std::nextafter(nan, from))));
 }
 
+TEST(TestMath, TestTranscendentals) {
+  using torch::headeronly::exp;
+  using torch::headeronly::log;
+  using torch::headeronly::log1p;
+  using torch::headeronly::tan;
+
+  EXPECT_FLOAT_EQ(exp(0.0f), 1.0f);
+  EXPECT_FLOAT_EQ(log(1.0f), 0.0f);
+  EXPECT_FLOAT_EQ(log1p(0.0f), 0.0f);
+  EXPECT_FLOAT_EQ(tan(0.0f), 0.0f);
+}
+
 } // namespace aot_inductor
 } // namespace torch
