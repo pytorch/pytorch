@@ -888,7 +888,19 @@ constexpr std::array rt_binary_specializations = {
     std::array<c10::ScalarType, 3>(
         {c10::CppTypeToScalarType<Half>::value,
          c10::CppTypeToScalarType<Half>::value,
-         c10::CppTypeToScalarType<float>::value})};
+         c10::CppTypeToScalarType<float>::value}),
+    // Integer true division promotes to float, so int32/int32 needs a cast and
+    // lands on the manual-unroll path with a runtime ScalarType switch per
+    // element. That switch, not the narrow loads, is what costs: isolating it
+    // gives 1.536x on gfx950 and 1.631x on gfx1250, while widening the loads on
+    // top adds 0.994x (unresolved) and 1.048x respectively. int32 is listed
+    // alone among the integer widths because can_vectorize_up_to keys off the
+    // functor's argument type (float), which agrees with int32 byte for byte
+    // but is merely the stricter check for narrower inputs.
+    std::array<c10::ScalarType, 3>(
+        {c10::CppTypeToScalarType<float>::value,
+         c10::CppTypeToScalarType<int32_t>::value,
+         c10::CppTypeToScalarType<int32_t>::value})};
 
 bool check_binary_rt_types_for_specialization(TensorIteratorBase& iter) {
   if (iter.ninputs() != 2)
