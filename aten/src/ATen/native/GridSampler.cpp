@@ -72,14 +72,14 @@ namespace {
       x = std::min(static_cast<coord_t>(size - 1),
                    std::max(x, static_cast<coord_t>(0)));
     } else if (padding_mode == GridSamplerPadding::Reflection) {
-      const coord_t twice_low = align_corners ? 0 : -1;
-      const coord_t twice_high = static_cast<coord_t>(2) * size -
-          (align_corners ? 2 : 1);
-      if (twice_low == twice_high) {
+      // the two bounds reflect_coordinates halves, reached without doubling an
+      // extent a coord_t may not represent
+      const coord_t low =
+          align_corners ? static_cast<coord_t>(0) : static_cast<coord_t>(-0.5);
+      const coord_t span = static_cast<coord_t>(align_corners ? size - 1 : size);
+      if (span == 0) {
         x = 0;
       } else {
-        const coord_t low = twice_low / 2;
-        const coord_t span = (twice_high - twice_low) / 2;
         const coord_t in = std::fabs(x - low);
         const coord_t extra = std::fmod(in, span);
         const bool odd =
@@ -112,15 +112,15 @@ namespace {
       x = std::min(static_cast<coord_t>(size - 1),
                    std::max(x, static_cast<coord_t>(0)));
     } else if (padding_mode == GridSamplerPadding::Reflection) {
-      const coord_t twice_low = align_corners ? 0 : -1;
-      const coord_t twice_high = static_cast<coord_t>(2) * size -
-          (align_corners ? 2 : 1);
-      if (twice_low == twice_high) {
+      // the two bounds reflect_coordinates halves, reached without doubling an
+      // extent a coord_t may not represent
+      const coord_t low =
+          align_corners ? static_cast<coord_t>(0) : static_cast<coord_t>(-0.5);
+      const coord_t span = static_cast<coord_t>(align_corners ? size - 1 : size);
+      if (span == 0) {
         x = 0;
         *grad_in = static_cast<coord_t>(0);
       } else {
-        const coord_t low = twice_low / 2;
-        const coord_t span = (twice_high - twice_low) / 2;
         const coord_t shifted = x - low;
         const coord_t sign =
             shifted < 0 ? static_cast<coord_t>(-1) : static_cast<coord_t>(1);
@@ -207,7 +207,8 @@ namespace {
     for (const auto i : c10::irange(4)) {
       const coord_t tap = compute_coordinates(base - 1 + i, size, padding_mode, align_corners);
       // the comparison decides, not the cast: a coordinate that is not finite fails
-      // both sides, where converting it is undefined
+      // both sides, where converting it is undefined. Above the range where the
+      // coordinate type holds every integer the bound is the conservative one
       indices[i] = (tap >= 0 && tap < static_cast<coord_t>(size))
           ? static_cast<index_t>(tap)
           : static_cast<index_t>(-1);
@@ -235,7 +236,8 @@ namespace {
     for (const auto i : c10::irange(4)) {
       const coord_t tap = compute_coordinates(base - 1 + i, size, padding_mode, align_corners);
       // the comparison decides, not the cast: a coordinate that is not finite fails
-      // both sides, where converting it is undefined
+      // both sides, where converting it is undefined. Above the range where the
+      // coordinate type holds every integer the bound is the conservative one
       indices[i] = (tap >= 0 && tap < static_cast<coord_t>(size))
           ? static_cast<index_t>(tap)
           : static_cast<index_t>(-1);
