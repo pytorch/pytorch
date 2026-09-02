@@ -83,6 +83,20 @@ class TestLRScheduler(TestCase):
         def step(self, epoch=None):
             super().step(epoch)
 
+    class KwargsRecordingScheduler(LRScheduler):
+        """A third-party scheduler collecting its step arguments in ``**kwargs``."""
+
+        def __init__(self, optimizer):
+            self.step_kwargs = []
+            super().__init__(optimizer)
+
+        def get_lr(self):
+            return [group["lr"] for group in self.optimizer.param_groups]
+
+        def step(self, epoch=None, **kwargs):
+            self.step_kwargs.append(kwargs)
+            super().step(epoch)
+
     class MetricsUpdateScheduler(LRScheduler):
         """A scheduler using the metrics-aware private update hook."""
 
@@ -1240,7 +1254,10 @@ class TestLRScheduler(TestCase):
     def test_sequentiallr_initializes_nested_chained_sequentiallr(self):
         inner = SequentialLR(
             self.opt,
-            schedulers=[LinearLR(self.opt, start_factor=0.5, total_iters=4), ConstantLR(self.opt)],
+            schedulers=[
+                LinearLR(self.opt, start_factor=0.5, total_iters=4),
+                ConstantLR(self.opt),
+            ],
             milestones=[4],
         )
         chained = ChainedScheduler([inner], optimizer=self.opt)
@@ -1299,6 +1316,38 @@ class TestLRScheduler(TestCase):
         )
         self.opt.step()
         sequential.step(metrics=1.0)
+
+    def test_composite_schedulers_forward_all_kwargs_to_children(self):
+        """Composites pass their step kwargs through, not just `metrics`."""
+        chained_child = self.KwargsRecordingScheduler(self.opt)
+        chained = ChainedScheduler([chained_child], optimizer=self.opt)
+        self.opt.step()
+        chained.step(metrics=1.0, other=2)
+
+        self.assertEqual(chained_child.step_kwargs[-1], {"metrics": 1.0, "other": 2})
+
+        sequential_child = self.KwargsRecordingScheduler(self.opt)
+        sequential = SequentialLR(
+            self.opt,
+            schedulers=[sequential_child, ConstantLR(self.opt)],
+            milestones=[2],
+        )
+        self.opt.step()
+        sequential.step(metrics=3.0, other=4)
+
+        self.assertEqual(sequential_child.step_kwargs[-1], {"metrics": 3.0, "other": 4})
+
+    def test_scheduler_ignores_kwargs_it_does_not_use(self):
+        scheduler = StepLR(self.opt, step_size=1)
+        self.opt.step()
+        scheduler.step(some_future_input=1.0)
+
+    def test_plateau_lr_rejects_misspelled_metrics(self):
+        """`metrics` is named explicitly, so a typo is not silently ignored."""
+        scheduler = PlateauLR(self.opt)
+        self.opt.step()
+        with self.assertRaisesRegex(ValueError, "requires the metric it monitors"):
+            scheduler.step(metric=1.0)
 
     def test_chained_scheduler_forwards_metrics_to_update_hook(self):
         child = self.MetricsUpdateScheduler(self.opt)

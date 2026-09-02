@@ -94,6 +94,22 @@ def _update_param_group_val(
         param_group[key] = val
 
 
+def _step_accepts_kwargs(scheduler: LRScheduler) -> bool:
+    """Whether ``scheduler.step`` collects arbitrary keyword arguments.
+
+    Every scheduler in this module does. A third-party scheduler still written
+    against the older API -- ``def step(self)`` or
+    ``def step(self, epoch=None)`` -- does not, and the composite schedulers
+    call its ``step`` without keyword arguments so that it keeps working until
+    it is updated.
+    """
+    # The bound method, so that `self` is not one of the parameters.
+    return any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in inspect.signature(scheduler.step).parameters.values()
+    )
+
+
 class LRScheduler:
     r"""Base class for all learning rate schedulers.
 
@@ -117,6 +133,7 @@ class LRScheduler:
 
     _get_lr_called_within_step: bool = False
     _is_initial: bool = False
+
     def __init__(
         self,
         optimizer: Optimizer,
@@ -236,9 +253,7 @@ class LRScheduler:
         """
         raise NotImplementedError
 
-    def step(
-        self, epoch: int | None = None, *, metrics: SupportsFloat | None = None
-    ) -> None:
+    def step(self, epoch: int | None = None, **kwargs: Any) -> None:
         """Step the scheduler.
 
         Args:
@@ -248,10 +263,12 @@ class LRScheduler:
                     :meth:`_get_closed_form_lr` if it is available. This is not
                     universally supported. Use :meth:`step` without arguments
                     instead.
-            metrics (SupportsFloat, optional): Accepted for signature parity
-                with :class:`PlateauLR` and the composite schedulers
-                (:class:`SequentialLR`, :class:`ChainedScheduler`); ignored
-                by schedulers that do not use it.
+            **kwargs: Extra scheduling inputs, ignored by any scheduler that
+                does not use them. The composite schedulers
+                (:class:`SequentialLR`, :class:`ChainedScheduler`) forward
+                these to the schedulers they hold, so a caller can pass an
+                input that only one of them consumes -- as
+                :class:`PlateauLR` does with ``metrics``.
 
         .. note::
             Call this method after calling the optimizer's
@@ -286,11 +303,9 @@ class LRScheduler:
         self._step_count += 1
         if epoch is not None:
             warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning, stacklevel=2)
-        self._update_lr(epoch, metrics=metrics)
+        self._update_lr(epoch, **kwargs)
 
-    def _update_lr(
-        self, epoch: int | None = None, *, metrics: SupportsFloat | None = None
-    ) -> None:
+    def _update_lr(self, epoch: int | None = None, **kwargs: Any) -> None:
         with _enable_get_lr_call(self):
             if epoch is None:
                 self.last_epoch += 1
@@ -1175,10 +1190,7 @@ class SequentialLR(LRScheduler):
                 f"number of milestones to be equal to {len(milestones)}"
             )
         self._schedulers = schedulers
-        self._schedulers_accept_metrics = [
-            "metrics" in inspect.signature(type(scheduler).step).parameters
-            for scheduler in schedulers
-        ]
+        self._schedulers_accept_kwargs = [_step_accepts_kwargs(s) for s in schedulers]
         self._milestones = milestones
         self.last_epoch = last_epoch + 1
         self.optimizer = optimizer
@@ -1214,11 +1226,9 @@ class SequentialLR(LRScheduler):
         self._last_lr = scheduler.get_last_lr()
 
     @override
-    def _update_lr(
-        self, epoch: int | None = None, *, metrics: SupportsFloat | None = None
-    ) -> None:
+    def _update_lr(self, epoch: int | None = None, **kwargs: Any) -> None:
         if epoch is None:
-            self.step(metrics=metrics)
+            self.step(**kwargs)
             return
 
         self.last_epoch = epoch
@@ -1227,25 +1237,26 @@ class SequentialLR(LRScheduler):
         child_epoch = self.last_epoch
         if idx > 0:
             child_epoch -= self._milestones[idx - 1]
-        scheduler._update_lr(child_epoch, metrics=metrics)
+        scheduler._update_lr(child_epoch, **kwargs)
 
         self._last_lr = scheduler.get_last_lr()
 
-    def step(self, *, metrics: SupportsFloat | None = None) -> None:  # type: ignore[override]
+    def step(self, **kwargs: Any) -> None:  # type: ignore[override]
         """Perform a step.
 
         Args:
-            metrics (SupportsFloat, optional): Forwarded to the currently
-                active sub-scheduler when its ``step`` method accepts it.
+            **kwargs: Forwarded to the currently active sub-scheduler. One
+                still written against the older ``step`` API, which cannot
+                take them, is stepped without them.
         """
         self.last_epoch += 1
         idx = bisect_right(self._milestones, self.last_epoch)
         scheduler = self._schedulers[idx]
         if idx > 0 and self._milestones[idx - 1] == self.last_epoch:
-            scheduler._update_lr(0, metrics=metrics)
+            scheduler._update_lr(0, **kwargs)
         else:
-            if self._schedulers_accept_metrics[idx]:
-                scheduler.step(metrics=metrics)
+            if self._schedulers_accept_kwargs[idx]:
+                scheduler.step(**kwargs)
             else:
                 scheduler.step()
 
@@ -1262,7 +1273,7 @@ class SequentialLR(LRScheduler):
         state_dict = {
             key: value
             for key, value in self.__dict__.items()
-            if key not in ("optimizer", "_schedulers", "_schedulers_accept_metrics")
+            if key not in ("optimizer", "_schedulers", "_schedulers_accept_kwargs")
         }
         state_dict["_schedulers"] = [None] * len(self._schedulers)
 
@@ -1601,9 +1612,8 @@ class ChainedScheduler(LRScheduler):
                     f"which is different from {optimizer.__class__.__name__}."
                 )
         self._schedulers = schedulers
-        self._schedulers_accept_metrics = [
-            "metrics" in inspect.signature(type(scheduler).step).parameters
-            for scheduler in schedulers
+        self._schedulers_accept_kwargs = [
+            _step_accepts_kwargs(scheduler) for scheduler in schedulers
         ]
         self.optimizer = optimizer
         self._last_lr = _param_groups_val_list(self._schedulers[-1].optimizer, "lr")
@@ -1622,25 +1632,24 @@ class ChainedScheduler(LRScheduler):
         self._last_lr = _param_groups_val_list(self._schedulers[-1].optimizer, "lr")
 
     @override
-    def _update_lr(
-        self, epoch: int | None = None, *, metrics: SupportsFloat | None = None
-    ) -> None:
+    def _update_lr(self, epoch: int | None = None, **kwargs: Any) -> None:
         for scheduler in self._schedulers:
-            scheduler._update_lr(epoch, metrics=metrics)
+            scheduler._update_lr(epoch, **kwargs)
         self._last_lr = _param_groups_val_list(self._schedulers[-1].optimizer, "lr")
 
-    def step(self, *, metrics: SupportsFloat | None = None) -> None:  # type: ignore[override]
+    def step(self, **kwargs: Any) -> None:  # type: ignore[override]
         """Perform a step.
 
         Args:
-            metrics (SupportsFloat, optional): Forwarded to every contained
-                scheduler whose ``step`` method accepts it.
+            **kwargs: Forwarded to every contained scheduler. One still
+                written against the older ``step`` API, which cannot take
+                them, is stepped without them.
         """
-        for scheduler, accepts_metrics in zip(
-            self._schedulers, self._schedulers_accept_metrics, strict=True
+        for scheduler, accepts_kwargs in zip(
+            self._schedulers, self._schedulers_accept_kwargs, strict=True
         ):
-            if accepts_metrics:
-                scheduler.step(metrics=metrics)
+            if accepts_kwargs:
+                scheduler.step(**kwargs)
             else:
                 scheduler.step()
         self._last_lr = _param_groups_val_list(self._schedulers[-1].optimizer, "lr")
@@ -1656,7 +1665,7 @@ class ChainedScheduler(LRScheduler):
         state_dict = {
             key: value
             for key, value in self.__dict__.items()
-            if key not in ("optimizer", "_schedulers", "_schedulers_accept_metrics")
+            if key not in ("optimizer", "_schedulers", "_schedulers_accept_kwargs")
         }
         state_dict["_schedulers"] = [None] * len(self._schedulers)
 
@@ -2041,7 +2050,11 @@ class PlateauLR(LRScheduler):
     # being deprecated.
     @override
     def step(
-        self, epoch: int | None = None, *, metrics: SupportsFloat | None = None
+        self,
+        epoch: int | None = None,
+        *,
+        metrics: SupportsFloat | None = None,
+        **kwargs: Any,
     ) -> None:
         r"""Perform a step.
 
@@ -2051,7 +2064,11 @@ class PlateauLR(LRScheduler):
                     Use :meth:`step` without this argument instead.
             metrics (SupportsFloat): The current value of the quantity being
                 monitored, such as a validation loss. Required on every call
-                except the implicit one performed at construction.
+                except the implicit one performed at construction. Named
+                explicitly, rather than read out of ``**kwargs``, so that
+                omitting it -- including by misspelling it -- raises below
+                instead of passing unnoticed.
+            **kwargs: Other scheduling inputs, unused here.
         """
         if epoch is not None and metrics is None:
             raise ValueError(
@@ -2067,14 +2084,18 @@ class PlateauLR(LRScheduler):
                 "`ChainedScheduler`, pass the metric to that scheduler's "
                 "`step` instead and it reaches this one from there."
             )
-        super().step(epoch, metrics=metrics)
+        super().step(epoch, metrics=metrics, **kwargs)
 
     @override
     def _update_lr(
-        self, epoch: int | None = None, *, metrics: SupportsFloat | None = None
+        self,
+        epoch: int | None = None,
+        *,
+        metrics: SupportsFloat | None = None,
+        **kwargs: Any,
     ) -> None:
         self._metrics = metrics
-        super()._update_lr(epoch, metrics=metrics)
+        super()._update_lr(epoch, metrics=metrics, **kwargs)
 
     @override
     def get_lr(self) -> list[float | Tensor]:
@@ -2591,7 +2612,7 @@ class CosineAnnealingWarmRestarts(LRScheduler):
         ]
 
     @override
-    def step(self, epoch=None, *, metrics: SupportsFloat | None = None) -> None:
+    def step(self, epoch=None, **kwargs: Any) -> None:
         """Step could be called after every batch update.
 
         Example:
@@ -2619,10 +2640,10 @@ class CosineAnnealingWarmRestarts(LRScheduler):
             >>> scheduler.step()  # scheduler.step(27), instead of scheduler(20)
 
         Args:
-            metrics (SupportsFloat, optional): Accepted for signature parity
-                with other schedulers so this class can be composed alongside
-                :class:`PlateauLR` inside :class:`SequentialLR`/
-                :class:`ChainedScheduler`; unused here.
+            **kwargs: Accepted for signature parity with other schedulers so
+                this class can be composed alongside :class:`PlateauLR`
+                inside :class:`SequentialLR`/:class:`ChainedScheduler`;
+                unused here.
         """
         if epoch is None and self.last_epoch < 0:
             epoch = 0
