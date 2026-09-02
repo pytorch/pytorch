@@ -1197,15 +1197,11 @@ class SequentialLR(LRScheduler):
         # "Undo" the step performed by other schedulers
         self.recursive_undo()
 
-        self._initial_step()
-
-    @override
-    def _initial_step(self) -> None:
-        """Initialize the scheduler subtree active at step 0."""
+        # Perform the initial step for only the scheduler meant to run at step 0.
         idx = bisect_right(self._milestones, 0)
-        scheduler = self._schedulers[idx]
-        scheduler._initial_step()
-        self._last_lr = scheduler.get_last_lr()
+        self._schedulers[idx]._initial_step()
+
+        self._last_lr = schedulers[idx].get_last_lr()
 
     def recursive_undo(self, sched=None) -> None:
         """
@@ -1240,23 +1236,6 @@ class SequentialLR(LRScheduler):
                 scheduler.step()
 
         self._last_lr = scheduler.get_last_lr()
-
-    @override
-    def _update_lr(self, epoch: int | None = None, **kwargs: Any) -> None:
-        if epoch is None:
-            self.step(**kwargs)
-            return
-
-        self.last_epoch = epoch
-        idx = bisect_right(self._milestones, self.last_epoch)
-        scheduler = self._schedulers[idx]
-        child_epoch = self.last_epoch
-        if idx > 0:
-            child_epoch -= self._milestones[idx - 1]
-        scheduler._update_lr(child_epoch, **kwargs)
-
-        self._last_lr = scheduler.get_last_lr()
-
 
     @override
     def state_dict(self) -> dict[str, Any]:
@@ -1612,25 +1591,6 @@ class ChainedScheduler(LRScheduler):
             _step_accepts_kwargs(scheduler) for scheduler in schedulers
         ]
         self.optimizer = optimizer
-        self._last_lr = _param_groups_val_list(self._schedulers[-1].optimizer, "lr")
-
-    def _initial_step(self) -> None:
-        # Bootstrap every child directly through its own `_initial_step`,
-        # rather than going through `self.step()` -- that would forward
-        # `metrics=None` to every child's `step`, which a `PlateauLR` child
-        # would reject unless its own `_is_initial` happens to be set (it
-        # isn't, since that flag lives on this container, not on the child).
-        # This only matters when this `ChainedScheduler` is itself the
-        # initial (milestone-0) stage of an outer `SequentialLR`, which is
-        # the only caller of `_initial_step`.
-        for scheduler in self._schedulers:
-            scheduler._initial_step()
-        self._last_lr = _param_groups_val_list(self._schedulers[-1].optimizer, "lr")
-
-    @override
-    def _update_lr(self, epoch: int | None = None, **kwargs: Any) -> None:
-        for scheduler in self._schedulers:
-            scheduler._update_lr(epoch, **kwargs)
         self._last_lr = _param_groups_val_list(self._schedulers[-1].optimizer, "lr")
 
     def step(self, **kwargs: Any) -> None:  # type: ignore[override]

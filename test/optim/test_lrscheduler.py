@@ -7,7 +7,6 @@ import tempfile
 import types
 import warnings
 from functools import partial
-from unittest import expectedFailure
 
 import torch
 import torch.nn.functional as F
@@ -1030,21 +1029,6 @@ class TestLRScheduler(TestCase):
         scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=milestones)
         self._test(scheduler, targets, epochs)
 
-    def test_sequentiallr_update_lr_uses_stage_local_epoch(self):
-        optimizer = SGD([torch.tensor(0.5)], lr=1.0)
-        second_scheduler = ExponentialLR(optimizer, gamma=0.1)
-        scheduler = SequentialLR(
-            optimizer,
-            schedulers=[ConstantLR(optimizer, factor=1.0), second_scheduler],
-            milestones=[3],
-        )
-
-        scheduler._update_lr(5)
-
-        self.assertEqual(scheduler.last_epoch, 5)
-        self.assertEqual(second_scheduler.last_epoch, 2)
-        self.assertEqual(optimizer.param_groups[0]["lr"], 0.1**2)
-
     def test_sequentiallr_no_warnings(self):
         scheduler1 = LinearLR(self.opt, start_factor=0.5, end_factor=0.1, total_iters=5)
         scheduler2 = ExponentialLR(self.opt, gamma=0.9)
@@ -1217,91 +1201,6 @@ class TestLRScheduler(TestCase):
 
         self.assertEqual(plateau.best, 0.5)
 
-    def test_sequentiallr_handoff_to_chained_plateau_lr(self):
-        plateau = PlateauLR(self.opt)
-        chained = ChainedScheduler([plateau], optimizer=self.opt)
-        scheduler = SequentialLR(
-            self.opt,
-            schedulers=[ConstantLR(self.opt), chained],
-            milestones=[1],
-        )
-
-        self.opt.step()
-        scheduler.step(metrics=0.5)
-
-        self.assertEqual(plateau.best, 0.5)
-
-    def test_sequentiallr_handoff_to_chained_sequentiallr(self):
-        inner = SequentialLR(
-            self.opt,
-            schedulers=[ConstantLR(self.opt, factor=0.5), StepLR(self.opt, 2)],
-            milestones=[3],
-        )
-        chained = ChainedScheduler([inner], optimizer=self.opt)
-        scheduler = SequentialLR(
-            self.opt,
-            schedulers=[ConstantLR(self.opt, factor=1.0), chained],
-            milestones=[1],
-        )
-
-        self.opt.step()
-        scheduler.step()
-
-        self.assertEqual(inner.last_epoch, 0)
-        self.assertEqual(inner._schedulers[0].last_epoch, 0)
-        self.assertEqual(self.opt.param_groups[0]["lr"], 0.025)
-
-    def test_sequentiallr_initializes_nested_chained_sequentiallr(self):
-        inner = SequentialLR(
-            self.opt,
-            schedulers=[
-                LinearLR(self.opt, start_factor=0.5, total_iters=4),
-                ConstantLR(self.opt),
-            ],
-            milestones=[4],
-        )
-        chained = ChainedScheduler([inner], optimizer=self.opt)
-        outer = SequentialLR(
-            self.opt,
-            schedulers=[chained, ConstantLR(self.opt)],
-            milestones=[8],
-        )
-
-        self.assertEqual(inner.last_epoch, 0)
-        self.assertEqual(inner._schedulers[0].last_epoch, 0)
-
-        for _ in range(3):
-            self.opt.step()
-            outer.step()
-        self.assertEqual(inner.last_epoch, 3)
-        self.assertEqual(inner._schedulers[0].last_epoch, 3)
-
-        self.opt.step()
-        outer.step()
-        self.assertEqual(inner.last_epoch, 4)
-        self.assertEqual(inner._schedulers[1].last_epoch, 0)
-
-    def test_sequentiallr_initializes_nested_chained_plateau_lr(self):
-        plateau = PlateauLR(self.opt)
-        inner = SequentialLR(
-            self.opt,
-            schedulers=[plateau, ConstantLR(self.opt)],
-            milestones=[3],
-        )
-        chained = ChainedScheduler([inner], optimizer=self.opt)
-        outer = SequentialLR(
-            self.opt,
-            schedulers=[chained, ConstantLR(self.opt)],
-            milestones=[5],
-        )
-
-        self.assertEqual(inner.last_epoch, 0)
-        self.assertEqual(plateau.last_epoch, 0)
-
-        self.opt.step()
-        outer.step(metrics=0.5)
-        self.assertEqual(plateau.best, 0.5)
-
     def test_composite_schedulers_support_legacy_children(self):
         chained = ChainedScheduler([self.LegacyScheduler(self.opt)], optimizer=self.opt)
         self.opt.step()
@@ -1407,21 +1306,6 @@ class TestLRScheduler(TestCase):
             PlateauLR(self.opt, mode="min", factor=0.5, patience=0, threshold=0),
         ]
         scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=[2])
-        self._test_with_metrics(scheduler, targets, metrics, epochs)
-
-    def test_sequentiallr_forwards_metrics_to_nested_chained_scheduler(self):
-        """A metric reaches a PlateauLR nested two containers deep."""
-        epochs = 6
-        for param_group in self.opt.param_groups:
-            param_group["lr"] = 1.0
-        metrics = [1.0] * epochs
-        targets = [[1.0, 0.5, 1.0, 1.0, 0.5, 0.5]]
-        plateau = PlateauLR(self.opt, mode="min", factor=0.5, patience=0, threshold=0)
-        schedulers = [
-            ChainedScheduler([plateau], optimizer=self.opt),
-            StepLR(self.opt, step_size=2, gamma=0.5),
-        ]
-        scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=[3])
         self._test_with_metrics(scheduler, targets, metrics, epochs)
 
     def test_composed_plateau_lr_without_metrics(self):
@@ -3457,95 +3341,6 @@ class TestLRScheduler(TestCase):
             else sch2.get_last_lr()[0],
             optim.param_groups[0]["lr"],
         )
-
-    # NOTE: Expected-failure tests for known scheduler issues.
-    #
-    # These tests should be converted to normal regression tests once
-    # the underlying behavior is fixed.
-
-    @expectedFailure
-    def test_sequentiallr_resume_reproducibility(self):
-        # Note: Saving and restoring both the optimizer and SequentialLR
-        # state mid training should reproduce the same LR sequence as a
-        # continuous uninterrupted run.
-        #
-        # This currently fails around scheduler transition boundaries after
-        # restoring from checkpoint state.
-        #
-        # The problematic state transition comes from SequentialLR's restore
-        # model:
-        # 1. SequentialLR.__init__() sets last_epoch, resets each param group
-        #    lr back to initial_lr, calls recursive_undo(), and then replays
-        #    _schedulers[0]._initial_step().
-        # 2. At this resume point, that constructor path leaves the optimizer
-        #    lr at 0.05 even though the saved scheduler state corresponds to
-        #    an effective lr of 0.08.
-        # 3. SequentialLR.load_state_dict() restores scheduler fields like
-        #    last_epoch and _last_lr, but it does not re-synchronize the
-        #    optimizer param-group lr with that loaded scheduler state.
-        # 4. LinearLR.get_lr() is recursive: it multiplies the current
-        #    optimizer lr, so the next resumed step advances
-        #    0.05 -> 0.05625 instead of the uninterrupted run's 0.08 -> 0.09.
-
-        base_lr = 0.1
-        milestone = 5
-        total_steps = 8
-        resume_step = 3
-
-        def make_scheduler(optim):
-            return SequentialLR(
-                optim,
-                [
-                    LinearLR(optim, start_factor=0.5, total_iters=milestone),
-                    ExponentialLR(optim, gamma=0.5),
-                ],
-                milestones=[milestone],
-            )
-
-        # run the full schedule and record the LR.
-        model = torch.nn.Linear(1, 1)
-        optim = torch.optim.SGD(model.parameters(), lr=base_lr)
-        sched = make_scheduler(optim)
-
-        reference_lrs = []
-        for _ in range(total_steps):
-            optim.step()
-            sched.step()
-            reference_lrs.append(sched.get_last_lr()[0])
-
-        # run a fresh optimizer/scheduler pair up to an intermediate step
-        model2 = torch.nn.Linear(1, 1)
-        optim2 = torch.optim.SGD(model2.parameters(), lr=base_lr)
-        sched2 = make_scheduler(optim2)
-
-        for _ in range(resume_step):
-            optim2.step()
-            sched2.step()
-
-        # save state to simulate checkpointing.
-        optim_state = optim2.state_dict()
-        sched_state = sched2.state_dict()
-
-        # restore into a new optimizer/scheduler pair
-        model3 = torch.nn.Linear(1, 1)
-        optim3 = torch.optim.SGD(model3.parameters(), lr=base_lr)
-        optim3.load_state_dict(optim_state)
-
-        sched3 = make_scheduler(optim3)
-        sched3.load_state_dict(sched_state)
-
-        loaded_optimizer_lr = optim3.param_groups[0]["lr"]
-        loaded_scheduler_lr = sched3.get_last_lr()[0]
-
-        resumed_lrs = []
-        for _ in range(resume_step, total_steps):
-            optim3.step()
-            sched3.step()
-            resumed_lrs.append(sched3.get_last_lr()[0])
-
-        self.assertEqual(loaded_optimizer_lr, loaded_scheduler_lr)
-        self.assertEqual(resumed_lrs[0], reference_lrs[resume_step])
-        self.assertEqual(resumed_lrs, reference_lrs[resume_step:])
 
 
 instantiate_parametrized_tests(TestLRScheduler)
