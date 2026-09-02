@@ -698,6 +698,9 @@ def compile_to_python(
     example_inputs: Sequence[InputType],
     *,
     options: dict[str, Any] | None = None,
+    is_inference: bool = True,
+    is_backward: bool = False,
+    output_strides: list[tuple[str, ...] | None] | None = None,
 ) -> tuple[str, bytes | None]:
     """Compile ``gm`` and return ``(inner_python, cache)`` -- the INNER half of the
     backend contract behind ``torch.compiler.precompile``.
@@ -813,6 +816,7 @@ def compile_to_python(
     from torch.compiler._cache import CacheArtifactManager
 
     from .compile_fx import compile_fx_inner
+    from .output_code import CompiledFxGraph
     from .virtualized import V
 
     # Own a copy: the collective rewrites and inductor may mutate the graph, and ``gm`` may
@@ -853,11 +857,28 @@ def compile_to_python(
             fake_inputs,
             static_input_idxs=(),
             cudagraphs=BoxedBool(False),
-            is_inference=True,
+            is_inference=is_inference,
+            is_backward=is_backward,
             boxed_forward_device_index=BoxedDeviceIndex(None),
         )
         artifacts = torch.compiler.save_cache_artifacts()
     inner_python = _runnable_source(compiled_graph)
+    if output_strides is not None:
+        # The strides Inductor CHOSE for this graph's outputs, as symbolic
+        # expression strings over the graph's shape symbols (see
+        # ``set_tracing_context_output_strides`` for how torch.compile evaluates
+        # them). A training backward has to be compiled against the forward's
+        # actual choices, and this is the only channel for that, since the
+        # caller cannot see the CompiledFxGraph.
+        if (
+            not isinstance(compiled_graph, CompiledFxGraph)
+            or compiled_graph.output_strides is None
+        ):
+            raise RuntimeError(
+                "compile_to_python: output strides were requested but the compile "
+                f"returned a {type(compiled_graph).__name__} that carries none."
+            )
+        output_strides.extend(compiled_graph.output_strides)
     cache = _acceleration_cache_bytes(artifacts)
     return inner_python, cache
 

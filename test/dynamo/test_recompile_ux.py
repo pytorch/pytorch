@@ -1,5 +1,10 @@
 # Owner(s): ["module: dynamo"]
+import faulthandler
 import operator
+import queue
+import sys
+import textwrap
+import threading
 import unittest
 import weakref
 from functools import cache
@@ -18,6 +23,7 @@ from torch._dynamo.exc import FailOnRecompileLimitHit
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    TestCase,
 )
 from torch.testing._internal.logging_utils import kwargs_to_settings, log_settings
 
@@ -497,6 +503,57 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         return len(torch._dynamo.eval_frame._debug_get_cache_entry_list(code))
 
     # ===== Basic isolation: independent caches per compile call =====
+
+    def test_concurrent_calls_do_not_deadlock_on_the_cache_lock(self):
+        """lookup() holds the ExtraState cache lock across guard evaluation,
+        and guard evaluation runs Python -- a LAMBDA_GUARD calls straight back
+        into the interpreter, so the GIL can drop mid-iteration. A thread that
+        blocks on that lock while HOLDING the GIL wedges the owner, who needs
+        the GIL to finish. The lock therefore has to release the GIL before it
+        waits. A short switch interval makes the handoff frequent.
+
+        The wedged thread holds the GIL, so nothing written in Python can
+        report this -- join() never returns, and a watchdog thread cannot help
+        either, since Event.wait must reacquire the GIL to run its next
+        bytecode. faulthandler's timeout runs on a C thread and needs no GIL,
+        so it is the only thing here that still fires. file= is required
+        because pytest's --capture=sys leaves sys.stderr without a fileno.
+        """
+
+        def f(x):
+            return x.sin() + x.cos()
+
+        opt = torch.compile(f, backend="eager", dynamic=False)
+        args = [torch.randn(n) for n in (3, 4, 5)]
+        for arg in args:
+            opt(arg)
+
+        errors = queue.SimpleQueue()
+
+        def hammer():
+            try:
+                for _ in range(200):
+                    for arg in args:
+                        opt(arg)
+            except BaseException as e:
+                errors.put(e)
+
+        threads = [threading.Thread(target=hammer, daemon=True) for _ in range(4)]
+        prior_interval = sys.getswitchinterval()
+        sys.setswitchinterval(1e-6)
+        faulthandler.dump_traceback_later(300, exit=True, file=sys.__stderr__)
+        try:
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+        finally:
+            faulthandler.cancel_dump_traceback_later()
+            sys.setswitchinterval(prior_interval)
+        raised = []
+        while not errors.empty():
+            raised.append(errors.get_nowait())
+        self.assertEqual(raised, [])
 
     @torch._dynamo.config.patch(
         recompile_limit=1,
@@ -1653,6 +1710,150 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(self._num_cache_entries(f), 0)
 
     # ===== Debug / introspection =====
+
+    def test_cache_key_lookup_is_off_until_a_cache_key_backend_exists(self):
+        # get_backend walks the callback chain on every intercepted frame, and
+        # looking for _torchdynamo_cache_key there is a MISS at every level for
+        # anyone who never precompiles -- a raising attribute lookup per level
+        # per frame, measured at ~1 us on a steady-state compiled call. The
+        # lookup is therefore gated on a flag that only a backend carrying such
+        # a key turns on. Nothing else in the tree sets that attribute, so the
+        # gate is invisible; this pins that the switch exists and is one-way.
+        # The gate is process-global and one-way, and anything that imports the
+        # precompile backend flips it, so the OFF half can only be observed in a
+        # fresh interpreter. Two wrappers over ONE shared backend are the
+        # discriminator: with the gate off get_backend follows
+        # _torchdynamo_orig_backend to that shared object and both compilations
+        # share one cache identity; with it on, their distinct cache keys are
+        # two identities.
+        script = textwrap.dedent(
+            """
+            import torch
+            from torch._C._dynamo.eval_frame import (
+                _debug_get_cache_entry_list,
+                _enable_precompile_cache_keys,
+            )
+
+            def fn(x):
+                return x.sin()
+
+            class Backend:
+                # The shape _PrecompileBackend has, minus the __init__ that
+                # would flip the gate before the OFF half is measured.
+                def __init__(self, inner):
+                    self._torchdynamo_orig_backend = inner
+                    self._torchdynamo_cache_key = object()
+
+                def __call__(self, gm, inputs):
+                    return self._torchdynamo_orig_backend(gm, inputs)
+
+            inner = torch._dynamo.lookup_backend("eager")
+
+            def entries(same_key):
+                torch._dynamo.reset()
+                x = torch.randn(4)
+                a, b = Backend(inner), Backend(inner)
+                if same_key:
+                    b._torchdynamo_cache_key = a._torchdynamo_cache_key
+                # optimize(), not compile(backend=), because compile() wraps the
+                # backend in a _TorchCompileWrapper that is not in the chain
+                # get_backend walks.
+                torch._dynamo.optimize(a)(fn)(x)
+                torch._dynamo.optimize(b)(fn)(x)
+                return len(_debug_get_cache_entry_list(fn.__code__))
+
+            print("off", entries(False))
+            _enable_precompile_cache_keys()
+            _enable_precompile_cache_keys()  # idempotent
+            print("on", entries(False))
+            print("on_same_key", entries(True))
+            """
+        )
+        stdout, stderr = TestCase.run_process_no_exception(script)
+        out = stdout.decode()
+        self.assertIn("off 1", out, stderr.decode())
+        self.assertIn("on 2", out, stderr.decode())
+        # The key IS the identity, so two backends sharing one key still share
+        # one cache entry -- the gate must not simply split every backend.
+        self.assertIn("on_same_key 1", out, stderr.decode())
+
+    def test_has_precompile_entries_is_region_exact(self):
+        """_has_precompile_entries answers for one region only. lookup() never
+        serves a precompile entry from another region, so an entry belonging to
+        a second artifact installed on the same code object is not coverage for
+        the first. It exists so that a caller can ask that question without
+        building the list of wrappers _debug_get_precompile_entries returns."""
+        from torch._C._dynamo.eval_frame import (
+            _debug_get_cache_entry_list,
+            _has_precompile_entries,
+            _load_precompile_entry,
+            _reset_precompile_entries_for_region,
+        )
+
+        def never_compiled(x):
+            return x + 1
+
+        self.assertFalse(_has_precompile_entries(never_compiled.__code__, -1))
+        with self.assertRaisesRegex(TypeError, "expected a code object"):
+            _has_precompile_entries(never_compiled, -1)
+
+        def f(x):
+            return x.sin()
+
+        torch.compile(f, backend="eager", dynamic=False)(torch.randn(3))
+        code = f.__code__
+        self.assertFalse(_has_precompile_entries(code, 7))
+
+        guard_manager = _debug_get_cache_entry_list(code)[0].guard_manager
+        _load_precompile_entry(code, guard_manager, code, 7)
+        try:
+            self.assertTrue(_has_precompile_entries(code, 7))
+            self.assertFalse(_has_precompile_entries(code, 9))
+            self.assertFalse(_has_precompile_entries(code, -1))
+        finally:
+            _reset_precompile_entries_for_region(code, 7)
+        self.assertFalse(_has_precompile_entries(code, 7))
+
+    def test_precompile_entries_are_removed_by_owner_not_by_region(self):
+        """Several packages may legitimately hold entries for one code object in
+        one region -- a library frame two loaded models both reach -- and lookup
+        picks between them by evaluating guards. Teardown must therefore remove
+        what one installer put there and leave the neighbour's alone; clearing
+        the whole region evicts a live artifact that, because lookup is
+        region-exact, nothing else can serve."""
+        from torch._C._dynamo.eval_frame import (
+            _debug_get_cache_entry_list,
+            _debug_get_precompile_entries,
+            _load_precompile_entry,
+            _reset_precompile_entries_for_owner,
+            _reset_precompile_entries_for_region,
+        )
+
+        def f(x):
+            return x.sin()
+
+        torch.compile(f, backend="eager", dynamic=False)(torch.randn(3))
+        code = f.__code__
+        guard_manager = _debug_get_cache_entry_list(code)[0].guard_manager
+
+        first, second = object(), object()
+        _load_precompile_entry(code, guard_manager, code, -1, first)
+        _load_precompile_entry(code, guard_manager, code, -1, second)
+        try:
+            self.assertEqual(len(_debug_get_precompile_entries(code)), 2)
+            _reset_precompile_entries_for_owner(code, -1, first)
+            # The neighbour survives.
+            self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
+            # Removing an owner that holds nothing here is a no-op.
+            _reset_precompile_entries_for_owner(code, -1, first)
+            self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
+            # Same owner, different region: also a no-op.
+            _reset_precompile_entries_for_owner(code, 7, second)
+            self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
+            _reset_precompile_entries_for_owner(code, -1, second)
+            self.assertEqual(len(_debug_get_precompile_entries(code)), 0)
+        finally:
+            _reset_precompile_entries_for_region(code, -1)
 
     def test_isolate_recompiles_debug_cache_entry_list_deterministic_order(self):
         """_debug_get_cache_entry_list returns entries sorted by
