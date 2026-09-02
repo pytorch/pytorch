@@ -654,6 +654,32 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(
             ref, loaded, {"x": torch.randn(5, requires_grad=True)}, False
         )
+        # Pin the serialized form itself: the owner's grad is None, not a dense
+        # stand-in that happens to pass the checks above.
+        from torch._dynamo.package import load_guards_state
+
+        loaded_x = load_guards_state(
+            self._cached_guards_state
+        ).output_graph.local_scope["x"]
+        self.assertIsNone(loaded_x.grad)
+
+    def test_non_leaf_assigned_grad_round_trips(self):
+        # A non-leaf can hold a manually assigned .grad (no retains_grad); a
+        # guard reading it (GradSource -> TYPE_MATCH on L['y'].grad) must be
+        # rebuilt against the grad, not against None, or the loaded guard
+        # rejects every valid candidate. This is the case a leaf/retains_grad
+        # gate on the .grad read got wrong.
+        def f(y):
+            return y.grad.data + 1
+
+        def make():
+            y = torch.randn(4, requires_grad=True) * 2
+            self.assertFalse(y.is_leaf)
+            y.grad = torch.ones(4)
+            return y
+
+        ref, loaded = self._test_serialization("TYPE_MATCH", f, make())
+        self._test_check_fn(ref, loaded, {"y": make()}, True)
 
     def test_module_parameter_grad_round_trips(self):
         # The common production shape: a module whose parameters carry grads
@@ -806,9 +832,25 @@ class TestGuardSerialization(TestGuardSerializationBase):
             # branch that would graph-break this simplified harness.
             return x + len(type(lk).__name__)
 
-        with self.assertRaises(PackageError) as cm:
+        with self.assertRaisesRegex(PackageError, "_thread.lock") as cm:
             self._test_serialization("TYPE_MATCH", fn, torch.randn(3), threading.Lock())
         self.assertIsInstance(cm.exception.__cause__, TypeError)
+
+    def test_symint_guard_value_raises_typed(self):
+        # The SymInt reducer arm raises the typed PackageError directly (pickle
+        # propagates reducer exceptions unchanged), not a RuntimeError that would
+        # escape the non-strict swallow as InternalTorchDynamoError.
+        import io
+
+        from torch._dynamo.guards import GuardsStatePickler
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        symint = shape_env.create_symintnode(
+            shape_env.create_symbol(3, LocalSource("x")), hint=3
+        )
+        with self.assertRaisesRegex(PackageError, "Cannot serialize SymInt"):
+            GuardsStatePickler({}, {}, {}, io.BytesIO()).dump(symint)
 
     def _check_reducer_error_arm(self, value, exc_type):
         # The other two arms of the pickle-dump catch: a value whose reducer
@@ -817,7 +859,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         def fn(x, v):
             return x + len(type(v).__name__)
 
-        with self.assertRaises(PackageError) as cm:
+        with self.assertRaisesRegex(PackageError, "reducer refused") as cm:
             self._test_serialization("TYPE_MATCH", fn, torch.randn(3), value)
         self.assertIsInstance(cm.exception.__cause__, exc_type)
 
