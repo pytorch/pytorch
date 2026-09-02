@@ -951,6 +951,25 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
         pad_mask[..., 0] = True
         encoder(x, mask=None, src_key_padding_mask=pad_mask)
 
+    def test_multihead_attention_is_causal_need_weights(self, device):
+        embed_dim = 8
+        num_heads = 2
+        sl, bs = 4, 3
+        mha = nn.MultiheadAttention(embed_dim, num_heads, device=device)
+        q = torch.randn(sl, bs, embed_dim, device=device)
+        causal_mask = nn.Transformer.generate_square_subsequent_mask(
+            sl, device=device, dtype=q.dtype
+        )
+
+        out_auto, w_auto = mha(q, q, q, is_causal=True, need_weights=True)
+        out_mask, w_mask = mha(q, q, q, attn_mask=causal_mask, need_weights=True)
+        self.assertEqual(out_auto, out_mask)
+        self.assertEqual(w_auto, w_mask)
+
+        out_sdpa, w_sdpa = mha(q, q, q, is_causal=True, need_weights=False)
+        self.assertEqual(out_auto, out_sdpa)
+        self.assertIsNone(w_sdpa)
+
     @dtypes(torch.double)
     @torch.no_grad()
     def test_multihead_attn_in_proj_bias_none(self, device, dtype):
