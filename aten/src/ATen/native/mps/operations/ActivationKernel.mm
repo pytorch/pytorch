@@ -161,6 +161,14 @@ static void sigmoid_backward_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "sigmoid_backward");
 }
 
+static void tanh_backward_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "tanh_backward");
+}
+
+static void logit_backward_kernel(TensorIteratorBase& iter, const Scalar& eps) {
+  lib.exec_binary_kernel(iter, "logit_backward", eps);
+}
+
 // Collapse a tensor around the split dim into [outer, 2*L], where
 // L = (size[dim]/2) * product(size[dim+1:]) is the contiguous run per outer row
 // (the two halves of a row sit L elements apart). Valid only for a contiguous
@@ -359,5 +367,7 @@ REGISTER_DISPATCH(mish_backward_stub, mish_backward_kernel);
 REGISTER_DISPATCH(GeluKernel, gelu_kernel);
 REGISTER_DISPATCH(GeluBackwardKernel, gelu_backward_kernel);
 REGISTER_DISPATCH(sigmoid_backward_stub, sigmoid_backward_kernel);
+REGISTER_DISPATCH(tanh_backward_stub, tanh_backward_kernel);
+REGISTER_DISPATCH(logit_backward_stub, logit_backward_kernel);
 
 } // namespace at::native

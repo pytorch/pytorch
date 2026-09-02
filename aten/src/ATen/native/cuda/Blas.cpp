@@ -19,10 +19,6 @@
 #include <c10/util/MaybeOwned.h>
 #include <ATen/native/GroupedMMUtils.h>
 #include <ATen/native/cuda/cuBlasCommonArgs.h>
-#include <ATen/native/cuda/RowwiseScaledMM.h>
-#include <ATen/native/cuda/ScaledGroupMM.h>
-#include <ATen/native/cuda/GroupMM.h>
-#include <ATen/ceil_div.h>
 
 #ifdef USE_MSLK
 #include <mslk/gemm/gemm_torch.h>
@@ -35,8 +31,6 @@
 #include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_efficientzerotensor.h>
 #include <ATen/ops/_int_mm_native.h>
-#include <ATen/ops/_scaled_mm_native.h>
-#include <ATen/ops/_unsafe_view_native.h>
 #include <ATen/ops/abs.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addmv_native.h>
@@ -170,14 +164,6 @@ static bool isInputCompliesAddmmCudaLt(
   // so, this condition can be ralexed in cases when a col-major
   // copy of result is needed.
   if (self.is_same(result) || self.dim() == 2) {
-    return false;
-  }
-  #endif
-
-  #if defined(USE_ROCM) && ROCM_VERSION == 60400
-  // hipblaslt TT fp32 regression on ROCm 6.4, cannot use
-  const auto args = cublasCommonArgs(mat1, mat2, result);
-  if (args.transa == 't' && args.transb == 't') {
     return false;
   }
   #endif

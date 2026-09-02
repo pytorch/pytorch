@@ -18,7 +18,6 @@
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/python_arg_parser.h>
-#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/python_symnode.h>
@@ -26,8 +25,6 @@
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/extension.h>
 #include <cstdint>
-
-#include <torch/csrc/dynamo/debug_macros.h>
 
 #include <nlohmann/json.hpp>
 
@@ -689,13 +686,23 @@ struct GlobalStateGuard {
     _torch_function_all_disabled = at::impl::torch_function_all_disabled();
     _deterministic_algorithms = ctx.deterministicAlgorithms();
     _deterministic_algorithms_warn_only = ctx.deterministicAlgorithmsWarnOnly();
-    _allow_tf32 =
-        ctx.float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL) ==
-        at::Float32Precision::TF32;
+    _cuda_matmul_precision =
+        ctx.float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL);
+    _uses_legacy_allow_tf32 = false;
     _allow_fp16_reduce = ctx.allowFP16ReductionCuBLAS();
     _allow_bf16_reduce = ctx.allowBF16ReductionCuBLAS();
     _num_threads = at::get_num_threads();
     _default_dtype = at::get_default_dtype();
+  }
+
+  bool cudaMatmulPrecisionMatches(const at::Context& ctx) const {
+    const auto precision =
+        ctx.float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL);
+    return _uses_legacy_allow_tf32
+        ? precision != at::Float32Precision::BF16X9 &&
+            (_cuda_matmul_precision == at::Float32Precision::TF32) ==
+                (precision == at::Float32Precision::TF32)
+        : _cuda_matmul_precision == precision;
   }
 
   bool check() const {
@@ -708,10 +715,7 @@ struct GlobalStateGuard {
             _deterministic_algorithms == ctx.deterministicAlgorithms() &&
             _deterministic_algorithms_warn_only ==
                 ctx.deterministicAlgorithmsWarnOnly() &&
-            _allow_tf32 ==
-                (ctx.float32Precision(
-                     at::Float32Backend::CUDA, at::Float32Op::MATMUL) ==
-                 at::Float32Precision::TF32) &&
+            cudaMatmulPrecisionMatches(ctx) &&
             _allow_fp16_reduce == ctx.allowFP16ReductionCuBLAS() &&
             _allow_bf16_reduce == ctx.allowBF16ReductionCuBLAS() &&
             _num_threads == at::get_num_threads()) &&
@@ -733,11 +737,8 @@ struct GlobalStateGuard {
     if (_deterministic_algorithms_warn_only !=
         ctx.deterministicAlgorithmsWarnOnly())
       os << "deterministic_algorithms_warn_only ";
-    if (_allow_tf32 !=
-        (ctx.float32Precision(
-             at::Float32Backend::CUDA, at::Float32Op::MATMUL) ==
-         at::Float32Precision::TF32))
-      os << "allow_tf32 ";
+    if (!cudaMatmulPrecisionMatches(ctx))
+      os << "cuda_matmul_precision ";
     if (_allow_fp16_reduce != ctx.allowFP16ReductionCuBLAS())
       os << "allow_fp16_reduce ";
     if (_allow_bf16_reduce != ctx.allowBF16ReductionCuBLAS())
@@ -758,7 +759,19 @@ struct GlobalStateGuard {
     json_j["deterministic_algorithms"] = json_t._deterministic_algorithms;
     json_j["deterministic_algorithms_warn_only"] =
         json_t._deterministic_algorithms_warn_only;
-    json_j["allow_tf32"] = json_t._allow_tf32;
+    if (json_t._uses_legacy_allow_tf32) {
+      json_j["allow_tf32"] =
+          json_t._cuda_matmul_precision == at::Float32Precision::TF32;
+    } else {
+      // Older readers cannot represent BF16X9, so make them reject that
+      // payload instead of treating it as allow_tf32=false.
+      if (json_t._cuda_matmul_precision != at::Float32Precision::BF16X9) {
+        json_j["allow_tf32"] =
+            json_t._cuda_matmul_precision == at::Float32Precision::TF32;
+      }
+      json_j["cuda_matmul_precision"] =
+          static_cast<int64_t>(json_t._cuda_matmul_precision);
+    }
     json_j["allow_fp16_reduce"] =
         static_cast<int64_t>(json_t._allow_fp16_reduce);
     json_j["allow_bf16_reduce"] =
@@ -777,7 +790,16 @@ struct GlobalStateGuard {
     json_t._deterministic_algorithms = json_j.at("deterministic_algorithms");
     json_t._deterministic_algorithms_warn_only =
         json_j.at("deterministic_algorithms_warn_only");
-    json_t._allow_tf32 = json_j.at("allow_tf32");
+    if (json_j.contains("cuda_matmul_precision")) {
+      json_t._cuda_matmul_precision = static_cast<at::Float32Precision>(
+          static_cast<int64_t>(json_j.at("cuda_matmul_precision")));
+      json_t._uses_legacy_allow_tf32 = false;
+    } else {
+      const bool allow_tf32 = json_j.at("allow_tf32");
+      json_t._cuda_matmul_precision =
+          allow_tf32 ? at::Float32Precision::TF32 : at::Float32Precision::IEEE;
+      json_t._uses_legacy_allow_tf32 = true;
+    }
     json_t._allow_fp16_reduce = static_cast<at::CuBLASReductionOption>(
         static_cast<int64_t>(json_j.at("allow_fp16_reduce")));
     json_t._allow_bf16_reduce = static_cast<at::CuBLASReductionOption>(
@@ -793,7 +815,8 @@ struct GlobalStateGuard {
   bool _torch_function_all_disabled;
   bool _deterministic_algorithms;
   bool _deterministic_algorithms_warn_only;
-  bool _allow_tf32;
+  at::Float32Precision _cuda_matmul_precision;
+  bool _uses_legacy_allow_tf32;
   at::CuBLASReductionOption _allow_fp16_reduce;
   at::CuBLASReductionOption _allow_bf16_reduce;
   int _num_threads;
