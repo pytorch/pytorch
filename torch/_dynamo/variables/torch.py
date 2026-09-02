@@ -800,18 +800,28 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             torch.fx.traceback._dynamo_region_activation_memory_budget,
             torch.fx.traceback._dynamo_region_activation_memory_budget.__wrapped__,  # type: ignore[attr-defined]
         ):
-            if len(args) != 1 or kwargs:
+            if len(args) not in (1, 2) or kwargs:
                 raise AssertionError(
                     "_dynamo_region_activation_memory_budget expects "
-                    "one positional argument"
+                    "one or two positional arguments"
                 )
             budget = guard_if_dyn(args[0])
             if type(budget) is not float:
                 raise AssertionError(
                     f"expected a float budget, got {type(budget).__name__}"
                 )
+            require_full_coverage = guard_if_dyn(args[1]) if len(args) == 2 else True
+            if type(require_full_coverage) is not bool:
+                raise AssertionError(
+                    "expected require_full_coverage to be a bool, got "
+                    f"{type(require_full_coverage).__name__}"
+                )
+            coverage_key = torch.fx.traceback.MEMORY_BUDGET_REQUIRE_FULL_COVERAGE_KEY
             return FxTracebackAnnotateVariable(
-                {torch.fx.traceback.MEMORY_BUDGET_ANNOTATION_KEY: budget},
+                {
+                    torch.fx.traceback.MEMORY_BUDGET_ANNOTATION_KEY: budget,
+                    coverage_key: require_full_coverage,
+                },
                 source=self.source,
             )
         elif inspect.isclass(self.value) and issubclass(self.value, torch.Stream):
