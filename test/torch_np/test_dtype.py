@@ -65,6 +65,19 @@ class TestConvertDType(TestCase):
         if empty.dtype != tnp.float32:
             raise AssertionError(f"Expected float32, got {empty.dtype}")
 
+    def test_non_numpy_dtype_name_lookalike_raises(self):
+        class float32:
+            pass
+
+        with self.assertRaises(TypeError):
+            tnp.dtype(float32)
+
+        class _Lookalike:
+            name = "float32"
+
+        with self.assertRaises(TypeError):
+            tnp.dtype(_Lookalike())
+
 
 if __name__ == "__main__":
     run_tests()

@@ -5,6 +5,7 @@ Define the scalar types and supported dtypes and numpy <--> torch dtype mappings
 from __future__ import annotations
 
 import builtins
+import sys
 from typing import TYPE_CHECKING, TypeGuard, TypeVar
 
 import torch
@@ -277,6 +278,19 @@ def sctype_from_torch_dtype(torch_dtype: torch.dtype) -> type[generic]:
     return _torch_dtypes[torch_dtype]
 
 
+def _sctype_from_numpy_arg(arg: object) -> type[generic] | None:
+    np = sys.modules.get("numpy")
+    if np is None:
+        return None
+    # np.float32 / np.bool_ / etc.
+    if isinstance(arg, type) and issubclass(arg, np.generic):
+        return sctype_from_string(arg.__name__)
+    # np.dtype("float32")
+    if isinstance(arg, np.dtype):
+        return sctype_from_string(arg.name)
+    return None
+
+
 # ### DTypes. ###
 
 
@@ -304,17 +318,9 @@ class DType:
         elif hasattr(arg, "dtype") and isinstance(arg.dtype, DType):
             sctype = arg.dtype._scalar_type
         else:
-            # numpy scalar types are classes (np.float32.__name__);
-            # numpy.dtype objects expose .name ("float32").
-            if isinstance(arg, type):
-                name = getattr(arg, "__name__", None)
-            else:
-                name = getattr(arg, "name", None)
-            if isinstance(name, str):
-                try:
-                    sctype = sctype_from_string(name)
-                except TypeError:
-                    sctype = sctype_from_string(arg)
+            numpy_sctype = _sctype_from_numpy_arg(arg)
+            if numpy_sctype is not None:
+                sctype = numpy_sctype
             else:
                 sctype = sctype_from_string(arg)
         self._scalar_type = sctype
