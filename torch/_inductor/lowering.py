@@ -7797,7 +7797,11 @@ def div_mode(a, b, rounding_mode=None):
             raise AssertionError(
                 "truncdiv operands can not be boolean at the same time"
             )
-        return truncdiv(a, b) if both_integer else trunc(div(a, b))
+        # Use div_rn (IEEE round-to-nearest) instead of truediv here because
+        # Triton's default division uses an approximate reciprocal, which can
+        # nudge the quotient past an integer boundary and cause trunc() to
+        # return the wrong integer.
+        return truncdiv(a, b) if both_integer else trunc(_div_rn(a, b))
     return div(a, b)
 
 
