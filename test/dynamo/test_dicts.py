@@ -2630,6 +2630,102 @@ class DictTests(torch._dynamo.test_case.TestCase):
             _is_safe_to_reorder(graph.call_function(torch._C._increment_version, (x,)))
         )
 
+        # inference_mode brackets its body. The exit consumes the enter's token,
+        # so it has a Node argument and looks pure; hoisting it above the body
+        # silently drops inference mode.
+        grad_mode = torch.autograd.grad_mode
+        enter = graph.call_function(grad_mode._enter_inference_mode, (True,))
+        self.assertFalse(_is_safe_to_reorder(enter))
+        exit_ = graph.call_function(grad_mode._exit_inference_mode, (enter,))
+        self.assertFalse(_is_safe_to_reorder(exit_))
+
+        # A HOP whose subgraphs cannot be resolved is a barrier: its effects
+        # could live anywhere this pass cannot see.
+        cond_node = graph.call_function(torch.ops.higher_order.cond, (x, x, x, ()))
+        self.assertFalse(_is_safe_to_reorder(cond_node))
+
+    def test_canonical_graph_preserves_inference_mode(self):
+        def fn(x):
+            with torch.inference_mode():
+                return x + 1
+
+        x = torch.randn(4)
+        ref = fn(x)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(ref.is_inference(), res.is_inference())
+        self.assertEqual(ref, res)
+
+    def test_canonical_graph_hop_mutation_is_not_reordered(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.ones(8))
+
+            def forward(self, p, x):
+                def true_fn(x):
+                    x.add_(1)
+                    self.buf.add_(1)
+                    return x + self.buf
+
+                x = x.clone()
+                out = torch.cond(p, true_fn, true_fn, (x,))
+                # Reads the values true_fn mutated; hoisting either read above
+                # the cond observes the pre-mutation buffer.
+                return x + self.buf + out
+
+        p, x = torch.tensor(True), torch.randn(1)
+        with torch.no_grad():
+            ref = M()(p, x.clone())
+            torch._dynamo.reset()
+            res = torch.compile(M(), backend="eager", fullgraph=True)(p, x.clone())
+        self.assertEqual(ref, res)
+
+    def test_canonical_graph_increment_version_stays_between_reads(self):
+        from torch._dynamo.output_graph import _canonicalize_graph
+        from torch._dynamo.tensor_version_op import _tensor_version
+
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+        v0 = graph.call_function(_tensor_version, (x,))
+        graph.call_function(torch.autograd.graph.increment_version, (x,))
+        v1 = graph.call_function(_tensor_version, (x,))
+        graph.output((v0, v1))
+
+        # Both reads sort before the bump on the canonical key, so without the
+        # barrier they hoist above it and observe the same version.
+        _canonicalize_graph(graph)
+        read, bump = "_tensor_version_default", "increment_version"
+        expected = ["x", read, bump, f"{read}_1", "output"]
+        self.assertEqual([n.name for n in graph.nodes], expected)
+
+    def test_canonical_graph_hop_barrier_follows_subgraph_purity(self):
+        from torch.fx.passes.canonicalize import _is_safe_to_reorder
+
+        def make(body):
+            root = torch.nn.Module()
+            sub = fx.Graph()
+            s = sub.placeholder("s")
+            sub.output((body(sub, s),))
+            root.branch = fx.GraphModule(torch.nn.Module(), sub)
+            g = fx.Graph()
+            x = g.placeholder("x")
+            attr = g.get_attr("branch")
+            gm = fx.GraphModule(root, g)
+            cond = torch.ops.higher_order.cond
+            return gm.graph.call_function(cond, (x, attr, attr, (x,)))
+
+        pure = make(lambda sub, s: sub.call_function(torch.sin, (s,)))
+        self.assertTrue(_is_safe_to_reorder(pure))
+
+        mutating = make(lambda sub, s: sub.call_method("add_", (s, s)))
+        self.assertFalse(_is_safe_to_reorder(mutating))
+
+        # Effects that do not live in a subgraph keep the HOP pinned even when
+        # every subgraph it does carry is pure.
+        not_allowlisted = make(lambda sub, s: sub.call_function(torch.sin, (s,)))
+        not_allowlisted.target = torch.ops.higher_order.auto_functionalized_v2
+        self.assertFalse(_is_safe_to_reorder(not_allowlisted))
+
     @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
     def test_canonical_graph_collectives_are_barriers(self):
         from torch.fx.passes.canonicalize import _is_safe_to_reorder
