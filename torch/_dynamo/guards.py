@@ -39,7 +39,7 @@ import weakref
 from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
-from typing import Any, cast, NamedTuple, NoReturn, TYPE_CHECKING
+from typing import Any, cast, NamedTuple, TYPE_CHECKING
 from typing_extensions import LiteralString, TypeAliasType, TypeVar
 from weakref import ReferenceType
 
@@ -1024,11 +1024,13 @@ def get_key_index_source(source: Any, index: Any) -> str:
     return f"list(dict.keys({source}))[{index}]"
 
 
-def raise_local_type_error(obj: object) -> NoReturn:
-    raise TypeError(
-        f"Type {type(obj)} for object {obj} cannot be saved "
-        + "into torch.compile() package since it's defined in local scope. "
-        + "Please define the class at global scope (top level of a module)."
+def _local_scope_serialization_message(obj: object) -> str:
+    # Shared by the reducer_override backstop and the TYPE_MATCH/BUILTIN_MATCH
+    # pre-check so the actionable text lives in one place.
+    return (
+        f"Type {type(obj)} for object {obj} cannot be saved into "
+        "torch.compile() package since it's defined in local scope. "
+        "Please define the class at global scope (top level of a module)."
     )
 
 
@@ -4502,10 +4504,10 @@ class GuardsStatePickler(pickle.Pickler):
             return type(self)._unpickle_sdp_backend, (obj.name,)
 
         if type(obj).__qualname__ != type(obj).__name__ and not isinstance(obj, tuple):
+            # No guard identity is available this deep in pickling, so this
+            # stays a plain PackageError rather than a GuardSerializationError.
             raise torch._dynamo.exc.PackageError(
-                f"Type {type(obj)} for object {obj} cannot be saved "
-                + "into torch.compile() package since it's defined in local scope. "
-                + "Please define the class at global scope (top level of a module)."
+                _local_scope_serialization_message(obj)
             )
 
         if (
@@ -4556,6 +4558,7 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
         guard_type=guard.create_fn_name(),
         derived_guard_types=(tuple(guard.guard_types) if guard.guard_types else ()),
         is_global=is_global,
+        provenance=guard.provenance,
         orig_guard=guard,
     )
 
@@ -4599,7 +4602,7 @@ def pickle_guards_state(
 
     try:
         pickler.dump(state)
-    except AttributeError as e:
+    except (AttributeError, TypeError, pickle.PicklingError) as e:
         raise torch._dynamo.exc.PackageError(str(e)) from e
     return buf.getvalue()
 
@@ -4794,6 +4797,10 @@ class CheckFunctionManager:
             CompileEventLogger.increment_toplevel("guard_latency_us", int(latency))
 
         self.guards_state: bytes | None = None
+        # Typed record of why guards_state is None: the swallowed PackageError
+        # (a GuardSerializationError names the exact guard). Consumers must
+        # chain or inspect this instead of matching message text.
+        self.guards_serialization_failure: exc.PackageError | None = None
         if save_guards:
             from torch._dynamo.output_graph import OutputGraphCommon
 
@@ -4808,9 +4815,27 @@ class CheckFunctionManager:
             except exc.PackageError as e:
                 if torch._dynamo.config.strict_precompile or strict_error:
                     raise e
+                # Format the traceback BEFORE stripping it from the stored
+                # exception chain: a live __traceback__ pins the guard-build
+                # frames (builder, output_graph, the user scopes they hold) on
+                # this long-lived object, defeating the cleanup below (see the
+                # NB comment there).
+                formatted_traceback = traceback.format_exc().split("\n")
+                stripped: set[int] = set()
+                pending: list[BaseException] = [e]
+                while pending:
+                    link = pending.pop()
+                    if id(link) in stripped:
+                        continue
+                    stripped.add(id(link))
+                    link.__traceback__ = None
+                    for nxt in (link.__cause__, link.__context__):
+                        if nxt is not None:
+                            pending.append(nxt)
+                self.guards_serialization_failure = e
                 self.output_graph.bypass_package(
                     f"Guard evaluation failed: {str(e)}",
-                    traceback=traceback.format_exc().split("\n"),
+                    traceback=formatted_traceback,
                 )
 
         # TODO: don't do the string rep, do something more structured here
@@ -4856,13 +4881,15 @@ class CheckFunctionManager:
                 if guard._unserializable:
                     # Only call builder.get again if we know we're going to throw
                     obj = builder.get(guard)
-                    raise_local_type_error(obj)
+                    raise torch._dynamo.exc.GuardSerializationError(
+                        guard_type,
+                        guard.name,
+                        _local_scope_serialization_message(obj),
+                    )
             elif (
                 guard_type in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
             ):
-                raise torch._dynamo.exc.PackageError(
-                    f"{guard_type} guard cannot be serialized."
-                )
+                raise torch._dynamo.exc.GuardSerializationError(guard_type, guard.name)
             elif failed := next(
                 (
                     i
@@ -4872,9 +4899,7 @@ class CheckFunctionManager:
                 None,
             ):
                 # Just raise the first failed guard name
-                raise torch._dynamo.exc.PackageError(
-                    f"{failed} guard cannot be serialized."
-                )
+                raise torch._dynamo.exc.GuardSerializationError(failed, guard.name)
 
         builtins_dict_name = output_graph.name_of_builtins_dict_key_in_fglobals or ""
         used_global_vars = set()
