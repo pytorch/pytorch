@@ -81,19 +81,18 @@ static void run_log_softmax(MPSStream* stream,
 TORCH_IMPL_FUNC(log_softmax_mps_out)
 (const Tensor& self, const int64_t dim, const bool half_to_float, const Tensor& out) {
   TORCH_CHECK(!half_to_float, "log_softmax with half to float conversion is not supported on MPS");
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      supportedFloatingType(self), "log_softmax not implemented on MPS for ", self.scalar_type());
-
   if (self.numel() == 0) {
     return;
   }
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      supportedFloatingType(self), "log_softmax not implemented on MPS for ", self.scalar_type());
 
   const auto self_ = self.dim() == 0 ? self.view(1) : self;
   const auto wrapped_dim = maybe_wrap_dim(dim, self_.dim());
   const auto dim_size = static_cast<uint64_t>(self_.size(wrapped_dim));
   const auto inner_size = static_cast<uint64_t>(c10::multiply_integers(self_.sizes().slice(wrapped_dim + 1)));
   const auto num_rows = static_cast<uint64_t>(self_.numel()) / dim_size;
-  const bool use_u32 = offsetsFitIn<uint32_t>(self_, out);
+  const bool use_u32 = offsetsFitIn<int32_t>(self_, out);
   const bool contiguous_rows = self_.is_contiguous() && wrapped_dim == self_.dim() - 1;
   // one simdgroup per row stops paying off past this width
   constexpr uint64_t row_kernel_max_dim = 2048;
@@ -118,7 +117,7 @@ TORCH_IMPL_FUNC(log_softmax_mps_out)
                                     .dim = static_cast<uint32_t>(wrapped_dim)};
   for (const auto d : c10::irange(self_.dim())) {
     params.sizes[d] = self_.size(d);
-    params.strides[d] = self_.stride(d);
+    params.strides[d] = self_.size(d) == 1 ? 0 : self_.stride(d);
   }
   const auto partials = use_split
       ? at::empty({static_cast<int64_t>(num_rows), static_cast<int64_t>(n_chunks), 2}, self.options().dtype(kFloat))
