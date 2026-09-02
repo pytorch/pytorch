@@ -39,6 +39,7 @@ from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestA
 from torch.testing._internal.common_cuda import (
     _create_scaling_case,
     _get_torch_cuda_version,
+    BF16X9_API_SUPPORTED,
     blas_library_context,
     has_device_side_assert,
     PLATFORM_SUPPORTS_GREEN_CONTEXT,
@@ -1322,6 +1323,51 @@ print(t.is_pinned())
         self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "tf32")
         torch.set_float32_matmul_precision("medium")
         self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "tf32")
+
+    @unittest.skipUnless(BF16X9_API_SUPPORTED, "requires NVIDIA CUDA 12.9+")
+    @recover_orig_fp32_precision
+    @serialTest()
+    def test_bfx9_fp32_precision_get_set(self):
+        torch.set_float32_matmul_precision("highest")
+        torch.backends.cuda.matmul.fp32_precision = "bfx9"
+        self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "bfx9")
+        self.assertFalse(torch.backends.cuda.matmul.allow_tf32)
+        self.assertEqual(torch.get_float32_matmul_precision(), "highest")
+
+        with torch.backends.flags(fp32_precision="tf32"):
+            self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "bfx9")
+            torch.backends.cuda.matmul.fp32_precision = "none"
+            self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "tf32")
+        torch.backends.cuda.matmul.fp32_precision = "bfx9"
+
+        for backend, op in (
+            ("generic", "all"),
+            ("cuda", "all"),
+            ("cuda", "conv"),
+            ("cuda", "rnn"),
+            ("mkldnn", "all"),
+            ("mkldnn", "matmul"),
+        ):
+            with self.subTest(backend=backend, op=op):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "precision 'bfx9' is only supported for backend 'cuda' and op 'matmul'",
+                ):
+                    torch._C._set_fp32_precision_setter(backend, op, "bfx9")
+
+        for precision in ("bf16x9", "16x9", "16x8"):
+            with (
+                self.subTest(precision=precision),
+                self.assertRaisesRegex(RuntimeError, "Unknown precision"),
+            ):
+                torch.backends.cuda.matmul.fp32_precision = precision
+
+        torch.set_float32_matmul_precision("high")
+        torch.backends.cuda.matmul.fp32_precision = "bfx9"
+        with self.assertRaisesRegex(RuntimeError, "mix of the legacy and new APIs"):
+            torch.get_float32_matmul_precision()
+        with self.assertRaisesRegex(RuntimeError, "mix of the legacy and new APIs"):
+            _ = torch.backends.cuda.matmul.allow_tf32
 
     @recover_orig_fp32_precision
     @serialTest()
