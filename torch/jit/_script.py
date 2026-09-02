@@ -568,9 +568,9 @@ if _enabled:
                     # class in question, and not on a superclass (which would
                     # be wrong wrong wrong!).
                     # See also https://github.com/pytorch/pytorch/issues/39463
-                    if "__annotations__" not in self.__class__.__dict__:
-                        self.__class__.__annotations__ = {}
-                    self.__annotations__[attr] = value.type
+                    # Off the class: one without its own annotations gets a
+                    # fresh dict, not the superclass's, and writes persist.
+                    self.__class__.__annotations__[attr] = value.type
                     value = value.value
                 return super().__setattr__(attr, value)
 
