@@ -1,6 +1,7 @@
 # pylint: disable=useless-parent-delegation
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import gc
 import typing
@@ -335,6 +336,10 @@ class CUDAGraph(_CUDAGraph):
     # instantiate). Handed to the graph-destroy hooks on destruction so consumers
     # can purge that state and their maps do not grow across the run.
     _recorded_exec_ids: set[int]
+    # Compact, unsymbolized Python traces keyed by graph-node toolsId. Populated only when
+    # capture_py_stacks is requested and bounded by _graph_py_stacks.
+    _py_stack_traces: dict[int, typing.Any]
+    _py_stack_dropped: int
     _keep_graph: bool
     # User hooks fired by capture_begin / capture_end / instantiate (see register_*_hook).
     _capture_start_hooks: dict[int, Callable[[CUDAGraph], None]]
@@ -363,6 +368,8 @@ class CUDAGraph(_CUDAGraph):
         instance._capture_graph_id = None
         instance._remapped_exec_id = None
         instance._recorded_exec_ids = set()
+        instance._py_stack_traces = {}
+        instance._py_stack_dropped = 0
         instance._keep_graph = keep_graph
         # OrderedDict (not dict): RemovableHandle weak-references the mapping.
         instance._capture_start_hooks = OrderedDict()
@@ -540,8 +547,8 @@ class CUDAGraph(_CUDAGraph):
         return handle
 
     def _maybe_remap_annotations(self) -> None:
-        # Remap recorded kernel annotations to the current exec graph id. No-op
-        # unless a capture id was stamped (annotations enabled). Called from
+        # Remap recorded kernel annotations and Python stacks to the current exec graph id.
+        # No-op unless a capture id was stamped (annotations enabled). Called from
         # instantiate() -- which replay() routes through for keep_graph=True --
         # so every fresh exec graph (each instantiate() produces a new exec id)
         # rekeys the annotations; remap_to_exec_graph self-skips when the exec id
@@ -566,6 +573,10 @@ class CUDAGraph(_CUDAGraph):
         tracker, self._tracker = self._tracker, None
         if tracker is not None:
             tracker.stop()
+        if self._py_stack_traces:
+            from torch.cuda._graph_py_stacks import clear_stacks
+
+            clear_stacks(self)
 
     def __del__(self) -> None:
         try:
@@ -647,6 +658,9 @@ class CUDAGraph(_CUDAGraph):
         which call ``capture_end`` internally.
         """
         self.capture_end_pre()
+        self._capture_end_after_pre()
+
+    def _capture_end_after_pre(self) -> None:
         # Run the capture-end hooks while the template is live (both keep_graph modes). The
         # capture graph id is NOT read here: maybe_stamp_capture_root already stamped it at
         # capture_begin, and the template keeps that id for its whole life. Errors are user
@@ -1087,6 +1101,7 @@ def export_graph_data(path: str) -> Callable[[CUDAGraph], None]:
 # Recognized keys of graph()'s annotation_config, each mapped to (default, allowed values).
 _ANNOTATION_CONFIG_KEYS: dict[str, tuple[typing.Any, tuple[typing.Any, ...]]] = {
     "backend": ("auto", ("auto", "cupti", "edge_walk")),
+    "capture_py_stacks": (False, (False, True)),
 }
 
 
@@ -1150,7 +1165,12 @@ class graph:
             needed -- which prevents kineto from initializing, so a later
             :class:`torch.profiler.profile` records no GPU activity; ``"edge_walk"`` forces
             the walk, which cannot see nodes created while the current stream was not yet
-            capturing.
+            capturing. ``"capture_py_stacks"`` records the Python launch stack for each
+            top-level graph node. It requires ``enable_annotations=True`` and
+            single-threaded autograd. Retrieve and drain the stacks with
+            :func:`torch.cuda.graph_py_stacks.take_stacks` after instantiation. This option
+            forces the CUPTI path; bringing up its subscriber prevents
+            :class:`torch.profiler.profile` from initializing later in the same process.
         check_input_liveness (bool, optional): If ``True``, tracks external tensor inputs during graph capture and
             raises an error if any are deallocated before replay. This helps debug "use after free" errors
             where input tensors are garbage collected between capture and replay. Default: ``False``.
@@ -1183,6 +1203,13 @@ class graph:
         check_input_liveness: bool = False,
     ):
         self._annotation_config = _parse_annotation_config(annotation_config)
+        self._capture_py_stacks = self._annotation_config["capture_py_stacks"]
+        if self._capture_py_stacks and not enable_annotations:
+            raise ValueError(
+                "annotation_config={'capture_py_stacks': True} requires "
+                "enable_annotations=True"
+            )
+        self._capture_py_stacks_active = False
         # Lazy-init of default_capture_stream helps avoid circular-import errors.
         # Not thread safe, but graphs already have the general (explicitly documented)
         # restriction that only one capture may be underway at a time in the process.
@@ -1222,7 +1249,7 @@ class graph:
 
         # Pick the annotation backend before capture_begin, so that failing to obtain CUPTI
         # raises without a capture already underway.
-        from torch.cuda import _graph_node_callbacks
+        from torch.cuda import _graph_node_callbacks, _graph_py_stacks
         from torch.cuda._graph_annotations import (
             _set_annotation_backend,
             _set_annotations_enabled,
@@ -1230,26 +1257,42 @@ class graph:
         )
 
         backend = "edge_walk"
+        node_callbacks_registered = False
         requested = self._annotation_config["backend"]
-        if self._enable_annotations and requested != "edge_walk":
-            force = requested == "cupti"
+        if self._enable_annotations and (
+            requested != "edge_walk" or self._capture_py_stacks
+        ):
+            force = requested == "cupti" or self._capture_py_stacks
             # The CUPTI backend attributes each node to the mark_kernels scope open on the
             # thread that created it, so multithreaded autograd would mis-attribute the nodes
             # its engine worker threads create -- their scope state is not the capturing
             # thread's. (capture_error_mode is NOT the gate: it scopes capture's safety
             # checks, not which threads contribute nodes.) The edge walk reads no ambient
             # scope, so it is unaffected and remains the fallback.
-            if torch._C._is_multithreading_enabled():
-                if force:
-                    raise RuntimeError(
-                        "annotation_config={'backend': 'cupti'} requires single-threaded "
-                        "autograd, so that graph nodes are created on the capturing thread and "
-                        "attributed to the right mark_kernels scope. Wrap the capture in "
-                        "torch.autograd.grad_mode.set_multithreading_enabled(False)."
-                    )
-            elif _graph_node_callbacks.register(force=force):
-                backend = "cupti"
+            multithreaded = torch._C._is_multithreading_enabled()
+            if multithreaded and (requested == "cupti" or self._capture_py_stacks):
+                option = (
+                    "'capture_py_stacks': True"
+                    if self._capture_py_stacks
+                    else "'backend': 'cupti'"
+                )
+                raise RuntimeError(
+                    f"annotation_config={{{option}}} requires single-threaded "
+                    "autograd, so that graph nodes are created on the capturing thread and "
+                    "have the expected Python stack. Wrap the capture in "
+                    "torch.autograd.grad_mode.set_multithreading_enabled(False)."
+                )
+            if not multithreaded and _graph_node_callbacks.register(force=force):
+                node_callbacks_registered = True
+                if requested != "edge_walk":
+                    backend = "cupti"
             elif force:
+                if self._capture_py_stacks:
+                    raise RuntimeError(
+                        "annotation_config={'capture_py_stacks': True} could not register "
+                        "CUPTI node-creation callbacks. This needs the cupti-python package "
+                        "and a CUPTI monitor able to subscribe."
+                    )
                 raise RuntimeError(
                     "annotation_config={'backend': 'cupti'} could not register CUPTI "
                     "node-creation callbacks. This needs the cupti-python package and a "
@@ -1257,64 +1300,117 @@ class graph:
                     "dependent-edge walk instead."
                 )
 
-        # Scope annotation recording to this capture: the capture-root stamp and
-        # mark_kernels both gate on this flag, and __exit__ always clears it. It has to be
-        # set before capture_begin so maybe_stamp_capture_root below is not a no-op.
-        _set_annotations_enabled(self._enable_annotations)
+        if self._capture_py_stacks:
+            try:
+                _graph_py_stacks._begin_capture(self.cuda_graph)
+            except Exception:
+                _graph_node_callbacks.disarm()
+                raise
+            self._capture_py_stacks_active = True
 
-        # Stackoverflow seems comfortable with this pattern
-        # https://stackoverflow.com/questions/26635684/calling-enter-and-exit-manually#39172487
-        self.stream_ctx.__enter__()
+        stream_entered = False
+        capture_started = False
+        try:
+            # Scope annotation recording to this capture: the capture-root stamp and
+            # mark_kernels both gate on this flag, and __exit__ always clears it. It has to
+            # be set before capture_begin so maybe_stamp_capture_root below is not a no-op.
+            _set_annotations_enabled(self._enable_annotations)
 
-        self.cuda_graph.capture_begin(
-            # type: ignore[misc]
-            *self.pool,
-            # pyrefly: ignore [bad-keyword-argument]
-            capture_error_mode=self.capture_error_mode,
-            # pyrefly: ignore [bad-keyword-argument]
-            check_input_liveness=self.check_input_liveness,
-        )
-        # The capture stream is now capturing into the top-level graph, and this is the only
-        # point where its id is readable (the cudaGraph_t itself does not exist until
-        # capture_end). One read serves everything downstream: mark_kernels telling a
-        # conditional-node body apart from this graph, the CUPTI backend's body-node filter,
-        # and the stamp remap_to_exec_graph later rekeys from.
-        maybe_stamp_capture_root(self.cuda_graph)
+            # Stackoverflow seems comfortable with this pattern
+            # https://stackoverflow.com/questions/26635684/calling-enter-and-exit-manually#39172487
+            self.stream_ctx.__enter__()
+            stream_entered = True
+            self.cuda_graph.capture_begin(
+                # type: ignore[misc]
+                *self.pool,
+                # pyrefly: ignore [bad-keyword-argument]
+                capture_error_mode=self.capture_error_mode,
+                # pyrefly: ignore [bad-keyword-argument]
+                check_input_liveness=self.check_input_liveness,
+            )
+            capture_started = True
 
-        # Arming needs the capture live. If it does not work out, settle on the edge walk
-        # before any mark_kernels scope runs rather than recording keys that would match
-        # nothing -- which is why the backend is published only now.
-        if backend == "cupti" and not _graph_node_callbacks.arm():
-            _graph_node_callbacks.disarm()
-            backend = "edge_walk"
-        _set_annotation_backend(backend)
+            # The capture stream is now capturing into the top-level graph, and this is the
+            # only point where its id is readable (the cudaGraph_t itself does not exist until
+            # capture_end). One read serves everything downstream: mark_kernels telling a
+            # conditional-node body apart from this graph and the CUPTI callback's body-node
+            # filter, while the graph stamp is used to remap recorded metadata after
+            # instantiate.
+            maybe_stamp_capture_root(self.cuda_graph)
+
+            # Arming needs the capture live. If it does not work out, settle on the edge walk
+            # before any mark_kernels scope runs rather than recording keys that would match
+            # nothing -- which is why the backend is published only now.
+            if node_callbacks_registered and not _graph_node_callbacks.arm():
+                _graph_node_callbacks.disarm()
+                backend = "edge_walk"
+                if self._capture_py_stacks_active:
+                    _graph_py_stacks._end_capture(self.cuda_graph)
+                    _graph_py_stacks.clear_stacks(self.cuda_graph)
+                    self._capture_py_stacks_active = False
+                    warnings.warn(
+                        "annotation_config={'capture_py_stacks': True} could not arm CUPTI "
+                        "node-creation callbacks; no Python launch stacks will be recorded",
+                        stacklevel=2,
+                    )
+            _set_annotation_backend(backend)
+        except BaseException as error:
+            with contextlib.suppress(Exception):
+                _graph_node_callbacks.disarm()
+            if self._capture_py_stacks_active:
+                _graph_py_stacks._end_capture(self.cuda_graph)
+                self._capture_py_stacks_active = False
+                with contextlib.suppress(Exception):
+                    _graph_py_stacks.clear_stacks(self.cuda_graph)
+            if capture_started:
+                with contextlib.suppress(Exception):
+                    try:
+                        self.cuda_graph.capture_end_pre()
+                    finally:
+                        self.cuda_graph.reset()
+            if stream_entered:
+                with contextlib.suppress(Exception):
+                    self.stream_ctx.__exit__(type(error), error, error.__traceback__)
+            _set_annotations_enabled(False)
+            raise
 
     def __exit__(self, *args: object) -> None:
-        from torch.cuda import _graph_node_callbacks
+        from torch.cuda import _graph_node_callbacks, _graph_py_stacks
         from torch.cuda._graph_annotations import (
             _set_annotations_enabled,
             resolve_pending_annotations,
         )
 
+        capture_completed = False
         try:
-            # Stop recording before capture_end: the CUPTI backend has already attributed
-            # every node as it was created, and leaving the callback enabled would also pick
-            # up nodes created while instantiating.
-            _graph_node_callbacks.disarm()
             if self._enable_annotations:
                 resolve_pending_annotations()
 
-            # capture_end stamps the capture id and, for keep_graph=False,
-            # instantiates (which remaps annotations to the exec id). For
-            # keep_graph=True the remap is owned by the later instantiate()/replay().
-            self.cuda_graph.capture_end()
-            self.stream_ctx.__exit__(*args)
-        finally:
-            # Annotation recording is capture-scoped; clear it unconditionally. disarm() is
-            # idempotent, so repeating it here just covers a capture that raised before the
-            # call above (it must not stay armed past this context either way).
+            # cudaStreamEndCapture is not expected to create graph nodes; the stack/annotation
+            # parity tests rely on that. Keeping the synchronous CUPTI callback armed through
+            # capture_end_pre is defensive. Disarm immediately after, before hooks or
+            # instantiation can create unrelated nodes.
+            self.cuda_graph.capture_end_pre()
             _graph_node_callbacks.disarm()
-            _set_annotations_enabled(False)
+            if self._capture_py_stacks_active:
+                _graph_py_stacks._end_capture(self.cuda_graph)
+                self._capture_py_stacks_active = False
+            self.cuda_graph._capture_end_after_pre()
+            capture_completed = True
+        finally:
+            try:
+                # Annotation recording is capture-scoped; clear it unconditionally. disarm()
+                # is idempotent, so repeating it here covers a capture that raised before the
+                # call above.
+                _graph_node_callbacks.disarm()
+                if self._capture_py_stacks_active:
+                    _graph_py_stacks._end_capture(self.cuda_graph)
+                    self._capture_py_stacks_active = False
+                if self._capture_py_stacks and not capture_completed:
+                    _graph_py_stacks.clear_stacks(self.cuda_graph)
+                _set_annotations_enabled(False)
+            finally:
+                self.stream_ctx.__exit__(*args)
         # returning None should propagate exceptions from either capture_end or stream_ctx.__exit__()
 
 

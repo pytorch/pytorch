@@ -2151,7 +2151,7 @@ class TestCuptiAnnotationBackend(TestCase):
         x = torch.ones([2048], device="cuda")
         pred = torch.tensor(True, device="cuda")
         g = torch.cuda.CUDAGraph(keep_graph=True)
-        with self.assertWarnsRegex(UserWarning, "were not annotated"):
+        with self.assertWarnsRegex(UserWarning, "node observation skipped"):
             with torch.cuda.graph(
                 g, enable_annotations=True, annotation_config={"backend": "cupti"}
             ):
