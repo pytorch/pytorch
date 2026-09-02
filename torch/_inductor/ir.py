@@ -127,6 +127,7 @@ from .utils import (
     get_kernel_metadata,
     GPU_ALIGN_BYTES,
     ir_dataclass,
+    is_dynamic,
     is_gpu,
     sympy_dot,
     sympy_index_symbol,
@@ -7029,6 +7030,10 @@ class ConcatKernel(NopKernel):
                 and input_unwrapped.is_input_buffer()
                 and (dev := inp.get_device()) is not None
                 and is_gpu(dev.type)
+                and (
+                    not is_dynamic(input_buffer)
+                    or config.combo_kernel_foreach_dynamic_shapes
+                )
             ):
                 op_names.append(input_buffer.get_operation_name())
 

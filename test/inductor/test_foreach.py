@@ -770,30 +770,39 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     @requires_gpu
+    @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
+    @torch._dynamo.config.patch("assume_static_by_default", False)
+    @torch._inductor.config.patch("combo_kernel_foreach_dynamic_shapes", True)
     def test_fuse_concat_dynamic_shapes(self):
-        # Horizontal fusion of the cat copies must survive dynamic shapes.
-        #
-        # Two things this test is sensitive to:
-        #  - the number of inputs must exceed config.max_pointwise_cat_inputs, or cat
-        #    is lowered as a single pointwise kernel with masked loads and never
-        #    builds a ConcatKernel, so the foreach grouping is never exercised.
-        #  - check_model_gpu is deliberately not used: it clones the inputs and does a
-        #    second, static compile, whose kernel count would mask the dynamic one.
+        # The number of inputs has to exceed config.max_pointwise_cat_inputs, or cat
+        # is lowered as a single pointwise kernel with masked loads and never builds a
+        # ConcatKernel, so the foreach grouping is never exercised.
         n = config.max_pointwise_cat_inputs + 4
 
         def fn(*args):
             return torch.stack(args)
 
-        args = tuple(torch.randn(5, 4).to(GPU_TYPE) for _ in range(n))
-        for arg in args:
-            torch._dynamo.mark_dynamic(arg, 0)
+        args = tuple(torch.rand(5, 4, device=GPU_TYPE) for _ in range(n))
 
-        torch._dynamo.reset()
-        torch._inductor.metrics.reset()
-        actual = torch.compile(fn, fullgraph=True)(*args)
-        self.assertEqual(actual, fn(*args))
+        self.check_model_gpu(fn, args)
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_gpu
+    @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
+    @torch._dynamo.config.patch("assume_static_by_default", False)
+    @torch._inductor.config.patch("combo_kernel_foreach_dynamic_shapes", False)
+    def test_fuse_concat_dynamic_shapes_fallback(self):
+        n = config.max_pointwise_cat_inputs + 4
+
+        def fn(*args):
+            return torch.stack(args)
+
+        args = tuple(torch.rand(5, 4, device=GPU_TYPE) for _ in range(n))
+
+        self.check_model_gpu(fn, args)
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, n)
 
     @requires_gpu
     def test_zero_elems(self):
