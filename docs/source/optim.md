@@ -443,9 +443,7 @@ hooks that apply to every optimizer instead of one optimizer instance.
 
 {class}`torch.optim.lr_scheduler.LRScheduler` provides several methods to adjust the learning
 rate based on the number of epochs. {class}`torch.optim.lr_scheduler.PlateauLR`
-allows dynamic learning rate reducing based on some validation measurements, and unlike the
-deprecated {class}`torch.optim.lr_scheduler.ReduceLROnPlateau` it can be composed with
-{class}`~torch.optim.lr_scheduler.SequentialLR` and {class}`~torch.optim.lr_scheduler.ChainedScheduler`.
+allows dynamic learning rate reducing based on some validation measurements.
 
 Learning rate scheduling should be applied after optimizer's update; e.g., you
 should write your code this way:
