@@ -9,18 +9,16 @@ import unittest
 from pathlib import Path
 
 from codepath_owners import (
-    MAX_CODEPATH_OWNERS_BYTES,
     build_codepath_owners,
     build_llm_artifact,
     load_codepath_owners,
     matches,
+    MAX_CODEPATH_OWNERS_BYTES,
     parse_rules,
     resolve_paths,
     resolve_rule,
 )
-from ownership import (
-    owner_label,
-)
+from ownership import owner_label
 from prepare_llm_input import fetch_pull_request_files
 
 
@@ -158,15 +156,11 @@ private/ # deliberately unowned
     def test_last_match_wins_including_ownerless_override(self) -> None:
         rules = parse_rules("* @all\n/docs/ @docs\n/docs/private/\n")
         self.assertEqual(resolve_rule("new/file.txt", rules)["owners"], ["@all"])
-        self.assertEqual(
-            resolve_rule("docs/new.txt", rules)["owners"], ["@docs"]
-        )
+        self.assertEqual(resolve_rule("docs/new.txt", rules)["owners"], ["@docs"])
         self.assertEqual(resolve_rule("docs/private/new.txt", rules)["owners"], [])
 
     def test_compact_artifact_is_an_exact_ordered_partition(self) -> None:
-        rules = parse_rules(
-            "* @all\n/docs/ @docs @org/writers\n/docs/private/\n"
-        )
+        rules = parse_rules("* @all\n/docs/ @docs @org/writers\n/docs/private/\n")
         resolutions = resolve_paths(
             [
                 "src/a.py",
@@ -196,9 +190,7 @@ private/ # deliberately unowned
 
     def test_no_match_is_distinct_from_ownerless_override(self) -> None:
         rules = parse_rules("/private/\n")
-        artifact = build_llm_artifact(
-            resolve_paths(["private/a", "outside/a"], rules)
-        )
+        artifact = build_llm_artifact(resolve_paths(["private/a", "outside/a"], rules))
         self.assertEqual(
             artifact["paths_without_owners"],
             [
@@ -252,9 +244,7 @@ class PolicyLoadingTest(unittest.TestCase):
 
     def test_builds_exact_dynamic_codepath_owners_contract(self) -> None:
         snapshot = self.load(b"/torch/ @pytorch/core\n")
-        artifact = build_codepath_owners(
-            ["torch/a.py", "README.md"], snapshot
-        )
+        artifact = build_codepath_owners(["torch/a.py", "README.md"], snapshot)
         self.assertEqual(
             set(artifact),
             {
@@ -314,8 +304,9 @@ class PolicyLoadingTest(unittest.TestCase):
 
     def test_invalid_github_usernames_are_not_owner_handles(self) -> None:
         for owner in ("@bad_user", "@-bad", "@bad-"):
-            with self.subTest(owner=owner), self.assertRaisesRegex(
-                ValueError, "codepath owner"
+            with (
+                self.subTest(owner=owner),
+                self.assertRaisesRegex(ValueError, "codepath owner"),
             ):
                 parse_rules(f"* {owner}\n", strict=True)
 
@@ -359,10 +350,7 @@ class CollectorIntegrationTest(unittest.TestCase):
 
     def test_file_pagination_bound_fails_closed(self) -> None:
         pages = [
-            [
-                {"filename": f"file-{page * 100 + index}"}
-                for index in range(100)
-            ]
+            [{"filename": f"file-{page * 100 + index}"} for index in range(100)]
             for page in range(30)
         ]
         with self.assertRaisesRegex(RuntimeError, "3,000 or more"):

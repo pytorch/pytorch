@@ -244,9 +244,7 @@ class RoundRobinTest(unittest.TestCase):
         )
 
     def test_unused_label_bootstraps_after_bounded_repository_history(self) -> None:
-        github = FakeGitHub(
-            [[{"event": "commented"}] * 100 for _ in range(10)] + [[]]
-        )
+        github = FakeGitHub([[{"event": "commented"}] * 100 for _ in range(10)] + [[]])
 
         self.assertEqual(
             fetch_latest_labeled_pull_requests(
@@ -310,9 +308,7 @@ class RoundRobinTest(unittest.TestCase):
                     fetch_round_robin_reviewers(
                         github, "pytorch/ciforge", 9, owners, set()
                     ),
-                    {
-                        "autograd": selection(expected, expected_reason)
-                    },
+                    {"autograd": selection(expected, expected_reason)},
                 )
 
     def test_removed_state_is_preserved_across_event_pages(self) -> None:

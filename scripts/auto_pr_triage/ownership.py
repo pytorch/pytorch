@@ -12,9 +12,7 @@ from codepath_owners import OWNER_ID_RE
 
 
 TARGET_BASE_REF = "main"
-EXTRA_OWNERSHIP_METADATA_PATH = (
-    ".github/auto-pr-triage/extra_ownership_metadata.json"
-)
+EXTRA_OWNERSHIP_METADATA_PATH = ".github/auto-pr-triage/extra_ownership_metadata.json"
 TEAM_MEMBERS_PATH = ".github/auto-pr-triage/team_members.json"
 MAX_CONFIG_BYTES = 1_000_000
 SHA_RE = re.compile(r"[0-9a-f]{40}")
@@ -245,9 +243,7 @@ def load_team_members(
 ) -> dict[str, Any]:
     """Load reviewer rosters from the trusted checkout."""
 
-    document, source = _load_document(
-        repository_root, repo, ref, TEAM_MEMBERS_PATH
-    )
+    document, source = _load_document(repository_root, repo, ref, TEAM_MEMBERS_PATH)
     return parse_team_members(
         document,
         source,
@@ -259,8 +255,4 @@ def load_team_members(
 def all_team_members(members: dict[str, Any]) -> set[str]:
     """Return every configured reviewer handle."""
 
-    return {
-        member
-        for roster in members["members"].values()
-        for member in roster
-    }
+    return {member for roster in members["members"].values() for member in roster}

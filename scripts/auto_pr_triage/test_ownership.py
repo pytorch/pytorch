@@ -9,9 +9,9 @@ from unittest import mock
 
 from ownership import (
     EXTRA_OWNERSHIP_METADATA_PATH,
-    TEAM_MEMBERS_PATH,
     load_extra_ownership_metadata,
     load_team_members,
+    TEAM_MEMBERS_PATH,
 )
 
 
@@ -25,9 +25,7 @@ class LocalOwnershipLoadingTest(unittest.TestCase):
             EXTRA_OWNERSHIP_METADATA_PATH: json.dumps(
                 {"autograd": "Owns autograd behavior."}
             ).encode(),
-            TEAM_MEMBERS_PATH: json.dumps(
-                {"autograd": ["@reviewer"]}
-            ).encode(),
+            TEAM_MEMBERS_PATH: json.dumps({"autograd": ["@reviewer"]}).encode(),
         }
         for relative_path, content in documents.items():
             path = root / relative_path

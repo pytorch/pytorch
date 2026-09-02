@@ -16,17 +16,17 @@ from urllib.parse import quote
 
 from codepath_owners import REPOSITORY_RE
 from github_reviews import (
-    fetch_round_robin_reviewers,
     fetch_requested_codeowner_handles,
     fetch_requested_reviewer_handles,
+    fetch_round_robin_reviewers,
     fetch_submitted_review_state,
 )
 from ownership import (
-    SHA_RE,
-    USER_HANDLE_RE,
     all_team_members,
     load_team_members,
     owner_label,
+    SHA_RE,
+    USER_HANDLE_RE,
 )
 from schemas import AnalysisResult, should_run_ownership_analysis
 
@@ -61,9 +61,7 @@ To provide more routing context:
 - Link this PR using a closing reference such as `Fixes #123` to an issue in this repository labeled `actionable`.
 
 If you believe this PR was closed by mistake, or you have added the missing context, please reopen it. While `bot-closed` remains on the PR, Auto PR Triage treats reopening as a human override and will not close it again."""  # noqa: B950
-AUTHOR_LOGIN_RE = re.compile(
-    r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\[bot\])?"
-)
+AUTHOR_LOGIN_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\[bot\])?")
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -169,9 +167,7 @@ class ReviewerState:
 def sanitize_log_text(value: str) -> str:
     """Escape GitHub workflow-command markers in untrusted log text."""
 
-    return value.replace("::", r"\u003a\u003a").replace(
-        "##[", r"\u0023\u0023["
-    )
+    return value.replace("::", r"\u003a\u003a").replace("##[", r"\u0023\u0023[")
 
 
 def escape_log_fragment(value: str) -> str:
@@ -295,8 +291,7 @@ def log_reviewer_routing(
             lines.append(
                 "Reasoning: "
                 + " ".join(
-                    escape_log_fragment(reason)
-                    for reason in justification["rationale"]
+                    escape_log_fragment(reason) for reason in justification["rationale"]
                 )
             )
             lines.append(f"Supporting files: {files}.")
@@ -322,8 +317,7 @@ def log_reviewer_routing(
         lines.append(f"Planned effect: {effect}")
         blocks.append("\n".join(lines))
     print(
-        "Auto PR Triage reviewer routing:\n\n"
-        + sanitize_log_text("\n\n".join(blocks))
+        "Auto PR Triage reviewer routing:\n\n" + sanitize_log_text("\n\n".join(blocks))
     )
 
 
@@ -428,7 +422,10 @@ def require_repository_label(
     encoded = quote(label_name, safe="")
     label = github.json(f"repos/{repository}/labels/{encoded}")
     actual_name = label.get("name") if isinstance(label, dict) else None
-    if not isinstance(actual_name, str) or actual_name.casefold() != label_name.casefold():
+    if (
+        not isinstance(actual_name, str)
+        or actual_name.casefold() != label_name.casefold()
+    ):
         raise RuntimeError(f"required repository label is unavailable: {label_name}")
 
 
@@ -488,8 +485,7 @@ def record_bot_close(github: GitHubClient, repository: str, number: int) -> None
     except (RuntimeError, subprocess.TimeoutExpired) as exc:
         detail = " ".join(str(exc).split())[:120]
         errors.append(
-            "close comment may already be present"
-            + (f": {detail}" if detail else "")
+            "close comment may already be present" + (f": {detail}" if detail else "")
         )
 
     if errors:
@@ -513,8 +509,7 @@ def normalize_requested_reviewer_handles(
     return frozenset(
         handle.casefold()
         for handle in handles
-        if USER_HANDLE_RE.fullmatch(handle)
-        or target_team_handle_re.fullmatch(handle)
+        if USER_HANDLE_RE.fullmatch(handle) or target_team_handle_re.fullmatch(handle)
     )
 
 
@@ -641,9 +636,7 @@ def select_owner_reviewers(
             }
             continue
 
-        submitted = (set(members) & reviewers.submitted_reviewers) - {
-            author_handle
-        }
+        submitted = (set(members) & reviewers.submitted_reviewers) - {author_handle}
         if submitted:
             key = min(submitted)
             choices[owner_id] = {
@@ -652,9 +645,7 @@ def select_owner_reviewers(
             }
             continue
 
-        pending = (set(members) & reviewers.requested_reviewers) - {
-            author_handle
-        }
+        pending = (set(members) & reviewers.requested_reviewers) - {author_handle}
         if pending:
             key = min(pending)
             choices[owner_id] = {
@@ -738,15 +729,12 @@ def log_routing_plan(
         "submitted_handoff": submitted_handoff,
     }
     log_json_record("Auto PR Triage plan", record)
-    log_reviewer_routing(
-        args.mode, owner_choices or {}, planned_reviewer_requests
-    )
+    log_reviewer_routing(args.mode, owner_choices or {}, planned_reviewer_requests)
     summary = getattr(args, "github_step_summary", None)
     if summary is None:
         return
     reviewer_names = ", ".join(
-        f"`{reviewer.removeprefix('@')}`"
-        for reviewer in planned_reviewer_requests
+        f"`{reviewer.removeprefix('@')}`" for reviewer in planned_reviewer_requests
     )
     try:
         with Path(summary).open("a", encoding="utf-8") as output:
@@ -754,18 +742,12 @@ def log_routing_plan(
             output.write(f"- Mode: `{args.mode}`\n")
             output.write(f"- Decision: `{decision}`\n")
             output.write(
-                "- Has uncovered concerns: "
-                f"`{str(has_uncovered_concerns).lower()}`\n"
+                f"- Has uncovered concerns: `{str(has_uncovered_concerns).lower()}`\n"
             )
-            output.write(
-                f"- Planned reviewer requests: {reviewer_names or 'none'}\n"
-            )
+            output.write(f"- Planned reviewer requests: {reviewer_names or 'none'}\n")
             for owner, choice in sorted((owner_choices or {}).items()):
                 reviewer = choice["reviewer"].removeprefix("@")
-                output.write(
-                    f"- Owner `{owner}`: `{reviewer}` "
-                    f"({choice['state']})\n"
-                )
+                output.write(f"- Owner `{owner}`: `{reviewer}` ({choice['state']})\n")
             if submitted_handoff is not None:
                 output.write(
                     "- Existing configured-reviewer handoff: "
@@ -779,8 +761,7 @@ def log_routing_plan(
     except OSError as exc:
         detail = " ".join(str(exc).split())[:200]
         print(
-            "Auto PR Triage step summary unavailable: "
-            f"{type(exc).__name__}: {detail}"
+            f"Auto PR Triage step summary unavailable: {type(exc).__name__}: {detail}"
         )
 
 
@@ -811,10 +792,7 @@ def apply_controller_action(
     # facts. Apply uses one-pass reads with accepted stale-result
     # risk and does not automatically reconcile concurrent changes. Resulting
     # mutations are bounded and reversible.
-    if (
-        not analysis.is_open_non_draft_pr_against_main
-        or analysis.is_already_handled
-    ):
+    if not analysis.is_open_non_draft_pr_against_main or analysis.is_already_handled:
         return ControllerOutcome("kept_open")
 
     if not should_run_ownership_analysis(
@@ -858,9 +836,7 @@ def apply_controller_action(
             and closed.get("state") == "closed"
         )
         if not confirmed:
-            raise RuntimeError(
-                "close was not confirmed; the PR may already be closed"
-            )
+            raise RuntimeError("close was not confirmed; the PR may already be closed")
         record_bot_close(github, args.repository, args.pr)
         return ControllerOutcome("closed")
 
@@ -914,9 +890,7 @@ def apply_controller_action(
             team_members, submitted_reviewers, author_handle
         )
         if handoff is None:
-            labels = tuple(
-                label for label in (shadow_label,) if label is not None
-            )
+            labels = tuple(label for label in (shadow_label,) if label is not None)
             log_routing_plan(
                 args,
                 "keep_open",
@@ -1062,8 +1036,7 @@ def apply_controller_action(
         codepath_teams = tuple(
             slug
             for slug in codepath.github_teams
-            if f"@{target_org}/{slug}".casefold()
-            not in reviewers.requested_reviewers
+            if f"@{target_org}/{slug}".casefold() not in reviewers.requested_reviewers
         )
     request_users = tuple(sorted({*selected_users, *codepath_users}, key=str.casefold))
     if len(request_users) + len(codepath_teams) > MAX_REVIEW_REQUESTS:
@@ -1092,13 +1065,11 @@ def apply_controller_action(
         status_labels += (shadow_label,)
     for label_name in status_labels:
         require_repository_label(github, args.repository, label_name)
-    planned_reviewer_requests = (
-        tuple(f"@{login}" for login in request_users)
-        + tuple(f"@{target_org}/{slug}" for slug in codepath_teams)
+    planned_reviewer_requests = tuple(f"@{login}" for login in request_users) + tuple(
+        f"@{target_org}/{slug}" for slug in codepath_teams
     )
-    direct_codepath_requests = (
-        tuple(f"@{login}" for login in codepath_users)
-        + tuple(f"@{target_org}/{slug}" for slug in codepath_teams)
+    direct_codepath_requests = tuple(f"@{login}" for login in codepath_users) + tuple(
+        f"@{target_org}/{slug}" for slug in codepath_teams
     )
 
     def provenance_for(owner: str, source: str) -> dict[str, Any]:
@@ -1146,9 +1117,7 @@ def apply_controller_action(
             choice["selection_reason"] = "direct_codepath_owner"
         owner_choices[owner] = choice
     labels = tuple(
-        dict.fromkeys(
-            status_labels if shadow_mode else (*status_labels, *team_labels)
-        )
+        dict.fromkeys(status_labels if shadow_mode else (*status_labels, *team_labels))
     )
     log_routing_plan(
         args,
@@ -1262,8 +1231,7 @@ def main() -> int:
     elif outcome.status == "incomplete":
         if args.mode == "shadow":
             print(
-                f"Shadow result for {args.repository}#{args.pr}: "
-                "analysis incomplete."
+                f"Shadow result for {args.repository}#{args.pr}: analysis incomplete."
             )
         else:
             print(

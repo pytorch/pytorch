@@ -11,10 +11,10 @@ from pathlib import Path
 from typing import Any
 
 from schemas import (
-    MAX_OWNER_PROVENANCE_FILES,
     AnalysisResult,
-    TriageInput,
+    MAX_OWNER_PROVENANCE_FILES,
     should_run_ownership_analysis,
+    TriageInput,
 )
 
 
@@ -56,9 +56,7 @@ def log_analysis_record(record: dict[str, Any]) -> None:
     """Print model reasoning safely without allowing workflow commands."""
 
     for line in json.dumps(record, indent=2, sort_keys=True).splitlines():
-        safe_line = line.replace("::", r"\u003a\u003a").replace(
-            "##[", r"\u0023\u0023["
-        )
+        safe_line = line.replace("::", r"\u003a\u003a").replace("##[", r"\u0023\u0023[")
         print(f"Auto PR Triage result | {safe_line}")
 
 
@@ -69,9 +67,7 @@ def validate_result(triage_input: TriageInput, result: dict[str, Any]) -> list[s
     metadata_owners = set(
         triage_input.trusted_context["extra_ownership_metadata"]["owners"]
     )
-    changed_files = {
-        item["path"]: item for item in triage_input.untrusted_pr["files"]
-    }
+    changed_files = {item["path"]: item for item in triage_input.untrusted_pr["files"]}
     changed_paths = set(changed_files)
     expected_indices = set(range(len(triage_input.untrusted_pr["files"])))
     raw_indices = result["analyzed_file_indices"]
@@ -86,11 +82,7 @@ def validate_result(triage_input: TriageInput, result: dict[str, Any]) -> list[s
     suggestions = result["additional_owners"]
     suggested_owners = [suggestion["owner_id"] for suggestion in suggestions]
     duplicates = sorted(
-        {
-            owner
-            for owner in suggested_owners
-            if suggested_owners.count(owner) > 1
-        }
+        {owner for owner in suggested_owners if suggested_owners.count(owner) > 1}
     )
     if duplicates:
         errors.append(f"duplicate additional owners: {duplicates}")
@@ -120,9 +112,7 @@ def validate_result(triage_input: TriageInput, result: dict[str, Any]) -> list[s
             path = evidence["file"]
             excerpt = evidence["diff_excerpt"]
             if path not in changed_files:
-                errors.append(
-                    f"evidence path for {owner} is absent from PR: {path}"
-                )
+                errors.append(f"evidence path for {owner} is absent from PR: {path}")
                 continue
             if path not in supporting_paths:
                 errors.append(
@@ -141,23 +131,17 @@ def validate_result(triage_input: TriageInput, result: dict[str, Any]) -> list[s
             ):
                 errors.append(f"evidence excerpt for {owner} is not in patch: {path}")
                 continue
-            if not any(
-                line.startswith(("+", "-"))
-                for line in excerpt.splitlines()
-            ):
+            if not any(line.startswith(("+", "-")) for line in excerpt.splitlines()):
                 errors.append(
                     f"evidence excerpt for {owner} has no changed line: {path}"
                 )
     uncovered_paths = {
-        path
-        for concern in result["uncovered_concerns"]
-        for path in concern["files"]
+        path for concern in result["uncovered_concerns"] for path in concern["files"]
     }
     unknown_uncovered_paths = sorted(uncovered_paths - changed_paths)
     if unknown_uncovered_paths:
         errors.append(
-            "uncovered concern paths absent from PR: "
-            f"{unknown_uncovered_paths}"
+            f"uncovered concern paths absent from PR: {unknown_uncovered_paths}"
         )
     return errors
 
@@ -211,12 +195,8 @@ def build_analysis_result(
         )
 
     codepath_owners = triage_input.trusted_context["codepath_owners"]["owners"]
-    codepath_files: dict[str, set[str]] = {
-        owner: set() for owner in codepath_owners
-    }
-    for group in triage_input.trusted_context["codepath_owners"][
-        "matched_path_groups"
-    ]:
+    codepath_files: dict[str, set[str]] = {owner: set() for owner in codepath_owners}
+    for group in triage_input.trusted_context["codepath_owners"]["matched_path_groups"]:
         for owner in group["owners"]:
             codepath_files[owner].update(group["paths"])
     owner_provenance = {
@@ -247,10 +227,7 @@ def build_analysis_result(
         and recommendation["confidence"] != "low"
     )
     additional_owners = (
-        [
-            suggestion["owner_id"]
-            for suggestion in recommendation["additional_owners"]
-        ]
+        [suggestion["owner_id"] for suggestion in recommendation["additional_owners"]]
         if accept_additional
         else []
     )

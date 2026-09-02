@@ -14,21 +14,14 @@ from pathlib import Path
 from typing import Any
 
 from codepath_owners import (
-    CODEPATH_OWNERS_PATH,
-    REPOSITORY_RE,
     build_codepath_owners,
+    CODEPATH_OWNERS_PATH,
     load_codepath_owners,
+    REPOSITORY_RE,
 )
-from github_reviews import (
-    fetch_maintainer_activity,
-    fetch_user_has_triage_permission,
-)
-from ownership import (
-    SHA_RE,
-    TARGET_BASE_REF,
-    load_extra_ownership_metadata,
-)
-from schemas import RESULT_SCHEMA, TriageInput, should_run_ownership_analysis
+from github_reviews import fetch_maintainer_activity, fetch_user_has_triage_permission
+from ownership import load_extra_ownership_metadata, SHA_RE, TARGET_BASE_REF
+from schemas import RESULT_SCHEMA, should_run_ownership_analysis, TriageInput
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -96,7 +89,9 @@ def run_command(
     )
     if result.returncode:
         detail = result.stderr.strip() or result.stdout.strip()
-        raise RuntimeError(f"{command[0]} failed with exit {result.returncode}: {detail}")
+        raise RuntimeError(
+            f"{command[0]} failed with exit {result.returncode}: {detail}"
+        )
     return result
 
 
@@ -128,7 +123,9 @@ class GitHubReader:
         )
         response = json.loads(result.stdout)
         if response.get("errors"):
-            raise RuntimeError(f"GitHub GraphQL failed: {json.dumps(response['errors'])}")
+            raise RuntimeError(
+                f"GitHub GraphQL failed: {json.dumps(response['errors'])}"
+            )
         return response["data"]
 
 
@@ -151,7 +148,10 @@ def fetch_pull_request_files(
             f"repos/{repo}/pulls/{number}/files"
             f"?per_page={PULL_REQUEST_FILES_PER_PAGE}&page={page}"
         )
-        if not isinstance(response, list) or len(response) > PULL_REQUEST_FILES_PER_PAGE:
+        if (
+            not isinstance(response, list)
+            or len(response) > PULL_REQUEST_FILES_PER_PAGE
+        ):
             raise RuntimeError("pull request files response is invalid")
         for item in response:
             if (
@@ -213,8 +213,7 @@ def fetch_actionable_linked_issue_state(
             if issue["repository"]["nameWithOwner"].casefold() != repo.casefold():
                 continue
             if any(
-                label["name"].casefold() == "actionable"
-                for label in labels["nodes"]
+                label["name"].casefold() == "actionable" for label in labels["nodes"]
             ):
                 return True
     except (KeyError, TypeError, AttributeError) as exc:
@@ -440,9 +439,7 @@ def main() -> int:
                     + json.dumps(
                         {
                             "maintainer": (
-                                maintainer_activity[0]
-                                if maintainer_activity
-                                else None
+                                maintainer_activity[0] if maintainer_activity else None
                             ),
                             "found": maintainer_activity is not None,
                             "signals": (

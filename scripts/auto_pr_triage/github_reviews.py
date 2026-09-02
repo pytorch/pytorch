@@ -86,9 +86,7 @@ def fetch_user_has_triage_permission(
     """Return whether GitHub grants one user triage-or-higher repository access."""
 
     encoded_login = quote(login, safe="")
-    response = github.json(
-        f"repos/{repo}/collaborators/{encoded_login}/permission"
-    )
+    response = github.json(f"repos/{repo}/collaborators/{encoded_login}/permission")
     if not isinstance(response, dict):
         raise RuntimeError("collaborator permission response is invalid")
     try:
@@ -96,8 +94,7 @@ def fetch_user_has_triage_permission(
         returned_login = user["login"]
         permissions = user["permissions"]
         access = {
-            name: permissions[name]
-            for name in ("triage", "push", "maintain", "admin")
+            name: permissions[name] for name in ("triage", "push", "maintain", "admin")
         }
     except (KeyError, TypeError, AttributeError) as exc:
         raise RuntimeError("collaborator permission response is incomplete") from exc
@@ -440,9 +437,8 @@ def fetch_latest_pull_request_for_label(
             raise RuntimeError("owner label usage response is invalid")
         for issue in issues:
             number = issue.get("number")
-            if (
-                not isinstance(number, int)
-                or not isinstance(issue.get("pull_request"), dict)
+            if not isinstance(number, int) or not isinstance(
+                issue.get("pull_request"), dict
             ):
                 raise RuntimeError("owner label is not dedicated to pull requests")
             if number == current_number:
@@ -455,9 +451,7 @@ def fetch_latest_pull_request_for_label(
             for event in timeline:
                 event_label = event.get("label")
                 name = (
-                    event_label.get("name")
-                    if isinstance(event_label, dict)
-                    else None
+                    event_label.get("name") if isinstance(event_label, dict) else None
                 )
                 event_id = event.get("id")
                 if (
@@ -468,7 +462,9 @@ def fetch_latest_pull_request_for_label(
                 ):
                     matching_ids.append(event_id)
             if not matching_ids:
-                raise RuntimeError("owner label event is absent from labeled pull request")
+                raise RuntimeError(
+                    "owner label event is absent from labeled pull request"
+                )
             candidate = (number, max(matching_ids))
             if latest is None or candidate[1] > latest[1]:
                 latest = candidate
@@ -568,9 +564,7 @@ def fetch_round_robin_reviewers(
 
     for entry in owners.values():
         label = entry["label"]
-        response = github.json(
-            f"repos/{repo}/labels/{quote(label, safe='')}"
-        )
+        response = github.json(f"repos/{repo}/labels/{quote(label, safe='')}")
         actual = response.get("name") if isinstance(response, dict) else None
         if not isinstance(actual, str) or actual.casefold() != label.casefold():
             raise RuntimeError("configured owner label is unavailable")

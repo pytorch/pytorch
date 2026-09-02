@@ -142,7 +142,9 @@ def parse_rule(raw: str, line_number: int) -> dict[str, Any]:
     pattern = "".join(pattern_characters)
     glob_regex(pattern)
     owners = line[owner_start:].split()
-    invalid_owner = next((owner for owner in owners if not OWNER_RE.fullmatch(owner)), None)
+    invalid_owner = next(
+        (owner for owner in owners if not OWNER_RE.fullmatch(owner)), None
+    )
     if invalid_owner:
         raise ValueError(
             f"invalid codepath owner {invalid_owner!r} on line {line_number}"
@@ -211,7 +213,12 @@ def resolve_paths(
 
     resolutions = []
     for path in dict.fromkeys(paths):
-        if not isinstance(path, str) or not path or path.startswith("/") or "\0" in path:
+        if (
+            not isinstance(path, str)
+            or not path
+            or path.startswith("/")
+            or "\0" in path
+        ):
             raise ValueError(f"invalid repository-relative path: {path!r}")
         rule = resolve_rule(path, rules)
         resolutions.append(

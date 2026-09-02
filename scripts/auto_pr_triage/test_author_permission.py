@@ -4,18 +4,9 @@ import argparse
 import unittest
 from unittest import mock
 
-from apply_triage_decision import (
-    ControllerOutcome,
-    apply_controller_action,
-)
-from github_reviews import (
-    fetch_maintainer_activity,
-    fetch_user_has_triage_permission,
-)
-from ownership import (
-    EXTRA_OWNERSHIP_METADATA_PATH,
-    TEAM_MEMBERS_PATH,
-)
+from apply_triage_decision import apply_controller_action, ControllerOutcome
+from github_reviews import fetch_maintainer_activity, fetch_user_has_triage_permission
+from ownership import EXTRA_OWNERSHIP_METADATA_PATH, TEAM_MEMBERS_PATH
 from process_llm_output import build_analysis_result
 from schemas import AnalysisResult, TriageInput
 
@@ -145,9 +136,7 @@ class AuthorPermissionTest(unittest.TestCase):
                 permissions[permission] = True
                 github = FakePermissionGitHub(permissions)
                 self.assertTrue(
-                    fetch_user_has_triage_permission(
-                        github, REPOSITORY, "author"
-                    )
+                    fetch_user_has_triage_permission(github, REPOSITORY, "author")
                 )
                 self.assertEqual(
                     github.calls,
@@ -158,9 +147,7 @@ class AuthorPermissionTest(unittest.TestCase):
         github = FakePermissionGitHub(
             {"triage": False, "push": False, "maintain": False, "admin": False}
         )
-        self.assertFalse(
-            fetch_user_has_triage_permission(github, REPOSITORY, "author")
-        )
+        self.assertFalse(fetch_user_has_triage_permission(github, REPOSITORY, "author"))
 
     def test_nested_triage_permission_wins_over_legacy_read_value(self) -> None:
         github = mock.Mock()
@@ -178,9 +165,7 @@ class AuthorPermissionTest(unittest.TestCase):
                 },
             },
         }
-        self.assertTrue(
-            fetch_user_has_triage_permission(github, REPOSITORY, "author")
-        )
+        self.assertTrue(fetch_user_has_triage_permission(github, REPOSITORY, "author"))
 
     def test_permission_response_is_strictly_validated(self) -> None:
         valid = {
@@ -195,9 +180,7 @@ class AuthorPermissionTest(unittest.TestCase):
         ):
             with self.subTest(response=github.permissions):
                 with self.assertRaises(RuntimeError):
-                    fetch_user_has_triage_permission(
-                        github, REPOSITORY, "author"
-                    )
+                    fetch_user_has_triage_permission(github, REPOSITORY, "author")
 
     def test_trusted_author_enables_analysis_without_overriding_owners(self) -> None:
         without_codepath_owners = build_analysis_result(
@@ -283,17 +266,13 @@ class MaintainerActivityTest(unittest.TestCase):
                 return_value=True,
             ) as permission,
         ):
-            activity = fetch_maintainer_activity(
-                mock.Mock(), REPOSITORY, 123, "author"
-            )
+            activity = fetch_maintainer_activity(mock.Mock(), REPOSITORY, 123, "author")
 
         self.assertEqual(
             activity,
             ("@maintainer", ("comment", "review", "self_review_request")),
         )
-        permission.assert_called_once_with(
-            mock.ANY, REPOSITORY, "maintainer"
-        )
+        permission.assert_called_once_with(mock.ANY, REPOSITORY, "maintainer")
 
     def test_only_self_requested_review_counts(self) -> None:
         events = [
@@ -319,13 +298,9 @@ class MaintainerActivityTest(unittest.TestCase):
                 "github_reviews.fetch_pull_request_timeline",
                 return_value=events,
             ),
-            mock.patch(
-                "github_reviews.fetch_user_has_triage_permission"
-            ) as permission,
+            mock.patch("github_reviews.fetch_user_has_triage_permission") as permission,
         ):
-            activity = fetch_maintainer_activity(
-                mock.Mock(), REPOSITORY, 123, "author"
-            )
+            activity = fetch_maintainer_activity(mock.Mock(), REPOSITORY, 123, "author")
 
         self.assertIsNone(activity)
         permission.assert_not_called()
@@ -363,14 +338,10 @@ class MaintainerActivityTest(unittest.TestCase):
                 return_value=False,
             ) as permission,
         ):
-            activity = fetch_maintainer_activity(
-                mock.Mock(), REPOSITORY, 123, "author"
-            )
+            activity = fetch_maintainer_activity(mock.Mock(), REPOSITORY, 123, "author")
 
         self.assertIsNone(activity)
-        permission.assert_called_once_with(
-            mock.ANY, REPOSITORY, "contributor"
-        )
+        permission.assert_called_once_with(mock.ANY, REPOSITORY, "contributor")
 
     def test_read_only_collaborator_does_not_count_as_activity(self) -> None:
         events = [
@@ -390,9 +361,7 @@ class MaintainerActivityTest(unittest.TestCase):
                 return_value=False,
             ) as permission,
         ):
-            activity = fetch_maintainer_activity(
-                mock.Mock(), REPOSITORY, 123, "author"
-            )
+            activity = fetch_maintainer_activity(mock.Mock(), REPOSITORY, 123, "author")
 
         self.assertIsNone(activity)
         permission.assert_called_once()
@@ -409,9 +378,7 @@ class MaintainerActivityTest(unittest.TestCase):
             ],
         ):
             with self.assertRaisesRegex(RuntimeError, "user is invalid"):
-                fetch_maintainer_activity(
-                    mock.Mock(), REPOSITORY, 123, "author"
-                )
+                fetch_maintainer_activity(mock.Mock(), REPOSITORY, 123, "author")
 
     def test_permission_failure_fails_safe(self) -> None:
         events = [
@@ -432,9 +399,7 @@ class MaintainerActivityTest(unittest.TestCase):
             ),
         ):
             with self.assertRaisesRegex(RuntimeError, "unavailable"):
-                fetch_maintainer_activity(
-                    mock.Mock(), REPOSITORY, 123, "author"
-                )
+                fetch_maintainer_activity(mock.Mock(), REPOSITORY, 123, "author")
 
     def test_candidate_limit_fails_safe(self) -> None:
         events = [
@@ -450,9 +415,7 @@ class MaintainerActivityTest(unittest.TestCase):
             return_value=events,
         ):
             with self.assertRaisesRegex(RuntimeError, "candidate limit"):
-                fetch_maintainer_activity(
-                    mock.Mock(), REPOSITORY, 123, "author"
-                )
+                fetch_maintainer_activity(mock.Mock(), REPOSITORY, 123, "author")
 
     def test_activity_enables_analysis_and_preserves_codepath_owners(self) -> None:
         prepared = triage_input(
@@ -499,9 +462,10 @@ class ApplyAuthorPermissionTest(unittest.TestCase):
         self.github = mock.Mock()
 
     def test_apply_records_would_close_for_missing_actionable_issue(self) -> None:
-        with mock.patch(
-            "apply_triage_decision.require_repository_label"
-        ), mock.patch("apply_triage_decision.add_labels") as add_labels:
+        with (
+            mock.patch("apply_triage_decision.require_repository_label"),
+            mock.patch("apply_triage_decision.add_labels") as add_labels,
+        ):
             outcome = apply_controller_action(self.args, self.github)
 
         self.assertEqual(outcome, ControllerOutcome("shadow_close"))
@@ -525,6 +489,7 @@ class ApplyAuthorPermissionTest(unittest.TestCase):
             method="PATCH",
             payload={"state": "closed"},
         )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -13,10 +13,11 @@ from codepath_owners import (
 )
 from ownership import (
     EXTRA_OWNERSHIP_METADATA_PATH,
+    OWNER_ID_RE,
     SHA_RE,
     TARGET_BASE_REF,
-    OWNER_ID_RE,
 )
+
 
 TRIAGE_INPUT_SCHEMA_VERSION = 10
 MAX_CODEPATH_OWNERS = 100
@@ -38,10 +39,14 @@ def should_run_ownership_analysis(
 ) -> bool:
     """Return whether ownership analysis can affect the controller decision."""
 
-    return is_open_non_draft_pr_against_main and not is_already_handled and (
-        author_has_triage_permission
-        or has_actionable_linked_issue
-        or has_maintainer_activity
+    return (
+        is_open_non_draft_pr_against_main
+        and not is_already_handled
+        and (
+            author_has_triage_permission
+            or has_actionable_linked_issue
+            or has_maintainer_activity
+        )
     )
 
 
@@ -272,10 +277,7 @@ class AnalysisResult:
         }
         if (
             not isinstance(self.owner_provenance, dict)
-            or (
-                self.owner_provenance_truncated
-                and self.owner_provenance
-            )
+            or (self.owner_provenance_truncated and self.owner_provenance)
             or (
                 not self.owner_provenance_truncated
                 and set(self.owner_provenance) != set(expected_provenance)
@@ -440,9 +442,11 @@ class AnalysisResult:
             "has_uncovered_concerns",
         }:
             raise ValueError("analysis result has invalid fields")
-        if not isinstance(value["codepath_owners"], list) or not isinstance(
-            value["additional_owners"], list
-        ) or not isinstance(value["owner_provenance"], dict):
+        if (
+            not isinstance(value["codepath_owners"], list)
+            or not isinstance(value["additional_owners"], list)
+            or not isinstance(value["owner_provenance"], dict)
+        ):
             raise ValueError("analysis result owners must be arrays")
         codepath_owners = value["codepath_owners"]
         additional_owners = value["additional_owners"]
@@ -607,10 +611,8 @@ def _validate_ownership(
             not isinstance(owner, str) or not CODEPATH_OWNER_RE.fullmatch(owner)
             for owner in codepath_owners
         )
-        or len({owner.casefold() for owner in codepath_owners})
-        != len(codepath_owners)
-        or tuple(sorted(codepath_owners, key=str.casefold))
-        != tuple(codepath_owners)
+        or len({owner.casefold() for owner in codepath_owners}) != len(codepath_owners)
+        or tuple(sorted(codepath_owners, key=str.casefold)) != tuple(codepath_owners)
     ):
         raise RuntimeError("codepath owners are invalid")
     target_org = repository.split("/", 1)[0].casefold()
@@ -644,9 +646,7 @@ def _validate_ownership(
         ):
             raise RuntimeError("matched codepath-owner path group is invalid")
         if grouped_paths & set(paths):
-            raise RuntimeError(
-                "changed path appears in multiple codepath-owner groups"
-            )
+            raise RuntimeError("changed path appears in multiple codepath-owner groups")
         grouped_owners.update(owners)
         grouped_paths.update(paths)
 
@@ -744,9 +744,7 @@ class TriageInput:
                 and metadata["target_base_ref"] == TARGET_BASE_REF
                 and SHA_RE.fullmatch(metadata["workflow_sha"])
                 and isinstance(metadata["diff_truncated_or_unavailable"], bool)
-                and isinstance(
-                    metadata["is_open_non_draft_pr_against_main"], bool
-                )
+                and isinstance(metadata["is_open_non_draft_pr_against_main"], bool)
                 and isinstance(metadata["is_already_handled"], bool)
                 and isinstance(metadata["has_actionable_linked_issue"], bool)
                 and isinstance(metadata["author_has_triage_permission"], bool)
@@ -868,9 +866,7 @@ class TriageInput:
                         "author_has_triage_permission": metadata[
                             "author_has_triage_permission"
                         ],
-                        "has_maintainer_activity": metadata[
-                            "has_maintainer_activity"
-                        ],
+                        "has_maintainer_activity": metadata["has_maintainer_activity"],
                     },
                 },
                 value["untrusted_pr"],

@@ -14,6 +14,7 @@ from urllib.parse import unquote
 
 from apply_triage_decision import (
     ALLOWED_SHADOW_LABELS,
+    apply_controller_action,
     BOT_CLOSED_COMMENT,
     BOT_SHADOW_CLOSE_LABEL,
     BOT_SHADOW_TRIAGED_LABEL,
@@ -21,7 +22,6 @@ from apply_triage_decision import (
     CODEOWNERS_SHADOW_LABELS,
     ControllerOutcome,
     GitHubClient,
-    apply_controller_action,
     main,
 )
 from github_reviews import stable_fallback_member
@@ -168,7 +168,7 @@ def run_apply(
             owner_provenance=owner_provenance,
             owner_provenance_truncated=owner_provenance_truncated,
             has_uncovered_concerns=has_uncovered_concerns,
-        )
+        ),
     )
     if native_codeowners_shadow and github.native_codeowners is None:
         github.native_codeowners = [
@@ -176,12 +176,15 @@ def run_apply(
             for owner in codepath_owners
             if owner.startswith("@") and owner.casefold() != "@external-author"
         ]
-    with mock.patch(
-        "apply_triage_decision.load_team_members",
-        return_value=team_members or ownership_config()["team_members"],
-    ), mock.patch(
-        "apply_triage_decision.NATIVE_CODEOWNERS_SHADOW",
-        native_codeowners_shadow,
+    with (
+        mock.patch(
+            "apply_triage_decision.load_team_members",
+            return_value=team_members or ownership_config()["team_members"],
+        ),
+        mock.patch(
+            "apply_triage_decision.NATIVE_CODEOWNERS_SHADOW",
+            native_codeowners_shadow,
+        ),
     ):
         return apply_controller_action(args, github)
 
@@ -220,12 +223,15 @@ def run_without_owners(
             has_uncovered_concerns=has_uncovered_concerns,
         ),
     )
-    with mock.patch(
-        "apply_triage_decision.load_team_members",
-        return_value=ownership_config()["team_members"],
-    ), mock.patch(
-        "apply_triage_decision.NATIVE_CODEOWNERS_SHADOW",
-        native_codeowners_shadow,
+    with (
+        mock.patch(
+            "apply_triage_decision.load_team_members",
+            return_value=ownership_config()["team_members"],
+        ),
+        mock.patch(
+            "apply_triage_decision.NATIVE_CODEOWNERS_SHADOW",
+            native_codeowners_shadow,
+        ),
     ):
         return apply_controller_action(args, github)
 
@@ -327,12 +333,8 @@ class FakeGitHub:
             else:
                 self.live_reads.append("requested")
             return {
-                "users": [
-                    {"login": login} for login in sorted(self.requested_users)
-                ],
-                "teams": [
-                    {"slug": slug} for slug in sorted(self.requested_teams)
-                ],
+                "users": [{"login": login} for login in sorted(self.requested_users)],
+                "teams": [{"slug": slug} for slug in sorted(self.requested_teams)],
             }
         if endpoint == "repos/pytorch/ciforge/issues/123/labels" and method == "POST":
             if not isinstance(payload, dict) or not isinstance(
@@ -341,9 +343,7 @@ class FakeGitHub:
                 raise AssertionError("unexpected label payload")
             existing = {label["name"] for label in self.pr["labels"]}
             self.pr["labels"].extend(
-                {"name": name}
-                for name in payload["labels"]
-                if name not in existing
+                {"name": name} for name in payload["labels"] if name not in existing
             )
             return copy.deepcopy(self.pr["labels"])
         if endpoint == "repos/pytorch/ciforge/issues/123/comments" and method == "POST":
@@ -387,9 +387,7 @@ class FakeGitHub:
                         "__typename": "User",
                         "login": owner.removeprefix("@"),
                     }
-                nodes.append(
-                    {"asCodeOwner": True, "requestedReviewer": reviewer}
-                )
+                nodes.append({"asCodeOwner": True, "requestedReviewer": reviewer})
             return {
                 "repository": {
                     "pullRequest": {
@@ -412,9 +410,7 @@ class FakeGitHub:
                     {
                         "repository": {"nameWithOwner": "pytorch/ciforge"},
                         "labels": {
-                            "nodes": [
-                                {"id": "actionable-label", "name": "actionable"}
-                            ],
+                            "nodes": [{"id": "actionable-label", "name": "actionable"}],
                             "pageInfo": {"hasNextPage": False},
                         },
                         "timelineItems": {
@@ -537,8 +533,9 @@ class GitHubClientTest(unittest.TestCase):
 
         with mock.patch("apply_triage_decision.subprocess.run") as run:
             for endpoint, method, payload in requests:
-                with self.subTest(endpoint=endpoint), self.assertRaisesRegex(
-                    ValueError, "shadow-mode boundary"
+                with (
+                    self.subTest(endpoint=endpoint),
+                    self.assertRaisesRegex(ValueError, "shadow-mode boundary"),
                 ):
                     github.json(endpoint, method=method, payload=payload)
         run.assert_not_called()
@@ -581,8 +578,9 @@ class GitHubClientTest(unittest.TestCase):
                 "repos/pytorch/pytorch/issues/123/labels",
                 "repos/pytorch/ciforge/issues/124/labels",
             ):
-                with self.subTest(endpoint=endpoint), self.assertRaisesRegex(
-                    ValueError, "shadow-mode boundary"
+                with (
+                    self.subTest(endpoint=endpoint),
+                    self.assertRaisesRegex(ValueError, "shadow-mode boundary"),
                 ):
                     github.json(endpoint, method="POST", payload=payload)
         run.assert_not_called()
@@ -626,9 +624,7 @@ class ControllerInputTest(unittest.TestCase):
     def test_rejects_foreign_codepath_team_before_github_io(self) -> None:
         github = FakeGitHub()
         args = controller_args(
-            analysis_result_json=analysis_result_json(
-                codepath_owners=("@other/team",)
-            )
+            analysis_result_json=analysis_result_json(codepath_owners=("@other/team",))
         )
 
         with self.assertRaisesRegex(ValueError, "foreign codepath owner team"):
@@ -700,8 +696,9 @@ class ControllerInputTest(unittest.TestCase):
             controller_args(run_attempt=0),
         ):
             github = FakeGitHub()
-            with self.subTest(args=args), self.assertRaisesRegex(
-                ValueError, "invalid pull request identity"
+            with (
+                self.subTest(args=args),
+                self.assertRaisesRegex(ValueError, "invalid pull request identity"),
             ):
                 apply_controller_action(args, github)
             self.assertEqual(github.calls, [])
@@ -893,9 +890,7 @@ class CodeownersShadowTest(unittest.TestCase):
         )
 
     def test_missing_shadow_label_fails_before_mutation(self) -> None:
-        github = FakeGitHub(
-            unavailable_labels=[CODEOWNERS_SHADOW_LABELS["match"]]
-        )
+        github = FakeGitHub(unavailable_labels=[CODEOWNERS_SHADOW_LABELS["match"]])
 
         with self.assertRaisesRegex(RuntimeError, "required repository label"):
             run_apply(github, native_codeowners_shadow=True)
@@ -1048,9 +1043,7 @@ class RolloutShadowModeTest(unittest.TestCase):
 
     def test_uncovered_concern_review_state_failure_stays_incomplete(self) -> None:
         class UnavailableReviewsGitHub(FakeGitHub):
-            def graphql(
-                self, query: str, variables: dict[str, Any]
-            ) -> dict[str, Any]:
+            def graphql(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
                 if "reviews(first:" in query:
                     raise RuntimeError("submitted reviews unavailable")
                 return super().graphql(query, variables)
@@ -1295,17 +1288,16 @@ class RolloutShadowModeTest(unittest.TestCase):
 
     def test_unavailable_submitted_handoff_fails_in_both_modes(self) -> None:
         class UnavailableSubmittedReviewsGitHub(FakeGitHub):
-            def graphql(
-                self, query: str, variables: dict[str, Any]
-            ) -> dict[str, Any]:
+            def graphql(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
                 if "reviews(first:" in query:
                     raise RuntimeError("submitted reviews unavailable")
                 return super().graphql(query, variables)
 
         for mode in ("shadow", "live"):
             github = UnavailableSubmittedReviewsGitHub()
-            with self.subTest(mode=mode), self.assertRaisesRegex(
-                RuntimeError, "submitted reviews unavailable"
+            with (
+                self.subTest(mode=mode),
+                self.assertRaisesRegex(RuntimeError, "submitted reviews unavailable"),
             ):
                 run_without_owners(github, mode=mode)
             self.assertEqual(mutations(github), [])
@@ -1329,10 +1321,7 @@ class RolloutShadowModeTest(unittest.TestCase):
         self.assertEqual(plan["planned_reviewer_requests"], ["@soulitzer"])
         self.assertEqual(set(plan["owner_choices"]), {"autograd", "compiler"})
         self.assertEqual(
-            {
-                choice["reviewer"]
-                for choice in plan["owner_choices"].values()
-            },
+            {choice["reviewer"] for choice in plan["owner_choices"].values()},
             {"@soulitzer"},
         )
         routing = printed_reviewer_routing(output)
@@ -1405,10 +1394,13 @@ class ApplyTriageTest(unittest.TestCase):
         github = FakeGitHub(actionable_issue=True)
         args = controller_args()
 
-        with mock.patch(
-            "apply_triage_decision.load_team_members",
-            side_effect=AssertionError("roster configuration should not load"),
-        ), mock.patch("apply_triage_decision.NATIVE_CODEOWNERS_SHADOW", False):
+        with (
+            mock.patch(
+                "apply_triage_decision.load_team_members",
+                side_effect=AssertionError("roster configuration should not load"),
+            ),
+            mock.patch("apply_triage_decision.NATIVE_CODEOWNERS_SHADOW", False),
+        ):
             result = apply_controller_action(args, github)
 
         self.assertEqual(result, ControllerOutcome("triaged", 1, 0))
@@ -1624,7 +1616,10 @@ class ApplyTriageTest(unittest.TestCase):
         self.assertEqual(mutations(github)[0][2], {"reviewers": [expected[1:]]})
         self.assertIn("owner: autograd", mutations(github)[1][2]["labels"])
         self.assertTrue(
-            any("using stable fallback" in call.args[0] for call in output.call_args_list)
+            any(
+                "using stable fallback" in call.args[0]
+                for call in output.call_args_list
+            )
         )
         self.assertEqual(
             printed_plan(output)["owner_choices"]["autograd"]["selection_reason"],
@@ -1717,7 +1712,9 @@ class ApplyTriageTest(unittest.TestCase):
 
         self.assertEqual(result, ControllerOutcome("triaged", 1, 1))
         request = next(
-            call for call in mutations(github) if call[1].endswith("/requested_reviewers")
+            call
+            for call in mutations(github)
+            if call[1].endswith("/requested_reviewers")
         )
         self.assertEqual(request[2], {"reviewers": ["soulitzer"]})
         plan = printed_plan(output)
@@ -1965,12 +1962,14 @@ class ApplyTriageTest(unittest.TestCase):
             )
         )
 
-        with mock.patch(
-            "apply_triage_decision.load_team_members",
-            return_value=config["team_members"],
-        ), mock.patch(
-            "apply_triage_decision.NATIVE_CODEOWNERS_SHADOW", False
-        ), mock.patch("builtins.print") as output:
+        with (
+            mock.patch(
+                "apply_triage_decision.load_team_members",
+                return_value=config["team_members"],
+            ),
+            mock.patch("apply_triage_decision.NATIVE_CODEOWNERS_SHADOW", False),
+            mock.patch("builtins.print") as output,
+        ):
             result = apply_controller_action(args, github)
         self.assertEqual(result, ControllerOutcome("triaged", 1, 1, 1))
         self.assertEqual(
@@ -2046,8 +2045,9 @@ class ApplyTriageTest(unittest.TestCase):
         )
         for owner, unavailable_labels, error in cases:
             github = FakeGitHub(unavailable_labels=unavailable_labels)
-            with self.subTest(owner=owner), self.assertRaisesRegex(
-                (ValueError, RuntimeError), error
+            with (
+                self.subTest(owner=owner),
+                self.assertRaisesRegex((ValueError, RuntimeError), error),
             ):
                 run_apply(
                     github,
@@ -2056,7 +2056,9 @@ class ApplyTriageTest(unittest.TestCase):
                 )
             self.assertEqual(mutations(github), [])
 
-    def test_unavailable_additional_owner_routing_preserves_codepath_handles(self) -> None:
+    def test_unavailable_additional_owner_routing_preserves_codepath_handles(
+        self,
+    ) -> None:
         github = FakeGitHub(unavailable_labels=["owner: autograd"])
 
         result = run_apply(
@@ -2130,8 +2132,9 @@ class ApplyTriageTest(unittest.TestCase):
 
         for codepath_owners in (("autograd",), ("@codepath-owner", "autograd")):
             github = UnavailableReviewersGitHub()
-            with self.subTest(codepath_owners=codepath_owners), self.assertRaisesRegex(
-                RuntimeError, "reviewer state unavailable"
+            with (
+                self.subTest(codepath_owners=codepath_owners),
+                self.assertRaisesRegex(RuntimeError, "reviewer state unavailable"),
             ):
                 run_apply(
                     github,
@@ -2165,7 +2168,9 @@ class ApplyTriageTest(unittest.TestCase):
         self.assertEqual(github.live_reads.count("requested"), 1)
         self.assertEqual(github.live_reads.count("submitted"), 1)
 
-    def test_satisfied_result_without_owners_uses_submitted_review_handoff(self) -> None:
+    def test_satisfied_result_without_owners_uses_submitted_review_handoff(
+        self,
+    ) -> None:
         github = FakeGitHub(
             submitted_users=["soulitzer"],
             submitted_user_state="COMMENTED",
@@ -2225,20 +2230,19 @@ class ApplyTriageTest(unittest.TestCase):
             )
 
     def test_no_owners_does_not_use_the_author_as_submitted_handoff(self) -> None:
-        github = FakeGitHub(
-            submitted_users=["external-author"], actionable_issue=True
-        )
+        github = FakeGitHub(submitted_users=["external-author"], actionable_issue=True)
         config = ownership_config()
-        config["team_members"]["members"]["autograd"].append(
-            "@external-author"
-        )
+        config["team_members"]["members"]["autograd"].append("@external-author")
         args = controller_args(
             analysis_result_json=analysis_result_json(codepath_owners=())
         )
-        with mock.patch(
-            "apply_triage_decision.load_team_members",
-            return_value=config["team_members"],
-        ), mock.patch("apply_triage_decision.NATIVE_CODEOWNERS_SHADOW", False):
+        with (
+            mock.patch(
+                "apply_triage_decision.load_team_members",
+                return_value=config["team_members"],
+            ),
+            mock.patch("apply_triage_decision.NATIVE_CODEOWNERS_SHADOW", False),
+        ):
             self.assertEqual(
                 apply_controller_action(args, github),
                 ControllerOutcome("kept_open"),
@@ -2248,30 +2252,28 @@ class ApplyTriageTest(unittest.TestCase):
     def test_author_cannot_be_selected_by_round_robin(self) -> None:
         github = FakeGitHub()
         config = ownership_config()
-        config["team_members"]["members"]["autograd"] = [
-            "@external-author"
-        ]
+        config["team_members"]["members"]["autograd"] = ["@external-author"]
         args = controller_args(
             analysis_result_json=analysis_result_json(
                 codepath_owners=(),
                 additional_owners=("autograd",),
             )
         )
-        with mock.patch(
-            "apply_triage_decision.load_team_members",
-            return_value=config["team_members"],
-        ), mock.patch(
-            "apply_triage_decision.NATIVE_CODEOWNERS_SHADOW", False
-        ), self.assertRaisesRegex(RuntimeError, "no eligible"):
+        with (
+            mock.patch(
+                "apply_triage_decision.load_team_members",
+                return_value=config["team_members"],
+            ),
+            mock.patch("apply_triage_decision.NATIVE_CODEOWNERS_SHADOW", False),
+            self.assertRaisesRegex(RuntimeError, "no eligible"),
+        ):
             apply_controller_action(args, github)
         self.assertEqual(mutations(github), [])
 
     def test_author_codepath_match_does_not_cover_additional_owner(self) -> None:
         github = FakeGitHub(actionable_issue=True)
         config = ownership_config()
-        config["team_members"]["members"]["autograd"].append(
-            "@external-author"
-        )
+        config["team_members"]["members"]["autograd"].append("@external-author")
         args = controller_args(
             analysis_result_json=analysis_result_json(
                 codepath_owners=("@external-author",),
@@ -2279,10 +2281,13 @@ class ApplyTriageTest(unittest.TestCase):
             )
         )
 
-        with mock.patch(
-            "apply_triage_decision.load_team_members",
-            return_value=config["team_members"],
-        ), mock.patch("apply_triage_decision.NATIVE_CODEOWNERS_SHADOW", False):
+        with (
+            mock.patch(
+                "apply_triage_decision.load_team_members",
+                return_value=config["team_members"],
+            ),
+            mock.patch("apply_triage_decision.NATIVE_CODEOWNERS_SHADOW", False),
+        ):
             result = apply_controller_action(args, github)
 
         self.assertEqual(result, ControllerOutcome("triaged", 1, 1))
@@ -2454,9 +2459,7 @@ class CloseDecisionTest(unittest.TestCase):
         self.assertEqual(github.permission_checks, 0)
 
     def test_missing_bot_closed_label_prevents_writes(self) -> None:
-        github = FakeGitHub(
-            labels=["open source"], unavailable_labels=["bot-closed"]
-        )
+        github = FakeGitHub(labels=["open source"], unavailable_labels=["bot-closed"])
         with self.assertRaisesRegex(RuntimeError, "required repository label"):
             run_close(github)
         self.assertEqual(mutations(github), [])
@@ -2508,8 +2511,7 @@ class CloseDecisionTest(unittest.TestCase):
                 payload: dict[str, Any] | None = None,
             ) -> Any:
                 if method == "POST" and (
-                    endpoint.endswith("/labels")
-                    or endpoint.endswith("/comments")
+                    endpoint.endswith("/labels") or endpoint.endswith("/comments")
                 ):
                     self.calls.append((method, endpoint, payload))
                     raise RuntimeError("annotation failure " + "x" * 500)
@@ -2522,6 +2524,7 @@ class CloseDecisionTest(unittest.TestCase):
         self.assertIn("bot-closed label", detail)
         self.assertIn("close comment", detail)
         self.assertEqual(github.pr["state"], "closed")
+
 
 class ApplyMainTest(unittest.TestCase):
     def test_main_reports_each_controller_status(self) -> None:
@@ -2581,9 +2584,7 @@ class ApplyMainTest(unittest.TestCase):
                         "os.environ",
                         {"GH_TOKEN": "token"},
                     ),
-                    mock.patch(
-                        "apply_triage_decision.parse_args", return_value=args
-                    ),
+                    mock.patch("apply_triage_decision.parse_args", return_value=args),
                     mock.patch("apply_triage_decision.GitHubClient") as client,
                     mock.patch(
                         "apply_triage_decision.apply_controller_action",
@@ -2656,17 +2657,14 @@ class ApplyMainTest(unittest.TestCase):
             {"AUTO_PR_TRIAGE_MODE: shadow", "AUTO_PR_TRIAGE_MODE: live"},
         )
         self.assertIn('--mode "$AUTO_PR_TRIAGE_MODE"', workflow)
-        self.assertIn(
-            "needs.analyze.outputs.analysis-result-json != ''", workflow
-        )
+        self.assertIn("needs.analyze.outputs.analysis-result-json != ''", workflow)
         self.assertNotIn("should-apply", workflow)
         self.assertNotIn("should-apply", action)
         self.assertNotIn("expected-head-sha", workflow)
         self.assertNotIn("expected-head-sha", action)
         self.assertIn("types: [labeled, ready_for_review]", workflow)
         self.assertIn(
-            "  analyze:\n    if: >-\n"
-            "      github.repository_owner == 'pytorch' &&",
+            "  analyze:\n    if: >-\n      github.repository_owner == 'pytorch' &&",
             workflow,
         )
         self.assertIn("github.event.pull_request.state == 'open'", workflow)
@@ -2707,8 +2705,7 @@ class ApplyMainTest(unittest.TestCase):
         )
         self.assertIn("WORKFLOW_SHA: ${{ github.sha }}", workflow)
         self.assertIn(
-            "ANALYSIS_RESULT_JSON: "
-            "${{ needs.analyze.outputs.analysis-result-json }}",
+            "ANALYSIS_RESULT_JSON: ${{ needs.analyze.outputs.analysis-result-json }}",
             workflow,
         )
         self.assertIn("  record-error:\n", workflow)
