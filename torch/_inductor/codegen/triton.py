@@ -50,6 +50,7 @@ from ..async_compile import AsyncCompile
 from ..codecache import code_hash, get_path, PyCodeCache, write_atomic
 from ..debug import set_kernel_post_grad_provenance_tracing
 from ..ops_handler import DefaultHandler
+from ..optimize_indexing import range_implied_indices
 from ..runtime import triton_heuristics
 from ..runtime.benchmarking import benchmarker
 from ..runtime.hints import (
@@ -2591,7 +2592,9 @@ class TritonKernelOverrides(TritonOverrides):
 
         value = None if need_where else other
 
-        with V.kernel.mask_loads(mask, value=value) as new_mask:
+        with V.kernel.mask_loads(
+            mask, value=value, implied_masks=V.kernel._range_implied_masks()
+        ) as new_mask:
             result = body()
 
         if need_where:
@@ -2610,7 +2613,11 @@ class TritonKernelOverrides(TritonOverrides):
         else:
             ret = result
 
+        # Loads inside the region may have dropped range masks that new_mask
+        # implies; restore them from the predicate so escaping values keep the
+        # same mask set as before the elision.
         ret.mask_vars.discard(new_mask)
+        ret.mask_vars.update(new_mask.mask_vars)
         return ret
 
     @staticmethod
@@ -3392,6 +3399,27 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
     def triton_tensor_ndim(self) -> int:
         return sum(int(tree.tensor_dim is not None) for tree in self.range_trees)
+
+    def _range_implied_masks(self) -> OrderedSet[str]:
+        """
+        Range masks the masked op being interpreted makes redundant: its
+        predicate proves an iteration var is in range (range_implied_indices)
+        and that var is a whole range tree root of this kernel.
+        """
+        result = OrderedSet[str]()
+        body = getattr(V.interpreter, "loop_body", None)
+        if body is None:
+            return result
+        sizevars = V.graph.sizevars
+        for name in range_implied_indices(body, V.interpreter.current_node):
+            entry = self.range_tree_nodes.get(body.indexing[name])
+            if (
+                entry is not None
+                and sizevars.statically_known_equals(entry.divisor, 1)
+                and sizevars.statically_known_equals(entry.length, entry.root.numel)
+            ):
+                result.add(entry.root.mask_name())
+        return result
 
     def indexing_size_str(self, i: int) -> str:
         sizes = ["None"] * self.triton_tensor_ndim()
@@ -8014,6 +8042,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 mask_vars.discard(tree.mask_name())
 
         mask_vars.discard("None")
+        mask_vars.difference_update(self._load_mask_implies)
 
     @cache_on_self
     def get_reduction_prefixes(self) -> list[str]:

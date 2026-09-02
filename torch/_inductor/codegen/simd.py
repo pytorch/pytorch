@@ -1275,22 +1275,35 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         raise NotImplementedError("NYI: call_kernel")
 
     @contextlib.contextmanager
-    def mask_loads(self, mask: str | OpsWrapper, value: int | float) -> Iterator[str]:
-        """Context manager to add an additional mask to tl.load/store"""
+    def mask_loads(
+        self,
+        mask: str | OpsWrapper,
+        value: int | float,
+        implied_masks: OrderedSet[str] | None = None,
+    ) -> Iterator[str]:
+        """
+        Context manager to add an additional mask to tl.load/store.
+        ``implied_masks`` are range masks that ``mask`` proves, so
+        filter_masks drops them inside the region.
+        """
         prior = self._load_mask
         prior_val = self._load_other
+        prior_implied = self._load_mask_implies
         if prior:
             mask = ops.logical_and(mask, prior)
 
         mask = OpsWrapper._unwrap(mask)
         self._load_mask = mask
         self._load_other = value
+        if implied_masks:
+            self._load_mask_implies = prior_implied | implied_masks
         try:
             # TODO(jansel): do we need a reshape here?
             yield mask
         finally:
             self._load_mask = prior
             self._load_other = prior_val
+            self._load_mask_implies = prior_implied
 
     def get_strides_of_load(self, index: sympy.Expr) -> dict[sympy.Symbol, sympy.Expr]:
         """
