@@ -105,6 +105,37 @@ class DeviceMeshTestGlooBackend(DTensorTestBase):
         else:
             self.assertEqual(mesh_group, default_group)
 
+    @with_comms
+    def test_device_mesh_reuse_default_group_for_custom_order_by_default(self):
+        # Without opting in via preserve_rank_order, a mesh dim whose size
+        # equals world_size must still take the default_group shortcut even
+        # when _rank_map is a permutation of [0, .., world_size). Skipping the
+        # shortcut unconditionally would silently change subgroup rank order
+        # for callers whose existing code relies on default_group's rank order.
+        reversed_ranks = list(reversed(range(self.world_size)))
+        mesh = DeviceMesh(self.device_type, torch.tensor(reversed_ranks))
+        mesh_group = mesh.get_group()
+        default_group = _get_default_group()
+        if torch.cuda.is_available():
+            self.assertEqual(mesh_group.group_desc, "mesh_default")
+        else:
+            self.assertEqual(mesh_group, default_group)
+
+    @with_comms
+    def test_device_mesh_skips_default_group_reuse_when_opted_in(self):
+        # With preserve_rank_order=True, a permuted full-world mesh dim must
+        # get a dedicated group instead of silently reusing default_group.
+        reversed_ranks = list(reversed(range(self.world_size)))
+        mesh = DeviceMesh(
+            self.device_type,
+            torch.tensor(reversed_ranks),
+            preserve_rank_order=True,
+        )
+        mesh_group = mesh.get_group()
+        default_group = _get_default_group()
+        self.assertEqual(mesh_group.group_desc, "mesh_dim_0")
+        self.assertEqual(get_world_size(mesh_group), get_world_size(default_group))
+
 
 class DeviceMeshSetDeviceTest(DTensorTestBase):
     @property
@@ -448,6 +479,36 @@ class DeviceMeshTestNDim(DTensorTestBase):
             for ranks in dim_ranks:
                 if self.rank in ranks:
                     self.assertEqual(global_ranks, ranks.tolist())
+
+    @with_comms
+    def test_device_mesh_preserve_rank_order(self):
+        # Permute the innermost dim so dim-2 subgroups are [1, 0], [3, 2], [5, 4], [7, 6].
+        mesh_tensor = torch.arange(8).reshape(2, 2, 2).flip(-1)
+        dim_ranks = mesh_tensor.reshape(-1, 2)
+
+        default_mesh = DeviceMesh(self.device_type, mesh_tensor)
+        default_group = default_mesh.get_group(2)
+        default_global_ranks = [
+            get_global_rank(default_group, i)
+            for i in range(get_world_size(default_group))
+        ]
+        for ranks in dim_ranks:
+            if self.rank in ranks:
+                # Without opting in, subgroup ranks are still sorted ascending.
+                self.assertEqual(default_global_ranks, sorted(ranks.tolist()))
+
+        ordered_mesh = DeviceMesh(
+            self.device_type, mesh_tensor, preserve_rank_order=True
+        )
+        ordered_group = ordered_mesh.get_group(2)
+        ordered_global_ranks = [
+            get_global_rank(ordered_group, i)
+            for i in range(get_world_size(ordered_group))
+        ]
+        for ranks in dim_ranks:
+            if self.rank in ranks:
+                # With preserve_rank_order=True, subgroup ranks follow the mesh tensor order.
+                self.assertEqual(ordered_global_ranks, ranks.tolist())
 
     @with_comms
     def test_device_mesh_hash(self):
