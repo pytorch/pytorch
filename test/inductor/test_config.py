@@ -10,6 +10,10 @@ from torch._inductor import config
 from torch._inductor.choices import InductorChoices
 from torch._inductor.pattern_matcher import PatternMatcherPass
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_TRITON
 from torch.testing._internal.triton_utils import requires_gpu
 
@@ -197,6 +201,32 @@ class TestInductorConfig(TestCase):
                 torch.randn(10)
             ),
         )
+
+    @parametrize("value", (None, 0, 0.5))
+    def test_fusion_memory_timeline_peak_option_types(self, value):
+        key = "fusion_memory_timeline_peak_allowed_increase_mb"
+        self.assertIsNone(config.fusion_memory_timeline_peak_allowed_increase_mb)
+        optimized = torch.compile(dummy_fn, options={key: value})
+        self.assertEqual(optimized.get_compiler_config()[key], value)
+
+    @parametrize("value", (-1, float("nan"), float("inf"), -float("inf"), True))
+    def test_fusion_memory_timeline_peak_option_validation(self, value):
+        from torch._inductor.scheduler import Scheduler
+
+        key = "fusion_memory_timeline_peak_allowed_increase_mb"
+        with (
+            config.patch({key: value}),
+            self.assertRaisesRegex(ValueError, "finite non-negative number"),
+        ):
+            Scheduler.fusion_memory_timeline_peak_allowed_increase_bytes()
+
+    def test_fusion_memory_timeline_peak_large_finite_option(self):
+        from torch._inductor.scheduler import Scheduler
+
+        with config.patch(fusion_memory_timeline_peak_allowed_increase_mb=1e308):
+            self.assertGreater(
+                Scheduler.fusion_memory_timeline_peak_allowed_increase_bytes(), 0
+            )
 
     def test_api_options(self):
         reduce_overhead_opts = torch._inductor.list_mode_options("reduce-overhead")
@@ -521,6 +551,9 @@ class TestInductorConfig(TestCase):
         called = False
         z.grad_fn.apply(torch.tensor(0))
         self.assertFalse(called)
+
+
+instantiate_parametrized_tests(TestInductorConfig)
 
 
 if __name__ == "__main__":

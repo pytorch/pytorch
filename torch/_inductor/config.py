@@ -1014,6 +1014,10 @@ loop_index_inversion_in_fusion: bool = True
 # For the cases loop ordering after fusion does not help, we don't lose much.
 score_fusion_memory_threshold = 10
 
+# Maximum estimated peak-memory increase, in MB, allowed for a fusion.
+# None preserves the existing fusion path without memory-timeline modeling.
+fusion_memory_timeline_peak_allowed_increase_mb: int | float | None = None
+
 # For Triton Templates, select fastest of best template + epilogue vs best template + separate epilogue kernel
 benchmark_epilogue_fusion = (
     os.environ.get("TORCHINDUCTOR_BENCHMARK_EPILOGUE_FUSION", "1") == "1"
