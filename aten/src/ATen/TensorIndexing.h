@@ -686,6 +686,41 @@ inline bool try_dispatch_masked_fill_(
   return false;
 }
 
+inline bool try_dispatch_index_fill_(
+    Tensor& self,
+    const std::vector<Tensor>& indices,
+    const Scalar& value) {
+  const auto self_dtype = self.scalar_type();
+  if (isQIntType(self_dtype) || isFloat8Type(self_dtype)) {
+    return false;
+  }
+
+  // index_fill_ only supports advanced indexing with a single index tensor.
+  std::optional<int64_t> index_dim;
+  for (const auto i : c10::irange(indices.size())) {
+    if (!indices[i].defined()) {
+      continue;
+    }
+    if (index_dim.has_value()) {
+      return false;
+    }
+    index_dim = static_cast<int64_t>(i);
+  }
+
+  if (!index_dim.has_value()) {
+    return false;
+  }
+  const auto dim = *index_dim;
+  const Tensor& index = indices[dim];
+  if (index.scalar_type() != kLong || index.device() != self.device() ||
+      (index.dim() > 1 && !index.is_contiguous_or_false())) {
+    return false;
+  }
+
+  self.index_fill_(dim, index.dim() > 1 ? index.view({-1}) : index, value);
+  return true;
+}
+
 // NOTE [ Setting `disable_slice_optimization` when calling C++ tensor indexing
 // functions from Python ]
 //
@@ -847,7 +882,8 @@ inline void set_item(
   }
 
   if constexpr (std::is_same_v<T, Scalar>) {
-    if (try_dispatch_masked_fill_(sliced, tensorIndices, value)) {
+    if (try_dispatch_masked_fill_(sliced, tensorIndices, value) ||
+        try_dispatch_index_fill_(sliced, tensorIndices, value)) {
       return;
     }
   }
