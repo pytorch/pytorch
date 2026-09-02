@@ -1130,7 +1130,7 @@ class LPPool1d(_LPPoolNd):
     On each window, the function computed is:
 
     .. math::
-        f(X) = \sqrt[p]{\sum_{x \in X} x^{p}}
+        f(X) = \sqrt[p]{\sum_{x \in X} |x|^{p}}
 
     - At p = :math:`\infty`, one gets Max Pooling over absolute values
     - At p = 1, one gets Sum Pooling (which is proportional to Average Pooling)
@@ -1177,7 +1177,7 @@ class LPPool2d(_LPPoolNd):
     On each window, the function computed is:
 
     .. math::
-        f(X) = \sqrt[p]{\sum_{x \in X} x^{p}}
+        f(X) = \sqrt[p]{\sum_{x \in X} |x|^{p}}
 
     - At p = :math:`\infty`, one gets Max Pooling over absolute values
     - At p = 1, one gets Sum Pooling (which is proportional to average pooling)
@@ -1237,7 +1237,7 @@ class LPPool3d(_LPPoolNd):
     On each window, the function computed is:
 
     .. math::
-        f(X) = \sqrt[p]{\sum_{x \in X} x^{p}}
+        f(X) = \sqrt[p]{\sum_{x \in X} |x|^{p}}
 
     - At p = :math:`\infty`, one gets Max Pooling over absolute values
     - At p = 1, one gets Sum Pooling (which is proportional to average pooling)
