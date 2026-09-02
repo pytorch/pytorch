@@ -43,6 +43,7 @@ import threading
 import time
 import traceback
 import types
+import unittest
 import weakref
 from collections import defaultdict, deque
 from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeAlias, TypeVar
@@ -181,9 +182,11 @@ from .variables.iter import MAX_ITERATOR_LIMIT
 from .variables.lazy import LazyVariableTracker
 from .variables.lists import (
     BaseListVariable,
+    DequeIteratorVariable,
     ListIteratorVariable,
     ListVariable,
     SliceVariable,
+    TupleIteratorVariable,
     TupleVariable,
 )
 from .variables.misc import (
@@ -547,11 +550,11 @@ def get_assert_bytecode_sequence(with_msg: bool) -> list[str]:
     if with_msg:
 
         def fn(x: Any) -> None:
-            assert x, "msg"  # noqa: S101
+            assert x, "msg"  # noqa: S101  # function is to recognize assert statements in user code
     else:
 
         def fn(x: Any) -> None:
-            assert x  # noqa: S101
+            assert x  # noqa: S101  # function is to recognize assert statements in user code
 
     insts = [inst.opname for inst in dis.get_instructions(fn)]
 
@@ -1463,6 +1466,15 @@ class InstructionTranslatorBase(
 ):
     output: OutputGraph
     symbolic_locals: dict[str, VariableTracker]
+    # Registry of this frame's cells (cellvars + freevars), recorded at frame
+    # setup. `symbolic_locals` models localsplus slot contents, which
+    # fast-local ops may legitimately clobber (LOAD_FAST_AND_CLEAR in inlined
+    # comprehensions evicts a merged cell slot; a comprehension iteration
+    # variable shadowing an enclosing `nonlocal` reuses the cell's name for a
+    # distinct fast slot). The registry survives such slot traffic so cell
+    # lookups and cell codegen at a graph break never depend on what the slot
+    # happens to hold. See `_cellvar` for the resolution rule.
+    symbolic_cellvars: dict[str, VariableTracker]
     symbolic_globals: dict[str, VariableTracker]
     symbolic_torch_function_state: SymbolicTorchFunctionState
     symbolic_stream_state: SymbolicStreamState
@@ -1565,12 +1577,27 @@ class InstructionTranslatorBase(
             self._cell_and_freevars = self.cellvars() + self.freevars()
         return self._cell_and_freevars
 
+    def _register_cells(self) -> None:
+        # Record this frame's cells in the symbolic_cellvars registry. A free
+        # var that shares its name with a fast local occupies a second,
+        # distinct localsplus slot in CPython (e.g. an inlined comprehension
+        # iteration variable shadowing an enclosing `nonlocal`); it is removed
+        # from symbolic_locals so fast-local ops on the name can't touch it.
+        # Cellvars that match a fast local are merged into one slot by CPython,
+        # so they (and non-colliding cells) stay in symbolic_locals as slot
+        # contents too. Idempotent: re-registering is a no-op.
+        fastlocals = set(self.f_code.co_varnames)
+        for name in self.cell_and_freevars():
+            if name in self.symbolic_locals:
+                self.symbolic_cellvars[name] = self.symbolic_locals[name]
+        for name in self.f_code.co_freevars:
+            if name in fastlocals:
+                self.symbolic_locals.pop(name, None)
+
     def prune_dead_locals(self) -> None:
         # keep cell and freevar references alive
         self.post_prune_cell_and_freevars = {
-            k: v
-            for k, v in self.symbolic_locals.items()
-            if k in self.cell_and_freevars()
+            name: self._cellvar(name) for name in self.cell_and_freevars()
         }
         # Only keep the locals that must remain on the stack.
         reads = livevars_analysis(self.instructions, self.current_instruction)
@@ -2208,12 +2235,25 @@ class InstructionTranslatorBase(
         if name.startswith("__stack"):
             self.symbolic_locals.pop(name)
 
+    def _cellvar(self, name: str) -> VariableTracker:
+        # The localsplus slot is authoritative while it holds a cell (a
+        # mid-function MAKE_CELL from an inlined comprehension can replace a
+        # merged cell slot's cell with a fresh one). Fall back to the registry
+        # when the slot doesn't hold a cell: either the name is a colliding
+        # free var that never lives in symbolic_locals, or the cell was
+        # temporarily evicted by LOAD_FAST_AND_CLEAR.
+        var = self.symbolic_locals.get(name)
+        # __instancecheck__ to avoid realizing lazy vts
+        if var is not None and type.__instancecheck__(CellVariable, var):
+            return var
+        return self.symbolic_cellvars[name]
+
     def LOAD_DEREF(self, inst: Instruction) -> None:
         if inst.argval not in self.cell_and_freevars():
             raise AssertionError(
                 "expected inst.argval in self.cell_and_freevars() to be true"
             )
-        cell = self.symbolic_locals[inst.argval]
+        cell = self._cellvar(inst.argval)
         contents_var = self.output.side_effects.load_cell(cell)
         self.push(contents_var)
 
@@ -2232,11 +2272,10 @@ class InstructionTranslatorBase(
             self.is_tracing_resume_prologue = val
 
     def DELETE_FAST(self, inst: Instruction) -> None:
-        name = inst.argval
-        var = self.symbolic_locals.get(name)
+        var = self.symbolic_locals.get(inst.argval)
         if isinstance(var, TensorVariable):
             self._maybe_emit_sync_dealloc(var)
-        del self.symbolic_locals[name]
+        del self.symbolic_locals[inst.argval]
 
     def _maybe_emit_sync_dealloc(self, var: TensorVariable) -> None:
         from .variables.streams import get_current_stream, new_event
@@ -2286,7 +2325,7 @@ class InstructionTranslatorBase(
             raise AssertionError(
                 "expected inst.argval in self.cell_and_freevars() to be true"
             )
-        cell = self.symbolic_locals[inst.argval]
+        cell = self._cellvar(inst.argval)
         val = self.pop()
         self.output.side_effects.store_cell(cell, val)
 
@@ -2297,7 +2336,9 @@ class InstructionTranslatorBase(
         if cell.local_name is not None:
             val.set_name_hint(cell.local_name)  # type: ignore[attr-defined]
 
-    LOAD_CLOSURE = LOAD_FAST
+    def LOAD_CLOSURE(self, inst: Instruction) -> None:
+        # LOAD_CLOSURE pushes the cell object itself.
+        self.push(self._cellvar(inst.argval))
 
     def _load_const(self, inst: Instruction) -> VariableTracker:
         i = inst.arg
@@ -2667,7 +2708,7 @@ class InstructionTranslatorBase(
     def _attach_traceback_to_exception(self, exc: ExceptionVals) -> None:
         # based on CPython's PyTraceBack_Here impl
         frame_summary = self.frame_summary()
-        tb = exc.getattro_impl(
+        tb = exc.tp_getattro_impl(
             # pyrefly: ignore [bad-argument-type]
             self,
             "__traceback__",
@@ -2839,7 +2880,7 @@ class InstructionTranslatorBase(
                     "expected _exception_instance_check(val) to be true"
                 )
             typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined, union-attr]
-            tb = val.getattro_impl(
+            tb = val.tp_getattro_impl(
                 # pyrefly: ignore[bad-argument-type]
                 self,
                 "__traceback__",
@@ -2858,7 +2899,7 @@ class InstructionTranslatorBase(
                 )
             typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined]
 
-            tb = val.getattro_impl(self, "__traceback__")
+            tb = val.tp_getattro_impl(self, "__traceback__")
 
         args += [typ, val, tb]
         self.call_function(fn, args, {})
@@ -2886,7 +2927,20 @@ class InstructionTranslatorBase(
                 raise e.with_traceback(raised_exception.__traceback__) from None
 
             curr_exc = self.exn_vt_stack.get_raised_exception()
-            dynamo_exc = exc.get_dynamo_observed_exception(curr_exc.python_type())
+            exc_python_type = curr_exc.python_type()
+            if (self.one_graph or self.error_on_graph_break) and issubclass(
+                exc_python_type, unittest.SkipTest
+            ):
+                try:
+                    skip_args: list[Any] = [
+                        a.as_python_constant() for a in curr_exc.args
+                    ]
+                except NotImplementedError:
+                    skip_args = []
+                skip_exc = exc_python_type(*skip_args)
+                raise skip_exc from None
+
+            dynamo_exc = exc.get_dynamo_observed_exception(exc_python_type)
             if not isinstance(raised_exception, dynamo_exc):
                 raise AssertionError(
                     "expected isinstance(raised_exception, dynamo_exc) to be true"
@@ -3321,10 +3375,11 @@ class InstructionTranslatorBase(
 
     def LOAD_ATTR(self, inst: Instruction) -> None:
         if sys.version_info >= (3, 12):
-            assert inst.arg is not None and inst.arg % 2 == 0, (  # noqa: S101
-                "LOAD_ATTR method variant should have been normalized by "
-                "remove_load_attr_method_variant in cleaned_instructions"
-            )
+            if inst.arg is None or inst.arg % 2 != 0:
+                raise AssertionError(
+                    "LOAD_ATTR method variant should have been normalized by "
+                    "remove_load_attr_method_variant in cleaned_instructions"
+                )
         self._load_attr(inst.argval)
 
     @break_graph_if_unsupported(
@@ -3348,9 +3403,17 @@ class InstructionTranslatorBase(
             {},
         )
 
+    def DELETE_DEREF(self, inst: Instruction) -> None:
+        if inst.argval not in self.cell_and_freevars():
+            raise AssertionError(
+                "expected inst.argval in self.cell_and_freevars() to be true"
+            )
+        cell = self._cellvar(inst.argval)
+        self.output.side_effects.store_cell(cell, variables.DeletedVariable())
+
     def _maybe_sync_dealloc_attr(self, obj: VariableTracker, name: str) -> None:
         # Only check side_effects — a pure dict lookup with no observable
-        # side effects. We intentionally avoid getattro_impl here because it
+        # side effects. We intentionally avoid tp_getattro_impl here because it
         # can trigger __getattr__, add graph nodes, or cause graph breaks.
         if self.output.side_effects.has_pending_mutation_of_attr(obj, name):
             attr_var = self.output.side_effects.load_attr(obj, name)
@@ -3904,8 +3967,7 @@ class InstructionTranslatorBase(
         #         frame N stack + locals,
         #         ...,
         #         frame 2 stack + locals,
-        #     ],
-        #     [frame 1 stack + locals],
+        #     ], *(frame 1 stack + locals)
         # ]
         cg.extend_output(
             [
@@ -3923,25 +3985,17 @@ class InstructionTranslatorBase(
         )
 
         # TOS: resume 1, remaining resumes, frames (popped), frame 1 stack + locals
-        if ContinueExecutionCache.uses_boxed_call(resume_codes[-1]):
-            cg.extend_output(
-                [
-                    # [remaining resumes, frames, [frame 1 stack + locals]]
-                    create_instruction("BUILD_LIST", arg=3),
-                ]
-            )
-        else:
-            cg.extend_output(
-                [
-                    *create_rot_n(3),
-                    create_instruction("BUILD_LIST", arg=2),
-                    *create_swap(2),
-                    # [remaining resumes, frames], frame 1 stack + locals
-                    create_instruction("LIST_EXTEND", arg=1),
-                ]
-            )
+        cg.extend_output(
+            [
+                *create_rot_n(3),
+                create_instruction("BUILD_LIST", arg=2),
+                *create_swap(2),
+                # [resumes, frames (popped)], frame 1 stack + locals
+                create_instruction("LIST_EXTEND", arg=1),
+            ]
+        )
 
-        # TOS: resume 1, resume call args
+        # TOS: resume 1, [remaining resumes, frames, *(frame 1 stack + locals)]
         cg.extend_output(create_call_function_ex(False, True))
 
     def should_compile_partial_graph(self) -> bool:
@@ -4210,9 +4264,7 @@ class InstructionTranslatorBase(
                 dict(zip(items[::2], items[1::2], strict=True)),
                 mutation_type=ValueMutationNew(),
             )
-            fn.get_dict_vt(self).setitem(  # pyrefly: ignore[bad-argument-type]
-                "__annotations__", ann
-            )
+            fn.annotations = ann
         self.push(fn)
 
     def UNPACK_SEQUENCE(self, inst: Instruction) -> None:
@@ -4379,6 +4431,10 @@ class InstructionTranslatorBase(
 
         self.call_function(BuiltinVariable(str.format), [fmt_var, value], {})
 
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when formatting an f-string value",
+    )
     def FORMAT_VALUE(self, inst: Instruction) -> None:
         flags = inst.arg
         if flags is None:
@@ -4829,6 +4885,25 @@ class InstructionTranslatorBase(
         if sys.version_info >= (3, 12) and not self.accept_prefix_inst:
             # In 3.12+, MAKE_CELL is no longer necessarily a prefix instruction.
             # It can be generated by inlined comprehensions.
+            # A mid-function MAKE_CELL replaces the slot's contents with a
+            # fresh cell (the frame-entry cell was saved on the stack by a
+            # preceding LOAD_FAST_AND_CLEAR and is restored by the
+            # comprehension epilogue). Only the slot is updated: the
+            # symbolic_cellvars registry keeps the frame-entry cell, and
+            # `_cellvar` prefers the slot while it holds a cell.
+            if inst.argval in self.f_code.co_freevars:
+                # The name refers to three localsplus slots at once (fast
+                # local + comprehension cell + free var, e.g. `nonlocal i`
+                # with `[lambda: i for i in ...]`). Dynamo tracks locals by
+                # name and cannot model two same-named cells; tracing on
+                # would silently target the wrong cell.
+                unimplemented(
+                    gb_type="MAKE_CELL on a free variable name",
+                    context=f"MAKE_CELL {inst.argval}",
+                    explanation="An inlined comprehension creates a cell whose name "
+                    f"`{inst.argval}` is also a free variable of the enclosing function.",
+                    hints=[*graph_break_hints.DIFFICULT],
+                )
             if not isinstance(self.symbolic_locals[inst.argval], NullVariable):
                 raise AssertionError(
                     "expected isinstance(self.symbolic_locals[inst.argval], NullVariable) to be true"
@@ -4986,12 +5061,7 @@ class InstructionTranslatorBase(
             # maybe use Format.VALUE_WITH_FAKE_GLOBALS instead?
             # https://docs.python.org/3/library/annotationlib.html#annotationlib.Format.VALUE_WITH_FAKE_GLOBALS
             attr = attr.call_function(self, [VariableTracker.build(self, 1)], {})
-            fn.call_method(
-                self,  # pyrefly: ignore[bad-argument-type]
-                "__setattr__",
-                [ConstantVariable.create("__annotations__"), attr],
-                {},
-            )
+            fn.annotations = attr
         elif flags & 0x08:
             fn.closure = attr
         elif flags & 0x04:
@@ -5006,9 +5076,7 @@ class InstructionTranslatorBase(
                 dict(zip(items[::2], items[1::2], strict=True)),
                 mutation_type=ValueMutationNew(),
             )
-            fn.get_dict_vt(self).setitem(  # pyrefly: ignore[bad-argument-type]
-                "__annotations__", ann
-            )
+            fn.annotations = ann
         elif flags & 0x02:
             fn.kwdefaults = attr
         elif flags & 0x01:
@@ -5016,14 +5084,26 @@ class InstructionTranslatorBase(
 
         self.push(fn)
 
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when converting an f-string value",
+    )
     def CONVERT_VALUE(self, inst: Instruction) -> None:
         if inst.arg is None:
             raise AssertionError("expected inst.arg is not None to be true")
         self.push(self._convert_value(self.pop(), inst.arg))
 
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when formatting an f-string value",
+    )
     def FORMAT_SIMPLE(self, inst: Instruction) -> None:
         self._format_value(VariableTracker.build(self, ""), 0)
 
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when formatting an f-string value",
+    )
     def FORMAT_WITH_SPEC(self, inst: Instruction) -> None:
         self._format_value(self.pop(), 0)
 
@@ -5142,7 +5222,7 @@ class InstructionTranslatorBase(
         nn_modules_pattern = re.compile(r".*torch/nn/modules.*")
         return nn_modules_pattern.match(filename) is not None
 
-    def store_global_weakref_by_id(self, prefix: str, value: Any) -> str:
+    def store_global_weakref_by_id(self, prefix: str, value: object) -> str:
         global_name = self.output.install_global_by_id(prefix, weakref.ref(value))
         install_guard(
             GlobalWeakRefSource(global_name).make_guard(GuardBuilder.WEAKREF_ALIVE)
@@ -5386,6 +5466,7 @@ class InstructionTranslatorBase(
         # Mutable state checkpointed by copy_graphstate()
         self.output = output
         self.symbolic_locals = symbolic_locals
+        self.symbolic_cellvars = {}
         self.symbolic_globals = symbolic_globals
         self.symbolic_torch_function_state = symbolic_torch_function_state
         self.symbolic_stream_state = symbolic_stream_state
@@ -5429,6 +5510,10 @@ class InstructionTranslatorBase(
         self.code_options: CodeOptions = code_options
         self.f_code: types.CodeType = f_code
         self.closure = closure
+        # Inlined frames receive a fully-populated symbolic_locals (cells
+        # included); register their cells now. Root frames populate
+        # symbolic_locals after super().__init__ and register there.
+        self._register_cells()
 
         # Execution record for replaying errors
         if closure is not None and config.replay_record_enabled:
@@ -5705,6 +5790,10 @@ class InstructionTranslator(InstructionTranslatorBase):
                 cell_var.local_name = name  # type: ignore[attr-defined]
                 self.symbolic_locals[name] = cell_var
 
+            # symbolic_locals is now fully populated; register the frame's
+            # cells (base __init__ ran before this population).
+            self._register_cells()
+
             self.symbolic_torch_function_state = SymbolicTorchFunctionState(
                 torch_function_mode_stack,
                 skip_next=False,
@@ -5717,6 +5806,9 @@ class InstructionTranslator(InstructionTranslatorBase):
                 # in export mode just eagerly realize everything
                 self.symbolic_locals = variables.LazyVariableTracker.realize_all(
                     self.symbolic_locals
+                )
+                self.symbolic_cellvars = variables.LazyVariableTracker.realize_all(
+                    self.symbolic_cellvars
                 )
 
     def _throw_if_in_functorch(self) -> None:
@@ -6052,17 +6144,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         sub_locals = None
         try:
             sub_locals = func.bind_args(parent, args, kwargs)
-        except TypeError as e:
-            unimplemented(
-                gb_type="failed to bind arguments when attempting to inline",
-                context=f"func='{func.get_name()}' {func.get_filename()}:{func.get_code().co_firstlineno}; "
-                f"args = {[arg.python_type() for arg in args]}; kwargs = {kwargs}",
-                explanation=f"Argument mismatch when attempting to trace function {func.get_name()}.",
-                hints=[
-                    *graph_break_hints.USER_ERROR,
-                ],
-                from_exc=e,
-            )
+        except variables.functions.BindArgsTypeError as e:
+            exc.raise_type_error(parent, msg=e.args[0])
 
         if sub_locals is None:
             raise AssertionError("expected sub_locals is not None to be true")
@@ -6491,7 +6574,8 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
 
     def GET_YIELD_FROM_ITER(self, inst: Instruction) -> None:
         tos = self.stack[-1]
-        if not isinstance(tos, ListIteratorVariable):
+        iter_vts = (ListIteratorVariable, TupleIteratorVariable, DequeIteratorVariable)
+        if not isinstance(tos, iter_vts):
             self.pop()
             res = VariableTracker.build(self, iter).call_function(self, [tos], {})  # type: ignore[arg-type]
             self.push(res)

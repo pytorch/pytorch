@@ -44,7 +44,6 @@ from torch._ops import OpOverload
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.fx.experimental._backward_state import BackwardState
-from torch.fx.experimental.proxy_tensor import HANDLED_TYPES
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
@@ -471,7 +470,15 @@ class _AnalyzeCustomOpInputOutputMode(TorchDispatchMode):
             underlying_tensor = tensor
             if isinstance(tensor, torch.nn.Parameter):
                 underlying_tensor = tensor.data
-            if type(underlying_tensor) not in HANDLED_TYPES:
+            # A subclass with no __torch_dispatch__ has no handler to defer to, so
+            # returning NotImplemented for it makes the dispatch fail outright.
+            # `types` cannot replace the check because HigherOrderOperator.dispatch
+            # passes it empty and this mode accepts HOPs.
+            if (
+                not is_fake_tensor(underlying_tensor)
+                and type(underlying_tensor).__torch_dispatch__
+                is not torch._C._disabled_torch_dispatch_impl
+            ):
                 return NotImplemented
 
         res = func(*args, **kwargs)
@@ -1108,9 +1115,10 @@ def _create_runtime_wrapper(
                             f"{oi}.as_strided_({ui}.size(), {ui}.stride(), {ui}.storage_offset())"
                         )
                     else:
-                        assert meta.mutates_data, (  # noqa: S101
-                            f"expected mutates_data for input {inpt_idx}"
-                        )
+                        if not meta.mutates_data:
+                            raise AssertionError(
+                                f"expected mutates_data for input {inpt_idx}"
+                            )
                     if meta.is_leaf:
                         buf.writeline(
                             f"if {oi}.requires_grad: {oi}.detach().copy_({ui})"

@@ -251,6 +251,12 @@ inductor_expected_failures_single_sample["cpu"] = {
     "resize_": {b8, f16, f32, f64, i32, i64},
     "resize_as_": {b8, f16, f32, f64, i32, i64},
     "histc": {f16},
+    # Same reason as "complex"/"view_as_complex" above: check_model runs the
+    # reference with reference_in_float=True, and reference_to_expect only
+    # casts the reference back when y.dtype.is_floating_point -- which is
+    # False for complex, so the f16 reference stays complex64 while the actual
+    # is complex32 and the dtype comparison fails.
+    "polar": {f16},
     ("sparse.mm", "reduce"): {f32, f64, f16},
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {
@@ -429,6 +435,8 @@ inductor_override_kwargs["cpu"] = {
         "atol": 1e-3,
         "rtol": 1e-4,
     },
+    ("_unsafe_masked_index_put_accumulate", f16): {"atol": 1e-4, "rtol": 0.01},
+    ("addbmm", f16): {"reference_in_float": False},
     # Following tests are failing with strict comparison but atol=1 is acceptable due roundings errors
     ("nn.functional.interpolate.bilinear", u8): {"atol": 1, "rtol": 0},
     ("nn.functional.upsample_bilinear", u8): {"atol": 1, "rtol": 0},
@@ -573,6 +581,8 @@ inductor_override_kwargs["cuda"] = {
         "grad_atol": 2e-3,
         "grad_rtol": 1e-3,
     },
+    ("special.i1", f16): {"grad_atol": 1e-5, "grad_rtol": 1e-2},
+    ("special.i1e", f16): {"grad_atol": 1e-5, "grad_rtol": 1e-2},
 }
 
 inductor_override_kwargs["xpu"] = {
@@ -739,6 +749,13 @@ inductor_override_kwargs["xpu"] = {
     # Reference crash on Intel LTS2 driver.
     ("nn.functional.interpolate.trilinear", f64): {
         "check_gradient": False,
+    },
+    # fp16 backward accumulates ~1e-3 rounding across the aten kernel and
+    # inductor decomposition; loosen tolerances to match the CUDA override
+    # added in pytorch/pytorch#190245.
+    ("native_group_norm", f16): {
+        "grad_atol": 2e-3,
+        "grad_rtol": 1e-3,
     },
 }
 if TEST_WITH_ROCM:
@@ -1421,7 +1438,7 @@ class TestInductorOpInfo(TestCase):
                 self.has_rng_op = False
 
             def __torch_dispatch__(self, func, types, args, kwargs=None):
-                kwargs = kwargs if kwargs else {}
+                kwargs = kwargs or {}
                 if torch.Tag.nondeterministic_seeded in func.tags:
                     self.has_rng_op = True
 

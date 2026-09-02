@@ -12,6 +12,7 @@
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/graph_task.h>
 #include <torch/csrc/autograd/input_buffer.h>
+#include <torch/csrc/autograd/node_creation_hook.h>
 #include <torch/csrc/autograd/saved_variable_hooks.h>
 #include <torch/csrc/autograd/utils/warnings.h>
 
@@ -175,6 +176,15 @@ struct TORCH_API Engine {
     return nullptr;
   }
 
+  // Wraps the currently registered torch.autograd.graph.node_creation_hook
+  // callbacks (a Python-only feature) into callable objects, outermost first.
+  // Returns empty when none are registered; only the Python engine can produce
+  // non-empty results.
+  virtual std::vector<std::unique_ptr<NodeCreationHook>>
+  get_node_creation_hooks() {
+    return {};
+  }
+
   // We pass cpu_ready_queue to evaluate_function, so that it knows
   // the correct ready queue to push to after a NodeTask is ready
   void evaluate_function(
@@ -228,7 +238,7 @@ struct TORCH_API Engine {
   void decrement_non_reentrant_thread_count();
   virtual void thread_main(const std::shared_ptr<GraphTask>& task);
   void reentrant_thread_init();
-  void add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task);
+  void add_thread_pool_task(std::weak_ptr<GraphTask> graph_task);
 
   // Safe to read device_ready_queues_ without synchronization after
   // initialization
