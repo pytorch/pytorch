@@ -259,10 +259,10 @@ class MixOrderReduction:
         g1 = cls.get_numel_rnumel(node1)
         g2 = cls.get_numel_rnumel(node2)
 
-        if len(g1) != 2 or len(g2) != 2 or g1 == g2:
+        if len(g1) != 2 or len(g2) != 2:
             return False
 
-        return tuple(g1) == tuple(reversed(g2))
+        return (g1 == g2 and g1[0] == g1[1]) or tuple(g1) == tuple(reversed(g2))
 
     @classmethod
     def _is_full_access(cls, buf: str, node: BaseSchedulerNode) -> bool:
@@ -283,11 +283,22 @@ class MixOrderReduction:
 
         if not var_ranges:
             if not isinstance(node, FusedSchedulerNode):
-                raise AssertionError(f"{type(node)}")
+                return False
+            # FusedSchedulerNode.read_writes is produced by ReadWrites.merge_list(),
+            # which intentionally drops var_ranges because fused children can have
+            # different loop domains. Preserve the existing best-effort fallback to
+            # the first child, but do not require that child to have ranges either.
             var_ranges = node.snodes[0].read_writes.var_ranges
 
         if not var_ranges:
-            raise AssertionError("expected var_ranges to be non-empty")
+            # Missing ranges are still valid here: scalar or fully unrolled nodes
+            # have no loop variables to record. For example,
+            # test_comprehensive_masked_cumprod_cuda_float32 can produce a fused
+            # node whose first child only has constant-indexed reads. Since this
+            # helper only proves a MixOrderReduction fusion opportunity, decline
+            # the proof instead of turning an optional fusion miss into a
+            # compilation failure.
+            return False
         if not (OrderedSet(var_ranges) - OrderedSet(index.free_symbols)):
             return True
 
@@ -411,6 +422,16 @@ class MixOrderReduction:
                 fallback_value=False,
             ):
                 return False
+
+        # Equal groups can be true square inner+outer reductions, but also
+        # same-order reductions where an unrelated read makes one node look
+        # non-contiguous. Compare only common full reads to prove mixed order.
+        g2 = cls.get_numel_rnumel(other_node)
+        if g1 == g2 and not any(
+            cls.is_contiguous_load(buf, node1) != cls.is_contiguous_load(buf, node2)
+            for buf in common_reads
+        ):
+            return False
 
         # Make sure a persistent reduction will be generated
         if any(
@@ -9057,7 +9078,10 @@ class Scheduler:
             return None
 
         snodes = [subnode for node in nodes for subnode in node.get_nodes()]
-        if not snodes or not all(isinstance(node, SchedulerNode) for node in snodes):
+        if not snodes or not all(
+            isinstance(node, SchedulerNode) and node._body is not None
+            for node in snodes
+        ):
             return None
 
         if any(node.is_cpu() for node in snodes):
@@ -9173,7 +9197,10 @@ class Scheduler:
         red_rnumel = typing.cast(sympy.Expr, groups[1])
         target_numel = red_numel * red_rnumel
 
-        if not all(isinstance(sn, SchedulerNode) for sn in pw_node.get_nodes()):
+        if not all(
+            isinstance(sn, SchedulerNode) and sn._body is not None
+            for sn in pw_node.get_nodes()
+        ):
             return False
         snodes = typing.cast(list[SchedulerNode], pw_node.get_nodes())
 
@@ -9632,6 +9659,11 @@ class Scheduler:
             return False
 
         why = WhyNoFuse(node1, node2)
+        if not self.get_backend(node1.get_device()).can_fuse_reduction_pair(
+            node1, node2
+        ):
+            why("incompatible reduction contracts")
+            return False
 
         if node1.is_template() and node2.has_strict_reduction():
             why("template fusion does not preserve strict reduction ordering")
@@ -9649,11 +9681,12 @@ class Scheduler:
             node1.get_device()
         ).can_fuse_multi_outputs_template(node1, node2):
             return True
-        if node1.is_template() and self.get_backend(
-            node1.get_device()
-        ).can_fuse_reduction_epilogue(node1, node2):
+        if (
+            node1.is_template() or isinstance(node1, FusedSchedulerNode)
+        ) and self.get_backend(node1.get_device()).can_fuse_reduction_epilogue(
+            node1, node2
+        ):
             return True
-
         if isinstance(node1, GroupedSchedulerNode) or isinstance(
             node2, GroupedSchedulerNode
         ):
@@ -11540,7 +11573,17 @@ class Scheduler:
                     cudagraphs_log.debug("         %s", line)
 
     def codegen(self) -> None:
+        from .optimize_indexing import remove_redundant_argreduce_indices
+
         with dynamo_timed("Scheduler.codegen"):
+            loop_bodies = OrderedSet(
+                snode._body
+                for node in self.nodes
+                for snode in node.get_nodes()
+                if isinstance(snode, SchedulerNode)
+                and isinstance(snode._body, LoopBody)
+            )
+            remove_redundant_argreduce_indices(list(loop_bodies))
             return (
                 self._codegen_partitions()
                 if torch._inductor.config.graph_partition
@@ -12162,6 +12205,11 @@ class BaseScheduling:  # noqa: docstring_linter
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
         return False
+
+    def can_fuse_reduction_pair(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        return True
 
     def can_fuse_multi_outputs_template(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode

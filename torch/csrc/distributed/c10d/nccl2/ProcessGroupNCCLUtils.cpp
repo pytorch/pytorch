@@ -224,11 +224,11 @@ ProcessGroupNCCL::RedOpRAII ProcessGroupNCCL::getNcclReduceOp(
     case ::c10d::ReduceOp::MAX:
       return ncclMax;
     case ::c10d::ReduceOp::BAND:
-      TORCH_CHECK(false, "Cannot use ReduceOp.BAND with NCCL");
+      C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BAND with NCCL");
     case ::c10d::ReduceOp::BOR:
-      TORCH_CHECK(false, "Cannot use ReduceOp.BOR with NCCL");
+      C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BOR with NCCL");
     case ::c10d::ReduceOp::BXOR:
-      TORCH_CHECK(false, "Cannot use ReduceOp.BXOR with NCCL");
+      C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BXOR with NCCL");
     case ::c10d::ReduceOp::PREMUL_SUM:
       return RedOpRAII(op, comm, getNcclDataType(tensor), nccl_api_);
     case ::c10d::ReduceOp::AVG:
@@ -542,41 +542,8 @@ void ProcessGroupNCCL::checkTensorsDevice(
   }
 }
 
-// Protected methods (not in the private section of the header)
-std::unique_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::getEvent(
-    bool timing_enabled) {
-  std::lock_guard<std::mutex> lock(event_pool_mutex_);
-
-  if (event_cache_enabled_ && timing_enabled == timing_enabled_.load() &&
-      !event_pool_.empty()) {
-    auto event = std::move(event_pool_.front());
-    event_pool_.pop();
-    return event;
-  }
-
-  return std::make_unique<at::cuda::CUDAEvent>(
-      timing_enabled ? cudaEventDefault : cudaEventDisableTiming);
-}
-
-void ProcessGroupNCCL::returnEvent(
-    std::unique_ptr<at::cuda::CUDAEvent> event,
-    bool timing_enabled) {
-  std::lock_guard<std::mutex> lock(event_pool_mutex_);
-
-  if (event_cache_enabled_ && timing_enabled == timing_enabled_.load() &&
-      event_pool_.size() < max_event_pool_size_) {
-    event_pool_.push(std::move(event));
-  }
-}
-
 void ProcessGroupNCCL::enableCollectivesTiming() {
-  std::lock_guard<std::mutex> lock(event_pool_mutex_);
-  if (timing_enabled_.exchange(true)) {
-    return;
-  }
-  // Pooled events were created with timing disabled and cannot serve
-  // getDuration(); drop them so later works get timing-capable events.
-  std::queue<std::unique_ptr<at::cuda::CUDAEvent>>().swap(event_pool_);
+  event_pool_->enableTiming();
 }
 
 void ProcessGroupNCCL::attachMemoryHook() {
@@ -650,21 +617,33 @@ void ProcessGroupNCCL::deregister_address(
   memoryRegistrationHandles_.erase(it);
 }
 
-std::pair<ncclWindow_t, size_t> ProcessGroupNCCL::lookupSegmentWindow(
-    const void* ptr) {
-  std::lock_guard<std::mutex> lock(memory_registration_mutex_);
+ProcessGroupNCCL::RegistrationMap::iterator ProcessGroupNCCL::
+    findContainingRegistrationLocked(const void* ptr) {
   const auto target = reinterpret_cast<uintptr_t>(ptr);
-  // memoryRegistrationHandles_ is sorted by base address; upper_bound + step
-  // back finds the segment whose base <= target.
+  // memoryRegistrationHandles_ is sorted by base address. upper_bound + step
+  // back finds the segment whose base is less than or equal to target.
   auto it = memoryRegistrationHandles_.upper_bound(ptr);
   if (it == memoryRegistrationHandles_.begin()) {
-    return {nullptr, 0};
+    return memoryRegistrationHandles_.end();
   }
   --it;
   const auto base = reinterpret_cast<uintptr_t>(it->first);
-  if (target >= base + it->second.len || it->second.winHandle == nullptr) {
+  if (target < base || target - base >= it->second.len) {
+    return memoryRegistrationHandles_.end();
+  }
+  return it;
+}
+
+std::pair<ncclWindow_t, size_t> ProcessGroupNCCL::lookupSegmentWindow(
+    const void* ptr) {
+  std::lock_guard<std::mutex> lock(memory_registration_mutex_);
+  auto it = findContainingRegistrationLocked(ptr);
+  if (it == memoryRegistrationHandles_.end() ||
+      it->second.winHandle == nullptr) {
     return {nullptr, 0};
   }
+  const auto target = reinterpret_cast<uintptr_t>(ptr);
+  const auto base = reinterpret_cast<uintptr_t>(it->first);
   return {it->second.winHandle, target - base};
 }
 
@@ -673,16 +652,20 @@ ncclResult_t ProcessGroupNCCL::ensureSegmentWindow(const void* ptr) {
     return ncclInvalidUsage;
   }
   std::lock_guard<std::mutex> lock(memory_registration_mutex_);
-  const auto target = reinterpret_cast<uintptr_t>(ptr);
-  auto it = memoryRegistrationHandles_.upper_bound(ptr);
-  if (it == memoryRegistrationHandles_.begin()) {
+  auto it = findContainingRegistrationLocked(ptr);
+  if (it == memoryRegistrationHandles_.end()) {
     return ncclInvalidArgument;
   }
-  --it;
-  const auto base = reinterpret_cast<uintptr_t>(it->first);
-  if (target >= base + it->second.len) {
+#if defined(USE_ROCM)
+  // RCCL can create host-RMA windows for ordinary HIP allocations. Enforce the
+  // NCCL2 allocator contract for every path that creates a window. Return
+  // ncclInvalidArgument because registerMemPool reserves ncclInvalidUsage for
+  // unavailable transports and keeps those segments registered as plain
+  // buffers.
+  if (!isNcclAllocatorSegment(it->first, it->second.len)) {
     return ncclInvalidArgument;
   }
+#endif
   if (it->second.winHandle != nullptr) {
     return ncclSuccess;
   }
@@ -750,12 +733,35 @@ void ProcessGroupNCCL::registerMemPool(at::cuda::MemPool* pool, bool symm) {
   TC_LOG(INFO, this) << "Registering MemPool " << pool->id().first << ":"
                      << pool->id().second << " (symm=" << symm << ") on "
                      << device_;
+  // One snapshot for both the ROCm provenance pre-check and the registration
+  // loop: taking it twice would let a concurrent allocation change the segment
+  // set between validation and use.
+  const auto segments = poolSegments(pool->id());
+#if defined(USE_ROCM)
+  if (symm) {
+    // RCCL can window-register ordinary HIP allocations, but the NCCL2
+    // symmetric contract requires ncclMemAlloc provenance. Reject up front,
+    // before any state mutation, so a rejected pool never lands in
+    // registeredMemPools_ or leaves plain registrations behind.
+    for (const auto& segment : segments) {
+      // NOLINTNEXTLINE(performance-no-int-to-ptr)
+      void* addr = reinterpret_cast<void*>(segment.address);
+      TORCH_CHECK(
+          isNcclAllocatorSegment(addr, segment.total_size),
+          "register_mem_pool(symm=True) on ROCm requires a MemPool created "
+          "with the NCCL backend allocator: MemPool(backend.mem_allocator). "
+          "Segment ",
+          addr,
+          " was not allocated by ncclMemAlloc.");
+    }
+  }
+#endif
   {
     std::lock_guard<std::mutex> lock(memory_registration_mutex_);
     registeredMemPools_.insert(pool->id());
   }
   bool symmUnsupported = false;
-  for (const auto& segment : poolSegments(pool->id())) {
+  for (const auto& segment : segments) {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     void* addr = reinterpret_cast<void*>(segment.address);
     {
