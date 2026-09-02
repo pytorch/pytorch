@@ -180,6 +180,10 @@ static void hermite_polynomial_he_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "hermite_polynomial_he");
 }
 
+static void laguerre_polynomial_l_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "laguerre_polynomial_l");
+}
+
 static void polar_mps_kernel(TensorIterator& iter) {
   lib.exec_binary_kernel(iter, "polar");
 }
@@ -359,6 +363,18 @@ static void ge_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "ge", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
 }
 
+static void logical_and_mps_kernel(TensorIterator& iter) {
+  lib.exec_binary_kernel(iter, "logical_and", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+}
+
+static void logical_or_mps_kernel(TensorIterator& iter) {
+  lib.exec_binary_kernel(iter, "logical_or", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+}
+
+static void logical_xor_mps_kernel(TensorIterator& iter) {
+  lib.exec_binary_kernel(iter, "logical_xor", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+}
+
 REGISTER_DISPATCH(atan2_stub, &atan2_mps_kernel)
 REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel)
 REGISTER_DISPATCH(fmin_stub, &fmin_mps_kernel)
@@ -381,6 +397,7 @@ REGISTER_DISPATCH(shifted_chebyshev_polynomial_v_stub, &shifted_chebyshev_polyno
 REGISTER_DISPATCH(shifted_chebyshev_polynomial_w_stub, &shifted_chebyshev_polynomial_w_mps_kernel)
 REGISTER_DISPATCH(hermite_polynomial_h_stub, &hermite_polynomial_h_mps_kernel)
 REGISTER_DISPATCH(hermite_polynomial_he_stub, &hermite_polynomial_he_mps_kernel)
+REGISTER_DISPATCH(laguerre_polynomial_l_stub, &laguerre_polynomial_l_mps_kernel)
 REGISTER_DISPATCH(polar_stub, &polar_mps_kernel);
 REGISTER_DISPATCH(complex_stub, &complex_mps_kernel);
 REGISTER_DISPATCH(lerp_kernel_scalar_weight, &lerp_scalar_mps_kernel)
@@ -407,4 +424,7 @@ REGISTER_DISPATCH(lt_stub, &lt_mps_kernel)
 REGISTER_DISPATCH(le_stub, &le_mps_kernel)
 REGISTER_DISPATCH(gt_stub, &gt_mps_kernel)
 REGISTER_DISPATCH(ge_stub, &ge_mps_kernel)
+REGISTER_DISPATCH(logical_and_stub, &logical_and_mps_kernel)
+REGISTER_DISPATCH(logical_or_stub, &logical_or_mps_kernel)
+REGISTER_DISPATCH(logical_xor_stub, &logical_xor_mps_kernel)
 } // namespace at::native
