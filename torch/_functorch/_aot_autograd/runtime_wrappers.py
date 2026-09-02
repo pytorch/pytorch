@@ -11,7 +11,9 @@ import contextlib
 import copy
 import functools
 import itertools
+import logging
 import pprint
+import threading
 import typing
 import warnings
 import weakref
@@ -124,6 +126,7 @@ def _unwrap_tensor_subclasses_no_symints(
 
 zip = strict_zip
 
+log = logging.getLogger(__name__)
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
 
@@ -233,38 +236,22 @@ def _identity(x: Any) -> Any:
 
 
 def _replay_input_mutation(orig: torch.Tensor, updated: torch.Tensor) -> None:
-    """Write a functionalized input mutation back onto the caller's tensor.
+    """Write back an input mutation that was hidden from autograd.
 
-    The tracked ``copy_`` this normally emits is stricter than the mutation it
-    stands in for. The op that really did the write can be invisible to
-    autograd -- FBGEMM's fused-optimizer kernels declare ``Tensor(a!)`` but
-    write through raw pointers, so nothing bumps a version counter and their
-    meta kernel writes nothing at all -- while the tensor being written can be
-    a view that refuses tracked in-place edits outright, which is what an
-    input returned as-is by a custom autograd.Function becomes (autograd
-    replaces it with an identity view stamped IN_CUSTOM_FUNCTION). Replaying
-    such a mutation the way it actually happened, invisibly, is the only sound
-    option: a tracked copy_ raises, and forcing one through by clearing
-    CreationMeta reroutes the base's history and silently drops the custom
-    Function's backward.
-
-    Decided per call rather than baked into the epilogue because nothing
-    guards it -- a graph traced against an ordinary tensor can be handed one
-    of these later, which for a serialized artifact means a different process.
+    Emitted only for an input whose InputAliasInfo records
+    mutations_hidden_from_autograd; a tracked mutation is written back with a
+    plain copy_, so a target that refuses in-place edits (a view stamped
+    IN_CUSTOM_FUNCTION) raises exactly as in eager. Whether an eager write
+    bumps the version counter is decided by the ADInplaceOrView layer (aten
+    codegen, or the fallback torch.library.custom_op installs), so a write
+    recorded hidden bypassed that layer and is replayed under no_grad with the
+    version counter preserved, as apply_in_graph_mutations does in-graph.
     """
-    # Exactly IN_CUSTOM_FUNCTION, not merely "not DEFAULT": a view made under
-    # no_grad or inference mode, or a multi-output-node view, still takes a
-    # tracked copy_, and writing those invisibly would skip the version bump
-    # that autograd relies on to catch a genuinely stale use.
-    # pybind11 hands back a fresh enum object each call, so this cannot be `is`.
-    if (
-        orig._is_view()
-        and torch._C._autograd._get_creation_meta(orig)
-        == torch._C._autograd.CreationMeta.IN_CUSTOM_FUNCTION
-    ):
-        with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(orig):
+    if orig.is_inference():
+        with torch.no_grad():
             orig.copy_(updated)
-    else:
+        return
+    with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(orig):
         orig.copy_(updated)
 
 
@@ -830,7 +817,13 @@ class _RuntimeForwardEpilogue:
                             "Mutations on inputs with user-specified streams are not yet supported. "
                             "See: https://github.com/pytorch/pytorch/issues/172522"
                         )
-                    original_inpt.copy_(updated_inpt)
+                    if meta.mutations_hidden_from_autograd:
+                        _replay_input_mutation(original_inpt, updated_inpt)
+                    elif meta.mutations_under_no_grad_or_inference_mode:
+                        with torch.no_grad():
+                            original_inpt.copy_(updated_inpt)
+                    else:
+                        original_inpt.copy_(updated_inpt)
 
     def _replay_output_aliases(
         self, orig_inputs: dict[int, Tensor], fw_outs: list[Any]
@@ -1178,8 +1171,12 @@ def _create_runtime_wrapper(
                                 "See: https://github.com/pytorch/pytorch/issues/172522",
                             )
                             buf.writeline(f"raise RuntimeError({msg_name})")
-                        else:
+                        elif meta.mutations_hidden_from_autograd:
                             buf.writeline(f"_replay_input_mutation({oi}, {ui})")
+                        elif meta.mutations_under_no_grad_or_inference_mode:
+                            buf.writeline(f"with torch.no_grad(): {oi}.copy_({ui})")
+                        else:
+                            buf.writeline(f"{oi}.copy_({ui})")
             if not wrote_body:
                 buf.writeline("pass")
 
@@ -2731,7 +2728,7 @@ class _AutogradSavedState:
         ctx.opaque_objects = opaque_object_outs
 
 
-def _dealias_marked_returns(raw_returns: list[Any], marked: Sequence[int]) -> None:
+def _dealias_marked_returns(raw_returns: list[Any], marked: frozenset[int]) -> None:
     """Give each slot about to be marked non-differentiable its own TensorImpl.
 
     mark_non_differentiable is keyed on TensorImpl, so marking one slot marks
@@ -2747,27 +2744,19 @@ def _dealias_marked_returns(raw_returns: list[Any], marked: Sequence[int]) -> No
     to declare non-differentiable anyway; slots that stay differentiable keep
     their identity.
     """
-    if not marked:
-        return
-    # This runs on every forward of every compiled autograd function and almost
-    # never fires, so index the marked slots -- usually one or two -- and probe
-    # the rest against them, rather than indexing all of raw_returns.
+    # Runs on every forward and almost never fires: index the marked slots
+    # (usually one or two) by identity and probe the unmarked Tensor slots.
     marked_positions: dict[int, list[int]] = {}
     for i in marked:
         x = raw_returns[i]
-        if isinstance(x, torch.Tensor):
+        if isinstance(x, Tensor):
             marked_positions.setdefault(id(x), []).append(i)
     if not marked_positions:
         return
-    marked_set = set(marked)
-    collide: set[int] = set()
     for j, o in enumerate(raw_returns):
-        if j not in marked_set:
-            hits = marked_positions.get(id(o))
-            if hits is not None:
-                collide.update(hits)
-    for i in collide:
-        raw_returns[i] = raw_returns[i].detach()
+        if j not in marked and isinstance(o, Tensor):
+            for i in marked_positions.pop(id(o), ()):
+                raw_returns[i] = raw_returns[i].detach()
 
 
 @dataclass
@@ -2839,7 +2828,7 @@ class _AutogradForwardEpilogue:
             for (i, x) in enumerate(raw_returns_not_including_intermediate_bases)
             if isinstance(x, torch.Tensor) and not raw_returns_meta[i].requires_grad
         ]
-        _dealias_marked_returns(raw_returns, non_diff_indices)
+        _dealias_marked_returns(raw_returns, frozenset(non_diff_indices))
         ctx.mark_non_differentiable(*(raw_returns[i] for i in non_diff_indices))
         ctx._materialize_non_diff_grads = False
         _snapshot_external_objects(ctx)
@@ -3140,6 +3129,12 @@ def _codegen_backward_prologue(
 
     tangent_dtypes = fw_metadata.traced_tangent_dtypes or []
     if len(tangent_dtypes) != num_flat_bw_args_with_grads:
+        log.warning(
+            "traced_tangent_dtypes has %d entries but the backward prologue keeps "
+            "%d tangent slots; not reporting tangent dtypes",
+            len(tangent_dtypes),
+            num_flat_bw_args_with_grads,
+        )
         tangent_dtypes = [None] * num_flat_bw_args_with_grads
     kept_tangent_info = KeptTangentInfo(
         grad_out_idx=tuple(all_surviving),
@@ -3590,10 +3585,8 @@ class _AOTDispatchAutogradFunctionFactory:
                 # See _dealias_marked_returns: marking is keyed on TensorImpl,
                 # so a slot sharing an object with another returned slot marks
                 # that one too.
-                buf.writeline(
-                    f"_dealias_marked_returns(raw_returns, {_non_diff_indices!r})"
-                )
-            if _non_diff_indices:
+                marked = buf.bind_value("_marked", frozenset(_non_diff_indices))
+                buf.writeline(f"_dealias_marked_returns(raw_returns, {marked})")
                 checks = " + ".join(
                     f"([raw_returns[{i}]] if isinstance(raw_returns[{i}], Tensor) else [])"
                     for i in _non_diff_indices
@@ -3764,6 +3757,32 @@ class _AOTDispatchAutogradFunctionFactory:
 
 # This is wrapped in a class just for namespacing purposes
 # No need to make it into an actual CompilerWrapper because it doesn't fit the abstract as cleanly
+_compile_spec_sinks = threading.local()
+
+
+@contextlib.contextmanager
+def capture_autograd_compile_specs() -> Generator[
+    list[AOTDispatchAutogradCompileSpec], None, None
+]:
+    """Collect every AOTDispatchAutogradCompileSpec built on this thread while active.
+
+    Thread-local, nestable, and the only sanctioned way to observe the spec from
+    outside AOTAutograd; to_standalone_python composes a training graph from it.
+    """
+    sinks: list[list[AOTDispatchAutogradCompileSpec]] | None = getattr(
+        _compile_spec_sinks, "sinks", None
+    )
+    if sinks is None:
+        sinks = []
+        _compile_spec_sinks.sinks = sinks
+    out: list[AOTDispatchAutogradCompileSpec] = []
+    sinks.append(out)
+    try:
+        yield out
+    finally:
+        sinks.remove(out)
+
+
 class AOTDispatchAutograd:
     @staticmethod
     def _raise_tangent_metadata_error(
@@ -4096,6 +4115,8 @@ with this message.
 
     @staticmethod
     def post_compile(spec: AOTDispatchAutogradCompileSpec) -> Callable[..., Any]:
+        for sink in getattr(_compile_spec_sinks, "sinks", ()):
+            sink.append(spec)
         compiled_function_cls = _AOTDispatchAutogradFunctionFactory(spec).build()
         return RuntimeWrapper(
             indices_of_inps_to_detach=spec.indices_of_inps_to_detach,

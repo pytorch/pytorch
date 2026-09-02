@@ -73,6 +73,7 @@ from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.codecache import compiled_fx_graph_hash
 from torch._inductor.custom_graph_pass import CustomPartitionerFn
 from torch._inductor.output_code import MockFXGraphCacheOutput
+from torch._inductor.utils import fresh_cache
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT,
@@ -5264,7 +5265,8 @@ def forward(self, tangents_1):
 
         self._assert_no_extra_refs(refcount_box)
 
-    def test_detach_output_aliasing_intermediate_base(self):
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_detach_output_aliasing_intermediate_base(self, backend):
         # mark_non_differentiable is keyed on TensorImpl, and a backend is free
         # to lower aten.detach to a no-op -- inductor does -- so y.detach() and
         # y's intermediate base can be the same object. Marking the detach
@@ -5284,25 +5286,21 @@ def forward(self, tangents_1):
                 [o.requires_grad for o in outs],
                 [o.grad_fn is not None for o in outs],
                 x.grad,
+                outs[2],
             )
 
         x_ref = torch.arange(8, dtype=torch.float32).requires_grad_(True)
-        rg_ref, gf_ref, grad_ref = run(f, x_ref)
+        rg_ref, gf_ref, grad_ref, _ = run(f, x_ref)
         self.assertIsNotNone(grad_ref)
 
-        for backend in ("aot_eager", "inductor"):
-            torch._dynamo.reset()
-            x = torch.arange(8, dtype=torch.float32).requires_grad_(True)
-            rg, gf, grad = run(torch.compile(f, backend=backend), x)
-            self.assertEqual(rg, rg_ref, f"requires_grad diverged on {backend}")
-            self.assertEqual(gf, gf_ref, f"grad_fn diverged on {backend}")
-            self.assertEqual(grad, grad_ref, f"gradient diverged on {backend}")
-
-        # The detach output must stay a leaf: sparing the base must not be
-        # done by declining to mark the output that aliases it.
         torch._dynamo.reset()
         x = torch.arange(8, dtype=torch.float32).requires_grad_(True)
-        detached = torch.compile(f, backend="inductor")(x)[2]
+        rg, gf, grad, detached = run(torch.compile(f, backend=backend), x)
+        self.assertEqual(rg, rg_ref)
+        self.assertEqual(gf, gf_ref)
+        self.assertEqual(grad, grad_ref)
+        # The detach output must stay a leaf: sparing the base must not be
+        # done by declining to mark the output that aliases it.
         self.assertFalse(detached.requires_grad)
         self.assertIsNone(detached.grad_fn)
 
@@ -5337,14 +5335,45 @@ def forward(self, tangents_1):
         outs[0].sum().backward()
         self.assertEqual(x.grad, x_ref.grad)
 
-    def test_input_mutation_replayed_onto_restricted_view(self):
-        # Functionalization lifts an input mutation out of the graph and replays
-        # it as a tracked copy_, which is stricter than the write it stands in
-        # for. Here the write is an opaque op that declares Tensor(a!) but goes
-        # through .data (no version bump, and its meta kernel writes nothing),
-        # and the target is an input a custom Function returned as-is, which
-        # autograd turns into a view stamped IN_CUSTOM_FUNCTION that refuses
-        # tracked in-place edits. Eager accepts the write; the replay must too.
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_tracked_input_mutation_on_custom_function_view_raises(self, backend):
+        # An input a custom Function returned as-is is a view stamped
+        # IN_CUSTOM_FUNCTION, and eager refuses a tracked in-place write to it.
+        # The epilogue replays a tracked mutation as a tracked copy_, so it
+        # must refuse too, even after the graph was warmed on an ordinary
+        # tensor: nothing guards the caller's CreationMeta.
+        class Identity(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, t):
+                return t
+
+            @staticmethod
+            def backward(ctx, g):
+                return g
+
+        def fn(w, x):
+            w.add_(x)
+            return w * 2
+
+        msg = "is a view and is being modified inplace"
+        base = torch.randn(4, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            fn(Identity.apply(base * 1.0), torch.randn(4))
+
+        torch._dynamo.reset()
+        compiled = torch.compile(fn, backend=backend)
+        compiled(torch.randn(4, requires_grad=True) * 1.0, torch.randn(4))
+        with self.assertRaisesRegex(RuntimeError, msg):
+            compiled(Identity.apply(base * 1.0), torch.randn(4))
+
+    def test_hidden_input_mutation_replayed_onto_custom_function_view(self):
+        # A mutation recorded as hidden from autograd bumped no version counter
+        # in eager, so its replay must not either: the view keeps the custom
+        # Function's backward and its later use passes the view+inplace check.
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _replay_input_mutation,
+        )
+
         class Scale(torch.autograd.Function):
             @staticmethod
             def forward(ctx, t):
@@ -5354,47 +5383,15 @@ def forward(self, tangents_1):
             def backward(ctx, g):
                 return g * 3
 
-        def opaque_add_(w, x):
-            w.data.add_(x)
-
-        with torch.library._scoped_library("aotmut", "FRAGMENT") as lib:
-            lib.define("opaque_add_(Tensor(a!) w, Tensor x) -> ()")
-            lib.impl("opaque_add_", opaque_add_, "CompositeExplicitAutograd")
-            lib.impl("opaque_add_", lambda w, x: None, "Meta")
-
-            def body(w, x):
-                torch.ops.aotmut.opaque_add_(w, x)
-                return (w * x).sum()
-
-            def run(backend, restricted):
-                torch._dynamo.reset()
-                torch.manual_seed(0)
-                base = torch.randn(4, requires_grad=True)
-                x = torch.randn(4, requires_grad=True)
-                w = base * 1.0
-                if restricted:
-                    w = Scale.apply(w)
-                f = body if backend is None else torch.compile(body, backend=backend)
-                f(w, x).backward()
-                return base.grad, x.grad, w.detach()
-
-            ref = run(None, True)
-            for backend in ("aot_eager", "inductor"):
-                self.assertEqual(run(backend, True), ref, f"diverged on {backend}")
-
-            # Whether the caller's tensor is such a view is not guarded, so a
-            # graph traced against an ordinary tensor can be handed one later --
-            # for a serialized artifact, in a different process. The choice has
-            # to be made per call, not baked into the epilogue.
-            torch._dynamo.reset()
-            compiled = torch.compile(body, backend="inductor")
-            b1 = torch.randn(4, requires_grad=True)
-            compiled(b1 * 1.0, torch.randn(4, requires_grad=True)).backward()
-            b2 = torch.randn(4, requires_grad=True)
-            compiled(
-                Scale.apply(b2 * 1.0), torch.randn(4, requires_grad=True)
-            ).backward()
-            self.assertIsNotNone(b2.grad)
+        base = torch.randn(4, requires_grad=True)
+        w = Scale.apply(base * 1.0)
+        grad_fn, version = w.grad_fn, w._version
+        _replay_input_mutation(w, torch.ones(4))
+        self.assertIs(w.grad_fn, grad_fn)
+        self.assertEqual(w._version, version)
+        self.assertEqual(w.detach(), torch.ones(4))
+        (w * 2).sum().backward()
+        self.assertEqual(base.grad, torch.full((4,), 6.0))
 
     def test_none_tangent_in_kept_slot_names_the_forward_output(self):
         # A None in a kept tangent slot otherwise surfaces several frames below
@@ -13216,6 +13213,49 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
         # But also can't be xfailed because it causes undefined behavior for
         # ASAN
         self.skipTest("Skipping because it fails in strict cache mode")
+
+    @torch._functorch.config.patch(
+        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+    )
+    @torch._inductor.config.patch(
+        {"fx_graph_cache": True, "fx_graph_remote_cache": False}
+    )
+    def test_traced_tangent_dtypes_survive_warm_cache(self):
+        def fn(a):
+            return a.sin(), (a * 2).to(torch.float64)
+
+        saved, loaded = [], []
+        orig_save, orig_lookup = AOTAutogradCache.save, AOTAutogradCache._lookup
+
+        def save(key, entry, remote):
+            saved.append(entry.runtime_metadata.traced_tangent_dtypes)
+            orig_save(key, entry, remote)
+
+        def lookup(*args, **kwargs):
+            result = orig_lookup(*args, **kwargs)
+            if result is not None:
+                loaded.append(result[0].runtime_metadata.traced_tangent_dtypes)
+            return result
+
+        def run():
+            torch._dynamo.reset()
+            a = torch.randn(4, requires_grad=True)
+            out = torch.compile(fn, backend="inductor")(a)
+            (out[0].sum() + out[1].sum()).backward()
+
+        with (
+            fresh_cache(),
+            patch.object(AOTAutogradCache, "save", staticmethod(save)),
+            patch.object(AOTAutogradCache, "_lookup", staticmethod(lookup)),
+        ):
+            counters.clear()
+            run()
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+            run()
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+        self.assertEqual(saved, [[torch.float32, torch.float64]])
+        self.assertEqual(loaded, saved)
 
 
 if __name__ == "__main__":

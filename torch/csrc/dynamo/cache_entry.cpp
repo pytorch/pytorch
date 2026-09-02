@@ -54,14 +54,6 @@ void CacheEntry::update_diff_guard_root_manager() {
       this->guard_manager.attr("diff_guard_root"));
 }
 
-PyCodeObject* CacheEntry_get_code(CacheEntry* e) {
-  return (PyCodeObject*)e->code.ptr();
-}
-
-const char* CacheEntry_get_trace_annotation(CacheEntry* e) {
-  return e->trace_annotation.c_str();
-}
-
 PyObject* CacheEntry_to_obj(CacheEntry* e) {
   if (!e) {
     return py::none().release().ptr();
@@ -85,20 +77,20 @@ void enable_precompile_cache_keys() {
   precompile_cache_keys_in_use.store(true, std::memory_order_relaxed);
 }
 
-// Borrowed on success, nullptr when absent, WITHOUT raising. py::hasattr and
-// PyObject_GetAttrString both build a str from the char* and then raise and
-// clear an AttributeError on a miss, and every level of every intercepted
-// frame's callback chain is a miss for the attributes below. Interned names
-// plus the no-raise lookup keep the walk off the exception path entirely.
-static PyObject* lookup_optional(py::handle handle, PyObject* name) {
+// py::hasattr and PyObject_GetAttrString both build a str from the char* and
+// then raise and clear an AttributeError on a miss, and every level of every
+// intercepted frame's callback chain is a miss for the attributes below.
+// Interned names plus the no-raise lookup keep the walk off the exception path
+// entirely.
+PyObject* lookup_optional_attr(py::handle obj, PyObject* name) {
   PyObject* value = nullptr;
 #if IS_PYTHON_3_13_PLUS
-  if (PyObject_GetOptionalAttr(handle.ptr(), name, &value) < 0) {
+  if (PyObject_GetOptionalAttr(obj.ptr(), name, &value) < 0) {
     PyErr_Clear();
     return nullptr;
   }
 #else
-  if (_PyObject_LookupAttr(handle.ptr(), name, &value) < 0) {
+  if (_PyObject_LookupAttr(obj.ptr(), name, &value) < 0) {
     PyErr_Clear();
     return nullptr;
   }
@@ -119,12 +111,12 @@ PyObject* get_backend(PyObject* callback) {
   py::handle handle = py::handle(callback);
   while (true) {
     if (check_cache_key) {
-      PyObject* key = lookup_optional(handle, cache_key_name);
+      PyObject* key = lookup_optional_attr(handle, cache_key_name);
       if (key != nullptr) {
         return key;
       }
     }
-    PyObject* next = lookup_optional(handle, orig_backend_name);
+    PyObject* next = lookup_optional_attr(handle, orig_backend_name);
     if (next == nullptr) {
       break;
     }
