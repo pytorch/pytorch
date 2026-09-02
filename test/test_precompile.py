@@ -2378,7 +2378,7 @@ class TestPrecompile(TestCase):
         # to refuse one the artifact was not captured from -- the same check
         # the path form makes -- or the wrong callable serves the captured
         # graphs. The function it WAS captured from is accepted.
-        code, cache = torch.compiler.precompile.artifact(
+        code, cache = torch.compiler.precompile(
             _precompile_unreachable_helper_caller,
             backend="eager",
             dynamic=False,
@@ -2403,7 +2403,7 @@ class TestPrecompile(TestCase):
         # Installing files the artifact's backends into the process-global
         # PrecompileContext. unload() has to take exactly those out again, or
         # every install/unload cycle leaks them for the life of the process.
-        code, cache = torch.compiler.precompile.artifact(
+        code, cache = torch.compiler.precompile(
             _precompile_unreachable_helper_caller,
             backend="eager",
             dynamic=False,

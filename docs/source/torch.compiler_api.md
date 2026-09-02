@@ -234,7 +234,7 @@ releases without a deprecation cycle.
 .. autoexception:: torch.compiler.PrecompileError
 
 .. autoclass:: torch.compiler.PrecompiledCallable
-   :members: unload, serve_time_compiles
+   :members: unload
 
    Returned by :func:`precompile.load` for an artifact that serves by installing,
    and used as a callable or context manager; it is not constructed directly.
