@@ -34,6 +34,7 @@ import pickle
 import re
 import sys
 import textwrap
+import threading
 import traceback
 import types
 import warnings
@@ -104,6 +105,7 @@ from torch._guards import (
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import get_opaque_obj_info, is_opaque_constant_type
 from torch._logging import structured
+from torch._subclasses.fake_tensor import _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental.symbolic_shapes import (
     _CppShapeGuardsHelper,
@@ -218,7 +220,15 @@ except ModuleNotFoundError:
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Iterator, KeysView, Sequence, Sized
+    from collections.abc import (
+        Collection,
+        Generator,
+        Iterable,
+        Iterator,
+        KeysView,
+        Sequence,
+        Sized,
+    )
 
     from sympy import Symbol
 
@@ -1379,6 +1389,25 @@ def unsupported_guard_check_spec(fn):
     """Mark a guard method as unsupported for auto-cache dispatch."""
     fn.guard_check_spec = UnsupportedGuardCheckSpec(fn.__name__)
     return fn
+
+
+# Dimension marking attributes compared by VALUE, each with the attribute whose
+# mere PRESENCE gates that comparison. A gate is only hasattr-tested, so nothing
+# registers its value in the guard tree -- serialization has to carry it by name
+# or the rebuilt guard sees no gate and drops the dependent leaf silently.
+_DIM_MARKING_GATED_ATTRIBUTES = (
+    ("_dynamo_unbacked_indices", ("_dynamo_shape_ids", "_dynamo_unbacked_bounds")),
+    ("_has_dynamo_dim_marking", ("_dynamo_dynamic_range",)),
+)
+_DIM_MARKING_GATE_ATTRIBUTES = frozenset(
+    gate for gate, _ in _DIM_MARKING_GATED_ATTRIBUTES
+)
+# Tensor attributes carried by NAME whatever the guard tree says. Each is only
+# presence-tested -- the dim-marking gates by hasattr, _is_param by
+# nn.Parameter.__instancecheck__ on a wrapper-subclass Parameter -- so nothing
+# registers its value in the tree, and _keep could only say yes to it by
+# coincidence: True is interned.
+_PRESENCE_GATE_ATTRIBUTES = _DIM_MARKING_GATE_ATTRIBUTES | {"_is_param"}
 
 
 class GuardBuilder(GuardBuilderBase):
@@ -3956,14 +3985,7 @@ class GuardBuilder(GuardBuilderBase):
             # Dependent attributes: compared by value, and only when their gate
             # attribute is present.
             dependent_attrs: dict[str, tuple[Any, str]] = {}
-            gated_attrs = (
-                (
-                    "_dynamo_unbacked_indices",
-                    ("_dynamo_shape_ids", "_dynamo_unbacked_bounds"),
-                ),
-                ("_has_dynamo_dim_marking", ("_dynamo_dynamic_range",)),
-            )
-            for gate_attr, dep_attr_names in gated_attrs:
+            for gate_attr, dep_attr_names in _DIM_MARKING_GATED_ATTRIBUTES:
                 if not hasattr(value, gate_attr):
                     continue
                 for attr_name in dep_attr_names:
@@ -4182,6 +4204,37 @@ class GuardsState:
     local_state: Any | None = None
 
 
+@functools.cache
+def _precompile_handle_types() -> tuple[type, ...]:
+    # Cached: this is consulted for every object the pickler reduces, and the
+    # imports stay local because precompile imports this module.
+    from torch._dynamo.precompile_package import InstalledCallable, PrecompileSession
+    from torch._precompile import (
+        _InstalledArtifact,
+        PrecompiledCallable,
+        PrecompiledModule,
+    )
+
+    return (
+        PrecompiledCallable,
+        PrecompiledModule,
+        _InstalledArtifact,
+        InstalledCallable,
+        PrecompileSession,
+    )
+
+
+def _is_precompile_handle(obj: Any) -> bool:
+    """Whether ``obj`` is one of precompile's own served-artifact handles.
+
+    Deliberately narrow. A lock in the CALLER's model still fails the frame
+    with its path named, because that is something they can act on; these are
+    ours, installed by a previous load, and carry a session's condition
+    variable a few attributes down.
+    """
+    return isinstance(obj, _precompile_handle_types())
+
+
 class _Missing:
     def __init__(self, reason: str | None = None) -> None:
         self._reason = reason
@@ -4198,33 +4251,17 @@ class _Missing:
         return _Missing()
 
 
-def _reaches(container: object, target: object) -> bool:
-    """Whether ``container`` holds ``target`` directly.
-
-    Only one level: a decorator stores its wrapper straight into the wrapper's
-    own __dict__, defaults or closure, and that is the shape that recurses.
-    A reference buried inside a user object would need a full traversal, which
-    would have to run arbitrary __iter__ on values the pickler has not vetted.
-    """
-    if container is target:
-        return True
-    if isinstance(container, dict):
-        return any(value is target for value in container.values())
-    if isinstance(container, (tuple, list)):
-        return any(value is target for value in container)
-    return False
-
-
 @dataclasses.dataclass(frozen=True)
 class _DeferredFunctionState:
-    """What a reconstructed function cannot receive through its reduce args.
+    """Everything a reconstructed function receives after it exists.
 
-    A decorator that gives its wrapper a call counter, a cache attribute or a
-    recursive default writes the wrapper into its own closure, __dict__ or
-    __defaults__. Those all travel in the reduce args, which pickle saves
-    BEFORE memoizing the function, so the reference re-enters the reducer and
-    recurses. Whatever reaches the function is moved here instead and applied
-    by _apply_function_state once the pickle exists.
+    pickle saves an object's reduce ARGS before memoizing the object, so a
+    reference from those args back to the function -- a decorator's call counter
+    on its own wrapper, a recursive default, or a second function that closes
+    over this one and is held in its __dict__ -- re-enters the reducer and
+    recurses until RecursionError. So none of it travels in args: state is
+    applied by _apply_function_state once the pickle exists, and by then every
+    such reference resolves to the function already built.
     """
 
     guarded_globals: dict[str, object] | None = None
@@ -4243,41 +4280,28 @@ class _DeferredFunctionState:
         )
 
 
-# A reconstructed FakeTensor keeps its own bookkeeping in __dict__ alongside
-# anything the user hung there. Re-serializing one must not carry these across:
-# the reconstructor sets them itself, and carrying them would accrete a fresh
-# copy of each on every round trip.
-_FAKE_TENSOR_OWNED_ATTRIBUTES = frozenset(
+# What a reconstructed FakeTensor needs to BE one, and stores in __dict__
+# alongside anything the user hung there. _restore_tensor_attributes assigns
+# straight through object.__setattr__, so a carried user attribute of the same
+# name would overwrite the fake's own state; those are refused by name rather
+# than left to fail somewhere inside the rebuild.
+_FAKE_TENSOR_RESERVED_ATTRIBUTES = frozenset(
     {
         "_fake_device",
         "fake_mode",
-        "constant",
         "pytype",
         "dispatch_keys",
+        "constant",
         "real_tensor",
-        "_nonzero_memo",
-        "_nonzero_memo_vc",
-        "_nonzero_memo_epoch",
-        "_item_memo",
-        "_item_memo_vc",
-        "_item_memo_epoch",
-        "_unique_memo",
-        "_unique_memo_vc",
-        "_unique_memo_epoch",
-        "_unique_consecutive_memo",
-        "_unique_consecutive_memo_vc",
-        "_unique_consecutive_memo_epoch",
-        "_nested_int_memo",
-        "_nested_int_memo_vc",
-        "_nested_int_memo_epoch",
+        "_debug_trace",
     }
 )
 
-# The subset a reconstructed FakeTensor genuinely needs to BE one. A user
-# attribute of the same name would overwrite it, so those are refused by name
-# rather than left to fail somewhere inside the rebuild.
-_FAKE_TENSOR_RESERVED_ATTRIBUTES = frozenset(
-    {"_fake_device", "fake_mode", "pytype", "dispatch_keys"}
+# Everything a reconstructed FakeTensor sets for itself, so re-serializing one
+# must not carry it across: it would accrete a fresh copy on every round trip.
+# The memo half is FakeTensor's own list rather than a copy of it, which drifted.
+_FAKE_TENSOR_OWNED_ATTRIBUTES = (
+    _FAKE_TENSOR_RESERVED_ATTRIBUTES | _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS
 )
 
 
@@ -4287,8 +4311,9 @@ def _get_unsupported_types() -> tuple[type, ...]:
     ret: tuple[type, ...] = (
         torch._C.Stream,
         weakref.ReferenceType,
-        # Generator pickles but does not unpickle: its __setstate__ raises, and
-        # the raise surfaces as a bare SystemError from deep inside load().
+        # A Generator's state is a ByteTensor no guard ever reads, so pruning
+        # replaces it with the sentinel and Generator.__setstate__ then raises,
+        # surfacing as a bare SystemError from deep inside load().
         torch._C.Generator,
     )
     try:
@@ -4303,26 +4328,50 @@ def _get_unsupported_types() -> tuple[type, ...]:
     return ret
 
 
-# Set while a precompile capture is running, to the leaves every LIVE guard
-# build produced. A rebuild from the artifact is compared against it, and a leaf
-# the live build never made means reconstruction lost something the guard reads.
-_LIVE_LEAF_GUARDS: set[tuple[str, str]] | None = None
+@functools.cache
+def _type_stand_in_types() -> tuple[type, ...]:
+    # The unsupported types a guard may still reach as a TYPE: each is rebuilt
+    # from a device alone, without touching the live object's state. Exact
+    # types, because TYPE_MATCH is exact and the rebuild is ``cls(device=...)``,
+    # which an ExternalStream or a user subclass need not accept.
+    return (torch.Generator, torch.Stream, torch.cuda.Stream)
 
 
-def _attribute_link(source: Any) -> tuple[str, str] | None:
+def _rebuild_type_stand_in(cls: type, device: torch.device) -> Any:
+    """A fresh ``cls`` on ``device``, in place of one a guard reads only as a type.
+
+    A Generator's or a Stream's state cannot be serialized, but a TYPE_MATCH
+    needs the type alone, so the artifact carries type and device and builds a
+    new object at load. For a stream this ALLOCATES a stream on that device at
+    load; for a CUDA device on a machine without CUDA the constructor raises,
+    so the load fails here rather than rebuilding a guard against a wrong type.
+    """
+    return cls(device=device)
+
+
+# The sinks of every precompile capture currently recording, each receiving the
+# leaves every LIVE guard build produces. A rebuild from the artifact is compared
+# against them, and a leaf the live build never made means reconstruction lost
+# something the guard reads. Deliberately process-global rather than
+# thread-local: a session legitimately drives compilation from worker threads,
+# and those builds belong to the capture that opened the recording. A list
+# rather than one set so that two overlapping sessions each see every build
+# instead of the later one hiding the earlier one's sink.
+_LIVE_LEAF_SINKS: list[set[tuple[str, str]]] = []
+_LIVE_LEAF_SINKS_LOCK = threading.Lock()
+
+
+def _attribute_link(source: Source) -> tuple[str, str] | None:
     """``(base, attribute)`` for a source that reads an attribute, else None."""
-    base = getattr(source, "base", None)
-    member = getattr(source, "member", None)
-    if base is None or not isinstance(member, str):
+    if not isinstance(source, (AttrSource, GenericAttrSource)):
         return None
-    # Source.name is a method on a live source and a plain string on a
-    # reconstructed one.
-    name = getattr(base, "name", None)
     try:
-        text = name() if callable(name) else name
+        return (source.base.name, source.member)
     except Exception:
+        # Source.name builds an access expression, and a source that has none
+        # raises. This is diagnostic bookkeeping, so a refusal means no link
+        # rather than a failure.
         return None
-    return (text, member) if isinstance(text, str) else None
 
 
 def _companion_attribute_guards(
@@ -4365,23 +4414,43 @@ def _companion_attribute_guards(
 
 
 @contextlib.contextmanager
-def record_live_guard_leaves() -> Generator[set[tuple[str, str]], None, None]:
-    global _LIVE_LEAF_GUARDS
-    previous, _LIVE_LEAF_GUARDS = _LIVE_LEAF_GUARDS, set()
+def record_live_guard_leaves(
+    sink: set[tuple[str, str]] | None = None,
+) -> Generator[set[tuple[str, str]], None, None]:
+    leaves: set[tuple[str, str]] = set() if sink is None else sink
+    with _LIVE_LEAF_SINKS_LOCK:
+        _LIVE_LEAF_SINKS.append(leaves)
     try:
-        yield _LIVE_LEAF_GUARDS
+        yield leaves
     finally:
-        _LIVE_LEAF_GUARDS = previous
+        with _LIVE_LEAF_SINKS_LOCK:
+            # By identity, latest first: two sinks holding the same leaves
+            # compare EQUAL, and list.remove would close the wrong recording.
+            for i in range(len(_LIVE_LEAF_SINKS) - 1, -1, -1):
+                if _LIVE_LEAF_SINKS[i] is leaves:
+                    del _LIVE_LEAF_SINKS[i]
+                    break
+
+
+class _DropEveryRecord(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return False
 
 
 @contextlib.contextmanager
 def _quiet(logger: logging.Logger) -> Generator[None, None, None]:
-    disabled = logger.disabled
-    logger.disabled = True
+    """Silence ``logger`` for the duration.
+
+    A filter rather than logger.disabled: the flag is a single piece of global
+    state on a logger the whole process shares, so a build on another thread
+    would lose its logs too, and nesting would restore the wrong value.
+    """
+    quiet = _DropEveryRecord()
+    logger.addFilter(quiet)
     try:
         yield
     finally:
-        logger.disabled = disabled
+        logger.removeFilter(quiet)
 
 
 def _is_interned_singleton(value: Any) -> bool:
@@ -4417,6 +4486,37 @@ def _is_interned_singleton(value: Any) -> bool:
     )
 
 
+# Every hook the pickle protocol consults. Compared by IDENTITY against object's
+# own slot: object grew a default __getstate__ in 3.11, so presence alone would
+# flag every class on those interpreters.
+_PICKLE_PROTOCOL_HOOKS = (
+    "__reduce__",
+    "__reduce_ex__",
+    "__getstate__",
+    "__setstate__",
+    "__getnewargs__",
+    "__getnewargs_ex__",
+)
+
+
+def _builds_its_own_pickle(cls: type) -> bool:
+    """Whether ``cls`` decides its own reduction, so pruning would corrupt it.
+
+    Attribute pruning replaces an unguarded value with the sentinel by ID, which
+    only comes back as an attribute when the DEFAULT protocol restores __dict__.
+    A class with its own __reduce__ or __getstate__ chooses what its arguments
+    mean, and the sentinel then arrives as one of them -- a constructor argument,
+    or a field its __setstate__ reads -- so the object reconstructs wrong instead
+    of merely losing an attribute nobody guards. The same holds for a
+    __setstate__ that reads a pruned field out of the default state, and for a
+    __getnewargs__ that feeds one to a validating __new__.
+    """
+    return any(
+        getattr(cls, name, None) is not getattr(object, name, None)
+        for name in _PICKLE_PROTOCOL_HOOKS
+    )
+
+
 class GuardsStatePickler(pickle.Pickler):
     def __init__(
         self,
@@ -4424,6 +4524,7 @@ class GuardsStatePickler(pickle.Pickler):
         empty_values: dict[int, Any],
         missing_values: dict[int, Any],
         *args: Any,
+        type_stand_ins: Collection[int] = frozenset(),
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -4432,9 +4533,17 @@ class GuardsStatePickler(pickle.Pickler):
         self.guard_tree_values = guard_tree_values
         self.empty_values = empty_values
         self.missing_values = missing_values
+        # Unsupported values every guard reaches only as a TYPE; see
+        # _type_stand_in_values. Empty by default, so a caller that has not
+        # checked the guards gets the refusal.
+        self.type_stand_ins = type_stand_ins
         # The object reducer_override was last handed, so a failure inside a
         # __reduce__ can be attributed to a value rather than only to a type.
         self.last_reduced: Any = None
+        # Cells whose contents a reconstructed function fills from its state.
+        # The cell object itself still travels, so sharing survives, but reducing
+        # it must not save the contents. See _reduce_nested_function.
+        self.deferred_cells: set[int] = set()
 
     @classmethod
     def _restore_tensor_attributes(
@@ -4461,6 +4570,12 @@ class GuardsStatePickler(pickle.Pickler):
         carried: dict[str, Any] = {}
         for name, value in state.items():
             if is_fake and name in _FAKE_TENSOR_OWNED_ATTRIBUTES:
+                continue
+            # A presence gate is never read, only tested for, so saying no here
+            # drops what the gate gates: a dim-marking leaf, or the Parameter
+            # identity of a wrapper subclass.
+            if name in _PRESENCE_GATE_ATTRIBUTES:
+                carried[name] = value
                 continue
             if not self._keep(value):
                 continue
@@ -4627,19 +4742,17 @@ class GuardsStatePickler(pickle.Pickler):
         code: types.CodeType,
         module: str,
         qualname: str,
-        argdefs: tuple[object, ...] | None,
+        name: str,
         closure: tuple[types.CellType, ...] | None,
-        kwdefaults: dict[str, object] | None = None,
-        name: str | None = None,
-        attributes: dict[str, object] | None = None,
-        guarded_globals: dict[str, object] | None = None,
-        snapshot_globals: bool = False,
+        snapshot_globals: bool,
+        doc: str | None = None,
     ) -> types.FunctionType:
         if snapshot_globals:
             # Deliberately no import_module here: the snapshot IS the scope, and
             # importing a module only to discard it is a load-time failure mode
-            # this branch does not otherwise have.
-            f_globals: dict[str, Any] = dict(guarded_globals or {})
+            # this branch does not otherwise have. The snapshot arrives with the
+            # rest of the deferred state.
+            f_globals: dict[str, Any] = {}
         else:
             # NB obj.__module__ is not reliably the module the function LIVES in
             # -- functools.wraps copies it from the wrapped function -- so this
@@ -4647,17 +4760,13 @@ class GuardsStatePickler(pickle.Pickler):
             # guard walks __globals__, since one that does registers the dict
             # and forces the snapshot above.
             f_globals = importlib.import_module(module).__dict__
-        fn = types.FunctionType(
-            code,
-            f_globals,
-            name if name is not None else code.co_name,
-            argdefs,
-            closure,
-        )
+        fn = types.FunctionType(code, f_globals, name, None, closure)
         fn.__qualname__ = qualname
-        fn.__kwdefaults__ = kwdefaults
-        if attributes:
-            fn.__dict__.update(attributes)
+        # FunctionType reads __module__ out of f_globals["__name__"], which the
+        # snapshot scope above does not have, so a guard on fn.__module__ used to
+        # rebuild against None.
+        fn.__module__ = module
+        fn.__doc__ = doc
         return fn
 
     def _keep(self, value: object) -> bool:
@@ -4673,38 +4782,26 @@ class GuardsStatePickler(pickle.Pickler):
         """
         return id(value) in self.guard_tree_values
 
-    def _reduce_cell(self, cell: types.CellType) -> types.CellType:
-        """Carry a closure cell, or replace it with a sentinel one.
+    @classmethod
+    def _unpickle_empty_cell(cls) -> types.CellType:
+        return types.CellType()
 
-        A carried cell is passed through UNCHANGED so that two functions
-        closing over the same variable still share it after reload, and so that
-        pickle can memoize it. Only a dropped cell is rebuilt.
-
-        An EMPTY cell -- a free variable a decorator only assigns on a path that
-        did not run -- has no contents to read at all, so presence is checked
-        before identity. Reading it unconditionally raised ValueError here,
-        which reaches the caller as a package bypass.
-        """
-        try:
-            contents = cell.cell_contents
-        except ValueError:
-            return type(self)._unpickle_cell(_Missing("empty function closure"))
-        if self._keep(cell) or self._keep(contents):
-            return cell
-        return type(self)._unpickle_cell(_Missing("unguarded function closure"))
+    def _dropped_cell(self, reason: str) -> types.CellType:
+        """A stand-in for a closure cell whose contents must not travel."""
+        return type(self)._unpickle_cell(_Missing(reason))
 
     @staticmethod
     def _apply_function_state(
         fn: types.FunctionType, state: _DeferredFunctionState
     ) -> None:
-        """Apply the pieces of a reconstructed function that reach the function.
+        """Apply everything a reconstructed function receives after it exists.
 
-        pickle memoizes an object only after saving its reduce ARGS, so
-        anything in args holding a reference back to the function being reduced
-        recurses until RecursionError. State is applied after memoization, so
-        those references resolve to the pickle already built. Everything here
-        is settable post-construction; __closure__ is not, which is why a
-        deferred cell is built empty in args and filled by contents here.
+        pickle memoizes an object only after saving its reduce ARGS, so anything
+        in args holding a reference back to the function being reduced recurses
+        until RecursionError. State is applied after memoization, so those
+        references resolve to the pickle already built. Everything here is
+        settable post-construction; __closure__ is not, which is why a cell
+        arrives empty in args and is filled with its contents here.
         """
         if state.guarded_globals:
             fn.__globals__.update(state.guarded_globals)
@@ -4764,12 +4861,15 @@ class GuardsStatePickler(pickle.Pickler):
             if not kwdefaults and not keep_kwdefaults:
                 kwdefaults = None
 
-        # Anything below that holds obj itself has to travel in STATE rather
-        # than in the reduce args: pickle memoizes obj only after saving its
-        # args, so a self-reference in args re-enters the reducer and recurses.
-        # A decorator writing a counter or a cache onto its own wrapper is the
-        # ordinary way this happens, and functools.wraps makes such a wrapper
-        # exactly the fqn-mismatched shape this reducer exists to rebuild.
+        # Everything below travels in STATE rather than in the reduce args, and
+        # unconditionally: pickle memoizes obj only after saving its args, so
+        # ANY path from an arg back to obj re-enters the reducer and recurses.
+        # A self-reference is the obvious one -- a decorator writing a counter
+        # onto its own wrapper -- but two kept functions referring to each other
+        # do it across the pair, which no per-value check can see from here.
+        # Only the cells themselves stay in args, because __closure__ is
+        # read-only after construction; they arrive empty and the state setter
+        # fills their contents.
         deferred_cells: list[tuple[int, object]] = []
         closure = obj.__closure__
         if closure is not None:
@@ -4778,16 +4878,18 @@ class GuardsStatePickler(pickle.Pickler):
                 try:
                     contents = cell.cell_contents
                 except ValueError:
-                    rebuilt.append(self._reduce_cell(cell))
+                    # A free variable a decorator only assigns on a path that
+                    # did not run: nothing to read, so nothing to carry.
+                    rebuilt.append(self._dropped_cell("empty function closure"))
                     continue
-                if contents is obj and (self._keep(cell) or self._keep(contents)):
-                    # __closure__ is read-only after construction, so unlike the
-                    # rest this cannot simply move to state: build the cell empty
-                    # and let the state setter fill its contents.
-                    rebuilt.append(types.CellType())
+                if self._keep(cell) or self._keep(contents):
+                    # The cell object itself is kept so that two functions
+                    # closing over one variable still share one cell after load.
+                    self.deferred_cells.add(id(cell))
+                    rebuilt.append(cell)
                     deferred_cells.append((index, contents))
                 else:
-                    rebuilt.append(self._reduce_cell(cell))
+                    rebuilt.append(self._dropped_cell("unguarded function closure"))
             closure = tuple(rebuilt)
 
         attributes = (
@@ -4797,27 +4899,21 @@ class GuardsStatePickler(pickle.Pickler):
                 name: value for name, value in obj.__dict__.items() if self._keep(value)
             }
         )
-        deferred_defaults = defaults if _reaches(defaults, obj) else None
-        deferred_kwdefaults = kwdefaults if _reaches(kwdefaults, obj) else None
-        deferred_attributes = attributes if _reaches(attributes, obj) else None
         state = _DeferredFunctionState(
             guarded_globals=guarded_globals,
             cell_contents=tuple(deferred_cells),
-            defaults=deferred_defaults,
-            kwdefaults=deferred_kwdefaults,
-            attributes=deferred_attributes,
+            defaults=defaults,
+            kwdefaults=kwdefaults,
+            attributes=attributes,
         )
         args = (
             obj.__code__,
             obj.__module__,
             obj.__qualname__,
-            None if deferred_defaults is not None else defaults,
-            closure,
-            None if deferred_kwdefaults is not None else kwdefaults,
             obj.__name__,
-            None if deferred_attributes is not None else attributes,
-            None,
+            closure,
             snapshot_globals,
+            obj.__doc__,
         )
         if not state:
             return type(self)._unpickle_nested_function, args
@@ -4837,6 +4933,16 @@ class GuardsStatePickler(pickle.Pickler):
         import sympy
 
         self.last_reduced = obj
+
+        if _is_precompile_handle(obj):
+            # A loaded artifact installed onto a live object, reached because
+            # that object is guarded. Walking into it serializes precompile's
+            # own machinery -- a PrecompileSession carries a condition variable,
+            # so the frame dies on "cannot pickle '_thread.RLock'" and runs
+            # eager. Nothing can guard on a served handle, and unlike a lock in
+            # the user's own model there is nothing they could change, so drop
+            # it the way a pruned value is dropped.
+            return _Missing, ("precompile handle",)
 
         if id(obj) in self.empty_values:
             return type(obj).__new__, (type(obj),)
@@ -5025,6 +5131,22 @@ class GuardsStatePickler(pickle.Pickler):
             return _Missing, ("capsule",)
 
         elif isinstance(obj, _get_unsupported_types()):
+            if id(obj) in self.guard_tree_values:
+                if id(obj) in self.type_stand_ins:
+                    # Only the type is guarded, so a fresh object of that type
+                    # on the same device answers the rebuilt guard exactly as
+                    # the live one would. The live object never gets pickled.
+                    return _rebuild_type_stand_in, (type(obj), obj.device)
+                # Substituting the sentinel for a value a guard READS is not a
+                # pruning, it is a lie: a TYPE_MATCH on a Generator rebuilds
+                # against type(_Missing()) and then never matches, so the
+                # artifact would load and silently reject every call. Refuse the
+                # frame instead -- loudly, and with the path, since the caller
+                # can act on that.
+                raise torch._dynamo.exc.PackageError(
+                    f"a guard reads a {type(obj).__module__}.{type(obj).__qualname__}, "
+                    "which precompile cannot serialize"
+                )
             return _Missing, ("unsupported",)
 
         elif inspect.isfunction(obj):
@@ -5041,18 +5163,37 @@ class GuardsStatePickler(pickle.Pickler):
         elif inspect.ismethod(obj):
             func = obj.__func__
             method_self = obj.__self__
-            inner_func = getattr(method_self, func.__name__)
+            # Decide from the receiver's FATE, not by reading it. This branch
+            # emits a bound method, so its own output comes back through here
+            # whenever the state is serialized twice -- which the guard policy
+            # does, rebuilding each frame from the pickle capture already made.
+            # By then the receiver is the sentinel, and the getattr below used
+            # to raise "'_Missing' object has no attribute <name>". Carrying the
+            # binding unconditionally makes the branch a FIXED POINT: it reduces
+            # its own output to itself, so the second pass is stable, and the
+            # reduction never depends on the receiver resolving the name at load
+            # either. The method stays a real method -- degrading it to the
+            # sentinel instead would re-pin a TYPE_MATCH on it to _Missing, and
+            # the artifact would capture and then never match a live receiver.
+            if self._reduces_to_missing(method_self):
+                return type(self)._unpickle_bound_method, (func, method_self)
+            inner_func = getattr(method_self, func.__name__, None)
             if inspect.ismethod(inner_func):
                 inner_func = inner_func.__func__
             if func is not inner_func:
                 return type(self)._unpickle_bound_method, (func, method_self)
 
-        elif isinstance(obj, type((lambda x: lambda: x)(0).__closure__[0])):  # type: ignore[index] # noqa: PLC3002
+        elif isinstance(obj, types.CellType):
+            if id(obj) in self.deferred_cells:
+                # A cell in some reconstructed function's closure: it travels so
+                # that sharing survives, but its CONTENTS come back through that
+                # function's state, because saving them here -- inside the
+                # function's args -- is what recurses.
+                return type(self)._unpickle_empty_cell, ()
             # An EMPTY cell -- a free variable only assigned on a path that
             # did not run -- has nothing to read, and reading it raised
             # ValueError out of here, which reaches the caller as a package
-            # bypass. _reduce_cell handles the cells it builds; this is the
-            # path a cell reached directly takes.
+            # bypass.
             try:
                 contents = obj.cell_contents
             except ValueError:
@@ -5066,6 +5207,7 @@ class GuardsStatePickler(pickle.Pickler):
             and not inspect.ismodule(obj)
             and not isinstance(obj, (torch.nn.Module, torch.Tensor))
             and not type(obj).__module__.startswith("torch.")
+            and not _builds_its_own_pickle(type(obj))
         ):
             # Any object the guard tree reached, not just an nn.Module. A guarded
             # object that is NOT a module -- a train pipeline, a wrapper holding a
@@ -5082,7 +5224,8 @@ class GuardsStatePickler(pickle.Pickler):
             # structural types: a DTensorSpec's fields are needed to rebuild the
             # spec even though no guard names each one, and pruning them leaves a
             # tensor no guard can match. Tensors are excluded for the same reason
-            # -- a subclass carries its spec in __dict__.
+            # -- a subclass carries its spec in __dict__ -- and a class that
+            # builds its own pickle because pruning is invisible to it.
             self._prune_unguarded_attributes(obj)
 
         if hasattr(torch.distributed, "distributed_c10d") and isinstance(
@@ -5122,6 +5265,22 @@ class GuardsStatePickler(pickle.Pickler):
                 return type(self)._unpickle_fsdp_module_type, (original_type,)
 
         return NotImplemented
+
+    def _reduces_to_missing(self, obj: Any) -> bool:
+        """Whether this value is already, or is about to become, the sentinel.
+
+        Mirrors the three rules above that substitute _Missing for a value the
+        guard tree never reached. A reducer that has to know its own output will
+        round-trip asks here rather than reading the value, because reading is
+        exactly what the substitution breaks.
+        """
+        if type(obj) is _Missing or id(obj) in self.missing_values:
+            return True
+        if isinstance(obj, torch.nn.Module):
+            return id(obj) not in self.guard_tree_values
+        if isinstance(obj, torch.Tensor) and obj.device.type != "meta":
+            return id(obj) not in self.guard_tree_values
+        return False
 
     def _prune_unguarded_attributes(self, obj: Any) -> None:
         """Mark every ``__dict__`` value nothing guards as prunable.
@@ -5177,14 +5336,35 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
     )
 
 
-def _offending_value_path(state: Any, target: Any) -> str:
+def _scope_roots(graph: Any) -> list[tuple[str, Any]]:
+    """The named values a guard state can reach, for the diagnostic walk."""
+    return [
+        (f"local_scope[{k!r}]", v)
+        for k, v in (getattr(graph, "local_scope", None) or {}).items()
+    ] + [
+        (f"global_scope[{k!r}]", v)
+        for k, v in (getattr(graph, "global_scope", None) or {}).items()
+    ]
+
+
+def _offending_value_path(
+    state: Any, target: Any, roots: list[tuple[str, Any]] | None = None
+) -> str:
     """Best-effort attribute path to the value that could not be pickled.
 
     The error names WHAT failed and never WHERE it lives, which in a large model
     means bisecting by hand across multi-minute captures. The pickler records
-    the object it was reducing, so this walks the scopes the guard state carries
-    and reports the first path holding THAT object -- by identity, not by type,
-    which used to report a same-typed bystander instead.
+    the object it was reducing, so this walks the guard state and reports the
+    first path holding THAT object -- by identity, not by type, which used to
+    report a same-typed bystander instead.
+
+    Searched from ``state``, because that is what gets pickled. Rooting only at
+    the two scopes searched five objects on a real capture while the pickler
+    walked the whole output graph, its guards and its guard-tree values, so a
+    value living anywhere else -- a lock on a compiler internal, say -- was
+    unreachable however well the scopes were preserved. The scopes stay as
+    SEEDS, ahead of ``state`` in the queue, so the common case still reports the
+    short readable path rather than a long one through the graph.
 
     Best-effort by construction: it is a diagnostic appended to an error that is
     already being raised, so any failure here must stay silent rather than mask
@@ -5193,19 +5373,16 @@ def _offending_value_path(state: Any, target: Any) -> str:
     try:
         if target is None:
             return ""
-        graph = state.output_graph
-        roots = [
-            (f"local_scope[{k!r}]", v)
-            for k, v in (getattr(graph, "local_scope", None) or {}).items()
-        ] + [
-            (f"global_scope[{k!r}]", v)
-            for k, v in (getattr(graph, "global_scope", None) or {}).items()
-        ]
+        if roots is None:
+            roots = _scope_roots(state.output_graph)
         seen: set[int] = set()
-        queue = collections.deque(roots)
+        queue = collections.deque([*roots, ("state", state)])
+        # Higher than the scope-only walk needed: the whole guard state is
+        # orders of magnitude larger, and this runs once, on a path that is
+        # already raising.
         while queue:
             path, value = queue.popleft()
-            if id(value) in seen or len(seen) > 20000:
+            if id(value) in seen or len(seen) > 200000:
                 continue
             seen.add(id(value))
             if value is target:
@@ -5226,6 +5403,55 @@ def _offending_value_path(state: Any, target: Any) -> str:
     except Exception:
         return ""
     return ""
+
+
+_UNRESOLVED_SOURCE = object()
+
+
+def _type_stand_in_values(
+    guards: Iterable[Guard], builder: GuardBuilder, guard_tree_values: dict[int, Any]
+) -> set[int]:
+    """ids of the unsupported values every guard reaches only as a type.
+
+    A TYPE_MATCH on a Generator or a Stream needs nothing but the type, so a
+    fresh object of the same type and device can stand in for it. Anything that
+    reads the VALUE cannot be answered that way: an EQUALS_MATCH on a stream
+    (Dynamo emits one for ``s == t`` and for ``s.cuda_stream``), or a guard on
+    an attribute the stand-in does not preserve, would be rebuilt against the
+    stand-in's state and compare live inputs to it. Only ``.device`` is
+    preserved, and only TYPE_MATCH may name the object itself; everything else
+    keeps the refusal. Walked from the guard's own source up through its bases,
+    so a read THROUGH the object counts even when the object is never guarded.
+    """
+    stand_in_types = _type_stand_in_types()
+    reads: dict[int, set[str]] = {}
+    for guard in guards:
+        source: Source | None = guard.originating_source
+        if source is None or not guard.name:
+            continue
+        child: Source | None = None
+        while source is not None:
+            try:
+                value = builder.get(source)
+            except Exception:
+                # A HASATTR on an absent attribute has no value; its base may.
+                value = _UNRESOLVED_SOURCE
+            if type(value) in stand_in_types:
+                kinds = reads.setdefault(id(value), set())
+                if child is None:
+                    kinds.add(guard.create_fn_name())
+                elif not (
+                    isinstance(child, (AttrSource, GenericAttrSource))
+                    and child.member == "device"
+                ):
+                    kinds.add("<value>")
+            child = source
+            source = source.base if isinstance(source, ChainedSource) else None
+    return {
+        i
+        for i, value in guard_tree_values.items()
+        if type(value) in stand_in_types and reads.get(i, set()) <= {"TYPE_MATCH"}
+    }
 
 
 def pickle_guards_state(
@@ -5264,7 +5490,22 @@ def pickle_guards_state(
             # TODO See if we have lift this branch as the first one.
             # Prune more objects in pytree hierarchy.
             missing_values[id(leaf)] = leaf
-    pickler = GuardsStatePickler(guard_tree_values, empty_values, missing_values, buf)
+    type_stand_ins = _type_stand_in_values(
+        state.output_graph.guards, builder, guard_tree_values
+    )
+    pickler = GuardsStatePickler(
+        guard_tree_values,
+        empty_values,
+        missing_values,
+        buf,
+        type_stand_ins=type_stand_ins,
+    )
+
+    # Snapshot the search roots before the pruning below empties global_scope.
+    # The diagnostic that names the unpicklable value walks these, so pruning
+    # first leaves anything reachable only through a global unnameable -- which
+    # is how "cannot pickle '_thread.RLock' object" arrived with no path at all.
+    scope_roots = _scope_roots(state.output_graph)
 
     if all(
         torch.compiler.keep_portable_guards_unsafe(
@@ -5280,14 +5521,27 @@ def pickle_guards_state(
 
     try:
         pickler.dump(state)
+    except RecursionError:
+        # Not a user's serialization limitation: either a reducer failed to
+        # break a cycle in the state, or the pickler recursed on depth it should
+        # have flattened. Both are ours, and a bypass would hide them behind a
+        # model that silently runs eager.
+        raise
+    except torch._dynamo.exc.PackageError as e:
+        # A reducer that refuses a value knows WHAT it refused and not where the
+        # value lives, which is the half the caller can act on -- so append the
+        # path, exactly as the broad handler below does.
+        raise torch._dynamo.exc.PackageError(
+            f"{e}{_offending_value_path(state, pickler.last_reduced, scope_roots)}"
+        ) from e
     except torch._dynamo.exc.TorchDynamoException:
         # Dynamo steers compilation with exceptions -- RestartAnalysis,
         # SkipFrame, Unsupported, ObservedException -- and all of them derive
         # from TorchDynamoException, which derives from RuntimeError. Pickling
-        # runs user __reduce__, __getstate__ and property getters, so a value
-        # whose getter is itself traced can raise one here. Rewriting a restart
-        # into a package bypass means the restart never happens, so the whole
-        # family propagates; PackageError is in it and keeps its old meaning.
+        # runs user __reduce__, __getstate__ and property getters, any of which
+        # may call a COMPILED callable, and one of these coming back out of that
+        # call belongs to the frame being compiled there: rewriting it into a
+        # package bypass means the restart or the graph break never happens.
         raise
     except Exception as e:
         # Deliberately broad, including AssertionError. It is tempting to let
@@ -5304,7 +5558,7 @@ def pickle_guards_state(
         # not actionable in a model with a thousand-frame guard tree.
         raise torch._dynamo.exc.PackageError(
             f"{type(e).__name__}: {e}"
-            f"{_offending_value_path(state, pickler.last_reduced)}"
+            f"{_offending_value_path(state, pickler.last_reduced, scope_roots)}"
         ) from e
     return buf.getvalue()
 
@@ -5524,10 +5778,12 @@ class CheckFunctionManager:
                 }
             # Only from a LIVE build. Recording a reconstruction's leaves would
             # let a reconstruction bug whitelist itself.
-            if _LIVE_LEAF_GUARDS is not None and not output_graph.skip_guards_check:
-                _LIVE_LEAF_GUARDS.update(
-                    serialization_builder.guard_manager.leaf_fingerprint()
-                )
+            if _LIVE_LEAF_SINKS and not output_graph.skip_guards_check:
+                fingerprint = serialization_builder.guard_manager.leaf_fingerprint()
+                with _LIVE_LEAF_SINKS_LOCK:
+                    # Re-read: a recording may have closed while the walk ran.
+                    for sink in _LIVE_LEAF_SINKS:
+                        sink.update(fingerprint)
 
             self.guard_manager = guard_manager
             self.compile_check_fn(builder, runtime_guards, guard_fail_fn)
@@ -5716,16 +5972,20 @@ class CheckFunctionManager:
 
         # A guard's user_stack is pure provenance, and most guards from one
         # frame share the same one -- but as EQUAL objects rather than the same
-        # object, so the pickle memo cannot fold them. Canonicalize by rendered
-        # text so it can: a quarter of a large artifact is these.
-        interned: dict[str, traceback.StackSummary] = {}
+        # object, so the pickle memo cannot fold them. Canonicalize by frame
+        # position so it can: a quarter of a large artifact is these. Keyed on
+        # the positions rather than on the rendered text, which would read every
+        # source line of every frame of every guard through linecache.
+        interned: dict[tuple[tuple[str, int | None, str], ...], traceback.StackSummary]
+        interned = {}
 
         def intern_user_stack(
             stack: traceback.StackSummary | None,
         ) -> traceback.StackSummary | None:
             if stack is None:
                 return None
-            return interned.setdefault("".join(stack.format()), stack)
+            key = tuple((f.filename, f.lineno, f.name) for f in stack)
+            return interned.setdefault(key, stack)
 
         def normalize_create_fn(x: Callable[..., None]) -> Callable[..., None]:
             if isinstance(x, functools.partial):
