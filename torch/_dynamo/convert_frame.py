@@ -621,6 +621,9 @@ class ConvertFrameAssert:
         self._recompile_limit = recompile_limit
         self._box = ConvertFrameBox()
 
+    def set_package(self, package: CompilePackage) -> None:
+        self._package = package
+
     @property
     def _clone_with_backend(self) -> Callable[[CompilerFn], ConvertFrameAssert]:
         return lambda backend: convert_frame_assert(
@@ -2351,6 +2354,9 @@ class ConvertFrame:
         self._hooks = hooks
         self._recompile_limit = recompile_limit
 
+    def set_package(self, package: CompilePackage) -> None:
+        self._inner_convert.set_package(package)
+
     @property
     def _clone_with_backend(self) -> Callable[[WrapBackendDebug], ConvertFrame]:
         # Used by DDPOptimizer to swap in its own backend.
@@ -2560,6 +2566,12 @@ class CatchErrorsWrapper:
         functools.wraps(callback)(self)
         self._torchdynamo_orig_backend = callback
         self.hooks = hooks
+
+    def set_package(self, package: CompilePackage) -> None:
+        inner = self._torchdynamo_orig_backend
+        if not isinstance(inner, (ConvertFrame, ConvertFrameAssert)):
+            raise AssertionError(f"cannot set a package on {type(inner)}")
+        inner.set_package(package)
 
     def _handle_skip(
         self, result: ConvertFrameReturn, frame: DynamoFrameType
