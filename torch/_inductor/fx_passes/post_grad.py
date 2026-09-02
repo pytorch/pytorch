@@ -26,7 +26,7 @@ from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_d
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.utils._ordered_set import OrderedSet
 
-from .. import config, ir, pattern_matcher  # noqa: F401
+from .. import config, inductor_prims, ir, pattern_matcher  # noqa: F401
 from ..codegen.common import custom_backend_passes
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
 from ..lowering import lowerings as L
@@ -2117,6 +2117,126 @@ def _fuse_addcdiv_to_fma(match: Match, inp, t1, t2, value) -> None:
 
     counters["inductor"]["addcdiv_fma_fused"] += 1
     match.replace_by_example(repl, [inp, t1, t2, value])
+
+
+def _can_fold_scaled_mm_output_scale(match: Match) -> bool:
+    """Whether ``_scaled_mm(...) * scale`` can use its native output scale.
+
+    Restrict this rewrite to the NVGEMM path: other scaled-mm backends do not
+    uniformly expose ``scale_result`` through Inductor yet.  The vendored
+    Blackwell block-scaled kernel consumes a 0-D FP32 tensor through its alpha
+    argument without changing the GEMM result shape or dtype.
+    """
+    if not (config.max_autotune or config.max_autotune_gemm):
+        return False
+    if "NVGEMM" not in {
+        backend.strip() for backend in config.max_autotune_gemm_backends.split(",")
+    }:
+        return False
+
+    output_scale = match.kwargs["output_scale"]
+    if not isinstance(output_scale, torch.fx.Node):
+        return False
+    scale_val = output_scale.meta.get("val")
+    if not (
+        isinstance(scale_val, torch.Tensor)
+        and scale_val.device.type == "cuda"
+        and scale_val.dtype == torch.float32
+        and scale_val.ndim == 0
+    ):
+        return False
+
+    scaled_mm = next(
+        (
+            node
+            for node in match.nodes
+            if node.op == "call_function" and node.target is aten._scaled_mm.default
+        ),
+        None,
+    )
+    if scaled_mm is None:
+        return False
+    target = scaled_mm.target
+    if not callable(target):
+        return False
+
+    from torch.fx.operator_schemas import normalize_function
+
+    normalized = normalize_function(
+        target,
+        scaled_mm.args,
+        scaled_mm.kwargs,
+        normalize_to_only_use_kwargs=True,
+    )
+    if normalized is None:
+        return False
+    return (
+        normalized.kwargs["bias"] is None and normalized.kwargs["scale_result"] is None
+    )
+
+
+_scaled_mm_without_output_scale = CallFunction(
+    aten._scaled_mm.default,
+    KeywordArg("mat_a"),
+    KeywordArg("mat_b"),
+    KeywordArg("scale_a"),
+    KeywordArg("scale_b"),
+    None,
+    None,
+    KeywordArg("out_dtype"),
+)
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.mul.Tensor,
+        _scaled_mm_without_output_scale,
+        KeywordArg("output_scale"),
+    ),
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=pass_patterns[1],
+    extra_check=_can_fold_scaled_mm_output_scale,
+)
+@register_graph_pattern(
+    CallFunction(
+        aten.mul.Tensor,
+        KeywordArg("output_scale"),
+        _scaled_mm_without_output_scale,
+    ),
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=pass_patterns[1],
+    extra_check=_can_fold_scaled_mm_output_scale,
+)
+def _fold_scaled_mm_output_scale(
+    match: Match,
+    mat_a,
+    mat_b,
+    scale_a,
+    scale_b,
+    out_dtype,
+    output_scale,
+) -> None:
+    """Replace a scaled GEMM and scalar multiply with an internal fused op.
+
+    Doing this before lowering is important for QKV projections: their scaled
+    output is split into multiple consumers, which prevents the scheduler's
+    ordinary single-consumer template-epilogue fusion from seeing the multiply.
+    """
+
+    def repl(mat_a, mat_b, scale_a, scale_b, out_dtype, output_scale):
+        return inductor_prims.nvgemm_scaled_mm_output_scale(
+            mat_a,
+            mat_b,
+            scale_a,
+            scale_b,
+            output_scale,
+            out_dtype,
+        )
+
+    counters["inductor"]["scaled_mm_output_scale_fused"] += 1
+    match.replace_by_example(
+        repl, [mat_a, mat_b, scale_a, scale_b, out_dtype, output_scale]
+    )
 
 
 def register_partial_reduction_pattern():

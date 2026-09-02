@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import sympy
 
 import torch
+from torch._dynamo.utils import counters
 from torch._higher_order_ops import flex_gemm
 from torch._inductor import config
 from torch._inductor.codegen.cuda.cuda_env import is_datacenter_blackwell_arch
@@ -279,6 +280,39 @@ class TestNVUniversalGemm(TestCase):
             ),
         )
 
+    def test_nvgemm_precompile_metadata_includes_output_scale(self):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
+            NVUniversalGemmScheduling,
+        )
+
+        def node(name, size, stride, dtype):
+            result = MagicMock()
+            result.get_name.return_value = name
+            result.get_size.return_value = size
+            result.get_stride.return_value = stride
+            result.get_dtype.return_value = dtype
+            return result
+
+        kernel = MagicMock()
+        kernel._template_input_args = [
+            ("in_ptr0", node("input", (4, 4), (4, 1), torch.float16))
+        ]
+        kernel.output_scale_node = node("alpha", (), (), torch.float32)
+        ctb = MagicMock()
+        ctb.layout.size = (4, 4)
+        ctb.layout.stride = (4, 1)
+        ctb.layout.dtype = torch.float16
+        ctb.layout.device = torch.device("cuda:0")
+        ctb.kernel_metadata = {}
+
+        scheduling = NVUniversalGemmScheduling.__new__(NVUniversalGemmScheduling)
+        with mock.patch.object(torch.cuda, "is_available", return_value=False):
+            metadata = scheduling._build_precompile_metadata(kernel, ctb)
+
+        self.assertEqual(metadata["precompile_shapes"]["alpha"], [])
+        self.assertEqual(metadata["precompile_strides"]["alpha"], [])
+        self.assertEqual(metadata["precompile_dtypes"]["alpha"], "float32")
+
     def test_direct_epilogue_schema_separates_local_reduce_result(self):
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
             CuTeDSLEpilogueArguments,
@@ -382,6 +416,226 @@ class TestNVUniversalGemm(TestCase):
             result = compiled_fn(a, b)
 
         torch.testing.assert_close(result, expected)
+
+    def test_scaled_mm_swap_ab_cudagraph_output_scale(self):
+        """The swapped NVFP4 kernel must update its raw pointers on
+        every invocation and consume a scalar multiply through its alpha arg.
+        """
+        m, n, k = 32, 512, 512
+        a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
+        alpha = torch.rand((), device="cuda")
+
+        def scaled_mm(a, b, scale_a, scale_b, alpha):
+            return (
+                torch._scaled_mm(
+                    a,
+                    b,
+                    scale_a=scale_a,
+                    scale_b=scale_b,
+                    out_dtype=torch.bfloat16,
+                )
+                * alpha
+            )
+
+        expected = scaled_mm(a, b, scale_a, scale_b, alpha)
+        torch._dynamo.reset()
+
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+            NVUniversalGemmCaller,
+        )
+
+        def benchmark(caller, *args, **kwargs):
+            is_target = (
+                caller.swap_ab
+                and caller.kernel.metadata.operator_class.__name__
+                == "VendoredDenseBlockScaledGemmKernel"
+            )
+            return 0.1 if is_target else 1.0
+
+        with (
+            config.patch(
+                _nvgemm_config(
+                    nvgemm_swap_ab=True,
+                    nvgemm_max_profiling_configs=1,
+                    benchmark_epilogue_fusion=False,
+                    compile_threads=1,
+                )
+            ),
+            mock.patch.object(
+                NVUniversalGemmCaller, "benchmark", autospec=True, side_effect=benchmark
+            ),
+        ):
+            compiled = torch.compile(scaled_mm)
+            result, (code,) = run_and_get_code(compiled, a, b, scale_a, scale_b, alpha)
+            self.assertEqual(result, expected, equal_nan=True, atol=1.0, rtol=2e-2)
+
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                graph_result = compiled(a, b, scale_a, scale_b, alpha)
+            torch.cuda.synchronize()
+            graph_result.zero_()
+            graph.replay()
+            torch.cuda.synchronize()
+
+        self.assertEqual(graph_result, expected, equal_nan=True, atol=1.0, rtol=2e-2)
+        self.assertIn("swap_ab=True", code)
+        self.assertIn("output_scale=", code)
+        self.assertNotIn("CuTeDSLEpilogueArguments", code)
+        self.assertIn(
+            "_compiled_cache, _disk_fn_cache, _KERNEL_NAME, _DISK_CACHE_CONFIG_KEY,",
+            code,
+        )
+        self.assertIn("module_path=_KERNEL_NAME", code)
+
+    def test_scaled_mm_output_scale_folds_before_split_fanout(self):
+        """Fold output scaling before QKV-style split/view fan-out."""
+        m, n, k = 32, 6144, 2048
+        a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
+        alpha = torch.rand((), device="cuda")
+
+        def scaled_mm_qkv(a, b, scale_a, scale_b, alpha):
+            out = (
+                torch._scaled_mm(
+                    a,
+                    b,
+                    scale_a=scale_a,
+                    scale_b=scale_b,
+                    out_dtype=torch.bfloat16,
+                )
+                * alpha
+            )
+            return torch.split(out, (4096, 1024, 1024), dim=-1)
+
+        expected = scaled_mm_qkv(a, b, scale_a, scale_b, alpha)
+        torch._dynamo.reset()
+        counters["inductor"]["scaled_mm_output_scale_fused"] = 0
+
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+            NVUniversalGemmCaller,
+        )
+
+        def benchmark(caller, *args, **kwargs):
+            return 0.1 if caller.swap_ab else 1.0
+
+        with (
+            config.patch(
+                _nvgemm_config(
+                    nvgemm_swap_ab=True,
+                    nvgemm_max_profiling_configs=1,
+                    benchmark_epilogue_fusion=False,
+                    compile_threads=1,
+                )
+            ),
+            mock.patch.object(
+                NVUniversalGemmCaller, "benchmark", autospec=True, side_effect=benchmark
+            ),
+        ):
+            compiled = torch.compile(scaled_mm_qkv)
+            result, (code,) = run_and_get_code(compiled, a, b, scale_a, scale_b, alpha)
+
+        for actual, reference in zip(result, expected):
+            self.assertEqual(actual, reference, equal_nan=True, atol=1.0, rtol=2e-2)
+        self.assertEqual(counters["inductor"]["scaled_mm_output_scale_fused"], 1)
+        self.assertIn("output_scale=", code)
+        self.assertNotIn("triton_poi_fused_mul", code)
+
+    @parametrize("shape", ((1,), (1, 1, 1)))
+    def test_scaled_mm_output_scale_preserves_singleton_tensor_semantics(self, shape):
+        m, n, k = 32, 512, 512
+        a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
+        alpha = torch.rand(shape, device="cuda")
+
+        def scaled_mm(a, b, scale_a, scale_b, alpha):
+            return (
+                torch._scaled_mm(
+                    a,
+                    b,
+                    scale_a=scale_a,
+                    scale_b=scale_b,
+                    out_dtype=torch.bfloat16,
+                )
+                * alpha
+            )
+
+        expected = scaled_mm(a, b, scale_a, scale_b, alpha)
+        torch._dynamo.reset()
+        with config.patch(_nvgemm_config(compile_threads=1)):
+            result, code = run_and_get_code(
+                torch.compile(scaled_mm), a, b, scale_a, scale_b, alpha
+            )
+
+        self.assertEqual(result, expected, atol=1.0, rtol=2e-2)
+        self.assertEqual(result.shape, expected.shape)
+        self.assertEqual(result.dtype, expected.dtype)
+        self.assertNotIn("output_scale=", "\n".join(code))
+
+    def test_scaled_mm_output_scale_fallback_preserves_multiply(self):
+        import torch._inductor.codegen.nv_universal_gemm as nvgemm
+
+        m, n, k = 32, 512, 512
+        a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
+        alpha = torch.rand((), device="cuda")
+
+        def scaled_mm(a, b, scale_a, scale_b, alpha):
+            return (
+                torch._scaled_mm(
+                    a,
+                    b,
+                    scale_a=scale_a,
+                    scale_b=scale_b,
+                    out_dtype=torch.bfloat16,
+                )
+                * alpha
+            )
+
+        expected = scaled_mm(a, b, scale_a, scale_b, alpha)
+        torch._dynamo.reset()
+        with (
+            config.patch(
+                _nvgemm_config(
+                    max_autotune_gemm_backends="ATEN,NVGEMM", compile_threads=1
+                )
+            ),
+            mock.patch.object(nvgemm, "add_nv_universal_scaled_gemm_choices"),
+        ):
+            result, code = run_and_get_code(
+                torch.compile(scaled_mm), a, b, scale_a, scale_b, alpha
+            )
+
+        self.assertEqual(result, expected, atol=1.0, rtol=2e-2)
+        self.assertNotIn("output_scale=", "\n".join(code))
+        self.assertIn("triton_poi", "\n".join(code))
+
+    def test_scaled_mm_scale_result_is_ignored_for_bfloat16_output(self):
+        m, n, k = 32, 512, 512
+        a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
+        scale_result = torch.rand((), device="cuda")
+
+        def scaled_mm(a, b, scale_a, scale_b, scale_result):
+            return torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                scale_result=scale_result,
+                out_dtype=torch.bfloat16,
+            )
+
+        expected = torch._scaled_mm(
+            a,
+            b,
+            scale_a=scale_a,
+            scale_b=scale_b,
+            out_dtype=torch.bfloat16,
+        )
+
+        with config.patch(_nvgemm_config(compile_threads=1)):
+            result, code = run_and_get_code(
+                torch.compile(scaled_mm), a, b, scale_a, scale_b, scale_result
+            )
+
+        self.assertEqual(result, expected)
+        self.assertNotIn("output_scale=", "\n".join(code))
 
     def test_cudagraphs_intermediate_addmm(self):
         """An NVGEMM addmm whose bias-epilogue output is an intermediate consumed

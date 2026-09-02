@@ -21,14 +21,27 @@ from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
 from torch.torch_version import TorchVersion
 from torch.utils._ordered_set import OrderedSet
 
-from .. import config as inductor_config, distributed_autotune, lowering as L
+from .. import (
+    config as inductor_config,
+    distributed_autotune,
+    inductor_prims,
+    lowering as L,
+)
 from ..codegen.cutlass.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.flydsl.flydsl_template import FlyDSLTemplate
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
 from ..codegen.wrapper import PythonWrapperCodegen
-from ..ir import Buffer, ChoiceCaller, IRNode, is_triton, is_unaligned, Layout
+from ..ir import (
+    Buffer,
+    ChoiceCaller,
+    IRNode,
+    is_triton,
+    is_unaligned,
+    Layout,
+    TensorBox,
+)
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import (
     fallback_handler,
@@ -1331,6 +1344,7 @@ def tuned_scaled_mm(
     out_dtype=None,
     use_fast_accum=False,
     layout=None,
+    nvgemm_output_scale=None,
 ):
     """
     Performs an optimized matrix multiplication where scaling factors are applied
@@ -1366,6 +1380,19 @@ def tuned_scaled_mm(
     check_supported_striding(mat_a, mat_b)
 
     scale_a_real, scale_b_real = realize_inputs(scale_a, scale_b)
+    output_scale_real = (
+        realize_inputs(nvgemm_output_scale) if nvgemm_output_scale is not None else None
+    )
+
+    def apply_output_scale(node):
+        if output_scale_real is None:
+            return node
+        scale = (
+            output_scale_real
+            if isinstance(output_scale_real, TensorBox)
+            else TensorBox.create(output_scale_real)
+        )
+        return lowerings[aten.mul](node, scale)
 
     input_nodes: list[Any]
 
@@ -1393,6 +1420,32 @@ def tuned_scaled_mm(
         )
 
     _, is_nonzero = _is_static_problem(layout)
+
+    # The vendored Blackwell block-scaled NVGEMM kernel has a native FP32
+    # output-scale argument.  Prefer that semantic path when scale_result is
+    # present so a graph-level ``_scaled_mm(...) * scalar`` rewrite can avoid a
+    # separate pointwise kernel even when the result fans out (for example QKV).
+    if (
+        output_scale_real is not None
+        and is_nonzero
+        and use_nv_universal_gemm_template(layout, m, n, k, mat_a, mat_b)
+    ):
+        from ..codegen.nv_universal_gemm import add_nv_universal_scaled_gemm_choices
+
+        scaled_choices: list[ChoiceCaller] = []
+        add_nv_universal_scaled_gemm_choices(
+            scaled_choices,
+            layout,
+            input_nodes,
+            kernel_inputs=kernel_inputs,
+            output_scale_node=output_scale_real,
+        )
+        if scaled_choices:
+            scaled_input_nodes = [*input_nodes, output_scale_real]
+            node, _ = autotune_select_algorithm(
+                name, scaled_choices, scaled_input_nodes, layout
+            )
+            return node
 
     if (
         # We don't have triton lowerings for the MX variants yet
@@ -1481,7 +1534,7 @@ def tuned_scaled_mm(
     # Early return for MX variants
     if scale_a.dtype != torch.float32:
         node, _ = autotune_select_algorithm(name, choices, input_nodes, layout)
-        return node
+        return apply_output_scale(node)
 
     if (
         is_nonzero
@@ -1499,7 +1552,30 @@ def tuned_scaled_mm(
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, kernel_inputs.nodes())
 
     node, _ = autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
-    return node
+    return apply_output_scale(node)
+
+
+@register_lowering(
+    inductor_prims.nvgemm_scaled_mm_output_scale, type_promotion_kind=None
+)
+def tuned_nvgemm_scaled_mm_output_scale(
+    mat_a,
+    mat_b,
+    scale_a,
+    scale_b,
+    output_scale,
+    out_dtype=None,
+    layout=None,
+):
+    return tuned_scaled_mm(
+        mat_a,
+        mat_b,
+        scale_a,
+        scale_b,
+        out_dtype=out_dtype,
+        layout=layout,
+        nvgemm_output_scale=output_scale,
+    )
 
 
 @functools.cache
