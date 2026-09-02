@@ -792,8 +792,10 @@ namespace {
       const index_t n = index / (out_H * out_W);
       const auto grid_offset = n * grid_sN + h * grid_sH + w * grid_sW;
 
-      // get the corresponding input x, y coordinates from grid
-      using coord_t = grid_t;
+      // get the corresponding input x, y coordinates from grid. A pixel coordinate
+      // is an index, so it goes in the accumulate type; the normalized instantiation
+      // keeps grid_t.
+      using coord_t = std::conditional_t<pixel_coords, at::opmath_type<grid_t>, grid_t>;
       coord_t x = grid.data[grid_offset];
       coord_t y = grid.data[grid_offset + grid_sCoor];
 
@@ -1021,8 +1023,10 @@ namespace {
       const index_t n = index / (out_D * out_H * out_W);
       const auto grid_offset = n * grid_sN + d * grid_sD + h * grid_sH + w * grid_sW;
 
-      // get the corresponding input x, y, z coordinates from grid
-      using coord_t = grid_t;
+      // get the corresponding input x, y, z coordinates from grid. A pixel
+      // coordinate is an index, so it goes in the accumulate type; the normalized
+      // instantiation keeps grid_t.
+      using coord_t = std::conditional_t<pixel_coords, at::opmath_type<grid_t>, grid_t>;
       coord_t ix = grid.data[grid_offset];
       coord_t iy = grid.data[grid_offset + grid_sCoor];
       coord_t iz = grid.data[grid_offset + 2 * grid_sCoor];
