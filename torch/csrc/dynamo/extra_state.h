@@ -82,21 +82,25 @@ typedef struct VISIBILITY_HIDDEN PrecompileEntry {
 // thread still inside it. The state and its mutex die with the last reference.
 typedef struct VISIBILITY_HIDDEN ExtraState {
   // Declared first so it is destroyed last: everything below is only ever
-  // touched under it.
-  mutable std::recursive_mutex cache_mutex;
+  // touched under it. Nothing that can run Python -- no decref, no attribute
+  // access, no Python allocation -- may happen while it is held: a finalizer
+  // reaching invalidate() on this same state would self-deadlock, and a guard
+  // taking another function's lock would deadlock against the opposite order.
+  // Callers detach under the lock and release after it.
+  mutable std::mutex cache_mutex;
   std::list<PrecompileEntry> precompile_entries;
   // Per-compile cache map: isolate_recompiles_id -> list of CacheEntry.
   // id -1 is the default (non-isolated) bucket. id >= 0 are isolated compiles.
   // All cache entries live in this map — there is no separate default list.
   std::unordered_map<int64_t, std::list<CacheEntry>> cache_entry_map;
-  // Total cache entries across all compile scopes (for O(1)
-  // has_any_cache_entries)
+  // Total cache entries across all compile scopes.
   size_t total_cache_entry_count{0};
-  // Entries removed from cache_entry_map while `pinned` is non-zero. A raw
-  // CacheEntry* reaches Python only under a CachePin (the compile callback's
-  // argument and the lists it reads), so cleared nodes are parked here,
-  // unreachable, and freed once the last pin drops.
+  // Entries removed from their lists while `pinned` is non-zero. Raw
+  // CacheEntry* and PrecompileEntry* reach Python only under a CachePin (the
+  // compile callback's argument and the lists it reads), so removed nodes are
+  // parked here, unreachable, and freed once the last pin drops.
   std::list<CacheEntry> graveyard;
+  std::list<PrecompileEntry> precompile_graveyard;
   size_t pinned{0};
   // Frame state to detect dynamic shape dims in the default compile scope.
   py::dict frame_state;
@@ -125,11 +129,13 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   ExtraState& operator=(ExtraState&&) = delete;
   ~ExtraState();
   std::list<CacheEntry>& cache_entry_list(int64_t isolate_recompiles_id);
-  bool has_any_cache_entries() const;
   bool has_relevant_entries(int64_t isolate_recompiles_id) const;
   // Callers hold cache_mutex. Entries are found by the IDENTITY of the guard
   // manager that owns them, never by address: a std::list node is recycled, so
   // a fresh entry at an old address would otherwise pass for the old one.
+  CacheEntry* find_entry(
+      int64_t isolate_recompiles_id,
+      PyObject* guard_manager);
   CacheEntry* find_entry(PyObject* guard_manager);
   void move_to_front(CacheEntry* cache_entry);
   void move_to_back(CacheEntry* cache_entry);
@@ -156,8 +162,8 @@ struct VISIBILITY_HIDDEN ExtraStateHandle {
       py::object live_guard_manager);
 };
 
-// Keeps every CacheEntry handed to Python allocated (see ExtraState::graveyard)
-// for as long as the pin lives.
+// Keeps every CacheEntry and PrecompileEntry handed to Python allocated (see
+// ExtraState::graveyard) for as long as the pin lives.
 class VISIBILITY_HIDDEN CachePin {
  public:
   explicit CachePin(ExtraStateRef state);
@@ -253,7 +259,9 @@ void extra_state_set_region_exec_strategy(
 // deleter for the object on extra scratch space. This function is called
 // internally in _PyCode_SetExtra and also during the code deallocation.
 // It drops the code object's reference to the ExtraState; the state itself is
-// freed when the last lookup or pin holding it lets go.
+// freed when the last lookup or pin holding it lets go. Re-entrant calls on
+// the same slot (Python run by the teardown resetting the code again) return
+// without freeing; see ExtraStateHolder in extra_state.cpp.
 
 // Developer note - You should not call this function directly. This is called
 // directly inside reset_extra_state. If you are in a situation trying to call
@@ -261,8 +269,9 @@ void extra_state_set_region_exec_strategy(
 void destroy_extra_state(void* obj);
 
 // Detaches the ExtraState from the code object. Safe on a code object that has
-// none. Note that _PyCode_SetExtra calls the destroy_extra_state deleter
-// internally, and therefore we don't call it explicitly here.
+// none or whose state is already being torn down. Note that _PyCode_SetExtra
+// calls the destroy_extra_state deleter internally, and therefore we don't call
+// it explicitly here.
 void reset_extra_state(PyCodeObject* code);
 
 // Extracts the backend fn from the callback.
@@ -282,8 +291,10 @@ void enable_precompile_cache_keys();
 //  - extra_state: a reference, or nullptr when the code object has none.
 ExtraStateRef get_extra_state(PyCodeObject* code);
 
-// Creates a new extra state and put it on the extra scratch space of the code
-// object. The code object must not already have one.
+// Creates a new extra state and puts it on the extra scratch space of the code
+// object, which must have none (get_extra_state returned nullptr). While the
+// previous state is still being torn down the slot is left alone and the new
+// state is returned detached: it lives only as long as the caller's reference.
 ExtraStateRef init_and_set_extra_state(PyCodeObject* code);
 
 // Lookup the cache held by extra_state. Guards run with cache_mutex released.
