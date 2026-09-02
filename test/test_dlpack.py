@@ -9,7 +9,6 @@ from torch.testing._internal.common_device_type import (
     dtypesIfMPS,
     instantiate_device_type_tests,
     onlyCPU,
-    onlyCUDA,
     onlyNativeDeviceTypes,
     onlyOn,
     skipCUDAIfNotRocm,
@@ -205,44 +204,6 @@ class TestTorchDlPackDevice(TestCase):
         self.assertEqual(y5, y5_dl)
 
     @skipMeta
-    @onlyCUDA
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
-    def test_dlpack_conversion_with_diff_streams(self, device, dtype):
-        stream_a = torch.cuda.Stream()
-        stream_b = torch.cuda.Stream()
-        # DLPack protocol helps establish a correct stream order
-        # (hence data dependency) at the exchange boundary.
-        # the `tensor.__dlpack__` method will insert a synchronization event
-        # in the current stream to make sure that it was correctly populated.
-        with torch.cuda.stream(stream_a):
-            x = make_tensor((5,), dtype=dtype, device=device) + 1
-            z = torch.from_dlpack(x.__dlpack__(stream=stream_b.cuda_stream))
-            stream_a.synchronize()
-        stream_b.synchronize()
-        self.assertEqual(z, x)
-
-    @skipMeta
-    @onlyCUDA
-    @dtypes(
-        torch.float8_e5m2,
-        torch.float8_e5m2fnuz,
-        torch.float8_e4m3fn,
-        torch.float8_e4m3fnuz,
-        torch.float8_e8m0fnu,
-        torch.float4_e2m1fn_x2,
-    )
-    def test_dlpack_conversion_with_diff_streams_narrow_precision(self, device, dtype):
-        stream_a = torch.cuda.Stream()
-        stream_b = torch.cuda.Stream()
-        with torch.cuda.stream(stream_a):
-            x = make_tensor((5,), dtype=torch.uint8, device=device) + 1
-            x = x.view(dtype)
-            z = torch.from_dlpack(x.__dlpack__(stream=stream_b.cuda_stream))
-            stream_a.synchronize()
-        stream_b.synchronize()
-        self.assertEqual(z.view(torch.uint8), x.view(torch.uint8))
-
-    @skipMeta
     @onlyNativeDeviceTypes
     @dtypes(
         *all_types_and_complex_and(
@@ -262,106 +223,12 @@ class TestTorchDlPackDevice(TestCase):
             raise AssertionError(f"dtype mismatch: {x.dtype} != {y.dtype}")
 
     @skipMeta
-    @onlyCUDA
-    def test_dlpack_default_stream(self, device):
-        class DLPackTensor:
-            def __init__(self, tensor):
-                self.tensor = tensor
-
-            def __dlpack_device__(self):
-                return self.tensor.__dlpack_device__()
-
-            def __dlpack__(self, stream=None):
-                if torch.version.hip is None:
-                    if stream != 1:
-                        raise AssertionError(f"expected stream=1, got {stream}")
-                else:
-                    if stream != 0:
-                        raise AssertionError(f"expected stream=0, got {stream}")
-                capsule = self.tensor.__dlpack__(stream=stream)
-                return capsule
-
-        # CUDA-based tests runs on non-default streams
-        with torch.cuda.stream(torch.cuda.default_stream()):
-            x = DLPackTensor(make_tensor((5,), dtype=torch.float32, device=device))
-            from_dlpack(x)
-
-    @skipMeta
-    @onlyCUDA
-    def test_dlpack_convert_default_stream(self, device):
-        # tests run on non-default stream, so _sleep call
-        # below will run on a non-default stream, causing
-        # default stream to wait due to inserted syncs
-        torch.cuda.default_stream().synchronize()
-        # run _sleep call on a non-default stream, causing
-        # default stream to wait due to inserted syncs
-        side_stream = torch.cuda.Stream()
-        with torch.cuda.stream(side_stream):
-            x = torch.zeros(1, device=device)
-            torch.cuda._sleep(2**20)
-            self.assertTrue(torch.cuda.default_stream().query())
-            # ROCm uses stream 0 for default stream, CUDA uses stream 1
-            default_stream_id = 0 if torch.version.hip else 1
-            x.__dlpack__(stream=default_stream_id)
-        # check that the default stream has work (a pending cudaStreamWaitEvent)
-        self.assertFalse(torch.cuda.default_stream().query())
-
-    @skipMeta
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     def test_dlpack_tensor_invalid_stream(self, device, dtype):
         with self.assertRaises(TypeError):
             x = make_tensor((5,), dtype=dtype, device=device)
             x.__dlpack__(stream=object())
-
-    @skipMeta
-    @onlyCUDA
-    def test_dlpack_cuda_per_thread_stream(self, device):
-        # Test whether we raise an error if we are trying to use per-thread default
-        # stream, which is currently not supported by PyTorch.
-        x = make_tensor((5,), dtype=torch.float32, device=device)
-
-        if TEST_WITH_ROCM:
-            context = self.assertRaisesRegex(
-                AssertionError, r"unsupported stream on ROCm: 2"
-            )
-        else:
-            context = self.assertRaisesRegex(
-                BufferError, "per-thread default stream is not supported"
-            )
-
-        with context:
-            x.__dlpack__(stream=2)
-
-    @skipMeta
-    @onlyCUDA
-    @skipCUDAIfNotRocm
-    def test_dlpack_invalid_rocm_streams(self, device):
-        # Test that we correctly raise errors on unsupported ROCm streams.
-        def test(x, stream):
-            with self.assertRaisesRegex(
-                AssertionError, r"unsupported stream on ROCm: \d"
-            ):
-                x.__dlpack__(stream=stream)
-
-        x = make_tensor((5,), dtype=torch.float32, device=device)
-        test(x, stream=1)
-        test(x, stream=2)
-
-    @skipMeta
-    @onlyCUDA
-    def test_dlpack_invalid_cuda_streams(self, device):
-        x = make_tensor((5,), dtype=torch.float32, device=device)
-
-        if TEST_WITH_ROCM:
-            # On ROCm, stream=0 is valid (default stream).
-            self.assertIsNotNone(x.__dlpack__(stream=0))
-        else:
-            # CUDA raises AssertionError for stream=0
-            with self.assertRaisesRegex(
-                AssertionError, r"unsupported stream on CUDA: \d"
-            ):
-                x.__dlpack__(stream=0)
 
     @skipMeta
     def test_dlpack_invalid_cpu_stream(self):
@@ -921,9 +788,133 @@ class TestTorchDlPackDevice(TestCase):
         self.assertNotEqual(t0.device, t1.device)
 
 
+class TestTorchDlPackStreams(TestCase):
+    # DLPack stream exchange is only specified for CUDA and ROCm; the sentinel
+    # stream values below have no meaning on any other backend.
+
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    def test_dlpack_conversion_with_diff_streams(self, device, dtype):
+        stream_a = torch.cuda.Stream()
+        stream_b = torch.cuda.Stream()
+        # DLPack protocol helps establish a correct stream order
+        # (hence data dependency) at the exchange boundary.
+        # the `tensor.__dlpack__` method will insert a synchronization event
+        # in the current stream to make sure that it was correctly populated.
+        with torch.cuda.stream(stream_a):
+            x = make_tensor((5,), dtype=dtype, device=device) + 1
+            z = torch.from_dlpack(x.__dlpack__(stream=stream_b.cuda_stream))
+            stream_a.synchronize()
+        stream_b.synchronize()
+        self.assertEqual(z, x)
+
+    @dtypes(
+        torch.float8_e5m2,
+        torch.float8_e5m2fnuz,
+        torch.float8_e4m3fn,
+        torch.float8_e4m3fnuz,
+        torch.float8_e8m0fnu,
+        torch.float4_e2m1fn_x2,
+    )
+    def test_dlpack_conversion_with_diff_streams_narrow_precision(self, device, dtype):
+        stream_a = torch.cuda.Stream()
+        stream_b = torch.cuda.Stream()
+        with torch.cuda.stream(stream_a):
+            x = make_tensor((5,), dtype=torch.uint8, device=device) + 1
+            x = x.view(dtype)
+            z = torch.from_dlpack(x.__dlpack__(stream=stream_b.cuda_stream))
+            stream_a.synchronize()
+        stream_b.synchronize()
+        self.assertEqual(z.view(torch.uint8), x.view(torch.uint8))
+
+    def test_dlpack_default_stream(self, device):
+        class DLPackTensor:
+            def __init__(self, tensor):
+                self.tensor = tensor
+
+            def __dlpack_device__(self):
+                return self.tensor.__dlpack_device__()
+
+            def __dlpack__(self, stream=None):
+                if torch.version.hip is None:
+                    if stream != 1:
+                        raise AssertionError(f"expected stream=1, got {stream}")
+                else:
+                    if stream != 0:
+                        raise AssertionError(f"expected stream=0, got {stream}")
+                capsule = self.tensor.__dlpack__(stream=stream)
+                return capsule
+
+        # CUDA-based tests runs on non-default streams
+        with torch.cuda.stream(torch.cuda.default_stream()):
+            x = DLPackTensor(make_tensor((5,), dtype=torch.float32, device=device))
+            from_dlpack(x)
+
+    def test_dlpack_convert_default_stream(self, device):
+        # tests run on non-default stream, so _sleep call
+        # below will run on a non-default stream, causing
+        # default stream to wait due to inserted syncs
+        torch.cuda.default_stream().synchronize()
+        # run _sleep call on a non-default stream, causing
+        # default stream to wait due to inserted syncs
+        side_stream = torch.cuda.Stream()
+        with torch.cuda.stream(side_stream):
+            x = torch.zeros(1, device=device)
+            torch.cuda._sleep(2**20)
+            self.assertTrue(torch.cuda.default_stream().query())
+            # ROCm uses stream 0 for default stream, CUDA uses stream 1
+            default_stream_id = 0 if torch.version.hip else 1
+            x.__dlpack__(stream=default_stream_id)
+        # check that the default stream has work (a pending cudaStreamWaitEvent)
+        self.assertFalse(torch.cuda.default_stream().query())
+
+    def test_dlpack_cuda_per_thread_stream(self, device):
+        # Test whether we raise an error if we are trying to use per-thread default
+        # stream, which is currently not supported by PyTorch.
+        x = make_tensor((5,), dtype=torch.float32, device=device)
+
+        if TEST_WITH_ROCM:
+            context = self.assertRaisesRegex(
+                AssertionError, r"unsupported stream on ROCm: 2"
+            )
+        else:
+            context = self.assertRaisesRegex(
+                BufferError, "per-thread default stream is not supported"
+            )
+
+        with context:
+            x.__dlpack__(stream=2)
+
+    @skipCUDAIfNotRocm
+    def test_dlpack_invalid_rocm_streams(self, device):
+        # Test that we correctly raise errors on unsupported ROCm streams.
+        def test(x, stream):
+            with self.assertRaisesRegex(
+                AssertionError, r"unsupported stream on ROCm: \d"
+            ):
+                x.__dlpack__(stream=stream)
+
+        x = make_tensor((5,), dtype=torch.float32, device=device)
+        test(x, stream=1)
+        test(x, stream=2)
+
+    def test_dlpack_invalid_cuda_streams(self, device):
+        x = make_tensor((5,), dtype=torch.float32, device=device)
+
+        if TEST_WITH_ROCM:
+            # On ROCm, stream=0 is valid (default stream).
+            self.assertIsNotNone(x.__dlpack__(stream=0))
+        else:
+            # CUDA raises AssertionError for stream=0
+            with self.assertRaisesRegex(
+                AssertionError, r"unsupported stream on CUDA: \d"
+            ):
+                x.__dlpack__(stream=0)
+
+
 instantiate_device_type_tests(
     TestTorchDlPackDevice, globals(), allow_mps=True, allow_xpu=True
 )
+instantiate_device_type_tests(TestTorchDlPackStreams, globals(), only_for="cuda")
 
 
 # ReadOnlyTensorWrapper is an eager, runtime-only export shim that rejects all
