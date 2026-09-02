@@ -1,22 +1,10 @@
-# Shared launch-plan memoization for the CuteDSL native ops.
+# Shared launch-plan memoization for the CuteDSL native ops. A "plan" is the compiled kernel plus
+# every shape-invariant host decision (path, vector width, output dtypes, alignment), derived once per
+# operand signature so a repeat call does only the wrap and launch -- without it the eager host cost
+# is dominated by re-deriving the plan, not by the launch.
 #
-# Every op family does the same thing: derive a "plan" (the compiled kernel + all
-# shape-invariant host-side decisions -- chosen path, vector width, output dtypes,
-# alignment, ...) once per distinct operand signature, then on later calls reuse it
-# and only do the per-call work (wrap the live tensors, launch). The plan is a pure
-# function of the cache KEY (dtypes, shapes/strides, device, op params), which is
-# exactly what is baked into the compiled kernel.
-#
-# Without this, the eager host cost is dominated by recomputing the plan every call
-# (shape/promotion derivation, path selection, kernel lookup) -- far more than the
-# irreducible wrap + launch. Caching collapses a repeated-shape workload to wrap +
-# launch.
-#
-# A plan of None is a valid memoized result meaning "declined -- the caller should
-# fall back" (e.g. a geometry this kernel cannot serve). It is cached like any other
-# so the (sometimes non-trivial) decline decision is not recomputed. Callers get the
-# plan itself back, None included; the miss-vs-cached-None distinction is internal
-# (the _MISS sentinel) and deliberately not part of the signature.
+# A plan of None is a valid memoized result meaning "declined, fall back", cached so a non-trivial
+# decline is not recomputed. The miss-vs-cached-None distinction stays internal (_MISS).
 
 from __future__ import annotations
 
