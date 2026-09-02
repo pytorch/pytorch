@@ -347,6 +347,125 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.type, "cpu")
         self.assertEqual(exported.dtype, torch.bfloat16)
 
+    def _get_autocast_cpu_state(self):
+        n = torch.autocast_increment_nesting()
+        torch.autocast_decrement_nesting()
+        return (
+            n - 1,
+            torch.is_autocast_enabled("cpu"),
+            torch.get_autocast_dtype("cpu"),
+        )
+
+    def _test_autocast_exception_restores_state(self, fn):
+        # Regression test for https://github.com/pytorch/pytorch/issues/195488
+        # An exception raised inside a compiled `with autocast(...):` region
+        # must leave autocast state exactly as eager would: the compiled
+        # graph's own exit node never runs, since torch.fx.Graph has no
+        # try/finally, so the call site has to restore it instead.
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4, 4)
+        bad_idx = torch.tensor([99])
+
+        baseline = self._get_autocast_cpu_state()
+        for _ in range(3):
+            with self.assertRaisesRegex(IndexError, "index"):
+                opt_fn(x, bad_idx)
+            self.assertEqual(self._get_autocast_cpu_state(), baseline)
+
+    def test_autocast_exception_restores_state(self):
+        def fn(x, idx):
+            with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                return x.index_select(0, idx)
+
+        self._test_autocast_exception_restores_state(fn)
+
+    def test_autocast_nested_exception_restores_state(self):
+        # Same as test_autocast_exception_restores_state, but the exception
+        # is raised inside a nested autocast region -- both levels must
+        # unwind, in reverse (innermost-first) order.
+        def fn(x, idx):
+            with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                with torch.autocast(device_type="cpu", dtype=torch.float16):
+                    return x.index_select(0, idx)
+
+        self._test_autocast_exception_restores_state(fn)
+
+    def test_autocast_sequential_exception_restores_state(self):
+        # Same as test_autocast_exception_restores_state, but with two
+        # non-nested regions in one graph, the second of which raises. Both
+        # regions trace to completion (only the runtime call raises), so both
+        # get recorded; the first region's exit must not be left restoring
+        # state the second region already changed.
+        def fn(x, idx):
+            with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                y = x.sin()
+            with torch.autocast(device_type="cpu", dtype=torch.float16):
+                return y.index_select(0, idx)
+
+        self._test_autocast_exception_restores_state(fn)
+
+    def test_autocast_exception_after_graph_break_restores_state(self):
+        # Same as test_autocast_exception_restores_state, but a graph break
+        # inside the `with` block splits the region's enter and exit across
+        # two separately compiled subgraphs (the exit is retraced into the
+        # resume function). The exception happens in the resume function,
+        # after the graph break -- verifies the split region still restores
+        # state correctly, not just the fullgraph=True case above.
+        def fn(x, idx):
+            with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                y = x.sin()
+                torch._dynamo.graph_break()
+                return y.index_select(0, idx)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(4, 4)
+        bad_idx = torch.tensor([99])
+
+        baseline = self._get_autocast_cpu_state()
+        for _ in range(3):
+            with self.assertRaisesRegex(IndexError, "index"):
+                opt_fn(x, bad_idx)
+            self.assertEqual(self._get_autocast_cpu_state(), baseline)
+
+    def test_autocast_exception_restores_state_stale_nesting_baseline(self):
+        # GlobalStateGuard guards autocast's enabled/dtype/cache_enabled but
+        # not the nesting depth, so a cache hit can invoke a compiled artifact
+        # from a different ambient nesting depth than it had at compile time,
+        # as long as enabled/dtype/cache_enabled still match. Compile while
+        # already inside one ambient autocast(cpu, bfloat16) region (so the
+        # cached artifact's compile-time nesting baseline is 1), then call
+        # again from inside two (call-time baseline 2) -- the depth to unwind
+        # back to on exception must be read fresh each call, not fixed at
+        # compile time, or the second call unwinds too far and corrupts the
+        # still-open outer region.
+        def fn(x, idx):
+            with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                return x.index_select(0, idx)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(4, 4)
+        bad_idx = torch.tensor([99])
+
+        with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+            with self.assertRaisesRegex(IndexError, "index"):
+                opt_fn(x, bad_idx)
+
+            with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                with self.assertRaisesRegex(IndexError, "index"):
+                    opt_fn(x, bad_idx)
+                # Still inside both outer `with` blocks: nesting must be 2
+                # (only the compiled call's own region unwound, back to the
+                # ambient depth the two outer blocks put it at), not 1 or 0.
+                nesting, enabled, dtype = self._get_autocast_cpu_state()
+                self.assertEqual(nesting, 2)
+                self.assertTrue(enabled)
+                self.assertEqual(dtype, torch.bfloat16)
+
+        # Both outer `with` blocks have now run their own real __exit__.
+        # A corrupted nesting depth (dragged to 0 or below by the second
+        # call) would surface here as a negative or nonzero leftover.
+        self.assertEqual(self._get_autocast_cpu_state()[0], 0)
+
     def test_autocast_cpu_graph_break(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):

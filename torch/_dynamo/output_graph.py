@@ -744,6 +744,12 @@ class OutputGraph(OutputGraphCommon):
         self.export_constraints = export_constraints  # type: ignore[assignment]
         self.frame_state = frame_state
         self.cleanup_hooks: list[Callable[[], Any]] = []
+        # (device_type, dtype, enabled, cache_enabled) for each `with autocast(...)`
+        # region fully entered and exited while tracing this graph. Used to give
+        # the compiled callable the same exception safety as the traced `with`
+        # statement: see Note [Autocast exception safety] in
+        # compile_and_call_fx_graph.
+        self.autocast_target_values: list[tuple[Any, Any, Any, Any]] = []
         # compile_id is an id number for the current torch.compile
         self.compile_id: int = next(_compile_id_counter)
         # Set of globals installed via install_global* APIs
@@ -3051,6 +3057,90 @@ class OutputGraph(OutputGraphCommon):
 
             if self.package is not None:
                 self.package.add_backend_id(name, compiled_fn)
+
+            # Note [Autocast exception safety]
+            # A `with autocast(...):` region traced fully inside this graph
+            # lowers to flat `_enter_autocast` / `_exit_autocast` nodes (see
+            # AutocastModeVariable in variables/ctx_manager.py) -- torch.fx.Graph
+            # has no try/finally, so if the compiled graph raises between them,
+            # the exit node never runs and autocast state (the nesting counter,
+            # per-device enabled/dtype/cache_enabled) leaks past the `with`
+            # block. Eager `with` guarantees `__exit__` runs via Python's own
+            # try/finally, so restore that guarantee here at the call site
+            # instead: on every call, before invoking the compiled function,
+            # snapshot the nesting depth and the current per-device state for
+            # every device type touched by a region traced in this graph, and
+            # on exception only, decrement the nesting counter back down to
+            # the snapshotted depth and restore each device's snapshot.
+            #
+            # Both snapshots are taken fresh on every call, not once when this
+            # wrapper is built. The per-device enabled/dtype/cache_enabled
+            # values are already covered by GlobalStateGuard, so a cache hit
+            # can only reuse this compiled artifact when those match what was
+            # traced -- but the guard does not cover the nesting depth, and a
+            # cache hit can still occur from a different ambient nesting than
+            # this compile had (e.g. called from inside an unrelated outer
+            # `with autocast(...):` of the same device/dtype), so the depth to
+            # unwind back to has to be read per call, not baked in here.
+            #
+            # The nesting counter has to be unwound to the snapshotted depth
+            # rather than by a fixed count: a region traced in this graph may
+            # have already run its real enter *and* exit by the time a later,
+            # independent (non-nested) region in the same graph raises, so the
+            # number of regions traced is not the number of enters still open
+            # at the point of the exception. The counter itself always
+            # reflects that correctly at exception time, which is why this
+            # reads it live instead of counting appended entries. The success
+            # path is untouched: nothing here runs unless the call raises, so
+            # the graph's own nodes remain the only thing that affects
+            # autocast state when nothing raises.
+            if autocast_target_values := self.autocast_target_values:
+                self.autocast_target_values = []
+                real_compiled_fn = compiled_fn
+                device_types = tuple(
+                    dict.fromkeys(
+                        device_type for device_type, _, _, _ in autocast_target_values
+                    )
+                )
+
+                def _autocast_exception_safe_wrapper(*args, **kwargs):
+                    # Read fresh on every call, not once when this wrapper is
+                    # built: GlobalStateGuard guards enabled/dtype/cache_enabled,
+                    # so those never differ from this compile, but it does not
+                    # guard the nesting depth. A cache hit can still invoke this
+                    # same compiled artifact from a different ambient nesting
+                    # depth (e.g. called from inside an unrelated outer
+                    # `with autocast(...):` of the same device/dtype), so the
+                    # depth to unwind back to has to be read per call.
+                    prior_nesting = torch.autocast_increment_nesting() - 1
+                    torch.autocast_decrement_nesting()
+                    prior_states = {
+                        device_type: (
+                            torch.is_autocast_enabled(device_type),
+                            torch.get_autocast_dtype(device_type),
+                            torch.is_autocast_cache_enabled(),
+                        )
+                        for device_type in device_types
+                    }
+                    try:
+                        return real_compiled_fn(*args, **kwargs)
+                    except Exception:
+                        current_nesting = torch.autocast_increment_nesting() - 1
+                        torch.autocast_decrement_nesting()
+                        for _ in range(current_nesting - prior_nesting):
+                            if torch.autocast_decrement_nesting() == 0:
+                                torch.clear_autocast_cache()
+                        for device_type, (
+                            enabled,
+                            dtype,
+                            cache_enabled,
+                        ) in prior_states.items():
+                            torch.set_autocast_enabled(device_type, enabled)
+                            torch.set_autocast_dtype(device_type, dtype)
+                            torch.set_autocast_cache_enabled(cache_enabled)
+                        raise
+
+                compiled_fn = _autocast_exception_safe_wrapper
 
             # If __torch_function__ subclass dispatch was inlined during
             # tracing, wrap the compiled graph to disable __torch_function__
