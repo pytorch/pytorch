@@ -398,20 +398,7 @@ class InductorChoices:
                 if hasattr(ktc, "_choice"):
                     del ktc._choice
         # Third pass: Convert to ChoiceCaller objects
-        callers = [ktc.choice for ktc in adjusted_choices if ktc.choice is not None]
-
-        if config.cuda.autotune_tunableop_dynamic_dims_wildcard:
-            # Only ExternKernelCaller (aten) reads this mask to drive TunableOp
-            # wildcard persistence; Triton/CUTLASS callers ignore it. Imported
-            # here rather than at module scope to avoid an import cycle.
-            from torch._inductor.select_algorithm import ExternKernelCaller
-
-            mask = kernel_inputs.dynamic_dim_mask(op_name)
-            for caller in callers:
-                if isinstance(caller, ExternKernelCaller):
-                    caller.tunable_dyn_dims_mask = mask
-
-        return callers
+        return [ktc.choice for ktc in adjusted_choices if ktc.choice is not None]
 
     def triton_kernel_kwargs(
         self,

@@ -1,7 +1,6 @@
 #pragma once
 
-#include <ATen/core/Tensor.h>
-#include <c10/core/Scalar.h>
+#include <ATen/ATen.h>
 
 #include <ATen/native/mkldnn/xpu/detail/LRUCache.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>

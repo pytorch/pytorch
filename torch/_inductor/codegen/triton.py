@@ -4540,9 +4540,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             self.inside_reduction
             and self.range_trees[-1].is_loop
             and not indexing.has_rindex()
-            and not indexing.has_rmask()
         ):
-            # Lift loads whose address and mask are available outside the loop.
+            # can lift a common load outside of reduction loop
+            # One exception is when this is an indirect_load.
             return self.body
         else:
             return self.loads
@@ -4920,6 +4920,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if isinstance(indexing, IndexingOptions):
             if self._has_stride1_on_rdim(indexing.index):
                 self.has_load_with_contiguous_rdim = True
+            reduction_axes_omitted = indexing.reduction_axes_omitted
+        else:
+            reduction_axes_omitted = False
 
         has_rindex = indexing.has_rindex()
         has_tmpmask = indexing.has_tmpmask()
@@ -5106,8 +5109,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     ),
                 )
 
-        # Only CSE values emitted outside the loop remain valid after it closes.
-        if not self.inside_reduction or load_buffer is self.body:
+        if not self.inside_reduction or (
+            not indexing.has_rmask()
+            and not has_rindex
+            # The address and predicate producers for a narrowed load live in
+            # the loop-local compute buffer, so re-emit it for each loop chunk.
+            and not reduction_axes_omitted
+        ):
             self.outside_loop_vars.add(result_var)
 
         return result_var

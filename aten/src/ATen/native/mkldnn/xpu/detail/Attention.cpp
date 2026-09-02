@@ -2,9 +2,6 @@
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
-#include <ATen/ops/ones.h>
-#include <ATen/ops/scalar_tensor.h>
-#include <ATen/ops/where.h>
 #include <oneapi/dnnl/dnnl.hpp>
 
 namespace {

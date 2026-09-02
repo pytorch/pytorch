@@ -10,7 +10,6 @@ import contextvars
 import functools
 import inspect
 import logging
-import math
 import operator
 import threading
 import typing
@@ -1609,8 +1608,8 @@ class PythonKeyTracer(Tracer):
     torch_fn_counts: dict[OpOverload, int]
     enable_thunkify: bool = False
 
-    def __init__(self, *, autowrap_modules: tuple[types.ModuleType, ...] = ()) -> None:
-        super().__init__(autowrap_modules=autowrap_modules)  # type: ignore[arg-type]
+    def __init__(self) -> None:
+        super().__init__(autowrap_modules=())  # type: ignore[arg-type]
         _init_proxy_trackers(self)
 
     # In general, we don't want to make modules leaves. In principle, users of
@@ -2558,17 +2557,8 @@ class _ModuleStackTracer(PythonKeyTracer):
     See Note [Preserving the nn module stack metadata during export non-strict mode]  # noqa: W605
     """
 
-    @classmethod
-    def _graph_module_deserialization_tracer(cls, root: Module) -> Tracer:
-        return _ModuleStackTracerForGraphModuleDeserialization(root)
-
-    def __init__(
-        self,
-        scope_root: Module,
-        *,
-        autowrap_modules: tuple[types.ModuleType, ...] = (),
-    ) -> None:
-        super().__init__(autowrap_modules=autowrap_modules)
+    def __init__(self, scope_root: GraphModule) -> None:
+        super().__init__()
         self.record_stack_traces = not fx.config.do_not_emit_stack_traces
         self._record_forward_stack_traces_only = True
         self.scope_root = scope_root
@@ -2852,43 +2842,6 @@ class _ModuleStackTracer(PythonKeyTracer):
             )
 
         return node
-
-
-class _ModuleStackTracerForGraphModuleDeserialization(_ModuleStackTracer):
-    """Replay GraphModule code without running export-only tracer behavior."""
-
-    def __init__(self, scope_root: Module) -> None:
-        super().__init__(scope_root, autowrap_modules=(math,))
-        self.record_stack_traces = False
-
-    def trace(
-        self,
-        root: Module | Callable[..., Any],
-        concrete_args: dict[str, object] | None = None,
-    ) -> fx.Graph:
-        return Tracer.trace(self, root, concrete_args)
-
-    def call_module(
-        self,
-        m: Module,
-        forward: Callable[..., Any],
-        args: tuple[object, ...],
-        kwargs: dict[str, object],
-    ) -> Any:
-        return Tracer.call_module(self, m, forward, args, kwargs)
-
-    def getattr(
-        self, attr: str, attr_val: object, parameter_proxy_cache: dict[str, Proxy]
-    ) -> object:
-        if isinstance(attr_val, Module) and self.enable_attr_proxy:
-            return self.proxy_type(attr_val, attr)
-        return Tracer.getattr(self, attr, attr_val, parameter_proxy_cache)
-
-    def is_leaf_module(self, m: Module, module_qualified_name: str) -> bool:
-        return True
-
-    def create_node(self, *args: object, **kwargs: object) -> fx.node.Node:
-        return Tracer.create_node(self, *args, **kwargs)  # type: ignore[arg-type]
 
 
 class _MakefxTracer:

@@ -52,10 +52,7 @@ template <typename T>
 class DefaultGemmAndBiasOp : public Callable<GemmAndBiasParams<T>> {
   public:
     TuningStatus Call(const GemmAndBiasParams<T>* params) override {
-      // gemm_and_bias returns false when cuBLASLt finds no usable algo, and
-      // leaves the output unwritten. Reporting OK would make the caller skip
-      // its unfused retry and consume that buffer.
-      const bool dispatched = at::cuda::blas::gemm_and_bias<T>(
+      at::cuda::blas::gemm_and_bias<T>(
           _transposeBoolFromChar(params->transa),
           _transposeBoolFromChar(params->transb),
           params->m, params->n, params->k,
@@ -65,7 +62,7 @@ class DefaultGemmAndBiasOp : public Callable<GemmAndBiasParams<T>> {
           params->bias,
           params->c, params->ldc,
           params->activation);
-      return dispatched ? OK : FAIL;
+      return OK;
     }
 };
 

@@ -89,8 +89,6 @@ def _cudnn_rejection_reasons(
         reasons.append("query dtype must be float16 or bfloat16")
     if query.shape[-1] % 8 != 0 or value.shape[-1] % 8 != 0:
         reasons.append("query and value head dimensions must be divisible by 8")
-    if query.shape[-1] > 128 or value.shape[-1] > 128:
-        reasons.append("head dimensions must be at most 128")
     if window_size == [-1, 0]:
         if cu_seq_q is not cu_seq_k:
             reasons.append(

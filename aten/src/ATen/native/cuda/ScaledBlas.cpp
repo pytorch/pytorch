@@ -231,7 +231,7 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
   );
 }
 
-bool
+Tensor&
 _tunable_scaled_gemm_rocm(
           cublasCommonArgs& args,
           const Tensor& mat1, const Tensor& mat2,
@@ -242,20 +242,19 @@ _tunable_scaled_gemm_rocm(
           const at::ScalarType out_dtype,
           Tensor& out) {
 #ifdef USE_ROCM
-  bool dispatched = false;
 #define TUNABLE_DISPATCH(BLASOP_A, BLASOP_B)                            \
       if (mat1.scalar_type() == ScalarType::Float8_e4m3fnuz) {        \
         if (mat2.scalar_type() == ScalarType::Float8_e4m3fnuz) {      \
           static at::cuda::tunable::ScaledGemmTunableOp<              \
               at::Float8_e4m3fnuz, at::Float8_e4m3fnuz, scalar_t,     \
               BLASOP_A, BLASOP_B> scaledgemm{};                       \
-          dispatched = scaledgemm(&params) == at::cuda::tunable::OK;                              \
+          scaledgemm(&params);                                        \
         }                                                             \
         else if (mat2.scalar_type() == ScalarType::Float8_e5m2fnuz) { \
           static at::cuda::tunable::ScaledGemmTunableOp<              \
               at::Float8_e4m3fnuz, at::Float8_e5m2fnuz, scalar_t,     \
               BLASOP_A, BLASOP_B> scaledgemm{};                       \
-          dispatched = scaledgemm(&params) == at::cuda::tunable::OK;                              \
+          scaledgemm(&params);                                        \
         }                                                             \
       }                                                               \
       else if (mat1.scalar_type() == ScalarType::Float8_e5m2fnuz) {   \
@@ -263,13 +262,13 @@ _tunable_scaled_gemm_rocm(
           static at::cuda::tunable::ScaledGemmTunableOp<              \
               at::Float8_e5m2fnuz, at::Float8_e4m3fnuz, scalar_t,     \
               BLASOP_A, BLASOP_B> scaledgemm{};                       \
-          dispatched = scaledgemm(&params) == at::cuda::tunable::OK;                              \
+          scaledgemm(&params);                                        \
         }                                                             \
         else if (mat2.scalar_type() == ScalarType::Float8_e5m2fnuz) { \
           static at::cuda::tunable::ScaledGemmTunableOp<              \
               at::Float8_e5m2fnuz, at::Float8_e5m2fnuz, scalar_t,     \
               BLASOP_A, BLASOP_B> scaledgemm{};                       \
-          dispatched = scaledgemm(&params) == at::cuda::tunable::OK;                              \
+          scaledgemm(&params);                                        \
         }                                                             \
       }                                                               \
       else if (mat1.scalar_type() == ScalarType::Float8_e4m3fn) {     \
@@ -277,13 +276,13 @@ _tunable_scaled_gemm_rocm(
           static at::cuda::tunable::ScaledGemmTunableOp<              \
               at::Float8_e4m3fn, at::Float8_e4m3fn, scalar_t,         \
               BLASOP_A, BLASOP_B> scaledgemm{};                       \
-          dispatched = scaledgemm(&params) == at::cuda::tunable::OK;                              \
+          scaledgemm(&params);                                        \
         }                                                             \
         else if (mat2.scalar_type() == ScalarType::Float8_e5m2) {     \
           static at::cuda::tunable::ScaledGemmTunableOp<              \
               at::Float8_e4m3fn, at::Float8_e5m2, scalar_t,           \
               BLASOP_A, BLASOP_B> scaledgemm{};                       \
-          dispatched = scaledgemm(&params) == at::cuda::tunable::OK;                              \
+          scaledgemm(&params);                                        \
         }                                                             \
       }                                                               \
       else if (mat1.scalar_type() == ScalarType::Float8_e5m2) {       \
@@ -291,35 +290,19 @@ _tunable_scaled_gemm_rocm(
           static at::cuda::tunable::ScaledGemmTunableOp<              \
               at::Float8_e5m2, at::Float8_e4m3fn, scalar_t,           \
               BLASOP_A, BLASOP_B> scaledgemm{};                       \
-          dispatched = scaledgemm(&params) == at::cuda::tunable::OK;                              \
+          scaledgemm(&params);                                        \
         }                                                             \
         else if (mat2.scalar_type() == ScalarType::Float8_e5m2) {     \
           static at::cuda::tunable::ScaledGemmTunableOp<              \
               at::Float8_e5m2, at::Float8_e5m2, scalar_t,             \
               BLASOP_A, BLASOP_B> scaledgemm{};                       \
-          dispatched = scaledgemm(&params) == at::cuda::tunable::OK;                              \
+          scaledgemm(&params);                                        \
         }                                                             \
       }
   AT_DISPATCH_V2(out_dtype, "_tunable_scaled_gemm", AT_WRAP([&] {
     bool transa_ = ((args.transa != 'n') && (args.transa != 'N'));
     bool transb_ = ((args.transb != 'n') && (args.transb != 'N'));
     at::cuda::tunable::ScaledGemmParams<scalar_t> params;
-    // Stamp per-call dynamic-dims mask before invoking the TunableOp,
-    // remapping to BLAS frame on swapped_mn (same logic as
-    // launchTunableGemmAndBias in Blas.cpp). See GetCurrentDynamicDimsMask()
-    // in ATen/cuda/tunable/Tunable.h for the frame and remap rationale.
-    {
-      auto raw_mask = at::cuda::tunable::GetCurrentDynamicDimsMask();
-      if (args.swapped_mn) {
-        params.dynamic_dims_mask = at::cuda::tunable::DynamicDimsMask(
-            /*M=*/raw_mask.n(),
-            /*N=*/raw_mask.m(),
-            /*K=*/raw_mask.k(),
-            /*BATCH=*/raw_mask.batch());
-      } else {
-        params.dynamic_dims_mask = raw_mask;
-      }
-    }
     params.transa = args.transa;
     params.transb = args.transb;
     params.m = args.m;
@@ -346,9 +329,6 @@ _tunable_scaled_gemm_rocm(
     params.ldc = args.result_ld;
     params.c_dtype = out_dtype;
     params.use_fast_accum = use_fast_accum;
-    // `dispatched` stays false if the selected kernel reports a non-OK status,
-    // or if no branch of TUNABLE_DISPATCH matches this dtype pair; either way
-    // the caller re-dispatches at::cuda::blas::scaled_gemm.
     if (transa_ && transb_) {
       TUNABLE_DISPATCH(at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::T)
     }
@@ -367,7 +347,7 @@ _tunable_scaled_gemm_rocm(
   }),
   kHalf, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_FLOATING_TYPES));
 #undef TUNABLE_DISPATCH
-  return dispatched;
+  return out;
 #else
   TORCH_CHECK_NOT_IMPLEMENTED(false, "_scaled_gemm_rocm only callable on ROCM devices");
 #endif
@@ -406,23 +386,18 @@ _scaled_gemm(
   bool tunable_op_enabled = false;
 #endif
   if (tunable_op_enabled) {
-      // Only available on ROCM. Returns false when the tunable dispatch did
-      // not run the GEMM -- the selected kernel reported a non-OK status, or
-      // no TUNABLE_DISPATCH branch matched this dtype pair. Both cases fall
-      // through to the non-tunable scaled_gemm below. Matches the addmm
-      // fallback in launchGemmAndBiasCublasLt.
-      if (_tunable_scaled_gemm_rocm(
-              args,
-              mat1, mat2,
-              scale_a, scale_b,
-              scaling_choice_a, scaling_choice_b,
-              bias,
-              use_fast_accum,
-              out_dtype_,
-              out)) {
-        return out;
-      }
+      // Only available on ROCM
+      return _tunable_scaled_gemm_rocm(
+          args,
+          mat1, mat2,
+          scale_a, scale_b,
+          scaling_choice_a, scaling_choice_b,
+          bias,
+          use_fast_accum,
+          out_dtype_,
+          out);
   }
+  else
   {
       at::cuda::blas::scaled_gemm(
           args.transa,

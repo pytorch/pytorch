@@ -99,15 +99,3 @@
 ```{eval-rst}
 .. autofunction:: set_numerical_check_tolerances
 ```
-
-```{eval-rst}
-.. autofunction:: dynamic_dims_mask
-```
-
-```{eval-rst}
-.. autofunction:: wildcard_fallback_enable
-```
-
-```{eval-rst}
-.. autofunction:: wildcard_fallback_is_enabled
-```

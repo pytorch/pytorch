@@ -16,9 +16,6 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
     CUDA-specific codegen functions, see DeviceOpOverrides for details
     """
 
-    def uses_gpu_cpp_wrapper(self) -> bool:
-        return True
-
     def import_get_raw_stream_as(self, name: str) -> str:
         return f"from torch._C import _cuda_getCurrentRawStream as {name}"
 

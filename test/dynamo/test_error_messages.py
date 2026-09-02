@@ -1356,43 +1356,6 @@ from user code:
 """,
         )
 
-    def _backend_compiler_failed_traceback(self):
-        def bad_backend(gm, example_inputs):
-            raise TypeError("'NoneType' object is not iterable")
-
-        def fn(x):
-            return x + 1
-
-        # assertRaises suppresses the traceback, so manually catch
-        try:
-            torch.compile(fn, backend=bad_backend, fullgraph=True)(torch.ones(1))
-        except BackendCompilerFailed as exc:
-            return "".join(
-                traceback.format_exception(type(exc), exc, exc.__traceback__)
-            )
-
-        self.fail("expected BackendCompilerFailed")
-
-    def test_backend_compiler_failed_traceback(self):
-        msg = self._backend_compiler_failed_traceback()
-
-        self.assertIn("BackendCompilerFailed: backend='bad_backend' raised:", msg)
-        self.assertIn("TypeError: 'NoneType' object is not iterable", msg)
-        self.assertIn("in bad_backend", msg)
-        self.assertIn("output_graph.py", msg)
-        self.assertNotIn("convert_frame.py", msg)
-        self.assertNotIn("symbolic_convert.py", msg)
-        self.assertIn("Set TORCHDYNAMO_VERBOSE=1 for the full Dynamo stack trace", msg)
-
-    @torch._dynamo.config.patch(verbose=True)
-    def test_backend_compiler_failed_traceback_verbose(self):
-        msg = self._backend_compiler_failed_traceback()
-
-        self.assertIn("in bad_backend", msg)
-        self.assertIn("convert_frame.py", msg)
-        self.assertIn("symbolic_convert.py", msg)
-        self.assertNotIn("TORCHDYNAMO_VERBOSE=1", msg)
-
     @make_logging_test(graph_breaks=True)
     def test_graph_break_in_loop(self, records):
         @torch.compile(backend="eager")

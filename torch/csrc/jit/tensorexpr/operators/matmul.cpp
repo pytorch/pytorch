@@ -33,7 +33,7 @@ Tensor computeMatmul(
   // matmuls. For bigger sizes we generate a TE ExternalCall, which would call
   // an aten::matmul.
   // Native, even naive, lowering is beneficial when the sizes are small because
-  // it allows eliminating dispatch overhead.
+  // it allows to eliminate dispatch overhead.
   if (total_size && total_size->value() < 1000) {
     return Reduce(
         "nnc_matmul",
