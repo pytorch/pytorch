@@ -15,7 +15,6 @@ stable, and update generated-artifact compatibility deliberately if it changes.
 # dynamo/aot chain to fully initialize before the ``from .runtime_wrappers``
 # import below so a bare ``import torch`` artifact stays self-contained.
 import torch._dynamo  # noqa: F401
-from torch._prims_common import CUDARngStateHelper
 
 # IDENTITY CONTRACT: these names MUST be plain re-exports that preserve the original
 # object identity -- never wrap, decorate, or alias them (e.g. functools.wraps, a thin
@@ -26,18 +25,82 @@ from torch._prims_common import CUDARngStateHelper
 # The same contract covers ``CUDARngStateHelper`` (imported above for circular-import
 # ordering): the table keys on id() of its ``get_torch_state_as_tuple`` /
 # ``set_new_offset`` staticmethods, so it too must not be wrapped or aliased.
+from torch._C import (
+    _get_obj_in_tls,
+    _is_key_in_tls,
+    _is_view_replay_enabled,
+    _set_view_replay_enabled,
+)
+from torch._C._functorch import peek_interpreter_stack
+from torch._prims_common import CUDARngStateHelper
+
+from .descriptors import PlainAOTOutput, TangentAOTInput
 from .functional_utils import gen_alias_from_base
 from .runtime_wrappers import (
+    _AutogradRngStateTracker,
+    _AutogradSavedState,
+    _dealias_marked_returns,
+    _grad_output_prototypes,
+    _mask_pruned_backward_outputs,
+    _materialize_missing_grad_outputs,
+    _pruned_backward_output_indices_from_dependencies,
+    _snapshot_external_objects,
     _unwrap_tensoralias,
+    AOTDispatchAutograd,
+    index_to_external_object_weakref,
+    KeptTangentInfo,
     mark_dynamo_propagated_dynamic_indices,
+)
+from .schemas import (
+    InputAliasInfo,
+    MemoryFormatMeta,
+    OutputAliasInfo,
+    OutputType,
+    PlainTensorMeta,
+    SubclassCreationMeta,
+    TensorAlias,
+    ViewAndMutationMeta,
 )
 from .utils import normalize_as_list
 
 
+# Inference artifacts use the first group; training artifacts (compile_to_python
+# with grad_enabled=True) additionally use the autograd-function epilogue and
+# prologue helpers, the metadata types their baked ViewAndMutationMeta is
+# reconstructed from, and the torch._C entry points the codegen'd wrappers
+# close over. source_emit redirects any reference to one of these objects to
+# this module, so a generated artifact never imports an AOTAutograd module by
+# its internal path.
 __all__ = [
     "gen_alias_from_base",
     "_unwrap_tensoralias",
     "mark_dynamo_propagated_dynamic_indices",
     "normalize_as_list",
     "CUDARngStateHelper",
+    "_AutogradRngStateTracker",
+    "_AutogradSavedState",
+    "_dealias_marked_returns",
+    "_grad_output_prototypes",
+    "_mask_pruned_backward_outputs",
+    "_materialize_missing_grad_outputs",
+    "_pruned_backward_output_indices_from_dependencies",
+    "_snapshot_external_objects",
+    "AOTDispatchAutograd",
+    "index_to_external_object_weakref",
+    "KeptTangentInfo",
+    "InputAliasInfo",
+    "MemoryFormatMeta",
+    "OutputAliasInfo",
+    "OutputType",
+    "PlainTensorMeta",
+    "SubclassCreationMeta",
+    "TensorAlias",
+    "ViewAndMutationMeta",
+    "PlainAOTOutput",
+    "TangentAOTInput",
+    "_get_obj_in_tls",
+    "_is_key_in_tls",
+    "_is_view_replay_enabled",
+    "_set_view_replay_enabled",
+    "peek_interpreter_stack",
 ]

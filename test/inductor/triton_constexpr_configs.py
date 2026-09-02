@@ -129,6 +129,18 @@ class UserDefinedAttrsPrivateFieldConfig:
         return hash((type(self), self._nested))
 
 
+class UserDefinedPydanticLikeNoEqConfig:
+    # __repr_args__ without an __eq__: rendering must verify field-wise.
+    def __init__(self, nested):
+        self.nested = nested
+
+    def __repr_args__(self):
+        return (("nested", self.nested),)
+
+    def __repr__(self):
+        return f"{type(self).__name__}(nested={self.nested!r})"
+
+
 class UserDefinedPydanticLikeConfig:
     def __init__(self, nested, hidden=None):
         self.nested = nested

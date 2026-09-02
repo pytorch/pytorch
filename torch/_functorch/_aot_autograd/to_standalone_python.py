@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import ast
 import itertools
+import logging
 import re
 import threading
 from dataclasses import dataclass, field
@@ -48,6 +49,9 @@ from typing import Any, cast, TYPE_CHECKING
 
 from .codegen import capture_generated_sources, GeneratedSource
 from .source_emit import _REBUILD_HELPER, emit_value
+
+
+log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
@@ -909,6 +913,15 @@ def namespace_module_names(sources: Sequence[str]) -> list[str]:
             out.append(source)
             continue
         suffix = f"_s{slot}"
+        lines = source.split("\n")
+
+        def char_offset(lineno: int, byte_offset: int) -> int:
+            # ast col offsets are UTF-8 byte offsets; the lines are str.
+            line = lines[lineno - 1]
+            if line.isascii():
+                return byte_offset
+            return len(line.encode("utf-8")[:byte_offset].decode("utf-8"))
+
         edits: dict[int, list[tuple[int, int, str]]] = {}
         for node in ast.walk(tree):
             if (
@@ -917,9 +930,12 @@ def namespace_module_names(sources: Sequence[str]) -> list[str]:
                 and node.end_col_offset is not None
             ):
                 edits.setdefault(node.lineno, []).append(
-                    (node.col_offset, node.end_col_offset, node.id + suffix)
+                    (
+                        char_offset(node.lineno, node.col_offset),
+                        char_offset(node.lineno, node.end_col_offset),
+                        node.id + suffix,
+                    )
                 )
-        lines = source.split("\n")
         for lineno, name in headers:
             if name not in targets:
                 continue
@@ -935,6 +951,19 @@ def namespace_module_names(sources: Sequence[str]) -> list[str]:
             lines[lineno - 1] = line
         out.append("\n".join(lines))
     return out
+
+
+# Names the emitted training module binds at module scope and that the capture
+# driver (torch._precompile) reads and writes through call.__globals__. Both
+# sides go through these constants.
+AOT_OBSERVED_UNDEFINED_TANGENT_MASKS = "_AOT_OBSERVED_UNDEFINED_TANGENT_MASKS"
+AOT_BACKWARD_VARIANT_COMPILER = "_AOT_BACKWARD_VARIANT_COMPILER"
+AOT_BACKWARD_VARIANTS = "_AOT_BACKWARD_VARIANTS"
+
+
+def _inner_call_bw_name(index: int) -> str:
+    # Emitted binding of the index-th backward variant's inner inductor call.
+    return f"_inner_call_bw_{index}"
 
 
 @dataclass(frozen=True)
@@ -969,12 +998,14 @@ class _CompileToPythonState:
     re-canonicalizes defensively. The first
     real backward with a new mask compiles and runs that specialization immediately,
     then records its source and cache. After running its examples, the CALLER reads
-    the observed masks out of ``call.__globals__["_AOT_OBSERVED_UNDEFINED_TANGENT_MASKS"]``
+    the observed masks out of ``call.__globals__[AOT_OBSERVED_UNDEFINED_TANGENT_MASKS]``
     and passes them to ``finalize``, which emits only those recorded variants.
     ``finalize`` does not touch the module globals: the caller is responsible for
-    setting ``_AOT_BACKWARD_VARIANT_COMPILER`` back to ``None`` and clearing
-    ``_AOT_BACKWARD_VARIANTS`` in that globals dict (see
-    ``torch._precompile._DynamoPythonBackend.finalize_training``).
+    setting ``AOT_BACKWARD_VARIANT_COMPILER`` back to ``None`` and clearing
+    ``AOT_BACKWARD_VARIANTS`` in that globals dict (see
+    ``torch._precompile._DynamoPythonBackend.finalize_training``). The names are
+    the module-level constants of the same name in this module; consumers must
+    use those rather than the literal strings.
     """
 
     forward_python: str
@@ -998,8 +1029,8 @@ class _CompileToPythonState:
     )
 
     def install_capture(self, globals_dict: dict[str, Any]) -> None:
-        self._capture_backward_call = globals_dict["_inner_call_bw_0"]
-        globals_dict["_AOT_BACKWARD_VARIANT_COMPILER"] = self.compile_mask
+        self._capture_backward_call = globals_dict[_inner_call_bw_name(0)]
+        globals_dict[AOT_BACKWARD_VARIANT_COMPILER] = self.compile_mask
 
     def canonical_mask(self, mask: int) -> int:
         from . import runtime_wrappers as _rw
@@ -1041,7 +1072,6 @@ class _CompileToPythonState:
                 compiled.skip_materialize_grad_output_indices,
             )
 
-        import torch
         from torch._guards import compile_context, tracing
         from torch._inductor import (
             compile_to_python as _inductor_compile_to_python,
@@ -1107,22 +1137,16 @@ class _CompileToPythonState:
                         specialization_indices,
                         list(self.backward_inputs),
                     )
-                if (
-                    result is None
-                    and attempted_exact_retrace
-                    and not any(
-                        isinstance(meta, _rw.SubclassCreationMeta)
-                        for meta in self.spec.fw_metadata.subclass_tangent_meta
-                    )
-                ):
-                    reasons = (
-                        "; ".join(retrace_decline_reasons)
-                        or "the backward retrace declined"
-                    )
-                    raise torch.compiler.PrecompileError(
-                        "precompile could not compile an observed undefined-output "
-                        f"tangent pattern: {reasons}; structural specialization "
-                        "did not apply either."
+                if result is None and attempted_exact_retrace:
+                    # Same policy as the live runtime's get_or_compile: a
+                    # declined retrace falls back to the base backward with
+                    # materialized zero tangents (the emitted glue always builds
+                    # grad-output prototypes), never a hard error.
+                    log.info(
+                        "standalone backward for undefined-output mask %s uses the "
+                        "base backward: %s; structural specialization did not apply",
+                        f"{mask:#b}",
+                        "; ".join(retrace_decline_reasons) or "the retrace declined",
                     )
                 if result is None:
                     pruned = (
@@ -1456,7 +1480,7 @@ def _compose_training_module(
     for variant, source_index in zip(
         backward_variants, variant_source_indices, strict=True
     ):
-        call_name = f"_inner_call_bw_{source_index}"
+        call_name = _inner_call_bw_name(source_index)
         value = (
             f"({call_name}, {variant.kept_arg_indices!r}, "
             f"{variant.pruned_output_indices!r}, "
@@ -1466,17 +1490,16 @@ def _compose_training_module(
             default_variant = value
         else:
             exact_variants.append(f"    {variant.undefined_grad_out_mask!r}: {value},")
-    variants_src = "\n".join(["_AOT_BACKWARD_VARIANTS = {", *exact_variants, "}"])
+    variants_src = "\n".join([f"{AOT_BACKWARD_VARIANTS} = {{", *exact_variants, "}"])
     imports |= {
         "import contextlib",
         "import torch",
         "import weakref",
-        "from torch._functorch._aot_autograd.runtime_wrappers import "
+        "from torch._functorch._aot_autograd.standalone_runtime import "
         "_AutogradRngStateTracker, _AutogradSavedState, "
         "_mask_pruned_backward_outputs, "
         "_pruned_backward_output_indices_from_dependencies, "
-        "_snapshot_external_objects, index_to_external_object_weakref",
-        "from torch._functorch._aot_autograd.standalone_runtime import "
+        "_snapshot_external_objects, index_to_external_object_weakref, "
         "normalize_as_list",
     }
 
@@ -1489,7 +1512,7 @@ def _compose_training_module(
     # it needs a prototype.
     prototypes_expr = "_grad_output_prototypes(raw_returns, _fw_metadata)"
     imports.add(
-        "from torch._functorch._aot_autograd.runtime_wrappers import "
+        "from torch._functorch._aot_autograd.standalone_runtime import "
         "_grad_output_prototypes"
     )
 
@@ -1505,8 +1528,8 @@ _rng_state = {rng_src}
 _BACKWARD_OUTPUT_DEPENDENCIES = {backward_output_dependencies_src}
 _BACKWARD_OUTPUT_PROVABLY_ZERO = {provably_zero_src}
 _AOT_SPECIALIZABLE_GRAD_OUT_INDICES = {specializable_src}
-_AOT_OBSERVED_UNDEFINED_TANGENT_MASKS = set()
-_AOT_BACKWARD_VARIANT_COMPILER = None
+{AOT_OBSERVED_UNDEFINED_TANGENT_MASKS} = set()
+{AOT_BACKWARD_VARIANT_COMPILER} = None
 _NUM_FORWARD_RETURNS = {spec.fw_metadata.num_forward_returns}
 _DISABLE_AMP = {spec.disable_amp!r}
 
@@ -1602,12 +1625,12 @@ class _CompiledFunction(torch.autograd.Function):
             for index in ctx._undefined_grad_out_indices
             if index in _AOT_SPECIALIZABLE_GRAD_OUT_INDICES
         )
-        if _AOT_BACKWARD_VARIANT_COMPILER is not None:
-            _AOT_OBSERVED_UNDEFINED_TANGENT_MASKS.add(mask)
-        variant = _AOT_BACKWARD_VARIANTS.get(mask)
-        if variant is None and _AOT_BACKWARD_VARIANT_COMPILER is not None:
-            variant = _AOT_BACKWARD_VARIANT_COMPILER(mask)
-            _AOT_BACKWARD_VARIANTS[mask] = variant
+        if {AOT_BACKWARD_VARIANT_COMPILER} is not None:
+            {AOT_OBSERVED_UNDEFINED_TANGENT_MASKS}.add(mask)
+        variant = {AOT_BACKWARD_VARIANTS}.get(mask)
+        if variant is None and {AOT_BACKWARD_VARIANT_COMPILER} is not None:
+            variant = {AOT_BACKWARD_VARIANT_COMPILER}(mask)
+            {AOT_BACKWARD_VARIANTS}[mask] = variant
         if variant is None:
             variant = _AOT_DEFAULT_BACKWARD_VARIANT
         if variant is None:
@@ -1669,7 +1692,7 @@ def call(flat_inputs):  # noqa: F811
             for block in (
                 f"# === Inner Inductor output code: BACKWARD variant {index - 1} ===",
                 source,
-                f"_inner_call_bw_{index - 1} = call_s{index}",
+                f"{_inner_call_bw_name(index - 1)} = call_s{index}",
                 "",
             )
         ],
@@ -1943,12 +1966,19 @@ def _compile_to_python_with_state(
         has_joint = "bw" in dense
         differentiates = has_joint or _graph_differentiates(dense["gm"])
         fwd_output_strides: list[tuple[str, ...] | None] = []
+        # The user-visible outputs of a training forward are its first
+        # num_forward outputs; the rest are saved activations inductor may
+        # re-lay-out freely (the backward is restrided to match below).
+        num_user_outputs = (
+            specs[0].fw_metadata.num_forward if has_joint and len(specs) == 1 else None
+        )
         inner_python, forward_cache = _inductor_compile_to_python(
             dense["gm"],
             example_inputs,
             options=options,
             is_inference=not differentiates,
             output_strides=fwd_output_strides,
+            num_user_visible_outputs=num_user_outputs,
         )
         if not has_joint:
             source = _compose_standalone_module(
@@ -2014,6 +2044,10 @@ def compile_to_python(
 
     See the module documentation for the generated module's calling convention.
     ``grad_enabled=True`` includes AOTAutograd's differentiable forward and backward.
+
+    When called inside an active ``TracingContext`` (i.e. from a torch.compile
+    backend), the graph's shapes are taken from that context's shape environment
+    rather than inferred from ``gm``; the emitted source is otherwise the same.
     """
     source, cache, _ = _compile_to_python_with_state(
         gm,

@@ -31,8 +31,10 @@ affect that output receive zero gradients where eager autograd leaves
 ``.grad = None``. The opt-in config below makes ``torch.compile`` match eager
 autograd instead: such inputs receive ``.grad = None``, their backward
 computation is pruned, and ``torch.autograd.grad(..., allow_unused=False)``
-raises the same error as it does in eager mode. The setting is read when the
-compiled forward runs:
+raises the same error as it does in eager mode. The setting is captured when
+the function is compiled (the first call below), not when it runs, so enable it
+around the compile; toggling it afterwards does not change an already-compiled
+function, and Dynamo does not recompile on functorch config changes:
 
 ```py
 with torch._functorch.config.patch(aot_autograd_prune_unused_outputs=True):

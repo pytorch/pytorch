@@ -325,7 +325,9 @@ class CacheArtifactManager:
                 continue
             artifacts = CacheArtifactManager.deserialize(serialized)
             if artifacts is None:
-                return None
+                # The cache is only an accelerator; drop the unreadable bundle
+                # (deserialize already logged it) and keep the others.
+                continue
             for artifact_type, values in artifacts.items():
                 for artifact in values:
                     if artifact in seen:

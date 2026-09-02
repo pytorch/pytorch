@@ -22,6 +22,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_WINDOWS,
     parametrize,
     run_tests,
     skipIfCrossRef,
@@ -72,6 +73,21 @@ _DYNAMO_TENSOR_DEFAULT = torch.randn(3)
 
 def _precompile_dynamo_dynamic(x):
     return x.sin() + x.shape[0]
+
+
+_PRECOMPILE_GLOBAL_LIST = [1, 2]
+
+
+def _precompile_dynamo_returns_type(x):
+    return x + 1, type(x)
+
+
+def _precompile_dynamo_returns_torch_dtype(x):
+    return x + 1, torch.float32
+
+
+def _precompile_dynamo_returns_global_list(x):
+    return x + 1, _PRECOMPILE_GLOBAL_LIST
 
 
 def _precompile_dynamo_torch_sin(x):
@@ -1532,6 +1548,10 @@ class TestPrecompile(TestCase):
         self.assertEqual(len(logs.records), 1)
         self.assertIn("treating it as a non-match", logs.output[0])
         self.assertIn("injected guard failure", logs.output[0])
+        # The no-match error tells the user a variant raised rather than
+        # implying only that no example covered the call.
+        with self.assertRaisesRegex(PrecompileError, "1 of which raised"):
+            loaded(torch.randn(2, 4))
 
     def test_tracer_dynamo_capture_preserves_existing_compile_entries(self):
         from torch._dynamo.testing import CompileCounter
@@ -1852,6 +1872,78 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "tensor-valued function"):
             torch.compiler.precompile(
                 _precompile_dynamo_slotted_tensor_default,
+                example_inputs=[(torch.randn(3),)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_checks_overlap_through_wrapper_subclasses(self):
+        # A wrapper subclass owns no storage (untyped_storage() raises), so the
+        # overlap probe must look through to its inner tensors: two distinct
+        # TwoTensors are fine, two sharing an inner buffer are rejected, at
+        # capture and at serve.
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        def add(x, y):
+            return x + y
+
+        a, b, c, d = (torch.randn(4) for _ in range(4))
+        code, cache = torch.compiler.precompile(
+            add,
+            example_inputs=[(TwoTensor(a, b), TwoTensor(c, d))],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        x, y = TwoTensor(a, b), TwoTensor(c, d)
+        self.assertEqual(loaded(x, y), x + y)
+        buf = torch.randn(8)
+        d_off = torch.randn(8)[4:]  # TwoTensor requires equal storage offsets
+        with self.assertRaisesRegex(PrecompileError, "overlap"):
+            torch.compiler.precompile(
+                add,
+                example_inputs=[(TwoTensor(buf[:4], b), TwoTensor(buf[4:], d_off))],
+                tracer="dynamo",
+                backend="eager",
+            )
+        with self.assertRaisesRegex(PrecompileError, "overlap"):
+            loaded(TwoTensor(buf[:4], b), TwoTensor(buf[4:], d_off))
+
+    @unittest.skipUnless(torch.backends.mkldnn.is_available(), "requires MKLDNN")
+    def test_tracer_dynamo_rejects_mkldnn_layout_input(self):
+        # The other non-strided, non-sparse layout: rejected like jagged.
+        x = torch.randn(2, 2).to_mkldnn()
+        with self.assertRaisesRegex(PrecompileError, "cannot verify storage overlap"):
+            torch.compiler.precompile(
+                _precompile_dynamo_torch_sin,
+                example_inputs=[(x,)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_residual_module_globals_are_imported(self):
+        # Dynamo's residual bytecode can load globals of the captured frame the
+        # artifact namespace does not bind: a module the user referenced and a
+        # module Dynamo installed under a synthetic name (type(x) -> torch).
+        # Both are reproducible as imports and must serve.
+        for fn in (
+            _precompile_dynamo_returns_type,
+            _precompile_dynamo_returns_torch_dtype,
+        ):
+            code, cache = torch.compiler.precompile(
+                fn, example_inputs=[(torch.randn(3),)], tracer="dynamo", backend="eager"
+            )
+            loaded = torch.compiler.precompile.load(code, cache)
+            x = torch.randn(3)
+            self.assertEqual(loaded(x), fn(x))
+
+    def test_tracer_dynamo_rejects_irreproducible_residual_global(self):
+        # A non-module global the served bytecode would read cannot be rebuilt
+        # in the artifact; fail at capture with the name, not at serve with a
+        # NameError.
+        with self.assertRaisesRegex(PrecompileError, "_PRECOMPILE_GLOBAL_LIST"):
+            torch.compiler.precompile(
+                _precompile_dynamo_returns_global_list,
                 example_inputs=[(torch.randn(3),)],
                 tracer="dynamo",
                 backend="eager",
@@ -2603,8 +2695,59 @@ class TestPrecompile(TestCase):
             torch.compiler.precompile.load(
                 "code", b"cache", artifact_path="a.py", cache_path="a.cache"
             )
+        # Partial mixing is mixing too, and must not fall through to the
+        # "requires both paths" ValueError the docs do not promise for it.
+        with self.assertRaisesRegex(TypeError, "not both"):
+            torch.compiler.precompile.load("code", b"cache", artifact_path="a.py")
+        with self.assertRaisesRegex(TypeError, "not both"):
+            torch.compiler.precompile.load("code", None, cache_path="a.cache")
         with self.assertRaisesRegex(TypeError, "requires python_code and cache"):
             torch.compiler.precompile.load()
+        # A wrong-typed cache is a programming error, not a corrupt envelope.
+        with self.assertRaisesRegex(TypeError, "expects cache as bytes"):
+            torch.compiler.precompile.load("code", "not-bytes")
+
+    def test_load_from_paths_reads_bytes_verbatim(self):
+        # code_hash is over the artifact's UTF-8 bytes; a text-mode read would
+        # normalize CRLF (git autocrlf, editors) and fail the hash on an
+        # otherwise valid artifact.
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_torch_sin,
+            example_inputs=[(torch.randn(3),)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_path = os.path.join(tmp, "a.py")
+            cache_path = os.path.join(tmp, "a.cache")
+            with open(artifact_path, "wb") as f:
+                f.write(code.replace("\n", "\r\n").encode("utf-8"))
+            with open(cache_path, "wb") as f:
+                f.write(cache)
+            loaded = torch.compiler.precompile.load(
+                artifact_path=artifact_path, cache_path=cache_path
+            )
+            x = torch.randn(3)
+            self.assertEqual(loaded(x), torch.sin(x))
+
+    def test_tracer_dynamo_version_check_precedes_state_parse_and_cache(self):
+        # A foreign build must be reported as such even when the rest of the
+        # artifact (the Dynamo state literal, the cache) is unreadable: the
+        # version check runs first.
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_torch_sin,
+            example_inputs=[(torch.randn(3),)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        incompatible = code.replace(
+            f"_DYNAMO_TORCH_VERSION = {torch.__version__!r}",
+            "_DYNAMO_TORCH_VERSION = '0.0.0'",
+        )
+        incompatible = incompatible.replace("_DYNAMO_STATE = ", "_DYNAMO_STATE = 1 + ")
+        self.assertNotEqual(incompatible, code)
+        with self.assertRaisesRegex(PrecompileError, "produced by torch"):
+            torch.compiler.precompile.load(incompatible, b"garbage")
 
     def test_load_from_paths_make_fx_artifact(self):
         # The (artifact_path, cache_path) form of load() is exercised elsewhere
@@ -5304,6 +5447,34 @@ class TestPrecompile(TestCase):
             self.assertEqual(stat.S_IMODE(os.stat(cache_path).st_mode), 0o604)
             with open(artifact_path) as f:
                 self.assertEqual(f.read(), "A = 2\n")
+
+    @unittest.skipIf(IS_WINDOWS, "symlinks need privileges on Windows")
+    def test_write_dynamo_artifact_files_writes_through_symlink(self):
+        from torch._precompile import _write_dynamo_artifact_files
+
+        with tempfile.TemporaryDirectory() as tmp:
+            real_dir = os.path.join(tmp, "real")
+            os.makedirs(real_dir)
+            real_artifact = os.path.join(real_dir, "a.py")
+            real_cache = os.path.join(real_dir, "a.cache")
+            for path in (real_artifact, real_cache):
+                with open(path, "wb") as f:
+                    f.write(b"old")
+            link_artifact = os.path.join(tmp, "a.py")
+            link_cache = os.path.join(tmp, "a.cache")
+            os.symlink(real_artifact, link_artifact)
+            os.symlink(real_cache, link_cache)
+            _write_dynamo_artifact_files(
+                "NEW = 1\n", b"newcache", link_artifact, link_cache
+            )
+            # The links survive and the targets hold the new content, as with
+            # open(path, "w").
+            self.assertTrue(os.path.islink(link_artifact))
+            self.assertTrue(os.path.islink(link_cache))
+            with open(real_artifact) as f:
+                self.assertEqual(f.read(), "NEW = 1\n")
+            with open(real_cache, "rb") as f:
+                self.assertEqual(f.read(), b"newcache")
 
     def test_tracer_dynamo_load_degrades_on_missing_cache_file(self):
         # A crash between the two renames of the FIRST stateful rewrite leaves

@@ -241,6 +241,7 @@ import contextlib
 import hashlib
 import io
 import logging
+import re
 import threading
 import weakref
 from types import MappingProxyType
@@ -1110,6 +1111,38 @@ def _build_metadata_section(compiled: PrecompiledModule) -> list[str]:
     return parts
 
 
+_ARTIFACT_VERSION_RE = re.compile(
+    r"^(_DYNAMO_TORCH_VERSION|_DYNAMO_PYTHON_VERSION) = (.+)$", re.MULTILINE
+)
+
+
+def _check_dynamo_artifact_versions(python_code: str) -> None:
+    import ast
+    import sys
+
+    found: dict[str, object] = {}
+    for match in _ARTIFACT_VERSION_RE.finditer(python_code):
+        try:
+            found[match.group(1)] = ast.literal_eval(match.group(2))
+        except (SyntaxError, ValueError):
+            return  # not a well-formed dynamo artifact; _parse_artifact_metadata reports it
+    python_version = found.get("_DYNAMO_PYTHON_VERSION")
+    if isinstance(python_version, (tuple, list)) and tuple(python_version) != tuple(
+        sys.version_info[:2]
+    ):
+        raise PrecompileError(
+            "precompile artifact was produced on Python "
+            f"{python_version[0]}.{python_version[1]}, but is "
+            f"being loaded on Python {sys.version_info[0]}.{sys.version_info[1]}."
+        )
+    torch_version = found.get("_DYNAMO_TORCH_VERSION")
+    if torch_version is not None and torch_version != torch.__version__:
+        raise PrecompileError(
+            f"precompile artifact was produced by torch {torch_version}, "
+            f"but is being loaded by torch {torch.__version__}."
+        )
+
+
 def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     """Read the calling-convention constants back out of ``python_code`` WITHOUT
     executing it (exec'ing the inlined Inductor output would JIT the kernels, the
@@ -1388,8 +1421,12 @@ class _DynamoPythonBackend:
         return self._call(list(args))
 
     def _observed_masks(self) -> set[int]:
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            AOT_OBSERVED_UNDEFINED_TANGENT_MASKS,
+        )
+
         globals_dict = getattr(self._call, "__globals__", {})
-        return set(globals_dict.get("_AOT_OBSERVED_UNDEFINED_TANGENT_MASKS", ()))
+        return set(globals_dict.get(AOT_OBSERVED_UNDEFINED_TANGENT_MASKS, ()))
 
     def _finalize_masks(self, extra_masks: Iterable[int] = ()) -> tuple[int, ...]:
         # extra_masks carries patterns observed on SIBLING backends of the same
@@ -1444,8 +1481,13 @@ class _DynamoPythonBackend:
         try:
             self.python_code, self.cache = self._compile_state.finalize(masks)
         finally:
-            globals_dict["_AOT_BACKWARD_VARIANT_COMPILER"] = None
-            variants = globals_dict.get("_AOT_BACKWARD_VARIANTS")
+            from torch._functorch._aot_autograd.to_standalone_python import (
+                AOT_BACKWARD_VARIANT_COMPILER,
+                AOT_BACKWARD_VARIANTS,
+            )
+
+            globals_dict[AOT_BACKWARD_VARIANT_COMPILER] = None
+            variants = globals_dict.get(AOT_BACKWARD_VARIANTS)
             if isinstance(variants, dict):
                 variants.clear()
             self._compile_state = None
@@ -2009,16 +2051,43 @@ def _validate_dynamo_capture(
         # tree_leaves and an aliased pair would bypass the check. Keep this
         # enumeration in sync with the driver copy in
         # torch/_precompile_driver.py (test_precompile pins the parity).
+        from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+        def dense_components(tensor):
+            # A wrapper subclass (TwoTensor, DTensor) owns no storage of its
+            # own -- untyped_storage() raises on it -- so check the inner
+            # tensors it flattens to; instance_values does not descend into
+            # tensors.
+            if is_traceable_wrapper_subclass(tensor):
+                attrs, _ = tensor.__tensor_flatten__()
+                for attr in attrs:
+                    yield from dense_components(getattr(tensor, attr))
+            else:
+                yield tensor
+
+        def unsupported_layout(tensor):
+            # Sparse layouts are left for the guard checks to reject; any
+            # other non-strided layout cannot have its aliasing verified.
+            if tensor.layout in sparse_layouts or tensor.layout is torch.strided:
+                return
+            raise PrecompileError(
+                "precompile tracer='dynamo' cannot verify storage overlap "
+                f"for a {tensor.layout} layout tensor input."
+            )
+
         tensors = []
         for value in instance_values(values):
-            if not isinstance(value, torch.Tensor) or value.layout in sparse_layouts:
+            if not isinstance(value, torch.Tensor):
                 continue
-            if value.layout is not torch.strided:
-                raise PrecompileError(
-                    "precompile tracer='dynamo' cannot verify storage overlap "
-                    f"for a {value.layout} layout tensor input."
-                )
-            tensors.append(value)
+            # The outer layout is checked before flattening: a jagged
+            # NestedTensor is itself a wrapper subclass over strided buffers,
+            # and it is the jagged layout that is rejected.
+            unsupported_layout(value)
+            for component in dense_components(value):
+                unsupported_layout(component)
+                if component.layout in sparse_layouts:
+                    continue
+                tensors.append(component)
         if len(tensors) < 2:
             return False
         storage_ranges: dict[tuple[str, int | None], list[tuple[int, int]]] = {}
@@ -2440,6 +2509,55 @@ class PrecompileStateSummary(NamedTuple):
     dropped_guards: tuple[tuple[str, str], ...]
 
 
+def _import_sources_for_residual_globals(
+    code: Any, capture_target: Callable[..., object]
+) -> dict[str, str]:
+    """The module bindings the served Dynamo bytecode needs, checked at capture.
+
+    The rebuilt functions run in the artifact module's namespace, which holds
+    only the recorded import aliases, the backend ids and builtins. Dynamo's
+    residual bytecode can also load other globals of the captured frame: a
+    module the user referenced (``torch.float32``, ``math.pi``) or a module
+    Dynamo installed under a synthetic name (``install_global_by_id``). Those
+    are reproducible, so record them as import sources. Any other global (a
+    tensor, a constant, an object) is not, so fail here with the name rather
+    than with a NameError at serve time.
+    """
+    import builtins
+    import dis
+    import types
+
+    from torch._dynamo.package import SerializedCode
+
+    import_sources = dict(code.import_sources)
+    bound = set(import_sources) | set(code.backend_ids) | set(vars(builtins))
+    fn_globals = capture_target.__globals__
+
+    def global_loads(code_obj: types.CodeType) -> Iterator[str]:
+        for instruction in dis.get_instructions(code_obj):
+            if instruction.opname in ("LOAD_GLOBAL", "LOAD_NAME"):
+                yield instruction.argval
+        for const in code_obj.co_consts:
+            if isinstance(const, types.CodeType):
+                yield from global_loads(const)
+
+    for guarded in code.guarded_codes:
+        for name in global_loads(SerializedCode.to_code_object(guarded.dynamo_code)):
+            if name in bound or name in import_sources or name not in fn_globals:
+                continue
+            value = fn_globals[name]
+            if isinstance(value, types.ModuleType):
+                import_sources[name] = value.__name__
+                continue
+            raise PrecompileError(
+                f"precompile tracer='dynamo' cannot serve {capture_target.__name__!r}: "
+                f"its compiled bytecode reads the global {name!r} (a "
+                f"{type(value).__name__}), which the artifact cannot reproduce. "
+                "Pass it as an argument or make it a module attribute instead."
+            )
+    return import_sources
+
+
 def _build_dynamo_artifact(
     package: Any,
     capture_target: Callable[..., object],
@@ -2502,7 +2620,7 @@ def _build_dynamo_artifact(
 
     dynamo_state: dict[str, Any] = {
         "code": code.python_code,
-        "import_sources": dict(code.import_sources),
+        "import_sources": _import_sources_for_residual_globals(code, capture_target),
         "defaults": capture_target.__defaults__,
         "kwdefaults": capture_target.__kwdefaults__,
         # Newest-first: the driver serves the first variant whose guards pass,
@@ -2785,7 +2903,11 @@ def _write_dynamo_artifact_files(
     # A failure before the first rename cleans its temp files up and leaves the
     # previous pair; a failure between the renames leaves the NEW artifact with
     # the OLD cache, which load() degrades on (code_hash mismatch -> cold cache
-    # with a warning) and the next successful rewrite repairs.
+    # with a warning) and the next successful rewrite repairs. Two writers in
+    # different processes can interleave the renames the same way; the pair is
+    # owned by one capture session, so that is not guarded against here.
+    # torch._inductor.codecache.write_atomic is deliberately not reused: it
+    # lacks the fsync and mode preservation this rewrite needs.
     import os
     import stat
     import uuid
@@ -2797,7 +2919,10 @@ def _write_dynamo_artifact_files(
             (artifact_path, python_code.encode("utf-8")),
             (cache_path, cache),
         ):
-            parent = os.path.dirname(os.fspath(path)) or "."
+            # Write THROUGH a symlinked destination, as open(path, "w") would,
+            # instead of replacing the link with a regular file.
+            path = os.path.realpath(path) if os.path.islink(path) else os.fspath(path)
+            parent = os.path.dirname(path) or "."
             missing = []
             ancestor = os.path.abspath(parent)
             while not os.path.isdir(ancestor):
@@ -2821,11 +2946,12 @@ def _write_dynamo_artifact_files(
             tmp = f"{path}.{uuid.uuid4().hex}.tmp"
             fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
             renames.append((tmp, path))
-            try:
-                os.chmod(tmp, stat.S_IMODE(os.stat(path).st_mode))
-            except FileNotFoundError:
-                pass
             with os.fdopen(fd, "wb") as f:
+                # Inside the with-block so a failing chmod still closes fd.
+                try:
+                    os.chmod(tmp, stat.S_IMODE(os.stat(path).st_mode))
+                except FileNotFoundError:
+                    pass
                 f.write(data)
                 f.flush()
                 os.fsync(f.fileno())
@@ -2834,12 +2960,15 @@ def _write_dynamo_artifact_files(
         # A rename is not durable until the parent directory entry is fsynced;
         # without this a crash right after os.replace can lose the new name and
         # resurrect nothing, widening the mismatch window the scheme bounds.
-        for directory in sorted(dirs_to_sync):
-            dir_fd = os.open(directory, os.O_RDONLY)
-            try:
-                os.fsync(dir_fd)
-            finally:
-                os.close(dir_fd)
+        # Windows has no directory fsync (opening a directory fails), and its
+        # metadata journal makes the rename durable on its own.
+        if os.name != "nt":
+            for directory in sorted(dirs_to_sync):
+                dir_fd = os.open(directory, os.O_RDONLY)
+                try:
+                    os.fsync(dir_fd)
+                finally:
+                    os.close(dir_fd)
     except BaseException:
         # A tmp already renamed away just fails its unlink with ENOENT.
         for tmp, _ in renames:
@@ -3358,15 +3487,15 @@ class _PrecompileApi:
         guarded recompilations they trigger. The Dynamo artifact retains serialized
         input-derived guards and treats the Python environment as invariant.
 
-        THREADING: the inductor lowering step drives process-global compiler state
-        and is serialized by an internal lock, so concurrent ``backend="inductor"``
-        calls lower one at a time. Dynamo capture is also serialized because it uses
-        process-global frame-evaluation and compilation state; the lock only covers
-        precompile itself, and the capture temporarily patches process-global Dynamo
-        and functorch config (e.g. ``fail_on_recompile_limit_hit``), so an unrelated
-        ``torch.compile`` on another thread during a capture can observe those patched
-        values. The make_fx capture phase and its ``backend="eager"`` path are NOT
-        serialized.
+        THREADING: Dynamo capture (``tracer="dynamo"`` and ``stateful``) is
+        serialized by an internal lock because it uses process-global
+        frame-evaluation and compilation state. That lock is held while the
+        examples run (user code included) and while the capture temporarily patches
+        process-global Dynamo and functorch config (e.g.
+        ``fail_on_recompile_limit_hit``), so an unrelated ``torch.compile`` on
+        another thread during a capture can observe those patched values or raise
+        on a recompile it would otherwise tolerate. The make_fx path -- its capture
+        and its inductor lowering -- takes no lock; inductor's own locks apply.
 
         ``backend`` selects how the captured graph is realized:
 
@@ -3412,6 +3541,13 @@ class _PrecompileApi:
           raises on overlapping runtime inputs), and non-strided input layouts
           other than sparse (which surfaces Dynamo's own rejection).
 
+        Options by tracer: ``recompile_limit`` and ``dynamic`` apply only to
+        ``tracer="dynamo"`` (``ValueError`` otherwise); ``decompositions`` applies
+        only to ``tracer="make_fx"`` (``NotImplementedError`` with dynamo). ``load``
+        treats a cache that does not pair with ``python_code`` as a hard error for a
+        make_fx artifact and as a cold cache (with a warning) for a dynamo artifact,
+        whose python_code alone is a complete program.
+
         ``decompositions`` is an optional decomposition table (a dict mapping each
         ``OpOverload`` to a decomposition function) forwarded to ``make_fx`` as its
         ``decomposition_table`` during capture, so you can control how ATen ops are
@@ -3424,7 +3560,11 @@ class _PrecompileApi:
         inference graphs. Examples may mix requires_grad states for the same
         input: requires_grad is guarded per input per variant, so each runtime
         call dispatches to a variant captured for its inputs' requires_grad
-        states, and raises if none was.
+        states, and raises if none was. This holds under an ambient
+        ``torch.no_grad()`` too: a variant captured on a ``requires_grad=False``
+        example never serves a ``requires_grad=True`` input even though eager
+        semantics would coincide there, so capture an example whose inputs have
+        the requires_grad states the serving call will use.
         How the backward is realized depends on the backend,
         mirroring ``torch.compile``: with ``backend="inductor"`` a differentiable
         graph is compiled as a joint forward+backward -- readable AOTAutograd source
@@ -3632,7 +3772,9 @@ class _PrecompileApi:
         guards minimization dropped from at least one variant (also embedded
         in the artifact as ``_DROPPED_GUARDS``). Load the on-disk pair
         directly with ``precompile.load(artifact_path=..., cache_path=...)``.
-        Rewriting is proportional to everything captured so far, not to the
+        Guard minimization rebuilds a guard manager per candidate guard per pass
+        until no guard can be dropped, so each rewrite is quadratic in a variant's
+        guard count. Rewriting is proportional to everything captured so far, not to the
         call, so a long loop over a large capture pays it every time; feed
         stateful the calls that add variants rather than all of them. The
         state is process-local and not serializable; call ``state.close()``
@@ -3739,18 +3881,26 @@ class _PrecompileApi:
         inference; fresh outputs are detached to preserve eager-like semantics under
         that ambient ``no_grad``.
         """
+        if (artifact_path is not None or cache_path is not None) and (
+            python_code is not None or cache is not None
+        ):
+            raise TypeError(
+                "precompile.load takes either (python_code, cache) or "
+                "(artifact_path, cache_path), not both."
+            )
         if (artifact_path is None) != (cache_path is None):
             raise ValueError(
                 "precompile.load requires both artifact_path and cache_path."
             )
+        if cache is not None and not isinstance(cache, (bytes, bytearray)):
+            raise TypeError(
+                f"precompile.load expects cache as bytes, got {type(cache).__name__}."
+            )
         if artifact_path is not None and cache_path is not None:
-            if python_code is not None or cache is not None:
-                raise TypeError(
-                    "precompile.load takes either (python_code, cache) or "
-                    "(artifact_path, cache_path), not both."
-                )
-            with open(artifact_path, encoding="utf-8") as f:
-                python_code = f.read()
+            # Read the bytes and decode: code_hash is over the UTF-8 bytes the
+            # writer produced, and a text-mode read would normalize CRLF.
+            with open(artifact_path, "rb") as f:
+                python_code = f.read().decode("utf-8")
             try:
                 with open(cache_path, "rb") as f:
                     cache = f.read()
@@ -3788,6 +3938,10 @@ class _PrecompileApi:
         # (emitted from torch._precompile_driver), so the loaded object needs none of it.
         # _parse_artifact_metadata still runs to validate python_code is a precompile
         # artifact and to read BACKEND for the cache-pairing check below.
+        # Reject a foreign torch/Python build before parsing the (large) Dynamo
+        # state literal or unpickling the cache bundle; the emitted driver
+        # repeats the check for artifacts exec'd through other paths.
+        _check_dynamo_artifact_versions(python_code)
         meta = _parse_artifact_metadata(python_code)
         backend = cast(str, meta["BACKEND"])
         tracer = cast(str, meta.get("TRACER", "make_fx"))
@@ -3927,6 +4081,8 @@ precompile.__doc__ = _PrecompileApi.__call__.__doc__
 # would anchor them under this private module. load is a bound method; patch the
 # underlying function so introspection on precompile.load reports torch.compiler too.
 PrecompileError.__module__ = "torch.compiler"
+# ``state.summary()`` returns this; expose it so callers can annotate it.
+_PrecompileApi.StateSummary = PrecompileStateSummary  # type: ignore[attr-defined]
 PrecompileError.__qualname__ = "precompile.PrecompileError"
 _PrecompileApi.load.__module__ = "torch.compiler"
 _PrecompileApi.load.__qualname__ = "precompile.load"

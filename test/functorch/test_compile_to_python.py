@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: pt2"]
 import ast
+import os
 import unittest
 from unittest import mock
 
@@ -559,6 +560,11 @@ class TestAOTCompileToPython(TestCase):
         self.assertEqual(actual_x.grad, expected_x.grad)
         self.assertEqual(actual_y.grad, expected_y.grad)
 
+    @skipIfTorchDynamo(
+        "under dynamo-wrapped testing the test body itself is compiled, so the"
+        " artifact's backward runs under compiled autograd, which deliberately"
+        " rejects _CompiledFunction's boxed_grads_call"
+    )
     def test_training_output_alias_regen(self):
         def flat_fn(flat):
             return [flat[0].view(-1)]
@@ -576,6 +582,98 @@ class TestAOTCompileToPython(TestCase):
         )
         actual.sum().backward()
         self.assertEqual(actual_x.grad, torch.ones_like(actual_x))
+
+    def _training_artifact(self):
+        def flat_fn(flat):
+            return [torch.nn.functional.linear(flat[0], flat[1], flat[2]).relu()]
+
+        lin = torch.nn.Linear(4, 3)
+        x = torch.randn(2, 4, requires_grad=True)
+        args = [x, lin.weight, lin.bias]
+        gm = make_fx(flat_fn)(args)
+        return compile_to_python(gm, args, grad_enabled=True)
+
+    def test_training_artifact_imports_only_stable_surface(self):
+        # The training composer and the metadata it bakes must reference
+        # AOTAutograd only through standalone_runtime, like the inference path.
+        import re
+
+        source, _cache = self._training_artifact()
+        aot_imports = set(re.findall(r"(?:from|import) (torch\._functorch\S*)", source))
+        self.assertEqual(
+            aot_imports, {"torch._functorch._aot_autograd.standalone_runtime"}
+        )
+
+    def test_training_artifact_loads_in_fresh_process(self):
+        # Self-containment is only real if the artifact runs where nothing but
+        # torch has been imported: load it, run forward and backward, in a
+        # subprocess.
+        import subprocess
+        import sys
+        import tempfile
+
+        source, _cache = self._training_artifact()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "artifact.py")
+            with open(path, "w") as f:
+                f.write(source)
+            script = (
+                "import sys, torch\n"
+                "from torch._functorch.aot_autograd import load_from_python\n"
+                f"call = load_from_python(open({path!r}).read(), None)\n"
+                "torch.manual_seed(0)\n"
+                "x = torch.randn(2, 4, requires_grad=True)\n"
+                "w = torch.randn(3, 4, requires_grad=True)\n"
+                "b = torch.randn(3, requires_grad=True)\n"
+                "out = call([x, w, b])[0]\n"
+                "out.sum().backward()\n"
+                "ref_x = x.detach().clone().requires_grad_()\n"
+                "torch.nn.functional.linear(ref_x, w.detach(), b.detach()).relu().sum().backward()\n"
+                "assert torch.allclose(x.grad, ref_x.grad), (x.grad, ref_x.grad)\n"
+                "print('OK')\n"
+            )
+            result = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("OK", result.stdout)
+
+    def test_namespace_module_names_non_ascii(self):
+        # ast column offsets are UTF-8 byte offsets; a non-ASCII character
+        # earlier on the line must not shift the rename.
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            namespace_module_names,
+        )
+
+        source = 'def call(args):\n    return args\ns = "\u00e9" + str(call)\n'
+        (renamed,) = namespace_module_names([source])
+        compile(renamed, "<renamed>", "exec")
+        self.assertIn("str(call_s0)", renamed)
+
+    def test_passthrough_source_releases_args(self):
+        from torch._inductor.standalone_compile import _passthrough_source
+
+        gm = torch.fx.symbolic_trace(lambda x: (x,))
+        namespace = {}
+        exec(_passthrough_source(gm), namespace)
+        args = [torch.randn(2)]
+        out = namespace["call"](args)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(args, [])
+
+    def test_cache_merge_skips_unreadable_bundle(self):
+        from torch.compiler._cache import CacheArtifactManager
+
+        _source, cache = self._training_artifact()
+        self.assertIsNone(CacheArtifactManager.merge((b"not a bundle", None)))
+        if cache is not None:
+            self.assertEqual(
+                CacheArtifactManager.merge((cache, b"not a bundle")),
+                CacheArtifactManager.merge((cache,)),
+            )
 
     def test_training_forward_and_backward_do_not_share_names(self):
         # The two inductor modules are spliced into ONE namespace and both define

@@ -535,18 +535,45 @@ def _build_dynamo_forward():
             torch.sparse_bsr,
             torch.sparse_bsc,
         )
+        from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+        def dense_components(tensor):
+            # A wrapper subclass (TwoTensor, DTensor) owns no storage of its
+            # own -- untyped_storage() raises on it -- so check the inner
+            # tensors it flattens to; instance_values does not descend into
+            # tensors.
+            if is_traceable_wrapper_subclass(tensor):
+                attrs, _ = tensor.__tensor_flatten__()
+                for attr in attrs:
+                    yield from dense_components(getattr(tensor, attr))
+            else:
+                yield tensor
+
+        def unsupported_layout(tensor):
+            # Sparse layouts are left for the guard checks to reject; any
+            # other non-strided layout cannot have its aliasing verified.
+            if tensor.layout in sparse_layouts or tensor.layout is torch.strided:
+                return
+            from torch._precompile import PrecompileError
+
+            raise PrecompileError(
+                "precompile: cannot verify storage overlap for a "
+                f"{tensor.layout} layout runtime tensor input."
+            )
+
         tensors = []
         for value in instance_values(values):
-            if not isinstance(value, torch.Tensor) or value.layout in sparse_layouts:
+            if not isinstance(value, torch.Tensor):
                 continue
-            if value.layout is not torch.strided:
-                from torch._precompile import PrecompileError
-
-                raise PrecompileError(
-                    "precompile: cannot verify storage overlap for a "
-                    f"{value.layout} layout runtime tensor input."
-                )
-            tensors.append(value)
+            # The outer layout is checked before flattening: a jagged
+            # NestedTensor is itself a wrapper subclass over strided buffers,
+            # and it is the jagged layout that is rejected.
+            unsupported_layout(value)
+            for component in dense_components(value):
+                unsupported_layout(component)
+                if component.layout in sparse_layouts:
+                    continue
+                tensors.append(component)
         if len(tensors) < 2:
             return False
         storage_ranges: dict = {}
@@ -640,11 +667,13 @@ def _build_dynamo_forward():
         ambient_grad = torch.is_grad_enabled()
         # Pin grad mode to the capture-time state: the serialized guards were
         # minimized under it, and requires_grad is guarded per input.
+        raised = 0
         with torch.set_grad_enabled(_DYNAMO_GRAD_ENABLED):
             for manager, function in variants:
                 try:
                     matched = manager.check(local_scope)
                 except Exception:
+                    raised += 1
                     # A guard that raises on this input (e.g. probing an
                     # attribute a differently-typed argument lacks) is a
                     # non-match, not a hard failure: fall through so a later
@@ -667,10 +696,16 @@ def _build_dynamo_forward():
                     return result
         from torch._precompile import PrecompileError
 
+        raised_note = (
+            f", {raised} of which raised while evaluating their guards (enable DEBUG "
+            "logging for torch._precompile to see the tracebacks)"
+            if raised
+            else ""
+        )
         raise PrecompileError(
             f"precompile: no captured Dynamo variant of {target.co_name!r} matches "
             f"this call. Add an example covering it and precompile again; the artifact "
-            f"contains {len(variants)} guarded variant(s)."
+            f"contains {len(variants)} guarded variant(s){raised_note}."
         )
 
     return forward

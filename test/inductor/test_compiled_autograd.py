@@ -3808,9 +3808,8 @@ class CompiledAutograd0(torch.nn.Module):
         validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_26], [((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_2, unwrap_maybe_dynamic_int_3], True, 6)]);  getitem_26 = unwrap_maybe_dynamic_int_2 = unwrap_maybe_dynamic_int_3 = None
         getitem_27 = validate_outputs_1[0];  validate_outputs_1 = None
 
-        getitem_28 = hooks[0]
-        getattr_1 = getitem_28._aot_grad_output_prototype_objects;  getitem_28 = None
-        call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((getitem_1, getitem_2), [], [], (getitem_27,), getattr_1);  getitem_1 = getitem_2 = getitem_27 = getattr_1 = None
+        getitem_28 = hooks[0];  getitem_28 = None
+        call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((getitem_1, getitem_2), [], [], (getitem_27,));  getitem_1 = getitem_2 = getitem_27 = None
         aot0_primals_1 = call_aot_bwd_prologue[0]
         aot0_primals_2 = call_aot_bwd_prologue[1]
         aot0_tangents_1 = call_aot_bwd_prologue[2]

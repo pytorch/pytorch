@@ -109,9 +109,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       not checked. Exempt from the aliasing rejection: dtypes, layouts, and memory
       formats (process-wide, value-guarded singletons) and enum members (a used enum
       argument fails capture loudly on its unserializable identity guard regardless).
-      Only strided and sparse input layouts are accepted -- sparse surfaces Dynamo's
-      own rejection, and any other layout (e.g. jagged) is refused at capture and at
-      serve because its aliasing cannot be verified.
+      Only strided input layouts are accepted: a sparse input is rejected by
+      Dynamo itself, and any other layout (e.g. jagged) is refused at capture and at
+      serve because its aliasing cannot be verified. Wrapper tensor subclasses are
+      checked through the tensors they flatten to.
 
       With ``tracer="dynamo"``, capture runs with gradients enabled on every backend
       and each captured graph's differentiability is inferred from its inputs,
@@ -238,7 +239,6 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
                [result], state = torch.compiler.precompile.stateful(
                    step, example_inputs=[(batch,)], state=state,
                    artifact_path="step.py", cache_path="step.cache",
-                   recompile_limit=256,
                )
                # result is this call's real step output; run the training loop on it.
        finally:
@@ -267,7 +267,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        previous call resumes it. A resumed call must use the same ``fn``,
        ``backend``, ``recompile_limit``, and ``dynamic`` as the
        state, else it raises rather than produce a mixed artifact. After each
-       rewrite ``state.summary()`` reports what the artifact carries (calls,
+       rewrite ``state.summary()`` returns a ``precompile.StateSummary`` reporting what the artifact carries (calls,
        examples, variants, graphs, dynamic graphs, and the environment guards
        minimization dropped from at least one variant -- also embedded in the
        artifact as ``_DROPPED_GUARDS``). The state is process-local and not
@@ -291,8 +291,9 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    Reconstruct a runnable from the ``(python_code, cache)`` pair returned by
    ``precompile``, or -- the natural companion of stateful capture's on-disk
    rewrites -- from the file pair at ``artifact_path``/``cache_path``. Pass one
-   form or the other, not both (mixing raises ``TypeError``; giving only one
-   path raises ``ValueError``). The calling convention is read from
+   form or the other, not both (mixing any in-memory argument with any path
+   argument raises ``TypeError``; giving only one path raises ``ValueError``; a
+   ``cache`` that is not ``bytes`` raises ``TypeError``). The calling convention is read from
    ``python_code`` (the single source of truth); ``cache`` only accelerates
    loading -- it carries only the compiled backend artifact (the Inductor
    bundle for ``backend="inductor"``; empty for ``backend="eager"``) and no
