@@ -53,7 +53,7 @@ class TensorDLPackWrapper:
         return self.tensor.__dlpack_device__(*args, **kwargs)
 
 
-class TestTorchDlPack(TestCase):
+class TestTorchDlPackDevice(TestCase):
     exact_dtype = True
 
     @skipMeta
@@ -922,7 +922,7 @@ class TestTorchDlPack(TestCase):
 
 
 instantiate_device_type_tests(
-    TestTorchDlPack, globals(), allow_mps=True, allow_xpu=True
+    TestTorchDlPackDevice, globals(), allow_mps=True, allow_xpu=True
 )
 
 
