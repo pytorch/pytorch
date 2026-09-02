@@ -254,9 +254,9 @@ void associative_scan_tensor_list_cuda_kernel(
       });
 }
 
-REGISTER_CUDA_DISPATCH(associative_scan_stub, &associative_scan_cuda_kernel);
+REGISTER_CUDA_DISPATCH(associative_scan_stub, &associative_scan_cuda_kernel)
 REGISTER_CUDA_DISPATCH(
     associative_scan_tensor_list_stub,
-    &associative_scan_tensor_list_cuda_kernel);
+    &associative_scan_tensor_list_cuda_kernel)
 
 } // namespace at::native

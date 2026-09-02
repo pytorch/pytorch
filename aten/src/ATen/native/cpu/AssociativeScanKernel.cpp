@@ -211,9 +211,9 @@ void associative_scan_tensor_list_cpu_kernel(
 
 } // namespace
 
-REGISTER_DISPATCH(associative_scan_stub, &associative_scan_cpu_kernel);
+REGISTER_DISPATCH(associative_scan_stub, &associative_scan_cpu_kernel)
 REGISTER_DISPATCH(
     associative_scan_tensor_list_stub,
-    &associative_scan_tensor_list_cpu_kernel);
+    &associative_scan_tensor_list_cpu_kernel)
 
 } // namespace at::native
