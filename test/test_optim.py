@@ -15,7 +15,7 @@ from optim.test_swa_utils import TestSWAUtils
 import torch
 from torch.nn import Parameter
 from torch.optim import Optimizer, SGD
-from torch.optim.lr_scheduler import PlateauLR
+from torch.optim.lr_scheduler import PlateauLR, ReduceLROnPlateau
 from torch.optim.optimizer import (
     register_optimizer_step_post_hook,
     register_optimizer_step_pre_hook,
@@ -264,7 +264,7 @@ class TestOptimRenewed(TestCase):
                         optimizer.step()
 
                     for scheduler in schedulers:
-                        if isinstance(scheduler, PlateauLR):
+                        if isinstance(scheduler, (PlateauLR, ReduceLROnPlateau)):
                             scheduler.step(metrics=loss)
                         else:
                             scheduler.step()
@@ -324,7 +324,7 @@ class TestOptimRenewed(TestCase):
                 for _ in range(20):
                     loss = optimizer.step(closure)
                     for scheduler in schedulers:
-                        if isinstance(scheduler, PlateauLR):
+                        if isinstance(scheduler, (PlateauLR, ReduceLROnPlateau)):
                             scheduler.step(metrics=loss)
                         else:
                             scheduler.step()
@@ -367,7 +367,7 @@ class TestOptimRenewed(TestCase):
             for _ in range(20):
                 loss = optimizer.step(closure)
                 for scheduler in schedulers:
-                    if isinstance(scheduler, PlateauLR):
+                    if isinstance(scheduler, (PlateauLR, ReduceLROnPlateau)):
                         scheduler.step(metrics=loss)
                     else:
                         scheduler.step()
@@ -552,14 +552,14 @@ class TestOptimRenewed(TestCase):
                 w = i % 2
                 optimizer.step(functools.partial(eval, params, True, w))
                 for scheduler in schedulers:
-                    if isinstance(scheduler, PlateauLR):
+                    if isinstance(scheduler, (PlateauLR, ReduceLROnPlateau)):
                         scheduler.step(metrics=rosenbrock(params[0]))
                     else:
                         scheduler.step()
                 if not optim_info.only_supports_sparse_grads:
                     optimizer_c.step(functools.partial(eval, params_c, False, w))
                     for scheduler in schedulers_c:
-                        if isinstance(scheduler, PlateauLR):
+                        if isinstance(scheduler, (PlateauLR, ReduceLROnPlateau)):
                             scheduler.step(metrics=rosenbrock(params_c[0]))
                         else:
                             scheduler.step()
