@@ -4376,6 +4376,10 @@ class GuardsStatePickler(pickle.Pickler):
             # known upfront are registered in pickle_guards_state (ordering vs
             # pickle memoization matters there); this covers tensors discovered
             # mid-dump, e.g. wrapper subclass inner tensors.
+            # NB: the grad is reduced through the same meta path as any other
+            # guarded tensor, so a non-strided grad layout (sparse COO/CSR,
+            # e.g. from embedding backward) is not faithfully round-tripped --
+            # empty_like on meta does not preserve it. Strided grads are fine.
             grad = obj.grad
             if isinstance(grad, torch.Tensor):
                 self.guard_tree_values.setdefault(id(grad), grad)
@@ -4579,7 +4583,10 @@ def pickle_guards_state(
     buf = io.BytesIO()
     empty_values = {}
     missing_values = {}
-    guard_tree_values = builder.guard_tree_values
+    # Shallow-copy: the grad worklist below and reducer_override both insert
+    # newly discovered tensors here, and that bookkeeping should stay local to
+    # this dump rather than mutating the builder's dict.
+    guard_tree_values = dict(builder.guard_tree_values)
 
     leaves = pytree.tree_leaves(state.output_graph.local_scope)
     for leaf in leaves:
@@ -4624,7 +4631,15 @@ def pickle_guards_state(
 
     try:
         pickler.dump(state)
-    except (AttributeError, TypeError, pickle.PicklingError) as e:
+    except (AttributeError, pickle.PicklingError) as e:
+        raise torch._dynamo.exc.PackageError(str(e)) from e
+    except TypeError as e:
+        # pickle raises TypeError("cannot pickle '...' object") for a genuinely
+        # unserializable value (thread locks, generators, ...). A TypeError of
+        # any other shape is a bug in a reducer, not an unserializable guard,
+        # so let it surface instead of masking it as a serialization failure.
+        if "cannot pickle" not in str(e):
+            raise
         raise torch._dynamo.exc.PackageError(str(e)) from e
     return buf.getvalue()
 

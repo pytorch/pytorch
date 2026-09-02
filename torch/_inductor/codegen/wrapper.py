@@ -219,7 +219,14 @@ def _constexpr_constructor_items(value: Any) -> list[tuple[str | None, Any]] | N
         pairs = cast(Callable[[], Iterable[tuple[object, object]]], repr_args)()
         items: list[tuple[str | None, Any]] = []
         for name, item in pairs:
-            if name is not None and not isinstance(name, str):
+            if name is not None and (
+                not isinstance(name, str)
+                or not name.isidentifier()
+                or keyword.iskeyword(name)
+            ):
+                # A non-identifier/keyword field name cannot be emitted as a
+                # keyword argument; decline up front instead of producing
+                # source that only fails later in _verify_constexpr_source.
                 return None
             items.append((name, item))
         return items
