@@ -46,7 +46,6 @@ from .constant import ConstantVariable
 from .dicts import ConstDictVariable
 from .hashable import HashableTracker
 from .lists import ListVariable
-from .misc import GetAttrVariable
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -108,14 +107,13 @@ class OptimizerVariable(UserDefinedObjectVariable):
         self.tensor_to_source = tensor_to_source or {}
         self.static_tensor_names = static_tensor_names or set()
 
-    def _call_init_group(
+    def _init_group(
         self,
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> "VariableTracker | None":
-        """This is an optimization to avoid tracing the very slow initialization
-        of the optimizer. Declining (None) traces _init_group normally."""
+    ) -> VariableTracker | None:
+        """This is an optimization to avoid tracing the very slow initialization of the optimizer"""
         if not hasattr(self.value, "_init_group"):
             return None
         try:
@@ -136,24 +134,16 @@ class OptimizerVariable(UserDefinedObjectVariable):
             # to the input tensors (e.g. dtype, layout). Changing these would trigger a
             # recompilation and hence never result in the wrong specialization of `ret_val`.
             return ConstantVariable.create(ret_val)
-        except (ArgMappingException, GuardInstallException) as _:
-            # trace normally if we can't map args or install guards correctly
+        except (ArgMappingException, GuardInstallException):
+            # Decline so UDOV inlines _init_group if we can't map args or
+            # install guards correctly.
             return None
 
-    tp_methods = {"_init_group": Method(_call_init_group)}
-
-    def _get_init_group(
-        self, tx: "InstructionTranslatorBase"
-    ) -> VariableTracker | None:
-        name = "_init_group"
-        if not hasattr(self.value, name):
-            return None
-        if not self.source:
-            raise AssertionError("OptimizerVariable requires a source for _init_group")
-        py_type = type(getattr(self.value, name))
-        return GetAttrVariable(
-            self, name, py_type=py_type, source=AttrSource(self.source, name)
-        )
+    # LOAD_ATTR of _init_group is bound to CallMethodVariable in UDOV so the
+    # call reaches this handler. A GetSet is not needed (and would hide the
+    # method from the type dict). Stock optimizers wrap _init_group with
+    # compiler.disable; inlining that wrapper graph-breaks.
+    tp_methods = {"_init_group": Method(_init_group)}
 
     # param_groups only runs setup side effects (static addresses, capturable
     # guards) and declines, falling through to the generic protocol.
@@ -168,7 +158,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
         return None
 
     tp_getset = {
-        "_init_group": GetSet(_get_init_group, readonly_setter),
         "param_groups": GetSet(_get_param_groups, readonly_setter),
     }
 
