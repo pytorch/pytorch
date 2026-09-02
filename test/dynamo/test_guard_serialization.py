@@ -605,8 +605,8 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # test_nonstrict_unpicklable_guard_state_failure_is_typed: an
         # unpicklable guarded value (thread lock) must raise PackageError
         # directly from the underlying "cannot pickle" TypeError, exercising
-        # the pickle-dump catch that reclassifies only genuine unserializable
-        # values (a TypeError of any other shape now surfaces as a bug).
+        # the pickle-dump catch that reclassifies any pickling failure
+        # (TypeError, PicklingError, AttributeError) as a typed PackageError.
         import threading
 
         def fn(x, lk):
@@ -859,8 +859,12 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # support that in serialization
         with self.assertRaisesRegex(
             PackageError, "CLASS_MATCH guard cannot be serialized."
-        ):
+        ) as cm:
             self._test_serialization("CLASS_MATCH", fn, x)
+        # The derived-guard-type branch must carry the typed attributes so
+        # consumers can inspect which guard failed without matching the message.
+        self.assertIsInstance(cm.exception, torch._dynamo.exc.GuardSerializationError)
+        self.assertEqual(cm.exception.guard_type, "CLASS_MATCH")
 
     def test_closure_match(self):
         def fn(x):
@@ -873,8 +877,10 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # support that in serialization
         with self.assertRaisesRegex(
             PackageError, "CLOSURE_MATCH guard cannot be serialized."
-        ):
+        ) as cm:
             self._test_serialization("CLOSURE_MATCH", fn, x)
+        self.assertIsInstance(cm.exception, torch._dynamo.exc.GuardSerializationError)
+        self.assertEqual(cm.exception.guard_type, "CLOSURE_MATCH")
 
     def test_sequence_length(self):
         # tuple input installs a SEQUENCE_LENGTH guard
@@ -1118,7 +1124,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         compiled = torch._dynamo.optimize(backend="eager", package=package)(fn)
         try:
             with self.assertRaisesRegex(
-                PackageError, "guards_state must not be None"
+                PackageError, "Failed to serialize guards"
             ) as cm:
                 compiled(*args)
             return cm.exception.__cause__
