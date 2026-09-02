@@ -3653,7 +3653,10 @@ def capture_autograd_compile_specs() -> Generator[
     try:
         yield out
     finally:
-        sinks.remove(out)
+        # Sinks holding equal contents compare equal; pop the innermost by identity.
+        popped = sinks.pop()
+        if popped is not out:
+            raise AssertionError("capture_autograd_compile_specs exited out of order")
 
 
 class AOTDispatchAutograd:
