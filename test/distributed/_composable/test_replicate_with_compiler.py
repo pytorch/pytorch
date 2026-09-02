@@ -179,6 +179,10 @@ class ReplicateTest(MultiProcessInductorTestCase):
         )
         dist.destroy_process_group()
 
+
+class ReplicateTestCPU(ReplicateTest):
+    hw_classification = HardwareClassification.GENERIC
+
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/160597")
     def test_compile_cpu(self):
         torch._inductor.config._fuse_ddp_communication_passes = [
@@ -335,6 +339,8 @@ class ReplicateTest(MultiProcessInductorTestCase):
         fc.run(code)
 
 
+
+
 class ReplicateTestGPU(ReplicateTest):
     hw_classification = HardwareClassification.CUDA
 
@@ -355,7 +361,7 @@ class ReplicateTestGPU(ReplicateTest):
     @skip_if_lt_x_gpu(2)
     def test_compile_bf16(self, device):
         major, _ = torch.cuda.get_device_capability()
-        if major < 8:
+        if major < 8 and torch.version.hip is None:
             self.skipTest("bf16 requires compute capability >= 8.0")
 
         def setup(model, compiled_replicate_model, compiled_ddp_model) -> None:
@@ -387,7 +393,7 @@ class ReplicateTestGPU(ReplicateTest):
         self._test_compile(no_sync=False, no_compile_forward=True, device=device)
 
 
-instantiate_device_type_tests(ReplicateTestGPU, globals(), only_for="cuda")
+instantiate_device_type_tests(ReplicateTestGPU, globals(), only_for="cuda", allow_xpu=True)
 
 
 class DDP_TP_Test(InductorTestCase):
