@@ -50,11 +50,15 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 % intentionally omitted from the autosummary block above.
 
 ```{eval-rst}
-.. py:function:: precompile(fn, *, backend="inductor", tracer="make_fx", decompositions=None, example_inputs, guard_filter_fn=None, recompile_limit=256, dynamic=None, invariants=None, training=False)
+.. py:function:: precompile(fn, *example_args, backend="inductor", tracer="make_fx", decompositions=None, example_inputs=None, guard_filter_fn=None, recompile_limit=None, dynamic=None, invariants=None, require_complete=True, require_no_risky_drops=True, require_no_dropped_guards=False, training=False)
 
    Ahead-of-time precompile ``fn`` against ``example_inputs``, a sequence of calls each
-   given as a tuple of positional arguments. precompile makes those calls itself and
-   returns a self-contained, runnable Python source string plus an acceleration cache as
+   given as a tuple of positional arguments. ``example_inputs`` is required -- omitting it
+   raises ``TypeError`` -- with one exception kept for compatibility: the 2.14 spelling
+   ``precompile(fn, *example_args)`` still works, means
+   ``example_inputs=[tuple(example_args)]``, and emits a ``FutureWarning``.
+   precompile makes those calls itself and
+   produces a self-contained, runnable Python source string plus an acceleration cache as
    ``(python_code, cache)``. ``tracer`` picks the capture front-end: ``"make_fx"`` (the
    default) is one non-strict ATen trace and takes exactly one call, while ``"dynamo"``
    takes as many as you give it and captures every graph-break continuation and guarded
@@ -99,7 +103,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        between them is what the artifact can discriminate on. The ``nn.Module`` arguments
        are lifted and the rest are the runtime inputs. Calls run under ordinary
        ``torch.no_grad()`` unless ``training=True``, even if the caller is in
-       ``torch.inference_mode()``; serve the resulting artifact under the same grad mode.
+       ``torch.inference_mode()``; the artifact records that mode and dispatches served
+       calls under it, whatever the caller's ambient grad mode (see ``training``).
        Inference mode is a distinct guarded state and must be captured manually if needed.
        Tensors created inside inference mode remain inference tensors after that context is
        disabled, so they are rejected; create those inputs outside inference mode.
@@ -117,12 +122,19 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        and the parameter gradients are accumulated onto the runtime model like eager).
        ``make_fx`` requires one full graph; use ``tracer="dynamo"`` when Python
        graph-breaks or when several guarded/recompiled variants must be retained.
-       Unlike ``make_fx``, the dynamo driver
-       does NOT re-validate the
-       runtime model/inputs, so on the eager backend a drifted model (broken weight tying,
-       a retyped/reshaped weight) or a broadcast-compatible input-shape mismatch can
-       silently miscompute where ``make_fx`` would raise; pass a model and inputs matching
-       the example. The dynamo artifact inlines marshalled bytecode plus a pickled state
+       The dynamo artifact carries one serialized guard tree per captured variant and
+       rebuilds them at load, so a served call is dispatched to the first variant whose
+       guards pass; when none do, a standalone artifact REFUSES the call, and an installed
+       one (``SERVING_MODE = "installed"``) compiles it at serve time and counts it in
+       ``serve_time_compiles()`` -- unless the call is made under
+       ``torch._dynamo.precompile_package.serving()``, which refuses it instead. Either
+       way a shape, dtype, device or value the examples did not exercise is never served
+       by a captured graph (the guards that pin shapes, values and branches are never
+       dropped by the invariant policy). What it
+       does not reproduce is the ``make_fx`` driver's param/buffer NAME check. The
+       dynamo artifact records the grad mode it was captured under and dispatches
+       under it, so the caller's ambient grad mode does not decide whether a call is
+       served. It inlines marshalled bytecode plus a pickled state
        blob, so it is locked to the Python version that produced it AND, because its import
        aliases can reference private ``torch._dynamo`` modules, to a compatible torch build,
        unlike ``make_fx`` source (Python-version portable on either backend; use
@@ -137,8 +149,9 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        entry. Live capture retains all guards so later examples trigger their recompiles.
        Risky dropped guards are rejected by default when saving, and every
        custom-filter drop counts as risky.
-   :param recompile_limit: Maximum multi-graph variants captured per frame; defaults to 256
-       and overrides a lower ambient accumulated-recompile limit for this capture.
+   :param recompile_limit: Maximum multi-graph variants captured per frame; ``None``
+       means 256, which overrides a lower ambient accumulated-recompile limit for this
+       capture. Applies only to ``tracer="dynamo"``.
    :param dynamic: Multi-graph dynamic-shape policy forwarded to ``torch.compile``.
    :param invariants: Optional path receiving the multi-graph invariant report.
    :returns: For positional input, ``(python_code, cache)`` -- a self-contained Python
@@ -214,6 +227,16 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 .. autoexception:: torch.compiler.PrecompileError
 
 .. autoclass:: torch.compiler.PrecompiledCallable
+   :members:
+
+.. autoclass:: torch.compiler.ExampleInput
+
+.. autoclass:: torch.compiler.PrecompileSummary
+   :members:
+
+.. autoclass:: torch.compiler.FrameInvariants
+
+.. autoclass:: torch.compiler.GuardFact
    :members:
 
 

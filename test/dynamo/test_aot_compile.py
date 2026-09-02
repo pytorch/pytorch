@@ -662,6 +662,14 @@ def wrap_forward_function(fn: Callable):
 @torch._dynamo.config.patch("enable_aot_compile", True)
 @instantiate_parametrized_tests
 class TestAOTCompile(torch._inductor.test_case.TestCase):
+    def assertNoMatchReportShape(self, message, num_candidates):
+        lines = message.splitlines()
+        self.assertEqual(len(lines), num_candidates + 2, message)
+        self.assertTrue(lines[0].startswith("No AOT compiled graph matched"), lines[0])
+        for i in range(num_candidates):
+            self.assertTrue(lines[i + 1].startswith(f"  [{i}] "), lines[i + 1])
+        self.assertTrue(lines[-1].startswith("Add a ModelInput"), lines[-1])
+
     def test_aot_compile_module_import_alias_guard_survives_reload(self):
         # Dynamo mints __import_* aliases into the TRACING process's globals and
         # roots guards at them. A process that only loads never traced, so the
@@ -742,7 +750,7 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         self.assertIn("SOME_GLOBAL", message)
         # The entry that raised must not swallow the one that can explain itself.
         self.assertIn("dtype mismatch", message)
-        self.assertEqual(len(message.splitlines()), 4)
+        self.assertNoMatchReportShape(message, num_candidates=2)
 
     def test_check_compatibility_compares_artifact_against_current_machine(self):
         # CompileArtifacts.check_compatibility must invoke the CACHED
@@ -1269,7 +1277,25 @@ from user code:
         self.assertIn("[0]", message)
         self.assertIn("[1]", message)
         # One line per input, not a multi-line GuardDebugInfo repr per input.
-        self.assertEqual(len(message.splitlines()), 4)
+        self.assertNoMatchReportShape(message, num_candidates=2)
+
+    def test_disable_guard_check_is_ignored_with_several_candidates_on_a_miss(self):
+        # With more than one result loaded, an opted-out result is not a
+        # fallback for a call none of them matched: the opt-out says nothing
+        # about which graph the call belongs to, so the miss is reported.
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="inductor")
+        model._aot_compile(
+            [
+                ModelInput(
+                    args=(torch.randn(3, 3, dtype=dtype),), kwargs={}, contexts=[]
+                )
+                for dtype in (torch.float32, torch.float64)
+            ]
+        )
+        model.forward.compiled_results[0].disable_guard_check()
+        with self.assertRaisesRegex(RuntimeError, "Tried 2 compiled input") as ctx:
+            model(torch.randn(3, 3, dtype=torch.float16))
+        self.assertNoMatchReportShape(str(ctx.exception), num_candidates=2)
 
     def test_aot_compile_module_disable_guard_check(self):
         # disable_guard_check() is the escape hatch for an artifact whose guards

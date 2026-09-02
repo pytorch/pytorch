@@ -66,8 +66,6 @@ class CompileArtifacts:
 
     @property
     def emits_native_code(self) -> bool:
-        from torch._dynamo.package import emits_native_code
-
         return emits_native_code(self.backend_name)
 
     def check_compatibility(self) -> None:
@@ -224,7 +222,9 @@ class AOTCompiledFunction:
     # Scope used ONLY to resolve guards, kept separate from _extra_globals so
     # that supplying it cannot rewire what the compiled bytecode reads. It is
     # held by reference, not copied, so guards track the loading process's
-    # globals as they change.
+    # globals as they change. Loading writes Dynamo's synthetic __import_*
+    # aliases into this dict (only the names it does not already have) and
+    # leaves them there, exactly as tracing does to the capturing process.
     _guard_globals: dict[str, object] | None = None
 
     def prepare_f_locals(self, *args: object, **kwargs: object) -> dict[str, object]:
@@ -278,15 +278,16 @@ class AOTCompiledFunction:
                 # child nn.Module call guards its hook dicts through
                 # G['__import_torch_dot_nn_dot_modules_dot_module']. A process
                 # that only LOADS never traced, so its module dict has none and
-                # the guard KeyErrors on every call. setdefault, so only the
-                # synthetic names are added: a real global the loading process
-                # already has keeps its live value, which is the point of using
-                # the live scope at all.
+                # the guard KeyErrors on every call. Only absent names are
+                # added, and nothing is imported for a name already bound: a
+                # real global the loading process already has keeps its live
+                # value, which is the point of using the live scope at all.
                 for (
                     alias,
                     module_name,
                 ) in self._artifacts.runtime_env.import_sources.items():
-                    guard_scope.setdefault(alias, importlib.import_module(module_name))
+                    if alias not in guard_scope:
+                        guard_scope[alias] = importlib.import_module(module_name)
             self._artifacts.guard_manager = load_guard_manager(
                 guards_state,
                 self._artifacts.original_code,
@@ -584,24 +585,31 @@ class AOTCompiledModel:
             f"No AOT compiled graph matched this call. Tried "
             f"{len(self.compiled_results)} compiled input(s):"
         ]
+        # One line per entry, so the report's shape is fixed: a header, one
+        # line per candidate, a footer. Every interpolated piece is flattened
+        # because guard code parts and exception messages can span lines.
         for i, result in enumerate(self.compiled_results):
-            guard_manager = result._artifacts.guard_manager
-            if guard_manager is None:
-                lines.append(f"  [{i}] <guards unavailable>")
-                continue
             # A guard that raises while being re-evaluated for this report must
             # not replace the report. The call did not match, and that -- along
             # with every other entry's reason -- is what the caller has to hear.
+            guard_manager = result._artifacts.guard_manager
+            if guard_manager is None:
+                raise AssertionError("guard_manager must not be None")
             try:
                 f_locals = result.prepare_f_locals(self.model, *args, **kwargs)
                 reason = guard_manager.check_verbose(f_locals)
             except Exception as e:
-                lines.append(f"  [{i}] <guard check raised {type(e).__name__}: {e}>")
+                detail = " ".join(str(e).splitlines())
+                lines.append(
+                    f"  [{i}] <guard check raised {type(e).__name__}: {detail}>"
+                )
                 continue
             # Report just the failing guard: GuardDebugInfo's repr is multi-line
             # and would break the per-entry layout into an unreadable blob.
-            parts = getattr(reason, "verbose_code_parts", None) or [str(reason)]
-            lines.append(f"  [{i}] {'; '.join(str(p) for p in parts)}")
+            parts = reason.verbose_code_parts or [str(reason)]
+            lines.append(
+                f"  [{i}] {'; '.join(' '.join(str(p).splitlines()) for p in parts)}"
+            )
         lines.append(
             "Add a ModelInput covering this call, or check whether a guard that "
             "distinguishes it was dropped by guard_filter_fn."
