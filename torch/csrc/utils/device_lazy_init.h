@@ -36,7 +36,9 @@ inline bool is_device_lazy_init_supported(at::DeviceType device_type) {
       device_type == at::DeviceType::XPU ||
       device_type == at::DeviceType::HPU ||
       device_type == at::DeviceType::MTIA ||
-      device_type == at::DeviceType::PrivateUse1);
+      device_type == at::DeviceType::PrivateUse1 ||
+      device_type == at::DeviceType::PrivateUse2 ||
+      device_type == at::DeviceType::PrivateUse3);
 }
 
 inline void maybe_initialize_device(at::Device& device) {

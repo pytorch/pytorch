@@ -45,7 +45,9 @@ void device_lazy_init(at::DeviceType device_type) {
   auto module = THPObjectPtr(PyImport_ImportModule(module_name.c_str()));
   TORCH_CHECK_PYTHON(module);
 
-  if (device_type == at::DeviceType::PrivateUse1) {
+  if (device_type == at::DeviceType::PrivateUse1 ||
+      device_type == at::DeviceType::PrivateUse2 ||
+      device_type == at::DeviceType::PrivateUse3) {
     auto has_lazy_init_method =
         PyObject_HasAttrString(module.get(), "_lazy_init") == 1;
     if (!has_lazy_init_method) {

@@ -2,8 +2,10 @@
 #include <c10/core/DispatchKeySet.h>
 
 #include <algorithm>
+#include <array>
 #include <regex>
 #include <unordered_map>
+#include <utility>
 
 namespace c10 {
 
@@ -339,6 +341,8 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"NestedTensorHPU", c10::DispatchKey::NestedTensorHPU},
       {"NestedTensorMeta", c10::DispatchKey::NestedTensorMeta},
       {"NestedTensorPrivateUse1", c10::DispatchKey::NestedTensorPrivateUse1},
+      {"NestedTensorPrivateUse2", c10::DispatchKey::NestedTensorPrivateUse2},
+      {"NestedTensorPrivateUse3", c10::DispatchKey::NestedTensorPrivateUse3},
       {"PrivateUse1", c10::DispatchKey::PrivateUse1},
       {"PrivateUse2", c10::DispatchKey::PrivateUse2},
       {"PrivateUse3", c10::DispatchKey::PrivateUse3},
@@ -347,6 +351,8 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"QuantizedCUDA", c10::DispatchKey::QuantizedCUDA},
       {"QuantizedXPU", c10::DispatchKey::QuantizedXPU},
       {"QuantizedPrivateUse1", c10::DispatchKey::QuantizedPrivateUse1},
+      {"QuantizedPrivateUse2", c10::DispatchKey::QuantizedPrivateUse2},
+      {"QuantizedPrivateUse3", c10::DispatchKey::QuantizedPrivateUse3},
 
       {"SparseCPU", c10::DispatchKey::SparseCPU},
       {"SparseCUDA", c10::DispatchKey::SparseCUDA},
@@ -357,6 +363,8 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"SparseVE", c10::DispatchKey::SparseVE},
       {"SparseMeta", c10::DispatchKey::SparseMeta},
       {"SparsePrivateUse1", c10::DispatchKey::SparsePrivateUse1},
+      {"SparsePrivateUse2", c10::DispatchKey::SparsePrivateUse2},
+      {"SparsePrivateUse3", c10::DispatchKey::SparsePrivateUse3},
 
       {"SparseCsrCPU", c10::DispatchKey::SparseCsrCPU},
       {"SparseCsrCUDA", c10::DispatchKey::SparseCsrCUDA},
@@ -365,6 +373,8 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"SparseCsrVE", c10::DispatchKey::SparseCsrVE},
       {"SparseCsrMeta", c10::DispatchKey::SparseCsrMeta},
       {"SparseCsrPrivateUse1", c10::DispatchKey::SparseCsrPrivateUse1},
+      {"SparseCsrPrivateUse2", c10::DispatchKey::SparseCsrPrivateUse2},
+      {"SparseCsrPrivateUse3", c10::DispatchKey::SparseCsrPrivateUse3},
 
       {"AutogradCPU", c10::DispatchKey::AutogradCPU},
       {"AutogradCUDA", c10::DispatchKey::AutogradCUDA},
@@ -392,13 +402,24 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
        c10::DispatchKey::FuncTorchBatchedDecomposition},
   };
   auto it = key_map.find(k);
-  if (it == key_map.end() && c10::get_privateuse1_backend() != "PrivateUse1") {
-    std::string pu1_backend_name = c10::get_privateuse1_backend();
-    std::ranges::transform(
-        pu1_backend_name, pu1_backend_name.begin(), ::toupper);
-    std::string processed_k =
-        std::regex_replace(k, std::regex(pu1_backend_name), "PrivateUse1");
-    it = key_map.find(processed_k);
+  if (it == key_map.end()) {
+    static constexpr std::array<std::pair<DeviceType, const char*>, 3>
+        privateuse_keys = {{
+            {DeviceType::PrivateUse1, "PrivateUse1"},
+            {DeviceType::PrivateUse2, "PrivateUse2"},
+            {DeviceType::PrivateUse3, "PrivateUse3"},
+        }};
+    for (const auto& privateuse_key : privateuse_keys) {
+      std::string backend_name = c10::get_privateuse_backend(
+          privateuse_key.first, /*lower_case=*/true);
+      std::ranges::transform(backend_name, backend_name.begin(), ::toupper);
+      std::string processed_k = std::regex_replace(
+          k, std::regex(backend_name), privateuse_key.second);
+      it = key_map.find(processed_k);
+      if (it != key_map.end()) {
+        break;
+      }
+    }
   }
   TORCH_CHECK(it != key_map.end(), "could not parse dispatch key: ", k);
   return it->second;
