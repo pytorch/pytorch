@@ -915,24 +915,6 @@ class TestVarlenAttention(_VarlenVsSdpaMixin, NNTestCase):
         )
 
     @skipIfRocm
-    @setSdpaBackendsToDefaultFinally
-    @parametrize("dtype", [torch.bfloat16, torch.float16])
-    @parametrize("window_size", [(-1, -1), (-1, 0), [-1, 0]])
-    @parametrize("_should_use_cudnn", [True])
-    def test_cudnn_attention_varlen(
-        self, device, dtype, window_size, _should_use_cudnn
-    ):
-        self._test_varlen_vs_sdpa(
-            device,
-            dtype,
-            scale=None,
-            window_size=window_size,
-            backend="fa2",
-            enable_gqa=False,
-            _should_use_cudnn=_should_use_cudnn,
-        )
-
-    @skipIfRocm
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
@@ -1317,146 +1299,6 @@ class TestVarlenAttention(_VarlenVsSdpaMixin, NNTestCase):
         # The real output matches the query's layout, like Flash and the fake.
         self.assertEqual(eager.stride(), q.stride())
         self.assertEqual(compiled, eager)
-
-    @skipIfRocm
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
-    )
-    @parametrize("dtype", [torch.bfloat16, torch.float16])
-    @parametrize("compile", [False, True])
-    def test_sdpa_kernel_backend_selection(self, device, dtype, compile):
-        """Honor forced backends and preserve the forward choice for backward."""
-        torch.manual_seed(42)
-        seq_len = 256
-        num_heads, head_dim = 4, 64
-        cu_seq = torch.tensor([0, seq_len], device=device, dtype=torch.int32)
-        tensors = [
-            torch.randn(seq_len, num_heads, head_dim, device=device, dtype=dtype)
-            for _ in range(3)
-        ]
-        grad_out = torch.randn_like(tensors[0])
-        _check_cudnn_varlen_supported(device)
-
-        for backend, backward_backend in (
-            (SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION),
-            (SDPBackend.CUDNN_ATTENTION, SDPBackend.FLASH_ATTENTION),
-        ):
-            with (
-                patch.object(
-                    torch.ops.aten,
-                    "_cudnn_attention_forward",
-                    wraps=torch.ops.aten._cudnn_attention_forward,
-                ) as cudnn_forward,
-                patch.object(
-                    torch.ops.aten,
-                    "_cudnn_attention_backward",
-                    wraps=torch.ops.aten._cudnn_attention_backward,
-                ) as cudnn_backward,
-            ):
-                q, k, v = [
-                    tensor.detach().clone().requires_grad_() for tensor in tensors
-                ]
-                if compile:
-                    # SDP enablement is captured when the graph is traced.
-                    torch._dynamo.reset()
-                attn = (
-                    torch.compile(varlen_attn, backend="eager", fullgraph=True)
-                    if compile
-                    else varlen_attn
-                )
-                with sdpa_kernel(backend):
-                    out = attn(
-                        q,
-                        k,
-                        v,
-                        cu_seq,
-                        cu_seq,
-                        seq_len,
-                        seq_len,
-                        window_size=(-1, 0),
-                    )
-                with sdpa_kernel(backward_backend):
-                    torch.autograd.grad(out, (q, k, v), grad_out)
-                expected_calls = int(backend == SDPBackend.CUDNN_ATTENTION)
-                self.assertEqual(cudnn_forward.call_count, expected_calls)
-                self.assertEqual(cudnn_backward.call_count, expected_calls)
-
-    @parametrize("compile", [False, True])
-    def test_sdpa_kernel_backend_priority(self, device, compile):
-        q, k, v, cu_seq = _make_causal_varlen_inputs(device)
-        args = (q, k, v, cu_seq, cu_seq, q.size(0), [-1, 0])
-
-        with patch.object(varlen_attention, "_should_use_cudnn", return_value=True):
-            for backend_order in (
-                [SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION],
-                [SDPBackend.CUDNN_ATTENTION, SDPBackend.FLASH_ATTENTION],
-            ):
-                with sdpa_kernel(backend_order, set_priority=True):
-                    if compile:
-                        torch._dynamo.reset()
-                        get_priority = torch.compile(
-                            lambda x: x + varlen_attention._get_sdp_priority_order()[0],
-                            backend="eager",
-                            fullgraph=True,
-                        )
-                        priority = get_priority(torch.zeros((), device=device)).item()
-                        self.assertEqual(priority, backend_order[0].value)
-                    backend = varlen_attention._select_backend(*args)
-                self.assertEqual(backend, backend_order[0].value)
-            self.assertEqual(
-                varlen_attention._select_backend(*args),
-                SDPBackend.CUDNN_ATTENTION.value,
-            )
-
-    @skipIfRocm
-    def test_cudnn_backend_constraint_errors(self, device):
-        """Name the cuDNN constraints that rejected a forced cuDNN selection."""
-        # Backend selection happens before dispatch, so this needs no cuDNN.
-        seq_len = 256
-        q = torch.randn(seq_len, 4, 64, device=device, dtype=torch.bfloat16)
-        k = torch.randn_like(q)
-        v = torch.randn_like(q)
-        cu_seq = torch.tensor([0, seq_len], device=device, dtype=torch.int32)
-
-        short_seq = torch.tensor([0, 128], device=device, dtype=torch.int32)
-        with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
-            with self.assertRaises(RuntimeError) as error:
-                varlen_attn(
-                    q[:128],
-                    k[:128],
-                    v[:128],
-                    short_seq,
-                    short_seq,
-                    128,
-                    128,
-                    num_splits=1,
-                )
-        self.assertIn("max_q must", str(error.exception))
-        self.assertIn("num_splits", str(error.exception))
-
-        with (
-            sdpa_kernel(SDPBackend.CUDNN_ATTENTION),
-            self.assertRaisesRegex(RuntimeError, "same cu_seq tensor"),
-        ):
-            varlen_attn(
-                q,
-                k,
-                v,
-                cu_seq,
-                cu_seq.clone(),
-                seq_len,
-                seq_len,
-                window_size=(-1, 0),
-            )
-
-        # cuDNN is a valid varlen_attn backend, but varlen_attn_out is flash-only.
-        with (
-            sdpa_kernel(SDPBackend.CUDNN_ATTENTION),
-            self.assertRaisesRegex(RuntimeError, "only supports.*FLASH_ATTENTION"),
-        ):
-            varlen_attn_out(
-                torch.empty_like(q), q, k, v, cu_seq, cu_seq, seq_len, seq_len
-            )
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179968")
     @unittest.skipIf(
@@ -2384,8 +2226,173 @@ class TestVarlenAttention(_VarlenVsSdpaMixin, NNTestCase):
             self.assertEqual(out_buf, out)
 
 
+class TestVarlenAttentionCuDNN(_VarlenVsSdpaMixin, NNTestCase):
+    # cuDNN is the only varlen backend with dedicated aten ops
+    # (_cudnn_attention_forward/_backward) and it is only ever selected for a
+    # CUDA query, so these tests cannot be shared with other backends.
+
+    @skipIfRocm
+    @setSdpaBackendsToDefaultFinally
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize("window_size", [(-1, -1), (-1, 0), [-1, 0]])
+    @parametrize("_should_use_cudnn", [True])
+    def test_cudnn_attention_varlen(
+        self, device, dtype, window_size, _should_use_cudnn
+    ):
+        self._test_varlen_vs_sdpa(
+            device,
+            dtype,
+            scale=None,
+            window_size=window_size,
+            backend="fa2",
+            enable_gqa=False,
+            _should_use_cudnn=_should_use_cudnn,
+        )
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize("compile", [False, True])
+    def test_sdpa_kernel_backend_selection(self, device, dtype, compile):
+        """Honor forced backends and preserve the forward choice for backward."""
+        torch.manual_seed(42)
+        seq_len = 256
+        num_heads, head_dim = 4, 64
+        cu_seq = torch.tensor([0, seq_len], device=device, dtype=torch.int32)
+        tensors = [
+            torch.randn(seq_len, num_heads, head_dim, device=device, dtype=dtype)
+            for _ in range(3)
+        ]
+        grad_out = torch.randn_like(tensors[0])
+        _check_cudnn_varlen_supported(device)
+
+        for backend, backward_backend in (
+            (SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION),
+            (SDPBackend.CUDNN_ATTENTION, SDPBackend.FLASH_ATTENTION),
+        ):
+            with (
+                patch.object(
+                    torch.ops.aten,
+                    "_cudnn_attention_forward",
+                    wraps=torch.ops.aten._cudnn_attention_forward,
+                ) as cudnn_forward,
+                patch.object(
+                    torch.ops.aten,
+                    "_cudnn_attention_backward",
+                    wraps=torch.ops.aten._cudnn_attention_backward,
+                ) as cudnn_backward,
+            ):
+                q, k, v = [
+                    tensor.detach().clone().requires_grad_() for tensor in tensors
+                ]
+                if compile:
+                    # SDP enablement is captured when the graph is traced.
+                    torch._dynamo.reset()
+                attn = (
+                    torch.compile(varlen_attn, backend="eager", fullgraph=True)
+                    if compile
+                    else varlen_attn
+                )
+                with sdpa_kernel(backend):
+                    out = attn(
+                        q,
+                        k,
+                        v,
+                        cu_seq,
+                        cu_seq,
+                        seq_len,
+                        seq_len,
+                        window_size=(-1, 0),
+                    )
+                with sdpa_kernel(backward_backend):
+                    torch.autograd.grad(out, (q, k, v), grad_out)
+                expected_calls = int(backend == SDPBackend.CUDNN_ATTENTION)
+                self.assertEqual(cudnn_forward.call_count, expected_calls)
+                self.assertEqual(cudnn_backward.call_count, expected_calls)
+
+    @parametrize("compile", [False, True])
+    def test_sdpa_kernel_backend_priority(self, device, compile):
+        q, k, v, cu_seq = _make_causal_varlen_inputs(device)
+        args = (q, k, v, cu_seq, cu_seq, q.size(0), [-1, 0])
+
+        with patch.object(varlen_attention, "_should_use_cudnn", return_value=True):
+            for backend_order in (
+                [SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION],
+                [SDPBackend.CUDNN_ATTENTION, SDPBackend.FLASH_ATTENTION],
+            ):
+                with sdpa_kernel(backend_order, set_priority=True):
+                    if compile:
+                        torch._dynamo.reset()
+                        get_priority = torch.compile(
+                            lambda x: x + varlen_attention._get_sdp_priority_order()[0],
+                            backend="eager",
+                            fullgraph=True,
+                        )
+                        priority = get_priority(torch.zeros((), device=device)).item()
+                        self.assertEqual(priority, backend_order[0].value)
+                    backend = varlen_attention._select_backend(*args)
+                self.assertEqual(backend, backend_order[0].value)
+            self.assertEqual(
+                varlen_attention._select_backend(*args),
+                SDPBackend.CUDNN_ATTENTION.value,
+            )
+
+    @skipIfRocm
+    def test_cudnn_backend_constraint_errors(self, device):
+        """Name the cuDNN constraints that rejected a forced cuDNN selection."""
+        # Backend selection happens before dispatch, so this needs no cuDNN.
+        seq_len = 256
+        q = torch.randn(seq_len, 4, 64, device=device, dtype=torch.bfloat16)
+        k = torch.randn_like(q)
+        v = torch.randn_like(q)
+        cu_seq = torch.tensor([0, seq_len], device=device, dtype=torch.int32)
+
+        short_seq = torch.tensor([0, 128], device=device, dtype=torch.int32)
+        with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+            with self.assertRaises(RuntimeError) as error:
+                varlen_attn(
+                    q[:128],
+                    k[:128],
+                    v[:128],
+                    short_seq,
+                    short_seq,
+                    128,
+                    128,
+                    num_splits=1,
+                )
+        self.assertIn("max_q must", str(error.exception))
+        self.assertIn("num_splits", str(error.exception))
+
+        with (
+            sdpa_kernel(SDPBackend.CUDNN_ATTENTION),
+            self.assertRaisesRegex(RuntimeError, "same cu_seq tensor"),
+        ):
+            varlen_attn(
+                q,
+                k,
+                v,
+                cu_seq,
+                cu_seq.clone(),
+                seq_len,
+                seq_len,
+                window_size=(-1, 0),
+            )
+
+        # cuDNN is a valid varlen_attn backend, but varlen_attn_out is flash-only.
+        with (
+            sdpa_kernel(SDPBackend.CUDNN_ATTENTION),
+            self.assertRaisesRegex(RuntimeError, "only supports.*FLASH_ATTENTION"),
+        ):
+            varlen_attn_out(
+                torch.empty_like(q), q, k, v, cu_seq, cu_seq, seq_len, seq_len
+            )
+
+
 instantiate_device_type_tests(TestVarlenAttentionDevice, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestVarlenAttention, globals(), only_for=("cuda",))
+instantiate_device_type_tests(TestVarlenAttentionCuDNN, globals(), only_for=("cuda",))
 
 if __name__ == "__main__":
     run_tests()
