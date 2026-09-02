@@ -3178,32 +3178,56 @@ def compile_fx_backward(
 
         fixed = count_tangents(gm)
 
-        if compiler_config_extra.has_regional_cudagraphs:
-            # Keep a forward-only regional opt-in from changing the backward.
-            # Backward-region handling derives its own decision separately.
-            cudagraphs = (
+        if not compiler_config_extra.has_regional_cudagraphs:
+            # Preserve the legacy override_cudagraphs behavior unchanged.
+            backward_cudagraphs = compiler_config_extra.forward_cudagraphs
+            if compiler_config_extra.cudagraphs_bwd_override is not None:
+                backward_cudagraphs = BoxedBool(
+                    compiler_config_extra.cudagraphs_bwd_override
+                )
+            backward_region_preference_differs = False
+        else:
+            # A forward-region opt-in may have changed the graph-local box from
+            # False to True. Start the backward from the top-level decision, then
+            # derive its decision independently from its own regions.
+            backward_cudagraphs = (
                 compiler_config_extra.forward_cudagraphs
                 if compiler_config_extra.top_level_cudagraphs
                 else BoxedBool(False)
             )
-        else:
-            # Preserve the legacy override_cudagraphs behavior unchanged.
-            cudagraphs = compiler_config_extra.forward_cudagraphs
-            if compiler_config_extra.cudagraphs_bwd_override is not None:
-                cudagraphs = BoxedBool(compiler_config_extra.cudagraphs_bwd_override)
+            backward_top_level_cudagraphs = backward_cudagraphs.value
+            if not backward_cudagraphs.value and _any_subgraph_enables_cudagraphs(gm):
+                backward_cudagraphs = BoxedBool(True)
+            backward_region_preference_differs = (
+                _any_subgraph_cudagraphs_preference_differs(
+                    gm, backward_top_level_cudagraphs
+                )
+            )
+        enable_backward_region_graph_partition = (
+            not config.graph_partition and backward_region_preference_differs
+        )
+        backward_region_graph_partition_context = (
+            config.patch("graph_partition", True)
+            if enable_backward_region_graph_partition
+            else contextlib.nullcontext()
+        )
 
         # Static backward inputs (see Note: [static_input_idxs semantics])
         # are the saved tensors, minus two over-approximations of the
         # name-based classification:
-        # 1. When the forward was partitioned, saved activations from inline
-        #    code between partitions are NOT at fixed addresses; keep only
+        # 1. When the forward has inline work around partitions, or the backward
+        #    uses region-only partitioning, saved activations may come from
+        #    uncaptured forward code and are NOT at fixed addresses; keep only
         #    "primals_*" (get_static_bw_input_idxs).
         # 2. A saved-for-backward plain user input is a "primals_*" but gets
         #    a fresh tensor every call; the partitioner stamps
         #    meta["is_static_input"] to demote it to the runtime
         #    copy_if_misaligned treatment. Unstamped placeholders default to
         #    static, preserving the name-based classification.
-        if compiler_config_extra.forward_is_cudagraph_partitioned.value:
+        if (
+            compiler_config_extra.forward_is_cudagraph_partitioned.value
+            or backward_region_preference_differs
+        ):
             candidate_idxs: Sequence[int] = get_static_bw_input_idxs(gm)
         else:
             candidate_idxs = range(fixed)
@@ -3220,21 +3244,22 @@ def compile_fx_backward(
                 else contextlib.nullcontext()
             ),
             _cudagraph_config_patch_context(
-                cudagraphs,
+                backward_cudagraphs,
                 top_level_cudagraphs=compiler_config_extra.top_level_cudagraphs,
             ),
+            backward_region_graph_partition_context,
         ):
             return inner_compile(
                 gm,
                 example_inputs,
                 static_input_idxs=static_input_idxs,
-                cudagraphs=cudagraphs,
+                cudagraphs=backward_cudagraphs,
                 is_backward=True,
                 graph_id=compiler_config_extra.graph_id,
                 boxed_forward_device_index=compiler_config_extra.forward_device_index,
                 **_cudagraph_compile_kwargs(
                     region_aware=compiler_config_extra.has_regional_cudagraphs,
-                    partition_only_regions=False,
+                    partition_only_regions=enable_backward_region_graph_partition,
                 ),
             )
 
