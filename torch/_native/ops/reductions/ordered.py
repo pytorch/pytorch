@@ -1,14 +1,8 @@
 # The ORDERED sum/prod kernels, in the shape the inner-tree override expects:
-# `into(out_1d, in_2d)`, writing rows of a canonical (M, N) input into a 1-D output.
-#
-# Eligibility, the (M, N) canonicalisation, keepdim and the out= variants are NOT redone here:
-# cutedsl_impl owns them and this module only chooses the kernel. That is deliberate -- reusing
-# that logic makes this a drop-in kernel swap, so exactly the same calls are served, with the
-# same bit pattern, and nothing about the override's contract moves.
-#
-# The bit pattern is the point, so it is asserted, not assumed: the order reproduces the
-# reference kernel's add DAG exactly (test_inner_tree_order pins 112 golden hashes across 14
-# shapes x 4 dtypes x sum/prod, and the reference's own suite runs unchanged against this).
+# `into(out_1d, in_2d)`, writing rows of a canonical (M, N) input into a 1-D output. Eligibility,
+# canonicalisation, keepdim and out= stay in cutedsl_impl, which makes this a drop-in kernel swap.
+# The bit pattern is asserted, not assumed: test_inner_tree_order pins 112 golden hashes against the
+# reference kernel's add DAG.
 #
 # MEASURED on B200, fp32 sum over the last dim at a fixed 256 MiB footprint (device us):
 #
@@ -37,15 +31,13 @@ def _acc(dtype):
 
 
 def _layout_ok(out, src):
-    # This order's wrap declares a COMPACT (M, N) input and a unit-stride output. A gapped outer
-    # stride (a sliced input) or a strided output (a keepdim out= view) is still eligible for the
-    # override, so those keep the reference kernel: same order, same bits, no coverage change.
+    # This order's wrap declares a COMPACT (M, N) input and a unit-stride output, so a gapped outer
+    # stride or a strided output keeps the reference kernel: same order, same bits.
     #
-    # ALIGNMENT is NOT gated here. A compact input at a non-zero storage offset (`buf[1:].view(M,
-    # N)`) has fine strides and a base pointer that meets less than the wrap would like to declare;
-    # `_run_itree` declares what the pointer actually meets and drops to the unstaged form of the
-    # same plan where the staged one needs more. Both are bit-neutral, so those calls stay on the
-    # order instead of falling back -- which matters because the reference kernel is meant to go.
+    # ALIGNMENT is NOT gated. A compact input at a non-zero storage offset has fine strides but a
+    # base pointer meeting less than the wrap would declare; `_run_itree` declares what it actually
+    # meets and drops to the unstaged form of the same plan, both bit-neutral, so the call stays on
+    # the order rather than falling back.
     return src.stride(0) == src.shape[1] and out.stride(0) == 1
 
 

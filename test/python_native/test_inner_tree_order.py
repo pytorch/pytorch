@@ -37,21 +37,14 @@ def _order_on():
             os.environ[rt._INNER_TREE_ENV] = prev
 
 
-# GOLDEN BIT PATTERNS, pinned so the bitwise contract outlives its reference. The reference is
-# `ops/reductions/inner_tree_kernel.py`. There is no ATen kernel to regenerate against: upstream
-# wrote one (#182986, June 2026) and pinned 54 hashes from it, but that iteration never landed --
-# what landed two months later is the DSL port, carrying 36 of those hashes unchanged into
-# test_sum_cutedsl.py::test_bitwise. Those 36 are the tie back to ATen, for VALUES only: they were
-# generated from exactly-representable data, so they cannot detect a reordering, and upstream's
-# order-sensitive cross-warp hash was generated from the port rather than from ATen. This table
-# exists because the port is a live fallback today but is meant to be deleted once gapped/strided
-# inputs are served natively, and a differential test cannot outlive it.
+# GOLDEN BIT PATTERNS, pinned so the bitwise contract outlives its reference,
+# `ops/reductions/inner_tree_kernel.py` -- which is a live fallback today but is meant to be deleted,
+# and a differential test cannot outlive it. There is no ATen kernel to regenerate against.
 #
-# Hardware-independent by construction -- the DAG is fixed by N alone and IEEE add/multiply are
-# exact -- so these travel across GPUs and toolkits. A hash that changes means the ORDER changed,
-# for every entry test_golden_input_can_detect_a_reorder covers; the narrow dtypes are value
-# checks only, for the reason given there. Regenerate against the reference kernel, never against
-# an unverified change to our own fold.
+# Hardware-independent by construction (the DAG is fixed by N alone and IEEE add/multiply are exact),
+# so these travel across GPUs. A changed hash means the ORDER changed, for every entry
+# test_golden_input_can_detect_a_reorder covers; the narrow dtypes are value checks only. Regenerate
+# against the reference kernel, never against an unverified change to our own fold.
 _GOLDEN = {
     # --- sum ---
     ("sum", "float16", 8, 4): "7069267eff54930e",  # multirow
@@ -171,22 +164,11 @@ _GOLDEN = {
 
 
 def _golden_input(m, n, dtype, prod):
-    """The input the table was generated from, reproduced exactly.
-
-    The values have to ROUND, or the table pins nothing about the order: an earlier version used
-    alternating +-1 with a per-row shift of (row % 5 - 2)/4 -- every value a multiple of 0.25 and
-    every partial sum under 1.5n, hence EXACT in the fp32 accumulator, so reassociation could not
-    move a bit and both fold orders hashed identically at every shape.
-
-    They also have to be APERIODIC over the largest row here. Fractions over two small moduli sum
-    to zero across each period, so with 29 and 7 alone the result depends only on n mod 203, and
-    1024 and 40000 -- one looped, one split -- hash identically. Hence the third modulus: lcm(29,
-    7, 4093) = 830879 exceeds the largest m*n (786432), so no row completes a period.
-
-    A low-discrepancy sequence is the wrong fix, incidentally: `(v * phi) % 1` keeps partial sums
-    near zero AND leaves only ~33 mantissa bits, so an fp64 sum of it is exact and both orders
-    agree bit for bit. Ratios of primes have full-length binary expansions, which is the property
-    that matters. All deterministic and RNG-free, so the table reproduces anywhere.
+    """The input the table was generated from, reproduced exactly. Three requirements, each load-
+    bearing: the values must ROUND (or reassociation cannot move a bit and the table pins nothing
+    about the order), they must be APERIODIC over the largest row (lcm of the moduli, 830879, exceeds
+    the largest m*n), and they must be RNG-free so the table reproduces anywhere. Ratios of primes
+    give the full-length binary expansions the first requirement needs.
     """
     v = torch.arange(m * n, device="cuda", dtype=torch.float64).reshape(m, n)
     vals = ((v % 29) - 14) / 29 + ((v % 7) - 3) / 13 + ((v % 4093) - 2046) / 4093 / 4
@@ -459,17 +441,12 @@ class TestInnerTreeOrder(TestCase):
         )
 
     def test_golden_input_can_detect_a_reorder(self):
-        # The table is worth nothing if its input cannot tell two orders apart, and the first
-        # version of it could not: values were multiples of 0.25 with partial sums under 1.5n,
-        # hence EXACT in the accumulator, so all 56 sum entries hashed identically under the
-        # launch-shape fold and would have passed with the wrong DAG. Assert the discriminating
-        # power rather than trusting the generator, one shape per plan shape.
+        # The table is worth nothing if its input cannot tell two orders apart, so assert the
+        # discriminating power rather than trusting the generator, one shape per plan shape.
         #
-        # fp32/fp64 only, and N > 4. A narrowing store cannot carry an fp32-accumulator difference
-        # (~1e-7 relative) into 8 or 11 mantissa bits, so the fp16/bf16 entries are value checks at
-        # any input -- consistent with those dtypes sitting outside the bitwise contract (see
-        # cutedsl_impl's dtype note). At N=4 one thread owns the whole row, so there is no
-        # reassociation to detect. Both exclusions are structural, not properties of this data.
+        # fp32/fp64 only, and N > 4, both structurally: a narrowing store cannot carry an
+        # fp32-accumulator difference into 8 or 11 mantissa bits, and at N=4 one thread owns the
+        # whole row, so there is no reassociation to detect.
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
@@ -501,12 +478,9 @@ class TestInnerTreeOrder(TestCase):
                         )
 
     def test_the_gate_routes_the_dispatcher_through_the_order(self):
-        # What the gate is FOR, asserted through the dispatcher rather than the fold. Two arms had
-        # to be fixed to make this hold, and neither is visible in the numbers because both wrong
-        # paths compute a correct reduction: a narrow row used to arrive with an explicit tpr (which
-        # makes reduce_row_tile decline the order), and a split-shape row used to fall through to
-        # kernel_xcta, whose TileReduce never consults the gate. MEASURED as differing bits at
-        # (524288, 16) and (64, 100000) respectively before those fixes.
+        # What the gate is FOR, asserted through the DISPATCHER rather than the fold. Neither failure
+        # mode this guards is visible in the numbers, because both wrong paths compute a correct
+        # reduction -- only the bits differ.
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
@@ -592,14 +566,10 @@ class TestInnerTreeOrder(TestCase):
     def test_tree_fold_matches_the_serial_fold_for_every_value_trait(self):
         # THE LAW the trait protocol has to satisfy, and the reason `leaf` exists:
         #     combine(leaf(a), leaf(b)) == reduce(reduce(init(), a), b)
-        # The default fold walks a row SERIALLY through `reduce`; this order folds it as a TREE
-        # through `leaf` + `combine`. A trait carrying its per-element transform only in `reduce`
-        # therefore folds RAW values under the tree and returns a plausible WRONG number -- which
-        # is exactly what norm/all/any/count_nonzero did before `leaf` existed, and what a
-        # protocol test that only checks which methods exist cannot see.
-        #
-        # Run both shapes over one input and compare. Not bitwise: the two DAGs associate
-        # differently on purpose, so a tolerance is the correct comparison here.
+        # A trait carrying its per-element transform only in `reduce` folds RAW values under a tree
+        # order and returns a plausible WRONG number, which a protocol test checking only which
+        # methods exist cannot see. Compared with a tolerance, since the two DAGs associate
+        # differently on purpose.
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
