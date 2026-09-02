@@ -1498,7 +1498,7 @@ class TritonOverrides(OpOverrides):
         if (
             x_dtype == torch.float32
             and y_dtype == torch.float32
-            and config.eager_numerics.division_rounding
+            and config.use_eager_division_rounding()
         ):
             # x / y in Triton is lowered to div.full which is approx
             # we want div_rn to adhere with eager
@@ -2336,7 +2336,7 @@ class TritonOverrides(OpOverrides):
     @maybe_upcast_float32()
     # pyrefly: ignore [bad-override]
     def log(x):
-        if config.eager_numerics.use_pytorch_libdevice:
+        if config.use_pytorch_libdevice():
             # Strict numerics should use the backend math library entry point.
             # On ROCm this maps to OCML and avoids Triton's generic log lowering.
             return f"libdevice.log({x})"
@@ -7184,9 +7184,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     @classmethod
     def triton_meta_common(cls) -> TritonMeta:
         return {
-            "enable_fp_fusion": not config.emulate_precision_casts,
+            "enable_fp_fusion": not config.should_emulate_precision_casts(),
             "launch_pdl": cls._enable_pdl_codegen(),
-            "disable_ftz": config.eager_numerics.disable_ftz,
+            "disable_ftz": config.should_disable_ftz(),
         }
 
     @classmethod

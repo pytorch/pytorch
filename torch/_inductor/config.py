@@ -1073,11 +1073,36 @@ deterministic = os.getenv("TORCHINDUCTOR_DETERMINISTIC") == "1"
 # Batch-invariant mode: stable per-sample compiled kernel across batch sizes. Implies deterministic.
 batch_invariant = os.getenv("TORCHINDUCTOR_BATCH_INVARIANT") == "1"
 
-# Use eager's opt-in INNER_TREE order for eligible NVIDIA CUDA sums.
+# Use eager-compatible math settings and INNER_TREE ordering for eligible CUDA reductions.
 # pyrefly: ignore [bad-assignment]
 numerics: Literal["default", "strict"] = os.environ.get(
     "TORCHINDUCTOR_NUMERICS", "default"
 )  # type: ignore[assignment]
+
+
+def _current_config() -> Any:
+    return cast(Any, sys.modules[__name__])
+
+
+def use_pytorch_libdevice() -> bool:
+    config = _current_config()
+    return config.numerics == "strict" or config.eager_numerics.use_pytorch_libdevice
+
+
+def use_eager_division_rounding() -> bool:
+    config = _current_config()
+    return config.numerics == "strict" or config.eager_numerics.division_rounding
+
+
+def should_disable_ftz() -> bool:
+    config = _current_config()
+    return config.numerics == "strict" or config.eager_numerics.disable_ftz
+
+
+def should_emulate_precision_casts() -> bool:
+    config = _current_config()
+    return config.numerics == "strict" or config.emulate_precision_casts
+
 
 # When we do split reduction, this number control the minimum value for
 # num_split. Too small num_split make the split reduction less efficient.
@@ -3216,12 +3241,6 @@ emulate_precision_casts: bool = (
 emulate_precision_casts_on_saved_tensors: bool = (
     os.environ.get("TORCHINDUCTOR_EMULATE_PRECISION_CASTS_ON_SAVED_TENSORS", "1") == "1"
 )
-
-if numerics == "strict":
-    eager_numerics.use_pytorch_libdevice = True
-    eager_numerics.division_rounding = True
-    eager_numerics.disable_ftz = True
-    emulate_precision_casts = True
 
 # adds patch, save_config, etc
 install_config_module(sys.modules[__name__])

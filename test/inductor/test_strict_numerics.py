@@ -1,5 +1,5 @@
 # Owner(s): ["module: inductor"]
-"""Tests for strict inner-contiguous reduction ordering."""
+"""Tests for strict numerics mode."""
 
 import os
 import subprocess
@@ -88,16 +88,40 @@ FUSION_CASES = (
     "multi_output",
 )
 
-STRICT_NUMERICS_CONFIG = {
-    "numerics": "strict",
-    "eager_numerics.use_pytorch_libdevice": True,
-    "eager_numerics.division_rounding": True,
-    "eager_numerics.disable_ftz": True,
-    "emulate_precision_casts": True,
+EFFECTIVE_NUMERICS = {
+    "eager_numerics.use_pytorch_libdevice": config.use_pytorch_libdevice,
+    "eager_numerics.division_rounding": config.use_eager_division_rounding,
+    "eager_numerics.disable_ftz": config.should_disable_ftz,
+    "emulate_precision_casts": config.should_emulate_precision_casts,
 }
 
 
+def _numerics_options(numerics, enabled):
+    return {
+        key: numerics if key == "numerics" else enabled
+        for key in ("numerics", *EFFECTIVE_NUMERICS)
+    }
+
+
+def _effective_numerics():
+    return {key: value() for key, value in EFFECTIVE_NUMERICS.items()}
+
+
 class StrictNumericsConfigTest(TestCase):
+    def test_config_patch_enables_eager_numerics(self):
+        with config.patch(_numerics_options("strict", False)):
+            self.assertEqual(
+                _effective_numerics(), dict.fromkeys(EFFECTIVE_NUMERICS, True)
+            )
+            with config.patch(numerics="default"):
+                self.assertEqual(
+                    _effective_numerics(), dict.fromkeys(EFFECTIVE_NUMERICS, False)
+                )
+        with config.patch(_numerics_options("default", True)):
+            self.assertEqual(
+                _effective_numerics(), dict.fromkeys(EFFECTIVE_NUMERICS, True)
+            )
+
     def test_strict_env_enables_eager_numerics(self):
         env = os.environ.copy()
         env["TORCHINDUCTOR_NUMERICS"] = "strict"
@@ -109,16 +133,39 @@ class StrictNumericsConfigTest(TestCase):
                 "-c",
                 (
                     "from torch._inductor import config; "
-                    "print(config.eager_numerics.use_pytorch_libdevice, "
-                    "config.eager_numerics.division_rounding, "
-                    "config.eager_numerics.disable_ftz, "
-                    "config.emulate_precision_casts)"
+                    "print(config.use_pytorch_libdevice(), "
+                    "config.use_eager_division_rounding(), "
+                    "config.should_disable_ftz(), "
+                    "config.should_emulate_precision_casts())"
                 ),
             ],
             env=env,
             text=True,
         )
         self.assertEqual(output.strip(), "True True True True")
+
+
+@unittest.skipUnless(
+    HAS_CUDA_AND_TRITON and torch.version.hip is None,
+    "requires NVIDIA CUDA and Triton",
+)
+class StrictNumericsCompileTest(TestCase):
+    def test_compile_options_enable_eager_division(self, device):
+        x = torch.full((1024,), 11.0, device=device)
+        y = torch.full((1024,), 7.0, device=device)
+
+        result, codes = run_and_get_code(
+            torch.compile(
+                lambda a, b: a / b,
+                fullgraph=True,
+                options={"numerics": "strict"},
+            ),
+            x,
+            y,
+        )
+
+        self.assertEqual(result.view(torch.int32), (x / y).view(torch.int32))
+        self.assertIn("div_rn", "\n".join(codes))
 
 
 @unittest.skipUnless(
@@ -133,9 +180,7 @@ class StrictNumericsTest(TestCase):
         torch.manual_seed(0)
 
     def _run(self, fn, *args, **cfg):
-        with config.patch(
-            {**STRICT_NUMERICS_CONFIG, "force_disable_caches": True, **cfg}
-        ):
+        with config.patch({"numerics": "strict", "force_disable_caches": True, **cfg}):
             torch._dynamo.reset()
             result, codes = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
         return result, "\n".join(codes)
@@ -243,9 +288,7 @@ class StrictNumericsTest(TestCase):
         def fn(z):
             return torch.sum(z, 1)
 
-        with config.patch(
-            {**STRICT_NUMERICS_CONFIG, "force_disable_caches": True, **cfg}
-        ):
+        with config.patch({"numerics": "strict", "force_disable_caches": True, **cfg}):
             torch._dynamo.reset()
             compiled = torch.compile(fn, fullgraph=True, dynamic=True)
             for n in sizes:
@@ -422,6 +465,7 @@ class StrictNumericsTest(TestCase):
         self.assertIn("tensor_descriptor" if kind == "split" else "tl.store", code)
 
 
+instantiate_device_type_tests(StrictNumericsCompileTest, globals(), only_for="cuda")
 instantiate_device_type_tests(StrictNumericsTest, globals(), only_for="cuda")
 
 

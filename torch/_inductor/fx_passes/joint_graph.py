@@ -908,8 +908,9 @@ def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtyp
         # A narrower intermediate can be worth materializing before upcasting.
         if dtype1.itemsize < dtype2.itemsize:
             return
-        if config.emulate_precision_casts and not _is_lossless_fp_widening_cast(
-            arg_val.dtype, dtype1
+        if (
+            config.should_emulate_precision_casts()
+            and not _is_lossless_fp_widening_cast(arg_val.dtype, dtype1)
         ):
             return
         repl = graph.call_function(
