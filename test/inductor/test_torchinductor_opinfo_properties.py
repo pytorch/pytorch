@@ -47,6 +47,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
     ops,
+    onlyAccelerator,
 )
 from torch.testing._internal.common_methods_invocations import (
     binary_ufuncs,
@@ -63,7 +64,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    TEST_XPU,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.opinfo.core import _filter_unary_elementwise_tensor
@@ -1080,7 +1080,7 @@ class TestOpInfoProperties(TestCase):
     # Run-to-Run Determinism Tests
     # =========================================================================
 
-    #@onlyCUDA
+    @onlyAccelerator
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -1152,7 +1152,7 @@ class TestOpInfoProperties(TestCase):
     # Numerical Equivalence with Eager Mode Tests
     # =========================================================================
 
-    #@onlyCUDA
+    @onlyAccelerator
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -1196,7 +1196,7 @@ class TestOpInfoProperties(TestCase):
     # Exhaustive/Sampled Unary Ufunc Tests
     # =========================================================================
 
-    #@onlyCUDA
+    @onlyAccelerator
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_unary_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -1251,7 +1251,7 @@ class TestOpInfoProperties(TestCase):
     # Sampled Binary Ufunc Tests
     # =========================================================================
 
-    #@onlyCUDA
+    @onlyAccelerator
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_binary_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
