@@ -559,11 +559,14 @@ def _is_skip_guard_eval_unsafe_stance() -> bool:
 
 
 def _reset_guarded_backend_cache() -> None:
+    from .package import reset_live_packages
+
     global cached_backends
     for backend in cached_backends.values():
         if hasattr(backend, "reset"):
             backend.reset()
     cached_backends.clear()
+    reset_live_packages()
 
 
 DONT_WRAP_FILES = {
@@ -1146,39 +1149,54 @@ class _TorchDynamoContext:
         def get_compiler_config() -> CompilerConfig | None:
             return self.compiler_config
 
-        from .package import DynamoCache
+        from .package import DynamoCache, live_package, register_live_package
 
         # If self._package is lazily initialized, we should check the dynamo cache now
         if config.caching_precompile:
             if self._package is not None and not self._package.is_initialized():
                 fn_key = fn.forward if isinstance(fn, torch.nn.Module) else fn
-                result = DynamoCache.load(fn_key)
-                if result is None:
-                    # Create a fresh CompilePackage
-                    self._package.initialize(fn_key, None, ignore_inlined_sources=False)
+                shared = live_package(fn_key, self._isolate_recompiles_id)
+                if shared is not None:
+                    # Another live wrapper of this function already loaded and
+                    # installed its artifact into this region; a second install
+                    # would stack a duplicate precompile entry per wrap.
+                    if not isinstance(self.callback, convert_frame.CatchErrorsWrapper):
+                        raise AssertionError(
+                            f"unexpected callback {type(self.callback)}"
+                        )
+                    self.callback.set_package(shared)
+                    self._package = shared
                 else:
-                    try:
-                        self._package.initialize(
-                            fn_key, result.dynamo, ignore_inlined_sources=False
-                        )
-                        # Install into the SAME region this context looks up in.
-                        # Precompile entries match their own region only, so a
-                        # default-bucket install here would never be found by an
-                        # isolate_recompiles=True context -- the cache would load
-                        # and then silently serve nothing.
-                        self._package.install(
-                            result.backends,
-                            isolate_recompiles_id=self._isolate_recompiles_id,
-                        )
-                    except RuntimeError:
-                        log.warning(
-                            "Failed to load entry from dynamo cache", exc_info=True
-                        )
-                        if self._package.is_initialized():
-                            self._package.reset_after_failed_install()
+                    result = DynamoCache.load(fn_key)
+                    if result is None:
+                        # Create a fresh CompilePackage
                         self._package.initialize(
                             fn_key, None, ignore_inlined_sources=False
                         )
+                    else:
+                        try:
+                            self._package.initialize(
+                                fn_key, result.dynamo, ignore_inlined_sources=False
+                            )
+                            # Install into the SAME region this context looks up in.
+                            # Precompile entries match their own region only, so a
+                            # default-bucket install here would never be found by an
+                            # isolate_recompiles=True context -- the cache would load
+                            # and then silently serve nothing.
+                            self._package.install(
+                                result.backends,
+                                isolate_recompiles_id=self._isolate_recompiles_id,
+                            )
+                        except RuntimeError:
+                            log.warning(
+                                "Failed to load entry from dynamo cache", exc_info=True
+                            )
+                            if self._package.is_initialized():
+                                self._package.reset_after_failed_install()
+                            self._package.initialize(
+                                fn_key, None, ignore_inlined_sources=False
+                            )
+                    register_live_package(self._package, self._isolate_recompiles_id)
 
         fn = innermost_fn(fn)
 
@@ -1755,6 +1773,31 @@ class DisableContext(_TorchDynamoContext):
         return (self.__class__, ())
 
 
+def _backend_emits_native_code(backend: str | Callable[..., Any] | None) -> bool:
+    """
+    Whether artifacts of this backend carry a CPU codegen target to protect.
+
+    get_compiler_fn erases the name, and torch.compile hands over a
+    _TorchCompileWrapper rather than the string the user wrote, so the name is
+    recovered from the wrapper, then from the registry (a registered callable
+    passed directly, e.g. optimize(eager)), then from __name__. A callable that
+    yields no name is assumed to emit native code: a false rejection at load is
+    recoverable and silently running a kernel built for another ISA is not.
+    """
+    from torch._dynamo.package import emits_native_code
+
+    from .backends.registry import _COMPILER_FNS
+
+    if isinstance(backend, str):
+        return emits_native_code(backend)
+    name = getattr(backend, "compiler_name", None)
+    if name is None:
+        name = next((n for n, fn in _COMPILER_FNS.items() if fn is backend), None)
+    if name is None:
+        name = getattr(backend, "__name__", None)
+    return name is None or emits_native_code(name)
+
+
 def _optimize_catch_errors(
     compile_fn: convert_frame.ConvertFrameProtocol,
     hooks: Hooks,
@@ -2062,13 +2105,7 @@ def _optimize(
             dynamic_shapes=dynamic_shapes,
         )
 
-    # get_compiler_fn erases the name, and torch.compile hands us a
-    # _TorchCompileWrapper rather than the string the user wrote.
-    from torch._dynamo.package import emits_native_code as _emits_native_code
-
-    emits_native_code = _emits_native_code(
-        str(getattr(backend, "compiler_name", backend))
-    )
+    emits_native_code = _backend_emits_native_code(backend)
     backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
@@ -3018,13 +3055,7 @@ def _optimize_assert(
     Used for fullgraph=True and export, since we must always error on graph breaks and ignore
     symbolic_convert.error_on_graph_break. Can also be used for testing.
     """
-    # get_compiler_fn erases the name, and torch.compile hands us a
-    # _TorchCompileWrapper rather than the string the user wrote.
-    from torch._dynamo.package import emits_native_code as _emits_native_code
-
-    emits_native_code = _emits_native_code(
-        str(getattr(backend, "compiler_name", backend))
-    )
+    emits_native_code = _backend_emits_native_code(backend)
     backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
