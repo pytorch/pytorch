@@ -76,7 +76,7 @@ class DistributedDataParallelCommHookTest(DistributedTestBase):
 
         return local_model
 
-    def _get_grads(self, process_group, device, hook_type=None):
+    def _get_grads(self, process_group, hook_type=None):
         device_id = gpus_for_rank(self.world_size)[self.rank][0]
         gpu_model = DistributedDataParallel(
             TestDdpCommHook().to(device_id),
@@ -115,9 +115,9 @@ class DistributedDataParallelCommHookTest(DistributedTestBase):
         process_group = self.create_pg(device)
 
         # No hook registered case, get the reference grads.
-        reference_grads = self._get_grads(process_group, device, None)
+        reference_grads = self._get_grads(process_group, None)
         # Register hook case, get the hook grads.
-        hook_grads = self._get_grads(process_group, device, DDPCommHookType.ALLREDUCE)
+        hook_grads = self._get_grads(process_group, DDPCommHookType.ALLREDUCE)
 
         torch.testing.assert_close(hook_grads, reference_grads, rtol=1e-5, atol=0)
 
@@ -131,9 +131,9 @@ class DistributedDataParallelCommHookTest(DistributedTestBase):
         process_group = self.create_pg(device)
 
         # No hook registered case, get the reference grads.
-        reference_grads = self._get_grads(process_group, device, None)
+        reference_grads = self._get_grads(process_group, None)
         # Register hook case, get the hook grads.
-        hook_grads = self._get_grads(process_group, device, DDPCommHookType.FP16_COMPRESS)
+        hook_grads = self._get_grads(process_group, DDPCommHookType.FP16_COMPRESS)
 
         torch.testing.assert_close(hook_grads, reference_grads, rtol=1e-5, atol=1e-4)
 
@@ -147,9 +147,9 @@ class DistributedDataParallelCommHookTest(DistributedTestBase):
         process_group = self.create_pg(device)
 
         # No hook registered case, get the reference grads.
-        reference_grads = self._get_grads(process_group, device, None)
+        reference_grads = self._get_grads(process_group, None)
         # Register hook case, get the hook grads.
-        hook_grads = self._get_grads(process_group, device, DDPCommHookType.QUANTIZE_PER_TENSOR)
+        hook_grads = self._get_grads(process_group, DDPCommHookType.QUANTIZE_PER_TENSOR)
 
         torch.testing.assert_close(hook_grads, reference_grads, rtol=1e-5, atol=1e-4)
 
@@ -163,10 +163,10 @@ class DistributedDataParallelCommHookTest(DistributedTestBase):
         process_group = self.create_pg(device)
 
         # No hook registered case, get the reference grads.
-        reference_grads = self._get_grads(process_group, device, None)
+        reference_grads = self._get_grads(process_group, None)
         # Register hook case, get the hook grads.
         hook_grads = self._get_grads(
-            process_group, device, DDPCommHookType.QUANTIZE_PER_CHANNEL
+            process_group, DDPCommHookType.QUANTIZE_PER_CHANNEL
         )
 
         torch.testing.assert_close(hook_grads, reference_grads, rtol=1e-5, atol=1e-4)
@@ -181,9 +181,9 @@ class DistributedDataParallelCommHookTest(DistributedTestBase):
         process_group = self.create_pg(device)
 
         # No hook registered case, get the reference grads.
-        reference_grads = self._get_grads(process_group, device, None)
+        reference_grads = self._get_grads(process_group, None)
         # Register hook case, get the hook grads.
-        hook_grads = self._get_grads(process_group, device, DDPCommHookType.NOOP)
+        hook_grads = self._get_grads(process_group, DDPCommHookType.NOOP)
         # Apply a subsequent allreduce to average grads.
         hook_grads.div_(self.world_size)
         dist.all_reduce(hook_grads, group=process_group)
