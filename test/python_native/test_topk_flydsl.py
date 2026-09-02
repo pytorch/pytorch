@@ -112,7 +112,7 @@ class TestFlyDSLTopK(TestCase):
         self._assert_topk_matches_aten(x, k)
 
     def test_register_correctness_with_odd_rows(self):
-        # Register kernel packs rows_per_cta=2 per CTA; odd M leaves a tail
+        # Register kernel packs two rows per CTA; odd M leaves a tail
         # block where in_bounds is false for one row slot (row_safe falls back
         # to row 0 for loads only; writes stay gated on in_bounds).
         k = 8

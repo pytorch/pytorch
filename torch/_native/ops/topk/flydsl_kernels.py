@@ -56,6 +56,7 @@ _NUM_RADIX_PASSES = _FP32_BIT_WIDTH // _RADIX_BITS
 _N_HIST_BINS = 1 << _RADIX_BITS
 _VEC = 4
 _NAN_SENTINEL_ORD = 0x7FFFFFFF
+_REGISTER_ROWS_PER_CTA = 2
 
 
 def _u32_to_i32(x: int) -> int:
@@ -458,9 +459,9 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
     return launch_radix_select_topk
 
 
-def _build_register_topk_module(n: int, k: int, arch: str, rows_per_cta: int = 2):
+def _build_register_topk_module(n: int, k: int, arch: str):
     threads_per_row = 32 if is_rdna_arch(arch) else 64
-    block_threads = threads_per_row * rows_per_cta
+    block_threads = threads_per_row * _REGISTER_ROWS_PER_CTA
     vec = n // threads_per_row
     # Process elements group by group to reduce VGPR usage and preserve occupancy.
     # Groups are K elements, widened to _VEC for 128-bit loads. N >= 1024 is a
@@ -488,7 +489,7 @@ def _build_register_topk_module(n: int, k: int, arch: str, rows_per_cta: int = 2
         bid = fx.block_idx.x
         lane = tid % fx.Int32(threads_per_row)
         row_local = tid // fx.Int32(threads_per_row)
-        row = bid * fx.Int32(rows_per_cta) + row_local
+        row = bid * fx.Int32(_REGISTER_ROWS_PER_CTA) + row_local
         row_safe = (row < rows_m).select(row, 0)
         in_bounds = row < rows_m
 
@@ -583,7 +584,7 @@ def _build_register_topk_module(n: int, k: int, arch: str, rows_per_cta: int = 2
         rows_m: fx.Int32,
         stream: fx.Stream = fx.Stream(None),
     ):
-        num_blocks = (rows_m + rows_per_cta - 1) // rows_per_cta
+        num_blocks = (rows_m + _REGISTER_ROWS_PER_CTA - 1) // _REGISTER_ROWS_PER_CTA
         launcher = register_topk_kernel(input, values, indices, rows_m)
         launcher.launch(
             grid=(num_blocks, 1, 1),
@@ -596,15 +597,13 @@ def _build_register_topk_module(n: int, k: int, arch: str, rows_per_cta: int = 2
 
 @instrumented_flydsl_cache(
     "aten::topk",
-    key_fn=lambda n, k, rows_per_cta, arch, backend, device_index, *a, **kw: (
-        f"register N={n} K={k} rows_per_cta={rows_per_cta} {arch} "
-        f"backend={backend} device={device_index}"
+    key_fn=lambda n, k, arch, backend, device_index, *a, **kw: (
+        f"register N={n} K={k} {arch} backend={backend} device={device_index}"
     ),
 )
 def _compile_register_topk(
     n: int,
     k: int,
-    rows_per_cta: int,
     arch: str,
     backend: str,
     device_index: int,
@@ -618,7 +617,7 @@ def _compile_register_topk(
     # be cached per device.
     del backend, device_index
     input_2d, values_2d, indices_2d, rows_m, stream = compile_args
-    launch = _build_register_topk_module(n, k, arch, rows_per_cta=rows_per_cta)
+    launch = _build_register_topk_module(n, k, arch)
     return flyc.compile(
         launch,
         make_compile_arg(input_2d, read_only=True),
@@ -634,8 +633,6 @@ def topk_register_out(
     k: int,
     values_2d: torch.Tensor,
     indices_2d: torch.Tensor,
-    *,
-    rows_per_cta: int = 2,
 ) -> None:
     rows_m = input_2d.shape[0]
     n = input_2d.shape[1]
@@ -647,7 +644,6 @@ def topk_register_out(
         compiled = _compile_register_topk(
             n,
             k,
-            rows_per_cta,
             arch,
             flyc.compile_backend_name(),
             device_index,
@@ -656,13 +652,11 @@ def topk_register_out(
         compiled(read_only_tensor(input_2d), values_2d, indices_2d, rows_m, stream)
 
 
-def topk_register(
-    input_2d: torch.Tensor, k: int, *, rows_per_cta: int = 2
-) -> tuple[torch.Tensor, torch.Tensor]:
+def topk_register(input_2d: torch.Tensor, k: int) -> tuple[torch.Tensor, torch.Tensor]:
     rows_m = input_2d.shape[0]
     values_2d = torch.empty((rows_m, k), device=input_2d.device, dtype=input_2d.dtype)
     indices_2d = torch.empty((rows_m, k), device=input_2d.device, dtype=torch.int64)
-    topk_register_out(input_2d, k, values_2d, indices_2d, rows_per_cta=rows_per_cta)
+    topk_register_out(input_2d, k, values_2d, indices_2d)
     return values_2d, indices_2d
 
 
