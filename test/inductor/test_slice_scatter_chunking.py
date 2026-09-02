@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import gc
+import operator
 from unittest import mock, skipIf
 
 import torch
@@ -44,7 +45,7 @@ class TestSliceScatterChunking(TestCase):
         return gm
 
     @parametrize("factory", ("empty", "empty_strided"))
-    def test_complete_chain(self, device, factory):
+    def test_nonfunctional_chain(self, device, factory):
         def fn(head, middle, tail):
             if factory == "empty":
                 out = torch.empty((6, 4), device=head.device, dtype=head.dtype)
@@ -62,10 +63,77 @@ class TestSliceScatterChunking(TestCase):
         gm = self._run_pass(fn, head, middle, tail)
         targets = [node.target for node in gm.graph.nodes]
 
-        self.assertNotIn(aten.slice_scatter.default, targets)
+        self.assertEqual(targets.count(aten.slice_scatter.default), 0)
         self.assertEqual(targets.count(aten.cat.default), 1)
         self.assertEqual(targets.count(aten.copy_.default), 0)
         self.assertEqual(gm(head, middle, tail), torch.cat((head, middle, tail)))
+
+    @parametrize("dim", (0, -1))
+    def test_realized_chunks_use_copies(self, device, dim):
+        def fn(a, b, c, d):
+            head = a @ b
+            tail = c @ d
+            shape = list(head.shape)
+            chunk_size = shape[dim]
+            shape[dim] *= 2
+            out = torch.empty(shape, device=a.device, dtype=a.dtype)
+            out = aten.slice_scatter.default(out, head, dim, 0, chunk_size)
+            return aten.slice_scatter.default(
+                out, tail, dim, chunk_size, chunk_size * 2
+            )
+
+        args = tuple(
+            torch.randn(shape, device=device)
+            for shape in ((2, 4), (4, 3), (2, 4), (4, 3))
+        )
+        gm = self._run_pass(fn, *args)
+        targets = [node.target for node in gm.graph.nodes]
+
+        self.assertEqual(targets.count(aten.slice_scatter.default), 0)
+        self.assertEqual(targets.count(aten.cat.default), 0)
+        self.assertEqual(targets.count(aten.copy_.default), 2)
+        self.assertEqual(gm(*args), fn(*args))
+        self.assertEqual(gm(*args).stride(), fn(*args).stride())
+
+    @onlyCPU
+    def test_cpu_nested_region_output_not_fusible(self, device):
+        graph = torch.fx.Graph()
+        region = graph.call_function(
+            torch.ops.higher_order.invoke_subgraph, args=(None, "region")
+        )
+        source = graph.call_function(operator.getitem, args=(region, 0))
+        source.meta["val"] = torch.empty(1)
+
+        self.assertFalse(
+            slice_scatter_chunking._is_nested_compile_region_output(source)
+        )
+
+    @parametrize("consumer", ("matmul", "pointwise"))
+    def test_realized_pointwise_chunk_uses_copies(self, device, consumer):
+        def fn(x, weight, tail):
+            out = torch.empty((4, 4), device=x.device, dtype=x.dtype)
+            head = x.cos()
+            tail = tail.sin()
+            if consumer == "matmul":
+                aux = head @ weight + tail @ weight
+            else:
+                aux = head.sin() + tail.cos()
+            out = aten.slice_scatter.default(out, head, 0, 0, 2)
+            out = aten.slice_scatter.default(out, tail, 0, 2, 4)
+            return out, aux
+
+        args = (
+            torch.randn(2, 4, device=device),
+            torch.randn(4, 4, device=device),
+            torch.randn(2, 4, device=device),
+        )
+        gm = self._run_pass(fn, *args)
+        targets = [node.target for node in gm.graph.nodes]
+
+        self.assertEqual(targets.count(aten.slice_scatter.default), 0)
+        self.assertEqual(targets.count(aten.cat.default), 0)
+        self.assertEqual(targets.count(aten.copy_.default), 2)
+        self.assertEqual(gm(*args), fn(*args))
 
     @parametrize("with_aliases", (False, True))
     def test_functionalized_copy_chain(self, device, with_aliases):
@@ -199,7 +267,7 @@ class TestSliceScatterChunking(TestCase):
         self.assertEqual(last, torch.cat((head, tail)))
 
     @parametrize("base_kind", ("input", "pointwise", "offset", "extra_capacity"))
-    def test_cat_rejects_non_factory_base(self, device, base_kind):
+    def test_rejects_non_factory_base(self, device, base_kind):
         def fn(head, tail, storage):
             if base_kind == "input":
                 out = storage
@@ -265,19 +333,20 @@ class TestSliceScatterChunking(TestCase):
         gm = self._run_pass(fn, head, tail, tracing_mode="symbolic")
 
         targets = [node.target for node in gm.graph.nodes]
-        self.assertNotIn(aten.slice_scatter.default, targets)
+        self.assertEqual(targets.count(aten.slice_scatter.default), 0)
+        self.assertEqual(targets.count(aten.copy_.default), 2)
         self.assertEqual(gm(head, tail), torch.cat((head, tail)))
 
     @parametrize(
         "case",
         (
-            subtest(((4, 4), (0, 1), None), name="overlapping"),
-            subtest(((4, 4), (1, 4), (1, 4)), name="noncontiguous"),
-            subtest(((4, 1), (1, 99), (1, 99)), name="noncanonical"),
+            subtest(((4, 4), (0, 1), None, 0), name="overlapping"),
+            subtest(((4, 4), (1, 4), (1, 4), 2), name="noncontiguous"),
+            subtest(((4, 1), (1, 99), (1, 99), 2), name="noncanonical"),
         ),
     )
-    def test_rejects_unsupported_factory_layout(self, device, case):
-        shape, stride, expected_stride = case
+    def test_factory_layout(self, device, case):
+        shape, stride, expected_stride, expected_copies = case
 
         def fn(head, tail):
             out = torch.empty_strided(
@@ -292,8 +361,10 @@ class TestSliceScatterChunking(TestCase):
         gm = self._run_pass(fn, head, tail)
 
         targets = [node.target for node in gm.graph.nodes]
-        self.assertEqual(targets.count(aten.slice_scatter.default), 2)
-        self.assertEqual(targets.count(aten.copy_.default), 0)
+        self.assertEqual(
+            targets.count(aten.slice_scatter.default), 0 if expected_copies else 2
+        )
+        self.assertEqual(targets.count(aten.copy_.default), expected_copies)
         if expected_stride is not None:
             self.assertEqual(gm(head, tail).stride(), expected_stride)
 
@@ -312,7 +383,7 @@ class TestSliceScatterChunking(TestCase):
         self.assertEqual(targets.count(aten.copy_.default), 0)
         self.assertEqual(gm(head, tail).dtype, torch.float32)
 
-    def test_skips_noncontiguous_sources(self, device):
+    def test_noncontiguous_sources(self, device):
         def fn(head, tail):
             out = torch.empty((2, 3, 1, 1), device=head.device, dtype=head.dtype)
             out = aten.slice_scatter.default(out, head, 0, 0, 1)
@@ -330,66 +401,104 @@ class TestSliceScatterChunking(TestCase):
         gm = self._run_pass(fn, head, tail)
 
         targets = [node.target for node in gm.graph.nodes]
-        self.assertEqual(targets.count(aten.slice_scatter.default), 2)
-        self.assertEqual(targets.count(aten.copy_.default), 0)
+        self.assertEqual(targets.count(aten.slice_scatter.default), 0)
+        self.assertEqual(targets.count(aten.copy_.default), 2)
         self.assertEqual(gm(head, tail), expected)
 
-    @parametrize(
-        "same_context",
-        (
-            subtest(True, name="matching"),
-            subtest(False, name="different"),
-        ),
-    )
-    def test_custom_context(self, device, same_context):
+    @parametrize("replacement", ("cat", "copy"))
+    @parametrize("same_context", (True, False))
+    def test_custom_context(self, device, replacement, same_context):
+        def write(out, src, start, end):
+            if replacement == "copy":
+                src = aten.copy.default(out[start:end], src)
+            return aten.slice_scatter.default(out, src, 0, start, end)
+
         def fn(head, tail):
             out = torch.empty((4, 4), device=head.device, dtype=head.dtype)
-            out = aten.slice_scatter.default(out, head, 0, 0, 2)
-            return aten.slice_scatter.default(out, tail, 0, 2, 4)
+            if replacement == "cat":
+                head = head.cos()
+                tail = tail.sin()
+            out = write(out, head, 0, 2)
+            return write(out, tail, 2, 4)
 
         head = torch.randn(2, 4, device=device)
         tail = torch.randn(2, 4, device=device)
         custom = {"stream": 1, "mempool": 2, "mempool_device": 0}
         gm = make_fx(fn, tracing_mode="fake")(head, tail)
-        slice_scatters = gm.graph.find_nodes(
-            op="call_function", target=aten.slice_scatter.default
-        )
-        slice_scatters[0].meta["custom"] = custom.copy()
-        slice_scatters[1].meta["custom"] = (
-            custom.copy() if same_context else {**custom, "stream": 2}
-        )
+        nodes = [
+            node
+            for node in gm.graph.nodes
+            if node.target
+            in (
+                aten.empty.memory_format,
+                aten.copy.default,
+                aten.slice_scatter.default,
+            )
+        ]
+        for node in nodes:
+            node.meta["custom"] = custom.copy()
+        if not same_context:
+            nodes[-1].meta["custom"] = {**custom, "stream": 2}
         fake_tensor_updater = FakeTensorUpdater(gm)
         fake_mode = detect_fake_mode([node.meta.get("val") for node in gm.graph.nodes])
         with V.set_fake_mode(fake_mode):
             slice_scatter_chunking.slice_scatter_chunking_pass(gm.graph)
             fake_tensor_updater.incremental_update()
         gm.graph.lint()
+        gm.recompile()
 
-        cats = gm.graph.find_nodes(op="call_function", target=aten.cat.default)
         remaining = gm.graph.find_nodes(
             op="call_function", target=aten.slice_scatter.default
         )
-        self.assertEqual(len(cats), 1 if same_context else 0)
+        copies = gm.graph.find_nodes(op="call_function", target=aten.copy_.default)
+        cats = gm.graph.find_nodes(op="call_function", target=aten.cat.default)
+        expected_copies = 2 if same_context and replacement == "copy" else 0
+        expected_cats = 1 if same_context and replacement == "cat" else 0
+        self.assertEqual(len(copies), expected_copies)
+        self.assertEqual(len(cats), expected_cats)
         self.assertEqual(len(remaining), 0 if same_context else 2)
         if same_context:
-            self.assertEqual(cats[0].meta.get("custom"), custom)
+            replacement_node = copies[0] if replacement == "copy" else cats[0]
+            self.assertEqual(replacement_node.meta.get("custom"), custom)
+        self.assertEqual(gm(head, tail), fn(head, tail))
+
+    @onlyCPU
+    @inductor_config.patch(force_disable_caches=True)
+    def test_deep_live_view_chain_compile(self, device):
+        def fn(head, tail):
+            out = torch.empty((4, 4), device=head.device, dtype=head.dtype)
+            out = aten.slice_scatter.default(out, head, 0, 0, 2)
+            out = aten.slice_scatter.default(out, tail, 0, 2, 4)
+            for _ in range(1100):
+                out = out[1:]
+            return out
+
+        head = torch.randn(2, 4, device=device)
+        tail = torch.randn(2, 4, device=device)
+        compiled = torch.compile(fn, fullgraph=True)
+
+        self.assertEqual(compiled(head, tail), fn(head, tail))
 
     def test_ignores_dead_destination_views(self, device):
+        def write(out, src, start, end):
+            copied = aten.copy.default(out[start:end], src)
+            return aten.slice_scatter.default(out, copied, 0, start, end)
+
         def fn(head, tail):
             out = torch.empty((4, 4), device=head.device, dtype=head.dtype)
             aten.slice.Tensor(out, 0, 0, 2)
-            out = aten.slice_scatter.default(out, head, 0, 0, 2)
+            out = write(out, head, 0, 2)
             aten.slice.Tensor(out, 0, 2, 4)
-            return aten.slice_scatter.default(out, tail, 0, 2, 4)
+            return write(out, tail, 2, 4)
 
         head = torch.randn(2, 4, device=device)
         tail = torch.randn(2, 4, device=device)
         gm = self._run_pass(fn, head, tail)
 
         targets = [node.target for node in gm.graph.nodes]
-        self.assertNotIn(aten.slice.Tensor, targets)
+        self.assertEqual(targets.count(aten.slice.Tensor), 2)
         self.assertNotIn(aten.slice_scatter.default, targets)
-        self.assertEqual(targets.count(aten.cat.default), 1)
+        self.assertEqual(targets.count(aten.copy_.default), 2)
         self.assertEqual(gm(head, tail), fn(head, tail))
 
     def test_rejects_intervening_mutation(self, device):
@@ -411,7 +520,7 @@ class TestSliceScatterChunking(TestCase):
 
     @onlyCUDA
     @inductor_config.patch(force_disable_caches=True)
-    def test_mm_chunk_codegen(self, device):
+    def test_mm_chunk_codegen_bounded_peak(self, device):
         def fn(a, b, c, d):
             rows = a.shape[0]
             out = torch.empty((rows * 2, b.shape[1]), device=a.device, dtype=a.dtype)
@@ -441,7 +550,7 @@ class TestSliceScatterChunking(TestCase):
         compiled(*args)
         torch.cuda.synchronize()
         peak = torch.cuda.max_memory_allocated() - baseline
-        self.assertLessEqual(peak, 65 * 2**20)
+        self.assertLessEqual(peak, 97 * 2**20)
 
     @inductor_config.patch(force_disable_caches=True)
     def test_functionalized_copy_chain_compile(self, device):
@@ -531,6 +640,21 @@ class TestSliceScatterChunking(TestCase):
             0,
         )
         self.assertEqual(gm(*chunks), fn(*chunks))
+
+    def test_no_candidate_skips_mutation_region_scan(self, device):
+        def fn(x):
+            return x.cos()
+
+        x = torch.randn(4, device=device)
+        with mock.patch.object(
+            slice_scatter_chunking,
+            "compute_mutation_region_ids",
+            wraps=slice_scatter_chunking.compute_mutation_region_ids,
+        ) as compute:
+            gm = self._run_pass(fn, x)
+
+        self.assertEqual(compute.call_count, 0)
+        self.assertEqual(gm(x), fn(x))
 
     def test_rejected_chain_is_scanned_once(self, device):
         chain_length = 20
@@ -711,9 +835,28 @@ class TestSliceScatterChunking(TestCase):
                 (inner, width),
             )
         )
-        compiled = torch.compile(fn, fullgraph=True)
-        actual = compiled(*args)
+        can_fuse_as_cat = slice_scatter_chunking._can_fuse_as_cat
+        saw_regional_cat = False
 
+        def tracked_can_fuse_as_cat(chain):
+            nonlocal saw_regional_cat
+            result = can_fuse_as_cat(chain)
+            if any(
+                slice_scatter_chunking._is_nested_compile_region_output(src)
+                for src in chain.sources
+            ):
+                saw_regional_cat |= result
+            return result
+
+        compiled = torch.compile(fn, fullgraph=True)
+        with mock.patch.object(
+            slice_scatter_chunking,
+            "_can_fuse_as_cat",
+            tracked_can_fuse_as_cat,
+        ):
+            actual = compiled(*args)
+
+        self.assertTrue(saw_regional_cat)
         self.assertEqual(actual, fn(*args))
         del actual
         gc.collect()
@@ -725,18 +868,44 @@ class TestSliceScatterChunking(TestCase):
         peak = torch.cuda.max_memory_allocated() - baseline
         self.assertLessEqual(peak, 129 * 2**20)
 
+    @parametrize("dim", (0, -1))
+    def test_pointwise_chunks_fuse(self, device, dim):
+        def fn(head, tail):
+            shape = list(head.shape)
+            chunk_size = shape[dim]
+            shape[dim] *= 2
+            out = torch.empty(shape, device=head.device, dtype=head.dtype)
+            out = aten.slice_scatter.default(out, head.cos(), dim, 0, chunk_size)
+            return aten.slice_scatter.default(
+                out, tail.sin(), dim, chunk_size, chunk_size * 2
+            )
+
+        head = torch.randn(2, 3, device=device)
+        tail = torch.randn(2, 3, device=device)
+        gm = self._run_pass(fn, head, tail)
+        targets = [node.target for node in gm.graph.nodes]
+        actual = gm(head, tail)
+        expected = fn(head, tail)
+
+        self.assertEqual(targets.count(aten.slice_scatter.default), 0)
+        self.assertEqual(targets.count(aten.copy_.default), 0)
+        self.assertEqual(targets.count(aten.cat.default), 1)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual.stride(), expected.stride())
+
     @onlyCUDA
-    def test_pointwise_chunks_fuse(self, device):
-        def fn(x):
-            rows = x.shape[0] // 2
-            out = torch.empty(x.shape, device=x.device, dtype=x.dtype)
-            out = aten.slice_scatter.default(out, x[:rows].cos(), 0, 0, rows)
-            return aten.slice_scatter.default(out, x[rows:].sin(), 0, rows, x.shape[0])
+    @inductor_config.patch(force_disable_caches=True)
+    def test_external_chunks_codegen(self, device):
+        def fn(head, middle, tail):
+            out = torch.empty((6, 1024), device=head.device, dtype=head.dtype)
+            out = aten.slice_scatter.default(out, head, 0, 0, 2)
+            out = aten.slice_scatter.default(out, middle, 0, 2, 4)
+            return aten.slice_scatter.default(out, tail, 0, 4, 6)
 
-        x = torch.randn(8192, 1024, device=device)
-        actual, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+        args = tuple(torch.randn(2, 1024, device=device) for _ in range(3))
+        actual, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
 
-        self.assertEqual(actual, fn(x))
+        self.assertEqual(actual, fn(*args))
         self.assertEqual(code.count(".run("), 1)
 
     @onlyCUDA

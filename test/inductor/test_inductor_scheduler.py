@@ -408,7 +408,7 @@ class TestScheduler(TestCase):
         node1, node2 = Mock(), Mock()
 
         self.assertFalse(
-            scheduler.fuse_if_speedup(
+            scheduler._fuse_if_speedup_with_memory(
                 node1,
                 node2,
                 speedup,
@@ -417,12 +417,17 @@ class TestScheduler(TestCase):
             )
         )
 
-        scheduler._can_fuse_impl.assert_called_once_with(node1, node2, can_reorder=True)
+        scheduler._can_fuse_impl.assert_called_once_with(
+            node1, node2, can_reorder=True, allow_mix_order_reduction=True
+        )
         speedup.assert_not_called()
         scheduler.fuse_two_nodes.assert_not_called()
 
     def test_unchecked_fusion_invalidates_memory_state_until_next_round(self):
-        from torch._inductor.scheduler import FusionMemoryState
+        from torch._inductor.scheduler import (
+            FusionMemoryState,
+            FusionMemoryStateStatus,
+        )
 
         scheduler = object.__new__(Scheduler)
         node1, node2 = Mock(), Mock()
@@ -441,45 +446,71 @@ class TestScheduler(TestCase):
             ),
             fused,
         )
-        self.assertFalse(state.valid)
-        self.assertIsNone(scheduler._fusion_memory_state)
+        self.assertEqual(state.status, FusionMemoryStateStatus.INVALIDATED)
+        self.assertIs(scheduler._fusion_memory_state, state)
+        self.assertEqual(
+            scheduler._check_fusion_memory(state, node1, node2), (False, None)
+        )
 
+    def test_resize_storage_fails_fusion_memory_closed(self):
+        from torch._inductor.scheduler import FusionMemoryStateStatus
+
+        scheduler = object.__new__(Scheduler)
+        node = self._mock_base_snode("resize")
+        node.node = object.__new__(ir.ResizeStorageBytes)
+
+        state = scheduler._init_fusion_memory_state([node])
+
+        self.assertEqual(state.status, FusionMemoryStateStatus.FAILED_CLOSED)
+        self.assertEqual(state.device_states, {})
+
+    @xfailIfNoAcceleratorTriton
+    @onlyCUDA
     def test_fusion_memory_guard_rejects_in_torch_compile(self, device):
-        def fn(x):
-            return torch.sin(x), torch.cos(x)
+        def fn(x, weight):
+            early = torch.mm(torch.sin(x).sum(dim=0)[None, :], weight)
+            late = torch.cos(x).sum(dim=0)
+            return early, late
 
-        checks = 0
+        x = torch.testing.make_tensor((1, 4096), device=device, dtype=torch.bool)
+        weight = torch.testing.make_tensor(
+            (4096, 1), device=device, dtype=torch.float32
+        )
+        memory_config = "fusion_memory_timeline_peak_allowed_increase_mb"
 
-        def reject_fusion(*args, **kwargs):
-            nonlocal checks
-            checks += 1
-            return True, None
-
-        x = torch.testing.make_tensor((32,), device=device, dtype=torch.float32)
-        torch._dynamo.reset()
-        metrics.reset()
-        with patch.object(Scheduler, "_fusion_memory_update", reject_fusion):
+        def compile_and_count(allowed_increase_mb):
+            torch._dynamo.reset()
+            metrics.reset()
             compiled = torch.compile(
                 fn,
                 backend="inductor",
                 fullgraph=True,
                 options={
                     "fx_graph_cache": False,
-                    "fusion_memory_timeline_peak_allowed_increase_mb": 0,
+                    "reorder_for_peak_memory": False,
+                    memory_config: allowed_increase_mb,
                     "fusion_memory_timeline_full_correctness": True,
                 },
             )
-            self.assertEqual(compiled(x), fn(x))
+            self.assertEqual(compiled(x, weight), fn(x, weight))
+            return metrics.generated_kernel_count
 
-        self.assertGreater(checks, 0)
-        self.assertEqual(metrics.generated_kernel_count, 2)
+        self.assertEqual(compile_and_count(None), 1)
+        self.assertEqual(compile_and_count(0), 2)
 
     def test_pending_fusion_preserves_reorder_legality(self):
-        from torch._inductor.scheduler import PendingFusion
+        from torch._inductor.scheduler import (
+            FusionMemoryState,
+            FusionMemoryStateStatus,
+            PendingFusion,
+        )
 
         scheduler = object.__new__(Scheduler)
+        scheduler._fusion_memory_state = FusionMemoryState(
+            {}, status=FusionMemoryStateStatus.INVALIDATED
+        )
         scheduler.get_fused_node = lambda node: node
-        scheduler.fuse_if_speedup = Mock(return_value=False)
+        scheduler._fuse_if_speedup_with_memory = Mock(return_value=False)
         node1, node2 = Mock(), Mock()
         speedup = Mock(return_value=True)
         pending = PendingFusion(speedup, node1, node2, can_reorder=True)
@@ -488,13 +519,66 @@ class TestScheduler(TestCase):
             OrderedSet([node1, node2]), {node1: pending, node2: pending}
         )
 
-        scheduler.fuse_if_speedup.assert_called_once_with(
+        scheduler._fuse_if_speedup_with_memory.assert_called_once_with(
             node1,
             node2,
             speedup,
             OrderedSet([node1, node2]),
             can_reorder=True,
         )
+
+    def test_disabled_pending_fusion_preserves_fuse_if_speedup_signature(self):
+        from torch._inductor.scheduler import PendingFusion
+
+        scheduler = object.__new__(Scheduler)
+        scheduler._fusion_memory_state = None
+        scheduler.get_fused_node = lambda node: node
+        scheduler.fuse_if_speedup = Mock(return_value=False)
+        node1, node2 = Mock(), Mock()
+        speedup = Mock(return_value=True)
+        pending = PendingFusion(speedup, node1, node2, can_reorder=True)
+        fused_nodes = OrderedSet([node1, node2])
+
+        scheduler._finish_pending_fusions(
+            fused_nodes, {node1: pending, node2: pending}
+        )
+
+        scheduler.fuse_if_speedup.assert_called_once_with(
+            node1, node2, speedup, fused_nodes
+        )
+
+    def test_disabled_pending_conflict_uses_legacy_resolution(self):
+        from torch._inductor.scheduler import PendingFusion
+
+        scheduler = object.__new__(Scheduler)
+        scheduler._fusion_memory_state = None
+        scheduler.seen_template_fusions = OrderedSet()
+        scheduler.get_fused_node = lambda node: node
+        scheduler.can_fuse = Mock(return_value=False)
+        scheduler.will_fusion_create_cycle = Mock(return_value=False)
+        scheduler.fuse_two_nodes = Mock()
+        scheduler.fuse_if_speedup = Mock(
+            side_effect=AssertionError("unexpected fusion legality recheck")
+        )
+        node1, node2, candidate = (
+            self._mock_base_snode(name) for name in ("node1", "node2", "candidate")
+        )
+        speedup = Mock(return_value=True)
+        pending = PendingFusion(speedup, node1, node2, can_reorder=True)
+        fused_nodes = OrderedSet([node1, node2, candidate])
+
+        scheduler._try_fusion_pairs(
+            [(node1, candidate)],
+            {node1: pending, node2: pending},
+            {},
+            fused_nodes,
+            True,
+        )
+
+        speedup.assert_called_once_with()
+        scheduler.will_fusion_create_cycle.assert_called_once_with(node1, candidate)
+        scheduler.fuse_two_nodes.assert_called_once_with(node1, node2, fused_nodes)
+        scheduler.fuse_if_speedup.assert_not_called()
 
     def test_snode_args_kwargs_removes_filled_positional_kwargs(self):
         snode = Mock()

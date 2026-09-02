@@ -310,17 +310,30 @@ class ImplDetailTest(MockSchedulerTest):
         self.assertIs(snode._body, original_body)
         self.assertIsNone(snode._loop_mutation_listener)
 
-    def test_loop_state_generation_is_not_reused_after_rollback(self):
+    def test_fusion_memory_rollback_discards_trial_cache_state(self):
         snode = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+        scheduler = V.graph.scheduler
+        scheduler._tiling_memory_cache = {}
+        scheduler._fusion_memory_cache_trackers = []
         original_generation = snode._loop_state_gen
-        tracker = _LoopMutationTracker.create((snode,))
+        baseline_key = ((snode, original_generation),)
+        scheduler._tiling_memory_cache[baseline_key] = "baseline"
+        outer = _LoopMutationTracker.create_fusion_memory((snode,))
+        inner = _LoopMutationTracker.create((snode,))
         snode.apply_new_loop_order([1, 0])
         first_trial_generation = snode._loop_state_gen
-        tracker.finish(rollback=True)
+        trial_key = ((snode, first_trial_generation),)
+        scheduler._tiling_memory_cache[trial_key] = "trial"
+        for tracker in scheduler._fusion_memory_cache_trackers:
+            tracker.track_fusion_memory_cache_key(trial_key)
+        inner.finish(rollback=True)
+        self.assertEqual(snode._loop_state_gen, original_generation)
+        self.assertNotIn(trial_key, scheduler._tiling_memory_cache)
+        outer.finish_fusion_memory(rollback=True)
 
         self.assertEqual(snode._loop_state_gen, original_generation)
-        snode.apply_new_loop_order([1, 0])
-        self.assertGreater(snode._loop_state_gen, first_trial_generation)
+        self.assertEqual(scheduler._tiling_memory_cache[baseline_key], "baseline")
+        self.assertEqual(scheduler._fusion_memory_cache_trackers, [])
 
     def test_fusion_search_rolls_back_successful_probe(self):
         node1 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
@@ -340,6 +353,51 @@ class ImplDetailTest(MockSchedulerTest):
             )
 
         self.assertEqual(node1.snapshot_loop_state(), original_state)
+
+    def test_disabled_fusion_memory_preserves_successful_loop_mutation(self):
+        node1 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+        node2 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler._fusion_memory_state = None
+        scheduler.will_fusion_create_cycle = mock.Mock(return_value=False)
+        scheduler.fuse_two_nodes = mock.Mock()
+        original_state = node1.snapshot_loop_state()
+
+        def mutate_and_accept(*args, **kwargs):
+            node1.apply_new_loop_order([1, 0])
+            return True
+
+        with mock.patch.object(scheduler, "can_fuse", side_effect=mutate_and_accept):
+            self.assertFalse(
+                scheduler.fuse_if_speedup(
+                    node1,
+                    node2,
+                    lambda: False,
+                    OrderedSet([node1, node2]),
+                )
+            )
+
+        self.assertNotEqual(node1.snapshot_loop_state(), original_state)
+        scheduler.fuse_two_nodes.assert_not_called()
+
+    def test_disabled_fusion_memory_uses_standard_fusion_search(self):
+        node1 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+        node2 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler._fusion_memory_state = None
+        scheduler.unfusable_node = mock.Mock(return_value=False)
+        scheduler.can_fuse = mock.Mock(return_value=True)
+        scheduler._can_fuse_for_search = mock.Mock(
+            side_effect=AssertionError("unexpected speculative search")
+        )
+        scheduler.get_possible_fusions_with_highest_priority = mock.Mock(
+            side_effect=lambda pairs: pairs
+        )
+        scheduler.score_fusion_key = mock.Mock(return_value=0)
+
+        self.assertTrue(scheduler.get_possible_fusions([node1, node2], False))
+        scheduler.can_fuse.assert_called()
+        scheduler._can_fuse_for_search.assert_not_called()
 
     def test_expand_dimension_loop_state_rollback(self):
         snode = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
