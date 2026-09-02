@@ -161,21 +161,22 @@ class FaultToleranceTest(AbstractFaultToleranceTest, MultiProcessTestCase):
     )
     def test_work_explicit_timeout_includes_prelaunch_stall(self, device):
         rank_device = self._rank_device(device)
+        dev_mod = torch.get_device_module(self.device_type)
         self._create_reconfigured_pg("ft_work_timeout", 1300, rank_device)
         dist.all_reduce(torch.ones(1, device=rank_device))
-        torch.cuda.synchronize()
-        torch.cuda._sleep(int(500 * get_cycles_per_ms()))
+        torch.accelerator.synchronize()
+        dev_mod._sleep(int(500 * get_cycles_per_ms()))
         work = dist.all_reduce(torch.ones(4, device=rank_device), async_op=True)
 
         with self.assertRaisesRegex(dist.DistBackendError, "timed out"):
             work.wait(timeout=timedelta(milliseconds=50))
 
-        self.assertFalse(torch.cuda.current_stream().query())
+        self.assertFalse(dev_mod.current_stream().query())
         self.assertTrue(work.is_completed())
         self.assertEqual(
             WorkResult(work.get_future_result().wait()), WorkResult.TIMEOUT
         )
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
     @requires_capabilities(
         Capability.collective.reconfigure, Capability.collective.work_result
@@ -184,7 +185,7 @@ class FaultToleranceTest(AbstractFaultToleranceTest, MultiProcessTestCase):
         rank_device = self._rank_device(device)
         self._create_reconfigured_pg("ft_work_error", 1301, rank_device)
         dist.all_reduce(torch.ones(1, device=rank_device))
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         if self.rank == 0:
             work = dist.all_reduce(torch.ones(1, device=rank_device), async_op=True)
