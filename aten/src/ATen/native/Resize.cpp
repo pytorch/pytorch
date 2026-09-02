@@ -15,6 +15,7 @@
 #include <ATen/ops/_resize_output_native.h>
 #endif
 
+#include <c10/util/accumulate.h>
 #include <c10/util/overflows.h>
 
 namespace at::native {
@@ -159,15 +160,7 @@ void resize_bytes_meta(StorageImpl* storage, c10::SymInt size_bytes) {
 }
 
 static void maybe_resize_storage_meta(TensorImpl* self, c10::SymInt new_size_bytes) {
-  // It does not make sense to try to resize a storage
-  // to hold 0 elements, and this can break
-  // if storage_offset is positive but
-  // new_size is 0, so just bail in that case
-  // (same comment is in Resize.h)
-  if (self->sym_numel() == 0) {
-    return;
-  }
-
+  // Caller must skip zero-numel requested shapes (see _resize_impl_).
   const Storage& storage = self->unsafe_storage();
   if (!storage) {
     TORCH_INTERNAL_ASSERT(0, "NYI, this should only be Caffe2");
@@ -199,21 +192,29 @@ static TensorImpl* _resize_impl_(
     return self;
   }
 
+  // Resize storage before updating metadata so allocation failures leave
+  // tensor metadata unchanged.
   const auto itemsize = self->dtype().itemsize();
   const auto storage_offset = self->generic_storage_offset<T>();
-  T storage_size = T(1);
+  T storage_size;
   if (stride) {
-    self->set_sizes_and_strides(size, *stride);
     storage_size = at::detail::computeStorageNbytes(
         size, *stride, itemsize, storage_offset);
   } else {
-    self->generic_set_sizes_contiguous(size);
     storage_size = at::detail::computeStorageNbytesContiguous(
         size, itemsize, storage_offset);
   }
 
-  if (resize_storage) {
+  // Same zero-numel bail as the previous maybe_resize_storage_* helpers, but
+  // based on the *requested* shape because metadata is not updated yet.
+  if (resize_storage && c10::multiply_integers(size) != 0) {
     _maybe_resize_storage(self, std::move(storage_size));
+  }
+
+  if (stride) {
+    self->set_sizes_and_strides(size, *stride);
+  } else {
+    self->generic_set_sizes_contiguous(size);
   }
 
   return self;
