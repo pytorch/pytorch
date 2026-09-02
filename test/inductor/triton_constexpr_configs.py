@@ -107,6 +107,28 @@ class UserDefinedAttrsLikeConfig:
         return f"{type(self).__name__}(nested={self.nested!r})"
 
 
+class UserDefinedAttrsPrivateFieldConfig:
+    # attrs exposes a private field `_nested` as the __init__ parameter `nested`
+    # (Attribute.alias); the generated source must use the alias.
+    __attrs_attrs__ = (
+        SimpleNamespace(name="_nested", alias="nested", repr=True, init=True),
+    )
+
+    def __init__(self, nested):
+        self._nested = nested
+
+    def __repr__(self):
+        return f"{type(self).__name__}(_nested={self._nested!r})"
+
+    def __eq__(self, other):
+        if type(other) is not type(self):
+            return NotImplemented
+        return self._nested == other._nested
+
+    def __hash__(self):
+        return hash((type(self), self._nested))
+
+
 class UserDefinedPydanticLikeConfig:
     def __init__(self, nested, hidden=None):
         self.nested = nested
