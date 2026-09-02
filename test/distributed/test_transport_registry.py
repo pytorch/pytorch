@@ -130,7 +130,8 @@ class TestTransportRegistry(TestCase):
             _registry, "_iter_entry_points", return_value=iter([entry_point])
         ):
             self.assertEqual(
-                available_transports(), ("external", "tcp", "torchcomms", "ucxx")
+                available_transports(),
+                ("external", "ibverbs", "tcp", "torchcomms", "ucxx"),
             )
 
 
