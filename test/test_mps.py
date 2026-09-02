@@ -5331,8 +5331,9 @@ class TestMPS(TestCaseMPS):
         byte_counts = torch.bincount(
             torch.tensor([0, 1, 1, 1, 4], device=device, dtype=torch.int32),
             torch.tensor([1, 2, 3, 4, 5], dtype=torch.int8, device=device))
+        # Integer weights accumulate in and return float32 (MPS has no float64).
         self.assertEqual(
-            torch.tensor([1, 9, 0, 0, 5], device=device, dtype=torch.int32), byte_counts)
+            torch.tensor([1, 9, 0, 0, 5], device=device, dtype=torch.float32), byte_counts)
         # test non-contiguous inputs and weights
         inputs = torch.tensor([[0, 0], [3, 1], [2, 1], [1, 1], [3, 4]], device=device, dtype=torch.int32)
         weights = torch.tensor([[.1, 1], [.2, 2], [.3, 3], [.4, 4], [.5, 5]], device=device)
@@ -5369,6 +5370,32 @@ class TestMPS(TestCaseMPS):
         big_exp[1] = 10
         big_out = torch.ones(10, dtype=torch.int8, device=device).bincount()
         self.assertEqual(big_exp, big_out)
+
+        # Correctness regression for highly-skewed inputs where most elements
+        # share a single bin. This pattern stresses the atomic accumulator's
+        # contention path; this test asserts MPS still matches CPU exactly on
+        # a representative connected-component-label shape.
+        skewed = torch.zeros(1080 * 1920, dtype=torch.int64, device=device)
+        skewed[100_000:157_600] = 193_501
+        skewed_cpu = skewed.cpu()
+        self.assertEqual(skewed.bincount(minlength=skewed.numel() + 1).cpu(),
+                         skewed_cpu.bincount(minlength=skewed_cpu.numel() + 1))
+
+        # Output-dtype contract for weighted bincount. CPU/CUDA return float32
+        # for float32 weights and float64 for every other weight dtype; MPS has
+        # no float64, so every weighted bincount returns float32 (the closest
+        # match to the reference's type class). This also guards against an
+        # earlier iteration that returned int for integer/bfloat16 weights.
+        indices_dt = torch.tensor([0, 1, 1, 1, 4], dtype=torch.int32, device=device)
+        for wdt in [torch.bfloat16, torch.float16, torch.float32,
+                    torch.int8, torch.int16, torch.int32, torch.int64]:
+            w = (torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5], device=device).to(wdt)
+                 if wdt.is_floating_point else
+                 torch.tensor([1, 2, 3, 4, 5], device=device, dtype=wdt))
+            out = indices_dt.bincount(weights=w)
+            self.assertEqual(out.dtype, torch.float32,
+                             msg=f"bincount(weights dtype={wdt}) returned {out.dtype}, expected float32")
+            self.assertEqual(out.cpu(), indices_dt.cpu().bincount(weights=w.cpu().float()))
 
     def test_bincount(self):
         device = "mps"
