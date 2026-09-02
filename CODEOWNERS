@@ -903,7 +903,6 @@
 /.ci/ @pytorch/pytorch-dev-infra
 /.ci/docker/ubuntu-rocm/ @jeffdaily
 /.ci/docker/common/install_roc*.sh @jeffdaily
-/.ci/docker/common/install_miopen.sh @jeffdaily
 /.ci/docker/common/install_amdsmi.sh @jeffdaily
 /.ci/docker/ci_commit_pins/rocm-*.txt @jeffdaily
 /.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @jeffdaily @jataylo @jithunnair-amd @pruthvistony
@@ -1126,6 +1125,7 @@
 # /test/dynamo_skips/
 # /test/export/test_dynamic_shapes.py
 # /test/onnx/exporter/test_dynamic_shapes.py
+# /test/test_cpython_diff_sync.py
 # /torch/_dynamo/
 # /torch/csrc/dynamo/
 /torch/_dynamo/backends/tvm.py @guan404ming
