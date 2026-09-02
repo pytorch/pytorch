@@ -39,6 +39,7 @@ from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestA
 from torch.testing._internal.common_cuda import (
     _create_scaling_case,
     _get_torch_cuda_version,
+    BF16X9_API_SUPPORTED,
     blas_library_context,
     has_device_side_assert,
     PLATFORM_SUPPORTS_GREEN_CONTEXT,
@@ -863,11 +864,7 @@ print(t.is_pinned())
                 # ROCm logic is less so, it's cublaslt for some Instinct, cublas for all else
                 # Mirror CUDAHooks::getHipblasltPreferredArchs in CUDAHooks.cpp
                 ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split(".")[:2])
-                archs = ["gfx90a", "gfx942"]
-                if ROCM_VERSION >= (6, 4):
-                    archs.extend(["gfx1200", "gfx1201"])
-                if ROCM_VERSION >= (7, 0):
-                    archs.append("gfx950")
+                archs = ["gfx90a", "gfx942", "gfx1200", "gfx1201", "gfx950"]
                 if ROCM_VERSION >= (7, 13):
                     archs.extend(["gfx1100", "gfx1101", "gfx1151"])
                 if ROCM_VERSION >= (7, 14):
@@ -1326,6 +1323,51 @@ print(t.is_pinned())
         self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "tf32")
         torch.set_float32_matmul_precision("medium")
         self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "tf32")
+
+    @unittest.skipUnless(BF16X9_API_SUPPORTED, "requires NVIDIA CUDA 12.9+")
+    @recover_orig_fp32_precision
+    @serialTest()
+    def test_bfx9_fp32_precision_get_set(self):
+        torch.set_float32_matmul_precision("highest")
+        torch.backends.cuda.matmul.fp32_precision = "bfx9"
+        self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "bfx9")
+        self.assertFalse(torch.backends.cuda.matmul.allow_tf32)
+        self.assertEqual(torch.get_float32_matmul_precision(), "highest")
+
+        with torch.backends.flags(fp32_precision="tf32"):
+            self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "bfx9")
+            torch.backends.cuda.matmul.fp32_precision = "none"
+            self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "tf32")
+        torch.backends.cuda.matmul.fp32_precision = "bfx9"
+
+        for backend, op in (
+            ("generic", "all"),
+            ("cuda", "all"),
+            ("cuda", "conv"),
+            ("cuda", "rnn"),
+            ("mkldnn", "all"),
+            ("mkldnn", "matmul"),
+        ):
+            with self.subTest(backend=backend, op=op):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "precision 'bfx9' is only supported for backend 'cuda' and op 'matmul'",
+                ):
+                    torch._C._set_fp32_precision_setter(backend, op, "bfx9")
+
+        for precision in ("bf16x9", "16x9", "16x8"):
+            with (
+                self.subTest(precision=precision),
+                self.assertRaisesRegex(RuntimeError, "Unknown precision"),
+            ):
+                torch.backends.cuda.matmul.fp32_precision = precision
+
+        torch.set_float32_matmul_precision("high")
+        torch.backends.cuda.matmul.fp32_precision = "bfx9"
+        with self.assertRaisesRegex(RuntimeError, "mix of the legacy and new APIs"):
+            torch.get_float32_matmul_precision()
+        with self.assertRaisesRegex(RuntimeError, "mix of the legacy and new APIs"):
+            _ = torch.backends.cuda.matmul.allow_tf32
 
     @recover_orig_fp32_precision
     @serialTest()
@@ -5800,6 +5842,71 @@ print(ret)
             .strip()
         )
         self.assertEqual(r, "1.0")
+
+    @unittest.skipIf(not TEST_MULTIGPU, "requires multiple devices")
+    def test_primary_context_devices(self):
+        # _primary_context_devices() reports every device holding a primary
+        # context, without itself creating one; the caller excludes the device it
+        # owns. Run in a subprocess for a clean CUDA state.
+        test_script = """\
+import torch
+
+# Read-only query reports nothing before any context exists.
+assert torch.cuda._primary_context_devices() == [], "expected a clean start"
+
+# A primary context on device 0 is visible; a rank owning device 1 treats it as
+# stray, while a rank owning device 0 does not.
+torch.zeros(1, device="cuda:0")
+ctxs = torch.cuda._primary_context_devices()
+assert ctxs == [0], ctxs
+assert [d for d in ctxs if d != 1] == [0], ctxs
+assert [d for d in ctxs if d != 0] == [], ctxs
+print("OK")
+"""
+        r = (
+            subprocess.check_output([sys.executable, "-c", test_script])
+            .decode("ascii")
+            .strip()
+        )
+        self.assertEqual(r, "OK")
+
+    @unittest.skipIf(not TEST_MULTIGPU, "requires multiple devices")
+    def test_set_device_stray_context_check(self):
+        # TORCH_CUDA_CHECK_STRAY_CONTEXT=error makes set_device raise when a
+        # primary context already exists on another device (created before the
+        # process pinned its own).
+        raise_script = """\
+import os
+os.environ["TORCH_CUDA_CHECK_STRAY_CONTEXT"] = "error"
+import torch
+torch.zeros(1, device="cuda:0")
+try:
+    torch.cuda.set_device(1)
+    print("NO_RAISE")
+except RuntimeError:
+    print("RAISED")
+"""
+        r = (
+            subprocess.check_output([sys.executable, "-c", raise_script])
+            .decode("ascii")
+            .strip()
+        )
+        self.assertEqual(r, "RAISED")
+
+        # No stray context -> set_device does not raise even in error mode.
+        clean_script = """\
+import os
+os.environ["TORCH_CUDA_CHECK_STRAY_CONTEXT"] = "error"
+import torch
+torch.cuda.set_device(1)
+print("OK")
+"""
+        r = (
+            subprocess.check_output([sys.executable, "-c", clean_script])
+            .decode("ascii")
+            .strip()
+        )
+        self.assertEqual(r, "OK")
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
