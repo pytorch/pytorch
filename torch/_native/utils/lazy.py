@@ -1,14 +1,10 @@
-# Lazy module proxy for torch._native. Binding a heavy / optional-dependency module
-# through LazyModule defers its import to first ATTRIBUTE ACCESS, not to the point the
-# binding is created. This keeps `import torch` (and native-op registration) free of
-# DSL runtimes like cutlass -- the lazy-DSL-import contract enforced by
-# test_no_dsl_imports_after_import_torch -- while call sites keep writing `mod.attr`
-# unchanged.
+# Lazy module proxy for torch._native: defers a heavy import to first ATTRIBUTE ACCESS rather than
+# to the binding, which is what keeps `import torch` free of DSL runtimes like cutlass (the contract
+# test_no_dsl_imports_after_import_torch enforces) while call sites still write `mod.attr`.
 #
-# torch/onnx/_internal/_lazy_import._LazyModule is the same 10 lines. The duplication is
-# deliberate: this module is imported during native-op registration, and reaching into
-# torch.onnx for it would put an onnx dependency on that path. Do not "deduplicate" them
-# without moving one somewhere neutral.
+# torch/onnx/_internal/_lazy_import._LazyModule is the same 10 lines. Duplicated deliberately: this
+# is imported during native-op registration, and reaching into torch.onnx would put an onnx
+# dependency on that path. Do not deduplicate without moving one somewhere neutral.
 #
 # Use the TYPE_CHECKING-real / else-lazy idiom so static tooling still resolves attrs:
 #

@@ -1,30 +1,9 @@
-# COLUMN reduction (reduce dim 0 of a contiguous 2D input) on the shared tile datapath.
-#
-# The transpose of the row case, and it needs exactly two things the row kernels do not:
-#
-#   WORK MAPPING. A row reduction gives one OUTPUT to a group of lanes and merges them; a
-#   column reduction has as many outputs as there are columns, each with little work, so it
-#   gives one output to one THREAD and never merges across lanes. Same fold primitives,
-#   opposite mapping.
-#
-#   VECTORIZATION AXIS. A row reduction vectorizes along the REDUCED axis (contiguous); a
-#   column reduction vectorizes along the KEPT axis and steps the reduced axis by the row
-#   stride. tile.fold_cols_rolled is that fold.
-#
-# The driver also has to split the REDUCED axis (rows) P ways, or the reduction carries no
-# parallelism of its own -- and the deficit grows with the reduced extent: unsplit, (65536, 256)
-# put its 256 columns / vec 4 = 64 chunks on ONE block walking 65536 rows and took 7830us
-# against ATen's 15.8.
-#
-# Stage 2 combines the P partials per column and is the SAME kernel body in combine mode. The
-# partial LAYOUT follows stage 2's work mapping: (P, C) for the thread-per-column form, where
-# adjacent threads write adjacent slots and stage 2 reads down P with the same coalescing;
-# (C, P) for the block-per-column form, whose ReduceBlock from_partials needs each output's
-# partials in one contiguous run.
-#
-# Like the row module, this one is a DRIVER: the kernel body is tile.TileReduce with
-# axis="col", and what lives here is the measured launch policy (vec cap, split factor,
-# threads per block, which stage-2 mapping) plus the plan cache.
+# COLUMN reduction (dim 0 of a contiguous 2D input): a DRIVER over tile.TileReduce at axis="col",
+# owning the measured launch policy and the plan cache. Differs from the row case in two ways: one
+# output per THREAD with no lane merge, and vectorization along the KEPT axis (tile.fold_cols_rolled).
+# The REDUCED axis must be split P ways or the reduction carries no parallelism -- unsplit,
+# (65536, 256) took 7830us against ATen's 15.8. The partial LAYOUT follows stage 2's mapping: (P, C)
+# thread-per-column, (C, P) block-per-column.
 
 from cutlass import Int32
 
@@ -52,11 +31,9 @@ _P_MAX = 4096
 # C=65536 10.5/16.6 -- so block wins while C is small enough that C blocks is not itself the
 # cost, and thread wins once C/nt alone fills the device. Crossover bracketed 4096..16384.
 _C_THREAD_STAGE2 = 8192
-# Columns per thread. For a COLUMN reduction `vec` sets the load width AND the number of live
-# ACCUMULATORS per thread -- a tension the row case does not have, where vec only widens the
-# load. The byte-derived width (8 for bf16) costs more in registers and lost threads than it
-# buys: MEASURED bf16, vec=8 relative to vec=4 -- (4096,4096) 0.83x, (16384,1024) 0.79x,
-# (256,65536) 0.77x. Capping at 4 is a no-op for fp32 (derives 4) and fp64 (derives 2).
+# Columns per thread. For a COLUMN reduction `vec` sets the load width AND the live ACCUMULATOR
+# count per thread, a tension the row case does not have. Capped at 4 because the registers a wider
+# width costs outweigh the load: bf16 at vec=8 is 0.77-0.83x of vec=4. A no-op for fp32 and fp64.
 _VEC_MAX = 4
 # Threads per block. SMALL on purpose: a block covers nt column-chunks, so a wide block idles
 # most of its threads whenever the column count is short (C=256 at vec=4 is 64 chunks -- 64 of
