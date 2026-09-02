@@ -690,4 +690,17 @@ def _build_installed_forward():
             PrecompileContext.record_artifact(_backend)
         return serve_cache_entry(fn, cache_entry, backend=BACKEND)
 
-    return _InstalledArtifact(_serve, _entry_function)
+    def _check_entry(fn):
+        from torch._dynamo.precompile_package import (
+            _check_artifact_matches,
+            _entry_fn_of,
+        )
+
+        _check_artifact_matches(cache_entry.dynamo, _entry_fn_of(fn), "this artifact")
+
+    return _InstalledArtifact(
+        _serve,
+        _entry_function,
+        check_fn=_check_entry,
+        backend_keys=tuple(cache_entry.backends),
+    )

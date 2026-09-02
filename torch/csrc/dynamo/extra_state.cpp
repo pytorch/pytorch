@@ -196,23 +196,44 @@ void ExtraState::apply_pending_evictions(
     this->has_pending_evictions.store(false, std::memory_order_release);
   }
   for (auto& eviction : evictions) {
-    if (eviction.clear_all) {
-      dead_precompile.splice(dead_precompile.end(), this->precompile_entries);
-      for (auto& [id, entries] : this->cache_entry_map) {
-        auto& dst = dead_cache[id];
-        dst.splice(dst.end(), entries);
-      }
-      this->cache_entry_map.clear();
-      this->total_cache_entry_count = 0;
-    } else {
-      auto& entries = this->precompile_entries;
-      for (auto it = entries.begin(); it != entries.end();) {
-        auto next = std::next(it);
-        if (it->isolate_recompiles_id == eviction.region_id &&
-            it->owner.ptr() == eviction.owner.ptr()) {
-          dead_precompile.splice(dead_precompile.end(), entries, it);
+    switch (eviction.kind) {
+      case PendingEviction::CLEAR_ALL: {
+        dead_precompile.splice(dead_precompile.end(), this->precompile_entries);
+        for (auto& [id, entries] : this->cache_entry_map) {
+          auto& dst = dead_cache[id];
+          dst.splice(dst.end(), entries);
         }
-        it = next;
+        this->cache_entry_map.clear();
+        this->total_cache_entry_count = 0;
+        break;
+      }
+      case PendingEviction::PRECOMPILE_ALL: {
+        dead_precompile.splice(dead_precompile.end(), this->precompile_entries);
+        break;
+      }
+      case PendingEviction::CACHE_REGION: {
+        auto it = this->cache_entry_map.find(eviction.region_id);
+        if (it != this->cache_entry_map.end()) {
+          this->total_cache_entry_count -= it->second.size();
+          auto& dst = dead_cache[eviction.region_id];
+          dst.splice(dst.end(), it->second);
+          this->cache_entry_map.erase(it);
+        }
+        break;
+      }
+      case PendingEviction::OWNER:
+      case PendingEviction::PRECOMPILE_REGION: {
+        bool by_owner = eviction.kind == PendingEviction::OWNER;
+        auto& entries = this->precompile_entries;
+        for (auto it = entries.begin(); it != entries.end();) {
+          auto next = std::next(it);
+          if (it->isolate_recompiles_id == eviction.region_id &&
+              (!by_owner || it->owner.ptr() == eviction.owner.ptr())) {
+            dead_precompile.splice(dead_precompile.end(), entries, it);
+          }
+          it = next;
+        }
+        break;
       }
     }
   }
@@ -280,11 +301,16 @@ void ExtraState::clear_in_place() {
       // clear; the next depth-zero cache_mutex holder applies it. The clear
       // landing "just after" the interrupted lookup matches the pre-existing
       // asynchrony of a reset racing a lookup from another thread.
-      this->park_eviction(PendingEviction{true, -1, py::none()});
+      this->park_eviction(
+          PendingEviction{PendingEviction::CLEAR_ALL, -1, py::none()});
     } else {
       dead_precompile_entries.swap(this->precompile_entries);
       dead_cache_entries.swap(this->cache_entry_map);
       this->total_cache_entry_count = 0;
+      // Nothing a parked eviction could still remove survives this clear.
+      std::lock_guard<std::mutex> pending(this->pending_invalidation_mutex);
+      this->pending_evictions.clear();
+      this->has_pending_evictions.store(false, std::memory_order_release);
     }
   }
   {
@@ -848,12 +874,22 @@ void _clear_cache_entries_for_region(
     std::list<CacheEntry> evicted;
     {
       CacheLock lock(extra->cache_mutex);
-      auto it = extra->cache_entry_map.find(isolate_recompiles_id);
-      if (it != extra->cache_entry_map.end()) {
-        TORCH_CHECK(extra->total_cache_entry_count >= it->second.size());
-        extra->total_cache_entry_count -= it->second.size();
-        evicted = std::move(it->second);
-        extra->cache_entry_map.erase(it);
+      if (extra->cache_python_depth > 0) {
+        // Python run BY this state's in-flight lookup got here (a guard, a
+        // backend __eq__); that lookup holds iterators into this list. Park
+        // the splice for the next depth-zero holder, like reset_code does.
+        extra->park_eviction(ExtraState::PendingEviction{
+            ExtraState::PendingEviction::CACHE_REGION,
+            isolate_recompiles_id,
+            py::none()});
+      } else {
+        auto it = extra->cache_entry_map.find(isolate_recompiles_id);
+        if (it != extra->cache_entry_map.end()) {
+          TORCH_CHECK(extra->total_cache_entry_count >= it->second.size());
+          extra->total_cache_entry_count -= it->second.size();
+          evicted = std::move(it->second);
+          extra->cache_entry_map.erase(it);
+        }
       }
     }
   }
@@ -916,7 +952,13 @@ void _reset_precompile_entries(const py::handle& code_obj) {
     std::list<PrecompileEntry> evicted;
     {
       CacheLock lock(extra->cache_mutex);
-      evicted.swap(extra->precompile_entries);
+      if (extra->cache_python_depth > 0) {
+        // See _clear_cache_entries_for_region.
+        extra->park_eviction(ExtraState::PendingEviction{
+            ExtraState::PendingEviction::PRECOMPILE_ALL, -1, py::none()});
+      } else {
+        evicted.swap(extra->precompile_entries);
+      }
     }
   }
 }
@@ -935,13 +977,21 @@ void _reset_precompile_entries_for_region(
     std::list<PrecompileEntry> evicted;
     {
       CacheLock lock(extra->cache_mutex);
-      auto& entries = extra->precompile_entries;
-      for (auto it = entries.begin(); it != entries.end();) {
-        auto next = std::next(it);
-        if (it->isolate_recompiles_id == isolate_recompiles_id) {
-          evicted.splice(evicted.end(), entries, it);
+      if (extra->cache_python_depth > 0) {
+        // See _clear_cache_entries_for_region.
+        extra->park_eviction(ExtraState::PendingEviction{
+            ExtraState::PendingEviction::PRECOMPILE_REGION,
+            isolate_recompiles_id,
+            py::none()});
+      } else {
+        auto& entries = extra->precompile_entries;
+        for (auto it = entries.begin(); it != entries.end();) {
+          auto next = std::next(it);
+          if (it->isolate_recompiles_id == isolate_recompiles_id) {
+            evicted.splice(evicted.end(), entries, it);
+          }
+          it = next;
         }
-        it = next;
       }
     }
   }
@@ -971,7 +1021,7 @@ void _reset_precompile_entries_for_owner(
         // from Python run BY A GUARD of this very state's in-flight lookup,
         // whose iterators must see its lists untouched. Park it either way.
         extra->park_eviction(ExtraState::PendingEviction{
-            false,
+            ExtraState::PendingEviction::OWNER,
             isolate_recompiles_id,
             py::reinterpret_borrow<py::object>(owner)});
         return;

@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TestCase,
 )
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON, HAS_GPU
 
 
 # A module-level (global) model + a function referencing it, to exercise the
@@ -602,8 +603,8 @@ class TestPrecompile(TestCase):
         exec(compile(code, "<artifact>", "exec"), ns)
         self.assertEqual(ns["forward"](m, x), m(x))
 
-    @unittest.skipUnless(
-        torch.cuda.is_available(), "needs CUDA + Triton for the kernel cache"
+    @unittest.skipIf(
+        not HAS_CUDA_AND_TRITON, "needs CUDA + Triton for the kernel cache"
     )
     @torch._inductor.config.patch({"compile_threads": 1})
     def test_cache_reload_without_eager_static_launcher_rehydration(self):
@@ -638,7 +639,7 @@ class TestPrecompile(TestCase):
                 counters["inductor"]["triton_bundler_load_static_autotuner"], 0
             )
 
-    @unittest.skipUnless(torch.cuda.is_available(), "needs CUDA for Triton autotuning")
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "needs CUDA + Triton for autotuning")
     def test_cache_bundles_autotune_artifacts(self):
         from torch._inductor.utils import fresh_cache
 
@@ -2372,6 +2373,54 @@ class TestPrecompile(TestCase):
             # Served, not recompiled: the whole point of installing.
             self.assertEqual(counters["stats"]["unique_graphs"], 0)
 
+    def test_installed_artifact_fn_must_match_the_capture(self):
+        # load(fn=...) installs onto whatever function it is given, so it has
+        # to refuse one the artifact was not captured from -- the same check
+        # the path form makes -- or the wrong callable serves the captured
+        # graphs. The function it WAS captured from is accepted.
+        code, cache = torch.compiler.precompile.artifact(
+            _precompile_unreachable_helper_caller,
+            backend="eager",
+            dynamic=False,
+            tracer="dynamo",
+            example_inputs=[(torch.randn(4),)],
+        )
+        x = torch.randn(4)
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            PrecompileError, "was captured from .* but is being loaded onto"
+        ):
+            torch.compiler.precompile.load(
+                code, cache, fn=_precompile_unreachable_helper
+            )
+        loaded = torch.compiler.precompile.load(
+            code, cache, fn=_precompile_unreachable_helper_caller
+        )
+        with loaded, torch.no_grad():
+            self.assertEqual(loaded(x), _precompile_unreachable_helper_caller(x))
+
+    def test_installed_artifact_unload_releases_its_recorded_backends(self):
+        # Installing files the artifact's backends into the process-global
+        # PrecompileContext. unload() has to take exactly those out again, or
+        # every install/unload cycle leaks them for the life of the process.
+        code, cache = torch.compiler.precompile.artifact(
+            _precompile_unreachable_helper_caller,
+            backend="eager",
+            dynamic=False,
+            tracer="dynamo",
+            example_inputs=[(torch.randn(4),)],
+        )
+        x = torch.randn(4)
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        registry = PrecompileContext._backend_artifacts_by_key
+        baseline = len(registry)
+        for _ in range(2):
+            with loaded, torch.no_grad():
+                self.assertEqual(loaded(x), _precompile_unreachable_helper_caller(x))
+                self.assertGreater(len(registry), baseline)
+            self.assertEqual(len(registry), baseline)
+
     def test_installed_artifact_call_after_unload_raises(self):
         # Installing mutates process-global code objects, and the handle's
         # contract is that the mutation is attributable to a point in the
@@ -2825,8 +2874,10 @@ class TestPrecompile(TestCase):
         inner = session._session
         with inner._state:
             inner._active_calls = 1
-        with mock.patch.object(inner._state, "wait", side_effect=KeyboardInterrupt):
-            with self.assertRaises(KeyboardInterrupt):
+        with mock.patch.object(
+            inner._state, "wait", side_effect=KeyboardInterrupt("interrupted")
+        ):
+            with self.assertRaisesRegex(KeyboardInterrupt, "interrupted"):
                 session.__exit__(None, None, None)
         self.assertFalse(inner._closing)
         self.assertFalse(inner._finished)
@@ -3082,7 +3133,7 @@ class TestPrecompile(TestCase):
 
     def test_tracer_dynamo_mark_unbacked_shape_id_mismatch_rejected(self):
         # Two dims sharing a shape_id bind to ONE unbacked symbol, so their sizes must be
-        # equal at runtime; the equality is enforced by the captured graph's own assert.
+        # equal at runtime; a call that breaks the equality matches no captured variant.
         m = torch.nn.Linear(4, 4).eval()
         x = torch.randn(8, 4)
         y = torch.randn(8, 4)
@@ -3097,7 +3148,7 @@ class TestPrecompile(TestCase):
         f_c = torch.compiler.precompile.load(code, cache)
         a, b = torch.randn(3, 4), torch.randn(3, 4)
         self.assertEqual(f_c(m, a, b), m(a) + b)
-        with self.assertRaises((RuntimeError, AssertionError)):
+        with self.assertRaisesRegex(RuntimeError, "no captured variant of"):
             f_c(m, torch.randn(3, 4), torch.randn(5, 4))
 
     def test_tracer_dynamo_mark_unbacked_hint_override_honored(self):
@@ -5444,7 +5495,10 @@ class TestPrecompileNumerics(TestCase):
         )
 
 
-instantiate_device_type_tests(TestPrecompileNumerics, globals())
+# The accelerator lowering needs triton; without it only the CPU variants run.
+instantiate_device_type_tests(
+    TestPrecompileNumerics, globals(), only_for=None if HAS_GPU else "cpu"
+)
 
 
 if __name__ == "__main__":

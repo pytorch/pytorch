@@ -94,10 +94,10 @@ be used directly.
 The public surface is ``torch.compiler.precompile`` -- with ``example_inputs``
 for this multi-graph form -- and ``torch.compiler.precompile.load``. The
 helpers in this module, including the capture session, implement that surface
-and remain internal. The positional ``torch.compiler.precompile`` form
-produces a self-contained Python source artifact from one example call. Both are distinct from
-``torch._dynamo.config.caching_precompile``, which caches ``torch.compile``
-artifacts transparently without an explicit capture block.
+and remain internal. The default ``tracer="make_fx"`` form of the same call
+produces a self-contained Python source artifact from one example call. Both are
+distinct from ``torch._dynamo.config.caching_precompile``, which caches
+``torch.compile`` artifacts transparently without an explicit capture block.
 """
 
 from __future__ import annotations
@@ -1188,6 +1188,7 @@ class PrecompileSession:
         self._package = CompilePackage(
             self._entry_fn,
             serialization_guard_filter_fn=self._guard_filter_fn,
+            explicit_capture=True,
             requires_native_backend_compatibility=backend != "eager",
         )
         self._backend_artifacts: dict[_BackendId, Any] = {}
@@ -1233,9 +1234,8 @@ class PrecompileSession:
                         f"{name!r} on {type(module).__name__}. Automatic examples "
                         "capture ordinary torch.no_grad() semantics, but leaving "
                         "inference_mode does not turn existing tensors into ordinary "
-                        "tensors. Create the module outside torch.inference_mode(), or "
-                        "use capture() manually and serve under the matching inference "
-                        "mode."
+                        "tensors. Create the module outside torch.inference_mode() "
+                        "before passing it to torch.compiler.precompile."
                     )
 
     def _clear_runtime_cache(self) -> None:
@@ -1326,9 +1326,9 @@ class PrecompileSession:
                         "example_inputs contains an inference tensor. Automatic "
                         "examples capture ordinary torch.no_grad() semantics, but "
                         "leaving inference_mode does not turn an existing inference "
-                        "tensor into an ordinary tensor. Create automatic inputs "
-                        "outside torch.inference_mode(), or use capture() manually "
-                        "and serve under the matching inference mode."
+                        "tensor into an ordinary tensor. Create the example inputs "
+                        "outside torch.inference_mode() before passing them to "
+                        "torch.compiler.precompile."
                     )
                 for value in tree_leaves((args, kwargs)):
                     if isinstance(value, torch.nn.Module):
@@ -2151,7 +2151,7 @@ def precompile_load(
     entry_fn = _entry_fn_of(fn)
     store = _SingleFileStore()
     cache_entry = store.load_cache_entry(path)
-    _check_artifact_matches(cache_entry.dynamo, entry_fn, path)
+    _check_artifact_matches(cache_entry.dynamo, entry_fn, f"the artifact at {path}")
     return serve_cache_entry(
         fn,
         cache_entry,
@@ -2187,6 +2187,7 @@ def serve_cache_entry(
         serialization_guard_filter_fn=(
             default_guard_filter_fn if guard_filter_fn is None else guard_filter_fn
         ),
+        explicit_capture=True,
     )
     optimize_ctx = torch._dynamo.optimize(
         _PrecompileBackend(backend),
@@ -2224,10 +2225,10 @@ def precompile_capture(
     lower ambient ``accumulated_recompile_limit`` for this capture so that the
     explicit API limit is the effective one.
 
-    ``example_inputs`` are run on ``__enter__``, under ``torch.no_grad()``, so
-    the ``with`` body is optional for an inference capture; calls you make in
-    the body run in the ambient grad mode instead. Existing inference tensors in
-    the inputs or an ``nn.Module``'s parameters and buffers are rejected because
+    ``example_inputs`` are run on ``__enter__``, under ``torch.no_grad()`` unless
+    ``training=True``, so the ``with`` body is optional; calls you make in the
+    body run in the ambient grad mode instead. Existing inference tensors in the
+    inputs or an ``nn.Module``'s parameters and buffers are rejected because
     disabling inference mode does not make them ordinary tensors. ``invariants``
     names a file written when the block exits without an exception. A session is
     one-shot; create another capture instead of re-entering it.
@@ -2386,10 +2387,11 @@ def serving() -> Iterator[None]:
 
 
 def _check_artifact_matches(
-    dynamo: _DynamoCacheEntry, entry_fn: Callable[..., object], path: str
+    dynamo: _DynamoCacheEntry, entry_fn: Callable[..., object], artifact: str
 ) -> None:
     """
-    Refuse an artifact captured from a different callable.
+    Refuse an artifact captured from a different callable. ``artifact`` names it
+    in the error, e.g. ``"the artifact at <path>"``.
 
     CompilePackage.initialize discards the serialized entry code object and
     rebinds the stored guards and bytecode onto whatever function it is given,
@@ -2407,14 +2409,14 @@ def _check_artifact_matches(
     """
     code = getattr(entry_fn, "__code__", None)
     if code is None:
-        raise PackageError(f"{entry_fn!r} has no __code__ to load {path} onto.")
+        raise PackageError(f"{entry_fn!r} has no __code__ to load {artifact} onto.")
     if not dynamo.codes:
-        raise PackageError(f"Artifact at {path} contains no code entries.")
+        raise PackageError(f"precompile: {artifact} contains no code entries.")
     entry = dynamo.codes[0]
     actual_module = _defining_module_name(code) or getattr(entry_fn, "__module__", None)
     if actual_module is not None and entry.python_module != actual_module:
         raise PackageError(
-            f"Artifact at {path} was captured from a callable defined in "
+            f"precompile: {artifact} was captured from a callable defined in "
             f"{entry.python_module!r} but is being loaded onto one defined in "
             f"{actual_module!r}. Loading it would serve the captured "
             f"function's graphs for this one."
@@ -2423,19 +2425,19 @@ def _check_artifact_matches(
     actual = getattr(entry_fn, "__qualname__", None)
     if expected is not None and actual is not None and expected != actual:
         raise PackageError(
-            f"Artifact at {path} was captured from {expected!r} but is being "
+            f"precompile: {artifact} was captured from {expected!r} but is being "
             f"loaded onto {actual!r}. Loading it would serve the captured "
             f"function's graphs for this one."
         )
     stored = entry.python_code
     if stored.co_name != code.co_name:
         raise PackageError(
-            f"Artifact at {path} was captured from code object "
+            f"precompile: {artifact} was captured from code object "
             f"{stored.co_name!r} but is being loaded onto {code.co_name!r}."
         )
     if stored.co_firstlineno != code.co_firstlineno:
         raise PackageError(
-            f"Artifact at {path} was captured from a definition at "
+            f"precompile: {artifact} was captured from a definition at "
             f"{entry.python_module}:{stored.co_firstlineno} but the callable of "
             f"that name here is defined at line {code.co_firstlineno}. Same "
             f"name, different definition -- a class defined under an `if` that "
