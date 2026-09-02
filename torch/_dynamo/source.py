@@ -276,12 +276,10 @@ class GlobalSource(Source):
 
 @dataclass_with_cached_hash(frozen=True)
 class GlobalWeakRefSource(Source):
-    # INPUT, not GLOBAL: a dynamo-installed weakref to an object bound at
-    # compile time (e.g. an optimizer's params, via store_global_weakref_by_id)
-    # that the compiled bytecode dereferences at runtime. Its WEAKREF_ALIVE
-    # guard checks liveness only (instance dispatch comes from ID_MATCH on the
-    # traced input), but an environment-drop policy must never remove it:
-    # dropping it would run the compiled code against a dead weakref.
+    # INPUT, not GLOBAL: a Dynamo-installed weakref proxy for the identity of a
+    # traced runtime object (e.g. an optimizer argument and its params), so its
+    # guards are dispatch-relevant even though the lookup goes through globals.
+    # See Note [Guard provenance].
     _provenance: ClassVar[GuardProvenance] = GuardProvenance.INPUT
 
     global_name: str
@@ -1176,10 +1174,10 @@ class TorchFunctionModeStackSource(Source):
 
 @dataclass_with_cached_hash(frozen=True)
 class ConstantSource(Source):
-    # Classification is about GUARD semantics and ConstantSource cannot be
-    # guarded on (make_guard raises below); its reconstruct does emit a
-    # LOAD_GLOBAL of a dynamo-installed binding, which non-guard consumers
-    # reasoning about reconstruction portability should not infer from this.
+    # SYNTHETIC on the guard axis: ConstantSource cannot be guarded on
+    # (make_guard raises below). Its reconstruct still emits a LOAD_GLOBAL of a
+    # Dynamo-installed binding; see Note [Guard provenance] on why non-guard
+    # consumers must not infer reconstruction portability from this.
     _provenance: ClassVar[GuardProvenance] = GuardProvenance.SYNTHETIC
 
     source_name: str
@@ -1284,8 +1282,10 @@ class ContextVarGetSource(ChainedSource):
 # guard contents from the ambient ShapeEnv
 @dataclass_with_cached_hash(frozen=True)
 class ShapeEnvSource(Source):
-    # INPUT: the SHAPE_ENV guard is the dynamic-shape dispatch guard over
-    # input sizes, so an environment-drop policy must keep it.
+    # INPUT despite the synthetic root: the singleton SHAPE_ENV guard rooted
+    # here encodes the symbolic-shape constraints derived from the traced
+    # inputs' sizes/strides, so it is dispatch-relevant and a drop policy must
+    # never treat it as environment. See Note [Guard provenance].
     _provenance: ClassVar[GuardProvenance] = GuardProvenance.INPUT
 
     @property
@@ -1327,7 +1327,10 @@ class CurrentStreamSource(Source):
 
 @dataclass_with_cached_hash(frozen=True)
 class BackwardStateSource(Source):
-    _provenance: ClassVar[GuardProvenance] = GuardProvenance.AMBIENT
+    # SYNTHETIC: BackwardState is a Dynamo-installed container for the compiled
+    # backward, not interpreter/process-wide state; it is not guarded on in a
+    # dispatch-relevant way. See Note [Guard provenance].
+    _provenance: ClassVar[GuardProvenance] = GuardProvenance.SYNTHETIC
 
     @property
     def _name_template(self) -> str:
