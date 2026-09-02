@@ -1140,9 +1140,8 @@ def _normalize_blockwise_scale(
     # For BlockWise1x128, torch._scaled_mm (v1) passes scale_b as
     # [ceil(K/128), N] while the template reads [N, ceil(K/128)] (the layout
     # _scaled_mm_v2 already supplies). Transpose the v1 layout without a copy.
-    # Which ABI we are lowering is known statically from the caller, so it is
-    # passed in rather than inferred: when N == ceil(K/128) the scale is square
-    # and the two layouts are indistinguishable by shape.
+    # The caller passes the ABI rather than us inferring it: when N == ceil(K/128)
+    # the scale is square and the two layouts are indistinguishable by shape.
     if transpose and v1_scale_layout and scale_option == ScalingType.BlockWise1x128:
         return PermuteView.create(scale, (1, 0))
 
@@ -1200,15 +1199,12 @@ def is_desired_scaling(
 
 
 def get_main_loop_dot_precision(device_type: str) -> str:
-    # The main-loop template scales the operands before the dot, making them
-    # fp32, where tl.dot defaults to tf32 and drops most of the fp8 mantissa.
-    # ALLOW_TF32 is the wrong control: it tracks fp32_precision, which is about
-    # fp32 matmuls, while these operands are exact fp8 values times an fp32
-    # scale, and the cuBLAS path this is checked against never uses tf32 here.
+    # The template scales the operands before the dot, making them fp32, where
+    # tl.dot defaults to tf32 and drops most of the fp8 mantissa. ALLOW_TF32 is
+    # not the control here: it tracks fp32_precision, which is about fp32 matmuls.
     # tf32x3 recovers the accuracy at ~3x tf32 where ieee costs ~10x, but only
-    # CUDA accepts it (ROCm allows ieee/bf16x3/bf16x6). Template kwargs are
-    # rendered verbatim into the kernel source, so the quotes are part of the
-    # value.
+    # CUDA accepts it (ROCm allows ieee/bf16x3/bf16x6). Template kwargs render
+    # verbatim into the kernel source, so the quotes are part of the value.
     return '"tf32x3"' if device_type == "cuda" else '"ieee"'
 
 

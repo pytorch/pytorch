@@ -126,8 +126,7 @@
 
             a_scaled = a * scale_a_block
             b_scaled = b * scale_b_block
-            # Scaled operands are fp32, where tl.dot would default to tf32 and
-            # drop most of the fp8 mantissa. See get_main_loop_dot_precision.
+            # fp32 operands, so tl.dot would default to tf32; see get_main_loop_dot_precision.
             accumulator = tl.dot(a_scaled, b_scaled.T, accumulator, input_precision=DOT_PRECISION)
 
         offs_cm = offs_am + tl.arange(0, BLOCK_M)

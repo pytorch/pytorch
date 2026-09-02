@@ -1154,8 +1154,7 @@ class TestFP8Lowering(TestCase):
         (
             # The DISABLED bot skips parametrizations by index, so new shapes go
             # on the end; inserting ahead of these redirects those skips onto
-            # unrelated shapes. Index 2 keeps its position but shrinks M from
-            # 32768, which is a deliberate runtime cut, not a reindex.
+            # unrelated shapes.
             (16, 256, 256),
             (1024, 512, 1024),
             (2048, 4096, 4096),
