@@ -791,6 +791,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
 
         def compile_submod(input_mod, args):
             from functorch.compile import nop
+
             from torch._functorch.aot_autograd import aot_module_simplified
 
             class WrapperModule(torch.nn.Module):
@@ -1730,6 +1731,56 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
                     self.assertEqual(opt_out, ref_out)
                     self.assertEqual(base, base_ref)
                     self.assertEqual(compiler.frame_count, 2)
+
+    def test_input_mutation_storage_overlap_full_view_recompiles(self):
+        def f(field, indices, gain, workspace):
+            torch.index_select(field, 0, indices, out=workspace)
+            workspace.mul_(gain)
+            field.index_copy_(0, indices, workspace)
+
+        torch._dynamo.reset()
+        compiler = CompileCounterWithBackend("aot_eager")
+        opt_f = torch.compile(
+            f,
+            backend=compiler,
+            fullgraph=True,
+            dynamic=False,
+        )
+
+        indices = torch.tensor([0, 2, 4], dtype=torch.int64)
+
+        field = torch.arange(1, 7, dtype=torch.float64)
+        gain = torch.tensor([2, 3, 4], dtype=torch.float64)
+        workspace = torch.full((3,), -1.0, dtype=torch.float64)
+
+        ref_field = field.clone()
+        ref_workspace = workspace.clone()
+        f(ref_field, indices, gain, ref_workspace)
+        opt_f(field, indices, gain, workspace)
+
+        self.assertEqual(field, ref_field)
+        self.assertEqual(workspace, ref_workspace)
+        self.assertEqual(compiler.frame_count, 1)
+
+        field = torch.arange(1, 7, dtype=torch.float64)
+        alias_base = torch.tensor([2, 3, 4], dtype=torch.float64)
+        gain = alias_base[:]
+        workspace = alias_base[:]
+
+        ref_field = field.clone()
+        ref_base = alias_base.clone()
+        ref_gain = ref_base[:]
+        ref_workspace = ref_base[:]
+
+        self.assertIsNot(gain, workspace)
+        self.assertEqual(gain.data_ptr(), workspace.data_ptr())
+
+        f(ref_field, indices, ref_gain, ref_workspace)
+        opt_f(field, indices, gain, workspace)
+
+        self.assertEqual(field, ref_field)
+        self.assertEqual(alias_base, ref_base)
+        self.assertEqual(compiler.frame_count, 2)
 
     def test_input_mutation_storage_overlap_uses_single_partition_guard(self):
         class ManyParams(torch.nn.Module):
