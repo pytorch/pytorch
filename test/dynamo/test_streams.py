@@ -813,6 +813,9 @@ class <lambda>(torch.nn.Module):
             with s0:
                 z1 = torch.add(y, y)
                 z0 = torch.add(z1, y)
+                # z1 is produced on s0 and read below on s2. Without this wait the
+                # eager run races, so the reference `expected` is nondeterministic.
+                s2.wait_stream(s0)
                 with s2:
                     y = 2 + z1
 
@@ -839,15 +842,31 @@ class <lambda>(torch.nn.Module):
         # Annotation: {'stream': 3}
         add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg1_1, arg1_1)
 
+        # Annotation: {'stream': 3}
+        add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_1, arg1_1);  arg1_1 = None
+
+        # No stacktrace found for following nodes
+        subgraph_wait_stream = self.subgraph_wait_stream
+        control_deps = torch.ops.higher_order.control_deps((add_1, add_2, add), subgraph_wait_stream, add_1, add);  add_1 = add = subgraph_wait_stream = None
+
         # Annotation: {'stream': 1}
-        add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_1, 2)
+        getitem_1: "f32[2, 2]" = control_deps[2]
 
         # Annotation: {'stream': 3}
-        add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_1, arg1_1);  add_1 = arg1_1 = None
+        getitem: "f32[2, 2]" = control_deps[1];  control_deps = None
 
         # Annotation: {'stream': 1}
-        copy_: "f32[2, 2]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = copy_ = None
-        return (add_3, add_2)
+        add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(getitem, 2);  getitem = None
+
+        # Annotation: {'stream': 1}
+        copy_: "f32[2, 2]" = torch.ops.aten.copy_.default(arg0_1, getitem_1);  arg0_1 = getitem_1 = copy_ = None
+        return (add_2, add_3)
+
+    class subgraph_wait_stream(torch.nn.Module):
+        def forward(self, dep_0: "f32[2, 2]", dep_1: "f32[2, 2]"):
+            # Annotation: {'stream': 3}
+            wait_stream_default = torch.ops.streams.wait_stream.default(1, 3)
+            return (wait_stream_default, dep_0, dep_1)
 """,
         )
 
