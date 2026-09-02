@@ -571,16 +571,15 @@ class _InstalledArtifact:
 
                     fn = self._entry_factory() if self._fn is None else self._fn
                     # Backend keys are content hashes, so an ambient
-                    # caching_precompile run on the same graph files under the
-                    # same keys. _serve records every backend and overwrites, so
-                    # remember what was already there, put it back once install
-                    # has consumed ours, and let unload take only what this
-                    # install added.
-                    theirs = {
-                        k: PrecompileContext.serialize_artifact_by_key(k)
+                    # caching_precompile run on the same graph (or another handle
+                    # on this artifact) files under the same keys. _serve records
+                    # only absent keys; remember which those were so unload takes
+                    # back exactly what this install added.
+                    present = {
+                        k
                         for k in self._backend_keys
+                        if PrecompileContext.serialize_artifact_by_key(k) is not None
                     }
-                    theirs = {k: v for k, v in theirs.items() if v is not None}
                     # An artifact emitted before _serve took a prepared package
                     # still serves; it just rebuilds what _prepare already built.
                     if self._prepared is not None and "prepared" in _serve_parameters(
@@ -590,12 +589,10 @@ class _InstalledArtifact:
                     else:
                         self._inner = self._serve(fn)
                     self._prepared = None
-                    for artifact in theirs.values():
-                        PrecompileContext.record_artifact(artifact)
                     self._recorded = {
                         k: PrecompileContext.serialize_artifact_by_key(k)
                         for k in self._backend_keys
-                        if k not in theirs
+                        if k not in present
                     }
                 inner = self._inner
         return inner

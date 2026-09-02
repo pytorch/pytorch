@@ -4114,6 +4114,43 @@ class TestPrecompile(TestCase):
             self.assertIsNone(PrecompileContext.serialize_artifact_by_key(key))
         PrecompileContext.take_artifact(keys[0])
 
+    def test_two_handles_on_one_artifact_unload_cleanly(self):
+        # Two loads of the same artifact share every backend key. The second
+        # install must not take over the first one's registry entries, and after
+        # both unload nothing of either may remain.
+        code, cache = torch.compiler.precompile.artifact(
+            _precompile_unreachable_helper_caller,
+            backend="eager",
+            dynamic=False,
+            tracer="dynamo",
+            example_inputs=[(torch.randn(4),)],
+        )
+        x = torch.randn(4)
+        torch._dynamo.reset()
+        a = torch.compiler.precompile.load(code, cache)
+        b = torch.compiler.precompile.load(code, cache)
+        keys = list(a._compiled._backend_keys)
+        for key in keys:
+            PrecompileContext.take_artifact(key)
+        with torch.no_grad():
+            a.__enter__()
+            filed = [PrecompileContext.serialize_artifact_by_key(k) for k in keys]
+            b.__enter__()
+            self.assertEqual(b(x), _precompile_unreachable_helper_caller(x))
+            for key, artifact in zip(keys, filed):
+                self.assertIs(
+                    PrecompileContext.serialize_artifact_by_key(key), artifact
+                )
+            b.__exit__(None, None, None)
+            for key, artifact in zip(keys, filed):
+                self.assertIs(
+                    PrecompileContext.serialize_artifact_by_key(key), artifact
+                )
+            self.assertEqual(a(x), _precompile_unreachable_helper_caller(x))
+            a.__exit__(None, None, None)
+        for key in keys:
+            self.assertIsNone(PrecompileContext.serialize_artifact_by_key(key))
+
     @parametrize("backend", ("eager", "inductor"))
     def test_training_capture_serves_a_backward_without_a_loss(self, backend):
         # The capture never sees a loss and never calls .backward(). The joint

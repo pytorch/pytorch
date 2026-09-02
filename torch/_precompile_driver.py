@@ -769,9 +769,12 @@ def _build_installed_forward():
 
         # The backends have to be in the context before install deserializes
         # them, the same thing DynamoStore.load_cache_entry does for the path
-        # form of this artifact.
+        # form of this artifact. Keys are content hashes, so one an ambient
+        # caching_precompile run (or another handle on this artifact) already
+        # filed is equivalent and stays theirs; only absent keys are recorded.
         for _backend in cache_entry.backends.values():
-            PrecompileContext.record_artifact(_backend)
+            if PrecompileContext.serialize_artifact_by_key(_backend.key) is None:
+                PrecompileContext.record_artifact(_backend)
         return serve_cache_entry(fn, cache_entry, backend=BACKEND, prepared=prepared)
 
     def _check_entry(fn):
