@@ -1608,10 +1608,17 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
         self, annotation: dict[str, Any], initial_values: Any = None, **kwargs: Any
     ) -> None:
         self.annotation = annotation
-        budget = annotation.get(torch.fx.traceback.MEMORY_BUDGET_ANNOTATION_KEY)
-        target_values = (
-            (budget,) if len(annotation) == 1 and type(budget) is float else ()
+        budget_key = torch.fx.traceback.MEMORY_BUDGET_ANNOTATION_KEY
+        coverage_key = torch.fx.traceback.MEMORY_BUDGET_REQUIRE_FULL_COVERAGE_KEY
+        budget = annotation.get(budget_key)
+        require_full_coverage = annotation.get(coverage_key, True)
+        is_memory_budget = (
+            budget_key in annotation
+            and set(annotation).issubset({budget_key, coverage_key})
+            and type(budget) is float
+            and type(require_full_coverage) is bool
         )
+        target_values = (budget, require_full_coverage) if is_memory_budget else ()
         super().__init__(
             target_values=target_values,
             initial_values=initial_values,
