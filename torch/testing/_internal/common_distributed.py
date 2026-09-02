@@ -1790,7 +1790,7 @@ class DynamoDistributedSingleProcTestCase(torch._dynamo.test_case.TestCase):
                 os.environ,
                 {
                     "MASTER_ADDR": "localhost",
-                    "MASTER_PORT": "12355",
+                    "MASTER_PORT": str(find_free_port()),
                 },
             )
         )
