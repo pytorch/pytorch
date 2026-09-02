@@ -3139,12 +3139,22 @@ class TestPrecompile(TestCase):
         with _maybe_scoped(loaded), torch.no_grad():
             self.assertEqual(loaded(model, x), expected)
 
-    def test_precompile_rejects_positional_example_arguments(self):
-        # example_inputs is the only calling convention; the old positional
-        # spelling gets a pointed error rather than CPython's arity message.
-        x = torch.randn(3)
-        with self.assertRaisesRegex(TypeError, "no positional example arguments"):
-            torch.compiler.precompile(lambda y: y + 1, x, backend="eager")
+    def test_precompile_positional_example_call_is_deprecated_but_equivalent(self):
+        # precompile(fn, *example_args) is the 2.14 spelling of one example
+        # call. It still works, as example_inputs=[tuple(example_args)], under
+        # a FutureWarning; naming the call both ways is an error.
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(2, 4)
+        with self.assertWarnsRegex(FutureWarning, "example_inputs"):
+            code, cache = torch.compiler.precompile(
+                lambda mm, t: mm(t), m, x, backend="eager"
+            )
+        f_c = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(f_c(m, x), m(x))
+        with self.assertRaisesRegex(TypeError, "AND example_inputs"):
+            torch.compiler.precompile(
+                lambda mm, t: mm(t), m, x, backend="eager", example_inputs=[(m, x)]
+            )
 
     def test_precompile_requires_example_inputs(self):
         with self.assertRaisesRegex(ValueError, "requires example_inputs"):
