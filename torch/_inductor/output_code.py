@@ -190,21 +190,38 @@ def maybe_handle_backward_generation(
     # if cudagraph'd the forward and set the device, we need to let the cudagraph manager
     # know we are running the backward even if we will not run it in cudagraphs
     if is_backward and config.triton.cudagraph_trees:
+        region_aware = compiled_graph.fx_kwargs.get("cudagraphs_region_aware", False)
         if boxed_forward_device_index is None:
+            if region_aware:
+                return
             raise AssertionError("boxed_forward_device_index must not be None")
         if boxed_forward_device_index.value is None:
+            if region_aware:
+                return
             raise AssertionError("boxed_forward_device_index.value must not be None")
         compiled_graph_callable = compiled_graph.current_callable
-
-        manager = torch._inductor.cudagraph_trees.get_manager(
-            boxed_forward_device_index.value, create_if_none_exists=False
+        forward_device_index = boxed_forward_device_index.value
+        manager = (
+            None
+            if region_aware
+            else torch._inductor.cudagraph_trees.get_manager(
+                forward_device_index, create_if_none_exists=False
+            )
         )
-        # should already exist from forward
-        if manager is None:
+        if manager is None and not region_aware:
             raise AssertionError("CUDAGraph manager must not be None")
 
         def compiled_artifact(new_inputs: Sequence[InputType]) -> object:
-            manager.set_to_running_backward()  # type: ignore[union-attr]
+            nonlocal manager
+            # On an AOTAutograd cache hit, post_compile runs before the forward
+            # creates its manager. Resolve it when the backward first executes;
+            # runtime capture-size filtering may legitimately leave it absent.
+            if region_aware and manager is None:
+                manager = torch._inductor.cudagraph_trees.get_manager(
+                    forward_device_index, create_if_none_exists=False
+                )
+            if manager is not None:
+                manager.set_to_running_backward()
             return compiled_graph_callable(new_inputs)
 
         compiled_graph.current_callable = compiled_artifact
@@ -879,21 +896,22 @@ class CompiledFxGraph(OutputCode):
             return
 
         set_tracing_context_output_strides(example_inputs, self)
+        if graph_kwargs["cudagraphs"] is None:
+            raise AssertionError("graph_kwargs['cudagraphs'] must not be None")
         if graph_kwargs["is_backward"] is None:
             raise AssertionError("graph_kwargs['is_backward'] must not be None")
         is_backward = graph_kwargs["is_backward"]
-        # A direction-specific annotation or nested-region opt-in can override
-        # the forward-derived shared BoxedBool. The override is serialized with
-        # this FX graph so AOTAutograd cache hits make the same decision.
-        cudagraphs_post_compile_override = self.fx_kwargs.get(
-            "cudagraphs_post_compile_override"
+        # AOTAutograd's shared BoxedBool cannot represent independent forward and
+        # backward region decisions. Region-aware graphs therefore use the
+        # graph-local value serialized in their FX cache entry. Graphs without
+        # regional configuration retain the legacy path unchanged.
+        cudagraphs = (
+            self.fx_kwargs.get("cudagraphs")
+            if self.fx_kwargs.get("cudagraphs_region_aware", False)
+            else graph_kwargs["cudagraphs"]
         )
-        if cudagraphs_post_compile_override is not None:
-            graph_cudagraphs = BoxedBool(cudagraphs_post_compile_override)
-        else:
-            if graph_kwargs["cudagraphs"] is None:
-                raise AssertionError("graph_kwargs['cudagraphs'] must not be None")
-            graph_cudagraphs = graph_kwargs["cudagraphs"]
+        if cudagraphs is None:
+            raise AssertionError("graph-local cudagraphs state must not be None")
 
         # When a CUDAGraphPolicy is set and it says not to wrap this
         # inner CompiledFxGraph (e.g. because wrapping happens at the
@@ -903,9 +921,9 @@ class CompiledFxGraph(OutputCode):
         policy = config.cudagraph_policy
         if policy is not None and not policy.should_wrap(self):
             counters["inductor"]["cudagraph_skips"] += 1
-            BoxedBool.disable(graph_cudagraphs)
+            BoxedBool.disable(cudagraphs)
 
-        if graph_cudagraphs:
+        if cudagraphs:
             # It's possible that cudagraphs is enabled, but was disabled
             # during a previous compilation we're loading from the cache.
             # If so, we need to disable it on this new process too.
@@ -916,7 +934,7 @@ class CompiledFxGraph(OutputCode):
                     )
                 else:
                     counters["inductor"]["cudagraph_skips"] += 1
-                BoxedBool.disable(graph_cudagraphs)
+                BoxedBool.disable(cudagraphs)
             else:
                 if is_backward:
                     if "boxed_forward_device_index" not in graph_kwargs:
@@ -942,7 +960,7 @@ class CompiledFxGraph(OutputCode):
                     cudagraph_partition_post_compile(
                         example_inputs,
                         self,
-                        graph_cudagraphs,
+                        cudagraphs,
                         constants.unwrap(self),
                         boxed_forward_device_index,
                     )
@@ -950,15 +968,21 @@ class CompiledFxGraph(OutputCode):
                     cudagraph_post_compile(
                         example_inputs,
                         self,
-                        graph_cudagraphs,
+                        cudagraphs,
                         constants.unwrap(self),
                         boxed_forward_device_index,
                     )
+        if (
+            self.fx_kwargs.get("cudagraphs_region_aware", False)
+            and not is_backward
+            and not cudagraphs
+        ):
+            BoxedBool.disable(graph_kwargs["cudagraphs"])
         inputs_to_check = self.inputs_to_check
-        # graph_cudagraphs could have been disabled by the earlier conditions,
+        # cudagraphs could have been disabled from the earlier conditions
         # so we still need to realign inputs if that happens
         maybe_realign_inputs(
-            graph_cudagraphs,
+            cudagraphs,
             self,
             inputs_to_check,
             self.mutated_input_idxs,
