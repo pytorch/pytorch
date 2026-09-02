@@ -1020,13 +1020,12 @@ class NestedReduction:
     ) -> bool:
         """Check cross-stage forwarding in the grouped R coordinate frame.
 
-        Codegen forwards internal values positionally. Evaluate every ordinary
-        grouped-stage internal load in its planned iteration domain and require
-        it to address the same element as its producer store. Sub-parent edges
-        use the separate lane and broadcast proofs in the sub-parent planner.
+        Codegen forwards internal values positionally. Reindex every ordinary
+        grouped-stage internal read, and its producer's write, into one frame
+        spanning the parent ``[X, R]`` and grouped ``[X, R/G, G]`` geometries,
+        and require them to address the same element. Sub-parent edges use the
+        separate lane and broadcast proofs in the sub-parent planner.
         """
-        from .codegen.simd import CantSplit, SIMDKernel
-        from .loop_body import MemoryUsageType
         from .utils import sympy_index_symbol
 
         if domain_context.grouped_axis is not cls.GroupedAxis.R:
@@ -1060,39 +1059,64 @@ class NestedReduction:
         else:
             return False
 
-        def accesses(
-            node: SchedulerNode,
-            groups: tuple[sympy.Expr, ...],
-            values: tuple[sympy.Expr, ...],
-            kinds: tuple[MemoryUsageType, ...],
-        ) -> dict[str, tuple[sympy.Expr, ...]]:
-            def split_values(
-                *new_ranges: Sequence[sympy.Expr],
-            ) -> list[list[sympy.Expr]]:
-                return [
-                    decompose_index(value, ranges)
-                    for value, ranges in zip(values, new_ranges, strict=True)
-                ]
+        # A coordinate with a single element is always zero. Keep it out of the
+        # comparison so a degenerate extent does not look like a stride.
+        unit_axes = {
+            axis: sympy.Integer(0)
+            for axis, extent in frame_ranges.items()
+            if V.graph.sizevars.statically_known_equals(extent, 1)
+        }
 
-            mapped_args = SIMDKernel.map_kernel_groups_to_node_sizes(
-                groups, node.get_ranges(), split_values
+        Frame = tuple[tuple[sympy.Expr, ...], tuple[sympy.Expr, ...]]
+        rw_by_node: dict[SchedulerNode, dependencies.ReadWrites] = {}
+
+        def read_writes(node: SchedulerNode) -> dependencies.ReadWrites:
+            """Dependencies in the node's own loop variables.
+
+            ``loop_ordering_after_fusion`` decides whether a node's cached
+            dependencies were canonicalized, which renames their variables away
+            from the domain the frame is built from. Re-extract instead.
+            """
+            if node not in rw_by_node:
+                rw = dependencies.extract_read_writes(
+                    node._body, *node._sizes, normalize=False
+                )
+                rw_by_node[node] = (
+                    rw.rename(node.mutation_renames) if node.mutation_renames else rw
+                )
+            return rw_by_node[node]
+
+        def frame_index(
+            node: SchedulerNode, dep: Dep, frame: Frame
+        ) -> sympy.Expr | None:
+            """Reindex one access into the shared frame, or None if it cannot be."""
+            if not isinstance(dep, MemoryDep):
+                return None
+            sizes, values = frame
+            # A dependency drops the dimensions its index does not use, so a
+            # broadcast access no longer spans the frame. Restore the node's own
+            # domain, which an unnormalized index is always expressed in.
+            var_ranges = read_writes(node).var_ranges
+            if var_ranges is None:
+                return None
+            dep = MemoryDep(
+                dep.name,
+                dep.index,
+                tuple(var_ranges),
+                tuple(var_ranges.values()),
+                dep.mode,
             )
-            indices = node._body.indexing_from_args(
-                mapped_args, allow_same_symbol_in_index=True
+            axes = tuple(
+                sympy_index_symbol(f"_nested_axis{i}") for i in range(len(sizes))
             )
-            result: dict[str, list[sympy.Expr]] = defaultdict(list)
-            for kind in kinds:
-                for entry in node._body.memory_usage[kind]:
-                    if entry.buffer_name is not None:
-                        result[entry.buffer_name].append(
-                            V.graph.sizevars.simplify_with_ranges(
-                                indices[entry.index_name].replace(
-                                    Identity, lambda x: x
-                                ),
-                                frame_ranges,
-                            )
-                        )
-            return {name: tuple(indexes) for name, indexes in result.items()}
+            normalized = dep.normalize_with_ranges(axes, sizes)
+            if normalized is None:
+                return None
+            index = sympy_subs(normalized.index, dict(zip(axes, values, strict=True)))
+            index = index.replace(Identity, lambda x: x)
+            return V.graph.sizevars.simplify_with_ranges(
+                sympy_subs(index, unit_axes), frame_ranges
+            )
 
         outer_nodes = typing.cast(
             "tuple[SchedulerNode, ...]", tuple(outer_node.get_nodes())
@@ -1101,78 +1125,54 @@ class NestedReduction:
             "tuple[SchedulerNode, ...]", tuple(grouped_node.get_nodes())
         )
         domains_by_node = dict(pointwise_domains)
-        parent_source = (
+        parent_frame: Frame = (
             (parent_numel, parent_rnumel),
             (parent_x, group_r * group_size + local_r),
         )
-        local_source = ((*iter_ranges, *reduce_ranges), grouped_values)
-        reduced_source = (tuple(iter_ranges), reduced_values)
+        local_frame: Frame = ((*iter_ranges, *reduce_ranges), grouped_values)
+        reduced_frame: Frame = (tuple(iter_ranges), reduced_values)
 
-        sources_by_node: dict[
-            SchedulerNode,
-            tuple[tuple[sympy.Expr, ...], tuple[sympy.Expr, ...]],
-        ] = dict.fromkeys(outer_nodes, parent_source)
+        frames_by_node: dict[SchedulerNode, Frame] = dict.fromkeys(
+            outer_nodes, parent_frame
+        )
         for node, domain in pointwise_domains:
             if domain is cls.PointwiseDomain.REDUCED:
-                sources_by_node[node] = reduced_source
+                frames_by_node[node] = reduced_frame
             elif domain is cls.PointwiseDomain.PARENT_FULL:
-                sources_by_node[node] = parent_source
+                frames_by_node[node] = parent_frame
             elif domain is cls.PointwiseDomain.LOCAL_REDUCTION_INPUT:
-                sources_by_node[node] = local_source
-        sources_by_node[grouped_reduction] = local_source
+                frames_by_node[node] = local_frame
+        frames_by_node[grouped_reduction] = local_frame
 
         writers_by_name: dict[str, list[SchedulerNode]] = defaultdict(list)
         for node in (*outer_nodes, *grouped_nodes):
             for name in node.get_buffer_names():
                 writers_by_name[name].append(node)
-        writes_by_node: dict[SchedulerNode, dict[str, tuple[sympy.Expr, ...]]] = {}
 
-        try:
-            for consumer in grouped_nodes:
-                if domains_by_node.get(consumer) is cls.PointwiseDomain.SUB_PARENT:
+        for consumer in grouped_nodes:
+            if domains_by_node.get(consumer) is cls.PointwiseDomain.SUB_PARENT:
+                continue
+            for dep in read_writes(consumer).reads:
+                # WeakDeps order mutations and carry no value to forward.
+                if isinstance(dep, WeakDep) or dep.name not in writers_by_name:
                     continue
-                source = sources_by_node.get(consumer)
-                if source is None:
+                writers = writers_by_name[dep.name]
+                consumer_frame = frames_by_node.get(consumer)
+                if consumer_frame is None or len(writers) != 1:
                     return False
-                internal_deps = tuple(
-                    dep
-                    for dep in consumer.read_writes.reads
-                    if dep.name in writers_by_name
-                )
-                if not internal_deps:
-                    continue
-                if not all(isinstance(dep, MemoryDep) for dep in internal_deps):
+                writer_frame = frames_by_node.get(writers[0])
+                if writer_frame is None or writers[0] is consumer:
                     return False
-                consumer_reads = accesses(
-                    consumer,
-                    *source,
-                    (MemoryUsageType.LOAD, MemoryUsageType.LOAD_SEED),
-                )
-                for name in OrderedSet(dep.name for dep in internal_deps):
-                    writers = writers_by_name[name]
-                    if len(writers) != 1 or writers[0] is consumer:
-                        return False
-                    writer = writers[0]
-                    writer_source = sources_by_node.get(writer)
-                    if writer_source is None:
-                        return False
-                    if writer not in writes_by_node:
-                        writes_by_node[writer] = accesses(
-                            writer,
-                            *writer_source,
-                            (MemoryUsageType.STORE, MemoryUsageType.STORE_REDUCTION),
-                        )
-                    writes = writes_by_node[writer].get(name, ())
-                    reads = consumer_reads.get(name, ())
-                    if not writes or not reads:
-                        return False
-                    if any(
-                        not any(cls._index_exprs_equal(read, write) for write in writes)
-                        for read in reads
-                    ):
-                        return False
-        except CantSplit:
-            return False
+                read = frame_index(consumer, dep, consumer_frame)
+                writes = [
+                    frame_index(writers[0], write, writer_frame)
+                    for write in read_writes(writers[0]).writes
+                    if write.name == dep.name
+                ]
+                if read is None or not writes or any(w is None for w in writes):
+                    return False
+                if not any(cls._index_exprs_equal(read, write) for write in writes):
+                    return False
         return True
 
     @staticmethod
@@ -1741,6 +1741,9 @@ class NestedReduction:
                 is_consumer
                 and cls._nested_sub_parent_rate(sn, domain_context) is not None
             )
+            # Reachable only when group_size equals a sub-parent factor, so
+            # G is 2 or 4. unroll_reductions_threshold turns groups that small
+            # into pointwise ops, so this needs a lowered threshold to fire.
             if reduced_compatible and sub_parent_compatible:
                 return None
             if sub_parent_compatible:
@@ -1885,6 +1888,8 @@ class NestedReduction:
         # from kernel features and RBLOCK limits, not the persistent_reductions
         # config, so this cannot be narrowed to looped parents here: decline
         # both until staged codegen can reload such a value.
+        # TODO: teach the sub-parent stage to reload these sources after the
+        # parent loop closes, as ordinary chained reductions do, and drop this.
         if live_source_names & parent_stage_writes:
             return None
         broadcast_relations = cls._sub_parent_broadcast_access_relations(
@@ -1919,9 +1924,13 @@ class NestedReduction:
 
         if not isinstance(outer_node, (SchedulerNode, FusedSchedulerNode)):
             return True
+        # A node that is already staged carries a grouped [X, R/G] body, which
+        # the coalescing analysis cannot express in the parent's (numel, rnumel)
+        # frame. Score the tiling without it, as the config-off path does.
         coalesce_analysis = (
             outer_node.get_coalesce_analysis()
             if config.triton.coalesce_tiling_analysis
+            and not isinstance(outer_node, FusedStagedReduction)
             else None
         )
         node_schedule = list(outer_node.get_nodes())

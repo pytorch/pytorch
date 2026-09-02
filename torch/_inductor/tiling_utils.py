@@ -2,7 +2,7 @@ import dataclasses
 import itertools
 from collections import Counter, defaultdict
 from collections.abc import Callable, Sequence
-from typing import Any, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Literal, overload, TYPE_CHECKING, TypeVar, Union
 
 import sympy
 
@@ -268,6 +268,24 @@ class _FusedNodeView:
         return OrderedSet(node.get_name() for node in self.nodes)
 
 
+@overload
+def get_pw_red_splits(
+    n: "SchedulerNode",
+    pointwise_numel: sympy.Expr,
+    red_numel: sympy.Expr,
+    none_if_not_divisible: Literal[True],
+) -> tuple[VarsAndRanges, VarsAndRanges] | None: ...
+
+
+@overload
+def get_pw_red_splits(
+    n: "SchedulerNode",
+    pointwise_numel: sympy.Expr,
+    red_numel: sympy.Expr,
+    none_if_not_divisible: Literal[False] = False,
+) -> tuple[VarsAndRanges, VarsAndRanges]: ...
+
+
 def get_pw_red_splits(
     n: "SchedulerNode",
     pointwise_numel: sympy.Expr,
@@ -286,12 +304,12 @@ def get_pw_red_splits(
             (n._body.reduce_vars, n._body.sizes[1]),
         )  # type: ignore[return-value]
 
-    # A grouped reduction stage iterates [X, R/G], which is neither the pointwise
-    # frame nor the flattened pointwise*reduction one, so it has no split here.
     if get_hint(sympy_product(n._body.sizes[0])) != get_hint(
         pointwise_numel * red_numel  # type: ignore[operator]
     ):
-        return None
+        raise AssertionError(
+            "expected pointwise sizes to match pointwise_numel * red_numel"
+        )
     i = len(n._body.sizes[0]) - 1
     prod = 1
     while i >= 0:
@@ -579,10 +597,9 @@ def extract_normalized_read_writes(
         if not n_reads and not n_writes:
             continue
 
-        splits = get_pw_red_splits(n, pointwise_numel, red_numel)
-        if splits is None:
-            return None
-        (iter_vars, n_pw_splits), (red_vars, n_red_splits) = splits
+        (iter_vars, n_pw_splits), (red_vars, n_red_splits) = get_pw_red_splits(
+            n, pointwise_numel, red_numel
+        )
 
         groups = pw_splits + red_splits
         lengths = (n_pw_splits, (n_red_splits))

@@ -2449,9 +2449,10 @@ class _NestedReductionBase:
         self._check_rejected(f, (torch.randn(4, D, device=GPU_TYPE),))
 
     def test_two_grouped_stages_differing_group_size(self):
-        """A second grouped stage iterates [X, R/G2], which is neither the fused
-        node's pointwise nor its flattened pointwise*reduction frame. Coalescing
-        analysis has no split for it and must decline rather than raise."""
+        """Planning a second grouped stage asks a min-block tiling question about
+        an outer node that is already staged. Its [X, R/G] body has no split in
+        the parent's (numel, rnumel) frame, so the planner must skip coalescing
+        analysis rather than ask for one that cannot be built."""
         B, D, G1, G2 = 64, 512, 8, 4
 
         def f(x, w):
@@ -2557,6 +2558,23 @@ class _NestedReductionBase:
         x = torch.randn(B, D, device=GPU_TYPE) * 3.0
         self.assertEqual(compiled(x), f(x), atol=1e-4, rtol=1e-4)
         self.assertGreater(metrics.generated_kernel_count, 1)
+
+    # The group must stay a real reduction for the ambiguity to exist, and the
+    # default threshold unrolls a group this small into pointwise ops.
+    @inductor_config.patch("unroll_reductions_threshold", 4)
+    def test_reject_ambiguous_reduced_sub_parent_domain(self):
+        """G equal to a sub-parent factor makes one lane match the reduced output."""
+        B, D, G = 64, 512, 4
+
+        def f(x, weight):
+            normalized = F.rms_norm(x, (D,), weight)
+            groups = normalized.view(B, D // G, G)
+            amax = groups.abs().amax(dim=-1)
+            return amax, groups[..., 0] / (amax + 1e-6)
+
+        args = (torch.randn(B, D, device=GPU_TYPE), torch.randn(D, device=GPU_TYPE))
+        self._check_rejected(f, args)
+        self.assertEqual(metrics.generated_kernel_count, 2)
 
     def test_reject_multiple_reduce_dims(self):
         """[B, groups, G1, G2] needs one local reduce axis."""
