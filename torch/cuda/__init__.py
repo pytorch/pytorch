@@ -2103,7 +2103,16 @@ def _compile_kernel(
         return getattr(result, mangled_name)
 
 
-from . import amp, graph_annotations, jiterator, nvtx, profiler, sparse, tunable
+from . import (
+    amp,
+    graph_annotations,
+    graph_py_stacks,
+    jiterator,
+    nvtx,
+    profiler,
+    sparse,
+    tunable,
+)
 
 
 _POOL_HANDLE = NewType("_POOL_HANDLE", tuple[int, int])
@@ -2188,6 +2197,7 @@ __all__ = [
     "get_sync_debug_mode",
     "graph",
     "graph_annotations",
+    "graph_py_stacks",
     "graph_pool_handle",
     "graphs",
     "has_half",
