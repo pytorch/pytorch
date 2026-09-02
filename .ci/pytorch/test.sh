@@ -1838,93 +1838,268 @@ test_custom_script_ops() {
   assert_git_not_dirty
 }
 
-test_libtorch_agnostic_targetting() {
-    echo "Testing libtorch_agnostic runs correctly on TORCH_TARGET_VERSION"
+# --- libtorch_agnostic targeting matrix helpers ----------------------------
 
-    REPO_DIR=$(pwd)
-    WHEEL_DIR="${REPO_DIR}/test/cpp_extensions/.wheels"
+_libtorch_agnostic_activate_release() {
+    local venv_name="$1"
+    local torch_version="$2"
+    local release_channel
 
-    # Build wheel with current PyTorch (this has TORCH_TARGET_VERSION 2_9_0)
-    echo "Building 2.9 extension wheel with current PyTorch..."
-    pushd test/cpp_extensions/libtorch_agn_2_9_extension
-    time python setup.py bdist_wheel
-
-    # Save the wheel
-    mkdir -p "$WHEEL_DIR"
-    cp dist/*.whl "$WHEEL_DIR/"
-    WHEEL_FILE=$(find "$WHEEL_DIR" -maxdepth 1 -name "*.whl" -type f | head -1)
-    echo "Built wheel: $(basename "$WHEEL_FILE")"
-    popd
-
-    # Create venv and install PyTorch 2.9
-    python -m venv venv_pytorch_2_9
-    # shellcheck disable=SC1091
-    . venv_pytorch_2_9/bin/activate
-
-    # Clear PYTHONPATH to avoid using the development PyTorch
-    echo "Clearing PYTHONPATH to use only venv packages..."
-    unset PYTHONPATH
-
-    # Upgrade pip to latest version
-    echo "Upgrading pip to latest version..."
-    pip install --upgrade pip
-    pip --version
-
-    echo "Installing PyTorch 2.9..."
-
-    # Install from release channel only
-    PYTORCH_VERSION="2.9.0"
-
-    # Extract CUDA version from BUILD_ENVIRONMENT (e.g., "cuda12.1" -> "cu121")
     if [[ "$BUILD_ENVIRONMENT" =~ cuda([0-9]+)\.([0-9]+) ]]; then
-        CUDA_MAJOR="${BASH_REMATCH[1]}"
-        CUDA_MINOR="${BASH_REMATCH[2]}"
-        CUDA_VERSION="cu${CUDA_MAJOR}${CUDA_MINOR}"
-        echo "  Detected CUDA ${CUDA_MAJOR}.${CUDA_MINOR} from BUILD_ENVIRONMENT, using ${CUDA_VERSION}"
+        release_channel="cu${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
+        echo "  Detected CUDA ${BASH_REMATCH[1]}.${BASH_REMATCH[2]} from BUILD_ENVIRONMENT, using ${release_channel}"
     else
-        # Default to CPU build
-        CUDA_VERSION="cpu"
+        release_channel="cpu"
         echo "  No CUDA detected in BUILD_ENVIRONMENT, using CPU build"
     fi
 
-    if pip install torch=="${PYTORCH_VERSION}" --index-url https://download.pytorch.org/whl/${CUDA_VERSION}/; then
-        echo "Installed PyTorch ${PYTORCH_VERSION} from release channel (${CUDA_VERSION})"
-    else
-        echo "  FAILED to install PyTorch 2.9.0 from release channel"
-        echo "  URL: https://download.pytorch.org/whl/${CUDA_VERSION}/"
+    "${AMBIENT_PYTHON}" -m venv "${venv_name}"
+    # shellcheck disable=SC1091
+    . "${venv_name}/bin/activate"
+    unset PYTHONPATH
+    pip install --upgrade pip
+
+    if ! pip install torch=="${torch_version}" --index-url "https://download.pytorch.org/whl/${release_channel}/"; then
+        echo "  FAILED to install PyTorch ${torch_version} from release channel (${release_channel})"
         deactivate
-        rm -rf venv_pytorch_2_9
+        if [[ -n "${AMBIENT_PYTHONPATH}" ]]; then
+            export PYTHONPATH="${AMBIENT_PYTHONPATH}"
+        else
+            unset PYTHONPATH
+        fi
+        rm -rf "${venv_name}"
         return 1
     fi
-
-    INSTALLED_VERSION=$(python -c "import torch; print(torch.__version__)" 2>/dev/null || echo "unknown")
-    echo "  Installed version: $INSTALLED_VERSION"
-
-    # Install test dependencies
-    echo "Installing test dependencies..."
+    echo "  Installed PyTorch ${torch_version} from release channel (${release_channel})"
     pip install expecttest numpy unittest-xml-reporting
+}
 
-    # Install the pre-built wheel
-    echo ""
-    echo "Installing pre-built 2.9 extension wheel (built with PyTorch 2.10)..."
-    pip install "$WHEEL_FILE"
-    echo "Installed $(basename "$WHEEL_FILE") into PyTorch 2.9 environment"
-
-    # Run tests with PyTorch 2.9 runtime (2.10 tests will be skipped automatically)
-    echo ""
-    echo "Running tests with PyTorch 2.9 runtime (using wheel built on PyTorch 2.10)..."
-    if time python test/cpp_extensions/test_libtorch_agnostic.py -v; then
-        echo ""
-        echo "  Wheel built with current torch and TORCH_TARGET_VERSION 2_9_0 works with PyTorch 2.9 runtime!"
-    else
-        echo "targeting test failed"
+_libtorch_agnostic_deactivate_release() {
+    if [[ -n "${VIRTUAL_ENV-}" ]]; then
         deactivate
-        rm -rf venv_pytorch_2_9 "$WHEEL_DIR"
+    fi
+    if [[ -n "${AMBIENT_PYTHONPATH}" ]]; then
+        export PYTHONPATH="${AMBIENT_PYTHONPATH}"
+    else
+        unset PYTHONPATH
+    fi
+}
+
+# Build libtorch_agn_* against torch B; T is M_N (named ext) or a version for frozen.
+_build_libtorch_agnostic_extension() {
+    local build_ver="$1"
+    local target_ver="$2"
+    local ext_key package ext_dir build_venv="" build_ok=0
+    local saved_torch_target_version="${TORCH_TARGET_VERSION-}"
+
+    if [[ "${target_ver}" =~ ^[0-9]+_[0-9]+$ ]]; then
+        ext_key="${target_ver}"
+    else
+        ext_key="frozen"
+        export TORCH_TARGET_VERSION="${target_ver}"
+    fi
+    package="libtorch_agn_${ext_key}"
+    ext_dir="${package}_extension"
+
+    MATRIX_PACKAGE="${package}"
+    MATRIX_WHEEL=""
+
+    echo "  build: B=${build_ver} T=${target_ver} (extension=${ext_key})"
+    rm -rf "$WHEEL_DIR"
+
+    if [[ "${build_ver}" != "branch" ]]; then
+        build_venv="venv_matrix_build_${build_ver//./_}"
+        if ! _libtorch_agnostic_activate_release "${build_venv}" "${build_ver}"; then
+            if [[ -n "${saved_torch_target_version}" ]]; then
+                export TORCH_TARGET_VERSION="${saved_torch_target_version}"
+            else
+                unset TORCH_TARGET_VERSION
+            fi
+            return 1
+        fi
+    fi
+
+    pushd "${REPO_DIR}/test/cpp_extensions/${ext_dir}"
+    rm -rf build dist
+    time python setup.py bdist_wheel || build_ok=1
+    if [[ "${build_ok}" -eq 0 ]]; then
+        mkdir -p "$WHEEL_DIR"
+        cp dist/*.whl "$WHEEL_DIR/"
+        MATRIX_WHEEL=$(find "$WHEEL_DIR" -maxdepth 1 -name "${package}*.whl" -type f | head -1)
+        echo "  build: built $(basename "$MATRIX_WHEEL")"
+    else
+        echo "  build: FAILED (extension=${ext_dir}, B=${build_ver})"
+    fi
+    rm -rf build dist
+    popd
+
+    if [[ -n "${build_venv}" ]]; then
+        _libtorch_agnostic_deactivate_release
+        rm -rf "${build_venv}"
+    fi
+
+    if [[ -n "${saved_torch_target_version}" ]]; then
+        export TORCH_TARGET_VERSION="${saved_torch_target_version}"
+    else
+        unset TORCH_TARGET_VERSION
+    fi
+
+    return "${build_ok}"
+}
+
+# Install MATRIX_WHEEL into torch R ("branch" | release version).
+_setup_libtorch_agnostic_runtime() {
+    local runtime_ver="$1"
+
+    MATRIX_RELEASE_VENV=""
+    MATRIX_INSTALLED_IN_AMBIENT=0
+
+    echo "  runtime: R=${runtime_ver}"
+
+    if [[ "${runtime_ver}" != "branch" ]]; then
+        MATRIX_RELEASE_VENV="venv_matrix_runtime_${runtime_ver//./_}"
+        if ! _libtorch_agnostic_activate_release "${MATRIX_RELEASE_VENV}" "${runtime_ver}"; then
+            MATRIX_RELEASE_VENV=""
+            return 1
+        fi
+    else
+        MATRIX_INSTALLED_IN_AMBIENT=1
+    fi
+
+    if ! pip install "$MATRIX_WHEEL"; then
+        echo "  runtime: pip install of $(basename "$MATRIX_WHEEL") FAILED"
         return 1
     fi
 
-    deactivate
-    rm -rf venv_pytorch_2_9 "$WHEEL_DIR"
+    echo "  runtime: ready (package=${MATRIX_PACKAGE}, R=${runtime_ver})"
+    return 0
+}
+
+_cleanup_libtorch_agnostic_runtime() {
+    if [[ "${MATRIX_INSTALLED_IN_AMBIENT:-0}" -eq 1 && -n "${MATRIX_PACKAGE:-}" ]]; then
+        pip uninstall -y "${MATRIX_PACKAGE}" > /dev/null 2>&1 || true
+    fi
+    if [[ -n "${MATRIX_RELEASE_VENV:-}" ]]; then
+        _libtorch_agnostic_deactivate_release
+        rm -rf "${MATRIX_RELEASE_VENV}"
+    fi
+    rm -rf "${WHEEL_DIR:-}"
+    MATRIX_PACKAGE=""
+    MATRIX_WHEEL=""
+    MATRIX_RELEASE_VENV=""
+    MATRIX_INSTALLED_IN_AMBIENT=0
+}
+
+# BC/FC matrix over build (B) / target (T) / runtime (R); expect success when T <= min(B, R).
+test_libtorch_agnostic_targetting() {
+    echo "Testing libtorch_agnostic BC/FC across the build/target/runtime version matrix"
+
+    REPO_DIR=$(pwd)
+    WHEEL_DIR="${REPO_DIR}/test/cpp_extensions/.wheels"
+    OVERALL_FAILED=0
+
+    AMBIENT_PYTHON="$(python -c 'import sys; print(sys.executable)')"
+    AMBIENT_PYTHONPATH="${PYTHONPATH-}"
+    echo "Ambient python: ${AMBIENT_PYTHON}"
+    if ! python -c "import torch, setuptools; print('Ambient torch', torch.__version__, 'from', torch.__file__)"; then
+        echo "Ambient python must provide importable torch and setuptools."
+        echo "Activate the venv you used to build/install this branch's PyTorch first"
+        echo "(e.g. source /home/dev/.venv/bin/activate), then re-run."
+        return 1
+    fi
+
+    # Case 1 (FC): B=branch, T=2_9, R=2.9 -> expect PASS
+    echo ""
+    echo "=== Case 1 (FC): build=branch, target=2_9, runtime=2.9.0 ==="
+    echo "=== target <= min(build, runtime) -> expect PASS ==="
+    if _build_libtorch_agnostic_extension "branch" "2_9" \
+        && _setup_libtorch_agnostic_runtime "2.9.0"; then
+        echo "Running test_libtorch_agnostic.py with PyTorch 2.9 runtime..."
+        if time python test/cpp_extensions/test_libtorch_agnostic.py -v; then
+            echo "CASE 1 PASSED as expected"
+        else
+            echo "CASE 1 FAILED: expected PASS but test_libtorch_agnostic.py failed"
+            OVERALL_FAILED=1
+        fi
+    else
+        echo "CASE 1 FAILED: build or runtime setup failed"
+        OVERALL_FAILED=1
+    fi
+    _cleanup_libtorch_agnostic_runtime
+
+    # Case 2 (BC): B=2.9, T=2.9 (frozen), R=branch -> expect PASS
+    echo ""
+    echo "=== Case 2 (BC): build=2.9.0, TORCH_TARGET_VERSION=2.9 (frozen), runtime=branch ==="
+    echo "=== frozen extension (2.9 ABI) on new runtime -> expect PASS ==="
+    if _build_libtorch_agnostic_extension "2.9.0" "2.9" \
+        && _setup_libtorch_agnostic_runtime "branch"; then
+        # /tmp avoids repo-root ./torch shadowing site-packages
+        if (cd /tmp && python -c "
+import torch
+import libtorch_agn_frozen
+t = torch.tensor([-1.0, 2.0])
+assert torch.equal(libtorch_agn_frozen.ops.identity(t), t)
+assert torch.equal(libtorch_agn_frozen.ops.my_abs(t), t.abs())
+"); then
+            echo "CASE 2 PASSED as expected"
+        else
+            echo "CASE 2 FAILED: expected PASS but the python call failed"
+            OVERALL_FAILED=1
+        fi
+    else
+        echo "CASE 2 FAILED: build or runtime setup failed"
+        OVERALL_FAILED=1
+    fi
+    _cleanup_libtorch_agnostic_runtime
+
+    # Case 3: B=branch, T=2_14, R=2.9 -> expect RUNTIME FAIL
+    echo ""
+    echo "=== Case 3: build=branch, target=2_14, runtime=2.9.0 ==="
+    echo "=== target > runtime -> expect RUNTIME FAILURE ==="
+    if _build_libtorch_agnostic_extension "branch" "2_14" \
+        && _setup_libtorch_agnostic_runtime "2.9.0"; then
+        if ! (cd /tmp && python -c "import torch; assert torch.__version__.startswith('2.9.'), torch.__version__"); then
+            echo "CASE 3 FAILED: runtime venv is not using torch 2.9"
+            OVERALL_FAILED=1
+        elif (cd /tmp && python -c "
+import libtorch_agn_2_14
+") 2>/tmp/case3_stderr.log; then
+            echo "CASE 3 FAILED: expected a runtime failure but the import succeeded"
+            OVERALL_FAILED=1
+        elif ! grep -q "undefined symbol" /tmp/case3_stderr.log; then
+            echo "CASE 3 FAILED: import failed, but not with the expected undefined symbol error"
+            echo "  captured error:"
+            cat /tmp/case3_stderr.log
+            OVERALL_FAILED=1
+        else
+            echo "CASE 3 PASSED as expected (runtime failure)"
+            echo "  captured error:"
+            cat /tmp/case3_stderr.log
+        fi
+        rm -f /tmp/case3_stderr.log
+    else
+        echo "CASE 3 FAILED: build/runtime setup failed (both should have succeeded)"
+        OVERALL_FAILED=1
+    fi
+    _cleanup_libtorch_agnostic_runtime
+
+    # Case 4: B=2.9, T=2.14 (frozen) -> expect BUILD FAIL
+    echo ""
+    echo "=== Case 4: build=2.9.0, TORCH_TARGET_VERSION=2.14 (frozen) ==="
+    echo "=== target > build -> expect BUILD FAILURE ==="
+    if _build_libtorch_agnostic_extension "2.9.0" "2.14"; then
+        echo "CASE 4 FAILED: expected build to fail, but it succeeded"
+        OVERALL_FAILED=1
+    else
+        echo "CASE 4 PASSED as expected (build failure)"
+    fi
+    _cleanup_libtorch_agnostic_runtime
+
+    if [[ "${OVERALL_FAILED}" -ne 0 ]]; then
+        echo ""
+        echo "libtorch_agnostic targeting matrix: at least one case did not behave as expected"
+        return 1
+    fi
 
     assert_git_not_dirty
 }
