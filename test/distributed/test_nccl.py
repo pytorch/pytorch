@@ -1301,8 +1301,6 @@ class NCCLSymmetricMemoryNccl2Test(MultiProcContinuousTest):
         # Confirm the intended path: a torchcomms PG + the NCCL symm-mem backend.
         self.assertEqual(c10d.get_backend(c10d.group.WORLD), self.backend_name)
         self.assertEqual(symm_mem.get_backend(self.device), "NCCL")
-        # Publish the communicator before rendezvous looks it up.
-        c10d.all_reduce(torch.ones(1, device=self.device))
         group_name = c10d.group.WORLD.group_name
 
         t = symm_mem.empty(64, dtype=torch.float, device=self.device).fill_(self.rank)
