@@ -47,7 +47,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
     ctcloss_reference, get_new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, onlyOn, \
-    skipCUDAIf, skipCUDAIfNoCudnn, skipCUDAIfRocm, skipMPSIf, skipMPS, \
+    skipCUDAIf, skipCUDAIfNoCudnn, skipCUDAIfRocm, skipCUDAIfNotRocm, skipMPSIf, skipMPS, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, expectedFailureMPS, \
     expectedFailureMPSPre27, skipMeta, get_all_device_types
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
@@ -11159,6 +11159,33 @@ class TestNNDeviceType(NNTestCase):
         output = rnn(input, hx)
         output_ref = rnn.cpu()(input.cpu(), hx.cpu())
         self.assertEqual(tuple([i.cuda() for i in output_ref]), output, atol=5e-3, rtol=1e-3)
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @skipIfRocmVersionLessThan((10, 0))
+    @dtypes(torch.float16, torch.float32)
+    def test_lstm_packed_batch_seq_exceeds_max_grid_y(self, device, dtype):
+        # ROCm-only regression for https://github.com/pytorch/pytorch/issues/177834
+        # MIOpen LSTM bias-add (Op2dTensorLite) launched with grid Y = batch * seq_len.
+        # HIP maxGridSize.y is 65535; Y above that produced silent wrong results vs CPU
+        # on ROCm < 10 (fixed in MIOpen 3.6). Skip NVIDIA CUDA and unfixed ROCm.
+        batch, seq_len, input_size, hidden_size = 110, 600, 8, 16
+        self.assertGreater(batch * seq_len, 65535)
+
+        torch.manual_seed(0)
+        lstm = nn.LSTM(
+            input_size, hidden_size, num_layers=1, bias=True,
+            bidirectional=True, batch_first=True,
+        ).eval()
+        x = torch.randn(batch, seq_len, input_size)
+        with torch.no_grad():
+            y_cpu, _ = lstm(x)
+            y_gpu, _ = deepcopy(lstm).to(device=device, dtype=dtype)(
+                x.to(device=device, dtype=dtype)
+            )
+
+        atol, rtol = (5e-3, 1e-3) if dtype == torch.float16 else (1e-4, 1e-4)
+        self.assertEqual(y_cpu, y_gpu.float().cpu(), atol=atol, rtol=rtol)
 
     @onlyCUDA
     @gcIfJetson
