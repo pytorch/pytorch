@@ -3065,7 +3065,11 @@ class OutputGraph(OutputGraphCommon):
             # has no try/finally, so if the compiled graph raises between them,
             # the exit node never runs and autocast state (the nesting counter,
             # per-device enabled/dtype/cache_enabled) leaks past the `with`
-            # block. Eager `with` guarantees `__exit__` runs via Python's own
+            # block. This has to catch BaseException, not just Exception:
+            # CPython's `with` statement runs `__exit__` on the way out for
+            # BaseException subclasses too (KeyboardInterrupt, SystemExit),
+            # and the wrapper's job is to reproduce that guarantee, not a
+            # narrower one. Eager `with` guarantees `__exit__` runs via Python's own
             # try/finally, so restore that guarantee here at the call site
             # instead: on every call, before invoking the compiled function,
             # snapshot the nesting depth and the current per-device state for
@@ -3124,7 +3128,7 @@ class OutputGraph(OutputGraphCommon):
                     }
                     try:
                         return real_compiled_fn(*args, **kwargs)
-                    except Exception:
+                    except BaseException:
                         current_nesting = torch.autocast_increment_nesting() - 1
                         torch.autocast_decrement_nesting()
                         for _ in range(current_nesting - prior_nesting):
