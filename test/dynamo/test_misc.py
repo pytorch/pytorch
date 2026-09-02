@@ -88,6 +88,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
+    onlyOn,
     PYTORCH_CUDA_MEMCHECK,
 )
 from torch.testing._internal.common_methods_invocations import (
@@ -112,11 +113,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.utils._sympy.numbers import int_oo
-
-
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
 
 
 pytree_modules = {
@@ -292,61 +288,6 @@ class MiscTests(torch._inductor.test_case.TestCase):
         self.assertTrue(same(val3, correct3))
         self.assertTrue(same(val4, correct1))
         self.assertEqual(counter.frame_count, 3)
-
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "Test requires CUDA or XPU.")
-    def test_assume_32_bit_indexing(self):
-        @torch.compile(backend="inductor")
-        def func(a, b):
-            # Multiple concat operations
-            x = torch.concat([a, b], dim=0)
-            y = torch.concat([a, b], dim=1)
-
-            # Reshape to create indexing patterns
-            x_flat = x.reshape(-1)
-            y_flat = y.reshape(-1)
-
-            # Take the smaller one and expand
-            min_size = min(x_flat.shape[0], y_flat.shape[0])
-            x_trunc = x_flat[:min_size]
-            y_trunc = y_flat[:min_size]
-
-            # Combine and compute
-            result = (x_trunc + y_trunc) * 10
-
-            # Cumulative operations create complex indexing
-            cumsum = result.cumsum(dim=0)
-
-            return cumsum.sum()
-
-        a = torch.rand(100, 30, device=device_type)
-        b = torch.rand(100, 30, device=device_type)
-
-        torch._dynamo.decorators.mark_unbacked(a, 0)
-        torch._dynamo.decorators.mark_unbacked(a, 1)
-        torch._dynamo.decorators.mark_unbacked(b, 0)
-        torch._dynamo.decorators.mark_unbacked(b, 1)
-
-        source_code = run_and_get_code(func, a, b)[1]
-        # Check that int64 indexing is used (either 1D [:] or 2D [:, None] form)
-        self.assertTrue(
-            "tl.arange(0, XBLOCK)[:].to(tl.int64)" in str(source_code)
-            or "tl.arange(0, XBLOCK)[:, None].to(tl.int64)" in str(source_code)
-        )
-        # Check that 32-bit indexing is NOT used
-        self.assertFalse(
-            "tl.arange(0, XBLOCK)[:]\n" in str(source_code)
-            and ".to(tl.int64)" not in str(source_code)
-        )
-
-        torch._dynamo.reset()
-
-        with torch._inductor.config.patch(assume_32bit_indexing=True):
-            source_code = run_and_get_code(func, a, b)[1]
-            # Check that int64 indexing is NOT used when assume_32bit_indexing=True
-            self.assertFalse(
-                "tl.arange(0, XBLOCK)[:].to(tl.int64)" in str(source_code)
-                or "tl.arange(0, XBLOCK)[:, None].to(tl.int64)" in str(source_code)
-            )
 
     def test_dynamo_side_effect(self):
         class GlobalContext:
@@ -1197,105 +1138,6 @@ graph():
         res = opt_f(x, True)
         self.assertEqual(res, torch.ones(5) + 1)
         self.assertTrue(res.offloading_activation)
-
-    @unittest.skipIf(
-        not TEST_XPU
-        and (
-            not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0)
-        ),
-        "requires Hopper+ (SM >= 9.0) for TMA, or XPU",
-    )
-    @unittest.skipIf(
-        not torch.utils._triton.has_triton()
-        or not hasattr(__import__("triton"), "set_allocator"),
-        "requires triton with set_allocator support",
-    )
-    def test_triton_set_allocator_no_graph_break(self):
-        """set_allocator inside torch.compile does not graph break and
-        replays correctly at runtime (including cache hits)."""
-        import triton
-        import triton.language as tl
-        from triton.runtime._allocation import NullAllocator
-
-        @triton.jit
-        def tma_copy_kernel(
-            x_ptr,
-            out_ptr,
-            M,
-            N,
-            stride_m,
-            stride_n,
-            BLOCK_M: tl.constexpr,
-            BLOCK_N: tl.constexpr,
-        ):
-            pid = tl.program_id(0)
-            desc = tl.make_tensor_descriptor(
-                x_ptr,
-                shape=[M, N],
-                strides=[stride_m, stride_n],
-                block_shape=[BLOCK_M, BLOCK_N],
-            )
-            block = tl.load_tensor_descriptor(desc, [pid * BLOCK_M, 0])
-            out_desc = tl.make_tensor_descriptor(
-                out_ptr,
-                shape=[M, N],
-                strides=[stride_m, stride_n],
-                block_shape=[BLOCK_M, BLOCK_N],
-            )
-            tl.store_tensor_descriptor(out_desc, [pid * BLOCK_M, 0], block)
-
-        M, N, BLOCK_M, BLOCK_N = 128, 64, 64, 64
-
-        def run_kernel(x):
-            out = torch.empty_like(x)
-            tma_copy_kernel[(M // BLOCK_M,)](
-                x,
-                out,
-                M,
-                N,
-                x.stride(0),
-                x.stride(1),
-                BLOCK_M=BLOCK_M,
-                BLOCK_N=BLOCK_N,
-            )
-            return out
-
-        x = torch.randn(M, N, device=device_type)
-
-        from contextlib import contextmanager
-
-        from triton.runtime._allocation import _allocator
-
-        @contextmanager
-        def triton_allocator(allocator):
-            prev = _allocator.get()
-            triton.set_allocator(allocator)
-            try:
-                yield
-            finally:
-                triton.set_allocator(prev)
-
-        def fn_with_set_allocator(x):
-            triton.set_allocator(
-                lambda size, alignment, stream: torch.empty(
-                    size, device=device_type, dtype=torch.int8
-                )
-            )
-            return run_kernel(x)
-
-        opt_fn = torch.compile(
-            fn_with_set_allocator, backend="aot_eager", fullgraph=True
-        )
-
-        # set_allocator inside compiled region does NOT graph break
-        with triton_allocator(NullAllocator()):
-            out = opt_fn(x)
-            self.assertEqual(out, x)
-
-            # Verify set_allocator replays on cache hit (not just tracing)
-            triton.set_allocator(NullAllocator())
-            out2 = opt_fn(x)
-            self.assertEqual(out2, x)
 
     def test_closure_recompiles(self):
         cnt = CompileCounter()
@@ -7077,20 +6919,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         opt_fn = torch.compile(fn, backend="eager")
         for x in [torch.contiguous_format, torch.channels_last]:
             self.assertEqual(fn(x), opt_fn(x))
-
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "Test requires CUDA or XPU.")
-    def test_cuda_tensor_is_pinned_constant_false(self):
-        def pinned_memory_of(arg):
-            return arg.is_pinned()
-
-        def fn(x):
-            if pinned_memory_of(x) or x.is_pinned(None) or x.is_pinned(device=None):
-                return x + 1
-            return x + 2
-
-        x = torch.randn(4, device=device_type)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(fn(x), opt_fn(x))
 
     def test_python_slice(self):
         def f1(input):
@@ -18784,6 +18612,174 @@ class TestCustomFunction(torch.testing._internal.common_utils.TestCase):
 
 
 class MiscTestsDevice(torch._inductor.test_case.TestCase):
+    @onlyOn(["cuda", "xpu"])
+    @unittest.skipIf(
+        not torch.utils._triton.has_triton()
+        or not hasattr(__import__("triton"), "set_allocator"),
+        "requires triton with set_allocator support",
+    )
+    def test_triton_set_allocator_no_graph_break(self, device):
+        """set_allocator inside torch.compile does not graph break and
+        replays correctly at runtime (including cache hits)."""
+        import triton
+        import triton.language as tl
+        from triton.runtime._allocation import NullAllocator
+
+        if device == "cuda" and torch.cuda.get_device_capability() < (
+            9,
+            0,
+        ):
+            self.skipTest("requires Hopper+ (SM >= 9.0) for TMA, or XPU")
+
+        @triton.jit
+        def tma_copy_kernel(
+            x_ptr,
+            out_ptr,
+            M,
+            N,
+            stride_m,
+            stride_n,
+            BLOCK_M: tl.constexpr,
+            BLOCK_N: tl.constexpr,
+        ):
+            pid = tl.program_id(0)
+            desc = tl.make_tensor_descriptor(
+                x_ptr,
+                shape=[M, N],
+                strides=[stride_m, stride_n],
+                block_shape=[BLOCK_M, BLOCK_N],
+            )
+            block = tl.load_tensor_descriptor(desc, [pid * BLOCK_M, 0])
+            out_desc = tl.make_tensor_descriptor(
+                out_ptr,
+                shape=[M, N],
+                strides=[stride_m, stride_n],
+                block_shape=[BLOCK_M, BLOCK_N],
+            )
+            tl.store_tensor_descriptor(out_desc, [pid * BLOCK_M, 0], block)
+
+        M, N, BLOCK_M, BLOCK_N = 128, 64, 64, 64
+
+        def run_kernel(x):
+            out = torch.empty_like(x)
+            tma_copy_kernel[(M // BLOCK_M,)](
+                x,
+                out,
+                M,
+                N,
+                x.stride(0),
+                x.stride(1),
+                BLOCK_M=BLOCK_M,
+                BLOCK_N=BLOCK_N,
+            )
+            return out
+
+        x = torch.randn(M, N, device=device)
+
+        from contextlib import contextmanager
+
+        from triton.runtime._allocation import _allocator
+
+        @contextmanager
+        def triton_allocator(allocator):
+            prev = _allocator.get()
+            triton.set_allocator(allocator)
+            try:
+                yield
+            finally:
+                triton.set_allocator(prev)
+
+        def fn_with_set_allocator(x):
+            triton.set_allocator(
+                lambda size, alignment, stream: torch.empty(
+                    size, device=device, dtype=torch.int8
+                )
+            )
+            return run_kernel(x)
+
+        opt_fn = torch.compile(
+            fn_with_set_allocator, backend="aot_eager", fullgraph=True
+        )
+
+        # set_allocator inside compiled region does NOT graph break
+        with triton_allocator(NullAllocator()):
+            out = opt_fn(x)
+            self.assertEqual(out, x)
+
+            # Verify set_allocator replays on cache hit (not just tracing)
+            triton.set_allocator(NullAllocator())
+            out2 = opt_fn(x)
+            self.assertEqual(out2, x)
+
+    @onlyOn(["cuda", "xpu"])
+    def test_assume_32_bit_indexing(self, device):
+        @torch.compile(backend="inductor")
+        def func(a, b):
+            # Multiple concat operations
+            x = torch.concat([a, b], dim=0)
+            y = torch.concat([a, b], dim=1)
+
+            # Reshape to create indexing patterns
+            x_flat = x.reshape(-1)
+            y_flat = y.reshape(-1)
+
+            # Take the smaller one and expand
+            min_size = min(x_flat.shape[0], y_flat.shape[0])
+            x_trunc = x_flat[:min_size]
+            y_trunc = y_flat[:min_size]
+
+            # Combine and compute
+            result = (x_trunc + y_trunc) * 10
+
+            # Cumulative operations create complex indexing
+            cumsum = result.cumsum(dim=0)
+
+            return cumsum.sum()
+
+        a = torch.rand(100, 30, device=device)
+        b = torch.rand(100, 30, device=device)
+
+        torch._dynamo.decorators.mark_unbacked(a, 0)
+        torch._dynamo.decorators.mark_unbacked(a, 1)
+        torch._dynamo.decorators.mark_unbacked(b, 0)
+        torch._dynamo.decorators.mark_unbacked(b, 1)
+
+        source_code = run_and_get_code(func, a, b)[1]
+        # Check that int64 indexing is used (either 1D [:] or 2D [:, None] form)
+        self.assertTrue(
+            "tl.arange(0, XBLOCK)[:].to(tl.int64)" in str(source_code)
+            or "tl.arange(0, XBLOCK)[:, None].to(tl.int64)" in str(source_code)
+        )
+        # Check that 32-bit indexing is NOT used
+        self.assertFalse(
+            "tl.arange(0, XBLOCK)[:]\n" in str(source_code)
+            and ".to(tl.int64)" not in str(source_code)
+        )
+
+        torch._dynamo.reset()
+
+        with torch._inductor.config.patch(assume_32bit_indexing=True):
+            source_code = run_and_get_code(func, a, b)[1]
+            # Check that int64 indexing is NOT used when assume_32bit_indexing=True
+            self.assertFalse(
+                "tl.arange(0, XBLOCK)[:].to(tl.int64)" in str(source_code)
+                or "tl.arange(0, XBLOCK)[:, None].to(tl.int64)" in str(source_code)
+            )
+
+    @onlyOn(["cuda", "xpu"])
+    def test_cuda_tensor_is_pinned_constant_false(self, device):
+        def pinned_memory_of(arg):
+            return arg.is_pinned()
+
+        def fn(x):
+            if pinned_memory_of(x) or x.is_pinned(None) or x.is_pinned(device=None):
+                return x + 1
+            return x + 2
+
+        x = torch.randn(4, device=device)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
     def test_rand(self, device):
         cnts = torch._dynamo.testing.CompileCounter()
         device = device
@@ -18957,10 +18953,9 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         self.assertEqual(out, opt_out)
 
     def test_torch_device_python_type(self, device):
-        device_type = torch.device(device).type
-        for device, device_type, index in [
+        for device_name, expected_device_type, index in [
             ("cpu", "cpu", None),
-            (device, device_type, 0),
+            (device, device, 0),
         ]:
 
             def fn(target):
@@ -18968,7 +18963,7 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
                 a = torch.zeros(2, 3, device=target_device)
                 # Constant assert at trace time
                 assert isinstance(target_device, torch.device)  # noqa: S101
-                assert target_device.type == device_type  # noqa: S101
+                assert target_device.type == expected_device_type  # noqa: S101
                 assert target_device.index == index  # noqa: S101
                 b = torch.zeros(2, 3, device=target_device)
                 c = torch.zeros(2, 3, device=target_device)
@@ -18976,12 +18971,12 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
 
             from torch._dynamo.variables import ConstantVariable
 
-            device = torch.device(device)
-            expected_variable = ConstantVariable(device)
-            self.assertEqual(expected_variable.python_type(), type(device))
+            target_device = torch.device(device_name)
+            expected_variable = ConstantVariable(target_device)
+            self.assertEqual(expected_variable.python_type(), type(target_device))
 
             opt_func = torch.compile(fn, backend="eager", fullgraph=True)
-            a = torch.tensor([2, 3], device=device)
+            a = torch.tensor([2, 3], device=target_device)
             res = opt_func(a)
             self.assertIsInstance(res, torch.Tensor)
 
