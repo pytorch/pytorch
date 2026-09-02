@@ -4098,7 +4098,9 @@ class TestPrecompile(TestCase):
             self.assertEqual(loaded(x), _precompile_unreachable_helper_caller(x))
             for key in keys:
                 self.assertIsNotNone(PrecompileContext.serialize_artifact_by_key(key))
-        self.assertIsNotNone(PrecompileContext.serialize_artifact_by_key(keys[0]))
+        # Their object is what remains, not the install's own backend.
+        kept = PrecompileContext.serialize_artifact_by_key(keys[0])
+        self.assertEqual(kept.content, "theirs")
         for key in keys[1:]:
             self.assertIsNone(PrecompileContext.serialize_artifact_by_key(key))
         PrecompileContext.take_artifact(keys[0])
