@@ -1349,6 +1349,7 @@ def _unpack_fast_types() -> tuple[type, ...]:
             variables.ListIteratorVariable,
             variables.TupleIteratorVariable,
             variables.DequeIteratorVariable,
+            variables.DequeReverseIteratorVariable,
             variables.RangeVariable,
             variables.SetVariable,
             variables.FrozensetVariable,
