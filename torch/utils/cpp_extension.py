@@ -263,6 +263,28 @@ def _join_sycl_home(*paths) -> str:
     return os.path.join(SYCL_HOME, *paths)
 
 
+def _derive_rocm_version(version_module: types.ModuleType) -> tuple[int, ...] | None:
+    """
+    Return the ROCm release version as a (major, minor) tuple, or None off ROCm.
+
+    Prefer torch.version.rocm, which was added later than torch.version.hip and
+    so is absent or None on builds whose torch/version.py never recorded it.
+    Fall back to the HIP version rather than failing at import: ROCM_VERSION
+    must be set whenever torch.version.hip is, because consumers compare it
+    without a None guard.
+    """
+    hip_version = getattr(version_module, 'hip', None)
+    if not hip_version:
+        return None
+    rocm_version = getattr(version_module, 'rocm', None)
+    if not rocm_version:
+        logger.warning(
+            'torch.version.hip is set but torch.version.rocm is not; '
+            'deriving ROCM_VERSION from torch.version.hip'
+        )
+        rocm_version = hip_version
+    return tuple(int(v) for v in rocm_version.split('.')[:2])
+
 
 def _wrap_compiler(compiler: str | list[str]) -> list[str]:
     """Prepend a compiler wrapper (ccache/sccache) if available.
@@ -361,11 +383,7 @@ ROCM_VERSION = None
 HIP_VERSION = None
 if torch.version.hip is not None:
     HIP_VERSION = tuple(int(v) for v in torch.version.hip.split('.')[:2])
-    if torch.version.rocm is None:
-        raise AssertionError(
-            "torch.version.hip is set but torch.version.rocm is not; "
-            "torch/version.py is inconsistent with this build of PyTorch")
-    ROCM_VERSION = tuple(int(v) for v in torch.version.rocm.split('.')[:2])
+    ROCM_VERSION = _derive_rocm_version(torch.version)
 
 CUDA_HOME = _find_cuda_home() if (torch.cuda._is_compiled() and torch.version.cuda) else None
 CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
@@ -2432,8 +2450,10 @@ def _jit_compile(name,
 
 def _get_hipcc_path():
     if IS_WINDOWS:
-        # mypy thinks ROCM_VERSION is None but it will never be None here
-        hipcc_exe = 'hipcc.exe' if ROCM_VERSION >= (6, 4) else 'hipcc.bat'  # type: ignore[operator]
+        # This selects a HIP SDK layout, so it gates on the HIP version rather
+        # than the ROCm release version. Never None here: callers are behind
+        # IS_HIP_EXTENSION, which implies torch.version.hip is set.
+        hipcc_exe = 'hipcc.exe' if HIP_VERSION >= (6, 4) else 'hipcc.bat'  # type: ignore[operator]
         return _join_rocm_home('bin', hipcc_exe)
     else:
         return _join_rocm_home('bin', 'hipcc')
@@ -2830,7 +2850,16 @@ def _get_build_directory(name: str, verbose: bool) -> str:
         # Note: torch.backends.cuda.is_built() returns True for both CUDA and ROCm,
         # so we need to check torch.version.hip to distinguish them
         if torch.version.hip is not None:
-            accelerator_str = f'rocm{torch.version.hip.replace(".", "")}'
+            # Strip git sha and dots so the key matches cu{version}.
+            def _ver_key(version: str) -> str:
+                return version.split("-", maxsplit=1)[0].replace(".", "")
+
+            hip_key = _ver_key(torch.version.hip)
+            rocm_ver = getattr(torch.version, "rocm", None)
+            if rocm_ver:
+                accelerator_str = f'rocm{_ver_key(rocm_ver)}_hip{hip_key}'
+            else:
+                accelerator_str = f'rocm{hip_key}'
         elif torch.version.cuda is not None:
             accelerator_str = f'cu{torch.version.cuda.replace(".", "")}'
         else:

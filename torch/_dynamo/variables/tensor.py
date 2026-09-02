@@ -316,8 +316,11 @@ class TensorVariable(VariableTracker):
         for k in ("_size", "stride", "is_contiguous"):
             if k not in specialized_props:
                 setattr(self, k, None)
+        # class_type is not resynced: a non-traceable tensor subclass lives only on
+        # the VariableTracker, so the fake tensor would resolve it to torch.Tensor.
         for k, v in specialized_props.items():
-            setattr(self, k, v)
+            if k != "class_type":
+                setattr(self, k, v)
 
     def _get_fake_version(self) -> int | None:
         """Get the current version of self's fake tensor, or None if unavailable."""
@@ -394,7 +397,9 @@ class TensorVariable(VariableTracker):
         proxy = tx.output.create_proxy(
             "call_function", op_fn, (self.as_proxy(), other.as_proxy()), {}
         )
-        return wrap_fx_proxy_cls(type(self), tx, proxy)
+        # Getting here means no __torch_function__ intercepted the comparison, so the
+        # result is a plain tensor even when self models a subclass.
+        return wrap_fx_proxy_cls(TensorVariable, tx, proxy)
 
     @staticmethod
     def specialize(value: torch.Tensor) -> TensorSpecializedProps:
@@ -769,7 +774,17 @@ class TensorVariable(VariableTracker):
             )
         ):
             install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
-            result.source = AttrSource(self.source, name)
+            if result.is_python_constant():
+                # ConstantVariable.create(None) is a process-wide singleton, and
+                # method_attr_grad hands it back for a pending `p.grad = None`; a
+                # source written onto it leaks into every later compile. Non-constants
+                # keep the in-place write: .data's tracker is AttributeMutationNew,
+                # which __init__ rejects a source for.
+                result = result.clone(
+                    source=AttrSource(self.source, name), source_location=None
+                )
+            else:
+                result.source = AttrSource(self.source, name)
 
         # It's hard to get inplace view (metadata mutation) on graph input work properly across
         # dynamo/aot/inductor, just fall back.
@@ -1230,6 +1245,28 @@ class TensorVariable(VariableTracker):
             return VariableTracker.build(
                 tx, fake.is_contiguous(memory_format=memory_format_const)
             )
+        return None
+
+    def method_is_pinned(
+        self,
+        tx: "InstructionTranslatorBase",
+        device: VariableTracker | None = None,
+    ) -> ConstantVariable | None:
+        # ATen is_pinned() is always false for non-CPU tensors. CPU pinning can
+        # vary without changing Dynamo's tensor metadata guards, so leave it to
+        # the generic path. Tensor subclasses can override is_pinned through
+        # __torch_dispatch__, so preserve dispatch for them too.
+        no_device = device is None or (
+            isinstance(device, ConstantVariable) and device.value is None
+        )
+        example_value = self.proxy.node.meta.get("example_value")
+        if (
+            no_device
+            and self.device is not None
+            and self.device.type != "cpu"
+            and not is_traceable_wrapper_subclass(example_value)
+        ):
+            return VariableTracker.build(tx, False)
         return None
 
     def method_type(
@@ -2433,6 +2470,7 @@ class TensorVariable(VariableTracker):
         "is_floating_point": Method(method_is_floating_point),
         "is_inference": Method(method_is_inference),
         "is_complex": Method(method_is_complex),
+        "is_pinned": Method(method_is_pinned),
         "is_contiguous": Method(method_is_contiguous),
         "type": Method(method_type),
         "as_subclass": Method(method_as_subclass),

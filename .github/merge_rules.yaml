@@ -576,7 +576,6 @@
   - atalman
   - blaine-rister
   - bobrenjc93
-  - BoyuanFeng
   - choijon5
   - ColinPeppler
   - d4l3k
@@ -588,8 +587,8 @@
   - egienvalue
   - fegin
   - frgossen
-  - fxdawnn
   - georgehong
+  - han3101
   - haoyuz
   - htyu
   - huydhn
@@ -607,7 +606,6 @@
   - liangel-02
   - Microve
   - mlazos
-  - NicolasHug
   - njriasan
   - oulgen
   - pianpwk
@@ -620,14 +618,13 @@
   - slayton58
   - soulitzer
   - tushar00jain
+  - vkuzo
   - warrendeng
   - wconstab
   - weifengpy
   - williamwen42
-  - xmfan
   - ydwu4
   - yushangdi
-  - zpcore
   mandatory_checks_name:
   - EasyCLA
   - Lint

@@ -556,7 +556,7 @@ def no_batch_dim_reference_fn(m, p, *args, **kwargs):
     Currently it only supports modules which return a single Tensor as output.
     You can bind the following kwargs.
     Kwargs:
-        batch_first[bool] : If True, all the Tensors in `args` while be unsqueezed at dim `0` .
+        batch_first[bool] : If True, all the Tensors in `args` will be unsqueezed at dim `0` .
                         and output will be squeezed at dim `0` else dim `1` for both.
         kwargs_to_batchify[dict] : Dictionary specifying the name of the argument and dimension to unsqueeze.
                                Useful if there are few arguments whose batch dimension are different
@@ -5154,15 +5154,9 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.ZeroPad2d,
                module_inputs_func=module_inputs_torch_nn_ZeroPad2d,
-               skips=(
-                   # Fails with channels last test on MPS backend
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='mps'),)
                ),
     ModuleInfo(torch.nn.ZeroPad3d,
                module_inputs_func=module_inputs_torch_nn_ZeroPad3d,
-               skips=(
-                   # Fails with channels last test on MPS backend
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='mps'),)
                ),
     ModuleInfo(torch.nn.CircularPad1d,
                module_inputs_func=module_inputs_torch_nn_CircularPad1d,
@@ -5184,14 +5178,8 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.ConstantPad2d,
                module_inputs_func=module_inputs_torch_nn_ConstantPad2d,
-               skips=(
-                   # Fails with channels last test on MPS backend
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='mps'),)
                ),
     ModuleInfo(torch.nn.ConstantPad3d,
                module_inputs_func=module_inputs_torch_nn_ConstantPad3d,
-               skips=(
-                   # Fails with channels last test on MPS backend
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='mps'),)
                )
 ]
