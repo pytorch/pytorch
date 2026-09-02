@@ -348,14 +348,18 @@ def aot_compile_fullgraph(
 
         if not hooks.guard_filter_fn:
             from torch._dynamo.types import GuardFilterEntry
+            from torch._guards import GuardProvenance
 
             def new_guard_filter_fn(
                 guard_entries: Sequence[GuardFilterEntry],
             ) -> Sequence[bool]:
+                # The Python environment (module globals and imports) is the
+                # caller's invariant, so drop guards rooted there by
+                # provenance; is_global would keep ImportSource-rooted ones.
                 return [
                     (
                         not (
-                            g.is_global
+                            g.provenance is GuardProvenance.GLOBAL
                             or g.guard_type
                             in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
                         )
