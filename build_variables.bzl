@@ -944,7 +944,6 @@ libtorch_python_core_sources = [
     "torch/csrc/Storage.cpp",
     "torch/csrc/StorageMethods.cpp",
     "torch/csrc/StorageSharing.cpp",
-    "torch/csrc/XpuIPCTypes.cpp",
     "torch/csrc/Stream.cpp",
     "torch/csrc/Event.cpp",
     "torch/csrc/TensorIterator.cpp",

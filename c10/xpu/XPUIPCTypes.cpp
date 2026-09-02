@@ -17,6 +17,21 @@
 #include <utility>
 #include <vector>
 
+namespace c10::xpu::XPUCachingAllocator {
+namespace {
+
+class XpuIPCCollectCallback : public FreeMemoryCallback {
+ public:
+  bool Execute() override {
+    return torch::XpuIPCCollect();
+  }
+};
+
+REGISTER_FREE_MEMORY_CALLBACK_XPU("xpu_ipc_collect", XpuIPCCollectCallback)
+
+} // namespace
+} // namespace c10::xpu::XPUCachingAllocator
+
 namespace torch {
 
 namespace {
@@ -30,10 +45,7 @@ using XpuIPCRefCountersFile = at::ipc::RefCountersFile<int64_t, XpuCounterOps>;
 class XpuIPCSentData final
     : public at::ipc::SentDataBase<int64_t, XpuCounterOps> {
  public:
-  XpuIPCSentData(
-      std::string handle,
-      uint64_t offset,
-      int64_t* counter_ptr)
+  XpuIPCSentData(std::string handle, uint64_t offset, int64_t* counter_ptr)
       : at::ipc::SentDataBase<int64_t, XpuCounterOps>(
             std::move(handle),
             offset,
@@ -49,7 +61,8 @@ class XpuIPCSentData final
   std::shared_ptr<void> export_handle_owner_;
 };
 
-struct XpuIPCSentDataLimbo final : public at::ipc::SentDataLimboBase<XpuIPCSentData> {
+struct XpuIPCSentDataLimbo final
+    : public at::ipc::SentDataLimboBase<XpuIPCSentData> {
   void add(std::unique_ptr<XpuIPCSentData> shared_block) {
     at::ipc::SentDataLimboBase<XpuIPCSentData>::add(std::move(shared_block));
     if (size() > XPU_IPC_WARN_AFTER_X_BLOCKS_IN_LIMBO) {
@@ -140,9 +153,7 @@ at::DataPtr GetNewRefCountedXpuSentData(void* data, at::Device device) {
         sizeof(int64_t) * XPU_IPC_REF_COUNTER_FILE_SIZE,
         nullptr);
     auto rc = std::make_shared<XpuIPCRefCountersFile>(
-        ref_counter_handle,
-        XPU_IPC_REF_COUNTER_FILE_SIZE,
-        std::move(sptr));
+        ref_counter_handle, XPU_IPC_REF_COUNTER_FILE_SIZE, std::move(sptr));
     xpu_ipc_global_entities.ref_counters_files_[ref_counter_handle] = rc;
     xpu_ipc_global_entities.next_available_ref_counters_file_ = rc;
   }
@@ -150,9 +161,7 @@ at::DataPtr GetNewRefCountedXpuSentData(void* data, at::Device device) {
   auto& file_ref = xpu_ipc_global_entities.next_available_ref_counters_file_;
   file_ref->set_counter(1);
   auto sent_data = std::make_unique<XpuIPCSentData>(
-      file_ref->handle(),
-      file_ref->get_offset(),
-      file_ref->counter_ptr());
+      file_ref->handle(), file_ref->get_offset(), file_ref->counter_ptr());
 
   file_ref->rotate_offset();
   if (!file_ref->have_offsets()) {
@@ -185,7 +194,8 @@ XpuSharedStorage ShareXpuStorage(const at::Storage& storage) {
   at::DataPtr sent_data_ptr =
       GetNewRefCountedXpuSentData(storage.mutable_data(), storage.device());
   auto old_data_ptr = storage.set_data_ptr(std::move(sent_data_ptr));
-  auto sent_data = static_cast<XpuIPCSentData*>(storage.data_ptr().get_context());
+  auto sent_data =
+      static_cast<XpuIPCSentData*>(storage.data_ptr().get_context());
   sent_data->set_original_ptr(std::move(old_data_ptr));
   if (share_handle.owner.has_value()) {
     sent_data->set_export_handle_owner(std::move(share_handle.owner.value()));
@@ -250,7 +260,8 @@ c10::intrusive_ptr<at::StorageImpl> NewStorageFromXpuShared(
         std::unique_ptr<XpuIpcDeleterContext> ctx(
             static_cast<XpuIpcDeleterContext*>(ctx_));
         ctx->base_ptr.reset();
-        ReleaseXpuIPCRefCounter(ctx->ref_counter_handle, ctx->ref_counter_offset);
+        ReleaseXpuIPCRefCounter(
+            ctx->ref_counter_handle, ctx->ref_counter_offset);
       },
       at::Device(at::DeviceType::XPU, shared.device));
 

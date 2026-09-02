@@ -18,6 +18,7 @@ set(C10_XPU_SRCS
     PeerToPeerAccess.cpp
     XPUCachingAllocator.cpp
     XPUFunctions.cpp
+    XPUIPCTypes.cpp
     XPUStream.cpp
     impl/XPUGuardImpl.cpp
 )
@@ -42,7 +43,7 @@ if(NOT BUILD_LIBTORCHLESS)
   endif()
 
   # ---[ Dependency of c10_xpu
-  target_link_libraries(c10_xpu PUBLIC c10 torch::xpurt)
+  target_link_libraries(c10_xpu PUBLIC c10 torch_cpu torch::xpurt)
   target_include_directories(
       c10_xpu PUBLIC
       $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>
