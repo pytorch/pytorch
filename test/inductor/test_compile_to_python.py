@@ -556,5 +556,21 @@ class TestInductorCompileToPythonContract(TestCase):
             self.assertEqual(_exec(src2)(_flat_inputs(m, x))[0], m(x))
 
 
+class TestInductorCompileToPythonPassthrough(TestCase):
+    def test_passthrough_source_releases_args(self):
+        # The passthrough used for a trivial backward must honor inductor's
+        # boxed-call contract of consuming its argument list so saved tensors
+        # are released as early as a real kernel would release them.
+        from torch._inductor.standalone_compile import _passthrough_source
+
+        gm = torch.fx.symbolic_trace(lambda x: (x,))
+        namespace = {}
+        exec(_passthrough_source(gm), namespace)
+        args = [torch.randn(2)]
+        out = namespace["call"](args)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(args, [])
+
+
 if __name__ == "__main__":
     run_tests()

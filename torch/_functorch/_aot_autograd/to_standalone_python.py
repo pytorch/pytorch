@@ -187,35 +187,16 @@ def _known_helper_table() -> dict[int, tuple[str, str]]:
     # ``standalone_runtime`` (not scattered AOTAutograd internals).
     import torch
 
-    from . import standalone_runtime as rt
-
     _RT = "from torch._functorch._aot_autograd.standalone_runtime import"
     table: dict[int, tuple[str, str]] = {
+        # Modules have no __qualname__ and increment_version's import path is
+        # not the stable ``import torch``; everything re-exported by
+        # standalone_runtime is routed there by source_emit._emit_importable
+        # (keyed on the same object identities), so it needs no row here.
         id(torch): ("import torch", "torch"),
-        id(rt.normalize_as_list): (f"{_RT} normalize_as_list", "normalize_as_list"),
-        id(rt.mark_dynamo_propagated_dynamic_indices): (
-            f"{_RT} mark_dynamo_propagated_dynamic_indices",
-            "mark_dynamo_propagated_dynamic_indices",
-        ),
         id(torch.autograd.graph.increment_version): (
             "import torch",
             "torch.autograd.graph.increment_version",
-        ),
-        id(rt.gen_alias_from_base): (
-            f"{_RT} gen_alias_from_base",
-            "gen_alias_from_base",
-        ),
-        id(rt._unwrap_tensoralias): (
-            f"{_RT} _unwrap_tensoralias",
-            "_unwrap_tensoralias",
-        ),
-        id(rt.CUDARngStateHelper.get_torch_state_as_tuple): (
-            f"{_RT} CUDARngStateHelper",
-            "CUDARngStateHelper.get_torch_state_as_tuple",
-        ),
-        id(rt.CUDARngStateHelper.set_new_offset): (
-            f"{_RT} CUDARngStateHelper",
-            "CUDARngStateHelper.set_new_offset",
         ),
     }
     return table
@@ -1142,9 +1123,10 @@ class _CompileToPythonState:
                     # declined retrace falls back to the base backward with
                     # materialized zero tangents (the emitted glue always builds
                     # grad-output prototypes), never a hard error.
-                    log.info(
+                    log.warning(
                         "standalone backward for undefined-output mask %s uses the "
-                        "base backward: %s; structural specialization did not apply",
+                        "base backward with materialized zero tangents: %s; "
+                        "structural specialization did not apply",
                         f"{mask:#b}",
                         "; ".join(retrace_decline_reasons) or "the retrace declined",
                     )
