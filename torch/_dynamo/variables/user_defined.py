@@ -1137,7 +1137,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
             and any(name in klass.__dict__ for klass in self.value.__mro__)
         ):
-            if isinstance(args[0], UserDefinedObjectVariable) and args[0]._base_vt is not None:
+            if (
+                isinstance(args[0], UserDefinedObjectVariable)
+                and args[0]._base_vt is not None
+            ):
                 return args[0]._base_vt.call_method(tx, name, args[1:], kwargs)
             return args[0].call_method(tx, name, args[1:], kwargs)
         elif name == "__len__" and len(args) == 1 and not kwargs:
