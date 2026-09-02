@@ -301,11 +301,22 @@ class DType:
         # a dtype already?
         elif isinstance(arg, DType):
             sctype = arg._scalar_type
-        # a has a right attribute?
-        elif hasattr(arg, "dtype"):
+        elif hasattr(arg, "dtype") and isinstance(arg.dtype, DType):
             sctype = arg.dtype._scalar_type
         else:
-            sctype = sctype_from_string(arg)
+            # numpy scalar types are classes (np.float32.__name__);
+            # numpy.dtype objects expose .name ("float32").
+            if isinstance(arg, type):
+                name = getattr(arg, "__name__", None)
+            else:
+                name = getattr(arg, "name", None)
+            if isinstance(name, str):
+                try:
+                    sctype = sctype_from_string(name)
+                except TypeError:
+                    sctype = sctype_from_string(arg)
+            else:
+                sctype = sctype_from_string(arg)
         self._scalar_type = sctype
 
     @property
