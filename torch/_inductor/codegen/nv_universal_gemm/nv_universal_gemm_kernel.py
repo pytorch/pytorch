@@ -57,6 +57,12 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+# CuTe DSL compilation mutates process-global compiler state and is not thread
+# safe.  Runtime compilation is normally avoided by the persistent cache, but
+# dynamic shapes can still require it, so serialize the compatibility shim
+# below as well.
+_NVGEMM_COMPILE_LOCK = threading.Lock()
+
 _NVGEMM_BIAS_ADD_EPILOGUE_SOURCE = (
     "def _epilogue_fn(accum, bias):\n    D = accum + bias\n    return D"
 )
@@ -236,9 +242,8 @@ def _compile_nvgemm(
 ):
     """Compile an NVGEMM artifact, trying a fallback (disk cache) first.
 
-    Thread safety is handled at the dispatch layer: autotuning precompile
-    runs in subprocess workers (process-isolated), runtime is
-    single-threaded per graph execution.
+    Kernel compilation is serialized by ``_compile_nvgemm_kernel`` because
+    CuTe DSL compilation mutates process-global state.
 
     kernel_obj: pre-resolved kernel (skips _lookup_gemm_kernel).
     kernel_name: kernel name for _lookup_gemm_kernel.
@@ -277,10 +282,44 @@ def _compile_nvgemm(
     if fallback_fn is not None:
         artifact = fallback_fn(kernel)
     if artifact is None:
-        artifact = kernel.compile(args)
+        artifact = _compile_nvgemm_kernel(kernel, args)
         was_compiled = True
 
     return artifact, args, kernel, was_compiled
+
+
+def _compile_nvgemm_kernel(kernel, args):
+    """Compile while preserving CuTe DSL's subscriptable compile protocol.
+
+    Runtime JIT monitors sometimes wrap ``cute.compile`` with an ordinary
+    function.  CUTLASS operators use ``cute.compile[options](...)``, so such a
+    wrapper turns a legitimate cache miss into ``'function' object is not
+    subscriptable``.  If the wrapper retained ``__wrapped__`` (as
+    ``functools.wraps`` does), temporarily restore the underlying compiler for
+    the duration of this already-serialized compilation.
+    """
+    import cutlass.cute as cute
+
+    with _NVGEMM_COMPILE_LOCK:
+        if hasattr(type(cute.compile), "__getitem__"):
+            return kernel.compile(args)
+
+        wrapped_compile = cute.compile
+        unwrapped_compile = wrapped_compile
+        while not hasattr(type(unwrapped_compile), "__getitem__"):
+            next_compile = getattr(unwrapped_compile, "__wrapped__", None)
+            if next_compile is None:
+                return kernel.compile(args)
+            unwrapped_compile = next_compile
+
+        log.warning(
+            "Temporarily unwrapping cute.compile for NVGEMM runtime compilation"
+        )
+        cute.compile = unwrapped_compile
+        try:
+            return kernel.compile(args)
+        finally:
+            cute.compile = wrapped_compile
 
 
 class CUDAContextMetadata:
