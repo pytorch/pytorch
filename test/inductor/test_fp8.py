@@ -107,17 +107,17 @@ def _prepare_blockwise_scale(
     inverse_scale: torch.Tensor,
     block_outer: int,
     block_inner: int,
-    transposed: bool,
 ) -> torch.Tensor:
     # The cuBLAS blockwise kernels expect outer-dim-major scales for 1x128 blocks
     # and shape (round_up(K/128, 4), {M,N}/128) for 128x128 blocks (inner dim
-    # padded to a multiple of 4 before the transpose). `transposed` indicates
-    # whether the corresponding data tensor was transposed (e.g. weight passed
-    # as w.t()): if so we apply one additional transpose to keep the scale
-    # aligned with the data layout.
+    # padded to a multiple of 4 before the transpose).
     if (block_outer, block_inner) == (1, 128):
         out = inverse_scale.t().contiguous().t()
-        return out.t() if transposed else out
+        # cuBLAS blockwise 1x128 expects scale_b (the weight scale) to have
+        # outer-dim-major layout with shape [N, K/128] (outer = weight's
+        # output dim N). The scale describes w's N dimension regardless of
+        # whether w is transposed to w.t() before being passed to scaled_mm.
+        return out
     pad_amount = (-inverse_scale.shape[-1]) % 4
     if pad_amount:
         inverse_scale = torch.nn.functional.pad(
@@ -1149,7 +1149,21 @@ class TestFP8Lowering(TestCase):
     @xfailIf(
         torch.cuda.is_available() and torch.cuda.get_device_capability() != (9, 0)
     )  # cuBLAS 128-element blockwise scaling is only supported for CC 9.0
-    @parametrize("shape", ((16, 256, 256), (1024, 512, 1024), (32768, 4096, 4096)))
+    @parametrize(
+        "shape",
+        (
+            # The DISABLED bot skips parametrizations by index, so new shapes go
+            # on the end; inserting ahead of these redirects those skips onto
+            # unrelated shapes. Index 2 keeps its position but shrinks M from
+            # 32768, which is a deliberate runtime cut, not a reindex.
+            (16, 256, 256),
+            (1024, 512, 1024),
+            (2048, 4096, 4096),
+            (16, 256, 640),  # K padding with a degenerate 128x128 row block
+            (256, 384, 640),  # non-square 128x128 block grid with K padding
+            (256, 32, 4096),  # N == ceil(K/128): v1 and v2 scale_b shapes collide
+        ),
+    )
     @parametrize("use_fast_accum", (False, True))
     @parametrize(
         "scaling_block_sizes",
@@ -1162,26 +1176,6 @@ class TestFP8Lowering(TestCase):
         scaling_block_sizes: tuple[int, int, int, int],
         device,
     ):
-        # (shape, use_fast_accum, scaling_block_sizes) combos disabled due to CI
-        # failures; other combos still run. See the referenced issues.
-        _disabled_combos = {
-            ((16, 256, 256), False, (1, 128, 128, 128)),
-            ((16, 256, 256), False, (1, 128, 1, 128)),
-            ((16, 256, 256), False, (128, 128, 1, 128)),
-            ((16, 256, 256), True, (1, 128, 128, 128)),
-            ((16, 256, 256), True, (1, 128, 1, 128)),
-            ((16, 256, 256), True, (128, 128, 1, 128)),
-            ((1024, 512, 1024), False, (1, 128, 1, 128)),
-            ((1024, 512, 1024), False, (128, 128, 1, 128)),
-            ((1024, 512, 1024), True, (1, 128, 1, 128)),
-            ((1024, 512, 1024), True, (128, 128, 1, 128)),
-            ((32768, 4096, 4096), False, (1, 128, 1, 128)),
-            ((32768, 4096, 4096), False, (128, 128, 1, 128)),
-            ((32768, 4096, 4096), True, (1, 128, 1, 128)),
-            ((32768, 4096, 4096), True, (128, 128, 1, 128)),
-        }
-        if (shape, use_fast_accum, scaling_block_sizes) in _disabled_combos:
-            self.skipTest("disabled due to CI failures; see #190236")
         if "xpu" in device and use_fast_accum:
             self.skipTest("XPU does not support use_fast_accum=True for now")
         # Only bf16 output type is supported for non-tensorwise scaling, not fp32
@@ -1201,17 +1195,13 @@ class TestFP8Lowering(TestCase):
             w, dtype_float8, block_outer=bn, block_inner=bk
         )
         w_t_fp8 = w_fp8.t()
-        w_inverse_scale = _prepare_blockwise_scale(
-            w_inverse_scale, bn, bk, transposed=True
-        )
+        w_inverse_scale = _prepare_blockwise_scale(w_inverse_scale, bn, bk)
 
         # quantize input x
         x_fp8, x_inverse_scale = _quantize_blockwise(
             x, dtype_float8, block_outer=am, block_inner=ak
         )
-        x_inverse_scale = _prepare_blockwise_scale(
-            x_inverse_scale, am, ak, transposed=False
-        )
+        x_inverse_scale = _prepare_blockwise_scale(x_inverse_scale, am, ak)
 
         recipe_x = (
             ScalingType.BlockWise1x128
