@@ -724,14 +724,21 @@ Tensor pow_backward(Tensor grad, const Tensor& self, const Scalar& exponent) {
   }
 }
 
+Tensor pow_backward_self_raw(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& exponent) {
+  return at::where(
+      exponent == 0.0,
+      at::scalar_tensor(0.0, grad.options()),
+      grad * (exponent * self.pow(exponent - 1)).conj());
+}
+
 Tensor pow_backward_self(
     const Tensor& grad,
     const Tensor& self,
     const Tensor& exponent) {
-  auto out = at::where(
-      exponent == 0.0,
-      at::scalar_tensor(0.0, grad.options()),
-      grad * (exponent * self.pow(exponent - 1)).conj());
+  auto out = pow_backward_self_raw(grad, self, exponent);
   return handle_r_to_c(self, std::move(out));
 }
 
