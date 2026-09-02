@@ -395,7 +395,13 @@ class PrecompileError(RuntimeError):
 
 
 class PrecompiledCallable:
-    """Callable handle for one loaded multi-graph precompile artifact."""
+    """Callable handle for one loaded multi-graph precompile artifact.
+
+    Returned by :func:`torch.compiler.precompile.load` for an artifact that
+    serves by installing; it is not constructed directly. Part of the prototype
+    ``torch.compiler.precompile`` API, so it may change without a deprecation
+    cycle.
+    """
 
     def __init__(self, compiled: Any) -> None:
         self._compiled = compiled
@@ -453,9 +459,16 @@ class _InstalledArtifact:
         self,
         serve: Callable[[Callable[..., object]], Any],
         entry_factory: Callable[[], Callable[..., object]],
+        *,
+        check_fn: Callable[[Callable[..., object]], None] | None = None,
+        backend_keys: Sequence[str] = (),
     ) -> None:
         self._serve = serve
         self._entry_factory = entry_factory
+        # Refuses a load(fn=...) target the artifact was not captured from.
+        self._check_fn = check_fn
+        # PrecompileContext keys serve() records; unload() takes them back out.
+        self._backend_keys = backend_keys
         self._fn: Callable[..., object] | None = None
         self._inner: Any = None
         # unload() retires the handle for good. Without this flag a call after
@@ -471,12 +484,19 @@ class _InstalledArtifact:
         self._install_lock = threading.Lock()
 
     def _rebind(self, fn: Callable[..., object]) -> None:
+        from torch._dynamo.exc import PackageError
+
         with self._install_lock:
             if self._inner is not None:
                 raise PrecompileError(
                     "precompile: this artifact is already installed; pass fn= to load() "
                     "before the first call."
                 )
+            if self._check_fn is not None:
+                try:
+                    self._check_fn(fn)
+                except PackageError as e:
+                    raise PrecompileError(str(e)) from e
             self._fn = fn
 
     def _ensure(self) -> Any:
@@ -510,11 +530,15 @@ class _InstalledArtifact:
         self.unload()
 
     def unload(self) -> None:
+        from torch._dynamo.precompile_context import PrecompileContext
+
         with self._install_lock:
             self._unloaded = True
             inner, self._inner = self._inner, None
         if inner is not None:
             inner.unload()
+            for key in self._backend_keys:
+                PrecompileContext.take_artifact(key)
 
     @property
     def _package(self) -> Any:
@@ -2549,6 +2573,10 @@ def _make_inlined_forward(python_code: str) -> Callable[..., object]:
 class _PrecompileApi:
     """Callable namespace implementing ``torch.compiler.precompile`` and its loaders.
 
+    This whole surface -- the call, ``load``, and the objects they return -- is a
+    prototype API: signatures, error types and the artifact format may change
+    between releases without a deprecation cycle.
+
     A single instance is exposed as ``torch.compiler.precompile``; calling it precompiles a
     computation and ``torch.compiler.precompile.load`` reloads the resulting source
     artifacts. ``capture`` provides the guarded multi-graph path. It is a
@@ -2603,6 +2631,11 @@ class _PrecompileApi:
         training: bool = False,
     ) -> tuple[str, bytes]:
         """Ahead-of-time precompile ``fn`` against example inputs.
+
+        .. warning::
+
+            This is a prototype API. Its signature, error types and artifact
+            format may change between releases without a deprecation cycle.
 
         ``example_inputs`` is the calling convention: a sequence of calls, each a tuple of
         positional arguments (or an ``ExampleInput`` carrying keywords). precompile makes
