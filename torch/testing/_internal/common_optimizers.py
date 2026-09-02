@@ -120,8 +120,8 @@ class OptimizerInfo:
         scheduler_inputs=(
             [
                 lambda opt: StepLR(opt, gamma=0.9, step_size=10),
-                lambda opt: ReduceLROnPlateau(opt),
                 lambda opt: PlateauLR(opt),
+                lambda opt: ReduceLROnPlateau(opt),
             ],
         ),
         # A subset of the global-cliquey flags (fused, foreach, differentiable) the optimizer
@@ -1657,8 +1657,8 @@ optim_db: list[OptimizerInfo] = [
             {"lr": 0.1, "weight_decay": 0, "lr_decay": 0},
             [
                 lambda opt: StepLR(opt, gamma=1 - 1e-5, step_size=500),
-                lambda opt: ReduceLROnPlateau(opt, threshold=1e-4),
                 lambda opt: PlateauLR(opt, threshold=1e-4),
+                lambda opt: ReduceLROnPlateau(opt, threshold=1e-4),
             ],
         ),
         decorators=(
@@ -1717,15 +1717,15 @@ optim_db: list[OptimizerInfo] = [
             ],
             [
                 lambda opt: ExponentialLR(opt, gamma=0.9),
-                lambda opt: ReduceLROnPlateau(opt),
                 lambda opt: PlateauLR(opt),
+                lambda opt: ReduceLROnPlateau(opt),
             ],
             [lambda opt: ConstantLR(opt, factor=0.4, total_iters=4)],
             [lambda opt: PolynomialLR(opt, power=0.9, total_iters=4)],
             [
                 lambda opt: StepLR(opt, gamma=0.9, step_size=10),
-                lambda opt: ReduceLROnPlateau(opt),
                 lambda opt: PlateauLR(opt),
+                lambda opt: ReduceLROnPlateau(opt),
             ],
         ),
         optim_error_inputs_func=optim_error_inputs_func_adam,
@@ -2121,8 +2121,8 @@ optim_db: list[OptimizerInfo] = [
             [
                 lambda opt: StepLR(opt, gamma=0.99, step_size=10),
                 lambda opt: ExponentialLR(opt, gamma=0.99),
-                lambda opt: ReduceLROnPlateau(opt),
                 lambda opt: PlateauLR(opt),
+                lambda opt: ReduceLROnPlateau(opt),
             ],
             [lambda opt: ConstantLR(opt, factor=0.4, total_iters=4)],
             [lambda opt: PolynomialLR(opt, power=0.9, total_iters=4)],
