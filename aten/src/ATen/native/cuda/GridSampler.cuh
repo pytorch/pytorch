@@ -319,18 +319,17 @@ void get_cubic_coefficients_grad(
 }
 
 
-// grid_sampler_unnormalize with the extent kept in index_t, for the kernels
-// that index with int64_t; bit-identical to the int-taking one for every
-// extent an int can carry.
+// grid_sampler_unnormalize with the extent in index_t, for the kernels that
+// index with int64_t. It converts where the int-taking helper converts, so the
+// two agree for any extent. Separate copies keep the shared kernels unchanged.
 template <typename scalar_t, typename index_t>
 __forceinline__ __device__
 scalar_t grid_sampler_unnormalize_sized(scalar_t coord, index_t size,
                                         bool align_corners) {
-  const scalar_t extent = static_cast<scalar_t>(size);
   if (align_corners) {
-    return ((coord + 1) / 2) * (extent - 1);
+    return ((coord + 1) / 2) * static_cast<scalar_t>(size - 1);
   } else {
-    return ((coord + 1) * extent - 1) / 2;
+    return ((coord + 1) * static_cast<scalar_t>(size) - 1) / 2;
   }
 }
 
@@ -339,23 +338,19 @@ __forceinline__ __device__
 scalar_t grid_sampler_unnormalize_set_grad_sized(scalar_t coord, index_t size,
                                                  bool align_corners,
                                                  scalar_t* grad_in) {
-  const scalar_t extent = static_cast<scalar_t>(size);
   if (align_corners) {
-    *grad_in = (extent - 1) / 2;
-    return ((coord + 1) / 2) * (extent - 1);
+    *grad_in = static_cast<scalar_t>(size - 1) / 2;
+    return ((coord + 1) / 2) * static_cast<scalar_t>(size - 1);
   } else {
-    *grad_in = extent / 2;
-    return ((coord + 1) * extent - 1) / 2;
+    *grad_in = static_cast<scalar_t>(size) / 2;
+    return ((coord + 1) * static_cast<scalar_t>(size) - 1) / 2;
   }
 }
 
-// compute_coordinates with the extent kept in index_t: the tricubic kernels
-// index with index_t, and narrowing the extent to int before the padding would
-// fold a dimension past INT_MAX onto the wrong voxel. The reflection parity is
-// taken with fmod so no float ever converts to an integer type, and no
-// downgrade clips a valid position past INT_MAX: the caller's comparison gate
-// decides before any cast. For every extent an int can carry the arithmetic
-// matches compute_coordinates exactly.
+// compute_coordinates with the extent in index_t: narrowing it to int would
+// fold a dimension past INT_MAX onto the wrong voxel. It forms the same bounds,
+// but takes the reflection parity with fmod and skips the downgrade, so no float
+// converts to an integer and no valid position past INT_MAX is clipped.
 template <typename scalar_t, typename index_t>
 __forceinline__ __device__
 scalar_t compute_coordinates_sized(scalar_t coord, index_t size,
@@ -365,15 +360,14 @@ scalar_t compute_coordinates_sized(scalar_t coord, index_t size,
     coord = ::min(static_cast<scalar_t>(size - 1),
                   ::max(coord, static_cast<scalar_t>(0)));
   } else if (padding_mode == GridSamplerPadding::Reflection) {
-    const scalar_t twice_low = align_corners ? 0 : -1;
-    const scalar_t twice_high =
-        static_cast<scalar_t>(2) * static_cast<scalar_t>(size) -
-        (align_corners ? 2 : 1);
-    if (twice_low == twice_high) {
+    // reflect_coordinates halves the difference of two integer bounds. Halving
+    // what it doubles reaches them with one exact conversion of the extent.
+    const scalar_t low =
+        align_corners ? static_cast<scalar_t>(0) : static_cast<scalar_t>(-0.5);
+    const scalar_t span = static_cast<scalar_t>(align_corners ? size - 1 : size);
+    if (span == 0) {
       coord = 0;
     } else {
-      const scalar_t low = twice_low / 2;
-      const scalar_t span = (twice_high - twice_low) / 2;
       const scalar_t in = ::fabs(coord - low);
       const scalar_t extra = ::fmod(in, span);
       const bool odd = ::fmod(::floor(in / span), static_cast<scalar_t>(2)) != 0;
