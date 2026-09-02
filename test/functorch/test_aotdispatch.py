@@ -5264,7 +5264,8 @@ def forward(self, tangents_1):
 
         self._assert_no_extra_refs(refcount_box)
 
-    def test_detach_output_aliasing_intermediate_base(self):
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_detach_output_aliasing_intermediate_base(self, backend):
         # mark_non_differentiable is keyed on TensorImpl, and a backend is free
         # to lower aten.detach to a no-op -- inductor does -- so y.detach() and
         # y's intermediate base can be the same object. Marking the detach
@@ -5280,31 +5281,25 @@ def forward(self, tangents_1):
         def run(fn, x):
             outs = fn(x)
             (outs[0].sum() + outs[1].sum() + outs[3].sum()).backward()
-            return (
-                [o.requires_grad for o in outs],
-                [o.grad_fn is not None for o in outs],
-                x.grad,
-            )
+            return outs, x.grad
 
         x_ref = torch.arange(8, dtype=torch.float32).requires_grad_(True)
-        rg_ref, gf_ref, grad_ref = run(f, x_ref)
+        outs_ref, grad_ref = run(f, x_ref)
         self.assertIsNotNone(grad_ref)
 
-        for backend in ("aot_eager", "inductor"):
-            torch._dynamo.reset()
-            x = torch.arange(8, dtype=torch.float32).requires_grad_(True)
-            rg, gf, grad = run(torch.compile(f, backend=backend), x)
-            self.assertEqual(rg, rg_ref, f"requires_grad diverged on {backend}")
-            self.assertEqual(gf, gf_ref, f"grad_fn diverged on {backend}")
-            self.assertEqual(grad, grad_ref, f"gradient diverged on {backend}")
+        torch._dynamo.reset()
+        x = torch.arange(8, dtype=torch.float32).requires_grad_(True)
+        outs, grad = run(torch.compile(f, backend=backend), x)
+        self.assertEqual(
+            [(o.requires_grad, o.grad_fn is not None) for o in outs],
+            [(o.requires_grad, o.grad_fn is not None) for o in outs_ref],
+        )
+        self.assertEqual(grad, grad_ref)
 
         # The detach output must stay a leaf: sparing the base must not be
         # done by declining to mark the output that aliases it.
-        torch._dynamo.reset()
-        x = torch.arange(8, dtype=torch.float32).requires_grad_(True)
-        detached = torch.compile(f, backend="inductor")(x)[2]
-        self.assertFalse(detached.requires_grad)
-        self.assertIsNone(detached.grad_fn)
+        self.assertFalse(outs[2].requires_grad)
+        self.assertIsNone(outs[2].grad_fn)
 
     def test_detach_output_aliasing_sibling_output(self):
         # No intermediate base here: h * 1 folds to h and detach() no-ops, so
@@ -5337,49 +5332,60 @@ def forward(self, tangents_1):
         outs[0].sum().backward()
         self.assertEqual(x.grad, x_ref.grad)
 
-    def test_replay_input_mutation_warns_once_on_grad_visible_target(self):
-        # The invisible replay of a mutation that LOOKS autograd-visible (grad
-        # enabled, target requires grad) may drop real gradient information;
-        # that inherent ambiguity is reported once per process -- a module
-        # flag, since the codegen'd epilogue callers each get a fresh frame
-        # and would re-warn per compiled function through warnings' registry.
+    def test_input_mutation_on_custom_function_view_diverges_from_eager_with_warning(
+        self,
+    ):
+        # An input a custom Function returned as-is is a view stamped
+        # IN_CUSTOM_FUNCTION; eager refuses an autograd-visible in-place op on
+        # it. Compile cannot tell that write from a .data one at the region
+        # boundary, so it replays the mutation invisibly (warning once per
+        # process and input): the values land, but a later use of the view
+        # differentiates through its pre-mutation history -- the custom
+        # Function's backward runs on the post-mutation values and the
+        # mutating op contributes nothing (x gets no gradient).
         from torch._functorch._aot_autograd import runtime_wrappers as rw
 
-        class Passthrough(torch.autograd.Function):
+        class Scale(torch.autograd.Function):
             @staticmethod
-            def forward(ctx, x):
-                return x
+            def forward(ctx, t):
+                return t
 
             @staticmethod
             def backward(ctx, g):
-                return g
+                return g * 3
+
+        def body(w, x):
+            w.add_(x)
+            return (w * x).sum()
 
         base = torch.randn(4, requires_grad=True)
-        view = Passthrough.apply(base)
-        self.assertTrue(view._is_view())
+        with self.assertRaisesRegex(
+            RuntimeError, "is a view and is being modified inplace"
+        ):
+            body(Scale.apply(base * 1.0), torch.randn(4))
 
-        prior = rw._replay_input_mutation_warned
-        try:
-            rw._replay_input_mutation_warned = False
-            updated = torch.randn(4)
-            with warnings.catch_warnings(record=True) as caught:
-                warnings.simplefilter("always")
-                rw._replay_input_mutation(view, updated)
-                rw._replay_input_mutation(view, updated)
-            hits = [w for w in caught if "replaying a mutation" in str(w.message)]
-            self.assertEqual(len(hits), 1)
-            self.assertEqual(view.detach(), updated)
+        torch._dynamo.reset()
+        compiled = torch.compile(body, backend="aot_eager")
+        compiled(
+            torch.randn(4, requires_grad=True) * 1.0, torch.randn(4, requires_grad=True)
+        )
 
-            # The unambiguous serving configuration stays silent.
-            rw._replay_input_mutation_warned = False
-            with warnings.catch_warnings(record=True) as caught, torch.no_grad():
-                warnings.simplefilter("always")
-                rw._replay_input_mutation(view, torch.randn(4))
-            self.assertEqual(
-                [w for w in caught if "replaying a mutation" in str(w.message)], []
-            )
-        finally:
-            rw._replay_input_mutation_warned = prior
+        rw._warn_replayed_custom_function_view.cache_clear()
+        base = torch.randn(4, requires_grad=True)
+        x = torch.randn(4, requires_grad=True)
+        w = Scale.apply(base * 1.0)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            compiled(w, x)
+            compiled(w, x)
+        hits = [c for c in caught if "without autograd tracking" in str(c.message)]
+        self.assertEqual(len(hits), 1)
+        self.assertIn("mutated input 0", str(hits[0].message))
+        self.assertEqual(w.detach(), base.detach() + 2 * x.detach())
+
+        (w * w).sum().backward()
+        self.assertEqual(base.grad, 3 * 2 * w.detach())
+        self.assertIsNone(x.grad)
 
     def test_input_mutation_replayed_onto_restricted_view(self):
         # Functionalization lifts an input mutation out of the graph and replays
@@ -5440,6 +5446,27 @@ def forward(self, tangents_1):
             ).backward()
             self.assertIsNotNone(b2.grad)
 
+    def test_input_mutation_on_nonleaf_view_matches_eager(self):
+        # A plain non-leaf view accepts a tracked in-place edit in eager, so the
+        # epilogue's tracked copy_ has to reproduce both the values and the
+        # gradient path through the view, used again after the compiled region.
+        def body(w, x):
+            w.mul_(2)
+            return (w * x).sum()
+
+        def run(f):
+            torch.manual_seed(0)
+            base = torch.randn(2, 4, requires_grad=True)
+            x = torch.randn(4, requires_grad=True)
+            w = (base * 1.0)[0]
+            out = f(w, x)
+            (out + (w * 3).sum()).backward()
+            return base.grad, x.grad, w.detach()
+
+        ref = run(body)
+        torch._dynamo.reset()
+        self.assertEqual(run(torch.compile(body, backend="aot_eager")), ref)
+
     def test_none_tangent_in_kept_slot_names_the_forward_output(self):
         # A None in a kept tangent slot otherwise surfaces several frames below
         # AOTAutograd as inductor's "expected Tensor() for op: input", naming
@@ -5456,11 +5483,12 @@ def forward(self, tangents_1):
         x = torch.arange(8, dtype=torch.float32).requires_grad_(True)
         with patch.object(rw, "_dealias_marked_returns", lambda raw, marked: None):
             outs = torch.compile(f, backend="inductor")(x)
-            with self.assertRaises(RuntimeError) as cm:
+            with self.assertRaisesRegex(
+                RuntimeError, "handed a non-Tensor for a tangent it requires"
+            ) as cm:
                 outs[3].sum().backward()
 
         msg = str(cm.exception)
-        self.assertIn("handed a non-Tensor for a tangent it requires", msg)
         self.assertIn("tangent index         : 1", msg)
         self.assertIn("received              : None (type NoneType", msg)
         self.assertIn("IntermediateBaseAOTOutput(base_of=PlainAOTOutput(idx=0))", msg)
@@ -5493,11 +5521,12 @@ def forward(self, tangents_1):
             # The subclass output is what routes the prologue through the
             # has_subclass chained-generator branch.
             self.assertIsInstance(outs[0], TwoTensor)
-            with self.assertRaises(RuntimeError) as cm:
+            with self.assertRaisesRegex(
+                RuntimeError, "handed a non-Tensor for a tangent it requires"
+            ) as cm:
                 outs[0].sum().backward()
 
         msg = str(cm.exception)
-        self.assertIn("handed a non-Tensor for a tangent it requires", msg)
         self.assertIn("tangent index         : 1", msg)
         self.assertIn("received              : None (type NoneType", msg)
         self.assertIn("TangentAOTInput(output=PlainAOTOutput(idx=1))", msg)
