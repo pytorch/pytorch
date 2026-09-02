@@ -24,41 +24,23 @@ from cutlass import const_expr, Int32, Int64
 
 WARP = 32
 
-# HARD bound on the per-thread unroll, enforced in TileMap. A tile of `vec * loads` elements
-# per thread folded with a STATIC trip count emits that whole loop at trace time, so COMPILE
-# TIME SCALES WITH it. Measured (fp32 sum, cold compile, one N per point):
-#
+# SAFETY bound on the per-thread unroll (vec * loads), enforced in TileMap: a static trip count is
+# emitted at trace time, so compile time scales with it, superlinearly past ~1300 ops.
 #   unrolled ops   12    80   320   640  1280  2560
 #   compile (s)  0.14  0.17  0.35  0.60  1.17  4.54
-#
-# so roughly 1 ms per unrolled element op, going superlinear past ~1300. A multi-field trait
-# multiplies the IR per element (Welford is 3 fields), so the effective cost is worse. Left
-# unbounded, a caller asking for N=4096 at tpr=1 emits 4096 element ops and compilation does
-# not finish in any reasonable time -- that is not a hypothetical, it wedged a sweep here.
-#
-# This is a SAFETY bound, deliberately looser than any perf gate. The point is that no caller
-# -- including a benchmark harness that bypasses the perf gates -- can silently blow up
-# compile time.
 MAX_UNROLL = 512
 
 
 def vec_size(N: int, itemsize: int) -> int:
-    """Elements per load instruction.
-
-    gcd rather than `16 // itemsize`: it makes vec divide N, which buys three things at
-    once -- no ragged tail inside a chunk, every chunk base a multiple of vec, and a row
-    stride (N*itemsize) that is a multiple of vec*itemsize, so every ROW start carries the
-    same alignment as the base pointer.
+    """Elements per load instruction. gcd, not `16 // itemsize`, so vec DIVIDES N: no ragged tail
+    in a chunk, and every chunk base and row start carries the base pointer's alignment.
     """
     return math.gcd(N, max(1, 16 // itemsize))
 
 
 def align_bytes(N: int, itemsize: int) -> int:
-    """Alignment to DECLARE on the input wrap so the DSL emits the wide load.
-
-    Not optional: `from_dlpack` otherwise assumes only the element's natural width and
-    silently emits narrow loads (measured 3x on the multirow shape). Safe by the `vec_size`
-    argument above, given a tensor whose base pointer is an allocation base.
+    """Alignment to DECLARE on the input wrap. Not optional: `from_dlpack` otherwise assumes the
+    element width and silently emits narrow loads, measured 3x on the multirow shape.
     """
     return vec_size(N, itemsize) * itemsize
 
@@ -127,10 +109,9 @@ def fold_row_rolled(
 ):
     """Fold row `r` across `tm.tpr` lanes with a RUNTIME chunk loop. Returns an acc tuple.
 
-    Each wave covers tpr*vec contiguous elements; this thread takes chunk (c*tpr + lane).
-    A wave that runs past the row's last chunk is handled by CLAMPING the chunk index and
-    passing valid=False to the trait, not by branching -- binding a dynamic value inside a
-    dynamic `if` is rejected by the DSL, and the trait already folds `valid` correctly.
+    Each wave covers tpr*vec contiguous elements and this thread takes chunk (c*tpr + lane). A wave
+    past the row's last chunk CLAMPS the index and passes valid=False rather than branching, which
+    the DSL rejects for a dynamic bind.
     """
     reduce_fn, acc_dt = trait.reduce, trait.acc
     acc = trait.init()
