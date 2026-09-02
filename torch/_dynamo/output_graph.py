@@ -1427,11 +1427,11 @@ class OutputGraph(OutputGraphCommon):
             # type.__instancecheck__ avoids realizing lazy
             # VariableTrackers, which would install guards inside
             # compile_subgraph.
-            if (
-                type.__instancecheck__(EventVariable, var)
-                and id(var.value) in pending_ids
-            ):
-                escaped.add(id(var.value))
+            if not type.__instancecheck__(EventVariable, var):
+                return
+            event_var: EventVariable = var  # pyrefly: ignore[bad-assignment]
+            if id(event_var.value) in pending_ids:
+                escaped.add(id(event_var.value))
 
         roots: list[Any] = [all_stack_values]
         # Attribute stores AND value mutations on tracked objects (list
@@ -1453,9 +1453,14 @@ class OutputGraph(OutputGraphCommon):
             _check, roots, side_effects=self.side_effects, visit_keys=True
         )
 
-        for value, msg in self._pending_event_record_violations:
-            if id(value) in escaped:
-                raise RuntimeError(msg)
+        escaped_violations = [
+            msg
+            for value, msg in self._pending_event_record_violations
+            if id(value) in escaped
+        ]
+        self._pending_event_record_violations.clear()
+        for msg in escaped_violations:
+            raise RuntimeError(msg)
 
     @property
     def graph(self) -> torch.fx.Graph:
