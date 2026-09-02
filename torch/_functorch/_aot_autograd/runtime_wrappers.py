@@ -3831,7 +3831,12 @@ def _pruned_backward_output_indices_for_undefined_grad_outputs(
     # zeros into .grad; the backward retrace reproduces that, but by the time
     # these fallbacks run, custom-function provenance has been inlined away,
     # so the graph analysis cannot tell the two cases apart. The divergence is
-    # None vs a zero gradient, which autograd accumulation treats identically.
+    # None vs a zero gradient: accumulation into an existing .grad is identical
+    # either way, but a leaf whose ONLY contribution is such a slot ends up with
+    # .grad = None here where eager would leave a zero-filled tensor, so code
+    # that branches on `.grad is None` can observe the difference. This is the
+    # only nondeterminism the masking introduces relative to eager, and it is
+    # accepted (a None and a zero gradient are numerically equivalent).
     undefined_tangent_flat_indices = _undefined_tangent_flat_indices(
         fw_metadata, undefined_grad_out_indices
     )
@@ -4112,6 +4117,50 @@ class _AutogradSavedState:
         ctx.opaque_objects = opaque_object_outs
 
 
+def _dealias_marked_returns(raw_returns: list[Any], marked: Sequence[int]) -> None:
+    """Give each slot about to be marked non-differentiable its own TensorImpl.
+
+    mark_non_differentiable is keyed on TensorImpl, so marking one slot marks
+    EVERY returned slot holding that same object, and with
+    ctx._materialize_non_diff_grads = False a slot marked this way is handed a
+    None instead of zeros. Backends are free to return one object in two slots
+    -- inductor lowers aten.detach to a no-op, and h*1 / h+0 fold away -- so
+    `return h * 1, h.detach()` marks the differentiable output too and drops
+    the gradient, and `return y[:2], y[2:], y.detach()` marks y's intermediate
+    base, which the backward requires a tangent for.
+
+    Substituting an alias is only correct because the slot is one we are about
+    to declare non-differentiable anyway; slots that stay differentiable keep
+    their identity.
+
+    ``marked`` may name slots that are not tensors: the ahead-of-time codegen
+    path selects indices by output metadata and does not pre-filter, so
+    non-tensor slots are simply skipped here.
+    """
+    if not marked:
+        return
+    # This runs on every forward of every compiled autograd function and almost
+    # never fires. Build the id->positions map from only the marked slots
+    # (usually one or two) so it stays tiny; the single pass over raw_returns
+    # below to probe for collisions is unavoidable.
+    marked_positions: dict[int, list[int]] = {}
+    for i in marked:
+        x = raw_returns[i]
+        if isinstance(x, torch.Tensor):
+            marked_positions.setdefault(id(x), []).append(i)
+    if not marked_positions:
+        return
+    marked_set = set(marked)
+    collide: set[int] = set()
+    for j, o in enumerate(raw_returns):
+        if j not in marked_set:
+            hits = marked_positions.get(id(o))
+            if hits is not None:
+                collide.update(hits)
+    for i in collide:
+        raw_returns[i] = raw_returns[i].detach()
+
+
 @dataclass
 class _AutogradForwardEpilogue:
     metadata: ViewAndMutationMeta
@@ -4297,9 +4346,10 @@ class _AutogradBackwardCompiler:
     # specialization mask and are populate-once and idempotent -- the compiled
     # backward for a given mask is deterministic. Concurrent backwards on the same
     # compiled function (multithreaded autograd) may redundantly compute the same
-    # entry, but never observe a torn value: dict/set membership updates are atomic
-    # under the GIL and a duplicate insert overwrites with an equivalent result. No
-    # lock is taken so the common cache-hit path stays contention-free.
+    # entry, but the outcome is correct regardless of interleaving: each key maps
+    # to one value and a duplicate insert overwrites it with an equivalent one, so
+    # the hot cache-hit path takes no lock. _prepare_lazy_backward_context is the
+    # exception -- its mutations are not idempotent -- and takes _prepare_lock.
     compiled_bw: Callable[..., Any] | None
     lazy_backward_info: (
         AutogradLazyBackwardCompileInfo | CachedAutogradLazyBackwardCompileInfo | None
@@ -4320,6 +4370,11 @@ class _AutogradBackwardCompiler:
     # specialization ladder (and a fresh backward compile) per backward call.
     materialize_fallback_masks: set[int] = field(default_factory=set)
     lazy_backward_context_prepared: bool = False
+    # Serializes _prepare_lazy_backward_context, whose mutations are NOT
+    # idempotent under concurrent backwards (the DDP bucket decrement, and the
+    # cache-clear + recompile when saved_tensors_use_once flips), unlike the
+    # populate-once specialization caches above.
+    _prepare_lock: threading.Lock = field(default_factory=threading.Lock)
 
     def can_specialize_undefined_grad_outputs(self) -> bool:
         return (
@@ -4522,7 +4577,7 @@ class _AutogradBackwardCompiler:
                         "; ".join(retrace_decline_reasons)
                         or "the backward retrace declined"
                     )
-                    raise RuntimeError(
+                    raise torch.compiler.PrecompileError(
                         "AOTAutograd could not compile the backward for undefined "
                         f"grad output indices {specialization_indices} (mask "
                         f"{specialization_key:#b}): {reasons}; structural "
@@ -4619,72 +4674,74 @@ class _AutogradBackwardCompiler:
                 f"got {type(self.lazy_backward_info)}"
             )
 
-        if self.lazy_backward_context_prepared:
-            pass
-        elif (
-            hasattr(self.lazy_backward_info, "saved_context")
-            and self.lazy_backward_info.saved_context is not None
-        ):
-            if not isinstance(self.lazy_backward_info.saved_context, TracingContext):
-                raise AssertionError(
-                    f"expected TracingContext, got {type(self.lazy_backward_info.saved_context)}"
-                )
-            ddp_ctx = self.lazy_backward_info.saved_context.ddp_optimizer_ctx
-            if ddp_ctx is not None:
-                if ddp_ctx.curr_bucket < 0:
-                    raise AssertionError(
-                        "expected same # of fw and bw compiles, "
-                        f"but found bucket {ddp_ctx.curr_bucket}"
-                    )
-                curr_fw_meta = ddp_ctx.metadata_per_bucket[ddp_ctx.curr_bucket]
-                # Note [DDPOptimizer and fw_metadata]
-                # When using the DDPOptimizer, we have a single dynamo graph (and TracingContext),
-                # but multiple AOTDispatcher graph.
-                #
-                # One consequence is that there will be **multiple** fw_metadata objects, one per AOT graph,
-                # which we stash the fw_metadata on the TracingContext.
-                #
-                # Normally what happens is that as we compile AOT graphs 1...N, we clobber the fw_metadata
-                # for graph i-1 when we start running AOT for graph i.
-                # Ordinarily this is fine, because inductor no longer needs the metadata from graph i-1.
-                #
-                # However, this is a problem for lazy compilation of the backward. During backward compilation,
-                # we compile the backward lazily at backward runtime, meaning that we will first compile
-                # backward graph N, N-1, ..., 1.
-                # We need to ensure that at the time inductor compiles bw graph N-1, it can access
-                # the corresponding fw_metadata for graph N-1.
-                #
-                # We do this by stashing a DDPOptimizerContext, which tracks:
-                # - the metadata of all N graphs
-                # - the graph we are currently compiling in our DDPOptimizer region.
-                ddp_ctx.curr_bucket -= 1
-                self.lazy_backward_info.saved_context.fw_metadata = curr_fw_meta
-            self.lazy_backward_context_prepared = True
-        else:
-            self.lazy_backward_context_prepared = True
-
-        if not saved_tensors_use_once:
-            if self.fw_metadata.bw_donated_idxs:
-                # Backwards compiled so far assumed donated buffers. Clearing
-                # bw_donated_idxs would let them slip past the retain_graph
-                # guard in _backward_impl, so drop them and recompile without
-                # donation instead.
-                self.specialized_compiled_bws.clear()
-                self.compiled_bw = None
-            self.fw_metadata.bw_donated_idxs = []
-            # Update bw_donated_idxs if using lazy_backward_info from `aot_dispatch_autograd`
-            if (
+        with self._prepare_lock:
+            if self.lazy_backward_context_prepared:
+                pass
+            elif (
                 hasattr(self.lazy_backward_info, "saved_context")
-                and hasattr(self.lazy_backward_info.saved_context, "fw_metadata")
-                and hasattr(
-                    self.lazy_backward_info.saved_context.fw_metadata,  # type: ignore[union-attr]
-                    "bw_donated_idxs",
-                )
+                and self.lazy_backward_info.saved_context is not None
             ):
-                self.lazy_backward_info.saved_context.fw_metadata.bw_donated_idxs = (  # type: ignore[union-attr]
-                    # pyrefly: ignore [implicit-any]
-                    []
-                )
+                saved_ctx = self.lazy_backward_info.saved_context
+                if not isinstance(saved_ctx, TracingContext):
+                    raise AssertionError(
+                        f"expected TracingContext, got {type(saved_ctx)}"
+                    )
+                ddp_ctx = saved_ctx.ddp_optimizer_ctx
+                if ddp_ctx is not None:
+                    if ddp_ctx.curr_bucket < 0:
+                        raise AssertionError(
+                            "expected same # of fw and bw compiles, "
+                            f"but found bucket {ddp_ctx.curr_bucket}"
+                        )
+                    curr_fw_meta = ddp_ctx.metadata_per_bucket[ddp_ctx.curr_bucket]
+                    # Note [DDPOptimizer and fw_metadata]
+                    # When using the DDPOptimizer, we have a single dynamo graph (and TracingContext),
+                    # but multiple AOTDispatcher graph.
+                    #
+                    # One consequence is that there will be **multiple** fw_metadata objects, one per AOT graph,
+                    # which we stash the fw_metadata on the TracingContext.
+                    #
+                    # Normally what happens is that as we compile AOT graphs 1...N, we clobber the fw_metadata
+                    # for graph i-1 when we start running AOT for graph i.
+                    # Ordinarily this is fine, because inductor no longer needs the metadata from graph i-1.
+                    #
+                    # However, this is a problem for lazy compilation of the backward. During backward compilation,
+                    # we compile the backward lazily at backward runtime, meaning that we will first compile
+                    # backward graph N, N-1, ..., 1.
+                    # We need to ensure that at the time inductor compiles bw graph N-1, it can access
+                    # the corresponding fw_metadata for graph N-1.
+                    #
+                    # We do this by stashing a DDPOptimizerContext, which tracks:
+                    # - the metadata of all N graphs
+                    # - the graph we are currently compiling in our DDPOptimizer region.
+                    ddp_ctx.curr_bucket -= 1
+                    saved_ctx.fw_metadata = curr_fw_meta
+                self.lazy_backward_context_prepared = True
+            else:
+                self.lazy_backward_context_prepared = True
+
+            if not saved_tensors_use_once:
+                if self.fw_metadata.bw_donated_idxs:
+                    # Backwards compiled so far assumed donated buffers. Clearing
+                    # bw_donated_idxs would let them slip past the retain_graph
+                    # guard in _backward_impl, so drop them and recompile without
+                    # donation instead.
+                    self.specialized_compiled_bws.clear()
+                    self.compiled_bw = None
+                self.fw_metadata.bw_donated_idxs = []
+                # Update bw_donated_idxs if using lazy_backward_info from `aot_dispatch_autograd`
+                if (
+                    hasattr(self.lazy_backward_info, "saved_context")
+                    and hasattr(self.lazy_backward_info.saved_context, "fw_metadata")
+                    and hasattr(
+                        self.lazy_backward_info.saved_context.fw_metadata,  # type: ignore[union-attr]
+                        "bw_donated_idxs",
+                    )
+                ):
+                    self.lazy_backward_info.saved_context.fw_metadata.bw_donated_idxs = (  # type: ignore[union-attr]
+                        # pyrefly: ignore [implicit-any]
+                        []
+                    )
 
 
 def _codegen_backward_prologue(
@@ -5093,7 +5150,6 @@ class _AOTDispatchAutogradFunctionFactory:
         )
 
         compiled_fw_func = self.spec.compiled_fw_func
-        compiled_bw_func = self.spec.compiled_bw_func
         maybe_subclass_meta = self.spec.maybe_subclass_meta
         num_symints_saved_for_bw_ = self.spec.num_symints_saved_for_bw
         backward_state_indices = self.spec.backward_state_indices
@@ -5247,7 +5303,8 @@ class _AOTDispatchAutogradFunctionFactory:
 
         class CompiledFunction(torch.autograd.Function):
             compiled_fw = compiled_fw_func
-            compiled_bw = compiled_bw_func
+            # backward_compiler owns the compiled backward (single source of
+            # truth); the class does not keep its own copy.
             metadata: ViewAndMutationMeta = fw_metadata  # type: ignore[assignment]
             maybe_subclass_metadata: SubclassMeta | None = maybe_subclass_meta
             num_symints_saved_for_bw = num_symints_saved_for_bw_
@@ -5368,8 +5425,6 @@ class _AOTDispatchAutogradFunctionFactory:
                         all_args=all_args,
                     )
                 )
-                if not undefined_grad_out_indices:
-                    CompiledFunction.compiled_bw = compiled_bw
 
                 if (
                     torch._functorch.config.donated_buffer

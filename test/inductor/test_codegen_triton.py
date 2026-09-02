@@ -2675,14 +2675,16 @@ def helper(x):
         self.assertIsNone(_constexpr_module_missing_in_worker(root_src, other))
         aliased = "from foo.bar import Cfg as Renamed\n"
         self.assertIsNone(_constexpr_module_missing_in_worker(aliased, err))
-        # A formatted worker traceback may chain an earlier, unrelated
-        # ModuleNotFoundError; only the last (propagated) one is attributed.
+        # A formatted worker traceback may chain the constexpr import failure
+        # before an unrelated secondary one; any reported missing module that
+        # matches a constexpr import is attributed regardless of chain order,
+        # so the in-process fallback still fires.
         chained = (
             "ModuleNotFoundError: No module named 'foo'\n\n"
             "During handling of the above exception, another exception occurred:\n\n"
             "ModuleNotFoundError: No module named 'baz'\n"
         )
-        self.assertIsNone(_constexpr_module_missing_in_worker(src, chained))
+        self.assertEqual(_constexpr_module_missing_in_worker(src, chained), "foo.bar")
         reversed_chain = (
             "ModuleNotFoundError: No module named 'baz'\n\n"
             "During handling of the above exception, another exception occurred:\n\n"
@@ -2691,6 +2693,13 @@ def helper(x):
         self.assertEqual(
             _constexpr_module_missing_in_worker(src, reversed_chain), "foo.bar"
         )
+        # A traceback with only unrelated failures matches no constexpr import.
+        unrelated_chain = (
+            "ModuleNotFoundError: No module named 'baz'\n\n"
+            "During handling of the above exception, another exception occurred:\n\n"
+            "ModuleNotFoundError: No module named 'qux'\n"
+        )
+        self.assertIsNone(_constexpr_module_missing_in_worker(src, unrelated_chain))
 
     @unittest.skipUnless(has_triton_package(), "requires Triton")
     def test_constexpr_fallback_catches_raw_module_not_found(self):

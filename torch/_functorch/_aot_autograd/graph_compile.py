@@ -2653,7 +2653,11 @@ def retrace_backward_handling_errors(
     except Exception as e:
         from torch._precompile import PrecompileError
 
-        if isinstance(e, PrecompileError):
+        # PrecompileError means the backward is not portable and precompile must
+        # see it; an AssertionError is an internal invariant violation and must
+        # not be silently downgraded to a fallback. Everything else is a
+        # legitimate reason to decline to structural specialization.
+        if isinstance(e, (PrecompileError, AssertionError)):
             raise
         log.warning(
             "Backward retrace for undefined grad outputs %s failed; "
