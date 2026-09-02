@@ -138,8 +138,9 @@ class DeviceInterface:
         Returning None opts out. An empty dict still contributes metadata.
         Implementations should return only metadata that invalidates generated
         or autotuned code when changed, without unnecessarily initializing hardware.
-        This hook is sampled through the cached CacheBase.get_system() path, so
-        interfaces must be registered before its first use.
+        Only called when is_available() returns True. This hook is sampled through
+        the cached CacheBase.get_system() path, so interfaces must be registered
+        and available before its first use.
         """
         return None
 

@@ -360,6 +360,8 @@ class CacheBase:
 
         device_interface_info: dict[str, dict[str, object]] = {}
         for name, interface in get_registered_device_interfaces():
+            # The registry contains both the base device name and indexed local
+            # instances; collect cache metadata only once per backend.
             if ":" in name:
                 continue
 
@@ -370,12 +372,14 @@ class CacheBase:
                 if not interface.is_available():
                     continue
                 info = interface.get_cache_system_info()
-                if info is not None:
-                    if not isinstance(info, dict):
-                        raise TypeError(
-                            "get_cache_system_info() must return a dict or None"
-                        )
-                    json.dumps(info, sort_keys=True)
+                if info is None:
+                    continue
+                if not isinstance(info, dict):
+                    raise TypeError(f"expected a dict or None, got {type(info)}")
+                # Probe serializability here before key_from_json() and
+                # update_local_cache() serialize this metadata later.
+                json.dumps(info, sort_keys=True)
+                device_interface_info[name] = info
             except Exception:
                 log.warning(
                     "Failed to collect cache system info from device interface %s",
@@ -383,8 +387,6 @@ class CacheBase:
                     exc_info=True,
                 )
                 continue
-            if info is not None:
-                device_interface_info[name] = info
 
         if device_interface_info:
             hash_input["device_interfaces"] = device_interface_info
