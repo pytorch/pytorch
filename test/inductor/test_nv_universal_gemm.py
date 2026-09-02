@@ -164,6 +164,44 @@ class TestNVUniversalGemm(TestCase):
         }
         self.assertEqual(len(signatures), 7)
 
+    def test_nvgemm_cache_key_distinguishes_epilogue_source(self):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            _create_gemm_cache_key,
+            _make_disk_config_key,
+        )
+
+        inputs = (torch.empty_strided((4, 4), (4, 1)),) * 2
+        out = torch.empty_strided((4, 4), (4, 1))
+        kwargs = {"has_epilogue": True, "aux_tensors": ()}
+        self.assertNotEqual(
+            _create_gemm_cache_key(inputs, out, epilogue_source="first", **kwargs),
+            _create_gemm_cache_key(inputs, out, epilogue_source="second", **kwargs),
+        )
+        self.assertNotEqual(
+            _make_disk_config_key(
+                "kernel", "GEMM", torch.float32, epilogue_source="first"
+            ),
+            _make_disk_config_key(
+                "kernel", "GEMM", torch.float32, epilogue_source="second"
+            ),
+        )
+
+    def test_direct_epilogue_schema_separates_local_reduce_result(self):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            CuTeDSLEpilogueArguments,
+        )
+
+        args = CuTeDSLEpilogueArguments(
+            "def epilogue(accum, D):\n"
+            "    _local_reduce = accum\n"
+            "    return D, _local_reduce",
+            D=torch.empty(1),
+        )
+        schema = args.epilogue_fn.schema
+        self.assertEqual(schema.outputs, ("D",))
+        self.assertEqual(schema.parameter_names, ("D",))
+        self.assertTrue(schema.returns_local_reduce)
+
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     @parametrize(
         "layout_a,layout_b",

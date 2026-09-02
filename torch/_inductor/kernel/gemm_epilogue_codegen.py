@@ -228,16 +228,16 @@ class GemmReductionCompileConfig:
             args.tensor_epilogue_returns_local_reduce,
         )
 
-    def _primary_callbacks(self, *, include_consumer: bool = True) -> tuple[Any, ...]:
+    def _primary_callbacks(self) -> tuple[Any, ...]:
         reduction = self.reduction
-        callbacks = (
+        return (
             reduction.reduce_op,
             reduction.init_val,
             reduction.combine,
             reduction.source,
             reduction.finalize,
+            self.consumer,
         )
-        return (*callbacks, self.consumer) if include_consumer else callbacks
 
     def blockscaled_primary_constexprs(self) -> tuple[Any, ...]:
         args = self.args
@@ -249,13 +249,11 @@ class GemmReductionCompileConfig:
             *self._primary_callbacks(),
         )
 
-    def constexprs(self, *, include_consumers: bool = True) -> tuple[Any, ...]:
-        constexprs = (
-            *self._common_constexprs(),
-            *self._primary_callbacks(include_consumer=include_consumers),
-        )
+    def constexprs(self) -> tuple[Any, ...]:
         return (
-            (*constexprs, self.secondary_consumer) if include_consumers else constexprs
+            *self._common_constexprs(),
+            *self._primary_callbacks(),
+            self.secondary_consumer,
         )
 
 
@@ -289,8 +287,12 @@ class GemmEpilogueCuteDSLCSE:
         return self._cache.get(cache_key)
 
     def generate(self, body, expr, *, bounds=None, dtype=None, shape=None):
+        cached = self.try_get(expr)
+        if cached is not None:
+            return cached
         result = self.newvar(bounds=bounds, dtype=dtype, shape=shape)
         body.writeline(f"{result} = {expr}")
+        self.put(expr, result)
         return result
 
 

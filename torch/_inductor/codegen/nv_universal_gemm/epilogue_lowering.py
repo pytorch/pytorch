@@ -529,10 +529,11 @@ class NVGemmEpilogueLowering:
         if isinstance(node.data, Reduction):
             if expected_strides is None:
                 return None
-            reads = list(access_node.read_writes.reads)
+            read_writes = node.get_read_writes()
+            reads = list(read_writes.reads)
             if len(reads) != 1 or reads[0].name != gemm_node.get_name():
                 return None
-            range_vars = access_node.read_writes.range_vars
+            range_vars = read_writes.range_vars
             if range_vars is None:
                 return None
             expected_stride_options = [expected_strides]
