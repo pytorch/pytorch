@@ -630,6 +630,9 @@ endif()
 
 # ---[ Google-glog
 if(USE_GLOG)
+  if(USE_ABSL_LOG)
+    message(FATAL_ERROR "USE_ABSL_LOG and USE_GLOG cannot be used at the same time.")
+  endif()
   include(${CMAKE_CURRENT_LIST_DIR}/public/glog.cmake)
   if(TARGET glog::glog)
     set(CAFFE2_USE_GOOGLE_GLOG 1)
@@ -639,6 +642,22 @@ if(USE_GLOG)
         "strongly recommended that you install glog. Suppress this warning "
         "with -DUSE_GLOG=OFF")
     caffe2_update_option(USE_GLOG OFF)
+  endif()
+endif()
+
+# ---[ Abseil Logging
+if(USE_ABSL_LOG)
+  if(USE_GLOG)
+    message(FATAL_ERROR "USE_ABSL_LOG and USE_GLOG cannot be used at the same time.")
+  endif()
+  include(${CMAKE_CURRENT_LIST_DIR}/public/absl.cmake)
+  if(TARGET absl::log)
+    set(CAFFE2_USE_ABSL_LOG 1)
+  else()
+    message(WARNING
+        "absl is not found. Caffe2 will build without absl logging support. "
+        "Suppress this warning with -DUSE_ABSL_LOG=OFF")
+    caffe2_update_option(USE_ABSL_LOG OFF)
   endif()
 endif()
 
