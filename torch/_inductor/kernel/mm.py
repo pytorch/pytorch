@@ -1054,29 +1054,37 @@ def _is_blockwise1xTILESIZE_scaling(
     return normalized or v1_raw
 
 
+def _blockwise128x128_shape_match(
+    sz: Sequence[_IntLike],
+    tensor_sz: Sequence[_IntLike],
+    transpose: bool,
+) -> tuple[bool, bool, _IntLike]:
+    # Triton reads [out_blocks, k_blocks]; cuBLAS supplies the transpose of that
+    # with K padded to a multiple of 4. Returns whether sz matches each, plus the
+    # padded K used by both the cuBLAS shape and its stride.
+    if transpose:
+        out_blocks = ceildiv(tensor_sz[1], 128)
+        k_blocks = ceildiv(tensor_sz[0], 128)
+    else:
+        out_blocks = ceildiv(tensor_sz[0], 128)
+        k_blocks = ceildiv(tensor_sz[1], 128)
+    k_blocks_padded = ceildiv(k_blocks, 4) * 4
+    sizevars = V.graph.sizevars
+    triton_ok = sizevars.statically_known_equals(
+        sz[0], out_blocks
+    ) and sizevars.statically_known_equals(sz[1], k_blocks)
+    cublas_ok = sizevars.statically_known_equals(
+        sz[0], k_blocks_padded
+    ) and sizevars.statically_known_equals(sz[1], out_blocks)
+    return triton_ok, cublas_ok, k_blocks_padded
+
+
 def _is_blockwise128x128_scaling(
     sz: Sequence[_IntLike],
     tensor_sz: Sequence[_IntLike],
     transpose: bool = False,
 ) -> bool:
-    # Triton expects [out_blocks, k_blocks] (output blocks as rows, K blocks as cols).
-    # cuBLAS produces transposed+padded [k_blocks_padded_to_4, out_blocks] for 128x128.
-    if transpose:
-        out_blocks = ceildiv(tensor_sz[1], 128)  # N/128
-        k_blocks = ceildiv(tensor_sz[0], 128)  # K/128
-    else:
-        out_blocks = ceildiv(tensor_sz[0], 128)  # M/128
-        k_blocks = ceildiv(tensor_sz[1], 128)  # K/128
-    k_blocks_padded = ceildiv(k_blocks, 4) * 4
-    sizevars = V.graph.sizevars
-    # Case 1: Triton layout [out_blocks, k_blocks]
-    triton_ok = sizevars.statically_known_equals(
-        sz[0], out_blocks
-    ) and sizevars.statically_known_equals(sz[1], k_blocks)
-    # Case 2: cuBLAS transposed layout [k_blocks_padded_to_4, out_blocks]
-    cublas_ok = sizevars.statically_known_equals(
-        sz[0], k_blocks_padded
-    ) and sizevars.statically_known_equals(sz[1], out_blocks)
+    triton_ok, cublas_ok, _ = _blockwise128x128_shape_match(sz, tensor_sz, transpose)
     return triton_ok or cublas_ok
 
 
@@ -1088,28 +1096,16 @@ def _uses_cublas_blockwise128x128_layout(
 ) -> bool:
     if scale_option != ScalingType.BlockWise128x128:
         return False
-    tensor_sz = mat.get_size()
-    if transpose:
-        out_blocks = ceildiv(tensor_sz[1], 128)
-        k_blocks = ceildiv(tensor_sz[0], 128)
-    else:
-        out_blocks = ceildiv(tensor_sz[0], 128)
-        k_blocks = ceildiv(tensor_sz[1], 128)
-    k_blocks_padded = ceildiv(k_blocks, 4) * 4
-    sizevars = V.graph.sizevars
-    scale_sz = scale.get_size()
-    cublas_layout = sizevars.statically_known_equals(
-        scale_sz[0], k_blocks_padded
-    ) and sizevars.statically_known_equals(scale_sz[1], out_blocks)
+    triton_layout, cublas_layout, k_blocks_padded = _blockwise128x128_shape_match(
+        scale.get_size(), mat.get_size(), transpose
+    )
     if not cublas_layout:
         return False
-
-    triton_layout = sizevars.statically_known_equals(
-        scale_sz[0], out_blocks
-    ) and sizevars.statically_known_equals(scale_sz[1], k_blocks)
     if not triton_layout:
         return True
 
+    # Both shapes match, so only the strides tell them apart.
+    sizevars = V.graph.sizevars
     scale_stride = scale.maybe_get_stride()
     if scale_stride is None:
         return False
