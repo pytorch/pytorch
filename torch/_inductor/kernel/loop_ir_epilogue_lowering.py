@@ -202,6 +202,9 @@ class GemmEpilogueIRAnalysis:
 
     stores: dict[str, GemmEpilogueIRStore]
     buffers: tuple[ComputedBuffer, ...] = ()
+    index_vars: dict[str, tuple[sympy.Expr, ...]] = dataclasses.field(
+        default_factory=dict
+    )
 
     @classmethod
     def from_buffers(
@@ -209,10 +212,14 @@ class GemmEpilogueIRAnalysis:
     ) -> "GemmEpilogueIRAnalysis":
         buffers = tuple(buffers)
         handler = _GemmEpilogueIRHandler()
+        index_vars = {}
         with V.set_ops_handler(handler):
             for buffer in buffers:
-                buffer.get_store_function()(*buffer.data.inner_fn_args())
-        return cls(handler.stores, buffers)
+                args = buffer.data.inner_fn_args()
+                if len(args) == 1:
+                    index_vars[buffer.get_name()] = tuple(args[0])
+                buffer.get_store_function()(*args)
+        return cls(handler.stores, buffers, index_vars)
 
     def store(self, name: str) -> GemmEpilogueIRStore | None:
         return self.stores.get(name)

@@ -33,7 +33,15 @@ from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
 from ..codegen.wrapper import PythonWrapperCodegen
-from ..ir import Buffer, ChoiceCaller, IRNode, is_triton, is_unaligned, Layout
+from ..ir import (
+    Buffer,
+    ChoiceCaller,
+    IRNode,
+    is_triton,
+    is_unaligned,
+    Layout,
+    TensorBox,
+)
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import (
     fallback_handler,
@@ -1376,6 +1384,16 @@ def tuned_scaled_mm(
         realize_inputs(nvgemm_output_scale) if nvgemm_output_scale is not None else None
     )
 
+    def apply_output_scale(node):
+        if output_scale_real is None:
+            return node
+        scale = (
+            output_scale_real
+            if isinstance(output_scale_real, TensorBox)
+            else TensorBox.create(output_scale_real)
+        )
+        return lowerings[aten.mul](node, scale)
+
     input_nodes: list[Any]
 
     if not bias:
@@ -1516,7 +1534,7 @@ def tuned_scaled_mm(
     # Early return for MX variants
     if scale_a.dtype != torch.float32:
         node, _ = autotune_select_algorithm(name, choices, input_nodes, layout)
-        return node
+        return apply_output_scale(node)
 
     if (
         is_nonzero
@@ -1534,9 +1552,7 @@ def tuned_scaled_mm(
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, kernel_inputs.nodes())
 
     node, _ = autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
-    if output_scale_real is not None:
-        node = lowerings[aten.mul](node, output_scale_real)
-    return node
+    return apply_output_scale(node)
 
 
 @register_lowering(
