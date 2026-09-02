@@ -19,27 +19,23 @@ from torch._dynamo.testing import (
 from torch._dynamo.trace_rules import _as_posix_path
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_cuda import SM90OrLater
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     find_free_port,
+    HardwareClassification,
     IS_WINDOWS,
     munge_exc,
     skipIfTorchDynamo,
     skipIfWindows,
-)
-from torch.testing._internal.inductor_utils import (
-    HAS_CUDA_AND_TRITON,
-    HAS_XPU_AND_TRITON,
 )
 from torch.testing._internal.logging_utils import (
     LoggingTestCase,
     make_logging_test,
     make_settings_test,
 )
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
-
-
-requires_gpu = unittest.skipUnless(
-    HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON, "requires cuda or xpu with triton"
+from torch.testing._internal.triton_utils import (
+    requires_cuda_and_triton,
+    requires_gpu_and_triton,
 )
 
 requires_distributed = functools.partial(
@@ -165,34 +161,6 @@ class LoggingTests(LoggingTestCase):
     test_output_code = multi_record_test(3, output_code=True)
     test_aot_graphs = multi_record_test(3, aot_graphs=True)
 
-    @requires_gpu
-    @make_logging_test(schedule=True)
-    def test_schedule(self, records):
-        fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
-        fn_opt(torch.ones(1000, 1000, device=device_type))
-        self.assertGreater(len(records), 0)
-        self.assertLess(len(records), 5)
-
-    @requires_gpu
-    @make_logging_test(fusion=True)
-    def test_fusion(self, records):
-        fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
-        fn_opt(torch.ones(1000, 1000, device=device_type))
-        self.assertGreater(len(records), 0)
-
-        # LOAF will add an extra round of fusion and result in more logs
-        self.assertLess(
-            len(records), 8 * (1 + torch._inductor.config.loop_ordering_after_fusion)
-        )
-
-    @requires_gpu
-    @make_logging_test(cudagraphs=True)
-    def test_cudagraphs(self, records):
-        fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)  # noqa: UNSPECIFIED_BACKEND
-        fn_opt(torch.ones(1000, 1000, device=device_type))
-        self.assertGreater(len(records), 0)
-        self.assertLess(len(records), 8)
-
     @make_logging_test(recompiles=True)
     def test_recompiles(self, records):
         def outmost_fn(x, ys, zs):
@@ -225,13 +193,13 @@ class LoggingTests(LoggingTestCase):
         self.assertIn(
             """\
     - User stack trace:
-    -   File [file_path], line 199, in outmost_fn
+    -   File [file_path], line 167, in outmost_fn
     -     return outer_fn(x, ys, zs)
-    -   File [file_path], line 202, in outer_fn
+    -   File [file_path], line 170, in outer_fn
     -     return fn(x, ys, zs)
-    -   File [file_path], line 205, in fn
+    -   File [file_path], line 173, in fn
     -     return inner(x, ys, zs)
-    -   File [file_path], line 208, in inner
+    -   File [file_path], line 176, in inner
     -     for y, z in zip(ys, zs):""",
             record_str,
         )
@@ -1349,37 +1317,6 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 4)
 
-    @make_logging_test(perf_hints=True)
-    @requires_gpu
-    def test_optimizer_non_static_param(self, records):
-        params = [torch.randn(10, 10, device=device_type) for _ in range(2)]
-        for param in params:
-            param.grad = torch.zeros_like(param)
-        opt = torch.optim.Adam(params)
-        compiled_opt_step = torch.compile(opt.step, mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
-        compiled_opt_step()
-        self.assertGreater(len(records), 0)
-        self.assertLess(len(records), 3)
-
-    @make_logging_test(autotuning=True)
-    @requires_gpu
-    @unittest.skipIf(
-        torch.cuda.is_available() and not SM90OrLater, "requires H100+ GPU"
-    )
-    def test_autotuning(self, records):
-        with torch._inductor.utils.fresh_cache():
-
-            def f(a, b):
-                return torch.mm(a, b)
-
-            f = torch.compile(f, mode="max-autotune-no-cudagraphs")  # noqa: UNSPECIFIED_BACKEND
-            f(
-                torch.randn(10, 10, device=device_type),
-                torch.randn(10, 10, device=device_type),
-            )
-            self.assertGreater(len(records), 0)
-            self.assertLess(len(records), 40)
-
     @make_logging_test(graph_region_expansion=True)
     def test_graph_region_expansion(self, records):
         with torch._dynamo.config.patch("track_nodes_for_deduplication", True):
@@ -1552,15 +1489,77 @@ TorchDynamo attempted to trace the following frames: [
         self.assertIn("non-infra torch dispatch mode present", msg)
         self.assertIn("fn", msg)
 
-    @requires_gpu
+class LoggingTestsDevice(LoggingTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @requires_gpu_and_triton
+    @make_logging_test(schedule=True)
+    def test_schedule(self, records, device):
+        fn_opt = torch.compile(self.inductor_schedule_fn, backend="inductor")
+        fn_opt(torch.ones(1000, 1000, device=device))
+        self.assertGreater(len(records), 0)
+        self.assertLess(len(records), 5)
+
+    @requires_gpu_and_triton
+    @make_logging_test(fusion=True)
+    def test_fusion(self, records, device):
+        fn_opt = torch.compile(self.inductor_schedule_fn, backend="inductor")
+        fn_opt(torch.ones(1000, 1000, device=device))
+        self.assertGreater(len(records), 0)
+
+        # LOAF will add an extra round of fusion and result in more logs
+        self.assertLess(
+            len(records), 8 * (1 + torch._inductor.config.loop_ordering_after_fusion)
+        )
+
+    @requires_gpu_and_triton
+    @make_logging_test(cudagraphs=True)
+    def test_cudagraphs(self, records, device):
+        fn_opt = torch.compile(mode="reduce-overhead")(self.inductor_schedule_fn)  # noqa: UNSPECIFIED_BACKEND
+        fn_opt(torch.ones(1000, 1000, device=device))
+        self.assertGreater(len(records), 0)
+        self.assertLess(len(records), 8)
+
+    @requires_gpu_and_triton
+    @make_logging_test(perf_hints=True)
+    def test_optimizer_non_static_param(self, records, device):
+        params = [torch.randn(10, 10, device=device) for _ in range(2)]
+        for param in params:
+            param.grad = torch.zeros_like(param)
+        opt = torch.optim.Adam(params)
+        compiled_opt_step = torch.compile(opt.step, mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
+        compiled_opt_step()
+        self.assertGreater(len(records), 0)
+        self.assertLess(len(records), 3)
+
+    @requires_gpu_and_triton
+    @make_logging_test(autotuning=True)
+    def test_autotuning(self, records, device):
+        if device == "cuda" and not SM90OrLater:
+            raise unittest.SkipTest("requires H100+ GPU")
+
+        with torch._inductor.utils.fresh_cache():
+
+            def f(a, b):
+                return torch.mm(a, b)
+
+            f = torch.compile(f, mode="max-autotune-no-cudagraphs")  # noqa: UNSPECIFIED_BACKEND
+            f(
+                torch.randn(10, 10, device=device),
+                torch.randn(10, 10, device=device),
+            )
+            self.assertGreater(len(records), 0)
+            self.assertLess(len(records), 40)
+
+    @requires_gpu_and_triton
     @torch._inductor.config.patch("force_disable_caches", True)
     @make_logging_test(autotuning_inputs=True)
-    def test_autotuning_inputs(self, records):
+    def test_autotuning_inputs(self, records, device):
         @torch.compile(mode="max-autotune")  # noqa: UNSPECIFIED_BACKEND
         def f(x):
             return (x * 2.0 + 1.0).sum(dim=1)
 
-        f(torch.randn(2048, 4096, device=device_type))
+        f(torch.randn(2048, 4096, device=device))
 
         autotune_records = [r for r in records if ".__autotuning_inputs" in r.name]
         self.assertGreater(len(autotune_records), 0)
@@ -1570,16 +1569,16 @@ TorchDynamo attempted to trace the following frames: [
         self.assertIn("dtype=torch.float32", msg)
         self.assertIn("stride=(", msg)
 
-    @requires_gpu
+    @requires_gpu_and_triton
     @torch._inductor.config.patch("force_disable_caches", True)
     @make_logging_test(inductor=logging.DEBUG)
-    def test_autotuning_inputs_off_by_default(self, records):
+    def test_autotuning_inputs_off_by_default(self, records, device):
         # off_by_default: must stay silent even with the parent inductor log at DEBUG
         @torch.compile(mode="max-autotune")  # noqa: UNSPECIFIED_BACKEND
         def f(x):
             return (x * 2.0 + 1.0).sum(dim=1)
 
-        f(torch.randn(2048, 4096, device=device_type))
+        f(torch.randn(2048, 4096, device=device))
         self.assertEqual(
             len([r for r in records if ".__autotuning_inputs" in r.name]), 0
         )
@@ -1675,6 +1674,11 @@ exclusions = {
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:
         setattr(LoggingTests, f"test_{name}", single_record_test(**{name: True}))
+
+
+instantiate_device_type_tests(
+    LoggingTestsDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
