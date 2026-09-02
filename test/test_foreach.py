@@ -13,7 +13,7 @@ from numbers import Number
 import torch
 from torch.testing import make_tensor
 from torch.testing._comparison import default_tolerances
-from torch.testing._internal.common_cuda import _get_torch_cuda_version, SM90OrLater
+from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -90,33 +90,22 @@ class ForeachFuncWrapper:
         actual = None
         zero_size = kwargs.pop("zero_size", False)
 
-        # Skip profiler check for CUDA 12.6, 12.8 as the upgrade makes profiler results flaky
-        # https://github.com/pytorch/pytorch/issues/148681. TODO: ADD IT BACK!!!
-        skip_profiler_check = _get_torch_cuda_version() in [(12, 6), (12, 8)]
-        if (
-            is_cuda
-            and not skip_profiler_check
-            and torch.autograd.kineto_available()
-            and torch.profiler.ProfilerActivity.CUDA
-            in torch.profiler.supported_activities()
-        ):
-            with torch.profiler.profile() as p:
+        if is_cuda and torch.autograd.kineto_available():
+            # The MTA fastpath is detected via the CPU-side RECORD_FUNCTION
+            # marker emitted in ATen/native/cuda/MultiTensorApply.cuh. Since the marker
+            # is a CPU event, only CPU-side profiling is required.
+            # We intentionally do not profile CUDA kernels, as CUPTI's symbolization is
+            # not reliable on ROCm and flaky on CUDA >= 12.6.
+            with torch.profiler.profile(
+                activities=[torch.profiler.ProfilerActivity.CPU]
+            ) as p:
                 actual = self.func(*inputs, **kwargs)
-                # synchronize within the profiler context to make sure events happen before exiting
-                torch.cuda.synchronize()
             keys = tuple([e.key for e in p.key_averages()])
-            mta_kernel_called = any("multi_tensor_apply_kernel" in k for k in keys)
-            # Explicitly track MTA launch on ROCm via RECORD_FUNCTION in
-            # MultiTensorApply.cuh to avoid dependence on ROCm kernel
-            # symbolization.
-            mta_launch_marker_called = TEST_WITH_ROCM and any(
-                "_foreach_mta_launch" in k for k in keys
-            )
-            mta_called = mta_kernel_called or mta_launch_marker_called
+            mta_called = any("_foreach_mta_launch" in k for k in keys)
 
             if mta_called != (expect_fastpath and (not zero_size)):
                 raise AssertionError(
-                    f"{mta_called=}, {mta_kernel_called=}, {mta_launch_marker_called=}, {expect_fastpath=}, {zero_size=}, {self.func.__name__=}, {keys=}"
+                    f"{mta_called=}, {expect_fastpath=}, {zero_size=}, {self.func.__name__=}, {keys=}"
                 )
         else:
             actual = self.func(*inputs, **kwargs)

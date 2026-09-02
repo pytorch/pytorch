@@ -1,9 +1,7 @@
 #pragma once
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
-#if defined(USE_ROCM)
 #include <ATen/record_function.h>
-#endif
 #include <c10/cuda/CUDAGuard.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
@@ -142,9 +140,11 @@ __global__ void multi_tensor_apply_kernel(
 }
 
 inline void record_foreach_mta_launch() {
-#if defined(USE_ROCM)
+  // Emit a CPU-side launch marker so torch.profiler can detect
+  // that the multi_tensor_apply fastpath ran without depending on GPU kernel
+  // symbolization, which is not fully reliable on ROCm and flaky on CUDA
+  // >= 12.6 See github.com/pytorch/pytorch/issues/148681.
   RECORD_FUNCTION("aten::_foreach_mta_launch", {});
-#endif
 }
 
 } // namespace
