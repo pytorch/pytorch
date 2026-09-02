@@ -104,6 +104,16 @@ class MyClassNotSerializable:
         return x + 1
 
 
+class RaisesPicklingErrorOnReduce:
+    def __reduce_ex__(self, protocol):
+        raise pickle.PicklingError("reducer refused")
+
+
+class RaisesAttributeErrorOnReduce:
+    def __reduce_ex__(self, protocol):
+        raise AttributeError("reducer refused")
+
+
 class Inputs:
     def __init__(self, x, unused):
         self.x = x
@@ -615,9 +625,28 @@ class TestGuardSerialization(TestGuardSerializationBase):
             # branch that would graph-break this simplified harness.
             return x + len(type(lk).__name__)
 
-        with self.assertRaisesRegex(PackageError, "cannot pickle") as cm:
+        with self.assertRaises(PackageError) as cm:
             self._test_serialization("TYPE_MATCH", fn, torch.randn(3), threading.Lock())
         self.assertIsInstance(cm.exception.__cause__, TypeError)
+
+    def _check_reducer_error_arm(self, value, exc_type):
+        # The other two arms of the pickle-dump catch: a value whose reducer
+        # raises PicklingError or AttributeError must also surface as the typed
+        # PackageError chained to the original exception.
+        def fn(x, v):
+            return x + len(type(v).__name__)
+
+        with self.assertRaises(PackageError) as cm:
+            self._test_serialization("TYPE_MATCH", fn, torch.randn(3), value)
+        self.assertIsInstance(cm.exception.__cause__, exc_type)
+
+    def test_strict_pickling_error_guard_value_raises_typed(self):
+        self._check_reducer_error_arm(
+            RaisesPicklingErrorOnReduce(), pickle.PicklingError
+        )
+
+    def test_strict_attribute_error_guard_value_raises_typed(self):
+        self._check_reducer_error_arm(RaisesAttributeErrorOnReduce(), AttributeError)
 
     def test_tensor_subclass_metadata_match(self):
         class LocalSubclass(torch.Tensor):
@@ -1186,9 +1215,15 @@ class TestGuardSerialization(TestGuardSerializationBase):
             fn, torch.randn(3), threading.Lock()
         )
         self.assertIsInstance(cause, torch._dynamo.exc.PackageError)
-        self.assertIn("cannot pickle", str(cause))
         self.assertIsInstance(cause.__cause__, TypeError)
+        # Both links are stripped: the leaf TypeError is the one holding the
+        # pickle/reducer frames that would pin the GuardBuilder.
         self.assertIsNone(cause.__traceback__)
+        self.assertIsNone(cause.__cause__.__traceback__)
+        if sys.version_info >= (3, 11):
+            self.assertTrue(
+                any("Guard serialization traceback" in n for n in cause.__notes__)
+            )
 
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_id_match_with_config(self):
