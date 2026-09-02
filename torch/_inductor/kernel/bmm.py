@@ -29,7 +29,6 @@ from ..utils import (
     use_nv_universal_gemm_template,
     use_triton_template,
 )
-from torch.utils._triton import has_triton_stable_tma_api
 from ..virtualized import ops, V
 from .mm_common import (
     _is_static_problem,
@@ -83,7 +82,7 @@ def blackwell_bmm_grid(b, m, n, meta, *, cdiv, max, min):
     return (grid_x, cdiv(b, grid_z), grid_z)
 
 
-blackwell_bmm_template = TritonTemplate(
+blackwell_ws_persistent_tma_bmm_template = TritonTemplate(
     name="blackwell_bmm",
     grid=blackwell_bmm_grid,
     source=load_kernel_template("triton_blackwell_ws_persistent_device_tma_bmm"),
@@ -156,16 +155,14 @@ def append_blackwell_bmm_choice(
         "DECOMPOSE_K": False,
         "K_SPLIT": 1,
         "M_PAD": m,
-        "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),
         # Keep the output a normal logical rank-3 tensor.  Until 2CTA output
         # transformation supports rank-3 descriptors, use the generic pointer
         # store emitted by store_output.
         "tma_store": flattened_output,
-        "transpose_discontiguous_tensor_descriptors_override": True,
     }
     if config.two_ctas:
         kwargs["ctas_per_cga"] = (2, 1, 1)
-    error = blackwell_bmm_template.maybe_append_choice(
+    error = blackwell_ws_persistent_tma_bmm_template.maybe_append_choice(
         choices,
         input_nodes=input_nodes,
         layout=layout,
