@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from typing import Any, TYPE_CHECKING
 
 import torch
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor import config as inductor_config, ir
 from torch._inductor.utils import has_free_symbols
 from torch._inductor.virtualized import V
@@ -100,17 +101,15 @@ class KernelInputs(ABC):
         return self._input_nodes[0].get_device()
 
     def device_name(self) -> str | None:
-        """
-        Get the device name information.
-
-        Returns:
-            A tuple of (gpu_name, vendor, model)
-        """
+        """Architecture name from the device's properties, if present."""
         if self._device_name is None:
             device = self.device()
-            if self.device_type == "cuda":
-                device_properties = torch.cuda.get_device_properties(device)
-                self._device_name = device_properties.gcnArchName
+            try:
+                device_interface = get_interface_for_device(device)
+                device_properties = device_interface.get_device_properties(device)
+            except NotImplementedError:
+                return None
+            self._device_name = getattr(device_properties, "gcnArchName", None)
         return self._device_name
 
     def shapes_symbolic(self) -> tuple[tuple[Any, ...], ...]:
