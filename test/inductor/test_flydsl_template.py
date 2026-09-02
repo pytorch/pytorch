@@ -315,6 +315,7 @@ class TestFlyDSLTemplate(TestCase):
             ([64, 128], torch.float32, [128, 1], 0, 64),
             ([64, 128], torch.float16, [129, 1], 0, 64),
             ([64, 128], torch.float16, [128, 1], 1, 64),
+            ([64, 72], torch.float16, [72, 1], 0, 64),
         ),
     )
     def test_mm_gate_rejects_invalid_inputs(self, size, dtype, stride, offset, n):
@@ -569,23 +570,25 @@ class TestFlyDSLTemplate(TestCase):
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")
     @parametrize(
-        "layout,dtype,k,tile_size,use_half_tile_interleaved",
+        "layout,dtype,k,tile_size,tile_k,use_half_tile_interleaved",
         (
-            ("nn", torch.bfloat16, 96, 128, False),
-            ("nt", torch.bfloat16, 96, 128, False),
-            ("tn", torch.bfloat16, 96, 128, False),
-            ("tt", torch.bfloat16, 96, 128, False),
-            ("nn", torch.bfloat16, 96, 128, True),
-            ("nt", torch.bfloat16, 96, 128, True),
-            ("tn", torch.bfloat16, 96, 128, True),
-            ("tt", torch.bfloat16, 96, 128, True),
-            ("nn", torch.float16, 128, 128, False),
-            ("tn", torch.float16, 128, 128, False),
-            ("tt", torch.float16, 128, 128, False),
-            ("nn", torch.float16, 128, 128, True),
-            ("tn", torch.float16, 128, 128, True),
-            ("tt", torch.float16, 128, 128, True),
-            ("tt", torch.bfloat16, 96, 256, False),
+            ("nn", torch.bfloat16, 96, 128, 64, False),
+            ("nt", torch.bfloat16, 96, 128, 64, False),
+            ("tn", torch.bfloat16, 96, 128, 64, False),
+            ("tt", torch.bfloat16, 96, 128, 64, False),
+            ("nn", torch.bfloat16, 96, 128, 64, True),
+            ("nt", torch.bfloat16, 96, 128, 64, True),
+            ("tn", torch.bfloat16, 96, 128, 64, True),
+            ("tt", torch.bfloat16, 96, 128, 64, True),
+            ("nn", torch.float16, 128, 128, 64, False),
+            ("tn", torch.float16, 128, 128, 64, False),
+            ("tt", torch.float16, 128, 128, 64, False),
+            ("nn", torch.float16, 128, 128, 64, True),
+            ("tn", torch.float16, 128, 128, 64, True),
+            ("tt", torch.float16, 128, 128, 64, True),
+            ("tt", torch.bfloat16, 96, 256, 64, False),
+            ("nt", torch.bfloat16, 128, 128, 128, False),
+            ("nt", torch.bfloat16, 256, 64, 256, False),
         ),
     )
     @torch._inductor.config.patch(
@@ -594,7 +597,7 @@ class TestFlyDSLTemplate(TestCase):
         flydsl_enable_autotuning=True,
     )
     def test_flydsl_gemm_all_layouts_accuracy(
-        self, layout, dtype, k, tile_size, use_half_tile_interleaved
+        self, layout, dtype, k, tile_size, tile_k, use_half_tile_interleaved
     ):
         from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
 
@@ -606,12 +609,14 @@ class TestFlyDSLTemplate(TestCase):
         m = 64
         n = 40
         # HTI halves the 128 tile, covering 64-, 128-, and 256-row LDS layouts.
+        block_warps = 2 if use_half_tile_interleaved or tile_size == 64 else 4
         gemm_config = asdict(
             flydsl_heuristics.FlyDSLGemmConfig(
                 TILE_M=tile_size,
                 TILE_N=tile_size,
-                BLOCK_M_WARPS=2 if use_half_tile_interleaved else 4,
-                BLOCK_N_WARPS=2 if use_half_tile_interleaved else 4,
+                TILE_K=tile_k,
+                BLOCK_M_WARPS=block_warps,
+                BLOCK_N_WARPS=block_warps,
                 USE_HALF_TILE_INTERLEAVED=use_half_tile_interleaved,
             )
         )
@@ -638,6 +643,7 @@ class TestFlyDSLTemplate(TestCase):
         get_configs.assert_called_once_with()
         self.assertIn(f"TILE_M: fx.Constexpr = {tile_size}", code)
         self.assertIn(f"TILE_N: fx.Constexpr = {tile_size}", code)
+        self.assertIn(f"TILE_K: fx.Constexpr = {tile_k}", code)
         self.assertIn(f"GEMM_N: fx.Constexpr = {n}", code)
         self.assertIn(
             f"USE_HALF_TILE_INTERLEAVED: fx.Constexpr = {use_half_tile_interleaved}",

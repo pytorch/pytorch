@@ -283,9 +283,7 @@ class BlockSwizzle:
         )
 
 
-def _make_xor_swizzle(contiguous_extent, base):
-    mask = _LDS_BANK_PERIOD_LOG2 - base
-    shift = contiguous_extent.bit_length() - 1 - base
+def _make_xor_swizzle(mask, base, shift):
     return fx.static(fx.SwizzleType.get(mask, base, shift))
 
 
@@ -307,7 +305,7 @@ def make_lds_layout(rows, block_k, is_transposed):
     if const_expr(not is_power_of_two or shift < mask):
         return base_layout
     return fx.make_composed_layout(
-        _make_xor_swizzle(contiguous_extent, base),
+        _make_xor_swizzle(mask, base, shift),
         base_layout,
     )
 
