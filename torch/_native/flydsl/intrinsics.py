@@ -21,7 +21,17 @@ class AtomicSyncScope(Enum):
     WORKGROUP = fx.rocdl.SyncScope.Workgroup
 
 
-__all__ = ["AtomicOrdering", "AtomicSyncScope", "atomic_add"]
+__all__ = ["AtomicOrdering", "AtomicSyncScope", "atomic_add", "maxsi", "minsi"]
+
+
+def maxsi(lhs: Integer, rhs: Integer) -> Integer:
+    """Return the signed maximum of two FlyDSL integers."""
+    return lhs.dtype(arith.maxsi(arith.unwrap(lhs), arith.unwrap(rhs)))
+
+
+def minsi(lhs: Integer, rhs: Integer) -> Integer:
+    """Return the signed minimum of two FlyDSL integers."""
+    return lhs.dtype(arith.minsi(arith.unwrap(lhs), arith.unwrap(rhs)))
 
 
 def atomic_add(

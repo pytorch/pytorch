@@ -11,7 +11,6 @@ from torch._native.ops.topk.flydsl_impl import (
 )
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_device_type import skipCUDAIf
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -70,7 +69,7 @@ def _test_m(device_index: int | None = None) -> int:
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
 @skipIfNoFlyDSL
-@skipCUDAIf(
+@unittest.skipIf(
     torch.version.hip is None
     or not fu._is_supported_arch(
         torch.cuda.current_device() if torch.cuda.is_available() else 0,
@@ -88,6 +87,11 @@ class TestFlyDSLTopK(TestCase):
     def _make_input(self, *, shape):
         torch.manual_seed(0)
         return make_tensor(shape, device="cuda", dtype=torch.float32)
+
+    def _assert_no_flydsl_compiles(self) -> None:
+        from torch._native.ops.topk.flydsl_kernels import topk_cache_info
+
+        self.assertEqual(topk_cache_info().misses, 0)
 
     def _assert_topk_matches_aten(self, x: torch.Tensor, k: int) -> None:
         with pn.flydsl.disabled():
@@ -257,6 +261,43 @@ class TestFlyDSLTopK(TestCase):
         self.assertGreaterEqual(info.hits, 1)
         self.assertEqual(info.currsize, 1)
 
+    @parametrize("k,n", ((32, 4096), (8, 1537), (64, 4096), (320, 8192)))
+    def test_unsupported_configuration_falls_through_without_compiling(
+        self, k: int, n: int
+    ):
+        x = self._make_input(shape=(_test_m(), n))
+        torch.topk(x, k, dim=-1)
+        self._assert_no_flydsl_compiles()
+
+    @parametrize(
+        "case",
+        (
+            "dtype",
+            "smallest",
+            "unsorted",
+            "non_last_dim",
+            "noncontiguous",
+            "too_few_rows",
+        ),
+    )
+    def test_unsupported_case_falls_through_without_compiling(self, case: str):
+        rows = _test_m()
+        if case == "too_few_rows":
+            from torch._native.ops.topk.flydsl_impl import _min_rows_for_full_wave
+
+            rows = _min_rows_for_full_wave(torch.cuda.current_device()) - 1
+        n = _test_n(8)
+        shape = (n, rows) if case == "noncontiguous" else (rows, n)
+        dtype = torch.float16 if case == "dtype" else torch.float32
+        x = make_tensor(shape, device="cuda", dtype=dtype)
+        if case == "noncontiguous":
+            x = x.transpose(0, 1)
+        dim = 0 if case == "non_last_dim" else -1
+        largest = case != "smallest"
+        sorted_ = case != "unsorted"
+        torch.topk(x, 8, dim=dim, largest=largest, sorted=sorted_)
+        self._assert_no_flydsl_compiles()
+
     def test_radix_non_multiple_of_four_n(self):
         torch.manual_seed(11)
         x = make_tensor((_test_m(), 32769), device="cuda", dtype=torch.float32)
@@ -279,6 +320,31 @@ class TestFlyDSLTopK(TestCase):
         self.assertIs(got_i, indices)
         self.assertEqual(got_v, ref_v)
         self.assertEqual(torch.gather(x, -1, got_i), got_v)
+
+    @parametrize("k", (64, 257, 704, 1023))
+    def test_deterministic_mode_matches_aten_with_heavy_ties(self, k: int):
+        from torch._native.ops.topk.flydsl_kernels import topk_cache_info
+
+        torch.manual_seed(6)
+        n = _test_n(k)
+        self.assertEqual(_expected_kernel(k, n), "radix")
+        x = torch.randint(0, 4, (_test_m(), n), device="cuda", dtype=torch.float32)
+
+        prior = torch.are_deterministic_algorithms_enabled()
+        try:
+            torch.use_deterministic_algorithms(True)
+            with pn.flydsl.disabled():
+                ref_v, ref_i = torch.topk(x, k, dim=-1)
+            v1, i1 = torch.topk(x, k, dim=-1)
+            v2, i2 = torch.topk(x, k, dim=-1)
+        finally:
+            torch.use_deterministic_algorithms(prior)
+
+        self.assertEqual(topk_cache_info("radix").misses, 1)
+        self.assertEqual(v1, v2)
+        self.assertEqual(i1, i2)
+        self.assertEqual(v1, ref_v)
+        self.assertEqual(i1, ref_i)
 
     @parametrize("k", _REGISTER_KS)
     def test_register_tie_order_is_value_desc_index_asc(self, k: int):
@@ -306,6 +372,21 @@ class TestFlyDSLTopK(TestCase):
         torch.manual_seed(12)
         x = make_tensor((_test_m(), _test_n_max(k)), device="cuda", dtype=torch.float32)
         self._assert_topk_matches_aten(x, k)
+
+    @parametrize("k", (8, 704))
+    def test_autograd_passes_through(self, k: int):
+        x = make_tensor(
+            (_test_m(), _test_n(k)),
+            device="cuda",
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+        values, indices = torch.topk(x, k, dim=-1)
+        values.sum().backward()
+        self.assertIsNotNone(x.grad)
+        expected = torch.zeros_like(x)
+        expected.scatter_(-1, indices, 1.0)
+        self.assertEqual(x.grad, expected)
 
     @unittest.skipIf(
         torch.cuda.device_count() < 2,

@@ -43,7 +43,7 @@ from flydsl.runtime.device import is_rdna_arch
 import torch
 from torch._native.flydsl.cache import CachedCompile, CacheInfo
 from torch._native.flydsl.compile_args import make_compile_arg, read_only_tensor
-from torch._native.flydsl.intrinsics import atomic_add
+from torch._native.flydsl.intrinsics import atomic_add, maxsi, minsi
 from torch._native.flydsl_utils import _resolve_rocm_arch
 from torch._native.instrumentation import instrumented_flydsl_cache
 
@@ -88,6 +88,12 @@ def _decode_topk_key(key, row):
     val, idx, ord32 = _decode_key(key)
     val = (ord32 == fx.Int32(_NAN_SENTINEL_ORD)).select(row[idx], val)
     return val, idx
+
+
+def _load_vec_f32(copy_atom, input_div, idx):
+    r = fx.make_rmem_tensor(_VEC, Float32)
+    fx.copy_atom_call(copy_atom, fx.slice(input_div, (None, idx)), r)
+    return fx.memref_load_vec(r)
 
 
 def _make_topk_storage(sort_len: int, block_threads: int):
@@ -162,11 +168,6 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
         s_keys = storage.s_phase.s_keys.peek().view(fx.make_layout(sort_len, 1))
         s_idxs = storage.s_idxs.peek().view(fx.make_layout(sort_len, 1))
 
-        def load_vec_f32(idx):
-            r = fx.make_rmem_tensor(_VEC, Float32)
-            fx.copy_atom_call(copy_atom_v, fx.slice(input_div, (None, idx)), r)
-            return fx.memref_load_vec(r)
-
         def warp_inclusive_prefix_i32(val, lane):
             for i in range_constexpr(int(math.log2(warp_size))):
                 offset = 1 << i
@@ -229,7 +230,9 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
             prefix = s_prefix[0]
             decided_mask = s_mask[0]
             for step in range_constexpr(vec_iters):
-                rvals = load_vec_f32(step * block_threads + tid)
+                rvals = _load_vec_f32(
+                    copy_atom_v, input_div, step * block_threads + tid
+                )
                 for vi in range_constexpr(_VEC):
                     accumulate_radix_byte_hist(
                         _f32_to_ord(rvals[vi]),
@@ -330,7 +333,9 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
             for step in range_constexpr(vec_iters):
                 tile_base = step * tile
                 base = tile_base + tid * _VEC
-                rvals = load_vec_f32(step * block_threads + tid)
+                rvals = _load_vec_f32(
+                    copy_atom_v, input_div, step * block_threads + tid
+                )
                 elems = []
                 for vi in range_constexpr(_VEC):
                     idx = fx.Int32(base + vi)
@@ -370,7 +375,9 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
             for step in range_constexpr(vec_iters):
                 tile_base = step * tile
                 base = tile_base + tid * _VEC
-                rvals = load_vec_f32(step * block_threads + tid)
+                rvals = _load_vec_f32(
+                    copy_atom_v, input_div, step * block_threads + tid
+                )
                 for vi in range_constexpr(_VEC):
                     idx = fx.Int32(base + vi)
                     gather_candidate(rvals[vi], idx, s_vals, s_idxs)
@@ -494,17 +501,11 @@ def _build_register_topk_module(n: int, k: int, arch: str, rows_per_cta: int = 2
         input_div = fx.logical_divide(row_input, fx.make_layout(_VEC, 1))
         copy_atom_v = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), 32)
 
-        def load_vec_f32(idx):
-            r = fx.make_rmem_tensor(_VEC, Float32)
-            fx.copy_atom_call(copy_atom_v, fx.slice(input_div, (None, idx)), r)
-            return fx.memref_load_vec(r)
-
         def compare_and_swap(arr, i: int, j: int, descending: bool):
             a = arr[i]
             b = arr[j]
-            a_is_greater = a > b
-            hi = a_is_greater.select(a, b)
-            lo = a_is_greater.select(b, a)
+            hi = maxsi(a, b)
+            lo = minsi(a, b)
             arr[i] = hi if descending else lo
             arr[j] = lo if descending else hi
 
@@ -547,7 +548,7 @@ def _build_register_topk_module(n: int, k: int, arch: str, rows_per_cta: int = 2
         for g in range_constexpr(num_groups):
             for j in range_constexpr(group_loads):
                 chunk = fx.Int32((g * group_loads + j) * threads_per_row) + lane
-                rvals = load_vec_f32(chunk)
+                rvals = _load_vec_f32(copy_atom_v, input_div, chunk)
                 base = chunk * fx.Int32(_VEC)
                 for e in range_constexpr(_VEC):
                     buf[j * _VEC + e] = _make_key(rvals[e], base + fx.Int32(e))
