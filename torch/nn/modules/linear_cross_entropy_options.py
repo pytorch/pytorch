@@ -9,6 +9,12 @@ __all__ = ["LinearCrossEntropyOptions"]
 
 _VALID_ACC_POLICIES = ("auto", "accurate", "compact")
 
+# Device types whose capabilities have been validated for the chunked path.
+# Both are opt-in: a device absent from one takes the slower but always-correct
+# route, so adding an entry is additive and never silently wrong.
+_MM_OUT_DTYPE_DEVICES = ("cuda",)
+_FP32_ACCUM_GEMM_DEVICES = ("cuda",)
+
 
 def _auto_acc_policy(device_type: str | None, dtype: torch.dtype) -> str:
     """Resolve the ``acc_policy`` ``"auto"`` sentinel from device and dtype.
@@ -24,6 +30,36 @@ def _auto_acc_policy(device_type: str | None, dtype: torch.dtype) -> str:
     if device_type == "cpu" and dtype in (torch.float16, torch.bfloat16):
         return "accurate"
     return "compact"
+
+
+def _mm_supports_out_dtype(device_type: str) -> bool:
+    """Whether ``mm(out_dtype=)`` is available and validated on this device.
+
+    Lets the chunked path feed mixed-dtype operands straight to ``mm`` instead
+    of staging explicit casts through scratch buffers.
+
+    To add a device: check ``aten::mm.dtype_out`` is registered for it in
+    ``native_functions.yaml``, then compare numerics against the reference path
+    for fp16/bf16 inputs with an fp32 accumulator.
+    """
+    return device_type in _MM_OUT_DTYPE_DEVICES
+
+
+def _gemm_accumulates_in_fp32(device_type: str) -> bool:
+    """Whether a same-dtype ``addmm_`` keeps an fp32 accumulator internally.
+
+    Distinct from :func:`_mm_supports_out_dtype`: this is about the kernel's
+    internal accumulator, not an operator overload, so no registration or
+    device query can answer it. The two gates stay separate by construction --
+    ``out_dtype=`` governs single writes whose destination dtype differs from
+    the operands, while this governs the one path that accumulates every chunk
+    into the same narrow tensor.
+
+    Gates skipping the ``(num_classes, in_features)`` weight-grad scratch under
+    ``acc_policy="compact"``. A wrong ``True`` degrades gradient precision
+    across chunks silently rather than raising, so verify before adding.
+    """
+    return device_type in _FP32_ACCUM_GEMM_DEVICES
 
 
 @dataclasses.dataclass(slots=True, frozen=True)
