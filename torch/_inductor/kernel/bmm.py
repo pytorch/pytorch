@@ -177,6 +177,24 @@ def append_blackwell_bmm_choice(
     if error is not None:
         raise error
 
+
+def can_use_blackwell_bmm_template(mat1, mat2, layout) -> bool:
+    if not (
+        inductor_config.triton.enable_blackwell_bmm_template
+        and inductor_config.triton.enable_persistent_tma_matmul
+        and has_triton_stable_tma_api()
+        and mat1.get_dtype() in (torch.float16, torch.bfloat16)
+        and mat1.get_dtype() == mat2.get_dtype() == layout.dtype
+    ):
+        return False
+    try:
+        tuple(map(int, (*mat1.get_size(), *mat2.get_size(), *layout.size)))
+    except (TypeError, ValueError):
+        return False
+    from ..codegen.cuda.cuda_env import is_datacenter_blackwell_arch
+
+    return is_datacenter_blackwell_arch()
+
 aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out", op_overload=aten.bmm.out)
 aten_bmm_dtype = ExternKernelChoice(
     torch.bmm,
@@ -352,6 +370,21 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
             kwarg_overrides=kwarg_overrides,
         )
     )
+    if can_use_blackwell_bmm_template(mat1, mat2, layout):
+        # Keep candidate growth bounded while the generic template's cost model
+        # is being validated.  2CTA is a separate flattened-output subgraph
+        # choice and is not silently mixed into this direct rank-3 route.
+        append_blackwell_bmm_choice(
+            choices,
+            (mat1, mat2),
+            layout,
+            config=BlackwellBMMConfig(
+                block_m=128,
+                block_n=128,
+                block_k=128,
+                num_stages=3,
+            ),
+        )
     _, is_nonzero = _is_static_problem(layout)
     batch_stride_largest_or_zero = is_batch_stride_largest_or_zero(mat1, mat2, layout)
     if (
