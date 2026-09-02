@@ -114,6 +114,10 @@ runner_mapping:
   # runners via this prefix; passthrough so the OSDC build's runner mapping keeps it.
   amd-sandbox-linux.rocm.gpu.mi350.1: amd-sandbox-linux.rocm.gpu.mi350.1
   amd-sandbox-linux.rocm.gpu.mi350.2: amd-sandbox-linux.rocm.gpu.mi350.2
+  # '-doks' variants target AMD DigitalOcean DOKS MI350 GPUs in DPX partition mode;
+  # passthrough, distinct scale sets from the two labels above.
+  amd-sandbox-linux-doks.rocm.gpu.mi350.1: amd-sandbox-linux-doks.rocm.gpu.mi350.1
+  amd-sandbox-linux-doks.rocm.gpu.mi350.2: amd-sandbox-linux-doks.rocm.gpu.mi350.2
 
 # Runners whose hardware exists only on the Meta fleet (no LF / no AWS EC2
 # equivalent). The mapper forces the 'mt-' prefix on these regardless of which
