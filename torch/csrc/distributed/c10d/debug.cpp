@@ -6,6 +6,7 @@
 
 #include <c10/util/env.h>
 #include <torch/csrc/distributed/c10d/debug.h>
+#include <torch/csrc/utils/cpp_stacktraces.h>
 
 #include <algorithm>
 #include <cctype>
@@ -62,6 +63,14 @@ DebugLevel g_debug_level = DebugLevel::Off;
 
 void setDebugLevel(DebugLevel level) {
   g_debug_level = level;
+
+  // When DETAIL is requested, also turn on C++ stack traces -- otherwise
+  // errors raised from collective ops under DETAIL debugging lack the
+  // C++-side context needed to pin down where in the backend they came
+  // from. See https://github.com/pytorch/pytorch/issues/78842.
+  if (level == DebugLevel::Detail) {
+    torch::set_cpp_stacktraces_enabled(true);
+  }
 }
 
 void setDebugLevelFromEnvironment() {
