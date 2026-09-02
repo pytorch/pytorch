@@ -397,6 +397,11 @@ nccl2 = "torch.distributed.distributed_c10d:_register_builtin_nccl2_backend"
 ucc = "torch.distributed.distributed_c10d:_register_builtin_ucc_backend"
 xccl = "torch.distributed.distributed_c10d:_register_builtin_xccl_backend"
 
+[project.entry-points."torch.distributed.transports"]
+tcp = "torch.distributed._transport._tcp:TCPTransport"
+torchcomms = "torch.distributed._transport._torchcomms:TorchCommsTransport"
+ucxx = "torch.distributed._transport._ucxx:UCXXTransport"
+
 [project.urls]
 Homepage = "https://pytorch.org"
 Repository = "https://github.com/pytorch/pytorch"
