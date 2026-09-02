@@ -1426,7 +1426,7 @@ def _augment_memory_snapshot_stack_traces(
     return snapshot_dict
 
 
-def _is_privateuse1_backend_available():
+def _is_privateuse1_backend_available() -> bool:
     """
     Determines whether the privateuse1 backend is registered and available.
 
@@ -1435,9 +1435,11 @@ def _is_privateuse1_backend_available():
     """
     privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
     privateuse1_backend_module = getattr(torch, privateuse1_backend_name, None)
-    return (
-        is_available := getattr(privateuse1_backend_module, "is_available", None)
-    ) and is_available()
+
+    return bool(
+        (is_available := getattr(privateuse1_backend_module, "is_available", None))
+        and is_available()
+    )
 
 
 def getenv(name: str) -> "str | None":
