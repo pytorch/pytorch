@@ -323,19 +323,6 @@ class TestSplit(TestCase):
             self.assertEqual(part.order(x, split_dims[i], z).shape, (10, 5, 20))
             self.assertEqual(split_dims[i].size, 5)
 
-    def test_device_handling(self):
-        # Test on CPU
-        cpu_tensor = torch.randn(3, 12, 5)
-        x, y, z = dims(3)
-        t = cpu_tensor[x, y, z]
-
-        d1, d2 = Dim("d1", 4), Dim("d2", 8)
-        result = t.split([d1, d2], dim=y)
-
-        for i, part in enumerate(result):
-            ordered = part.order(x, d1 if i == 0 else d2, z)
-            self.assertEqual(ordered.device, torch.device("cpu"))
-
     def test_split_preserves_dtype(self):
         """Test that split preserves tensor dtype."""
         for dtype in [torch.float32, torch.float64, torch.int32, torch.int64]:
@@ -471,7 +458,7 @@ class TestSplitDevice(TestCase):
             self.assertEqual(ordered.shape[2], 5)
 
 
-instantiate_device_type_tests(TestSplitDevice, globals(), except_for="cpu")
+instantiate_device_type_tests(TestSplitDevice, globals())
 
 if __name__ == "__main__":
     run_tests()
