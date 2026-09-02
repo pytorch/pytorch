@@ -9,7 +9,7 @@ high-performance GEMM kernels for NVIDIA GPUs.
 import itertools
 import re
 from enum import auto, Enum
-from typing import Any
+from typing import Any, Literal
 
 import torch
 from torch._inductor import config
@@ -31,7 +31,15 @@ from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
     _unwrap_efc_compiled_obj,
 )
 from torch._inductor.heuristics.template.nv_universal_gemm import get_nvgemm_heuristics
-from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, Layout, TensorBox
+from torch._inductor.ir import (
+    Buffer,
+    ChoiceCaller,
+    FixedLayout,
+    Layout,
+    PermuteView,
+    TensorBox,
+)
+from torch._inductor.kernel.gemm_epilogue import GemmReductionPlan
 from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.utils import ensure_nv_universal_gemm_available
 from torch._inductor.virtualized import V
@@ -60,6 +68,18 @@ class GemmVariant(Enum):
         if self == GemmVariant.SCALED_GEMM:
             return "nv_universal_scaled_gemm"
         return "nv_universal_gemm"
+
+    def supports_reduction(self, plan: GemmReductionPlan) -> bool:
+        """Whether this variant can lower a recognized reduction contract."""
+        if self == GemmVariant.SCALED_GEMM:
+            from .epilogue_capabilities import BLOCK_SCALED_GEMM_REDUCTION_CAPABILITIES
+
+            return BLOCK_SCALED_GEMM_REDUCTION_CAPABILITIES.supports_contract(plan)
+        if self == GemmVariant.GEMM:
+            from .epilogue_capabilities import DENSE_GEMM_REDUCTION_CAPABILITIES
+
+            return DENSE_GEMM_REDUCTION_CAPABILITIES.supports_contract(plan)
+        return False
 
 
 class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
@@ -141,14 +161,15 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
             # bias is the last input; the rest are the GEMM operands.
             return self._make_bias_run_fn(input_tensors, out)
 
-        # For swap_ab, transpose mat_a/mat_b and swap scales before creating
-        # GemmArguments. The swapped GEMM computes (N, M) = out.t(); write it
-        # zero-copy into a transposed (column-major) view of the real (M, N)
-        # output, so no temp buffer / copy is needed (the kernel handles a
-        # column-major C via its out-layout detection).
-        if self.swap_ab and len(input_tensors) >= 4:
-            a, b, sa, sb = input_tensors[:4]
-            input_tensors = (b.t(), a.t(), sb, sa) + input_tensors[4:]
+        # swap_ab: transpose operands and write into a transposed view of `out`
+        # (zero-copy). See _nvgemm_run for the full explanation.
+        if self.swap_ab and len(input_tensors) >= 2:
+            a, b = input_tensors[0], input_tensors[1]
+            if len(input_tensors) >= 4:
+                sa, sb = input_tensors[2], input_tensors[3]
+                input_tensors = (b.t(), a.t(), sb, sa) + input_tensors[4:]
+            else:
+                input_tensors = (b.t(), a.t()) + input_tensors[2:]
             out = out.t()
 
         helper_kwargs: dict[str, Any] = {}
@@ -295,6 +316,7 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
             epilogue_args=epilogue_args,
             epilogue_source="nvgemm_addmm_bias_v1",
             fallback_fn=disk_fallback,
+            base_kernel=self.kernel,
         )
 
         if was_compiled:
@@ -493,6 +515,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
         return info
 
     def get_make_kernel_render(self):
+        """Create the callable that renders this NVGEMM choice."""
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
             NVUniversalGemmKernel,
         )
@@ -517,9 +540,11 @@ class NVUniversalGemmCaller(ChoiceCaller):
             out_node,
             hint_override=None,
             epilogue_fn_code=None,
+            epilogue_is_cutedsl=False,
             epilogue_reads=None,
             epilogue_writes=None,
             epilogue_var_renames=None,
+            local_reduce=None,
         ):
             from torch._inductor.ir import StorageBox, TensorBox
 
@@ -554,9 +579,11 @@ class NVUniversalGemmCaller(ChoiceCaller):
                 swizzle_type_a=swizzle_type_a,
                 swizzle_type_b=swizzle_type_b,
                 epilogue_fn_code=epilogue_fn_code,
+                epilogue_is_cutedsl=epilogue_is_cutedsl,
                 epilogue_reads=epilogue_reads,
                 epilogue_writes=epilogue_writes,
                 epilogue_var_renames=epilogue_var_renames,
+                local_reduce=local_reduce,
                 swap_ab=swap_ab,
                 # pyrefly: ignore [bad-argument-type]
                 bias_node=bias_node,
@@ -576,21 +603,29 @@ def _create_dummy_tensor_from_layout(
     """
     Create a FakeTensor from a Layout for kernel filtering.
 
-    Uses Layout.get_example() which creates FakeTensors within V.fake_mode,
-    avoiding real CUDA memory allocation. cutlass.operators only needs shape/stride/dtype
-    metadata for its supports() checks.
+    Prefer optimization-hinted concrete metadata for symbolic layouts, then
+    fall back to Layout.get_example(). Neither path allocates real CUDA memory.
     """
     try:
-        result = layout.get_example()
-        if dtype_override is not None and result.dtype != dtype_override:
-            result = result.view(dtype_override)
-        return result
+        size = V.graph.sizevars.optimization_hints(layout.size)
+        stride = V.graph.sizevars.optimization_hints(layout.stride)
+        with V.fake_mode:
+            return torch.empty_strided(
+                size,
+                stride,
+                dtype=dtype_override or layout.dtype,
+                device=layout.device,
+            )
     except Exception:
-        # Broad: layout.get_example()/torch.empty_strided under fake mode can
-        # raise a variety of unexpected errors (TypeError, AssertionError, etc.)
-        # depending on stride/symint state. Failing to materialize a dummy
-        # should never abort autotune — just skip this candidate.
-        return None
+        try:
+            result = layout.get_example()
+            if dtype_override is not None and result.dtype != dtype_override:
+                result = result.view(dtype_override)
+            return result
+        except Exception:
+            # Capability filtering is optional; an unusable representative
+            # tensor must not abort lowering.
+            return None
 
 
 _TILE_RE = re.compile(r"tile(\d+)x\d+x\d+")
@@ -675,14 +710,18 @@ def _add_nv_gemm_choices_impl(
         for node in input_nodes
     ]
 
-    if swap_ab and len(dummy_tensors) >= 4:
-        # swap_ab: transpose mat_a/mat_b dummies and swap scales.
-        # Original: dummy[0]=mat_a(M,K/2) row, dummy[1]=mat_b(K/2,N) col
-        # Swap: new_A=mat_b.t()=(N,K/2) row, new_B=mat_a.t()=(K/2,M) col
-        # Scales: new_scale_a=scale_b, new_scale_b=scale_a
-        d_a, d_b, d_sa, d_sb = dummy_tensors[:4]
+    if swap_ab and len(dummy_tensors) >= 2:
+        # swap_ab: transpose mat_a/mat_b dummies (and swap scales when scaled).
+        # Original: dummy[0]=mat_a(M,K) row, dummy[1]=mat_b(K,N) col
+        # Swap: new_A=mat_b.t()=(N,K) row, new_B=mat_a.t()=(K,M) col
+        d_a, d_b = dummy_tensors[0], dummy_tensors[1]
         if d_a is not None and d_b is not None:
-            dummy_tensors = [d_b.t(), d_a.t(), d_sb, d_sa] + dummy_tensors[4:]
+            if len(dummy_tensors) >= 4:
+                # scaled: new_scale_a=scale_b, new_scale_b=scale_a
+                d_sa, d_sb = dummy_tensors[2], dummy_tensors[3]
+                dummy_tensors = [d_b.t(), d_a.t(), d_sb, d_sa] + dummy_tensors[4:]
+            else:
+                dummy_tensors = [d_b.t(), d_a.t()] + dummy_tensors[2:]
 
     effective_layout = kernel_layout if kernel_layout is not None else layout
     out_tensor = _create_dummy_tensor_from_layout(effective_layout)
@@ -739,10 +778,26 @@ def _add_nv_gemm_choices_impl(
 
     # A baked bias-add requires an epilogue-fusion-capable (EFC) kernel, so
     # scan only EFC kernels -- skips supports() on the far larger non-EFC set.
+    # The args-filtered fast query is complete only for dense GEMM; scaled uses
+    # direct block-scaled sub-provider enumeration (get_operators under-generates
+    # operands from scaled args); anything else falls back to the full manifest.
+    candidate_source: Literal["args", "scaled", "manifest"]
+    if variant == GemmVariant.GEMM:
+        candidate_source = "args"
+    elif variant == GemmVariant.SCALED_GEMM:
+        candidate_source = "scaled"
+    else:
+        candidate_source = "manifest"
     non_efc_kernels, efc_kernels = partition_compatible_kernels(
-        args, cc_int, _classify, num_buckets=2, efc_only=bias_node is not None
+        args,
+        cc_int,
+        _classify,
+        num_buckets=2,
+        efc_only=bias_node is not None,
+        candidate_source=candidate_source,
+        classifier_key="nvgemm_efc_partition_v1",
     )
-    if not config.epilogue_fusion or swap_ab:
+    if not config.epilogue_fusion or (swap_ab and variant == GemmVariant.SCALED_GEMM):
         efc_kernels = []
     if bias_node is not None:
         non_efc_kernels = []
@@ -755,12 +810,26 @@ def _add_nv_gemm_choices_impl(
     )
     if variant in (GemmVariant.GEMM, GemmVariant.SCALED_GEMM) and mm_inputs is not None:
         heuristics = get_nvgemm_heuristics()
+        unfiltered_efc_kernels = efc_kernels
         non_efc_kernels = heuristics.filter_kernels(
             non_efc_kernels, mm_inputs, max_configs, accumulator_type
         )
         efc_kernels = heuristics.filter_kernels(
             efc_kernels, mm_inputs, max_configs, accumulator_type
         )
+        if variant in (GemmVariant.GEMM, GemmVariant.SCALED_GEMM):
+            wide_tile_ns = (64, 128) if variant == GemmVariant.GEMM else (128, 256)
+            for tile_n in wide_tile_ns:
+                wide_kernels = [
+                    kernel
+                    for kernel in unfiltered_efc_kernels
+                    if kernel.metadata.design.tile_shape[1] == tile_n
+                ]
+                ranked = heuristics.filter_kernels(
+                    wide_kernels, mm_inputs, 1, accumulator_type
+                )
+                if ranked and ranked[0] not in efc_kernels:
+                    efc_kernels.append(ranked[0])
     else:
         # TODO(nikhilap): Enable heuristics for grouped GEMM
         # when nvMatmulHeuristics adds support
@@ -834,6 +903,36 @@ def add_nv_universal_gemm_choices(
         variant=GemmVariant.GEMM,
         accumulator_type=accumulator_type or torch.float32,
         mm_inputs=inputs,
+    )
+
+    # swap_ab: swap A/B so the large N goes on the M-axis, improving tile
+    # utilization for small-M / tall-skinny shapes (M << N). The kernel computes
+    # (N, M) and the runtime writes it into a transposed view of the (M, N)
+    # output. Mirrors the scaled path (see add_nv_universal_scaled_gemm_choices)
+    # but without scale operands. Only valid for 2D mm: this entry point also
+    # serves BMM (layout [B, M, N]), where the (M, N) / 2D-PermuteView swap logic
+    # would be wrong, so skip it there.
+    if not config.nvgemm_swap_ab or len(layout.size) != 2:
+        return
+    m, n = layout.size[0], layout.size[1]
+    swap_kernel_layout = FixedLayout(layout.device, layout.dtype, [n, m])
+    # Rank swap configs with the heuristic on the SWAPPED (N, M, K) problem:
+    # new mat1 = mat_b.t() (N, K) row, new mat2 = mat_a.t() (K, M) col. Without
+    # this, the swap variant would fall back to an unranked prefix and miss the
+    # small-tile configs that make swap_ab win.
+    mat_a, mat_b = inputs.mat1mat2()
+    swap_inputs = MMKernelInputs(
+        [PermuteView.create(mat_b, [1, 0]), PermuteView.create(mat_a, [1, 0])]
+    )
+    _add_nv_gemm_choices_impl(
+        choices=choices,
+        layout=layout,
+        input_nodes=inputs.nodes(),
+        variant=GemmVariant.GEMM,
+        accumulator_type=accumulator_type or torch.float32,
+        mm_inputs=swap_inputs,
+        swap_ab=True,
+        kernel_layout=swap_kernel_layout,
     )
 
 
@@ -936,7 +1035,7 @@ def add_nv_universal_scaled_gemm_choices(
     if not ensure_nv_universal_gemm_available():
         return
 
-    from torch._inductor.utils import infer_scale_swizzle_ir
+    from torch._inductor.utils import infer_scale_swizzle, infer_scale_swizzle_ir
 
     if len(input_nodes) < 4:
         return
@@ -947,6 +1046,30 @@ def add_nv_universal_scaled_gemm_choices(
     scale_type_b, swizzle_type_b = infer_scale_swizzle_ir(
         mat_b, scale_b, transpose=True
     )
+
+    if scale_type_a is None or scale_type_b is None:
+        mat_a_hint = _create_dummy_tensor_from_layout(
+            mat_a.get_layout(), dtype_override=mat_a.get_dtype()
+        )
+        mat_b_hint = _create_dummy_tensor_from_layout(
+            mat_b.get_layout(), dtype_override=mat_b.get_dtype()
+        )
+        scale_a_hint = _create_dummy_tensor_from_layout(scale_a.get_layout())
+        scale_b_hint = _create_dummy_tensor_from_layout(scale_b.get_layout())
+        if (
+            mat_a_hint is not None
+            and mat_b_hint is not None
+            and scale_a_hint is not None
+            and scale_b_hint is not None
+        ):
+            if scale_type_a is None:
+                scale_type_a, swizzle_type_a = infer_scale_swizzle(
+                    mat_a_hint, scale_a_hint
+                )
+            if scale_type_b is None:
+                scale_type_b, swizzle_type_b = infer_scale_swizzle(
+                    mat_b_hint.t(), scale_b_hint
+                )
 
     if scale_type_a is None or scale_type_b is None:
         return
@@ -964,8 +1087,8 @@ def add_nv_universal_scaled_gemm_choices(
         swizzle_type_b=swizzle_type_b,
     )
 
-    # swap_ab: swap A/B operands so the large N goes on the M-axis.
-    # Improves tile utilization for small-M decode shapes (M << N).
+    # swap_ab: see add_nv_universal_gemm_choices for the rationale (swap A/B so
+    # the large N lands on the well-tiled M-axis for small-M shapes).
     if not config.nvgemm_swap_ab:
         return
 

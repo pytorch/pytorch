@@ -195,6 +195,13 @@ class FunctionalTensor(torch.Tensor):
             FunctionalTensor._extra_dispatch_keys & torch._C._dispatch_keys(elem)
         )
 
+        # Hand over the storage size instead of letting _make_wrapper_subclass
+        # recompute it: computeStorageNbytes walks the dimensions doing symbolic
+        # arithmetic, and elem already knows the answer. The storage exists only
+        # to track aliasing, and mirroring elem's is the faithful value. On a 4d
+        # symbolic tensor this takes the call from 144us to 21us.
+        storage_size = None if is_sparse_any(elem) else elem.untyped_storage().size()
+
         out = torch.Tensor._make_wrapper_subclass(
             # TODO: right now, _make_wrapper_subclass's dynamic shape interaction is not great.
             # Calling the overload that has kwargs causes us to go down the first overload path,
@@ -216,6 +223,7 @@ class FunctionalTensor(torch.Tensor):
             False,  # dispatch_device
             False,  # dispatch_layout
             extra_dispatch_keys,  # _extra_dispatch_keys
+            storage_size,  # storage_size
         )
         torch._C._set_throw_on_mutable_data_ptr(out)
         out.elem = elem
@@ -422,6 +430,7 @@ class FunctionalTensorMode(TorchDispatchMode):
         pre_dispatch: bool = False,
         export: bool = False,
         _allow_token_discovery: bool = False,
+        _keep_input_mutations: bool = True,
     ) -> None:
         super().__init__()
         self.export = export
@@ -448,6 +457,8 @@ class FunctionalTensorMode(TorchDispatchMode):
         # side-effectful ops. In the second stage there should be no token
         # discovery. This flag distinguishes between the two stages.
         self._allow_token_discovery = _allow_token_discovery
+        # Controls whether invoke_subgraph keeps input mutations in its graph.
+        self._keep_input_mutations = _keep_input_mutations
 
         self._storage_to_base: weakref.WeakKeyDictionary[
             torch.storage.UntypedStorage, FunctionalTensor | None
@@ -786,8 +797,12 @@ def disable_functional_mode() -> Generator[None, None, None]:
 # - Doing so means that it does not automatically compose with other
 #   functorch transforms, since these transforms always run above __torch_dispatch__.
 #   That's why this util lives here, and not in functorch.
+# - Input mutations are only propagated back when propagate_input_mutations is set.
 def dispatch_functionalize(
-    func: Callable[..., Any], mode: FunctionalTensorMode = FunctionalTensorMode()
+    func: Callable[..., Any],
+    mode: FunctionalTensorMode = FunctionalTensorMode(),
+    *,
+    propagate_input_mutations: bool = False,
 ) -> Callable[..., Any]:
     # TODO: pull these from aot autograd
     def to_fun(t: object) -> object:
@@ -811,11 +826,26 @@ def dispatch_functionalize(
         disable_above = torch._C._ExcludeDispatchKeyGuard(
             torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
         )
-        with disable_above, mode:
-            func_args = pytree.tree_map_only(torch.Tensor, to_fun, args)
-            func_kwargs = pytree.tree_map_only(torch.Tensor, to_fun, kwargs)
-            func_outputs = func(*func_args, **func_kwargs)
-            outputs = pytree.tree_map_only(FunctionalTensor, from_fun, func_outputs)
+        flat_inputs: list[Any] = []
+        flat_func_inputs: list[Any] = []
+        with disable_above:
+            with mode:
+                func_args = pytree.tree_map_only(torch.Tensor, to_fun, args)
+                func_kwargs = pytree.tree_map_only(torch.Tensor, to_fun, kwargs)
+                if propagate_input_mutations:
+                    # A boxed func clears its input list, so flatten before the call.
+                    flat_inputs = pytree.arg_tree_leaves(*args, **kwargs)
+                    flat_func_inputs = pytree.arg_tree_leaves(*func_args, **func_kwargs)
+                func_outputs = func(*func_args, **func_kwargs)
+                outputs = pytree.tree_map_only(FunctionalTensor, from_fun, func_outputs)
+
+            if propagate_input_mutations:
+                from torch._C._functorch import _propagate_functional_input_mutation
+
+                # Runs outside of mode so the copy_ mutates the caller's tensors.
+                for arg, func_arg in zip(flat_inputs, flat_func_inputs):
+                    if isinstance(func_arg, FunctionalTensor):
+                        _propagate_functional_input_mutation(arg, func_arg.elem)
 
             return outputs
 

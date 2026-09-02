@@ -1,11 +1,15 @@
 # Owner(s): ["module: inductor"]
 
 
+import threading
 import unittest
 from unittest import mock
 from unittest.mock import MagicMock, patch
 
+import sympy
+
 import torch
+from torch._higher_order_ops import flex_gemm
 from torch._inductor import config
 from torch._inductor.codegen.cuda.cuda_env import is_datacenter_blackwell_arch
 from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
@@ -23,11 +27,14 @@ from torch._inductor.utils import (
     ensure_nvmatmul_heuristics_available,
     run_and_get_code,
 )
+from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
+    dtype_name,
     instantiate_parametrized_tests,
     parametrize,
 )
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._triton import has_triton_reduction_ordering
 
 
 def _round_up(x, multiple):
@@ -164,6 +171,152 @@ class TestNVUniversalGemm(TestCase):
             len(min_cc_ok),
             "exact-arch filter should reject kernels that min_cc alone accepts",
         )
+
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    def test_matmul_swap_ab(self, dtype):
+        """swap_ab computes (B^T @ A^T)^T so the large N lands on the M-axis,
+        improving tile utilization for small-M shapes. Verify a small-M matmul
+        stays numerically correct with swap_ab enabled (the swapped operands and
+        transposed output view must round-trip to the original result).
+        """
+        m, n, k = 16, 512, 512
+
+        def matmul(a, b):
+            return a @ b
+
+        a = _create_tensor_with_layout("contiguous", m, k, dtype)
+        b = _create_tensor_with_layout("contiguous", k, n, dtype)
+        expected = matmul(a, b)
+
+        torch._dynamo.reset()
+
+        with config.patch(_nvgemm_config(nvgemm_swap_ab=True)):
+            compiled_fn = torch.compile(matmul)
+            result = compiled_fn(a, b)
+
+        torch.testing.assert_close(result, expected)
+
+    def test_cudagraphs_intermediate_addmm(self):
+        """An NVGEMM addmm whose bias-epilogue output is an intermediate consumed
+        downstream must not leave that output retained by the cached EFC kernel,
+        or CUDA graph capture fails ("tensor(s) in the cudagraph pool not tracked
+        as outputs") and the tensor leaks. The cached kernel is built from
+        meta-device tensors, so runtime outputs flow only through the per-call
+        arguments.
+        """
+        dtype = torch.bfloat16
+        m, k = 512, 512
+        # Scaled down so the chained bf16 matmul stays well-conditioned.
+        bias = torch.randn(k, dtype=dtype, device="cuda") * 0.1
+        x = torch.randn(m, k, dtype=dtype, device="cuda") * 0.1
+        w = torch.randn(k, k, dtype=dtype, device="cuda") * 0.1
+
+        def chain(bias, x, w):
+            # h is an NVGEMM addmm output consumed downstream (not the graph's
+            # final output), which is what triggers the retention bug.
+            h = torch.addmm(bias, x, w.t())
+            return torch.addmm(bias, h, w.t())
+
+        expected = chain(bias.float(), x.float(), w.float()).to(dtype)
+
+        torch._dynamo.reset()
+
+        cfg = _nvgemm_config()
+        cfg["triton.cudagraphs"] = True
+        with config.patch(cfg):
+            compiled_fn = torch.compile(chain)
+            for _ in range(3):
+                result = compiled_fn(bias, x, w)
+
+        torch.testing.assert_close(result, expected, rtol=1.6e-2, atol=1e-1)
+
+    def test_efc_epilogue_lookup_no_deadlock(self):
+        """get_efc_kernel_with_epilogue holds _cache_lock and, when the base EFC
+        kernel is not pre-resolved and misses the args cache, calls
+        get_kernel_by_name -> _ensure_caches, which re-acquires _cache_lock on the
+        same thread. With a plain (non-reentrant) lock this self-deadlocks; the
+        lock is an RLock. Run the reentrant path in a worker thread and assert it
+        completes (a plain Lock would hang here).
+        """
+        from torch._inductor.codegen.nv_universal_gemm import kernel_cache
+
+        # Force the manifest-fallback re-entry: no cached manifest, empty args
+        # cache, unknown name, no pre-resolved base_kernel.
+        kernel_cache.clear_cache()
+        result = []
+
+        def worker():
+            result.append(
+                kernel_cache.get_efc_kernel_with_epilogue(
+                    "__nonexistent_kernel__", None, base_kernel=None
+                )
+            )
+
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join(timeout=120)
+        self.assertFalse(
+            t.is_alive(),
+            "get_efc_kernel_with_epilogue deadlocked (reentrant _cache_lock)",
+        )
+        self.assertIsNone(result[0])
+
+    def test_efc_epilogue_cache_separates_reduction_specializations(self):
+        from torch._inductor.codegen.nv_universal_gemm import kernel_cache
+
+        class FakeOperator:
+            def __init__(self, metadata):
+                self.metadata = metadata
+
+        base_metadata = mock.Mock(
+            operands=object(),
+            design=object(),
+            operator_name="test_efc",
+            operator_class=FakeOperator,
+            supported_targets=object(),
+        )
+        base_kernel = FakeOperator(base_metadata)
+        epilogue_args = mock.Mock(tensors={})
+        sum_specialization = (("reduction_type", "sum"),)
+        max_specialization = (("reduction_type", "max"),)
+
+        kernel_cache.clear_cache()
+        try:
+            with (
+                mock.patch.object(
+                    kernel_cache, "_meta_epilogue_metadata", return_value=object()
+                ),
+                mock.patch(
+                    "cutlass.operators.metadata.OperatorMetadata",
+                    side_effect=lambda **kwargs: mock.Mock(**kwargs),
+                ),
+            ):
+                first = kernel_cache.get_efc_kernel_with_epilogue(
+                    "test_efc",
+                    epilogue_args,
+                    epilogue_source="same_epilogue",
+                    base_kernel=base_kernel,
+                    specialization=sum_specialization,
+                )
+                same = kernel_cache.get_efc_kernel_with_epilogue(
+                    "test_efc",
+                    epilogue_args,
+                    epilogue_source="same_epilogue",
+                    base_kernel=base_kernel,
+                    specialization=sum_specialization,
+                )
+                different = kernel_cache.get_efc_kernel_with_epilogue(
+                    "test_efc",
+                    epilogue_args,
+                    epilogue_source="same_epilogue",
+                    base_kernel=base_kernel,
+                    specialization=max_specialization,
+                )
+        finally:
+            kernel_cache.clear_cache()
+
+        self.assertIs(first, same)
+        self.assertIsNot(first, different)
 
     def test_unaligned_base_pointer_rejected(self):
         """Test that matmul with unaligned base pointer is rejected.
@@ -389,6 +542,153 @@ class TestNVUniversalGemm(TestCase):
 
         torch.testing.assert_close(result, expected, equal_nan=True)
 
+    def test_scaled_gemm_grouped_n_reduce_provider(self):
+        from cutlass import Float32
+        from cutlass.operators import ScaleMode, ScaleSwizzleMode
+
+        from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
+            _scaled_candidates,
+        )
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            _create_gemm_arguments,
+        )
+        from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments
+
+        m, n, k = 128, 128, 512
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
+        b = b.T
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        out = torch.empty((m, n), device="cuda", dtype=torch.bfloat16)
+        group = 32
+        reduce_out = torch.empty((m, n // group), device="cuda", dtype=torch.float32)
+        mode = ScaleMode.Blockwise1x16
+        swizzle = ScaleSwizzleMode.Swizzle32x4x4
+        args = _create_gemm_arguments(
+            "SCALED_GEMM",
+            (a, b, scale_a, scale_b),
+            out,
+            Float32,
+            scale_mode_a=mode,
+            swizzle_mode_a=swizzle,
+            scale_mode_b=mode,
+            swizzle_mode_b=swizzle,
+            local_reduce=GemmReductionArguments(
+                output=reduce_out,
+                group=group,
+                axis=1,
+            ),
+        )
+        kernel = next(
+            candidate
+            for candidate in _scaled_candidates(args, 100, efc_only=True)
+            if candidate.metadata.design.tile_shape[1] == n
+        )
+        artifact = kernel.compile(args)
+        kernel.run(
+            args,
+            artifact,
+            stream=torch.cuda.current_stream(),
+            assume_supported_args=True,
+        )
+        torch.cuda.synchronize()
+        self.assertEqual(
+            reduce_out,
+            out.float().view(m, -1, group).sum(-1),
+        )
+
+    def test_scaled_gemm_unit_dim_epilogue_non_current_stream(self):
+        from cutlass import Float32
+        from cutlass.operators import ScaleMode, ScaleSwizzleMode
+        from cutlass.operators.arguments import EpilogueArguments
+
+        from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
+            _scaled_candidates,
+        )
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            _create_gemm_arguments,
+        )
+
+        m, n, k = 1, 128, 512
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
+        b = b.T
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        bias = torch.randn((1, 1), device="cuda", dtype=torch.bfloat16)
+        out = torch.empty((m, n), device="cuda", dtype=torch.bfloat16)
+        expected = (
+            torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            + bias
+        )
+        epilogue = EpilogueArguments(
+            epilogue_fn="def epilogue(accum, bias):\n    D = accum + bias\n    return D\n",
+            bias=bias,
+            D=out,
+        )
+        mode = ScaleMode.Blockwise1x16
+        swizzle = ScaleSwizzleMode.Swizzle32x4x4
+        args = _create_gemm_arguments(
+            "SCALED_GEMM",
+            (a, b, scale_a, scale_b),
+            out,
+            Float32,
+            scale_mode_a=mode,
+            swizzle_mode_a=swizzle,
+            scale_mode_b=mode,
+            swizzle_mode_b=swizzle,
+            epilogue=epilogue,
+        )
+        selection_args = _create_gemm_arguments(
+            "SCALED_GEMM",
+            (a, b, scale_a, scale_b),
+            out,
+            Float32,
+            scale_mode_a=mode,
+            swizzle_mode_a=swizzle,
+            scale_mode_b=mode,
+            swizzle_mode_b=swizzle,
+        )
+        kernel = next(
+            candidate
+            for candidate in _scaled_candidates(selection_args, 100, efc_only=True)
+            if candidate.metadata.design.tile_shape[1] == n
+        )
+        artifact = kernel.compile(args)
+        torch.cuda.synchronize()
+        torch.cuda._sleep(10_000_000)
+        stream = torch.cuda.Stream()
+        kernel.run(args, artifact, stream=stream, assume_supported_args=True)
+        stream.synchronize()
+        self.assertEqual(out, expected)
+
     @parametrize("out_dtype", (torch.float32, torch.bfloat16))
     @parametrize(
         "layout_a",
@@ -535,6 +835,221 @@ class TestNVUniversalGemm(TestCase):
 
 class TestNVUniversalGemmHeuristics(TestCase):
     """Unit tests for NVUniversalGemmHeuristics without requiring actual libraries."""
+
+    def test_grouped_reduction_affine_index_rejects_offset(self):
+        from torch._inductor.codegen.nv_universal_gemm.epilogue_lowering import (
+            _matches_affine_index,
+        )
+
+        i, j, r = sympy.symbols("i j r", integer=True)
+        strides = (32, 4, 1)
+
+        def known_equals(left, right):
+            return sympy.simplify(left - right) == 0
+
+        self.assertTrue(
+            _matches_affine_index(32 * i + 4 * j + r, (i, j, r), strides, known_equals)
+        )
+        self.assertFalse(
+            _matches_affine_index(
+                32 * i + 4 * j + r + 1, (i, j, r), strides, known_equals
+            )
+        )
+        self.assertTrue(
+            _matches_affine_index(32 * i + 4 * j + r, (), strides, known_equals)
+        )
+        self.assertFalse(
+            _matches_affine_index(32 * i + 4 * j + r + 1, (), strides, known_equals)
+        )
+
+    def test_reduction_source_rejects_different_load_indices(self):
+        from torch._inductor.kernel.loop_ir_cutedsl_codegen import LoopIRCuteDSLCodegen
+        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
+            GemmEpilogueIRExpression as Expr,
+        )
+
+        index = sympy.Symbol("index", integer=True)
+        source = Expr(
+            "mul",
+            (
+                Expr("load", ("gemm", index, None)),
+                Expr("load", ("gemm", index + 1, None)),
+            ),
+        )
+        with self.assertRaisesRegex(NotImplementedError, "one logical element"):
+            LoopIRCuteDSLCodegen.source_from_expression("gemm", source, "source")
+
+    def test_output_scale_rejects_value_changing_cast(self):
+        from torch._inductor.kernel.loop_ir_cutedsl_codegen import LoopIRCuteDSLCodegen
+        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
+            GemmEpilogueIRExpression as Expr,
+        )
+
+        scale = MagicMock()
+        scale.get_dtype.return_value = torch.float32
+        scale.get_size.return_value = (1,)
+        graph = MagicMock(
+            name_to_buffer={},
+            graph_inputs={"scale": scale},
+        )
+        graph.sizevars.statically_known_equals.side_effect = lambda left, right: (
+            left == right
+        )
+        codegen = LoopIRCuteDSLCodegen("gemm", OrderedSet(("gemm",)))
+        accumulator = Expr("load", ("gemm", 0, None))
+        scale_load = Expr("load", ("scale", 0, None))
+        with V.set_graph_handler(graph):
+            self.assertEqual(
+                codegen._output_scale_name(Expr("mul", (accumulator, scale_load))),
+                "scale",
+            )
+            self.assertEqual(
+                codegen._output_scale_name(
+                    Expr(
+                        "mul",
+                        (accumulator, Expr("to_dtype", (scale_load, torch.float32))),
+                    )
+                ),
+                "scale",
+            )
+            self.assertIsNone(
+                codegen._output_scale_name(
+                    Expr(
+                        "mul",
+                        (accumulator, Expr("to_dtype", (scale_load, torch.int32))),
+                    )
+                )
+            )
+
+    def test_grouped_reduction_conversion_contract(self):
+        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
+            GemmEpilogueIRExpression as Expr,
+            GemmEpilogueIRStore,
+            grouped_reduction_ir,
+        )
+
+        load = Expr("load", ("gemm", 0, None))
+
+        def classify(value):
+            square = Expr("mul", (value, value))
+            reduction = Expr("reduction", (torch.float32, torch.float32, "sum", square))
+            return grouped_reduction_ir(
+                GemmEpilogueIRStore(0, reduction), "gemm", 4, torch.bfloat16
+            )
+
+        fp32 = Expr("to_dtype", (load, torch.float32))
+        self.assertEqual(classify(fp32), ("sum", "square"))
+        fp16_then_fp32 = Expr(
+            "to_dtype", (Expr("to_dtype", (load, torch.float16)), torch.float32)
+        )
+        self.assertIsNone(classify(fp16_then_fp32))
+        bitcast = Expr("to_dtype_bitcast", (load, torch.bfloat16, torch.bfloat16))
+        self.assertIsNone(classify(Expr("to_dtype", (bitcast, torch.float32))))
+
+    def test_grouped_reduction_ir_normalizes_loop_representation(self):
+        from torch._inductor.kernel.gemm_epilogue import GemmReductionConfig
+        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
+            GemmEpilogueIRAnalysis,
+            GemmEpilogueIRExpression as Expr,
+            GemmEpilogueIRStore,
+        )
+
+        load = Expr("load", ("gemm", 0, None))
+        reduction = Expr("reduction", (torch.float32, torch.float32, "sum", load))
+        analysis = GemmEpilogueIRAnalysis({"out": GemmEpilogueIRStore(0, reduction)})
+
+        self.assertEqual(
+            analysis.grouped_reduction("out", "gemm", 4, 1, torch.float32),
+            GemmReductionConfig(
+                output_name="out",
+                group=4,
+                axis=1,
+                reduction_type="sum",
+                source_type="identity",
+            ),
+        )
+
+    @unittest.skipUnless(
+        ensure_nv_universal_gemm_available(), "Requires cutlass.operators"
+    )
+    def test_dense_reduction_uses_generated_callback_contract(self):
+        import dataclasses
+
+        import cutlass.cute as cute
+
+        from torch._inductor.codegen.nv_universal_gemm.epilogue_capabilities import (
+            BLOCK_SCALED_GEMM_REDUCTION_CAPABILITIES,
+            DENSE_GEMM_REDUCTION_CAPABILITIES,
+        )
+        from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments
+        from torch._inductor.kernel.gemm_epilogue_codegen import (
+            GemmReductionCompileConfig,
+        )
+
+        args = GemmReductionArguments(
+            group=8,
+            axis=1,
+            reduction_type="sum",
+            source_type="square",
+            reduction_algorithm="variance",
+            feeds_main=True,
+            finalizer_fn=("def finalize(value, group):\n    return value / group"),
+        )
+        config = GemmReductionCompileConfig.from_args(args, cute)
+
+        self.assertEqual(
+            config.constexprs()[:5],
+            (8, 1, "sum", "variance", True),
+        )
+        self.assertNotIn("square", config.constexprs())
+        self.assertEqual(config.reduction.source(3.0), 9.0)
+        self.assertEqual(config.reduction.finalize(16.0, 8), 2.0)
+        self.assertTrue(
+            DENSE_GEMM_REDUCTION_CAPABILITIES.supports("sum", "square", "variance")
+        )
+        self.assertFalse(
+            DENSE_GEMM_REDUCTION_CAPABILITIES.supports("variance_affine:1:0", "square")
+        )
+        secondary = dataclasses.replace(
+            args,
+            feeds_main=False,
+            secondary_feed_output="secondary",
+            secondary_consumer_fn=(
+                "def consume(accumulator, primary, secondary):\n"
+                "    return accumulator > 0.0"
+            ),
+        )
+        self.assertTrue(DENSE_GEMM_REDUCTION_CAPABILITIES.supports_contract(secondary))
+        self.assertFalse(
+            BLOCK_SCALED_GEMM_REDUCTION_CAPABILITIES.supports_contract(secondary)
+        )
+
+    def test_grouped_reduction_rejects_ambiguous_composite(self):
+        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
+            GemmEpilogueIRExpression as Expr,
+            GemmEpilogueIRStore,
+            grouped_reduction_ir,
+        )
+
+        summed = Expr(
+            "reduction",
+            (torch.float32, torch.float32, "sum", Expr("load", ("gemm", 0, None))),
+        )
+        maximum = Expr(
+            "reduction",
+            (torch.float32, torch.float32, "max", Expr("load", ("gemm", 0, None))),
+        )
+        store = GemmEpilogueIRStore(0, Expr("add", (summed, maximum)))
+        self.assertIsNone(grouped_reduction_ir(store, "gemm", 4, torch.float32))
+
+    def test_epilogue_ir_preserves_empty_tuple_argument(self):
+        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
+            GemmEpilogueIRExpression,
+        )
+
+        expression = GemmEpilogueIRExpression("reshape", ("value", ()))
+        self.assertEqual(expression.args, ("value", ()))
+        self.assertEqual(expression.kwargs, ())
 
     def _create_mock_kernel(self, tile_m, tile_n, tile_k, cluster_m, cluster_n):
         """Create a mock kernel with the given tile/cluster configuration."""
@@ -807,6 +1322,440 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         torch.testing.assert_close(result, fn(a, b), atol=1e-2, rtol=1e-2)
         self.assertTrue(epilogue_fused, "pointwise op was NOT fused into epilogue")
 
+    def test_matmul_multi_store_epilogue_fusion(self):
+        a = torch.randn(self.M, self.K, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(self.K, self.N, device="cuda", dtype=torch.bfloat16)
+
+        def fn(a, b):
+            result = (a @ b).float()
+            return torch.relu(result), result + 1.0
+
+        result, code, epilogue_fused = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
+        self.assertTrue(epilogue_fused)
+        self.assertIn("out_ptr1", code)
+
+    def test_flex_gemm_pointwise_epilogue_fusion(self):
+        dtype = torch.bfloat16
+        a = torch.randn(self.M, self.K, device="cuda", dtype=dtype)
+        b = torch.randn(self.K, self.N, device="cuda", dtype=dtype)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                torch.relu,
+                kernel_options={"backend": "NVGEMM"},
+            )
+
+        result, code, epilogue_fused = self._compile_and_check(fn, a, b)
+        torch.testing.assert_close(result, torch.relu(a @ b), atol=1e-2, rtol=1e-2)
+        self.assertTrue(epilogue_fused, "FlexGEMM body was NOT fused into epilogue")
+
+    def test_flex_gemm_preserves_output_for_unfused_reduction(self):
+        dtype = torch.bfloat16
+        a = torch.randn(128, 64, device="cuda", dtype=dtype)
+        b = torch.randn(64, 128, device="cuda", dtype=dtype)
+
+        def fn(a, b):
+            def epilogue(acc):
+                grouped = acc.float().view(128, -1, 32)
+                return acc.relu(), grouped.sum(-1)
+
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "NVGEMM"},
+            )
+
+        result, code, epilogue_fused = self._compile_and_check(fn, a, b)
+        expected = fn(a, b)
+        torch.testing.assert_close(result[0], expected[0], atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(result[1], expected[1], atol=1e-1, rtol=1e-2)
+        self.assertTrue(epilogue_fused, "pointwise consumer was NOT fused")
+        self.assertIn("out_ptr1", code)
+
+    @parametrize("operation", ("mul", "sigmoid", "gelu"))
+    def test_scaled_mm_pointwise_epilogue_fusion(self, operation):
+        """Unary pointwise op is fused into an NVFP4 scaled GEMM epilogue."""
+        m, n, k = self.M, self.N, self.K
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
+        b = b.T
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+
+        def fn(a, b, scale_a, scale_b):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            if operation == "sigmoid":
+                return torch.sigmoid(result)
+            if operation == "gelu":
+                return torch.nn.functional.gelu(result)
+            return result * 0.5
+
+        result, code, epilogue_fused = self._compile_and_check(
+            fn, a, b, scale_a, scale_b
+        )
+        torch.testing.assert_close(result, fn(a, b, scale_a, scale_b), equal_nan=True)
+        self.assertTrue(
+            epilogue_fused, f"{operation} was NOT fused into scaled epilogue"
+        )
+
+    def test_matmul_single_store_epilogue_chain(self):
+        a = torch.randn(self.M, self.K, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(self.K, self.N, device="cuda", dtype=torch.bfloat16)
+
+        def fn(a, b):
+            return torch.relu((a @ b).float()) + 1.0
+
+        result, code, epilogue_fused = self._compile_and_check(fn, a, b)
+        self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
+        self.assertTrue(epilogue_fused)
+        self.assertNotIn("out_ptr1", code)
+
+    def test_scaled_mm_multi_store_epilogue_fusion(self):
+        m, n, k = self.M, self.N, self.K
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
+        b = b.T
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+
+        def fn(a, b, scale_a, scale_b):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            result_fp32 = result.float()
+            return result, torch.relu(result_fp32), result_fp32 * 0.5
+
+        result, code, epilogue_fused = self._compile_and_check(
+            fn, a, b, scale_a, scale_b
+        )
+        expected = fn(a, b, scale_a, scale_b)
+        self.assertEqual(result, expected)
+        self.assertTrue(epilogue_fused)
+        self.assertIn("out_ptr1", code)
+        self.assertIn("out_ptr2", code)
+
+    @parametrize(
+        "case",
+        (
+            ((((M, N), torch.bfloat16),), True),
+            ((((N,), torch.bfloat16),), True),
+            ((((1, N), torch.bfloat16),), True),
+            ((((M, 1), torch.bfloat16),), True),
+            ((((N,), torch.bfloat16), ((M, 1), torch.bfloat16)), True),
+            ((((N,), torch.float32),), True),
+        ),
+        name_fn=lambda case: "_and_".join(
+            f"{'x'.join(map(str, sh))}_{dtype_name(dt)}" for sh, dt in case[0]
+        ),
+    )
+    def test_scaled_mm_broadcast_epilogue_fusion(self, case):
+        bias_specs, expected_fused = case
+        m, n, k = self.M, self.N, self.K
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
+        b = b.T
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        biases = tuple(
+            torch.randn(shape, device="cuda", dtype=dtype)
+            for shape, dtype in bias_specs
+        )
+
+        def fn(a, b, scale_a, scale_b, *biases):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            for bias in biases:
+                result = result + bias
+            return torch.relu(result)
+
+        result, code, epilogue_fused = self._compile_and_check(
+            fn, a, b, scale_a, scale_b, *biases
+        )
+        self.assertEqual(epilogue_fused, expected_fused)
+        # Random packed FP4 operands can produce NaNs in the reference GEMM.
+        torch.testing.assert_close(
+            result, fn(a, b, scale_a, scale_b, *biases), equal_nan=True
+        )
+
+    @parametrize("bias_shape", ((1,), (1, 1)))
+    def test_scaled_mm_unit_dim_broadcast_epilogue_fusion(self, bias_shape):
+        m, n, k = 1, 128, self.K
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
+        b = b.T
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        bias = torch.randn(bias_shape, device="cuda", dtype=torch.bfloat16)
+
+        def fn(a, b, scale_a, scale_b, bias):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            return torch.relu(result + bias)
+
+        result, _, epilogue_fused = self._compile_and_check(
+            fn, a, b, scale_a, scale_b, bias
+        )
+        self.assertTrue(epilogue_fused)
+        self.assertEqual(result, fn(a, b, scale_a, scale_b, bias))
+
+    @parametrize(
+        "case",
+        (
+            (0, "sum", 4),
+            (0, "mean", 4),
+            (0, "prod", 4),
+            (0, "amax", 4),
+            (0, "amin", 4),
+            (0, "sum", 8),
+            (0, "mean", 8),
+            (0, "prod", 8),
+            (0, "amax", 8),
+            (0, "amin", 8),
+            (0, "sum", 16),
+            (0, "mean", 16),
+            (0, "prod", 16),
+            (0, "amax", 16),
+            (0, "amin", 16),
+            (1, "sum", 32),
+            (1, "mean", 32),
+            (1, "prod", 32),
+            (1, "amax", 32),
+            (1, "amin", 32),
+            (1, "sum", 64),
+            (1, "mean", 64),
+            (1, "prod", 64),
+            (1, "amax", 64),
+            (1, "amin", 64),
+        ),
+        name_fn=lambda case: f"axis_{case[0]}_{case[1]}_group_{case[2]}",
+    )
+    def test_scaled_mm_grouped_reduce_fusion(self, case):
+        axis, reduction, group = case
+        m, n, k = 128, 256 if group > 32 else 128, 512
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
+        b = b.T
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+
+        def fn(a, b, scale_a, scale_b):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            grouped = (
+                result.float().view(-1, group, n)
+                if axis == 0
+                else result.float().view(m, -1, group)
+            )
+            dim = 1 if axis == 0 else -1
+            if reduction == "sum":
+                reduced = grouped.sum(dim)
+            elif reduction == "mean":
+                reduced = grouped.mean(dim)
+            elif reduction == "prod":
+                reduced = grouped.prod(dim)
+            elif reduction == "amax":
+                reduced = grouped.amax(dim)
+            else:
+                reduced = grouped.amin(dim)
+            return result, reduced
+
+        result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
+        expected = fn(a, b, scale_a, scale_b)
+        self.assertEqual(result[0], expected[0])
+        self.assertEqual(result[1], expected[1])
+        self.assertIn("output=", code)
+
+        if case == (1, "sum", 32):
+            if not has_triton_reduction_ordering():
+                self.skipTest("requires INNER_TREE Triton")
+            with config.patch({"numerics": "strict"}):
+                _, strict_code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
+            self.assertNotIn("'local_reduce': GemmReductionArguments", strict_code)
+            self.assertIn("ReductionOrdering.INNER_TREE", strict_code)
+
+    def test_scaled_mm_grouped_reduce_source_fusion(self):
+        m, n, k, group = 128, 128, 512, 32
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
+        b = b.T
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+
+        def fn(a, b, scale_a, scale_b):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            grouped = result.float().view(m, -1, group)
+            return torch.relu(result), grouped.square().mean(-1)
+
+        result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
+        expected = fn(a, b, scale_a, scale_b)
+        self.assertEqual(result[0], expected[0])
+        self.assertEqual(result[1], expected[1])
+        self.assertIn("output=", code)
+        self.assertIn("source_type='square'", code)
+
+    @config.patch(emulate_precision_casts=True)
+    def test_scaled_mm_grouped_reduce_rejects_intermediate_fp16(self):
+        m, n, k, group = 128, 128, 512, 32
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
+        b = b.T
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+
+        def fn(a, b, scale_a, scale_b):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            grouped = result.half().float().view(m, -1, group)
+            return torch.relu(result), grouped.square().mean(-1)
+
+        result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
+        self.assertEqual(result, fn(a, b, scale_a, scale_b))
+        self.assertNotIn("'local_reduce': GemmReductionArguments", code)
+
+    def test_scaled_mm_grouped_reduce_feeds_main(self):
+        m, n, k, group = 128, 128, 512, 4
+        packed_k = k // 2
+        a = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b = torch.randint(0, 256, (n, packed_k), device="cuda", dtype=torch.uint8).view(
+            torch.float4_e2m1fn_x2
+        )
+        b = b.T
+        padded_k_blocks = _round_up(ceildiv(k, 16), 4)
+        scale_a = torch.rand(_round_up(m, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        scale_b = torch.rand(_round_up(n, 128) * padded_k_blocks, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+
+        def fn(a, b, scale_a, scale_b):
+            result = torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.bfloat16,
+            )
+            grouped = result.float().view(-1, group, n)
+            mean = grouped.mean(1, keepdim=True).expand(-1, group, -1)
+            return result.float() - mean.reshape(m, n)
+
+        result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
+        self.assertEqual(result, fn(a, b, scale_a, scale_b))
+        self.assertIn("feeds_main=True", code)
+
     def test_matmul_add_relu_chained(self):
         """Multi-op pointwise chain (a@b + bias → relu) collapses to one
         ComputedBuffer and is fused as a single epilogue."""
@@ -913,6 +1862,24 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         result, code, epilogue_fused = self._compile_and_check(fn, a, b, bias)
         torch.testing.assert_close(result, fn(a, b, bias), atol=1e-2, rtol=1e-2)
         self.assertTrue(epilogue_fused, "bias+relu was NOT fused into epilogue")
+
+    @parametrize(
+        "bias_shape",
+        ((N,), (1, N), (M, 1)),
+        name_fn=lambda shape: "x".join(map(str, shape)),
+    )
+    def test_epilogue_with_broadcast_aux_input(self, bias_shape):
+        dtype = torch.bfloat16
+        a = torch.randn(self.M, self.K, device="cuda", dtype=dtype)
+        b = torch.randn(self.K, self.N, device="cuda", dtype=dtype)
+        bias = torch.randn(bias_shape, device="cuda", dtype=dtype)
+
+        def fn(a, b, bias):
+            return torch.relu((a @ b) + bias)
+
+        result, code, epilogue_fused = self._compile_and_check(fn, a, b, bias)
+        torch.testing.assert_close(result, fn(a, b, bias), atol=1e-2, rtol=1e-2)
+        self.assertTrue(epilogue_fused, "broadcast bias+relu was not fused")
 
     def test_efc_disk_cache_round_trip(self):
         """Verify that EFC kernel compiled artifacts can be serialized to disk
