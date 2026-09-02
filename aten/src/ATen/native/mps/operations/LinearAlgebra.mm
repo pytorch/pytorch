@@ -1137,6 +1137,7 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
               self.dtype(),
               " != ",
               other.dtype())
+  TORCH_CHECK(self.scalar_type() != kBool, "mm: not implemented for 'Bool' on MPS");
   TensorArg args[]{{output, "out", 0}, {self, "mat1", 1}, {other, "mat2", 2}};
   checkAllSameGPU("mm", args);
 
