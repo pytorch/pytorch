@@ -183,11 +183,21 @@ class GuardSource(enum.Enum):
         )
 
     def is_unspecialized_nn_module(self) -> bool:
-        return self in (
-            GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE,
-            GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE,
-            GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
-            GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+        # FSDP-managed module attributes (config.skip_fsdp_guards) are
+        # unspecialized nn module attributes whose guards are dropped. The guard
+        # skipping itself is keyed on is_fsdp_module() / FSDPNNModuleSource, so
+        # for every other purpose (static ints/tuples, static tensor attrs,
+        # guard filters) they should behave like any other unspecialized nn
+        # module attribute.
+        return (
+            self
+            in (
+                GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE,
+                GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE,
+                GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+                GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+            )
+            or self.is_fsdp_module()
         )
 
     def is_unspecialized_builtin_nn_module(self) -> bool:
