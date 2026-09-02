@@ -299,7 +299,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // over the surviving/new members. Implemented in
   // ReconfigureNCCL.cpp.
   bool supportsReconfigure() const override {
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0) && !defined(USE_ROCM)
+    // Same revoke availability gate as DefaultNcclApi::commRevoke.
+#if (defined(USE_ROCM) && NCCL_VERSION_CODE >= NCCL_VERSION(2, 30, 4)) || \
+    (!defined(USE_ROCM) && NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0))
     return true;
 #else
     return false;
