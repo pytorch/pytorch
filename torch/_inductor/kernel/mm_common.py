@@ -7,11 +7,12 @@ from typing import Any
 
 import torch
 from torch._inductor.select_algorithm import realize_inputs, SymbolicGridFn
-from torch._inductor.utils import get_current_backend, sympy_product
+from torch._inductor.utils import get_current_backend, is_bf16x9_matmul, sympy_product
 from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 
 from .. import config
+from ..codegen.triton_utils import use_block_ptr_enabled
 from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import _IntLike, Layout, TensorBox
 from ..utils import load_template, triton_type
@@ -135,7 +136,10 @@ def scale_mm_epilogue():
 
 
 def use_native_matmul(mat1, mat2):
-    if not config.triton.native_matmul:
+    if (
+        is_bf16x9_matmul(mat1.get_device().type, mat1.get_dtype())
+        or not config.triton.native_matmul
+    ):
         return False
 
     # If tma matmul is on, don't do native matmul
@@ -145,9 +149,9 @@ def use_native_matmul(mat1, mat2):
     ):
         raise AssertionError("native matmul doesn't support tma codegen yet")
 
-    # Currently only enable native matmul for default indexing
-    # TODO : support block ptr
-    if config.triton.use_block_ptr:
+    # Currently only enable native matmul for default indexing.
+    # TODO: support block ptr
+    if use_block_ptr_enabled():
         raise AssertionError("native matmul doesn't support block_ptr codegen yet")
 
     # Currently only enable native matmul for triton on GPU.
@@ -176,7 +180,7 @@ def use_native_matmul(mat1, mat2):
     # If the shape has unbacked symbols, don't do native matmul.
     # This is related to the behavior of statically_known_multiple_of on unbacked symints.
     # Since statically_known_multiple_of just returns False for unbacked symbols
-    # due to the expensive cost, codegen fails when there is a unbacked symbol.
+    # due to the expensive cost, codegen fails when there is an unbacked symbol.
     # In particular, it fails at _split_iteration_ranges in codegen/simd.py.
     # See this : https://github.com/pytorch/pytorch/pull/131649
     if any(map(has_free_unbacked_symbols, [m, k, n])):
@@ -194,7 +198,9 @@ def use_native_matmul(mat1, mat2):
     return True
 
 
-def _use_small_mm_pointwise(m, k, n, layout) -> bool:
+def _use_small_mm_pointwise(
+    m, k, n, device_type: str, statically_known_true=None
+) -> bool:
     """Check if mm should be lowered to pointwise ops for small K and N.
 
     For very small inner dimensions (K < 5 and N < 5) with M >= 64,
@@ -205,12 +211,16 @@ def _use_small_mm_pointwise(m, k, n, layout) -> bool:
     at large M due to reduction-dimension alignment).  Disabled under
     max_autotune to preserve template selection.
     See https://github.com/pytorch/pytorch/issues/186348
+
+    ``statically_known_true`` lets callers that run before the inductor
+    ``GraphLowering`` is active (e.g. the pad_mm joint-graph pass, where
+    ``V.graph`` is unavailable) supply their own predicate.
     """
     if config.max_autotune or config.max_autotune_gemm:
         return False
-    if layout.device.type in ("cpu", "mps"):
+    if device_type in ("cpu", "mps"):
         return False
-    skt = V.graph.sizevars.statically_known_true
+    skt = statically_known_true or V.graph.sizevars.statically_known_true
     return skt(m >= 64) and skt(k < 5) and skt(n < 5)
 
 

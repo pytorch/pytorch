@@ -1321,11 +1321,9 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
         auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _x_slice_dim = 1, _x_slice_start = 0, _x_slice_end = 4, _y_base_index = 0, _y_slice_dim = 1, _y_slice_start = 4, _y_slice_end = 10, _all_bases = [arg0_1])
         getitem_3: "f32[10, 10][10, 1]cpu" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
         copy_: "f32[10, 10][10, 1]cpu" = torch.ops.aten.copy_.default(arg0_1, getitem_3);  arg0_1 = copy_ = None
-        split_with_sizes_1 = torch.ops.aten.split_with_sizes.default(getitem_3, [4, 6], 1)
-        getitem_4: "f32[10, 4][10, 1]cpu" = split_with_sizes_1[0];  split_with_sizes_1 = None
-        split_with_sizes_2 = torch.ops.aten.split_with_sizes.default(getitem_3, [4, 6], 1);  getitem_3 = None
-        getitem_7: "f32[10, 6][10, 1]cpu" = split_with_sizes_2[1];  split_with_sizes_2 = None
-        return (getitem_4, getitem_7)""",
+        slice_1: "f32[10, 4][10, 1]cpu" = torch.ops.aten.slice.Tensor(getitem_3, 1, 0, 4)
+        slice_2: "f32[10, 6][10, 1]cpu" = torch.ops.aten.slice.Tensor(getitem_3, 1, 4, 10);  getitem_3 = None
+        return (slice_1, slice_2)""",
                         ignore_comments=True,
                         ignore_empty_lines=True,
                     )
@@ -1337,11 +1335,9 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
         auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _x_slice_dim = 1, _x_slice_start = 0, _x_slice_end = 4, _y_base_index = 0, _y_slice_dim = 1, _y_slice_start = 4, _y_slice_end = 10, _all_bases = [arg0_1])
         getitem_3: "f32[10, 10][10, 1]cpu" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
         copy_: "f32[10, 10][10, 1]cpu" = torch.ops.aten.copy_.default(arg0_1, getitem_3);  arg0_1 = copy_ = None
-        split_with_sizes_1 = torch.ops.aten.split_with_sizes.default(getitem_3, [4, 6], 1)
-        getitem_4: "f32[10, 4][10, 1]cpu" = split_with_sizes_1[0];  split_with_sizes_1 = None
-        split_with_sizes_2 = torch.ops.aten.split_with_sizes.default(getitem_3, [4, 6], 1);  getitem_3 = None
-        getitem_7: "f32[10, 6][10, 1]cpu" = split_with_sizes_2[1];  split_with_sizes_2 = None
-        return (getitem_4, getitem_7)""",
+        slice_1: "f32[10, 4][10, 1]cpu" = torch.ops.aten.slice.Tensor(getitem_3, 1, 0, 4)
+        slice_2: "f32[10, 6][10, 1]cpu" = torch.ops.aten.slice.Tensor(getitem_3, 1, 4, 10);  getitem_3 = None
+        return (slice_1, slice_2)""",
                         ignore_comments=True,
                         ignore_empty_lines=True,
                     )
@@ -1358,11 +1354,9 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
         slice_tensor_1: "f32[10, 6][10, 1]cpu" = torch.ops.aten.slice.Tensor(arg0_1, 1, 4, 10)
         foo_default = torch.ops.mylib.foo.default(slice_tensor, slice_tensor_1);  slice_tensor = slice_tensor_1 = foo_default = None
         copy_: "f32[10, 10][10, 1]cpu" = torch.ops.aten.copy_.default(arg0_1, arg0_1);  copy_ = None
-        split_with_sizes_1 = torch.ops.aten.split_with_sizes.default(arg0_1, [4, 6], 1)
-        getitem_4: "f32[10, 4][10, 1]cpu" = split_with_sizes_1[0];  split_with_sizes_1 = None
-        split_with_sizes_2 = torch.ops.aten.split_with_sizes.default(arg0_1, [4, 6], 1);  arg0_1 = None
-        getitem_7: "f32[10, 6][10, 1]cpu" = split_with_sizes_2[1];  split_with_sizes_2 = None
-        return (getitem_4, getitem_7)""",
+        slice_1: "f32[10, 4][10, 1]cpu" = torch.ops.aten.slice.Tensor(arg0_1, 1, 0, 4)
+        slice_2: "f32[10, 6][10, 1]cpu" = torch.ops.aten.slice.Tensor(arg0_1, 1, 4, 10);  arg0_1 = None
+        return (slice_1, slice_2)""",
                         ignore_comments=True,
                         ignore_empty_lines=True,
                     )
@@ -1375,11 +1369,9 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
         slice_tensor_1: "f32[10, 6][10, 1]cpu" = torch.ops.aten.slice.Tensor(arg0_1, 1, 4, 10)
         foo_default = torch.ops.mylib.foo.default(slice_tensor, slice_tensor_1);  slice_tensor = slice_tensor_1 = foo_default = None
         copy_: "f32[10, 10][10, 1]cpu" = torch.ops.aten.copy_.default(arg0_1, arg0_1);  copy_ = None
-        split_with_sizes_1 = torch.ops.aten.split_with_sizes.default(arg0_1, [4, 6], 1)
-        getitem_4: "f32[10, 4][10, 1]cpu" = split_with_sizes_1[0];  split_with_sizes_1 = None
-        split_with_sizes_2 = torch.ops.aten.split_with_sizes.default(arg0_1, [4, 6], 1);  arg0_1 = None
-        getitem_7: "f32[10, 6][10, 1]cpu" = split_with_sizes_2[1];  split_with_sizes_2 = None
-        return (getitem_4, getitem_7)""",
+        slice_1: "f32[10, 4][10, 1]cpu" = torch.ops.aten.slice.Tensor(arg0_1, 1, 0, 4)
+        slice_2: "f32[10, 6][10, 1]cpu" = torch.ops.aten.slice.Tensor(arg0_1, 1, 4, 10);  arg0_1 = None
+        return (slice_1, slice_2)""",
                         ignore_comments=True,
                         ignore_empty_lines=True,
                     )
@@ -1435,8 +1427,8 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
                         """\
 def forward(self, arg0_1: "f32[s77, s77][s77, 1]cpu", arg1_1: "Sym(s77)"):
         floordiv: "Sym(0)" = 0 // arg1_1;  arg1_1 = None
-        add_6: "Sym(2)" = floordiv + 2
-        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _x_slice_dim = 0, _x_slice_start = floordiv, _x_slice_end = add_6, _y_base_index = 0, _y_slice_dim = 1, _y_slice_start = 3, _y_slice_end = 4, _all_bases = [arg0_1]);  floordiv = add_6 = None
+        add: "Sym(2)" = floordiv + 2
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _x_slice_dim = 0, _x_slice_start = floordiv, _x_slice_end = add, _y_base_index = 0, _y_slice_dim = 1, _y_slice_start = 3, _y_slice_end = 4, _all_bases = [arg0_1]);  floordiv = add = None
         getitem_1: "f32[s77, s77][s77, 1]cpu" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
         copy_: "f32[s77, s77][s77, 1]cpu" = torch.ops.aten.copy_.default(arg0_1, getitem_1);  arg0_1 = copy_ = None
         slice_3: "f32[2, s77][s77, 1]cpu" = torch.ops.aten.slice.Tensor(getitem_1, 0, 0, 2)
@@ -1468,7 +1460,7 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
                         """\
 def forward(self, arg0_1: "f32[s77, s77][s77, 1]cpu", arg1_1: "Sym(s77)"):
         floordiv: "Sym(0)" = 0 // arg1_1;  arg1_1 = None
-        add_6: "Sym(2)" = floordiv + 2;  floordiv = add_6 = None
+        add: "Sym(2)" = floordiv + 2;  floordiv = add = None
         slice_tensor: "f32[2, s77][s77, 1]cpu" = torch.ops.aten.slice.Tensor(arg0_1, 0, 0, 2)
         slice_tensor_1: "f32[s77, 1][s77, 1]cpu" = torch.ops.aten.slice.Tensor(arg0_1, 1, 3, 4)
         foo_default = torch.ops.mylib.foo.default(slice_tensor, slice_tensor_1);  slice_tensor = slice_tensor_1 = foo_default = None
@@ -1617,8 +1609,8 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
 def forward(self, arg0_1: "f32[s77][1]cpu", arg1_1: "Sym(s77)"):
         clone: "f32[s77][1]cpu" = torch.ops.aten.clone.default(arg0_1)
         nonzero: "i64[u0, 1][1, u0]cpu" = torch.ops.aten.nonzero.default(clone);  clone = None
-        sym_size_int_1: "Sym(u0)" = torch.ops.aten.sym_size.int(nonzero, 0)
-        ge: "Sym(u0 >= 0)" = sym_size_int_1 >= 0;  sym_size_int_1 = None
+        sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(nonzero, 0)
+        ge: "Sym(u0 >= 0)" = sym_size_int >= 0;  sym_size_int = None
         _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar = None
         _to_copy: "f32[u0, 1][1, u0]cpu" = torch.ops.aten._to_copy.default(nonzero, dtype = torch.float32);  nonzero = None
         auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _x_alias = True, _y_base_index = 1, _y_alias = True, _all_bases = [arg0_1, _to_copy]);  _to_copy = None
@@ -1663,8 +1655,8 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
                         """\
 def forward(self, arg0_1: "f32[s77][1]cpu", arg1_1: "Sym(s77)"):
         nonzero: "i64[u0, 1][1, u0]cpu" = torch.ops.aten.nonzero.default(arg0_1)
-        sym_size_int_1: "Sym(u0)" = torch.ops.aten.sym_size.int(nonzero, 0)
-        ge: "Sym(u0 >= 0)" = sym_size_int_1 >= 0;  sym_size_int_1 = None
+        sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(nonzero, 0)
+        ge: "Sym(u0 >= 0)" = sym_size_int >= 0;  sym_size_int = None
         _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar = None
         convert_element_type: "f32[u0, 1][1, u0]cpu" = torch.ops.prims.convert_element_type.default(nonzero, torch.float32);  nonzero = None
         alias_default: "f32[s77][1]cpu" = torch.ops.aten.alias.default(arg0_1)

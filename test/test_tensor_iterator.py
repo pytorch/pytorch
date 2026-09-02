@@ -148,8 +148,7 @@ class TestTensorIteratorBuild(TestCase):
         )
         self.assertEqual(it.device(0).type, "cpu")
 
-
-class TestTensorIteratorDeviceType(TestCase):
+class TestTensorIterator(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @parametrize(
@@ -378,7 +377,7 @@ class TestTensorIteratorDeviceType(TestCase):
         self.assertEqual(it.numel, 3)
 
 
-instantiate_device_type_tests(TestTensorIteratorDeviceType, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestTensorIterator, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
