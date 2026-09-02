@@ -1799,6 +1799,14 @@ def optimize(*args: Any, **kwargs: Any) -> OptimizeContext | _NullDecorator:
     return _optimize(rebuild_ctx, *args, **kwargs)
 
 
+def _backend_emits_native_code(backend: str | Callable[..., Any] | None) -> bool:
+    # get_compiler_fn erases the name, and torch.compile hands us a
+    # _TorchCompileWrapper rather than the string the user wrote.
+    from torch._dynamo.package import emits_native_code
+
+    return emits_native_code(str(getattr(backend, "compiler_name", backend)))
+
+
 def _optimize(
     rebuild_ctx: Callable[[], OptimizeContext | _NullDecorator],
     backend: str | Callable[..., Any] = "inductor",
@@ -1886,13 +1894,7 @@ def _optimize(
             dynamic_shapes=dynamic_shapes,
         )
 
-    # get_compiler_fn erases the name, and torch.compile hands us a
-    # _TorchCompileWrapper rather than the string the user wrote.
-    from torch._dynamo.package import emits_native_code as _emits_native_code
-
-    emits_native_code = _emits_native_code(
-        str(getattr(backend, "compiler_name", backend))
-    )
+    emits_native_code = _backend_emits_native_code(backend)
     backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
@@ -2842,13 +2844,7 @@ def _optimize_assert(
     Used for fullgraph=True and export, since we must always error on graph breaks and ignore
     symbolic_convert.error_on_graph_break. Can also be used for testing.
     """
-    # get_compiler_fn erases the name, and torch.compile hands us a
-    # _TorchCompileWrapper rather than the string the user wrote.
-    from torch._dynamo.package import emits_native_code as _emits_native_code
-
-    emits_native_code = _emits_native_code(
-        str(getattr(backend, "compiler_name", backend))
-    )
+    emits_native_code = _backend_emits_native_code(backend)
     backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
