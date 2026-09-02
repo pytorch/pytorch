@@ -252,15 +252,6 @@ using detail::CuBlasLtGroupedMatrixLayout;
 
 template <typename Dtype, typename C_Dtype = Dtype>
 static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
-#if defined(USE_ROCM) && ROCM_VERSION == 60400
-  // regression in ROCm 6.4, planned fixed in 6.4.1, hipblaslt TT fp32 calculation errors
-  // best to disallow hipblaslt for this specific case
-  if constexpr (std::is_same_v<Dtype, float>) {
-    if (detail::cublasOpFromChar(transa) == CUBLAS_OP_T && detail::cublasOpFromChar(transb) == CUBLAS_OP_T) {
-        return false;
-    }
-  }
-#endif
   const auto type_info = detail::getCublasLtTypeInfo<Dtype, C_Dtype>();
   const cudaDataType_t abType = type_info.ab_type;
   const cudaDataType_t cType = type_info.c_type;
@@ -1885,18 +1876,16 @@ void scaled_gemm(
     matmulDescB = HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT;
   }
   else if (mat1_scale_dtype == kFloat8_e8m0fnu && mat2_scale_dtype == kFloat8_e8m0fnu) {
-  #if ROCM_VERSION >= 70000
-            std::vector<std::string> mx_archs{"gfx950"};
-  #if ROCM_VERSION >= 71400
-            mx_archs.push_back("gfx1250");
-  #endif
-            if (at::detail::getCUDAHooks().isGPUArch(mx_archs)) {
-                // TODO: add constraints based on hipblaslt internals
-                TORCH_CHECK((m % 16 == 0) && (n % 16 == 0) && (k % 128 == 0),
-                           "M, N must be multiples of 16 and K should be multiple of 128 for MX format. "
-                           "Got m=", m, ", n=", n, ", k=", k);
-            }
-  #endif
+    std::vector<std::string> mx_archs{"gfx950"};
+#if ROCM_VERSION >= 71400
+    mx_archs.push_back("gfx1250");
+#endif
+    if (at::detail::getCUDAHooks().isGPUArch(mx_archs)) {
+      // TODO: add constraints based on hipblaslt internals
+      TORCH_CHECK((m % 16 == 0) && (n % 16 == 0) && (k % 128 == 0),
+                 "M, N must be multiples of 16 and K should be multiple of 128 for MX format. "
+                 "Got m=", m, ", n=", n, ", k=", k);
+    }
   }
 #elif (CUDA_VERSION < 12090) && !defined(USE_ROCM)
   // hipblaslt supported row-wise before cublas, and did so their own way (via
