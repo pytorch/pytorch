@@ -66,8 +66,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
         size_bytes_(std::move(size_bytes)),
         size_bytes_is_heap_allocated_(size_bytes_.is_heap_allocated()),
         resizable_(resizable),
-        received_cuda_(false),
-        received_xpu_(false),
+        received_ipc_(false),
         allocator_(allocator) {
     if (resizable) {
       TORCH_INTERNAL_ASSERT(
@@ -281,23 +280,14 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   // This method can be used only after storage construction and cannot be used
-  // to modify storage status
-  void set_received_cuda(bool received_cuda) {
-    received_cuda_ = received_cuda;
+  // to modify storage status. Indicates storage was received from another process
+  // via IPC (CUDA, XPU, or other accelerator) and doesn't have local allocation.
+  void set_received_ipc(bool received_ipc) {
+    received_ipc_ = received_ipc;
   }
 
-  bool received_cuda() {
-    return received_cuda_;
-  }
-
-  // This method can be used only after storage construction and cannot be used
-  // to modify storage status
-  void set_received_xpu(bool received_xpu) {
-    received_xpu_ = received_xpu;
-  }
-
-  bool received_xpu() const {
-    return received_xpu_;
+  bool received_ipc() const {
+    return received_ipc_;
   }
 
   impl::PyObjectSlot* pyobj_slot() {
@@ -390,12 +380,9 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   SymInt size_bytes_;
   bool size_bytes_is_heap_allocated_;
   bool resizable_;
-  // Identifies that Storage was received from another process and doesn't have
-  // local to process cuda memory allocation
-  bool received_cuda_;
-  // Identifies that Storage was received from another process via XPU IPC and
-  // doesn't have local to process XPU memory allocation
-  bool received_xpu_;
+  // Identifies that Storage was received from another process via IPC (CUDA, XPU,
+  // or other accelerator) and doesn't have local memory allocation.
+  bool received_ipc_;
   // All special checks in data/data_ptr calls are guarded behind this single
   // boolean. This is for performance: .data/.data_ptr calls are commonly in the
   // hot-path.

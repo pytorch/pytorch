@@ -291,7 +291,7 @@ static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* noargs) {
       "_share_cuda_: only available on CUDA");
   c10::StorageImpl* storage_impl = storage.unsafeGetStorageImpl();
 
-  if (storage_impl->received_cuda()) {
+  if (storage_impl->received_ipc()) {
     TORCH_CHECK(
         false,
         "Attempted to send CUDA tensor received from another process; this is not currently supported. Consider cloning before sending.");
@@ -549,7 +549,7 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
       /*resizable=*/false);
 
   base->set_resizable(false);
-  base->set_received_cuda(true);
+  base->set_received_ipc(true);
 
   return THPStorage_NewWithStorage(THPStorageClass, std::move(base));
 #else

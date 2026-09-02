@@ -267,7 +267,7 @@ at::DataPtr GetNewRefCountedXpuSentData(void* data, at::Device device) {
 } // namespace
 
 bool IsImportedXpuStorage(const c10::StorageImpl& storage) {
-  return storage.received_xpu();
+  return storage.received_ipc();
 }
 
 XpuSharedStorage ShareXpuStorage(const at::Storage& storage) {
@@ -361,7 +361,7 @@ c10::intrusive_ptr<at::StorageImpl> NewStorageFromXpuShared(
       std::move(data_ptr),
       nullptr,
       false);
-  storage->set_received_xpu(true);
+  storage->set_received_ipc(true);
   return storage;
 }
 
