@@ -4156,16 +4156,17 @@ def _get_unsupported_types() -> tuple[type, ...]:
 def _serializable_grad(t: torch.Tensor) -> torch.Tensor | None:
     """The .grad to carry through the meta round-trip for a guarded tensor.
 
-    Only leaves (and non-leaves that retain grad) can hold a grad; reading
-    .grad on any other non-leaf warns and returns None, so skip the read. A
-    non-strided grad (e.g. a sparse grad from nn.Embedding(sparse=True)) is
-    serialized as None: Dynamo refuses to trace sparse tensors, so no guard can
-    ever compare against its metadata, and pickling a meta tensor drops the
-    layout, which would otherwise substitute a dense stand-in.
+    Read unconditionally (a non-leaf can hold a manually assigned grad that a
+    GradSource guard then checks) but with the non-leaf warning suppressed, as
+    Dynamo's own builder does. A non-strided grad (e.g. a sparse grad from
+    nn.Embedding(sparse=True)) is serialized as None: Dynamo refuses to wrap
+    sparse tensors outside export, so no serialized guard compares against its
+    metadata, and pickling a meta tensor drops the layout, which would
+    otherwise substitute a dense stand-in.
     """
-    if not (t.is_leaf or t.retains_grad):
-        return None
-    grad = t.grad
+    from torch._subclasses.meta_utils import safe_grad
+
+    grad = safe_grad(t)
     if not isinstance(grad, torch.Tensor) or grad.layout != torch.strided:
         return None
     return grad
@@ -4367,10 +4368,7 @@ class GuardsStatePickler(pickle.Pickler):
             # the reduce tuple rather than re-reading obj.grad (a subclass may
             # route .grad through a descriptor returning a fresh object, whose
             # id would then miss the registration above).
-            # A non-strided grad (sparse COO/CSR, e.g. from embedding backward)
-            # cannot survive the meta round-trip -- empty_like on meta drops the
-            # layout -- so reject it rather than silently substituting a dense
-            # grad whose metadata would mismatch the real one at guard-check time.
+            # A non-strided grad is carried as None (see _serializable_grad).
             grad = _serializable_grad(obj)
             if grad is not None:
                 self.guard_tree_values.setdefault(id(grad), grad)
@@ -4898,8 +4896,12 @@ class CheckFunctionManager:
                 # `raise ... from`, so that covers the whole chain we own,
                 # while __context__ may point at an unrelated exception the
                 # caller is handling, whose traceback is not ours to drop.
+                # CPython only breaks cycles for __context__, not for an
+                # explicit `raise ... from`, so guard against a cyclic chain.
+                seen_links: set[int] = set()
                 link: BaseException | None = e
-                while link is not None:
+                while link is not None and id(link) not in seen_links:
+                    seen_links.add(id(link))
                     link.__traceback__ = None
                     link = link.__cause__
                 # Keep the frames' text (not the frames) on the exception so a
@@ -4954,9 +4956,10 @@ class CheckFunctionManager:
         for guard in sorted_guards:
             guard_type = guard.create_fn_name()
             derived_guard_types = tuple(guard.guard_types) if guard.guard_types else ()
-            # BUILTIN_MATCH calls TYPE_MATCH sometimes, so we need to check both for
-            # a chance that the guard is unserializable
-            if guard_type in ("TYPE_MATCH", "BUILTIN_MATCH"):
+            # BUILTIN_MATCH calls TYPE_MATCH sometimes, and FAKE_SCRIPT_TYPE_MATCH
+            # sets the same flag for a local-scope fake script type, so check
+            # every guard type that can mark itself unserializable.
+            if guard_type in ("TYPE_MATCH", "BUILTIN_MATCH", "FAKE_SCRIPT_TYPE_MATCH"):
                 if guard._unserializable:
                     # Only call builder.get again if we know we're going to throw
                     obj = builder.get(guard)
