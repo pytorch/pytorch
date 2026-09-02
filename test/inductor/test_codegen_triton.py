@@ -65,6 +65,7 @@ try:
         runner as LauncherScopeShadowConfig,
         tl as TritonLanguageShadowConfig,
         UserDefinedAttrsLikeConfig,
+        UserDefinedAttrsPrivateFieldConfig,
         UserDefinedPydanticLikeConfig,
         UserDefinedTritonKernelCoercingConfig,
         UserDefinedTritonKernelConfigMode,
@@ -83,6 +84,7 @@ except ImportError:
         runner as LauncherScopeShadowConfig,
         tl as TritonLanguageShadowConfig,
         UserDefinedAttrsLikeConfig,
+        UserDefinedAttrsPrivateFieldConfig,
         UserDefinedPydanticLikeConfig,
         UserDefinedTritonKernelCoercingConfig,
         UserDefinedTritonKernelConfigMode,
@@ -1626,6 +1628,29 @@ def helper(x):
         self.assertIs(type(rebuilt), config_type)
         self.assertEqual(rebuilt.nested, nested)
 
+    def test_constexpr_source_attrs_private_field_uses_alias(self):
+        nested = UserDefinedTritonKernelConfigNamespace.Nested(offset=2)
+        config = UserDefinedAttrsPrivateFieldConfig(nested=nested)
+        source, imports = _constexpr_source(config)
+        alias = "__inductor_constexpr_module_0"
+        self.assertEqual(
+            source,
+            f"{alias}.UserDefinedAttrsPrivateFieldConfig(nested={alias}.UserDefinedTritonKernelConfigNamespace.Nested(offset=2))",
+        )
+        scope = {}
+        exec("\n".join(imports), scope)
+        self.assertEqual(eval(source, scope), config)
+
+    def test_constexpr_nested_nan_decline_names_nan(self):
+        from torch._inductor.codegen.wrapper import _render_constexpr_mappings
+
+        # A NaN nested inside a container declines the whole value; the error
+        # must still name NaN as the cause rather than fall through to the
+        # generic message.
+        for value in ([1.0, float("nan")], {"k": (float("nan"),)}):
+            with self.assertRaisesRegex(RuntimeError, "NaN constexprs are rejected"):
+                _render_constexpr_mappings([{"CFG": value}])
+
     def test_constexpr_source_constructor_repr_declines(self):
         from torch._inductor.codegen.wrapper import _render_constexpr_mappings
 
@@ -2675,6 +2700,18 @@ def helper(x):
         self.assertIsNone(_constexpr_module_missing_in_worker(root_src, other))
         aliased = "from foo.bar import Cfg as Renamed\n"
         self.assertIsNone(_constexpr_module_missing_in_worker(aliased, err))
+        # `import foo` can fail because foo/__init__.py imports a submodule the
+        # worker lacks; the reported missing name is then a descendant of the
+        # constexpr module and must still be attributed to it.
+        parent_src = "import foo as __inductor_constexpr_module_0\n"
+        descendant = ModuleNotFoundError(
+            "No module named 'foo.helpers'", name="foo.helpers"
+        )
+        self.assertEqual(
+            _constexpr_module_missing_in_worker(parent_src, descendant), "foo"
+        )
+        lookalike = ModuleNotFoundError("No module named 'foobar'", name="foobar")
+        self.assertIsNone(_constexpr_module_missing_in_worker(parent_src, lookalike))
         # A formatted worker traceback may chain the constexpr import failure
         # before an unrelated secondary one; any reported missing module that
         # matches a constexpr import is attributed regardless of chain order,

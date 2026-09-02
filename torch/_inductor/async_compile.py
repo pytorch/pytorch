@@ -124,9 +124,16 @@ def _constexpr_module_missing_in_worker(
     # A formatted traceback can chain an unrelated secondary import failure
     # after the constexpr one, so match any reported missing module against the
     # constexpr imports rather than committing to whichever propagated last.
+    # The missing name may be an ancestor of the constexpr module (importing
+    # foo.bar fails at foo) or a descendant (foo/__init__.py imports
+    # foo.helpers, which is what the worker lacks).
     for name in candidates:
         for module in modules:
-            if module == name or module.startswith(name + "."):
+            if (
+                module == name
+                or module.startswith(name + ".")
+                or name.startswith(module + ".")
+            ):
                 return module
     return None
 

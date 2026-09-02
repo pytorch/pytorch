@@ -1748,6 +1748,15 @@ def _graph_differentiates(gm: GraphModule) -> bool:
     ``threshold_backward``). Matching the suffix rather than any occurrence of
     "backward" avoids a spurious hit on an op whose name merely contains the
     substring, and avoids stringifying placeholders/get_attrs entirely.
+
+    This is a name heuristic, consulted only when the capture produced no joint
+    graph (``"bw" in dense`` is authoritative otherwise). The dense graph carries
+    no autograd metadata that could say more: functionalization has already
+    erased requires_grad from node values. Its one blind spot is a backward
+    expressed through a custom op whose name lacks the ``_backward`` suffix; such
+    a graph lowers with ``is_inference=True``, i.e. inductor's inference layout
+    heuristics and post-grad passes, which is a performance rather than a
+    correctness difference.
     """
     import torch
 
