@@ -1207,7 +1207,7 @@ def lp_pool2d(
 def lp_pool1d(
     input: Tensor,
     norm_type: int | float,
-    kernel_size: int,
+    kernel_size: BroadcastingList1[int],
     stride: Optional[BroadcastingList1[int]] = None,  # noqa: UP045
     ceil_mode: bool = False,
 ) -> Tensor:
@@ -1231,6 +1231,7 @@ def lp_pool1d(
             stride=stride,
             ceil_mode=ceil_mode,
         )
+    (kw,) = _single(kernel_size)
     if isinstance(norm_type, (int, float)):
         if norm_type == 0:
             raise ValueError(f"norm_type must be a non-zero value, but got {norm_type}")
@@ -1247,7 +1248,7 @@ def lp_pool1d(
         )
 
     return (
-        (torch.sign(out) * relu(torch.abs(out))).mul(kernel_size).pow(1.0 / norm_type)
+        (torch.sign(out) * relu(torch.abs(out))).mul(kw).pow(1.0 / norm_type)
     )
 
 
