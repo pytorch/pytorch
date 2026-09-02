@@ -19,6 +19,7 @@ from torch.optim.lr_scheduler import (
     OneCycleLR,
     PlateauLR,
     PolynomialLR,
+    ReduceLROnPlateau,
     SequentialLR,
     StepLR,
 )
@@ -57,6 +58,7 @@ schedulers = [
     (lambda opt: CyclicLR(opt, base_lr=0.01, max_lr=0.1, step_size_up=10)),
     (lambda opt: OneCycleLR(opt, max_lr=0.01, epochs=10, steps_per_epoch=10)),
     (lambda opt: PlateauLR(opt, mode="min")),
+    (lambda opt: ReduceLROnPlateau(opt, mode="min")),
     (lambda opt: ChainedScheduler(constant_exponential_schedulers(opt))),
     (
         lambda opt: SequentialLR(
@@ -79,7 +81,7 @@ def plot_function(scheduler):
 
     for _ in range(num_epochs):
         lrs.append(optimizer.param_groups[0]["lr"])
-        if isinstance(scheduler, PlateauLR):
+        if isinstance(scheduler, (PlateauLR, ReduceLROnPlateau)):
             val_loss = torch.randn(1).item()
             scheduler.step(metrics=val_loss)
         else:
