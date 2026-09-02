@@ -638,12 +638,17 @@ class AutogradCompilerInstance:
         # Passing the context itself to an allow_in_graph target would require
         # Dynamo to proxy AutogradFunctionContextVariable.
         grad_output_prototypes = ctx._aot_grad_output_prototypes  # type: ignore[attr-defined]
-        pgrad_output_prototype_objects = self.fx_tracer.create_proxy(
-            kind="call_function",
-            target=getattr,
-            args=(pctx, "_aot_grad_output_prototype_objects"),
-            kwargs={},
-        )
+        # With the feature off nothing consumes the prototypes, and the default
+        # compiled-autograd graph must stay byte-for-byte unchanged, so the
+        # getattr node is only emitted when pruning is on.
+        pgrad_output_prototype_objects = None
+        if aot_config.prune_unused_outputs:
+            pgrad_output_prototype_objects = self.fx_tracer.create_proxy(
+                kind="call_function",
+                target=getattr,
+                args=(pctx, "_aot_grad_output_prototype_objects"),
+                kwargs={},
+            )
 
         @torch._dynamo.allow_in_graph  # type: ignore[misc]
         def call_aot_bwd_prologue(
@@ -651,7 +656,7 @@ class AutogradCompilerInstance:
             ctx_symints: Sequence[IntLikeType],
             ctx_opaque_objs: Sequence[Any],
             flat_args: Sequence[Any],
-            grad_output_prototype_objects: Sequence[Any],
+            grad_output_prototype_objects: Sequence[Any] = (),
         ) -> Any:
             flat_args_list = list(flat_args)
             return bw_prologue_fn(
@@ -673,7 +678,11 @@ class AutogradCompilerInstance:
                 psymints,
                 popaque_objects,
                 pinputs,
-                pgrad_output_prototype_objects,
+                *(
+                    [pgrad_output_prototype_objects]
+                    if pgrad_output_prototype_objects is not None
+                    else []
+                ),
             ),
             kwargs={},
         )

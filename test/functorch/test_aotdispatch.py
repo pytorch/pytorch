@@ -234,6 +234,18 @@ def unpack_fp8_with_scale(packed):
     return _unpack_fp8_with_scale_wrap(packed)
 
 
+@torch.library.custom_op("aot_test_prune::affine_backward", mutates_args=())
+def _aot_test_prune_affine_backward(
+    grad_output: torch.Tensor, x: torch.Tensor
+) -> torch.Tensor:
+    return grad_output + x
+
+
+@_aot_test_prune_affine_backward.register_fake
+def _(grad_output, x):
+    return torch.empty_like(x)
+
+
 class AOTTestCase(TestCase):
     def assertTensorMetadataEqual(self, actual, expected):
         self.assertEqual(tuple(actual.shape), tuple(expected.shape))
@@ -1420,6 +1432,7 @@ def forward(self, primals_1):
         self.assertIsNone(y_test.a.grad)
         self.assertIsNone(y_test.b.grad)
 
+    @torch._functorch.config.patch(aot_autograd_prune_unused_outputs=True)
     def test_unused_differentiable_outputs_with_view_output(self):
         @torch.compile(backend="aot_eager")
         def fn(x):
@@ -1787,6 +1800,153 @@ def forward(self, primals_1):
         self.assertEqual(x_ref.grad, x_test.grad)
         self.assertIsNone(y_ref.grad)
         self.assertIsNone(y_test.grad)
+
+    @staticmethod
+    def _two_branch_fn(x, y):
+        # Each branch saves a relu mask (detach_N) for its backward; retracing
+        # with the y branch's tangent undefined drops that branch and renumbers
+        # the x mask to the y mask's former name.
+        return (x * 2).relu(), y.sin().relu()
+
+    def _eager_two_branch_grads(self, x, y):
+        x_ref = x.detach().clone().requires_grad_()
+        y_ref = y.detach().clone().requires_grad_()
+        self._two_branch_fn(x_ref, y_ref)[0].sum().backward()
+        return x_ref.grad, y_ref.grad
+
+    @torch._functorch.config.patch(
+        aot_autograd_prune_unused_outputs=True, donated_buffer=False
+    )
+    def test_unused_differentiable_outputs_retrace_binds_saved_activations_structurally(
+        self,
+    ):
+        # Name-only binding of saved activations handed the x backward the y
+        # branch's mask (same codegen name after the retrace renumbered nodes);
+        # binding must match what the activation computes.
+        x = torch.randn(8, requires_grad=True)
+        y = torch.randn(8, requires_grad=True)
+        x_grad, y_grad = self._eager_two_branch_grads(x, y)
+        out = torch.compile(self._two_branch_fn, backend="aot_eager")(x, y)
+        out[0].sum().backward()
+        self.assertEqual(x.grad, x_grad)
+        self.assertIsNone(y.grad)
+        self.assertIsNone(y_grad)
+
+    @torch._functorch.config.patch(
+        aot_autograd_prune_unused_outputs=True, donated_buffer=True
+    )
+    @torch._inductor.config.patch(fx_graph_cache=False)
+    def test_unused_differentiable_outputs_retrace_remaps_donated_buffers(self):
+        # The retraced backward keeps a subset of the original inputs, so the
+        # original positional donated-buffer indices must be remapped before
+        # inductor applies them; otherwise a tangent is marked donated and the
+        # user's grad tensor is overwritten in place.
+        x = torch.randn(8, requires_grad=True)
+        y = torch.randn(8, requires_grad=True)
+        x_grad, _ = self._eager_two_branch_grads(x, y)
+        out = torch.compile(self._two_branch_fn, backend="inductor")(x, y)
+        grad = torch.randn(8)
+        grad_copy = grad.clone()
+        out[0].backward(grad)
+        self.assertEqual(grad, grad_copy)
+        self.assertEqual(x.grad, torch.where(x.detach() * 2 > 0, grad_copy * 2, 0.0))
+
+    @torch._functorch.config.patch(aot_autograd_prune_unused_outputs=True)
+    def test_unused_differentiable_outputs_do_not_fold_custom_backward_ops(self):
+        # Only aten backward formulas are linear in their grad arguments; a
+        # custom op merely named *_backward (here grad_output + x) must not be
+        # folded to zero when its tangent is pruned.
+        class Affine(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad):
+                (x,) = ctx.saved_tensors
+                return torch.ops.aot_test_prune.affine_backward(grad, x)
+
+        def fn(x, y):
+            return Affine.apply(x), y.cos()
+
+        x = torch.randn(4, requires_grad=True)
+        y = torch.randn(4, requires_grad=True)
+        x_ref = x.detach().clone().requires_grad_()
+        fn(x_ref, y.detach().clone().requires_grad_())[0].sum().backward()
+        torch.compile(fn, backend="aot_eager")(x, y)[0].sum().backward()
+        self.assertEqual(x.grad, x_ref.grad)
+
+    def test_prunes_to_zero_only_folds_aten_backward_ops(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _all_backward_grad_args_are_pruned_zeros,
+            _PRUNED_ZERO,
+        )
+
+        x = torch.randn(2)
+        self.assertTrue(
+            _all_backward_grad_args_are_pruned_zeros(
+                torch.ops.aten.threshold_backward.default, (_PRUNED_ZERO, x, 0), {}
+            )
+        )
+        self.assertFalse(
+            _all_backward_grad_args_are_pruned_zeros(
+                torch.ops.aot_test_prune.affine_backward.default, (_PRUNED_ZERO, x), {}
+            )
+        )
+
+    @torch._functorch.config.patch(aot_autograd_prune_unused_outputs=True)
+    def test_unused_differentiable_outputs_concurrent_backwards(self):
+        # Threads take different masks through the same compiler concurrently;
+        # every backward must return the eager gradient with no spurious
+        # assertion, None tangent, or torn cache read.
+        import threading
+
+        def fn(x, y):
+            return x.sin(), y.cos()
+
+        compiled = torch.compile(fn, backend="aot_eager")
+        # Compile the forward here: config.patch is thread-scoped, so a forward
+        # first compiled inside a worker would snapshot the flag as off.
+        compiled(torch.randn(4, requires_grad=True), torch.randn(4, requires_grad=True))
+        failures = []
+
+        def worker(pick):
+            try:
+                for _ in range(4):
+                    x = torch.randn(4, requires_grad=True)
+                    y = torch.randn(4, requires_grad=True)
+                    out = compiled(x, y)
+                    out[pick].sum().backward()
+                    kept, dropped = (x, y) if pick == 0 else (y, x)
+                    expected = (
+                        kept.detach().cos() if pick == 0 else -kept.detach().sin()
+                    )
+                    if dropped.grad is not None or not torch.allclose(
+                        kept.grad, expected
+                    ):
+                        failures.append((pick, kept.grad, dropped.grad))
+            except Exception as e:
+                failures.append(e)
+
+        threads = [threading.Thread(target=worker, args=(i % 2,)) for i in range(6)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(failures, [])
+
+    @torch._functorch.config.patch(aot_autograd_prune_unused_outputs=True)
+    def test_unused_differentiable_outputs_autograd_grad_subset(self):
+        def fn(x, y):
+            return x.sin(), y.cos()
+
+        x = torch.randn(4, requires_grad=True)
+        y = torch.randn(4, requires_grad=True)
+        out = torch.compile(fn, backend="aot_eager")(x, y)
+        gx, gy = torch.autograd.grad(out[0].sum(), (x, y), allow_unused=True)
+        self.assertEqual(gx, x.detach().cos())
+        self.assertIsNone(gy)
 
     @torch._functorch.config.patch(
         aot_autograd_prune_unused_outputs=True, donated_buffer=True
@@ -6449,6 +6609,9 @@ def forward(self, tangents_1):
         ref_out.sum().backward()
         ref_grad, x.grad = x.grad, None
         out, detached = torch.compile(f, backend="inductor")(x)
+        # The test is only meaningful while inductor actually aliases the two
+        # slots; fail loudly if a lowering change makes it vacuous.
+        self.assertEqual(out.data_ptr(), detached.data_ptr())
         self.assertFalse(detached.requires_grad)
         out.sum().backward()
         self.assertEqual(x.grad, ref_grad)
@@ -6456,8 +6619,9 @@ def forward(self, tangents_1):
     def test_non_differentiable_output_aliasing_intermediate_base(self):
         # y is an intermediate base aliased by two differentiable view outputs;
         # returning y.detach() as a third slot shares y's TensorImpl (inductor
-        # lowers detach to a no-op), so marking it non-differentiable would mark
-        # y's base -- which the backward requires a tangent for -- and raise.
+        # lowers detach to a no-op), so marking it non-differentiable marks y's
+        # base and the regenerated views come back disconnected from x: the
+        # backward runs but x.grad stays None.
         def f(x):
             y = x * 2
             return y[:2], y[2:], y.detach()
@@ -6467,6 +6631,7 @@ def forward(self, tangents_1):
         (ref_a.sum() + ref_b.sum()).backward()
         ref_grad, x.grad = x.grad, None
         a, b, detached = torch.compile(f, backend="inductor")(x)
+        self.assertEqual(a.data_ptr(), detached.data_ptr())
         self.assertFalse(detached.requires_grad)
         (a.sum() + b.sum()).backward()
         self.assertEqual(x.grad, ref_grad)
@@ -6500,16 +6665,6 @@ def forward(self, tangents_1):
         self.assertIs(returns[1], marker)
         self.assertIsNot(returns[2], shared)
 
-        # An unmarked slot already wrapped in TensorAlias (aliased output or
-        # metadata-mutated input) still collides through the wrapper.
-        from torch._functorch._aot_autograd.schemas import TensorAlias
-
-        wrapped = TensorAlias(shared)
-        returns = [wrapped, shared]
-        _dealias_marked_returns(returns, [1])
-        self.assertIs(returns[0], wrapped)
-        self.assertIsNot(returns[1], shared)
-
         # Two marked slots sharing one object with no unmarked partner are
         # left alone: marking either marks both, and both are meant to be.
         returns = [shared, shared]
@@ -6529,16 +6684,19 @@ def forward(self, tangents_1):
         ref_out.sum().backward()
         ref_grad, x.grad = x.grad, None
         out, d1, d2 = torch.compile(f, backend="inductor")(x)
+        self.assertEqual(out.data_ptr(), d1.data_ptr())
+        self.assertEqual(out.data_ptr(), d2.data_ptr())
         self.assertFalse(d1.requires_grad)
         self.assertFalse(d2.requires_grad)
         out.sum().backward()
         self.assertEqual(x.grad, ref_grad)
 
-    def test_non_differentiable_output_with_mutated_input(self):
-        # A data-mutated input occupies a leading raw_returns slot (marked
-        # non-differentiable when it does not require grad) alongside a
-        # detached view of it; neither marking may leak onto the
-        # differentiable output.
+    def test_non_differentiable_alias_of_mutated_input(self):
+        # A non-differentiable output that aliases a data-mutated input arrives
+        # as a TensorAlias slot (never marked, never probed); the mutation
+        # itself stays in-graph because y does not require grad. No collision
+        # occurs here; the test pins that this shape keeps working alongside
+        # the dealiasing epilogue.
         def f(x, y):
             y.mul_(2)
             return x * 2 + y, y.detach()
@@ -10821,6 +10979,7 @@ def forward(self, primals_1, tangents_1):
         actual = self._run_with_compiled_autograd(run)
         self.assertEqual(actual, expected)
 
+    @torch._functorch.config.patch(aot_autograd_prune_unused_outputs=True)
     def test_compiled_autograd_unused_mutated_input_output(self):
         @torch.compile(backend="aot_eager")
         def f(x, y):
