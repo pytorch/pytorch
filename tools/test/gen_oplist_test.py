@@ -20,9 +20,10 @@ class GenOplistTest(unittest.TestCase):
             ("op3", MagicMock(include_all_overloads=True)),
         ]
 
-        self.assertRaises(
-            Exception, throw_if_any_op_includes_overloads, selective_builder
-        )
+        with self.assertRaisesRegex(
+            ValueError, "Operators that include all overloads are not allowed"
+        ):
+            throw_if_any_op_includes_overloads(selective_builder)
 
         selective_builder.operators.items.return_value = [
             ("op1", MagicMock(include_all_overloads=False)),
