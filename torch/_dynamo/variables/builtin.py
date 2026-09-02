@@ -2049,10 +2049,11 @@ class BuiltinVariable(BaseBuiltinVariable):
             fail(args, kwargs)
 
         if check_constant_args(args[1:], kwargs):
+            const_args = [a.as_python_constant() for a in args[1:]]
             try:
                 r = builtins.__build_class__(
                     fn,  # type: ignore[possibly-undefined]
-                    *[a.as_python_constant() for a in args[1:]],
+                    *const_args,
                 )
             except Exception as exc:
                 # A class body that fails CPython's own validation (e.g. an
