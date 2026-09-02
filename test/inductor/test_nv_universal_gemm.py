@@ -122,6 +122,48 @@ def _nvgemm_config(**overrides):
 class TestNVUniversalGemm(TestCase):
     """Test cases for NVIDIA Universal GEMM functionality."""
 
+    def test_direct_epilogue_cache_signature_distinguishes_wrapped_tensors(self):
+        from cutlass.operators.utils.tensor import TensorWrapper
+
+        from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
+            _epilogue_args_signature,
+        )
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            CuTeDSLEpilogueArguments,
+        )
+
+        source = "def epilogue(accum, D):\n    return D"
+
+        def signature(tensor, alignment_bytes=16, *, preserve_layout=False):
+            args = CuTeDSLEpilogueArguments(source, D=tensor)
+            args.to_tensor_wrappers()
+            if preserve_layout or alignment_bytes != 16:
+                args.tensors["D"] = TensorWrapper(tensor, alignment_bytes)
+            return _epilogue_args_signature(args)
+
+        contiguous = torch.empty(4, 8, device="cuda", dtype=torch.bfloat16)
+        transposed = torch.empty(8, 4, device="cuda", dtype=torch.bfloat16).T
+        different_shape = torch.empty(8, 8, device="cuda", dtype=torch.bfloat16)
+        different_dtype = contiguous.float()
+        scalar = torch.empty((), device="cuda", dtype=torch.bfloat16)
+        scalar_physical_shape = torch.empty(8, 1, device="cuda", dtype=torch.bfloat16)
+
+        signatures = {
+            signature(contiguous, alignment_bytes=4),
+            signature(transposed, preserve_layout=True),
+            *(
+                signature(tensor)
+                for tensor in (
+                    contiguous,
+                    different_shape,
+                    different_dtype,
+                    scalar,
+                    scalar_physical_shape,
+                )
+            ),
+        }
+        self.assertEqual(len(signatures), 7)
+
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     @parametrize(
         "layout_a,layout_b",
