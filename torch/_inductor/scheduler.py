@@ -9078,7 +9078,10 @@ class Scheduler:
             return None
 
         snodes = [subnode for node in nodes for subnode in node.get_nodes()]
-        if not snodes or not all(isinstance(node, SchedulerNode) for node in snodes):
+        if not snodes or not all(
+            isinstance(node, SchedulerNode) and node._body is not None
+            for node in snodes
+        ):
             return None
 
         if any(node.is_cpu() for node in snodes):
@@ -9194,7 +9197,10 @@ class Scheduler:
         red_rnumel = typing.cast(sympy.Expr, groups[1])
         target_numel = red_numel * red_rnumel
 
-        if not all(isinstance(sn, SchedulerNode) for sn in pw_node.get_nodes()):
+        if not all(
+            isinstance(sn, SchedulerNode) and sn._body is not None
+            for sn in pw_node.get_nodes()
+        ):
             return False
         snodes = typing.cast(list[SchedulerNode], pw_node.get_nodes())
 
@@ -9653,6 +9659,11 @@ class Scheduler:
             return False
 
         why = WhyNoFuse(node1, node2)
+        if not self.get_backend(node1.get_device()).can_fuse_reduction_pair(
+            node1, node2
+        ):
+            why("incompatible reduction contracts")
+            return False
 
         if node1.is_template() and node2.has_strict_reduction():
             why("template fusion does not preserve strict reduction ordering")
@@ -9670,11 +9681,12 @@ class Scheduler:
             node1.get_device()
         ).can_fuse_multi_outputs_template(node1, node2):
             return True
-        if node1.is_template() and self.get_backend(
-            node1.get_device()
-        ).can_fuse_reduction_epilogue(node1, node2):
+        if (
+            node1.is_template() or isinstance(node1, FusedSchedulerNode)
+        ) and self.get_backend(node1.get_device()).can_fuse_reduction_epilogue(
+            node1, node2
+        ):
             return True
-
         if isinstance(node1, GroupedSchedulerNode) or isinstance(
             node2, GroupedSchedulerNode
         ):
@@ -12193,6 +12205,11 @@ class BaseScheduling:  # noqa: docstring_linter
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
         return False
+
+    def can_fuse_reduction_pair(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        return True
 
     def can_fuse_multi_outputs_template(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
