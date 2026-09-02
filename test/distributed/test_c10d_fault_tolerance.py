@@ -22,7 +22,6 @@ from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
     run_tests,
     TEST_CUDA,
-    TEST_WITH_ROCM,
     TestCase,
 )
 
@@ -357,8 +356,6 @@ class AbstractFaultToleranceTest:
     def test_reconfigure_timeout_is_retryable(self):
         if self.backend_name != "nccl2":
             self.skipTest("nonblocking NCCL initialization behavior")
-        if TEST_WITH_ROCM:
-            self.skipTest("RCCL issue being investigated")
         self._init_reconfigurable_pg()
         handles = self._collect_handles("ft_timeout_retry_initial")
 
