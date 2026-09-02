@@ -386,48 +386,13 @@ class TestVarlenAttentionDevice(NNTestCase):
                 scale=scale,
             )
 
-    @skipIfRocm
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
-    )
     def test_sdpa_kernel_backend_errors(self, device):
-        """Report forced-backend constraints instead of silently falling back."""
+        """Report an unusable backend selection instead of silently falling back."""
         seq_len = 256
         q = torch.randn(seq_len, 4, 64, device=device, dtype=torch.bfloat16)
         k = torch.randn_like(q)
         v = torch.randn_like(q)
         cu_seq = torch.tensor([0, seq_len], device=device, dtype=torch.int32)
-
-        short_seq = torch.tensor([0, 128], device=device, dtype=torch.int32)
-        with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
-            with self.assertRaises(RuntimeError) as error:
-                varlen_attn(
-                    q[:128],
-                    k[:128],
-                    v[:128],
-                    short_seq,
-                    short_seq,
-                    128,
-                    128,
-                    num_splits=1,
-                )
-        self.assertIn("max_q must", str(error.exception))
-        self.assertIn("num_splits", str(error.exception))
-
-        with (
-            sdpa_kernel(SDPBackend.CUDNN_ATTENTION),
-            self.assertRaisesRegex(RuntimeError, "same cu_seq tensor"),
-        ):
-            varlen_attn(
-                q,
-                k,
-                v,
-                cu_seq,
-                cu_seq.clone(),
-                seq_len,
-                seq_len,
-                window_size=(-1, 0),
-            )
 
         with (
             sdpa_kernel(SDPBackend.MATH),
@@ -436,7 +401,7 @@ class TestVarlenAttentionDevice(NNTestCase):
             varlen_attn(q, k, v, cu_seq, cu_seq, seq_len, seq_len)
 
         with (
-            sdpa_kernel(SDPBackend.CUDNN_ATTENTION),
+            sdpa_kernel(SDPBackend.MATH),
             self.assertRaisesRegex(RuntimeError, "only supports.*FLASH_ATTENTION"),
         ):
             varlen_attn_out(
@@ -1434,6 +1399,56 @@ class TestVarlenAttention(NNTestCase):
             self.assertEqual(
                 varlen_attention._select_backend(*args),
                 SDPBackend.CUDNN_ATTENTION.value,
+            )
+
+    @skipIfRocm
+    def test_cudnn_backend_constraint_errors(self, device):
+        """Name the cuDNN constraints that rejected a forced cuDNN selection."""
+        # Backend selection happens before dispatch, so this needs no cuDNN.
+        seq_len = 256
+        q = torch.randn(seq_len, 4, 64, device=device, dtype=torch.bfloat16)
+        k = torch.randn_like(q)
+        v = torch.randn_like(q)
+        cu_seq = torch.tensor([0, seq_len], device=device, dtype=torch.int32)
+
+        short_seq = torch.tensor([0, 128], device=device, dtype=torch.int32)
+        with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+            with self.assertRaises(RuntimeError) as error:
+                varlen_attn(
+                    q[:128],
+                    k[:128],
+                    v[:128],
+                    short_seq,
+                    short_seq,
+                    128,
+                    128,
+                    num_splits=1,
+                )
+        self.assertIn("max_q must", str(error.exception))
+        self.assertIn("num_splits", str(error.exception))
+
+        with (
+            sdpa_kernel(SDPBackend.CUDNN_ATTENTION),
+            self.assertRaisesRegex(RuntimeError, "same cu_seq tensor"),
+        ):
+            varlen_attn(
+                q,
+                k,
+                v,
+                cu_seq,
+                cu_seq.clone(),
+                seq_len,
+                seq_len,
+                window_size=(-1, 0),
+            )
+
+        # cuDNN is a valid varlen_attn backend, but varlen_attn_out is flash-only.
+        with (
+            sdpa_kernel(SDPBackend.CUDNN_ATTENTION),
+            self.assertRaisesRegex(RuntimeError, "only supports.*FLASH_ATTENTION"),
+        ):
+            varlen_attn_out(
+                torch.empty_like(q), q, k, v, cu_seq, cu_seq, seq_len, seq_len
             )
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179968")
