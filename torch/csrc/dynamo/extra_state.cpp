@@ -289,6 +289,7 @@ void ExtraState::clear_in_place() {
   std::list<PrecompileEntry> dead_precompile_entries;
   std::unordered_map<int64_t, std::list<CacheEntry>> dead_cache_entries;
   std::vector<std::pair<py::object, py::object>> dead_pending;
+  std::vector<PendingEviction> dead_evictions;
   py::dict dead_frame_state;
   std::unordered_map<int64_t, py::dict> dead_region_frame_state;
   {
@@ -308,8 +309,10 @@ void ExtraState::clear_in_place() {
       dead_cache_entries.swap(this->cache_entry_map);
       this->total_cache_entry_count = 0;
       // Nothing a parked eviction could still remove survives this clear.
+      // Swapped out, destroyed after the locks release like everything else
+      // here: an owner's decref may run Python.
       std::lock_guard<std::mutex> pending(this->pending_invalidation_mutex);
-      this->pending_evictions.clear();
+      dead_evictions.swap(this->pending_evictions);
       this->has_pending_evictions.store(false, std::memory_order_release);
     }
   }

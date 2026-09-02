@@ -2546,7 +2546,7 @@ class TestPrecompile(TestCase):
         # to refuse one the artifact was not captured from -- the same check
         # the path form makes -- or the wrong callable serves the captured
         # graphs. The function it WAS captured from is accepted.
-        code, cache = torch.compiler.precompile.artifact(
+        code, cache = torch.compiler.precompile(
             _precompile_unreachable_helper_caller,
             backend="eager",
             dynamic=False,
@@ -2571,7 +2571,7 @@ class TestPrecompile(TestCase):
         # Installing files the artifact's backends into the process-global
         # PrecompileContext. unload() has to take exactly those out again, or
         # every install/unload cycle leaks them for the life of the process.
-        code, cache = torch.compiler.precompile.artifact(
+        code, cache = torch.compiler.precompile(
             _precompile_unreachable_helper_caller,
             backend="eager",
             dynamic=False,
@@ -2982,7 +2982,6 @@ class TestPrecompile(TestCase):
         for (a_name, a), (b_name, b) in itertools.combinations(sets.items(), 2):
             self.assertEqual(sorted(a & b), [], f"{a_name} overlaps {b_name}")
 
-    @parametrize("where", ["object", "in_a_list"])
     def test_a_dict_membership_guard_is_never_dropped(self):
         # `"flag" in d` is a branch, and the guard pinning it (DICT_NOT_CONTAINS)
         # is a Python fact about a container's contents. Whatever the policy
@@ -2990,7 +2989,7 @@ class TestPrecompile(TestCase):
         # who holds the key -- so the artifact must refuse, not answer.
         x = torch.ones(2)
         with torch.no_grad():
-            code, cache = torch.compiler.precompile.artifact(
+            code, cache = torch.compiler.precompile(
                 _precompile_dict_flag_branch,
                 backend="eager",
                 dynamic=False,
@@ -3014,7 +3013,7 @@ class TestPrecompile(TestCase):
         other.load_state_dict(captured.state_dict())
         x = torch.ones(2)
         with torch.no_grad():
-            code, cache = torch.compiler.precompile.artifact(
+            code, cache = torch.compiler.precompile(
                 _precompile_call_model,
                 backend="eager",
                 dynamic=False,

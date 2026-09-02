@@ -37,10 +37,12 @@ violates the aliasing contract runs SILENTLY in the standalone artifact where th
 eager / compiled path would error -- an intentional trade-off, not a numerics bug.
 
 Not covered: a training artifact's ``.backward()`` cannot run under COMPILED AUTOGRAD.
-The emitted ``_CompiledFunction`` uses ``boxed_grads_call=True`` and carries no fx
-``bw_module`` (a source artifact has none to carry), so compiled autograd's
-``proxy_call_backward`` rejects it with a RuntimeError; run the served backward under
-the ordinary autograd engine. The runtime's real CompiledFunction does not have this
+Compiled autograd inlines an AOT backward from the fx ``bw_module`` the forward class
+carries as ``_lazy_backward_info``, and a source artifact has none to carry (its
+backward is already lowered to source). The emitted ``_CompiledFunction`` therefore
+refuses with ``NotImplementedError`` the moment compiled autograd reads that attribute,
+rather than letting it blame AOTAutogradCache; run the served backward under the
+ordinary autograd engine. The runtime's real CompiledFunction does not have this
 limitation -- it is the price of the source rendering.
 """
 
@@ -1167,6 +1169,19 @@ def _finalize(ctx, fw_outs):
     return tuple(raw_returns)
 
 
+class _NoCompiledAutograd:
+    # Compiled autograd reads _lazy_backward_info off the forward class before
+    # anything else (set_node_origin) and, finding None, blames AOTAutogradCache
+    # -- advice that cannot apply here. The real class holds an
+    # AutogradLazyBackwardCompileInfo there on a fresh compile (None is the
+    # cache-loaded case); this artifact has no fx bw_module to hand over, its
+    # backward is already lowered above, so refuse up front with the reason.
+    def __get__(self, obj, objtype=None):
+        raise NotImplementedError(
+            "compiled autograd is not supported for a standalone training artifact"
+        )
+
+
 class _CompiledFunction(torch.autograd.Function):
     # Same class attributes as AOTAutograd's CompiledFunction (runtime_wrappers.py).
     compiled_fw = _inner_call_fw
@@ -1176,9 +1191,7 @@ class _CompiledFunction(torch.autograd.Function):
     maybe_subclass_metadata = None
     num_symints_saved_for_bw = {spec.num_symints_saved_for_bw!r}
     _aot_id = {spec.aot_config.aot_id!r}
-    # The backward is already lowered above; None is what the real class holds
-    # once its backward is compiled eagerly.
-    _lazy_backward_info = None
+    _lazy_backward_info = _NoCompiledAutograd()
     _bw_prologue_fn = _backward_prologue
     _bw_epilogue_fn = _backward_epilogue
     _fwd_fn = _compiled_forward
