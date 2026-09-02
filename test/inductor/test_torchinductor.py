@@ -3554,6 +3554,46 @@ class CommonTemplate:
 
         self.common(fn, (torch.randint(4, (4,)),))
 
+    @parametrize("op", ("clamp", "clamp_min", "clamp_max"))
+    def test_clamp_scalar_overflow(self, op):
+        def fn(x):
+            if op == "clamp":
+                return torch.clamp(x, min=-3.4e39, max=3.4e39)
+            if op == "clamp_min":
+                return torch.clamp_min(x, -3.4e39)
+            return torch.clamp_max(x, 3.4e39)
+
+        x = torch.randn(4, device=self.device)
+        error = "value cannot be converted to type float without overflow"
+
+        with self.assertRaisesRegex(RuntimeError, error):
+            fn(x)
+        with self.assertRaisesRegex(RuntimeError, error):
+            torch.compile(fn)(x)
+
+    @parametrize(
+        "dtype, value",
+        (
+            (torch.float16, 100000.0),
+            (torch.bfloat16, 1e40),
+            (torch.float16, 100000),
+        ),
+    )
+    def test_clamp_scalar_overflow_lowp(self, dtype, value):
+        if not self.is_dtype_supported(dtype):
+            raise unittest.SkipTest(f"{dtype} not supported on {self.device}")
+
+        def fn(x):
+            return torch.clamp(x, min=-value, max=value)
+
+        x = torch.randn(4, device=self.device, dtype=dtype)
+        error = "value cannot be converted to type .* without overflow"
+
+        with self.assertRaisesRegex(RuntimeError, error):
+            fn(x)
+        with self.assertRaisesRegex(RuntimeError, error):
+            torch.compile(fn)(x)
+
     def test_comparison_scalar_type_promotion_bf16(self):
         if self.device == "mps":
             raise unittest.SkipTest(
