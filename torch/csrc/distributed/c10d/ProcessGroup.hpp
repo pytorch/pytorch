@@ -1202,6 +1202,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   c10::intrusive_ptr<c10d::Store> store_;
+  // Split children use distinct prefixes over one parent-owned connection.
+  c10::intrusive_ptr<c10d::Store> split_store_;
   // Fallback rank/size used only when there is no default backend; the default
   // backend is otherwise the source of truth (see getRank/getSize).
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
