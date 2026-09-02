@@ -2667,6 +2667,12 @@
   "GB0166": [
     {
       "Gb_type": "Unsupported torch._C._ImperativeEngine.queue_callback()",
+      "Context": "call_method {self} queue_callback",
+      "Explanation": "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True.",
+      "Hints": []
+    },
+    {
+      "Gb_type": "Unsupported torch._C._ImperativeEngine.queue_callback()",
       "Context": "call_method {self} {name}",
       "Explanation": "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True.",
       "Hints": []
