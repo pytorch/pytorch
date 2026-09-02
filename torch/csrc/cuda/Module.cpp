@@ -15,7 +15,6 @@
 #if AT_CUDNN_ENABLED()
 
 #endif
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CachingHostAllocator.h>
 #include <ATen/cuda/Sleep.h>
@@ -48,7 +47,6 @@
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <array>
-#include <chrono>
 #include <iostream>
 #include <sstream>
 #include <thread>
