@@ -337,9 +337,11 @@ tensorboard==2.18.0 ; python_version >= "3.13"
 #test that import: test_tensorboard
 
 pywavelets==1.4.1 ; python_version < "3.12"
-pywavelets==1.7.0 ; python_version >= "3.12"
+pywavelets==1.7.0 ; python_version >= "3.12" and python_version < "3.14"
+pywavelets==1.9.0 ; python_version >= "3.14"
 #Description: This is a requirement of scikit-image, we need to pin
 # it here because 1.5.0 conflicts with numpy 1.21.2 used in CI
+# 1.7.0 has no cp314 wheel; 1.9.0 ships wheels for 3.14
 #Pinned versions: 1.4.1
 #test that import:
 
