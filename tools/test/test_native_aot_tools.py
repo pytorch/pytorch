@@ -2164,11 +2164,7 @@ class TestWheelPatch(unittest.TestCase):
                 self.assertIsNone(zf.testzip())
 
     def test_zip64_members_survive_the_copy(self):
-        # ZIP64_LIMIT is patched rather than writing 2 GiB. (a) a member that no longer
-        # needs a ZIP64 extra must not keep the source's, whose 0x0001 field records an
-        # offset in the source archive that `uv` refuses. (b) a member above the limit
-        # must still write, which is what carrying file_size onto the fresh ZipInfo is
-        # for: left at 0 it decides against a ZIP64 header and raises on close.
+        # ZIP64_LIMIT is patched rather than writing 2 GiB, once either side of it.
         with tempfile.TemporaryDirectory() as d:
             with mock.patch.object(zipfile, "ZIP64_LIMIT", 2):
                 whl = self._make_wheel(d)  # every member gets a real ZIP64 extra
@@ -2616,8 +2612,7 @@ class TestShouldRun(unittest.TestCase):
     def _verdict(self, env):
         """(stdout, stderr) of `--print-verdict`, captured separately."""
         out, err = io.StringIO(), io.StringIO()
-        # Every probe true except hip: all-true means ROCm, which skips before the
-        # arch logic under test.
+        # All-true would mean ROCm, which skips before the arch logic under test.
         probe = lambda e: e != "torch.version.hip is not None"  # noqa: E731
         with contextlib.ExitStack() as stack:
             # Through main() rather than _run, so it needs the same REPO redirect, or
@@ -3861,9 +3856,7 @@ class TestWheelRefusal(unittest.TestCase):
                 build_stage2.main(["--wheel", "/tmp/nonexistent.whl"])
 
     def test_the_refusal_is_ahead_of_every_applicability_gate(self):
-        # Why build.sh guards the whole block with *cuda*: this refusal cannot consult
-        # should_run, which imports torch to know whether the build is CUDA, so a
-        # --wheel caller whose torch legitimately does not import must not reach it.
+        # The refusal cannot consult should_run, which needs torch: hence the guard.
         called = []
         with (
             mock.patch.object(build_stage2, "_torch_probe", lambda e: False),
@@ -4247,9 +4240,7 @@ class TestCiAndCMakeWiring(unittest.TestCase):
         )
 
     def test_stage_two_is_cuda_guarded_in_both_ci_shells(self):
-        # Unguarded, build.sh runs `--wheel` for every non-libtorch build and the
-        # refusal fails ASan and TSan, where `import torch` cannot work. Structure, not
-        # the literal: the call must sit between the guard and its matching fi.
+        # Structure, not the literal: the call must sit between the guard and its fi.
         text = self._read(".ci/pytorch/build.sh")
         # The closing marker must exist: partitioning on a missing separator returns
         # the whole string, and the assertions below would match an unrelated guard.
@@ -4282,9 +4273,7 @@ class TestCiAndCMakeWiring(unittest.TestCase):
                 self.assertLess(at, disable, "and unset only AFTER it has expanded")
 
     def test_the_documented_skip_reasons_match_should_run(self):
-        # The module docstring, CONTRIBUTING.md and should_run() are three statements of
-        # one list, and the COUNT is what keeps them in step: a tenth docstring bullet
-        # fails here until the doc line carries it.
+        # The count is what keeps docstring, CONTRIBUTING.md and should_run() in step.
         doc = build_stage2.__doc__
         contributing = self._read("CONTRIBUTING.md")
         arms = (
@@ -4358,9 +4347,7 @@ class TestStageTwoArgvContract(unittest.TestCase):
         return cmd, env
 
     def test_both_children_are_given_the_one_artifacts_directory(self):
-        # The other half of this class's invariant: both children must be pointed at the
-        # same tree, or export writes tree A while generation reads tree B and stage 2
-        # exits 0. Asserted inside the fixture, which patches the constant compared.
+        # Both children must get the same tree, or export writes A, generation reads B.
         with self._run_main(None) as calls:
             export_cmd, _ = self._args_of(calls, "export.py")
             gen_cmd, _ = self._args_of(calls, "gen_aot_lib.py")
@@ -4404,19 +4391,15 @@ class TestStageTwoArgvContract(unittest.TestCase):
             self.assertNotIn("--arch-list", cmd)
 
     def test_every_tree_export_creates_is_one_generation_was_told_about(self):
-        # The invariant: the arch name appears in the artifact directory, the sidecar,
-        # generation's --archs filter and the recorded ARCH_LIST, and all four must
-        # follow from one resolution -- otherwise every tree is ignored and stage 2
-        # exits 0. The real lists: .ci/manywheel/build_env_setup.py and the b200 job.
+        # Directory, sidecar, --archs filter and recorded ARCH_LIST must follow from
+        # one resolution. The lists are the real ones (manywheel, and the b200 job).
         for arch_list in (
             "7.5;8.0;9.0;10.0;12.0",
             "7.5;8.0;8.6;9.0",
             "10.0a",
             "9.0",
             "9.0a;10.0",
-            # Both spellings of ONE capability collapse to a single arch, so the two
-            # sides must agree on which survives: export nesting sm_100a/ while
-            # generation filters on sm_100 embeds nothing.
+            # Both spellings collapse to one arch; the two sides must agree which.
             "10.0;10.0a",
         ):
             with self.subTest(arch_list=arch_list):
@@ -4452,13 +4435,8 @@ class TestStageTwoArgvContract(unittest.TestCase):
 class TestRelinkNeverStrandsTheInstalledTorch(unittest.TestCase):
     """main()'s relink half, which copies over the INSTALLED torch.
 
-    A separate fixture from TestStageTwoArgvContract._run_main, which deliberately
-    supplies no generated source so it stops BEFORE the relink -- the whole subject
-    here is what happens past that point. Nothing covered this half, which is how
-    two blockers lived in it: the build-directory guard sat after the reconfigure
-    that creates the directory (so it could never fire), and the copy over
-    site-packages happened before the check that decides whether the relink was
-    any good."""
+    A separate fixture from TestStageTwoArgvContract._run_main, which supplies no
+    generated source and so stops before the relink."""
 
     OLD, NEW = b"PREVIOUSLY-INSTALLED", b"RELINKED"
 
@@ -4481,18 +4459,10 @@ class TestRelinkNeverStrandsTheInstalledTorch(unittest.TestCase):
     ):
         """main() with every child faked, so the ORDER is the production one.
 
-        Yields a namespace: `outcome` is the exception message or the return code,
-        `content` the bytes left in site-packages, `children` the commands main() got as
-        far as launching, `listing` everything left in the installed lib dir (which
-        catches a temporary this block forgets to clean up), `argv` the reconfigure's
-        command line, `include` the emitted CMake's path, and `reported` main()'s
-        stderr.
-
-        One keyword per arm of main(): the verdict, the runtime demand, a child that
-        dies, a failing reconfigure, a relink that produced nothing, and a torch whose
-        lib/ never held the library. ``kill_swap`` raises at the os.replace that swaps
-        the new library in, standing in for a Ctrl-C at the worst moment. ``wheel`` runs
-        main() the way both CI shells do."""
+        Yields `outcome` (exception message or return code), `content` (bytes in
+        site-packages), `children` (commands launched), `listing` (the installed lib
+        dir), `argv` (the reconfigure's command line), `include` (the emitted CMake)
+        and `reported` (stderr); one keyword per arm of main()."""
         children = []
         patched = []
         argv = []
@@ -4594,18 +4564,14 @@ class TestRelinkNeverStrandsTheInstalledTorch(unittest.TestCase):
             )
 
     def test_a_declined_verdict_does_nothing_at_all(self):
-        # Every other fixture here patches should_run() to True, so this pins main()
-        # consulting it at all: without the call, an opted-out build would still
-        # export, relink and overwrite the installed torch.
+        # Every other fixture patches should_run() True, so this pins the call itself.
         with self._main(verdict=False) as run:
             self.assertEqual(run.outcome, "returned 0")
             self.assertEqual(run.children, [])
             self.assertEqual(run.content, self.OLD)
 
     def test_a_declining_run_disables_what_a_previous_one_wired_up(self):
-        # caffe2/CMakeLists.txt include()s the generated file unconditionally, and
-        # .ci/manywheel/build_all.sh shares one build/ across eight interpreters, so a
-        # skipped interpreter's wheel would ship the previous one's objects.
+        # build_all.sh shares one build/ across eight interpreters (see the docstring).
         with self._main(verdict=False, stale_include=True) as run:
             self.assertEqual(run.outcome, "returned 0")
             with open(run.include) as f:
@@ -4614,9 +4580,7 @@ class TestRelinkNeverStrandsTheInstalledTorch(unittest.TestCase):
         self.assertNotIn("target_sources", emitted)
 
     def test_a_declining_run_creates_no_include_where_there_was_none(self):
-        # OVERWRITTEN, never created: CMake registers an include()d file as a configure
-        # dependency only if it existed at configure time, so one written into a tree
-        # that never had it is invisible to this build and blocks the next generation.
+        # A file created where none existed is invisible until the NEXT configure.
         with self._main(verdict=False) as run:
             self.assertFalse(os.path.exists(run.include))
 
@@ -4629,9 +4593,7 @@ class TestRelinkNeverStrandsTheInstalledTorch(unittest.TestCase):
             self.assertEqual(run.content, self.OLD)
 
     def test_a_build_dir_without_a_cache_is_refused_before_any_cmake(self):
-        # `cmake -B <dir>` on a missing directory exits 0 and configures FROM SCRATCH, so
-        # a guard after the reconfigure can never fire and the copy would put that
-        # library over the installed torch. Keyed on the CACHE, not the directory.
+        # `cmake -B` on a missing directory exits 0 and configures FROM SCRATCH.
         with self._main(cache=False) as run:
             self.assertIn("holds no CMakeCache.txt", run.outcome)
             self.assertEqual(run.content, self.OLD)
@@ -4686,18 +4648,14 @@ class TestRelinkNeverStrandsTheInstalledTorch(unittest.TestCase):
             self.assertEqual(run.listing, ["libtorch_cuda.so"])
 
     def test_a_kill_at_the_swap_leaves_the_library_and_no_temporary(self):
-        # ONE os.replace, so the installed library never stops existing: renaming a
-        # backup away first makes it two steps, and a kill in between leaves the
-        # environment with no library at all.
+        # One os.replace, so the installed library never stops existing.
         with self._main(kill_swap=True) as run:
             self.assertIn("killed at the swap", run.outcome)
             self.assertEqual(run.content, self.OLD)
             self.assertEqual(run.listing, ["libtorch_cuda.so"])
 
     def test_a_failed_verification_says_what_state_it_leaves(self):
-        # No restore copy is kept, the reconfigure check above having refused every
-        # disagreement one could undo, so the error has to say what is installed and
-        # how to get back.
+        # No restore copy is kept, so the error has to say how to get back.
         with self._main(embedded_after=False) as run:
             self.assertIn("reports no embedded kernels", run.outcome)
             self.assertIn("reinstall the wheel", run.outcome)
@@ -4713,9 +4671,7 @@ class TestRelinkNeverStrandsTheInstalledTorch(unittest.TestCase):
         self.assertIn("+3 MiB of embedded kernels", run.reported)
 
     def test_the_reconfigure_forces_status_messages(self):
-        # The agreement check greps for a message(STATUS), and EnvVarForwarding forwards
-        # CMAKE_* variables into the cache with FORCE, so CMAKE_MESSAGE_LOG_LEVEL=WARNING
-        # would hide the marker and persist. The flag wins over the cached value.
+        # A cached CMAKE_MESSAGE_LOG_LEVEL would hide the marker; the flag wins.
         with self._main() as run:
             self.assertEqual(run.outcome, "returned 0")
             self.assertIn("--log-level=STATUS", run.argv)
@@ -4724,9 +4680,7 @@ class TestRelinkNeverStrandsTheInstalledTorch(unittest.TestCase):
             self.assertIs(run.kwargs.get("capture_output"), True)
 
     def test_the_wheel_is_patched_with_the_relinked_library(self):
-        # --wheel is how both CI shells call this, the wheel being built before the
-        # relink. Nothing downstream re-checks it: the AOT tests skip themselves without
-        # embedded kernels, so an unpatched wheel ships kernel-free and green.
+        # Nothing downstream re-checks the wheel: the AOT tests skip without kernels.
         with self._main(wheel=True) as run:
             self.assertEqual(run.outcome, "returned 0")
             patched = [c for c in run.children if c.startswith("wheel:")]
@@ -4738,9 +4692,7 @@ class TestRelinkNeverStrandsTheInstalledTorch(unittest.TestCase):
         self.assertEqual(lib.split(os.sep)[-3:], ["build", "lib", "libtorch_cuda.so"])
 
     def test_a_wheel_that_does_not_exist_is_refused_before_the_export(self):
-        # A typo would otherwise cost a full export, relink and copy before
-        # FileNotFoundError surfaces. should_run is patched FALSE deliberately: the
-        # check sits ahead of it, so without it this returns 0.
+        # should_run is FALSE deliberately: this check sits ahead of it.
         with tempfile.TemporaryDirectory() as d:
             with (
                 mock.patch.object(build_stage2, "_torch_probe", lambda e: True),
@@ -4939,9 +4891,7 @@ class TestOrphanCheckIsCalled(unittest.TestCase):
 
 class TestModulePathOrder(unittest.TestCase):
     def test_the_repo_root_is_appended_never_prepended(self):
-        # The repo root holds a torch/ SOURCE tree with no compiled extension, so ahead
-        # of site-packages it shadows the installed wheel -- invisible in an editable
-        # checkout, where that tree IS the installed torch. Checked per file.
+        # The repo root's torch/ SOURCE tree shadows the installed wheel if inserted.
         for mod in ("build_stage2.py", "export.py", "gen_aot_lib.py"):
             with self.subTest(module=mod):
                 with open(os.path.join(REPO, "tools", "native_aot", mod)) as f:
@@ -4996,9 +4946,7 @@ class TestEmittedCMake(unittest.TestCase):
                 self.assertNotIn(gone, cmake)
 
     def test_the_include_line_agrees_with_the_python_constants(self):
-        # The assertion above is a literal while every other test reads the constants,
-        # so renaming CMAKE_INCLUDE or moving the artifacts dir would leave the
-        # OPTIONAL include finding nothing. Derived from both, so either moving fails.
+        # Derived from both constants, so moving either fails the literal above.
         rel = os.path.relpath(
             build_stage2.NATIVE_AOT_ARTIFACTS_DIR, build_stage2.BUILD_DIR
         )
