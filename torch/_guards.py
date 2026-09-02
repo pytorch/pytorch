@@ -212,8 +212,11 @@ class GuardSource(enum.Enum):
 # is ROOTED, answering the one question guard-serialization consumers
 # (torch._dynamo.package, torch._dynamo.aot_compile, torch.compiler.precompile)
 # keep needing: is this guard derived from the traced frame's inputs (so it is
-# dispatch-relevant and must be kept), or from the surrounding environment (so
-# an environment-invariant contract may drop it)?
+# dispatch-relevant and must be kept), or from the surrounding environment?
+# Only GLOBAL is a category a consumer may drop wholesale under an
+# environment-invariant contract; AMBIENT mixes process-wide configuration with
+# per-call context (see the member docs) and must be dropped guard by guard, if
+# at all.
 #
 # It is computed structurally, once, from the typed Source chain -- never by
 # parsing the rendered guard name. Rendered names embed input roots inside call
@@ -229,26 +232,44 @@ class GuardSource(enum.Enum):
 # test/dynamo/test_sources.py enforces totality over every Source subclass so
 # a new source cannot land unclassified.
 class GuardProvenance(enum.Enum):
-    # Dispatch-relevant guards that a serialization consumer must keep: rooted
-    # at the traced frame's bindings (arguments, locals, cells), at a
-    # dynamo-installed weakref proxy for a traced runtime object
-    # (GlobalWeakRefSource), or at the shape env (whose SHAPE_ENV guard encodes
-    # symbolic constraints derived from the inputs).
+    """Where a guard's source chain is rooted.
+
+    Exposed to ``guard_filter_fn`` callbacks through
+    ``GuardFilterEntry.provenance`` so a filter can classify guards
+    structurally instead of parsing rendered guard names. Every root
+    ``Source`` declares exactly one member; chained sources inherit their
+    root's. See Note [Guard provenance] in ``torch/_guards.py``.
+
+    ``INPUT``
+        Dispatch-relevant guards a serialization consumer must keep: rooted at
+        the traced frame's bindings (arguments, locals, cells), at a
+        Dynamo-installed weakref proxy for a traced runtime object, or at the
+        shape env (whose SHAPE_ENV guard encodes symbolic constraints derived
+        from the inputs).
+    ``GLOBAL``
+        Rooted at a module globals dict at guard-check time, whoever installed
+        the binding (user globals and imports both): part of the Python
+        environment, and the one category a consumer may drop wholesale under
+        an environment-invariant contract.
+    ``AMBIENT``
+        Rooted at interpreter- or process-wide state not reachable through any
+        module's globals. This covers both process-wide configuration
+        (deterministic algorithms, default device, streams) and per-call
+        context (grad mode, the functorch and torch-function mode stacks,
+        saved-tensor hooks, forward-AD level) that selects a different correct
+        graph at the call site. It is therefore not uniformly droppable; a
+        consumer must decide per guard type.
+    ``SYNTHETIC``
+        Tracing-internal roots that are not part of the Python environment
+        (synthetic and temp locals, ephemeral sources, materialized constants,
+        recorded random values, backward state). Some still render real guard
+        expressions; the point is that they are never droppable environment
+        state, so a drop policy must keep them.
+    """
+
     INPUT = 0
-    # Rooted at a module globals dict at guard-check time, whoever installed the
-    # binding (user globals and imports both): part of the Python environment.
     GLOBAL = 1
-    # Rooted at interpreter- or process-wide state (grad mode and friends, the
-    # torch-function mode stack, streams): part of the environment, but not
-    # reachable through any module's globals.
     AMBIENT = 2
-    # Tracing-internal roots that are not part of the Python environment
-    # (synthetic and temp locals, ephemeral sources, materialized constants,
-    # recorded random values, backward state). Some of these are still guarded
-    # on (SyntheticLocalSource and RandomValueSource render real guard
-    # expressions); the point is that they are never droppable *environment*
-    # state, so a drop policy must keep them. Their reconstruction bytecode may
-    # also load dynamo-installed globals.
     SYNTHETIC = 3
 
 

@@ -111,12 +111,13 @@ class GuardProvenanceTests(torch._dynamo.test_case.TestCase):
 
         self.assertGreater(len(roots), 10)  # sanity: the walk found the roots
 
-        # Totality guarantee is only as good as the walk's coverage: it sees a
-        # root class only once its defining module is imported. To keep the
-        # guarantee from silently depending on import order, require every
-        # torch-own root to live in a module this test imports up front, so a
-        # new root defined elsewhere either lands here (and is checked) or trips
-        # this assertion telling the author where roots must live.
+        # The walk sees a root class only once its defining module is imported,
+        # so its coverage is exactly the modules imported by this test. This
+        # assertion cannot see a root defined in an unimported module either; it
+        # pins the convention that roots live in the two modules imported above
+        # by rejecting any root the walk DOES find elsewhere, so a root added to
+        # a module this test happens to import transitively fails here with the
+        # placement rule instead of being silently checked or skipped.
         root_source_modules = {"torch._dynamo.source", "torch._guards"}
         for cls in roots:
             if not is_torch_own(cls):
@@ -125,10 +126,9 @@ class GuardProvenanceTests(torch._dynamo.test_case.TestCase):
                 cls.__module__,
                 root_source_modules,
                 f"{cls.__module__}.{cls.__name__} is a root Source defined "
-                f"outside {sorted(root_source_modules)}; either move it there "
-                "or extend this test to import its module, otherwise "
-                "test_every_source_declares_provenance cannot see it and its "
-                "classification goes unenforced.",
+                f"outside {sorted(root_source_modules)}; move it there so "
+                "test_every_source_declares_provenance can see and enforce its "
+                "classification.",
             )
 
         for cls in roots:
