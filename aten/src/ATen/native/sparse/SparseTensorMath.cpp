@@ -51,6 +51,7 @@
 #include <ATen/ops/floor_divide.h>
 #include <ATen/ops/floor_divide_native.h>
 #include <ATen/ops/hspmm_native.h>
+#include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/mm_native.h>
 #include <ATen/ops/mul.h>
 #include <ATen/ops/mul_native.h>
@@ -353,30 +354,15 @@ Tensor norm_sparse(const SparseTensor& self, const Scalar& p) {
 Tensor norm_sparse(const SparseTensor& self, const std::optional<Scalar>& p, IntArrayRef dim, bool keepdim, std::optional<ScalarType> dtype) {
   AT_ASSERT(self.is_sparse());
   if (!dim.empty()) {
-    // Only full reductions are supported, so check if that is the case
-    int64_t ndim = self.dim();
-    bool passed_full_reduction_check = static_cast<size_t>(ndim) == dim.size();
-    if (passed_full_reduction_check) {
-      auto dim_ = dim.vec();
-      maybe_wrap_dims(dim_, ndim);
-      std::vector<bool> dims_check(ndim, false);
-      // Need to check for duplicates, and fail if any are found
-      for (auto dim_ind : dim_) {
-        if (dims_check[dim_ind]) {
-          passed_full_reduction_check = false;
-          break;
-        }
-        dims_check[dim_ind] = true;
-      }
-    }
-    TORCH_CHECK(passed_full_reduction_check,
-      "norm_sparse currently only supports full reductions, so 'dim' must either be empty or contain all dimensions of the input");
+    const auto ndim = static_cast<size_t>(self.dim());
+    TORCH_CHECK(dim_list_to_bitset(dim, ndim).count() == ndim,
+      "norm on sparse tensors only supports full reductions: 'dim' must either be empty or contain all dimensions of the input");
   }
-  TORCH_CHECK(keepdim == false, "norm_sparse currently does not support keepdim=True");
-  TORCH_CHECK(!dtype.has_value(), "norm_sparse currently does not support 'dtype' argument");
   constexpr auto TWO = 2.0;
   auto p_ = p.value_or(TWO);
-  return self.coalesce()._values().norm(p_);
+  auto result = at::linalg_vector_norm(
+      self.coalesce()._values(), p_, std::nullopt, /*keepdim=*/false, dtype);
+  return keepdim ? result.view(DimVector(self.dim(), 1)) : result;
 }
 
 // --------------------------------------------------------------------
