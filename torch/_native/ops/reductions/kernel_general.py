@@ -9,12 +9,14 @@
 #   every kept extent 1              -> reduce_all
 #   anything only K0 could serve     -> declined to aten by the cond
 #
-# The trait protocol (init/reduce/combine/shfl_down/project, nfields/fdtypes) and
-# the warp_reduce/block_reduce helpers are REUSED UNCHANGED from reduce_traits.
+# ADDRESSING. TI coalesces any reduction into an iteration where a dim is REDUCED iff the output
+# stride along it is 0. The host passes compile-time (extent, element_stride) lists -- `red_dims`
+# for the per-thread fold, `kept_dims` for one block per kept coordinate -- and the kernel decodes a
+# linear index to a flat offset against them (_decode_offset). Multi-dim reductions and arbitrary
+# strides fall out of the same decode. Reduce-all is the degenerate zero-kept-dims case.
 #
-# How one kernel covers everything -- block `o` (one per KEPT-dim coordinate)
-# reduces `count` elements along the reduced dims; threads stride the linear
-# reduction index r by blockDim; then warp + block reduce.
+# Only STRUCTURE is compiled in (cache_sig); geometry VALUES are runtime args, so kernel count is
+# O(op x dtype x pair-count), not O(distinct shapes).
 #
 # ADDRESSING is driven by torch's TensorIterator (see kernel_general /
 # _decompose_via_ti). TI coalesces/reorders ANY reduction (any dim set, any
@@ -444,16 +446,13 @@ def _launch(op, key, ins, outs):
 
 
 def _ti_pairs(x, out):
-    """The kernel's input addressing for ``reduce x into out``, from TensorIterator.
-    A dim is REDUCED iff the iterator's output stride along it is 0, else KEPT.
-    Returns (red_pairs, kept_pairs) of (extent, input_element_stride). TI handles
-    all the broadcast/coalesce/reorder; this is a thin read of its result.
+    """The kernel's input addressing for ``reduce x into out``, read off TensorIterator: a dim is
+    REDUCED iff the output stride along it is 0. Returns (red_pairs, kept_pairs) of
+    (extent, input_element_stride).
 
-    KEPT dims are ordered by OUTPUT stride ascending (fastest output dim first),
-    because block index o is decoded mixed-radix fastest-first (_decode_offset)
-    and must land on out.reshape(-1)[o] -- i.e. match the output's flat traversal.
-    REDUCED dims need no ordering: the fold visits every reduced element exactly
-    once and the combine is commutative (single-dim argmax has one pair anyway)."""
+    KEPT dims are ordered by OUTPUT stride ascending, because the block index is decoded
+    fastest-first and must land on out.reshape(-1)[o]. REDUCED dims need no order -- the fold visits
+    each element once and combine is commutative."""
     it = reduce_op(out, x)
     in_str = it.element_strides(it.noutputs)  # input operand follows the outputs
     out_str = it.element_strides(0)
@@ -484,22 +483,15 @@ def _flat(x):
     return torch.as_strided(x, (n,), (1,), storage_offset=0)
 
 
-# --- Fast-path classification (the ONE source of truth shared by the router below
-# and the override cond gate in overrides.py). Operates on the TI-decomposed
-# (red_pairs, kept_pairs) so it sees the POST-coalesce geometry, not the raw dim
-# arg: e.g. a contiguous 3D last-dim reduction coalesces to a single reduced run +
-# a single kept run and is serviceable by the fast ROW kernel after a 2D reshape.
-#
-# The K0 general kernel is correct for ANY geometry but is ~5-8x slower than aten
-# (it does scalar/strided offset-decoded loads). So instead of running K0 for
-# non-2D geometries, we (a) RESHAPE the coalescible ones into the fast row/col
-# kernels here, and (b) DECLINE the rest to aten via the cond gate. "fast_kind"
-# returns which fast path a reduction maps to, or None if only K0 could serve it
-# (-> the cond declines, aten takes it). ---
+# --- Fast-path classification: the ONE source of truth, shared by the router below and the override
+# cond gate. Runs on the TI-decomposed pairs, so it sees POST-coalesce geometry (a contiguous 3D
+# last-dim reduction collapses to one reduced + one kept run and reshapes into the row kernel). The
+# general kernel is correct for any geometry but ~5-8x slower than ATen, so coalescible geometries are
+# reshaped into the fast paths and the rest DECLINE to ATen. ---
 
 
 def fast_kind(red_pairs, kept_pairs, nouts, has_index):
-    """Which fast kernel serves this TI-decomposed reduction, or None (-> K0/aten).
+    """Which fast kernel serves this TI-decomposed reduction, or None (-> the general kernel/ATen).
 
     "row"     : reduced axis is the single contiguous (stride-1) innermost run;
                 kept is a single run. Reshape to (prod(kept), prod(red)), reduce
@@ -511,12 +503,9 @@ def fast_kind(red_pairs, kept_pairs, nouts, has_index):
     None      : neither -- only the K0 general kernel could serve it; the cond
                 declines to aten instead (K0 is far slower than aten's kernel).
 
-    Both axes must coalesce to a SINGLE run (len==1) so the reduction is a dense
-    2D (kept, red) or (red, kept) view. For a contiguous input TI collapses each
-    dense axis to one pair, so a genuine row/col/coalescible-n-D case gives exactly
-    one red + one kept pair; a transpose / multi-run / gapped layout gives >1 and
-    falls to None (aten). The stride-1 pair is the innermost (contiguous) axis and
-    decides row vs col.
+    BOTH axes must coalesce to a single run, so the reduction is a dense 2D view: a transpose,
+    multi-run or gapped layout gives more than one pair and falls to None. The stride-1 pair is the
+    innermost axis and decides row vs col.
     """
     if len(kept_pairs) == 0:
         return "all"
@@ -612,29 +601,19 @@ def _reduce(trait, trait_key, x, dims, out_dtypes, nouts, block=_K0_BLOCK):
     red_axes = {d % x.dim() for d in red_axes}
     out_shape = [s for i, s in enumerate(x.shape) if i not in red_axes]
 
-    # Single output ELEMENT (every kept extent is 1) -> route to reduce_all (the
-    # two-stage split), not the K0 fallback. Reached when a multi-dim `dims` happens to
-    # cover all axes, or a 1D reduce (the override's reduce-ALL path calls reduce_all
-    # directly, but reduce_dim with an explicit full dim set lands here), and -- the M=1
-    # row case -- when the kept axes merely have extent 1: TI collapses those away
-    # entirely, so fast_kind reports "all" (see its len(kept_pairs) == 0 arm) and the
-    # classify block below cannot serve it. Without this a (1, N) reduce-dim landed on
-    # K0's ONE block for the whole row. _as_shape restores out_shape (numel 1, so it is
-    # pure metadata). Single output only; a 2-output full reduction is rare and stays on K0.
+    # Single output ELEMENT (every kept extent is 1) -> reduce_all's two-stage split rather than the
+    # general fallback, which would put ONE block on the whole row. Reached by a full `dims` set and
+    # by the M=1 row case, where TI collapses the extent-1 kept axes away entirely so the classify
+    # block below cannot serve it. _as_shape restores out_shape, which is pure metadata at numel 1.
     if math.prod(out_shape) == 1 and nouts == 1 and x.is_contiguous():
         out = reduce_all(trait, trait_key, x, out_dtypes[0], block=block)
         return (_as_shape(out, out_shape),)
 
-    # Classify the POST-TI-coalesce geometry and route to the fast kernels via a
-    # dense 2D reshape. A contiguous n-D reduction whose reduced (or kept) axes are
-    # innermost coalesces to a single reduced + single kept run -> serviceable by
-    # the row/col kernels after reshaping to (kept, red) / (red, kept). This is why
-    # e.g. a contiguous (A,B,C) reduce over dim 2 (or dims (1,2)) goes fast instead
-    # of to the ~5-8x-slower K0 general kernel. The override cond declines any
-    # geometry that returns None here (only K0 could serve it) so aten takes it;
-    # `_reduce` therefore only sees fast_kind in {row, col} on the real (non-
-    # declined) call. K0 below stays as the correctness fallback for direct callers
-    # and for the case a fast kernel itself declines (e.g. xcta on a prime N).
+    # Classify the POST-TI-coalesce geometry and route to a fast kernel through a dense 2D reshape,
+    # which is what puts a contiguous n-D reduction over its innermost axes on the row/col kernels
+    # rather than the ~5-8x-slower general one. The override cond declines anything returning None
+    # here, so `_reduce` only sees {row, col} on a real call; the general kernel below remains the
+    # correctness fallback for direct callers and for a fast kernel that declines.
     if len(out_shape) > 0 and x.is_contiguous():
         red_pairs, kept_pairs = _ti_pairs(x, _probe(x, red_axes))
         has_index = getattr(trait, "has_index", False)
