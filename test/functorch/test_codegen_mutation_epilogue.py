@@ -18,12 +18,15 @@ Tests verify that a "mutation_epilogue" artifact is emitted via
 trace_structured.
 """
 
+import inspect
 import logging
+import re
 from contextlib import contextmanager
 
 import torch
 import torch._functorch.config
 from functorch.compile import nop
+from torch._functorch._aot_autograd.runtime_wrappers import _RuntimeForwardEpilogue
 from torch._functorch.aot_autograd import aot_function
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
@@ -123,6 +126,37 @@ class TestCodegenMutationEpilogue(TestCase):
             "Expected mutation_epilogue codegen artifact to be emitted",
         )
         self.assertIn("_replay_input_mutation", captured[0])
+
+    def test_replay_call_passes_the_runtime_input_index(self):
+        """
+        The write-back's index argument is the mutated input's position among
+        the compiled function's inputs (what the once-per-index warning keys
+        on), not its slot in the mutated list -- the same arguments the
+        reference _apply_input_mutations passes. Dynamo orders graph inputs by
+        first use, so x is input 0 and the mutated y is input 1 in slot 0.
+        """
+        with self._capture_codegen_source("mutation_epilogue") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x, y):
+                out = x + 1
+                y.mul_(2)
+                return out + y
+
+            x = torch.randn(4)
+            y = torch.randn(4, requires_grad=True).clone()
+            y.retain_grad()
+            f(x, y)
+
+        self.assertEqual(len(captured), 1)
+        calls = re.findall(r"_replay_input_mutation\((.*)\)", captured[0])
+        self.assertEqual(calls, ["orig_inputs[1], updated_inputs[0], 1"])
+        reference = inspect.getsource(_RuntimeForwardEpilogue._apply_input_mutations)
+        self.assertIn("original_inpt = orig_inputs[inpt_idx]", reference)
+        self.assertIn("updated_inpt = updated_inputs[i]", reference)
+        self.assertIn(
+            "_replay_input_mutation(original_inpt, updated_inpt, inpt_idx)", reference
+        )
 
     def test_leaf_mutation_under_no_grad(self):
         """
