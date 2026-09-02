@@ -77,7 +77,7 @@
         )
         offs_cm = pid_m * BLOCK_M
         offs_cn = pid_n * BLOCK_N
-        subtiles = _blackwell_bmm_subtiles(
+        subtiles = _subtile_accumulator(
             accumulator, BLOCK_M, BLOCK_N, EPILOGUE_SUBTILE
         )
         for i in tl.static_range(EPILOGUE_SUBTILE):
@@ -105,16 +105,29 @@ def _blackwell_bmm_pid(tile_id, num_pid_in_group, grid_m, GROUP_M: tl.constexpr)
 
 
 @triton.jit
-def _blackwell_bmm_subtiles(
+def _subtile_accumulator(
     acc,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
     SUBTILE_FACTOR: tl.constexpr,
 ):
+    tl.static_assert(SUBTILE_FACTOR > 0, "SUBTILE_FACTOR must be positive")
+    tl.static_assert(
+        (SUBTILE_FACTOR & (SUBTILE_FACTOR - 1)) == 0,
+        "SUBTILE_FACTOR must be a power of 2",
+    )
+
     if SUBTILE_FACTOR == 1:
         return (acc,)
     else:
-        tl.static_assert(SUBTILE_FACTOR == 2)
+        tl.static_assert(BLOCK_N % 2 == 0)
         acc = tl.reshape(acc, (BLOCK_M, 2, BLOCK_N // 2))
         acc = tl.permute(acc, (0, 2, 1))
-        return tl.split(acc)
+        left, right = tl.split(acc)
+        left_subtiles = _subtile_accumulator(
+            left, BLOCK_M, BLOCK_N // 2, SUBTILE_FACTOR // 2
+        )
+        right_subtiles = _subtile_accumulator(
+            right, BLOCK_M, BLOCK_N // 2, SUBTILE_FACTOR // 2
+        )
+        return left_subtiles + right_subtiles
