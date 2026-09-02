@@ -1319,12 +1319,12 @@ def forward(self, x):
     lazy_load_decompositions_3 = torch._functorch.predispatch.lazy_load_decompositions();  lazy_load_decompositions_3 = None
     _vmap_increment_nesting_3 = torch._functorch.predispatch._vmap_increment_nesting(128, 'error');  _vmap_increment_nesting_3 = None
     _add_batch_dim_3 = torch._functorch.predispatch._add_batch_dim(arange_start_3, 0, 4);  arange_start_3 = None
-    le_tensor = torch.ops.aten.le.Tensor(_add_batch_dim_3, _add_batch_dim_2);  _add_batch_dim_3 = None
-    remainder_scalar = torch.ops.aten.remainder.Scalar(_add_batch_dim_2, 128);  _add_batch_dim_2 = None
+    remainder_scalar = torch.ops.aten.remainder.Scalar(_add_batch_dim_2, 128)
     function_const_func_spec0 = self.function_const_func_spec0
     torch__dynamo__trace_wrapped_higher_order_op_mod_index0 = self.torch__dynamo__trace_wrapped_higher_order_op_ModIndex0
     flat_apply = torch.ops.higher_order.flat_apply(function_const_func_spec0, torch__dynamo__trace_wrapped_higher_order_op_mod_index0, 'torch._dynamo._trace_wrapped_higher_order_op.ModIndex', detach_default, _add_batch_dim, remainder_scalar);  function_const_func_spec0 = torch__dynamo__trace_wrapped_higher_order_op_mod_index0 = _add_batch_dim = remainder_scalar = None
     gt_scalar = torch.ops.aten.gt.Scalar(flat_apply, 0);  flat_apply = None
+    le_tensor = torch.ops.aten.le.Tensor(_add_batch_dim_3, _add_batch_dim_2);  _add_batch_dim_3 = _add_batch_dim_2 = None
     __and___tensor = torch.ops.aten.__and__.Tensor(le_tensor, gt_scalar);  le_tensor = gt_scalar = None
     _remove_batch_dim = torch._functorch.predispatch._remove_batch_dim(__and___tensor, 4, 128, 0);  __and___tensor = None
     _vmap_decrement_nesting = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting = None
@@ -15986,7 +15986,6 @@ def forward(self, x):
 def forward(self, x, y):
     sin_default = torch.ops.aten.sin.default(y)
     sum_dim_int_list = torch.ops.aten.sum.dim_IntList(sin_default, []);  sin_default = None
-    add_tensor = torch.ops.aten.add.Tensor(y, sum_dim_int_list);  y = sum_dim_int_list = None
     _local_scalar_dense_default = torch.ops.aten._local_scalar_dense.default(x);  x = None
     ge = _local_scalar_dense_default >= 3
     _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u2 >= 3 on node 'ge_1'");  ge = _assert_scalar_default = None
@@ -15996,6 +15995,7 @@ def forward(self, x, y):
     _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression 2 < u0 on node 'gt_1'");  gt = _assert_scalar_default_2 = None
     lt = _local_scalar_dense_default < 6;  _local_scalar_dense_default = None
     _assert_scalar_default_3 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression u0 < 6 on node 'lt_1'");  lt = _assert_scalar_default_3 = None
+    add_tensor = torch.ops.aten.add.Tensor(y, sum_dim_int_list);  y = sum_dim_int_list = None
     full_default = torch.ops.aten.full.default([4, 4], 1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
     sum_dim_int_list_1 = torch.ops.aten.sum.dim_IntList(full_default, []);  full_default = None
     add_tensor_1 = torch.ops.aten.add.Tensor(add_tensor, sum_dim_int_list_1);  add_tensor = sum_dim_int_list_1 = None
