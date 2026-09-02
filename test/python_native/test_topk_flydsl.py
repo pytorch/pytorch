@@ -122,6 +122,19 @@ class TestFlyDSLTopK(TestCase):
         x = make_tensor((rows, n), device="cuda", dtype=torch.float32)
         self._assert_topk_matches_aten(x, k)
 
+    def test_3d_input(self):
+        from torch._native.ops.topk.flydsl_kernels import topk_cache_info
+
+        torch.manual_seed(3)
+        k = 704
+        n = _test_n(k)
+        rows = (_test_m() + 3) // 4
+        x = make_tensor((4, rows, n), device="cuda", dtype=torch.float32)
+        self._assert_topk_matches_aten(x, k)
+        got_v, _ = torch.topk(x, k, dim=-1)
+        self.assertEqual(topk_cache_info("radix").misses, 1)
+        self.assertEqual(got_v.shape, (4, rows, k))
+
     def test_correctness_with_extreme_values(self):
         k = 8
         torch.manual_seed(2)
