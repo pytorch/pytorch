@@ -2507,6 +2507,17 @@ class TestSelfKwarg(TestCase):
         torch.ops.aten.min.default(self=torch.rand(100))
 
 
+class TestOpOverloadPacket(TestCase):
+    def test_qualname(self):
+        # https://github.com/pytorch/pytorch/issues/186140
+        # __qualname__ used to leak the pybind11 function-record qualname of
+        # the underlying C++ op through OpOverloadPacket.__getattr__.
+        packet = torch.ops.aten.sin
+        self.assertEqual(packet.__qualname__, "sin")
+        self.assertEqual(packet.__name__, "sin")
+        self.assertEqual(packet.default.__qualname__, "aten::sin")
+
+
 @unMarkDynamoStrictTest
 class TestRefsOpsInfo(TestCase):
     hw_classification = HardwareClassification.GENERIC
