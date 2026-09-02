@@ -1528,6 +1528,28 @@ class TestVmapOperators(Namespace.TestVmapBase):
     def _vmap_view_test(self, *args, **kwargs):
         self._vmap_test(*args, **kwargs, check_view=True)
 
+    def test_multi_margin_loss_batched_weight(self):
+        # multi_margin_loss's weight is a shared per-class vector, so the OpInfo
+        # vmap tests (which only batch positional args) never batch it. Cover the
+        # batched-weight path of its batch rule here against a for-loop reference.
+        B, N, C = 2, 4, 5
+        # (batch_input, batch_target, batch_weight)
+        configs = [(False, False, True), (True, True, True)]
+        for reduction, p, (bi, bt, bw) in itertools.product(
+            ("none", "mean", "sum"), (1, 2), configs
+        ):
+            inp = torch.randn(B, N, C) if bi else torch.randn(N, C)
+            tgt = torch.randint(0, C, (B, N)) if bt else torch.randint(0, C, (N,))
+            wgt = torch.randn(B, C) if bw else torch.randn(C)
+            in_dims = (0 if bi else None, 0 if bt else None, 0 if bw else None)
+
+            def op(inp, tgt, wgt, p=p, reduction=reduction):
+                return F.multi_margin_loss(
+                    inp, tgt, p=p, weight=wgt, reduction=reduction
+                )
+
+            self._vmap_test(op, (inp, tgt, wgt), in_dims=in_dims)
+
     def _test_unary(self, op, getter, device, *args, **kwargs):
         test = functools.partial(self._vmap_test, *args, **kwargs)
         B0, B1 = 7, 11

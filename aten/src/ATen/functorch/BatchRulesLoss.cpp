@@ -74,6 +74,19 @@ smooth_l1_loss_batch_rule(const at::Tensor& self, std::optional<int64_t> self_bd
                                 });
 }
 
+static Tensor apply_loss_reduction(
+    const at::Tensor& unreduced,
+    int64_t reduction,
+    std::optional<int64_t> dim = std::nullopt) {
+  if (reduction == at::Reduction::Mean) {
+    return dim.has_value() ? unreduced.mean(*dim) : unreduced.mean();
+  }
+  if (reduction == at::Reduction::Sum) {
+    return dim.has_value() ? unreduced.sum(*dim) : unreduced.sum();
+  }
+  return unreduced;
+}
+
 static std::tuple<Tensor, Tensor, int64_t, bool, VmapDimVector> multi_margin_loss_prepare_inputs(
     const Tensor& self,
     std::optional<int64_t> self_bdim,
@@ -86,7 +99,7 @@ static std::tuple<Tensor, Tensor, int64_t, bool, VmapDimVector> multi_margin_los
   target_ = ensure_has_bdim(target_, target_bdim.has_value(), bdim_size);
 
   const auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
       self_logical_rank <= 2,
       "vmap: Expected input for multi_margin_loss to have logical rank <= 2, but got ",
       self_logical_rank);
@@ -132,13 +145,25 @@ static Tensor multi_margin_loss_restore_forward(
   if (nframe == 1) {
     return result_.squeeze(1);
   }
-  if (reduction == Reduction::Sum) {
-    return result_.sum(1);
-  }
-  if (reduction == Reduction::Mean) {
-    return result_.mean(1);
-  }
-  TORCH_INTERNAL_ASSERT(false);
+  return apply_loss_reduction(result_, reduction, /*dim=*/1);
+}
+
+// The native op takes weight as a single shared per-class vector (length nclass),
+// so it has no batch dim to absorb a batched weight. Its only effect is the scalar
+// factor weight[target] per frame, which we compute here to apply outside the op.
+static Tensor multi_margin_loss_per_frame_weight(
+    const Tensor& weight,
+    std::optional<int64_t> weight_bdim,
+    const Tensor& target_flat,
+    int64_t bdim_size,
+    int64_t nframe) {
+  auto weight_ = moveBatchDimToFront(weight, weight_bdim);
+  weight_ = ensure_has_bdim(weight_, weight_bdim.has_value(), bdim_size);
+  const auto nclass = weight_.size(-1);
+  auto weight_flat = weight_.unsqueeze(1)
+                         .expand({bdim_size, nframe, nclass})
+                         .reshape({bdim_size * nframe, nclass});
+  return weight_flat.gather(1, target_flat.unsqueeze(1)).squeeze(1);
 }
 
 static std::tuple<at::Tensor, std::optional<int64_t>>
@@ -152,16 +177,20 @@ multi_margin_loss_batch_rule(
     const std::optional<Tensor>& weight_opt,
     std::optional<int64_t> weight_bdim,
     int64_t reduction) {
-  TORCH_CHECK(
-      !weight_bdim.has_value(),
-      "vmap: batching over the weight argument of multi_margin_loss is not supported");
-
-  const auto bdim_size = get_bdim_size2(self, self_bdim, target, target_bdim);
-  auto [self_flat, target_flat, nframe, target_has_logical_dim, self_logical_sizes] =
+  const bool weight_batched = weight_bdim.has_value();
+  const auto bdim_size = weight_batched
+      ? get_bdim_size3(self, self_bdim, target, target_bdim, *weight_opt, weight_bdim)
+      : get_bdim_size2(self, self_bdim, target, target_bdim);
+  // forward does not need self_logical_sizes (only the backward reshapes grad_input to it)
+  [[maybe_unused]] auto [self_flat, target_flat, nframe, target_has_logical_dim, self_logical_sizes] =
       multi_margin_loss_prepare_inputs(self, self_bdim, target, target_bdim, bdim_size);
-  (void)self_logical_sizes;
   auto result = at::multi_margin_loss(
-      self_flat, target_flat, p, margin, weight_opt, Reduction::None);
+      self_flat, target_flat, p, margin,
+      weight_batched ? std::optional<Tensor>() : weight_opt, Reduction::None);
+  if (weight_batched) {
+    result = result * multi_margin_loss_per_frame_weight(
+                          *weight_opt, weight_bdim, target_flat, bdim_size, nframe);
+  }
   result = multi_margin_loss_restore_forward(
       result, bdim_size, nframe, target_has_logical_dim, reduction);
   return std::make_tuple(std::move(result), 0);
@@ -198,19 +227,24 @@ multi_margin_loss_backward_batch_rule(
     const std::optional<Tensor>& weight_opt,
     std::optional<int64_t> weight_bdim,
     int64_t reduction) {
-  TORCH_CHECK(
-      !weight_bdim.has_value(),
-      "vmap: batching over the weight argument of multi_margin_loss_backward is not supported");
-
-  const auto bdim_size = get_bdim_size3(
-      grad_output, grad_output_bdim, self, self_bdim, target, target_bdim);
-  auto [self_flat, target_flat, nframe, target_has_logical_dim, self_logical_sizes] =
+  const bool weight_batched = weight_bdim.has_value();
+  const auto bdim_size = weight_batched
+      ? get_bdim_size4(grad_output, grad_output_bdim, self, self_bdim, target, target_bdim, *weight_opt, weight_bdim)
+      : get_bdim_size3(grad_output, grad_output_bdim, self, self_bdim, target, target_bdim);
+  // backward does not need target_has_logical_dim (only the forward uses it to squeeze)
+  [[maybe_unused]] auto [self_flat, target_flat, nframe, target_has_logical_dim, self_logical_sizes] =
       multi_margin_loss_prepare_inputs(self, self_bdim, target, target_bdim, bdim_size);
-  (void)target_has_logical_dim;
   auto grad_output_flat = multi_margin_loss_prepare_grad_output(
       grad_output, grad_output_bdim, bdim_size, nframe, reduction);
   auto grad_input = at::multi_margin_loss_backward(
-      grad_output_flat, self_flat, target_flat, p, margin, weight_opt, Reduction::None);
+      grad_output_flat, self_flat, target_flat, p, margin,
+      weight_batched ? std::optional<Tensor>() : weight_opt, Reduction::None);
+  if (weight_batched) {
+    // weight scales every frame's whole gradient row by weight[target].
+    auto w = multi_margin_loss_per_frame_weight(
+        *weight_opt, weight_bdim, target_flat, bdim_size, nframe);
+    grad_input = grad_input * w.unsqueeze(1);
+  }
   if (reduction == Reduction::Mean && nframe > 1) {
     grad_input.div_(nframe);
   }
@@ -221,15 +255,6 @@ multi_margin_loss_backward_batch_rule(
   grad_input_shape.insert(grad_input_shape.end(), self_logical_sizes.begin(), self_logical_sizes.end());
   grad_input = grad_input.reshape(grad_input_shape);
   return std::make_tuple(std::move(grad_input), 0);
-}
-
-static Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
-  if (reduction == at::Reduction::Mean) {
-    return unreduced.mean();
-  } else if (reduction == at::Reduction::Sum) {
-    return unreduced.sum();
-  }
-  return unreduced;
 }
 
 static Tensor binary_cross_entropy_plumbing(
