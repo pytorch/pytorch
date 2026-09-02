@@ -373,6 +373,7 @@ releases without a deprecation cycle.
        )
 
 .. autoexception:: torch.compiler.PrecompileError
+   :members: result
 
 .. autoclass:: torch.compiler.PrecompiledCallable
    :members: unload, serve_time_compiles

@@ -2294,6 +2294,24 @@ class TestPrecompile(TestCase):
                 self.assertEqual(f.read(), b"goodcache")
             self.assertEqual([f for f in os.listdir(d) if f.endswith(".tmp")], [])
 
+    def test_precompile_artifact_write_honours_the_umask(self):
+        # mkstemp creates its file 0600 and the rename carried that onto the
+        # artifact, so nobody else on a shared directory could read it. The
+        # pair has to land with the mode a plain open() gives under the umask.
+        import stat
+
+        from torch._precompile import _write_artifact
+
+        umask = os.umask(0)
+        os.umask(umask)
+        with tempfile.TemporaryDirectory() as d:
+            artifact_path = os.path.join(d, "a.py")
+            cache_path = os.path.join(d, "a.cache")
+            _write_artifact(artifact_path, cache_path, "X = 1\n", b"cache")
+            for path in (artifact_path, cache_path):
+                self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o666 & ~umask)
+            self.assertEqual([f for f in os.listdir(d) if f.endswith(".tmp")], [])
+
     def test_precompile_accumulate_reports_the_drops_its_artifact_made(self):
         # The accumulating render filters COPIES, so the drops it made have to
         # be read back off that pass -- otherwise summary() and the artifact's
@@ -4052,6 +4070,48 @@ class TestPrecompile(TestCase):
             finally:
                 fresh.unload()
 
+    def test_installed_artifact_unload_leaves_another_owners_artifacts(self):
+        # Backend keys are content hashes, so an ambient caching_precompile run
+        # on the same graph files under the very keys this artifact carries.
+        # unload() takes back only what this install put there: neither a key
+        # someone else had already filed nor one re-filed while installed.
+        from torch._dynamo.precompile_context import EagerCacheArtifact
+
+        code, cache = torch.compiler.precompile.artifact(
+            _precompile_unreachable_helper_caller,
+            backend="eager",
+            dynamic=False,
+            tracer="dynamo",
+            example_inputs=[(torch.randn(4),)],
+        )
+        x = torch.randn(4)
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        keys = list(loaded._compiled._backend_keys)
+        self.assertGreater(len(keys), 1)
+        for key in keys:
+            PrecompileContext.take_artifact(key)
+        theirs = EagerCacheArtifact(key=keys[0], content="theirs")
+
+        PrecompileContext.record_artifact(theirs)
+        with torch.no_grad(), loaded:
+            self.assertEqual(loaded(x), _precompile_unreachable_helper_caller(x))
+            for key in keys:
+                self.assertIsNotNone(PrecompileContext.serialize_artifact_by_key(key))
+        self.assertIsNotNone(PrecompileContext.serialize_artifact_by_key(keys[0]))
+        for key in keys[1:]:
+            self.assertIsNone(PrecompileContext.serialize_artifact_by_key(key))
+        PrecompileContext.take_artifact(keys[0])
+
+        with torch.no_grad(), loaded:
+            self.assertEqual(loaded(x), _precompile_unreachable_helper_caller(x))
+            PrecompileContext.record_artifact(theirs)
+        kept = PrecompileContext.serialize_artifact_by_key(keys[0])
+        self.assertEqual(kept.content, "theirs")
+        for key in keys[1:]:
+            self.assertIsNone(PrecompileContext.serialize_artifact_by_key(key))
+        PrecompileContext.take_artifact(keys[0])
+
     @parametrize("backend", ("eager", "inductor"))
     def test_training_capture_serves_a_backward_without_a_loss(self, backend):
         # The capture never sees a loss and never calls .backward(). The joint
@@ -4900,13 +4960,22 @@ class TestPrecompile(TestCase):
     def test_live_guard_leaf_recording_is_thread_scoped(self):
         # A torch.compile on another thread must neither record into a
         # capture's set nor, on exit, clobber what a second session installed.
+        # The worker runs in a fresh context on purpose: a thread that inherits
+        # its parent's context (free-threaded 3.14, under
+        # sys.flags.thread_inherit_context) sees the capture's set by design;
+        # keeping it out is the caller's job, not record_live_guard_leaves's.
+        import contextvars
+
         from torch._dynamo.guards import _LIVE_LEAF_GUARDS, record_live_guard_leaves
 
         seen: dict[str, object] = {}
+
+        def worker():
+            seen.update(other=_LIVE_LEAF_GUARDS.get())
+
         with record_live_guard_leaves() as leaves:
-            other = threading.Thread(
-                target=lambda: seen.update(other=_LIVE_LEAF_GUARDS.get())
-            )
+            ctx = contextvars.Context()
+            other = threading.Thread(target=lambda: ctx.run(worker))
             other.start()
             other.join()
             self.assertIs(_LIVE_LEAF_GUARDS.get(), leaves)

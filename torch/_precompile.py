@@ -324,9 +324,9 @@ import logging
 import os
 import pickle
 import sys
-import tempfile
 import threading
 import types
+import uuid
 from collections.abc import Callable, Mapping, Sequence
 from types import MappingProxyType
 from typing import Any, cast, NewType, TYPE_CHECKING
@@ -399,11 +399,14 @@ class PrecompileError(RuntimeError):
     effectful op, a non-tensor output the inductor backend cannot lower, or a runtime
     input whose shape or memory format differs from the example (invariants 3 and 6).
     See Note [precompile programming model] in this module for the full contract.
+
+    ``result`` carries what the call that raised returned, when it ran before the
+    refusal; ``None`` otherwise.
     """
 
-    # What the call that raised this returned, when it ran before the refusal:
-    # an accumulating capture's step has already executed by the time its
-    # artifact gate refuses, so the result rides on the error. None otherwise.
+    #: What the call that raised this returned, when it ran before the refusal:
+    #: an accumulating capture's step has already executed by the time its
+    #: artifact gate refuses, so the result rides on the error. ``None`` otherwise.
     result: object = None
 
 
@@ -500,8 +503,10 @@ class _InstalledArtifact:
         self._entry_factory = entry_factory
         # Refuses a load(fn=...) target the artifact was not captured from.
         self._check_fn = check_fn
-        # PrecompileContext keys serve() records; unload() takes them back out.
+        # PrecompileContext keys serve() records; unload() takes back the ones
+        # this install added, by identity (see _ensure).
         self._backend_keys = backend_keys
+        self._recorded: dict[str, Any] = {}
         self._fn: Callable[..., object] | None = None
         self._inner: Any = None
         self._prepared: Any = None
@@ -562,7 +567,19 @@ class _InstalledArtifact:
                         "new handle."
                     )
                 if self._inner is None:
+                    from torch._dynamo.precompile_context import PrecompileContext
+
                     fn = self._entry_factory() if self._fn is None else self._fn
+                    # Backend keys are content hashes, so an ambient
+                    # caching_precompile run on the same graph files under the
+                    # same keys. Remember exactly what this install added -- not
+                    # a key someone else had already filed -- so unload takes
+                    # back nothing that is theirs.
+                    present = {
+                        k
+                        for k in self._backend_keys
+                        if PrecompileContext.serialize_artifact_by_key(k) is not None
+                    }
                     # An artifact emitted before _serve took a prepared package
                     # still serves; it just rebuilds what _prepare already built.
                     if self._prepared is not None and "prepared" in _serve_parameters(
@@ -572,6 +589,11 @@ class _InstalledArtifact:
                     else:
                         self._inner = self._serve(fn)
                     self._prepared = None
+                    self._recorded = {
+                        k: PrecompileContext.serialize_artifact_by_key(k)
+                        for k in self._backend_keys
+                        if k not in present
+                    }
                 inner = self._inner
         return inner
 
@@ -601,8 +623,12 @@ class _InstalledArtifact:
             inner, self._inner = self._inner, None
         if inner is not None:
             inner.unload()
-            for key in self._backend_keys:
-                PrecompileContext.take_artifact(key)
+            recorded, self._recorded = self._recorded, {}
+            for key, artifact in recorded.items():
+                # Only the object this install filed: a same-key artifact filed
+                # since (an ambient run on the same graph) is not ours to take.
+                if PrecompileContext.serialize_artifact_by_key(key) is artifact:
+                    PrecompileContext.take_artifact(key)
 
     @property
     def _package(self) -> Any:
@@ -2881,13 +2907,11 @@ def _write_artifact(
             # A unique name per writer: two captures targeting one path must
             # not share a scratch file, or one renames the other's half-written
             # bytes into place. Beside the target, so the rename stays on one
-            # filesystem.
-            fd, tmp = tempfile.mkstemp(
-                dir=parent or ".",
-                prefix=os.path.basename(os.fspath(path)) + ".",
-                suffix=".tmp",
-            )
-            os.close(fd)
+            # filesystem. A plain open rather than mkstemp: mkstemp creates the
+            # file 0600 and the rename carries that mode onto the artifact,
+            # which nobody else on a shared directory can then read; open()
+            # honours the umask.
+            tmp = f"{os.fspath(path)}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
             written.append((tmp, path))
             mode, encoding = (
                 ("wb", None) if isinstance(payload, bytes) else ("w", "utf-8")

@@ -91,13 +91,16 @@ Know these before relying on an artifact in production:
 This wraps CompilePackage, which is the low-level component and is not meant to
 be used directly.
 
-The public surface is ``torch.compiler.precompile`` -- with ``example_inputs``
-for this multi-graph form -- and ``torch.compiler.precompile.load``. The
-helpers in this module, including the capture session, implement that surface
-and remain internal. The default ``tracer="make_fx"`` form of the same call
-produces a self-contained Python source artifact from one example call. Both are
-distinct from ``torch._dynamo.config.caching_precompile``, which caches
-``torch.compile`` artifacts transparently without an explicit capture block.
+The public surface is ``torch.compiler.precompile(...)``, which captures with
+this dynamo tracer, writes the artifact to files and returns the example calls'
+results; ``torch.compiler.precompile.artifact(...)``, which returns the
+``(python_code, cache)`` pair in memory for either tracer (its default
+``tracer="make_fx"`` produces a self-contained Python source artifact from one
+example call); and ``torch.compiler.precompile.load``. The helpers in this
+module, including the capture session, implement that surface and remain
+internal. All of it is distinct from ``torch._dynamo.config.caching_precompile``,
+which caches ``torch.compile`` artifacts transparently without an explicit
+capture block.
 """
 
 from __future__ import annotations
