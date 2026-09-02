@@ -496,11 +496,12 @@ class MixOrderReduction:
 # Note [Sub-parent reduction epilogues]
 #
 # Fusion-time planning proves that a derived sub-parent domain is safe to emit
-# and gives the fused group a FusedStagedReduction identity. Scheduler fusion is
-# followed by merge_loops(), which may change the node ranges, so codegen builds
-# the final plan from the post-fusion nodes rather than carrying the approval
-# plan across phases. The staged identity is the stable contract: codegen cannot
-# decline the fusion and treats a missing final plan as a compiler error.
+# and gives the fused group a FusedStagedReduction identity. Standalone staged
+# groups may be rewritten by merge_loops(), while nested groups preserve the loop
+# bodies used to approve their topology. Codegen rebuilds the final plan from the
+# final fused nodes in either case. The staged identity is the stable contract:
+# codegen cannot decline the fusion and treats a missing final plan as a compiler
+# error.
 class NestedReduction:
     """
     Detects when an outer reduction and a dependent grouped reduction can be
@@ -1861,6 +1862,31 @@ class NestedReduction:
         )
         if not source_relations:
             return None
+        live_source_names = OrderedSet(
+            relation.consumer_access.name
+            for relation in source_relations
+            if relation.requires_live_source
+        )
+        local_input_nodes = OrderedSet(
+            node
+            for node, domain in pointwise_domains
+            if domain is cls.PointwiseDomain.LOCAL_REDUCTION_INPUT
+        )
+        parent_stage_writes = OrderedSet(
+            dep.name
+            for node in outer_nodes
+            if not node.is_reduction() and node not in local_input_nodes
+            for dep in node.read_writes.writes
+            if isinstance(dep, MemoryDep)
+        )
+        # Every outer pointwise node that is not displaced into the local stage
+        # runs inside the parent loop, so a looped parent cannot forward its
+        # value after the loop closes. Looping is a codegen choice made later
+        # from kernel features and RBLOCK limits, not the persistent_reductions
+        # config, so this cannot be narrowed to looped parents here: decline
+        # both until staged codegen can reload such a value.
+        if live_source_names & parent_stage_writes:
+            return None
         broadcast_relations = cls._sub_parent_broadcast_access_relations(
             parent_nodes,
             sub_parent_nodes,
@@ -2047,11 +2073,11 @@ class NestedReduction:
         group_size: sympy.Integer,
         grouped_axis: GroupedAxis,
     ) -> StagedReductionPlan | None:
-        """Rebuild mutable domains for an approved nested topology.
+        """Build domains for an approved nested topology.
 
-        ``merge_loops`` rewrites loop bodies after fusion, so grouped-axis
-        discovery can no longer recover every axis approved at fusion time.
-        The axis and group size remain stable; ranges and domains do not.
+        Nested fused nodes preserve their loop bodies, but append fusion may
+        extend the grouped topology. The approved axis and group size remain
+        stable while ranges and domains are rebuilt from the final nodes.
         """
         _, (outer_numel, outer_rnumel) = outer_node.group
         _, (grouped_numel, grouped_rnumel) = grouped_node.group
@@ -6731,6 +6757,9 @@ class Scheduler:
             return
 
         for node in self.nodes:
+            # Nested-reduction plans depend on the bodies used during fusion.
+            if isinstance(node, FusedNestedReductions):
+                continue
             # Even for CPU, if we are using the halide backend, we still need
             # the merge loops steps below
             if not isinstance(node, (SchedulerNode, FusedSchedulerNode)) or (

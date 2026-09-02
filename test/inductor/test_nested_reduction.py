@@ -585,6 +585,26 @@ class _NestedReductionBase:
             self.assertEqual(act, ref, atol=1e-2, rtol=1e-2)
         self.check_fusion()
 
+    @parametrize("dynamic", ["mark", "automatic"])
+    def test_dynamic_materialized_parent_output(self, dynamic):
+        D, G = 1024, 32
+
+        def f(x):
+            normalized = _rmsnorm(x)
+            groups = normalized.view(x.shape[0], D // G, G)
+            return normalized, groups.abs().amax(dim=-1)
+
+        compiled = torch.compile(f, fullgraph=True)
+        first = torch.randn(32, D, device=GPU_TYPE)
+        if dynamic == "mark":
+            torch._dynamo.mark_dynamic(first, 0)
+        self.assertEqual(compiled(first), f(first), atol=1e-3, rtol=1e-3)
+        second = torch.randn(48, D, device=GPU_TYPE)
+        self.assertEqual(compiled(second), f(second), atol=1e-3, rtol=1e-3)
+        expected_kernels = 1 if dynamic == "mark" else 2
+        self.assertEqual(metrics.codegen_nested_reduction, expected_kernels)
+        self.assertEqual(metrics.generated_kernel_count, expected_kernels)
+
     # ---- Producer-consumer: node2 reads node1's materialized output ----
     # Instead of node1 and node2 sharing a common input, node2 reads
     # node1's output. This triggers the producer-consumer path in
@@ -1950,6 +1970,60 @@ class _NestedReductionBase:
         self.check_nested_matches_unnested(f, (x,))
         self.check_no_fusion()
 
+    @parametrize("prologue_kind", ["output", "realized"])
+    def test_nested_sub_parent_rejects_parent_prologue_source(self, prologue_kind):
+        B, G = 32, 16
+        D = 4096 if self.force_persistent_outer_reduction is False else 512
+
+        def f(x, weight):
+            prologue = x * weight + 1
+            if prologue_kind == "realized":
+                prologue = torch.ops._inductor_test.realize(prologue)
+            normalized = _rmsnorm(prologue)
+            groups = normalized.view(B, D // G, G)
+            scale = (groups.abs().amax(dim=-1) / 6).clamp(1e-12, 448)
+            pairs = groups.view(B, D // G, G // 2, 2)
+            even = (pairs[..., 0] / scale.unsqueeze(-1)).to(torch.float16)
+            odd = (pairs[..., 1] / scale.unsqueeze(-1)).to(torch.float16)
+            outputs = even, odd, scale
+            return (*outputs, prologue) if prologue_kind == "output" else outputs
+
+        args = (
+            torch.randn(B, D, dtype=torch.bfloat16, device=GPU_TYPE),
+            torch.randn(D, dtype=torch.bfloat16, device=GPU_TYPE),
+        )
+        self.check_nested_matches_unnested(f, args)
+        self.check_fusion(expected_kernels=2)
+
+    def test_nested_sub_parent_parent_stage_sibling_source(self):
+        # The sub-parent plan declines this topology, but so does the staged
+        # fusion gate, so the kernel count below does not isolate the planner
+        # guard; test_inductor_scheduler.py covers that directly.
+        B, G = 32, 16
+        D = 4096 if self.force_persistent_outer_reduction is False else 512
+        realize = torch.ops._inductor_test.realize
+
+        def f(x, weight):
+            prologue = x * weight + 1
+            # Consumes the prologue but never feeds the parent reduction, so it
+            # is emitted in the parent stage without being a reduction ancestor.
+            gates = realize(torch.sigmoid(prologue)).view(B, D // G, G // 2, 2)
+            normalized = realize(_rmsnorm(prologue))
+            groups = normalized.view(B, D // G, G)
+            scale = (groups.abs().amax(dim=-1) / 6).clamp(1e-12, 448)
+            pairs = groups.view(B, D // G, G // 2, 2)
+            inverse = scale.unsqueeze(-1)
+            even = (pairs[..., 0] / inverse * gates[..., 0]).to(torch.float16)
+            odd = (pairs[..., 1] / inverse * gates[..., 1]).to(torch.float16)
+            return even, odd, scale, prologue
+
+        args = (
+            torch.randn(B, D, dtype=torch.bfloat16, device=GPU_TYPE),
+            torch.randn(D, dtype=torch.bfloat16, device=GPU_TYPE),
+        )
+        self.check_nested_matches_unnested(f, args)
+        self.assertGreaterEqual(metrics.generated_kernel_count, 2)
+
     def test_mxfp6_internal_source_full_resolution_fork(self):
         x = torch.randn(32, 1024, device=GPU_TYPE, dtype=torch.bfloat16)
         self.check_nested_matches_unnested(
@@ -2373,6 +2447,21 @@ class _NestedReductionBase:
             return _rmsnorm(x).reshape(4, -1, G).abs().amax(dim=-1)
 
         self._check_rejected(f, (torch.randn(4, D, device=GPU_TYPE),))
+
+    def test_two_grouped_stages_differing_group_size(self):
+        """A second grouped stage iterates [X, R/G2], which is neither the fused
+        node's pointwise nor its flattened pointwise*reduction frame. Coalescing
+        analysis has no split for it and must decline rather than raise."""
+        B, D, G1, G2 = 64, 512, 8, 4
+
+        def f(x, w):
+            n = _rmsnorm(x * w)
+            g1 = n.reshape(B, D // G1, G1).abs().amax(dim=-1)
+            g2 = n.reshape(B, D // G2, G2).abs().amax(dim=-1)
+            return n.reshape(B, D // G1, G1) / g1.unsqueeze(-1), g1, g2
+
+        args = (torch.randn(B, D, device=GPU_TYPE), torch.randn(D, device=GPU_TYPE))
+        self.check_nested_matches_unnested(f, args)
 
     def test_small_outer_reduction_fuses(self):
         self._norm_block_reduce(_rmsnorm, "amax", 4, 128, 16)
