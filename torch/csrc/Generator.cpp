@@ -2,11 +2,8 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/THP.h>
-#include <torch/csrc/autograd/generated/VariableType.h>
-#include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/utils/python_arg_parser.h>
-#include <torch/csrc/utils/tensor_types.h>
 
 #include <ATen/ATen.h>
 #include <ATen/CPUGeneratorImpl.h>
