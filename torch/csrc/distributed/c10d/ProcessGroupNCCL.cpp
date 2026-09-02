@@ -1611,7 +1611,7 @@ void ProcessGroupNCCL::shutdown() {
 ProcessGroupNCCL::~ProcessGroupNCCL() {
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
 
-#ifdef NCCL_HAS_SYMMEM_SUPPORT
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
   // Drop our entry from each per-device NCCLDevCommManager. Skip aborted
   // comms -- a successor PG may have already re-registered under the same
   // group_uid (e.g. restart-after-error), and unconditionally clearing
@@ -1623,10 +1623,15 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
         continue;
       }
       c10::Device device(at::kCUDA, ncclComm->getDeviceIndex());
+#ifdef USE_ROCM
       const std::string symmMemGroupName =
           options_->group_name.empty() ? "0" : options_->group_name;
       c10d::symmetric_memory::NCCLDevCommManager::get(device).unregister_comm(
-          symmMemGroupName);
+          symmMemGroupName, ncclComm->getNcclComm());
+#else
+      c10d::symmetric_memory::NCCLDevCommManager::get(device).unregister_comm(
+          getGroupUid());
+#endif
     }
   }
 #endif
@@ -3314,18 +3319,22 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
       ncclCommMemPoolMap.emplace(ncclComm, MemPoolSet{});
     }
 
-#ifdef NCCL_HAS_SYMMEM_SUPPORT
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
     // Publish the host ncclComm so NCCLSymmetricMemory can find it by
     // group name, avoiding dynamic_cast back to ProcessGroupNCCL.
     // Other producers (e.g. torchcomms' TorchCommNCCLX) populate the same
     // registry, giving symm_mem a uniform group_name -> ncclComm_t lookup
     // regardless of backend. Gated on NCCL_HAS_SYMMEM_DEVICE_SUPPORT
-    // (excludes ROCm) since the registry has no other consumer there.
     // Unregistered in ~ProcessGroupNCCL.
+#ifdef USE_ROCM
     const std::string symmMemGroupName =
         options_->group_name.empty() ? "0" : options_->group_name;
     c10d::symmetric_memory::NCCLDevCommManager::get(device).register_comm(
         symmMemGroupName, ncclComm->getNcclComm());
+#else
+    c10d::symmetric_memory::NCCLDevCommManager::get(device).register_comm(
+        getGroupUid(), ncclComm->getNcclComm());
+#endif
 #endif
   }
 
