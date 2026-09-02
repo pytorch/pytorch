@@ -74,7 +74,7 @@ bool memoryProfilingEnabled() {
   return reporter && reporter->memoryProfilingEnabled();
 }
 
-void SetGlobalMemoryReportingInfo(MemoryReportingInfoBase* reporter) {
+void setGlobalMemoryReportingInfo(MemoryReportingInfoBase* reporter) {
   global_memory_reporter.store(reporter, std::memory_order_relaxed);
 }
 
