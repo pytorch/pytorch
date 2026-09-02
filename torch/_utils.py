@@ -574,26 +574,15 @@ def _set_obj_state(obj, state):
         dict_state = state
         slots_state = None
 
-    def _setattr(k, v):
-        # A normal torch.save never emits dunder keys here. Rejecting them keeps
-        # a crafted state dict from setting attributes such as __class__ (which
-        # would silently change the object's type) when loading with
-        # weights_only=True.
-        if isinstance(k, str) and k.startswith("__") and k.endswith("__"):
-            raise RuntimeError(
-                f"_set_obj_state: refusing to set dunder attribute '{k}'"
-            )
-        setattr(obj, k, v)
-
     # Starting with Python 3.11, the __dict__ attribute is lazily created
     # and is serialized as None when not needed.
     if dict_state:
         for k, v in dict_state.items():
-            _setattr(k, v)
+            setattr(obj, k, v)
 
     if slots_state:
         for k, v in slots_state.items():
-            _setattr(k, v)
+            setattr(obj, k, v)
     return obj
 
 
