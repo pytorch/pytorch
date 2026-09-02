@@ -1364,8 +1364,9 @@ class OutputGraph(OutputGraphCommon):
     def check_event_record_after_input_mutation(
         self,
         stream_index: int,
-        event_value: Any = None,
-        event_has_source: bool = True,
+        *,
+        event_value: Any,
+        event_has_source: bool,
     ) -> None:
         """Error if an event is being recorded on a stream that already has
         an input mutation. Called at record time so ordering is naturally
@@ -1399,7 +1400,7 @@ class OutputGraph(OutputGraphCommon):
             "Event record occurred here:\n"
             f"{''.join(record_stack.format())}\n" + self._EVENT_INPUT_MUTATION_FIX
         )
-        if not event_has_source and event_value is not None:
+        if not event_has_source:
             self._pending_event_record_violations.append((event_value, msg))
             return
         raise RuntimeError(msg)
@@ -1421,7 +1422,7 @@ class OutputGraph(OutputGraphCommon):
         from .variables.streams import EventVariable
 
         pending_ids = {id(value) for value, _ in self._pending_event_record_violations}
-        escaped: OrderedSet[int] = OrderedSet()
+        escaped: set[int] = set()
 
         def _check(var: VariableTracker) -> None:
             # type.__instancecheck__ avoids realizing lazy
@@ -1429,9 +1430,9 @@ class OutputGraph(OutputGraphCommon):
             # compile_subgraph.
             if not type.__instancecheck__(EventVariable, var):
                 return
-            event_var: EventVariable = var  # pyrefly: ignore[bad-assignment]
-            if id(event_var.value) in pending_ids:
-                escaped.add(id(event_var.value))
+            value = cast(EventVariable, var).value
+            if id(value) in pending_ids:
+                escaped.add(id(value))
 
         roots: list[Any] = [all_stack_values]
         # Attribute stores AND value mutations on tracked objects (list
@@ -1459,8 +1460,8 @@ class OutputGraph(OutputGraphCommon):
             if id(value) in escaped
         ]
         self._pending_event_record_violations.clear()
-        for msg in escaped_violations:
-            raise RuntimeError(msg)
+        if escaped_violations:
+            raise RuntimeError("\n\n".join(escaped_violations))
 
     @property
     def graph(self) -> torch.fx.Graph:
@@ -2566,6 +2567,13 @@ class OutputGraph(OutputGraphCommon):
                         f"While compiling, we found certain side effects happened in the model.forward. "
                         f"Here are the list of potential sources you can double check: {side_effect_refs}"
                     )
+
+        # close_local_generators traces generator finally bytecode after
+        # the escape scan and can append new violations.  Catch them here.
+        if self._pending_event_record_violations:
+            msgs = [msg for _, msg in self._pending_event_record_violations]
+            self._pending_event_record_violations.clear()
+            raise RuntimeError("\n\n".join(msgs))
 
         return all_stack_locals_metas
 

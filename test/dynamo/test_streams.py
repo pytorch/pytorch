@@ -2224,6 +2224,31 @@ class GraphModule(torch.nn.Module):
             torch.ones(2, 2, device=device)
         )
 
+    def test_event_record_after_input_mutation_in_generator_finally(self, device):
+        # A generator's finally block records an event on a stream that
+        # already has an input mutation.  close_local_generators traces
+        # the finally bytecode after the escape scan, so this exercises
+        # the end-of-compile_subgraph check.
+        def gen(s):
+            try:
+                yield
+            finally:
+                e = torch.Event(device=device)
+                e.record(s)
+
+        def fn(x):
+            s = torch.Stream(device=device)
+            with s:
+                x.add_(1)
+                g = gen(s)
+                next(g)
+            return x + 1
+
+        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, 2, device=device)
+            )
+
     def test_event_record_before_input_mutation_no_error(self, device):
         def fn(x):
             s = torch.Stream(device=device)
