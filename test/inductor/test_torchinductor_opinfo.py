@@ -680,6 +680,14 @@ inductor_override_kwargs["xpu"] = {
     ("softmax", f16): {"atol": 1e-4, "rtol": 0.02},
     ("_softmax_backward_data", f16): {"atol": 0.008, "rtol": 0.002},
     ("special.log_ndtr", f64): {"atol": 1e-6, "rtol": 1e-5},
+    # fp16 backward: i1e_backward/i1_backward combine i0e/i1e with sgn+reciprocal
+    # in one expression; Inductor fuses the whole thing into a single kernel
+    # (one fp16 rounding at the end) while eager rounds after each sub-op, so
+    # the two accumulate rounding differently. Same fix already applied for
+    # CUDA above; XPU only started exercising this once Half/BFloat16 were
+    # added to i1/i1e's AT_DISPATCH_FLOATING_TYPES_AND2 backward dispatch.
+    ("special.i1", f16): {"grad_atol": 1e-5, "grad_rtol": 1e-2},
+    ("special.i1e", f16): {"grad_atol": 1e-5, "grad_rtol": 1e-2},
     ("std_mean.unbiased", f16): {
         "reference_in_float": True,
         "atol": 5e-5,
