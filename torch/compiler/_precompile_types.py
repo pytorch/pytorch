@@ -65,6 +65,12 @@ class PrecompileSummary:
     dropped_guards: tuple[tuple[str, str], ...] = ()
     kept_guards: tuple[tuple[str, str], ...] = ()
     risky_dropped_guards: tuple[tuple[str, str], ...] = ()
+    # Guards that COULD have been serialized and were not, because they held
+    # identically across every captured variant. Reported apart from
+    # dropped_guards, which is "could not be serialized", because the reason and
+    # the remedy differ -- but reported, because a capture that silently
+    # discards a precondition should not look like one that had none.
+    policy_dropped_guards: tuple[tuple[str, str], ...] = ()
     capture_errors: tuple[str, ...] = ()
 
     @property
@@ -73,6 +79,12 @@ class PrecompileSummary:
 
         False if any frame produced NO guarded code at all, if any frame hit the
         recompile limit, if any was bypassed, or if a capture call raised.
+
+        ``backend_graphs`` is checked too, because ``guarded_codes`` alone cannot
+        tell a real capture from an empty one: ``allow_empty_graphs`` lets a frame
+        that compiled nothing still count as one guarded code, so a model whose
+        every graph sits behind a recursive ``torch._dynamo.disable`` reported
+        complete while carrying no compiled compute at all.
         """
         return (
             not self.bypassed
@@ -80,6 +92,7 @@ class PrecompileSummary:
             and not self.uncovered_frames
             and not self.capture_errors
             and self.guarded_codes > 0
+            and self.backend_graphs > 0
         )
 
     def dropped_guard_types(self) -> dict[str, int]:
@@ -116,6 +129,7 @@ class PrecompileSummary:
         return base
 
 
+ExampleInput.__module__ = "torch.compiler"
 GuardFact.__module__ = "torch.compiler"
 FrameInvariants.__module__ = "torch.compiler"
 PrecompileSummary.__module__ = "torch.compiler"
