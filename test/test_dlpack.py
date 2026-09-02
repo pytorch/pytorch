@@ -543,7 +543,7 @@ class TestTorchDlPack(TestCase):
             self.assertNotEqual(inp.data_ptr(), out.data_ptr())
 
     @skipMeta
-    @onlyCUDA
+    @onlyOn(["xpu", "cuda"])
     def test_copy(self, device):
         # Force-copy same device tensor.
         self._test_from_dlpack(device, copy=True)
@@ -563,7 +563,7 @@ class TestTorchDlPack(TestCase):
         self._test_from_dlpack(device, out_device=device, copy=False)
 
     @skipMeta
-    @onlyCUDA
+    @onlyOn(["xpu", "cuda"])
     def test_needs_copy_error(self, device):
         with self.assertRaisesRegex(ValueError, r"cannot move .* tensor from .*"):
             self._test_from_dlpack(device, out_device="cpu", copy=False)
