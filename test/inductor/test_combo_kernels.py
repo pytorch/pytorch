@@ -3295,7 +3295,7 @@ class _ScheduleFirstFakeCombo:
 @instantiate_parametrized_tests
 class ComboKernelPeakMemoryTests(InductorTestCase):
     def test_scheduler_memory_uses_physical_allocation_size(self):
-        from torch._inductor.memory import compute_size_for_scheduler_buffer
+        from torch._inductor import memory as memory_module
 
         buffer = _PeakMemFakeBuffer("padded", set(), 0, 0)
         buffer.node = SimpleNamespace(
@@ -3310,26 +3310,16 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         )
 
         with V.set_graph_handler(graph):
-            legacy_sizes = compute_size_for_scheduler_buffer({"padded": buffer})
-            sizes = compute_size_for_scheduler_buffer(
+            sizes = memory_module.compute_size_for_scheduler_buffer(
                 {"padded": buffer}, use_allocation_storage_size=True
             )
 
-        self.assertEqual(legacy_sizes["padded"], (24, 24))
         self.assertEqual(sizes["padded"], (128, 128))
 
-    def test_freeable_input_uses_physical_allocation_size(self):
-        from torch._inductor import ir, memory as memory_module
-        from torch._inductor.graph import GraphLowering
-
-        input_buffer = ir.InputBuffer(
-            name="input",
-            layout=ir.FixedLayout(torch.device("cpu"), torch.float32, [2, 3], [8, 2]),
-        )
-        graph = object.__new__(GraphLowering)
+        input_buffer = SimpleNamespace(get_dtype=lambda: torch.float32)
+        graph = SimpleNamespace()
         graph.graph_inputs_original = {"input": input_buffer}
-        graph.buffer_to_padded_size = {}
-        graph.get_dep_size_hint = lambda _: 24
+        graph.get_allocation_storage_size = lambda _: 13
         graph.sizevars = SimpleNamespace(
             optimization_hint=lambda value, fallback: value
         )
@@ -3340,310 +3330,158 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
             V.set_graph_handler(graph),
             patch.object(memory_module, "is_nonfreeable_buffers", return_value=False),
         ):
-            legacy_inputs = memory_module.get_freeable_input_buf(
-                [node], OrderedSet(["input"])
-            )
             inputs = memory_module.get_freeable_input_buf(
                 [node],
                 OrderedSet(["input"]),
                 use_allocation_storage_size=True,
             )
 
-        self.assertEqual(legacy_inputs["input"].mpi_buffer.size_free, 24)
         self.assertEqual(inputs["input"].mpi_buffer.size_free, 52)
 
-    def test_freeable_non_tensor_input_preserves_zero_size(self):
+    def test_scheduler_memory_clamps_negative_physical_size_hints(self):
         from torch._inductor import memory as memory_module
 
+        buffer = _PeakMemFakeBuffer("dynamic", set(), 0, 0)
+        buffer.node = SimpleNamespace(
+            layout=object(),
+            get_dtype=lambda: torch.float32,
+            get_numel=lambda: 1,
+        )
+        input_buffer = SimpleNamespace(get_dtype=lambda: torch.float32)
         graph = SimpleNamespace(
-            graph_inputs_original={},
-            get_dep_size_hint=lambda _: 0,
+            scheduler=SimpleNamespace(mutation_real_name={}),
+            graph_inputs_original={"input": input_buffer},
+            sizevars=SimpleNamespace(optimization_hint=lambda value, fallback: -3),
+            get_allocation_storage_size=lambda _: object(),
         )
         node = _PeakMemFakeNode("node")
-        node.read_writes = SimpleNamespace(reads=[SimpleNamespace(name="obj")])
+        node.read_writes = SimpleNamespace(reads=[SimpleNamespace(name="input")])
 
         with (
             V.set_graph_handler(graph),
             patch.object(memory_module, "is_nonfreeable_buffers", return_value=False),
         ):
+            sizes = memory_module.compute_size_for_scheduler_buffer(
+                {"dynamic": buffer}, use_allocation_storage_size=True
+            )
             inputs = memory_module.get_freeable_input_buf(
-                [node],
-                OrderedSet(["obj"]),
-                use_allocation_storage_size=True,
+                [node], OrderedSet(["input"]), use_allocation_storage_size=True
             )
 
-        self.assertEqual(inputs["obj"].mpi_buffer.size_free, 0)
+        self.assertEqual(sizes["dynamic"], (0, 0))
+        self.assertEqual(inputs["input"].mpi_buffer.size_free, 0)
 
-    def test_multi_output_storage_is_filtered_atomically(self):
+    def test_scheduler_memory_storage_filters_per_device(self):
         from torch._inductor.memory import MemoryStorageInfo, SchedulerMemoryStorage
 
-        parent = _PeakMemFakeBuffer("parent", set(), 300, 0, "parent_op")
-        leaf_a = _PeakMemFakeBuffer("leaf_a", set(), 0, 100, "leaf_a_op")
-        leaf_b = _PeakMemFakeBuffer("leaf_b", set(), 0, 200, "leaf_b_op")
-        consumer_a = _PeakMemFakeNode("consumer_a")
-        consumer_b = _PeakMemFakeNode("consumer_b")
-        records = (
-            MemoryStorageInfo(
-                100,
-                parent,
-                leaf_a,
-                frozenset({"parent_op", "leaf_a_op"}),
-                (consumer_a,),
-                False,
-            ),
-            MemoryStorageInfo(
-                200,
-                parent,
-                leaf_b,
-                frozenset({"parent_op", "leaf_b_op"}),
-                (consumer_b,),
-                False,
-            ),
-        )
-        records_by_operation = dict.fromkeys(
-            ("parent_op", "leaf_a_op", "leaf_b_op"), records
-        )
-        storage = SchedulerMemoryStorage(records, records_by_operation, set(), {})
+        records = []
+        records_by_operation = {}
+        for name, device, size in (
+            ("cpu", torch.device("cpu"), 4),
+            ("cuda", torch.device("cuda", 1), 8),
+        ):
+            buffer = _PeakMemFakeBuffer(name, set(), size, size)
+            buffer.node = SimpleNamespace(get_device=lambda device=device: device)
+            record = MemoryStorageInfo(
+                size, buffer, buffer, frozenset([name]), (), False
+            )
+            records.append(record)
+            records_by_operation[name] = (record,)
 
-        visible = storage.materialize({"parent_op", "leaf_a_op", "leaf_b_op"})
-        self.assertEqual(visible.size_alloc, 300)
-        self.assertEqual(visible.lifetime_buffers, (leaf_a, leaf_b))
-
-        eliminated = storage.materialize(
-            {
-                "parent_op",
-                "leaf_a_op",
-                "leaf_b_op",
-                "consumer_a",
-                "consumer_b",
-            }
-        )
-        self.assertEqual(eliminated.size_alloc, 0)
-        self.assertEqual(eliminated.lifetime_buffers, ())
-
-        partial = storage.materialize({"parent_op", "leaf_a_op", "consumer_a"})
-        self.assertEqual(partial.size_alloc, 200)
-        self.assertEqual(partial.lifetime_buffers, ())
-
-        graph_output_record = MemoryStorageInfo(
-            100,
-            parent,
-            leaf_a,
-            frozenset({"parent_op", "leaf_a_op"}),
-            (consumer_a,),
-            True,
-        )
-        output_storage = SchedulerMemoryStorage(
-            (graph_output_record,),
-            {
-                "parent_op": (graph_output_record,),
-                "leaf_a_op": (graph_output_record,),
-            },
-            {"leaf_a"},
-            {},
-        )
-        graph_output = output_storage.materialize(
-            {"parent_op", "leaf_a_op", "consumer_a"}
-        )
-        self.assertEqual(graph_output.size_alloc, 100)
-        self.assertEqual(graph_output.lifetime_buffers, (leaf_a,))
-
-    def test_alias_graph_output_keeps_source_storage_live(self):
-        from torch._inductor.memory import build_scheduler_memory_storage
-
-        consumer = _PeakMemFakeNode("consumer")
-        source = _PeakMemFakeBuffer("source", set(), 100, 100, "source_op")
-        alias = _PeakMemFakeBuffer("alias", {consumer}, 100, 100, "alias_op")
-        source.node = SimpleNamespace(
-            layout=object(),
-            get_inputs_that_alias_output=lambda: (),
-            should_allocate=lambda: True,
-        )
-        alias.node = SimpleNamespace(
-            layout=object(),
-            get_inputs_that_alias_output=lambda: ("source",),
-            should_allocate=lambda: False,
-        )
-
-        storage = build_scheduler_memory_storage(
-            {"source": source, "alias": alias},
-            OrderedSet(["alias"]),
-            {},
-        )
-
-        self.assertEqual(len(storage.records), 1)
-        self.assertTrue(storage.records[0].is_graph_output)
-        self.assertIn(consumer, source.mpi_buffer.succ_nodes)
-        self.assertIn(consumer, source.mpi_buffer.succ_nodes_for_ordering)
-        self.assertEqual(storage.materialize({"source_op"}).size_alloc, 100)
-
-    def test_non_owning_layout_uses_source_storage(self):
-        from torch._inductor import ir
-        from torch._inductor.memory import build_scheduler_memory_storage
-
-        consumer = _PeakMemFakeNode("consumer")
-        source = _PeakMemFakeBuffer("source", set(), 100, 100, "source_op")
-        alias = _PeakMemFakeBuffer("alias", {consumer}, 100, 100, "alias_op")
-        source.node = SimpleNamespace(
-            layout=object(),
-            get_inputs_that_alias_output=lambda: (),
-            should_allocate=lambda: True,
-        )
-        alias.node = SimpleNamespace(
-            layout=object.__new__(ir.NonOwningLayout),
-            get_inputs_that_alias_output=lambda: ("source",),
-            should_allocate=lambda: True,
-        )
-
-        storage = build_scheduler_memory_storage(
-            {"source": source, "alias": alias},
-            OrderedSet(["alias"]),
-            {},
-        )
-
-        self.assertEqual(len(storage.records), 1)
-        self.assertTrue(storage.records[0].is_graph_output)
-        self.assertIn(consumer, source.mpi_buffer.succ_nodes)
-        self.assertEqual(storage.materialize({"source_op"}).size_alloc, 100)
-
-    def test_scheduler_memory_storage_partitions_by_device(self):
-        from torch._inductor.memory import MemoryStorageInfo, SchedulerMemoryStorage
-
-        parent = _PeakMemFakeBuffer("parent", set(), 30, 0)
-        cpu_leaf = _PeakMemFakeBuffer("cpu", set(), 0, 10)
-        cuda_leaf = _PeakMemFakeBuffer("cuda", set(), 0, 20)
-        cpu_leaf.node = SimpleNamespace(get_device=lambda: torch.device("cpu"))
-        cuda_leaf.node = SimpleNamespace(get_device=lambda: torch.device("cuda", 0))
-        cpu_record = MemoryStorageInfo(
-            10, parent, cpu_leaf, frozenset({"parent", "cpu"}), (), False
-        )
-        cuda_record = MemoryStorageInfo(
-            20, parent, cuda_leaf, frozenset({"parent", "cuda"}), (), False
-        )
+        free_sizes = {
+            id(record.lifetime_buffer.mpi_buffer): record.size for record in records
+        }
         storage = SchedulerMemoryStorage(
-            (cpu_record, cuda_record),
-            {
-                "parent": (cpu_record, cuda_record),
-                "cpu": (cpu_record,),
-                "cuda": (cuda_record,),
-            },
+            tuple(records),
+            records_by_operation,
             OrderedSet(),
-            {id(cpu_leaf.mpi_buffer): 10, id(cuda_leaf.mpi_buffer): 20},
-            {
-                id(cpu_leaf.mpi_buffer): "parent",
-                id(cuda_leaf.mpi_buffer): "parent",
-            },
+            free_sizes,
         )
 
         cpu_storage = storage.for_device(torch.device("cpu"))
-        cuda_storage = storage.for_device(torch.device("cuda", 0))
-
-        self.assertEqual(cpu_storage.records, (cpu_record,))
-        self.assertEqual(cuda_storage.records, (cuda_record,))
-        self.assertEqual(cpu_storage.materialize({"parent"}).size_alloc, 10)
-        self.assertEqual(cuda_storage.materialize({"parent"}).size_alloc, 20)
-        self.assertEqual(cpu_storage.materialize({"cuda"}).size_alloc, 0)
-        self.assertEqual(cuda_storage.materialize({"cpu"}).size_alloc, 0)
-
-    def test_multi_output_storage_builder_pairs_parent_allocation_with_leaf(self):
-        from torch._inductor import ir
-        from torch._inductor.memory import build_scheduler_memory_storage
-
-        parent = _PeakMemFakeBuffer("parent", set(), 100, 0, "parent_op")
-        parent.node = SimpleNamespace(
-            layout=ir.MultiOutputLayout(device=torch.device("cpu")),
-            get_inputs_that_alias_output=lambda: (),
-            should_allocate=lambda: False,
-        )
-        leaf = _PeakMemFakeBuffer("leaf", set(), 0, 100, "leaf_op")
-        leaf.node = object.__new__(ir.MultiOutput)
-        leaf.node.layout = ir.FixedLayout(torch.device("cpu"), torch.float32, [25], [1])
-        leaf.node.inputs = [parent.node]
-        parent.users = [
-            SimpleNamespace(node=SimpleNamespace(get_outputs=lambda: [leaf]))
-        ]
-
-        storage = build_scheduler_memory_storage(
-            {"parent": parent, "leaf": leaf},
-            OrderedSet(),
-            {},
-        )
-
-        self.assertEqual(len(storage.records), 1)
-        record = storage.records[0]
-        self.assertIs(record.allocation_buffer, parent)
-        self.assertIs(record.lifetime_buffer, leaf)
-        self.assertEqual(record.required_defining_ops, {"parent_op", "leaf_op"})
+        cuda_storage = storage.for_device(torch.device("cuda", 1))
+        self.assertEqual([record.size for record in cpu_storage.records], [4])
+        self.assertEqual([record.size for record in cuda_storage.records], [8])
 
     def test_mixed_alias_multi_output_tracks_fresh_leaf_storage(self):
         from torch._inductor import ir
         from torch._inductor.memory import build_scheduler_memory_storage
 
-        fresh_extractor = _PeakMemFakeNode("fresh_extractor")
+        extractor = _PeakMemFakeNode("extractor")
+        alias_consumer = _PeakMemFakeNode("alias_consumer")
         fresh_consumer = _PeakMemFakeNode("fresh_consumer")
-        source = _PeakMemFakeBuffer("source", set(), 100, 100, "source_op")
-        parent = _PeakMemFakeBuffer(
-            "parent", {fresh_extractor}, 0, 0, "parent_op"
-        )
-        alias = _PeakMemFakeBuffer("alias", set(), 0, 100, "alias_op")
-        fresh = _PeakMemFakeBuffer("fresh", {fresh_consumer}, 0, 40, "fresh_op")
-        fresh_extractor._outputs = [fresh]
-        source.node = SimpleNamespace(
-            layout=object(),
-            get_inputs_that_alias_output=lambda: (),
-            should_allocate=lambda: True,
-        )
-        schema = SimpleNamespace(
-            returns=(
-                SimpleNamespace(alias_info=object()),
-                SimpleNamespace(alias_info=None),
+        source_a = _PeakMemFakeBuffer("source_a", set(), 100, 100, "source_a_op")
+        source_b = _PeakMemFakeBuffer("source_b", set(), 80, 80, "source_b_op")
+        parent = _PeakMemFakeBuffer("parent", {extractor}, 0, 0, "parent_op")
+        library = self._test_stack.enter_context(
+            torch.library._scoped_library(
+                "inductor_test_fusion_memory_mixed", "FRAGMENT"
             )
         )
-        parent.node = SimpleNamespace(
-            layout=ir.MultiOutputLayout(device=torch.device("cpu")),
-            get_inputs_that_alias_output=lambda: ("source",),
-            should_allocate=lambda: True,
-            op_overload=SimpleNamespace(_schema=schema),
+        library.define(
+            "mixed(Tensor(a) x, Tensor(b) y) -> (Tensor(a), Tensor(b), Tensor)"
         )
-        for index, leaf in enumerate((alias, fresh)):
+        op = torch.ops.inductor_test_fusion_memory_mixed.mixed.default
+        alias_a = _PeakMemFakeBuffer("alias_a", set(), 0, 100, "alias_a_op")
+        alias_b = _PeakMemFakeBuffer("alias_b", {alias_consumer}, 0, 80, "alias_b_op")
+        fresh = _PeakMemFakeBuffer("fresh", {fresh_consumer}, 0, 40, "fresh_op")
+        extractor._outputs = [alias_b, fresh]
+        for source in (source_a, source_b):
+            source.node = SimpleNamespace(
+                layout=object(),
+                get_inputs_that_alias_output=lambda: (),
+                should_allocate=lambda: True,
+            )
+        input_a = SimpleNamespace(get_name=lambda: "source_a")
+        input_b = SimpleNamespace(get_name=lambda: "source_b")
+        parent.node = object.__new__(ir.FallbackKernel)
+        parent.node.layout = ir.MultiOutputLayout(device=torch.device("cpu"))
+        parent.node.op_overload = op
+        parent.node.inputs = (input_a, input_b)
+        parent.node.constant_args = ()
+        parent.node.unflatten_args = lambda inputs, constants: (inputs, {})
+        parent.node.alias_names = ["source_a", "source_b"]
+        for index, leaf in enumerate((alias_a, alias_b, fresh)):
             leaf.node = object.__new__(ir.MultiOutput)
             leaf.node.layout = ir.FixedLayout(
-                torch.device("cpu"), torch.float32, [25 if index == 0 else 10], [1]
+                torch.device("cpu"), torch.float32, [25 if index == 0 else 20], [1]
             )
             leaf.node.inputs = [parent.node]
             leaf.node.indices = [(tuple, index)]
             leaf.node.get_inputs_that_alias_output = lambda: ("parent",)
-        parent.users = [SimpleNamespace(node=fresh_extractor)]
+        parent.users = [SimpleNamespace(node=extractor)]
 
         with V.set_graph_handler(SimpleNamespace(cpp_wrapper=True)):
             storage = build_scheduler_memory_storage(
                 {
-                    "source": source,
+                    "source_a": source_a,
+                    "source_b": source_b,
                     "parent": parent,
-                    "alias": alias,
+                    "alias_a": alias_a,
+                    "alias_b": alias_b,
                     "fresh": fresh,
                 },
                 OrderedSet(),
                 {},
             )
 
-        self.assertEqual(len(storage.records), 2)
-        self.assertEqual(storage.materialize({"source_op"}).size_alloc, 100)
-        self.assertEqual(
-            storage.materialize({"parent_op", "fresh_op"}).size_alloc, 40
-        )
-        source_record = next(
-            record
-            for record in storage.records
-            if record.lifetime_buffer is source
-        )
-        self.assertTrue(source_record.is_graph_output)
-        self.assertIn(fresh_extractor, source.mpi_buffer.succ_nodes)
+        self.assertEqual(len(storage.records), 3)
+        self.assertEqual(storage.materialize({"parent_op", "fresh_op"}).size_alloc, 40)
+        records = {
+            record.lifetime_buffer.get_name(): record for record in storage.records
+        }
+        self.assertTrue(records["source_a"].is_graph_output)
+        self.assertFalse(records["source_b"].is_graph_output)
+        self.assertIn(extractor, source_a.mpi_buffer.succ_nodes)
+        self.assertNotIn(alias_consumer, source_a.mpi_buffer.succ_nodes)
+        self.assertIn(alias_consumer, source_b.mpi_buffer.succ_nodes)
 
     def test_multi_output_storage_tracks_dead_fallback_outputs(self):
         from torch._inductor.scheduler import Scheduler
 
-        library = torch.library.Library("inductor_test_dead_outputs", "FRAGMENT")
+        library = self._test_stack.enter_context(
+            torch.library._scoped_library("inductor_test_dead_outputs", "FRAGMENT")
+        )
         library.define("three(Tensor x) -> (Tensor, Tensor, Tensor)")
 
         def implementation(x):
@@ -3680,109 +3518,11 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         records = device_state.storage.records
         self.assertEqual(sorted(record.size for record in records), [16] * 3)
         self.assertEqual(
-            sum(
-                record.lifetime_starts_at_allocation
-                for record in records
-            ),
-            2,
+            sum(record.lifetime_starts_at_allocation for record in records), 2
         )
         self.assertEqual(device_state.baseline_peak, 48)
-        self.assertEqual(device_state.baseline_live_before[-1], 16)
-
-    def test_dead_multi_output_storage_uses_leaf_device(self):
-        from torch._inductor import ir
-        from torch._inductor.memory import build_scheduler_memory_storage
-
-        consumer = _PeakMemFakeNode("consumer")
-        parent = _PeakMemFakeBuffer("parent", {consumer}, 0, 0, "parent_op")
-        parent.node = SimpleNamespace(
-            layout=ir.MultiOutputLayout(device=torch.device("cpu")),
-            get_inputs_that_alias_output=lambda: (),
-            should_allocate=lambda: True,
-        )
-        leaf = _PeakMemFakeBuffer("dead", set(), 0, 100, "dead_op")
-        leaf.node = object.__new__(ir.MultiOutput)
-        leaf.node.layout = ir.FixedLayout(
-            torch.device("cuda", 1), torch.float32, [25], [1]
-        )
-        leaf.node.inputs = [parent.node]
-        parent.users = []
-
-        with V.set_graph_handler(SimpleNamespace(cpp_wrapper=True)):
-            storage = build_scheduler_memory_storage(
-                {"parent": parent, "dead": leaf}, OrderedSet(), {}
-            )
-        cuda_storage = storage.for_device(torch.device("cuda", 1))
-
-        self.assertEqual(len(cuda_storage.records), 1)
-        self.assertTrue(cuda_storage.records[0].lifetime_starts_at_allocation)
-        self.assertTrue(cuda_storage.records[0].is_graph_output)
-        self.assertIn("dead", cuda_storage.graph_outputs)
-        self.assertIn(consumer, leaf.mpi_buffer.succ_nodes)
-        self.assertEqual(storage.for_device(torch.device("cpu")).records, ())
-
-    def test_multi_output_aliases_match_schema_alias_sets(self):
-        from torch._inductor import ir
-        from torch._inductor.memory import build_scheduler_memory_storage
-
-        library = torch.library.Library("inductor_test_fusion_memory", "FRAGMENT")
-        library.define("two_aliases(Tensor(a) x, Tensor(b) y) -> (Tensor(a), Tensor(b))")
-        op = torch.ops.inductor_test_fusion_memory.two_aliases.default
-        consumer_a = _PeakMemFakeNode("consumer_a")
-        consumer_b = _PeakMemFakeNode("consumer_b")
-        source_a = _PeakMemFakeBuffer("source_a", set(), 40, 40, "source_a_op")
-        source_b = _PeakMemFakeBuffer("source_b", set(), 80, 80, "source_b_op")
-        for source in (source_a, source_b):
-            source.node = SimpleNamespace(
-                layout=object(),
-                get_inputs_that_alias_output=lambda: (),
-                should_allocate=lambda: True,
-            )
-        input_a = SimpleNamespace(get_name=lambda: "source_a")
-        input_b = SimpleNamespace(get_name=lambda: "source_b")
-        parent = _PeakMemFakeBuffer("parent", set(), 0, 0, "parent_op")
-        parent.node = SimpleNamespace(
-            layout=ir.MultiOutputLayout(device=torch.device("cpu")),
-            get_inputs_that_alias_output=lambda: ("source_a", "source_b"),
-            should_allocate=lambda: True,
-            op_overload=op,
-            inputs=(input_a, input_b),
-            constant_args=(),
-            unflatten_args=lambda inputs, constants: (inputs, {}),
-        )
-        alias_a = _PeakMemFakeBuffer("alias_a", {consumer_a}, 0, 40, "alias_a_op")
-        alias_b = _PeakMemFakeBuffer("alias_b", {consumer_b}, 0, 80, "alias_b_op")
-        for index, leaf in enumerate((alias_a, alias_b)):
-            leaf.node = object.__new__(ir.MultiOutput)
-            leaf.node.layout = ir.FixedLayout(
-                torch.device("cpu"), torch.float32, [10 << index], [1]
-            )
-            leaf.node.inputs = [parent.node]
-            leaf.node.indices = [(tuple, index)]
-            leaf.node.get_inputs_that_alias_output = lambda: ("parent",)
-        parent.users = [
-            SimpleNamespace(node=SimpleNamespace(get_outputs=lambda: [alias_a, alias_b]))
-        ]
-
-        storage = build_scheduler_memory_storage(
-            {
-                "source_a": source_a,
-                "source_b": source_b,
-                "parent": parent,
-                "alias_a": alias_a,
-                "alias_b": alias_b,
-            },
-            OrderedSet(["alias_a"]),
-            {},
-        )
-
-        records = {record.lifetime_buffer.get_name(): record for record in storage.records}
-        self.assertTrue(records["source_a"].is_graph_output)
-        self.assertFalse(records["source_b"].is_graph_output)
-        self.assertIn(consumer_a, source_a.mpi_buffer.succ_nodes)
-        self.assertNotIn(consumer_b, source_a.mpi_buffer.succ_nodes)
-        self.assertIn(consumer_b, source_b.mpi_buffer.succ_nodes)
-        self.assertNotIn(consumer_a, source_b.mpi_buffer.succ_nodes)
+        expected_final_live = 48 if torch._inductor.config.cpp_wrapper else 16
+        self.assertEqual(device_state.baseline_live_before[-1], expected_final_live)
 
     def setUp(self):
         super().setUp()
@@ -4957,464 +4697,6 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         )
         self.assertGreater(early_peak, 299)
         self.assertEqual((early_before, early_after), ([], []))
-
-    def test_estimate_region_peak_memory_rejects_unbalanced_storage(self):
-        from torch._inductor import memory as mem_mod
-
-        node = _PeakMemFakeNode("node")
-        node._outputs = [_PeakMemFakeBuffer("leaf", set(), 0, 100)]
-        legacy_peak = mem_mod.estimate_region_peak_memory(
-            [node],
-            region_start=0,
-            region_end=0,
-            step_of=lambda _: 0,
-            graph_outputs=set(),
-        )
-        self.assertEqual(legacy_peak, 0)
-
-        with self.assertRaisesRegex(AssertionError, "became negative"):
-            mem_mod.estimate_region_peak_memory(
-                [node],
-                region_start=0,
-                region_end=0,
-                step_of=lambda _: 0,
-                graph_outputs=set(),
-                buffer_free_sizes={id(node._outputs[0].mpi_buffer): 100},
-            )
-
-    def test_fusion_memory_update_splices_state(self):
-        from torch._inductor.scheduler import (
-            FusionMemoryDeviceState,
-            FusionMemoryState,
-            FusionMemoryUpdate,
-            Scheduler,
-        )
-
-        a, b, c = (_PeakMemFakeNode(n) for n in ("a", "b", "c"))
-        candidate = _PeakMemFakeNode("candidate")
-        fused = _PeakMemFakeNode("fused")
-        fused.snodes = [a, b]
-        device_state = FusionMemoryDeviceState(
-            nodes=[a, b, c],
-            tracked_nodes={a, b, c},
-            graph_outputs=set(),
-            node_to_idx={a: 0, b: 1, c: 2},
-            baseline_peak=30,
-            baseline_live_before=[0, 10, 20, 30],
-            baseline_live_after=[10, 20, 30],
-            peak_limit=30,
-            storage=SimpleNamespace(buffer_free_sizes={}),
-            last_use_steps={1: 2},
-        )
-        update = FusionMemoryUpdate(
-            node1=a,
-            node2=b,
-            candidate=candidate,
-            candidate_step=0,
-            region_start=0,
-            region_end=1,
-            local_nodes=[candidate],
-            live_before=[0, 2, 20],
-            live_after=[4, 20],
-            last_use_steps={1: 0, 3: 4},
-            candidate_outputs=[],
-            candidate_alloc_size=0,
-        )
-
-        scheduler = object.__new__(Scheduler)
-        device = torch.device("cpu")
-        state = FusionMemoryState({device: device_state})
-        scheduler._fusion_memory_state = state
-        with patch.object(scheduler, "fuse_two_nodes", return_value=fused):
-            self.assertIs(
-                scheduler._fuse_two_nodes_with_memory_update(
-                    a, b, set(), state, {device: update}
-                ),
-                fused,
-            )
-
-        self.assertEqual(device_state.nodes, [fused, None, c])
-        self.assertEqual(device_state.baseline_live_before, [0, 2, 20, 30])
-        self.assertEqual(device_state.baseline_live_after, [4, 20, 30])
-        self.assertEqual(device_state.baseline_peak, 30)
-        self.assertEqual(device_state.node_to_idx[fused], 0)
-        self.assertEqual(device_state.node_to_idx[a], 0)
-        self.assertEqual(device_state.node_to_idx[b], 0)
-        self.assertEqual(device_state.tracked_nodes, {fused, c})
-        self.assertEqual(device_state.last_use_steps, {1: 0, 3: 4})
-
-    def test_fusion_memory_update_filters_internal_candidate_outputs(self):
-        from torch._inductor.scheduler import Scheduler
-
-        producer = _PeakMemFakeNode("producer")
-        consumer = _PeakMemFakeNode("consumer")
-        external = _PeakMemFakeNode("external")
-        tmp = _PeakMemFakeBuffer("tmp", {consumer}, 100, 100)
-        out = _PeakMemFakeBuffer("out", {external}, 10, 10)
-        graph_out = _PeakMemFakeBuffer("graph_out", set(), 1, 1)
-
-        producer._outputs = [tmp]
-        consumer._outputs = [out, graph_out]
-        consumer.mpi_node.pred_buffers = {tmp}
-
-        scheduler = object.__new__(Scheduler)
-        candidate = Scheduler._make_fusion_memory_candidate(producer, consumer)
-        device_state = SimpleNamespace(
-            storage=SimpleNamespace(
-                materialize=lambda _: SimpleNamespace(
-                    lifetime_buffers=(out, graph_out), size_alloc=11
-                )
-            )
-        )
-        candidate_outputs, candidate_alloc_size = (
-            Scheduler._assign_fusion_memory_planning_info(
-                scheduler,
-                device_state,
-                producer,
-                consumer,
-                candidate,
-            )
-        )
-
-        self.assertEqual(candidate_outputs, (out, graph_out))
-        self.assertEqual(candidate_alloc_size, 11)
-        self.assertEqual(candidate.mpi_node.size, 11)
-        self.assertEqual(candidate.mpi_node.pred_buffers, set())
-
-    def test_fusion_memory_update_modes(self):
-        from torch._inductor.scheduler import (
-            FusionMemoryDeviceState,
-            FusionMemoryState,
-            Scheduler,
-        )
-
-        a, b, peak, far = (_PeakMemFakeNode(n) for n in ("a", "b", "peak", "far"))
-        device_state = FusionMemoryDeviceState(
-            nodes=[a, b, peak, far],
-            tracked_nodes={a, b, peak, far},
-            graph_outputs=set(),
-            node_to_idx={a: 0, b: 1, peak: 2, far: 3},
-            baseline_peak=100,
-            baseline_live_before=[0, 10, 20, 100, 90],
-            baseline_live_after=[10, 20, 100, 90],
-            peak_limit=100,
-            storage=SimpleNamespace(buffer_free_sizes={}),
-        )
-        device_state.refresh_peak_positions()
-        scheduler = object.__new__(Scheduler)
-        device = torch.device("cpu")
-        state = FusionMemoryState({device: device_state})
-        scheduler._fusion_memory_state = state
-        fast_update = SimpleNamespace(
-            region_start=0,
-            region_end=3,
-            live_before=[0, 0, 0, 0, 90],
-            live_after=[0, 0, 0, 0],
-        )
-        with (
-            torch._inductor.config.patch(
-                fusion_memory_timeline_peak_allowed_increase_mb=0,
-                fusion_memory_timeline_full_correctness=False,
-            ),
-            patch.object(
-                scheduler,
-                "_fusion_memory_update",
-                return_value=(False, fast_update),
-            ) as update_mock,
-        ):
-            self.assertEqual(
-                scheduler._check_fusion_memory(state, a, b),
-                (False, None),
-            )
-            update_mock.assert_not_called()
-            self.assertEqual(
-                scheduler._check_fusion_memory(state, a, far),
-                (False, {device: fast_update}),
-            )
-            update_mock.assert_called_once_with(
-                device_state,
-                a,
-                far,
-                return_live_memory=True,
-                peak_limit=device_state.peak_limit,
-            )
-            self.assertEqual(device_state.decision_cache, {(0, id(a), id(far)): False})
-            fused = _PeakMemFakeNode("fused")
-            self.assertEqual(
-                scheduler._check_fusion_memory(state, fused, b),
-                (False, None),
-            )
-            update_mock.assert_called_once_with(
-                device_state,
-                a,
-                far,
-                return_live_memory=True,
-                peak_limit=device_state.peak_limit,
-            )
-
-            device_state.decision_cache.clear()
-            update_mock.return_value = (True, None)
-            self.assertEqual(
-                scheduler._check_fusion_memory(state, a, far),
-                (True, None),
-            )
-            self.assertEqual(
-                scheduler._check_fusion_memory(None, a, far),
-                (False, None),
-            )
-
-        device_state.decision_cache.clear()
-        exact_update = SimpleNamespace(
-            region_start=0,
-            region_end=1,
-            live_before=[0, 0, 20],
-            live_after=[0, 0],
-        )
-        with (
-            torch._inductor.config.patch(
-                fusion_memory_timeline_peak_allowed_increase_mb=0,
-                fusion_memory_timeline_full_correctness=True,
-            ),
-            patch.object(
-                scheduler,
-                "_fusion_memory_update",
-                return_value=(False, exact_update),
-            ) as update_mock,
-        ):
-            self.assertEqual(
-                scheduler._check_fusion_memory(state, a, b),
-                (False, {device: exact_update}),
-            )
-            update_mock.assert_called_once_with(
-                device_state,
-                a,
-                b,
-                return_live_memory=True,
-                peak_limit=device_state.peak_limit,
-            )
-
-    def test_fusion_memory_checks_each_device_budget(self):
-        from torch._inductor.scheduler import FusionMemoryState, Scheduler
-
-        node1, node2 = _PeakMemFakeNode("node1"), _PeakMemFakeNode("node2")
-        update = object()
-        cpu_state = SimpleNamespace(
-            version=0,
-            decision_cache={},
-            peak_limit=100,
-            update_boundaries_match=lambda _: True,
-        )
-        cuda_state = SimpleNamespace(
-            version=0,
-            decision_cache={},
-            peak_limit=200,
-            update_boundaries_match=lambda _: True,
-        )
-        state = FusionMemoryState(
-            {
-                torch.device("cpu"): cpu_state,
-                torch.device("cuda", 0): cuda_state,
-            }
-        )
-        scheduler = object.__new__(Scheduler)
-        scheduler._fusion_memory_state = state
-
-        with (
-            torch._inductor.config.patch(
-                fusion_memory_timeline_peak_allowed_increase_mb=0,
-                fusion_memory_timeline_full_correctness=True,
-            ),
-            patch.object(
-                scheduler,
-                "_fusion_memory_update",
-                side_effect=[(False, update), (True, None)],
-            ) as update_mock,
-        ):
-            self.assertEqual(
-                scheduler._check_fusion_memory(state, node1, node2),
-                (True, None),
-            )
-
-        self.assertEqual(
-            [call.kwargs["peak_limit"] for call in update_mock.call_args_list],
-            [100, 200],
-        )
-
-    def test_fusion_memory_boundary_mismatch_fails_closed(self):
-        from torch._inductor.scheduler import (
-            FusionMemoryState,
-            FusionMemoryStateStatus,
-            Scheduler,
-        )
-
-        node1, node2 = _PeakMemFakeNode("node1"), _PeakMemFakeNode("node2")
-        device_state = SimpleNamespace(
-            version=0,
-            decision_cache={},
-            peak_limit=100,
-            update_boundaries_match=lambda _: False,
-        )
-        state = FusionMemoryState({torch.device("cpu"): device_state})
-        scheduler = object.__new__(Scheduler)
-        scheduler._fusion_memory_state = state
-
-        with (
-            torch._inductor.config.patch(
-                fusion_memory_timeline_peak_allowed_increase_mb=0,
-                fusion_memory_timeline_full_correctness=True,
-            ),
-            patch.object(
-                scheduler,
-                "_fusion_memory_update",
-                return_value=(False, object()),
-            ),
-        ):
-            self.assertEqual(
-                scheduler._check_fusion_memory(state, node1, node2),
-                (True, None),
-            )
-
-        self.assertEqual(state.status, FusionMemoryStateStatus.FAILED_CLOSED)
-        self.assertIs(scheduler._fusion_memory_state, state)
-        self.assertEqual(
-            scheduler._check_fusion_memory(state, node1, node2),
-            (True, None),
-        )
-
-    def test_fusion_memory_peak_query_does_not_cover_valleys(self):
-        from torch._inductor.scheduler import FusionMemoryDeviceState
-
-        nodes = [_PeakMemFakeNode(str(i)) for i in range(4)]
-        state = FusionMemoryDeviceState(
-            nodes=nodes,
-            tracked_nodes=OrderedSet(nodes),
-            graph_outputs=set(),
-            node_to_idx={node: idx for idx, node in enumerate(nodes)},
-            baseline_peak=100,
-            baseline_live_before=[0] * 5,
-            baseline_live_after=[100, 1, 1, 100],
-            peak_limit=100,
-            storage=SimpleNamespace(buffer_free_sizes={}),
-        )
-        state.refresh_peak_positions()
-
-        self.assertTrue(state.region_contains_peak(0, 1))
-        self.assertFalse(state.region_contains_peak(1, 2))
-        self.assertTrue(state.region_contains_peak(2, 3))
-
-        state.baseline_live_after = [90, 1, 1, 90]
-        state.refresh_peak_positions()
-        self.assertEqual(state.baseline_peak, 90)
-        self.assertEqual(state.peak_limit, 100)
-
-    @parametrize("full_correctness", [False, True])
-    def test_fusion_memory_update_mode_runs_real_full_check(self, full_correctness):
-        from torch._inductor.scheduler import (
-            FusionMemoryDeviceState,
-            FusionMemoryState,
-            Scheduler,
-        )
-
-        a, b, peak = (_PeakMemFakeNode(n) for n in ("a", "b", "peak"))
-        out = _PeakMemFakeBuffer("out", set(), 100, 100)
-        b._outputs = [out]
-        device_state = FusionMemoryDeviceState(
-            nodes=[a, b, peak],
-            tracked_nodes={a, b, peak},
-            graph_outputs={"out"},
-            node_to_idx={a: 0, b: 1, peak: 2},
-            baseline_peak=10,
-            baseline_live_before=[0, 0, 0, 10],
-            baseline_live_after=[0, 0, 10],
-            peak_limit=10,
-            storage=SimpleNamespace(
-                materialize=lambda _: SimpleNamespace(
-                    lifetime_buffers=(out,), size_alloc=100
-                ),
-                buffer_free_sizes={id(out.mpi_buffer): 100},
-                allocation_operation_by_buffer={},
-            ),
-            node_outputs={a: (), b: (out,), peak: ()},
-            node_alloc_sizes={a: 0, b: 100, peak: 0},
-        )
-        device_state.refresh_peak_positions()
-
-        class FakeBackend:
-            def __init__(self) -> None:
-                self.calls = 0
-
-            def fuse(self, node1, node2):
-                self.calls += 1
-                raise AssertionError("memory simulation must not call the backend")
-
-        backend = FakeBackend()
-        scheduler = object.__new__(Scheduler)
-        scheduler.get_backend = lambda device: backend
-        scheduler.name_to_buf = {}
-        scheduler.name_to_fused_node = {}
-        state = FusionMemoryState({torch.device("cpu"): device_state})
-        scheduler._fusion_memory_state = state
-
-        with torch._inductor.config.patch(
-            fusion_memory_timeline_peak_allowed_increase_mb=0,
-            fusion_memory_timeline_full_correctness=full_correctness,
-        ):
-            rejected, update = scheduler._check_fusion_memory(state, a, b)
-
-        self.assertEqual(rejected, full_correctness)
-        self.assertIsNone(update)
-        self.assertEqual(backend.calls, 0)
-
-    def test_fusion_memory_update_rejects_over_limit(self):
-        from torch._inductor.scheduler import FusionMemoryDeviceState, Scheduler
-
-        first = _PeakMemFakeNode("first")
-        middle = _PeakMemFakeNode("middle")
-        last = _PeakMemFakeNode("last")
-        middle_out = _PeakMemFakeBuffer("middle_out", set(), 100, 100)
-        graph_out = _PeakMemFakeBuffer("graph_out", set(), 100, 100)
-        middle._outputs = [middle_out]
-        last._outputs = [graph_out]
-
-        state = FusionMemoryDeviceState(
-            nodes=[first, middle, last],
-            tracked_nodes=OrderedSet([first, middle, last]),
-            graph_outputs=OrderedSet(["graph_out"]),
-            node_to_idx={first: 0, middle: 1, last: 2},
-            baseline_peak=100,
-            baseline_live_before=[0, 0, 0, 100],
-            baseline_live_after=[0, 100, 100],
-            peak_limit=100,
-            storage=SimpleNamespace(
-                materialize=lambda _: SimpleNamespace(
-                    lifetime_buffers=(graph_out,), size_alloc=100
-                ),
-                buffer_free_sizes={
-                    id(middle_out.mpi_buffer): 100,
-                    id(graph_out.mpi_buffer): 100,
-                },
-                allocation_operation_by_buffer={},
-            ),
-            last_use_steps={
-                id(middle_out.mpi_buffer): None,
-                id(graph_out.mpi_buffer): None,
-            },
-            node_outputs={first: (), middle: (middle_out,), last: (graph_out,)},
-            node_alloc_sizes={first: 0, middle: 100, last: 100},
-        )
-        scheduler = object.__new__(Scheduler)
-        scheduler.name_to_buf = {}
-        scheduler.name_to_fused_node = {}
-
-        rejected, update = scheduler._fusion_memory_update(
-            state,
-            first,
-            last,
-            return_live_memory=True,
-            peak_limit=state.peak_limit,
-        )
-        self.assertTrue(rejected)
-        self.assertIsNone(update)
 
 
 if __name__ == "__main__":

@@ -1014,15 +1014,9 @@ loop_index_inversion_in_fusion: bool = True
 # For the cases loop ordering after fusion does not help, we don't lose much.
 score_fusion_memory_threshold = 10
 
-# Use Inductor's estimated scheduler memory timeline to skip fusions that
-# increase estimated peak memory. None disables these guards; otherwise the
-# value is the allowed estimated peak increase in megabytes.
+# Maximum estimated peak-memory increase, in MB, allowed for a fusion.
+# None preserves the existing fusion path without memory-timeline modeling.
 fusion_memory_timeline_peak_allowed_increase_mb: int | float | None = None
-
-# Checking every fusion candidate can increase compile time. By default, only
-# candidates whose schedule interval contains a current peak are checked. An
-# unchecked accepted fusion disables the guard until the next fusion round.
-fusion_memory_timeline_full_correctness = False
 
 # For Triton Templates, select fastest of best template + epilogue vs best template + separate epilogue kernel
 benchmark_epilogue_fusion = (

@@ -12,7 +12,7 @@ from torch._utils_internal import signpost_event
 from torch.utils._ordered_set import OrderedSet
 
 from . import config
-from .ir import MultiOutputLayout, NoneLayout, NonOwningLayout
+from .ir import FallbackKernel, IRNode, MultiOutputLayout, NoneLayout, NonOwningLayout
 from .utils import get_dtype_size, is_nonfreeable_buffers
 from .virtualized import V
 
@@ -199,9 +199,10 @@ def get_freeable_input_buf(
         graph_input = V.graph.graph_inputs_original.get(dep.name)
         if graph_input is None:
             return V.graph.get_dep_size_hint(dep)
-        return V.graph.sizevars.optimization_hint(
+        storage_size = V.graph.sizevars.optimization_hint(
             V.graph.get_allocation_storage_size(graph_input), fallback=0
-        ) * get_dtype_size(graph_input.get_dtype())
+        )
+        return max(storage_size, 0) * get_dtype_size(graph_input.get_dtype())
 
     # get freeable input buffers' successor nodes for memory lifetime (excludes is_fake WeakDeps)
     # and for ordering (includes all deps)
@@ -318,9 +319,8 @@ def compute_size_for_scheduler_buffer(
                 if use_allocation_storage_size
                 else sched_buf.node.get_numel()
             )
-            buf_size = V.graph.sizevars.optimization_hint(
-                size, fallback=0
-            ) * get_dtype_size(sched_buf.node.get_dtype())
+            size_hint = V.graph.sizevars.optimization_hint(size, fallback=0)
+            buf_size = max(size_hint, 0) * get_dtype_size(sched_buf.node.get_dtype())
             sched_buf_to_size[sched_buf.get_name()] = (
                 0 if user_of_MultiOutputLayout else buf_size,
                 buf_size,
@@ -358,14 +358,18 @@ def build_scheduler_memory_storage(
             return aliases
 
         parent = buffer.node.inputs[0]
+        if not isinstance(parent, IRNode):
+            raise AssertionError("expected MultiOutput parent to be an IRNode")
         parent_aliases = tuple(parent.get_inputs_that_alias_output())
         if not parent_aliases:
             return aliases
         # MultiOutput reports aggregate parent aliasing for every leaf.
-        schema = getattr(getattr(parent, "op_overload", None), "_schema", None)
-        returns = getattr(schema, "returns", ())
-        if not returns:
+        if not isinstance(parent, FallbackKernel) or not isinstance(
+            parent.op_overload, torch._ops.OpOverload
+        ):
             return parent_aliases
+        schema = parent.op_overload._schema
+        returns = schema.returns
         if len(returns) == 1:
             output_index = 0
         elif buffer.node.indices and isinstance(buffer.node.indices[0][1], int):
@@ -378,10 +382,7 @@ def build_scheduler_memory_storage(
         if return_alias is None:
             return ()
 
-        unflatten_args = getattr(parent, "unflatten_args", None)
-        if unflatten_args is None:
-            return parent_aliases
-        args, kwargs = unflatten_args(parent.inputs, parent.constant_args)
+        args, kwargs = parent.unflatten_args(parent.inputs, parent.constant_args)
         return_alias_set = return_alias.before_set | return_alias.after_set
         matching_aliases = OrderedSet[str]()
         for argument, value in torch._library.utils.zip_schema(schema, args, kwargs):
@@ -399,9 +400,13 @@ def build_scheduler_memory_storage(
     alias_sources: dict[str, tuple[str, ...]] = {}
     for buffer in name_to_buf.values():
         aliases = get_alias_sources(buffer)
-        if aliases and (
-            not buffer.node.should_allocate()
-            or isinstance(buffer.node.layout, NonOwningLayout)
+        if (
+            aliases
+            and not isinstance(buffer.node.layout, MultiOutputLayout)
+            and (
+                not buffer.node.should_allocate()
+                or isinstance(buffer.node.layout, NonOwningLayout)
+            )
         ):
             alias_sources[buffer.get_name()] = aliases
 
@@ -430,7 +435,10 @@ def build_scheduler_memory_storage(
         if output not in live_multi_outputs
     )
     for output in dead_multi_outputs:
-        parent = multi_output_parents.get(id(output.node.inputs[0]))
+        output_node = output.node
+        if not isinstance(output_node, MultiOutput):
+            raise AssertionError("expected a MultiOutput buffer")
+        parent = multi_output_parents.get(id(output_node.inputs[0]))
         if parent is None:
             continue
         output.mpi_buffer.succ_nodes = parent.mpi_buffer.succ_nodes
@@ -506,7 +514,7 @@ def build_scheduler_memory_storage(
             return
 
         size = buffer.mpi_buffer.size_free
-        if size == 0:
+        if size <= 0:
             return
         successors = tuple(buffer.mpi_buffer.succ_nodes)
         storage_names = resolve_storage_names(buffer.get_name())
@@ -563,15 +571,13 @@ def build_scheduler_memory_storage(
 def assign_memory_planning_info_for_scheduler_buffers(
     nodes: list[BaseSchedulerNode],
     name_to_buf: dict[str, SchedulerBuffer],
-    sched_buf_to_size: dict[str, tuple[int, int]] | None = None,
 ) -> None:
     """
     For each SchedulerBuffer, assign its size info and successor nodes.
     A buffer's successor nodes determines when a buffer can be freed.
     """
     # get buffer sizes
-    if sched_buf_to_size is None:
-        sched_buf_to_size = compute_size_for_scheduler_buffer(name_to_buf)
+    sched_buf_to_size = compute_size_for_scheduler_buffer(name_to_buf)
 
     # get buffer's successor nodes for memory lifetime (excludes is_fake WeakDeps)
     # and for ordering (includes all deps)

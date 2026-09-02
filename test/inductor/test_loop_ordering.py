@@ -319,19 +319,16 @@ class ImplDetailTest(MockSchedulerTest):
         baseline_key = ((snode, original_generation),)
         scheduler._tiling_memory_cache[baseline_key] = "baseline"
         outer = _LoopMutationTracker.create_fusion_memory((snode,))
-        inner = _LoopMutationTracker.create((snode,))
         snode.apply_new_loop_order([1, 0])
         first_trial_generation = snode._loop_state_gen
         trial_key = ((snode, first_trial_generation),)
         scheduler._tiling_memory_cache[trial_key] = "trial"
         for tracker in scheduler._fusion_memory_cache_trackers:
             tracker.track_fusion_memory_cache_key(trial_key)
-        inner.finish(rollback=True)
-        self.assertEqual(snode._loop_state_gen, original_generation)
-        self.assertNotIn(trial_key, scheduler._tiling_memory_cache)
         outer.finish_fusion_memory(rollback=True)
 
         self.assertEqual(snode._loop_state_gen, original_generation)
+        self.assertNotIn(trial_key, scheduler._tiling_memory_cache)
         self.assertEqual(scheduler._tiling_memory_cache[baseline_key], "baseline")
         self.assertEqual(scheduler._fusion_memory_cache_trackers, [])
 
