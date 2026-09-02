@@ -7249,6 +7249,49 @@ class TestNNDeviceType(NNTestCase):
         output.sum().backward()
         self.assertEqualTypeString(output, input)
 
+    def test_native_batch_norm_backward_rejects_invalid_saved_stats(
+        self, device
+    ):
+        input_tensor = torch.full(
+            (4, 2, 0, 3),
+            1.0,
+            device=device,
+        )
+        grad_out = torch.zeros(0, device=device)
+        weight = torch.full(
+            (2,),
+            float("nan"),
+            device=device,
+        )
+        running_mean = torch.ones(2, device=device)
+
+        valid_stat = torch.ones(2, device=device)
+        empty_stat = torch.empty(0, device=device)
+
+        test_cases = (
+            ("save_mean", empty_stat, valid_stat),
+            ("save_invstd", valid_stat, empty_stat),
+        )
+
+        for stat_name, save_mean, save_invstd in test_cases:
+            with self.subTest(stat_name=stat_name):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    rf"Expected {stat_name} to contain 2 elements, but got 0",
+                ):
+                    torch.ops.aten.native_batch_norm_backward(
+                        grad_out,
+                        input_tensor,
+                        weight,
+                        running_mean,
+                        None,
+                        save_mean,
+                        save_invstd,
+                        True,
+                        float("-inf"),
+                        [True, False, False],
+                    )
+
     def _test_LayerNorm_cpu_mixed_dtype(self, device, dtype):
         for elementwise_affine in [True, False]:
             # layer norm input shape is normalized to m x n, cpu vectorized on n,
