@@ -929,11 +929,6 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                 reduction_plan = self._schedule_reduction_plan(
                     epilogue_program, swap_ab
                 )
-                if swap_ab and reduction_plan is not None:
-                    for name in reduction_plan.auxiliary_outputs:
-                        buffer = V.graph.get_buffer(name)
-                        if len(buffer.get_size()) == 2:
-                            buffer.get_layout().stride = [1, buffer.get_size()[0]]
                 if feeds_main:
                     if reduction_plan is None:
                         raise AssertionError("expected feed-main reduction plan")
