@@ -8,7 +8,9 @@
 
 import copy
 import gc
+import io
 import itertools
+import math
 import operator
 import unittest
 import warnings
@@ -72,7 +74,11 @@ from torch._inductor.codecache import compiled_fx_graph_hash
 from torch._inductor.custom_graph_pass import CustomPartitionerFn
 from torch._inductor.output_code import MockFXGraphCacheOutput
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
-from torch.fx.experimental.proxy_tensor import is_sym_node
+from torch.fx.experimental.proxy_tensor import (
+    _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT,
+    _ModuleStackTracer,
+    is_sym_node,
+)
 from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode, ShapeEnv
 from torch.nn.attention.flex_attention import flex_attention
 from torch.nn.utils.rnn import PackedSequence
@@ -4100,6 +4106,57 @@ def forward(self, tangents_1):
         self.assertEqual(out_ref, out_test)
         self.assertEqual(a, a2)
 
+    # See https://github.com/pytorch/pytorch/issues/191449
+    def test_dupe_arg_with_no_grad_alias_of_output(self):
+        # Duplicating and mutating an input routes metadata through
+        # AOTDedupeWrapper, which remaps base_idx through add_dupe_map. Only
+        # alias_of_input / is_input hold an input index there; a no-grad alias
+        # of a user output holds a user-output index and must be left alone.
+        # The leading outputs push that index past the input count, so remapping
+        # it used to raise IndexError.
+        def f(x, y):
+            y.mul_(2)
+            a, b, c = x + 1, x + 2, x + 3
+            d = x + 4 + y
+            return a, b, c, d, d.view(-1)
+
+        f_compiled = aot_function(f, nop)
+        x = torch.ones(4)
+        out_ref = f(x, x)
+
+        x2 = torch.ones(4)
+        out_test = f_compiled(x2, x2)
+
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(x, x2)
+        # Eager returns two distinct objects sharing storage, so the compiled
+        # function must too, or an eager resize_() on the alias corrupts d.
+        self.assertIsNot(out_test[3], out_test[4])
+        self.assertEqual(out_test[3].data_ptr(), out_test[4].data_ptr())
+
+    # See https://github.com/pytorch/pytorch/issues/191449
+    def test_synthetic_base_with_no_grad_alias_of_output(self):
+        # Overlapping aliased inputs plus a mutation build synthetic bases,
+        # which remap base_idx through synthetic_base_info. As with dedup, only
+        # alias_of_input / is_input hold an input index there.
+        def f(x, y):
+            y.mul_(2)
+            a, b, c = x + 1, x + 2, x + 3
+            d = x + 4 + y
+            return a, b, c, d, d.view(-1)
+
+        f_compiled = aot_function(f, nop)
+        base = torch.ones(8)
+        out_ref = f(base[0:6], base[2:8])
+
+        base2 = torch.ones(8)
+        out_test = f_compiled(base2[0:6], base2[2:8])
+
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(base, base2)
+        self.assertIsNot(out_test[3], out_test[4])
+        self.assertEqual(out_test[3].data_ptr(), out_test[4].data_ptr())
+
     @patch("torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count)
     @patch("torch._functorch.config.debug_assert", True)
     def test_invalid_dupe_left_bias(self, counter):
@@ -5309,6 +5366,133 @@ class TestAOTExport(AOTTestCase):
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
+
+    def test_aot_export_module_graph_module_serialization(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return (self.relu(self.linear(x)),)
+
+        mod = M().eval()
+        inp = torch.randn(2, 4)
+        gm, sig = aot_export_module(
+            mod,
+            (inp,),
+            trace_joint=False,
+            decompositions=torch._decomp.core_aten_decompositions(),
+        )
+
+        buffer = io.BytesIO()
+        torch.save(gm, buffer)
+        buffer.seek(0)
+        loaded = torch.load(buffer, weights_only=False)
+
+        graph_inputs = tuple(mod.get_parameter(name) for name in sig.parameters)
+        graph_inputs += tuple(mod.get_buffer(name) for name in sig.buffers)
+        graph_inputs += (inp,)
+        self.assertEqual(gm(*graph_inputs), loaded(*graph_inputs))
+        self.assertEqual(
+            [(node.op, node.target) for node in gm.graph.nodes],
+            [(node.op, node.target) for node in loaded.graph.nodes],
+        )
+
+    def test_module_stack_tracer_deserialization_preserves_graph_and_state(self):
+        class Shared(torch.nn.Module):
+            def forward(self, x):
+                return x.sin()
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                shared = Shared()
+                self.left = shared
+                self.right = shared
+
+            def forward(self, x):
+                return self.left(x) + self.right(x)
+
+        def roundtrip(gm):
+            buffer = io.BytesIO()
+            torch.save(gm, buffer)
+            buffer.seek(0)
+            return torch.load(buffer, weights_only=False)
+
+        inp = torch.randn(3)
+        export_gm = torch.export.export(M(), (inp,), strict=False).graph_module
+        self.assertIs(export_gm.graph._tracer_cls, _ModuleStackTracer)
+
+        loaded_export_gm = roundtrip(export_gm)
+        self.assertIs(loaded_export_gm.graph._tracer_cls, _ModuleStackTracer)
+        self.assertEqual(export_gm(inp), loaded_export_gm(inp))
+        self.assertEqual(
+            [(node.op, node.target) for node in export_gm.graph.nodes],
+            [(node.op, node.target) for node in loaded_export_gm.graph.nodes],
+        )
+
+        root = torch.nn.Module()
+        root.left = export_gm
+        root.right = export_gm
+        graph = torch.fx.Graph(tracer_cls=export_gm.graph._tracer_cls)
+        x = graph.placeholder("x")
+        left = graph.call_module("left", (x,))
+        right = graph.call_module("right", (x,))
+        graph.output((left, right))
+        nested_gm = torch.fx.GraphModule(root, graph)
+
+        sentinel_key = id(inp)
+        sentinel_node = next(iter(export_gm.graph.nodes))
+        with patch.dict(
+            _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT,
+            {sentinel_key: sentinel_node},
+            clear=True,
+        ):
+            loaded_nested_gm = roundtrip(nested_gm)
+            self.assertIs(
+                _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT[sentinel_key], sentinel_node
+            )
+
+        self.assertEqual(nested_gm(inp), loaded_nested_gm(inp))
+        self.assertIs(loaded_nested_gm.graph._tracer_cls, _ModuleStackTracer)
+        self.assertIs(loaded_nested_gm.left, loaded_nested_gm.right)
+        self.assertEqual(
+            [(node.op, node.target) for node in nested_gm.graph.nodes],
+            [(node.op, node.target) for node in loaded_nested_gm.graph.nodes],
+        )
+
+    def test_module_stack_tracer_deserialization_autowraps_math(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                size = (
+                    math.trunc(x.shape[-2] + 0.5),
+                    math.trunc(x.shape[-1] + 0.5),
+                )
+                return F.interpolate(x, size=size, mode="bilinear")
+
+        inp = torch.rand(1, 3, 28, 28)
+        gm = torch.export.export(
+            M(),
+            (inp,),
+            dynamic_shapes={
+                "x": {2: torch.export.Dim.DYNAMIC, 3: torch.export.Dim.DYNAMIC}
+            },
+            strict=False,
+        ).graph_module
+        self.assertTrue(any(node.target is math.trunc for node in gm.graph.nodes))
+
+        buffer = io.BytesIO()
+        torch.save(gm, buffer)
+        buffer.seek(0)
+        loaded = torch.load(buffer, weights_only=False)
+
+        self.assertEqual(gm(inp), loaded(inp))
+        self.assertEqual(
+            [(node.op, node.target) for node in gm.graph.nodes],
+            [(node.op, node.target) for node in loaded.graph.nodes],
+        )
 
     def test_aot_export_ban_dropout_mut_pre_dispatch(self):
         def fn(p, x):
@@ -9877,6 +10061,40 @@ def forward(self, primals_1, tangents_1):
             ],
             [0, 1, 2],
         )
+
+    def test_collect_metadata_no_grad_no_op_view_of_user_output(self):
+        # https://github.com/pytorch/pytorch/issues/191449
+        # Without gradients, a no-op view of another user output must still be
+        # classified as an alias so the runtime wrapper regenerates a distinct
+        # tensor object; otherwise the backend may return one object for both
+        # outputs, while eager returns distinct objects.
+        from torch._functorch._aot_autograd.collect_metadata_analysis import (
+            run_functionalized_fw_and_collect_metadata,
+        )
+        from torch._functorch._aot_autograd.descriptors import PlainAOTInput
+        from torch._functorch._aot_autograd.schemas import OutputType
+
+        def f(x):
+            base = x + 1
+            return [base.view(-1), base]
+
+        fake_mode = FakeTensorMode()
+        arg = fake_mode.from_tensor(torch.ones(1))
+
+        metadata = run_functionalized_fw_and_collect_metadata(
+            f,
+            flat_args_descs=[PlainAOTInput(0)],
+            keep_input_mutations=True,
+            static_input_indices=[],
+        )(arg)
+
+        self.assertEqual(
+            metadata.output_info[0].output_type,
+            OutputType.alias_of_intermediate_base_is_user_output,
+        )
+        self.assertEqual(metadata.output_info[0].base_idx, 1)
+        self.assertEqual(metadata.output_info[1].output_type, OutputType.non_alias)
+        self.assertEqual(metadata.num_intermediate_bases, 0)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
