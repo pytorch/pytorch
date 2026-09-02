@@ -352,6 +352,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
+    @torch._inductor.config.patch(fusion_memory_timeline_peak_allowed_increase_mb=0)
     def test_unbacked_auto_functionalize_op(self):
         @torch.library.custom_op(
             "mylib::mk_image", mutates_args=("decoder",), device_types=["cpu"]

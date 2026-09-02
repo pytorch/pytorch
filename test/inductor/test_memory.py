@@ -243,6 +243,7 @@ class TestOperatorReorderForPeakMemory(TestCase):
     @mock.patch.object(config, "allow_buffer_reuse", False)
     @unittest.skipUnless(TRITON_AVAILABLE, "Triton is not available")
     @config.patch("test_configs.track_memory_lifecycle", "assert")
+    @config.patch("fusion_memory_timeline_peak_allowed_increase_mb", 0)
     def test_mutation_size_propagation(self):
         """
         This tests correct size propagation in the case of mutations.
