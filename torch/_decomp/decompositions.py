@@ -415,7 +415,15 @@ def mse_loss_backward(
 
 @register_decomposition(aten._safe_softmax)
 def safe_softmax(self, dim, dtype=None):
+    # The CompositeExplicitAutograd kernel (aten/src/ATen/native/transformers/
+    # attention.cpp) runs below the Autocast dispatch key, so with dtype=None
+    # its internal softmax never gets autocast's fp32 upcast. This decomposition
+    # is used under fake-tensor/proxy tracing where the Autocast key can still
+    # be active, so pin the output dtype up front to match the eager kernel.
+    out_dtype = self.dtype if dtype is None else dtype
     out = torch.softmax(self, dim=dim, dtype=dtype)
+    if out.dtype != out_dtype:
+        out = out.to(out_dtype)
     masked = self.eq(float("-inf"))
     masked_rows = torch.all(masked, dim=dim, keepdim=True)
     zeros = torch.zeros_like(out)
