@@ -5264,6 +5264,23 @@ def forward(self, tangents_1):
 
         self._assert_no_extra_refs(refcount_box)
 
+    def test_non_differentiable_output_aliasing_differentiable_output(self):
+        # inductor lowers detach to a no-op and folds h * 1, so both returned
+        # slots hold one TensorImpl; marking the detached slot non-differentiable
+        # must not mark the differentiable one.
+        def f(x):
+            h = x * 2
+            return h * 1, h.detach()
+
+        x = torch.randn(4, requires_grad=True)
+        ref_out, _ = f(x)
+        ref_out.sum().backward()
+        ref_grad, x.grad = x.grad, None
+        out, detached = torch.compile(f, backend="inductor")(x)
+        self.assertFalse(detached.requires_grad)
+        out.sum().backward()
+        self.assertEqual(x.grad, ref_grad)
+
 
 def extract_graph(fx_g, _, graph_cell):
     graph_cell[0] = fx_g
