@@ -25,7 +25,11 @@
 // `__rdtsc` is available by default.
 // NB: This has to be first, because Clang will also define `__GNUC__`
 #elif defined(__GNUC__)
-#include <x86intrin.h>
+// x86gprintrin.h is the general-purpose subset that declares __rdtsc. Including
+// x86intrin.h instead pulls in every vector intrinsic header, which costs tens
+// of thousands of preprocessed lines in each of the ~850 targets that reach
+// this header.
+#include <x86gprintrin.h>
 #else
 #undef C10_RDTSC
 #endif
