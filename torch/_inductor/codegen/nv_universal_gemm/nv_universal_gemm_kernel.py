@@ -57,6 +57,9 @@ log = logging.getLogger(__name__)
 _NVGEMM_BIAS_ADD_EPILOGUE_SOURCE = (
     "def _epilogue_fn(accum, bias):\n    D = accum + bias\n    return D"
 )
+_NVGEMM_BIAS_ADD_EPILOGUE_FINGERPRINT = hashlib.sha256(
+    _NVGEMM_BIAS_ADD_EPILOGUE_SOURCE.encode()
+).hexdigest()
 
 
 def _local_reduce_source_constant(field: str) -> str:
@@ -415,7 +418,7 @@ def _worker_nvgemm_autotuning_precompile(
         epilogue_args = CuTeDSLEpilogueArguments(
             _NVGEMM_BIAS_ADD_EPILOGUE_SOURCE, bias=bias, D=out
         )
-        epilogue_source = "nvgemm_addmm_bias_v2"
+        epilogue_source = _NVGEMM_BIAS_ADD_EPILOGUE_FINGERPRINT
         aux_tensors = (bias,)
 
     cache_key = _create_gemm_cache_key(
@@ -1148,20 +1151,14 @@ def _build_bias_epilogue(
 ) -> tuple[str, list[str], list[str], dict[str, str]]:
     """Build the epilogue fields for an addmm bias-add (``accum + bias``).
 
-    Uses the bias buffer name as the epilogue-fn parameter, matching
-    CutlassEVTCodegen's convention. This deliberately avoids the name ``C``:
-    cutlass.operators' LoadSrcImpl claims any epilogue param named ``C`` whose
-    shape equals the output (ignoring stride), which shadows the row/column
-    broadcast impls and silently mis-reads a broadcast (1D) bias.
+    The stable ``bias`` parameter keeps runtime and precompile cache identities
+    aligned. It also avoids ``C``, which cutlass.operators reserves for a
+    same-shaped source and can misclassify broadcast biases.
     """
-    epilogue_fn_code = (
-        f"def _epilogue_fn(accum, {bias_name}):\n"
-        f"    D = accum + {bias_name}\n"
-        f"    return D"
-    )
+    epilogue_fn_code = _NVGEMM_BIAS_ADD_EPILOGUE_SOURCE
     epilogue_reads = [bias_name]
     epilogue_writes: list[str] = []
-    epilogue_var_renames = {bias_name: bias_name, "D": out_name}
+    epilogue_var_renames = {"bias": bias_name, "D": out_name}
     return epilogue_fn_code, epilogue_reads, epilogue_writes, epilogue_var_renames
 
 
