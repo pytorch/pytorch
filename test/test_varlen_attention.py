@@ -942,35 +942,6 @@ class TestVarlenAttention(_VarlenVsSdpaMixin, NNTestCase):
         self.assertFalse(lse.requires_grad)
         torch.autograd.grad(out.sum(), (q, k, v))
 
-    @skipIfRocm
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
-    )
-    def test_cudnn_varlen_compile_noncontiguous_query(self, device):
-        """The real and fake ops preserve the query's dimension order."""
-        _check_cudnn_varlen_supported(device)
-        torch.manual_seed(42)
-        seq_len, num_heads, head_dim = 256, 4, 64
-
-        def make():
-            # Head-major storage: strides (head_dim, seq_len * head_dim, 1).
-            return torch.randn(
-                num_heads, seq_len, head_dim, device=device, dtype=torch.bfloat16
-            ).permute(1, 0, 2)
-
-        q, k, v = make(), make(), make()
-        cu_seq = torch.tensor([0, seq_len], device=device, dtype=torch.int32)
-
-        def fn(q, k, v):
-            return varlen_attn(q, k, v, cu_seq, cu_seq, seq_len, seq_len)
-
-        with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
-            eager = fn(q, k, v)
-            compiled = torch.compile(fn, fullgraph=True)(q, k, v)
-        # The real output matches the query's layout, like Flash and the fake.
-        self.assertEqual(eager.stride(), q.stride())
-        self.assertEqual(compiled, eager)
-
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179968")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
@@ -1440,142 +1411,6 @@ class TestVarlenAttention(_VarlenVsSdpaMixin, NNTestCase):
                 )
             self.assertTrue(torch.equal(paged_num_splits, ref_num_splits))
 
-    @skipIfRocm
-    @parametrize("dtype", [torch.bfloat16, torch.float16])
-    def test_cudnn_varlen_cached_graph_grad_out_layout(self, device, dtype):
-        """Key cached backward graphs by grad_output layout."""
-        torch.manual_seed(42)
-        num_heads, head_dim = 4, 64
-        q_lens = [192, 256]
-        total, max_len = sum(q_lens), max(q_lens)
-        cu_seq_q = torch.tensor([0, q_lens[0], total], device=device, dtype=torch.int32)
-        tensors = [
-            torch.randn(
-                total, num_heads, head_dim, device=device, dtype=dtype
-            ).requires_grad_()
-            for _ in range(3)
-        ]
-        q, k, v = tensors
-
-        def grads(grad_out, use_cudnn):
-            with _use_cudnn_varlen(use_cudnn, device):
-                out = varlen_attn(q, k, v, cu_seq_q, cu_seq_q, max_len, max_len)
-                return torch.autograd.grad(out, tensors, grad_out)
-
-        contiguous = torch.randn(total, num_heads, head_dim, device=device, dtype=dtype)
-        # Same shape and innermost stride 1, but a wider row stride.
-        padded = torch.randn(
-            total, num_heads, head_dim * 2, device=device, dtype=dtype
-        )[..., :head_dim]
-        self.assertEqual(padded.stride(-1), 1)
-        self.assertNotEqual(padded.stride(-2), contiguous.stride(-2))
-        expanded = torch.randn(
-            total, num_heads, 1, device=device, dtype=dtype
-        ).expand_as(contiguous)
-        self.assertEqual(expanded.stride(-1), 0)
-        storage = torch.empty(contiguous.numel() + 1, device=device, dtype=dtype)
-        misaligned = torch.as_strided(
-            storage, contiguous.shape, contiguous.stride(), storage_offset=1
-        )
-        misaligned.copy_(contiguous)
-        self.assertEqual(misaligned.stride(), contiguous.stride())
-        self.assertNotEqual(misaligned.data_ptr() % 16, 0)
-
-        cudnn_backward = patch.object(
-            torch.ops.aten,
-            "_cudnn_attention_backward",
-            wraps=torch.ops.aten._cudnn_attention_backward,
-        )
-        # Prime the cache before exercising alternate strides and alignment.
-        with cudnn_backward as spy:
-            for grad_out in (contiguous, padded, expanded, misaligned):
-                expected = grads(grad_out.clone(), use_cudnn=False)
-                actual = grads(grad_out, use_cudnn=True)
-                for got, want in zip(actual, expected):
-                    self.assertEqual(got.float(), want.float(), atol=2e-2, rtol=2e-2)
-        self.assertEqual(spy.call_count, 4, "expected the cuDNN backend to be used")
-
-    @skipIfRocm
-    @parametrize("dtype", [torch.bfloat16, torch.float16])
-    def test_cudnn_varlen_cached_graph_aux_layouts(self, device, dtype):
-        """Key cached backward graphs by output and LSE layouts."""
-        _check_cudnn_varlen_supported(device)
-        torch.manual_seed(42)
-        total, num_heads, head_dim, max_len = 384, 4, 64, 192
-        cu_seq = torch.tensor([0, max_len, total], device=device, dtype=torch.int32)
-        q, k, v = (
-            torch.randn(total, num_heads, head_dim, device=device, dtype=dtype)
-            for _ in range(3)
-        )
-        grad_out = torch.randn_like(q)
-
-        with torch.no_grad():
-            result = torch.ops.aten._cudnn_attention_forward(
-                q,
-                k,
-                v,
-                None,
-                cu_seq,
-                cu_seq,
-                max_len,
-                max_len,
-                True,
-                0.0,
-                False,
-                False,
-            )
-        out, lse, seed, offset = result[0], result[1], result[6], result[7]
-
-        def backward(output, output_grad, stats):
-            return torch.ops.aten._cudnn_attention_backward(
-                output_grad,
-                q,
-                k,
-                v,
-                output,
-                stats,
-                seed,
-                offset,
-                None,
-                cu_seq,
-                cu_seq,
-                max_len,
-                max_len,
-                0.0,
-                False,
-            )
-
-        # Prime the cache with contiguous auxiliary tensors.
-        expected = backward(out, grad_out, lse)
-        out_permuted = (
-            torch.empty(num_heads, total, head_dim, device=device, dtype=dtype)
-            .permute(1, 0, 2)
-            .copy_(out)
-        )
-        grad_permuted = (
-            torch.empty(num_heads, total, head_dim, device=device, dtype=dtype)
-            .permute(1, 0, 2)
-            .copy_(grad_out)
-        )
-        out_padded = torch.empty(
-            total, num_heads, 2 * head_dim, device=device, dtype=dtype
-        )[..., :head_dim]
-        out_padded.copy_(out)
-        lse_padded = torch.empty(num_heads, 2 * total, device=device, dtype=lse.dtype)[
-            :, :total
-        ]
-        lse_padded.copy_(lse)
-
-        cases = [
-            (out_permuted, grad_permuted, lse),
-            (out_padded, grad_out, lse),
-            (out, grad_out, lse_padded),
-        ]
-        for output, output_grad, stats in cases:
-            actual = backward(output, output_grad, stats)
-            for got, want in zip(actual, expected):
-                self.assertEqual(got.float(), want.float(), atol=2e-2, rtol=2e-2)
-
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
@@ -1983,6 +1818,35 @@ class TestVarlenAttentionCuDNN(_VarlenVsSdpaMixin, NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
+    def test_cudnn_varlen_compile_noncontiguous_query(self, device):
+        """The real and fake ops preserve the query's dimension order."""
+        _check_cudnn_varlen_supported(device)
+        torch.manual_seed(42)
+        seq_len, num_heads, head_dim = 256, 4, 64
+
+        def make():
+            # Head-major storage: strides (head_dim, seq_len * head_dim, 1).
+            return torch.randn(
+                num_heads, seq_len, head_dim, device=device, dtype=torch.bfloat16
+            ).permute(1, 0, 2)
+
+        q, k, v = make(), make(), make()
+        cu_seq = torch.tensor([0, seq_len], device=device, dtype=torch.int32)
+
+        def fn(q, k, v):
+            return varlen_attn(q, k, v, cu_seq, cu_seq, seq_len, seq_len)
+
+        with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+            eager = fn(q, k, v)
+            compiled = torch.compile(fn, fullgraph=True)(q, k, v)
+        # The real output matches the query's layout, like Flash and the fake.
+        self.assertEqual(eager.stride(), q.stride())
+        self.assertEqual(compiled, eager)
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("compile", [False, True])
     def test_sdpa_kernel_backend_selection(self, device, dtype, compile):
@@ -2260,6 +2124,142 @@ class TestVarlenAttentionCuDNN(_VarlenVsSdpaMixin, NNTestCase):
             scores = torch.einsum("qhd,khd->hqk", q[lo:hi].float(), k_i.float())
             expected[:, lo:hi] = (scores * scale).logsumexp(-1)
         self.assertEqual(lse, expected, atol=2e-2, rtol=2e-2)
+
+    @skipIfRocm
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    def test_cudnn_varlen_cached_graph_grad_out_layout(self, device, dtype):
+        """Key cached backward graphs by grad_output layout."""
+        torch.manual_seed(42)
+        num_heads, head_dim = 4, 64
+        q_lens = [192, 256]
+        total, max_len = sum(q_lens), max(q_lens)
+        cu_seq_q = torch.tensor([0, q_lens[0], total], device=device, dtype=torch.int32)
+        tensors = [
+            torch.randn(
+                total, num_heads, head_dim, device=device, dtype=dtype
+            ).requires_grad_()
+            for _ in range(3)
+        ]
+        q, k, v = tensors
+
+        def grads(grad_out, use_cudnn):
+            with _use_cudnn_varlen(use_cudnn, device):
+                out = varlen_attn(q, k, v, cu_seq_q, cu_seq_q, max_len, max_len)
+                return torch.autograd.grad(out, tensors, grad_out)
+
+        contiguous = torch.randn(total, num_heads, head_dim, device=device, dtype=dtype)
+        # Same shape and innermost stride 1, but a wider row stride.
+        padded = torch.randn(
+            total, num_heads, head_dim * 2, device=device, dtype=dtype
+        )[..., :head_dim]
+        self.assertEqual(padded.stride(-1), 1)
+        self.assertNotEqual(padded.stride(-2), contiguous.stride(-2))
+        expanded = torch.randn(
+            total, num_heads, 1, device=device, dtype=dtype
+        ).expand_as(contiguous)
+        self.assertEqual(expanded.stride(-1), 0)
+        storage = torch.empty(contiguous.numel() + 1, device=device, dtype=dtype)
+        misaligned = torch.as_strided(
+            storage, contiguous.shape, contiguous.stride(), storage_offset=1
+        )
+        misaligned.copy_(contiguous)
+        self.assertEqual(misaligned.stride(), contiguous.stride())
+        self.assertNotEqual(misaligned.data_ptr() % 16, 0)
+
+        cudnn_backward = patch.object(
+            torch.ops.aten,
+            "_cudnn_attention_backward",
+            wraps=torch.ops.aten._cudnn_attention_backward,
+        )
+        # Prime the cache before exercising alternate strides and alignment.
+        with cudnn_backward as spy:
+            for grad_out in (contiguous, padded, expanded, misaligned):
+                expected = grads(grad_out.clone(), use_cudnn=False)
+                actual = grads(grad_out, use_cudnn=True)
+                for got, want in zip(actual, expected):
+                    self.assertEqual(got.float(), want.float(), atol=2e-2, rtol=2e-2)
+        self.assertEqual(spy.call_count, 4, "expected the cuDNN backend to be used")
+
+    @skipIfRocm
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    def test_cudnn_varlen_cached_graph_aux_layouts(self, device, dtype):
+        """Key cached backward graphs by output and LSE layouts."""
+        _check_cudnn_varlen_supported(device)
+        torch.manual_seed(42)
+        total, num_heads, head_dim, max_len = 384, 4, 64, 192
+        cu_seq = torch.tensor([0, max_len, total], device=device, dtype=torch.int32)
+        q, k, v = (
+            torch.randn(total, num_heads, head_dim, device=device, dtype=dtype)
+            for _ in range(3)
+        )
+        grad_out = torch.randn_like(q)
+
+        with torch.no_grad():
+            result = torch.ops.aten._cudnn_attention_forward(
+                q,
+                k,
+                v,
+                None,
+                cu_seq,
+                cu_seq,
+                max_len,
+                max_len,
+                True,
+                0.0,
+                False,
+                False,
+            )
+        out, lse, seed, offset = result[0], result[1], result[6], result[7]
+
+        def backward(output, output_grad, stats):
+            return torch.ops.aten._cudnn_attention_backward(
+                output_grad,
+                q,
+                k,
+                v,
+                output,
+                stats,
+                seed,
+                offset,
+                None,
+                cu_seq,
+                cu_seq,
+                max_len,
+                max_len,
+                0.0,
+                False,
+            )
+
+        # Prime the cache with contiguous auxiliary tensors.
+        expected = backward(out, grad_out, lse)
+        out_permuted = (
+            torch.empty(num_heads, total, head_dim, device=device, dtype=dtype)
+            .permute(1, 0, 2)
+            .copy_(out)
+        )
+        grad_permuted = (
+            torch.empty(num_heads, total, head_dim, device=device, dtype=dtype)
+            .permute(1, 0, 2)
+            .copy_(grad_out)
+        )
+        out_padded = torch.empty(
+            total, num_heads, 2 * head_dim, device=device, dtype=dtype
+        )[..., :head_dim]
+        out_padded.copy_(out)
+        lse_padded = torch.empty(num_heads, 2 * total, device=device, dtype=lse.dtype)[
+            :, :total
+        ]
+        lse_padded.copy_(lse)
+
+        cases = [
+            (out_permuted, grad_permuted, lse),
+            (out_padded, grad_out, lse),
+            (out, grad_out, lse_padded),
+        ]
+        for output, output_grad, stats in cases:
+            actual = backward(output, output_grad, stats)
+            for got, want in zip(actual, expected):
+                self.assertEqual(got.float(), want.float(), atol=2e-2, rtol=2e-2)
 
     @skipIfRocm
     def test_cudnn_kv_cache_validation(self, device):
