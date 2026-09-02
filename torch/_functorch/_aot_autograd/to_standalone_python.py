@@ -1743,10 +1743,11 @@ def _restride_backward_placeholders(
 def _graph_differentiates(gm: GraphModule) -> bool:
     """Whether a dense graph contains a backward computation inline.
 
-    Scoped to call nodes and to the callable target's operator name (the aten
-    ``*_backward`` convention, or a differentiating higher-order op), rather
-    than stringifying every node's target -- which would spuriously match a
-    placeholder/get_attr whose name merely contains "backward".
+    Scoped to call nodes and to the callable target's operator name, matched
+    against aten's ``*_backward`` naming convention (e.g. ``convolution_backward``,
+    ``threshold_backward``). Matching the suffix rather than any occurrence of
+    "backward" avoids a spurious hit on an op whose name merely contains the
+    substring, and avoids stringifying placeholders/get_attrs entirely.
     """
     import torch
 
@@ -1758,7 +1759,7 @@ def _graph_differentiates(gm: GraphModule) -> bool:
             name = target.overloadpacket.__name__
         else:
             name = getattr(target, "__name__", None) or str(target)
-        if "backward" in name:
+        if name.endswith("_backward"):
             return True
     return False
 

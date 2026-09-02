@@ -583,6 +583,8 @@ class AutogradCompilerInstance:
                     retrace_backward_handling_errors,
                 )
 
+                retrace_decline_reasons: list[str] = []
+
                 def _retrace() -> Any:
                     with (
                         _disable(),
@@ -595,12 +597,20 @@ class AutogradCompilerInstance:
                             specialization_indices,
                             cast(GraphModule, bw_module),
                             list(range(len(bw_placeholders))),
+                            decline_reason=retrace_decline_reasons,
                         )
 
                 ca_specialized = retrace_backward_handling_errors(
-                    _retrace, [], specialization_indices
+                    _retrace, retrace_decline_reasons, specialization_indices
                 )
                 exact_specialization = ca_specialized is not None
+                if ca_specialized is None and retrace_decline_reasons:
+                    verbose_log.debug(
+                        "compiled autograd backward retrace for undefined grad "
+                        "outputs %s declined (%s); using structural specialization",
+                        tuple(specialization_indices),
+                        "; ".join(retrace_decline_reasons),
+                    )
             if ca_specialized is None:
                 ca_specialized = _specialize_bw_module_for_undefined_grad_outputs(
                     cast(GraphModule, bw_module),
