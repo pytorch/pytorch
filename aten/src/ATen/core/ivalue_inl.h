@@ -1874,7 +1874,7 @@ Tuple generic_to_tuple_impl(
 template <
     typename... Args,
     typename Indices = std::make_index_sequence<sizeof...(Args)>,
-    typename = IValue::enable_if_ivalue_compatible<Args...>::type>
+    typename = typename IValue::enable_if_ivalue_compatible<Args...>::type>
 std::tuple<Args...> generic_to(const IValue& ivalue, _fake_type<std::tuple<Args...>> /*unused*/) {
   const auto& vals = ivalue.toTupleRef().elements();
   TORCH_CHECK(vals.size() == sizeof...(Args));
