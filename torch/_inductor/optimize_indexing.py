@@ -182,6 +182,84 @@ def indexing_dtype_strength_reduction(loop_body: LoopBody) -> None:
         )
 
 
+def _int64_index_expr(loop_body: LoopBody, node: Any) -> sympy.Expr | None:
+    """Loop-body expression behind an int64 ``index_expr``/``value_expr`` node."""
+    if not (
+        isinstance(node, torch.fx.Node)
+        and node.op == "call_method"
+        and node.target in ("index_expr", "value_expr")
+        and node.args[2] is torch.int64
+    ):
+        return None
+    index = node.args[1]
+    if not (
+        isinstance(index, torch.fx.Node)
+        and index.op == "call_module"
+        and index.target == "get_index"
+    ):
+        return None
+    return loop_body.indexing_exprs[index.args[0]]
+
+
+def _range_implied_vars(
+    loop_body: LoopBody, predicate: Any
+) -> OrderedSet[sympy.Symbol]:
+    """
+    Iteration vars ``v`` for which ``predicate`` being true proves
+    ``v < var_ranges[v]``: conjunctions of ``v < bound`` terms with a
+    statically known ``0 <= bound <= var_ranges[v]``.
+    """
+    result: OrderedSet[sympy.Symbol] = OrderedSet()
+    if not isinstance(predicate, torch.fx.Node) or predicate.op != "call_method":
+        return result
+    if predicate.target in ("and_", "logical_and"):
+        for term in predicate.args[1:]:
+            result |= _range_implied_vars(loop_body, term)
+        return result
+    if predicate.target != "lt":
+        return result
+    lhs, rhs = predicate.args[1:]
+    var = _int64_index_expr(loop_body, lhs)
+    if not isinstance(var, sympy.Symbol) or var not in loop_body.var_ranges:
+        return result
+    if (
+        isinstance(rhs, torch.fx.Node)
+        and rhs.op == "call_method"
+        and rhs.target == "constant"
+        and rhs.args[2] is torch.int64
+        and type(rhs.args[1]) is int
+    ):
+        bound: sympy.Expr | None = sympy.Integer(rhs.args[1])
+    else:
+        bound = _int64_index_expr(loop_body, rhs)
+    sizevars = V.graph.sizevars
+    if (
+        bound is not None
+        and sizevars.statically_known_geq(bound, 0)
+        and sizevars.statically_known_leq(bound, loop_body.var_ranges[var])
+    ):
+        result.add(var)
+    return result
+
+
+def annotate_range_implied_vars(loop_body: LoopBody) -> None:
+    """
+    For every ``masked_subblock`` and ``masked_store`` node, record the
+    iteration vars whose range bound is implied by the node's predicate in
+    ``loop_body.range_implied_vars``. Codegen may drop the range mask of
+    those vars inside the masked region since the predicate already
+    excludes the out-of-range lanes.
+    """
+    for node in loop_body.get_nodes():
+        if node.op == "call_module" and str(node.target).startswith("masked_subblock"):
+            predicate = node.args[0]
+        elif node.op == "call_method" and node.target == "masked_store":
+            predicate = node.args[4]
+        else:
+            continue
+        loop_body.range_implied_vars[node] = _range_implied_vars(loop_body, predicate)
+
+
 @dataclass(frozen=True)
 class _ValueUseRule:
     # These fields are op arguments, so Any covers FX nodes, SymPy exprs,

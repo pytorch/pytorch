@@ -47,6 +47,7 @@ if TYPE_CHECKING:
 
 from ..ops_handler import registered_pointwise_ops, WrapperHandler
 from ..optimize_indexing import (
+    annotate_range_implied_vars,
     convert_index_expr_to_value_expr,
     indexing_dtype_strength_reduction,
 )
@@ -4231,6 +4232,7 @@ class SIMDScheduling(BaseScheduling):
     def _prepare_loop_body(body) -> None:
         indexing_dtype_strength_reduction(body)
         convert_index_expr_to_value_expr(body)
+        annotate_range_implied_vars(body)
 
     def _codegen_node_schedule_body(self, node_schedule, kernel) -> None:
         """Run a node schedule into ``kernel``: collect indexing, then emit.

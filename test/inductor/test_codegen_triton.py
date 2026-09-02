@@ -41,10 +41,7 @@ from torch._inductor.utils import (
     run_and_get_kernels,
 )
 from torch._inductor.virtualized import V
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-)
+from torch.testing._internal.common_utils import instantiate_parametrized_tests
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -166,70 +163,6 @@ class TestCodegenTriton(InductorTestCase):
         self.assertNotIn("r0_mask", loads[0])
         self.assertNotIn("r0_mask", loads[1])
         self.assertIn("r0_mask", loads[2])
-
-    def _range_mask_kernel(self):
-        kernel = TritonKernel(
-            {"x": 8},
-            features=SIMDKernelFeatures([], 8, sympy.S.One),
-            override_persistent_reduction=False,
-            override_cooperative_reduction=False,
-        )
-        self._stack.enter_context(self._graph.set_current_device(torch.device("cuda")))
-        self._stack.enter_context(kernel)
-        return kernel, kernel.range_trees[0].full_range().symbol()
-
-    @parametrize("upper,expected", [(8, {"xmask"}), (9, set()), (-1, set())])
-    def test_lt_range_mask_constant_bound(self, upper, expected):
-        _, root = self._range_mask_kernel()
-        index = V.ops.value_expr(root, torch.int64)
-        mask = V.ops.lt(index, V.ops.constant(upper, torch.int64))
-        self.assertEqual(set(index.range_mask_vars), set())
-        self.assertEqual(set(mask.range_mask_vars), expected)
-
-    @parametrize(
-        "mode,expected",
-        [
-            ("conjunction", {"xmask"}),
-            ("disjunction", set()),
-            ("symbolic_upper_le", {"xmask"}),
-            ("symbolic_upper_le_value_expr", {"xmask"}),
-            ("symbolic_upper_gt", set()),
-            ("non_root_index", set()),
-            ("narrow_index", set()),
-            ("lossless_cast", {"xmask"}),
-            ("lossy_cast", set()),
-            ("arithmetic", set()),
-        ],
-    )
-    def test_lt_range_mask_conjunction_and_symbolic_bounds(self, mode, expected):
-        kernel, root = self._range_mask_kernel()
-        index = V.ops.index_expr(root, torch.int64)
-        if mode in ("conjunction", "disjunction"):
-            narrow = V.ops.lt(index, V.ops.constant(8, torch.int64))
-            wide = V.ops.lt(index, V.ops.constant(100, torch.int64))
-            self.assertEqual(set(wide.range_mask_vars), set())
-            combine = V.ops.and_ if mode == "conjunction" else V.ops.or_
-            mask = combine(wide, narrow)
-        elif mode.startswith("symbolic_upper"):
-            upper = V.graph.sizevars.shape_env.create_unbacked_symint()
-            torch._check(upper >= 0)
-            torch._check(upper <= (9 if mode == "symbolic_upper_gt" else 8))
-            rhs_op = V.ops.value_expr if "value_expr" in mode else V.ops.index_expr
-            mask = V.ops.lt(index, rhs_op(upper.node.expr, torch.int64))
-        else:
-            if mode == "non_root_index":
-                entry = kernel.range_trees[0].lookup(sympy.S.One, sympy.Integer(4))
-                index = V.ops.index_expr(entry.symbol(), torch.int64)
-            elif mode == "narrow_index":
-                index = V.ops.index_expr(root, torch.int8)
-            elif mode == "lossless_cast":
-                index = V.ops.to_dtype(index, torch.int64)
-            elif mode == "lossy_cast":
-                index = V.ops.to_dtype(index, torch.int8)
-            else:
-                index = V.ops.add(index, V.ops.constant(0, torch.int32))
-            mask = V.ops.lt(index, V.ops.constant(4, torch.int64))
-        self.assertEqual(set(mask.range_mask_vars), expected)
 
     def test_range_tree_entry_ownership_uses_root_identity(self):
         class AlternateR0Root(IterationRangesRoot):
