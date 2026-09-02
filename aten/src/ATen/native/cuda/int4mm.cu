@@ -1117,6 +1117,9 @@ at::Tensor _weight_int4pack_mm_cuda(
   if (!isCDNA2orLater(A.device().index())) {
     TORCH_CHECK(false, "_weight_int4pack_mm_cuda is only supported on AMD gpu arch greater than or equal to CDNA2");
   }
+#else
+  TORCH_CHECK(at::cuda::getCurrentDeviceProperties()->major >= 8,
+              "_weight_int4pack_mm_cuda requires a GPU with compute capability 8.0 or newer");
 #endif
 
   constexpr int32_t kMTileSize = 16;
@@ -1178,7 +1181,7 @@ at::Tensor _weight_int4pack_mm_cuda(
   auto C_final = at::empty(
       {m, n}, at::TensorOptions().dtype(at::kBFloat16).device(A.device()));
 
-#if defined(USE_ROCM) || (defined(CUDA_VERSION) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)))
+#if defined(USE_ROCM) || defined(CUDA_VERSION)
   auto stream = at::cuda::getCurrentCUDAStream();
 #define RUN_GEMM(WARPS, K_TILES_PER_WARP, Q_GROUP_SIZE, REDUCE_TYPE) \
   do {                                                               \
@@ -1318,6 +1321,8 @@ at::Tensor _convert_weight_to_int4pack_cuda(
   }
   constexpr int32_t kNTileSize = 16;
 #else
+  TORCH_CHECK(at::cuda::getCurrentDeviceProperties()->major >= 8,
+              "_convert_weight_to_int4pack_cuda requires a GPU with compute capability 8.0 or newer");
   constexpr int32_t kNTileSize = 8;
 #endif
   constexpr int32_t kKTileSize = 16;
@@ -1346,7 +1351,7 @@ at::Tensor _convert_weight_to_int4pack_cuda(
       {nTilesTensor, kSuperTiles, 32, innerKTiles / 2},
       at::TensorOptions().dtype(at::kInt).device(in.device()));
 
-#if defined(USE_ROCM) || ((defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)))
+#if defined(USE_ROCM) || (defined(CUDA_VERSION) && CUDA_VERSION >= 12000)
   auto stream = at::cuda::getCurrentCUDAStream();
   dim3 grid(kSuperTiles, nTiles);
 
