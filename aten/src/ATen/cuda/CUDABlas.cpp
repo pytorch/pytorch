@@ -493,8 +493,36 @@ void bgemm_internal_cublas<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
   detail::cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   BGEMM_CHECK_ARGVALUES(float);
-  TORCH_CUDABLAS_CHECK(cublasSgemmStridedBatched(
-      handle, opa, opb, m, n, k, &alpha, a, lda, stridea, b, ldb, strideb, &beta, c, ldc, stridec, num_batches));
+  auto compute_type = CUBLAS_COMPUTE_32F;
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12090
+  if (useBF16x9()) {
+    compute_type = CUBLAS_COMPUTE_32F_EMULATED_16BFX9;
+  }
+#endif
+  TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedEx(
+      handle,
+      opa,
+      opb,
+      m,
+      n,
+      k,
+      &alpha,
+      a,
+      CUDA_R_32F,
+      lda,
+      stridea,
+      b,
+      CUDA_R_32F,
+      ldb,
+      strideb,
+      &beta,
+      c,
+      CUDA_R_32F,
+      ldc,
+      stridec,
+      num_batches,
+      compute_type,
+      CUBLAS_GEMM_DEFAULT_TENSOR_OP));
 }
 
 template <>
@@ -965,8 +993,32 @@ void gemm_internal_cublas<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
   detail::cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(float);
-  TORCH_CUDABLAS_CHECK(cublasSgemm(
-      handle, opa, opb, m, n, k, &alpha, a, lda, b, ldb, &beta, c, ldc));
+  auto compute_type = CUBLAS_COMPUTE_32F;
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12090
+  if (useBF16x9()) {
+    compute_type = CUBLAS_COMPUTE_32F_EMULATED_16BFX9;
+  }
+#endif
+  TORCH_CUDABLAS_CHECK(cublasGemmEx(
+      handle,
+      opa,
+      opb,
+      m,
+      n,
+      k,
+      &alpha,
+      a,
+      CUDA_R_32F,
+      lda,
+      b,
+      CUDA_R_32F,
+      ldb,
+      &beta,
+      c,
+      CUDA_R_32F,
+      ldc,
+      compute_type,
+      CUBLAS_GEMM_DEFAULT_TENSOR_OP));
 }
 
 template <>
