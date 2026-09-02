@@ -384,6 +384,90 @@ def create_variable_length_batch(
     }
 
 
+class TestVarlenAttentionDevice(NNTestCase):
+    # varlen_attn validates the scale and resolves a backend before dispatching
+    # any kernel, so these checks hold on every device.
+
+    @parametrize("scale", [0.0, -0.125, float("nan")])
+    def test_varlen_invalid_scale(self, device, scale):
+        q, k, v, cu_seq = _make_causal_varlen_inputs(device)
+        seq_len = q.size(0)
+
+        with self.assertRaisesRegex(ValueError, "scale must be greater than 0"):
+            varlen_attn(q, k, v, cu_seq, cu_seq, seq_len, seq_len, scale=scale)
+
+        with self.assertRaisesRegex(ValueError, "scale must be greater than 0"):
+            varlen_attn_out(
+                torch.empty_like(q),
+                q,
+                k,
+                v,
+                cu_seq,
+                cu_seq,
+                seq_len,
+                seq_len,
+                scale=scale,
+            )
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    def test_sdpa_kernel_backend_errors(self, device):
+        """Report forced-backend constraints instead of silently falling back."""
+        seq_len = 256
+        q = torch.randn(seq_len, 4, 64, device=device, dtype=torch.bfloat16)
+        k = torch.randn_like(q)
+        v = torch.randn_like(q)
+        cu_seq = torch.tensor([0, seq_len], device=device, dtype=torch.int32)
+
+        short_seq = torch.tensor([0, 128], device=device, dtype=torch.int32)
+        with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+            with self.assertRaises(RuntimeError) as error:
+                varlen_attn(
+                    q[:128],
+                    k[:128],
+                    v[:128],
+                    short_seq,
+                    short_seq,
+                    128,
+                    128,
+                    num_splits=1,
+                )
+        self.assertIn("num_splits", str(error.exception))
+        if (torch.backends.cudnn.version() or 0) < 92400:
+            self.assertIn("max_q <= 128", str(error.exception))
+
+        with (
+            sdpa_kernel(SDPBackend.CUDNN_ATTENTION),
+            self.assertRaisesRegex(RuntimeError, "same cu_seq tensor"),
+        ):
+            varlen_attn(
+                q,
+                k,
+                v,
+                cu_seq,
+                cu_seq.clone(),
+                seq_len,
+                seq_len,
+                window_size=(-1, 0),
+            )
+
+        with (
+            sdpa_kernel(SDPBackend.MATH),
+            self.assertRaisesRegex(RuntimeError, "No viable backend"),
+        ):
+            varlen_attn(q, k, v, cu_seq, cu_seq, seq_len, seq_len)
+
+        with (
+            sdpa_kernel(SDPBackend.MATH),
+            self.assertRaisesRegex(RuntimeError, "No viable backend"),
+        ):
+            varlen_attn_out(
+                torch.empty_like(q), q, k, v, cu_seq, cu_seq, seq_len, seq_len
+            )
+
+
 class TestVarlenAttention(NNTestCase):
     # NOTE: This class is currently CUDA-specific, although a significant portion of its
     # functionality can be shared by other backends. Separating the common logic from
@@ -900,27 +984,6 @@ class TestVarlenAttention(NNTestCase):
             _should_use_cudnn=_should_use_cudnn,
         )
 
-    @parametrize("scale", [0.0, -0.125, float("nan")])
-    def test_varlen_invalid_scale(self, device, scale):
-        q, k, v, cu_seq = _make_causal_varlen_inputs(device)
-        seq_len = q.size(0)
-
-        with self.assertRaisesRegex(ValueError, "scale must be greater than 0"):
-            varlen_attn(q, k, v, cu_seq, cu_seq, seq_len, seq_len, scale=scale)
-
-        with self.assertRaisesRegex(ValueError, "scale must be greater than 0"):
-            varlen_attn_out(
-                torch.empty_like(q),
-                q,
-                k,
-                v,
-                cu_seq,
-                cu_seq,
-                seq_len,
-                seq_len,
-                scale=scale,
-            )
-
     @skipIfRocm
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
@@ -1395,64 +1458,6 @@ class TestVarlenAttention(NNTestCase):
             self.assertEqual(
                 varlen_attention._select_backend(*args),
                 SDPBackend.CUDNN_ATTENTION.value,
-            )
-
-    @skipIfRocm
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
-    )
-    def test_sdpa_kernel_backend_errors(self, device):
-        """Report forced-backend constraints instead of silently falling back."""
-        seq_len = 256
-        q = torch.randn(seq_len, 4, 64, device=device, dtype=torch.bfloat16)
-        k = torch.randn_like(q)
-        v = torch.randn_like(q)
-        cu_seq = torch.tensor([0, seq_len], device=device, dtype=torch.int32)
-
-        short_seq = torch.tensor([0, 128], device=device, dtype=torch.int32)
-        with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
-            with self.assertRaises(RuntimeError) as error:
-                varlen_attn(
-                    q[:128],
-                    k[:128],
-                    v[:128],
-                    short_seq,
-                    short_seq,
-                    128,
-                    128,
-                    num_splits=1,
-                )
-        self.assertIn("num_splits", str(error.exception))
-        if (torch.backends.cudnn.version() or 0) < 92400:
-            self.assertIn("max_q <= 128", str(error.exception))
-
-        with (
-            sdpa_kernel(SDPBackend.CUDNN_ATTENTION),
-            self.assertRaisesRegex(RuntimeError, "same cu_seq tensor"),
-        ):
-            varlen_attn(
-                q,
-                k,
-                v,
-                cu_seq,
-                cu_seq.clone(),
-                seq_len,
-                seq_len,
-                window_size=(-1, 0),
-            )
-
-        with (
-            sdpa_kernel(SDPBackend.MATH),
-            self.assertRaisesRegex(RuntimeError, "No viable backend"),
-        ):
-            varlen_attn(q, k, v, cu_seq, cu_seq, seq_len, seq_len)
-
-        with (
-            sdpa_kernel(SDPBackend.MATH),
-            self.assertRaisesRegex(RuntimeError, "No viable backend"),
-        ):
-            varlen_attn_out(
-                torch.empty_like(q), q, k, v, cu_seq, cu_seq, seq_len, seq_len
             )
 
     @skipIfRocm
@@ -2644,6 +2649,7 @@ class TestVarlenAttention(NNTestCase):
             self.assertEqual(out_buf, out)
 
 
+instantiate_device_type_tests(TestVarlenAttentionDevice, globals())
 instantiate_device_type_tests(TestVarlenAttention, globals(), only_for=("cuda",))
 
 if __name__ == "__main__":
