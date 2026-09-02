@@ -1808,6 +1808,35 @@ from user code:
         finally:
             c10d.destroy_process_group()
 
+    def test_aot_compile_drops_import_rooted_environment_guards(self):
+        # torch.utils._pytree.tree_leaves installs guards rooted at ImportSource
+        # (__import__('torch').utils._pytree.SUPPORTED_NODES). They are
+        # environment guards like their GlobalSource-rooted siblings, so the
+        # default filter must drop them by provenance; keyed on is_global they
+        # survive and registering a pytree node after compile fails the
+        # artifact's guard check.
+        def fn(x):
+            d = {"a": x, "b": x + 1}
+            return sum(torch.utils._pytree.tree_leaves(d))
+
+        x = torch.randn(3)
+        expected = fn(x)
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="eager").aot_compile(
+            ((x,), {})
+        )
+
+        class Node:
+            def __init__(self, v):
+                self.v = v
+
+        torch.utils._pytree.register_pytree_node(
+            Node, lambda n: ([n.v], None), lambda xs, _: Node(xs[0])
+        )
+        try:
+            self.assertEqual(compiled_fn(x), expected)
+        finally:
+            torch.utils._pytree._deregister_pytree_node(Node)
+
 
 class TestTritonKernelSerialization(torch._inductor.test_case.TestCase):
     """Tests for triton kernel side table serialization."""
