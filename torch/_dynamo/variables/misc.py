@@ -2779,29 +2779,7 @@ class ContextVarVariable(VariableTracker):
     def python_type(self) -> type:
         return contextvars.ContextVar
 
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: "list[VariableTracker]",
-        kwargs: "dict[str, VariableTracker]",
-    ) -> "VariableTracker":
-        if name == "get":
-            return self._handle_get(tx, args, kwargs)
-        elif name in ("set", "reset"):
-            unimplemented(
-                gb_type="ContextVar mutation not supported",
-                context=f"ContextVar('{self.cv_obj.name}').{name}()",
-                explanation=(
-                    f"ContextVar.{name}() is not yet supported inside "
-                    f"torch.compile. Move the .{name}() call outside the "
-                    f"compiled region."
-                ),
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
-        return super().call_method(tx, name, args, kwargs)
-
-    def _handle_get(
+    def get(
         self,
         tx: "InstructionTranslatorBase",
         args: "list[VariableTracker]",
@@ -2811,10 +2789,7 @@ class ContextVarVariable(VariableTracker):
         from ..utils import is_safe_constant
         from .base import NO_SUCH_SUBOBJ
 
-        if kwargs:
-            raise_observed_exception(
-                TypeError, tx, args=["ContextVar.get() takes no keyword arguments"]
-            )
+        # METH_FASTCALL only rejects kwargs; CPython still caps get() at 1 arg.
         if len(args) > 1:
             raise_observed_exception(
                 TypeError,
@@ -2850,6 +2825,36 @@ class ContextVarVariable(VariableTracker):
         )
         return VariableTracker.build(tx, value, source=value_source)
 
+    def set(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        return self._mutation_unsupported(tx, "set")
+
+    def reset(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        return self._mutation_unsupported(tx, "reset")
+
+    def _mutation_unsupported(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> NoReturn:
+        unimplemented(
+            gb_type="ContextVar mutation not supported",
+            context=f"ContextVar('{self.cv_obj.name}').{name}()",
+            explanation=(
+                f"ContextVar.{name}() is not yet supported inside "
+                f"torch.compile. Move the .{name}() call outside the "
+                f"compiled region."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
     def _get_value(
         self,
         tx: "InstructionTranslatorBase",
@@ -2863,6 +2868,11 @@ class ContextVarVariable(VariableTracker):
         except LookupError:
             raise_observed_exception(LookupError, tx, args=[f"{self.cv_obj!r}"])
 
+    tp_methods = {
+        "get": Method(get),
+        "set": Method(set),
+        "reset": Method(reset),
+    }
     # contextvars.ContextVar.name is a read-only member.
     tp_members = {"name": Member(getset_build(lambda s: s.cv_obj.name))}
 
