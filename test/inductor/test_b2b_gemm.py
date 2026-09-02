@@ -3,15 +3,14 @@ import os
 import unittest
 
 import torch
+from torch._dynamo.testing import CompileCounterWithBackend
 from torch._dynamo.utils import counters
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_utils import skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
-@skipIfXpu(msg="Segmentation fault on CI machine")
 class B2BGEMMTest(TestCase):
     device = GPU_TYPE
 
@@ -166,6 +165,31 @@ class B2BGEMMTest(TestCase):
         self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.1, rtol=0.01))
         self.assertTrue("B2B_GEMM_LEFT_TRITON_ENTRANCE" not in code)
         self.assertTrue("B2B_GEMM_RIGHT_TRITON_ENTRANCE" not in code)
+
+    @torch._dynamo.config.patch(recompile_limit=32)
+    @torch._inductor.config.patch(b2b_gemm_pass=True)
+    def test_b2b_gemm_good_shape_dynamic_shapes(self):
+        """
+        The load-ratio heuristic must accept SymInt dimensions without
+        specializing the compiled graph to their representative values.
+        """
+
+        def f(m1: torch.Tensor, m2: torch.Tensor, m3: torch.Tensor) -> torch.Tensor:
+            return torch.mm(torch.mm(m1, m2), m3)
+
+        def f_32(m1: torch.Tensor, m2: torch.Tensor, m3: torch.Tensor) -> torch.Tensor:
+            return f(m1.float(), m2.float(), m3.float()).half()
+
+        backend = CompileCounterWithBackend("inductor")
+        f_opt = torch.compile(f, backend=backend, dynamic=True)
+        for M, N, O, P in ((256, 32, 256, 32), (128, 16, 128, 16)):
+            A = torch.randn((M, N), device=GPU_TYPE, dtype=torch.float16)
+            B = torch.randn((N, O), device=GPU_TYPE, dtype=torch.float16)
+            C = torch.randn((O, P), device=GPU_TYPE, dtype=torch.float16)
+            self.assertEqual(f_32(A, B, C), f_opt(A, B, C), atol=0.1, rtol=0.01)
+
+        self.assertEqual(backend.frame_count, 1)
+        self.assertGreater(counters["inductor"]["b2b_gemm"], 0)
 
     @unittest.skipIf(os.environ.get("DO_PERF_TEST") != "1", "Perf test not enabled")
     @torch._dynamo.config.patch(recompile_limit=32)
