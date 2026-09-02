@@ -677,6 +677,37 @@ def _patch_nested_region_inductor_config(
     return config.patch(patches)
 
 
+def _get_invoke_subgraph_graph_module(
+    gm: GraphModule, node: torch.fx.Node
+) -> GraphModule | None:
+    subgraph_node = node.args[0]
+    if (
+        not isinstance(subgraph_node, torch.fx.Node)
+        or subgraph_node.op != "get_attr"
+        or not isinstance(subgraph_node.target, str)
+    ):
+        return None
+    subgraph = getattr(gm, subgraph_node.target, None)
+    return subgraph if isinstance(subgraph, GraphModule) else None
+
+
+def _propagate_invoke_subgraph_nested_region_config(gm: GraphModule) -> None:
+    # Seed each invoke_subgraph subgraph module's meta from the node meta, which
+    # (unlike a GraphModule's meta) survives FX transforms. Re-run at the start of
+    # every pass phase because each is an independent entry point that may see a
+    # freshly-created module (e.g. the partitioned backward graph); setdefault
+    # makes re-entry on an already-seeded module a no-op.
+    for node in gm.graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.invoke_subgraph
+    ):
+        nested_config = node.meta.get("custom", {}).get("nested_region_config")
+        if nested_config is None:
+            continue
+        subgraph = _get_invoke_subgraph_graph_module(gm, node)
+        if subgraph is not None:
+            subgraph.meta.setdefault("nested_region_config", nested_config)
+
+
 def _iter_subgraph_cudagraph_patches(
     gm: GraphModule,
 ) -> Generator[tuple[torch.fx.Node, dict[str, Any]], None, None]:
@@ -728,6 +759,88 @@ def _any_subgraph_configures_cudagraphs(gm: GraphModule) -> bool:
     return False
 
 
+def _validate_nested_region_cudagraphs(gm: GraphModule) -> None:
+    def visit(
+        current_gm: GraphModule,
+        enclosing_forward: bool,
+        enclosing_backward: bool,
+        first_level: bool,
+    ) -> None:
+        invoke_subgraph_module_ids: OrderedSet[int] = OrderedSet()
+        for node in current_gm.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.invoke_subgraph
+        ):
+            nested_config = node.meta.get("custom", {}).get("nested_region_config")
+            forward_patches = (
+                nested_config.inductor_config_patches if nested_config else None
+            )
+            backward_patches = (
+                nested_config.bw_inductor_config_patches
+                if nested_config
+                and nested_config.bw_inductor_config_patches is not None
+                else forward_patches
+            )
+            forward_override = (
+                bool(forward_patches["triton.cudagraphs"])
+                if forward_patches is not None
+                and "triton.cudagraphs" in forward_patches
+                else None
+            )
+            backward_override = (
+                bool(backward_patches["triton.cudagraphs"])
+                if backward_patches is not None
+                and "triton.cudagraphs" in backward_patches
+                else None
+            )
+            if not first_level and (
+                (forward_override is not None and forward_override != enclosing_forward)
+                or (
+                    backward_override is not None
+                    and backward_override != enclosing_backward
+                )
+            ):
+                raise RuntimeError(
+                    "nested compile regions cannot have conflicting cudagraph configs"
+                )
+
+            subgraph = _get_invoke_subgraph_graph_module(current_gm, node)
+            if subgraph is not None:
+                invoke_subgraph_module_ids.add(id(subgraph))
+                visit(
+                    subgraph,
+                    enclosing_forward=(
+                        enclosing_forward
+                        if forward_override is None
+                        else forward_override
+                    ),
+                    enclosing_backward=(
+                        enclosing_backward
+                        if backward_override is None
+                        else backward_override
+                    ),
+                    first_level=False,
+                )
+
+        for child in current_gm.children():
+            if (
+                isinstance(child, GraphModule)
+                and id(child) not in invoke_subgraph_module_ids
+            ):
+                visit(
+                    child,
+                    enclosing_forward=enclosing_forward,
+                    enclosing_backward=enclosing_backward,
+                    first_level=first_level,
+                )
+
+    visit(
+        gm,
+        enclosing_forward=config.triton.cudagraphs,
+        enclosing_backward=config.triton.cudagraphs,
+        first_level=True,
+    )
+
+
 def _any_subgraph_cudagraphs_preference_differs(
     gm: GraphModule, enclosing_cudagraphs: bool
 ) -> bool:
@@ -741,30 +854,6 @@ def _any_subgraph_cudagraphs_preference_differs(
         and bool(patches["triton.cudagraphs"]) != enclosing_cudagraphs
         for _, patches in _iter_subgraph_cudagraph_patches(gm)
     )
-
-
-def _propagate_invoke_subgraph_nested_region_config(gm: GraphModule) -> None:
-    # Seed each invoke_subgraph subgraph module's meta from the node meta, which
-    # (unlike a GraphModule's meta) survives FX transforms. Re-run at the start of
-    # every pass phase because each is an independent entry point that may see a
-    # freshly-created module (e.g. the partitioned backward graph); setdefault
-    # makes re-entry on an already-seeded module a no-op.
-    for node in gm.graph.find_nodes(
-        op="call_function", target=torch.ops.higher_order.invoke_subgraph
-    ):
-        nested_config = node.meta.get("custom", {}).get("nested_region_config")
-        if nested_config is None:
-            continue
-        subgraph_node = node.args[0]
-        if (
-            not isinstance(subgraph_node, torch.fx.Node)
-            or subgraph_node.op != "get_attr"
-            or not isinstance(subgraph_node.target, str)
-        ):
-            continue
-        subgraph = getattr(gm, subgraph_node.target, None)
-        if isinstance(subgraph, GraphModule):
-            subgraph.meta.setdefault("nested_region_config", nested_config)
 
 
 def _recursive_pre_grad_passes(
@@ -2876,6 +2965,12 @@ def create_compiler_config_extra(
             "torch._dynamo.override_cudagraphs cannot be combined with "
             "triton.cudagraphs in nested compile-region options"
         )
+    if has_regional_cudagraphs:
+        if pre_aot_graph is None:
+            raise AssertionError(
+                "regional cudagraph configuration requires an FX graph"
+            )
+        _validate_nested_region_cudagraphs(pre_aot_graph)
 
     # Although cudagraphs may have been enabled via config, various
     # conditions (which are tested within the bowels of Inductor) may
