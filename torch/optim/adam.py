@@ -176,9 +176,15 @@ class Adam(Optimizer):
                         else torch.tensor(0.0, dtype=_get_scalar_dtype(), device="cpu")
                     )
                     # Exponential moving average of gradient values
-                    state["exp_avg"] = torch.zeros_like(
-                        p, memory_format=torch.preserve_format
+                    beta1 = group["betas"][0]
+                    skip_first_moment = (
+                        isinstance(beta1, float) and beta1 == 0.0
+                        and not group.get("fused") and not group.get("foreach")
                     )
+                    if not skip_first_moment:
+                        state["exp_avg"] = torch.zeros_like(
+                            p, memory_format=torch.preserve_format
+                        )
                     # Exponential moving average of squared gradient values
                     state["exp_avg_sq"] = torch.zeros_like(
                         p, memory_format=torch.preserve_format
@@ -189,7 +195,7 @@ class Adam(Optimizer):
                             p, memory_format=torch.preserve_format
                         )
 
-                exp_avgs.append(state["exp_avg"])
+                exp_avgs.append(state.get("exp_avg"))
                 exp_avg_sqs.append(state["exp_avg_sq"])
 
                 if group["amsgrad"]:
@@ -394,6 +400,8 @@ def _single_tensor_adam(
     else:
         beta1_dict = None
 
+    skip_exp_avg = isinstance(beta1, float) and beta1 == 0.0
+
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
         exp_avg = exp_avgs[i]
@@ -430,7 +438,8 @@ def _single_tensor_adam(
 
         if torch.is_complex(param):
             grad = torch.view_as_real(grad)
-            exp_avg = torch.view_as_real(exp_avg)
+            if exp_avg is not None:
+                exp_avg = torch.view_as_real(exp_avg)
             exp_avg_sq = torch.view_as_real(exp_avg_sq)
             if amsgrad:
                 max_exp_avg_sqs[i] = torch.view_as_real(max_exp_avg_sqs[i])
@@ -454,7 +463,8 @@ def _single_tensor_adam(
 
         # Decay the first and second moment running average coefficient
 
-        exp_avg.lerp_(grad, 1 - device_beta1)
+        if not skip_exp_avg:
+            exp_avg.lerp_(grad, 1 - device_beta1)
 
         # Nested if is necessary to bypass jitscript rules
         if differentiable and isinstance(beta2, Tensor):
@@ -521,14 +531,15 @@ def _single_tensor_adam(
                     exp_avg_sq.sqrt() / (bias_correction2_sqrt * step_size_neg)
                 ).add_(eps / step_size_neg)
 
+            momentum = grad if skip_exp_avg else exp_avg
             if differentiable:
-                param.addcdiv_(exp_avg.clone(), denom)
+                param.addcdiv_(momentum.clone(), denom)
             else:
-                param.addcdiv_(exp_avg, denom)
+                param.addcdiv_(momentum, denom)
         else:
             step = _get_value(step_t)
 
-            bias_correction1 = 1 - beta1**step
+            bias_correction1 = 1 if skip_exp_avg else 1 - beta1**step
             bias_correction2 = 1 - beta2**step
 
             step_size = lr / bias_correction1
@@ -544,7 +555,8 @@ def _single_tensor_adam(
             else:
                 denom = (exp_avg_sq.sqrt() / bias_correction2_sqrt).add_(eps)
 
-            param.addcdiv_(exp_avg, denom, value=-step_size)  # type: ignore[arg-type]
+            momentum = grad if skip_exp_avg else exp_avg
+            param.addcdiv_(momentum, denom, value=-step_size)  # type: ignore[arg-type]
 
         # Lastly, switch back to complex view
         if amsgrad and torch.is_complex(params[i]):
