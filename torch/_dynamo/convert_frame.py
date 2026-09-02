@@ -1963,7 +1963,13 @@ def _compile(
 
         if package is not None:
             if check_fn.guards_state is None:
-                raise AssertionError("check_fn.guards_state must not be None")
+                # The non-strict CheckFunctionManager swallowed the
+                # serialization failure; re-raise it typed (and chained to the
+                # specific-guard cause when there is one) so package consumers
+                # can handle it without matching message text.
+                raise exc.PackageError(
+                    "check_fn.guards_state must not be None"
+                ) from check_fn.guards_serialization_failure
             package.add_guarded_code(check_fn.guards_state, out_code)
             package.add_inlined_source(output.tracing_context.traced_code)
             package.update_device_type(output.current_tracer.graph)
