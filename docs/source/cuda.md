@@ -231,6 +231,45 @@ can equally be saved next to a trace and joined offline.
 .. currentmodule:: torch.cuda
 ```
 
+## Graph Python Launch Stacks (prototype)
+
+`torch.cuda.graph_py_stacks` records the Python launch stack for each top-level
+CUDA graph node. Enable it on an annotation-enabled capture, then retrieve the
+stacks after the graph has been instantiated:
+
+```python
+import torch
+from torch.cuda.graph_py_stacks import take_stacks
+
+g = torch.cuda.CUDAGraph()
+with torch.autograd.grad_mode.set_multithreading_enabled(False):
+    with torch.cuda.graph(
+        g,
+        enable_annotations=True,
+        annotation_config={"capture_py_stacks": True},
+    ):
+        output = workload(input)
+
+stacks_by_graph_node_id = take_stacks(g)
+```
+
+Stack capture requires `cupti-python`, `enable_annotations=True`, and
+single-threaded autograd. It forces the CUPTI callback path; if no CUPTI
+subscriber is already active, this prevents {class}`torch.profiler.profile`
+from initializing later in the same process.
+
+```{eval-rst}
+.. currentmodule:: torch.cuda.graph_py_stacks
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    take_stacks
+    clear_stacks
+
+.. currentmodule:: torch.cuda
+```
+
 (cuda-memory-management-api)=
 
 ```{eval-rst}
@@ -462,6 +501,10 @@ deprecated compatibility APIs.
 
 ```{eval-rst}
 .. py:module:: torch.cuda.graph_annotations
+```
+
+```{eval-rst}
+.. py:module:: torch.cuda.graph_py_stacks
 ```
 
 ```{eval-rst}

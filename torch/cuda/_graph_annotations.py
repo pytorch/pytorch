@@ -49,7 +49,7 @@ import warnings
 from collections.abc import Mapping
 from contextlib import contextmanager
 from logging import getLogger
-from typing import Any, NamedTuple, TYPE_CHECKING, TypeAlias
+from typing import Any, NamedTuple, TYPE_CHECKING, TypeAlias, TypeVar
 
 
 if TYPE_CHECKING:
@@ -78,6 +78,7 @@ logger = getLogger(__name__)
 
 _CaptureState: TypeAlias = tuple[Any, list[Any]]
 _ExistingDirectDependents: TypeAlias = dict[int, set[int]]
+_T = TypeVar("_T")
 
 
 # Tri-state: None = not probed, True = available, False = unavailable.
@@ -944,11 +945,11 @@ def resolve_pending_annotations() -> None:
 
 
 def remap_to_exec_graph(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
-    """Remap annotation keys from capture graph ID to exec graph ID.
+    """Remap recorded graph metadata from capture graph ID to exec graph ID.
 
     During capture, toolsId encodes the capture graph's ID in the upper
     32 bits. After instantiation, the profiler uses the exec graph's ID.
-    This function rewrites the keys so annotations match the trace.
+    This function rewrites annotation and Python-stack keys so they match the trace.
 
     The graph's capture id is read from the ``_capture_graph_id`` stamped on it
     by ``maybe_stamp_capture_root`` at capture_begin, so only the annotations
@@ -967,7 +968,7 @@ def remap_to_exec_graph(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
     matches the live exec id (e.g. replay after instantiate) this is a no-op.
     """
     capture_graph_id = torch_cuda_graph._capture_graph_id
-    if not _kernel_annotations or capture_graph_id is None:
+    if capture_graph_id is None:
         return
 
     exec_graph_id = _check_cuda_bindings(
@@ -984,6 +985,11 @@ def remap_to_exec_graph(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
     if current_key_id == exec_graph_id:
         return
 
+    from torch.cuda import _graph_py_stacks
+
+    _graph_py_stacks._remap_to_exec_graph(
+        torch_cuda_graph, current_key_id, exec_graph_id
+    )
     remapped = _rekey_annotations(_kernel_annotations, current_key_id, exec_graph_id)
     _kernel_annotations.clear()
     _kernel_annotations.update(remapped)
@@ -991,10 +997,10 @@ def remap_to_exec_graph(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
 
 
 def _rekey_annotations(
-    annotations: dict[int, dict[str, Any]],
+    annotations: dict[int, _T],
     capture_graph_id: int,
     exec_graph_id: int,
-) -> dict[int, dict[str, Any]]:
+) -> dict[int, _T]:
     """Rekey one graph's annotations from its capture id to its exec id.
 
     A toolsId packs the graph id in the upper 32 bits and the node id in the
@@ -1005,7 +1011,7 @@ def _rekey_annotations(
     differ in node id, and the driver mints graph and exec ids from one counter
     that it does not reuse, so no other entry is keyed on a freshly minted exec id.
     """
-    remapped: dict[int, dict[str, Any]] = {}
+    remapped: dict[int, _T] = {}
     for tools_id, annotation in annotations.items():
         if tools_id >> 32 != capture_graph_id:
             remapped[tools_id] = annotation

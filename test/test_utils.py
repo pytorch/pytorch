@@ -14,6 +14,7 @@ import types
 import unittest
 import warnings
 from typing import Any, cast
+from unittest.mock import patch
 
 import torch
 import torch.nn as nn
@@ -1074,11 +1075,19 @@ def f(x):
         )
 
     def test_captured_traceback_format_all(self):
-        rs = CapturedTraceback.format_all(
-            [CapturedTraceback.extract(), CapturedTraceback.extract()]
-        )
+        import torch._C._profiler
+
+        traces = [CapturedTraceback.extract(), CapturedTraceback.extract()]
+        symbolize_tracebacks = torch._C._profiler.symbolize_tracebacks
+        with patch.object(
+            torch._C._profiler,
+            "symbolize_tracebacks",
+            wraps=symbolize_tracebacks,
+        ) as symbolize:
+            rs = CapturedTraceback.format_all(traces)
         self.assertEqual(len(rs), 2)
         self.assertIn("test_captured_traceback_format_all", "".join(rs[0]))
+        symbolize.assert_called_once_with([trace.tb for trace in traces])
 
     def test_captured_traceback_format_all_cached(self):
         tb = CapturedTraceback.extract()
