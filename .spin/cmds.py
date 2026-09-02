@@ -571,12 +571,9 @@ def _pip_install_cmd(editable):
 
 def _native_aot_stage2():
     # Post-install: the kernel builders import the installed torch, and
-    # scikit-build-core has no post-build hook inside the PEP 517 backend.
-    #
-    # Skips cleanly, printing why, when AOT kernels do not apply (build_stage2.py
-    # lists the conditions) -- but NOT for a missing DSL runtime, which is a hard
-    # error once it decides to export. So on a machine with an exportable GPU this
-    # needs the DSL wheels installed, or TORCH_NATIVE_AOT=0.
+    # scikit-build-core has no post-build hook inside the PEP 517 backend. Skips when
+    # AOT does not apply, but a machine with an exportable GPU needs the DSL wheels
+    # installed, or TORCH_NATIVE_AOT=0.
     spin.util.run([sys.executable, "tools/native_aot/build_stage2.py"])
 
 
