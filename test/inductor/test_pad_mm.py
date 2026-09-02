@@ -673,9 +673,7 @@ class PadMMTest(TestCase):
             ):
                 mha = torch.compile(mha, fullgraph=True, backend="inductor")
                 device_type = torch.device(device).type
-                with torch.autocast(
-                    device_type, dtype=dtype, cache_enabled=False
-                ):
+                with torch.autocast(device_type, dtype=dtype, cache_enabled=False):
                     out_vid = mha(x1, x2, attn_mask)
                     target_vid = torch.randn_like(out_vid)
 
@@ -724,9 +722,7 @@ class PadMMTest(TestCase):
         self.assertEqual(compiled.stride(), expected.stride())
 
 
-instantiate_device_type_tests(
-    PadMMTest, globals(), except_for="cpu", allow_xpu=True
-)
+instantiate_device_type_tests(PadMMTest, globals(), except_for="cpu", allow_xpu=True)
 
 
 if __name__ == "__main__":
