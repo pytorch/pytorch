@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import unittest.mock
 from typing import Any
 from collections.abc import Callable
@@ -553,6 +554,45 @@ instantiate_device_type_tests(TestTesting, globals())
 
 
 class TestFrameworkUtils(TestCase):
+
+    def test_subprocess_respects_unittest_k_filter(self):
+        test_source = """\
+from torch.testing._internal.common_utils import run_tests, TestCase
+
+
+class SubprocessFilterFixture(TestCase):
+    def test_selected(self):
+        pass
+
+    def test_other(self):
+        raise AssertionError("UNSELECTED_SENTINEL")
+
+
+if __name__ == "__main__":
+    run_tests()
+"""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            test_file = os.path.join(tmp_dir, "subprocess_filter_fixture.py")
+            with open(test_file, "w", encoding="utf-8") as f:
+                f.write(test_source)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    test_file,
+                    "--subprocess",
+                    "-k",
+                    "test_selected",
+                ],
+                capture_output=True,
+                check=False,
+                text=True,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn(
+            "UNSELECTED_SENTINEL", result.stdout + result.stderr
+        )
 
     @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
     @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
