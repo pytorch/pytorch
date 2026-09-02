@@ -333,17 +333,23 @@ def check_node_safe(node: Node) -> None:
                 f"expected method_target to be Node, got {type(method_target)}"
             )
         if not is_tensor(method_target):
-            module = getattr(method_target, "__module__", None)
-            name = getattr(method_target, "__name__", None)
+            # Node.__str__ is just the node name, so name the method separately.
+            try:
+                receiver = method_target.format_node()
+            except Exception:
+                # Formatting is best-effort; preserve the cache bypass on failure.
+                receiver = f"%{method_target.name} : {method_target.op}"
             raise BypassAOTAutogradCache(
-                f"Unsupported call_method target {method_target}. \nMethod module: {module}, \nMethod name: {name}"
+                f"Unsupported call_method {method_name!r} on receiver "
+                f"{receiver}, "
+                f"which has no example_value and so is not known to be a Tensor"
             )
         if (
             type(method_name) is not str
             and type(method_name).__name__ != "method_descriptor"
         ):
             raise BypassAOTAutogradCache(
-                f"Unsupported call_method method {node.target}: {method_name}"
+                f"Unsupported call_method method {method_name}"
             )
     # Cache safe
     elif node.op in ("placeholder", "get_attr", "call_module", "output"):
@@ -933,21 +939,15 @@ def create_fx_config(
 ) -> _CompileFxKwargs:
     if compiler_config_extra is None:
         forward_cudagraphs = BoxedBool(torch._inductor.config.triton.cudagraphs)
-        cudagraphs_post_compile_override = None
         boxed_forward_device_index = None
     else:
         forward_cudagraphs = compiler_config_extra.forward_cudagraphs
-        cudagraphs_post_compile_override = compiler_config_extra.cudagraphs_bwd_override
         boxed_forward_device_index = compiler_config_extra.forward_device_index
-    fx_config: _CompileFxKwargs = {
+    return {
         "cudagraphs": forward_cudagraphs,
         "boxed_forward_device_index": boxed_forward_device_index,
         "compile_region_name": compile_region_name,  # pyrefly: ignore[bad-typed-dict-key]
     }
-    if cudagraphs_post_compile_override is not None:
-        # Cache-key-only here; post_compile reads the value serialized in the graph.
-        fx_config["cudagraphs_post_compile_override"] = cudagraphs_post_compile_override
-    return fx_config
 
 
 def _check_triton_cache_version() -> None:
