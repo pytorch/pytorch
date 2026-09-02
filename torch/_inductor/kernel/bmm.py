@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import dataclasses
 import logging
 from typing import TYPE_CHECKING
 
@@ -19,6 +20,7 @@ from ..select_algorithm import (
 )
 from ..utils import (
     _use_cutlass_for_op,
+    get_num_sms,
     use_aten_gemm_kernels,
     use_ck_gemm_template,
     use_cpp_bmm_template,
@@ -26,6 +28,7 @@ from ..utils import (
     use_nv_universal_gemm_template,
     use_triton_template,
 )
+from torch.utils._triton import has_triton_stable_tma_api
 from ..virtualized import ops, V
 from .mm_common import (
     _is_static_problem,
@@ -63,6 +66,93 @@ bmm_template = TritonTemplate(
     source=load_kernel_template("triton_bmm"),
     cache_codegen_enabled_for_template=True,
 )
+
+
+@SymbolicGridFn
+def blackwell_bmm_grid(b, m, n, meta, *, cdiv, max, min):
+    grid_m = cdiv(m, meta["BLOCK_M"])
+    tiles = grid_m * cdiv(n, meta["BLOCK_N"])
+    grid_x = min(meta["NUM_SMS"], tiles)
+    max_y_grid = get_max_y_grid()
+    grid_z = max(cdiv(b, max_y_grid), 1)
+    return (grid_x, cdiv(b, grid_z), grid_z)
+
+
+blackwell_bmm_template = TritonTemplate(
+    name="blackwell_bmm",
+    grid=blackwell_bmm_grid,
+    source=load_kernel_template("triton_blackwell_ws_persistent_device_tma_bmm"),
+    cache_codegen_enabled_for_template=True,
+    prologue_loads_all_inputs=True,
+)
+
+
+@dataclasses.dataclass(frozen=True)
+class BlackwellBMMConfig:
+    block_m: int
+    block_n: int
+    block_k: int
+    num_stages: int
+    epilogue_subtile: int = 1
+
+
+def append_blackwell_bmm_choice(
+    choices,
+    input_nodes,
+    layout,
+    *,
+    config: BlackwellBMMConfig,
+):
+    mat1, mat2 = input_nodes
+    if len(mat1.get_size()) != 3 or len(mat2.get_size()) != 3:
+        raise NotImplementedError("Blackwell BMM requires rank-3 operands")
+    batch, m, k = map(int, mat1.get_size())
+    batch_b, k_b, n = map(int, mat2.get_size())
+    if batch != batch_b or k != k_b:
+        raise NotImplementedError("Blackwell BMM does not broadcast logical batches")
+    if list(map(int, layout.size)) != [batch, m, n]:
+        raise NotImplementedError("unexpected Blackwell BMM output layout")
+    a_row_major = mat1.get_stride()[2] == 1
+    a_col_major = mat1.get_stride()[1] == 1
+    b_row_major = mat2.get_stride()[2] == 1
+    b_col_major = mat2.get_stride()[1] == 1
+    if not (a_row_major or a_col_major) or not (b_row_major or b_col_major):
+        raise NotImplementedError(
+            "Blackwell BMM requires one contiguous matrix dimension"
+        )
+    kwargs = {
+        "BLOCK_M": config.block_m,
+        "BLOCK_N": config.block_n,
+        "BLOCK_K": config.block_k,
+        "GROUP_M": 8,
+        "NUM_SMS": get_num_sms(),
+        "A_ROW_MAJOR": a_row_major,
+        "B_ROW_MAJOR": b_row_major,
+        "ALLOW_TF32": False,
+        "USE_META_WS": True,
+        "WARP_SPECIALIZE": True,
+        "FLATTEN": False,
+        "DATA_PARTITION_FACTOR": 1,
+        "SEPARATE_EPILOGUE_STORE": True,
+        "EPILOGUE_SUBTILE": config.epilogue_subtile,
+        "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),
+        # Keep the output a normal logical rank-3 tensor.  Until 2CTA output
+        # transformation supports rank-3 descriptors, use the generic pointer
+        # store emitted by store_output.
+        "tma_store": False,
+        "transpose_discontiguous_tensor_descriptors_override": True,
+    }
+    error = blackwell_bmm_template.maybe_append_choice(
+        choices,
+        input_nodes=input_nodes,
+        layout=layout,
+        call_sizes=layout.size,
+        num_stages=config.num_stages,
+        num_warps=8,
+        **kwargs,
+    )
+    if error is not None:
+        raise error
 
 aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out", op_overload=aten.bmm.out)
 aten_bmm_dtype = ExternKernelChoice(
