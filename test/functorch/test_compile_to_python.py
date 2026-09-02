@@ -1,5 +1,10 @@
 # Owner(s): ["oncall: pt2"]
 import ast
+import os
+import subprocess
+import sys
+import tempfile
+import textwrap
 import unittest
 
 import torch
@@ -8,10 +13,12 @@ import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch._functorch._aot_autograd.codegen import GeneratedSource
 from torch._functorch._aot_autograd.to_standalone_python import (
+    _capture_autograd_specs,
     _compose_standalone_module,
     _find_effectful_op,
     _known_helper_table,
     _module_level_names,
+    _select_training_spec,
 )
 from torch._functorch.aot_autograd import compile_to_python, load_from_python
 from torch._higher_order_ops.effects import _get_effect, hop_print
@@ -359,6 +366,117 @@ class TestAOTCompileToPython(TestCase):
         ):
             compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
         self.assertEqual(seen, [False, True])  # forward, then backward
+
+    def test_training_compiled_function_mirrors_runtime_class_attributes(self):
+        # The emitted _CompiledFunction stands in for AOTAutograd's CompiledFunction,
+        # whose class attributes the runtime and compiled autograd read
+        # (_compiled_autograd_key, metadata, _bw_prologue_fn, ...). Every name the
+        # real class body binds must exist on the emitted one.
+        m = torch.nn.Linear(4, 3)
+        x = torch.randn(5, 4)
+        gm = _capture(m, x)
+        with torch.enable_grad():
+            src, _cache = compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
+        ns = {"__name__": "_compiled"}
+        exec(compile(src, "<compiled>", "exec"), ns)
+        emitted = ns["_CompiledFunction"]
+
+        torch._dynamo.reset()
+        real = torch.compile(m, backend="aot_eager")(x).grad_fn._forward_cls
+        expected = [n for n in vars(real) if not n.startswith("__")]
+        self.assertIn("_compiled_autograd_key", expected)
+        for name in expected:
+            self.assertTrue(hasattr(emitted, name), f"missing {name}")
+        self.assertIs(emitted.compiled_fw, ns["_inner_call_fw"])
+        self.assertIs(emitted.compiled_bw, ns["_inner_call_bw"])
+        self.assertIsNone(emitted.maybe_subclass_metadata)
+        self.assertIsNone(emitted._lazy_backward_info)
+        self.assertEqual(emitted.num_symints_saved_for_bw, 0)
+        self.assertEqual(
+            emitted.metadata.num_forward_returns, real.metadata.num_forward_returns
+        )
+
+    @skipIfTorchDynamo(
+        "the served _CompiledFunction sets boxed_grads_call=True, which compiled "
+        "autograd rejects; a feature limitation, see the module's not-covered list"
+    )
+    @functorch_config.patch(donated_buffer=True)
+    def test_training_donated_buffer_retain_graph_raises_like_torch_compile(self):
+        # A saved intermediate (the matmul output) is a donated buffer, which the
+        # lowered backward may overwrite; retain_graph=True then reuses it, so
+        # AOTAutograd's CompiledFunction refuses -- and so must the emitted one,
+        # with the same message. torch.compile only checks once its backward is
+        # compiled, so warm it with one plain backward first.
+        def f(x, w):
+            return torch.tanh(x @ w).sum()
+
+        x = torch.randn(4, 4, requires_grad=True)
+        w = torch.randn(4, 4, requires_grad=True)
+        with torch.enable_grad():
+            gm = make_fx(f)(x, w)
+            src, _cache = compile_to_python(gm, [x, w], grad_enabled=True)
+        self.assertIn("_get_current_graph_task_keep_graph", src)
+        call = _exec(src)
+        self.assertEqual(call([x, w])[0], f(x, w))
+        with self.assertRaises(RuntimeError) as emitted:
+            call([x, w])[0].backward(retain_graph=True)
+
+        # A cached AOTAutograd entry carries no donated buffers, so compile fresh.
+        torch._dynamo.reset()
+        with fresh_cache():
+            compiled = torch.compile(f, backend="inductor")
+            compiled(x, w).backward()
+            with self.assertRaises(RuntimeError) as real:
+                compiled(x, w).backward(retain_graph=True)
+        self.assertIn("non-empty donated buffers", str(real.exception))
+        self.assertEqual(str(emitted.exception), str(real.exception))
+
+    def test_training_artifact_execs_in_fresh_process(self):
+        # The artifact's imports are only exercised in a process where nothing has
+        # imported dynamo yet: the runtime helpers must come through the
+        # standalone_runtime surface, after ``import torch``, or the cold import of
+        # runtime_wrappers trips its circular import with _dynamo.
+        m = torch.nn.Linear(4, 3)
+        x = torch.randn(5, 4)
+        gm = _capture(m, x)
+        with torch.enable_grad():
+            src, _cache = compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
+        self.assertNotIn("runtime_wrappers import", src)
+        imports = [l for l in src.splitlines() if l.startswith(("import", "from"))]
+        self.assertEqual(imports[0], "import torch")
+        with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as fh:
+            fh.write(src)
+            path = fh.name
+        driver = textwrap.dedent(
+            f"""
+            import torch
+            ns = {{"__name__": "_fresh_artifact"}}
+            with open({path!r}) as fh:
+                exec(compile(fh.read(), {path!r}, "exec"), ns)
+            torch.manual_seed(0)
+            w = torch.randn(3, 4, requires_grad=True)
+            b = torch.randn(3, requires_grad=True)
+            x = torch.randn(5, 4)
+            out = ns["call"]([w, b, x])[0]
+            assert torch.allclose(out, torch.nn.functional.linear(x, w, b)), "output"
+            out.sum().backward()
+            assert torch.allclose(w.grad, x.sum(0).expand(3, 4)), "grad"
+            print("FRESH_OK")
+            """
+        )
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-c", driver],
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+        finally:
+            os.remove(path)
+        self.assertEqual(
+            proc.returncode, 0, f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+        )
+        self.assertIn("FRESH_OK", proc.stdout)
 
     def test_restride_refuses_symbolic_forward_strides(self):
         # CompiledFxGraph.output_strides entries are PRINTED stride
@@ -929,6 +1047,39 @@ class TestComposerHelpers(TestCase):
                 ),
                 f"helper import {import_stmt!r} bypasses the standalone_runtime surface",
             )
+
+    def test_select_training_spec_ignores_foreign_build(self):
+        # A re-entrant lowering during the capture window builds its own
+        # autograd Function under a DISTINCT TracingContext. Its spec is tagged
+        # with that context, like the codegen'd wrappers are, so only the spec
+        # built alongside the captured orchestration is selected.
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _AOTDispatchAutogradFunctionFactory as factory,
+        )
+
+        ours, foreign = object(), object()
+        specs = []
+        with (
+            unittest.mock.patch.object(factory, "build", lambda self: None),
+            _capture_autograd_specs(specs),
+        ):
+            ctx = torch._guards.TracingContext(None)
+            with torch._guards.tracing(ctx):
+                factory(spec=foreign).build()
+                factory(spec=ours).build()
+                origin = id(ctx)
+            with torch._guards.tracing(torch._guards.TracingContext(None)):
+                factory(spec=foreign).build()
+        self.assertEqual(len(specs), 3)
+        orch = GeneratedSource(
+            "runtime_wrapper_orchestration", "_runtime_wrapper", "", {}, None, origin
+        )
+        # Two specs share the orchestration's context: refuse rather than guess.
+        with self.assertRaisesRegex(NotImplementedError, "exactly one autograd spec"):
+            _select_training_spec(specs, [orch])
+        del specs[0]
+        self.assertIs(_select_training_spec(specs, [orch]), ours)
+        self.assertIs(_select_training_spec(specs, [orch, orch]), ours)
 
     def test_module_level_names_excludes_deleted(self):
         # Inductor's inner module binds then dels a name (async_compile = AsyncCompile();

@@ -45,6 +45,13 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
 ## torch.compiler.precompile
 
+```{warning}
+`torch.compiler.precompile` and everything reached through it (`precompile.load`,
+`torch.compiler.PrecompiledCallable`, and the other objects it returns) is a
+prototype API. Signatures, error types and the artifact format may change between
+releases without a deprecation cycle.
+```
+
 % precompile is a callable instance (not a plain function), which Sphinx
 % autosummary cannot render, so it is documented manually below and
 % intentionally omitted from the autosummary block above.
@@ -135,9 +142,11 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        capture. It applies only to ``tracer="make_fx"``; the dynamo tracer lowers through
        the backend instead and rejects it.
    :param guard_filter_fn: Multi-graph serialization filter; returns one boolean per guard
-       entry. Live capture retains all guards so later examples trigger their recompiles.
-       Risky dropped guards are rejected by default when saving, and every
-       custom-filter drop counts as risky.
+       entry. It composes with the default filter (which drops only the identity guards
+       that cannot be serialized), so it can drop more guards, never fewer. Live capture
+       retains all guards so later examples trigger their recompiles. Risky dropped
+       guards are rejected by default when saving, and every drop a custom filter adds
+       beyond the default's counts as risky.
    :param recompile_limit: Maximum multi-graph variants captured per frame; defaults to 256
        and overrides a lower ambient accumulated-recompile limit for this capture.
    :param dynamic: Multi-graph dynamic-shape policy forwarded to ``torch.compile``.
@@ -232,7 +241,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 .. autoexception:: torch.compiler.PrecompileError
 
 .. autoclass:: torch.compiler.PrecompiledCallable
-   :members:
+   :members: unload, serve_time_compiles
+
+   Returned by :func:`precompile.load` for an artifact that serves by installing,
+   and used as a callable or context manager; it is not constructed directly.
 
 
 ```
