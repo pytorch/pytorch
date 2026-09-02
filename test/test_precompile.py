@@ -3029,6 +3029,7 @@ class TestPrecompile(TestCase):
             with self.assertRaisesRegex(RuntimeError, "no captured variant"):
                 loaded(other, x)
 
+    @parametrize("where", ["object", "in_a_list"])
     def test_unpicklable_guard_value_names_where_it_lives(self, where):
         # The type in a pickle error says WHAT failed and never WHERE, which on a
         # large model means bisecting by hand. A lock is the archetypal offender
