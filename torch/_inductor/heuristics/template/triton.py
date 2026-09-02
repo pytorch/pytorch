@@ -37,6 +37,7 @@ from ...utils import (
     get_default_kpack,
     get_num_sms,
     get_tma_workspace_arg,
+    kpack_supported,
     mfma_kdim,
     TMA_DESCRIPTOR_SIZE,
     triton_type,
@@ -1796,8 +1797,8 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             kpack: int = explicit_kpack or get_default_kpack(conf.block_k)
             kdim = mfma_kdim(dtype_size, matrix_instr_nonkdim) or matrix_instr_nonkdim
 
-            # Drop the default kpack to 1 incase all pruned situation for some
-            # default config conbination.
+            # Drop the default kpack to 1 in case of an all-pruned situation for
+            # some default config combination.
             # The explicit kpack config will be pruned if it's invalid.
             if explicit_kpack is None and kpack > 1 and conf.block_k < kpack * kdim:
                 kpack = 1

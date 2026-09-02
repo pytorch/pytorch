@@ -524,7 +524,7 @@ class TestTritonHeuristics(TestCase):
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     @parametrize("dtype_size", [0, 2])
     def test_rocm_prune_block_k_underfills_mfma(self, dtype_size):
-        # A config that declares kpack > 1 but whose block_k is smaller than 
+        # A config that declares kpack > 1 but whose block_k is smaller than
         # kpack * kdim underfills the packed MFMA operand and is miscompiled,
         # so it must be pruned.
         if not torch.version.hip:

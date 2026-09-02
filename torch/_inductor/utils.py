@@ -1858,7 +1858,7 @@ def get_tma_workspace_arg(
 
 
 def kpack_supported() -> bool:
-    # kpack > 1 is honored only on gfx90a/gfx942. 
+    # kpack > 1 is honored only on gfx90a/gfx942.
     # It is deprecated starting from gfx950 (compiler forces it to 1)
     if not torch.version.hip:
         return False
@@ -1906,11 +1906,10 @@ def mfma_kdim(dtype_size: int, matrix_instr_nonkdim: int) -> int | None:
     kpack > 1 (the sole consumer) is limited to those archs."""
     if not torch.version.hip:
         return None
-    table = _MFMA_KDIM_CDNA3
     arch = torch.cuda.get_device_properties(0).gcnArchName
     if "gfx90a" in arch:
         return _MFMA_KDIM_CDNA2.get((dtype_size, matrix_instr_nonkdim))
-    elif "gfx942" in arch: 
+    elif "gfx942" in arch:
         return _MFMA_KDIM_CDNA3.get((dtype_size, matrix_instr_nonkdim))
     else:
         return None
