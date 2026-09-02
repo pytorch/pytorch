@@ -846,10 +846,10 @@ class TestFlyDSLTemplate(TestCase):
         b = torch.randn(2, k, 128, device="cuda", dtype=dtype)
         a_padded = torch.randn(total_m, k + 8, device="cuda", dtype=dtype)[:, :k]
         b_padded = torch.randn(2, k, 136, device="cuda", dtype=dtype)[..., :128]
-        a_unaligned = torch.as_strided(
-            torch.randn(total_m * k + 1, device="cuda", dtype=dtype),
-            (total_m, k),
-            (k, 1),
+        a_unaligned_base = torch.as_strided(
+            torch.randn(total_m * k + 8, device="cuda", dtype=dtype),
+            (total_m * k + 7,),
+            (1,),
             storage_offset=1,
         )
         a_aligned = torch.as_strided(
@@ -888,11 +888,32 @@ class TestFlyDSLTemplate(TestCase):
                     case_a, case_b, offs, expect_flydsl=False
                 )
 
-        def fn(a, b, offs):
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(a_base, b, offs):
+            a = torch.as_strided(
+                a_base,
+                (total_m, k),
+                (k, 1),
+                storage_offset=8,
+            )
             return F.grouped_mm(a, b, offs=offs)
 
-        with self.assertRaisesRegex(RuntimeError, "data_ptr to be aligned"):
-            torch.compile(fn, backend="inductor")(a_unaligned, b, offs)
+        aligned_view = torch.as_strided(
+            a_unaligned_base,
+            (total_m, k),
+            (k, 1),
+            storage_offset=8,
+        )
+        self.assertNotEqual(a_unaligned_base.data_ptr() % 16, 0)
+        self.assertEqual(aligned_view.data_ptr() % 16, 0)
+        torch._dynamo.reset()
+        result, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor"), a_unaligned_base, b, offs
+        )
+        self.assertNotIn("async_compile.flydsl", code)
+        self.assertIn("extern_kernels._grouped_mm", code)
+        self.assertEqual(result, fn(a_unaligned_base, b, offs), atol=3e-2, rtol=3e-2)
 
 
 if __name__ == "__main__":
