@@ -3684,8 +3684,15 @@ class SchedulerNode(BaseSchedulerNode):
         group_fn = self.scheduler.get_backend(device).group_fn
         self.group = (device, group_fn(self._sizes))
 
-        # Need normalize the prefix name to facilitate finding common dependencies
-        self.refresh_dependencies(normalize=True, need_clear_tiling_cache=True)
+        if mask_stores:
+            # Match _compute_attrs: the expanded consumer must compare equal,
+            # dep for dep, with the un-normalized deps of the reduction it is
+            # about to fuse with, otherwise can_fuse sees no shared data.
+            normalize = not config.loop_ordering_after_fusion or not is_gpu(device.type)
+        else:
+            # Need normalize the prefix name to facilitate finding common dependencies
+            normalize = True
+        self.refresh_dependencies(normalize=normalize, need_clear_tiling_cache=True)
 
     def merge_loops(self) -> None:
         self._body = self._body.merge_loops()
@@ -6659,6 +6666,7 @@ class Scheduler:
             if (
                 config.loop_reindexing_after_fusion
                 and config.masked_expansion_max_ratio > 0
+                and math.isfinite(config.masked_expansion_max_ratio)
                 and not config.benchmark_fusion
             ):
                 fused_nodes = OrderedSet(nodes)
@@ -9319,8 +9327,7 @@ class Scheduler:
         consumer: SchedulerNode,
     ) -> bool:
         """Expand one static pointwise consumer to a near-sized reduction."""
-        from .codegen.simd import SIMDKernel
-
+        why = WhyNoFuse(reduction, consumer)
         if (
             not isinstance(reduction, (SchedulerNode, FusedSchedulerNode))
             or isinstance(
@@ -9328,6 +9335,7 @@ class Scheduler:
                 (FusedMixOrderReductions, FusedNestedReductions, FusedStagedReduction),
             )
             or reduction.is_template()
+            or reduction.is_foreach()
             or consumer.is_reduction()
             or reduction.is_cpu()
             or consumer.has_aliasing_or_mutation()
@@ -9338,6 +9346,7 @@ class Scheduler:
                 consumer.get_device(), BackendFeature.MASKED_STORE
             )
         ):
+            why("masked expansion: unsupported node kinds")
             return False
 
         body = consumer._body
@@ -9347,32 +9356,41 @@ class Scheduler:
             isinstance(dep, MemoryDep) and dep.mode is not None
             for dep in consumer.read_writes.writes
         ):
+            why("masked expansion: consumer has ops whose writes cannot be masked")
             return False
 
         _, (red_numel, red_rnumel) = reduction.group
         pw_numel = sympy_product(consumer._sizes[0])
         target_numel = red_numel * red_rnumel
         if not V.graph.sizevars.statically_known_gt(red_numel, 0):
+            why("masked expansion: reduction numel %s may be empty", red_numel)
             return False
         pw_rnumel = FloorDiv(pw_numel, red_numel)
-        max_ratio = config.masked_expansion_max_ratio
-        if max_ratio <= 0 or not math.isfinite(max_ratio):
+        # Legality: the consumer domain must be a proper prefix of the
+        # reduction domain along the reduced dim, proved without guards.
+        if not V.graph.sizevars.statically_known_equals(
+            red_numel * pw_rnumel, pw_numel
+        ) or not V.graph.sizevars.statically_known_lt(pw_rnumel, red_rnumel):
+            why("masked expansion: %s is not a prefix of %s", pw_numel, target_numel)
             return False
-        max_target_ratio = sympy.Rational(1 + max_ratio).limit_denominator(10**6)
-        if (
-            not V.graph.sizevars.statically_known_equals(
-                red_numel * pw_rnumel, pw_numel
-            )
-            or not V.graph.sizevars.statically_known_lt(pw_rnumel, red_rnumel)
-            or not V.graph.sizevars.statically_known_leq(
-                target_numel, pw_numel * max_target_ratio
+
+        iter_sizes = tuple(consumer._sizes[0])
+        if not (
+            iter_sizes
+            and V.graph.sizevars.statically_known_equals(iter_sizes[-1], pw_rnumel)
+            and V.graph.sizevars.statically_known_equals(
+                sympy_product(iter_sizes[:-1]), red_numel
             )
         ):
+            why(
+                "masked expansion: consumer loops %s do not end in the reduced dim",
+                iter_sizes,
+            )
             return False
 
-        if not SIMDKernel.is_compatible((red_numel, pw_rnumel), consumer.get_ranges()):
-            return False
-
+        # Profitability, decided on hints like other fusion heuristics: the
+        # generated code is correct for any runtime size, only the wasted tail
+        # lanes grow if the hint is off.
         pw_numel_hint = V.graph.sizevars.optimization_hint(pw_numel, fallback=0)
         target_numel_hint = V.graph.sizevars.optimization_hint(target_numel, fallback=0)
         pw_access_bytes = consumer.get_read_write_buffers_sizes()
@@ -9381,32 +9399,33 @@ class Scheduler:
             or target_numel_hint <= pw_numel_hint
             or not pw_access_bytes
         ):
+            why("masked expansion: no size hints to estimate the expansion cost")
+            return False
+        if target_numel_hint > pw_numel_hint * (1 + config.masked_expansion_max_ratio):
+            why(
+                "masked expansion: %d -> %d exceeds masked_expansion_max_ratio",
+                pw_numel_hint,
+                target_numel_hint,
+            )
             return False
         expansion_bytes = (
             pw_access_bytes * (target_numel_hint - pw_numel_hint) + pw_numel_hint - 1
         ) // pw_numel_hint
 
-        iter_sizes = tuple(consumer._sizes[0])
-        if (
-            iter_sizes
-            and V.graph.sizevars.statically_known_equals(iter_sizes[-1], pw_rnumel)
-            and V.graph.sizevars.statically_known_equals(
-                sympy_product(iter_sizes[:-1]), red_numel
-            )
-        ):
-            expand_dim = len(iter_sizes) - 1
-        else:
-            return False
         consumer.expand_dimension_for_pointwise_node_with_masked_stores(
-            expand_dim, red_rnumel
+            len(iter_sizes) - 1, red_rnumel
         )
 
+        # Load-safety proof for the unmasked tail. Loads inside ops.masked
+        # subblocks are conjoined with the tail predicate by _MaskStoresHandler,
+        # so they never execute in the tail. Root-block loads run at the raw
+        # expanded coordinate, so each must read a buffer the reduction writes
+        # with the same normalized access; that access is indexed by the
+        # reduction's own domain and is therefore in bounds.
         root_load_names: OrderedSet[str] = OrderedSet()
         for body_node in consumer._body.root_block.graph.nodes:
             if body_node.op == "call_method" and body_node.target == "load":
-                name = body_node.kwargs.get(
-                    "name", body_node.args[1] if len(body_node.args) >= 2 else ""
-                )
+                name = body_node.args[1]
                 root_load_names.add(consumer.mutation_renames.get(name, name))
 
         reduction_deps: dict[str, list[Dep]] = defaultdict(list)
@@ -9420,6 +9439,10 @@ class Scheduler:
                 self.deps_match_normalized(read, write)
                 for write in reduction_writes[read.name]
             ):
+                why(
+                    "masked expansion: root-block read of %s is not a reduction write",
+                    read.name,
+                )
                 return False
 
         matched_reads = [
@@ -9431,10 +9454,17 @@ class Scheduler:
             )
         ]
         shared_bytes = sum(self.dep_size_hint(read) for read in matched_reads)
-        return (
+        if (
             expansion_bytes * config.masked_expansion_shared_bytes_multiple
-            <= shared_bytes
-        )
+            > shared_bytes
+        ):
+            why(
+                "masked expansion: shared bytes %d do not pay for expansion cost %d",
+                shared_bytes,
+                expansion_bytes,
+            )
+            return False
+        return True
 
     def _fuse_near_sized_reduction_epilogues(
         self, fused_nodes: OrderedSet[BaseSchedulerNode]

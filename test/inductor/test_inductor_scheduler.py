@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import contextlib
+import re
 from unittest import skipIf
 from unittest.mock import Mock, patch, PropertyMock
 
@@ -2095,44 +2096,39 @@ class TestScheduler(TestCase):
         self.assertEqual(fn(*args), actual, atol=5e-3, rtol=2e-2)
         self.assertEqual(metrics.generated_kernel_count, expected_kernels)
         if expected_kernels == 1:
+            # Every store must carry the tail predicate `r < 32` (the original
+            # column count) and must not carry the root range mask, which the
+            # tail predicate implies.
             source = "\n".join(code)
-            definitions = {
-                line.split(" = ", 1)[0].strip(): line
-                for line in source.splitlines()
-                if " = " in line
-            }
+            defs = dict(re.findall(r"^\s+(tmp\d+) = (.*)$", source, re.MULTILINE))
 
-            def is_reduction_index(expr):
-                if expr.startswith("r0_") and expr[3:].isdigit():
-                    return True
-                definition = definitions.get(expr, "")
-                if " = " not in definition or ").to(" not in definition:
+            def is_tail_predicate(term):
+                cmp = re.fullmatch(r"(tmp\d+) < (tmp\d+|32)", defs.get(term, ""))
+                if cmp is None:
                     return False
-                converted = definition.split(" = ", 1)[1]
-                base = converted.split(").to(", 1)[0]
-                if not base.startswith("("):
-                    return False
-                base = base[1:]
-                return base.startswith("r0_") and base[3:].isdigit()
+                lhs = defs.get(cmp.group(1), cmp.group(1))
+                rhs = cmp.group(2)
+                return bool(
+                    re.fullmatch(r"\(?r0_\d+\)?(\.to\(tl\.int\d+\))?", lhs)
+                    and (
+                        rhs == "32"
+                        or re.fullmatch(
+                            r"tl\.full\(\[[^\]]*\], 32, tl\.int\d+\)", defs.get(rhs, "")
+                        )
+                    )
+                )
 
-            store_lines = [line for line in source.splitlines() if "tl.store(" in line]
-            self.assertTrue(store_lines)
-            for line in store_lines:
-                predicate = line.rsplit(",", 1)[-1].rstrip(")\n ")
-                tail_masks = []
-                for term in predicate.split("&"):
-                    term = term.strip()
-                    comparison = definitions.get(term, "")
-                    if not term.startswith("tmp") or "<" not in comparison:
-                        continue
-                    lhs = comparison.split(" = ", 1)[1].rsplit("<", 1)[0].strip()
-                    rhs = comparison.rsplit("<", 1)[-1].strip()
-                    if is_reduction_index(lhs) and (
-                        rhs == "32" or ", 32," in definitions.get(rhs, "")
-                    ):
-                        tail_masks.append(term)
-                self.assertTrue(tail_masks, msg=f"store lacks tail mask: {line}")
+            predicates = re.findall(
+                r"tl\.store\(.*,\s*([^,]+)\)\s*$", source, re.MULTILINE
+            )
+            self.assertTrue(predicates)
+            for predicate in predicates:
                 self.assertNotIn("r0_mask", predicate)
+                terms = [t.strip() for t in predicate.split("&")]
+                self.assertTrue(
+                    any(is_tail_predicate(t) for t in terms),
+                    msg=f"store lacks tail mask: {predicate}",
+                )
 
     @xfailIfNoAcceleratorTriton
     @skipCPUIf(True, "requires accelerator Triton")
@@ -2179,6 +2175,51 @@ class TestScheduler(TestCase):
         self.assertEqual(fn(x, extra), actual, atol=5e-3, rtol=2e-2)
         self.assertEqual(metrics.generated_kernel_count, 1)
         self.assertIn("for r0_offset in", "\n".join(code))
+
+    @xfailIfNoAcceleratorTriton
+    @skipCPUIf(True, "requires accelerator Triton")
+    @parametrize("shape", ((256, 32), (8, 32, 32)))
+    def test_masked_expansion_softmax_slice(self, device, shape):
+        def fn(x, sink):
+            values = torch.cat((x, sink), dim=-1)
+            return values.softmax(dim=-1)[..., : x.shape[-1]].clone()
+
+        x = torch.randn(*shape, device=device)
+        sink = torch.randn(*shape[:-1], 1, device=device)
+        torch._dynamo.reset()
+        metrics.reset()
+        with fresh_inductor_cache():
+            actual = torch.compile(fn, fullgraph=True)(x, sink)
+
+        self.assertEqual(fn(x, sink), actual)
+        self.assertEqual(metrics.generated_kernel_count, 1)
+
+    @xfailIfNoAcceleratorTriton
+    @skipCPUIf(True, "requires accelerator Triton")
+    def test_masked_expansion_symbolic_columns(self, device):
+        def fn(x, sink):
+            values = torch.cat((x, sink), dim=-1)
+            return values.softmax(dim=-1)[..., : x.shape[-1]].clone()
+
+        x = torch.randn(4, 16, 200, device=device)
+        sink = torch.randn(4, 16, 1, device=device)
+        torch._dynamo.mark_dynamic(x, 1)
+        torch._dynamo.mark_dynamic(x, 2)
+        torch._dynamo.mark_dynamic(sink, 1)
+        x2 = torch.randn(4, 24, 300, device=device)
+        sink2 = torch.randn(4, 24, 1, device=device)
+        torch._dynamo.reset()
+        metrics.reset()
+        counters.clear()
+        with fresh_inductor_cache():
+            compiled = torch.compile(fn, fullgraph=True)
+            actual = compiled(x, sink)
+            actual2 = compiled(x2, sink2)
+
+        self.assertEqual(fn(x, sink), actual)
+        self.assertEqual(fn(x2, sink2), actual2)
+        self.assertEqual(metrics.generated_kernel_count, 1)
+        self.assertEqual(counters["stats"]["unique_graphs"], 1)
 
     @onlyCPU
     def test_masked_expansion_rejects_cpu(self, device):
@@ -2266,6 +2307,7 @@ class TestScheduler(TestCase):
     def test_masked_expansion_rejects_non_plain_store(self):
         reduction = Mock(spec=SchedulerNode)
         reduction.is_template.return_value = False
+        reduction.is_foreach.return_value = False
         reduction.is_cpu.return_value = False
         consumer = Mock(spec=SchedulerNode)
         consumer.is_reduction.return_value = False
@@ -2291,11 +2333,13 @@ class TestScheduler(TestCase):
     @xfailIfNoAcceleratorTriton
     @skipCPUIf(True, "requires accelerator Triton")
     def test_masked_expansion_rejects_mismatched_read(self, device):
+        # The rolled normalizer is a root-block read of a reduction output
+        # whose access does not match the reduction's write, so the tail
+        # could read out of bounds; the pass must decline.
         def fn(x, extra):
             values = torch.cat((x, extra), dim=-1)
-            probs = values.softmax(dim=-1)
-            sliced = probs[..., :32]
-            return (sliced + sliced.flip(-1)).clone()
+            normalizer = values.sum(dim=-1, keepdim=True)
+            return (values[..., :32] / normalizer.roll(1, dims=0)).clone()
 
         x = torch.randn(64, 32, device=device)
         extra = torch.randn(64, 1, device=device)

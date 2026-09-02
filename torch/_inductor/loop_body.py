@@ -57,9 +57,10 @@ MASKED_EXPANSION_BANNED_OPS = (
 class _MaskStoresHandler(WrapperHandler):
     """
     Rewrite every store in a body into a masked_store. Ops that write memory by
-    another route would pass through unmasked and clobber the expanded tail, so
-    they are rejected; callers screen for them via MASKED_EXPANSION_BANNED_OPS
-    before mutating anything, and these are the backstop.
+    another route would pass through unmasked and clobber the expanded tail;
+    LoopBody.expand_dimension_for_pointwise_node_with_masked_stores rejects
+    them via MASKED_EXPANSION_BANNED_OPS before tracing, and these raise as
+    the backstop.
     """
 
     def __init__(self, inner: OpsHandler[Any], mask: Any) -> None:
@@ -79,6 +80,9 @@ class _MaskStoresHandler(WrapperHandler):
 
     def store_reduction(self, name: str, index: sympy.Expr, value: Any) -> None:
         raise AssertionError("masked store expansion does not support store_reduction")
+
+    def masked_store(self, name: str, index: sympy.Expr, value: Any, mask: Any) -> None:
+        raise AssertionError("masked store expansion cannot be applied twice")
 
     def masked(self, mask: Any, body: Callable[[], Any], other: Any) -> Any:
         mask = self._inner.logical_and(self.mask, mask)
@@ -342,11 +346,22 @@ class LoopBody:
         expand_dimension_for_pointwise_node, this does not wrap the expanded
         dimension in `Mod`, so loads, index_exprs and bounds checks all evaluate
         at the raw expanded coordinate; only the writes are masked. The caller
-        must prove the added tail addresses are live (see
-        `_try_masked_reindex_reduction_consumer`, which requires every read to
-        match an access already made by the reduction) and must reject bodies
-        containing MASKED_EXPANSION_BANNED_OPS.
+        must prove the added tail addresses are live. Loads inside `ops.masked`
+        subblocks are safe because _MaskStoresHandler conjoins the tail
+        predicate into their mask; only root-block loads run unmasked in the
+        tail (see `Scheduler._try_masked_reindex_reduction_consumer`, which
+        requires each of them to match a write of the reduction). Bodies
+        containing MASKED_EXPANSION_BANNED_OPS are rejected here.
         """
+        illegal = [
+            op
+            for op in (*MASKED_EXPANSION_BANNED_OPS, "masked_store")
+            if self.has_op(op)
+        ]
+        if illegal:
+            raise AssertionError(
+                f"masked expansion is not legal for a body with {illegal}"
+            )
         if V.graph.sizevars.statically_known_equals(
             self.sizes[0][dimension], new_range
         ):
