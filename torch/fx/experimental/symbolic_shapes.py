@@ -7411,8 +7411,9 @@ class ShapeEnv:
             subst = self.axioms
         else:
             subst = {}
+            expr_free_symbols = expr.free_symbols
             for e in axioms:
-                if e.free_symbols.issubset(expr.free_symbols):
+                if e.free_symbols.issubset(expr_free_symbols):
                     subst.update(dict(self.get_implications(self.simplify(e))))
 
             resimplify_floor_div(subst)
