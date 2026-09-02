@@ -11752,23 +11752,53 @@ class TestNNDeviceType(NNTestCase):
                                    padding_mode=padding_mode, align_corners=False)
             self.assertEqual(out_3d.squeeze(2), out_2d)
 
-        # The double backward gathers dropped taps from their clamped voxels, so
-        # the mask has to be applied with where(): multiplying after the gather
-        # turns an aliased Inf into NaN. One axis fully out of the volume keeps
-        # the forward a clean zero while every tap aliases onto the Inf plane.
-        if padding_mode == 'zeros' and dtype is torch.double:
-            poisoned = torch.randn(1, 1, 5, 6, 7, device=device, dtype=dtype)
-            poisoned[0, 0, :, 0, :] = float('inf')
-            poisoned.requires_grad_()
-            grid = torch.tensor([[[[[0.1, -2.0, 0.1]]]]], device=device, dtype=dtype,
-                                requires_grad=True)
-            out = F.grid_sample(poisoned, grid, mode='bicubic', padding_mode='zeros',
+    @parametrize_test("mode", ["bilinear", "bicubic"])
+    @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
+    @onlyNativeDeviceTypes
+    @dtypes(torch.double)
+    def test_grid_sample_double_backward_drops_masked_taps(self, device, dtype, mode):
+        # A dropped tap is gathered from the voxel it clamps onto and its cotangent is
+        # scattered there, so both need where(): multiplying after the gather turns an
+        # aliased Inf into NaN. Poisoning plane 0, where dropped taps clamp, and asking
+        # for the same gradients with a finite value there is what says it never enters.
+        def second_order(dim, plane_value, cotangent):
+            # squared, so the mixed second difference is not zero: on a ramp the grid
+            # gradient below vanishes and the equality has nothing to compare
+            ramp = torch.arange(1., 43. if dim == 2 else 211., device=device, dtype=dtype)
+            input = (ramp * ramp).reshape((1, 1, 6, 7) if dim == 2 else (1, 1, 5, 6, 7))
+            if dim == 2:
+                input[0, 0, 0, :] = plane_value
+                # one sample an axis fully outside, one well inside and off the voxel
+                # centre, where the cubic takes its general branch
+                grid = torch.tensor([[[[0.1, -2.0], [0.1, 0.3]]]], device=device, dtype=dtype)
+            else:
+                input[0, 0, :, 0, :] = plane_value
+                grid = torch.tensor([[[[[0.1, -2.0, 0.1], [0.1, 0.3, 0.1]]]]],
+                                    device=device, dtype=dtype)
+            input.requires_grad_()
+            grid.requires_grad_()
+            out = F.grid_sample(input, grid, mode=mode, padding_mode='zeros',
                                 align_corners=False)
-            gg = torch.autograd.grad(out.sum(), grid, create_graph=True)[0]
-            d_input = torch.autograd.grad(gg.sum(), poisoned, retain_graph=True)[0]
-            d_grid = torch.autograd.grad(gg.sum(), grid)[0]
-            self.assertTrue(bool(d_input.isfinite().all()))
-            self.assertTrue(bool(d_grid.isfinite().all()))
+            grad_output = torch.ones_like(out)
+            grad_output.view(-1)[0] = cotangent  # carried by the dropped taps alone
+            d_grid = torch.autograd.grad(out, grid, grad_outputs=grad_output,
+                                         create_graph=True)[0]
+            # a finite seed, so only the masking may put a non-finite number in
+            return torch.autograd.grad(d_grid.sum(), [input, grid])
+
+        for dim in (2, 3):
+            reference = second_order(dim, 1.0, 1.0)
+            for bad in (float('inf'), -float('inf'), float('nan')):
+                # the voxel a dropped tap aliases reaches neither gradient
+                for got, expected in zip(second_order(dim, bad, 1.0), reference):
+                    self.assertTrue(bool(got.isfinite().all()))
+                    self.assertEqual(got, expected)
+                # nor does the cotangent it carries reach the scattered one. The grid
+                # gradient is exempt: it already holds what the first-order kernel makes
+                # of a non-finite cotangent on a dropped sample, which predates this.
+                d_input = second_order(dim, 1.0, bad)[0]
+                self.assertTrue(bool(d_input.isfinite().all()))
+                self.assertEqual(d_input, reference[0])
 
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
