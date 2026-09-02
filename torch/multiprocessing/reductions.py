@@ -574,6 +574,9 @@ def rebuild_storage_xpu(
     size_bytes,
     offset_bytes,
 ):
+    if os.name == "nt":
+        raise RuntimeError("XPU IPC storage sharing is not supported on Windows")
+
     cache_key = (handle, offset_bytes)
     storage: torch.TypedStorage | torch.UntypedStorage = storage_from_cache(
         cls, cache_key
@@ -634,6 +637,8 @@ def reduce_storage(storage):
             "Cannot pickle meta storage; try pickling a meta tensor instead"
         )
     elif storage.device.type == "xpu":
+        if os.name == "nt":
+            raise RuntimeError("XPU IPC storage sharing is not supported on Windows")
         if storage.size() == 0:
             return (rebuild_storage_empty, (type(storage), storage.device))
         (
