@@ -270,14 +270,25 @@ def _rmsnorm_block_scale_swizzle(x, weight, G):
 
 
 def _rmsnorm_mxfp8_scale_swizzle(x, weight, G):
-    from torch._inductor import inductor_prims
-
     B, D = x.shape
     x = F.rms_norm(x, (D,), weight)
     x_groups = x.view(B, D // G, G)
     amax = x_groups.abs().float().amax(dim=-1)
     scale = (amax / 448.0).clamp_min(torch.finfo(torch.float32).tiny)
-    scale_u8 = inductor_prims.cvt_e8m0_rceil(scale)
+    if scale.device.type == "cuda":
+        scale_u8 = inline_asm_elementwise(
+            scale,
+            asm_str="cvt.rp.satfinite.ue8m0x2.f32 $0, 0.0, $1;",
+            constraints="=h,r",
+            dtype=torch.uint16,
+        ).to(torch.uint8)
+    else:
+        scale_bits = scale.view(torch.int32)
+        biased_exp = (scale_bits >> 23) & 0xFF
+        mantissa = scale_bits & 0x7FFFFF
+        scale_u8 = torch.clamp(
+            biased_exp + (mantissa != 0).to(torch.int32), max=254
+        ).to(torch.uint8)
     scale_f32 = torch.ldexp(
         torch.ones_like(scale, dtype=torch.float32),
         scale_u8.to(torch.int32) - 127,
@@ -3434,10 +3445,20 @@ class _InternalsBase:
         )
 
     @skipIfRocm
-    @skipIfXpu(msg="MXFP8 inline asm requires CUDA")
     def test_rmsnorm_mxfp8_scale_swizzle_kernel_form(self):
-        if torch.cuda.get_device_capability() < (10, 0):
-            self.skipTest("cvt_e8m0_rceil lowering requires SM100+")
+        if GPU_TYPE == "cuda":
+            if torch.cuda.get_device_capability() < (10, 0):
+                self.skipTest("E8M0 inline PTX requires SM100+")
+            extra_checks = FileCheck().check_count(
+                "cvt.rp.satfinite.ue8m0x2.f32", 1, exactly=True
+            )
+        else:
+            extra_checks = (
+                FileCheck()
+                .check_not("cvt.rp.satfinite")
+                .check("8388607")
+                .check_not("cvt.rp.satfinite")
+            )
 
         self.assert_single_kernel_form(
             _capture_rmsnorm_mxfp8_scale_swizzle_sources,
@@ -3446,9 +3467,7 @@ class _InternalsBase:
             num_outputs=2,
             meta_num_load=self.looped_or_persistent(3, 2),
             min_rblock=32,
-            extra_checks=FileCheck().check_count(
-                "cvt.rp.satfinite.ue8m0x2.f32", 1, exactly=True
-            ),
+            extra_checks=extra_checks,
         )
 
     def assert_standalone_nvfp4_inline_asm_kernel_form(
