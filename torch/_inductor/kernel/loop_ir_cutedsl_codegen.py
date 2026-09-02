@@ -156,9 +156,6 @@ class LoopIRCuteDSLCodegen:
         reduction_type: str,
         geometry: GemmReductionGeometry,
     ) -> Any:
-        if geometry.needs_physical_callbacks and geometry.axis == 0:
-            return source
-        desc = tensorssa_reduction(canonical_tensorssa_reduction_type(reduction_type))
         fragment_group = (
             f"cutlass.const_expr(min({geometry.group}, "
             f"cute.size({source}.shape, mode=[0])))"
@@ -167,6 +164,12 @@ class LoopIRCuteDSLCodegen:
             f"cutlass.const_expr(cute.size({source}.shape, mode=[0]) "
             f"// min({geometry.group}, cute.size({source}.shape, mode=[0])))"
         )
+        if geometry.needs_physical_callbacks and geometry.axis == 0:
+            return self._generate_like(
+                f"{source}.reshape((({fragment_group}, 1, {repeats}), 1, 1))",
+                source,
+            )
+        desc = tensorssa_reduction(canonical_tensorssa_reduction_type(reduction_type))
         grouped = self._generate_like(
             f"{source}.reshape(((1, {fragment_group}, {repeats}), 1, 1))",
             source,
