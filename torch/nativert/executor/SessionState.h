@@ -28,6 +28,9 @@ class SessionState {
     workOutstanding_.fetch_add(ct, std::memory_order_seq_cst);
   }
 
+  // NOTE: removeWork may call notify_one() after wait() has already returned,
+  // so the owner must keep the SessionState alive until every thread that can
+  // call removeWork() has returned from it.
   C10_ALWAYS_INLINE void removeWork() {
     if (workOutstanding_.fetch_sub(1, std::memory_order_seq_cst) == 1) {
       workOutstanding_.notify_one();
