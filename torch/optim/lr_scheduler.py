@@ -1220,22 +1220,6 @@ class SequentialLR(LRScheduler):
         elif hasattr(scheds, "last_epoch"):
             scheds.last_epoch -= 1
 
-    @override
-    def _update_lr(self, epoch: int | None = None, **kwargs: Any) -> None:
-        if epoch is None:
-            self.step(**kwargs)
-            return
-
-        self.last_epoch = epoch
-        idx = bisect_right(self._milestones, self.last_epoch)
-        scheduler = self._schedulers[idx]
-        child_epoch = self.last_epoch
-        if idx > 0:
-            child_epoch -= self._milestones[idx - 1]
-        scheduler._update_lr(child_epoch, **kwargs)
-
-        self._last_lr = scheduler.get_last_lr()
-
     def step(self, **kwargs: Any) -> None:  # type: ignore[override]
         """Perform a step.
 
@@ -1256,6 +1240,23 @@ class SequentialLR(LRScheduler):
                 scheduler.step()
 
         self._last_lr = scheduler.get_last_lr()
+
+    @override
+    def _update_lr(self, epoch: int | None = None, **kwargs: Any) -> None:
+        if epoch is None:
+            self.step(**kwargs)
+            return
+
+        self.last_epoch = epoch
+        idx = bisect_right(self._milestones, self.last_epoch)
+        scheduler = self._schedulers[idx]
+        child_epoch = self.last_epoch
+        if idx > 0:
+            child_epoch -= self._milestones[idx - 1]
+        scheduler._update_lr(child_epoch, **kwargs)
+
+        self._last_lr = scheduler.get_last_lr()
+
 
     @override
     def state_dict(self) -> dict[str, Any]:
