@@ -2128,8 +2128,8 @@ optim_db: list[OptimizerInfo] = [
             [lambda opt: PolynomialLR(opt, power=0.9, total_iters=4)],
             [
                 lambda opt: StepLR(opt, gamma=0.9, step_size=10),
-                lambda opt: ReduceLROnPlateau(opt),
                 lambda opt: PlateauLR(opt),
+                lambda opt: ReduceLROnPlateau(opt),
             ],
         ),
         optim_error_inputs_func=optim_error_inputs_func_sgd,
