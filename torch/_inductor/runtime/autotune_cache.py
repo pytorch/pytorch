@@ -699,6 +699,49 @@ def _reconstruct_triton_config(
     return triton_config
 
 
+def _config_identity(cfg: Config) -> tuple[Any, ...]:
+    # Everything that distinguishes two Config objects besides extra_options.
+    return (
+        cfg.kwargs,
+        cfg.num_warps,
+        cfg.num_stages,
+        getattr(cfg, "num_ctas", None),
+        getattr(cfg, "maxnreg", None),
+        getattr(cfg, "num_consumer_groups", None),
+        getattr(cfg, "num_buffers_warp_spec", None),
+    )
+
+
+def _restore_degraded_kwargs(
+    best_config: dict[str, Any], configs: list[Config]
+) -> bool:
+    """Replace JSON-degraded kwarg values in ``best_config`` with the candidate
+    value they were serialized from.
+
+    Coordesc and dynamically added configs are reconstructed from the cached
+    JSON, so a tuple kwarg comes back as a list and a plain Enum as its raw
+    value. Such kwargs are constexprs that are constant across the candidate
+    configs (coordesc only varies ints), so the candidates supply the typed
+    value: for each key whose candidate values degrade, take the candidate that
+    serializes to the cached value. Returns False when a degraded key has no
+    such candidate, in which case the caller must re-autotune rather than
+    reconstruct a wrong-typed constexpr. IntEnum/str-mixin members ==-match
+    their unwrapped values and are not degraded.
+    """
+    for key, cached in list(best_config.items()):
+        # pyrefly: ignore [missing-attribute]
+        candidates = [cfg.kwargs[key] for cfg in configs if key in cfg.kwargs]
+        if not any(_json_config_value(val) != val for val in candidates):
+            continue
+        for val in candidates:
+            if _json_config_value(val) == cached:
+                best_config[key] = val
+                break
+        else:
+            return False
+    return True
+
+
 def _json_config_value(value: Any) -> Any:
     # Enum config kwargs stay real Enum members at runtime (the kernel may consume
     # e.g. MODE.value), but the JSON caches store the underlying value -- the same
@@ -789,8 +832,10 @@ def _load_cached_autotuning(
         ]
         if matching_configs:
             first = matching_configs[0]
-            # pyrefly: ignore [missing-attribute]
-            if all(cfg.kwargs == first.kwargs for cfg in matching_configs[1:]):
+            if all(
+                _config_identity(cfg) == _config_identity(first)
+                for cfg in matching_configs[1:]
+            ):
                 # A unique match, or duplicates that are interchangeable (equal
                 # before JSON serialization too, so no tuple/Enum degradation
                 # is hidden behind the match). Return the real candidate so
@@ -812,21 +857,11 @@ def _load_cached_autotuning(
                 return None
             # Subset-kwarg matches with JSON-stable values fall through to
             # reconstruction, as before the Enum guard.
-    if any(
-        _json_config_value(val) != val
-        for cfg in configs
-        # pyrefly: ignore [missing-attribute]
-        for val in cfg.kwargs.values()
-    ):
-        # Some candidate kwarg degrades under the JSON round-trip (tuple ->
-        # list, plain Enum -> raw value), so a no-match here may be a
-        # serialization artifact and reconstruction below would bake the
-        # degraded JSON value into the kernel; re-autotune instead.
-        # IntEnum/str-mixin members ==-match their unwrapped values, so
-        # they are not degraded and fall through to reconstruction. Applies
-        # to the coordesc branch too: coordesc-eligible kernels have int-only
-        # kwargs today, but if one ever grows a degradable kwarg its stamped
-        # entry must not reconstruct a wrong-typed constexpr either.
+    if not _restore_degraded_kwargs(best_config, configs):
+        # A kwarg that degrades under the JSON round-trip (tuple -> list, plain
+        # Enum -> raw value) has no candidate value that serializes to the
+        # cached one, so reconstruction would bake a wrong-typed constexpr;
+        # re-autotune instead.
         return None
 
     # Reconstruct Config from cached data. This handles both coordesc

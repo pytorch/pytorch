@@ -5277,6 +5277,9 @@ def forward(self, tangents_1):
         ref_out.sum().backward()
         ref_grad, x.grad = x.grad, None
         out, detached = torch.compile(f, backend="inductor")(x)
+        # The test is only meaningful while inductor actually aliases the two
+        # slots; fail loudly if a lowering change makes it vacuous.
+        self.assertEqual(out.data_ptr(), detached.data_ptr())
         self.assertFalse(detached.requires_grad)
         out.sum().backward()
         self.assertEqual(x.grad, ref_grad)
@@ -5284,8 +5287,9 @@ def forward(self, tangents_1):
     def test_non_differentiable_output_aliasing_intermediate_base(self):
         # y is an intermediate base aliased by two differentiable view outputs;
         # returning y.detach() as a third slot shares y's TensorImpl (inductor
-        # lowers detach to a no-op), so marking it non-differentiable would mark
-        # y's base -- which the backward requires a tangent for -- and raise.
+        # lowers detach to a no-op), so marking it non-differentiable marks y's
+        # base and the regenerated views come back disconnected from x: the
+        # backward runs but x.grad stays None.
         def f(x):
             y = x * 2
             return y[:2], y[2:], y.detach()
@@ -5295,6 +5299,7 @@ def forward(self, tangents_1):
         (ref_a.sum() + ref_b.sum()).backward()
         ref_grad, x.grad = x.grad, None
         a, b, detached = torch.compile(f, backend="inductor")(x)
+        self.assertEqual(a.data_ptr(), detached.data_ptr())
         self.assertFalse(detached.requires_grad)
         (a.sum() + b.sum()).backward()
         self.assertEqual(x.grad, ref_grad)
@@ -5328,16 +5333,6 @@ def forward(self, tangents_1):
         self.assertIs(returns[1], marker)
         self.assertIsNot(returns[2], shared)
 
-        # An unmarked slot already wrapped in TensorAlias (aliased output or
-        # metadata-mutated input) still collides through the wrapper.
-        from torch._functorch._aot_autograd.schemas import TensorAlias
-
-        wrapped = TensorAlias(shared)
-        returns = [wrapped, shared]
-        _dealias_marked_returns(returns, [1])
-        self.assertIs(returns[0], wrapped)
-        self.assertIsNot(returns[1], shared)
-
         # Two marked slots sharing one object with no unmarked partner are
         # left alone: marking either marks both, and both are meant to be.
         returns = [shared, shared]
@@ -5357,16 +5352,19 @@ def forward(self, tangents_1):
         ref_out.sum().backward()
         ref_grad, x.grad = x.grad, None
         out, d1, d2 = torch.compile(f, backend="inductor")(x)
+        self.assertEqual(out.data_ptr(), d1.data_ptr())
+        self.assertEqual(out.data_ptr(), d2.data_ptr())
         self.assertFalse(d1.requires_grad)
         self.assertFalse(d2.requires_grad)
         out.sum().backward()
         self.assertEqual(x.grad, ref_grad)
 
-    def test_non_differentiable_output_with_mutated_input(self):
-        # A data-mutated input occupies a leading raw_returns slot (marked
-        # non-differentiable when it does not require grad) alongside a
-        # detached view of it; neither marking may leak onto the
-        # differentiable output.
+    def test_non_differentiable_alias_of_mutated_input(self):
+        # A non-differentiable output that aliases a data-mutated input arrives
+        # as a TensorAlias slot (never marked, never probed); the mutation
+        # itself stays in-graph because y does not require grad. No collision
+        # occurs here; the test pins that this shape keeps working alongside
+        # the dealiasing epilogue.
         def f(x, y):
             y.mul_(2)
             return x * 2 + y, y.detach()
