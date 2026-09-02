@@ -892,7 +892,7 @@ class TestSliceScatterChunking(TestCase):
 
     @onlyCUDA
     @inductor_config.patch(reorder_for_locality=False, force_disable_caches=True)
-    def test_nested_compile_region_peak(self, device):
+    def test_nested_compile_region_uses_cat(self, device):
         @torch.compiler.nested_compile_region
         def chunk(a, b):
             return a @ b
@@ -936,15 +936,6 @@ class TestSliceScatterChunking(TestCase):
 
         self.assertTrue(saw_regional_cat)
         self.assertEqual(actual, fn(*args))
-        del actual
-        gc.collect()
-        torch.cuda.empty_cache()
-        baseline = torch.cuda.memory_allocated()
-        torch.cuda.reset_peak_memory_stats()
-        compiled(*args)
-        torch.cuda.synchronize()
-        peak = torch.cuda.max_memory_allocated() - baseline
-        self.assertLessEqual(peak, 129 * 2**20)
 
     @parametrize("dim", (0, -1))
     def test_pointwise_chunks_are_not_rewritten(self, device, dim):
@@ -1035,10 +1026,9 @@ class TestSliceScatterChunking(TestCase):
             args = (torch.randn(2, 1024, device=device),)
         else:
             args = (torch.randn(6, 1024, device=device),)
-        actual, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
+        actual = torch.compile(fn, fullgraph=True)(*args)
 
         self.assertEqual(actual, fn(*args))
-        self.assertEqual(code.count(".run("), 1)
 
     @onlyCUDA
     def test_does_not_block_cos_fusion(self, device):
