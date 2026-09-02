@@ -407,6 +407,8 @@ class TestAOTCompileToPython(TestCase):
         expected = [n for n in vars(real) if not n.startswith("__")]
         self.assertIn("_compiled_autograd_key", expected)
         for name in expected:
+            # dir(), not hasattr: _lazy_backward_info is a descriptor that
+            # raises (an AttributeError subclass), so hasattr reads it as absent.
             self.assertIn(name, dir(emitted), f"missing {name}")
         self.assertIs(emitted.compiled_fw, ns["_inner_call_fw"])
         self.assertIs(emitted.compiled_bw, ns["_inner_call_bw"])
