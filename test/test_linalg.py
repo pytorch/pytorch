@@ -4476,6 +4476,38 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "qr received unrecognized mode 'hello'"):
             torch.linalg.qr(t2, mode='hello')
 
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
+    @dtypes(torch.float)
+    def test_qr_out_overlapping(self, device, dtype):
+        # Overlapping out= tensors used to silently corrupt the result or hit
+        # an internal assert instead of raising a proper error (gh-180377)
+        overlap_msg = "refer to a single memory location"
+        for shape in ((4, 4), (3, 5)):
+            A = torch.randn(shape, device=device, dtype=dtype)
+            B = torch.zeros_like(A)
+            with self.assertRaisesRegex(RuntimeError, overlap_msg):
+                torch.linalg.qr(A, out=(B, B))
+        A = torch.randn(4, 4, device=device, dtype=dtype)
+        # F-contiguous outs take the impl path with no stride proxies
+        B = torch.zeros(4, 4, device=device, dtype=dtype).t()
+        with self.assertRaisesRegex(RuntimeError, overlap_msg):
+            torch.linalg.qr(A, out=(B, B))
+        A = torch.randn(2, 2, device=device, dtype=dtype)
+        buf = torch.zeros(6, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, overlap_msg):
+            torch.linalg.qr(A, out=(buf[0:4].view(2, 2), buf[2:6].view(2, 2)))
+        A = torch.randn(4, 4, device=device, dtype=dtype)
+        expanded = torch.zeros((1, 4), device=device, dtype=dtype).expand(4, 4)
+        with self.assertRaisesRegex(RuntimeError, "more than one element of the written-to tensor"):
+            torch.linalg.qr(A, out=(torch.zeros_like(A), expanded))
+        # the conventional empty Q of mode='r' never overlaps R
+        A = torch.randn(3, 3, device=device, dtype=dtype)
+        Q = torch.empty(0, device=device, dtype=dtype)
+        R = torch.empty_like(A)
+        torch.linalg.qr(A, mode='r', out=(Q, R))
+        self.assertEqual(R, torch.linalg.qr(A, mode='r').R)
+
     def _check_einsum(self, *args, np_args=None):
         if np_args is None:
             np_args = [arg.cpu().numpy() if isinstance(arg, torch.Tensor) else arg for arg in args]
