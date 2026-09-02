@@ -288,8 +288,9 @@ struct DifferentiableGraphBackward : public autograd::Node {
       } else if (v.isTensor()) {
         if (!v.toTensor().defined()) {
           // this undefined gradient actually corresponds to a tensor list
-          if (input_tensor_lists_.count(output_index) != 0) {
-            size_t list_size = input_tensor_lists_[output_index];
+          if (auto it = input_tensor_lists_.find(output_index);
+              it != input_tensor_lists_.end()) {
+            size_t list_size = it->second;
             for (size_t i = 0; i < list_size; i++) {
               produceOutput(output_index++, {}, outputs);
             }
@@ -459,6 +460,8 @@ struct DifferentiableGraphOp {
         grad_fn->addInputIValue(outputs[idx]);
       }
       captureOutputs(*grad_fn, outputs);
+      // grad_fn is fully populated now (edges wired, captures stored).
+      autograd::fire_node_creation_hooks(grad_fn);
       // drop the temporary outputs so that we return the same number of
       // outputs as if we were not also calculating gradient
       const size_t num_temporary_outputs = num_outputs - grad.f_real_outputs;

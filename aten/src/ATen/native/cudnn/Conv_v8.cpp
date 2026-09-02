@@ -4,15 +4,12 @@
 
 #if AT_CUDNN_ENABLED()
 
-#include <ATen/cudnn/cudnn-wrapper.h>
-
 #include <c10/macros/Macros.h>
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wsuggest-override")
 #include <cudnn_frontend.h>
 C10_DIAGNOSTIC_POP()
 
-#include <ATen/TensorUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cudnn/Handle.h>
@@ -682,6 +679,7 @@ bool plan_errata_exception(
   // cuDNN engines 58 and 63 may dispatch to a cuBLASLt kernel that performs
   // illegal memory accesses on sm_120. Engine IDs are cuDNN-version-specific,
   // so restrict this workaround to the affected cuDNN and GPU versions.
+#if CUBLAS_VERSION < 130601
   static auto hardcoded_errata_json_handle_sm120 = nlohmann::json::parse(R"(
             { "version" : 1,
               "rules"   :
@@ -706,6 +704,7 @@ bool plan_errata_exception(
                     }
                 ]
             })");
+#endif
   static auto hardcoded_errata_json_handle_3d = nlohmann::json::parse(R"(
             { "version" : 1,
               "rules"   :
@@ -730,6 +729,7 @@ bool plan_errata_exception(
           })) {
     return true;
   }
+#if CUBLAS_VERSION < 130601
   if (cudnn_frontend::check_errata(
           hardcoded_errata_json_handle_sm120,
           executionPlanTag,
@@ -742,6 +742,7 @@ bool plan_errata_exception(
           })) {
     return true;
   }
+#endif
   if (!has_json && x.dim() > 4) {
     return cudnn_frontend::check_errata(
         hardcoded_errata_json_handle_3d, executionPlanTag, handle, []() {

@@ -48,13 +48,18 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfRocmArch,
     skipIfXpu,
+    subtest,
     TEST_CUDA,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_XPU,
     xfailIfROCm,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU, IS_BIG_GPU
+from torch.testing._internal.inductor_utils import (
+    HAS_GPU,
+    IS_BIG_GPU,
+    requires_block_ptr,
+)
 
 
 if TEST_WITH_ROCM:
@@ -1838,7 +1843,6 @@ class CudaReproTests(TestCase):
                     atol=1e-3,
                 )
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/163765")
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_mean_ratio_chain(self):
         torch.manual_seed(12345)
@@ -2197,6 +2201,39 @@ class CudaReproTests(TestCase):
         self.assertEqual(foo_c(t[1:]), foo(t_orig[1:]))
         self.assertEqual(t, t_orig)
 
+    def test_misaligned_saved_for_backward_input(self):
+        # A user input saved for backward but unused in forward compute reaches
+        # the backward graph as a primal. The backward compile must not assume
+        # it is aligned just because the first call's example was: unlike
+        # params/buffers, its address changes every call.
+        N = 1024
+
+        class ScaleGradient(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, value, weight):
+                ctx.save_for_backward(weight)
+                return value.expand(N).clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (weight,) = ctx.saved_tensors
+                return (grad_output * weight).sum().reshape(1), None
+
+        compiled = torch.compile(ScaleGradient.apply, dynamic=False)
+
+        def run(weight):
+            value = torch.ones(1, device=device_type, requires_grad=True)
+            compiled(value, weight).sum().backward()
+            self.assertEqual(value.grad, weight.sum().to(value.dtype).reshape(1))
+
+        aligned = torch.ones(N, device=device_type, dtype=torch.int32)
+        self.assertEqual(aligned.data_ptr() % 16, 0)
+        run(aligned)
+
+        misaligned = torch.ones(N + 1, device=device_type, dtype=torch.int32)[1:]
+        self.assertNotEqual(misaligned.data_ptr() % 16, 0)
+        run(misaligned)
+
     def test_non_commutative_scan_op(self):
         from torch._higher_order_ops.associative_scan import associative_scan
 
@@ -2314,7 +2351,10 @@ class CudaReproTests(TestCase):
         self.assertIn("reduction_hint=ReductionHint.INNER", persistent_code)
         self.assertNotIn("for roffset", persistent_code)
 
-    @parametrize("use_block_ptr", [False, True])
+    @parametrize(
+        "use_block_ptr",
+        [subtest(False), subtest(True, decorators=[requires_block_ptr])],
+    )
     @parametrize("dynamic_batch", [False, True])
     @config.patch(
         {
@@ -2909,7 +2949,6 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.assertEqual(result, a + b)
         self.assertIn("znumel", code)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/163701")
     @unittest.skipIf(config.is_fbcode(), "Dependence on functorch.einops")
     def test_repeated_masked_load(self):
         counters.clear()
@@ -2992,6 +3031,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertEqual(default_output, max_autotune_output)
 
+    @tf32_on_and_off(0.005)
     def test_adaptive_avg_pool3d_issue_157248(self):
         """Test for GitHub issue #157248: Conv2d-unsqueeze-AdaptiveAvgPool3d produces incorrect results"""
 
@@ -3032,11 +3072,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                     compiled_output = compiled_model(input_tensor)
 
                 # They should be identical (or very close)
-                self.assertTrue(
-                    torch.allclose(eager_output, compiled_output, rtol=1e-5, atol=1e-5),
-                    lambda msg: f"{msg}\nResults differ for input shape {(batch, channels, h, w)}. "
-                    f"Max diff: {torch.max(torch.abs(eager_output - compiled_output)):.6f}",
-                )
+                self.assertEqual(eager_output, compiled_output)
 
     @parametrize(
         "quantiles_shape,quantiles_strides,batch_size",
@@ -3131,9 +3167,9 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertEqual(eager_out, compile_out)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/163689")
     @skipIfXpu(
-        msg="Explicit attn_mask should not be set when is_causal=True - torch-xpu-ops: 2802"
+        msg="_scaled_dot_product_efficient_attention returns log_sumexp in the query "
+        "dtype instead of float32, tripping Inductor's fake kernel metadata check"
     )
     def test_qwen2_7b_sdpa_input_alignment_requires_recompile(self):
         # SDPA constraints ensures inputs have alignment (8).
@@ -3179,7 +3215,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                     v,
                     attn_bias,
                     dropout_p=0.0,
-                    is_causal=True,
+                    is_causal=False,
                     scale=scale,
                     compute_log_sumexp=True,
                 )
