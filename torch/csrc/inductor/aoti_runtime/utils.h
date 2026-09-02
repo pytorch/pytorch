@@ -579,6 +579,45 @@ inline void assert_size_stride(
   assert_size_stride(tensor, expected_sizes, expected_strides, op_name);
 }
 
+inline void assert_alignment(
+    AtenTensorHandle tensor,
+    size_t alignment,
+    const char* op_name = nullptr) {
+  if (alignment == 0) {
+    std::stringstream msg;
+    msg << "alignment cannot be 0";
+    if (op_name) {
+      msg << " in op: " << op_name;
+    }
+    AOTI_RUNTIME_CHECK(false, std::move(msg).str());
+  }
+
+  bool is_defined = true;
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_is_defined(tensor, &is_defined));
+  if (!is_defined) {
+    return;
+  }
+
+  int64_t storage_offset = 0;
+  AOTI_TORCH_ERROR_CODE_CHECK(
+      aoti_torch_get_storage_offset(tensor, &storage_offset));
+
+  int32_t dtype = 0;
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(tensor, &dtype));
+  const size_t itemsize = aoti_torch_dtype_element_size(dtype);
+
+  if (storage_offset * itemsize % alignment != 0) {
+    std::stringstream msg;
+    if (op_name) {
+      msg << "\nError in op: " << op_name;
+    }
+    msg << "\nExpect the tensor to be " << alignment
+        << " bytes aligned. Fail due to storage_offset=" << storage_offset
+        << " itemsize=" << itemsize;
+    AOTI_RUNTIME_CHECK(false, std::move(msg).str());
+  }
+}
+
 inline void* get_data_ptr_wrapper(const ConstantHandle& constant) {
   return constant.data_ptr();
 }

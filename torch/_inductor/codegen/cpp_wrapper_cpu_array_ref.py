@@ -126,6 +126,10 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         # assert_size_stride would fail to compile.
         return
 
+    # Alignment assertions are queued only for ExternKernel outputs. Fallback
+    # codegen disables stack allocation below, so those values are
+    # RAIIAtenTensorHandle and can use CppWrapperCpu's assertion emitter.
+
     def _codegen_v2_raw_input_bindings(self, code: IndentedBuffer):
         for idx, (input_key, input_value) in enumerate(V.graph.graph_inputs.items()):
             input_cpp_type = CppWrapperCpuArrayRef.get_input_element_cpp_type(
@@ -459,15 +463,14 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                         extern "C" AOTIRuntimeError AOTInductorModelRunMinimalArrayrefInterface(
                             AOTInductorModelHandle model_handle,
                             const AOTInductorModelInputs& inputs,
-                            AOTInductorModelOutputs& outputs) {
+                            AOTInductorModelOutputs& outputs) AOTI_RUNTIME_TRY({
                           auto model = reinterpret_cast<torch::aot_inductor::AOTInductorModel*>(model_handle);
-                          CONVERT_EXCEPTION_TO_ERROR_CODE({
-                              outputs = model->run_impl_minimal_arrayref_interface<AOTInductorModelInputs, AOTInductorModelOutputs>(
-                                  inputs,
-                                  (torch::aot_inductor::DeviceStreamType)nullptr,
-                                  nullptr);
-                          })
-                        }
+                          outputs = model->run_impl_minimal_arrayref_interface<AOTInductorModelInputs, AOTInductorModelOutputs>(
+                              inputs,
+                              (torch::aot_inductor::DeviceStreamType)nullptr,
+                              nullptr);
+                          return AOTI_RUNTIME_SUCCESS;
+                        })
                     """
                     )
 
@@ -482,40 +485,39 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                             int32_t num_inputs,
                             const AOTInductorArrayRefTensor* c_inputs,
                             int32_t num_outputs,
-                            AOTInductorArrayRefTensor* c_outputs) {{
+                            AOTInductorArrayRefTensor* c_outputs) AOTI_RUNTIME_TRY({{
                           constexpr int32_t expected_num_inputs = {len(V.graph.graph_inputs)};
                           constexpr int32_t expected_num_outputs = {len(V.graph.graph_outputs)};
                           auto model = reinterpret_cast<torch::aot_inductor::AOTInductorModel*>(model_handle);
-                          CONVERT_EXCEPTION_TO_ERROR_CODE({{
-                              if (num_inputs != expected_num_inputs) {{
-                                throw std::runtime_error(
-                                    std::string("AOTInductorModelRunMinimalArrayrefInterfaceV2 expected ")
-                                    + std::to_string(expected_num_inputs)
-                                    + " inputs but got "
-                                    + std::to_string(num_inputs));
-                              }}
-                              if (num_outputs != expected_num_outputs) {{
-                                throw std::runtime_error(
-                                    std::string("AOTInductorModelRunMinimalArrayrefInterfaceV2 expected ")
-                                    + std::to_string(expected_num_outputs)
-                                    + " outputs but got "
-                                    + std::to_string(num_outputs));
-                              }}
-                              if (num_inputs > 0 && c_inputs == nullptr) {{
-                                throw std::runtime_error(
-                                    "AOTInductorModelRunMinimalArrayrefInterfaceV2 received null input descriptors");
-                              }}
-                              if (num_outputs > 0 && c_outputs == nullptr) {{
-                                throw std::runtime_error(
-                                    "AOTInductorModelRunMinimalArrayrefInterfaceV2 received null output descriptors");
-                              }}
-                              model->run_impl_minimal_arrayref_interface_v2_raw(
-                                  c_inputs,
-                                  c_outputs,
-                                  (torch::aot_inductor::DeviceStreamType)nullptr,
-                                  nullptr);
-                          }})
-                        }}
+                          if (num_inputs != expected_num_inputs) {{
+                            throw std::runtime_error(
+                                std::string("AOTInductorModelRunMinimalArrayrefInterfaceV2 expected ")
+                                + std::to_string(expected_num_inputs)
+                                + " inputs but got "
+                                + std::to_string(num_inputs));
+                          }}
+                          if (num_outputs != expected_num_outputs) {{
+                            throw std::runtime_error(
+                                std::string("AOTInductorModelRunMinimalArrayrefInterfaceV2 expected ")
+                                + std::to_string(expected_num_outputs)
+                                + " outputs but got "
+                                + std::to_string(num_outputs));
+                          }}
+                          if (num_inputs > 0 && c_inputs == nullptr) {{
+                            throw std::runtime_error(
+                                "AOTInductorModelRunMinimalArrayrefInterfaceV2 received null input descriptors");
+                          }}
+                          if (num_outputs > 0 && c_outputs == nullptr) {{
+                            throw std::runtime_error(
+                                "AOTInductorModelRunMinimalArrayrefInterfaceV2 received null output descriptors");
+                          }}
+                          model->run_impl_minimal_arrayref_interface_v2_raw(
+                              c_inputs,
+                              c_outputs,
+                              (torch::aot_inductor::DeviceStreamType)nullptr,
+                              nullptr);
+                          return AOTI_RUNTIME_SUCCESS;
+                        }})
                     """
                     )
                 else:
