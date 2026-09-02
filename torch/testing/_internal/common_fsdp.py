@@ -62,6 +62,8 @@ from torch.testing._internal.common_utils import (
     set_rng_seed,
     TEST_CUDA,
     TEST_HPU,
+    TEST_PRIVATEUSE1,
+    TEST_PRIVATEUSE1_DEVICE_TYPE,
     TEST_WITH_ROCM,
     TEST_XPU,
 )
@@ -88,6 +90,11 @@ else:
     DEVICE_TYPE = "cpu"
     DISTRIBUTED_BACKEND = "gloo"
     DEVICE_COUNT = 1
+
+# Device types supported by FSDP device-type-parameterized tests.
+FSDP_DEVICES = ("cuda", "hpu", "xpu")
+if TEST_PRIVATEUSE1:
+    FSDP_DEVICES = FSDP_DEVICES + (TEST_PRIVATEUSE1_DEVICE_TYPE,)
 
 
 class FSDPInitMode(Enum):
