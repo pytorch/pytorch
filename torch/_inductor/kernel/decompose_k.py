@@ -14,7 +14,6 @@ from torch._inductor import inductor_prims, ir
 from torch._inductor.lowering import register_lowering
 from torch._inductor.select_algorithm import SymbolicGridFn, TritonTemplate
 from torch._inductor.utils import get_num_sms
-from torch.utils._triton import has_triton_stable_tma_api
 
 from .mm_common import load_kernel_template
 
@@ -124,7 +123,6 @@ def append_blackwell_decompose_k_partial_choice(
         "TWO_CTAS": config.two_ctas,
         "FLATTEN_OUTPUT": True,
         "DECOMPOSE_K": True,
-        "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),
         "tma_store": True,
         "transpose_discontiguous_tensor_descriptors_override": True,
     }
