@@ -1205,6 +1205,7 @@ class SequentialLR(LRScheduler):
         self._schedulers[idx]._initial_step()
 
         self._last_lr = self._schedulers[idx].get_last_lr()
+
     def recursive_undo(self, sched=None) -> None:
         """
         Recursively undo any step performed by the initialization of
@@ -1238,23 +1239,6 @@ class SequentialLR(LRScheduler):
                 scheduler.step()
 
         self._last_lr = scheduler.get_last_lr()
-
-    @override
-    def _update_lr(self, epoch: int | None = None, **kwargs: Any) -> None:
-        if epoch is None:
-            self.step(**kwargs)
-            return
-
-        self.last_epoch = epoch
-        idx = bisect_right(self._milestones, self.last_epoch)
-        scheduler = self._schedulers[idx]
-        child_epoch = self.last_epoch
-        if idx > 0:
-            child_epoch -= self._milestones[idx - 1]
-        scheduler._update_lr(child_epoch, **kwargs)
-
-        self._last_lr = scheduler.get_last_lr()
-
 
     @override
     def state_dict(self) -> dict[str, Any]:
@@ -1621,12 +1605,6 @@ class ChainedScheduler(LRScheduler):
     def _initial_step(self) -> None:
         for scheduler in self._schedulers:
             scheduler._initial_step()
-        self._last_lr = _param_groups_val_list(self._schedulers[-1].optimizer, "lr")
-
-    @override
-    def _update_lr(self, epoch: int | None = None, **kwargs: Any) -> None:
-        for scheduler in self._schedulers:
-            scheduler._update_lr(epoch, **kwargs)
         self._last_lr = _param_groups_val_list(self._schedulers[-1].optimizer, "lr")
 
     def step(self, **kwargs: Any) -> None:  # type: ignore[override]
