@@ -477,15 +477,23 @@ def _constexpr_values_match(original: Any, rebuilt: Any) -> bool:
     repr_args = getattr(original, "__repr_args__", None)
     if callable(repr_args):
         # Field-wise like the dataclass/attrs branches, so a pydantic-style
-        # type does not need an __eq__ of its own to be verifiable.
+        # type does not need an __eq__ of its own to be verifiable. But
+        # __repr_args__ only exposes the repr-visible fields; when the type does
+        # define its own __eq__ (pydantic models compare every field), it sees
+        # hidden state too, so require it as well.
         original_items = list(repr_args())
         rebuilt_items = list(rebuilt.__repr_args__())
-        return len(original_items) == len(rebuilt_items) and all(
+        fields_match = len(original_items) == len(rebuilt_items) and all(
             name == rebuilt_name and _constexpr_values_match(item, rebuilt_item)
             for (name, item), (rebuilt_name, rebuilt_item) in zip(
                 original_items, rebuilt_items
             )
         )
+        if not fields_match:
+            return False
+        if type(original).__eq__ is object.__eq__:
+            return True
+        return (original == rebuilt) is True
     if isinstance(original, dict):
         return len(original) == len(rebuilt) and all(
             _constexpr_values_match(key, rebuilt_key)
@@ -507,14 +515,26 @@ def _constexpr_values_match(original: Any, rebuilt: Any) -> bool:
 
 def _verify_constexpr_source(
     value: Any, source: str, module_aliases: dict[str, str]
-) -> bool:
+) -> str | None:
+    """Return None if evaluating ``source`` rebuilds ``value`` faithfully, else
+    the reason it does not, for the decline message."""
     namespace = {
         alias: sys.modules.get(module) for module, alias in module_aliases.items()
     }
     try:
-        return _constexpr_values_match(value, eval(source, namespace))
-    except Exception:
-        return False
+        rebuilt = eval(source, namespace)
+    except Exception as e:
+        return f"evaluating it raised {type(e).__name__}: {e}"
+    try:
+        if _constexpr_values_match(value, rebuilt):
+            return None
+    except Exception as e:
+        return f"comparing the rebuilt value raised {type(e).__name__}: {e}"
+    return (
+        "it rebuilt a value that is not equal to the original (a repr=False "
+        "field holding a non-default value, a coercing __post_init__, or a "
+        "required constructor argument the repr omits)"
+    )
 
 
 def _constexpr_decline_detail(value: Any) -> str:
@@ -627,14 +647,11 @@ def _render_constexpr_mappings(
             )
             if expression is None:
                 reason = "has no source rendering"
-            elif not _verify_constexpr_source(value, expression, module_aliases):
-                reason = (
-                    f"was rendered as {expression} but evaluating that does not "
-                    "rebuild an equal value (a repr=False field holding a "
-                    "non-default value, a coercing __post_init__, or a required "
-                    "constructor argument the repr omits)"
-                )
-                expression = None
+            else:
+                failure = _verify_constexpr_source(value, expression, module_aliases)
+                if failure is not None:
+                    reason = f"was rendered as {expression} but {failure}"
+                    expression = None
             if expression is None:
                 raise RuntimeError(
                     f"Triton kernel constexpr argument {name!r} has value {value!r} "

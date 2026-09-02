@@ -5264,6 +5264,10 @@ def forward(self, tangents_1):
 
         self._assert_no_extra_refs(refcount_box)
 
+    # The h * 1 fold these tests rely on is joint_graph_constant_folding; pin
+    # it so the data_ptr assertions below cannot fail under a config that
+    # disables it.
+    @torch._inductor.config.patch(joint_graph_constant_folding=True)
     def test_non_differentiable_output_aliasing_differentiable_output(self):
         # inductor lowers detach to a no-op and folds h * 1, so both returned
         # slots hold one TensorImpl; marking the detached slot non-differentiable
@@ -5340,6 +5344,10 @@ def forward(self, tangents_1):
         self.assertIs(returns[0], shared)
         self.assertIs(returns[1], shared)
 
+    # The h * 1 fold these tests rely on is joint_graph_constant_folding; pin
+    # it so the data_ptr assertions below cannot fail under a config that
+    # disables it.
+    @torch._inductor.config.patch(joint_graph_constant_folding=True)
     def test_non_differentiable_output_duplicated(self):
         # Two detached slots plus the differentiable one all fold to one
         # TensorImpl under inductor; both marked slots must be detached off.

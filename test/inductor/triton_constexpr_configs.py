@@ -141,6 +141,30 @@ class UserDefinedPydanticLikeNoEqConfig:
         return f"{type(self).__name__}(nested={self.nested!r})"
 
 
+class UserDefinedBareNestedReprConfig:
+    # A constructor-style repr that names a nested type by its bare name, which
+    # the generated module cannot bind: rendering must decline with the
+    # evaluation error.
+    class Inner:
+        def __init__(self, v):
+            self.v = v
+
+        def __repr__(self):
+            return f"Inner({self.v!r})"
+
+    def __init__(self, v):
+        self.inner = self.Inner(v)
+
+    def __repr__(self):
+        return f"UserDefinedBareNestedReprConfig({self.inner!r})"
+
+    def __eq__(self, other):
+        return type(other) is type(self) and other.inner.v == self.inner.v
+
+    def __hash__(self):
+        return hash(self.inner.v)
+
+
 class UserDefinedPydanticLikeConfig:
     def __init__(self, nested, hidden=None):
         self.nested = nested
