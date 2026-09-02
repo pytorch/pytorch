@@ -69,6 +69,77 @@ class LoopIRCuteDSLCodegen:
             )
         return self.input_values[name]
 
+    @staticmethod
+    def _buffer(name: str) -> Any | None:
+        return V.graph.get_buffer(name) or V.graph.graph_inputs.get(name)
+
+    def _direct_load_index(
+        self,
+        analysis: GemmEpilogueIRAnalysis,
+        output_name: str,
+        source_name: str,
+    ) -> sympy.Expr | None:
+        output = self._buffer(output_name)
+        source = self._buffer(source_name)
+        indices = analysis.index_vars.get(output_name)
+        if output is None or source is None or indices is None:
+            return None
+
+        output_size = output.get_size()
+        source_size = source.get_size()
+        if len(indices) != len(output_size) or len(source_size) > len(output_size):
+            return None
+
+        source_stride = source.get_stride()
+        offset = source.get_layout().offset
+        expected = sympy.sympify(offset)
+        aligned_indices = indices[len(output_size) - len(source_size) :]
+        aligned_output_size = output_size[len(output_size) - len(source_size) :]
+        for index, source_dim, output_dim, stride in zip(
+            aligned_indices,
+            source_size,
+            aligned_output_size,
+            source_stride,
+            strict=True,
+        ):
+            if V.graph.sizevars.statically_known_equals(source_dim, 1):
+                continue
+            if not V.graph.sizevars.statically_known_equals(source_dim, output_dim):
+                return None
+            expected += index * stride
+        return expected
+
+    def _validate_load_indices(
+        self, analysis: GemmEpilogueIRAnalysis, output_name: str
+    ) -> None:
+        store = analysis.store(output_name)
+        if store is None or store.value.reductions:
+            return
+
+        pending = [store.value]
+        while pending:
+            value = pending.pop()
+            if isinstance(value, (tuple, list)):
+                pending.extend(value)
+                continue
+            if not isinstance(value, GemmEpilogueIRExpression):
+                continue
+            if value.op == "load":
+                name, index, stored = value.args
+                expected_index = self._direct_load_index(analysis, output_name, name)
+                if (
+                    expected_index is None
+                    or sympy.simplify(index - expected_index) != 0
+                ):
+                    raise NotImplementedError(
+                        "CuTeDSL GEMM epilogues do not support remapped tensor loads"
+                    )
+                if stored is not None:
+                    pending.append(stored)
+                continue
+            pending.extend(value.args)
+            pending.extend(item for _, item in value.kwargs)
+
     def _generate_like(self, expr: str, ref: Any, *, shape_ref: Any | None = None):
         if shape_ref is None:
             shape_ref = ref
@@ -308,6 +379,7 @@ class LoopIRCuteDSLCodegen:
         if self.accumulator not in self.removed_buffers:
             outputs.append((self.accumulator, self.accumulator_value))
         for name, store in analysis.stores.items():
+            self._validate_load_indices(analysis, name)
             if name not in self.removed_buffers and name not in self.suppressed_outputs:
                 outputs.append((name, self.lower(store.value)))
         if not outputs:
