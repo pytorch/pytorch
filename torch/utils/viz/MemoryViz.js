@@ -859,6 +859,7 @@ function annotate_snapshot(snapshot) {
 
 function MemoryPlot(
   svg,
+  axis_svg,
   data,
   left_pad,
   width,
@@ -885,8 +886,6 @@ function MemoryPlot(
   const plot_height = height;
 
   const yscale = scaleLinear().domain([0, max_size]).range([plot_height, 0]);
-  // Use formatSize with showBytes=false for clean axis labels
-  const yaxis = axisLeft(yscale).tickFormat(d => formatSize(d, false));
   const xscale = scaleLinear().domain([0, max_timestep]).range([0, plot_width]);
   const plot_coordinate_space = svg
     .append('g')
@@ -924,12 +923,49 @@ function MemoryPlot(
     .attr('stroke-width', d => typeof d.elem === 'string' && d.elem.startsWith('pool:') ? 3 : null)
     .attr('vector-effect', d => typeof d.elem === 'string' && d.elem.startsWith('pool:') ? 'non-scaling-stroke' : null);
 
-  const axis = plot_coordinate_space.append('g').call(yaxis);
+  const axis = axis_svg.append('g');
+  let axis_domain = yscale.domain();
+
+  function drawAxis() {
+    const bounds = axis_svg.node().getBoundingClientRect();
+    if (bounds.width === 0 || bounds.height === 0) {
+      return;
+    }
+
+    const max_value = Math.max(...axis_domain.map(Math.abs));
+    const units = ['', 'Ki', 'Mi', 'Gi', 'Ti', 'Pi', 'Ei', 'Zi'];
+    const unit_index = Math.min(
+      units.length - 1,
+      Math.max(0, Math.floor(Math.log(max_value) / Math.log(1024))),
+    );
+    const unit = 1024 ** unit_index;
+    const unit_domain = axis_domain.map(value => value / unit);
+    const tick_count = Math.max(2, Math.floor(bounds.height / 50));
+    const tick_step = Math.abs(d3.tickStep(...unit_domain, tick_count));
+    const precision = tick_step === 0
+      ? 0
+      : Math.max(0, Math.min(3, -Math.floor(Math.log10(tick_step))));
+    const tick_values = d3
+      .ticks(...unit_domain, tick_count)
+      .map(value => value * unit);
+    const axis_scale = scaleLinear().domain(axis_domain).range([bounds.height, 0]);
+    const yaxis = axisLeft(axis_scale)
+      .tickValues(tick_values)
+      .tickFormat(value => `${(value / unit).toFixed(precision)}${units[unit_index]}B`);
+
+    axis
+      .attr('transform', `translate(${left_pad * bounds.width / width}, 0)`)
+      .call(yaxis);
+  }
+
+  new ResizeObserver(drawAxis).observe(axis_svg.node());
+  drawAxis();
 
   function handleZoom(event) {
     const t = event.transform;
     zoom_group.attr('transform', t);
-    axis.call(yaxis.scale(event.transform.rescaleY(yscale)));
+    axis_domain = event.transform.rescaleY(yscale).domain();
+    drawAxis();
   }
 
   const thezoom = zoom().on('zoom', handleZoom);
@@ -1180,25 +1216,43 @@ function create_trace_view(
       'display: grid; grid-template-columns: 1fr; grid-template-rows: 10fr 1fr 8fr; flex: 1; min-height: 0; gap: 10px',
     );
 
-  const plot_svg = grid_container
+  const plot_container = grid_container
+    .append('div')
+    .attr(
+      'style',
+      'position: relative; grid-column: 1; grid-row: 1; width: 100%; height: 100%; min-height: 0; overflow: hidden;',
+    );
+  const plot_svg = plot_container
     .append('svg')
     .attr('display', 'block')
     .attr('viewBox', '0 0 1024 576')
     .attr('preserveAspectRatio', 'none')
-    .attr('style', 'grid-column: 1; grid-row: 1; width: 100%; height: 100%;');
+    .attr('style', 'width: 100%; height: 100%;');
+  const axis_svg = plot_container
+    .append('svg')
+    .attr('display', 'block')
+    .attr(
+      'style',
+      'position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none;',
+    );
 
-  const plot = MemoryPlot(plot_svg, data, left_pad, 1024, 576);
+  const plot = MemoryPlot(plot_svg, axis_svg, data, left_pad, 1024, 576);
 
   if (snapshot.categories.length !== 0) {
     Legend(plot_svg.append('g'), snapshot.categories);
   }
 
   const mini_svg = grid_container
+    .append('div')
+    .attr(
+      'style',
+      'grid-column: 1; grid-row: 2; width: 100%; height: 100%; min-height: 0; overflow: hidden;',
+    )
     .append('svg')
     .attr('display', 'block')
     .attr('viewBox', '0 0 1024 60')
     .attr('preserveAspectRatio', 'none')
-    .attr('style', 'grid-column: 1; grid-row: 2; width: 100%; height: 100%;');
+    .attr('style', 'width: 100%; height: 100%;');
 
   MiniMap(mini_svg, plot, data, left_pad, 1024);
   const context_div = grid_container
