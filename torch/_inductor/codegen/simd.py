@@ -538,6 +538,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         override_cooperative_reduction: bool | None = None,
         tiling_scores: dict[str, sympy.Expr] | None = None,
         mix_order_reduction: bool = False,
+        split_as_grid_reduction: bool = False,
     ) -> None:
         if pid_cache is None:
             pid_cache = {}
@@ -566,6 +567,18 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             else self.should_use_persistent_reduction()
         )
         self.mix_order_reduction: bool = mix_order_reduction
+        # Split lowered as an extra grid dim; the count is read from the x numel.
+        self.split_as_grid_reduction: bool = split_as_grid_reduction
+        if self.split_as_grid_reduction and self.cooperative_reduction:
+            # Both partition the reduction with their own rsplit_* bounds off
+            # program_id(0); the second definition would silently shadow the first.
+            raise AssertionError(
+                "split_as_grid_reduction and cooperative_reduction are mutually exclusive"
+            )
+        if self.split_as_grid_reduction and self.persistent_reduction:
+            # Only the looped path emits the per-partition bounds; a persistent
+            # kernel would drop them and reduce the full axis in every program.
+            self.persistent_reduction = False
         self.no_x_dim = self.want_no_x_dim()
         self.code_hash: str | None = None
         # Info to enable multiple store_output calls for epilogue subtiling
@@ -677,7 +690,12 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         pointwise_tensor_dims = list(reversed(grid_dims))
         reduction_dims = ["r0_", "r1_"]
         if no_x_dim:
-            tensor_dims = reduction_dims
+            # `x` becomes a grid-only axis: it keeps its grid dim but has no tensor
+            # dim. Any other pointwise dims keep theirs. For kernels whose only
+            # pointwise dim is `x` this is identical to dropping them all.
+            tensor_dims = [
+                dim for dim in pointwise_tensor_dims if dim != "x"
+            ] + reduction_dims
         elif no_r_dim:
             tensor_dims = pointwise_tensor_dims
         else:
@@ -5764,6 +5782,49 @@ class SIMDScheduling(BaseScheduling):
         return selection.tiling, selection.tiling_scores
 
     @classmethod
+    def _grid_split_tiling(
+        cls,
+        node: NodeScheduleEntry,
+        numel: sympy.Expr,
+        reduction_numel: sympy.Expr,
+        split: int,
+    ) -> immutable_dict[str, sympy.Expr]:
+        """Pointwise tiling for a split-as-grid stage-1 kernel.
+
+        Stage-1's ranges are ``[*kept, split]``. Each kept dim gets its own tile so
+        its index stays affine, and the split goes last so it lands on x, which for
+        these kernels carries no tensor dim. Falls back to the flat
+        ``[numel // split, split]`` tiling whenever the kept dims cannot be laid out
+        that way -- never worse than the previous behaviour.
+        """
+        sizevars = V.graph.sizevars
+        if sizevars.statically_known_equals(numel, split):
+            return cls.create_tiling([split], [reduction_numel])
+
+        fallback = cls.create_tiling([numel // split, split], [reduction_numel])
+
+        pointwise_ranges = list(node.get_ranges()[0])
+        if not pointwise_ranges or not sizevars.statically_known_equals(
+            pointwise_ranges[-1], split
+        ):
+            return fallback
+
+        kept = [
+            rng
+            for rng in pointwise_ranges[:-1]
+            if not sizevars.statically_known_equals(rng, 1)
+        ]
+        if not kept:
+            return fallback
+        # x belongs to the split, leaving y and z for the kept dims.
+        if len(kept) > 2:
+            kept = [sympy_product(kept[:-1]), kept[-1]]
+        if not sizevars.statically_known_equals(sympy_product(kept) * split, numel):
+            return fallback
+
+        return cls.create_tiling([*kept, split], [reduction_numel])
+
+    @classmethod
     def select_tiling_with_memory(
         cls,
         node_schedule,
@@ -5799,6 +5860,19 @@ class SIMDScheduling(BaseScheduling):
                     range_r = node_ranges[1]  # (K)
                     tiling = cls.create_tiling(range_y_x, range_r)
                     return _TilingSelection(tiling, None, None)
+
+        # The split takes x, which for these kernels is a grid-only axis with no
+        # tensor dim (see want_no_x_dim). The dims that were not reduced keep their
+        # own tiles on y/z, so their index stays affine; flattening them into one
+        # axis would force `yindex // K`, which the block_ptr matcher rejects unless
+        # K is a power of two.
+        for node in EnableReduction.filter(node_schedule):
+            if isinstance(node.node, ir.ComputedBuffer):
+                split = node.node._grid_split_factor
+                if not split:
+                    continue
+                tiling = cls._grid_split_tiling(node, numel, reduction_numel, split)
+                return _TilingSelection(tiling, None, None)
 
         # # TODO: enable by default
         if (

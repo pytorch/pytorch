@@ -1066,6 +1066,19 @@ conv_1x1_as_mm = False
 # enabling both of these will implicitly disable split_reductions
 split_reductions = os.getenv("TORCHINDUCTOR_SPLIT_REDUCTIONS", "1") == "1"
 
+# Lower a split reduction as an extra grid dim rather than reshaping the reduction
+# axis, so stage-1 loads stay block_ptr-eligible. Requires split_reductions.
+force_red_split_dim_as_grid_dim = (
+    os.getenv("TORCHINDUCTOR_FORCE_RED_SPLIT_DIM_AS_GRID_DIM", "0") == "1"
+)
+
+# In a looped reduction, mask the loaded value to the reduction identity and
+# combine unconditionally (instead of masking the accumulator), so block_ptr
+# backends can fuse the boundary-padded load + where into one DMA. Experimental.
+mask_reduction_value_not_accumulator = (
+    os.getenv("TORCHINDUCTOR_MASK_REDUCTION_VALUE_NOT_ACCUMULATOR", "0") == "1"
+)
+
 # A deterministic mode that skips any on device benchmarking in Inductor
 # if we know they affect numerics.  WARNING: Expect perf hit in this mode.
 deterministic = os.getenv("TORCHINDUCTOR_DETERMINISTIC") == "1"

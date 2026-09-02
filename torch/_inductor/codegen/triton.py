@@ -493,12 +493,17 @@ class BlockDescriptorOptions:
         # Compute the final shape, adjusting for special kernel types.
         final_shape = [TritonSymbols.get_block_size(tree) for tree in range_trees]
         if V.kernel.no_x_dim:
-            if range_trees[0].prefix != "x":
+            # x carries no tensor dim. It is not necessarily first: a split-as-grid
+            # kernel keeps y/z tensor dims for the dims it did not reduce.
+            x_positions = [
+                idx for idx, tree in enumerate(range_trees) if tree.prefix == "x"
+            ]
+            if len(x_positions) != 1:
                 raise AssertionError(
-                    f"expected first range tree prefix to be 'x', got "
-                    f"{range_trees[0].prefix!r}"
+                    f"expected exactly one 'x' range tree, got "
+                    f"{[tree.prefix for tree in range_trees]}"
                 )
-            final_shape.pop(0)
+            final_shape.pop(x_positions[0])
 
         # Check to see which of the final shape dimensions are included in this parameter
         # e.g. if block shape is [XBLOCK // 2, XBLOCK % 2], but the kernel shape
@@ -575,8 +580,13 @@ class BlockDescriptorOptions:
         return sympy_subs(expr, {roffset: replacement})
 
     def remove_roffsets(self, expr: sympy.Expr) -> sympy.Expr:
+        # Split-as-grid-dim: start the looped block_ptr at this program's partition
+        # offset (rsplit_start) instead of 0; other kernels zero the roffset.
+        replacement: sympy.Expr = sympy.Integer(0)
+        if getattr(V.kernel, "split_as_grid_reduction", 0):
+            replacement = sympy.Symbol("rsplit_start", integer=True, nonnegative=True)
         for symt in TritonSymbols.reduction_types:
-            expr = self.replace_offset(expr, sympy.Integer(0), symt)
+            expr = self.replace_offset(expr, replacement, symt)
         return expr
 
     def compute_boundary_check(
@@ -812,8 +822,13 @@ class BlockPtrOptions(BlockDescriptorOptions):
         return sympy_subs(expr, {roffset: replacement})
 
     def remove_roffsets(self, expr: sympy.Expr) -> sympy.Expr:
+        # Split-as-grid-dim: start the looped block_ptr at this program's partition
+        # offset (rsplit_start) instead of 0; other kernels zero the roffset.
+        replacement: sympy.Expr = sympy.Integer(0)
+        if getattr(V.kernel, "split_as_grid_reduction", 0):
+            replacement = sympy.Symbol("rsplit_start", integer=True, nonnegative=True)
         for symt in TritonSymbols.reduction_types:
-            expr = self.replace_offset(expr, sympy.Integer(0), symt)
+            expr = self.replace_offset(expr, replacement, symt)
         return expr
 
     def format(self, name: str, roffset=True) -> str:
@@ -2992,11 +3007,11 @@ class TMACompatibilityChecker:
             )
             return False
 
-        # Strict multirow reductions are forced persistent and can settle on
-        # XBLOCK=1 after the initial TMA probe. Their output store must therefore
-        # use the scalar fallback rather than a 16-byte tensor descriptor.
+        # These all settle on XBLOCK=1, so the store cannot reach TMA's 16-byte
+        # minimum and must fall back off the tensor descriptor.
         if self.for_store and (
-            self.kernel.no_x_dim or self.kernel.features.has_strict_multirow_reduction()
+            self.kernel.no_x_dim or self.kernel.split_as_grid_reduction
+            or self.kernel.features.has_strict_multirow_reduction()
         ):
             log.debug(
                 "%s stores with XBLOCK=1 cannot transfer 16 bytes.",
@@ -3378,6 +3393,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if self.cooperative_reduction:
             self.init_cooperative_reduction()
 
+        if self.split_as_grid_reduction:
+            self.init_split_as_grid_reduction()
+
         self.codegen_range_tree()
 
         if self.cooperative_reduction:
@@ -3735,6 +3753,37 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 "rsplit_end = tl.where(rsplit_end < rnumel, rsplit_end, rnumel)"
             )
 
+    def init_split_as_grid_reduction(self):
+        """Emit per-partition reduction bounds for a split-as-grid-dim reduction.
+
+        The split is the x grid dim (one program per partition via program_id(0),
+        XBLOCK == 1); each program reduces [rsplit_start, rsplit_end) of the true
+        axis into buf0[..., program_id(0)] and stage-2 combines over the split axis.
+        rsplit_chunk is a multiple of RBLOCK so partitions never overlap.
+        """
+        if not self.split_as_grid_reduction:
+            raise AssertionError("expected split_as_grid_reduction")
+        # The split count is the x dim extent (see get_tiling_and_scores).
+        split = self.numels["x"]
+        # The flat [rsplit_start, rsplit_end) bounds assume a single reduction dim;
+        # more would silently misapply them, so fail loudly.
+        reduction_trees = [t for t in self.range_trees if t.is_reduction]
+        if len(reduction_trees) != 1:
+            raise AssertionError(
+                "split_as_grid_reduction requires exactly one reduction dimension, "
+                f"got {len(reduction_trees)}"
+            )
+        self.body.splice(
+            f"""\
+            rsplit_id = tl.program_id(0)
+            num_rblocks = (rnumel + RBLOCK - 1) // RBLOCK
+            rsplit_chunk = (num_rblocks + {split} - 1) // {split} * RBLOCK
+            rsplit_start = rsplit_chunk * rsplit_id
+            rsplit_end = rsplit_chunk * (rsplit_id + 1)
+            rsplit_end = tl.where(rsplit_end < rnumel, rsplit_end, rnumel)
+            """,
+        )
+
     def init_cooperative_reduction_mask(self):
         rsplit_arange = "tl.arange(0, RSPLIT_NEXT_POWER_OF_2)"
         if not self.no_x_dim:
@@ -3813,6 +3862,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return self.features.strict_reduction_rblock()
 
     def want_no_x_dim(self):
+        if self.split_as_grid_reduction:
+            # The split owns x purely as a grid dim -- one partition per program,
+            # never a tensor axis. This keeps the kept dims on their own tiles
+            # instead of being flattened into a single axis to make room for it.
+            return True
         return (
             self.persistent_reduction
             and len(self.numels) == self.num_reduction_dims + 1
@@ -5028,6 +5082,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         append_broadcast = None
         shape: BlockShapeType = None
+        # Set when the block_ptr load boundary-pads OOB elements with zero, so a
+        # reduction over it can skip its accumulator mask when 0 is the identity.
+        block_ptr_zero_padded = False
 
         if should_unwrap_unspec_arg(name):
             line = var
@@ -5042,10 +5099,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         else:
             if isinstance(indexing, (BlockPtrOptions, TensorDescriptorOptions)):
+                # A zero `other` default plus a boundary_check makes
+                # codegen_block_ptr zero-pad OOB elements. Detect from the
+                # structured signals, not the formatted load string.
+                zero_default = other == ", other=0.0"
                 block_descriptor, other = self.codegen_block_ptr(
                     name, var, indexing, other
                 )
                 if isinstance(indexing, BlockPtrOptions):
+                    block_ptr_zero_padded = zero_default and indexing.has_mask()
                     line = f"tl.load({block_descriptor}{other}{ep}{cachemod})"
                 else:
                     line = self.codegen_descriptor_load_line(block_descriptor, indexing)
@@ -5143,6 +5205,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # Only CSE values emitted outside the loop remain valid after it closes.
         if not self.inside_reduction or load_buffer is self.body:
             self.outside_loop_vars.add(result_var)
+
+        if block_ptr_zero_padded:
+            V.kernel._identity_padding_values[str(result_var)] = 0.0
 
         return result_var
 
@@ -5400,6 +5465,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         do_upcast = pytree.tree_any(lambda v: should_upcast(v.dtype), value)
         original_dtype = dtype
         original_src_dtype = src_dtype
+
+        # Per-load identity padding recorded at the load() site (e.g. a zero-padded
+        # block_ptr load); looked up on the pre-upcast value var.
+        identity_padding = (
+            self._identity_padding_values.get(str(value))
+            if isinstance(value, CSEVariable)
+            else None
+        )
+
         if do_upcast:
             # Only promote FB16/BF16; do not promote other integer/boolean dtypes
             value = pytree.tree_map(maybe_upcast, value)
@@ -5452,15 +5526,38 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # tmp0 in the triton code is either a scalar, or single-element tensor
         # so if we emit tl.sum directly, it will only give 1 instead of RBLOCK * 1
         # To avoid this, we broadcast to the expected shape first.
-        value = self._map_tuple_or_scalar(
-            lambda v: self.cse.generate(
+        acc_default = ir.Reduction.default_accumulator(reduction_type, src_dtype)
+        cond = " & ".join(masks)
+        # The looped combine re-broadcasts the value, so the explicit broadcast is
+        # redundant here; persistent reductions still need it.
+        defer_value_broadcast = (
+            config.mask_reduction_value_not_accumulator
+            and not self.persistent_reduction
+            and bool(cond)
+            and not isinstance(acc_default, tuple)
+            and not reduction_type.startswith("arg")
+            and not is_welford_reduction(reduction_type)
+            and reduction_type not in ("online_softmax_reduce", "dot")
+        )
+
+        def _broadcast_reduction_value(v: CSEVariable) -> CSEVariable:
+            if defer_value_broadcast:
+                return v
+            # Skip a no-op broadcast (value already at the dense size).
+            if (
+                config.mask_reduction_value_not_accumulator
+                and v.shape is not None
+                and triton_shape_dims(v.shape) == triton_shape_dims(value_shape)
+            ):
+                return v
+            return self.cse.generate(
                 self.compute,
                 f"tl.broadcast_to({v}, {dense_size_str})",
                 dtype=v.dtype,
                 shape=value_shape,
-            ),
-            value,
-        )
+            )
+
+        value = self._map_tuple_or_scalar(_broadcast_reduction_value, value)
 
         arg_index_reduction_types = ("argmax", "argmin")
         arg_value_reduction_types = ("argmax_value", "argmin_value")
@@ -5628,8 +5725,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             result_var.mask_vars = result_mask_vars
         cond = " & ".join(masks)
 
+        # Drop the accumulator mask when the load's OOB pad is already the reduction
+        # identity (safe only for zero-padded block_ptr loads; see diff summary).
+        acc_default = ir.Reduction.default_accumulator(reduction_type, src_dtype)
+        skip_accumulator_masking = (
+            not isinstance(acc_default, tuple)
+            and identity_padding is not None
+            and acc_default == identity_padding
+        )
+
         def where_cond(tval, fval):
-            if not cond:
+            if not cond or skip_accumulator_masking:
                 return tval
             return TritonKernelOverrides.where(cond, tval, fval)
 
@@ -5928,10 +6034,31 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.post_loop_combine.writeline(f"{result_var} = {accumulator}")
             else:
                 combine_fn = ir.get_reduction_combine_fn(reduction_type, src_dtype)
-                updated = combine_fn(accumulator, value)
                 if reduction_type == "dot":
-                    self.compute.writeline(f"{accumulator} = {updated}")
+                    self.compute.writeline(
+                        f"{accumulator} = {combine_fn(accumulator, value)}"
+                    )
+                elif (
+                    config.mask_reduction_value_not_accumulator
+                    and cond
+                    and not skip_accumulator_masking
+                    and isinstance(value, CSEVariable)
+                    and not isinstance(acc_default, tuple)
+                ):
+                    # Mask the loaded value to the identity, then combine
+                    # unconditionally (value-mask instead of accumulator-mask).
+                    default_str = self._map_tuple_or_scalar(constant_repr, acc_default)
+                    masked_value = self.cse.generate(
+                        self.compute,
+                        where_cond(value, default_str),
+                        dtype=value.dtype,
+                        shape=value_shape,
+                    )
+                    self.compute.writeline(
+                        f"{accumulator} = {combine_fn(accumulator, masked_value)}"
+                    )
                 else:
+                    updated = combine_fn(accumulator, value)
                     self.compute.writeline(
                         f"{accumulator} = {where_cond(updated, accumulator)}"
                     )
@@ -6318,6 +6445,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._handle_pdl_before_access(self.post_loop_store, var)
 
         if isinstance(indexing, (BlockPtrOptions, TensorDescriptorOptions)):
+            if isinstance(indexing, TensorDescriptorOptions):
+                # store_reduction bypasses codegen_block_ptr, so without this
+                # codegen_kernel strips the >=16-byte floor and the store won't compile.
+                self._emitted_device_tma = True
             self.post_loop_store.writeline(
                 DeferredLine(
                     name,
@@ -6878,10 +7009,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             for level, tree in enumerate(loop_trees):
                 with self.body.indent(offset=level):
                     prefix = tree.prefix
-                    loop_start = "rsplit_start" if self.cooperative_reduction else "0"
-                    loop_end = (
-                        "rsplit_end" if self.cooperative_reduction else f"{prefix}numel"
+                    partitioned = (
+                        self.cooperative_reduction or self.split_as_grid_reduction
                     )
+                    loop_start = "rsplit_start" if partitioned else "0"
+                    loop_end = "rsplit_end" if partitioned else f"{prefix}numel"
                     # Conditionalize pipelining on HIP for Triton due to
                     # reports of numerical inaccuracies on older Triton
                     if torch.version.hip and get_triton_version() > (3, 2):
@@ -7261,6 +7393,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         }
         if self.mix_order_reduction:
             out["RSPLIT_SIZE"] = self.rsplit_size
+        if self.split_as_grid_reduction:
+            # Clamp the x (split) grid axis to XBLOCK == 1 so each program owns one
+            # partition; R0_BLOCK is still autotuned.
+            out["split_as_grid_reduction"] = True
         if config.deterministic or config.test_configs.force_filter_reduction_configs:
             out["has_loadstore_with_contiguous_rdim"] = (
                 self.has_load_with_contiguous_rdim
@@ -8630,6 +8766,9 @@ class TritonScheduling(SIMDScheduling):
 
         disable_multi_kernel = kernel_kwargs.pop("disable_multi_kernel", False)
         kernel_type.apply_feature_required_overrides(kernel_features, kernel_kwargs)
+
+        if kernel_features.get_grid_split():
+            kernel_kwargs["split_as_grid_reduction"] = True
 
         kernel_kwargs = V.choices.triton_kernel_kwargs(
             kernel_type, kernel_features, kernel_args, kernel_kwargs

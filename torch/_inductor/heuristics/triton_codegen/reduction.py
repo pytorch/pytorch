@@ -126,6 +126,7 @@ def _adapt_config_for_tiling(
         register_intensive=register_intensive,
         waves_per_eu=waves_per_eu,
         warp_size=warp_size,
+        z=block_sizes.get("z"),
     )
 
 

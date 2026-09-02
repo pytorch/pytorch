@@ -4466,11 +4466,15 @@ def triton_config_tiled_reduction(
     waves_per_eu=None,
     *,
     warp_size: int = 32,
+    z: int | None = None,
 ):
     """
     Construct a tile reduction triton config with some adjustment
     heuristics based on size_hints. Size_hints is a tuple of numels in
     each tile dimension and will be rounded up to the nearest power of 2.
+
+    ``z`` is only passed for three-dimensional pointwise tilings; leaving it
+    ``None`` reproduces the two-dimensional behaviour exactly.
     """
     # Convert the linear reduction numel into a multi-dimensional block.
     rnumels = _get_nd_reduction_numels(r, size_hints)
@@ -4478,9 +4482,12 @@ def triton_config_tiled_reduction(
     # shrink sizes to size hints
     x = min(x, size_hints["x"])
     y = min(y, size_hints["y"])
+    if z is not None:
+        z = min(z, size_hints["z"])
 
     def total_numel() -> int:
-        return conditional_product(x, y, *rnumels.values())
+        pointwise = (x, y) if z is None else (x, y, z)
+        return conditional_product(*pointwise, *rnumels.values())
 
     target = total_numel()
     if conditional_product(*size_hints.values()) < target:
@@ -4494,8 +4501,11 @@ def triton_config_tiled_reduction(
             rnumels[prefix] *= 2
     while y < size_hints["y"] and total_numel() < target:
         y *= 2
+    while z is not None and z < size_hints["z"] and total_numel() < target:
+        z *= 2
 
-    cfg = _get_config({"x": x, "y": y, **rnumels})
+    pointwise_numels = {"x": x, "y": y} if z is None else {"z": z, "y": y, "x": x}
+    cfg = _get_config({**pointwise_numels, **rnumels})
     num_warps = _num_warps(total_numel() // 256, min_num_warps=1, warp_size=warp_size)
     num_warps = _num_warps(
         num_warps,
@@ -4503,7 +4513,12 @@ def triton_config_tiled_reduction(
         register_intensive=register_intensive,
         warp_size=warp_size,
     )
-    check_config(cfg, xnumel=size_hints["x"], ynumel=size_hints["y"])
+    check_config(
+        cfg,
+        xnumel=size_hints["x"],
+        ynumel=size_hints["y"],
+        znumel=size_hints["z"] if z is not None else None,
+    )
     check_max_block(cfg)
     config = Config(cfg, num_warps=num_warps, num_stages=num_stages)
     if torch.version.hip:
@@ -4844,7 +4859,8 @@ def reduction(
     """args to @triton.heuristics()"""
     inductor_meta = {} if inductor_meta is None else inductor_meta
     inductor_meta["reduction_hint"] = reduction_hint
-    if inductor_meta.get("no_x_dim"):
+    if inductor_meta.get("no_x_dim") or inductor_meta.get("split_as_grid_reduction"):
+        # Pin the split (x) grid axis to XBLOCK == 1: one partition per program.
         size_hints["x"] = 1
 
     if triton_meta is None:

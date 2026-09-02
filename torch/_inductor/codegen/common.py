@@ -2347,6 +2347,9 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         self.store_buffer_counts: dict[str, int] = {}
         self._load_mask: str | None = None
         self._load_other: None | int | float = None
+        # Maps a zero-padded load's cse_var to the identity its OOB lanes hold (0),
+        # so a reduction over it can skip its accumulator mask.
+        self._identity_padding_values: dict[str, bool | int | float] = {}
         # OrderedSet in set_current_node
         self.current_node: SchedulerNode | None = None
         self.node_to_bounds: dict[torch.fx.Node, ValueRanges[Any]] | None = None
