@@ -23,13 +23,11 @@ from torch.distributed.tensor import (
 )
 from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_device_type import (
-    deviceCountAtLeast,
-    instantiate_device_type_tests,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_nccl,
+    skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -38,7 +36,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
-from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._debug_mode import (
     _OpCall,
     _RedistributeCall,
@@ -1032,7 +1029,6 @@ class TestDTensorDebugMode(TestCase):
     aten::add_.Tensor(t: i64[], 1)  ->  t: i64[]  # {'input_hash': ((2.0, None), {}), 'hash': 3.0}""",
         )
 
-    @unittest.skipIf(not HAS_GPU, "requires GPU")
     @unittest.skipIf(not has_triton_package(), "requires triton")
     def test_triton_kernel_logs(self, device):
         import triton
@@ -1107,7 +1103,6 @@ class TestDTensorDebugMode(TestCase):
         actual_hash = all_gather_logs[0].log["hash"]
         self.assertEqual(actual_hash, float(local_tensor.numel() * self.world_size))
 
-    @unittest.skipIf(not HAS_GPU, "requires GPU")
     @unittest.skipIf(not has_triton_package(), "requires triton")
     def test_check_triton_hash_mismatches(self, device):
         import triton
@@ -1349,9 +1344,9 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
             pass
 
     @requires_nccl()
-    @deviceCountAtLeast(2)
-    def test_allgather_base(self, devices):
-        self._init_process_group(torch.device(devices[0]).type)
+    @skip_if_lt_x_gpu(2)
+    def test_allgather_base(self, device):
+        self._init_process_group(torch.device(device).type)
         tensor = torch.ones(10, 10, device=self.device) * (self.rank + 1)
         # Output size must be world_size * input_size
         output_tensor = torch.zeros(10 * self.world_size, 10, device=self.device)
@@ -1373,10 +1368,10 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
         self._destroy_process_group()
 
     @requires_nccl()
-    @deviceCountAtLeast(2)
-    def test_allgather_base_async_op(self, devices):
+    @skip_if_lt_x_gpu(2)
+    def test_allgather_base_async_op(self, device):
         """Test all_gather_into_tensor with async_op=True."""
-        self._init_process_group(torch.device(devices[0]).type)
+        self._init_process_group(torch.device(device).type)
         tensor = torch.ones(10, 10, device=self.device) * (self.rank + 1)
         # Output size must be world_size * input_size
         output_tensor = torch.zeros(10 * self.world_size, 10, device=self.device)
@@ -1406,9 +1401,9 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
         self._destroy_process_group()
 
     @requires_nccl()
-    @deviceCountAtLeast(2)
-    def test_allgather_functional_with_async_collective_tensor(self, devices):
-        self._init_process_group(torch.device(devices[0]).type)
+    @skip_if_lt_x_gpu(2)
+    def test_allgather_functional_with_async_collective_tensor(self, device):
+        self._init_process_group(torch.device(device).type)
         tensor = torch.ones(10, 10, device=self.device) * (self.rank + 1)
 
         # Use functional collectives which return AsyncCollectiveTensor
