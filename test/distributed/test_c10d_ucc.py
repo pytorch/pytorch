@@ -375,11 +375,7 @@ class _DistributedDataParallelTestBase(
         return "ucc"
 
     def _get_process_group(self):
-        store = c10d.FileStore(self.rdvz_file, self.world_size)
-        c10d.init_process_group(
-            "ucc", store=store, rank=self.rank, world_size=self.world_size
-        )
-        return c10d.distributed_c10d._get_default_group()
+        return self.pg
 
     def _test_ucc_backend(
         self, devices, device_ids, multi_device=False, gradient_as_bucket_view=False
@@ -686,7 +682,7 @@ class DistributedDataParallelCUDATest(_DistributedDataParallelTestBase):
     )
     def test_ucc_backend_1gpu_module_device_ids_integer_list(self, device):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
-        devices = [torch.device(torch.device(device).type, i) for i in int_devices]
+        devices = [torch.device(self.device_type, i) for i in int_devices]
         self._test_ucc_backend(devices, int_devices)
 
     @requires_ucc()
@@ -696,7 +692,7 @@ class DistributedDataParallelCUDATest(_DistributedDataParallelTestBase):
     )
     def test_ucc_backend_1gpu_module_device_ids_torch_device_list(self, device):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
-        devices = [torch.device(torch.device(device).type, i) for i in int_devices]
+        devices = [torch.device(self.device_type, i) for i in int_devices]
         self._test_ucc_backend(devices, devices)
 
     @skip_but_pass_in_sandcastle(
@@ -709,7 +705,7 @@ class DistributedDataParallelCUDATest(_DistributedDataParallelTestBase):
     )
     def test_ucc_backend_2gpu_module(self, device):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
-        devices = [torch.device(torch.device(device).type, i) for i in int_devices]
+        devices = [torch.device(self.device_type, i) for i in int_devices]
         self._test_ucc_backend(devices, None, multi_device=True)
 
     @skip_but_pass_in_sandcastle(
@@ -722,7 +718,7 @@ class DistributedDataParallelCUDATest(_DistributedDataParallelTestBase):
     )
     def test_ucc_backend_4gpu_module(self, device):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:4]
-        devices = [torch.device(torch.device(device).type, i) for i in int_devices]
+        devices = [torch.device(self.device_type, i) for i in int_devices]
         self._test_ucc_backend(devices, None, multi_device=True)
 
     @skip_but_pass_in_sandcastle("times out")
@@ -819,13 +815,6 @@ class DistributedDataParallelCUDATest(_DistributedDataParallelTestBase):
         "test requires 2+ accelerators",
     )
     def test_save_load_checkpoint(self, device):
-        dist.init_process_group(
-            "ucc",
-            init_method=f"file://{self.rdvz_file}",
-            world_size=self.world_size,
-            rank=self.rank,
-        )
-
         class TestModel(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -847,7 +836,7 @@ class DistributedDataParallelCUDATest(_DistributedDataParallelTestBase):
                 optimizer.step()
 
         device_id = gpus_for_rank(self.world_size)[self.rank][0]
-        dev = torch.device(torch.device(device).type, device_id)
+        dev = torch.device(self.device_type, device_id)
 
         model_withload = TestModel().float().to(dev)
         model_withoutload = TestModel().float().to(dev)
@@ -895,8 +884,7 @@ class DistributedDataParallelCUDATest(_DistributedDataParallelTestBase):
             torch.save(ddp_withload.state_dict(), checkpoint_path)
 
         dist.barrier()
-        device_type = torch.device(device).type
-        map_location = {f"{device_type}:0": f"{device_type}:{device_id}"}
+        map_location = {f"{self.device_type}:0": f"{self.device_type}:{device_id}"}
         ddp_state_dict = torch.load(checkpoint_path, map_location=map_location)
 
         for model in [ddp_withload, model_withload]:
@@ -1063,55 +1051,50 @@ class DistributedDataParallelUccCommHookValidationTest(MultiProcessTestCase):
             model.register_comm_hook(None, dummy_hook)
 
 
-class CommTest(test_c10d_common.AbstractCommTest, MultiProcContinuousTest):
-    hw_classification = HardwareClassification.ACCELERATOR
-
-    @classmethod
-    def backend_str(cls) -> str:
-        return "ucc"
+class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
+    hw_classification = HardwareClassification.CPU
 
     @property
-    def device(self) -> str:
+    def device(self):
         return "cpu"
 
+    def setUp(self):
+        super().setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
     @requires_ucc()
-    @skip_but_pass_in_sandcastle_if(
-        torch.accelerator.device_count() < 2,
-        "test requires 2+ accelerators",
-    )
-    def test_sequence_num_set_default_pg_ucc(self, device):
+    @skip_if_lt_x_gpu(2)
+    def test_sequence_num_set_default_pg_ucc(self):
         self._test_sequence_num_set_default_pg(backend="ucc")
 
     @requires_ucc()
-    @skip_but_pass_in_sandcastle_if(
-        torch.accelerator.device_count() < 2,
-        "test requires 2+ accelerators",
-    )
-    def test_sequence_num_set_ucc_new_group(self, device):
+    @skip_if_lt_x_gpu(2)
+    def test_sequence_num_set_ucc_new_group(self):
         self._test_sequence_num_set_new_group(backend="ucc")
 
-    @skip_but_pass_in_sandcastle_if(
-        torch.accelerator.device_count() < 2,
-        "test requires 2+ accelerators",
-    )
+    @skip_if_lt_x_gpu(2)
     @requires_ucc()
-    def test_sequence_num_incremented_ucc_default(self, device):
+    def test_sequence_num_incremented_ucc_default(self):
         self._test_sequence_num_incremented_default_group("ucc")
 
-    @skip_but_pass_in_sandcastle_if(
-        torch.accelerator.device_count() < 4,
-        "test requires 4+ accelerators",
-    )
+    @skip_if_lt_x_gpu(4)
     @requires_ucc()
-    def test_sequence_num_incremented_ucc_subgroup(self, device):
+    def test_sequence_num_incremented_ucc_subgroup(self):
         if self.world_size < 4:
             return skip_but_pass_in_sandcastle("Test requires world_size of at least 4")
         self._test_sequence_num_incremented_subgroup("ucc")
 
     @skip_but_pass_in_sandcastle("Fails on M60")
     @requires_ucc()
-    def test_ucc_barrier_device_ids(self, device):
-        store = c10d.FileStore(self.rdvz_file, self.world_size)
+    def test_ucc_barrier_device_ids(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
             backend="ucc", rank=self.rank, world_size=self.world_size, store=store
         )
@@ -1120,36 +1103,24 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcContinuousTest):
             c10d.barrier(device_ids=[self.rank])
 
     @skip_but_pass_in_sandcastle("Fails on M60")
-    @skip_but_pass_in_sandcastle_if(
-        torch.accelerator.device_count() < 2,
-        "test requires 2+ accelerators",
-    )
+    @skip_if_lt_x_gpu(2)
     @requires_ucc()
-    def test_ucc_warn_not_in_group(self, device):
+    def test_ucc_warn_not_in_group(self):
         self._test_warn_not_in_group(backend="ucc")
 
-    @skip_but_pass_in_sandcastle_if(
-        torch.accelerator.device_count() < 2,
-        "test requires 2+ accelerators",
-    )
+    @skip_if_lt_x_gpu(2)
     @requires_ucc()
-    def test_ucc_rank_membership(self, device):
+    def test_ucc_rank_membership(self):
         self._test_rank_membership(backend="ucc")
 
-    @skip_but_pass_in_sandcastle_if(
-        torch.accelerator.device_count() < 2,
-        "test requires 2+ accelerators",
-    )
+    @skip_if_lt_x_gpu(2)
     @requires_ucc()
-    def test_tensor_dtype_mismatch(self, device):
+    def test_tensor_dtype_mismatch(self):
         self._test_tensor_dtype_mismatch(backend="ucc")
 
-    @skip_but_pass_in_sandcastle_if(
-        torch.accelerator.device_count() < 2,
-        "test requires 2+ accelerators",
-    )
+    @skip_if_lt_x_gpu(2)
     @requires_ucc()
-    def test_tensor_dtype_complex(self, device):
+    def test_tensor_dtype_complex(self):
         self._test_tensor_dtype_complex(backend="ucc")
 
 
@@ -1189,16 +1160,5 @@ instantiate_device_type_tests(
     only_for=("cuda",),
 )
 
-instantiate_device_type_tests(
-    CommTest,
-    globals(),
-    except_for=("cpu",),
-)
-
 if __name__ == "__main__":
-    if torch.cuda._initialized:
-        raise AssertionError(
-            "test_distributed must not have initialized CUDA context on main process"
-        )
-
     run_tests()
