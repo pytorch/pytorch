@@ -1572,48 +1572,44 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         # type: ignore[attr-defined]
         return self.proxy
 
-    def call_method(
+    def mark_non_differentiable(
         self,
         tx: "InstructionTranslatorBase",
-        name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "__setattr__":
-            return super().call_method(tx, name, args, kwargs)
-        elif name == "mark_non_differentiable":
-            if kwargs:
-                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
-            self.non_differentiable = proxy_args_kwargs(args, {})[0]
-            return variables.ConstantVariable.create(None)
-        elif name == "mark_dirty":
-            if kwargs:
-                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
-            if getattr(self, "proxy", None) is None:
-                unimplemented(
-                    gb_type="Unsupported autograd.Function context `mark_dirty`",
-                    context=f"call_method {self} {name}",
-                    explanation="Dynamo only supports tracing ctx.mark_dirty "
-                    "inside autograd.Function.apply.",
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
-            self.dirty_tensors = args
-            return variables.ConstantVariable.create(None)
+        no_keywords(tx, "mark_non_differentiable", kwargs)
+        self.non_differentiable = proxy_args_kwargs(args, {})[0]
+        return variables.ConstantVariable.create(None)
 
-        if name != "save_for_backward":
+    def mark_dirty(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        no_keywords(tx, "mark_dirty", kwargs)
+        if getattr(self, "proxy", None) is None:
             unimplemented(
-                gb_type="Unsupported autograd.Function context method",
-                context=f"call_method {self} {name}",
-                explanation="Dynamo does not support calling the method "
-                f"`{name}` on `autograd.Function` context objects. Supported "
-                "methods are `__setattr__`, `save_for_backward`, "
-                "`mark_dirty` and `mark_non_differentiable`.",
+                gb_type="Unsupported autograd.Function context `mark_dirty`",
+                context=f"call_method {self} mark_dirty",
+                explanation="Dynamo only supports tracing ctx.mark_dirty "
+                "inside autograd.Function.apply.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
+        self.dirty_tensors = args
+        return variables.ConstantVariable.create(None)
+
+    def save_for_backward(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         if self.saved_tensors is None:
             unimplemented(
                 gb_type="Unsupported autograd.Function context `save_for_backward`",
-                context=f"call_method {self} {name}",
+                context=f"call_method {self} save_for_backward",
                 explanation="Dynamo requires the `saved_tensors` attribute "
                 "to be initialized on the `autograd.Function` context object.",
                 hints=[
@@ -1640,6 +1636,12 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         for arg in args:
             self.saved_tensors.tensors.append(arg)
         return variables.ConstantVariable.create(None)
+
+    tp_methods = {
+        "mark_non_differentiable": Method(mark_non_differentiable),
+        "mark_dirty": Method(mark_dirty),
+        "save_for_backward": Method(save_for_backward),
+    }
 
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
@@ -1671,45 +1673,36 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
     ) -> None:
         super().__init__(value=value, value_type=value_type, **kwargs)
 
-    def call_method(
+    def queue_callback(
         self,
         tx: "InstructionTranslatorBase",
-        name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "queue_callback":
-            if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
-                if not (tx.one_graph or tx.error_on_graph_break):
-                    raise AssertionError(
-                        "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
-                    )
-                # queue_callback is a method-wrapper, no need to insert a guard.
-                fn_vt = VariableTracker.build(
-                    tx,
-                    torch._dynamo.external_utils.FakeCompiledAutogradEngine.queue_callback,
+        if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+            if not (tx.one_graph or tx.error_on_graph_break):
+                raise AssertionError(
+                    "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
                 )
-                return fn_vt.call_function(
-                    tx,
-                    (tx.output.side_effects.get_ca_final_callbacks_var(), *args),
-                    kwargs,
-                )
-            else:
-                unimplemented(
-                    gb_type="Unsupported torch._C._ImperativeEngine.queue_callback()",
-                    context=f"call_method {self} {name}",
-                    explanation="queue_callback() is only supported when "
-                    "Compiled Autograd is enabled with fullgraph=True.",
-                    hints=[],
-                )
-        else:
-            unimplemented(
-                gb_type="Unsupported torch._C._ImperativeEngine method",
-                context=f"call_method {self} {name}",
-                explanation="Dynamo only supports the `queue_callback` method "
-                f"on a torch._C._ImperativeEngine instance, but found: `{name}`.",
-                hints=[],
+            # queue_callback is a method-wrapper, no need to insert a guard.
+            fn_vt = VariableTracker.build(
+                tx,
+                torch._dynamo.external_utils.FakeCompiledAutogradEngine.queue_callback,
             )
+            return fn_vt.call_function(
+                tx,
+                (tx.output.side_effects.get_ca_final_callbacks_var(), *args),
+                kwargs,
+            )
+        unimplemented(
+            gb_type="Unsupported torch._C._ImperativeEngine.queue_callback()",
+            context=f"call_method {self} queue_callback",
+            explanation="queue_callback() is only supported when "
+            "Compiled Autograd is enabled with fullgraph=True.",
+            hints=[],
+        )
+
+    tp_methods = {"queue_callback": Method(queue_callback)}
 
 
 class LambdaVariable(VariableTracker):
