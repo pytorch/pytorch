@@ -411,17 +411,9 @@ class TestVarlenAttentionDevice(NNTestCase):
             )
 
 
-class TestVarlenAttention(NNTestCase):
-    # NOTE: This class is currently CUDA-specific, although a significant portion of its
-    # functionality can be shared by other backends. Separating the common logic from
-    # CUDA-specific logic would require a substantial refactoring, so this is deferred
-    # for now.
-    # The planned refactoring is to introduce a Capability mechanism, allowing each backend
-    # to report its supported Flash Attention implementations (FA2/FA3/FA4) and determine
-    # whether to enable them accordingly. The cuDNN-related logic will also be separated
-    # from the current class and kept CUDA-specific, ultimately resulting in a generic
-    # Accelerator class and a CUDA-specific class.
-    hw_classification = HardwareClassification.CUDA
+class _VarlenVsSdpaMixin:
+    # Shared by the flash and the cuDNN test class, which cannot inherit from
+    # each other: each would then run the other's tests.
 
     def _test_varlen_vs_sdpa(
         self,
@@ -622,6 +614,19 @@ class TestVarlenAttention(NNTestCase):
             )
 
             start_idx = end_idx
+
+
+class TestVarlenAttention(_VarlenVsSdpaMixin, NNTestCase):
+    # NOTE: This class is currently CUDA-specific, although a significant portion of its
+    # functionality can be shared by other backends. Separating the common logic from
+    # CUDA-specific logic would require a substantial refactoring, so this is deferred
+    # for now.
+    # The planned refactoring is to introduce a Capability mechanism, allowing each backend
+    # to report its supported Flash Attention implementations (FA2/FA3/FA4) and determine
+    # whether to enable them accordingly. The cuDNN-related logic will also be separated
+    # from the current class and kept CUDA-specific, ultimately resulting in a generic
+    # Accelerator class and a CUDA-specific class.
+    hw_classification = HardwareClassification.CUDA
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
