@@ -2,6 +2,10 @@
 
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGuard.h>
+#ifdef USE_ROCM
+#include <c10/cuda/CUDAGraphsC10Utils.h>
+#include <c10/util/env.h>
+#endif
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_dev_cap.hpp>
@@ -99,8 +103,9 @@ class TORCH_API NCCLDevCommManager {
     return it->second;
   }
 
-  // Non-throwing lookup for teardown paths, where the owning process group may
-  // already have removed or replaced its communicator.
+#ifdef USE_ROCM
+  // Non-throwing lookup for ROCm teardown paths, where the owning process group
+  // may already have removed or replaced its communicator.
   std::optional<ncclComm_t> find_comm(const std::string& group_name) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = group_to_comm_.find(group_name);
@@ -109,6 +114,48 @@ class TORCH_API NCCLDevCommManager {
     }
     return it->second;
   }
+
+  bool comm_has_device_api_support(
+      const std::string& group_name,
+      ncclComm_t comm) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto comm_it = group_to_comm_.find(group_name);
+    auto support_it = group_to_device_api_support_.find(group_name);
+    return comm_it != group_to_comm_.end() && comm_it->second == comm &&
+        support_it != group_to_device_api_support_.end() &&
+        support_it->second;
+  }
+
+  bool capture_allocation_supported() {
+    if (c10::utils::check_env(
+            "TORCH_NCCL_SYMM_MEM_DISABLE_CAPTURE_ALLOC") == true) {
+      return false;
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (capture_setup_stream_ == nullptr) {
+      return false;
+    }
+    for (const auto& [_, supported] :
+         group_to_capture_allocation_support_) {
+      if (supported) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  std::mutex& capture_setup_mutex() {
+    return capture_setup_mutex_;
+  }
+
+  cudaStream_t capture_setup_stream() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    TORCH_CHECK(
+        capture_setup_stream_ != nullptr,
+        "ROCm NCCL symmetric-memory capture setup stream is unavailable");
+    return capture_setup_stream_;
+  }
+#endif
 
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
   // Register a device communicator for a group. If `key` is not
@@ -174,6 +221,38 @@ class TORCH_API NCCLDevCommManager {
   // Producers must call `unregister_comm` from their destructor.
   void register_comm(const std::string& group_name, ncclComm_t comm) {
     std::lock_guard<std::mutex> lock(mutex_);
+#ifdef USE_ROCM
+    ncclCommProperties_t comm_props = NCCL_COMM_PROPERTIES_INITIALIZER;
+    const bool device_api_support =
+        ncclCommQueryProperties(comm, &comm_props) == ncclSuccess &&
+        comm_props.deviceApiSupport;
+    group_to_device_api_support_[group_name] = device_api_support;
+
+    bool capture_allocation_support = false;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 30, 7)
+    int runtime_version = 0;
+    capture_allocation_support =
+        ncclGetVersion(&runtime_version) == ncclSuccess &&
+        runtime_version >= NCCL_VERSION(2, 30, 7) && device_api_support &&
+        c10::utils::check_env("NCCL_CUMEM_ENABLE") == true &&
+        c10::utils::check_env("NCCL_WIN_ENABLE") == true;
+    if (capture_allocation_support && capture_setup_stream_ == nullptr) {
+      c10::cuda::CUDAGuard device_guard(device_);
+      const cudaError_t status = cudaStreamCreateWithFlags(
+          &capture_setup_stream_, cudaStreamNonBlocking);
+      if (status != cudaSuccess) {
+        capture_setup_stream_ = nullptr;
+        capture_allocation_support = false;
+        TORCH_WARN(
+            "Failed to create the ROCm NCCL symmetric-memory capture setup "
+            "stream: ",
+            cudaGetErrorString(status));
+      }
+    }
+#endif
+    group_to_capture_allocation_support_[group_name] =
+        capture_allocation_support;
+#endif
     group_to_comm_[group_name] = comm;
   }
 
@@ -189,6 +268,10 @@ class TORCH_API NCCLDevCommManager {
   void unregister_comm(const std::string& group_name) {
     std::lock_guard<std::mutex> lock(mutex_);
     group_to_comm_.erase(group_name);
+#ifdef USE_ROCM
+    group_to_device_api_support_.erase(group_name);
+    group_to_capture_allocation_support_.erase(group_name);
+#endif
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
     devcomm_registry_.erase(group_name);
 #endif
@@ -203,6 +286,10 @@ class TORCH_API NCCLDevCommManager {
     auto it = group_to_comm_.find(group_name);
     if (it != group_to_comm_.end() && it->second == comm) {
       group_to_comm_.erase(it);
+#ifdef USE_ROCM
+      group_to_device_api_support_.erase(group_name);
+      group_to_capture_allocation_support_.erase(group_name);
+#endif
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
       devcomm_registry_.erase(group_name);
 #endif
@@ -232,6 +319,10 @@ class TORCH_API NCCLDevCommManager {
           // Destroy each device communicator in this group
           for (auto& [_, devcomm] : group_map) {
             // Destroy the device communicator using the host communicator
+#ifdef USE_ROCM
+            c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard{
+                cudaStreamCaptureModeRelaxed};
+#endif
             ncclDevCommDestroy(comm_it->second, &devcomm);
           }
         }
@@ -243,6 +334,17 @@ class TORCH_API NCCLDevCommManager {
           << "Failed to destroy the NCCL device communicator, skipping";
     }
 #endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+#ifdef USE_ROCM
+    if (capture_setup_stream_ != nullptr) {
+      try {
+        c10::cuda::CUDAGuard guard(device_);
+        C10_CUDA_CHECK_WARN(cudaStreamDestroy(capture_setup_stream_));
+      } catch (...) {
+        LOG(WARNING) << "Failed to destroy the ROCm NCCL symmetric-memory "
+                        "capture setup stream, skipping";
+      }
+    }
+#endif
   }
 
  private:
@@ -258,6 +360,14 @@ class TORCH_API NCCLDevCommManager {
   // communicators. It should be registered before any device communicators
   // for the same group.
   std::unordered_map<std::string, ncclComm_t> group_to_comm_;
+
+#ifdef USE_ROCM
+  std::unordered_map<std::string, bool> group_to_device_api_support_;
+  std::unordered_map<std::string, bool>
+      group_to_capture_allocation_support_;
+  cudaStream_t capture_setup_stream_{nullptr};
+  std::mutex capture_setup_mutex_;
+#endif
 
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
   // A two-level map for device communicators:

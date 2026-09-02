@@ -16,7 +16,9 @@
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#ifdef USE_ROCM
 #include <c10/cuda/CUDAGraphsC10Utils.h>
+#endif
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/error.h>
 #include <mutex>
@@ -128,10 +130,9 @@ NCCLAllocMap::iterator find_allocation_covering(
 
 } // namespace
 
-// NCCL before 2.29 resolves peer pointers with a device kernel.
-#if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0) && \
-    defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT)
-#define NCCL_SYMMEM_BUILD_PTR_DEV
+// Before NCCL 2.29, we can use device-side APIs to get peer pointers.
+#if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
 // Fill both peer pointer arrays in a single kernel launch. For each peer,
 // NCCL returns the window base (== signal pad base); the data buffer pointer
 // is derived as `base + buffer_offset`, mirroring the host-side layout.
@@ -152,7 +153,8 @@ static __global__ void build_ptr_dev(
           : static_cast<char*>(buf) + buffer_offset;
   }
 }
-#endif
+#endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+#endif // NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
 
 class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
  public:
@@ -186,12 +188,8 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
         "`init_process_group` call.");
 
 #ifdef USE_ROCM
-    ncclCommProperties_t comm_props = NCCL_COMM_PROPERTIES_INITIALIZER;
-    C10D_NCCL_CHECK(
-        ncclCommQueryProperties(comm_, &comm_props),
-        "ncclCommQueryProperties failed");
     TORCH_CHECK(
-        comm_props.deviceApiSupport,
+        mgr.comm_has_device_api_support(group_name_, comm_),
         "RCCL symmetric memory requires device API support. Set "
         "NCCL_CUMEM_ENABLE=1 before initializing the process group and ensure "
         "that all participating GPUs have peer access.");
@@ -205,9 +203,28 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     // for the data sub-region: only the base pointer (returned by
     // ncclMemAlloc, already granularity-aligned) is registered.
     const size_t aligned_buffer_size = at::round_up(buffer_size_, 16UL);
+#ifdef USE_ROCM
     const size_t total_size = at::round_up(
         buffer_offset_ + aligned_buffer_size,
         static_cast<size_t>(NCCL_WIN_REQUIRED_ALIGNMENT));
+#else
+    const size_t total_size = buffer_offset_ + aligned_buffer_size;
+#endif
+#ifdef USE_ROCM
+    {
+      c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard{
+          cudaStreamCaptureModeRelaxed};
+      C10D_NCCL_CHECK(
+        ncclCommWindowRegister(comm_, allocation->alloc_base, total_size, &combined_win_, NCCL_WIN_COLL_SYMMETRIC),
+        c10::str(
+            "Failed to window register segment with ptr ",
+            allocation->alloc_base,
+            ", size ",
+            total_size,
+            " on rank ",
+            rank_));
+    }
+#else
     C10D_NCCL_CHECK(
       ncclCommWindowRegister(comm_, allocation->alloc_base, total_size, &combined_win_, NCCL_WIN_COLL_SYMMETRIC),
       c10::str(
@@ -217,6 +234,7 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
           total_size,
           " on rank ",
           rank_));
+#endif
 
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
     // (Host comm is already published into NCCLDevCommManager by the
@@ -287,10 +305,13 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
       stream));
 #else
   C10_CUDA_CHECK(cudaMemcpy(
-      buffers_dev_, buffers_.data(), arr_size, cudaMemcpyHostToDevice));
+    buffers_dev_,  // dst (device)
+    buffers_.data(),  // src (host)
+    arr_size,
+    cudaMemcpyHostToDevice));
   C10_CUDA_CHECK(cudaMemcpy(
-      signal_pads_dev_,
-      signal_pads_.data(),
+      signal_pads_dev_,  // dst (device)
+      signal_pads_.data(),  // src (host)
       arr_size,
       cudaMemcpyHostToDevice));
 #endif
@@ -323,17 +344,30 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     }
     c10::cuda::CUDAGuard guard(device_idx_);
     if (combined_win_ != nullptr) {
+#ifdef USE_ROCM
       auto live_comm =
           NCCLDevCommManager::get(
               c10::Device(c10::DeviceType::CUDA, device_idx_))
               .find_comm(group_name_);
       if (live_comm.has_value() && *live_comm == comm_) {
-        auto res = ncclCommWindowDeregister(comm_, combined_win_);
+        ncclResult_t res;
+        {
+          c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard{
+              cudaStreamCaptureModeRelaxed};
+          res = ncclCommWindowDeregister(comm_, combined_win_);
+        }
         if (res != ncclSuccess) {
           LOG(WARNING) << "ncclCommWindowDeregister failed: "
                        << ncclGetErrorString(res);
         }
       }
+#else
+      auto res = ncclCommWindowDeregister(comm_, combined_win_);
+      if (res != ncclSuccess) {
+        LOG(WARNING) << "ncclCommWindowDeregister failed: "
+                     << ncclGetErrorString(res);
+      }
+#endif
     }
     if (buffers_dev_ != nullptr) {
       c10::cuda::CUDACachingAllocator::raw_delete(buffers_dev_);
@@ -594,24 +628,59 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     const size_t buffer_offset =
         at::round_up(get_signal_pad_size(), signal_pad_alignment);
     const size_t aligned_buffer_size = at::round_up(size, 16UL);
+#ifdef USE_ROCM
     const size_t total_size = at::round_up(
         buffer_offset + aligned_buffer_size,
         static_cast<size_t>(NCCL_WIN_REQUIRED_ALIGNMENT));
-
-#ifdef USE_ROCM
-    TORCH_CHECK(
-        c10::cuda::currentStreamCaptureStatusMayInitCtx() ==
-            c10::cuda::CaptureStatus::None,
-        "ROCm NCCL symmetric memory allocation is not supported during HIP "
-        "graph capture. Allocate the symmetric tensor before capture.");
+#else
+    const size_t total_size = buffer_offset + aligned_buffer_size;
 #endif
 
     void* alloc_base;
+#ifdef USE_ROCM
+    const bool is_capturing =
+        c10::cuda::currentStreamCaptureStatusMayInitCtx() !=
+        c10::cuda::CaptureStatus::None;
+    if (is_capturing) {
+      auto& mgr = NCCLDevCommManager::get(
+          c10::Device(c10::DeviceType::CUDA, device_idx));
+      TORCH_CHECK(
+          mgr.capture_allocation_supported(),
+          "Fresh ROCm NCCL symmetric-memory allocation during HIP graph "
+          "capture requires RCCL 2.30.7 or newer, device API support, and "
+          "NCCL_CUMEM_ENABLE=1 plus NCCL_WIN_ENABLE=1 set before process-group "
+          "initialization. Preallocate, rendezvous, and retain the symmetric "
+          "tensor before capture on older RCCL, or when "
+          "TORCH_NCCL_SYMM_MEM_DISABLE_CAPTURE_ALLOC=1.");
+
+      std::lock_guard<std::mutex> setup_lock(mgr.capture_setup_mutex());
+      const cudaStream_t setup_stream = mgr.capture_setup_stream();
+      c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard{
+          cudaStreamCaptureModeRelaxed};
+      C10D_NCCL_CHECK(ncclMemAlloc(&alloc_base, total_size), "ncclMemAlloc");
+
+      const cudaError_t memset_status =
+          cudaMemsetAsync(alloc_base, 0, buffer_offset, setup_stream);
+      if (memset_status != cudaSuccess) {
+        ncclMemFree(alloc_base);
+        C10_CUDA_CHECK(memset_status);
+      }
+      const cudaError_t sync_status = cudaStreamSynchronize(setup_stream);
+      if (sync_status != cudaSuccess) {
+        ncclMemFree(alloc_base);
+        C10_CUDA_CHECK(sync_status);
+      }
+    } else {
+      C10D_NCCL_CHECK(ncclMemAlloc(&alloc_base, total_size), "ncclMemAlloc");
+      C10_CUDA_CHECK(cudaMemset(alloc_base, 0, buffer_offset));
+    }
+#else
     C10D_NCCL_CHECK(ncclMemAlloc(&alloc_base, total_size), "ncclMemAlloc");
     // ncclMemAlloc does not zero memory. Zero the signal pad (the first
     // buffer_offset bytes) so the CAS-based barrier() protocol starts from a
     // known all-zero state on first use.
     C10_CUDA_CHECK(cudaMemset(alloc_base, 0, buffer_offset));
+#endif
     // Hand back the data buffer pointer, not alloc_base; the signal pad stays
     // hidden in front. Returning the data ptr is safe for free(): the whole
     // block is owned by the NCCLAllocation keyed below, which ncclMemFree's
@@ -643,7 +712,6 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       symm_mem_keys_by_alloc_.erase(cache_keys_it);
     }
     allocations_.erase(alloc_it);
-
   };
 
   size_t get_alloc_size(void* ptr) override {
@@ -737,7 +805,6 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   }
 
  private:
-
   std::mutex mutex_;
   NCCLAllocMap allocations_;
   NCCLSymmMemMap symm_mems_;

@@ -523,8 +523,8 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
             self.assertEqual(res, out)
 
     @skip_but_pass_in_sandcastle_if(
-        TEST_WITH_ROCM,
-        "ROCm symmetric tensors must be allocated before graph capture",
+        TEST_WITH_ROCM and nccl.version() < (2, 30, 7),
+        "Fresh ROCm symmetric allocation during graph capture requires RCCL 2.30.7",
     )
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_nccl_version(
@@ -538,36 +538,50 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         group_name = c10d.group.WORLD.group_name
 
         dtype = torch.float
-        numel = 1024
+        # Use a ROCm-only size that no earlier test places in the no-split
+        # symmetric MemPool, so this test deterministically reaches raw alloc().
+        numel = 1_000_003 if TEST_WITH_ROCM else 1024
         capture_offset = torch.tensor(1, dtype=dtype, device=self.device)
         capture_stream = torch.cuda.Stream(device=self.device)
 
-        # Warm up on the same stream that will be captured. This establishes
-        # NCCL window metadata for the symmetric block that capture reuses.
-        with torch.cuda.stream(capture_stream):
-            inp = symm_mem.empty(numel, dtype=dtype, device=self.device)
-            out = torch.empty(numel, dtype=dtype, device=self.device)
-            for warmup_idx in range(3):
-                offset = 1 + warmup_idx
-                capture_offset.fill_(self.rank + offset)
+        if not TEST_WITH_ROCM:
+            # Preserve CUDA's existing warm-up path. ROCm 2.30.7+ deliberately
+            # skips it so capture exercises a raw symmetric-pool cache miss.
+            with torch.cuda.stream(capture_stream):
                 inp = symm_mem.empty(numel, dtype=dtype, device=self.device)
                 out = torch.empty(numel, dtype=dtype, device=self.device)
-                inp.fill_(capture_offset)
-                out.fill_(0.0)
-                torch.ops.symm_mem.one_shot_all_reduce_out(inp, "sum", group_name, out)
-                expected_sum = float(
-                    self.world_size * offset
-                    + self.world_size * (self.world_size - 1) / 2
-                )
-                self.assertEqual(out, torch.full_like(out, expected_sum))
-            del inp, out
-        capture_stream.synchronize()
+                for warmup_idx in range(3):
+                    offset = 1 + warmup_idx
+                    capture_offset.fill_(self.rank + offset)
+                    inp = symm_mem.empty(numel, dtype=dtype, device=self.device)
+                    out = torch.empty(numel, dtype=dtype, device=self.device)
+                    inp.fill_(capture_offset)
+                    out.fill_(0.0)
+                    torch.ops.symm_mem.one_shot_all_reduce_out(
+                        inp, "sum", group_name, out
+                    )
+                    expected_sum = float(
+                        self.world_size * offset
+                        + self.world_size * (self.world_size - 1) / 2
+                    )
+                    self.assertEqual(out, torch.full_like(out, expected_sum))
+                del inp, out
+            capture_stream.synchronize()
 
         graph = torch.cuda.CUDAGraph()
         offset = 13
         capture_offset.fill_(self.rank + offset)
         with torch.cuda.graph(graph, stream=capture_stream):
             inp = symm_mem.empty(numel, dtype=dtype, device=self.device)
+            if TEST_WITH_ROCM:
+                same_size = symm_mem.empty(numel, dtype=dtype, device=self.device)
+                different_size = symm_mem.empty(
+                    2 * numel, dtype=dtype, device=self.device
+                )
+                symm_mem.rendezvous(same_size, group=group_name)
+                symm_mem.rendezvous(different_size, group=group_name)
+                same_size.fill_(capture_offset)
+                different_size.fill_(capture_offset)
             out = torch.empty(numel, dtype=dtype, device=self.device)
             inp.fill_(capture_offset)
             out.fill_(0.0)
@@ -578,6 +592,12 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
             self.world_size * offset + self.world_size * (self.world_size - 1) / 2
         )
         self.assertEqual(out, torch.full_like(out, expected_sum))
+        if TEST_WITH_ROCM:
+            self.assertEqual(same_size, torch.full_like(same_size, self.rank + offset))
+            self.assertEqual(
+                different_size,
+                torch.full_like(different_size, self.rank + offset),
+            )
 
         for repeat in range(3):
             offset = 20 + repeat
@@ -587,6 +607,40 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
                 self.world_size * offset + self.world_size * (self.world_size - 1) / 2
             )
             self.assertEqual(out, torch.full_like(out, expected_sum))
+            if TEST_WITH_ROCM:
+                self.assertEqual(
+                    same_size, torch.full_like(same_size, self.rank + offset)
+                )
+                self.assertEqual(
+                    different_size,
+                    torch.full_like(different_size, self.rank + offset),
+                )
+
+    @skip_but_pass_in_sandcastle_if(
+        not (TEST_WITH_ROCM and nccl.version() >= (2, 30, 7)),
+        "ROCm RCCL 2.30.7+ capture-allocation kill-switch test",
+    )
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @skip_if_lt_x_gpu(2)
+    def test_nccl_symmem_capture_allocation_kill_switch(self):
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        c10d.all_reduce(torch.ones(1, device=self.device))
+
+        variable = "TORCH_NCCL_SYMM_MEM_DISABLE_CAPTURE_ALLOC"
+        previous = os.environ.get(variable)
+        os.environ[variable] = "1"
+        try:
+            graph = torch.cuda.CUDAGraph()
+            capture_stream = torch.cuda.Stream(device=self.device)
+            with self.assertRaisesRegex(RuntimeError, "requires RCCL 2.30.7"):
+                with torch.cuda.graph(graph, stream=capture_stream):
+                    symm_mem.empty(1_000_003, device=self.device)
+        finally:
+            if previous is None:
+                os.environ.pop(variable, None)
+            else:
+                os.environ[variable] = previous
 
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_nccl_version(
@@ -1312,6 +1366,37 @@ class NCCLSymmetricMemoryNccl2Test(MultiProcContinuousTest):
         self.assertEqual(
             result, torch.full_like(result, (self.world_size - 1) * self.world_size / 2)
         )
+
+    @skip_but_pass_in_sandcastle_if(
+        not (TEST_WITH_ROCM and nccl.version() >= (2, 30, 7)),
+        "ROCm RCCL 2.30.7+ fresh capture-allocation test",
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_nccl_symmem_fresh_cuda_graph(self):
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        self.assertEqual(c10d.get_backend(c10d.group.WORLD), self.backend_name)
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        group_name = c10d.group.WORLD.group_name
+
+        graph = torch.cuda.CUDAGraph()
+        capture_stream = torch.cuda.Stream(device=self.device)
+        with torch.cuda.graph(graph, stream=capture_stream):
+            tensor = symm_mem.empty(
+                1_234_567, dtype=torch.float, device=self.device
+            ).fill_(self.rank + 1)
+            result = torch.ops.symm_mem.one_shot_all_reduce(
+                tensor, "sum", group_name
+            )
+
+        for _ in range(3):
+            graph.replay()
+            self.assertEqual(
+                result,
+                torch.full_like(
+                    result, self.world_size * (self.world_size + 1) / 2
+                ),
+            )
 
 
 @skipIfRocmVersionLessThan((10, 1))

@@ -21,16 +21,11 @@
 // Synchronization uses per-CTA LSA barriers (same as nccl_reduce_scatter_columns)
 // so all ranks must launch the same grid shape.
 
-// This op requires a host-created device communicator.
-#ifdef NCCL_HAS_DEVCOMM
-#define NCCL_A2A_ENABLED
-#endif
-
 namespace c10d::nccl_extension {
 
 using namespace c10d::symmetric_memory;
 
-#ifdef NCCL_A2A_ENABLED
+#ifdef NCCL_HAS_DEVCOMM
 
 namespace {
 
@@ -135,8 +130,7 @@ __global__ void all_to_all_lsa_kernel(
   bar.sync(coop, cuda::memory_order_release);
 }
 
-
-#endif // NCCL_A2A_ENABLED
+#endif // NCCL_HAS_DEVCOMM
 
 // Host entry point.  Validates arguments, builds the devcomm (cached), and
 // launches the kernel.  See file-level comment for semantics.
@@ -146,7 +140,7 @@ void nccl_all_to_all_nd(
     int64_t scatter_dim,
     int64_t gather_dim,
     const std::string& group_name) {
-#ifdef NCCL_A2A_ENABLED
+#ifdef NCCL_HAS_DEVCOMM
   TORCH_CHECK(
       input.stride(-1) == 1,
       "nccl_all_to_all_nd: innermost dimension must be contiguous (stride[-1] == 1)");
@@ -181,9 +175,19 @@ void nccl_all_to_all_nd(
     ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
     reqs.lsaBarrierCount = A2A_MAX_CTA_COUNT;
     ncclDevComm devcomm;
+#ifdef USE_ROCM
+    {
+      c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard{
+          cudaStreamCaptureModeRelaxed};
+      C10D_NCCL_CHECK(
+          ncclDevCommCreate(comm, &reqs, &devcomm),
+          "ncclDevCommCreate failed in nccl_all_to_all_nd");
+    }
+#else
     C10D_NCCL_CHECK(
         ncclDevCommCreate(comm, &reqs, &devcomm),
         "ncclDevCommCreate failed in nccl_all_to_all_nd");
+#endif
     devcomm_opt = manager.register_devcomm(group_name, devcomm, kDevcommKey);
   }
   ncclDevComm& devcomm = devcomm_opt->get();
@@ -377,7 +381,7 @@ void nccl_all_to_all_nd(
   }
 #else
   TORCH_CHECK(false, "nccl_all_to_all_nd requires NCCL >= 2.29 with the symmetric-memory device-communicator API");
-#endif // NCCL_A2A_ENABLED
+#endif // NCCL_HAS_DEVCOMM
 }
 
 } // namespace c10d::nccl_extension

@@ -241,9 +241,19 @@ void nccl_all_gather_offset(
     reqs.lsaBarrierCount = AG_MAX_CTAS;
     reqs.lsaMultimem = use_multimem;
     ncclDevComm devcomm;
+#ifdef USE_ROCM
+    {
+      c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard{
+          cudaStreamCaptureModeRelaxed};
+      C10D_NCCL_CHECK(
+          ncclDevCommCreate(comm, &reqs, &devcomm),
+          "ncclDevCommCreate failed in nccl_all_gather_offset");
+    }
+#else
     C10D_NCCL_CHECK(
         ncclDevCommCreate(comm, &reqs, &devcomm),
         "ncclDevCommCreate failed in nccl_all_gather_offset");
+#endif
     devcomm_opt = manager.register_devcomm(group_name, devcomm, devcomm_key);
   }
   ncclDevComm& devcomm = devcomm_opt->get();
@@ -292,7 +302,11 @@ void nccl_all_gather_offset(
   auto out_window = out_hdl->get_window();
   TORCH_CHECK(
       out_window != nullptr, "nccl_all_gather_offset: out window is null");
+#ifdef USE_ROCM
   const size_t out_window_base_offset = out_hdl->get_window_offset();
+#else
+  const size_t out_window_base_offset = out_hdl->get_offset();
+#endif
   TORCH_CHECK(
       reinterpret_cast<uintptr_t>(input.data_ptr()) % AG_ALIGN == 0,
       "nccl_all_gather_offset: input must be 16-byte aligned");
