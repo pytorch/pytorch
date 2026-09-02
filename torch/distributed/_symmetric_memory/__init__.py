@@ -24,7 +24,7 @@ from torch._prims_common import make_contiguous_strides_for
 from torch.utils._triton import has_triton
 
 
-_watchdog_timeout: float | timedelta | None = timedelta(minutes=10)
+_watchdog_timeout: float | timedelta | None = None
 
 
 def set_watchdog_timeout(timeout: float | timedelta | None) -> None:
