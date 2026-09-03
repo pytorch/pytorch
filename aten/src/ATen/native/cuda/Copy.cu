@@ -280,7 +280,8 @@ struct TransposeTilePad {
 template <typename T, bool kGridStride>
 __global__ void transpose_copy_tiled_kernel(
     const T* __restrict__ src, T* __restrict__ dst,
-    int64_t width, int64_t height) {
+    int64_t width, int64_t height,
+    int64_t src_pitch, int64_t dst_pitch) {
   __shared__ T tile[kTransposeTile][kTransposeTile + TransposeTilePad<T>::value];
 
   // gridDim.y is capped at 65535 on every compute capability, so walk the
@@ -294,7 +295,7 @@ __global__ void transpose_copy_tiled_kernel(
 
     for (int j = 0; j < kTransposeTile; j += kTransposeRows) {
       if (x < width && (y + j) < height) {
-        tile[threadIdx.y + j][threadIdx.x] = src[(y + j) * width + x];
+        tile[threadIdx.y + j][threadIdx.x] = src[(y + j) * src_pitch + x];
       }
     }
     __syncthreads();
@@ -304,7 +305,7 @@ __global__ void transpose_copy_tiled_kernel(
 
     for (int j = 0; j < kTransposeTile; j += kTransposeRows) {
       if (x < height && (y + j) < width) {
-        dst[(y + j) * height + x] = tile[threadIdx.x][threadIdx.y + j];
+        dst[(y + j) * dst_pitch + x] = tile[threadIdx.x][threadIdx.y + j];
       }
     }
     // With a single pass there is no next iteration to guard
@@ -318,20 +319,20 @@ __global__ void transpose_copy_tiled_kernel(
 template <typename T>
 void launch_tiled_transpose(bool needs_stride, dim3 grid, dim3 block,
                             cudaStream_t stream, const void* sp, void* dp,
-                            int64_t w, int64_t h) {
+                            int64_t w, int64_t h,
+                int64_t src_pitch, int64_t dst_pitch) {
   if (needs_stride) {
     transpose_copy_tiled_kernel<T, true><<<grid, block, 0, stream>>>(
-        reinterpret_cast<const T*>(sp), reinterpret_cast<T*>(dp), w, h);
+        reinterpret_cast<const T*>(sp), reinterpret_cast<T*>(dp), w, h, src_pitch, dst_pitch);
   } else {
     transpose_copy_tiled_kernel<T, false><<<grid, block, 0, stream>>>(
-        reinterpret_cast<const T*>(sp), reinterpret_cast<T*>(dp), w, h);
+        reinterpret_cast<const T*>(sp), reinterpret_cast<T*>(dp), w, h, src_pitch, dst_pitch);
   }
 }
 
 bool maybe_tiled_transpose_copy(TensorIterator& iter) {
   if (iter.ndim() != 2) return false;
   const int64_t es = iter.element_size(0);
-  if (iter.element_size(1) != es) return false;
 
   auto shape = iter.shape();
   auto os = iter.strides(0);
@@ -339,8 +340,11 @@ bool maybe_tiled_transpose_copy(TensorIterator& iter) {
   const int64_t h = shape[0];
   const int64_t w = shape[1];
 
-  if (os[0] != es || os[1] != es * h) return false;
-  if (is[1] != es || is[0] != es * w) return false;
+  if (os[0] != es || is[1] != es) return false;
+  if (os[1] < es * h || is[0] < es * w) return false;
+  const int64_t dst_pitch = os[1] / es;   // elements between dst rows
+  const int64_t src_pitch = is[0] / es;   // elements between src rows
+  if (os[1] % es != 0 || is[0] % es != 0) return false;
 
   // Below ~4 MB the tiled path and the generic strided kernel are
   // indistinguishable above kernel-launch overhead (measured on sm_89 with
@@ -350,7 +354,7 @@ bool maybe_tiled_transpose_copy(TensorIterator& iter) {
   // already reaches peak bandwidth and tiling costs ~4%.
   if (h * w * es < (int64_t(4) << 20)) return false;
 
-  constexpr int64_t kMaxGridY = 65535;
+  const int64_t kMaxGridY = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
   const int64_t tiles_x = (w + kTransposeTile - 1) / kTransposeTile;
   const int64_t tiles_y = (h + kTransposeTile - 1) / kTransposeTile;
   dim3 block(kTransposeTile, kTransposeRows);
@@ -362,10 +366,10 @@ bool maybe_tiled_transpose_copy(TensorIterator& iter) {
   void* dp = iter.tensor(0).mutable_data_ptr();
 
   switch (es) {
-    case 1: launch_tiled_transpose<uint8_t>(needs_stride, grid, block, stream, sp, dp, w, h); break;
-    case 2: launch_tiled_transpose<uint16_t>(needs_stride, grid, block, stream, sp, dp, w, h); break;
-    case 4: launch_tiled_transpose<uint32_t>(needs_stride, grid, block, stream, sp, dp, w, h); break;
-    case 8: launch_tiled_transpose<uint64_t>(needs_stride, grid, block, stream, sp, dp, w, h); break;
+    case 1: launch_tiled_transpose<uint8_t>(needs_stride, grid, block, stream, sp, dp, w, h, src_pitch, dst_pitch); break;
+    case 2: launch_tiled_transpose<uint16_t>(needs_stride, grid, block, stream, sp, dp, w, h, src_pitch, dst_pitch); break;
+    case 4: launch_tiled_transpose<uint32_t>(needs_stride, grid, block, stream, sp, dp, w, h, src_pitch, dst_pitch); break;
+    case 8: launch_tiled_transpose<uint64_t>(needs_stride, grid, block, stream, sp, dp, w, h, src_pitch, dst_pitch); break;
     default: return false;
   }
 

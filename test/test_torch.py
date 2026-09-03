@@ -3422,20 +3422,16 @@ class TestTorchDeviceType(TestCase):
                 src = make_tensor((h, w), dtype=dtype, device=device)
                 out = src.t().contiguous()
                 self.assertEqual(out.cpu(), src.cpu().t().contiguous(), atol=0, rtol=0)
+        base = make_tensor((4096, 8192), dtype=dtype, device=device)
+        for view in (base[:, :4096], base[:2048], base[::2]):
+            out = view.t().contiguous()
+            self.assertEqual(out.cpu(), view.cpu().t().contiguous(), atol=0, rtol=0)
 
     # Shapes that must NOT take the tiled path, to guard the dispatch check.
     @onlyCUDA
     @dtypes(torch.float32)
     def test_copy_transpose_tiled_rejects(self, device, dtype):
         big = make_tensor((4096, 4096), dtype=dtype, device=device)
-
-        # strided source: rows are not densely packed
-        strided = big[::2].t()
-        self.assertEqual(strided.contiguous().cpu(), strided.cpu(), atol=0, rtol=0)
-
-        # narrowed source: columns are not densely packed
-        narrowed = big[:, :2048].t()
-        self.assertEqual(narrowed.contiguous().cpu(), narrowed.cpu(), atol=0, rtol=0)
 
         # broadcast source: zero stride
         expanded = make_tensor((1, 4096), dtype=dtype, device=device).expand(4096, 4096)
