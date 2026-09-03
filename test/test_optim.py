@@ -863,14 +863,19 @@ class TestOptimRenewed(TestCase):
                 )
                 model.to(dtype=dtype, device=device)
 
-                # foreach/fused optimizers should be tested with a
-                # zero_size tensor as its last param.
-                # ref: https://github.com/pytorch/pytorch/issues/100701
-                empty_param = torch.empty(
-                    (), device=device, dtype=dtype, requires_grad=True
-                )
-                empty_param.grad = torch.rand_like(empty_param)
-                params = list(model.parameters()) + [empty_param]
+                if optim_cls.__name__ == "Muon":
+                    # Muon only accepts 2D parameters, so filter out the 1D
+                    # biases.
+                    params = [p for p in model.parameters() if p.ndim == 2]
+                else:
+                    # foreach/fused optimizers should be tested with a
+                    # zero_size tensor as its last param.
+                    # ref: https://github.com/pytorch/pytorch/issues/100701
+                    empty_param = torch.empty(
+                        (), device=device, dtype=dtype, requires_grad=True
+                    )
+                    empty_param.grad = torch.rand_like(empty_param)
+                    params = list(model.parameters()) + [empty_param]
 
                 optimizer = optim_cls(params, **kwargs)
                 models.append(model)
@@ -1055,7 +1060,11 @@ class TestOptimRenewed(TestCase):
         numel = 2**32 - 2**23 if optim_cls.__name__ == "Adafactor" else 2**32
         optim_inputs = optim_info.optim_inputs_func(device=device)
         for optim_input in optim_inputs:
-            params = [torch.ones(numel, device=device, dtype=dtype)]
+            shape = (3, (numel + 2) // 3) if optim_cls.__name__ == "Muon" else (numel,)
+            # Muon's per-element update for this extreme shape rounds away at
+            # one in float16, so start from zero when checking for an update.
+            initial_value = 0 if optim_cls.__name__ == "Muon" else 1
+            params = [torch.full(shape, initial_value, device=device, dtype=dtype)]
             params[0].grad = torch.ones_like(params[0])
             optimizer = optim_cls(params, foreach=True, **optim_input.kwargs)
             optimizer.step()
@@ -1063,10 +1072,21 @@ class TestOptimRenewed(TestCase):
             # Every element saw the same param and grad, so they must all agree.
             # Compare with a size 1 param for reference.
             self.assertEqual(params[0].min(), params[0].max())
+            if optim_cls.__name__ == "Muon":
+                momentum_buffer = optimizer.state[params[0]]["momentum_buffer"]
+                self.assertEqual(momentum_buffer.min(), momentum_buffer.max())
+                self.assertNotEqual(momentum_buffer.flatten()[0], 0)
+                # Only match_rms_adamw scales this extreme shape enough for the
+                # parameter update to remain observable in float16.
+                if optim_input.kwargs.get("adjust_lr_fn") == "match_rms_adamw":
+                    self.assertNotEqual(params[0].flatten()[0], initial_value)
+                # Muon scales its update by the parameter shape, so a smaller
+                # reference tensor is not numerically comparable.
+                continue
             ref = torch.ones(1, device=device, dtype=dtype)
             ref.grad = torch.ones_like(ref)
             optim_cls([ref], foreach=True, **optim_input.kwargs).step()
-            self.assertEqual(params[0][0], ref[0])
+            self.assertEqual(params[0].flatten()[0], ref.flatten()[0])
 
     @onlyAccelerator
     @skipMPS
@@ -1146,6 +1166,10 @@ class TestOptimRenewed(TestCase):
                 if optim_cls.__name__ == "Adafactor" and kwargs.get("maximize", False):
                     # When maximize is True, Adafactor also tracks device_grad
                     nintermediates = 3
+            elif optim_cls.__name__ == "Muon":
+                # Muon keeps the orthogonalized updates and their full-precision
+                # copies live together before applying the parameter update.
+                nintermediates = 2
 
             # Dynamo ST uses less mem than eager in the case of Adam/Adagrad/Nadam/RAdam
             # which makes the foreach memory check fail
@@ -1707,7 +1731,7 @@ class TestOptimRenewed(TestCase):
 
         def _get_model_and_input_tensor(device, dtype, optim_cls):
             if optim_cls.__name__ == "Muon":
-                # Muon only accepts 2D parameter.
+                # Muon only accepts 2D parameters.
                 model = torch.nn.Linear(10, 4, bias=False)
                 input = torch.rand(10, device=device, dtype=dtype)
             else:
@@ -2463,14 +2487,19 @@ class TestOptimRenewed(TestCase):
         from torch.optim import Adam, AdamW
 
         optim_cls = optim_info.optim_cls
-        model = torch.nn.Linear(5, 5)
+        model = torch.nn.Linear(5, 5, bias=optim_cls.__name__ != "Muon")
         model.to(dtype=dtype, device=device)
         inpt = torch.rand(2, 5, dtype=dtype, device=device)
 
         import inspect
 
         # AdamW dispatches to superclass' adam
-        if optim_cls is AdamW:
+        if optim_cls.__name__ == "Muon":
+            import torch.optim._muon as muon_module
+
+            module = muon_module
+            module_name = "_multi_tensor_muon"
+        elif optim_cls is AdamW:
             module = inspect.getmodule(Adam)
             module_name = "_multi_tensor_adam"
         else:
