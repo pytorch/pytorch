@@ -23,7 +23,10 @@ class ShardedTensorTestBase(MultiProcessTestCase):
 
     @property
     def backend(self) -> str:
-        return dist.get_default_backend_for_device(self.device_type)
+        device_type = getattr(self, "device_type", None)
+        if device_type is None:
+            return "nccl"
+        return dist.get_default_backend_for_device(device_type)
 
     @property
     def current_device(self) -> torch.device:
@@ -100,7 +103,6 @@ class ShardedTensorTestBase(MultiProcessTestCase):
 
 
 # wrapper to initialize comms (processgroup + rpc)
-# backend=None resolves the default backend for the instantiated device type
 def with_comms(func=None, init_rpc=True, backend=None):
     if func is None:
         return partial(
@@ -112,14 +114,8 @@ def with_comms(func=None, init_rpc=True, backend=None):
     @wraps(func)
     def wrapper(self, *args, **kwargs):
         # Skip test if backend requires accelerator but not enough devices available
-        pg_backend = backend or self.backend
-        acc = torch.accelerator.current_accelerator()
-        if pg_backend != dist.Backend.GLOO:
-            if (
-                acc is None
-                or pg_backend != dist.get_default_backend_for_device(acc)
-                or torch.accelerator.device_count() < self.world_size
-            ):
+        if (backend or self.backend) != dist.Backend.GLOO:
+            if torch.accelerator.device_count() < self.world_size:
                 sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
         self.init_comms(init_rpc=init_rpc, backend=backend)
         func(self, *args, **kwargs)
