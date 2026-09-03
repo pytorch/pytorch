@@ -1258,12 +1258,19 @@ class TestObjectConstruction(TestCase):
             backend = dynamo_testing.EagerAndRecordGraphs()
 
             @torch.compile(backend=backend, fullgraph=True)
-            def fn(x):
-                return PrivateUse1FloatTensor(x)
+            def fn(x, y):
+                return PrivateUse1FloatTensor([x, y])
 
-            x = torch.randn(3)
-            self.assertEqual(fn(x), x)
+            x = torch.randn(())
+            y = torch.randn(())
+            self.assertEqual(fn(x, y), torch.stack([x, y]))
             self.assertEqual(len(backend.graphs), 1)
+            self.assertTrue(
+                any(
+                    node.op == "call_function" and node.target is torch.stack
+                    for node in backend.graphs[0].graph.nodes
+                )
+            )
             self.assertTrue(
                 any(
                     node.op == "call_function" and node.target is PrivateUse1FloatTensor
