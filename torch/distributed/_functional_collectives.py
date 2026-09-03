@@ -184,6 +184,11 @@ def all_reduce(
 
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
+
+    :: N.B. ``premul_sum`` backward assumes the pre-multiplier is identical on
+    every rank. With a per-rank (or tensor) factor the backward is incorrect: it
+    re-applies ``premul_sum`` to the gradient, yielding ``sum_s k_s * g_s``,
+    instead of scaling the summed gradient locally by this rank's ``k_r``.
     """
     group = _resolve_group(group, tag)
     reduce_op = reduceOp.lower() if isinstance(reduceOp, str) else reduceOp
@@ -412,6 +417,11 @@ def all_reduce_coalesced(
 
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
+
+    :: N.B. ``premul_sum`` backward assumes the pre-multiplier is identical on
+    every rank. With a per-rank (or tensor) factor the backward is incorrect: it
+    re-applies ``premul_sum`` to the gradient, yielding ``sum_s k_s * g_s``,
+    instead of scaling the summed gradient locally by this rank's ``k_r``.
     """
     group = _resolve_group(group, tag)
     reduce_op = reduceOp.lower() if isinstance(reduceOp, str) else reduceOp
