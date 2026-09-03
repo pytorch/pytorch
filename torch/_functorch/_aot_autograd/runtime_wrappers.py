@@ -238,6 +238,53 @@ def _identity(x: Any) -> Any:
     return x
 
 
+def _replay_input_mutation(
+    orig: torch.Tensor,
+    updated: torch.Tensor,
+    idx: int,
+    compile_id: str | None,
+    warned: set[int],
+    hidden: bool,
+) -> None:
+    """Write functionalized input mutation ``idx`` back onto the caller's tensor.
+
+    A tracked ``copy_``, except under grad mode onto a requires-grad view stamped
+    IN_CUSTOM_FUNCTION (an input a custom autograd.Function returned as-is),
+    which autograd then refuses to modify in place: that write is replayed under
+    no_grad with the version counter preserved, as a ``.data`` write did in
+    eager. With grad mode off eager itself writes such a view tracked, version
+    bump included, so the plain copy_ stands. Decided per call: nothing guards
+    the view's provenance. The invisible replay deliberately diverges from eager,
+    which raises on a visible write, and warns once per input (``warned`` is the
+    owning epilogue's set) unless ``hidden`` says the traced write was itself
+    invisible to autograd.
+    """
+    # pybind11 hands back a fresh enum object each call, so this cannot be `is`.
+    if (
+        torch.is_grad_enabled()
+        and orig.requires_grad
+        and orig._is_view()
+        and torch._C._autograd._get_creation_meta(orig)
+        == torch._C._autograd.CreationMeta.IN_CUSTOM_FUNCTION
+    ):
+        if not hidden and idx not in warned:
+            warned.add(idx)
+            graph = f" of compiled graph [{compile_id}]" if compile_id else ""
+            warnings.warn(
+                f"torch.compile is writing mutated input {idx}{graph} back onto a "
+                "view created inside a custom autograd.Function (or an input it "
+                "returned as-is) without autograd tracking. Eager rejects an "
+                "autograd-visible in-place op on such a view; compile cannot tell "
+                "that apart from a write that bypasses autograd (e.g. through "
+                ".data), so it replays the mutation invisibly and gradients that "
+                "later flow through this input see its pre-mutation history only."
+            )
+        with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(orig):
+            orig.copy_(updated)
+    else:
+        orig.copy_(updated)
+
+
 class AliasOfInputHandler:
     def __init__(
         self,
@@ -622,6 +669,7 @@ class _RuntimeForwardEpilogue:
     trace_joint: bool
     keep_input_mutations: bool
     epilogue_args_idx: tuple[int, ...] = field(init=False)
+    warned_inputs: set[int] = field(default_factory=set, init=False)
     output_handlers: tuple[
         NoopAliasHandler
         | AliasOfInputHandler
@@ -766,6 +814,8 @@ class _RuntimeForwardEpilogue:
                 )
             else:
                 if meta.mutates_data and meta.mutates_metadata:
+                    # Tracked, so a metadata mutation on an IN_CUSTOM_FUNCTION
+                    # view is still refused here, matching eager.
                     original_inpt.as_strided_(
                         updated_inpt.size(),
                         updated_inpt.stride(),
@@ -800,7 +850,15 @@ class _RuntimeForwardEpilogue:
                             "Mutations on inputs with user-specified streams are not yet supported. "
                             "See: https://github.com/pytorch/pytorch/issues/172522"
                         )
-                    original_inpt.copy_(updated_inpt)
+                    _replay_input_mutation(
+                        original_inpt,
+                        updated_inpt,
+                        inpt_idx,
+                        self.runtime_metadata.compile_id_str,
+                        self.warned_inputs,
+                        meta.mutations_hidden_from_autograd
+                        or meta.mutations_under_no_grad_or_inference_mode,
+                    )
 
     def _replay_output_aliases(
         self, orig_inputs: dict[int, Tensor], fw_outs: list[Any]
@@ -979,6 +1037,10 @@ def _create_runtime_wrapper(
     keep_input_mutations: bool,
     disable_amp: bool,
 ) -> Callable[..., Any]:
+    if runtime_metadata.compile_id_str is None:
+        compile_id = CompileContext.current_compile_id()
+        if compile_id is not None:
+            runtime_metadata.compile_id_str = str(compile_id)
     compiled_invoker = _RuntimeCompiledFnInvoker(
         compiled_fn=compiled_fn,
         indices_of_inps_to_detach=indices_of_inps_to_detach,
@@ -1089,7 +1151,12 @@ def _create_runtime_wrapper(
             args="orig_inputs, updated_inputs",
             artifact_name="mutation_epilogue",
         )
-        buf.bind(torch=torch, _unwrap_tensoralias=_unwrap_tensoralias)
+        buf.bind(
+            torch=torch,
+            _unwrap_tensoralias=_unwrap_tensoralias,
+            _replay_input_mutation=_replay_input_mutation,
+            _warned_inputs=runtime_epilogue.warned_inputs,
+        )
         wrote_body = False
         with buf.indent():
             for i, inpt_idx in enumerate(runtime_metadata.mutated_inp_runtime_indices):
@@ -1117,6 +1184,8 @@ def _create_runtime_wrapper(
                     )
                 else:
                     if meta.mutates_data and meta.mutates_metadata:
+                        # Tracked, so a metadata mutation on an IN_CUSTOM_FUNCTION
+                        # view is still refused here, matching eager.
                         buf.writeline(
                             f"{oi}.as_strided_({ui}.size(), {ui}.stride(), {ui}.storage_offset())"
                         )
@@ -1125,27 +1194,35 @@ def _create_runtime_wrapper(
                             raise AssertionError(
                                 f"expected mutates_data for input {inpt_idx}"
                             )
+                    has_stream = (
+                        runtime_metadata.mutated_inp_stream_indices is not None
+                        and i < len(runtime_metadata.mutated_inp_stream_indices)
+                        and runtime_metadata.mutated_inp_stream_indices[i] is not None
+                    )
+                    if has_stream:
+                        msg_name = buf.bind_value(
+                            "_stream_err",
+                            "Mutations on inputs with user-specified streams are not yet supported. "
+                            "See: https://github.com/pytorch/pytorch/issues/172522",
+                        )
+                        write_back = f"raise RuntimeError({msg_name})"
+                    else:
+                        hidden = (
+                            meta.mutations_hidden_from_autograd
+                            or meta.mutations_under_no_grad_or_inference_mode
+                        )
+                        cid = runtime_metadata.compile_id_str
+                        args = (
+                            f"{oi}, {ui}, {inpt_idx}, {cid!r}, _warned_inputs, {hidden}"
+                        )
+                        write_back = f"_replay_input_mutation({args})"
                     if meta.is_leaf:
                         buf.writeline(
                             f"if {oi}.requires_grad: {oi}.detach().copy_({ui})"
                         )
-                        buf.writeline(f"else: {oi}.copy_({ui})")
+                        buf.writeline(f"else: {write_back}")
                     else:
-                        has_stream = (
-                            runtime_metadata.mutated_inp_stream_indices is not None
-                            and i < len(runtime_metadata.mutated_inp_stream_indices)
-                            and runtime_metadata.mutated_inp_stream_indices[i]
-                            is not None
-                        )
-                        if has_stream:
-                            msg_name = buf.bind_value(
-                                "_stream_err",
-                                "Mutations on inputs with user-specified streams are not yet supported. "
-                                "See: https://github.com/pytorch/pytorch/issues/172522",
-                            )
-                            buf.writeline(f"raise RuntimeError({msg_name})")
-                        else:
-                            buf.writeline(f"{oi}.copy_({ui})")
+                        buf.writeline(write_back)
             if not wrote_body:
                 buf.writeline("pass")
 
@@ -2698,6 +2775,33 @@ class _AutogradSavedState:
         ctx.opaque_objects = opaque_object_outs
 
 
+def _dealias_marked_returns(raw_returns: list[Any], marked: Sequence[int]) -> None:
+    """Give each slot about to be marked non-differentiable its own TensorImpl.
+
+    mark_non_differentiable is keyed on TensorImpl, and a backend may return one
+    object in two slots (inductor lowers aten.detach to a no-op), so marking one
+    slot would otherwise also mark every other slot holding that object.
+    """
+    if not marked:
+        return
+    marked_positions: dict[int, list[int]] = {}
+    for i in marked:
+        x = raw_returns[i]
+        if isinstance(x, torch.Tensor):
+            marked_positions.setdefault(id(x), []).append(i)
+    if not marked_positions:
+        return
+    marked_set = set(marked)
+    collide: set[int] = set()
+    for j, o in enumerate(raw_returns):
+        if j not in marked_set:
+            hits = marked_positions.get(id(o))
+            if hits is not None:
+                collide.update(hits)
+    for i in collide:
+        raw_returns[i] = raw_returns[i].detach()
+
+
 @dataclass
 class _AutogradForwardEpilogue:
     metadata: ViewAndMutationMeta
@@ -2762,12 +2866,13 @@ class _AutogradForwardEpilogue:
             if x.mutation_type == MutationType.MUTATED_OUT_GRAPH
         ] + self.metadata.output_info
 
-        fw_outs_not_requiring_grad = [
-            x
+        non_diff_indices = [
+            i
             for (i, x) in enumerate(raw_returns_not_including_intermediate_bases)
             if isinstance(x, torch.Tensor) and not raw_returns_meta[i].requires_grad
         ]
-        ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
+        _dealias_marked_returns(raw_returns, non_diff_indices)
+        ctx.mark_non_differentiable(*(raw_returns[i] for i in non_diff_indices))
         ctx._materialize_non_diff_grads = False
         _snapshot_external_objects(ctx)
 
@@ -3434,7 +3539,12 @@ class _AOTDispatchAutogradFunctionFactory:
             args="raw_returns",
             artifact_name="compiled_fn_wrapper",
         )
-        buf.bind(TensorAlias=TensorAlias, torch=torch, Tensor=Tensor)
+        buf.bind(
+            TensorAlias=TensorAlias,
+            torch=torch,
+            Tensor=Tensor,
+            _dealias_marked_returns=_dealias_marked_returns,
+        )
 
         with buf.indent():
             for i, idx in enumerate(fw_metadata.mutated_inp_runtime_indices):
@@ -3470,6 +3580,9 @@ class _AOTDispatchAutogradFunctionFactory:
                 ):
                     _non_diff_indices.append(i)
             if _non_diff_indices:
+                buf.writeline(
+                    f"_dealias_marked_returns(raw_returns, {_non_diff_indices!r})"
+                )
                 checks = " + ".join(
                     f"([raw_returns[{i}]] if isinstance(raw_returns[{i}], Tensor) else [])"
                     for i in _non_diff_indices
@@ -3726,7 +3839,34 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
         tangent_stack_trace: str | None = None,
     ) -> tuple[Any, list[Any]]:
         if not isinstance(x, torch.Tensor):
-            return x, [x]
+            # The prologue only routes kept slots here (with a tangent_idx), so a
+            # None is a tangent the backward graph requires. Without this check it
+            # surfaces inside the backend against a codegen'd name like tangents_3.
+            if tangent_idx is None:
+                return x, [x]
+            from .descriptors import (
+                IntermediateBaseAOTOutput,
+                PlainAOTOutput,
+                TangentAOTInput,
+            )
+
+            which = tangent_desc.expr() if tangent_desc else "an unknown output"
+            if isinstance(tangent_desc, TangentAOTInput):
+                out, via = tangent_desc.output, ""
+                if isinstance(out, IntermediateBaseAOTOutput):
+                    out, via = out.base_of, "the intermediate base behind "
+                if isinstance(out, PlainAOTOutput):
+                    which = f"{via}forward output {out.idx}"
+            graph = f" in compiled graph [{compile_id_str}]" if compile_id_str else ""
+            trace = ""
+            if tangent_stack_trace:
+                trace = f"\nThe forward output was created here:\n{tangent_stack_trace}"
+            raise RuntimeError(
+                f"The compiled backward{graph} was handed {x!r} instead of a Tensor "
+                f"for tangent {tangent_idx}, the gradient of {which}. The backward "
+                "requires this tangent, so this is a bug in AOTAutograd or the backend "
+                f"(materialize_grads / mark_non_differentiable mismatch); please report it.{trace}"
+            )
 
         if is_fake_tensor(x):
             if not meta.memory_format:
