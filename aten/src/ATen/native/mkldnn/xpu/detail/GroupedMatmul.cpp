@@ -14,7 +14,7 @@ namespace at::native::onednn {
 // Describes how to configure oneDNN scales for a given role/ScalingType.
 // When use_mask_only is true, apply via set_scales_mask(arg, mask).
 // Otherwise, apply via set_scales(arg, mask, groups, dtype).
-struct ScaleSpec {
+struct GroupedScaleSpec {
   int mask;
   dnnl::memory::dims groups;
   dnnl::memory::data_type dtype;
@@ -29,9 +29,8 @@ struct ScaleSpec {
   }
 };
 
-inline ScaleSpec make_scale_spec(
+inline GroupedScaleSpec make_grouped_scale_spec(
     at::blas::ScalingType scaling_type,
-    int64_t K,
     const std::string& arg_type,
     bool a_is_2d,
     bool b_is_2d) {
@@ -195,7 +194,7 @@ sycl::event scaled_grouped_matmul(
       "Currently only 2d x 3d grouped matmul with offsets is supported");
 
   bool is_fp4 = mat_a.scalar_type() == at::kFloat4_e2m1fn_x2;
-  int32_t M, N, K, group_count;
+  int64_t M, N, K, group_count;
   M = mat_a.size(-2);
   K = is_fp4 ? mat_a.size(-1) * 2 : mat_a.size(-1);
   N = mat_b.size(-1);
@@ -227,10 +226,10 @@ sycl::event scaled_grouped_matmul(
   dnnl::primitive_attr op_attr = dnnl::primitive_attr();
 
   if (scaling_choice_a.has_value() && scaling_choice_b.has_value()) {
-    const ScaleSpec src_spec =
-        make_scale_spec(scaling_choice_a.value(), K, "src", a_is_2d, b_is_2d);
-    const ScaleSpec wei_spec =
-        make_scale_spec(scaling_choice_b.value(), K, "wei", a_is_2d, b_is_2d);
+    const GroupedScaleSpec src_spec = make_grouped_scale_spec(
+        scaling_choice_a.value(), "src", a_is_2d, b_is_2d);
+    const GroupedScaleSpec wei_spec = make_grouped_scale_spec(
+        scaling_choice_b.value(), "wei", a_is_2d, b_is_2d);
     src_spec.apply(op_attr, DNNL_ARG_SRC);
     wei_spec.apply(op_attr, DNNL_ARG_WEIGHTS);
   }
@@ -275,8 +274,13 @@ sycl::event scaled_grouped_matmul(
       engine,
       a_is_2d,
       b_is_2d);
-  dnnl::memory scratchpad =
-      make_onednn_memory(matmul_pd.scratchpad_desc(), engine, (void*)nullptr);
+  size_t scratchpad_size = matmul_pd.scratchpad_desc().get_size();
+  at::Tensor scratchpad_tensor = at::empty(
+      {static_cast<int64_t>(scratchpad_size)},
+      mat_a.options().dtype(at::kByte),
+      std::nullopt);
+  dnnl::memory scratchpad = make_onednn_memory(
+      matmul_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
 
   // 3. Setup Args for exec
   std::unordered_map<int, dnnl::memory> args;
