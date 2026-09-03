@@ -1,0 +1,60 @@
+%% Auto PR Triage user-facing decision flow.
+%% Regenerate from the repository root:
+%% npx -y @mermaid-js/mermaid-cli@10.9.1 -i docs/auto-pr-triage-overview.mmd -o docs/auto-pr-triage-overview.svg -b transparent
+%%{init: {"theme": "neutral", "themeCSS": ".nodeLabel, span.edgeLabel { display: inline-block; padding: 3px 12px 5px 3px; } .label foreignObject { overflow: visible; }", "flowchart": {"curve": "linear", "diagramPadding": 24, "htmlLabels": true, "nodeSpacing": 25, "padding": 24, "rankSpacing": 30}}}%%
+flowchart TB
+  START["<div style='text-align:center'><b>When Auto PR Triage runs</b></div><div style='text-align:left;margin-top:8px;padding-right:20px;white-space:nowrap'>For an open pull request targeting <b>main</b> with no prior Auto PR Triage outcome:<br/>First application of the 'open source' label while ready for review<br/><b>OR</b> first time a pull request already carrying that label moves from draft to ready for review</div>"]
+
+  ENTRY("<div style='text-align:center'><b>Does the pull request meet repository policy?</b></div><div style='text-align:left;margin-top:8px'>The pull request is linked to close an issue in the same<br/>repository marked 'actionable'<br/><b>OR</b> the author has triage+ permission for this repository<br/><b>OR</b> a triage+ maintainer reviewed, commented,<br/>or requested themselves</div>")
+  CLOSE["Close the pull request"]
+
+  OWNERSHIP["<div style='text-align:center'><b>Ownership analysis</b></div><div style='text-align:left;margin-top:8px'>1. <b>Codepath ownership:</b> Match changed files to rules in<br/><span style='display:inline-block;padding-left:1em'><code>.github/auto-pr-triage/codepath_owners.txt</code>.</span><br/><br/>2. <b>Semantic ownership:</b> Use an LLM and descriptions in<br/><span style='display:inline-block;padding-left:1em'><code>.github/auto-pr-triage/extra_ownership_metadata.json</code></span><br/><span style='display:inline-block;padding-left:1em'>to add ownership areas based on what the change does.</span></div>"]
+  HAS_OWNERS("Were any codepath or<br/>semantic owners found?")
+
+  REVIEW_PLAN["<div style='text-align:center'><b>Resolve owners to reviewer targets</b></div><div style='text-align:left;margin-top:8px'>The previous step produces two types of owners:<br/><br/><b>Direct GitHub targets:</b> <code>@user</code> and <code>@org/team</code> handles<br/>are already reviewer targets.<br/><br/><b>Team owner IDs:</b> Resolve each ID through its roster in<br/><code>.github/auto-pr-triage/team_members.json</code>. A roster member<br/>already covering the pull request as a direct codepath owner,<br/>submitted reviewer, or pending reviewer satisfies the team.<br/>Otherwise, choose the next eligible member by round robin.</div>"]
+  ROUTING_FAILED("Did ownership analysis or<br/>reviewer resolution fail?")
+  COVERED_OR_HANDOFF("Are all material concerns covered<br/><b>OR</b> has an eligible roster member<br/>already submitted a review?")
+
+  ANALYSIS_FAILED("Did ownership analysis fail?")
+  SUBMITTED("Has an eligible person from a configured<br/>team roster already submitted a review?")
+  HANDOFF["Mark as triaged<br/>No new reviewer request"]
+  HUMAN_TRIAGE["Do not mark as triaged<br/>Defer to a human triager"]
+  ANALYSIS_INCOMPLETE["Do not mark as triaged<br/>Report incomplete ownership analysis<br/>Defer to a human triager"]
+  ROUTING_INCOMPLETE["Do not mark as triaged<br/>Continue with any safely resolved reviewers<br/>Report incomplete routing for human follow-up"]
+  PARTIAL_ROUTING["Request any selected reviewers<br/>Do not mark as triaged<br/>Defer uncovered concerns to a human triager"]
+
+  ROUTED["Mark as triaged<br/>Request the selected reviewers"]
+
+  START --> ENTRY
+
+  ENTRY -- No --> CLOSE
+
+  ENTRY -- Yes --> OWNERSHIP
+  OWNERSHIP --> HAS_OWNERS
+
+  HAS_OWNERS -- No --> ANALYSIS_FAILED
+  ANALYSIS_FAILED -- No --> SUBMITTED
+  SUBMITTED -- Yes --> HANDOFF
+  SUBMITTED -- No --> HUMAN_TRIAGE
+  ANALYSIS_FAILED -- Yes --> ANALYSIS_INCOMPLETE
+
+  HAS_OWNERS -- Yes --> REVIEW_PLAN
+  REVIEW_PLAN --> ROUTING_FAILED
+  ROUTING_FAILED -- Yes --> ROUTING_INCOMPLETE
+  ROUTING_FAILED -- No --> COVERED_OR_HANDOFF
+  COVERED_OR_HANDOFF -- Yes --> ROUTED
+  COVERED_OR_HANDOFF -- No --> PARTIAL_ROUTING
+
+  classDef start fill:#ddf4ff,stroke:#0969da,color:#24292f,stroke-width:2px
+  classDef decision fill:#fff8c5,stroke:#9a6700,color:#24292f,stroke-width:2px
+  classDef work fill:#ddf4ff,stroke:#0969da,color:#24292f,stroke-width:2px
+  classDef close fill:#ffebe9,stroke:#cf222e,color:#24292f,stroke-width:2px
+  classDef triaged fill:#dafbe1,stroke:#1a7f37,color:#24292f,stroke-width:2px
+  classDef followup fill:#fff1e5,stroke:#bc4c00,color:#24292f,stroke-width:2px
+
+  class START start
+  class ENTRY,HAS_OWNERS,ANALYSIS_FAILED,SUBMITTED,ROUTING_FAILED,COVERED_OR_HANDOFF decision
+  class OWNERSHIP,REVIEW_PLAN work
+  class CLOSE close
+  class HANDOFF,ROUTED triaged
+  class ANALYSIS_INCOMPLETE,ROUTING_INCOMPLETE,PARTIAL_ROUTING,HUMAN_TRIAGE followup
