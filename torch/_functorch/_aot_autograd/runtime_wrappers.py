@@ -1158,7 +1158,7 @@ def _create_runtime_wrapper(
                         and i < len(runtime_metadata.mutated_inp_stream_indices)
                         and runtime_metadata.mutated_inp_stream_indices[i] is not None
                     )
-                    # Mirrors RuntimeWrapper._apply_input_mutations branch for branch.
+                    # Mirrors _RuntimeForwardEpilogue._apply_input_mutations branch for branch.
                     if has_stream:
                         msg_name = buf.bind_value(
                             "_stream_err",
