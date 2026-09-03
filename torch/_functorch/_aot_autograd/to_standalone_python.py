@@ -1366,7 +1366,7 @@ def _graph_differentiates(gm: GraphModule) -> bool:
     this, and it acts only on convolutions, whose backward is a named
     ``convolution_backward`` call, so matching the op name of call nodes suffices."""
     return any(
-        node.op == "call_function" and "backward" in str(node.target)
+        node.op == "call_function" and "convolution_backward" in str(node.target)
         for node in gm.graph.nodes
     )
 
@@ -1420,7 +1420,14 @@ def _restride_backward_placeholders(
                 "aot_autograd.compile_to_python cannot yet restride the "
                 f"backward for symbolic forward output strides {saved[offset]!r}."
             ) from e
-        if len(real) == val.dim() and tuple(val.stride()) != real:
+        if len(real) != val.dim():
+            raise NotImplementedError(
+                "aot_autograd.compile_to_python got a rank-"
+                f"{len(real)} forward output stride for a rank-{val.dim()} "
+                "backward placeholder; the saved-activation mapping does not "
+                "line up, so restriding here would target the wrong input."
+            )
+        if tuple(val.stride()) != real:
             node.meta["val"] = val.as_strided(val.size(), real)
 
 

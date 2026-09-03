@@ -4167,6 +4167,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         self.missing_values = missing_values
         self._missing_cache: dict[str, _Missing] = {}
         self._globals_snapshots: dict[int, dict[str, Any]] = {}
+        self._pruned_cells: dict[int, types.CellType] = {}
 
     @classmethod
     def _unpickle_module(cls, state: Any) -> torch.nn.Module:
@@ -4344,7 +4345,14 @@ class GuardsStatePickler(FunctionPicklerBase):
             return cell
         if self._keep(contents):
             return cell
-        return types.CellType(self._missing("unguarded function closure"))
+        # Memoize by the ORIGINAL cell's identity so two functions sharing one
+        # unguarded cell still share a single pruned cell after reload, rather
+        # than each getting a distinct _Missing-filled one.
+        pruned = self._pruned_cells.get(id(cell))
+        if pruned is None:
+            pruned = types.CellType(self._missing("unguarded function closure"))
+            self._pruned_cells[id(cell)] = pruned
+        return pruned
 
     def _reduce_function_by_value(self, obj: types.FunctionType) -> tuple[Any, ...]:
         """Pickle a function by value, pruned to what some guard reads.
