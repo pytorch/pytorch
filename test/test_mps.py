@@ -2741,8 +2741,8 @@ class TestMPS(TestCaseMPS):
             check(input_cpu, input_mps)
             check(input_cpu.mT, input_mps.mT)
 
-        # even/odd matrix sizes plus both sides of the n <= 8 register-kernel cutoff
-        matrix_sizes = [1, 2, 3, 4, 8, 9]
+        # test with different even/odd matrix sizes
+        matrix_sizes = [1, 2, 3, 4]
         # even/odd batch sizes
         batch_sizes = [1, 2, 4]
 
@@ -2827,9 +2827,8 @@ class TestMPS(TestCaseMPS):
                 X_mps_t = torch.linalg.solve(A_mps.mT, b_mps, left=left)
                 self.assertEqual(X_cpu_t, X_mps_t)
 
-        # even/odd matrix sizes plus both sides of the register-kernel cutoffs
-        # (lu_factor n <= 8, lu_solve n <= 16)
-        matrix_sizes = [1, 2, 3, 4, 8, 9, 16, 17]
+        # even/odd matrix sizes plus both sides of the lu_solve n <= 16 register-kernel cutoff
+        matrix_sizes = [1, 2, 3, 4, 16, 17]
         # even/odd batch sizes
         batch_sizes = [1, 2, 4]
 

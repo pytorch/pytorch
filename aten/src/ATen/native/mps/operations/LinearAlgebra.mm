@@ -897,34 +897,6 @@ static void lu_factor_panel_encode(const Tensor& LU,
   }
 }
 
-static void lu_factor_small_encode(const Tensor& A, const Tensor& LU, const Tensor& pivots, const Tensor& info) {
-  const auto m = A.size(-2);
-  const auto n = A.size(-1);
-  const auto batch = c10::multiply_integers(A.sizes().begin(), A.sizes().end() - 2);
-  const auto A_ = A.reshape({batch, m, n});
-  const auto LU_ = LU.view({batch, m, n});
-  const auto threads = c10::checked_convert<uint32_t>(batch, "uint32_t");
-  const LUSmallFactorParams<> params{.A_bstride = A_.stride(0),
-                                     .A_rstride = A_.stride(1),
-                                     .A_cstride = A_.stride(2),
-                                     .LU_bstride = LU_.stride(0),
-                                     .LU_rstride = LU_.stride(1),
-                                     .LU_cstride = LU_.stride(2),
-                                     .m = static_cast<uint32_t>(m),
-                                     .n = static_cast<uint32_t>(n)};
-  const auto nmax = std::bit_ceil(static_cast<uint32_t>(std::max({m, n, int64_t{4}})));
-  auto pso = lib.getPipelineStateForFunc(fmt::format("luFactorSmall_{}_{}", mps::scalarToMetalTypeString(A), nmax));
-  auto stream = getCurrentMPSStream();
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    @autoreleasepool {
-      auto enc = stream->commandEncoder();
-      [enc setComputePipelineState:pso];
-      mtl_setArgs(enc, A_, LU_, pivots, info, params);
-      mtl_dispatch1DJob(enc, pso, threads);
-    }
-  });
-}
-
 static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
                                              bool pivot,
                                              const Tensor& LU,
@@ -951,29 +923,26 @@ static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
     return;
   }
 
+  // kernels factor row-major, the LU output is column-major: square factors
+  // in the LU.mT() view and transposes in place, the rest go via a scratch
   resize_output(LU, A.sizes());
+  const bool inPlace = aRows == aCols && !LU.is_same(A) && LU.mT().is_contiguous();
+  Tensor work_full;
+  if (inPlace) {
+    work_full = LU.mT();
+  } else {
+    work_full = at::empty(A.sizes(), A.options());
+  }
+  work_full.copy_(A);
+  Tensor work = work_full.dim() > 3 ? work_full.flatten(0, -3) : work_full;
+  TORCH_INTERNAL_ASSERT(work.is_contiguous())
+  int64_t batchSize = work.dim() > 2 ? work.size(0) : 1;
+
   Tensor pivots_ = pivots.is_contiguous() ? pivots : at::empty(pivots.sizes(), pivots.options());
   Tensor info_ = info.is_contiguous() ? info : at::empty(info.sizes(), info.options());
-  if (std::max(aRows, aCols) <= kLUSmallFactorMax) {
-    lu_factor_small_encode(A, LU, pivots_, info_);
-  } else {
-    // kernels factor row-major, the LU output is column-major: square factors
-    // in the LU.mT() view and transposes in place, the rest go via a scratch
-    const bool inPlace = aRows == aCols && !LU.is_same(A) && LU.mT().is_contiguous();
-    Tensor work_full;
-    if (inPlace) {
-      work_full = LU.mT();
-    } else {
-      work_full = at::empty(A.sizes(), A.options());
-    }
-    work_full.copy_(A);
-    Tensor work = work_full.dim() > 3 ? work_full.flatten(0, -3) : work_full;
-    TORCH_INTERNAL_ASSERT(work.is_contiguous())
-    int64_t batchSize = work.dim() > 2 ? work.size(0) : 1;
-    lu_factor_panel_encode(work, pivots_, info_, aRows, aCols, batchSize, inPlace);
-    if (!inPlace) {
-      LU.copy_(work_full);
-    }
+  lu_factor_panel_encode(work, pivots_, info_, aRows, aCols, batchSize, inPlace);
+  if (!inPlace) {
+    LU.copy_(work_full);
   }
   if (!pivots_.is_same(pivots)) {
     pivots.copy_(pivots_);
@@ -1202,7 +1171,7 @@ static void linalg_inv_ex_out_mps_impl(const Tensor& A, bool check_errors, const
     info.zero_();
     return;
   }
-  if (A.size(-1) <= kLUSmallFactorMax) {
+  if (A.size(-1) <= kLUSmallInvMax) {
     lu_inv_small_encode(A, result, info);
     if (check_errors) {
       at::_linalg_check_errors(info, "linalg.inv_ex", A.dim() == 2);

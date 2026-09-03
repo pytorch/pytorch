@@ -2600,119 +2600,11 @@ kernel void luApplyPivotsRHS(
 INSTANTIATE_LU_APPLY_PIVOTS_RHS(float)
 INSTANTIATE_LU_APPLY_PIVOTS_RHS(float2)
 
-// Small-matrix LU (luFactorSmall / luInvSmall / luSolveSmall): one thread per
-// matrix (per right-hand-side column for the solve), the whole NMAX x NMAX
-// zero-padded matrix lives in registers. Every array index must stay a
+// Small-matrix LU (luInvSmall / luSolveSmall): one thread per matrix (per
+// right-hand-side column for the solve), the whole matrix lives in registers,
+// zero-padded to NMAX for the solve. Every array index must stay a
 // compile-time constant after unrolling, so row swaps scan for r == p instead
 // of indexing a[p] directly.
-template <typename T, short NMAX>
-kernel void luFactorSmall(
-    device const T* A [[buffer(0)]],
-    device T* LU [[buffer(1)]],
-    device int* pivots [[buffer(2)]],
-    device int* info [[buffer(3)]],
-    constant LUSmallFactorParams<>& params [[buffer(4)]],
-    uint tid [[thread_position_in_grid]]) {
-  const uint m = params.m;
-  const uint n = params.n;
-  const uint mn = min(m, n);
-  device const T* Ab = A + long(tid) * params.A_bstride;
-  device T* Lb = LU + long(tid) * params.LU_bstride;
-  device int* pv = pivots + ulong(tid) * mn;
-
-  T a[NMAX][NMAX];
-#pragma unroll
-  for (short r = 0; r < NMAX; r++) {
-#pragma unroll
-    for (short c = 0; c < NMAX; c++) {
-      a[r][c] = (uint(r) < m && uint(c) < n)
-          ? Ab[long(r) * params.A_rstride + long(c) * params.A_cstride]
-          : T(0.0f);
-    }
-  }
-
-  int inf = 0;
-#pragma unroll
-  for (short j = 0; j < NMAX; j++) {
-    if (uint(j) < mn) {
-      float bv = -1.0f;
-      short p = -1;
-#pragma unroll
-      for (short r = 0; r < NMAX; r++) {
-        if (r >= j && uint(r) < m) {
-          const float v = luPivotMag(a[r][j]);
-          if (v > bv) {
-            bv = v;
-            p = r;
-          }
-        }
-      }
-      if (p < 0) {
-        p = j;
-      }
-      pv[j] = int(p) + 1;
-      if (bv == 0.0f && inf == 0) {
-        inf = j + 1;
-      }
-#pragma unroll
-      for (short r = 0; r < NMAX; r++) {
-        if (r > j && r == p) {
-#pragma unroll
-          for (short c = 0; c < NMAX; c++) {
-            const T t = a[j][c];
-            a[j][c] = a[r][c];
-            a[r][c] = t;
-          }
-        }
-      }
-      if (bv != 0.0f) {
-        const T rp = luRecip(a[j][j]);
-#pragma unroll
-        for (short r = 0; r < NMAX; r++) {
-          if (r > j) {
-            const T l = c10::metal::mul(a[r][j], rp);
-            a[r][j] = l;
-#pragma unroll
-            for (short c = 0; c < NMAX; c++) {
-              if (c > j) {
-                a[r][c] = c10::metal::fma(-l, a[j][c], a[r][c]);
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-  info[tid] = inf;
-
-#pragma unroll
-  for (short r = 0; r < NMAX; r++) {
-#pragma unroll
-    for (short c = 0; c < NMAX; c++) {
-      if (uint(r) < m && uint(c) < n) {
-        Lb[long(r) * params.LU_rstride + long(c) * params.LU_cstride] = a[r][c];
-      }
-    }
-  }
-}
-
-#define INSTANTIATE_LU_FACTOR_SMALL(T, NMAX)                \
-  template [[host_name("luFactorSmall_" #T "_" #NMAX)]]     \
-  kernel void luFactorSmall<T, NMAX>(                       \
-      device const T* A [[buffer(0)]],                      \
-      device T* LU [[buffer(1)]],                           \
-      device int* pivots [[buffer(2)]],                     \
-      device int* info [[buffer(3)]],                       \
-      constant LUSmallFactorParams<>& params [[buffer(4)]], \
-      uint tid [[thread_position_in_grid]]);
-
-// NMAX buckets picked by lu_factor_small_encode
-INSTANTIATE_LU_FACTOR_SMALL(float, 4)
-INSTANTIATE_LU_FACTOR_SMALL(float, 8)
-INSTANTIATE_LU_FACTOR_SMALL(float2, 4)
-INSTANTIATE_LU_FACTOR_SMALL(float2, 8)
-static_assert(kLUSmallFactorMax == 8, "update luFactorSmall instantiations");
-
 template <short N>
 kernel void luInvSmall(
     device const float* A [[buffer(0)]],
@@ -2823,7 +2715,7 @@ kernel void luInvSmall(
       constant LUSmallInvParams<>& params [[buffer(3)]], \
       uint tid [[thread_position_in_grid]]);
 
-// exact sizes 1..kLUSmallFactorMax picked by lu_inv_small_encode
+// exact sizes 1..kLUSmallInvMax picked by lu_inv_small_encode
 INSTANTIATE_LU_INV_SMALL(1)
 INSTANTIATE_LU_INV_SMALL(2)
 INSTANTIATE_LU_INV_SMALL(3)
@@ -2832,7 +2724,7 @@ INSTANTIATE_LU_INV_SMALL(5)
 INSTANTIATE_LU_INV_SMALL(6)
 INSTANTIATE_LU_INV_SMALL(7)
 INSTANTIATE_LU_INV_SMALL(8)
-static_assert(kLUSmallFactorMax == 8, "update luInvSmall instantiations");
+static_assert(kLUSmallInvMax == 8, "update luInvSmall instantiations");
 
 template <typename T>
 inline T luSmallElem(
