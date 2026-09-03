@@ -19,7 +19,10 @@ from torch.distributed.pipelining import (
     ScheduleLoopedBFS,
     ScheduleZBVZeroBubble,
 )
-from torch.distributed.pipelining._utils import generate_stage_to_rank_mapping
+from torch.distributed.pipelining._utils import (
+    generate_stage_to_rank_mapping,
+    InferenceMode,
+)
 from torch.distributed.pipelining.schedules import (
     _Action,
     _add_reduce_grad,
@@ -307,10 +310,154 @@ class ScheduleTest(TestCase):
             ScheduleLoopedBFS,
         ],
     )
+    def test_schedule_with_pre_split_inputs(self, ScheduleClass):
+        """
+        Test that schedules can consume pre-split microbatch args, kwargs, and target.
+        """
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=1, store=store
+        )
+        try:
+            d_hid, batch_size = 16, 8
+            n_stages = 1
+            num_microbatches = 2
+            device = "cpu"
+
+            class KwargModule(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.linear = torch.nn.Linear(d_hid, d_hid)
+
+                def forward(self, x, y):
+                    return self.linear(torch.relu(x + y))
+
+            auto_mod = KwargModule().to(device)
+            pre_split_mod = copy.deepcopy(auto_mod)
+
+            x = torch.randn(batch_size, d_hid, device=device)
+            y = torch.randn(batch_size, d_hid, device=device)
+            target = torch.randn(batch_size, d_hid, device=device)
+            loss_fn = torch.nn.MSELoss(reduction="sum")
+
+            def make_schedule(mod):
+                stage = PipelineStage(mod, 0, n_stages, device)
+                if issubclass(ScheduleClass, PipelineScheduleSingle):
+                    stages = stage
+                else:
+                    stages = [stage]
+                return ScheduleClass(
+                    stages,
+                    num_microbatches,
+                    loss_fn=loss_fn,
+                    scale_grads=False,
+                )
+
+            auto_schedule = make_schedule(auto_mod)
+            pre_split_schedule = make_schedule(pre_split_mod)
+
+            auto_losses = []
+            auto_out = auto_schedule.step(x, y=y, target=target, losses=auto_losses)
+
+            arg_mbs = [(x_mb,) for x_mb in torch.tensor_split(x, num_microbatches)]
+            kwarg_mbs = [
+                {"y": y_mb} for y_mb in torch.tensor_split(y, num_microbatches)
+            ]
+            target_mbs = list(torch.tensor_split(target, num_microbatches))
+            pre_split_losses = []
+            pre_split_out = pre_split_schedule.step(
+                arg_mbs=arg_mbs,
+                kwarg_mbs=kwarg_mbs,
+                target_mbs=target_mbs,
+                losses=pre_split_losses,
+            )
+
+            self.assertEqual(pre_split_out, auto_out)
+            self.assertEqual(torch.stack(pre_split_losses), torch.stack(auto_losses))
+
+            for (name, pre_split_param), (auto_name, auto_param) in zip(
+                pre_split_mod.named_parameters(),
+                auto_mod.named_parameters(),
+                strict=True,
+            ):
+                self.assertEqual(name, auto_name)
+                self.assertEqual(
+                    pre_split_param.grad,
+                    auto_param.grad,
+                    msg=f"Gradient mismatch for {name}",
+                )
+        finally:
+            torch.distributed.destroy_process_group()
+
+    def test_schedule_pre_split_validation(self):
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=1, store=store
+        )
+        try:
+            d_hid = 4
+            device = "cpu"
+            x0 = torch.randn(2, d_hid, device=device)
+            x1 = torch.randn(2, d_hid, device=device)
+            stage = PipelineStage(torch.nn.Identity(), 0, 1, device)
+            schedule = ScheduleGPipe(stage, 2)
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "pass pre-split positional inputs through arg_mbs",
+            ):
+                schedule.step(x0, arg_mbs=[(x0,), (x1,)])
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "Unexpected keyword arguments with pre-split inputs: y",
+            ):
+                schedule.step(y=x0, kwarg_mbs=[{}, {}])
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "pass pre-split targets through target_mbs",
+            ):
+                schedule.step(target=x0, target_mbs=[x0, x1])
+
+            with self.assertRaisesRegex(TypeError, "arg_mbs must be a list"):
+                schedule.step(arg_mbs=(x0,))
+
+            with self.assertRaisesRegex(ValueError, "Expecting 2 arg_mbs"):
+                schedule.step(arg_mbs=[])
+
+            with self.assertRaisesRegex(TypeError, "kwarg_mbs must be a list"):
+                schedule.step(
+                    arg_mbs=[(x0,), (x1,)],
+                    kwarg_mbs={"y": x0},
+                )
+
+            with self.assertRaisesRegex(TypeError, "arg_mbs must be a list of tuples"):
+                schedule.step(arg_mbs=[x0, x1])
+
+            with self.assertRaisesRegex(TypeError, "kwarg_mbs must be a list of dicts"):
+                schedule.step(kwarg_mbs=[x0, x1])
+
+            with self.assertRaisesRegex(ValueError, "Expecting 2 target_mbs"):
+                schedule.step(
+                    arg_mbs=[(x0,), (x1,)],
+                    target_mbs=[x0],
+                )
+        finally:
+            torch.distributed.destroy_process_group()
+
+    @parametrize(
+        "ScheduleClass",
+        [
+            Schedule1F1B,
+            ScheduleGPipe,
+            ScheduleInterleaved1F1B,
+            ScheduleInterleavedZeroBubble,
+            ScheduleLoopedBFS,
+        ],
+    )
     def test_schedule_eval_then_train(self, ScheduleClass):
-        """
-        Test that simply runs evaluation followed by training.
-        """
+        """Test full-batch and pre-split evaluation followed by training."""
         store = FakeStore()
         torch.distributed.init_process_group(
             backend="fake", rank=0, world_size=1, store=store
@@ -339,17 +486,77 @@ class ScheduleTest(TestCase):
 
         # Attach to a schedule
         schedule = ScheduleClass(stages, num_microbatches, loss_fn=loss_fn)
-        # Run eval
-        for _ in range(2):
-            # Zero gradients
-            stage_module.zero_grad()
-            losses = []
-            schedule.eval(x, target=target, losses=losses)
-        # Run training
+        arg_mbs = [(x_mb,) for x_mb in torch.tensor_split(x, num_microbatches)]
+        target_mbs = list(torch.tensor_split(target, num_microbatches))
+
         try:
-            for _ in range(2):
-                losses = []
-                schedule.step(x, target=target, losses=losses)
+            stage_module.zero_grad()
+            full_losses = []
+            full_out = schedule.eval(x, target=target, losses=full_losses)
+            pre_split_losses = []
+            pre_split_out = schedule.eval(
+                arg_mbs=arg_mbs,
+                target_mbs=target_mbs,
+                losses=pre_split_losses,
+            )
+
+            self.assertEqual(pre_split_out, full_out)
+            self.assertEqual(torch.stack(pre_split_losses), torch.stack(full_losses))
+            for name, parameter in stage_module.named_parameters():
+                self.assertIsNone(
+                    parameter.grad,
+                    msg=f"eval unexpectedly produced a gradient for {name}",
+                )
+
+            train_losses = []
+            train_out = schedule.step(
+                arg_mbs=arg_mbs,
+                target_mbs=target_mbs,
+                losses=train_losses,
+            )
+            self.assertEqual(train_out, full_out)
+            self.assertEqual(torch.stack(train_losses), torch.stack(full_losses))
+            for name, parameter in stage_module.named_parameters():
+                self.assertIsNotNone(
+                    parameter.grad,
+                    msg=f"training did not produce a gradient for {name}",
+                )
+        finally:
+            torch.distributed.destroy_process_group()
+
+    @parametrize("rank", [0, 1])
+    def test_fake_pg_cross_rank_uses_static_metadata(self, rank):
+        """
+        With a fake process group, the cross-rank warm-up vote cannot exchange
+        real data, so the schedule must infer the metadata mode locally:
+        STATIC when complete metadata is supplied, and a clear error when
+        dynamic inference would be required.
+        """
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=rank, world_size=2, store=store
+        )
+        d_hid, batch_size = 16, 8
+        n_stages, num_microbatches = 2, 2
+        device = torch.device("cpu")
+        mod = MultiMLP(d_hid, n_layers=n_stages).get_submodule(f"layers.{rank}")
+
+        x = torch.randn(batch_size, d_hid, device=device)
+        mb = torch.randn(batch_size // num_microbatches, d_hid, device=device)
+        try:
+            stage = PipelineStage(
+                mod, rank, n_stages, device, input_args=mb, output_args=mod(mb)
+            )
+            schedule = ScheduleGPipe(stage, num_microbatches)
+            schedule.step(x) if rank == 0 else schedule.step()
+            self.assertEqual(stage._inference_mode, InferenceMode.STATIC)
+
+            # Without static metadata, dynamic inference is required, which
+            # cannot work over a fake group and must fail loudly.
+            stage_dyn = PipelineStage(mod, rank, n_stages, device)
+            schedule_dyn = ScheduleGPipe(stage_dyn, num_microbatches)
+            with self.assertRaisesRegex(RuntimeError, "fake process group"):
+                schedule_dyn.step(x) if rank == 0 else schedule_dyn.step()
         finally:
             torch.distributed.destroy_process_group()
 
@@ -472,6 +679,31 @@ class TestSchedulePlan(TestCase):
                     stage_to_rank=stage_to_rank,
                     num_stages=num_stages,
                 )
+
+    def test_max_active_stages_is_used_for_lowering(self):
+        stages = [
+            MockPipelineStage(group_size=4, group_rank=3, num_stages=16)
+            for _ in range(4)
+        ]
+
+        default_schedule = ScheduleInterleaved1F1B(
+            stages,
+            n_microbatches=16,
+        )
+        retained_schedule = ScheduleInterleaved1F1B(
+            stages,
+            n_microbatches=16,
+            max_active_stages=4,
+        )
+
+        def count_stage_15_unshards(schedule):
+            return sum(
+                action.stage_index == 15 and action.computation_type == UNSHARD
+                for action in schedule.pipeline_order_with_comms[3]
+            )
+
+        self.assertEqual(count_stage_15_unshards(default_schedule), 4)
+        self.assertEqual(count_stage_15_unshards(retained_schedule), 1)
 
     @parametrize(
         "ScheduleClass",

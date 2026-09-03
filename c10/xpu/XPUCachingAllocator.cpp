@@ -19,21 +19,23 @@ namespace {
 using stream_set = ska::flat_hash_set<xpu::XPUStream>;
 
 struct Block;
-typedef bool (*Comparison)(const Block*, const Block*);
-bool BlockComparatorSize(const Block* a, const Block* b);
-bool BlockComparatorAddress(const Block* a, const Block* b);
+
+struct BlockComparatorSize {
+  bool operator()(const Block* a, const Block* b) const;
+};
+
+struct BlockComparatorAddress {
+  bool operator()(const Block* a, const Block* b) const;
+};
 
 struct PrivatePool;
 
 struct BlockPool {
   BlockPool(bool small, PrivatePool* private_pool = nullptr)
-      : blocks(BlockComparatorSize),
-        unmapped(BlockComparatorAddress),
-        is_small(small),
-        owner_PrivatePool(private_pool) {}
+      : is_small(small), owner_PrivatePool(private_pool) {}
 
-  std::set<Block*, Comparison> blocks;
-  std::set<Block*, Comparison> unmapped;
+  std::set<Block*, BlockComparatorSize> blocks;
+  std::set<Block*, BlockComparatorAddress> unmapped;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const bool is_small;
   PrivatePool* owner_PrivatePool;
@@ -101,7 +103,7 @@ struct Block {
   }
 };
 
-bool BlockComparatorSize(const Block* a, const Block* b) {
+bool BlockComparatorSize::operator()(const Block* a, const Block* b) const {
   if (a->queue != b->queue) {
     return reinterpret_cast<uintptr_t>(a->queue) <
         reinterpret_cast<uintptr_t>(b->queue);
@@ -113,7 +115,7 @@ bool BlockComparatorSize(const Block* a, const Block* b) {
       reinterpret_cast<uintptr_t>(b->ptr);
 }
 
-bool BlockComparatorAddress(const Block* a, const Block* b) {
+bool BlockComparatorAddress::operator()(const Block* a, const Block* b) const {
   if (a->queue != b->queue) {
     return reinterpret_cast<uintptr_t>(a->queue) <
         reinterpret_cast<uintptr_t>(b->queue);
@@ -504,6 +506,9 @@ class RingBuffer {
   // Leaked on deallocation to avoid issues with Python shutdown
   std::vector<T>* alloc_trace;
 };
+
+static char SHAREABLE_HANDLE_VERSION = 1;
+enum ShareableHandleType : char { SHAREABLE_XPU_MALLOC = 'c' };
 
 } // anonymous namespace
 
@@ -1839,6 +1844,38 @@ class DeviceCachingAllocator {
     return it->second->use_count;
   }
 
+  ShareableHandle shareIpcHandle(Block* block) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+#ifdef _WIN32
+    TORCH_CHECK(false, "IPC sharing is not supported on Windows.");
+#endif
+    std::ostringstream ss;
+    ss.put(SHAREABLE_HANDLE_VERSION);
+    ptrdiff_t offset = 0;
+    TORCH_CHECK(
+        !block->expandable_segment,
+        "expandable segments are not supported for IPC sharing.");
+    ss.put(SHAREABLE_XPU_MALLOC);
+    Block* base_block = block;
+    while (base_block->prev) {
+      base_block = base_block->prev;
+    }
+    offset = static_cast<const char*>(block->ptr) -
+        static_cast<const char*>(base_block->ptr);
+    sycl::ext::oneapi::experimental::ipc_memory::handle handle =
+        sycl::ext::oneapi::experimental::ipc_memory::get(
+            base_block->ptr, c10::xpu::get_device_context());
+    sycl::ext::oneapi::experimental::ipc_memory::handle_data_t handle_data =
+        handle.data();
+    TORCH_INTERNAL_ASSERT(
+        handle_data.size() <= std::numeric_limits<char>::max(),
+        "IPC handle size exceeds maximum allowed size.");
+    ss.put(static_cast<char>(handle_data.size()));
+    ss.write(
+        reinterpret_cast<const char*>(handle_data.data()), handle_data.size());
+    return ShareableHandle{.offset = offset, .handle = ss.str()};
+  }
+
   // Called by XPUGraph::capture_begin
   void beginAllocateToPool(
       MempoolId_t mempool_id,
@@ -1938,6 +1975,58 @@ class NativeCachingAllocator : public XPUAllocator {
   alignas(hardware_destructive_interference_size) std::mutex mutex;
   ska::flat_hash_map<void*, Block*> allocated_blocks;
   c10::ApproximateClockToUnixTimeConverter clock_converter;
+
+  // IPC handle cache: maps a shareable handle string to its opened device
+  // pointer, ensuring each handle is opened at most once per process.
+  struct MemHandleCacheEntry {
+    MemHandleCacheEntry(c10::DeviceIndex device, std::string& handle) {
+#ifdef _WIN32
+      TORCH_CHECK(false, "IPC sharing is not supported on Windows.");
+#endif
+      std::istringstream ss(handle);
+      auto version = ss.get();
+      TORCH_CHECK(
+          version <= SHAREABLE_HANDLE_VERSION,
+          "received sharable handle from a future version of torch that this version does not know how to handle.");
+      int type = ss.get();
+      TORCH_CHECK(
+          type == SHAREABLE_XPU_MALLOC,
+          "unexpected or illformed shareable handle type.");
+      auto handle_size = static_cast<size_t>(ss.get());
+      sycl::ext::oneapi::experimental::ipc_memory::handle_data_t handle_data(
+          handle_size);
+      ss.read(
+          reinterpret_cast<char*>(handle_data.data()),
+          static_cast<std::streamsize>(handle_size));
+
+      xpu_ipc_ptr = sycl::ext::oneapi::experimental::ipc_memory::open(
+          handle_data,
+          c10::xpu::get_device_context(),
+          c10::xpu::get_raw_device(device));
+    }
+
+    // clear() must be called explicitly to release IPC resources. Using a
+    // destructor would risk calling ipc_memory::close after the SYCL runtime
+    // has already shut down during process exit.
+    void clear() {
+      if (xpu_ipc_ptr) {
+        sycl::ext::oneapi::experimental::ipc_memory::close(
+            xpu_ipc_ptr, c10::xpu::get_device_context());
+        xpu_ipc_ptr = nullptr;
+      }
+    }
+
+    void* ptr() {
+      return xpu_ipc_ptr;
+    }
+
+    std::weak_ptr<void> wp;
+
+   private:
+    void* xpu_ipc_ptr{nullptr};
+  };
+  alignas(hardware_destructive_interference_size) std::mutex ipc_mutex;
+  ska::flat_hash_map<std::string, MemHandleCacheEntry> ipc_handle_cache;
 
   void add_allocated_block(Block* block) {
     std::lock_guard<std::mutex> lock(mutex);
@@ -2168,6 +2257,44 @@ class NativeCachingAllocator : public XPUAllocator {
     }
   }
 
+  ShareableHandle shareIpcHandle(void* ptr) {
+    Block* block = get_allocated_block(ptr);
+    TORCH_CHECK(block, "invalid device pointer: ", ptr);
+    return device_allocators[block->device]->shareIpcHandle(block);
+  }
+
+  std::shared_ptr<void> getIpcDevPtr(std::string handle) {
+    std::lock_guard<std::mutex> lock(ipc_mutex);
+
+    auto iter = ipc_handle_cache.find(handle);
+    if (iter != ipc_handle_cache.end()) {
+      auto devptr = iter->second.wp.lock();
+      TORCH_INTERNAL_ASSERT(
+          devptr,
+          "ipc_handle_cache entry found but shared_ptr already expired.");
+      return devptr;
+    }
+    c10::DeviceIndex curr_device = c10::xpu::current_device();
+    auto inserted = ipc_handle_cache.insert(
+        iter, {handle, MemHandleCacheEntry(curr_device, handle)});
+    auto sp = std::shared_ptr<void>(
+        inserted->second.ptr(), [handle, this](void* ptr) {
+          std::unique_lock<std::mutex> deleter_lock(ipc_mutex);
+
+          auto it = ipc_handle_cache.find(handle);
+          TORCH_INTERNAL_ASSERT(
+              it != ipc_handle_cache.end(),
+              "ipc_handle_cache entry not found in deleter.");
+          auto entry = std::move(it->second);
+          ipc_handle_cache.erase(it);
+
+          deleter_lock.unlock();
+          entry.clear();
+        });
+    inserted->second.wp = sp;
+    return sp;
+  }
+
   void createOrIncrefPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
@@ -2265,6 +2392,14 @@ SnapshotInfo snapshot(MempoolId_t mempool_id) {
   return native_allocator.snapshot(mempool_id);
 }
 
+ShareableHandle shareIpcHandle(void* ptr) {
+  return native_allocator.shareIpcHandle(ptr);
+}
+
+std::shared_ptr<void> getIpcDevPtr(std::string handle) {
+  return native_allocator.getIpcDevPtr(std::move(handle));
+}
+
 void createOrIncrefPool(
     c10::DeviceIndex device,
     MempoolId_t mempool_id,
@@ -2301,63 +2436,3 @@ int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
 }
 
 } // namespace c10::xpu::XPUCachingAllocator
-
-namespace c10::xpu {
-
-// uid_ is incremented when a user creates a MemPool,
-//
-// uuid_ is incremented when XPUGraph creates a MemPool
-// as a result of a user not providing a pool.
-
-std::atomic<CaptureId_t> MemPool::uid_{1};
-std::atomic<CaptureId_t> MemPool::uuid_{1};
-
-MemPool::MemPool(
-    XPUCachingAllocator::XPUAllocator* allocator,
-    bool is_user_created,
-    bool use_on_oom)
-    : allocator_(allocator), is_user_created_(is_user_created) {
-  if (is_user_created_) {
-    id_ = {0, uid_++};
-  } else {
-    id_ = {uuid_++, 0};
-  }
-  device_ = c10::xpu::current_device();
-  XPUCachingAllocator::createOrIncrefPool(device_, id_, allocator);
-  if (use_on_oom) {
-    // XPU doesn't support use_on_oom yet
-    TORCH_WARN(
-        "XPUCachingAllocator::MemPool: use_on_oom is not supported on XPU");
-  }
-}
-
-MemPool::~MemPool() {
-  TORCH_INTERNAL_ASSERT(use_count() == 1);
-  XPUCachingAllocator::releasePool(device_, id_);
-  c10::xpu::XPUCachingAllocator::emptyCache(id_); // release cached blocks
-}
-
-MempoolId_t MemPool::id() {
-  return id_;
-}
-
-XPUCachingAllocator::XPUAllocator* MemPool::allocator() {
-  return allocator_;
-}
-
-int MemPool::use_count() {
-  return XPUCachingAllocator::getPoolUseCount(device_, id_);
-}
-
-c10::DeviceIndex MemPool::device() {
-  return device_;
-}
-
-MempoolId_t MemPool::graph_pool_handle(bool is_user_created) {
-  if (is_user_created) {
-    return {0, uid_++};
-  }
-  return {uuid_++, 0};
-}
-
-} // namespace c10::xpu
