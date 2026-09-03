@@ -5323,6 +5323,132 @@ def forward(self, tangents_1):
 
         self._assert_no_extra_refs(refcount_box)
 
+    # The h * 1 fold these tests rely on is joint_graph_constant_folding; pin
+    # it so the data_ptr assertions below cannot fail under a config that
+    # disables it.
+    @torch._inductor.config.patch(joint_graph_constant_folding=True)
+    def test_non_differentiable_output_aliasing_differentiable_output(self):
+        # inductor lowers detach to a no-op and folds h * 1, so both returned
+        # slots hold one TensorImpl; marking the detached slot non-differentiable
+        # must not mark the differentiable one.
+        def f(x):
+            h = x * 2
+            return h * 1, h.detach()
+
+        x = torch.randn(4, requires_grad=True)
+        ref_out, _ = f(x)
+        ref_out.sum().backward()
+        ref_grad, x.grad = x.grad, None
+        out, detached = torch.compile(f, backend="inductor")(x)
+        # The test is only meaningful while inductor actually aliases the two
+        # slots; fail loudly if a lowering change makes it vacuous.
+        self.assertEqual(out.data_ptr(), detached.data_ptr())
+        self.assertFalse(detached.requires_grad)
+        out.sum().backward()
+        self.assertEqual(x.grad, ref_grad)
+
+    def test_non_differentiable_output_aliasing_intermediate_base(self):
+        # y is an intermediate base aliased by two differentiable view outputs;
+        # returning y.detach() as a third slot shares y's TensorImpl (inductor
+        # lowers detach to a no-op), so marking it non-differentiable marks y's
+        # base and the regenerated views come back disconnected from x: the
+        # backward runs but x.grad stays None.
+        def f(x):
+            y = x * 2
+            return y[:2], y[2:], y.detach()
+
+        x = torch.randn(4, requires_grad=True)
+        ref_a, ref_b, _ = f(x)
+        (ref_a.sum() + ref_b.sum()).backward()
+        ref_grad, x.grad = x.grad, None
+        a, b, detached = torch.compile(f, backend="inductor")(x)
+        self.assertEqual(a.data_ptr(), detached.data_ptr())
+        self.assertFalse(detached.requires_grad)
+        (a.sum() + b.sum()).backward()
+        self.assertEqual(x.grad, ref_grad)
+
+    def test_dealias_marked_returns_unit(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _dealias_marked_returns,
+        )
+
+        # A marked slot sharing a TensorImpl with an unmarked slot is detached
+        # off; the unmarked slot keeps its identity.
+        shared = torch.randn(3)
+        returns = [shared, shared, torch.randn(3)]
+        _dealias_marked_returns(returns, [1])
+        self.assertIsNot(returns[1], shared)
+        self.assertIs(returns[0], shared)
+        self.assertEqual(returns[1], shared)
+
+        # No collision: the marked slot is left untouched.
+        a, b = torch.randn(2), torch.randn(2)
+        returns = [a, b]
+        _dealias_marked_returns(returns, [1])
+        self.assertIs(returns[1], b)
+
+        # Non-tensor marked indices are tolerated (the codegen path passes
+        # metadata-selected indices without a tensor filter): the non-tensor
+        # slot is skipped, the colliding tensor slot is still detached off.
+        marker = object()
+        returns = [shared, marker, shared]
+        _dealias_marked_returns(returns, [1, 2])
+        self.assertIs(returns[1], marker)
+        self.assertIsNot(returns[2], shared)
+
+        # Two marked slots sharing one object with no unmarked partner are
+        # left alone: marking either marks both, and both are meant to be.
+        returns = [shared, shared]
+        _dealias_marked_returns(returns, [0, 1])
+        self.assertIs(returns[0], shared)
+        self.assertIs(returns[1], shared)
+
+    # The h * 1 fold these tests rely on is joint_graph_constant_folding; pin
+    # it so the data_ptr assertions below cannot fail under a config that
+    # disables it.
+    @torch._inductor.config.patch(joint_graph_constant_folding=True)
+    def test_non_differentiable_output_duplicated(self):
+        # Two detached slots plus the differentiable one all fold to one
+        # TensorImpl under inductor; both marked slots must be detached off.
+        def f(x):
+            h = x * 2
+            return h * 1, h.detach(), h.detach()
+
+        x = torch.randn(4, requires_grad=True)
+        ref_out, _, _ = f(x)
+        ref_out.sum().backward()
+        ref_grad, x.grad = x.grad, None
+        out, d1, d2 = torch.compile(f, backend="inductor")(x)
+        self.assertEqual(out.data_ptr(), d1.data_ptr())
+        self.assertEqual(out.data_ptr(), d2.data_ptr())
+        self.assertFalse(d1.requires_grad)
+        self.assertFalse(d2.requires_grad)
+        out.sum().backward()
+        self.assertEqual(x.grad, ref_grad)
+
+    def test_non_differentiable_alias_of_mutated_input(self):
+        # A non-differentiable output that aliases a data-mutated input arrives
+        # as a TensorAlias slot (never marked, never probed); the mutation
+        # itself stays in-graph because y does not require grad. No collision
+        # occurs here; the test pins that this shape keeps working alongside
+        # the dealiasing epilogue.
+        def f(x, y):
+            y.mul_(2)
+            return x * 2 + y, y.detach()
+
+        x = torch.randn(4, requires_grad=True)
+        y = torch.randn(4)
+        y_ref = y.clone()
+        ref_out, _ = f(x, y_ref)
+        ref_out.sum().backward()
+        ref_grad, x.grad = x.grad, None
+        out, detached = torch.compile(f, backend="inductor")(x, y)
+        self.assertEqual(y, y_ref)
+        self.assertFalse(detached.requires_grad)
+        self.assertEqual(detached, y)
+        out.sum().backward()
+        self.assertEqual(x.grad, ref_grad)
+
 
 def extract_graph(fx_g, _, graph_cell):
     graph_cell[0] = fx_g
