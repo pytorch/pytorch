@@ -2,7 +2,6 @@
 
 #include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
-#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/import_read.h>
@@ -24,8 +23,9 @@ c10::StrongTypePtr customClassResolver(const c10::QualifiedName& qn) {
   if (type == nullptr) {
     TORCH_CHECK(
         false,
-        "Couldn't resolve type '{}', did you forget to add its build dependency?",
-        qn.qualifiedName());
+        "Couldn't resolve type '",
+        qn.qualifiedName(),
+        "', did you forget to add its build dependency?");
   }
   // Passing nullptr is a little bit sus, but should be fine:
   // 1. The lifetime of the class type is not tied to a specific
