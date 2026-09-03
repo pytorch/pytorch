@@ -68,6 +68,7 @@ def select_kernel_config(
     num_sms: int | None = None,
     groups_split_k: bool = False,
     batched: bool = False,
+    jagged_n: bool = False,
 ) -> HopperDeepSeekConfig:
     del k
     if not total_m or not n or not group_count:
@@ -75,8 +76,8 @@ def select_kernel_config(
     if not num_sms:
         num_sms = _DEFAULT_NUM_SMS
 
-    # Splitting K, and batching, both leave every group spanning all of total_m.
-    uniform_m = groups_split_k or batched
+    # Splitting K or N, and batching, all leave every group spanning total_m.
+    uniform_m = groups_split_k or batched or jagged_n
     if uniform_m:
         avg_group_m = total_m
     else:
@@ -106,7 +107,9 @@ def select_kernel_config(
     # A batched total_m is per-batch; L2 pressure scales with all the rows.
     total_rows = total_m * group_count if batched else total_m
     cluster_n_eligible = total_rows >= _CLUSTER_N_MIN_TOTAL_M or tiny_single_group
-    if cluster_n_eligible and tiles_n % 2 == 0:
+    # A ragged N gives each group its own tiles_n, so no single cluster_n can be
+    # guaranteed to divide them all.
+    if cluster_n_eligible and tiles_n % 2 == 0 and not jagged_n:
         cluster_n = 2
     # The narrow A-scale copy needs an aligned M start: splitting K keeps it at
     # m_tile * tile_m, splitting M does not.
@@ -121,6 +124,8 @@ def select_kernel_config(
             cluster_m=1,
             cluster_n=cluster_n,
             a_scale_wide=a_scale_wide,
-            b_scale_wide=n % tile_n != 0,
+            # A group's columns start at its offs value, which need not be a
+            # multiple of tile_n, so the staged B scale must tolerate a shift.
+            b_scale_wide=jagged_n or n % tile_n != 0,
         )
     )

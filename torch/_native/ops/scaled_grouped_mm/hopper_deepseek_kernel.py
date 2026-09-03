@@ -30,7 +30,10 @@ def run_deepseek_grouped_gemm(
     if device_index is None:
         device_index = torch.cuda.current_device()
     num_sms = _num_sms(device_index)
-    batched = mat_a.dim() == 3
+    b_is_2d = mat_b.dim() == 2
+    a_is_3d = mat_a.dim() == 3
+    batched = a_is_3d and not b_is_2d
+    jagged_n = a_is_3d and b_is_2d
     total_m = mat_a.size(-2)
     n = mat_b.size(-1)
     group_count = mat_a.size(0) if batched else offs.numel()
@@ -40,20 +43,32 @@ def run_deepseek_grouped_gemm(
         k=mat_a.size(-1),
         group_count=group_count,
         num_sms=num_sms,
-        groups_split_k=mat_b.dim() == 2,
+        groups_split_k=b_is_2d and not jagged_n,
         batched=batched,
+        jagged_n=jagged_n,
     )
-    if recipe_a != BLOCKWISE_1X128 and not batched and offs.numel() > 1:
-        # group_start // 128 truncation (accumulate_scaled) needs 128-aligned
-        # boundaries. Checked here, not in _cond, because it needs a sync.
-        torch._check(
-            bool((offs[:-1] % 128 == 0).all()),
-            lambda: "DeepSeek grouped mm with a BlockWise128x128 A-scale "
-            "recipe requires all group boundaries in `offs` (except the "
-            "last) to be a multiple of 128",
-        )
+    # A group_start // 128 truncation needs 128-aligned boundaries: on the
+    # A-scale row when offs splits M, on the B-scale column when it splits N.
+    # A ragged N additionally starts B's and C's per-group TMA descriptors at
+    # the group's column, and a bf16 C needs 8 elements for 16-byte alignment.
+    # The metadata kernel asserts this on device; reading offs back here would
+    # sync, which cannot be captured into a CUDA graph.
+    if b_is_2d and not jagged_n:
+        offs_align = 128
+    elif jagged_n:
+        offs_align = 128 if recipe_b != BLOCKWISE_1X128 else 8
+    else:
+        offs_align = 128 if recipe_a != BLOCKWISE_1X128 else 1
     problem_sizes, ptrs_abc, _, tile_offsets, total_tiles = build_group_metadata(
-        mat_a, mat_b, scale_a, scale_b, recipe_a, offs, out, config=config
+        mat_a,
+        mat_b,
+        scale_a,
+        scale_b,
+        recipe_a,
+        offs,
+        out,
+        config=config,
+        offs_align=offs_align,
     )
     # Batched needs no group metadata; offs is unread, so reuse a tensor of the
     # right dtype/rank rather than allocating one.

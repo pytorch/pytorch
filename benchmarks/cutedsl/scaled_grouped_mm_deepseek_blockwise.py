@@ -301,6 +301,82 @@ def _build_inputs_3d3d(total_m, g, K, N, lhs_block, rhs_block, device):
     return mat_a, _stack_op_scales(a_s_l), mat2, _stack_op_scales(b_s_l), (a_l, b_l)
 
 
+def _build_inputs_3d2d(total_m, g, K, N, lhs_block, rhs_block, device):
+    # offs splits N. total_m/g rows per batch and N*g total columns keeps the
+    # per-group problem, the FLOPs and the footprint equal to the 2d-3d run.
+    M = total_m // g
+    a_l, a_s_l = [], []
+    for _ in range(g):
+        a = torch.randn(M, K, device=device, dtype=torch.bfloat16)
+        a_fp8_i, a_scale_i = _quantize_block(a, block_outer=lhs_block)
+        a_l.append(a_fp8_i)
+        a_s_l.append(
+            _to_ref_scale_1x128(a_scale_i)
+            if lhs_block == 1
+            else _to_op_scale_128x128(a_scale_i, K)
+        )
+    # Quantize B per group: one (N, K) bf16 buffer at a time instead of a
+    # single (N*g, K) one, which is tens of GB at the tracked shapes. N is a
+    # multiple of 128, so no 128x128 scale block straddles a group.
+    b_fp8_parts, b_scale_parts = [], []
+    for _ in range(g):
+        b_i = torch.randn(N, K, device=device, dtype=torch.bfloat16)
+        b_fp8_i, b_scale_i = _quantize_block(b_i, block_outer=rhs_block)
+        b_fp8_parts.append(b_fp8_i)
+        b_scale_parts.append(b_scale_i)
+        del b_i
+    b_fp8 = torch.cat(b_fp8_parts, dim=0)
+    b_scale_nat = torch.cat(b_scale_parts, dim=0)
+    del b_fp8_parts, b_scale_parts
+    scale_b = (
+        _to_ref_scale_1x128(b_scale_nat)
+        if rhs_block == 1
+        else _to_op_scale_128x128(b_scale_nat, K)
+    )
+    offs = torch.arange(1, g + 1, device=device, dtype=torch.int32) * N
+    return (
+        torch.stack(a_l, dim=0),
+        _stack_op_scales(a_s_l),
+        b_fp8.t(),
+        scale_b,
+        (a_l, a_s_l, b_fp8, b_scale_nat),
+        offs,
+    )
+
+
+def _make_reference_3d2d(
+    per_group, lhs_recipe, lhs_block, rhs_recipe, rhs_block, M, N, g, K
+):
+    a_l, a_s_l, b_fp8, b_scale_nat = per_group
+
+    def op_layout(nat, block):
+        return _to_ref_scale_1x128(nat) if block == 1 else _to_op_scale_128x128(nat, K)
+
+    slices = []
+    for i, (a_fp8_i, a_s_i) in enumerate(zip(a_l, a_s_l)):
+        start, end = i * N, (i + 1) * N
+        rows = slice(start, end) if rhs_block == 1 else slice(start // 128, end // 128)
+        slices.append(
+            (start, end, a_fp8_i, a_s_i, op_layout(b_scale_nat[rows], rhs_block))
+        )
+
+    def reference():
+        out = torch.empty(M, N * g, device=b_fp8.device, dtype=torch.bfloat16)
+        for start, end, a_fp8_i, a_s_i, b_s_i in slices:
+            out[:, start:end] = scaled_mm(
+                a_fp8_i,
+                b_fp8[start:end].t(),
+                a_s_i,
+                lhs_recipe,
+                b_s_i,
+                rhs_recipe,
+                output_dtype=torch.bfloat16,
+            )
+        return out
+
+    return reference
+
+
 def _make_reference_3d3d(per_batch, a_scale, scale_b, lhs_recipe, rhs_recipe, M, N):
     a_l, b_l = per_batch
     g = len(a_l)
@@ -576,6 +652,26 @@ def _make_case_fns(
                 N,
             ),
         )
+    if layout == "3d_2d":
+        mat_a, a_scale, mat2, scale_b, per_group, offs = _build_inputs_3d2d(
+            total_m, g, K, N, lhs_block, rhs_block, device
+        )
+        return (
+            _make_grouped_op(
+                mat_a, mat2, a_scale, scale_b, lhs_recipe, rhs_recipe, offs
+            ),
+            _make_reference_3d2d(
+                per_group,
+                lhs_recipe,
+                lhs_block,
+                rhs_recipe,
+                rhs_block,
+                total_m // g,
+                N,
+                g,
+                K,
+            ),
+        )
     if layout == "2d_2d":
         a_fp8, a_scale, mat2, scale_b, nats, offs = _build_inputs_2d2d(
             total_m, g, K, N, lhs_block, rhs_block, device, grouping=grouping
@@ -847,10 +943,12 @@ if __name__ == "__main__":
     parser.add_argument("--stat", choices=_STAT_CHOICES, default="median")
     parser.add_argument(
         "--layout",
-        choices=["2d_3d", "2d_2d", "3d_3d"],
+        choices=["2d_3d", "2d_2d", "3d_3d", "3d_2d"],
         default="2d_3d",
         help="2d_3d: offs splits M, B is (G,K,N). 2d_2d: offs splits K, B is "
-        "(K,N). 3d_3d: batched, no offs, M is the total (M/G per batch).",
+        "(K,N). 3d_3d: batched, no offs, M is the total (M/G per batch). "
+        "3d_2d: offs splits N, M is the total (M/G per batch) and N is "
+        "per-group (N*G columns overall).",
     )
     args = parser.parse_args()
 

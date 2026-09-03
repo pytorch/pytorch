@@ -28,6 +28,9 @@ def expected_out_size_stride(
     alignment = max(16 // elem_size, 1)
     padded_n = -(-n // alignment) * alignment
     if mat_a.dim() == 3:
+        if mat_b.dim() == 2:
+            # offs splits N: one 2-D output, groups own column ranges.
+            return (mat_a.size(1), n), (padded_n, 1)
         batch, m = mat_a.size(0), mat_a.size(1)
         return (batch, m, n), (m * padded_n, padded_n, 1)
     m = mat_a.size(0)
@@ -85,10 +88,15 @@ def build_group_metadata(
     offs: torch.Tensor,
     out: torch.Tensor,
     config: HopperDeepSeekConfig | None = None,
+    offs_align: int = 1,
 ) -> GroupMetadata:
     # mat_b.size(0) is K when offs splits K; offs is absent when batched.
-    batched = mat_a.dim() == 3
+    b_is_2d = mat_b.dim() == 2
+    jagged_n = mat_a.dim() == 3 and b_is_2d
+    batched = mat_a.dim() == 3 and not b_is_2d
     group_count = mat_a.size(0) if batched else offs.numel()
+    # M is fixed when offs splits N; mat_a.size(0) is the group count there.
+    total_m = mat_a.size(-2) if jagged_n else mat_a.size(0)
     device_index = mat_a.device.index
     if device_index is None:
         device_index = torch.cuda.current_device()
@@ -103,11 +111,12 @@ def build_group_metadata(
         return meta
     if config is None:
         config = select_kernel_config(
-            total_m=mat_a.size(0),
+            total_m=total_m,
             n=mat_b.size(-1),
             k=mat_a.size(-1),
             group_count=group_count,
-            groups_split_k=mat_b.dim() == 2,
+            groups_split_k=b_is_2d and not jagged_n,
+            jagged_n=jagged_n,
         )
     if config.cluster_n > 1:
         tiles_n = -(-mat_b.size(-1) // config.tile_n)
@@ -118,8 +127,12 @@ def build_group_metadata(
                 f"divisible by cluster_n"
             )
 
-    groups_split_k = mat_b.dim() == 2
-    if groups_split_k:
+    groups_split_k = b_is_2d and not jagged_n
+    if jagged_n:
+        scale_a_rows_per_block = 1
+        scale_a_group_stride = scale_a.stride(0)
+        scale_b_group_stride = scale_b.stride(0)
+    elif groups_split_k:
         scale_a_rows_per_block = 128
         scale_a_group_stride = scale_a.stride(1)
         scale_b_group_stride = scale_b.stride(0)
@@ -141,15 +154,15 @@ def build_group_metadata(
         scale_a.data_ptr(),
         scale_b.data_ptr(),
         mat_a.stride(0),
-        mat_b.stride(0),
-        out.stride(0),
+        mat_b.stride(1) if jagged_n else mat_b.stride(0),
+        out.stride(1) if jagged_n else out.stride(0),
         scale_a_group_stride,
         scale_b_group_stride,
         scale_a_rows_per_block,
         config.tile_m,
         config.tile_n,
         config.cluster_m,
-        mat_a.size(0),
+        total_m,
         mat_b.size(-1),
         mat_a.size(-1),
         meta.problem_sizes,
@@ -161,5 +174,7 @@ def build_group_metadata(
         scale_a.element_size(),
         out.element_size(),
         groups_split_k,
+        jagged_n,
+        offs_align,
     )
     return meta

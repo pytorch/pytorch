@@ -84,6 +84,10 @@ def _out_cond(
     padded_n = -(-n // alignment) * alignment
     if self.dim() == 3:
         batch, m = self.size(0), self.size(1)
+        if mat2.dim() == 2:
+            if out.shape != (m, n):
+                return False
+            return out.stride() == (padded_n, 1)
         if out.shape != (batch, m, n):
             return False
         return out.stride() == (m * padded_n, padded_n, 1)

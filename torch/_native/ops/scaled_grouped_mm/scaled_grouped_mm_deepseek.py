@@ -91,9 +91,8 @@ def _should_use_cutedsl_scaled_grouped_mm_deepseek(
         return False
     a_is_3d = self.dim() == 3
     b_is_3d = mat2.dim() == 3
-    if a_is_3d and not b_is_3d:
-        return False
-    if a_is_3d:
+    # 3d-3d is the only layout without offs; 3d-2d splits N by it.
+    if a_is_3d and b_is_3d:
         if offs is not None:
             return False
     elif (
@@ -137,12 +136,19 @@ def _should_use_cutedsl_scaled_grouped_mm_deepseek(
     b_is_2d = mat2.dim() == 2
     if a_is_3d:
         batch, total_m, k = self.shape
-        group_count = batch
-        b_batch, k2, n = mat2.shape
-        if b_batch != batch:
-            return False
         if self.stride(0) % 16 != 0:
             return False
+        if b_is_2d:
+            # offs carries one column count per batch of A.
+            group_count = offs.shape[0]
+            if group_count != batch:
+                return False
+            k2, n = mat2.shape
+        else:
+            group_count = batch
+            b_batch, k2, n = mat2.shape
+            if b_batch != batch:
+                return False
     else:
         batch = None
         total_m, k = self.shape
@@ -228,8 +234,9 @@ def _should_use_cutedsl_scaled_grouped_mm_deepseek(
         k=k,
         group_count=group_count,
         num_sms=_num_sms(self.device.index or 0),
-        groups_split_k=b_is_2d,
-        batched=a_is_3d,
+        groups_split_k=b_is_2d and not a_is_3d,
+        batched=a_is_3d and not b_is_2d,
+        jagged_n=a_is_3d and b_is_2d,
     )
     if config.tile_n > n:
         return False

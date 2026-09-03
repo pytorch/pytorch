@@ -3165,6 +3165,108 @@ class TestFP8Matmul(TestCase):
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
+    @skipCUDAIf(not IS_SM90, "DeepSeek style grouped scaling requires SM90 (Hopper)")
+    @skipIfNoCuteDSL
+    @parametrize("out_overload", [False, True])
+    @parametrize(
+        "lhs_block,rhs_block,G,M,N,K",
+        [
+            (1, 128, 2, 128, 256, 256),
+            (1, 1, 2, 128, 256, 256),
+            (128, 1, 2, 128, 256, 256),
+            (1, 1, 3, 256, 384, 512),
+            (1, 128, 1, 64, 256, 256),
+        ],
+    )
+    def test_scaled_grouped_mm_deepseek_blockwise_3d_2d(
+        self, out_overload, lhs_block, rhs_block, G, M, N, K, device
+    ):
+        """offs splits N: A is (G, M, K), B is (K, N), out is (M, N)."""
+        from torch._native import registry
+
+        self.assertIn("_scaled_grouped_mm_v2", registry.get_dsl_operations("cutedsl"))
+
+        torch.manual_seed(42)
+        lhs_recipe = ScalingType.BlockWise1x128 if lhs_block == 1 else ScalingType.BlockWise128x128
+        rhs_recipe = ScalingType.BlockWise1x128 if rhs_block == 1 else ScalingType.BlockWise128x128
+
+        def _op_layout(nat, block):
+            if block == 1:
+                return nat.t().contiguous().t()
+            kb = nat.shape[-1]
+            padded = torch.zeros(
+                nat.shape[0], round_up(kb, 4), device=nat.device, dtype=nat.dtype
+            )
+            padded[:, :kb] = nat
+            return padded.t()
+
+        def _stack_op(scales):
+            d0, d1 = scales[0].shape
+            out = torch.empty_strided(
+                (len(scales), d0, d1), (d0 * d1, 1, d0),
+                device=scales[0].device, dtype=scales[0].dtype,
+            )
+            for i, sc in enumerate(scales):
+                out[i].copy_(sc)
+            return out
+
+        # Column counts per group: 128-aligned so either B recipe is expressible.
+        cols = [N // G] * G
+        cols[-1] += N - sum(cols)
+        cols = [round_up(c, 128) for c in cols[:-1]]
+        cols.append(N - sum(cols))
+        self.assertTrue(all(c > 0 for c in cols), f"bad split {cols} for N={N}")
+        offs = torch.tensor(
+            list(itertools.accumulate(cols)), device=device, dtype=torch.int32
+        )
+
+        b = torch.randn(N, K, device=device, dtype=torch.bfloat16)
+        b_fp8, b_q = tensor_to_scale_block(b, e4m3_type, rhs_block, 128)
+        scale_b = _op_layout(b_q.reciprocal(), rhs_block)
+
+        a_fp8_l, a_scale_l = [], []
+        out_ref = torch.empty(M, N, device=device, dtype=torch.bfloat16)
+        start = 0
+        for i, end in enumerate(itertools.accumulate(cols)):
+            a = torch.randn(M, K, device=device, dtype=torch.bfloat16)
+            a_fp8_i, a_q = tensor_to_scale_block(a, e4m3_type, lhs_block, 128)
+            a_s = _op_layout(a_q.reciprocal(), lhs_block)
+            rows = slice(start, end) if rhs_block == 1 else slice(start // 128, end // 128)
+            out_ref[:, start:end] = scaled_mm_wrap(
+                a_fp8_i, b_fp8[start:end].t(),
+                scale_a=a_s, scale_recipe_a=lhs_recipe,
+                scale_b=_op_layout(b_q.reciprocal()[rows], rhs_block),
+                scale_recipe_b=rhs_recipe,
+                out_dtype=torch.bfloat16,
+            )
+            a_fp8_l.append(a_fp8_i)
+            a_scale_l.append(a_s)
+            start = end
+
+        mat_a = torch.stack(a_fp8_l, dim=0)
+        mat2 = b_fp8.t()
+        a_scale = _stack_op(a_scale_l)
+
+        kwargs = {"out_dtype": torch.bfloat16, "offs": offs}
+        if out_overload:
+            padded_n = round_up(N, 8)
+            out = torch.empty_strided(
+                (M, N), (padded_n, 1), device=device, dtype=torch.bfloat16
+            )
+            actual = scaled_grouped_mm_wrap(
+                mat_a, mat2, [a_scale], [scale_b],
+                [lhs_recipe], [rhs_recipe], out=out, **kwargs,
+            )
+        else:
+            actual = scaled_grouped_mm_wrap(
+                mat_a, mat2, a_scale, scale_b,
+                lhs_recipe, rhs_recipe, **kwargs,
+            )
+
+        self.assertEqual(actual, out_ref, atol=6e-1, rtol=7e-2)
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @skipCUDAIf(not IS_SM90, "DeepSeek grouped eligibility requires SM90")
     @skipIfNoCuteDSL
     def test_scaled_grouped_mm_deepseek_eligibility(self, device):
