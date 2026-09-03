@@ -1140,6 +1140,10 @@ class AllocateLine(MemoryPlanningLine):
     def __post_init__(self):
         if V.graph.scheduler.current_node is None:
             raise AssertionError("expected scheduler.current_node to be set")
+        # The index is only meaningful within this scheduler's node list: an inlined
+        # subgraph emits its lines into the parent's list while V.graph is the
+        # SUBGRAPH. See should_reuse_buffer.
+        self.scheduler = V.graph.scheduler
         self.scheduler_node_index = V.graph.scheduler.nodes.index(
             V.graph.scheduler.current_node
         )
@@ -1147,6 +1151,21 @@ class AllocateLine(MemoryPlanningLine):
     def should_reuse_buffer(self, free_line: FreeIfNotReusedLine, size: int) -> bool:
         if self.comm_buffer:
             return True
+        if free_line.scheduler is not self.scheduler:
+            # A parent free paired with an allocation from an inlined invoke_subgraph
+            # region. codegen_invoke_subgraph inlines without the EnterSubgraphLine /
+            # ExitSubgraphLine bracket codegen_switch and codegen_while_loop wrap their
+            # branches in, and only that bracket makes memory_plan_reuse push a fresh
+            # MemoryPlanningState and swap estimate_peak. So the region's lines land in
+            # the parent's pool, scored against the parent's tree, and the two
+            # scheduler_node_index values index different node lists: the adjacency
+            # test below is meaningless and summarize_range raises on the inverted
+            # range. Bailing out costs regions the cross-boundary reuse that cond and
+            # while_loop keep.
+            # TODO: bracket the region instead. EnterSubgraphLine.codegen calls
+            # code.do_indent(), which needs an enclosing Python block statement -- an
+            # if/while branch emits one, a region does not.
+            return False
         if free_line.scheduler_node_index + 1 == self.scheduler_node_index:
             return True
         overall_peak_memory = self.wrapper.estimate_peak.overall_peak_memory
@@ -1264,6 +1283,9 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
     def __post_init__(self):
         if V.graph.scheduler.current_node is None:
             raise AssertionError("expected scheduler.current_node to be set")
+        # See AllocateLine.__post_init__ -- the index is only meaningful
+        # relative to this scheduler's node list.
+        self.scheduler = V.graph.scheduler
         self.scheduler_node_index = V.graph.scheduler.nodes.index(
             V.graph.scheduler.current_node
         )
@@ -2560,6 +2582,18 @@ class PythonWrapperCodegen(CodeGen):
                 wrapper_name = kernel
             self.writeline(f"{wrapper_name}({', '.join(args)})")
 
+    def _tma_descriptor_tensor_ref(self, desc, in_autotune_block):
+        """Reference to the descriptor's source tensor.
+
+        The compile-time autotune block is Python even when the wrapper emits C++,
+        and it already materializes an example tensor in the descriptor tensor's
+        own layout. Referring to that buffer by name keeps the block valid Python;
+        codegen_reference() would emit a C++ reinterpret (e.g. a `0L` literal).
+        """
+        if in_autotune_block:
+            return desc.get_tensor().get_name()
+        return desc.tensor.codegen_reference()
+
     def _generate_tma_descriptor_call_experimental(self, desc, apply_size_hints=False):
         dims = desc.dims
         block_dims = desc.block_dims
@@ -2567,7 +2601,7 @@ class PythonWrapperCodegen(CodeGen):
             dims = V.graph.sizevars.optimization_hint(dims)
             block_dims = V.graph.sizevars.optimization_hints(block_dims)
 
-        ptr = f"{desc.tensor.codegen_reference()}.data_ptr()"
+        ptr = f"{self._tma_descriptor_tensor_ref(desc, apply_size_hints)}.data_ptr()"
         # Explicitly call the Python version of val_to_arg_str
         dims = ", ".join(PythonWrapperCodegen.val_to_arg_str(self, dim) for dim in dims)
         block_dims = ", ".join(
@@ -2587,7 +2621,8 @@ class PythonWrapperCodegen(CodeGen):
 
         prefix = "triton.tools.tensor_descriptor.TensorDescriptor"
         fn = f"{prefix}.from_tensor"
-        args = f"{desc.tensor.codegen_reference()}, {block_shape}"
+        tensor_ref = self._tma_descriptor_tensor_ref(desc, apply_size_hints)
+        args = f"{tensor_ref}, {block_shape}"
         call = f"{fn}({args})"
         return call
 

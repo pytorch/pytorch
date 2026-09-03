@@ -323,7 +323,6 @@ class GemmOutputPlan:
             group=match.geometry.group,
             axis=match.geometry.axis,
             reduction_type=match.reduction_type,
-            source_type="identity",
             source_fn=GEMM_REDUCTION_IDENTITY_SOURCE,
             primary_output=self.output.name,
             feeds_main=local_reduce.feeds_main,
