@@ -94,9 +94,13 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       numpy array/scalar arguments are not supported yet (convert them with
       ``torch.from_numpy`` / ``float(...)``). A global whose
       object graph contains a tensor is rejected (conservatively, even when the fn only
-      reads a non-tensor field of it) because every tensor must be an explicit input,
-      and functions that mutate globals are rejected because the artifact could not
-      reproduce the side effect. Distinct tensor inputs must not share or overlap
+      reads a non-tensor field of it) because every tensor must be an explicit input.
+      Mutations of state reachable from a module global -- a helper's ``global``, an
+      attribute, dict or list of an object a module holds, or a default argument left
+      at its default value -- are rejected because the artifact could not reproduce
+      the side effect in the serving process; mutations of the call's own argument
+      objects are captured and replayed on the caller's objects at serve. Distinct
+      tensor inputs must not share or overlap
       storage -- their aliasing relation has no serialized form -- though passing the
       same tensor object more than once is supported; capture rejects overlapping
       inputs and the loaded artifact raises on them. An explicit pytree-leaf input
@@ -282,7 +286,13 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        itself returns a list is unambiguous), and ``state`` is the opaque
        accumulated-capture state to pass back in. Reload the on-disk pair with
        ``precompile.load(artifact_path=..., cache_path=...)``.
-   :raises PrecompileError: as ``precompile`` with ``tracer="dynamo"``.
+   :raises PrecompileError: as ``precompile`` with ``tracer="dynamo"``, and when a
+       resumed call's example can no longer be recorded (the state is then closed).
+   :raises TypeError: for an example that is not a tuple, one that does not bind to
+       ``fn``'s positional signature, or a ``state`` of the wrong type.
+   :raises ValueError: for empty ``example_inputs``, an unknown ``backend``, equal
+       ``artifact_path``/``cache_path``, a closed ``state``, or a resume under
+       different settings.
 ```
 
 ```{eval-rst}

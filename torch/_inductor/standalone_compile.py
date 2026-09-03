@@ -768,9 +768,10 @@ def compile_to_python(
     is provided, it is extended with the layouts selected for the graph outputs so an
     AOTAutograd backward can be lowered against the forward's actual saved-activation
     layouts. The first ``num_user_visible_outputs`` outputs (all of them when None)
-    are marked user-visible, which pins their strides to the graph's (as
-    ``torch.compile`` does through ``fw_compiler_base``) instead of letting inductor
-    pad or re-lay-out tensors the caller will hand to autograd or return.
+    are marked user-visible, which under ``keep_output_stride`` (the default; honored
+    from ``config_patches`` as ``torch.compile`` honors ``options``) pins their strides
+    to the graph's instead of letting inductor pad or re-lay-out tensors the caller
+    will hand to autograd or return.
 
     Caller preconditions (this layer does not re-derive them):
 
@@ -868,7 +869,11 @@ def compile_to_python(
     from torch._guards import detect_fake_mode, tracing, TracingContext
     from torch.compiler._cache import CacheArtifactManager
 
-    from .compile_fx import _recursive_record_user_visible_output_idxs, compile_fx_inner
+    from .compile_fx import (
+        _cudagraph_trees_clone_live_user_outputs,
+        _recursive_record_user_visible_output_idxs,
+        compile_fx_inner,
+    )
     from .virtualized import V
 
     # Own a copy: the collective rewrites and inductor may mutate the graph, and ``gm`` may
@@ -898,12 +903,10 @@ def compile_to_python(
         # superset of what compile_fx pins, so strictly more conservative).
         outputs = outputs[:num_user_visible_outputs]
     # Like compile_fx's marking, only tensor outputs are user visible; None and
-    # symbolic-int outputs carry no layout. Nested invoke_subgraph subgraphs
-    # get the same treatment compile_fx gives them.
-    output_node.meta["user_visible_output_idxs"] = [
+    # symbolic-int outputs carry no layout.
+    user_visible_output_idxs = [
         idx for idx, out in enumerate(outputs) if isinstance(out, torch.fx.Node)
     ]
-    _recursive_record_user_visible_output_idxs(gm)
     fake_mode = detect_fake_mode(fake_inputs)
     if fake_mode is None:
         raise RuntimeError(
@@ -921,6 +924,15 @@ def compile_to_python(
         V.set_fake_mode(fake_mode),
         CacheArtifactManager.with_fresh_cache(),
     ):
+        # Under the caller's config, as compile_fx does: the pin applies only
+        # with keep_output_stride (or cudagraph trees' live-output cloning), so
+        # options={"keep_output_stride": False} is honored here too. Nested
+        # invoke_subgraph subgraphs get the same treatment compile_fx gives them.
+        if config.keep_output_stride or _cudagraph_trees_clone_live_user_outputs():
+            output_node.meta["user_visible_output_idxs"] = user_visible_output_idxs
+        else:
+            output_node.meta["user_visible_output_idxs"] = []
+        _recursive_record_user_visible_output_idxs(gm)
         compiled_graph = compile_fx_inner(
             gm,
             fake_inputs,

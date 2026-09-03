@@ -1901,6 +1901,32 @@ def forward(self, primals_1):
         self.assertEqual(record["retrace"], [((2, 3), [])])
         self.assertEqual(record["donated"], [([1, 2], (2, 3), [0])])
 
+    @torch._functorch.config.patch(aot_autograd_prune_unused_outputs=True, cse=False)
+    def test_unused_differentiable_outputs_ambiguous_activation_declines(self):
+        # Two structurally identical saved activations (a duplicated x @ y that
+        # cse=False keeps apart) have the same fingerprint, so the retrace
+        # cannot tell which one a rebuilt placeholder is; binding either would
+        # be a guess, so it must decline and the structural fallback serve the
+        # backward with correct grads.
+        def fn(x, y):
+            a = x @ y
+            b = x @ y
+            return a.sin(), b.cos()
+
+        x = torch.randn(4, 4, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
+        x_ref = x.detach().clone().requires_grad_()
+        y_ref = y.detach().clone().requires_grad_()
+        fn(x_ref, y_ref)[0].sum().backward()
+        out = torch.compile(fn, backend="inductor")(x, y)
+        with self._spy_backward_specialization() as record:
+            out[0].sum().backward()
+        self.assertEqual(x.grad, x_ref.grad)
+        self.assertEqual(y.grad, y_ref.grad)
+        ((kept, reasons),) = record["retrace"]
+        self.assertIsNone(kept)
+        self.assertIn("structurally matches several", reasons[0])
+
     @torch._functorch.config.patch(
         aot_autograd_prune_unused_outputs=True,
         donated_buffer=False,

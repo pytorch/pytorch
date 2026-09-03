@@ -1666,7 +1666,9 @@ def _filter_dynamo_guards(
         if not matching_scopes:
             raise PrecompileError(
                 "precompile tracer='dynamo' captured a variant that does not match "
-                "any example input."
+                "any example input. This happens when the function changes state "
+                "its own guards read while it runs (grad mode, the default device, "
+                "a torch-function mode)."
             )
 
         # AOT and key-order guard records are input-derived or structurally
@@ -2496,23 +2498,48 @@ class _ReplayedSideEffects:
 
 
 def _reject_module_reachable_side_effects(
-    capture_target: Callable[..., object], sources: Sequence[str]
+    capture_target: Callable[..., object],
+    sources: Sequence[str],
+    example_inputs: Sequence[tuple[object, ...]],
 ) -> None:
     """Fail capture on a replayed side effect the artifact cannot reproduce.
 
     Dynamo replays a mutation of a pre-existing Python object in the residual
     bytecode, on the object its source names. A call argument (``L['obj']``) is
-    the caller's object at serve time too, so that replay is faithful. An object
-    reached through a global -- a module a helper's ``global`` writes
-    (``G['m']``), an object or container a module holds (``G['m'].CONFIG``,
-    ``G['m'].OBJS[0]``, ``G['m'].DICT``) -- is the SERVING process's object, so
-    the replay would apply the capture-time mutation there; reject it with the
-    path. (The entry frame's own global stores were rejected up front in
-    _validate_dynamo_capture.)
+    the caller's object at serve time too, so that replay is faithful -- unless
+    the parameter was bound to its default in some example: defaults travel as
+    a pickled copy inside the artifact, so the served replay would mutate that
+    copy, not the object the default names (which may well be module state,
+    ``cfg=m.CONFIG``). An object reached through a global -- a module a
+    helper's ``global`` writes (``G['m']``), an object or container a module
+    holds (``G['m'].CONFIG``, ``G['m'].OBJS[0]``, ``G['m'].DICT``) -- is the
+    SERVING process's object, so the replay would apply the capture-time
+    mutation there. Reject both with the path. (The entry frame's own global
+    stores were rejected up front in _validate_dynamo_capture.)
     """
+    import inspect
+
     fn_globals = capture_target.__globals__
+    signature = inspect.signature(capture_target)
+    defaulted: set[str] = set()
+    for example in example_inputs:
+        bound = signature.bind(*example).arguments
+        defaulted.update(
+            name
+            for name, param in signature.parameters.items()
+            if name not in bound and param.default is not inspect.Parameter.empty
+        )
     for source in sources:
-        if source.startswith("L["):
+        local = re.match(r"L\[(['\"])(.*?)\1\]", source)
+        if local is not None:
+            if local.group(2) in defaulted:
+                raise PrecompileError(
+                    f"precompile tracer='dynamo' cannot serve {capture_target.__name__!r}: "
+                    f"its compiled bytecode mutates {source}, whose parameter was bound "
+                    "to its default value; the artifact ships a copy of that default, "
+                    "so the mutation would apply to the copy rather than to the "
+                    "object the default names. Pass it as an explicit argument."
+                )
             continue
         match = re.fullmatch(r"G\[(['\"])(.*?)\1\](.*)", source, re.DOTALL)
         if match is None:
@@ -2725,7 +2752,9 @@ def _build_dynamo_artifact(
         raise PrecompileError(
             "precompile tracer='dynamo' did not capture a runnable entry frame."
         )
-    _reject_module_reachable_side_effects(capture_target, side_effects.sources)
+    _reject_module_reachable_side_effects(
+        capture_target, side_effects.sources, example_inputs
+    )
     filtered_guard_states, dropped_guards = _filter_dynamo_guards(
         capture_target, code.guarded_codes, example_inputs
     )
@@ -3275,10 +3304,29 @@ def _precompile_dynamo_stateful(
             _write_dynamo_artifact_files(python_code, cache, artifact_path, cache_path)
             state.calls += 1
             state.last_summary = summary._replace(calls=state.calls)
+        except PrecompileError as e:
+            if fresh:
+                state.close()
+                raise
+            # A failure after Dynamo produced bytecode (guard serialization)
+            # marks the package entry bypassed, and a bypassed entry records no
+            # further variants: the session can never render again. Close it
+            # and say so, instead of failing every later call on the active-
+            # codes check with an unrelated message.
+            if any(code.bypassed for code in state.package.cache_entry().codes):
+                state.close()
+                raise PrecompileError(
+                    f"{e} Dynamo could not record this variant, so the capture "
+                    "session cannot accept further examples; the state is closed "
+                    "and the last successfully written artifact files remain "
+                    "valid. Precompile again without the offending example."
+                ) from e
+            raise
         except BaseException:
             # A fresh call that failed returns no state, so tear its session
-            # down; a resumed call leaves the state (and the last successfully
-            # written artifact) intact.
+            # down; a resumed call that failed before Dynamo produced bytecode
+            # (a graph break, an unbindable example) leaves the state, and the
+            # last successfully written artifact, intact.
             if fresh:
                 state.close()
             raise
@@ -3672,8 +3720,13 @@ class _PrecompileApi:
           are rejected), a function without closure cells, and positional tensor/scalar
           arguments or containers of those values (``nn.Module`` arguments are not
           supported yet). A global whose object graph contains a tensor is rejected
-          conservatively (every tensor must be an explicit input), as are functions
-          that mutate globals, pytree-leaf inputs also reachable through the Python
+          conservatively (every tensor must be an explicit input), as are
+          mutations of state reachable from a module global (a helper's
+          ``global``, an attribute, dict or list of an object a module holds, or
+          a default argument left at its default value) because the artifact
+          could not reproduce them in the serving process -- mutations of the
+          call's own argument objects are captured and replayed on the caller's
+          objects at serve -- and pytree-leaf inputs also reachable through the Python
           environment (checked once at state creation for stateful capture;
           dtypes, layouts, and memory formats are exempt as value-guarded
           singletons, and enum members because a used enum argument fails

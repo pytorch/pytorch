@@ -51,9 +51,12 @@ environment can silently run a specialization captured for the old state. Initia
 support is for Python functions with positional tensor/scalar arguments and containers
 of those values; graph breaks, closures, `nn.Module`, and numpy array/scalar arguments
 are not supported yet.
-Globals whose object graph contains a tensor and functions that mutate globals are
-rejected, as are distinct tensor inputs sharing or overlapping storage (the same
-tensor object may be passed more than once).
+Globals whose object graph contains a tensor are rejected, as are mutations of
+state reachable from a module global (a helper's `global`, an attribute, dict or
+list of an object a module holds, a default argument left at its default) and
+distinct tensor inputs sharing or overlapping storage (the same tensor object may
+be passed more than once). Mutations of the call's own argument objects are
+captured and replayed on the caller's objects when the artifact is served.
 Each captured Dynamo graph's differentiability is inferred from its inputs, mirroring
 `torch.compile`: `requires_grad` inputs yield differentiable graphs whose served outputs
 retain a `grad_fn` and can be passed to `backward()`; no-grad inputs yield inference

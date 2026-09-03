@@ -139,6 +139,27 @@ def _precompile_dynamo_sets_module_attribute(x):
     return x + 1
 
 
+def _precompile_dynamo_mutates_default_object(x, cfg=_helpers.CONFIG):
+    cfg.value = 3
+    return x + 1
+
+
+_PRECOMPILE_DEFAULT_ACC: list[int] = []
+
+
+def _precompile_dynamo_mutates_default_list(x, acc=_PRECOMPILE_DEFAULT_ACC):
+    acc.append(1)
+    return x + len(acc)
+
+
+class _PrecompileStatefulObj:
+    v = 1
+
+
+def _precompile_dynamo_stateful_obj_step(x, o):
+    return x + o.v
+
+
 def _precompile_dynamo_returns_dunder_global(x):
     return x + 1, __PRECOMPILE_DUNDER_LIST
 
@@ -2134,6 +2155,88 @@ class TestPrecompile(TestCase):
             _helpers.FLAG = False
             _helpers.DICT.pop("k", None)
             del _helpers.LIST[1:]
+
+    def test_tracer_dynamo_rejects_mutation_of_defaulted_parameter(self):
+        # A default travels as a pickled copy inside the artifact, so a mutation
+        # of a parameter left at its default would apply to that copy at serve
+        # (and, at capture, to the module object the default names). Passing
+        # the object explicitly makes it the caller's object, which is faithful.
+        try:
+            with self.assertRaisesRegex(
+                PrecompileError, r"mutates L\['cfg'\].*default"
+            ):
+                torch.compiler.precompile(
+                    _precompile_dynamo_mutates_default_object,
+                    example_inputs=[(torch.randn(3),)],
+                    tracer="dynamo",
+                    backend="eager",
+                )
+            # Not the misleading "does not match any example input" the guard
+            # minimizer raised when the mutated default no longer matched.
+            with self.assertRaisesRegex(
+                PrecompileError, r"mutates L\['acc'\].*default"
+            ):
+                torch.compiler.precompile(
+                    _precompile_dynamo_mutates_default_list,
+                    example_inputs=[(torch.randn(3),)],
+                    tracer="dynamo",
+                    backend="eager",
+                )
+            cfg = _helpers._Config()
+            code, cache = torch.compiler.precompile(
+                _precompile_dynamo_mutates_default_object,
+                example_inputs=[(torch.randn(3), cfg)],
+                tracer="dynamo",
+                backend="eager",
+            )
+            served = _helpers._Config()
+            torch.compiler.precompile.load(code, cache)(torch.randn(3), served)
+            self.assertEqual(served.value, 3)
+        finally:
+            _helpers.CONFIG.value = 0
+            del _PRECOMPILE_DEFAULT_ACC[:]
+
+    def test_tracer_dynamo_stateful_closes_after_unrecordable_variant(self):
+        # A resumed call whose example fails guard serialization leaves Dynamo's
+        # package entry bypassed, so no later variant can be recorded; the
+        # state must be closed with an error that says so, not left open to
+        # fail every later call on an unrelated check.
+        with tempfile.TemporaryDirectory() as tmp:
+            kwargs = {
+                "backend": "eager",
+                "artifact_path": os.path.join(tmp, "f.py"),
+                "cache_path": os.path.join(tmp, "f.cache"),
+            }
+            x = torch.randn(4)
+            _, state = torch.compiler.precompile.stateful(
+                _precompile_dynamo_stateful_obj_step,
+                example_inputs=[(x, _PrecompileStatefulObj())],
+                state=None,
+                **kwargs,
+            )
+
+            class LocalObj:  # its TYPE_MATCH guard cannot be serialized
+                v = 2
+
+            with self.assertRaisesRegex(PrecompileError, "the state is closed"):
+                torch.compiler.precompile.stateful(
+                    _precompile_dynamo_stateful_obj_step,
+                    example_inputs=[(x, LocalObj())],
+                    state=state,
+                    **kwargs,
+                )
+            self.assertTrue(state.closed)
+            with self.assertRaisesRegex(ValueError, "closed state"):
+                torch.compiler.precompile.stateful(
+                    _precompile_dynamo_stateful_obj_step,
+                    example_inputs=[(x, _PrecompileStatefulObj())],
+                    state=state,
+                    **kwargs,
+                )
+            loaded = torch.compiler.precompile.load(
+                **{k: v for k, v in kwargs.items() if k != "backend"}
+            )
+            self.assertEqual(loaded(x, _PrecompileStatefulObj()), x + 1)
 
     def test_tracer_dynamo_dunder_user_global_gets_generic_message(self):
         # A user's own dunder-prefixed global is not a Dynamo helper, even one
