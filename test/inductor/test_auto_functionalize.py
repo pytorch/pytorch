@@ -59,6 +59,36 @@ class AutoFunctionalizeTests(torch._inductor.test_case.TestCase):
 
             f(x, out)
 
+    def _test_auto_functionalize_e8m0_input(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor(a!) x) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch._dynamo.disable
+            def foo_impl(x):
+                pass
+
+            def f(x):
+                torch.ops.mylib.foo(x)
+
+            x = torch.full((2,), 127, dtype=torch.uint8).view(
+                torch.float8_e8m0fnu
+            )
+            torch.compile(f, backend="inductor", fullgraph=True)(x)
+
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=False)
+    def test_auto_functionalize_e8m0_input(self):
+        self._test_auto_functionalize_e8m0_input()
+
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
+    def test_auto_functionalize_v2_e8m0_input(self):
+        self._test_auto_functionalize_e8m0_input()
+
     def test_auto_functionalize_self_as_mutate_arg(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             lib.define("foo(Tensor(a!) self) -> None")
