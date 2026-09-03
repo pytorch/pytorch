@@ -19,9 +19,13 @@ inline void arange_check_bounds(
     TORCH_CHECK(((stepc.real() > 0) && (endc.real() >= startc.real())) ||
         ((stepc.real() <= 0) && (endc.real() <= startc.real())),
         "upper bound and lower bound inconsistent with step sign for real part");
+
+    if(stepc.imag() != 0) {
     TORCH_CHECK(((stepc.imag() > 0) && (endc.imag() >= startc.imag())) ||
         ((stepc.imag() <= 0) && (endc.imag() <= startc.imag())),
         "upper bound and lower bound inconsistent with step sign for imaginary part");
+    }
+
     TORCH_CHECK(
         std::isfinite(startc.real()) && std::isfinite(endc.real()),
         "unsupported range for real part: ",

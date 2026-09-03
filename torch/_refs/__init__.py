@@ -5633,13 +5633,13 @@ def arange(
         length = (xend - xstart + xstep - sgn) // xstep  # type: ignore[possibly-undefined]
     elif has_complex:
         real_length = (
-            math.ceil((end.real - start.real) / step.real)  # type: ignore[possibly-undefined]
-            if step.real != 0 and math.isfinite(step.real)  # type: ignore[possibly-undefined]
+            math.ceil((end.real - start.real) / step.real)
+            if step.real != 0 and math.isfinite(step.real)
             else 0
         )
         imag_length = (
-            math.ceil((end.imag - start.imag) / step.imag)  # type: ignore[possibly-undefined]
-            if step.imag != 0 and math.isfinite(step.imag)  # type: ignore[possibly-undefined]
+            math.ceil((end.imag - start.imag) / step.imag)
+            if step.imag != 0 and math.isfinite(step.imag)
             else 0
         )
 
