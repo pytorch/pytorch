@@ -403,6 +403,29 @@ def online_softmax_combine(
 
 
 @triton.jit
+def online_softmax_reduce_scalar_combine(
+    lhs_max,
+    lhs_sum,
+    rhs,
+    rhs_mask,
+    dim,
+    use_fast_math: tl.constexpr,
+    strict_signed_zero: tl.constexpr,
+):
+    """
+    Reduce a block of values along `dim` and fold it into a per-row (max, sum)
+    state, so only one max/sum per output row stays live across the loop.
+    """
+    rhs = tl.where(rhs_mask, rhs, float("-inf")).to(lhs_max.dtype)
+    rhs_max, rhs_sum = online_softmax_reduce(
+        rhs, tl.where(rhs_mask, 1.0, 0.0), dim, use_fast_math, strict_signed_zero
+    )
+    return online_softmax_combine_with_sum(
+        lhs_max, lhs_sum, rhs_max, rhs_sum, use_fast_math, strict_signed_zero
+    )
+
+
+@triton.jit
 def online_softmax_combine_with_sum(
     lhs_max,
     lhs_sum,

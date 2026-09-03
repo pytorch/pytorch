@@ -2200,6 +2200,12 @@ class triton:
     # We should revisit this once we understand more of the source of register spills.
     spill_threshold: int = 32 if torch.version.hip else 16
 
+    # Use scalar accumulators for online softmax in non-persistent CUDA
+    # reduction loops.
+    scalar_online_softmax_accumulators: bool = (
+        os.environ.get("TORCHINDUCTOR_SCALAR_ONLINE_SOFTMAX_ACCUMULATORS", "1") == "1"
+    )
+
     # Generate code using the tl.make_block_ptr() API for loads/stores. Block
     # pointers were removed from the Triton frontend in triton-lang/triton#10833,
     # so this flag is honored only where the installed Triton still provides the
