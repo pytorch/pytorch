@@ -605,7 +605,22 @@ exclude_patterns = [
     'c10/util/SmallVector.cpp',  # length_error -> ValueError, bad_alloc -> MemoryError
     'c10/util/StringUtil.cpp',  # range_error -> ValueError
     # Burned down later in this stack. Nothing may be added here.
-    'torch/csrc/jit/**',
+    # NNC. The TorchScript frontend is deprecated, but this is not dead code:
+    # it is compiled unconditionally, it is still the default fuser for a CUDA
+    # torch.jit.script, and Static Runtime and mkldnn_rewrite.cpp link it
+    # regardless of that. 294 findings, so it gets its own PR.
+    'torch/csrc/jit/tensorexpr/**',
+    # 64 findings. Also holds two files whose conversion changes the
+    # Python-visible exception type, so they belong to the behaviour-change PR
+    # rather than this burn-down: python/init.cpp (2 std::exception) and
+    # python/pybind.h (2 std::logic_error). And pybind_utils.cpp's
+    # std::runtime_error is caught by name in distributed/rpc to drive an
+    # overload-fallback retry - converting it disables the fallback silently.
+    'torch/csrc/jit/python/**',
+    # 33 findings, mostly the interpreter and the static runtime.
+    'torch/csrc/jit/runtime/**',
+    # 19 findings across the optimisation passes.
+    'torch/csrc/jit/passes/**',
 ]
 command = [
     'python3',
