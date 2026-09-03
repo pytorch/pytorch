@@ -1263,8 +1263,6 @@ op_db: list[OpInfo] = [
         "linalg.cholesky",
         aten_name="linalg_cholesky",
         dtypes=floating_and_complex_types(),
-        # cholesky backward calls solve_triangular, which is float-only on MPS
-        backward_dtypesIfMPS=(torch.float32,),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         # See https://github.com/pytorch/pytorch/pull/78358
@@ -1277,8 +1275,6 @@ op_db: list[OpInfo] = [
         "linalg.cholesky_ex",
         aten_name="linalg_cholesky_ex",
         dtypes=floating_and_complex_types(),
-        # cholesky backward calls solve_triangular, which is float-only on MPS
-        backward_dtypesIfMPS=(torch.float32,),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         # See https://github.com/pytorch/pytorch/pull/78358
@@ -1999,9 +1995,6 @@ op_db: list[OpInfo] = [
         aten_name="linalg_lu_factor",
         op=torch.linalg.lu_factor,
         dtypes=floating_and_complex_types(),
-        # complex64 backward needs solve_triangular, which is float32-only on
-        # MPS, so only the float forward+backward runs there.
-        backward_dtypesIfMPS=floating_types(),
         # Runs very slowly on slow gradcheck - alternatively reduce input sizes
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
@@ -2024,9 +2017,6 @@ op_db: list[OpInfo] = [
         aten_name="linalg_lu_factor_ex",
         op=torch.linalg.lu_factor_ex,
         dtypes=floating_and_complex_types(),
-        # complex64 backward needs solve_triangular, which is float32-only on
-        # MPS, so only the float forward+backward runs there.
-        backward_dtypesIfMPS=floating_types(),
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
         supports_forward_ad=True,
@@ -2048,9 +2038,6 @@ op_db: list[OpInfo] = [
         aten_name="linalg_lu",
         op=torch.linalg.lu,
         dtypes=floating_and_complex_types(),
-        # complex64 backward needs solve_triangular, which is float32-only on
-        # MPS, so only the float forward+backward runs there.
-        backward_dtypesIfMPS=floating_types(),
         # https://github.com/pytorch/pytorch/issues/80411
         # Runs very slowly on slow-gradcheck - alternatively reduce input sizes
         gradcheck_fast_mode=True,
@@ -2081,9 +2068,6 @@ op_db: list[OpInfo] = [
         op=torch.linalg.lu_solve,
         aten_name="linalg_lu_solve",
         dtypes=floating_and_complex_types(),
-        # complex64 backward w.r.t. the LU factor needs solve_triangular, which
-        # is float32-only on MPS; the complex forward and B-gradient do run.
-        backward_dtypesIfMPS=floating_types(),
         # Runs very slowly on slow gradcheck - alternatively reduce input sizes
         gradcheck_fast_mode=True,
         supports_forward_ad=True,
