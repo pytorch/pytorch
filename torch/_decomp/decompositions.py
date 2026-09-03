@@ -6137,14 +6137,6 @@ def max_pool2d_with_indices_backward(
         and all(s >= k for s, k in zip(stride, kernel_size))
     )
     if nonoverlap:
-        # Add a temporary batch dim for unbatched (3D) inputs so the 4D-style
-        # indexing below works uniformly.
-        unbatched = self.dim() == 3
-        if unbatched:
-            self = self.unsqueeze(0)
-            grad_output = grad_output.unsqueeze(0)
-            indices = indices.unsqueeze(0)
-
         in_height, in_width = self.shape[-2:]
         out_height, out_width = grad_output.shape[-2:]
         h = torch.arange(in_height, device=self.device)
@@ -6158,20 +6150,17 @@ def max_pool2d_with_indices_backward(
 
         # indices is produced by max_pool2d_with_indices with the same parameters.
         # With non-overlapping windows, an input can belong to at most one output.
-        selected_indices = indices[:, :, ph][:, :, :, pw]
-        selected_grads = grad_output[:, :, ph][:, :, :, pw]
+        # Index the trailing H/W dims via Ellipsis so this handles both the
+        # unbatched (C, H, W) and batched (N, C, H, W) layouts.
+        selected_indices = indices[..., ph, :][..., pw]
+        selected_grads = grad_output[..., ph, :][..., pw]
         input_indices = h[:, None] * in_width + w[None, :]
         grad_input = torch.where(
             valid_h[:, None] & valid_w[None, :] & (selected_indices == input_indices),
             selected_grads,
             0,
         )
-        grad_input = grad_input.contiguous(
-            memory_format=utils.suggest_memory_format(self)
-        )
-        if unbatched:
-            grad_input = grad_input.squeeze(0)
-        return grad_input
+        return grad_input.contiguous(memory_format=utils.suggest_memory_format(self))
 
     if grad_output.is_xpu:
         return NotImplemented
