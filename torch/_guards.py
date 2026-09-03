@@ -235,7 +235,7 @@ class GuardProvenance(enum.Enum):
     """Where a guard's source chain is rooted.
 
     Exposed to ``guard_filter_fn`` callbacks (the ``torch.compile`` option
-    documented under "Reducing guard overhead" in the torch.compile
+    documented under "Reducing Guard Overhead" in the torch.compile
     programming model) as the ``provenance`` field of each entry the callback
     receives, so a filter can classify guards structurally instead of parsing
     rendered guard names. Every root ``Source`` declares exactly one member;
@@ -254,8 +254,9 @@ class GuardProvenance(enum.Enum):
         imported module looked up through ``__import__``. The one category a
         consumer may drop wholesale under an environment-invariant contract.
     ``AMBIENT``
-        Rooted at interpreter- or process-wide state not reachable through any
-        module's globals. This covers both process-wide configuration
+        Rooted at interpreter- or process-wide state that Dynamo reads through
+        its own accessors rather than through a globals lookup from the traced
+        frame. This covers both process-wide configuration
         (deterministic algorithms, default device, streams) and per-call
         context (grad mode, the functorch and torch-function mode stacks,
         saved-tensor hooks, forward-AD level) that selects a different correct
@@ -274,6 +275,12 @@ class GuardProvenance(enum.Enum):
     GLOBAL = 1
     AMBIENT = 2
     SYNTHETIC = 3
+
+
+# Public under torch.compiler (re-exported there); like the other public names
+# defined in private modules, force __module__ at the definition so docs,
+# test_public_bindings and pickling all see the public location.
+GuardProvenance.__module__ = "torch.compiler"
 
 
 """
