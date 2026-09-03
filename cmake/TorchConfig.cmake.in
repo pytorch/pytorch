@@ -155,10 +155,25 @@ if(NOT @BUILD_SHARED_LIBS@)
 endif()
 set_target_properties(torch PROPERTIES
     INTERFACE_INCLUDE_DIRECTORIES "${TORCH_INCLUDE_DIRS}"
-    CXX_STANDARD 20
 )
+
+# CMake only reports compile features after CXX has been enabled.
+if(CMAKE_CXX_COMPILER_LOADED)
+  # The feature can be absent because CMake does not recognize it or the compiler does not support the standard.
+  if("cxx_std_@CMAKE_CXX_STANDARD@" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
+    # Compile features specify a minimum and preserve a newer standard selected by the consumer.
+    target_compile_features(torch INTERFACE cxx_std_@CMAKE_CXX_STANDARD@)
+  else()
+    message(STATUS "TorchConfig: The CXX compiler does not report cxx_std_@CMAKE_CXX_STANDARD@ support; forcing C++@CMAKE_CXX_STANDARD@. If the compiler does not support C++@CMAKE_CXX_STANDARD@, compilation will fail.")
+    if(MSVC)
+      set_property(TARGET torch APPEND PROPERTY INTERFACE_COMPILE_OPTIONS "$<$<COMPILE_LANGUAGE:CXX>:/std:c++@CMAKE_CXX_STANDARD@>")
+    else()
+      set_property(TARGET torch APPEND PROPERTY INTERFACE_COMPILE_OPTIONS "$<$<COMPILE_LANGUAGE:CXX>:-std=c++@CMAKE_CXX_STANDARD@>")
+    endif()
+  endif()
+endif()
 if(TORCH_CXX_FLAGS)
-  set_property(TARGET torch PROPERTY INTERFACE_COMPILE_OPTIONS "${TORCH_CXX_FLAGS}")
+  set_property(TARGET torch APPEND PROPERTY INTERFACE_COMPILE_OPTIONS "${TORCH_CXX_FLAGS}")
 endif()
 
 find_package_handle_standard_args(Torch DEFAULT_MSG TORCH_LIBRARY TORCH_INCLUDE_DIRS)
