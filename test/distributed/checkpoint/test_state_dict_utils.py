@@ -74,9 +74,7 @@ class TestStateDictUtils(DTensorTestBase):
         )
         if dist.get_rank() in (0, 2):
             self.assertEqual(expected_gathered_dtensor, gathered_state_dict["dtensor"])
-            self.assertNotEqual(
-                gathered_state_dict["dtensor"].device.type, device_type
-            )
+            self.assertNotEqual(gathered_state_dict["dtensor"].device.type, device_type)
         else:
             self.assertEqual(gathered_state_dict, {})
 
@@ -312,6 +310,8 @@ class TestStateDictUtils(DTensorTestBase):
         self.assertTrue(torch.equal(sd["k"].cpu(), cpu_sd["k"]))
 
 
-instantiate_device_type_tests(TestStateDictUtils, globals(), except_for="cpu")
+instantiate_device_type_tests(
+    TestStateDictUtils, globals(), except_for="cpu", allow_xpu=True
+)
 if __name__ == "__main__":
     run_tests()
