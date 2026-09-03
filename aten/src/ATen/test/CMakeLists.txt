@@ -18,6 +18,7 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_rng_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/dlconvertor_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/extension_backend_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/functional_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/half_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/index_kernel_utils_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/ivalue_test.cpp
@@ -85,6 +86,7 @@ list(APPEND ATen_HIP_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_apply_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_complex_math_test.hip
   ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_complex_test.hip
+  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_device_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_distributions_test.hip
   ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_dlconvertor_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_generator_test.hip

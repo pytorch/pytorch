@@ -429,6 +429,11 @@ class GuardManagerWrapper:
         accessor is ``GetGenericDictGuardAccessor``—i.e., it only exposes its
         ``__dict__`` and nothing else that could mutate between runs.
 
+        A node whose subtree contains a relational guard with no dedicated
+        dict-tag fast path is not tag safe. Relational guards carry state across
+        multiple guarded values, so skipping one side of the relation can turn
+        a real failure into a false positive.
+
         For every tag safe node, verifying the identity/tag of just the top-level
         dictionary is enough to guarantee the entire subtree is unchanged, enabling
         a *fast-path* guard check.
@@ -456,10 +461,12 @@ class GuardManagerWrapper:
         1. Visit leaves and classify them as tag safe or not.
         2. Propagate tag-safety upward: a parent dictionary becomes tag safe only if
         all of its children are already tag-safe.
-        3. Propagate tag-safe-rootness upward: if the whole subtree is tag safe,
+        3. Propagate unoptimized relational guards upward so no ancestor can
+        skip a stateful guard in its subtree.
+        4. Propagate tag-safe-rootness upward: if the whole subtree is tag safe,
         the current node becomes the new tag safe root, otherwise propagate the
         subtree tag safe roots.
-        4. Collect every tag safe node and, by inspecting parent tags, label the
+        5. Collect every tag safe node and, by inspecting parent tags, label the
         subset that are tag safe roots.
         """
 
@@ -473,7 +480,9 @@ class GuardManagerWrapper:
                 for accessor, mgr in zip(accessors, child_mgrs)
             )
 
-        def visit_dict_manager(node: DictGuardManager) -> list[GuardManager]:
+        def visit_dict_manager(
+            node: DictGuardManager,
+        ) -> tuple[list[GuardManager], bool]:
             # Just recurse through the key and value dict managers and check if
             # all of them are tag safe nodes.
             if not issubclass(node.get_type_of_guarded_value(), dict):
@@ -482,17 +491,31 @@ class GuardManagerWrapper:
                 )
 
             tag_safe_roots = []
-            is_subtree_tag_safe = True
+            has_unoptimized_relational_guard = node.has_unoptimized_relational_guard()
 
             # Recurse to get the tag safe roots from subtree.
             for _idx, (key_mgr, val_mgr) in sorted(
                 node.get_key_value_managers().items()
             ):
                 if key_mgr is not None:
-                    visit(key_mgr)
+                    _, child_has_unoptimized_relational_guard = visit(key_mgr)
+                    has_unoptimized_relational_guard |= (
+                        child_has_unoptimized_relational_guard
+                    )
                 if val_mgr is not None:
-                    tag_safe_roots.extend(visit(val_mgr))
+                    (
+                        child_tag_safe_roots,
+                        child_has_unoptimized_relational_guard,
+                    ) = visit(val_mgr)
+                    tag_safe_roots.extend(child_tag_safe_roots)
+                    has_unoptimized_relational_guard |= (
+                        child_has_unoptimized_relational_guard
+                    )
 
+            if has_unoptimized_relational_guard:
+                return tag_safe_roots, has_unoptimized_relational_guard
+
+            is_subtree_tag_safe = True
             for key_mgr, val_mgr in node.get_key_value_managers().values():
                 if key_mgr:
                     is_subtree_tag_safe &= key_mgr.is_tag_safe()
@@ -502,9 +525,9 @@ class GuardManagerWrapper:
 
             if is_subtree_tag_safe:
                 node.mark_tag_safe()
-            return tag_safe_roots
+            return tag_safe_roots, has_unoptimized_relational_guard
 
-        def visit_manager(node: GuardManager) -> list[GuardManager]:
+        def visit_manager(node: GuardManager) -> tuple[list[GuardManager], bool]:
             if isinstance(node, DictGuardManager):
                 raise AssertionError(
                     f"Expected non-DictGuardManager node, got {type(node)}"
@@ -512,15 +535,26 @@ class GuardManagerWrapper:
 
             # Collect the subtree tag safe roots
             tag_safe_roots = []
+            has_unoptimized_relational_guard = node.has_unoptimized_relational_guard()
             for child_mgr in node.get_child_managers():
-                tag_safe_roots.extend(visit(child_mgr))
+                (
+                    child_tag_safe_roots,
+                    child_has_unoptimized_relational_guard,
+                ) = visit(child_mgr)
+                tag_safe_roots.extend(child_tag_safe_roots)
+                has_unoptimized_relational_guard |= (
+                    child_has_unoptimized_relational_guard
+                )
+
+            if has_unoptimized_relational_guard:
+                return tag_safe_roots, has_unoptimized_relational_guard
 
             if node.is_guarded_value_immutable():
                 # If the node guards a tensor, mark it tag safe only if there
                 # are no accessors. Presence of accessors means presence of
                 # symbolic shape guards.
                 if issubclass(node.get_type_of_guarded_value(), torch.Tensor):
-                    if node.has_no_accessors() and not node.has_object_aliasing_guard():
+                    if node.has_no_accessors():
                         node.mark_tag_safe()
                 elif any(
                     a.repr() == "PythonLambdaGuardAccessor"
@@ -550,9 +584,7 @@ class GuardManagerWrapper:
                     node.mark_tag_safe()
                     # Return the current node as tag safe root, discarding the
                     # subtree tag safe roots.
-                    return [
-                        node,
-                    ]
+                    return [node], has_unoptimized_relational_guard
             elif (
                 node.get_type_of_guarded_value()
                 in (
@@ -624,16 +656,16 @@ class GuardManagerWrapper:
                 if is_subtree_tag_safe:
                     node.mark_tag_safe()
 
-            return tag_safe_roots
+            return tag_safe_roots, has_unoptimized_relational_guard
 
-        def visit(node: GuardManager) -> list[GuardManager]:
+        def visit(node: GuardManager) -> tuple[list[GuardManager], bool]:
             if node is None:
-                return []
+                return [], False
             if isinstance(node, DictGuardManager):
                 return visit_dict_manager(node)
             return visit_manager(node)
 
-        tag_safe_roots = visit(self.root)
+        tag_safe_roots, _ = visit(self.root)
         for node in tag_safe_roots:
             if issubclass(node.get_type_of_guarded_value(), torch.nn.Module):
                 node.mark_tag_safe_root()
@@ -2893,6 +2925,7 @@ class GuardBuilder(GuardBuilderBase):
             self._set_guard_export_info(guard, code)
 
             self.get_guard_manager(guard).add_float_is_nan_guard(
+                val,
                 get_verbose_code_parts(code, guard),
                 guard.user_stack,
             )
@@ -2905,6 +2938,7 @@ class GuardBuilder(GuardBuilderBase):
             self._set_guard_export_info(guard, code)
 
             self.get_guard_manager(guard).add_complex_is_nan_guard(
+                val,
                 get_verbose_code_parts(code, guard),
                 guard.user_stack,
             )
@@ -3822,6 +3856,14 @@ class GuardBuilder(GuardBuilderBase):
             #   _dynamo_weak_dynamic_indices is the user-facing attribute, set via
             #   maybe_mark_dynamic(), and guarded on like the other dimension marking
             #   attributes above.
+            #   _dynamo_dynamic_range holds the min/max declared through
+            #   mark_dynamic() or maybe_mark_dynamic(). It is compared by VALUE, as one
+            #   set, so declaring a different range for a dim recompiles instead of
+            #   silently reusing a graph built for another range. Comparing the set as a
+            #   whole also means a graph compiled from {dim 0: [2, 5], dim 1: [3, 7]} is
+            #   not reused by a tensor declaring only {dim 0: [2, 5]}, even though the
+            #   marking indices of that tensor would match. TODO we can optimize that
+            #   recompilation by comparing value per dim.
             #   _dynamo_propagated_dynamic_indices is a compiler-internal attribute set by
             #   AOTAutograd's mark_dynamo_propagated_dynamic_indices() to propagate dynamism across
             #   graph breaks. It is NOT guarded on. When AOTAutograd discovers that an
@@ -3852,11 +3894,19 @@ class GuardBuilder(GuardBuilderBase):
                     code_part = f"hasattr({tensor_name}, '{attr_name}') == False"
                     code.append(code_part)
 
-            # Dependent attributes: checked only when _dynamo_unbacked_indices is present.
-            dependent_attrs: dict[str, tuple[dict[int, Any] | None, str]] = {}
-            dep_attr_names = ("_dynamo_shape_ids", "_dynamo_unbacked_bounds")
-            gate_attr = "_dynamo_unbacked_indices"
-            if hasattr(value, gate_attr):
+            # Dependent attributes: compared by value, and only when their gate
+            # attribute is present.
+            dependent_attrs: dict[str, tuple[Any, str]] = {}
+            gated_attrs = (
+                (
+                    "_dynamo_unbacked_indices",
+                    ("_dynamo_shape_ids", "_dynamo_unbacked_bounds"),
+                ),
+                ("_has_dynamo_dim_marking", ("_dynamo_dynamic_range",)),
+            )
+            for gate_attr, dep_attr_names in gated_attrs:
+                if not hasattr(value, gate_attr):
+                    continue
                 for attr_name in dep_attr_names:
                     attr_value = getattr(value, attr_name, None)
                     dependent_attrs[attr_name] = (attr_value, gate_attr)
