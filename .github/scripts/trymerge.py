@@ -186,9 +186,6 @@ query ($owner: String!, $name: String!, $number: Int!) {
       title
       body
       headRefName
-      headRepository {
-        nameWithOwner
-      }
       baseRefName
       baseRefOid
       baseRepository {
@@ -3088,7 +3085,6 @@ def main() -> None:
     args = parse_args()
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
-    pr = GitHubPR(org, project, args.pr_num)
 
     def handle_exception(e: Exception, title: str = "Merge failed") -> None:
         exception = f"**Reason**: {e}"
@@ -3116,6 +3112,13 @@ def main() -> None:
 
         gh_post_pr_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
         traceback.print_exc()
+
+    try:
+        pr = GitHubPR(org, project, args.pr_num)
+    except Exception as e:
+        if not args.check_mergeability:
+            handle_exception(e, f"Failed to fetch PR #{args.pr_num} data")
+        raise
 
     if args.revert:
         try:
