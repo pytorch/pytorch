@@ -6185,14 +6185,21 @@ if HAS_CUDA_AND_TRITON:
             from torch.testing._internal.triton_utils import add_kernel
 
             def foo(x, y):
+                n_elements = 128
+                BLOCK_SIZE = 16
+                grid = ((n_elements + BLOCK_SIZE - 1) // BLOCK_SIZE,)
                 # partition 1
                 output1 = torch.empty_like(x)
-                add_kernel[(8,)](x, y, output1, n_elements=128, BLOCK_SIZE=16)
+                add_kernel[grid](
+                    x, y, output1, n_elements=n_elements, BLOCK_SIZE=BLOCK_SIZE
+                )
                 output1_cpu = output1.cpu() + 1
                 # partition 2 should reuse the user-defined kernel
                 x2 = output1_cpu.to("cuda")
                 output2 = torch.empty_like(x)
-                add_kernel[(8,)](x2, y, output2, n_elements=128, BLOCK_SIZE=16)
+                add_kernel[grid](
+                    x2, y, output2, n_elements=n_elements, BLOCK_SIZE=BLOCK_SIZE
+                )
                 return output1, output2
 
             compiled_foo = torch.compile(foo)
