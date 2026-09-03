@@ -1,5 +1,7 @@
 # Owner(s): ["module: PrivateUse1"]
 
+from unittest import mock
+
 import torch
 import torch._dynamo
 from torch._dynamo.test_case import run_tests, TestCase
@@ -197,6 +199,59 @@ class TestAutocast(TestCase):
         self.assertEqual(
             enter_autocast_nodes[0].args,
             ("openreg", torch.float16, True, True),
+        )
+
+    def test_compile_with_minimal_backend_autocast(self):
+        class MinimalAutocast(torch.amp.autocast_mode.autocast):
+            def __init__(self):
+                super().__init__("openreg")
+
+        with mock.patch.object(torch.openreg.amp, "autocast", MinimalAutocast):
+            backend = EagerAndRecordGraphs()
+
+            @torch.compile(backend=backend, fullgraph=True)
+            def fn(x):
+                with torch.openreg.amp.autocast():
+                    return x + 1
+
+            x = torch.randn(4, device="openreg")
+            self.assertEqual(fn(x), x + 1)
+
+        enter_autocast_nodes = [
+            node
+            for node in backend.graphs[0].graph.nodes
+            if node.target is torch.amp._enter_autocast
+        ]
+        self.assertEqual(len(enter_autocast_nodes), 1)
+        self.assertEqual(
+            enter_autocast_nodes[0].args,
+            ("openreg", None, True, None),
+        )
+
+    def test_compile_with_backend_autocast_preserves_device_type(self):
+        class DeviceTypeAutocast(torch.amp.autocast_mode.autocast):
+            pass
+
+        with mock.patch.object(torch.openreg.amp, "autocast", DeviceTypeAutocast):
+            backend = EagerAndRecordGraphs()
+
+            @torch.compile(backend=backend, fullgraph=True)
+            def fn(x):
+                with torch.openreg.amp.autocast("cpu"):
+                    return x + 1
+
+            x = torch.randn(4, device="openreg")
+            self.assertEqual(fn(x), x + 1)
+
+        enter_autocast_nodes = [
+            node
+            for node in backend.graphs[0].graph.nodes
+            if node.target is torch.amp._enter_autocast
+        ]
+        self.assertEqual(len(enter_autocast_nodes), 1)
+        self.assertEqual(
+            enter_autocast_nodes[0].args,
+            ("cpu", None, True, None),
         )
 
     def test_compile_with_autocast(self):

@@ -114,23 +114,6 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             self.assertFalse(torch_variables._is_privateuse1_autocast(object))
             get_privateuse1_autocast.assert_not_called()
 
-    def test_privateuse1_autocast_preserves_device_type(self):
-        from torch._dynamo.variables.ctx_manager import AutocastModeVariable
-
-        class DeviceTypeAutocast(torch.amp.autocast_mode.autocast):
-            pass
-
-        variable = AutocastModeVariable.create(DeviceTypeAutocast, ["cpu"], {})
-        self.assertEqual(
-            variable.target_values,
-            [
-                "cpu",
-                None,
-                True,
-                None,
-            ],
-        )
-
     def test_no_grad(self):
         def fn1(a, b):
             x = a + 1
