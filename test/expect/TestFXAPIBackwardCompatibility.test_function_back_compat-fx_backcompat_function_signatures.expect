@@ -1,4 +1,4 @@
-torch.fx._symbolic_trace.Tracer.__init__(self, autowrap_modules: Tuple[Callable] = (<module math>,), autowrap_functions: Tuple[Callable[..., Any], ...] = (,), param_shapes_constant: bool = False) -> None
+torch.fx._symbolic_trace.Tracer.__init__(self, autowrap_modules: Tuple[types.ModuleType, ...] = (<module math>,), autowrap_functions: Tuple[Callable[..., Any], ...] = (,), param_shapes_constant: bool = False) -> None
 torch.fx._symbolic_trace.Tracer.call_module(self, m: torch.nn.modules.module.Module, forward: Callable[..., Any], args: Tuple[Any, ...], kwargs: Dict[str, Any]) -> Any
 torch.fx._symbolic_trace.Tracer.create_arg(self, a: Any) -> 'Argument'
 torch.fx._symbolic_trace.Tracer.get_fresh_qualname(self, prefix: str) -> str
