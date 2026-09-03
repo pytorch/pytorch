@@ -228,7 +228,7 @@ _DISALLOWED_DISPATCH_KEYS: frozenset[str] = frozenset(
 # `_native` must never appear here: it holds the opaque `_native::<node_id>` ops
 # that carry the override impls, so a router installed there would route into
 # itself.
-_ALLOWED_LIB_SYMBOLS: frozenset[str] = frozenset({"aten"})
+_ALLOWED_LIB_SYMBOLS: frozenset[str] = frozenset({"aten", "torch_nn"})
 
 
 def _build_key_set(
