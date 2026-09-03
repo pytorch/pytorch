@@ -2990,6 +2990,7 @@ class GuardBuilder(GuardBuilderBase):
             self._set_guard_export_info(guard, code)
 
             self.get_guard_manager(guard).add_float_is_nan_guard(
+                val,
                 get_verbose_code_parts(code, guard),
                 guard.user_stack,
             )
@@ -3002,6 +3003,7 @@ class GuardBuilder(GuardBuilderBase):
             self._set_guard_export_info(guard, code)
 
             self.get_guard_manager(guard).add_complex_is_nan_guard(
+                val,
                 get_verbose_code_parts(code, guard),
                 guard.user_stack,
             )

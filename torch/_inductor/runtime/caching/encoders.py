@@ -13,6 +13,16 @@ from torch._inductor.pattern_matcher import Match
 from torch._inductor.runtime.caching.utils import _encode_tensor, EncodedTensor
 
 
+def get_matmul_precision_for_cache(mat: Tensor) -> str:
+    """Return the device-specific FP32 policy used to key matmul decisions."""
+    # Non-FP32 matmuls ignore this policy and share one stable cache value.
+    if mat.dtype != torch.float32:
+        return "not_float32"
+    if mat.device.type == "cuda":
+        return torch.backends.cuda.matmul.fp32_precision
+    return torch.backends.mkldnn.fp32_precision
+
+
 class ShouldPadEncodedParams(TypedDict):
     """TypedDict for encoded should_pad parameters."""
 
@@ -22,7 +32,7 @@ class ShouldPadEncodedParams(TypedDict):
     input: EncodedTensor | None
     mat1_exclude_padding_time: bool
     mat2_exclude_padding_time: bool
-    tf32: bool
+    fp32_precision: str
 
 
 def should_pad_params_encoder(
@@ -59,10 +69,5 @@ def should_pad_params_encoder(
         input=_encode_tensor(input) if input is not None else None,
         mat1_exclude_padding_time=should_exclude_padding_time(match, "mat1"),
         mat2_exclude_padding_time=should_exclude_padding_time(match, "mat2"),
-        tf32=False
-        if mat1.dtype != torch.float32
-        else bool(
-            torch.backends.cuda.matmul.fp32_precision == "tf32"
-            or torch.backends.mkldnn.fp32_precision == "tf32"
-        ),
+        fp32_precision=get_matmul_precision_for_cache(mat1),
     )
