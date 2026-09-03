@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 # Owner(s): ["module: unknown"]
 
+import importlib.util
 import multiprocessing
 import os
 import random
@@ -13,7 +14,9 @@ import traceback
 import types
 import unittest
 import warnings
+from pathlib import Path
 from typing import Any, cast
+from unittest import mock
 
 import torch
 import torch.nn as nn
@@ -672,6 +675,9 @@ class TestCollectEnv(TestCase):
     def test_smoke(self):
         info_output = get_pretty_env_info()
         self.assertTrue(info_output.count("\n") >= 17)
+        self.assertIn("ROCm SDK used to build PyTorch:", info_output)
+        self.assertIn("HIP used to build PyTorch:", info_output)
+        self.assertNotIn("ROCM used to build PyTorch:", info_output)
 
 
 class TestHipify(TestCase):
@@ -967,8 +973,194 @@ class TestCppExtensionUtils(TestCase):
     def test_cc_compiler_is_ok(self):
         self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform("cc"))
 
+    @staticmethod
+    def _fake_version_module(**attrs):
+        module = types.ModuleType("fake_torch_version")
+        for name, value in attrs.items():
+            setattr(module, name, value)
+        return module
+
+    def test_derive_rocm_version_prefers_rocm(self):
+        version = self._fake_version_module(hip="7.0.51831", rocm="6.4.2")
+        derived = torch.utils.cpp_extension._derive_rocm_version(version)
+        self.assertEqual(derived, (6, 4))
+
+    def test_derive_rocm_version_falls_back_when_attribute_absent(self):
+        version = self._fake_version_module(hip="7.0.51831")
+        with self.assertLogs("torch.utils.cpp_extension", level="WARNING") as logs:
+            derived = torch.utils.cpp_extension._derive_rocm_version(version)
+        self.assertEqual(derived, (7, 0))
+        self.assertIn("torch.version.rocm", logs.output[0])
+
+    def test_derive_rocm_version_falls_back_when_rocm_is_none(self):
+        version = self._fake_version_module(hip="7.0.51831", rocm=None)
+        with self.assertLogs("torch.utils.cpp_extension", level="WARNING"):
+            derived = torch.utils.cpp_extension._derive_rocm_version(version)
+        self.assertEqual(derived, (7, 0))
+
+    def test_derive_rocm_version_is_none_off_rocm(self):
+        version = self._fake_version_module(hip=None, rocm=None)
+        self.assertIsNone(torch.utils.cpp_extension._derive_rocm_version(version))
+
+
+def _load_verify_dynamo():
+    path = Path(__file__).resolve().parents[1] / "tools" / "dynamo" / "verify_dynamo.py"
+    spec = importlib.util.spec_from_file_location("verify_dynamo_under_test", path)
+    loader = spec.loader if spec is not None else None
+    if spec is None or loader is None:
+        raise AssertionError(f"Could not load verify_dynamo from {path}")
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+class TestVerifyDynamoRocm(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.verify_dynamo = _load_verify_dynamo()
+
+    def _write_rocm_version_h(self, tmpdir, major, minor, patch):
+        header = Path(tmpdir) / "include" / "rocm-core" / "rocm_version.h"
+        header.parent.mkdir(parents=True)
+        header.write_text(
+            f"#define ROCM_VERSION_MAJOR {major}\n"
+            f"#define ROCM_VERSION_MINOR {minor}\n"
+            f"#define ROCM_VERSION_PATCH {patch}\n"
+        )
+
+    def test_parse_version_truncates_to_major_minor(self):
+        parsed = self.verify_dynamo._parse_version("7.14.1-githash", components=2)
+        self.assertEqual(str(parsed), "7.14")
+
+    def test_reads_full_rocm_sdk_version(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._write_rocm_version_h(tmpdir, 10, 1, 2)
+            with mock.patch.object(
+                self.verify_dynamo, "_find_rocm_home", return_value=tmpdir
+            ):
+                self.assertEqual(
+                    str(self.verify_dynamo.get_rocm_sdk_version()), "10.1.2"
+                )
+
+    def test_missing_rocm_sdk_header_falls_back(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with mock.patch.object(
+                self.verify_dynamo, "_find_rocm_home", return_value=tmpdir
+            ):
+                self.assertIsNone(self.verify_dynamo.get_rocm_sdk_version())
+
+    def test_malformed_rocm_sdk_header_falls_back(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            header = Path(tmpdir) / "include" / "rocm-core" / "rocm_version.h"
+            header.parent.mkdir(parents=True)
+            header.write_text("#define ROCM_VERSION_MAJOR 7\n")
+            with mock.patch.object(
+                self.verify_dynamo, "_find_rocm_home", return_value=tmpdir
+            ):
+                self.assertIsNone(self.verify_dynamo.get_rocm_sdk_version())
+
+    def test_check_rocm_sdk_ignores_patch_mismatch(self):
+        from torch.torch_version import TorchVersion
+
+        with (
+            mock.patch.object(torch.cuda, "is_available", return_value=True),
+            mock.patch.object(torch.version, "hip", "7.14.26306"),
+            mock.patch.object(torch.version, "rocm", "7.14.0"),
+            mock.patch.object(
+                self.verify_dynamo,
+                "get_rocm_sdk_version",
+                return_value=TorchVersion("7.14.1"),
+            ),
+            warnings.catch_warnings(record=True) as caught,
+        ):
+            warnings.simplefilter("always")
+            result = self.verify_dynamo.check_rocm()
+        self.assertEqual(str(result), "7.14")
+        self.assertFalse(any("mismatch" in str(w.message) for w in caught))
+
+    def test_check_rocm_sdk_warns_on_minor_mismatch(self):
+        from torch.torch_version import TorchVersion
+
+        with (
+            mock.patch.object(torch.cuda, "is_available", return_value=True),
+            mock.patch.object(torch.version, "hip", "7.15.26306"),
+            mock.patch.object(torch.version, "rocm", "7.14.0"),
+            mock.patch.object(
+                self.verify_dynamo,
+                "get_rocm_sdk_version",
+                return_value=TorchVersion("7.15.0"),
+            ),
+            warnings.catch_warnings(record=True) as caught,
+        ):
+            warnings.simplefilter("always")
+            self.verify_dynamo.check_rocm()
+        self.assertTrue(any("mismatch" in str(w.message) for w in caught))
+
+    def test_check_rocm_falls_back_to_hip_for_old_wheel(self):
+        from torch.torch_version import TorchVersion
+
+        with (
+            mock.patch.object(torch.cuda, "is_available", return_value=True),
+            mock.patch.object(torch.version, "hip", "7.15.26306"),
+            mock.patch.object(torch.version, "rocm", None),
+            mock.patch.object(
+                self.verify_dynamo, "get_rocm_sdk_version", return_value=None
+            ),
+            mock.patch.object(
+                self.verify_dynamo,
+                "get_hip_version",
+                return_value=TorchVersion("7.15"),
+            ),
+            warnings.catch_warnings(record=True) as caught,
+        ):
+            warnings.simplefilter("always")
+            result = self.verify_dynamo.check_rocm()
+        self.assertEqual(str(result), "7.15")
+        self.assertFalse(any("mismatch" in str(w.message) for w in caught))
+
 
 class TestTraceback(TestCase):
+    @staticmethod
+    @torch._dynamo.disable
+    def _context_decorator_traceback_frame_names():
+        @torch.no_grad()
+        def decorated():
+            raise RuntimeError("test")
+
+        try:
+            decorated()
+        except RuntimeError as e:
+            return [frame.name for frame in traceback.extract_tb(e.__traceback__)]
+        else:
+            raise AssertionError("Expected RuntimeError")
+
+    def test_context_decorator_traceback_frame_name(self):
+        frame_names = self._context_decorator_traceback_frame_names()
+        self.assertIn("no_grad", frame_names)
+        self.assertNotIn("decorate_context", frame_names)
+
+    @staticmethod
+    @torch._dynamo.disable
+    def _context_decorator_generator_traceback_frame_names():
+        @torch.no_grad()
+        def decorated_generator():
+            yield None
+            raise RuntimeError("test")
+
+        gen = decorated_generator()
+        next(gen)
+        try:
+            next(gen)
+        except RuntimeError as e:
+            return [frame.name for frame in traceback.extract_tb(e.__traceback__)]
+        else:
+            raise AssertionError("Expected RuntimeError")
+
+    def test_context_decorator_generator_traceback_frame_name(self):
+        frame_names = self._context_decorator_generator_traceback_frame_names()
+        self.assertIn("no_grad", frame_names)
+        self.assertNotIn("generator_context", frame_names)
+
     def test_basic(self):
         source = """\
 def f(x):
