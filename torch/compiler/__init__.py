@@ -319,23 +319,63 @@ def list_backends(exclude_tags=("debug", "experimental")) -> list[str]:
     return torch._dynamo.list_backends(exclude_tags)
 
 
-def assume_constant_result(fn):
+def assume_constant_result(fn=None, *, specialize_args=False):
     """
-    This function is used to mark a function `fn` as having a constant result.
-    This allows the compiler to optimize away your function.
-    Returns The same function `fn`
+    Mark a function ``fn`` as having a constant result: ``fn`` is executed
+    once at compile time and its result is baked into the compiled graph
+    as a constant.
 
     Args:
         fn: The function to be marked as having a constant result.
+        specialize_args: Controls when the baked result is reused across calls.
+
+            With the default ``specialize_args=False``, the result is assumed
+            not to depend on the argument values. Arguments can be anything;
+            user-defined objects are guarded by identity only, so a fresh
+            object each call recompiles every time, and an in-place mutation
+            goes undetected.
+
+            With ``specialize_args=True``, the result is assumed to depend on
+            the arguments but to be equal whenever they are equal: arguments
+            are guarded by value, so the baked result is reused for equal
+            arguments and recomputed when a value changes. The guards cover
+            everything the result can depend on, not only explicitly passed
+            arguments: for methods the receiver (``self``) is guarded like an
+            argument, and so is the default value of any parameter the caller
+            does not pass. Supported argument types are those ``torch.compile``
+            can compare by value:
+
+            - basic constants (``int``, ``float``, ``bool``, ``str``,
+              ``bytes``, ``None``, ``torch.dtype``, ``torch.device``, ...)
+              and enums,
+            - exact ``tuple``/``list``/``dict`` (plus ``torch.Size`` and plain
+              namedtuples) of supported values; container subclasses
+              graph-break, since they can carry instance state the value
+              guards would not see,
+            - dataclasses whose only state is their declared fields, with
+              recursively supported field values,
+            - classes registered as constants via
+              :func:`torch.utils._pytree.register_constant` or
+              ``torch._library.opaque_object.register_custom_class`` with
+              ``typ="constant"`` (compared by the class's ``__eq__``).
+
+            Anything else triggers a graph break rather than silently falling
+            back to identity guarding. In particular tensors are rejected
+            (their data cannot be value-guarded); tensor arguments are allowed
+            only with ``specialize_args=False``, where they are passed to
+            ``fn`` by real value without any guard.
+
+    Returns:
+        The same function ``fn``.
 
     .. warning::
-        `assume_constant_result` can, if invalid, cause safety and soundness issues, :func:`torch.compile`
-        will not attempt to validate whether the constant assumption is true or not
-
+        ``assume_constant_result`` can, if invalid, cause safety and
+        soundness issues. :func:`torch.compile` will not attempt to validate
+        whether the constant assumption is true or not.
     """
     import torch._dynamo
 
-    return torch._dynamo.assume_constant_result(fn)
+    return torch._dynamo.assume_constant_result(fn, specialize_args=specialize_args)
 
 
 def disable(fn=None, recursive=True, *, reason=None):
