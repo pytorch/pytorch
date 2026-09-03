@@ -243,17 +243,14 @@ class _DynamoCodeCacheEntry:
 
 
 def _restore_missing_fields(obj: Any, state: dict[str, Any]) -> None:
-    """Unpickle a dataclass written before some of its fields existed. A plain
-    default is reachable as a class attribute anyway; a default_factory field
-    (system_info) is not, and read as an AttributeError on load."""
+    """Unpickle a dataclass written before some of its fields existed, filling
+    in plain defaults only. Nothing here may be computed on the loading host:
+    a synthesized SystemInfo compared the host to itself and let any artifact
+    missing one install."""
     obj.__dict__.update(state)
     for field in dataclasses.fields(obj):
-        if field.name in state:
-            continue
-        if field.default is not dataclasses.MISSING:
+        if field.name not in state and field.default is not dataclasses.MISSING:
             setattr(obj, field.name, field.default)
-        elif field.default_factory is not dataclasses.MISSING:
-            setattr(obj, field.name, field.default_factory())
 
 
 def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
@@ -599,14 +596,10 @@ class _DynamoCacheEntry:
     codes: list[_DynamoCodeCacheEntry]
     source_info: SourceInfo
     device_type: str
-    # Probe-free on purpose: this default is what CompileArtifacts(**state)
-    # reaches for a pickle written before the field existed, and running the
-    # C++ toolchain there is seconds on a cold cache and a hard error on a
-    # host with no compiler. Every site that compares the target passes
-    # cpu_codegen= explicitly.
-    system_info: SystemInfo = dataclasses.field(
-        default_factory=functools.partial(SystemInfo.current, cpu_codegen=False)
-    )
+    # None only for a pickle written without it (or one that lost the key);
+    # check_versions() rejects it, since there is nothing to compare the host
+    # against. cache_entry() always records one.
+    system_info: SystemInfo | None = None
     device_types: frozenset[str] | None = None
     requires_native_backend_compatibility: bool = True
     fn_name: str | None = None
@@ -621,6 +614,11 @@ class _DynamoCacheEntry:
 
     def check_versions(self) -> None:
         """Check if the current system is compatible with the system used to create this cache entry."""
+        if self.system_info is None:
+            raise RuntimeError(
+                "Compile package records no system info; it cannot be checked "
+                "against this host"
+            )
         device_types = self.device_types or frozenset((self.device_type,))
         check_codegen = self.requires_native_backend_compatibility
         # Determining the codegen target runs the C++ toolchain, so only pay for
