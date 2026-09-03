@@ -1,5 +1,6 @@
 import itertools
 import logging
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import torch
@@ -441,6 +442,7 @@ def _init_param_group(
     mp_policy: "MixedPrecisionPolicy",
     offload_policy: "OffloadPolicy",
     reshard_after_forward: bool | int = True,
+    param_mp_policies: dict[nn.Parameter, "MixedPrecisionPolicy"] | None = None,
 ) -> None:
     """
     Initialize FSDP param groups for the given state.
@@ -471,6 +473,7 @@ def _init_param_group(
                 shard_placement_fn,
                 mp_policy,
                 offload_policy,
+                param_mp_policies,
             )
         )
         return
@@ -529,8 +532,36 @@ def _init_param_group(
                 shard_placement_fn,
                 mp_policy,
                 offload_policy,
+                param_mp_policies,
             )
         )
+
+
+def _resolve_param_mp_policies(
+    params: list[nn.Parameter], mp_policy: "MixedPrecisionPolicy"
+) -> tuple[
+    "MixedPrecisionPolicy",
+    dict[nn.Parameter, "MixedPrecisionPolicy"] | None,
+]:
+    if mp_policy.param_dtype_fn is None:
+        return mp_policy, None
+
+    param_dtype_fn = mp_policy.param_dtype_fn
+    mp_policy = replace(mp_policy, param_dtype_fn=None)
+    param_mp_policies: dict[nn.Parameter, MixedPrecisionPolicy] = {}
+    policies_by_dtype = {mp_policy.param_dtype: mp_policy}
+    for param in params:
+        param_dtype = param_dtype_fn(param)
+        if param_dtype is not None and not isinstance(param_dtype, torch.dtype):
+            raise ValueError(
+                "MixedPrecisionPolicy.param_dtype_fn must return a torch.dtype "
+                f"or None but got {type(param_dtype)}"
+            )
+        param_dtype = mp_policy.param_dtype if param_dtype is None else param_dtype
+        if param_dtype not in policies_by_dtype:
+            policies_by_dtype[param_dtype] = replace(mp_policy, param_dtype=param_dtype)
+        param_mp_policies[param] = policies_by_dtype[param_dtype]
+    return mp_policy, param_mp_policies
 
 
 def _get_modules_and_states(

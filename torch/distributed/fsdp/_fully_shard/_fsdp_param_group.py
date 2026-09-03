@@ -164,6 +164,7 @@ class FSDPParamGroup:
         shard_placement_fn: Callable[[nn.Parameter], ShardPlacementFnResult] | None,
         mp_policy: MixedPrecisionPolicy,
         offload_policy: OffloadPolicy,
+        param_mp_policies: dict[nn.Parameter, MixedPrecisionPolicy] | None = None,
     ):
         self.modules = modules  # permit ref cycle because 1:1 lifetime
         param_module_infos = _get_param_module_infos(params, modules)
@@ -176,7 +177,11 @@ class FSDPParamGroup:
                 post_forward_mesh_info,
                 device,
                 shard_placement_fn,
-                mp_policy,
+                (
+                    param_mp_policies[param]
+                    if param_mp_policies is not None
+                    else mp_policy
+                ),
                 offload_policy,
             )
             for param, module_info in zip(params, param_module_infos)
@@ -273,7 +278,7 @@ class FSDPParamGroup:
     # Initialization #
     def _init_mp_dtypes(self) -> None:
         for fsdp_param in self.fsdp_params:
-            fsdp_param.init_dtype_attrs(self.mp_policy)
+            fsdp_param.init_dtype_attrs(fsdp_param.mp_policy)
         trainable_params: list[FSDPParam] = [
             p for p in self.fsdp_params if p.sharded_param.requires_grad
         ]
@@ -284,24 +289,36 @@ class FSDPParamGroup:
                 p for p in self.fsdp_params if p.orig_dtype.is_floating_point
             ]
         orig_dtypes = {p.orig_dtype for p in params_for_dtype}
-        reduce_dtypes = {p.reduce_dtype for p in params_for_dtype}
-        if len(trainable_params) > 0 and len(orig_dtypes) != 1:
-            # Models may have no grad params
-            raise AssertionError(
-                f"FSDP expects uniform original parameter dtype but got {orig_dtypes}"
-            )
+        raw_reduce_dtypes = {p.reduce_dtype for p in params_for_dtype}
+        # ``reduce_dtype`` is ``None`` when no cast is needed, so compare the
+        # effective dtypes to validate one reduction buffer dtype.
+        reduce_dtypes = {
+            p.reduce_dtype or p.param_dtype or p.orig_dtype for p in params_for_dtype
+        }
         if len(trainable_params) > 0 and len(reduce_dtypes) != 1:
             # This can be relaxed if we issue one reduce-scatter per reduce
             # dtype (but we would need a way for users to specify multiple
             # reduce dtypes)
             raise AssertionError(
-                f"FSDP expects uniform reduce dtype but got {reduce_dtypes}"
+                "FSDP requires a common reduce dtype for all trainable parameters "
+                f"but got effective reduce dtypes {reduce_dtypes}. Set "
+                "MixedPrecisionPolicy.reduce_dtype to an explicit dtype."
             )
-        dtype_sets_are_uniform = len(orig_dtypes) == 1 and len(reduce_dtypes) == 1
-        self._orig_dtype = next(iter(orig_dtypes)) if dtype_sets_are_uniform else None
-        self._reduce_dtype = (
-            next(iter(reduce_dtypes)) if dtype_sets_are_uniform else None
-        )
+        orig_dtypes_are_uniform = len(orig_dtypes) == 1
+        reduce_dtypes_are_uniform = len(reduce_dtypes) == 1
+        self._orig_dtype = next(iter(orig_dtypes)) if orig_dtypes_are_uniform else None
+        if not reduce_dtypes_are_uniform:
+            self._reduce_dtype = None
+        elif self.mp_policy.reduce_dtype is not None and any(
+            p.reduce_dtype is not None
+            for p in self.fsdp_params
+            if p.orig_dtype.is_floating_point
+        ):
+            self._reduce_dtype = self.mp_policy.reduce_dtype
+        elif len(raw_reduce_dtypes) == 1:
+            self._reduce_dtype = next(iter(raw_reduce_dtypes))
+        else:
+            self._reduce_dtype = next(iter(reduce_dtypes))
 
     def lazy_init(self):
         # Lazy init should be idempotent
@@ -622,6 +639,7 @@ class FSDPParamGroup:
             self._training_state = TrainingState.POST_BACKWARD
             with record_function(self._with_fqn("FSDP::post_backward_accumulate")):
                 for fsdp_param in self.fsdp_params:
+                    fsdp_param._validate_unsharded_grad_dtypes()
                     fsdp_param.accumulate_unsharded_grad_if_needed()
             with record_function(self._with_fqn("FSDP::post_backward_reshard")):
                 if not self.reduce_grads:
@@ -682,6 +700,19 @@ class FSDPParamGroup:
                         del oldest
             if len(fsdp_params_with_grad) == 0:
                 return
+            orig_dtypes = {p.orig_dtype for p in fsdp_params_with_grad}
+            orig_dtype = next(iter(orig_dtypes)) if len(orig_dtypes) == 1 else None
+            reduce_dtypes = {
+                p.reduce_dtype or p.param_dtype or p.orig_dtype
+                for p in fsdp_params_with_grad
+            }
+            if len(reduce_dtypes) != 1:
+                raise AssertionError(
+                    "FSDP requires a common reduce dtype for all parameters with "
+                    f"gradients but got {reduce_dtypes}. Set "
+                    "MixedPrecisionPolicy.reduce_dtype to an explicit dtype."
+                )
+            reduce_dtype = next(iter(reduce_dtypes))
             with record_function(self._with_fqn("FSDP::post_backward_reduce")):
                 all_reduce_pg = (
                     self._all_reduce_process_group
@@ -720,8 +751,8 @@ class FSDPParamGroup:
                     ),
                     self.comm_ctx.reduce_scatter_stream,
                     self._reduce_scatter_comm,
-                    self._orig_dtype,
-                    self._reduce_dtype,
+                    orig_dtype,
+                    reduce_dtype,
                     self.device,
                     self.gradient_divide_factor,
                     (

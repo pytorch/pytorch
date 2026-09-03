@@ -25,6 +25,7 @@ from torch.testing._internal.common_fsdp import (
     FSDPTestMultiThread,
     get_devtype,
     MLP,
+    patch_all_reduce,
     patch_reduce_scatter,
     reduce_scatter_with_assert,
 )
@@ -42,6 +43,83 @@ device_type = torch.device(get_devtype())
 
 class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
     world_size = 2
+
+    @skipIfRocmVersionLessThan((7, 0))
+    @skip_if_lt_x_gpu(2)
+    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
+    def test_per_param_compute_dtypes(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w0 = nn.Parameter(torch.randn(8, 8))
+                self.w1 = nn.Parameter(torch.randn(8, 8))
+                self.w2 = nn.Parameter(torch.randn(8, 8))
+                self.param_dtypes: tuple[torch.dtype, ...] = ()
+
+            def forward(self, inp: torch.Tensor) -> torch.Tensor:
+                weights = (self.w0, self.w1, self.w2)
+                self.param_dtypes = tuple(weight.dtype for weight in weights)
+                return sum(
+                    (inp.to(weight.dtype) @ weight).float() for weight in weights
+                )
+
+        torch.manual_seed(42)
+        model = Model()
+        ref_model = copy.deepcopy(model).to(device_type)
+        compute_dtypes = (torch.bfloat16, torch.float16, torch.float32)
+        param_dtype_overrides = dict(
+            zip(
+                (id(param) for param in model.parameters()),
+                (None, torch.float16, torch.float32),
+                strict=True,
+            )
+        )
+        selector_calls = 0
+
+        def param_dtype_fn(param: nn.Parameter) -> torch.dtype | None:
+            nonlocal selector_calls
+            selector_calls += 1
+            return param_dtype_overrides[id(param)]
+
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16,
+            reduce_dtype=torch.float32,
+            cast_forward_inputs=False,
+            param_dtype_fn=param_dtype_fn,
+        )
+        replicate(model, mp_policy=mp_policy)
+        self.assertEqual(selector_calls, 3)
+        state = replicate.state(model)
+        self.assertIsNone(state._mp_policy.param_dtype_fn)
+
+        torch.manual_seed(1 + self.rank)
+        inp = torch.randn(4, 8, device=device_type)
+        ref_weights = tuple(ref_model.parameters())
+        ref_out = sum(
+            (inp.to(dtype) @ weight.to(dtype)).float()
+            for weight, dtype in zip(ref_weights, compute_dtypes, strict=True)
+        )
+        out = model(inp)
+        self.assertEqual(out, ref_out)
+        ref_out.sum().backward()
+        all_reduce_calls = 0
+        orig_all_reduce = dist.all_reduce
+
+        def all_reduce(tensor, *args, **kwargs):
+            nonlocal all_reduce_calls
+            all_reduce_calls += 1
+            self.assertEqual(tensor.dtype, torch.float32)
+            return orig_all_reduce(tensor, *args, **kwargs)
+
+        with patch_all_reduce(all_reduce):
+            out.sum().backward()
+        for param in ref_model.parameters():
+            dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
+
+        self.assertEqual(model.param_dtypes, compute_dtypes)
+        self.assertEqual(selector_calls, 3)
+        self.assertEqual(all_reduce_calls, 1)
+        check_sharded_parity(self, ref_model, model)
 
     def _init_models_and_optims(
         self,
