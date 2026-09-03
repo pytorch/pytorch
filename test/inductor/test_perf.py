@@ -219,7 +219,11 @@ class NumBytesMetricTests(TestCase):
         def f(a, b, c):
             return torch.cat((a + 1, b + 2, c + 3)) + 10
 
-        inp = (T(10, 10, device=device), T(10, 10, device=device), T(10, 10, device=device))
+        inp = (
+            T(10, 10, device=device),
+            T(10, 10, device=device),
+            T(10, 10, device=device),
+        )
         self.assertExpectedInline(count_numel(f, *inp), """600""")
 
         def f(a, b, c, d, e):
@@ -547,7 +551,11 @@ class FusionTests(TestCase):
             b.copy_(b0)
             a.copy_(a0)
 
-        inp = (T(10, 10, device=device), T(10, 10, device=device), T(10, 10, device=device))
+        inp = (
+            T(10, 10, device=device),
+            T(10, 10, device=device),
+            T(10, 10, device=device),
+        )
         self.assertExpectedInline(count_numel(f, *inp), """500""")
 
     @skipIfXpu(msg="copy_(cat()) fusion not supported on XPU")
@@ -588,7 +596,10 @@ class FusionTests(TestCase):
             y = torch.nn.functional.sigmoid(x_scaled)
             return (y, amax)
 
-        inp = (T(4, 2048, hidden_size, dtype=torch.float, device=device), T(1, dtype=torch.float, device=device))
+        inp = (
+            T(4, 2048, hidden_size, dtype=torch.float, device=device),
+            T(1, dtype=torch.float, device=device),
+        )
 
         # 2 kernels:
         # kernel 1: (input = X, scale, LN scale, LN bias, output = LN_pointwise(X), first-level amax (split-reduction))
@@ -624,7 +635,10 @@ class FusionTests(TestCase):
             y = torch.nn.functional.sigmoid(x_scaled)
             return (y, amax)
 
-        inp = (T(4, 2048, hidden_size, dtype=torch.float, device=device), T(1, dtype=torch.float, device=device))
+        inp = (
+            T(4, 2048, hidden_size, dtype=torch.float, device=device),
+            T(1, dtype=torch.float, device=device),
+        )
 
         compiled_f = torch.compile(f)
         compiled_f(*inp, True)
@@ -787,7 +801,11 @@ class SchedulerFusionTestsOnlyCPU(TestCase):
             output = o1 + o2
             return output
 
-        inp = (T(2, 3, 10, 11, device=device), T(11, device=device), T(11, device=device))
+        inp = (
+            T(2, 3, 10, 11, device=device),
+            T(11, device=device),
+            T(11, device=device),
+        )
         self.assertExpectedInline(count_numel(f, *inp), """1342""")
 
 
@@ -811,7 +829,11 @@ class TilingTests(TestCase):
         def f(a, b, c):
             return a + b.permute(1, 2, 0) + c.permute(2, 0, 1)
 
-        inp = (T(10, 10, 10, device=device), T(10, 10, 10, device=device), T(10, 10, 10, device=device))
+        inp = (
+            T(10, 10, 10, device=device),
+            T(10, 10, 10, device=device),
+            T(10, 10, 10, device=device),
+        )
         self.assertExpectedInline(count_numel(f, *inp), """4000""")
 
 
@@ -830,7 +852,12 @@ class MinCutPartitioningTests(TestCase):
             x = a + b + c + d
             return x.cos().cos()
 
-        inp = (T(10, grad=True, device=device), T(10, grad=True, device=device), T(10, grad=True, device=device), T(10, grad=True, device=device))
+        inp = (
+            T(10, grad=True, device=device),
+            T(10, grad=True, device=device),
+            T(10, grad=True, device=device),
+            T(10, grad=True, device=device),
+        )
         self.assertExpectedInline(count_numel_train(f, *inp), """90""")
 
     def test_partitioning_dtype(self, device):
@@ -1428,22 +1455,16 @@ class WouldBeNiceIfItWorked:
 instantiate_device_type_tests(
     NumBytesMetricTests, globals(), except_for="cpu", allow_xpu=True
 )
-instantiate_device_type_tests(
-    FusionTests, globals(), except_for="cpu", allow_xpu=True
-)
+instantiate_device_type_tests(FusionTests, globals(), except_for="cpu", allow_xpu=True)
 instantiate_device_type_tests(
     SchedulerFusionTests, globals(), except_for="cpu", allow_xpu=True
 )
 instantiate_device_type_tests(SchedulerFusionTestsOnlyCPU, globals(), only_for="cpu")
-instantiate_device_type_tests(
-    TilingTests, globals(), except_for="cpu", allow_xpu=True
-)
+instantiate_device_type_tests(TilingTests, globals(), except_for="cpu", allow_xpu=True)
 instantiate_device_type_tests(
     MinCutPartitioningTests, globals(), except_for="cpu", allow_xpu=True
 )
-instantiate_device_type_tests(
-    NoopTests, globals(), except_for="cpu", allow_xpu=True
-)
+instantiate_device_type_tests(NoopTests, globals(), except_for="cpu", allow_xpu=True)
 instantiate_device_type_tests(
     InplacingTests, globals(), except_for="cpu", allow_xpu=True
 )
