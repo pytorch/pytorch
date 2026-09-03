@@ -28,13 +28,13 @@ def blackwell_decompose_k_partial_grid(
     min,
 ):
     """Launch one persistent MxN tile grid for every K partition."""
-    m_pad = flattened_m // meta["K_SPLIT"]
+    m_pad = flattened_m // meta["BATCH_SIZE"]
     grid_m = cdiv(m_pad, meta["BLOCK_M"])
     grid_n = cdiv(n, meta["BLOCK_N"])
     grid_x = min(meta["NUM_SMS"], grid_m * grid_n)
     if meta["TWO_CTAS"]:
         grid_x = (grid_x // 2) * 2
-    return (grid_x, meta["K_SPLIT"], 1)
+    return (grid_x, meta["BATCH_SIZE"], 1)
 
 
 blackwell_decompose_k_partial_template = TritonTemplate(
@@ -107,9 +107,20 @@ def append_blackwell_decompose_k_partial_choice(
         "BLOCK_M": config.block_m,
         "BLOCK_N": config.block_n,
         "BLOCK_K": config.block_k,
+        "K_TILES": k_part // config.block_k,
         "GROUP_M": 8,
-        "K_SPLIT": k_split,
-        "M_PAD": m_pad,
+        "BATCH_SIZE": k_split,
+        "LOGICAL_M": m,
+        "LOGICAL_N": n,
+        "DESCRIPTOR_K": k,
+        "A_BATCH_STRIDE": 0,
+        "B_BATCH_STRIDE": 0,
+        "K_BATCH_OFFSET": k_part,
+        "A_M_STRIDE": int(mat1.get_stride()[0]),
+        "A_K_STRIDE": int(mat1.get_stride()[1]),
+        "B_K_STRIDE": int(mat2.get_stride()[0]),
+        "B_N_STRIDE": int(mat2.get_stride()[1]),
+        "OUTPUT_BATCH_ROWS": m_pad,
         "NUM_SMS": min(get_num_sms(), m_tiles * math.ceil(n / config.block_n)),
         "A_ROW_MAJOR": mat1.get_stride()[1] == 1,
         "B_ROW_MAJOR": mat2.get_stride()[1] == 1,
@@ -122,7 +133,6 @@ def append_blackwell_decompose_k_partial_choice(
         "EPILOGUE_SUBTILE": config.epilogue_subtile,
         "TWO_CTAS": config.two_ctas,
         "FLATTEN_OUTPUT": True,
-        "DECOMPOSE_K": True,
         "tma_store": True,
         "transpose_discontiguous_tensor_descriptors_override": True,
     }
