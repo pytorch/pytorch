@@ -1,0 +1,229 @@
+name: Auto PR Triage
+
+# Intentional one-pass execution: analyze reads each PR and triage signal
+# once. Apply trusts those bounded outputs and reads reviewer/rotation state
+# once when needed. Separate calls can observe different moments, later changes
+# are ignored for this run, and stale effects are bounded and recoverable.
+
+on:
+  pull_request_target:
+    types: [labeled, ready_for_review]
+
+concurrency:
+  group: auto-pr-triage-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  analyze:
+    if: >-
+      github.repository_owner == 'pytorch' &&
+      github.event.pull_request.state == 'open' &&
+      github.event.pull_request.base.ref == 'main' &&
+      !github.event.pull_request.draft &&
+      ((github.event.action == 'labeled' &&
+        github.event.label.name == 'open source') ||
+       (github.event.action == 'ready_for_review' &&
+        contains(github.event.pull_request.labels.*.name, 'open source')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: bedrock
+    outputs:
+      analysis-result-json: ${{ steps.auto-pr-triage.outputs.analysis-result-json }}
+      should-run: ${{ steps.history.outputs.should-run }}
+    permissions:
+      contents: read
+      id-token: write
+      issues: read
+      pull-requests: read
+    steps:
+      - name: Admit the first eligible label or ready event
+        id: history
+        env:
+          EVENT_ACTION: ${{ github.event.action }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]] || exit 1
+          [[ "$EVENT_ACTION" == "labeled" || "$EVENT_ACTION" == "ready_for_review" ]] || exit 1
+          HISTORY="$(
+            # GraphQL variables must remain literal for gh to bind with -F.
+            # shellcheck disable=SC2016
+            gh api graphql \
+              -F owner="${REPOSITORY%%/*}" \
+              -F name="${REPOSITORY#*/}" \
+              -F number="$PR_NUMBER" \
+              -f query='query($owner: String!, $name: String!, $number: Int!) {
+                repository(owner: $owner, name: $name) {
+                  pullRequest(number: $number) {
+                    timelineItems(
+                      last: 100
+                      itemTypes: [LABELED_EVENT, READY_FOR_REVIEW_EVENT]
+                    ) {
+                      nodes {
+                        __typename
+                        ... on LabeledEvent { label { name } }
+                      }
+                      pageInfo { hasPreviousPage }
+                    }
+                  }
+                }
+              }'
+          )"
+          HISTORY_TRUNCATED="$(
+            jq -r '.data.repository.pullRequest.timelineItems.pageInfo.hasPreviousPage' <<<"$HISTORY"
+          )"
+          LABEL_EVENT_COUNT="$(
+            jq '[.data.repository.pullRequest.timelineItems.nodes[] | select(.__typename == "LabeledEvent" and .label.name == "open source")] | length' <<<"$HISTORY"
+          )"
+          LATEST_LABEL_INDEX="$(
+            jq '[.data.repository.pullRequest.timelineItems.nodes | to_entries[] | select(.value.__typename == "LabeledEvent" and .value.label.name == "open source") | .key] | max // -1' <<<"$HISTORY"
+          )"
+          READY_EVENT_COUNT="$(
+            jq --argjson label_index "$LATEST_LABEL_INDEX" '[.data.repository.pullRequest.timelineItems.nodes | to_entries[] | select(.key > $label_index and .value.__typename == "ReadyForReviewEvent")] | length' <<<"$HISTORY"
+          )"
+          [[ "$HISTORY_TRUNCATED" == "true" || "$HISTORY_TRUNCATED" == "false" ]] || exit 1
+          [[ "$LABEL_EVENT_COUNT" =~ ^[0-9]+$ ]] || exit 1
+          [[ "$LATEST_LABEL_INDEX" =~ ^-?[0-9]+$ ]] || exit 1
+          [[ "$READY_EVENT_COUNT" =~ ^[0-9]+$ ]] || exit 1
+          if [[ "$HISTORY_TRUNCATED" == "true" ]]; then
+            echo "should-run=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping Auto PR Triage because entry-event history exceeds 100 matching events."
+          elif [[ "$EVENT_ACTION" == "labeled" && "$LABEL_EVENT_COUNT" == "1" ]]; then
+            echo "should-run=true" >> "$GITHUB_OUTPUT"
+          elif [[ "$EVENT_ACTION" == "ready_for_review" && "$LATEST_LABEL_INDEX" -ge 0 && "$READY_EVENT_COUNT" == "1" ]]; then
+            echo "should-run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "should-run=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping repeated or ineligible $EVENT_ACTION event for $REPOSITORY#$PR_NUMBER."
+          fi
+
+      - name: Set Auto PR Triage artifact directory
+        if: steps.history.outputs.should-run == 'true'
+        id: paths
+        env:
+          OUTPUT_DIR: ${{ runner.temp }}/auto-pr-triage-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          mkdir -p "$OUTPUT_DIR"
+          echo "output-dir=$OUTPUT_DIR" >> "$GITHUB_OUTPUT"
+
+      - if: steps.history.outputs.should-run == 'true'
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Analyze PR ownership
+        if: steps.history.outputs.should-run == 'true'
+        id: auto-pr-triage
+        uses: ./.github/actions/auto-pr-triage
+        with:
+          expected-base-ref: ${{ github.event.pull_request.base.ref }}
+          output-dir: ${{ steps.paths.outputs.output-dir }}
+          pr-number: ${{ github.event.pull_request.number }}
+          repository: ${{ github.repository }}
+          workflow-sha: ${{ github.sha }}
+
+      - name: Upload human-review result
+        if: >-
+          steps.history.outputs.should-run == 'true' &&
+          steps.auto-pr-triage.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: auto-pr-triage-human-review-${{ github.event.pull_request.number }}-${{ github.run_attempt }}
+          path: |
+            ${{ steps.paths.outputs.output-dir }}/action-failure.json
+            ${{ steps.paths.outputs.output-dir }}/error.json
+            ${{ steps.paths.outputs.output-dir }}/result.json
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Upload Auto PR Triage failure diagnostics
+        if: >-
+          always() &&
+          steps.history.outputs.should-run == 'true' &&
+          steps.auto-pr-triage.outcome != 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: auto-pr-triage-human-review-${{ github.event.pull_request.number }}-${{ github.run_attempt }}
+          path: |
+            ${{ steps.paths.outputs.output-dir }}/action-failure.json
+            ${{ steps.paths.outputs.output-dir }}/error.json
+            ${{ steps.paths.outputs.output-dir }}/execution.json
+            ${{ steps.paths.outputs.output-dir }}/result.json
+          retention-days: 90
+          if-no-files-found: warn
+
+  apply:
+    needs: analyze
+    if: >-
+      needs.analyze.result == 'success' &&
+      needs.analyze.outputs.should-run == 'true' &&
+      needs.analyze.outputs.analysis-result-json != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      # Change only this value to enable the bounded live mutation path.
+      AUTO_PR_TRIAGE_MODE: shadow
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Apply Auto PR Triage decision
+        env:
+          ANALYSIS_RESULT_JSON: ${{ needs.analyze.outputs.analysis-result-json }}
+          AUTHOR_LOGIN: ${{ github.event.pull_request.user.login }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          python3 scripts/auto_pr_triage/apply_triage_decision.py \
+            "$PR_NUMBER" \
+            --repository "$REPOSITORY" \
+            --mode "$AUTO_PR_TRIAGE_MODE" \
+            --workflow-sha "$WORKFLOW_SHA" \
+            --author-login "$AUTHOR_LOGIN" \
+            --run-attempt "$RUN_ATTEMPT" \
+            --analysis-result-json "$ANALYSIS_RESULT_JSON" \
+            --github-step-summary "$GITHUB_STEP_SUMMARY"
+
+  record-error:
+    needs: [analyze, apply]
+    if: >-
+      always() &&
+      (needs.analyze.result == 'failure' ||
+       needs.apply.result == 'failure' ||
+       (needs.analyze.result == 'success' &&
+        needs.analyze.outputs.should-run == 'true' &&
+        needs.apply.result == 'skipped'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Record unexpected Auto PR Triage failure
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          if [[ ! "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::warning::Cannot record Auto PR Triage failure for invalid PR identity."
+            exit 0
+          fi
+          if ! gh api \
+            --method POST \
+            "repos/$REPOSITORY/issues/$PR_NUMBER/labels" \
+            -f 'labels[]=bot-triage-error' >/dev/null; then
+            echo "::warning::Unable to add bot-triage-error. Inspect the failed job logs."
+          fi
