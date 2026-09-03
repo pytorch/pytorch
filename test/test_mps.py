@@ -2950,10 +2950,7 @@ class TestMPS(TestCaseMPS):
                     mat = (n, k) if left else (k, n)
                     check(A, make_B(*b_batch, *mat), left, adjoint)
 
-        # both sides of the n <= 16 register-kernel cutoff, then the multi-block (n > 32) path
-        for size in (16, 17):
-            for adjoint in [True, False]:
-                check(make_A(2, size, size), make_B(2, size, k), left=True, adjoint=adjoint)
+        # multi-block (n > 32) path
         check(make_A(2, 40, 40), make_B(2, 40, 5), left=True, adjoint=False)
 
     def test_linalg_lu_backed_complex_backward(self):

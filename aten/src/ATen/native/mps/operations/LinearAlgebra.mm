@@ -902,14 +902,14 @@ static void lu_factor_small_encode(const Tensor& A, const Tensor& LU, const Tens
   const auto n = A.size(-1);
   const auto batch = c10::multiply_integers(A.sizes().begin(), A.sizes().end() - 2);
   const auto A_ = A.reshape({batch, m, n});
-  const auto LU_ = LU.reshape({batch, m, n});
+  const auto LU_ = LU.view({batch, m, n});
+  const auto threads = c10::checked_convert<uint32_t>(batch, "uint32_t");
   const LUSmallFactorParams<> params{.A_bstride = A_.stride(0),
                                      .A_rstride = A_.stride(1),
                                      .A_cstride = A_.stride(2),
                                      .LU_bstride = LU_.stride(0),
                                      .LU_rstride = LU_.stride(1),
                                      .LU_cstride = LU_.stride(2),
-                                     .batch = c10::checked_convert<uint32_t>(batch, "uint32_t"),
                                      .m = static_cast<uint32_t>(m),
                                      .n = static_cast<uint32_t>(n)};
   const auto nmax = std::bit_ceil(static_cast<uint32_t>(std::max({m, n, int64_t{4}})));
@@ -920,12 +920,9 @@ static void lu_factor_small_encode(const Tensor& A, const Tensor& LU, const Tens
       auto enc = stream->commandEncoder();
       [enc setComputePipelineState:pso];
       mtl_setArgs(enc, A_, LU_, pivots, info, params);
-      mtl_dispatch1DJob(enc, pso, batch);
+      mtl_dispatch1DJob(enc, pso, threads);
     }
   });
-  if (!LU_.is_alias_of(LU)) {
-    LU.copy_(LU_);
-  }
 }
 
 static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
@@ -1091,7 +1088,7 @@ static void lu_solve_small_encode(const Tensor& LU,
                                   int64_t n,
                                   int64_t k,
                                   bool adjoint) {
-  const auto X = B.reshape({Bnum, n, k});
+  const auto X = B.view({Bnum, n, k});
   const auto threads = c10::checked_convert<uint32_t>(Bnum * k, "uint32_t");
   const LUSmallSolveParams<> params{.LU_bstride = LU.stride(0),
                                     .LU_rstride = adjoint ? LU.stride(2) : LU.stride(1),
@@ -1099,7 +1096,6 @@ static void lu_solve_small_encode(const Tensor& LU,
                                     .X_bstride = X.stride(0),
                                     .X_rstride = X.stride(1),
                                     .X_cstride = X.stride(2),
-                                    .batch = static_cast<uint32_t>(Bnum),
                                     .n = static_cast<uint32_t>(n),
                                     .k = static_cast<uint32_t>(k),
                                     .adjoint = adjoint};
@@ -1114,9 +1110,6 @@ static void lu_solve_small_encode(const Tensor& LU,
       mtl_dispatch1DJob(enc, pso, threads);
     }
   });
-  if (!X.is_alias_of(B)) {
-    B.copy_(X);
-  }
 }
 
 static void mps_lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
@@ -1180,14 +1173,14 @@ static void lu_inv_small_encode(const Tensor& A, const Tensor& result, const Ten
   const auto n = A.size(-1);
   const auto batch = c10::multiply_integers(A.sizes().begin(), A.sizes().end() - 2);
   const auto A_ = A.reshape({batch, n, n});
-  const auto X = result.reshape({batch, n, n});
+  const auto X = result.view({batch, n, n});
+  const auto threads = c10::checked_convert<uint32_t>(batch, "uint32_t");
   const LUSmallInvParams<> params{.A_bstride = A_.stride(0),
                                   .A_rstride = A_.stride(1),
                                   .A_cstride = A_.stride(2),
                                   .X_bstride = X.stride(0),
                                   .X_rstride = X.stride(1),
-                                  .X_cstride = X.stride(2),
-                                  .batch = c10::checked_convert<uint32_t>(batch, "uint32_t")};
+                                  .X_cstride = X.stride(2)};
   auto pso = lib.getPipelineStateForFunc(fmt::format("luInvSmall_{}_{}", mps::scalarToMetalTypeString(A), n));
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -1195,12 +1188,9 @@ static void lu_inv_small_encode(const Tensor& A, const Tensor& result, const Ten
       auto enc = stream->commandEncoder();
       [enc setComputePipelineState:pso];
       mtl_setArgs(enc, A_, X, info, params);
-      mtl_dispatch1DJob(enc, pso, batch);
+      mtl_dispatch1DJob(enc, pso, threads);
     }
   });
-  if (!X.is_alias_of(result)) {
-    result.copy_(X);
-  }
 }
 
 static void linalg_inv_ex_out_mps_impl(const Tensor& A, bool check_errors, const Tensor& result, const Tensor& info) {
@@ -1213,11 +1203,7 @@ static void linalg_inv_ex_out_mps_impl(const Tensor& A, bool check_errors, const
     return;
   }
   if (A.size(-1) <= kLUSmallFactorMax) {
-    Tensor info_ = info.is_contiguous() ? info : at::empty(info.sizes(), info.options());
-    lu_inv_small_encode(A, result, info_);
-    if (!info_.is_same(info)) {
-      info.copy_(info_);
-    }
+    lu_inv_small_encode(A, result, info);
     if (check_errors) {
       at::_linalg_check_errors(info, "linalg.inv_ex", A.dim() == 2);
     }

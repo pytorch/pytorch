@@ -2613,9 +2613,6 @@ kernel void luFactorSmall(
     device int* info [[buffer(3)]],
     constant LUSmallFactorParams<>& params [[buffer(4)]],
     uint tid [[thread_position_in_grid]]) {
-  if (tid >= params.batch) {
-    return;
-  }
   const uint m = params.m;
   const uint n = params.n;
   const uint mn = min(m, n);
@@ -2723,9 +2720,6 @@ kernel void luInvSmall(
     device int* info [[buffer(2)]],
     constant LUSmallInvParams<>& params [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
-  if (tid >= params.batch) {
-    return;
-  }
   device const float* Ab = A + long(tid) * params.A_bstride;
   device float* Xb = X + long(tid) * params.X_bstride;
 
@@ -2860,9 +2854,6 @@ kernel void luSolveSmall(
     constant LUSmallSolveParams<>& params [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
   const uint b = tid / params.k;
-  if (b >= params.batch) {
-    return;
-  }
   const uint col = tid - b * params.k;
   const uint n = params.n;
   const bool adjoint = params.adjoint;

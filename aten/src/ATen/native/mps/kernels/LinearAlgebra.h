@@ -85,7 +85,6 @@ struct LUSmallFactorParams {
   index_t LU_bstride;
   index_t LU_rstride;
   index_t LU_cstride;
-  uint32_t batch;
   uint32_t m;
   uint32_t n;
 };
@@ -98,7 +97,6 @@ struct LUSmallInvParams {
   index_t X_bstride;
   index_t X_rstride;
   index_t X_cstride;
-  uint32_t batch;
 };
 
 template <typename index_t = int64_t>
@@ -109,7 +107,6 @@ struct LUSmallSolveParams {
   index_t X_bstride;
   index_t X_rstride;
   index_t X_cstride;
-  uint32_t batch;
   uint32_t n;
   uint32_t k;
   bool adjoint;
