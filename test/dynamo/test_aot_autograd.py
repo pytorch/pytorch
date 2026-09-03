@@ -791,7 +791,6 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
 
         def compile_submod(input_mod, args):
             from functorch.compile import nop
-
             from torch._functorch.aot_autograd import aot_module_simplified
 
             class WrapperModule(torch.nn.Module):
