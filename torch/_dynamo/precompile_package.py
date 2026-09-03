@@ -108,6 +108,7 @@ import dataclasses
 import functools
 import hashlib
 import importlib.machinery
+import itertools
 import logging
 import os
 import pickle
@@ -810,8 +811,8 @@ class _PrecompileBackend:
             inner, "backend_ctx_ctor", contextlib.nullcontext
         )
         # Rendering a subgraph as source needs the graph, which only exists
-        # here. Kept for the REAL capture only: the guard probe throws its
-        # graphs away, and rendering is a second full lowering.
+        # here. Kept only where it will be rendered: rendering is a second full
+        # lowering, and retaining deepcopies every compiled graph.
         self._keep_graphs = keep_graphs
         self.graphs: dict[str, tuple[torch.fx.GraphModule, list[Any]]] = {}
         # Serving an INSTALLED artifact answers a guard miss by compiling,
@@ -975,7 +976,15 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
     }
 )
 
-
+# Guards that pin which BRANCH the traced code took on a data-dependent
+# condition: whether an attribute or key is THERE, what class a value has,
+# whether it is None or which bool it is, how long an iterator runs, and the
+# process state autograd dispatch reads. A branch guard is a CONSTANT_MATCH by
+# another name -- dropped, the captured side is served to a caller on the other
+# one -- and reachable on the DEFAULT gates, because a single-variant capture
+# makes every slot look invariant and a policy drop is not classed risky.
+# TYPE_MATCH is also what upstream leans on to make the relaxed
+# AsyncCollectiveTensor class guards sound, so it must never go.
 _BRANCH_PINNING_GUARD_TYPES = frozenset(
     {
         "HASATTR",
@@ -1368,6 +1377,34 @@ def _warn_risky_drops(risky: Sequence[tuple[str, str]]) -> None:
     )
 
 
+def _grad_snapshot(
+    fn: object, examples: Sequence[ExampleInput | tuple[object, ...]]
+) -> dict[torch.Tensor, torch.Tensor | None]:
+    """Every tensor an example could accumulate a gradient into, and its .grad.
+
+    Keyed by the tensor itself so one entry survives a tensor appearing in
+    several examples; Tensor hashes by identity, which is what is wanted here.
+    """
+    found: dict[torch.Tensor, torch.Tensor | None] = {}
+
+    def visit(value: object) -> None:
+        if isinstance(value, torch.Tensor):
+            found.setdefault(value, value.grad)
+        elif isinstance(value, torch.nn.Module):
+            for tensor in itertools.chain(value.parameters(), value.buffers()):
+                found.setdefault(tensor, tensor.grad)
+
+    visit(fn if isinstance(fn, torch.nn.Module) else getattr(fn, "__self__", None))
+    for example in examples:
+        args, kwargs = _example_call(example)
+        for leaf in tree_leaves((args, kwargs)):
+            visit(leaf)
+        # tree_leaves flattens a Module to nothing, so visit the raw arguments too.
+        for value in (*args, *kwargs.values()):
+            visit(value)
+    return found
+
+
 def varying_guard_slots(
     guard_sets: Mapping[tuple[str, str, int], Sequence[frozenset[_GuardFact]]],
 ) -> frozenset[tuple[str, str]]:
@@ -1485,8 +1522,8 @@ class PrecompileSession:
         # eagerly, so the artifact carries AOTAutograd's CompiledFunction and
         # calling .backward() on a served output runs precompiled code.
         self._training = training
-        # On for the real capture; the guard probe leaves it off so it does not
-        # pay for a lowering whose source is thrown away.
+        # Off unless the subgraphs will be rendered: retaining them deepcopies
+        # every compiled graph for the life of the session.
         self._keep_graphs = keep_graphs
         self._backend_obj: _PrecompileBackend | None = None
         self._policy_dropped_guards: set[tuple[str, str]] = set()
@@ -1629,6 +1666,7 @@ class PrecompileSession:
             raise RuntimeError("PrecompileSession cannot be re-entered")
         if self._stack is not None:
             raise RuntimeError("PrecompileSession is already active")
+        grads: dict[torch.Tensor, torch.Tensor | None] = {}
         stack = contextlib.ExitStack()
         # Backends must serialize into the artifact rather than into the
         # process-local inductor cache.
@@ -1663,6 +1701,15 @@ class PrecompileSession:
                 _register_explicit_compile_region(isolate_recompiles_id, self)
                 self._optimized = optimize_ctx(self._fn)
             self._compiled = self._optimized
+            # A training example runs a real backward, which ACCUMULATES into
+            # the caller's tensors. Snapshot and clear first, restore in the
+            # finally below: capturing a model must not leave its gradients
+            # changed, and on the documented warmup-step-then-capture flow it
+            # would otherwise double them. make_fx does the same; see the
+            # rationale at torch._precompile._capture.
+            grads = _grad_snapshot(self._fn, self._example_inputs)
+            for tensor in grads:
+                tensor.grad = None
             # Automatic examples are the ordinary no_grad inference path.
             # inference_mode is a distinct guarded state and is disabled here
             # even when the caller entered it before starting capture.
@@ -1709,6 +1756,11 @@ class PrecompileSession:
                     self._finished = True
             raise
         finally:
+            # The SAME grad object, not a copy: a caller holding a prior p.grad
+            # reference, or optimizer state keyed on grad identity, must not be
+            # invalidated by having been used as an example.
+            for tensor, grad in grads.items():
+                tensor.grad = grad
             # Guard/backend state is already in the package. Do not retain the
             # caller's potentially large CPU/GPU example tensors with the session.
             self._example_inputs = ()
@@ -1780,7 +1832,7 @@ class PrecompileSession:
         from torch._dynamo.output_graph import OutputGraphCommon
         from torch._dynamo.package import load_guards_state, SerializedCode
 
-        keep_only = varying_guard_slots(self._guard_sets)
+        varying = varying_guard_slots(self._guard_sets)
         dropped: set[tuple[str, str]] = set()
 
         def survives(guard_type: str, name: str, derived: Sequence[str] = ()) -> bool:
@@ -1800,7 +1852,7 @@ class PrecompileSession:
             return (
                 guard_type in kept_types
                 or any(d in kept_types for d in derived)
-                or (guard_type, _normalize(name)) in keep_only
+                or (guard_type, _normalize(name)) in varying
             )
 
         def policy(entries: Sequence[GuardFilterEntry]) -> Sequence[bool]:
@@ -2353,7 +2405,7 @@ class PrecompileSession:
             backends,
             self._with_unrendered(summary),
             self._backend,
-            _entry_fn_of(self._fn),
+            self._entry_fn,
             rendered,
             grad_enabled=self._capture_grad_mode(),
         )
@@ -2830,6 +2882,13 @@ def _check_artifact_matches(
 def _entry_fn_of(fn: object) -> Callable[..., object]:
     if not callable(fn):
         raise TypeError(f"expected a callable or nn.Module, got {type(fn).__name__}")
+    from .eval_frame import innermost_fn
+
+    # A torch._dynamo.disable wrapper has the inner function's name on a
+    # (*args, **kwargs) signature of its own, and Dynamo compiles the inner
+    # function; the entry, its varargs check and the binding written into the
+    # artifact all have to be that same function.
+    fn = innermost_fn(fn)
     if not hasattr(fn, "__code__"):
         raise TypeError(
             f"expected a function or nn.Module, got {type(fn).__name__}, which "
