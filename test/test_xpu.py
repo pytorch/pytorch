@@ -1851,6 +1851,13 @@ if __name__ == "__main__":
         page_size = mmap.PAGESIZE
         buf = mmap.mmap(-1, page_size)
         a = torch.frombuffer(buf, dtype=torch.uint8, count=page_size)
+        if int(torch.version.xpu) < 20260200:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "register_host_memory is not supported for the current SYCL compiler version",
+            ):
+                pin_memory_utils.pin_memory(a.data_ptr(), a.nbytes)
+
         self.assertFalse(a.is_pinned())
         pin_memory_utils.pin_memory(a.data_ptr(), a.nbytes)
         self.assertTrue(a.is_pinned())
