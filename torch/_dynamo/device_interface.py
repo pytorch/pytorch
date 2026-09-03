@@ -768,6 +768,17 @@ def register_interface_for_device(
     an explicit ``import torch_npu``-style import, both of which precede any
     import of inductor. Registering later is not supported and will not be
     reflected in the snapshot.
+
+    A privateuse1 backend can register its interface in one of two ways:
+
+    (1) Direct: call this function at import time (requires importing
+        ``torch._dynamo`` eagerly).
+
+    (2) Lazy: provide ``get_device_interface() -> type[DeviceInterface]``
+        on the backend module (registered via
+        ``torch._register_device_module``).  Called lazily so ``import torch``
+        does not import ``torch._dynamo``.  If a direct registration is
+        already present, the lazy hook is skipped.
     """
     if isinstance(device, torch.device):
         device = device.type
@@ -793,6 +804,36 @@ def get_registered_device_interfaces() -> Iterable[tuple[str, type[DeviceInterfa
     return device_interfaces.items()
 
 
+def _register_interface_for_privateuse1() -> None:
+    backend = torch._C._get_privateuse1_backend_name()
+    if backend == "privateuseone" or backend in device_interfaces:
+        return
+    from torch.utils.backend_registration import _get_custom_mod_func
+
+    try:
+        get_device_interface_fn = _get_custom_mod_func("get_device_interface")
+        interface = get_device_interface_fn()
+        if interface is None or not (
+            isinstance(interface, type) and issubclass(interface, DeviceInterface)
+        ):
+            if interface is not None:
+                import warnings
+
+                warnings.warn(
+                    f"get_device_interface() for backend '{backend}' returned "
+                    f"{interface!r} which is not a DeviceInterface subclass; "
+                    f"skipping registration.",
+                    stacklevel=2,
+                )
+            return
+        register_interface_for_device(backend, interface)
+        device_count_fn = _get_custom_mod_func("device_count")
+        for i in range(device_count_fn()):
+            register_interface_for_device(f"{backend}:{i}", interface)
+    except RuntimeError:
+        pass
+
+
 def init_device_reg() -> None:
     global _device_initialized
     register_interface_for_device("cuda", CudaInterface)
@@ -812,5 +853,7 @@ def init_device_reg() -> None:
     register_interface_for_device("cpu", CpuInterface)
     register_interface_for_device("mps", MpsInterface)
     register_interface_for_device("tpu", TpuInterface)
+
+    _register_interface_for_privateuse1()
 
     _device_initialized = True
