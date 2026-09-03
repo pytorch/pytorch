@@ -19,7 +19,7 @@ from typing import Any
 from unittest import main, mock, skip, TestCase
 from urllib.error import HTTPError
 
-from github_utils import gh_graphql
+from github_utils import gh_graphql, GHGraphQLError
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from greenlight_guard import (
     GREENLIGHT_LOGIN,
@@ -42,6 +42,7 @@ from trymerge import (
     get_docker_build_checks,
     get_drci_classifications,
     get_topmost_docker_pr,
+    gh_get_pr_info,
     gh_get_team_members,
     GitHubPR,
     is_authorized_without_greenlight,
@@ -332,6 +333,48 @@ class DummyGitRepo(GitRepo):
 
     def commit_message(self, ref: str) -> str:
         return "super awesome commit message"
+
+
+class TestGetPRInfoForbiddenHeadRepository(TestCase):
+    """gh_get_pr_info tolerates a FORBIDDEN error on the headRepository path
+    (org fork blocking classic PATs) and nothing else."""
+
+    forbidden_error = {
+        "type": "FORBIDDEN",
+        "path": ["repository", "pullRequest", "headRepository"],
+        "message": "`SomeOrg` forbids access via a personal access token (classic).",
+    }
+
+    def graphql_response(self, errors: list[dict[str, Any]]) -> dict[str, Any]:
+        pull_request = {"headRefName": "some-branch", "headRepository": None}
+        return {"data": {"repository": {"pullRequest": pull_request}}, "errors": errors}
+
+    def test_forbidden_head_repository_is_tolerated(self) -> None:
+        rc = self.graphql_response([self.forbidden_error])
+        with mock.patch(
+            "trymerge.gh_graphql", side_effect=GHGraphQLError("failed", rc)
+        ):
+            info = gh_get_pr_info("pytorch", "pytorch", 123)
+        self.assertIsNone(info["headRepository"])
+        self.assertEqual(info["headRefName"], "some-branch")
+
+    def test_other_errors_still_raise(self) -> None:
+        other_error = {"type": "NOT_FOUND", "path": ["repository", "pullRequest"]}
+        for errors in ([other_error], [self.forbidden_error, other_error], []):
+            rc = self.graphql_response(errors)
+            with mock.patch(
+                "trymerge.gh_graphql", side_effect=GHGraphQLError("failed", rc)
+            ):
+                with self.assertRaises(GHGraphQLError):
+                    gh_get_pr_info("pytorch", "pytorch", 123)
+
+    def test_missing_pull_request_still_raises(self) -> None:
+        rc = {"data": {"repository": None}, "errors": [self.forbidden_error]}
+        with mock.patch(
+            "trymerge.gh_graphql", side_effect=GHGraphQLError("failed", rc)
+        ):
+            with self.assertRaises(GHGraphQLError):
+                gh_get_pr_info("pytorch", "pytorch", 123)
 
 
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)

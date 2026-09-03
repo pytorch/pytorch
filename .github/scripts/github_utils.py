@@ -133,6 +133,16 @@ def gh_fetch_json_dict(
     return cast(dict[str, Any], _gh_fetch_json_any(url, params, data))
 
 
+class GHGraphQLError(RuntimeError):
+    """GraphQL response contained errors; the raw response is kept so callers
+    can tolerate partial failures (GraphQL still returns data for the paths
+    that resolved)."""
+
+    def __init__(self, message: str, response: dict[str, Any]) -> None:
+        super().__init__(message)
+        self.response = response
+
+
 def gh_graphql(query: str, **kwargs: Any) -> dict[str, Any]:
     rc = gh_fetch_url(
         "https://api.github.com/graphql",  # @lint-ignore
@@ -140,8 +150,8 @@ def gh_graphql(query: str, **kwargs: Any) -> dict[str, Any]:
         reader=json.load,
     )
     if "errors" in rc:
-        raise RuntimeError(
-            f"GraphQL query {query}, args {kwargs} failed: {rc['errors']}"
+        raise GHGraphQLError(
+            f"GraphQL query {query}, args {kwargs} failed: {rc['errors']}", rc
         )
     return cast(dict[str, Any], rc)
 
