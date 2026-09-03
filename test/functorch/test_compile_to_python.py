@@ -606,16 +606,31 @@ class TestAOTCompileToPython(TestCase):
         source, _cache = self._training_artifact()
         self.assertEqual(set(re.findall(pattern, source)), surface)
         # Subclass tangents route through the subclass prologue/epilogue
-        # helpers, and output aliasing bakes ViewMetaSequence/MetadataKey
-        # metadata; both must come from the surface too.
+        # helpers, which must come from the surface too.
         tt = TwoTensor(torch.randn(4), torch.randn(4)).requires_grad_()
         gm = make_fx(lambda flat: [flat[0].sin()])([tt])
         subclass_source, _ = compile_to_python(gm, [tt], grad_enabled=True)
         self.assertEqual(set(re.findall(pattern, subclass_source)), surface)
-        x = torch.randn(2, 3, requires_grad=True)
-        gm = make_fx(lambda flat: [flat[0].view(-1), flat[0][0]])([x])
-        alias_source, _ = compile_to_python(gm, [x], grad_enabled=True)
-        self.assertEqual(set(re.findall(pattern, alias_source)), surface)
+        self.assertIn("_CompiledFunction", subclass_source)
+
+        # Input mutation and intermediate-base outputs bake their own descriptor
+        # classes into the training metadata (an alias-only function is demoted
+        # to the inference path and would not exercise the training composer).
+        def mutation_fn(flat):
+            x = flat[0]
+            x.mul_(2)
+            return [x.sin()]
+
+        def intermediate_base_fn(flat):
+            y = flat[0].sin()
+            return [y.view(-1), y[0]]
+
+        for fn in (mutation_fn, intermediate_base_fn):
+            x = torch.randn(2, 3, requires_grad=True).clone()
+            gm = make_fx(fn)([x])
+            source, _ = compile_to_python(gm, [x], grad_enabled=True)
+            self.assertIn("_CompiledFunction", source)
+            self.assertEqual(set(re.findall(pattern, source)), surface)
 
     def test_training_artifact_loads_in_fresh_process(self):
         # Self-containment is only real if the artifact runs where nothing but

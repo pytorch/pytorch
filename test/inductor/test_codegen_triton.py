@@ -2843,6 +2843,71 @@ def helper(x):
             self.assertEqual(compile_in_process.call_count, 1)
         self.assertEqual(task.result.call_count, 1)
 
+    def test_constexpr_fallback_survives_wait_timeout(self):
+        # With compile_worker_wait_timeout set, _wait_futures passes a timeout
+        # and LambdaFuture waits on the worker future first; that wait must not
+        # re-raise the worker failure ahead of the result_fn fallback.
+        import os
+        from unittest.mock import Mock
+
+        from torch._inductor.async_compile import AsyncCompile
+        from torch._inductor.compile_worker.subproc_pool import SubprocException
+
+        module_name = f"inductor_fallback_probe_{os.getpid()}"
+        source_code = f"import {module_name} as __inductor_constexpr_module_0\n"
+        failure = SubprocException(
+            f"ModuleNotFoundError: No module named '{module_name}'"
+        )
+        task = Mock()
+        task.result.side_effect = failure
+        task.exception.return_value = failure
+        pool = Mock()
+        pool.submit.return_value = task
+        sentinel_kernel = object()
+        with (
+            patch.object(AsyncCompile, "use_process_pool", return_value=True),
+            patch.object(AsyncCompile, "process_pool", return_value=pool),
+            patch.object(
+                AsyncCompile, "_compile_triton_in_process", return_value=sentinel_kernel
+            ),
+        ):
+            future = AsyncCompile().triton("probe_kernel", source_code)
+            with self.assertLogs("torch._inductor.async_compile", level="WARNING"):
+                self.assertIs(future.result(timeout=5), sentinel_kernel)
+        task.exception.assert_called_once_with(timeout=5)
+
+    def test_autotune_cache_match_keeps_cached_type_regardless_of_order(self):
+        # Candidates that differ only in an int/float or bool/int kwarg (which
+        # compare == and serialize alike) are not interchangeable: the load
+        # must not hand back whichever came first but reconstruct from the
+        # cached value, so the winner keeps the type it was saved with.
+        from types import SimpleNamespace
+
+        from torch._inductor.runtime import autotune_cache
+        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+
+        def cfg(**kwargs):
+            return SimpleNamespace(kwargs=kwargs, num_warps=4, num_stages=2)
+
+        cases = (
+            ({"S": 1.0}, cfg(S=1), cfg(S=1.0), float),
+            ({"S": 1}, cfg(S=1.0), cfg(S=1), int),
+            ({"F": True}, cfg(F=1), cfg(F=True), bool),
+            ({"F": 1}, cfg(F=True), cfg(F=1), int),
+        )
+        for cached, a, b, expected_type in cases:
+            for order in ([a, b], [b, a]):
+                best = dict(cached, num_warps=4, num_stages=2, configs_hash="h")
+                with patch.object(
+                    autotune_cache,
+                    "_reconstruct_triton_config",
+                    side_effect=lambda best_config, extra: dict(best_config),
+                ):
+                    loaded = _load_cached_autotuning(best, "h", order, {})
+                self.assertIsInstance(loaded, dict)
+                (key,) = cached
+                self.assertIs(type(loaded[key]), expected_type)
+
     def test_constexpr_module_missing_in_worker_accepts_exception(self):
         # Spawn/fork worker pools re-raise the worker's ModuleNotFoundError
         # directly instead of wrapping it in SubprocException; the helper must

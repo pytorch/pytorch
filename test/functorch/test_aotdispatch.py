@@ -1902,7 +1902,9 @@ def forward(self, primals_1):
         self.assertEqual(record["donated"], [([1, 2], (2, 3), [0])])
 
     @torch._functorch.config.patch(
-        aot_autograd_prune_unused_outputs=True, donated_buffer=False
+        aot_autograd_prune_unused_outputs=True,
+        donated_buffer=False,
+        enable_autograd_cache=True,
     )
     @torch._inductor.config.patch(fx_graph_cache=True)
     def test_unused_differentiable_outputs_retrace_survives_cache_save(self):
@@ -1916,12 +1918,16 @@ def forward(self, primals_1):
         x = torch.randn(8, requires_grad=True)
         y = torch.randn(8, requires_grad=True)
         x_grad, _ = self._eager_two_branch_grads(x, y)
+        counters.clear()
         with fresh_cache():
             out = torch.compile(self._two_branch_fn, backend="inductor", dynamic=True)(
                 x, y
             )
             with self._spy_backward_specialization() as record:
                 out[0].sum().backward()
+        # The save actually ran (TORCHINDUCTOR_AUTOGRAD_CACHE=0 in the
+        # environment would otherwise make this pass vacuously).
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
         self.assertEqual(x.grad, x_grad)
         self.assertIsNone(y.grad)
         self.assertEqual(len(record["retrace"]), 1)

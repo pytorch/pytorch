@@ -256,12 +256,12 @@ class GuardProvenance(enum.Enum):
     ``AMBIENT``
         Rooted at interpreter- or process-wide state that Dynamo reads through
         its own accessors rather than through a globals lookup from the traced
-        frame. This covers both process-wide configuration
-        (deterministic algorithms, default device, streams) and per-call
-        context (grad mode, the functorch and torch-function mode stacks,
-        saved-tensor hooks, forward-AD level) that selects a different correct
-        graph at the call site. It is therefore not uniformly droppable; a
-        consumer must decide per guard type.
+        frame. This covers both process-wide configuration (deterministic
+        algorithms) and per-thread or per-call context (the current stream,
+        grad mode, the default device and the other torch-function modes,
+        the functorch mode stack, saved-tensor hooks, forward-AD level) that
+        selects a different correct graph at the call site. It is therefore
+        not uniformly droppable; a consumer must decide per guard type.
     ``SYNTHETIC``
         Tracing-internal roots that are not part of the Python environment
         (synthetic and temp locals, ephemeral sources, materialized constants,
