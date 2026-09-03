@@ -15663,6 +15663,39 @@ if __name__ == '__main__':
 
     @skipMPS
     @onlyAccelerator
+    @dtypes(torch.float, torch.double)
+    def test_CTCLoss_max_threads_launch_bounds(self, device, dtype):
+        # Exercises maximum thread block sizes (768 for double, 1024 for float)
+        # in native CTC loss kernels when 2 * target_length + 1 > max_threads / 2.
+        target_length = 300
+        input_length = 600
+        vocab_size = 5
+        batch_size = 2
+
+        for target_dtype in [torch.int, torch.long]:
+            log_probs = (
+                torch.randn(input_length, batch_size, vocab_size, dtype=dtype, device=device)
+                .log_softmax(2)
+                .requires_grad_()
+            )
+            targets = torch.randint(
+                low=1, high=vocab_size, size=(batch_size, target_length), dtype=target_dtype, device=device
+            )
+            input_lengths = torch.full((batch_size,), input_length, dtype=target_dtype)
+            target_lengths = torch.full((batch_size,), target_length, dtype=target_dtype)
+
+            with torch.backends.cudnn.flags(enabled=False):
+                loss = torch.nn.functional.ctc_loss(
+                    log_probs, targets, input_lengths, target_lengths,
+                    reduction='sum', zero_infinity=True
+                )
+                grad, = torch.autograd.grad(loss, log_probs, torch.ones_like(loss))
+
+            self.assertFalse(torch.isnan(loss).any())
+            self.assertFalse(torch.isnan(grad).any())
+
+    @skipMPS
+    @onlyAccelerator
     def test_CTCLoss_critical_target_len(self, device):
         # cudnn has an unexpected problem with target length 256, see issue #53505
         N = 1
