@@ -1,10 +1,12 @@
 # Owner(s): ["module: dynamo"]
 
 import contextlib
+import copy
 import dataclasses
 import importlib
 import inspect
 import os
+import pickle
 import sys
 import types
 from unittest import mock
@@ -412,6 +414,41 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             package.uninstall()
             self.assertEqual(module.__dict__.get("g"), want)
         self.assertEqual(dynamo_package._GLOBAL_BINDINGS.get(module, {}), {})
+
+    def test_source_graph_module_copies_are_isolated(self):
+        # _src and the exec'd forward are shared between copies; everything else
+        # nn.Module keeps on an instance is state, hook dicts included, and a
+        # copy sharing it lets an update on one copy silently edit the other.
+        # __reduce__ used to pickle the SHARED _src, whose body aliases the
+        # original's parameter/buffer containers -- so mutating the original
+        # after a deepcopy round-tripped the mutated tensors into the copy's
+        # pickle even though live calls were isolated. __reduce__ now
+        # snapshots the instance's own state.
+        from torch._dynamo.precompile_context import (
+            _EagerGraphSource,
+            _SourceGraphModule,
+        )
+
+        src = _EagerGraphSource(
+            code="def forward(self, x):\n    return x + self.b\n",
+            import_block="",
+            body={"_buffers": {"b": torch.ones(3)}},
+        )
+        original = _SourceGraphModule(src)
+        dup = copy.deepcopy(original)
+        dup.register_forward_hook(lambda *args: None)
+        dup._non_persistent_buffers_set.add("b")
+        self.assertEqual(len(original._forward_hooks), 0)
+        self.assertEqual(original._non_persistent_buffers_set, set())
+        self.assertIs(dup._src, original._src)
+
+        x = torch.randn(3)
+        original._buffers["b"].mul_(100)
+        self.assertEqual(original(x), x + 100)
+        self.assertEqual(dup(x), x + 1)  # live isolation
+        self.assertEqual(pickle.loads(pickle.dumps(dup))(x), x + 1)
+        # And an instance pickles its CURRENT state, not its load-time state.
+        self.assertEqual(pickle.loads(pickle.dumps(original))(x), x + 100)
 
     # Every shape found to split a compilation while the report called it an
     # invariant. The fingerprint has failed open three times -- shapes, then
