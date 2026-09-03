@@ -1947,17 +1947,12 @@ class CachingAutotuner(KernelInterface):
         TritonBundler.put_winner(launcher.cache_hash)
 
         if self.save_cache_hook:
-            # Only stamp found_by_coordesc when coordesc will actually refine this
-            # kernel; the flag makes warm loads skip candidate matching and
-            # reconstruct the Config from the JSON payload, which loses non-JSON
-            # kwarg values (e.g. Enum constexprs on user autotune kernels).
             self.save_cache_hook(
                 launcher.config,
                 self.autotune_time_taken_ns,
                 found_by_coordesc=self.inductor_meta.get(
                     "coordinate_descent_tuning", False
-                )
-                and self._should_coordesc_tune,
+                ),
                 triton_cache_hash=launcher.cache_hash,
             )
 
@@ -2159,6 +2154,12 @@ class CachingAutotuner(KernelInterface):
         # CTA clusters, add num_ctas/cluster_dims here from the schema.
         # Currently num_ctas is already captured via config_to_dict(launcher.config)
         # for scratch space scaling, but is not used in the actual kernel launch.
+        binary_metadata = binary.metadata
+        legacy_tensordesc_meta = (
+            binary_metadata.get("tensordesc_meta")
+            if isinstance(binary_metadata, dict)
+            else getattr(binary_metadata, "tensordesc_meta", None)
+        )
         schema = getattr(binary, "launch_metadata_schema", None)
         if schema is not None and inductor_config.use_launch_metadata_schema:
             params: dict[str, Any] = {
@@ -2174,6 +2175,9 @@ class CachingAutotuner(KernelInterface):
                 "global_scratch": launcher.global_scratch,
                 "profile_scratch": launcher.profile_scratch,
                 "cuda_arch": cuda_arch,
+                "tensordesc_meta": schema.get(
+                    "tensordesc_meta", legacy_tensordesc_meta
+                ),
             }
         else:
             # Fallback: hasattr probing for older Triton versions
@@ -2202,6 +2206,7 @@ class CachingAutotuner(KernelInterface):
                 "global_scratch": launcher.global_scratch,
                 "profile_scratch": launcher.profile_scratch,
                 "cuda_arch": cuda_arch,
+                "tensordesc_meta": legacy_tensordesc_meta,
             }
 
         from torch._inductor.codecache import CudaKernelParamCache
