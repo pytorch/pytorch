@@ -467,11 +467,7 @@ def _step_logger() -> Callable[..., None]:
 
 @functools.cache
 def _warn_tf32_disabled() -> None:
-    if (
-        torch.cuda.is_available()
-        and torch.backends.cuda.matmul.fp32_precision != "tf32"
-        and torch.cuda.get_device_capability() >= (8, 0)
-    ):
+    if torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0):
         perf_hint_log.info(
             "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. "
             "Consider setting `torch.set_float32_matmul_precision('high')` for better performance."
@@ -1579,7 +1575,10 @@ class _InProcessFxCompile(FxCompile):
                 )
                 time.sleep(sleep_sec)
 
-            if is_tf32_warning_applicable(gm):
+            if torch.backends.cuda.matmul.fp32_precision not in (
+                "tf32",
+                "bfx9",
+            ) and is_tf32_warning_applicable(gm):
                 _warn_tf32_disabled()
 
             inductor_counters = counters["inductor"].copy()
@@ -2599,8 +2598,11 @@ def get_cpp_wrapper_config(log_cudagraph_skip: bool = True) -> dict[str, object]
     autotune_at_compile_time = (
         config.triton.autotune_at_compile_time
         if config.triton.autotune_at_compile_time is not None
-        # Default to True for AOTI. Subject to change in future.
-        else has_triton() and V.aot_compilation
+        # Default to True for AOTI when an accelerator or the selected CPU
+        # Triton backend is available. Subject to change in future.
+        else (
+            has_triton(include_cpu=config.cpu_backend == "triton") and V.aot_compilation
+        )
     )
     return {
         "triton.autotune_at_compile_time": autotune_at_compile_time,
@@ -3333,6 +3335,12 @@ def _compile_fx_main(
         num_example_inputs = len(example_inputs_)
 
         compiler_config_extra = create_compiler_config_extra(model_)
+
+        # Load device backends (privateuse1 vendors) before the decomposition
+        # table is snapshotted below: _inductor_backend_init may register
+        # decompositions, custom passes, and codegen backends, all of which are
+        # consumed from this point on.
+        init_backend_registration()
 
         decompositions = get_decomp_fn()
         inner_compile = functools.partial(inner_compile, get_decomp_fn=get_decomp_fn)
