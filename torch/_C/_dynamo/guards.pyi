@@ -366,11 +366,13 @@ class GuardManager:
     ) -> None: ...
     def add_float_is_nan_guard(
         self,
+        value: float,
         verbose_code_parts: list[str],
         user_stack: traceback.StackSummary | None,
     ) -> None: ...
     def add_complex_is_nan_guard(
         self,
+        value: complex,
         verbose_code_parts: list[str],
         user_stack: traceback.StackSummary | None,
     ) -> None: ...
