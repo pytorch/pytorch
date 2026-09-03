@@ -1300,9 +1300,11 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertEqual(len(dynamo_package.live_packages(fn, -1)), 2)
         entry = PrecompileContext._dynamo_cache_entries[key]
         self.assertTrue(entry.requires_native_backend_compatibility)
-        if dynamo_package._current_cpu_codegen_target() is None:
-            raise unittest.SkipTest("no C++ toolchain: no CPU codegen target recorded")
-        self.assertIsNotNone(entry.system_info.cpu_codegen_target)
+        # None on both sides when there is no C++ toolchain to probe.
+        self.assertEqual(
+            entry.system_info.cpu_codegen_target,
+            dynamo_package._current_cpu_codegen_target(),
+        )
 
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_concurrent_wraps_share_one_package(self):
@@ -1429,7 +1431,9 @@ class TestPackage(torch._inductor.test_case.TestCase):
 
     def test_cache_entry_loads_from_a_pickle_without_newer_fields(self):
         # A pickle written before these fields existed must still load and pass
-        # check_versions(), which reads them directly.
+        # check_versions(), which reads them directly. system_info is the
+        # exception: with nothing recorded there is nothing to compare the host
+        # against, and synthesizing one on load compared the host to itself.
         def fn(x):
             return x + 1
 
@@ -1450,13 +1454,10 @@ class TestPackage(torch._inductor.test_case.TestCase):
             source_info=dynamo_package.SourceInfo(set()),
             device_type="cpu",
             device_types=frozenset({"cpu"}),
+            system_info=SystemInfo.current(cpu_codegen=False),
         )
         old = copy.copy(entry)
-        for name in (
-            "device_types",
-            "requires_native_backend_compatibility",
-            "system_info",
-        ):
+        for name in ("device_types", "requires_native_backend_compatibility"):
             old.__dict__.pop(name)
 
         loaded = pickle.loads(pickle.dumps(old))
@@ -1468,7 +1469,13 @@ class TestPackage(torch._inductor.test_case.TestCase):
         loaded.check_versions()
         self.assertEqual(loaded.debug_info()["device_types"], ["cpu"])
 
-    @torch._dynamo.config.patch(caching_precompile=True)
+        old.__dict__.pop("system_info")
+        loaded = pickle.loads(pickle.dumps(old))
+        self.assertIsNone(loaded.system_info)
+        with self.assertRaisesRegex(RuntimeError, "records no system info"):
+            loaded.check_versions()
+
+    @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
     def test_failed_install_and_failed_rollback_still_compile_cold(self):
         # eval_frame falls back to a cold compile when installing a cached
         # artifact raises. That must hold when the rollback raises as well.
@@ -1513,6 +1520,319 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertTrue(any("compiling from scratch" in m for m in messages), messages)
         messages = [r.getMessage() for r in package_logs.records]
         self.assertIn("Failed to uninstall after a failed install", messages)
+
+    @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=True)
+    def test_strict_precompile_raises_on_a_failed_install(self):
+        # Every load failure degraded to a warning and a cold compile, so under
+        # strict_precompile a broken install showed up only as a missing hit.
+        def fn(x):
+            return x.sin() + 1
+
+        x = torch.randn(3)
+        torch.compile(fn, backend="inductor")(x)
+        self._save_and_reload(expected_backends=1, expected_dynamo=1)
+
+        with (
+            mock.patch.object(
+                CompilePackage, "_install_codes", side_effect=RuntimeError("boom")
+            ),
+            self.assertRaisesRegex(RuntimeError, "boom"),
+        ):
+            torch.compile(fn, backend="inductor")
+        self.assertEqual(dynamo_package.live_packages(fn, -1), [])
+
+        with torch._dynamo.config.patch(strict_precompile=False):
+            compiled = torch.compile(fn, backend="inductor")
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(len(dynamo_package.live_packages(fn, -1)), 1)
+
+    @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
+    def test_a_loader_invariant_failure_is_not_a_cold_compile(self):
+        # An AssertionError out of install() is a bug in the loader, not a stale
+        # artifact, and used to be swallowed into "compiling from scratch".
+        def fn(x):
+            return x.sin() + 1
+
+        x = torch.randn(3)
+        torch.compile(fn, backend="inductor")(x)
+        self._save_and_reload(expected_backends=1, expected_dynamo=1)
+
+        with (
+            mock.patch.object(
+                CompilePackage, "_install_codes", side_effect=AssertionError("bug")
+            ),
+            self.assertRaisesRegex(AssertionError, "bug"),
+        ):
+            torch.compile(fn, backend="inductor")
+
+    def test_a_release_that_raises_is_retried_on_the_next_drain(self):
+        # A deferred release that raised was popped and lost, leaving its skips
+        # and globals behind for the life of the process.
+        failing = dynamo_package._RegionInstall()
+        calls = []
+
+        def release_that_fails_once():
+            calls.append(1)
+            if len(calls) == 1:
+                raise RuntimeError("release boom")
+
+        with mock.patch.object(failing, "_release", release_that_fails_once):
+            dynamo_package._PENDING_RELEASES.append(failing)
+            with self.assertLogs(dynamo_package.logger, level="ERROR"):
+                dynamo_package.drain_pending_releases()
+            self.assertIn(failing, dynamo_package._PENDING_RELEASES)
+            dynamo_package.drain_pending_releases()
+            self.assertNotIn(failing, dynamo_package._PENDING_RELEASES)
+        self.assertEqual(len(calls), 2)
+
+    def test_finalizer_fired_inside_an_install_defers_its_release(self):
+        # RLock.acquire(blocking=False) succeeds for the owning thread, so a
+        # finalizer gc fired inside install() released another package inline
+        # and deleted the builtins-dict name the install was about to claim.
+        module = types.ModuleType("test_package_finalizer_reentry")
+        name = "__builtins_dict___0"
+        builtins_dict = {}
+        dying = dynamo_package._RegionInstall()
+        with dynamo_package._PACKAGE_INSTALL_LOCK:
+            module.__dict__[name] = builtins_dict
+            dying.claim_global(module, name, builtins_dict)
+
+        class Holder:
+            pass
+
+        holder = Holder()
+        holder.cycle = holder
+        weakref.finalize(holder, dying.release_from_finalizer)
+        del holder
+
+        installing = dynamo_package._RegionInstall()
+        with dynamo_package._PACKAGE_INSTALL_LOCK:
+            # _install_global writes the name, then claims it; gc fires between.
+            module.__dict__[name] = builtins_dict
+            gc.collect()
+            self.assertIn(dying, dynamo_package._PENDING_RELEASES)
+            installing.claim_global(module, name, builtins_dict)
+            dynamo_package._drain_pending_releases()
+        self.assertNotIn(dying, dynamo_package._PENDING_RELEASES)
+        self.assertIs(module.__dict__.get(name), builtins_dict)
+
+        installing.release()
+        self.assertNotIn(name, module.__dict__)
+
+    def test_wrapping_drains_a_release_deferred_under_the_install_lock(self):
+        # A finalizer that fires while another thread holds the install lock
+        # defers its release, and nothing drained it until the next install or
+        # reset: a frame the dead package skipped process-wide kept running
+        # eager under a plain torch.compile.
+        from torch._C._dynamo.eval_frame import get_code_exec_strategy
+        from torch._dynamo.types import FrameAction
+
+        def fn(x):
+            return x + 1
+
+        dying = dynamo_package._RegionInstall()
+        with dynamo_package._PACKAGE_INSTALL_LOCK:
+            dying.skip_code(fn.__code__)
+        self.assertEqual(
+            get_code_exec_strategy(fn.__code__).cur_action, FrameAction.SKIP
+        )
+
+        class Holder:
+            pass
+
+        holder = Holder()
+        holder.cycle = holder
+        weakref.finalize(holder, dying.release_from_finalizer)
+        del holder
+
+        held, let_go = threading.Event(), threading.Event()
+
+        def hold_install_lock():
+            with dynamo_package._PACKAGE_INSTALL_LOCK:
+                held.set()
+                let_go.wait(20)
+
+        other = threading.Thread(target=hold_install_lock)
+        other.start()
+        self.assertTrue(held.wait(20))
+        try:
+            gc.collect()
+        finally:
+            let_go.set()
+            other.join(20)
+        self.assertIn(dying, dynamo_package._PENDING_RELEASES)
+        self.assertEqual(
+            get_code_exec_strategy(fn.__code__).cur_action, FrameAction.SKIP
+        )
+
+        counter = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(2)
+        self.assertEqual(torch.compile(fn, backend=counter)(x), fn(x))
+        self.assertEqual(counter.frame_count, 1)
+        self.assertNotIn(dying, dynamo_package._PENDING_RELEASES)
+
+    def test_a_load_that_compiles_does_not_deadlock_against_reset(self):
+        # acquire_live_package() held the registry lock across load(). A module
+        # the artifact imports that runs a compiled function at import time
+        # then needed compile_lock under it, while torch._dynamo.reset() takes
+        # compile_lock and then comes for the registry lock.
+        in_load, reset_started = threading.Event(), threading.Event()
+        errors = []
+        package = CompilePackage(None)
+        key = (
+            "test_package_lock_order",
+            -1,
+            dynamo_package._SettingKey(None),
+            True,
+            dynamo_package._SettingKey(None),
+        )
+
+        def g(x):
+            return x * 2
+
+        def load():
+            in_load.set()
+            if not reset_started.wait(20):
+                raise AssertionError("reset never started")
+            torch.compile(g, backend="eager")(torch.ones(2))
+
+        def loader():
+            try:
+                dynamo_package.acquire_live_package(key, package, load)
+            except BaseException as e:
+                errors.append(e)
+
+        def resetter():
+            try:
+                in_load.wait(20)
+                with torch._dynamo.convert_frame.compile_lock:
+                    reset_started.set()
+                    dynamo_package.reset_live_packages()
+            except BaseException as e:
+                errors.append(e)
+
+        threads = [
+            threading.Thread(target=loader, daemon=True),
+            threading.Thread(target=resetter, daemon=True),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(60)
+        self.assertFalse(any(thread.is_alive() for thread in threads))
+        self.assertEqual(errors, [])
+        # The reset ran during the load, so the load's package is stale and
+        # must not have been registered for later wraps to join.
+        self.assertNotIn(key, dynamo_package._LIVE_PACKAGES)
+        self.assertEqual(dynamo_package._LOADING, {})
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_rewrapping_with_another_guard_filter_gets_its_own_package(self):
+        # The filter torch.compile applies to the recorded guards travels in
+        # Hooks.guard_filter_fn; a key without it let two wrappers with
+        # different filters share a package whose artifact mixed both filters'
+        # guards.
+        from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+
+        # A str argument: a bool would guard by ID_MATCH, which the
+        # caching_precompile filter drops under either wrapper.
+        def fn(x, mode):
+            return x.sin() + (1 if mode == "a" else 2)
+
+        def keep_all(entries):
+            return [True for _ in entries]
+
+        def drop_mode(entries):
+            return [entry.name != "mode" for entry in entries]
+
+        def guards_mode(package):
+            (code,) = package.cache_entry().codes
+            return [
+                any(
+                    guard.name.endswith("['mode']")
+                    for guard in dynamo_package.load_guards_state(
+                        guarded.guards_state
+                    ).output_graph.guards
+                )
+                for guarded in code.guarded_codes
+            ]
+
+        # Fresh dicts each time: torch.compile pops guard_filter_fn out of the
+        # options it is given.
+        def wrap(guard_filter_fn):
+            options = {"guard_filter_fn": guard_filter_fn}
+            return torch.compile(fn, backend="inductor", options=options)
+
+        x = torch.randn(3)
+        keep, drop = wrap(keep_all), wrap(drop_mode)
+        self.assertEqual(keep(x, "a"), fn(x, "a"))
+        self.assertEqual(drop(x, "b"), fn(x, "b"))
+        packages = dynamo_package.live_packages(fn, -1)
+        self.assertEqual(len(packages), 2)
+        self.assertEqual(sorted(guards_mode(p) for p in packages), [[False], [True]])
+
+        PrecompileContext.save_to_dynamo_cache()
+        torch._dynamo.reset()
+        PrecompileContext.clear()
+        keep, drop = wrap(keep_all), wrap(drop_mode)
+        self.assertEqual(keep(x, "b"), fn(x, "b"))
+        self.assertEqual(drop(x, "b"), fn(x, "b"))
+        self.assertEqual(len(dynamo_package.live_packages(fn, -1)), 2)
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 2)
+        counters = torch._dynamo.utils.counters["dynamo_cache"]
+        self.assertEqual(counters["dynamo_cache_hit"], 2)
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_rewrapping_with_the_same_callable_backend_shares_its_package(self):
+        # A callable backend with no __eq__ of its own is compared by identity,
+        # as _TorchCompileWrapper.__eq__ does: the same object joins the live
+        # package, a fresh partial of the same function gets its own.
+        def fn(x):
+            return x.sin() + 1
+
+        def eager_backend(gm, example_inputs):
+            return gm.forward
+
+        x = torch.randn(3)
+        shared = functools.partial(eager_backend)
+        wrappers = [torch.compile(fn, backend=shared) for _ in range(3)]
+        for wrapper in wrappers:
+            self.assertEqual(wrapper(x), fn(x))
+        self.assertEqual(len(dynamo_package.live_packages(fn, -1)), 1)
+
+        fresh = [functools.partial(eager_backend) for _ in range(2)]
+        wrappers += [torch.compile(fn, backend=b) for b in fresh]
+        for wrapper in wrappers[3:]:
+            self.assertEqual(wrapper(x), fn(x))
+        self.assertEqual(len(dynamo_package.live_packages(fn, -1)), 3)
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_reset_code_caches_forgets_the_live_package(self):
+        # reset_code_caches() wiped the installed entries but left the package
+        # registered, so the next wrap joined it and compiled cold instead of
+        # reloading the artifact.
+        from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+
+        def fn(x):
+            return x.sin() + 1
+
+        x = torch.randn(3)
+        torch.compile(fn, backend="inductor")(x)
+        self._save_and_reload(expected_backends=1, expected_dynamo=1)
+
+        first = torch.compile(fn, backend="inductor")
+        self.assertEqual(first(x), fn(x))
+        self.assertEqual(len(dynamo_package.live_packages(fn, -1)), 1)
+        torch._dynamo.reset_code_caches()
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+        self.assertEqual(dynamo_package.live_packages(fn, -1), [])
+
+        second = torch.compile(fn, backend="inductor")
+        self.assertEqual(second(x), fn(x))
+        self.assertEqual(len(dynamo_package.live_packages(fn, -1)), 1)
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 1)
+        counters = torch._dynamo.utils.counters["dynamo_cache"]
+        self.assertEqual(counters["dynamo_cache_hit"], 2)
 
     def test_loaded_cache_entry_is_not_mutated_by_a_recompile(self):
         # initialize() must work on its own copy of the entry: the store keeps
@@ -4904,7 +5224,12 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 )
             }
         )
-        stale = _DynamoCacheEntry(codes=[], source_info=drifted, device_type="mtia")
+        stale = _DynamoCacheEntry(
+            codes=[],
+            source_info=drifted,
+            device_type="mtia",
+            system_info=SystemInfo.current(cpu_codegen=False),
+        )
 
         package = CompilePackage(None)
         with self.assertRaisesRegex(RuntimeError, "Source code changes detected"):
