@@ -1739,9 +1739,8 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
                 return x.sin()
 
             class Backend:
-                # The shape a precompile backend wrapper takes: an inner
-                # backend plus a cache key, without flipping the gate itself
-                # so the OFF half can be measured first.
+                # The shape _PrecompileBackend has, minus the __init__ that
+                # would flip the gate before the OFF half is measured.
                 def __init__(self, inner):
                     self._torchdynamo_orig_backend = inner
                     self._torchdynamo_cache_key = object()

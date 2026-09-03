@@ -12,6 +12,7 @@ from torch._functorch._aot_autograd.to_standalone_python import (
     _find_effectful_op,
     _known_helper_table,
     _module_level_names,
+    namespace_module_names,
 )
 from torch._functorch.aot_autograd import compile_to_python, load_from_python
 from torch._higher_order_ops.effects import _get_effect, hop_print
@@ -709,6 +710,28 @@ class TestComposerHelpers(TestCase):
                 ),
                 f"helper import {import_stmt!r} bypasses the standalone_runtime surface",
             )
+
+    def test_namespace_module_names_uses_byte_offsets(self):
+        # ast column offsets count UTF-8 bytes; a non-ASCII literal before a renamed
+        # name on the same line must not shift the splice.
+        src = 'def call(args):\n    return args\npair = ("\u00e9", call)\n'
+        (out,) = namespace_module_names([src])
+        self.assertIn('pair_s0 = ("\u00e9", call_s0)', out)
+        ns = {}
+        exec(out, ns)
+        self.assertIs(ns["pair_s0"][1], ns["call_s0"])
+
+    def test_namespace_module_names_rewrites_unpacking_and_global(self):
+        # Tuple targets are module-level bindings too, and a ``global`` declaration
+        # names the binding without a Name node; both must be renamed with it.
+        src = "a, b = 1, 2\ndef bump():\n    global a\n    a += b\n"
+        (out,) = namespace_module_names([src])
+        self.assertIn("a_s0, b_s0 = 1, 2", out)
+        self.assertIn("global a_s0", out)
+        ns = {}
+        exec(out, ns)
+        ns["bump_s0"]()
+        self.assertEqual(ns["a_s0"], 3)
 
     def test_module_level_names_excludes_deleted(self):
         # Inductor's inner module binds then dels a name (async_compile = AsyncCompile();

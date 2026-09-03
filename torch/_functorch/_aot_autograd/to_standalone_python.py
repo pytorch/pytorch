@@ -828,7 +828,12 @@ def _graph_has_dynamic_shapes(gm: GraphModule) -> bool:
     strides has static sizes, and treating it as static would silently specialize the
     artifact to the example strides. (Unbacked symints appearing only in intermediates,
     not on any placeholder, are still missed here, but such a graph fails loudly
-    downstream when emit_value rejects the still-symbolic metadata.)"""
+    downstream when emit_value rejects the still-symbolic metadata.)
+
+    Both metadata keys are checked, like ``_resolve_fake_mode``: make_fx stashes the fake
+    under "val", while a Dynamo graph (which torch.compiler.precompile's dynamo tracer
+    feeds here) stashes it under "example_value" -- reading only "val" would call a
+    dynamic Dynamo graph static and silently specialize it to the example sizes."""
     import torch
 
     def _is_symbolic(v: Any) -> bool:
@@ -837,16 +842,89 @@ def _graph_has_dynamic_shapes(gm: GraphModule) -> bool:
     for node in gm.graph.nodes:
         if node.op != "placeholder":
             continue
-        val = node.meta.get("val")
-        if _is_symbolic(val):
-            return True
-        if isinstance(val, torch.Tensor) and (
-            any(_is_symbolic(s) for s in val.shape)
-            or any(_is_symbolic(s) for s in val.stride())
-            or _is_symbolic(val.storage_offset())
-        ):
-            return True
+        for key in ("val", "example_value"):
+            val = node.meta.get(key)
+            if _is_symbolic(val):
+                return True
+            if isinstance(val, torch.Tensor) and (
+                any(_is_symbolic(s) for s in val.shape)
+                or any(_is_symbolic(s) for s in val.stride())
+                or _is_symbolic(val.storage_offset())
+            ):
+                return True
     return False
+
+
+def namespace_module_names(sources: Sequence[str]) -> list[str]:
+    """Suffix every top-level name each module DEFINES, per module.
+
+    Splicing several Inductor modules into ONE namespace is only safe if their
+    top-level names are disjoint, because the code inside a module resolves its
+    siblings as late-bound globals: a module's ``call`` looks up its kernels and
+    its ``_runtime_wrapper`` when INVOKED, not when defined. Two modules of the
+    same computation -- a forward and its backward, or two shape variants of one
+    frame -- otherwise define the same names, and the first silently runs the
+    second's code. Snapshotting each module's entry is not enough for the same
+    reason.
+
+    Rewriting is driven by AST positions rather than a text match, which is what
+    keeps three lookalikes out of it: an attribute (``runner.call`` is an
+    ``Attribute``, not a ``Name``), a nested binding (``def call`` inside
+    ``class Runner`` is not module-level), and an import (``async_compile`` is
+    both a local binding and part of ``torch._inductor.async_compile``).
+    """
+    out: list[str] = []
+    for slot, source in enumerate(sources):
+        tree = ast.parse(source)
+        imported = {
+            (alias.asname or alias.name).split(".")[0]
+            for node in tree.body
+            if isinstance(node, (ast.Import, ast.ImportFrom))
+            for alias in node.names
+        }
+        targets = _module_level_names(tree) - imported
+        if not targets:
+            out.append(source)
+            continue
+        suffix = f"_s{slot}"
+        # AST column offsets are UTF-8 byte offsets, so splice on the encoded line.
+        lines = [line.encode("utf-8") for line in source.split("\n")]
+        edits: dict[int, set[tuple[int, int, str]]] = {}
+
+        def _edit(lineno: int, begin: int, end: int, name: str) -> None:
+            edits.setdefault(lineno, set()).add((begin, end, name + suffix))
+
+        def _edit_first_match(lineno: int, begin: int, name: str) -> None:
+            # A def/class name and a global/nonlocal declaration have no Name node
+            # of their own; each is the first whole word matching ``name`` after
+            # the statement's start column.
+            found = re.search(
+                rb"\b%s\b" % re.escape(name.encode()), lines[lineno - 1][begin:]
+            )
+            if found is not None:
+                _edit(lineno, begin + found.start(), begin + found.end(), name)
+
+        for node in tree.body:
+            if (
+                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                and node.name in targets
+            ):
+                _edit_first_match(node.lineno, node.col_offset, node.name)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name):
+                if node.id in targets and node.end_col_offset is not None:
+                    _edit(node.lineno, node.col_offset, node.end_col_offset, node.id)
+            elif isinstance(node, (ast.Global, ast.Nonlocal)):
+                for name in node.names:
+                    if name in targets:
+                        _edit_first_match(node.lineno, node.col_offset, name)
+        for lineno, spans in edits.items():
+            line = lines[lineno - 1]
+            for begin, end, text in sorted(spans, reverse=True):
+                line = line[:begin] + text.encode("utf-8") + line[end:]
+            lines[lineno - 1] = line
+        out.append(b"\n".join(lines).decode("utf-8"))
+    return out
 
 
 def compile_to_python(

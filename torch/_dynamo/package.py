@@ -30,7 +30,7 @@ import threading
 import types
 import uuid
 import weakref
-from collections.abc import Callable, Generator, Iterable, Iterator
+from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 from contextlib import nullcontext
 from typing import Any, NewType, Optional, TYPE_CHECKING, Union
 from typing_extensions import Never
@@ -41,6 +41,7 @@ from torch._dynamo.graph_utils import _graph_device_types
 from torch.utils.weak import WeakIdKeyDictionary
 
 from .bytecode_transformation import (
+    _reserve_unique_id_through,
     COMPILED_FN_PREFIX,
     get_code_keys,
     is_compiled_fn_name,
@@ -167,7 +168,8 @@ class _RegionInstall:
     ``owner`` is stamped onto every precompile entry the package installs, so
     release() removes exactly those and leaves a neighbour package's entries on
     a shared code object alone. ``codes`` covers resume functions and any frame
-    reached through code_source, not just the entry frame.
+    reached through code_source, not just the entry frame; code_context() adds
+    the live frames an uncovered call compiled inside the region.
     ``skipped_codes`` are region-local skips; ``process_skipped_codes`` are the
     default region's, shared with plain torch.compile via _SKIP_INSTALLERS.
     """
@@ -184,6 +186,14 @@ class _RegionInstall:
         # frame with no guarded code is installed but gets no entries, so it
         # cannot serve as the probe.
         self.precompile_probe: types.CodeType | None = None
+
+    def is_installed(self) -> bool:
+        return bool(
+            self.installed_globals
+            or self.codes
+            or self.skipped_codes
+            or self.process_skipped_codes
+        )
 
     def claim_global(self, module: types.ModuleType, name: str, value: Any) -> None:
         self.installed_globals.setdefault(module, []).append(
@@ -371,13 +381,15 @@ def drain_pending_releases() -> None:
 # The package serving a function under caching_precompile, keyed on the
 # function and on every wrapper setting the package bakes into what it records
 # or installs: the region, the backend, whether that backend's artifacts carry
-# a CPU codegen target, and the guard filter the wrapper applies, which under
-# caching_precompile filters the guards that get serialized. Re-wrapping with
-# the same settings joins this package instead of loading and installing the
-# artifact again, which stacked one precompile entry per wrap on the code
-# object; a wrapper with other settings gets its own, or an inductor variant
-# recorded through an adopted eager package would ship without the codegen
-# target the ISA gate reads. Weak, so the entries go with the last wrapper.
+# a CPU codegen target, and the guard filter the recorded guards went through
+# (the package's own serialization filter when it has one, otherwise the
+# wrapper's guard_filter_fn, which under caching_precompile filters the guards
+# that get serialized). Re-wrapping with the same settings joins this package
+# instead of loading and installing the artifact again, which stacked one
+# precompile entry per wrap on the code object; a wrapper with other settings
+# gets its own, or an inductor variant recorded through an adopted eager
+# package would ship without the codegen target the ISA gate reads. Weak, so
+# the entries go with the last wrapper.
 class _SettingKey:
     """A wrapper setting as a dict key. Compared with the setting's own ``==``
     -- torch.compile hands over a fresh _TorchCompileWrapper per call, equal to
@@ -444,15 +456,16 @@ def live_package_key(
     package: "CompilePackage",
     guard_filter_fn: Callable[..., Any] | None,
 ) -> _LivePackageKey:
-    """``guard_filter_fn`` is the wrapper's Hooks.guard_filter_fn: under
-    caching_precompile it is the filter the serialized guards went through (see
-    CheckFunctionManager)."""
+    """``guard_filter_fn`` is the wrapper's Hooks.guard_filter_fn. A package
+    with its own serialization filter records through that; otherwise, under
+    caching_precompile, the runtime filter is the one the serialized guards
+    went through (see CheckFunctionManager)."""
     return (
         CompilePackage.source_id_from_fn(fn),
         isolate_recompiles_id,
         _SettingKey(backend),
-        package._requires_native_backend_compatibility,
-        _SettingKey(guard_filter_fn),
+        package._default_requires_native_backend_compatibility,
+        _SettingKey(package.serialization_guard_filter_fn or guard_filter_fn),
     )
 
 
@@ -643,14 +656,85 @@ def _get_module_content(module: types.ModuleType) -> str:
     return inspect.getsource(module)
 
 
+def _defining_module_name(code: types.CodeType) -> str | None:
+    """
+    The sys.modules key whose source actually contains ``code``.
+
+    Two things make this harder than ``inspect.getmodule``. It can hand back a
+    module that merely re-exports the code from a private implementation file --
+    ``collections.abc`` is three lines of ``from _collections_abc import *`` --
+    and hashing this code's line range against that module reads lines that are
+    not there. And ``__name__`` is not necessarily importable back to the same
+    object: ``_collections_abc`` sets its own ``__name__`` to "collections.abc",
+    which imports to the shim instead. Load-time revalidation re-imports this
+    name, so return the key, not ``__name__``.
+
+    Real models inline through such modules constantly, so give up and skip the
+    checksum rather than record one against the wrong file.
+    """
+    module = inspect.getmodule(code)
+    if module is not None and getattr(module, "__file__", None) == code.co_filename:
+        name = getattr(module, "__name__", None)
+        if name is not None and sys.modules.get(name) is module:
+            return name
+    return _scan_sys_modules_for_file(code.co_filename)
+
+
+# filename -> (len(sys.modules) when scanned, module key or None).
+_MODULE_KEY_BY_FILE: dict[str, tuple[int, str | None]] = {}
+
+
+def _scan_sys_modules_for_file(filename: str) -> str | None:
+    """
+    Memoized because the fallback is O(len(sys.modules)) and this runs per
+    inlined code object during capture, on the shared caching_precompile path.
+
+    A hit is cached outright. A MISS is only cached while sys.modules has not
+    changed size, because the usual reason for one is that the module has not
+    been imported yet -- caching that permanently, which functools.cache would,
+    silently drops the source checksum for every lazily imported file for the
+    rest of the process.
+
+    Length is an ABA check, not a version: equal-size churn between two calls
+    keeps a stale miss, and ``del sys.modules[m]; import m`` -- the ordinary
+    force-reimport idiom -- is exactly that. sys.modules exposes no mutation
+    counter to use instead. A stale MISS costs this file's checksum, so a later
+    edit to it is not caught at load; worth knowing when hunting a checksum that
+    should have fired.
+
+    A cached HIT is revalidated against sys.modules before it is returned, for
+    the cost of one dict lookup rather than the scan the memo exists to avoid.
+    Trusting it instead made ``del sys.modules[m]`` -- with no re-import, so the
+    ABA check above cannot see it -- hand back a dead name that ``add_code``
+    then raised KeyError on.
+    """
+    generation = len(sys.modules)
+    cached = _MODULE_KEY_BY_FILE.get(filename)
+    if cached is not None:
+        cached_generation, cached_key = cached
+        if cached_key is None:
+            if cached_generation == generation:
+                return None
+        elif getattr(sys.modules.get(cached_key), "__file__", None) == filename:
+            return cached_key
+    found = None
+    for key, candidate in list(sys.modules.items()):
+        if getattr(candidate, "__file__", None) == filename:
+            found = key
+            break
+    _MODULE_KEY_BY_FILE[filename] = (generation, found)
+    return found
+
+
 @dataclasses.dataclass
 class SourceInfo:
     inlined_sources: set[InlinedSource]
 
     def add_code(self, code: types.CodeType) -> None:
-        module = inspect.getmodule(code)
-        if module is None:
+        module_name = _defining_module_name(code)
+        if module_name is None:
             return
+        module = sys.modules[module_name]
         sourcelines, firstlineno = inspect.getsourcelines(code)
         lastlineno = firstlineno + len(sourcelines)
         source = "".join(sourcelines)
@@ -661,7 +745,7 @@ class SourceInfo:
             )
         self.inlined_sources.add(
             InlinedSource(
-                module=module.__name__,
+                module=module_name,
                 firstlineno=firstlineno,
                 lastlineno=lastlineno,
                 checksum=_hash_source(source),
@@ -934,7 +1018,6 @@ def _current_cpu_codegen_target() -> _CpuCodegenTarget | None:
     have produced nor be about to run an inductor CPU kernel, so there is no
     baked vector width to protect.
     """
-    from torch._inductor import config as inductor_config
     from torch._inductor.cpu_vec_isa import pick_vec_isa
 
     try:
@@ -947,11 +1030,23 @@ def _current_cpu_codegen_target() -> _CpuCodegenTarget | None:
         )
         return None
 
+    env, simdlen, march = _cpu_codegen_config()
     return (
         platform.machine(),
         torch.backends.cpu.get_cpu_capability(),
-        os.environ.get("ATEN_CPU_CAPABILITY"),
+        env,
         vec_isa,
+        simdlen,
+        march,
+    )
+
+
+def _cpu_codegen_config() -> tuple[str | None, int | None, str | None]:
+    """The process-mutable inputs of the codegen target, cheap to read."""
+    from torch._inductor import config as inductor_config
+
+    return (
+        os.environ.get("ATEN_CPU_CAPABILITY"),
         inductor_config.cpp.simdlen,
         inductor_config.cpp.march,
     )
@@ -1123,7 +1218,7 @@ class _DynamoCacheEntry:
     device_types: frozenset[str] | None = None
     requires_native_backend_compatibility: bool = True
     fn_name: str | None = None
-    fn_first_lineno: str | None = None
+    fn_first_lineno: int | None = None
 
     def __setstate__(self, state: dict[str, Any]) -> None:
         _restore_missing_fields(self, state)
@@ -1303,12 +1398,18 @@ class CompilePackage:
         fn: Callable[..., Any] | None,
         dynamo: _DynamoCacheEntry | None = None,
         ignore_inlined_sources: bool = False,
+        serialization_guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]]
+        | None = None,
         requires_native_backend_compatibility: bool = True,
     ) -> None:
         self._innermost_fn = None
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
-
-        self._current_entry: _DynamoCodeCacheEntry | None = None
+        # Resume functions install under a global name carrying this token, so
+        # two packages holding byte-identical resume code -- two loads of one
+        # artifact, or two artifacts of one script captured in separate
+        # processes -- do not take each other's name. See
+        # _resume_global_renames.
+        self._install_token = uuid.uuid4().hex
         self._region_install = _RegionInstall()
         # A package dropped without uninstall() -- every torch.compile wrapper
         # that used it went away -- must not leave what it installed behind.
@@ -1317,25 +1418,36 @@ class CompilePackage:
             self, self._region_install.release_from_finalizer
         )
         self._release_on_collect.atexit = False
-        # Every device the captured graphs name; the cache entry records the
-        # set, so an accelerator capture with a CPU epilogue is checked as both.
+
+        self._current_entry: _DynamoCodeCacheEntry | None = None
+        # Frames whose capture was cut short by the recompile limit. Deliberately
+        # runtime-only and NOT serialized: it describes this capture session, not
+        # the artifact, and it must not affect what install() serves.
+        self._truncated_frames: set[str] = set()
+        # A frame can enter Dynamo yet produce no guarded code for one exercised
+        # variant (for example, an unsupported or empty resume path). Keep that
+        # distinct from resume code that was generated but never executed.
+        self._uncovered_frames: set[str] = set()
         self._device_types: set[str] = set()
-        # Whether this package's backend generates native code. An eager one
-        # bakes no vector width, so it must neither pay the C++ toolchain probe
-        # at save nor be rejected on ISA skew at load.
-        self._requires_native_backend_compatibility = (
+        self._system_info: SystemInfo | None = None
+        self._cpu_codegen_probed = False
+        # Variants compiled after inductor's CPU codegen config moved away from
+        # the recorded target. They are left out of the artifact.
+        self.variants_dropped_for_codegen_target = 0
+        self._default_requires_native_backend_compatibility = (
             requires_native_backend_compatibility
+        )
+        self._requires_native_backend_compatibility = (
+            self._default_requires_native_backend_compatibility
         )
 
         # For debugging/testing purpose only.
         self._cached_backends: dict[_BackendId, Any] = {}
         self._source_info: SourceInfo = SourceInfo(inlined_sources=set())
         self._resume_codes: set[types.CodeType] = set()
-        # Resume functions install under a global name carrying this token, so
-        # two packages holding byte-identical resume code -- two loads of one
-        # artifact, or two artifacts of one script captured in separate
-        # processes -- do not take each other's name. See _resume_global_renames.
-        self._install_token = uuid.uuid4().hex
+        # Runtime guards stay intact; this filter applies only to the guard
+        # state recorded in the package.
+        self.serialization_guard_filter_fn = serialization_guard_filter_fn
         self._initialized = False
         if fn is not None:
             self.initialize(fn, dynamo, ignore_inlined_sources)
@@ -1354,8 +1466,23 @@ class CompilePackage:
 
         if self._initialized:
             raise AssertionError("CompilePackage is already initialized")
+        # A load that raises is retried on the SAME object -- eval_frame's
+        # caching_precompile path falls back to initialize(fn, None) -- so every
+        # field a load writes has to be reset here rather than trusted to still
+        # hold its __init__ value.
         self._source_info = SourceInfo(inlined_sources=set())
+        self._codes = {}
         self._device_types = set()
+        self._system_info = None
+        self._cpu_codegen_probed = False
+        self.variants_dropped_for_codegen_target = 0
+        self._requires_native_backend_compatibility = (
+            self._default_requires_native_backend_compatibility
+        )
+        self._cached_backends = {}
+        self._resume_codes = set()
+        self._truncated_frames = set()
+        self._uncovered_frames = set()
         self._innermost_fn = innermost_fn(fn)  # type: ignore[assignment]
         if self._innermost_fn is None:
             raise AssertionError("innermost_fn returned None")
@@ -1384,11 +1511,20 @@ class CompilePackage:
             self._codes = {self._innermost_fn.__code__: main}
             for code in codes:
                 self._codes[SerializedCode.to_code_object(code.python_code)] = code
+            # Restore the complete device coverage and compile-time system
+            # requirements recorded by the artifact. Written last so a failed
+            # load cannot leak them into a cold-cache fallback on this object.
             self._device_types = set(entry.device_types or (entry.device_type,))
-        else:
-            self._add_function(
-                self._innermost_fn.__code__, self._innermost_fn.__module__
+            self._system_info = entry.system_info
+            self._requires_native_backend_compatibility = (
+                entry.requires_native_backend_compatibility
             )
+        else:
+            module_name = (
+                _defining_module_name(self._innermost_fn.__code__)
+                or self._innermost_fn.__module__
+            )
+            self._add_function(self._innermost_fn.__code__, module_name)
         self._initialized = True
 
     def _add_function(
@@ -1461,12 +1597,30 @@ class CompilePackage:
         if code not in self._codes:
             self._add_user_function(code)
 
+        # A call the artifact does not cover compiles INSIDE the installed
+        # region and leaves its cache entries on the LIVE code object, which for
+        # a resume function is not the reconstructed twin _codes is keyed by.
+        # The two compare EQUAL, so match on identity: otherwise uninstall()
+        # clears the twin and the live frame keeps one entry per load forever,
+        # until accumulated_recompile_limit refuses to compile it ever again.
+        if self._region_install.region_id >= 0 and not any(
+            installed is code for installed in self._region_install.codes
+        ):
+            self._region_install.codes.append(code)
+
         entry = self._codes[code]
         self._current_entry = entry
         try:
             yield
         finally:
             entry.has_compile_id = True
+            # "Uncovered" means the frame produced NO guarded code at all, which
+            # is the case install() skip_code()s and save() reports as a gap. A
+            # frame that hit the recompile limit has working variants and is
+            # reported as truncated instead; counting it here too made the
+            # uncovered error text ("no guarded variants at all") false for it.
+            if not entry.guarded_codes and not entry.bypassed:
+                self._uncovered_frames.add(code.co_name)
             self._current_entry = None
 
     def add_guarded_code(
@@ -1486,6 +1640,22 @@ class CompilePackage:
         for backend_id in _backend_ids_from_code(dynamo_code):
             self._add_backend_id(backend_id)
 
+    def discard_variant_backends(self, dynamo_code: types.CodeType) -> None:
+        """Forget the backends of a variant that is not being recorded.
+        OutputGraph registers them as it compiles, before the guards are built
+        and update_device_type() judges the variant."""
+        if self._current_entry is None:
+            raise AssertionError(
+                "_current_entry is not set in discard_variant_backends"
+            )
+        from torch._dynamo.precompile_context import PrecompileContext
+
+        for backend_id in _backend_ids_from_code(dynamo_code):
+            if backend_id in self._current_entry.backend_ids:
+                self._current_entry.backend_ids.remove(backend_id)
+            self._cached_backends.pop(backend_id, None)
+            PrecompileContext.take_artifact(backend_id)
+
     def add_inlined_source(self, sources: list[types.CodeType]) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_inlined_source")
@@ -1496,14 +1666,116 @@ class CompilePackage:
                 continue
             self._source_info.add_code(code)
 
-    def update_device_type(self, graph: torch.fx.Graph | None) -> None:
-        # Every device the graph NAMES, not the first meta value it carries:
-        # under dynamic shapes the leading placeholder is a SymInt, which has no
-        # device, and reading it as "cpu" makes a pure-accelerator capture bake
-        # a cpu_codegen_target it has no native code for -- which then refuses
-        # to load on a host with a different vector ISA or no C++ compiler. A
-        # graph that names nothing emits nothing and contributes nothing.
-        self._device_types.update(_graph_device_types(graph))
+    def update_device_type(self, graph: torch.fx.Graph | None) -> bool:
+        """
+        Record the devices this variant's graph names. Returns False when the
+        variant must not be recorded because inductor's CPU codegen config has
+        moved since the target was probed: the guards do not capture inductor
+        config, so the artifact would serve a kernel built for another vector
+        width. The frame keeps its earlier variants and stays installable.
+        """
+        # Every device the graph names, not just one: a variant that compiles to
+        # nothing (an exercised branch with no tensor op, which this package
+        # records as a guarded empty variant rather than skipping) names none
+        # and must contribute none, and a graph whose leading placeholder is a
+        # SymInt must not be read as "cpu". Getting either wrong makes a
+        # pure-accelerator capture bake a cpu_codegen_target it has no native
+        # code for, and then refuse to load on a host with a different vector
+        # ISA or no C++ compiler at all.
+        device_types = _graph_device_types(graph)
+        if not device_types:
+            return True
+        # cpu_codegen_target only guards CPU native code and computing it runs
+        # the C++ toolchain, so a capture that never emits any must not pay for
+        # it. A cpu graph arriving after an accelerator-only prefix backfills the
+        # field, so the artifact still records what it was captured against.
+        needs_cpu_codegen = (
+            self._requires_native_backend_compatibility and "cpu" in device_types
+        )
+        if self._system_info is None:
+            self._system_info = SystemInfo.current(cpu_codegen=needs_cpu_codegen)
+            self._cpu_codegen_probed = needs_cpu_codegen
+        elif needs_cpu_codegen:
+            # The toolchain runs at most once per package. Later CPU frames only
+            # re-read the config the probe depends on.
+            recorded = self._system_info.cpu_codegen_target
+            if recorded is None and not self._cpu_codegen_probed:
+                self._system_info = dataclasses.replace(
+                    self._system_info,
+                    cpu_codegen_target=_current_cpu_codegen_target(),
+                )
+                self._cpu_codegen_probed = True
+            elif recorded is not None and _cpu_codegen_config() != (
+                recorded[2],
+                recorded[4],
+                recorded[5],
+            ):
+                if self.variants_dropped_for_codegen_target == 0:
+                    logger.warning(
+                        "CPU codegen target changed during precompile capture: "
+                        "recorded=%s, current config=%s; variants compiled from "
+                        "now on are left out of the artifact",
+                        recorded,
+                        _cpu_codegen_config(),
+                    )
+                self.variants_dropped_for_codegen_target += 1
+                return False
+        self._device_types.update(device_types)
+        return True
+
+    def has_current_entry(self) -> bool:
+        return self._current_entry is not None
+
+    def mark_current_entry_truncated(self) -> None:
+        """
+        Record that this frame hit the recompile limit, so callers building an
+        artifact can tell the capture is missing variants. Unlike bypassing, the
+        variants already captured stay installable -- a truncated frame still
+        serves what it covers and recompiles for the rest.
+
+        Only the frame that hit the limit lands here, so ``truncated_frames`` is
+        a LOWER BOUND: the limit also puts everything called beneath this frame
+        into run-only mode, and those frames stop capturing without ever
+        re-entering Dynamo to report it.
+        """
+        if self._current_entry is None:
+            raise AssertionError(
+                "_current_entry is not set in mark_current_entry_truncated"
+            )
+        code = self._current_entry.python_code
+        self._truncated_frames.add(
+            f"{code.co_name} ({code.co_filename}:{code.co_firstlineno})"
+        )
+
+    @property
+    def truncated_frames(self) -> frozenset[str]:
+        return frozenset(self._truncated_frames)
+
+    @property
+    def uncovered_frames(self) -> frozenset[str]:
+        return frozenset(self._uncovered_frames)
+
+    def guarded_code_count(self, code: types.CodeType) -> int:
+        entry = self._codes.get(code)
+        return 0 if entry is None else len(entry.guarded_codes)
+
+    def code_objects(self) -> tuple[types.CodeType, ...]:
+        return tuple(self._codes)
+
+    def region_codes(self) -> tuple[types.CodeType, ...]:
+        """
+        Every live code object an isolated region of this package can hold
+        state on.
+
+        A frame reached through code_source is installed onto the code the
+        RUNNING program resolves that name to, not onto the reconstructed twin
+        in _codes, and the two compare EQUAL, so this is deliberately not
+        deduplicated: any set or dict keyed by value collapses the pair and
+        drops exactly the live code. Call it before uninstall(), which forgets
+        what it installed onto. _RegionInstall.skipped_codes is a strict subset of
+        _RegionInstall.codes, so it needs no separate entry here.
+        """
+        return (*self._codes, *self._region_install.codes)
 
     def bypass_current_entry(self) -> None:
         if self._current_entry is None:
@@ -1568,6 +1840,28 @@ class CompilePackage:
         module.__dict__[name] = value
         self._region_install.claim_global(module, name, value)
 
+    def claim_region_global(self, scope: dict[str, Any], name: str, value: Any) -> None:
+        """
+        Take over a global a compile inside this package's installed region just
+        wrote, so uninstall() removes it with the rest.
+
+        A call the artifact does not cover falls back to an ordinary Dynamo
+        compile inside the region. OutputGraph installs that compile's globals
+        and anchors them to a CleanupHook on the transformed code object, which
+        the package never sees and which does not fire when the region goes
+        away, so unclaimed they stay in the served module for the life of the
+        process. Only while installed: the same path runs during capture, for
+        globals the capture session's own compiled callable still reads.
+        """
+        if self._region_install.region_id < 0:
+            return
+        module_name = scope.get("__name__")
+        module = sys.modules.get(module_name) if isinstance(module_name, str) else None
+        if module is None or module.__dict__ is not scope:
+            return
+        with _PACKAGE_INSTALL_LOCK:
+            self._region_install.claim_global(module, name, value)
+
     def uninstall(self) -> None:
         with _PACKAGE_INSTALL_LOCK:
             self._uninstall()
@@ -1576,6 +1870,29 @@ class CompilePackage:
         if self._innermost_fn is None:
             raise AssertionError("_innermost_fn is not set in uninstall")
         self._region_install.release()
+
+    def _deserialize_backends(
+        self, backends: dict[_BackendId, Any]
+    ) -> dict[_BackendId, Any]:
+        """
+        Deserialize outside the install lock, since an inductor artifact can be
+        slow to load, but only the backends install will actually reach: a
+        bypassed entry installs nothing, so loading its artifact is wasted work
+        and can fail the whole install over a graph that serves nothing.
+        """
+        needed = {
+            backend_id
+            for entry in self._codes.values()
+            if not entry.bypassed
+            for backend_id in entry.backend_ids
+        }
+        deserialized = {}
+        for backend_id, artifact in backends.items():
+            if backend_id not in needed:
+                continue
+            with dynamo_timed("after_deserialization", phase_name="backend_compile"):
+                deserialized[backend_id] = artifact.after_deserialization()
+        return deserialized
 
     def install(
         self,
@@ -1589,14 +1906,63 @@ class CompilePackage:
           2. Install the compiled functions to global scopes.
           3. Install the precompiled cache entries to ExtraStates on the code object.
         """
+        deserialized_backends = self._deserialize_backends(backends)
         with _PACKAGE_INSTALL_LOCK:
             _drain_pending_releases()
             self._uninstall()
             self._region_install.region_id = isolate_recompiles_id
-            self._install_codes(backends)
-            # A finalizer that fired on this thread during the install deferred
-            # to here.
-            _drain_pending_releases()
+            try:
+                self._install_codes(deserialized_backends)
+                # A finalizer that fired on this thread during the install
+                # deferred to here; the failure path drains on its rollback.
+                _drain_pending_releases()
+            except BaseException:
+                # A half-installed package is worse than an unloaded one: some
+                # frames serve precompiled code and some do not, and because
+                # install() raised, the caller has no handle to undo it. The
+                # expected way to get here is after_deserialization() rejecting an
+                # artifact on a serving host that does not match the capture host.
+                try:
+                    self._uninstall()
+                except BaseException:
+                    logger.exception("Failed to roll back a partial package install")
+                raise
+
+    def installed_entries_dropped(self) -> bool:
+        """
+        True when the precompile entries install() loaded are gone.
+
+        torch._dynamo.reset() clears every code object install() touched -- they
+        all go through convert_frame.input_codes -- while leaving the installed
+        globals behind, so the next call recompiles instead of serving.
+
+        Scoped to the region install() used rather than to the code object as a
+        whole: lookup() never serves a precompile entry across regions, so a
+        second artifact loaded onto the same function after the reset is not
+        coverage for this one. A served call runs this every time, so it asks
+        C++ a yes/no question instead of materializing a wrapper per entry.
+        """
+        from torch._C._dynamo.eval_frame import _has_precompile_entries
+
+        probe = self._region_install.precompile_probe
+        return probe is not None and not _has_precompile_entries(
+            probe, self._region_install.region_id
+        )
+
+    def reset_after_failed_install(self) -> None:
+        """Make a package whose load or install raised reusable for a cold-cache fallback."""
+        with _PACKAGE_INSTALL_LOCK:
+            if self._region_install.is_installed():
+                # Already on an error path, so recover rather than raise: a
+                # rollback that fails too must not stop the cold compile.
+                logger.warning(
+                    "failed install left package state installed; uninstalling"
+                )
+                try:
+                    self._uninstall()
+                except Exception:
+                    logger.exception("Failed to uninstall after a failed install")
+            self._initialized = False
 
     def _install_codes(self, backends: dict[_BackendId, Any]) -> None:
         from torch._C._dynamo.eval_frame import _load_precompile_entry
@@ -1618,19 +1984,23 @@ class CompilePackage:
             with context:
                 module = sys.modules[entry.python_module]
                 for alias, module_name in entry.import_sources.items():
-                    self._install_global(
-                        module, alias, importlib.import_module(module_name)
-                    )
+                    # Deliberately not recorded for uninstall. An import alias
+                    # is a module object under a name derived from the module,
+                    # so every writer writes the same value, and plain
+                    # torch.compile (symbolic_convert.import_source) installs it
+                    # permanently. Taking it back out breaks whoever else in
+                    # this module resolved the same alias.
+                    module.__dict__[alias] = importlib.import_module(module_name)
                 target_code = code
                 if entry.install_to_global:
                     for function_name in entry.function_names:
-                        function_name = renames.get(function_name, function_name)
+                        installed_name = renames[function_name]
                         if code.co_freevars:
                             # Resume functions with freevars need a factory
                             # that takes a closure tuple, matching
                             # install_resume_function_global in output_graph.py.
                             f_globals = module.__dict__
-                            fn_name = function_name
+                            fn_name = installed_name
 
                             def _make_fn(
                                 closure: tuple[types.CellType, ...],
@@ -1642,12 +2012,12 @@ class CompilePackage:
                                     _code, _globals, _name, None, closure
                                 )
 
-                            self._install_global(module, function_name, _make_fn)
+                            self._install_global(module, installed_name, _make_fn)
                         else:
                             fn = types.FunctionType(
-                                code, module.__dict__, function_name
+                                code, module.__dict__, installed_name
                             )
-                            self._install_global(module, function_name, fn)
+                            self._install_global(module, installed_name, fn)
                 if entry.code_source:
                     target_code = _lookup_code(entry)
 
@@ -1679,15 +2049,11 @@ class CompilePackage:
                         raise RuntimeError(
                             f"Backend {backend_id} is not found in the given backends"
                         )
-                    with dynamo_timed(
-                        "after_deserialization", phase_name="backend_compile"
-                    ):
-                        backend = backends[backend_id].after_deserialization()
-                        self._install_global(
-                            module,
-                            backend_id,
-                            torch._dynamo.disable(backend),
-                        )
+                    self._install_global(
+                        module,
+                        backend_id,
+                        torch._dynamo.disable(backends[backend_id]),
+                    )
 
                 if len(entry.guarded_codes) == 0:
                     # Legacy and transparent-cache artifacts can contain a frame
@@ -1720,22 +2086,46 @@ class CompilePackage:
                         builtin_dict_name
                         := guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
                     ):
+                        _, separator, suffix = builtin_dict_name.rpartition("_")
+                        if separator and suffix.isdigit():
+                            # Process-global side effect: every install bumps
+                            # unique_id() past this suffix so a later compile
+                            # cannot mint the same name.
+                            _reserve_unique_id_through(int(suffix))
                         # A pre-reset compile's CleanupHook may still own this
                         # name even when we're about to leave its value alone
                         # below (same dict object every compile in this
                         # module), so it must not delete it once collected.
                         CleanupHook.disown(runtime_global_scope, builtin_dict_name)
                         builtins_dict = get_builtins_dict(runtime_global_scope)
-                        if builtin_dict_name in runtime_global_scope:
-                            if (
-                                runtime_global_scope[builtin_dict_name]
-                                is not builtins_dict
-                            ):
-                                raise AssertionError(
-                                    f"Builtins dict mismatch for key '{builtin_dict_name}'"
+                        bound = runtime_global_scope.get(
+                            builtin_dict_name, _ABSENT_GLOBAL
+                        )
+                        if bound is not _ABSENT_GLOBAL and bound is not builtins_dict:
+                            raise AssertionError(
+                                f"Builtins dict mismatch for key '{builtin_dict_name}'"
+                            )
+                        with _INSTALLER_REGISTRY_LOCK:
+                            owned_by_a_package = any(
+                                binding.value is builtins_dict and binding.owners
+                                for binding in (_GLOBAL_BINDINGS.get(module) or {}).get(
+                                    builtin_dict_name, ()
                                 )
-                        else:
-                            runtime_global_scope[builtin_dict_name] = builtins_dict
+                            )
+                        # Recorded, so uninstall() takes it back out. The
+                        # artifact's counter was reserved above, so local
+                        # compiles cannot mint the same name while loaded.
+                        # Joining a set another package already owns matters as
+                        # much as creating the binding: two loads of one
+                        # artifact record the same name, and the first unload
+                        # would otherwise delete a key the other one's bytecode
+                        # reads. A name a PLAIN compile minted has no owner to
+                        # join and is left alone, since claiming it would make
+                        # our unload delete what that compile reads.
+                        if bound is _ABSENT_GLOBAL or owned_by_a_package:
+                            self._install_global(
+                                module, builtin_dict_name, builtins_dict
+                            )
                     if not isinstance(guards_state, torch._dynamo.guards.GuardsState):
                         raise AssertionError(
                             f"Expected GuardsState, got {type(guards_state)}"
@@ -1755,6 +2145,12 @@ class CompilePackage:
                         self._region_install.owner,
                     )
 
+    def code_entries(self) -> Iterable["_DynamoCodeCacheEntry"]:
+        """The per-frame entries, for a caller that edits them before they are
+        packaged. Unlike cache_entry(), this does not require a complete
+        capture."""
+        return self._codes.values()
+
     def cache_entry(self) -> _DynamoCacheEntry:
         self.validate()
         if self._innermost_fn is None:
@@ -1769,15 +2165,9 @@ class CompilePackage:
             source_info=self._source_info,
             device_type=device_type,
             device_types=device_types,
-            # The field's default_factory would run the C++ toolchain probe on
-            # every save; only an artifact that can hold CPU native code has a
-            # baked vector width to record.
-            system_info=SystemInfo.current(
-                cpu_codegen=(
-                    self._requires_native_backend_compatibility
-                    and "cpu" in device_types
-                )
-            ),
+            # _system_info is None only when no graph was ever captured, so
+            # there is nothing baked and no reason to run the toolchain probe.
+            system_info=self._system_info or SystemInfo.current(cpu_codegen=False),
             requires_native_backend_compatibility=(
                 self._requires_native_backend_compatibility
             ),
