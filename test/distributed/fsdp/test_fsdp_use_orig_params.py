@@ -226,10 +226,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
             raise ValueError(f"Invalid string: {sharding_strategy_str}")
         return sharding_strategy
 
-    @unittest.skipIf(
-        torch.accelerator.current_accelerator() is None or not has_triton(),
-        "Inductor+accelerator needs triton and a recent accelerator",
-    )
+    @unittest.skipIf(not has_triton(), "Inductor needs triton")
     @skip_if_lt_x_gpu(2)
     def test_fsdp_compile(self, device):
         self.run_subtests(
@@ -1463,9 +1460,6 @@ NUM_SIZE0_TENSORS = 1000
 class TestMultiTensorApply(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @unittest.skipIf(
-        torch.accelerator.current_accelerator() is None, "no accelerator available"
-    )
     def test_multi_tensor_apply_size0_tensors_cuda(self, device):
         size0_tensors = [
             torch.empty(0, device=device) for _ in range(NUM_SIZE0_TENSORS)
