@@ -21,28 +21,8 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_addmm_activation_native.h>
-#include <ATen/ops/_efficientzerotensor.h>
 #include <ATen/ops/_scaled_grouped_mm_v2_native.h>
 #include <ATen/ops/_scaled_mm_native.h>
-#include <ATen/ops/_unsafe_view_native.h>
-#include <ATen/ops/abs.h>
-#include <ATen/ops/addmm_native.h>
-#include <ATen/ops/addmv_native.h>
-#include <ATen/ops/baddbmm_native.h>
-#include <ATen/ops/bmm_native.h>
-#include <ATen/ops/copy_native.h>
-#include <ATen/ops/dot_native.h>
-#include <ATen/ops/empty.h>
-#include <ATen/ops/empty_strided.h>
-#include <ATen/ops/gelu.h>
-#include <ATen/ops/max.h>
-#include <ATen/ops/mm_native.h>
-#include <ATen/ops/mul.h>
-#include <ATen/ops/ones.h>
-#include <ATen/ops/relu.h>
-#include <ATen/ops/scalar_tensor_native.h>
-#include <ATen/ops/vdot_native.h>
 #endif
 
 using at::blas::ScalingType;
@@ -54,7 +34,7 @@ using scaled_blas::ScaledGemmImplementation;
 
 namespace at::native {
 
-namespace xpu {
+namespace {
 
 void _check_scales_fp8_rowwise(
     const Tensor& mat,
@@ -232,7 +212,7 @@ void check_swizzle(ArrayType& swizzle_enums) {
   }
 }
 
-} // namespace xpu
+} // namespace
 
 Tensor _scaled_grouped_mm_xpu(
     const Tensor& mat_a,
@@ -419,8 +399,8 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_xpu_v2_out)
   auto swizzle_b_enum = convert_int_to_enum<SwizzleType>(swizzle_b);
 
   // swizze checks
-  xpu::check_swizzle(swizzle_a_enum);
-  xpu::check_swizzle(swizzle_b_enum);
+  check_swizzle(swizzle_a_enum);
+  check_swizzle(swizzle_b_enum);
 
   // at this point we can start working out what we want to be doing
   // Try to do as few steps as possible.
@@ -446,35 +426,21 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_xpu_v2_out)
     case ScaledGemmImplementation::ROWWISE_ROWWISE: {
       const int scale_multiplier =
           (mat_a.dim() == 2 && mat_b.dim() == 2) ? offs->size(0) : 1;
-      xpu::_check_scales_fp8_rowwise(
+      _check_scales_fp8_rowwise(
           mat_a, scale_a[0], 0 /* dim */, 0 /* arg_idx */, scale_multiplier);
-      xpu::_check_scales_fp8_rowwise(
+      _check_scales_fp8_rowwise(
           mat_b, scale_b[0], 1 /* dim */, 1 /* arg_idx */, scale_multiplier);
       break;
     }
-    case ScaledGemmImplementation::MXFP8_MXFP8: {
-      // scale shape checks
-      xpu::_check_scales_blocked(
-          mat_a, scale_a[0], 0 /* dim */, 0 /* arg_idx */);
-      xpu::_check_scales_blocked(
-          mat_b, scale_b[0], 1 /* dim */, 1 /* arg_idx */);
-      break;
-    }
-    case ScaledGemmImplementation::MXFP4_MXFP4: {
-      // scale shape checks
-      xpu::_check_scales_blocked(
-          mat_a, scale_a[0], 0 /* dim */, 0 /* arg_idx */);
-      xpu::_check_scales_blocked(
-          mat_b, scale_b[0], 1 /* dim */, 1 /* arg_idx */);
-      break;
-    }
+    case ScaledGemmImplementation::MXFP8_MXFP8:
+    case ScaledGemmImplementation::MXFP4_MXFP4:
     case ScaledGemmImplementation::NVFP4_NVFP4: {
       // scale shape checks
-      xpu::_check_scales_blocked(
-          mat_a, scale_a[0], 0 /* dim */, 0 /* arg_idx */);
-      xpu::_check_scales_blocked(
-          mat_b, scale_b[0], 1 /* dim */, 1 /* arg_idx */);
-      alpha = scale_a[1].mul(scale_b[1]);
+      _check_scales_blocked(mat_a, scale_a[0], 0 /* dim */, 0 /* arg_idx */);
+      _check_scales_blocked(mat_b, scale_b[0], 1 /* dim */, 1 /* arg_idx */);
+      if (gemm_impl == ScaledGemmImplementation::NVFP4_NVFP4) {
+        alpha = scale_a[1].mul(scale_b[1]);
+      }
       break;
     }
     default:
@@ -502,15 +468,12 @@ Tensor _grouped_mm_xpu(
     const std::optional<at::Tensor>& bias,
     std::optional<c10::ScalarType> out_dtype) {
   _grouped_mm_validate_inputs(mat_a, mat_b, offs, bias, out_dtype);
-  const bool a_b_and_out_are_same_type =
-      mat_a.dtype() == mat_b.dtype() && out_dtype.has_value()
-      ? (mat_a.dtype() == out_dtype.value())
-      : true;
+  const bool a_b_and_out_are_same_type = (mat_a.dtype() == mat_b.dtype()) &&
+      (!out_dtype.has_value() || mat_a.dtype() == *out_dtype);
 
   const bool a_is_2d = mat_a.dim() == 2;
   const bool b_is_2d = mat_b.dim() == 2;
-  const bool supported_cases =
-      ((a_is_2d && !b_is_2d) || (a_is_2d && b_is_2d)) && !bias.has_value();
+  const bool supported_cases = (a_is_2d && !b_is_2d) && !bias.has_value();
 
   bool use_fast_path = a_b_and_out_are_same_type && supported_cases;
   const auto out_dtype_ =
