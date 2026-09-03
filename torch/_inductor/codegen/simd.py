@@ -2220,6 +2220,32 @@ class _GroupedReductionOpsHandler(WrapperHandler):  # type: ignore[type-arg]
         self._layout = layout
         self._family = family
         self._load_transform = load_transform
+        self._reduced = False
+
+    @contextlib.contextmanager
+    def _reduced_domain(self, expr: sympy.Expr) -> Iterator[sympy.Expr]:
+        # Before the local reduction this body is still parent-full, so its
+        # indices are already correct. Everything after it lives in the reduced
+        # domain and must be expressed over the reduced-output symbols.
+        if not self._reduced:
+            yield expr
+            return
+        with self._family.ensure_active(self._kernel):
+            yield self._family.remap_index(expr)
+
+    def index_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> CSEVariable:
+        with self._reduced_domain(expr) as remapped:
+            return self._inner.index_expr(remapped, dtype)
+
+    def value_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> CSEVariable:
+        with self._reduced_domain(expr) as remapped:
+            return self._inner.value_expr(remapped, dtype)
+
+    def check_bounds(
+        self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+    ) -> None:
+        with self._reduced_domain(expr) as remapped:
+            self._inner.check_bounds(remapped, size, lower, upper)
 
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:
         value = self._inner.load(name, index)
@@ -2245,6 +2271,7 @@ class _GroupedReductionOpsHandler(WrapperHandler):  # type: ignore[type-arg]
         self._family.ensure_headers(k)
         reshaped = k.emit_reshape(value, self._layout.reshape_shape, src_dtype)
         k.num_reduction += 1
+        self._reduced = True
         return k.emit_reduce(
             reshaped,
             reduction_type,
@@ -3673,7 +3700,10 @@ class SIMDScheduling(BaseScheduling):
                 grouped_reduction_body.var_ranges[v]
                 for v in grouped_reduction_body.iter_vars
             ],
-            group_reduction_vars.iter_remapped,
+            [
+                reduced_output_family.remap_index(value)
+                for value in group_reduction_vars.iter_remapped
+            ],
         )
         parent_full_load_transform = _ParentFullLoadTransform(kernel, layout)
         for sn in grouped_schedule:

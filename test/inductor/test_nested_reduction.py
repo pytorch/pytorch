@@ -428,6 +428,23 @@ class _NestedReductionBase:
         self.check_numeric(f, (x,))
         self.check_fusion()
 
+    @parametrize("masked_dim", [0, 1])
+    def test_block_amax_epilogue_index_mask(self, masked_dim):
+        # The epilogue reads its own iteration index, which lives in the
+        # reduced domain rather than the parent reduction's.
+        B, D, G = 256, 4096, 32
+
+        def f(x):
+            block_amax = _rmsnorm(x).reshape(B, D // G, G).abs().amax(dim=-1)
+            size = block_amax.shape[masked_dim]
+            iota = torch.arange(size, device=x.device)
+            keep = (iota < size - 7).unsqueeze(1 - masked_dim)
+            return torch.where(keep, block_amax, torch.zeros_like(block_amax))
+
+        x = torch.randn(B, D, device=GPU_TYPE)
+        self.check_nested_matches_unnested(f, (x,))
+        self.check_fusion()
+
     @parametrize("reduce_fn", ["sum", "amin"])
     def test_layernorm_block_reduce(self, reduce_fn):
         self._norm_block_reduce(_layernorm, reduce_fn, 64, 4096, 16)
