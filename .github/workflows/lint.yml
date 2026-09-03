@@ -236,6 +236,7 @@ jobs:
         PYTHONPATH=$(pwd) pytest tools/stats
         PYTHONPATH=$(pwd) pytest tools/test -o "python_files=test*.py"
         PYTHONPATH=$(pwd) pytest .github/scripts -o "python_files=test*.py"
+        PYTHONPATH=$(pwd)/scripts/auto_pr_triage python -m unittest discover -s scripts/auto_pr_triage -p 'test_*.py' -b
 
   test_collect_env:
     if: ${{ github.repository == 'pytorch/pytorch' }}
