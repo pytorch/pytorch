@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 
 import torch
 from torch import _prims, Tensor
-from torch.nn import functional as F
 from torch._utils import _get_device_index
 
 
@@ -17,35 +16,6 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
-
-
-def _blackwell_decompose_k_partial_impl(
-    a: Tensor,
-    b: Tensor,
-    k_split: int,
-    config_index: int,
-) -> Tensor:
-    """Reference for the internal aligned decompose-K partial operation."""
-    configs = (
-        (128, 128, False),
-        (128, 64, True),
-        (128, 64, True),
-    )
-    block_m, block_k, two_ctas = configs[config_index]
-    m, k = a.shape
-    n = b.shape[1]
-    m_tiles = (m + block_m - 1) // block_m
-    if two_ctas:
-        m_tiles = (m_tiles + 1) // 2 * 2
-    m_pad = m_tiles * block_m
-    k_part = ((k + k_split - 1) // k_split + block_k - 1) // block_k * block_k
-    partials = []
-    for split in range(k_split):
-        start = split * k_part
-        end = min(start + k_part, k)
-        partial = torch.mm(a[:, start:end], b[start:end], out_dtype=torch.float32)
-        partials.append(F.pad(partial, (0, 0, 0, m_pad - m)))
-    return torch.stack(partials).view(k_split * m_pad, n)
 
 
 def make_prim(
@@ -126,13 +96,6 @@ randint = make_prim(
     "inductor_randint(SymInt low, SymInt high, SymInt[] size, Tensor seed) -> Tensor",
     lambda low, high, size, seed: torch.randint(low, high, size, device=seed.device),
     doc="torch.randint() using backend-specific RNG that can be fused",
-)
-
-# Internal plan component for the Blackwell aligned decompose-K prototype.
-# Its lowering is a dedicated TMA template over the original rank-2 operands.
-blackwell_decompose_k_partial = make_prim(
-    "blackwell_decompose_k_partial(Tensor a, Tensor b, int k_split, int config_index) -> Tensor",
-    _blackwell_decompose_k_partial_impl,
 )
 
 
