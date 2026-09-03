@@ -439,6 +439,13 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     ):
         if use_decompose_k_choice(m, n, k):
             templates_to_use.append(decompose_k_subgraph_template)
+            if (
+                inductor_config.triton.enable_blackwell_decompose_k_partial
+                and use_triton_blackwell_tma_template(
+                    mat1, mat2, output_layout=layout, add_guards=True
+                )
+            ):
+                templates_to_use.append(blackwell_decompose_k_subgraph_template)
         # Triton Templates typically perform very poorly for large K.
         # Its highly unlikely that if we want to use decompose_k, then
         # Triton will ever win.
