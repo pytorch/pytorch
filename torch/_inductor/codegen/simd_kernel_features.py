@@ -186,7 +186,7 @@ class SIMDKernelFeatures:
     def buf_accesses(self) -> dict[str, list[Dep]]:
         """only needed for config.benchmark_kernel"""
         buf_accesses = collections.defaultdict(list)
-        for node in self.scheduler_nodes():
+        for node in self.indexing_scheduler_nodes():
             for access in node.read_writes.reads | node.read_writes.writes:
                 buf_accesses[access.name].append(access)
         return buf_accesses
@@ -418,7 +418,7 @@ class MemoryEstimator:
         self.groups = groups
         self.symbols = [make_symbol(SymT.INDEX, i) for i in range(len(groups))]
         # We are doing two estimates simultaneously:
-        # 1) the first is a for a non-persistent (aka looped) reduction, using self.outside_loop/self.loops
+        # 1) the first is for a non-persistent (aka looped) reduction, using self.outside_loop/self.loops
         # we add an item to loops each corresponding to each reduction loop in the kernel
         # outside_loop is only used for broadcasting or point-wise ops that don't use the reduction dimension
         # 2) the second is for a persistent kernel, using self.persistent

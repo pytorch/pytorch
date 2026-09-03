@@ -7,14 +7,6 @@
     "class MMRankingH100": 305,
     "def MMRankingH100.fill_choices()": 203
   },
-  "torch/_inductor/autoheuristic/artifacts/_MixedMMA100.py": {
-    "class MixedMMA100": 134,
-    "def MixedMMA100.get_best_choices()": 86
-  },
-  "torch/_inductor/autoheuristic/artifacts/_MixedMMH100.py": {
-    "class MixedMMH100": 133,
-    "def MixedMMH100.get_best_choices()": 86
-  },
   "torch/_inductor/autoheuristic/artifacts/_PadMMA100.py": {
     "class PadMMA100": 249,
     "def PadMMA100.get_best_choices()": 221

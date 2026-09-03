@@ -653,8 +653,16 @@ struct ReduceJitOp {
     bool is_last_block_done = mark_block_finished();
 
     if (is_last_block_done) {
-  #ifndef USE_ROCM // skip fence if store are committed [CMTSTRS]
-      __threadfence(); //complete acquire pattern
+  #ifndef USE_ROCM
+      __threadfence(); // complete the acquire pattern after atomic
+  #else
+      // complete the acquire pattern after atomic
+      // On ROCm, committed stores [CMTSTRS] ensure the producer block's writes are visible to global memory.
+      // But the last block (consumer) still needs an acquire fence to invalidate its (non-coherent) L1,
+      // before reading the staging buffer. An acquire-only fence at agent scope is sufficient
+      // (and cheaper than a full seq_cst __threadfence()) since it pairs with the agent-scope
+      // committed stores above.
+      __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
   #endif
       value = ident;
       if (config.should_block_x_reduce()) {

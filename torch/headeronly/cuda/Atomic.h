@@ -243,7 +243,7 @@ inline __device__ at::BFloat16 gpuAtomicAdd(
 }
 
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 600)
-// from CUDA C Programmic Guide
+// from CUDA C Programming Guide
 inline __device__ double atomicAdd(double* address, double val)
 #if defined(__clang__) && defined(__CUDA__)
 #pragma GCC diagnostic push
