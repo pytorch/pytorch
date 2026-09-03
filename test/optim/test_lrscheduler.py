@@ -121,6 +121,23 @@ class TestLRScheduler(TestCase):
             self.update_kwargs.append(kwargs)
             super()._update_lr(epoch)
 
+    class LegacyGetLRScheduler(LRScheduler):
+        """A third-party scheduler using the previous ``get_lr`` API."""
+
+        def get_lr(self):
+            return [group["lr"] for group in self.optimizer.param_groups]
+
+    class KwargsGetLRScheduler(LRScheduler):
+        """A third-party scheduler consuming kwargs in ``get_lr``."""
+
+        def __init__(self, optimizer):
+            self.get_lr_kwargs = []
+            super().__init__(optimizer)
+
+        def get_lr(self, **kwargs):
+            self.get_lr_kwargs.append(kwargs)
+            return [group["lr"] for group in self.optimizer.param_groups]
+
     exact_dtype = True
 
     def setUp(self):
@@ -812,6 +829,20 @@ class TestLRScheduler(TestCase):
         scheduler.step(metrics=2.0)
         self.assertEqual(handoff.update_kwargs[-1], {"metrics": 2.0})
 
+    def test_lrscheduler_kwargs_support_legacy_get_lr(self):
+        scheduler = self.LegacyGetLRScheduler(self.opt)
+        self.opt.step()
+        scheduler.step(metrics=1.0)
+
+        self.assertEqual(scheduler.last_epoch, 1)
+
+    def test_kwargs_reach_get_lr(self):
+        scheduler = self.KwargsGetLRScheduler(self.opt)
+        self.opt.step()
+        scheduler.step(metrics=1.0)
+
+        self.assertEqual(scheduler.get_lr_kwargs[-1], {"metrics": 1.0})
+
     # PlateauLR is ReduceLROnPlateau's composable replacement (properly
     # implements get_lr(), so it can be used inside SequentialLR/
     # ChainedScheduler). Its get_lr()-driven logic is meant to be numerically
@@ -984,6 +1015,7 @@ class TestLRScheduler(TestCase):
         for key in scheduler.__dict__:
             if key != "optimizer":
                 self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
+        self.assertNotIn("_metrics", scheduler.state_dict())
 
     def test_sequentiallr1(self):
         epochs = 19
@@ -1282,7 +1314,7 @@ class TestLRScheduler(TestCase):
         scheduler.step(some_future_input=1.0)
 
     def test_plateau_lr_rejects_misspelled_metrics(self):
-        """`metrics` is named explicitly, so a typo is not silently ignored."""
+        """A misspelled `metrics` argument is not silently ignored."""
         scheduler = PlateauLR(self.opt)
         self.opt.step()
         with self.assertRaisesRegex(ValueError, "requires the metric it monitors"):

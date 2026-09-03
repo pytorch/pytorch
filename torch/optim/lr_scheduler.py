@@ -226,9 +226,13 @@ class LRScheduler:
         # corrupt their learning rates by modifying the outputs in place.
         return self._last_lr
 
-    def get_lr(self) -> list[float | Tensor]:
+    def get_lr(self, **kwargs: Any) -> list[float | Tensor]:
         r"""Compute the next learning rate for each of the optimizer's
         :attr:`~torch.optim.Optimizer.param_groups`.
+
+        Args:
+            **kwargs: Extra inputs used to compute the learning rate. It's up
+                to each scheduler how to use them.
 
         Returns:
             list[float | Tensor]: A :class:`list` of learning rates for each of
@@ -300,13 +304,19 @@ class LRScheduler:
         with _enable_get_lr_call(self):
             if epoch is None:
                 self.last_epoch += 1
-                values = self.get_lr()
+                if kwargs and _accepts_kwargs(self.get_lr):
+                    values = self.get_lr(**kwargs)
+                else:
+                    values = self.get_lr()
             else:
                 self.last_epoch = epoch
                 if hasattr(self, "_get_closed_form_lr"):
                     values = cast(list[float | Tensor], self._get_closed_form_lr())
                 else:
-                    values = self.get_lr()
+                    if kwargs and _accepts_kwargs(self.get_lr):
+                        values = self.get_lr(**kwargs)
+                    else:
+                        values = self.get_lr()
 
         for param_group, lr in zip(self.optimizer.param_groups, values, strict=True):
             _update_param_group_val(param_group, "lr", lr)
@@ -453,7 +463,7 @@ class LambdaLR(LRScheduler):
                 self.lr_lambdas[idx].__dict__.update(fn)
 
     @override
-    def get_lr(self) -> list[float | Tensor]:
+    def get_lr(self, **kwargs: Any) -> list[float | Tensor]:
         r"""Compute the next learning rate for each of the optimizer's
         :attr:`~torch.optim.Optimizer.param_groups`.
 
@@ -570,7 +580,7 @@ class MultiplicativeLR(LRScheduler):
                 self.lr_lambdas[idx].__dict__.update(fn)
 
     @override
-    def get_lr(self) -> list[float | Tensor]:
+    def get_lr(self, **kwargs: Any) -> list[float | Tensor]:
         r"""Compute the next learning rate for each of the optimizer's
         :attr:`~torch.optim.Optimizer.param_groups`.
 
@@ -645,7 +655,7 @@ class StepLR(LRScheduler):
         super().__init__(optimizer, last_epoch)
 
     @override
-    def get_lr(self) -> list[float | Tensor]:
+    def get_lr(self, **kwargs: Any) -> list[float | Tensor]:
         r"""Compute the next learning rate for each of the optimizer's
         :attr:`~torch.optim.Optimizer.param_groups`.
 
@@ -731,7 +741,7 @@ class MultiStepLR(LRScheduler):
         super().__init__(optimizer, last_epoch)
 
     @override
-    def get_lr(self) -> list[float | Tensor]:
+    def get_lr(self, **kwargs: Any) -> list[float | Tensor]:
         r"""Compute the next learning rate for each of the optimizer's
         :attr:`~torch.optim.Optimizer.param_groups`.
 
@@ -835,7 +845,7 @@ class ConstantLR(LRScheduler):
         super().__init__(optimizer, last_epoch)
 
     @override
-    def get_lr(self) -> list[float | Tensor]:
+    def get_lr(self, **kwargs: Any) -> list[float | Tensor]:
         r"""Compute the next learning rate for each of the optimizer's
         :attr:`~torch.optim.Optimizer.param_groups`.
 
@@ -949,7 +959,7 @@ class LinearLR(LRScheduler):
         super().__init__(optimizer, last_epoch)
 
     @override
-    def get_lr(self) -> list[float | Tensor]:
+    def get_lr(self, **kwargs: Any) -> list[float | Tensor]:
         r"""Compute the next learning rate for each of the optimizer's
         :attr:`~torch.optim.Optimizer.param_groups`.
 
@@ -1050,7 +1060,7 @@ class ExponentialLR(LRScheduler):
         super().__init__(optimizer, last_epoch)
 
     @override
-    def get_lr(self) -> list[float | Tensor]:
+    def get_lr(self, **kwargs: Any) -> list[float | Tensor]:
         r"""Compute the next learning rate for each of the optimizer's
         :attr:`~torch.optim.Optimizer.param_groups`.
 
@@ -1317,7 +1327,7 @@ class PolynomialLR(LRScheduler):
         super().__init__(optimizer, last_epoch)
 
     @override
-    def get_lr(self) -> list[float | Tensor]:
+    def get_lr(self, **kwargs: Any) -> list[float | Tensor]:
         r"""Compute the next learning rate for each of the optimizer's
         :attr:`~torch.optim.Optimizer.param_groups`.
 
@@ -1441,7 +1451,7 @@ class CosineAnnealingLR(LRScheduler):
         super().__init__(optimizer, last_epoch)
 
     @override
-    def get_lr(self) -> list[float | Tensor]:
+    def get_lr(self, **kwargs: Any) -> list[float | Tensor]:
         r"""Compute the next learning rate for each of the optimizer's
         :attr:`~torch.optim.Optimizer.param_groups`.
 
@@ -1776,13 +1786,6 @@ class PlateauLR(LRScheduler):
         self.patience = patience
         self.cooldown = cooldown
         self.eps = eps
-        # Set by `step`, consumed and cleared by `get_lr`. `None` means "no
-        # metric available for this update" -- true during the implicit
-        # initial step performed by the base class's constructor, or when a
-        # `SequentialLR` milestone handoff receives no metric -- and `get_lr`
-        # then simply carries the current lr forward instead of attempting a
-        # reduction.
-        self._metrics: SupportsFloat | None = None
         self._init_is_better(
             mode=mode, threshold=threshold, threshold_mode=threshold_mode
         )
@@ -1805,8 +1808,6 @@ class PlateauLR(LRScheduler):
     def step(
         self,
         epoch: int | None = None,
-        *,
-        metrics: SupportsFloat | None = None,
         **kwargs: Any,
     ) -> None:
         r"""Perform a step.
@@ -1815,14 +1816,12 @@ class PlateauLR(LRScheduler):
             epoch (int, optional):
                 .. deprecated:: 1.4
                     Use :meth:`step` without this argument instead.
-            metrics (SupportsFloat): The current value of the quantity being
-                monitored, such as a validation loss. Required on every call
-                except the implicit one performed at construction. Named
-                explicitly, rather than read out of ``**kwargs``, so that
-                omitting it -- including by misspelling it -- raises below
-                instead of passing unnoticed.
-            **kwargs: Other scheduling inputs, unused here.
+            **kwargs: Scheduling inputs. The ``metrics`` entry is the current
+                value of the quantity being monitored, such as a validation
+                loss, and is required on every call except the implicit one
+                performed at construction.
         """
+        metrics = kwargs.get("metrics")
         if epoch is not None and metrics is None:
             raise ValueError(
                 "`PlateauLR.step` received an `epoch` argument but no "
@@ -1837,22 +1836,15 @@ class PlateauLR(LRScheduler):
                 "`ChainedScheduler`, pass the metric to that scheduler's "
                 "`step` instead and it reaches this one from there."
             )
-        super().step(epoch, metrics=metrics, **kwargs)
+        super().step(epoch, **kwargs)
 
     @override
-    def _update_lr(
-        self,
-        epoch: int | None = None,
-        *,
-        metrics: SupportsFloat | None = None,
-        **kwargs: Any,
-    ) -> None:
-        self._metrics = metrics
-        super()._update_lr(epoch, metrics=metrics, **kwargs)
-
-    @override
-    def get_lr(self) -> list[float | Tensor]:
+    def get_lr(self, **kwargs: Any) -> list[float | Tensor]:
         r"""Compute the next learning rate for each optimizer parameter group.
+
+        Args:
+            **kwargs: Scheduling inputs. The ``metrics`` entry is the current
+                value of the quantity being monitored.
 
         Without a metric for this update, the current learning rate is
         returned unchanged; no reduction is attempted.
@@ -1865,11 +1857,11 @@ class PlateauLR(LRScheduler):
         _warn_get_lr_called_within_step(self)
 
         current_lrs = _param_groups_val_list(self.optimizer, "lr")
-        if self._metrics is None:
+        metrics = kwargs.get("metrics")
+        if metrics is None:
             return current_lrs
 
-        current = float(self._metrics)
-        self._metrics = None
+        current = float(metrics)
 
         if self._is_better(current, self.best):
             self.best = current
@@ -2365,7 +2357,7 @@ class CyclicLR(LRScheduler):
         return gamma**x
 
     @override
-    def get_lr(self) -> list[float | Tensor]:
+    def get_lr(self, **kwargs: Any) -> list[float | Tensor]:
         r"""Compute the next learning rate for each of the optimizer's
         :attr:`~torch.optim.Optimizer.param_groups`.
 
@@ -2534,7 +2526,7 @@ class CosineAnnealingWarmRestarts(LRScheduler):
         super().__init__(optimizer, last_epoch)
 
     @override
-    def get_lr(self) -> list[float | Tensor]:
+    def get_lr(self, **kwargs: Any) -> list[float | Tensor]:
         r"""Compute the next learning rate for each of the optimizer's
         :attr:`~torch.optim.Optimizer.param_groups`.
 
@@ -2916,7 +2908,7 @@ class OneCycleLR(LRScheduler):
         return (end - start) * pct + start
 
     @override
-    def get_lr(self) -> list[float | Tensor]:
+    def get_lr(self, **kwargs: Any) -> list[float | Tensor]:
         r"""Compute the next learning rate for each of the optimizer's
         :attr:`~torch.optim.Optimizer.param_groups`.
 
