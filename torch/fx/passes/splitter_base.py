@@ -1014,7 +1014,7 @@ class _SplitterBase:
         while parent_nodes:
             node = None
 
-            # Find an acc node that depends on visited nodes only
+            # Find a acc node that depends on visited nodes only
             for n in parent_nodes:
                 if deps[n] <= visited_nodes and n in self.acc_nodes:
                     node = n

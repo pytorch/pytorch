@@ -1106,11 +1106,9 @@ class NativeFunction:
                 )
 
         # NB: if your function accidentally has rand/dropout/... in its name
-        # but is not actually random, feel free to amend this to special case.
-        # The stateless _philox_* ops are fully determined by their key input
-        # (e.g. _philox_randint_), so they are intentionally not tagged.
+        # but is not actually random, feel free to amend this to special case
         if (
-            ("rand" in str(self.func.name) and "_philox_" not in str(self.func.name))
+            "rand" in str(self.func.name)
             or (
                 (
                     "dropout" in str(self.func.name)

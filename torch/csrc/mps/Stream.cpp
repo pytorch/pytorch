@@ -117,11 +117,16 @@ void THPMPSStream_init(PyObject* module) {
   Py_INCREF(THPStreamClass);
   THPMPSStreamType.tp_base = THPStreamClass;
   THPMPSStreamClass = (PyObject*)&THPMPSStreamType;
-  TORCH_CHECK_PYTHON(PyType_Ready(&THPMPSStreamType) >= 0);
+  if (PyType_Ready(&THPMPSStreamType) < 0) {
+    // @allow-raw-throw: rethrows the error PyType_Ready has already set
+    throw python_error();
+  }
   Py_INCREF(&THPMPSStreamType);
-  TORCH_CHECK_PYTHON(
-      PyModule_AddObject(
-          module, "_MPSStreamBase", (PyObject*)&THPMPSStreamType) >= 0);
+  if (PyModule_AddObject(
+          module, "_MPSStreamBase", (PyObject*)&THPMPSStreamType) < 0) {
+    // @allow-raw-throw: rethrows the error PyModule_AddObject has already set
+    throw python_error();
+  }
 }
 
 #endif // USE_MPS

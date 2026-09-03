@@ -7,6 +7,7 @@
 
 #include <ATen/ATen.h>
 
+#include <memory>
 #include <utility>
 
 namespace torch::autograd {

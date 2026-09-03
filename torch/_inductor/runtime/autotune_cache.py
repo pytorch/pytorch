@@ -67,8 +67,7 @@ def inductor_meta_from_config() -> _InductorMetaTy:
     from torch._inductor import config
 
     backend_hash = None
-    # CPU Triton artifacts also need a backend-specific cache key.
-    if has_triton(include_cpu=True):
+    if has_triton():
         try:
             backend_hash = torch.utils._triton.triton_hash_with_backend()
         except RuntimeError:
@@ -127,7 +126,7 @@ class AutotuneCache:
     remote_cache: tuple[RemoteCache[JsonDataTy], str] | None = None
     artifact_recorder: CacheArtifactRecorder | None = None
 
-    # Create an AutotuneCache. Returns None if none of the caches can be used.
+    # Create a AutotuneCache. Returns None if none of the caches can be used.
     @staticmethod
     def create(
         inductor_meta: _InductorMetaTy, filename: str, configs_hash: str

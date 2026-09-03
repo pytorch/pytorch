@@ -5,6 +5,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
 
+#include <sstream>
 #include <utility>
 
 namespace torch::autograd {

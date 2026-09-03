@@ -44,22 +44,6 @@ def has_triton_package() -> bool:
 
 
 @functools.cache
-def has_triton_block_ptr() -> bool:
-    """Whether the installed Triton still provides the block-pointer frontend API.
-
-    triton-lang/triton#10833 removed block pointers but kept ``tl.make_block_ptr``
-    as a raising stub while dropping ``tl.advance``, so ``advance`` is the
-    load-bearing check -- probing ``make_block_ptr`` alone would be fooled by the
-    stub. Inductor's codegen emits both builtins, so require both.
-    """
-    if not has_triton_package():
-        return False
-    import triton.language as tl
-
-    return hasattr(tl, "make_block_ptr") and hasattr(tl, "advance")
-
-
-@functools.cache
 def get_triton_version(fallback: tuple[int, int] = (0, 0)) -> tuple[int, int]:
     try:
         import triton
@@ -222,12 +206,7 @@ def has_triton_reduction_ordering() -> bool:
 
 
 @functools.cache
-def has_triton(*, include_cpu: bool = False) -> bool:
-    """Return whether a usable Triton backend is available.
-
-    By default, this helper only considers accelerator devices; callers must
-    explicitly include CPU.
-    """
+def has_triton() -> bool:
     if not has_triton_package():
         return False
 
@@ -246,7 +225,7 @@ def has_triton(*, include_cpu: bool = False) -> bool:
     # specific TritonUnavailableError rather than RuntimeError so unexpected
     # errors are not silently swallowed.
     for name, device_interface in get_registered_device_interfaces():
-        if ":" in name or (name == "cpu" and not include_cpu):
+        if ":" in name:
             continue
         if not (
             device_interface.is_available() and device_interface.is_triton_capable()

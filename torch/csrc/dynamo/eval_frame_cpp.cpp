@@ -9,6 +9,7 @@
 #include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 #include <torch/csrc/dynamo/stackref_bridge.h>
+#include <torch/csrc/utils/python_compat.h>
 
 #include <algorithm>
 #include <optional>
@@ -382,7 +383,7 @@ PyObject* dynamo__custom_eval_frame(
     // immediately skip the frame, and (2) even if it did, this would only
     // be profitable if there was tensor code in the unwinding code.  Seems
     // unlikely.
-    DEBUG_TRACE("throw %s", get_frame_name(frame));
+    DEBUG_TRACE("throw %s", get_frame_name(frame)); // @allow-raw-throw
     return dynamo_eval_frame_default(tstate, frame, throw_flag);
   }
 

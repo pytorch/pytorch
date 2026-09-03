@@ -884,9 +884,8 @@ void initJITBindings(PyObject* module) {
               }
             }
             auto old_strategy = getFusionStrategy();
-            auto strat = fmap(
-                std::move(old_strategy),
-                [](std::pair<FusionBehavior, size_t> behav) {
+            auto strat =
+                fmap(old_strategy, [](std::pair<FusionBehavior, size_t> behav) {
                   return std::pair<std::string, size_t>(
                       behav.first == FusionBehavior::STATIC ? "STATIC"
                                                             : "DYNAMIC",
@@ -1549,7 +1548,9 @@ void initJITBindings(PyObject* module) {
     THPObjectPtr getMemview(void* buf, size_t n) const {
       THPObjectPtr memview(PyMemoryView_FromMemory(
           reinterpret_cast<char*>(buf), n, PyBUF_WRITE));
-      TORCH_CHECK_PYTHON(memview);
+      if (!memview) {
+        throw python_error();
+      }
       return memview;
     }
 

@@ -1,6 +1,7 @@
 #include <torch/csrc/tensor/python_tensor.h>
 
 #include <pybind11/pybind11.h>
+#include <structmember.h>
 #include <torch/csrc/utils/pybind.h>
 
 #include <torch/csrc/Dtype.h>
@@ -10,7 +11,10 @@
 #include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
+#include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/cuda_enabled.h>
+#include <torch/csrc/utils/device_lazy_init.h>
+#include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/utils/tensor_types.h>
 
@@ -179,7 +183,9 @@ static void py_initialize_metaclass(PyTypeObject& metaclass) {
   metaclass.tp_methods = metaclass_methods;
   metaclass.tp_getset = metaclass_properties;
   metaclass.tp_base = &PyType_Type;
-  TORCH_CHECK_PYTHON(PyType_Ready(&metaclass) >= 0);
+  if (PyType_Ready(&metaclass) < 0) {
+    throw python_error();
+  }
 }
 
 static PyTypeObject tensor_type_prototype = {
@@ -196,14 +202,18 @@ static void py_initialize_tensor_type(
   // we need to initialize as many types as there are VariableType instances.
   // We copy the basic object fields from a prototype definition and initialize
   // the remaining fields below.
-  type = tensor_type_prototype;
+  memcpy(&type, &tensor_type_prototype, sizeof(PyTypeObject));
   // Subclassing from torch.<ScalarType>Tensor isn't supported.
   // (Py_TPFLAGS_BASETYPE omitted). Subclassing torch.Tensor still allowed.
   type.tp_flags = Py_TPFLAGS_DEFAULT;
   type.tp_name = name;
   type.tp_new = Tensor_new;
-  TORCH_CHECK_PYTHON(PyType_Ready(&type) >= 0);
-  TORCH_CHECK_PYTHON(PyDict_Merge(type.tp_dict, tp_dict, 0) >= 0);
+  if (PyType_Ready(&type) < 0) {
+    throw python_error();
+  }
+  if (PyDict_Merge(type.tp_dict, tp_dict, 0) < 0) {
+    throw python_error();
+  }
 }
 
 static std::string get_name(Backend backend, ScalarType scalarType) {
@@ -216,7 +226,8 @@ static std::string get_name(Backend backend, ScalarType scalarType) {
 static THPObjectPtr get_storage_obj(Backend backend, ScalarType dtype) {
   auto module_name = torch::utils::backend_to_string(backend);
   auto module_obj = THPObjectPtr(PyImport_ImportModule(module_name));
-  TORCH_CHECK_PYTHON(module_obj);
+  if (!module_obj)
+    throw python_error();
 
   auto storage_name = std::string(toString(dtype)) + "Storage";
   THPObjectPtr storage(
@@ -250,20 +261,26 @@ static void set_name(PyTensorType& type_obj, const std::string& name) {
 
 static THPObjectPtr get_tensor_dict() {
   auto torch = THPObjectPtr(PyImport_ImportModule("torch"));
-  TORCH_CHECK_PYTHON(torch);
+  if (!torch)
+    throw python_error();
 
   auto tensor_class = THPObjectPtr(PyObject_GetAttrString(torch, "Tensor"));
-  TORCH_CHECK_PYTHON(tensor_class);
+  if (!tensor_class)
+    throw python_error();
 
   auto tensor_type = (PyTypeObject*)tensor_class.get();
   TORCH_CHECK(tensor_type->tp_base, "missing base type for Tensor");
 
   auto res = THPObjectPtr(PyDict_New());
-  TORCH_CHECK_PYTHON(res);
+  if (!res)
+    throw python_error();
 
-  TORCH_CHECK_PYTHON(PyDict_Merge(res.get(), tensor_type->tp_dict, 0) >= 0);
-  TORCH_CHECK_PYTHON(
-      PyDict_Merge(res.get(), tensor_type->tp_base->tp_dict, 0) >= 0);
+  if (PyDict_Merge(res.get(), tensor_type->tp_dict, 0) < 0) {
+    throw python_error();
+  }
+  if (PyDict_Merge(res.get(), tensor_type->tp_base->tp_dict, 0) < 0) {
+    throw python_error();
+  }
 
   return res;
 }
@@ -290,10 +307,12 @@ static void set_default_storage_type(Backend backend, ScalarType dtype) {
   THPObjectPtr storage = get_storage_obj(backend, dtype);
 
   auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
-  TORCH_CHECK_PYTHON(torch_module);
+  if (!torch_module)
+    throw python_error();
 
-  TORCH_CHECK_PYTHON(
-      PyObject_SetAttrString(torch_module.get(), "Storage", storage) == 0);
+  if (PyObject_SetAttrString(torch_module.get(), "Storage", storage) != 0) {
+    throw python_error();
+  }
 }
 
 static void set_default_tensor_type(
@@ -374,11 +393,13 @@ void initialize_python_bindings() {
 static void py_bind_tensor_types(
     const std::vector<PyTensorType*>& tensor_types) {
   auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
-  TORCH_CHECK_PYTHON(torch_module);
+  if (!torch_module)
+    throw python_error();
 
   auto tensor_classes = THPObjectPtr(
       PyObject_GetAttrString(torch_module.get(), "_tensor_classes"));
-  TORCH_CHECK_PYTHON(tensor_classes);
+  if (!tensor_classes)
+    throw python_error();
 
   for (auto& tensor_type : tensor_types) {
     auto name = std::string(tensor_type->name);
@@ -387,13 +408,17 @@ static void py_bind_tensor_types(
     auto module_name = name.substr(0, idx);
 
     auto module_obj = THPObjectPtr(PyImport_ImportModule(module_name.c_str()));
-    TORCH_CHECK_PYTHON(module_obj);
+    if (!module_obj)
+      throw python_error();
 
     PyObject* type_obj = (PyObject*)tensor_type;
     Py_INCREF(type_obj);
-    TORCH_CHECK_PYTHON(
-        PyModule_AddObject(module_obj.get(), type_name.c_str(), type_obj) >= 0);
-    TORCH_CHECK_PYTHON(PySet_Add(tensor_classes.get(), type_obj) >= 0);
+    if (PyModule_AddObject(module_obj.get(), type_name.c_str(), type_obj) < 0) {
+      throw python_error();
+    }
+    if (PySet_Add(tensor_classes.get(), type_obj) < 0) {
+      throw python_error();
+    }
   }
 }
 

@@ -12,7 +12,7 @@ from torch.ao.pruning._experimental.pruner import (
     SaliencyPruner,
 )
 from torch.nn.utils import parametrize
-from torch.testing._internal.common_device_type import dtypes
+from torch.testing._internal.common_device_type import dtypes, onlyCPU
 from torch.testing._internal.common_pruning import (
     Conv2dActivation,
     Conv2dBias,
@@ -68,9 +68,7 @@ class BottomHalfLSTMPruner(BaseStructuredSparsifier):
                 mask.data = new_mask.data
 
 
-class TestSaliencyPrunerDevice(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
+class TestSaliencyPruner(TestCase):
     @dtypes(torch.float)
     def test_saliency_pruner_update_mask(self, device, dtype):
         """Test that we prune out the row with the lowest saliency (first row)"""
@@ -997,49 +995,49 @@ class TestBaseStructuredSparsifierDevice(TestCase):
             )
 
 
-class SimpleConvFPGM(nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-        self.conv2d1 = nn.Conv2d(
-            in_channels=1, out_channels=3, kernel_size=3, padding=1, bias=False
-        )
-        # Manually set the filter weights for demonstration purposes
-        """
-        Three filters' weight are manually set to values 3.0, 2.0, and 0.1.
-        Different from the norm-based decision that prunes filter with value 0.1,
-        FPGM will prune the one with value 2.0.
-        """
-        weights = torch.tensor([3.0, 2.0, 0.1])  # Weight weights for each filter
-        weights = weights[:, None, None, None]  # broadcasting
-        self.conv2d1.weight.data.copy_(torch.ones(self.conv2d1.weight.shape) * weights)
-
-        # Second Convolutional Layer
-        self.conv2d2 = nn.Conv2d(
-            in_channels=3, out_channels=4, kernel_size=3, padding=1, bias=False
-        )
-        weights = torch.tensor([6.0, 7.0, 0.4, 0.5])
-        weights = weights[:, None, None, None]
-        self.conv2d2.weight.data.copy_(torch.ones(self.conv2d2.weight.shape) * weights)
-
-    def forward(self, x):
-        x = self.conv2d1(x)
-        x = self.conv2d2(x)
-        return x
-
-
-class TestFPGMPrunerCPU(TestCase):
+class TestFPGMPruner(TestCase):
     """
     Test case for the implementation of paper:
     `Filter Pruning via Geometric Median for Deep Convolutional Neural Networks Acceleration <https://arxiv.org/abs/1811.00250>`_.
     """
 
-    hw_classification = HardwareClassification.CPU
+    class SimpleConvFPGM(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.conv2d1 = nn.Conv2d(
+                in_channels=1, out_channels=3, kernel_size=3, padding=1, bias=False
+            )
+            # Manually set the filter weights for demonstration purposes
+            """
+            Three filters' weight are manually set to values 3.0, 2.0, and 0.1.
+            Different from the norm-based decision that prunes filter with value 0.1,
+            FPGM will prune the one with value 2.0.
+            """
+            weights = torch.tensor([3.0, 2.0, 0.1])  # Weight weights for each filter
+            weights = weights[:, None, None, None]  # broadcasting
+            self.conv2d1.weight.data.copy_(
+                torch.ones(self.conv2d1.weight.shape) * weights
+            )
 
-    def test_compute_distance(self):
+            # Second Convolutional Layer
+            self.conv2d2 = nn.Conv2d(
+                in_channels=3, out_channels=4, kernel_size=3, padding=1, bias=False
+            )
+            weights = torch.tensor([6.0, 7.0, 0.4, 0.5])
+            weights = weights[:, None, None, None]
+            self.conv2d2.weight.data.copy_(
+                torch.ones(self.conv2d2.weight.shape) * weights
+            )
+
+        def forward(self, x):
+            x = self.conv2d1(x)
+            x = self.conv2d2(x)
+            return x
+
+    @onlyCPU
+    def test_compute_distance(self, device):
         """Test the distance computation function"""
-        device = "cpu"
-
-        model = SimpleConvFPGM().to(device)
+        model = TestFPGMPruner.SimpleConvFPGM().to(device)
         pruner = FPGMPruner(0.3)
         dist_conv1 = pruner._compute_distance(model.conv2d1.weight)
 
@@ -1100,19 +1098,10 @@ class TestFPGMPrunerCPU(TestCase):
         ).all():
             raise AssertionError("Distance computation does not match expected")
 
-
-class TestFPGMPrunerDevice(TestCase):
-    """
-    Test case for the implementation of paper:
-    `Filter Pruning via Geometric Median for Deep Convolutional Neural Networks Acceleration <https://arxiv.org/abs/1811.00250>`_.
-    """
-
-    hw_classification = HardwareClassification.ACCELERATOR
-
     def _test_update_mask_on_single_layer(self, expected_conv1, device):
         """Test that pruning is conducted based on the pair-wise distance measurement instead of absolute norm value"""
         # test pruning with one layer of conv2d
-        model = SimpleConvFPGM().to(device)
+        model = TestFPGMPruner.SimpleConvFPGM().to(device)
         x = torch.ones((1, 1, 32, 32), device=device)
         pruner = FPGMPruner(0.3)
         config = [{"tensor_fqn": "conv2d1.weight"}]
@@ -1151,7 +1140,7 @@ class TestFPGMPrunerDevice(TestCase):
         self, expected_conv1, expected_conv2, device
     ):
         # the second setting
-        model = SimpleConvFPGM().to(device)
+        model = TestFPGMPruner.SimpleConvFPGM().to(device)
         x = torch.ones((1, 1, 32, 32), device=device)
         pruner = FPGMPruner(0.3)
         config = [

@@ -1,9 +1,14 @@
 #include <pybind11/pybind11.h>
+#include <torch/csrc/Device.h>
 #include <torch/csrc/THP.h>
+#include <torch/csrc/cuda/Module.h>
 #include <torch/csrc/cuda/Stream.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_numbers.h>
 
+#include <c10/cuda/CUDAGuard.h>
+
+#include <cuda_runtime_api.h>
 #include <structmember.h>
 
 PyObject* THCPStreamClass = nullptr;
@@ -213,9 +218,12 @@ void THCPStream_init(PyObject* module) {
   Py_INCREF(THPStreamClass);
   THCPStreamType.tp_base = THPStreamClass;
   THCPStreamClass = (PyObject*)&THCPStreamType;
-  TORCH_CHECK_PYTHON(PyType_Ready(&THCPStreamType) >= 0);
+  if (PyType_Ready(&THCPStreamType) < 0) {
+    throw python_error();
+  }
   Py_INCREF(&THCPStreamType);
-  TORCH_CHECK_PYTHON(
-      PyModule_AddObject(
-          module, "_CudaStreamBase", (PyObject*)&THCPStreamType) >= 0);
+  if (PyModule_AddObject(
+          module, "_CudaStreamBase", (PyObject*)&THCPStreamType) < 0) {
+    throw python_error();
+  }
 }

@@ -51,18 +51,12 @@ def register_fake_operators():
     torch.library.register_autocast(
         "_TorchScriptTesting::queue_push", "cuda", torch.float32
     )
-    torch.library.register_autocast(
-        "_TorchScriptTesting::queue_push", "xpu", torch.float32
-    )
 
     torch.library.register_autocast(
         "_TorchScriptTesting::queue_pop", "cpu", torch.float32
     )
     torch.library.register_autocast(
         "_TorchScriptTesting::queue_pop", "cuda", torch.float32
-    )
-    torch.library.register_autocast(
-        "_TorchScriptTesting::queue_pop", "xpu", torch.float32
     )
 
     @torch.library.register_fake("_TorchScriptTesting::queue_size")
@@ -181,17 +175,10 @@ def load_torchbind_test_lib():
         raise unittest.SkipTest("non-portable load_library call used in test")
     elif IS_SANDCASTLE or IS_FBCODE:
         lib_file_path = Path("//caffe2/test/cpp/jit:test_custom_class_registrations")
+    elif IS_WINDOWS:
+        lib_file_path = find_library_location("torchbind_test.dll")
     else:
-        if IS_WINDOWS:
-            lib_file_path = find_library_location("torchbind_test.dll")
-        else:
-            lib_file_path = find_library_location("libtorchbind_test.so")
-
-        if not lib_file_path.exists():
-            raise unittest.SkipTest(
-                f"torchbind test library not found: {lib_file_path}"
-            )
-
+        lib_file_path = find_library_location("libtorchbind_test.so")
     torch.ops.load_library(str(lib_file_path))
 
 

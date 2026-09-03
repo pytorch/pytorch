@@ -12,13 +12,16 @@ static void registerLayout(
     const char* name,
     const char* qualified_name) {
   THPObjectPtr obj(THPLayout_New(layout, qualified_name));
-  TORCH_CHECK_PYTHON(PyModule_AddObjectRef(torch_module, name, obj.get()) == 0);
+  if (PyModule_AddObjectRef(torch_module, name, obj.get()) != 0) {
+    throw python_error();
+  }
   registerLayoutObject((THPLayout*)obj.get(), layout);
 }
 
 void initializeLayouts() {
   auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
-  TORCH_CHECK_PYTHON(torch_module);
+  if (!torch_module)
+    throw python_error();
 
   registerLayout(torch_module, at::Layout::Strided, "strided", "torch.strided");
   registerLayout(

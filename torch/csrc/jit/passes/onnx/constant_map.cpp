@@ -25,12 +25,10 @@ bool ConstantValueMap::HasRank(const std::string& tensorName) {
 }
 
 std::optional<size_t> ConstantValueMap::GetRank(const std::string& tensorName) {
-  const auto& rank_map = ConstantValueMap::getInstance().rankMap;
-  auto it = rank_map.find(tensorName);
-  if (it == rank_map.end()) {
+  if (!HasRank(tensorName)) {
     return std::nullopt;
   }
-  return it->second;
+  return ConstantValueMap::getInstance().rankMap[tensorName];
 }
 
 void ConstantValueMap::SetAllGraphInputsStatic(bool all_static) {
@@ -279,9 +277,9 @@ void ConstantValueMap::PrintMaps() {
   std::cout << "Rank/Shape Map:" << '\n';
   for (const auto& x : ConstantValueMap::getInstance().rankMap) {
     std::stringstream ss;
-    auto& shape_map = ConstantValueMap::getInstance().shapeMap;
-    if (auto it = shape_map.find(x.first); it != shape_map.end()) {
-      auto shape_symbols = it->second.sizes();
+    if (ConstantValueMap::getInstance().shapeMap.contains(x.first)) {
+      auto shape_symbols =
+          ConstantValueMap::getInstance().shapeMap[x.first].sizes();
       if (shape_symbols.has_value()) {
         for (const auto& shape_symbol : shape_symbols.value()) {
           if (shape_symbol.is_static()) {

@@ -663,10 +663,13 @@ static PyObject* THXPModule_initExtension(PyObject* self, PyObject* noargs) {
   at::globalContext().lazyInitDevice(c10::DeviceType::XPU);
 
   auto m = THPObjectPtr(PyImport_ImportModule("torch.xpu"));
-  TORCH_CHECK_PYTHON(m);
+  if (!m)
+    throw python_error();
 
   auto set_module_attr = [&](const char* name, PyObject* v) {
-    TORCH_CHECK_PYTHON(PyObject_SetAttrString(m, name, v) >= 0);
+    if (PyObject_SetAttrString(m, name, v) < 0) {
+      throw python_error();
+    }
   };
 
   auto num_gpus = c10::xpu::device_count();

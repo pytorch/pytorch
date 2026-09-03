@@ -57,9 +57,9 @@ from .base import (
     AttributeMutationNew,
     AttrMutationKind,
     GetSet,
+    getset_read,
     Method,
     NO_SUCH_SUBOBJ,
-    readonly_setter,
     ValueMutationNew,
     VariableTracker,
 )
@@ -1209,9 +1209,7 @@ class DictViewVariable(VariableTracker):
     # dictview_mapping getset returns a read-only mappingproxy of the underlying
     # dict. https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5032-L5040
     tp_getset = {
-        "mapping": GetSet(
-            lambda s, _: MappingProxyVariable(s.dv_dict), readonly_setter
-        ),
+        "mapping": GetSet(getset_read(lambda s: MappingProxyVariable(s.dv_dict))),
     }
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:

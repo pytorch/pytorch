@@ -382,6 +382,17 @@ void multinomial_with_replacement_kernel_impl(
     } else {
       // Generic, slow implementation with memory allocations
 
+      // For sampling without replacement, we modify the distribution
+      // for subsequent samples in this space
+      Tensor origDist = native::empty_like(
+          self_v,
+          std::nullopt /* dtype */,
+          std::nullopt /* layout */,
+          std::nullopt /* device */,
+          std::nullopt /* pin_memory */,
+          LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      origDist.copy_(self_v);
+
       Tensor normDist = native::empty_like(
           self_v,
           std::nullopt /* dtype */,
@@ -399,7 +410,7 @@ void multinomial_with_replacement_kernel_impl(
           LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
       // Renorm along rows
-      normDist.copy_(self_v);
+      normDist.copy_(origDist);
       renormRows(normDist);
 
       // Prefix sum along rows

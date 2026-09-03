@@ -203,10 +203,8 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
         calloc(1, sizeof(struct pytorch_qnnp_operator)));
     if (convolution == nullptr) {
       TORCH_INTERNAL_ASSERT(
-          false,
-          "failed to allocate ",
-          sizeof(struct pytorch_qnnp_operator),
-          " bytes for pytorch_qnnp_operator structure");
+          false, "failed to allocate %zu bytes for pytorch_qnnp_operator structure",
+          sizeof(struct pytorch_qnnp_operator));
     }
 
     convolution_op =
@@ -280,7 +278,8 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
     if (zero_buffer == nullptr) {
       pytorch_qnnp_delete_operator(convolution);
       TORCH_INTERNAL_ASSERT(
-          false, "failed to allocate ", zero_size, " bytes for zero padding");
+          false, "failed to allocate %zu bytes for zero padding",
+          zero_size);
     }
     // Need to set to input zero point
     // memset(zero_buffer, input_zero_point, zero_size);

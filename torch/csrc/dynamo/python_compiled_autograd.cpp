@@ -1,7 +1,5 @@
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
 
-#include <torch/csrc/Exceptions.h>
-
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <torch/csrc/autograd/engine.h>
@@ -70,6 +68,13 @@ std::string TURN_OFF_COMPILED_AUTOGRAD_MSG() {
 }
 
 } // namespace
+
+// see https://github.com/pytorch/pytorch/pull/34845
+static void throw_python_error() {
+  python_error err;
+  err.persist();
+  throw std::move(err);
+}
 
 // RuntimeState contains arbitrary callables created during the forward pass.
 // e.g. .retains_grad(). It is created during the compiled_args stage, and is
@@ -828,7 +833,7 @@ static TraceState call_begin_capture(
     TORCH_INTERNAL_ASSERT(!Py_IsNone(compile_id_str));
     std::string formatted_compile_reason = unwrap_string(compile_id_str) +
         ": " + std::move(compile_reason.value());
-    cache.compile_reasons.emplace_back(std::move(formatted_compile_reason));
+    cache.compile_reasons.emplace_back(formatted_compile_reason);
     THPObjectPtr py_compile_reasons(wrap_string_list(cache.compile_reasons));
     static PyObject* log_compile_reasons =
         PyUnicode_InternFromString("log_compile_reasons");

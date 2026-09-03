@@ -8,6 +8,8 @@
 
 #include <c10/util/ApproximateClock.h>
 
+#include <nlohmann/json.hpp>
+
 #include <cstdint>
 #include <optional>
 #include <string>

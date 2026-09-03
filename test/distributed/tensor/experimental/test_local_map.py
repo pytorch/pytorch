@@ -777,7 +777,12 @@ class TestLocalMapSpmdTypesMultiGPU(DTensorTestBase):
         Step 2: BuggyDPMatmul with spmd_types=True -> spmd.SpmdTypeError (V + I).
         Step 3: CorrectDPMatmul with spmd_types=True -> correct gradients.
         """
-        from spmd_types import assert_type, MeshAxis, register_local_autograd_function
+        from spmd_types import (
+            assert_type,
+            MeshAxis,
+            register_autograd_function,
+            register_local_autograd_function,
+        )
 
         @register_local_autograd_function
         class BuggyDPMatmul(torch.autograd.Function):
@@ -793,6 +798,7 @@ class TestLocalMapSpmdTypesMultiGPU(DTensorTestBase):
                 grad_W = torch.mm(X.t(), grad_output)  # BUG: missing all-reduce
                 return grad_X, grad_W
 
+        @register_autograd_function
         class CorrectDPMatmul(torch.autograd.Function):
             @staticmethod
             def forward(ctx, X, W, mesh):
@@ -810,11 +816,13 @@ class TestLocalMapSpmdTypesMultiGPU(DTensorTestBase):
                 return grad_X, grad_W, None
 
             @staticmethod
-            def spmd_typecheck(out, *, X, W, mesh):
+            def typecheck_forward(X, W, mesh):
                 dp = MeshAxis.of(mesh.get_group("dp"))
                 assert_type(X, {dp: spmd.V})
                 assert_type(W, {dp: spmd.I})
+                out = CorrectDPMatmul.apply(X, W, mesh)
                 assert_type(out, {dp: spmd.V})
+                return out
 
         device_mesh = init_device_mesh(
             device_type=self.device_type,

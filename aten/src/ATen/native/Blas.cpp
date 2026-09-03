@@ -2,11 +2,13 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/Config.h>
 
 #include <ATen/native/mkldnn/Matmul.h>
 #include <ATen/native/mkldnn/Linear.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/GroupedMMUtils.h>
+#include <ATen/BlasBackend.h>
 #if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
 #endif
@@ -27,7 +29,9 @@
 #include <ATen/ops/mv_native.h>
 #include <ATen/ops/scalar_tensor_native.h>
 #include <ATen/ops/vdot_native.h>
+#include <ATen/ops/_scaled_mm_native.h>
 #include <ATen/ops/mul.h>
+#include <ATen/ops/matmul.h>
 #endif
 
 namespace at::meta {

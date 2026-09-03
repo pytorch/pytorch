@@ -25,14 +25,15 @@ template <typename T, template <class> class Op>
 std::vector<Tensor> foreach_binary_op(
     TensorList tensors,
     const Scalar& scalar) {
+  std::vector<std::vector<at::Tensor>> tensor_lists;
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(tensors.size());
   for (const auto& t : tensors) {
     vec_res.emplace_back(at::native::empty_like(t));
   }
 
-  auto tensor_lists =
-      c10::make_nested<Tensor>(tensors.vec(), std::move(vec_res));
+  tensor_lists.emplace_back(tensors.vec());
+  tensor_lists.emplace_back(std::move(vec_res));
 
   using opmath_t = at::opmath_type<T>;
   multi_tensor_apply<2>(
@@ -49,7 +50,8 @@ std::vector<Tensor> foreach_binary_op(
 
 template <typename T, template <class> class Op>
 void foreach_binary_op_(TensorList tensors, const Scalar& scalar) {
-  auto tensor_lists = c10::make_nested<Tensor>(tensors.vec());
+  std::vector<std::vector<at::Tensor>> tensor_lists;
+  tensor_lists.emplace_back(tensors.vec());
 
   using opmath_t = at::opmath_type<T>;
   multi_tensor_apply<1>(

@@ -59,7 +59,9 @@ inline bool THPUtils_checkLong(PyObject* obj) {
 inline int32_t THPUtils_unpackInt(PyObject* obj) {
   int overflow = 0;
   long value = PyLong_AsLongAndOverflow(obj, &overflow);
-  TORCH_CHECK_PYTHON(value != -1 || !PyErr_Occurred());
+  if (value == -1 && PyErr_Occurred()) {
+    throw python_error();
+  }
   TORCH_CHECK_VALUE(overflow == 0, "Overflow when unpacking long long");
   TORCH_CHECK_VALUE(
       value <= std::numeric_limits<int32_t>::max() &&
@@ -71,14 +73,18 @@ inline int32_t THPUtils_unpackInt(PyObject* obj) {
 inline int64_t THPUtils_unpackLong(PyObject* obj) {
   int overflow = 0;
   long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
-  TORCH_CHECK_PYTHON(value != -1 || !PyErr_Occurred());
+  if (value == -1 && PyErr_Occurred()) {
+    throw python_error();
+  }
   TORCH_CHECK_VALUE(overflow == 0, "Overflow when unpacking long long");
   return (int64_t)value;
 }
 
 inline uint32_t THPUtils_unpackUInt32(PyObject* obj) {
   unsigned long value = PyLong_AsUnsignedLong(obj);
-  TORCH_CHECK_PYTHON(!PyErr_Occurred());
+  if (PyErr_Occurred()) {
+    throw python_error();
+  }
   TORCH_CHECK_VALUE(
       value <= std::numeric_limits<uint32_t>::max(),
       "Overflow when unpacking long long");
@@ -87,7 +93,9 @@ inline uint32_t THPUtils_unpackUInt32(PyObject* obj) {
 
 inline uint64_t THPUtils_unpackUInt64(PyObject* obj) {
   unsigned long long value = PyLong_AsUnsignedLongLong(obj);
-  TORCH_CHECK_PYTHON(!PyErr_Occurred());
+  if (PyErr_Occurred()) {
+    throw python_error();
+  }
   return (uint64_t)value;
 }
 
@@ -96,7 +104,9 @@ bool THPUtils_checkIndex(PyObject* obj);
 inline int64_t THPUtils_unpackIndex(PyObject* obj) {
   if (!THPUtils_checkLong(obj)) {
     auto index = THPObjectPtr(PyNumber_Index(obj));
-    TORCH_CHECK_PYTHON(index != nullptr);
+    if (index == nullptr) {
+      throw python_error();
+    }
     // NB: This needs to be called before `index` goes out of scope and the
     // underlying object's refcount is decremented
     return THPUtils_unpackLong(index.get());
@@ -137,13 +147,17 @@ inline double THPUtils_unpackDouble(PyObject* obj) {
     return PyFloat_AS_DOUBLE(obj);
   }
   double value = PyFloat_AsDouble(obj);
-  TORCH_CHECK_PYTHON(value != -1 || !PyErr_Occurred());
+  if (value == -1 && PyErr_Occurred()) {
+    throw python_error();
+  }
   return value;
 }
 
 inline c10::complex<double> THPUtils_unpackComplexDouble(PyObject* obj) {
   Py_complex value = PyComplex_AsCComplex(obj);
-  TORCH_CHECK_PYTHON(value.real != -1.0 || !PyErr_Occurred());
+  if (value.real == -1.0 && PyErr_Occurred()) {
+    throw python_error();
+  }
 
   return c10::complex<double>(value.real, value.imag);
 }
@@ -153,7 +167,9 @@ inline bool THPUtils_unpackNumberAsBool(PyObject* obj) {
   // Handle NumPy boolean scalars (np.bool_)
   if (torch::utils::is_numpy_bool(obj)) {
     int truth = PyObject_IsTrue(obj);
-    TORCH_CHECK_PYTHON(truth != -1);
+    if (truth == -1) {
+      throw python_error();
+    }
     return truth != 0;
   }
 #endif
@@ -169,7 +185,9 @@ inline bool THPUtils_unpackNumberAsBool(PyObject* obj) {
 
   int overflow = 0;
   long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
-  TORCH_CHECK_PYTHON(value != -1 || !PyErr_Occurred());
+  if (value == -1 && PyErr_Occurred()) {
+    throw python_error();
+  }
   // No need to check overflow, because when overflow occurred, it should
   // return true in order to keep the same behavior of numpy.
   return (bool)value;
@@ -178,7 +196,9 @@ inline bool THPUtils_unpackNumberAsBool(PyObject* obj) {
 inline c10::DeviceIndex THPUtils_unpackDeviceIndex(PyObject* obj) {
   int overflow = 0;
   long value = PyLong_AsLongAndOverflow(obj, &overflow);
-  TORCH_CHECK_PYTHON(value != -1 || !PyErr_Occurred());
+  if (value == -1 && PyErr_Occurred()) {
+    throw python_error();
+  }
   TORCH_CHECK(overflow == 0, "Overflow when unpacking DeviceIndex");
   TORCH_CHECK(
       value <= std::numeric_limits<c10::DeviceIndex>::max() &&
@@ -191,14 +211,17 @@ template <typename T>
 inline T THPUtils_unpackInteger(PyObject* obj) {
   int overflow = -1;
   const auto value = PyLong_AsLongLongAndOverflow(obj, &overflow);
-  TORCH_CHECK_PYTHON(value != -1 || !PyErr_Occurred());
+  if (value == -1 && PyErr_Occurred()) {
+    throw python_error();
+  }
   if (!overflow) {
     return static_cast<int64_t>(value);
   }
   // try unsigned
   const auto uvalue = PyLong_AsUnsignedLongLong(obj);
-  TORCH_CHECK_PYTHON(
-      uvalue != static_cast<std::decay_t<decltype(uvalue)>>(-1) ||
-      !PyErr_Occurred());
+  if (uvalue == static_cast<std::decay_t<decltype(uvalue)>>(-1) &&
+      PyErr_Occurred()) {
+    throw python_error();
+  }
   return static_cast<uint64_t>(uvalue);
 }

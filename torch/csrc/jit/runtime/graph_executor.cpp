@@ -288,9 +288,8 @@ struct DifferentiableGraphBackward : public autograd::Node {
       } else if (v.isTensor()) {
         if (!v.toTensor().defined()) {
           // this undefined gradient actually corresponds to a tensor list
-          if (auto it = input_tensor_lists_.find(output_index);
-              it != input_tensor_lists_.end()) {
-            size_t list_size = it->second;
+          if (input_tensor_lists_.contains(output_index)) {
+            size_t list_size = input_tensor_lists_[output_index];
             for (size_t i = 0; i < list_size; i++) {
               produceOutput(output_index++, {}, outputs);
             }

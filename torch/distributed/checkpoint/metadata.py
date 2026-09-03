@@ -3,7 +3,7 @@ import os
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, cast
+from typing import Any
 
 import torch
 from torch.distributed.checkpoint.stateful import StatefulT
@@ -54,8 +54,6 @@ class TensorProperties:
     # This field is deprecated.
     pin_memory: bool = False
 
-    strides: tuple[int, ...] | None = None
-
     def __getstate__(self):
         # Since torch.memory_format cannot be pickled!
         memory_format = self.memory_format
@@ -74,31 +72,19 @@ class TensorProperties:
             self.requires_grad,
             mem_format_encoding,
             self.pin_memory,
-            self.strides,
         )
 
     def __setstate__(
         self,
         state,
     ):
-        if len(state) == 5:
-            (
-                self.dtype,
-                self.layout,
-                self.requires_grad,
-                mem_format_encoding,
-                self.pin_memory,
-            ) = state
-            self.strides = None
-        else:
-            (
-                self.dtype,
-                self.layout,
-                self.requires_grad,
-                mem_format_encoding,
-                self.pin_memory,
-                self.strides,
-            ) = state
+        (
+            self.dtype,
+            self.layout,
+            self.requires_grad,
+            mem_format_encoding,
+            self.pin_memory,
+        ) = state
 
         if mem_format_encoding == _MEM_FORMAT_ENCODING.TORCH_CONTIGUOUS_FORMAT:
             memory_format = torch.contiguous_format
@@ -115,14 +101,12 @@ class TensorProperties:
 
     @staticmethod
     def create_from_tensor(tensor: torch.Tensor) -> "TensorProperties":
-        stride = getattr(tensor, "stride", None)
         return TensorProperties(
             dtype=tensor.dtype,
             layout=tensor.layout,
             requires_grad=tensor.requires_grad,
             memory_format=torch.contiguous_format,
             pin_memory=tensor.is_pinned(),
-            strides=cast(tuple[int, ...], stride()) if callable(stride) else None,
         )
 
 

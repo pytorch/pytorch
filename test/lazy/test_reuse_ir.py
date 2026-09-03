@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: jit"]
 
+import os
 import unittest
 
 import torch
@@ -8,24 +9,21 @@ import torch._lazy.config
 import torch._lazy.ir_cache
 import torch._lazy.metrics as metrics
 import torch._lazy.ts_backend
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    IS_WINDOWS,
-    run_tests,
-    TestCase,
-)
+from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
 
 
 torch._lazy.ts_backend.init()
 torch._lazy.config.set_reuse_ir(True)
 
 
-@unittest.skipIf(IS_WINDOWS, "To be fixed")
-class TestLazyReuseIrDevice(TestCase):
-    hw_classification = HardwareClassification.GENERIC
+def get_test_device():
+    return "cuda" if "LTC_TS_CUDA" in os.environ else "cpu"
 
-    def testAdd(self, device):
+
+@unittest.skipIf(IS_WINDOWS, "To be fixed")
+class TestLazyReuseIr(TestCase):
+    def testAdd(self):
+        device = get_test_device()
         x = torch.randn(2, 3, 4, device=device)
         y = torch.randn(2, 3, 4, device=device)
         z = torch.zeros(2, 3, 4, device=device)
@@ -51,7 +49,8 @@ class TestLazyReuseIrDevice(TestCase):
         metrics.reset()
         torch._lazy.ir_cache.reset()
 
-    def testAddSub(self, device):
+    def testAddSub(self):
+        device = get_test_device()
         x = torch.randn(2, 3, 4, device=device)
         y = torch.randn(2, 3, 4, device=device)
         z = torch.zeros(2, 3, 4, device=device)
@@ -83,8 +82,9 @@ class TestLazyReuseIrDevice(TestCase):
         metrics.reset()
         torch._lazy.ir_cache.reset()
 
-    def testAddSubFallback(self, device):
+    def testAddSubFallback(self):
         torch._lazy.config.set_force_fallback("aten::sub")
+        device = get_test_device()
         x = torch.randn(2, 3, 4, device=device)
         y = torch.randn(2, 3, 4, device=device)
         z = torch.zeros(2, 3, 4, device=device)
@@ -117,7 +117,8 @@ class TestLazyReuseIrDevice(TestCase):
         torch._lazy.ir_cache.reset()
         torch._lazy.config.set_force_fallback("")
 
-    def testBatchNorm(self, device):
+    def testBatchNorm(self):
+        device = get_test_device()
         x = torch.randn(16, 3, 224, 224, device=device)
         weight = torch.randn(3, device=device)
         bias = torch.randn(3, device=device)
@@ -154,14 +155,6 @@ class TestLazyReuseIrDevice(TestCase):
             )
         metrics.reset()
         torch._lazy.ir_cache.reset()
-
-
-instantiate_device_type_tests(
-    TestLazyReuseIrDevice,
-    globals(),
-    only_for=("cpu", "cuda", "xpu"),
-    allow_xpu=True,
-)
 
 
 if __name__ == "__main__":

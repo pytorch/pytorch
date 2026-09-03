@@ -78,7 +78,6 @@ class AbstractFlightRecorderHookTest:
         return os.environ["TORCH_FR_DUMP_TEMP_FILE"] + str(self.rank)
 
     def _init_pg(self):
-        os.environ["LOCAL_RANK"] = str(self.rank)
         if self.device_type == "cuda":
             torch.cuda.set_device(self.rank)
         if self._communicates:

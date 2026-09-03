@@ -37,10 +37,11 @@ LINTER_CODE = "RAWTHROW"
 MARKER = "@allow-raw-throw"
 
 # Exceptions that no TORCH_CHECK can stand in for, mapped to the path prefix
-# they are allowed under, so an entry cannot leak into code its justification
-# does not cover. An empty prefix means the justification holds everywhere. Add
-# an entry only with a justification of the kind below, never because converting
-# a site looked awkward.
+# they are allowed under. An unqualified name is scoped to the subsystem that
+# owns it, so that an unrelated type reusing the name elsewhere is still
+# reported; a namespace-qualified name cannot collide, so it is allowed
+# anywhere. Add an entry only with a justification of the kind below, never
+# because converting a site looked awkward.
 #
 # Deliberately absent: py::type_error, py::value_error and py::index_error.
 # Those are exactly TORCH_CHECK_TYPE, TORCH_CHECK_VALUE and TORCH_CHECK_INDEX -
@@ -53,20 +54,12 @@ ALLOWED_EXCEPTION_TYPES = {
     "WorkerException": "torch/csrc/api/",
     "py::cast_error": "torch/csrc/jit/",  # caught by name in jit/python
     "py::error_already_set": "",  # a Python error is set; rethrowing preserves it
-    "MyException": "c10/test/",  # LeftRight_test, caught by EXPECT_THROW
-    # Drives the unwinder's own control flow; caught by name in
-    # fast_symbolizer.h and unwind.cpp.
-    "UnwindError": "torch/csrc/profiler/",
-    "unwind::UnwindError": "torch/csrc/profiler/",
     # Reach the interpreter as a Python type c10 has no equivalent of, so
     # TORCH_CHECK would turn them into RuntimeError.
     "py::key_error": "",
     "py::stop_iteration": "",
     # Carries the device error code alongside the message.
     "c10::AcceleratorError": "",
-    # Same shape as AcceleratorError: carries the ncclResult_t alongside the
-    # message, and is what this backend's own NCCL_CHECK macros raise.
-    "NCCLException": "torch/csrc/distributed/c10d/nccl2/",
 }
 
 
@@ -362,12 +355,7 @@ def replacement_macro(path: str) -> str:
     posix = path.replace("\\", "/")
     if "torch/csrc/inductor/aoti_runtime/" in posix:
         return "AOTI_RUNTIME_CHECK"
-    if (
-        "torch/headeronly/" in posix
-        or "torch/csrc/stable/" in posix
-        # Installed, and deliberately depends on torch/headeronly only.
-        or posix.endswith("torch/csrc/utils/generated_serialization_types.h")
-    ):
+    if "torch/headeronly/" in posix or "torch/csrc/stable/" in posix:
         return "STD_TORCH_CHECK"
     return "TORCH_CHECK"
 

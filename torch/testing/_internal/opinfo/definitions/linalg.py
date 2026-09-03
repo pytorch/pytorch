@@ -1222,6 +1222,18 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_linalg_det_logdet_slogdet,
         decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoLinalgsolver],
         check_batched_gradgrad=False,
+        skips=(
+            # Exception: linalg.lu_factor(): MPS doesn't support complex types.
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
+        ),
     ),
     OpInfo(
         "linalg.diagonal",
@@ -1959,6 +1971,18 @@ op_db: list[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_linalg_det_logdet_slogdet,
         decorators=[skipCUDAIfNoMagmaAndNoLinalgsolver, skipCPUIfNoLapack],
+        skips=(
+            # Exception: linalg.lu_factor(): MPS doesn't support complex types.
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
+        ),
     ),
     OpInfo(
         "linalg.vander",
@@ -1999,9 +2023,6 @@ op_db: list[OpInfo] = [
         aten_name="linalg_lu_factor",
         op=torch.linalg.lu_factor,
         dtypes=floating_and_complex_types(),
-        # complex64 backward needs solve_triangular, which is float32-only on
-        # MPS, so only the float forward+backward runs there.
-        backward_dtypesIfMPS=floating_types(),
         # Runs very slowly on slow gradcheck - alternatively reduce input sizes
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
@@ -2017,6 +2038,16 @@ op_db: list[OpInfo] = [
                 "test_compare_cpu",
                 active_if=(not TEST_XPU),
             ),
+            # RuntimeError: linalg.lu_factor(): MPS doesn't support complex types.
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
         ),
     ),
     OpInfo(
@@ -2024,9 +2055,6 @@ op_db: list[OpInfo] = [
         aten_name="linalg_lu_factor_ex",
         op=torch.linalg.lu_factor_ex,
         dtypes=floating_and_complex_types(),
-        # complex64 backward needs solve_triangular, which is float32-only on
-        # MPS, so only the float forward+backward runs there.
-        backward_dtypesIfMPS=floating_types(),
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
         supports_forward_ad=True,
@@ -2041,6 +2069,16 @@ op_db: list[OpInfo] = [
                 "test_compare_cpu",
                 active_if=(not TEST_XPU),
             ),
+            # RuntimeError: linalg.lu_factor(): MPS doesn't support complex types.
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
         ),
     ),
     OpInfo(
@@ -2048,9 +2086,6 @@ op_db: list[OpInfo] = [
         aten_name="linalg_lu",
         op=torch.linalg.lu,
         dtypes=floating_and_complex_types(),
-        # complex64 backward needs solve_triangular, which is float32-only on
-        # MPS, so only the float forward+backward runs there.
-        backward_dtypesIfMPS=floating_types(),
         # https://github.com/pytorch/pytorch/issues/80411
         # Runs very slowly on slow-gradcheck - alternatively reduce input sizes
         gradcheck_fast_mode=True,
@@ -2065,6 +2100,16 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 "test_compare_cpu",
                 active_if=(not TEST_XPU),
+            ),
+            # Exception: linalg.lu_factor(): MPS doesn't support complex types.
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
             ),
             # https://github.com/pytorch/pytorch/issues/137684
             DecorateInfo(
@@ -2081,9 +2126,6 @@ op_db: list[OpInfo] = [
         op=torch.linalg.lu_solve,
         aten_name="linalg_lu_solve",
         dtypes=floating_and_complex_types(),
-        # complex64 backward w.r.t. the LU factor needs solve_triangular, which
-        # is float32-only on MPS; the complex forward and B-gradient do run.
-        backward_dtypesIfMPS=floating_types(),
         # Runs very slowly on slow gradcheck - alternatively reduce input sizes
         gradcheck_fast_mode=True,
         supports_forward_ad=True,
@@ -2095,6 +2137,13 @@ op_db: list[OpInfo] = [
                 unittest.skip("Tests different backward paths"),
                 "TestCommon",
                 "test_floating_inputs_are_differentiable",
+            ),
+            # RuntimeError: linalg.solve.triangular(); Only float is supported!
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
             ),
         ),
         decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoLinalgsolver],
@@ -2207,6 +2256,16 @@ op_db: list[OpInfo] = [
                 "test_noncontiguous_samples",
                 device_type="cpu",
             ),
+            # Exception: linalg.lu_factor(): MPS only supports floats.
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
         ],
         skips=(
             DecorateInfo(
@@ -2271,6 +2330,16 @@ op_db: list[OpInfo] = [
                 "test_variant_consistency_jit",
                 device_type="mps",
                 dtypes=[torch.float32],
+            ),
+            # Exception: linalg.lu_factor(): MPS only supports floats.
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
             ),
         ),
     ),
@@ -2377,14 +2446,6 @@ op_db: list[OpInfo] = [
                 "TestJit",
                 "test_variant_consistency_jit",
                 device_type="cuda",
-            ),
-            # https://github.com/intel/torch-xpu-ops/issues/1963
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestFakeTensor",
-                "test_fake_autocast",
-                device_type="xpu",
-                dtypes=[torch.float32],
             ),
         ),
     ),
@@ -2589,14 +2650,6 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=(torch.complex64,),
             ),
-            # torch-xpu-ops/issues/4313
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_numpy_ref",
-                device_type="xpu",
-                dtypes=(torch.float64,),
-            ),
             # The test is flaky on AMX with Inductor
             DecorateInfo(
                 unittest.skip,
@@ -2644,6 +2697,16 @@ op_db: list[OpInfo] = [
             ),
         ],
         skips=(
+            # Exception: linalg.lu_factor(): MPS only supports floats.
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
             # The test is flaky on AMX with Inductor
             DecorateInfo(
                 unittest.skip,

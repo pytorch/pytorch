@@ -293,7 +293,6 @@ class TestProvenanceTracingArtifact(TestCase):
                     shutil.rmtree(filepath)
 
     @requires_gpu_and_triton
-    @config.patch("shape_padding", False)
     def test_triton_kernel_to_post_grad_tracing_cuda(self):
         self._test_triton_kernel_to_post_grad_tracing(device=GPU_TYPE)
 
@@ -301,7 +300,6 @@ class TestProvenanceTracingArtifact(TestCase):
         self._test_triton_kernel_to_post_grad_tracing(device="cpu")
 
     @requires_gpu_and_triton
-    @config.patch("shape_padding", False)
     def test_triton_kernel_to_post_grad_tracing_extern_kernel(self):
         M = 8
         N = 6
@@ -645,7 +643,6 @@ class TestProvenanceTracingStackTraces(TestCase):
 
     @torch._inductor.config.patch({"trace.provenance_tracking_level": 2})
     @requires_gpu_and_triton
-    @config.patch("shape_padding", False)
     def test_tlparse_kernel_stack_traces(self):
         device = GPU_TYPE
         model = Model4().to(device)
@@ -744,7 +741,6 @@ class TestProvenanceTracingStackTraces(TestCase):
 
     @requires_gpu_and_triton
     @torch._inductor.config.patch("trace.provenance_tracking_level", 1)
-    @config.patch("shape_padding", False)
     def test_kernel_information_generation(self):
         """Test basic kernel information generation in AOTI packages."""
 
@@ -1192,7 +1188,6 @@ class ProvenanceTracingKernelContextTemplate:
             torch.compile(model)(*example_inputs)
 
     @unittest.skipIf(sys.platform == "darwin", "Different kernel names on MacOS")
-    @config.patch("shape_padding", False)
     def test_aoti_python_stack_traces(self):
         class Model(torch.nn.Module):
             def __init__(self):
