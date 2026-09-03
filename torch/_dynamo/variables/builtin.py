@@ -2440,6 +2440,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             (
                 variables.SetVariable,
                 variables.FrozensetVariable,
+                variables.DictKeySetVariable,
                 variables.ConstDictVariable,
             ),
         ):
@@ -3205,7 +3206,14 @@ class BuiltinVariable(BaseBuiltinVariable):
         if isinstance(a, DictViewVariable):
             a = a.dv_dict
         if isinstance(
-            a, (ListVariable, ConstDictVariable, SetVariable, FrozensetVariable)
+            a,
+            (
+                ListVariable,
+                ConstDictVariable,
+                SetVariable,
+                FrozensetVariable,
+                variables.DictKeySetVariable,
+            ),
         ):
             return VariableTracker.build(tx, len(a.items) == 0)
         if isinstance(a, UserDefinedObjectVariable):
@@ -3387,7 +3395,13 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         # CPython's do-not-rehash-dict-keys behavior when building a dict from
         # an existing set/frozenset/dict.
         if isinstance(
-            arg, (variables.SetVariable, variables.FrozensetVariable, ConstDictVariable)
+            arg,
+            (
+                variables.SetVariable,
+                variables.FrozensetVariable,
+                variables.DictKeySetVariable,
+                ConstDictVariable,
+            ),
         ):
             # HashableTracker keys are accepted by ConstDictVariable.__init__.
             return _make_result(dict.fromkeys(arg.items.keys(), value))  # type: ignore[arg-type]

@@ -8,10 +8,10 @@
 
     stride_am = {{stride("A", 0)}}
     stride_bn = {{stride("B", 1)}}
-    stride_scale_a = {{stride("A_inverse_scale", 0)}}
-    stride_scale_b = {{stride("B_inverse_scale", 0)}}
-    stride_scale_a_col = {{stride("A_inverse_scale", 1)}}
-    stride_scale_b_col = {{stride("B_inverse_scale", 1)}}
+    stride_scale_a = {{stride("A_inverse_scale", 1 if SCALE_A_TRANSPOSED else 0)}}
+    stride_scale_b = {{stride("B_inverse_scale", 1 if SCALE_B_TRANSPOSED else 0)}}
+    stride_scale_a_col = {{stride("A_inverse_scale", 0 if SCALE_A_TRANSPOSED else 1)}}
+    stride_scale_b_col = {{stride("B_inverse_scale", 0 if SCALE_B_TRANSPOSED else 1)}}
 
     start_pid = tl.program_id(axis=0).to(INDEX_DTYPE)
     num_pid_m = tl.cdiv(M, BLOCK_M)
