@@ -1,0 +1,5 @@
+{
+  "autograd": "Owns autograd engine behavior, gradient recording and execution, and Python autograd APIs.",
+  "flex_attention": "Owns FlexAttention kernels, score and mask modification behavior, and FlexAttention integration.",
+  "nn": "Owns neural-network modules, module behavior, and user-facing torch.nn APIs."
+}
