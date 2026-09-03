@@ -9,6 +9,9 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_dev_cap.hpp>
+#ifdef USE_ROCM
+#include <cstdint>
+#endif
 #include <functional>
 #include <mutex>
 #include <optional>
@@ -115,6 +118,34 @@ class TORCH_API NCCLDevCommManager {
     return it->second;
   }
 
+  uint64_t get_comm_generation(
+      const std::string& group_name,
+      ncclComm_t comm) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto comm_it = group_to_comm_.find(group_name);
+    auto generation_it = group_to_comm_generation_.find(group_name);
+    TORCH_CHECK(
+        comm_it != group_to_comm_.end() && comm_it->second == comm &&
+            generation_it != group_to_comm_generation_.end(),
+        "ROCm NCCL communicator registration changed while symmetric memory "
+        "was rendezvousing group '",
+        group_name,
+        "'");
+    return generation_it->second;
+  }
+
+  bool comm_registration_is_live(
+      const std::string& group_name,
+      ncclComm_t comm,
+      uint64_t generation) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto comm_it = group_to_comm_.find(group_name);
+    auto generation_it = group_to_comm_generation_.find(group_name);
+    return comm_it != group_to_comm_.end() && comm_it->second == comm &&
+        generation_it != group_to_comm_generation_.end() &&
+        generation_it->second == generation;
+  }
+
   bool comm_has_device_api_support(
       const std::string& group_name,
       ncclComm_t comm) {
@@ -216,10 +247,15 @@ class TORCH_API NCCLDevCommManager {
   // Register the host-side NCCL communicator for `group_name` on this
   // manager's device. Last-write-wins so a successor PG can replace the
   // entry before the prior PG's destructor runs (e.g. restart-after-error).
-  // Producers must call `unregister_comm` from their destructor.
+  // Producers must retire their entry before invalidating the communicator;
+  // destructor cleanup remains a fallback.
   void register_comm(const std::string& group_name, ncclComm_t comm) {
     std::lock_guard<std::mutex> lock(mutex_);
 #ifdef USE_ROCM
+    auto registered_comm = group_to_comm_.find(group_name);
+    const bool is_new_registration =
+        registered_comm == group_to_comm_.end() ||
+        registered_comm->second != comm;
     ncclCommProperties_t comm_props = NCCL_COMM_PROPERTIES_INITIALIZER;
     const bool device_api_support =
         ncclCommQueryProperties(comm, &comm_props) == ncclSuccess &&
@@ -252,33 +288,37 @@ class TORCH_API NCCLDevCommManager {
         capture_allocation_support;
 #endif
     group_to_comm_[group_name] = comm;
+#ifdef USE_ROCM
+    if (is_new_registration ||
+        group_to_comm_generation_.find(group_name) ==
+            group_to_comm_generation_.end()) {
+      group_to_comm_generation_[group_name] = next_comm_generation_++;
+    }
+#endif
   }
 
   // Unregister `group_name` on this manager's device. Safe to call when
   // nothing is registered. Does not destroy the host comm; lifetime stays
   // with the producer.
   //
-  // Producers are expected to skip already-aborted comms in their
-  // destructor (e.g. ProcessGroupNCCL guards on isAborted()). Without that
-  // discipline, a stale destructor could race with a successor PG that
-  // re-registered under the same `group_name` (e.g. restart-after-error)
-  // and silently drop the successor's entry.
+  // This key-only form is retained for CUDA callers. ROCm teardown uses the
+  // identity-safe overload below.
   void unregister_comm(const std::string& group_name) {
     std::lock_guard<std::mutex> lock(mutex_);
     group_to_comm_.erase(group_name);
 #ifdef USE_ROCM
     group_to_device_api_support_.erase(group_name);
     group_to_capture_allocation_support_.erase(group_name);
+    group_to_comm_generation_.erase(group_name);
 #endif
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
     devcomm_registry_.erase(group_name);
 #endif
   }
 
-  // Identity-safe unregister: drop the entry only if the currently-registered
-  // comm is still `comm`. A stale producer whose comm was already replaced by a
-  // successor under the same `group_name` becomes a no-op, so it cannot clobber
-  // the successor -- no isAborted()-style discipline needed at the call site.
+  // Drop the entry only if the currently registered comm is still `comm`.
+  // Delayed cleanup for an old process group is therefore a no-op after a
+  // same-name successor has registered.
   void unregister_comm(const std::string& group_name, ncclComm_t comm) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = group_to_comm_.find(group_name);
@@ -287,6 +327,7 @@ class TORCH_API NCCLDevCommManager {
 #ifdef USE_ROCM
       group_to_device_api_support_.erase(group_name);
       group_to_capture_allocation_support_.erase(group_name);
+      group_to_comm_generation_.erase(group_name);
 #endif
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
       devcomm_registry_.erase(group_name);
@@ -362,6 +403,8 @@ class TORCH_API NCCLDevCommManager {
 #ifdef USE_ROCM
   std::unordered_map<std::string, bool> group_to_device_api_support_;
   std::unordered_map<std::string, bool> group_to_capture_allocation_support_;
+  std::unordered_map<std::string, uint64_t> group_to_comm_generation_;
+  uint64_t next_comm_generation_{1};
   cudaStream_t capture_setup_stream_{nullptr};
   std::mutex capture_setup_mutex_;
 #endif

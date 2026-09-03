@@ -1,4 +1,6 @@
 #ifdef USE_ROCM
+// RCCL gates its reduce/copy device APIs on CUDA's extended-lambda macro. HIP
+// supports the required device lambdas but does not define that macro.
 #ifndef __CUDACC_EXTENDED_LAMBDA__
 #define __CUDACC_EXTENDED_LAMBDA__ 1
 #endif
@@ -16,7 +18,8 @@
 
 #if defined(NCCL_DEVICE_HAS_REDUCE_COPY) && defined(USE_ROCM) && \
     defined(__HIP_NO_HALF_OPERATORS__)
-// ATen disables HIP's half operators, but RCCL instantiates OpSum<__half>.
+// PyTorch disables HIP's half operators, but RCCL's reduce/copy headers
+// instantiate OpSum<__half> even when only copy APIs are used.
 __device__ __forceinline__ __half operator+(
     const __half& a,
     const __half& b) {
@@ -241,19 +244,9 @@ void nccl_all_gather_offset(
     reqs.lsaBarrierCount = AG_MAX_CTAS;
     reqs.lsaMultimem = use_multimem;
     ncclDevComm devcomm;
-#ifdef USE_ROCM
-    {
-      c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard{
-          cudaStreamCaptureModeRelaxed};
-      C10D_NCCL_CHECK(
-          ncclDevCommCreate(comm, &reqs, &devcomm),
-          "ncclDevCommCreate failed in nccl_all_gather_offset");
-    }
-#else
     C10D_NCCL_CHECK(
         ncclDevCommCreate(comm, &reqs, &devcomm),
         "ncclDevCommCreate failed in nccl_all_gather_offset");
-#endif
     devcomm_opt = manager.register_devcomm(group_name, devcomm, devcomm_key);
   }
   ncclDevComm& devcomm = devcomm_opt->get();
@@ -302,11 +295,7 @@ void nccl_all_gather_offset(
   auto out_window = out_hdl->get_window();
   TORCH_CHECK(
       out_window != nullptr, "nccl_all_gather_offset: out window is null");
-#ifdef USE_ROCM
   const size_t out_window_base_offset = out_hdl->get_window_offset();
-#else
-  const size_t out_window_base_offset = out_hdl->get_offset();
-#endif
   TORCH_CHECK(
       reinterpret_cast<uintptr_t>(input.data_ptr()) % AG_ALIGN == 0,
       "nccl_all_gather_offset: input must be 16-byte aligned");

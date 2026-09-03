@@ -1,4 +1,6 @@
 #ifdef USE_ROCM
+// RCCL gates its reduce/copy device APIs on CUDA's extended-lambda macro. HIP
+// supports the required device lambdas but does not define that macro.
 #ifndef __CUDACC_EXTENDED_LAMBDA__
 #define __CUDACC_EXTENDED_LAMBDA__ 1
 #endif
@@ -15,7 +17,8 @@
 #include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
 
 #if defined(NCCL_DEVICE_HAS_REDUCE_COPY) && defined(USE_ROCM)
-// ATen disables HIP's half operators, but RCCL instantiates OpSum<__half>.
+// PyTorch disables HIP's half operators, but RCCL's reduce/copy headers
+// instantiate OpSum<__half> for half reductions.
 #if defined(__HIP_NO_HALF_OPERATORS__)
 __device__ __forceinline__ __half operator+(const __half& a, const __half& b) {
   return __float2half(__half2float(a) + __half2float(b));
@@ -145,11 +148,15 @@ __global__ void reduce_scatter_offset_kernel(
 // across ranks), so every rank agrees on the barrier index for each row tile.
 //
 // Slots are launched sequentially on the stream (one launch per owned block) so
-// that at most one destination allocation is being written at a time.  On ROCm,
-// running the LSA device reduce concurrently across CTAs that write to DIFFERENT
-// destination allocations triggers a memory-aperture fault in RCCL's device
-// reduce; serializing per destination avoids it.  Row tiles within a single slot
-// all write the same destination allocation, which is safe.
+// that at most one destination allocation is being written at a time. A fused
+// multi-destination launch was reproduced with RCCL 2.30.7 on both gfx942 and
+// gfx950: the GPU queues reported HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION
+// while CTAs wrote different destination allocations. Serialize all ROCm
+// launches conservatively until the underlying RCCL device-reduce issue is
+// understood and fixed. Row tiles within one slot all write the same destination
+// allocation, which is safe.
+// TODO: Debug the RCCL multi-destination LSA reduction and narrow or remove this
+// workaround when the fused launch is safe.
 //
 // UseMultimem=true: uses ncclMultimemReduceSum for hardware reduction via
 // multicast; requires devcomm created with lsaMultimem=true.
@@ -260,19 +267,9 @@ void nccl_reduce_scatter_offset(
     reqs.lsaBarrierCount = RS_MAX_CTA_COUNT;
     reqs.lsaMultimem = use_multimem;
     ncclDevComm devcomm;
-#ifdef USE_ROCM
-    {
-      c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard{
-          cudaStreamCaptureModeRelaxed};
-      C10D_NCCL_CHECK(
-          ncclDevCommCreate(comm, &reqs, &devcomm),
-          "ncclDevCommCreate failed in nccl_reduce_scatter_offset");
-    }
-#else
     C10D_NCCL_CHECK(
         ncclDevCommCreate(comm, &reqs, &devcomm),
         "ncclDevCommCreate failed in nccl_reduce_scatter_offset");
-#endif
     // Cache the device communicator.
     devcomm_opt = manager.register_devcomm(group_name, devcomm, kDevcommKey);
   }
@@ -461,9 +458,8 @@ void nccl_reduce_scatter_offset(
   auto window = nccl_hdl->get_window();
   TORCH_CHECK(window != nullptr, "nccl_reduce_scatter_offset: NCCL window is null");
 
-  // Launch one kernel per owned slot, sequentially on the stream.  Reducing to
-  // different destination allocations concurrently faults in RCCL's device
-  // reduce on ROCm (see the kernel comment); stream-ordered per-slot launches
+  // Launch one kernel per owned slot, sequentially on the stream. See the
+  // gfx942/gfx950 RCCL fault rationale above; stream-ordered per-slot launches
   // keep at most one destination in flight while still tiling rows across CTAs.
   AT_DISPATCH_NV_FLOATS(
       input.scalar_type(),

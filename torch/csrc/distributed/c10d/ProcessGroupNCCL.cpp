@@ -291,6 +291,19 @@ bool shouldAllCommunicatorsRegisterAllTensors() {
   return flag;
 }
 
+#if defined(USE_ROCM) && defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT)
+void unregisterSymmetricMemoryComm(
+    const std::shared_ptr<NCCLComm>& ncclComm,
+    const std::string& groupName) {
+  if (!ncclComm || ncclComm->isAborted()) {
+    return;
+  }
+  c10::Device device(at::kCUDA, ncclComm->getDeviceIndex());
+  c10d::symmetric_memory::NCCLDevCommManager::get(device).unregister_comm(
+      groupName, ncclComm->getNcclComm());
+}
+#endif
+
 } // namespace
 
 // Map each communicator to the memory pools registered with it.
@@ -1452,6 +1465,14 @@ void ProcessGroupNCCL::abortCommsFromMap(
     auto& ncclComm = it.second;
     VLOG(2) << logPrefix() << "ProcessGroupNCCL destroying ncclComm_ "
             << ncclComm->repr() << " on CUDA device: " << devName;
+#if defined(USE_ROCM) && defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT)
+    // A retained symmetric-memory handle must stop resolving this RCCL
+    // communicator before abort invalidates it. Identity-safe removal also
+    // leaves a same-name successor untouched.
+    const std::string symmMemGroupName =
+        options_->group_name.empty() ? "0" : options_->group_name;
+    unregisterSymmetricMemoryComm(ncclComm, symmMemGroupName);
+#endif
     // abort() call now has GPU guard inside
     ncclComm->abort(abortReason);
     // Note that we don't remove the aborted communicators from the
@@ -1596,6 +1617,14 @@ void ProcessGroupNCCL::shutdown() {
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto& it : devNCCLCommMap_) {
       auto& ncclComm = it.second;
+#if defined(USE_ROCM) && defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT)
+      // Retire the registry entry while the RCCL communicator is still valid.
+      // Late deregistration through a destroyed communicator produced
+      // "invalid device ordinal" on the tested ROCm stack.
+      const std::string symmMemGroupName =
+          options_->group_name.empty() ? "0" : options_->group_name;
+      unregisterSymmetricMemoryComm(ncclComm, symmMemGroupName);
+#endif
       ncclComm->destroy();
     }
   }
@@ -1607,23 +1636,25 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
 
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
-  // Drop our entry from each per-device NCCLDevCommManager. Skip aborted
-  // comms -- a successor PG may have already re-registered under the same
-  // group_uid (e.g. restart-after-error), and unconditionally clearing
-  // would silently wipe the successor's entry.
+  // Fallback for process groups that reach destruction without shutdown or
+  // abort. Normal ROCm teardown retires the identity before invalidating RCCL;
+  // the fallback remains identity-safe for a same-name successor.
   {
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto& [_, ncclComm] : devNCCLCommMap_) {
       if (!ncclComm || ncclComm->isAborted()) {
         continue;
       }
-      c10::Device device(at::kCUDA, ncclComm->getDeviceIndex());
 #ifdef USE_ROCM
+      // ROCm rendezvous keys the manager by the Python-visible group name.
+      // Match the WORLD-group "0" fallback used at registration, and include
+      // the comm identity so a delayed destructor cannot erase a successor
+      // process group that reused the same name.
       const std::string symmMemGroupName =
           options_->group_name.empty() ? "0" : options_->group_name;
-      c10d::symmetric_memory::NCCLDevCommManager::get(device).unregister_comm(
-          symmMemGroupName, ncclComm->getNcclComm());
+      unregisterSymmetricMemoryComm(ncclComm, symmMemGroupName);
 #else
+      c10::Device device(at::kCUDA, ncclComm->getDeviceIndex());
       c10d::symmetric_memory::NCCLDevCommManager::get(device).unregister_comm(
           getGroupUid());
 #endif
@@ -3313,6 +3344,9 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
     // regardless of backend. Gated on NCCL_HAS_SYMMEM_DEVICE_SUPPORT
     // Unregistered in ~ProcessGroupNCCL.
 #ifdef USE_ROCM
+    // NCCLSymmetricMemory resolves a process group by its Python-visible name;
+    // use the same "0" fallback as the default WORLD group. Keep CUDA on
+    // getGroupUid() so enabling ROCm does not change its existing registry key.
     const std::string symmMemGroupName =
         options_->group_name.empty() ? "0" : options_->group_name;
     c10d::symmetric_memory::NCCLDevCommManager::get(device).register_comm(
