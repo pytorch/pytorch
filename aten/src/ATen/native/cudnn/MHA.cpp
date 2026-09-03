@@ -165,6 +165,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
 #include <ATen/native/transformers/sdp_utils.h>
 
 #include <ATen/cuda/Exceptions.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 
 #include <ATen/TensorUtils.h>
 #include <ATen/native/utils/ParamsHash.h>
@@ -297,6 +298,15 @@ enum class SequenceLengthMode : uint8_t {
   CUMULATIVE = 1,
 };
 
+// Which causal diagonal cuDNN masks against. TOP_LEFT is the dense SDPA
+// convention; BOTTOM_RIGHT aligns the diagonal to the last query and key of
+// each sequence, which is the FlashAttention varlen/KV-cache convention.
+enum class CausalMask : uint8_t {
+  NONE = 0,
+  TOP_LEFT = 1,
+  BOTTOM_RIGHT = 2,
+};
+
 struct MHAParams {
   c10::DeviceIndex device_id;
   fe::DataType_t dataType;
@@ -326,9 +336,7 @@ struct MHAParams {
   int64_t d_qk;
   int64_t d_v;
   double dropout_probability;
-  bool is_causal;
-  // Align the causal diagonal to the bottom right of each sequence.
-  bool is_causal_bottom_right;
+  CausalMask causal_mask;
   bool return_softmaxstats;
   // might be redundant if we take 0 dim/stride
   // as signaling no-bias
@@ -401,12 +409,11 @@ void setMHAParams(
     const Tensor& dO,
     const Tensor& softmaxstats,
     double dropout_probability,
-    bool is_causal,
+    CausalMask causal_mask,
     bool return_softmaxstats,
     bool is_nested,
     const std::optional<Tensor>& page_table,
-    SequenceLengthMode sequence_length_mode,
-    bool is_causal_bottom_right) {
+    SequenceLengthMode sequence_length_mode) {
   memset(&params, 0, sizeof(MHAParams));
   params.device_id = at::cuda::current_device();
   params.dataType = fe::DataType_t::HALF;
@@ -420,8 +427,7 @@ void setMHAParams(
   params.s_q = s_q;
   params.s_kv = s_kv;
   params.dropout_probability = dropout_probability;
-  params.is_causal = is_causal;
-  params.is_causal_bottom_right = is_causal_bottom_right;
+  params.causal_mask = causal_mask;
   params.return_softmaxstats = return_softmaxstats;
   params.has_attn_bias = attn_bias.has_value();
   params.is_paged = page_table.has_value();
@@ -509,13 +515,12 @@ struct MHACacheKeyWrapper : ParamsWrapper<MHAParams> {
       const Tensor& dO,
       const Tensor& softmaxstats,
       double dropout_probability,
-      bool is_causal,
+      CausalMask causal_mask,
       bool return_softmaxstats,
       bool is_nested,
       const std::optional<Tensor>& page_table = std::nullopt,
       SequenceLengthMode sequence_length_mode =
-          SequenceLengthMode::PER_SEQUENCE,
-      bool is_causal_bottom_right = false) {
+          SequenceLengthMode::PER_SEQUENCE) {
     setMHAParams(
         this->pod,
         b,
@@ -532,12 +537,11 @@ struct MHACacheKeyWrapper : ParamsWrapper<MHAParams> {
         dO,
         softmaxstats,
         dropout_probability,
-        is_causal,
+        causal_mask,
         return_softmaxstats,
         is_nested,
         page_table,
-        sequence_length_mode,
-        is_causal_bottom_right);
+        sequence_length_mode);
   }
 };
 
@@ -897,8 +901,7 @@ std::unique_ptr<fe::graph::Graph> build_graph_nestedtensor(
     int64_t d_v,
     float scaling_factor,
     bool return_softmaxstats,
-    bool is_causal,
-    bool is_causal_bottom_right,
+    CausalMask causal_mask,
     double dropout_probability,
     const Tensor& cum_seqlen_q,
     const Tensor& cum_seqlen_kv,
@@ -952,8 +955,8 @@ std::unique_ptr<fe::graph::Graph> build_graph_nestedtensor(
 #else
           .set_generate_stats(return_softmaxstats)
 #endif
-          .set_causal_mask(is_causal && !is_causal_bottom_right)
-          .set_causal_mask_bottom_right(is_causal && is_causal_bottom_right)
+          .set_causal_mask(causal_mask == CausalMask::TOP_LEFT)
+          .set_causal_mask_bottom_right(causal_mask == CausalMask::BOTTOM_RIGHT)
           .set_attn_scale(attn_scale)
           .set_padding_mask(true);
 #if AT_CUDNN_HAS_CUMULATIVE_SEQUENCE_LENGTHS
@@ -1644,7 +1647,7 @@ void run_cudnn_SDP_fprop(
       Tensor(),
       softmaxstats,
       dropout_probability,
-      is_causal,
+      is_causal ? CausalMask::TOP_LEFT : CausalMask::NONE,
       return_softmaxstats,
       false);
   auto [cache_it, not_found] = getMHAGraphCache_().try_emplace(key, nullptr);
@@ -1754,10 +1757,14 @@ void run_cudnn_SDP_fprop_nestedtensor(
   // seqused_k describes a KV cache whose queries are its newest tokens, so
   // causal masking aligns the diagonal to the bottom right of each sequence
   // (FlashAttention semantics) instead of the top left.
-  const bool is_causal_bottom_right = is_causal && seqused_k.has_value();
-  TORCH_CHECK(
-      !is_causal_bottom_right || sdp::is_cudnn_varlen_924_or_later(),
-      "cuDNN varlen causal attention with a KV cache requires cuDNN >= 9.24.");
+  const CausalMask causal_mask = !is_causal ? CausalMask::NONE
+      : seqused_k.has_value()               ? CausalMask::BOTTOM_RIGHT
+                                            : CausalMask::TOP_LEFT;
+  if (causal_mask == CausalMask::BOTTOM_RIGHT) {
+    TORCH_CHECK(
+        at::detail::getCUDAHooks().versionRuntimeCuDNN() >= 92400,
+        "cuDNN varlen causal attention with a KV cache requires cuDNN >= 9.24.");
+  }
   if (seqused_k.has_value()) {
     checkInt32Alignment(seqused_k.value(), "seqused_k");
   }
@@ -1801,12 +1808,11 @@ void run_cudnn_SDP_fprop_nestedtensor(
       Tensor(),
       softmaxstats_,
       dropout_probability,
-      is_causal,
+      causal_mask,
       return_softmaxstats,
       true,
       page_table,
-      sequence_length_mode,
-      is_causal_bottom_right);
+      sequence_length_mode);
 
   MHAGraphCache& cache = getMHAGraphCache_();
   auto cache_it = cache.find(key);
@@ -1822,8 +1828,7 @@ void run_cudnn_SDP_fprop_nestedtensor(
         d_v,
         scaling_factor,
         return_softmaxstats,
-        is_causal,
-        is_causal_bottom_right,
+        causal_mask,
         dropout_probability,
         cum_seqlen_q,
         cum_seqlen_kv,
@@ -2012,7 +2017,7 @@ void run_cudnn_SDP_bprop(
       dO_,
       softmaxstats,
       dropout_probability,
-      is_causal,
+      is_causal ? CausalMask::TOP_LEFT : CausalMask::NONE,
       true,
       false);
   auto [cache_it, not_found] =
@@ -2190,7 +2195,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
       dO_,
       softmaxstats_,
       dropout_probability,
-      is_causal,
+      is_causal ? CausalMask::TOP_LEFT : CausalMask::NONE,
       true,
       true);
 

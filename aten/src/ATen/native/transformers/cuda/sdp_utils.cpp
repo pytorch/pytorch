@@ -1035,18 +1035,6 @@ bool is_cudnn_attention_decode_disabled() {
 #endif
 }
 
-// Short-query and bottom-right causal varlen attention are only validated on
-// cuDNN 9.24 and newer.
-bool is_cudnn_varlen_924_or_later() {
-#if AT_CUDNN_ENABLED() && defined(CUDNN_VERSION)
-  static const bool supported =
-      at::detail::getCUDAHooks().versionRuntimeCuDNN() >= 92400;
-  return supported;
-#else
-  return false;
-#endif
-}
-
 bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
 #if defined(USE_ROCM) || !AT_CUDNN_ENABLED() || !defined(CUDNN_VERSION)
   if (debug) {

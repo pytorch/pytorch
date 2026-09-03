@@ -66,16 +66,15 @@ def use_fa4():
 
 
 @contextmanager
-def _use_flash(activate_impl):
-    """Pin Flash so cuDNN-eligible shapes still exercise the requested impl."""
+def _use_backend(backend):
+    """Pin the SDPA backend so each parametrization exercises what it names."""
+    if backend == "cudnn":
+        with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+            yield
+        return
+    activate_impl = {"fa2": nullcontext, "fa3": use_fa3, "fa4": use_fa4}[backend]
     with activate_impl(), sdpa_kernel(SDPBackend.FLASH_ATTENTION):
         yield
-
-
-def _use_backend(backend):
-    if backend == "cudnn":
-        return nullcontext()
-    return _use_flash({"fa2": nullcontext, "fa3": use_fa3, "fa4": use_fa4}[backend])
 
 
 def _check_cudnn_varlen_supported(device):
@@ -468,9 +467,8 @@ class TestVarlenAttention(NNTestCase):
             if _should_use_cudnn
             else nullcontext()
         )
-        backend_context = nullcontext() if _should_use_cudnn else _use_backend(backend)
         with (
-            backend_context,
+            _use_backend(backend),
             _use_cudnn_varlen(_should_use_cudnn, device),
             forward_context as cudnn_forward,
         ):
@@ -897,7 +895,7 @@ class TestVarlenAttention(NNTestCase):
             dtype,
             scale=None,
             window_size=window_size,
-            backend="fa2",
+            backend="cudnn",
             enable_gqa=False,
             _should_use_cudnn=_should_use_cudnn,
         )
@@ -2151,6 +2149,7 @@ class TestVarlenAttention(NNTestCase):
         scale = 1.0 / math.sqrt(head_dim)
         repeats = num_heads_q // num_heads_k
         expected = torch.empty_like(q_packed, dtype=torch.float32)
+        expected_lse = torch.empty_like(lse)
         for i, (q_len, kv_len) in enumerate(zip(q_lens, kv_lens)):
             lo, hi = int(cu_seq_q[i]), int(cu_seq_q[i + 1])
             q_i = q_packed[lo:hi].float()
@@ -2162,7 +2161,10 @@ class TestVarlenAttention(NNTestCase):
             scores.masked_fill_(col > row + (kv_len - q_len), float("-inf"))
             probs = torch.nan_to_num(scores.softmax(-1))
             expected[lo:hi] = torch.einsum("hqk,khd->qhd", probs, v_i)
+            # Fully masked rows (empty KV) have an LSE of -inf.
+            expected_lse[:, lo:hi] = scores.logsumexp(-1)
         self.assertEqual(output.float(), expected, atol=2e-2, rtol=2e-2)
+        self.assertEqual(lse, expected_lse, atol=2e-2, rtol=2e-2)
         self.assertEqual(out_buf, output)
         self.assertEqual(lse_out, lse)
 

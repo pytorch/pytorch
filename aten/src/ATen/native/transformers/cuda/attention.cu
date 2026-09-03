@@ -5,6 +5,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/core/grad_mode.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
@@ -988,8 +989,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
   return std::make_tuple(Tensor(), Tensor(), Tensor(), Tensor(), c10::SymInt(0), c10::SymInt(0), Tensor(), Tensor(), Tensor());
 }
 
-// `out` receives the attention output in the varlen path instead of a fresh
-// allocation.
 static std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Tensor, Tensor> _cudnn_attention_forward_impl(
     const Tensor& query,
     const Tensor& key,
@@ -1038,7 +1037,7 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tens
       "last dimension.");
   TORCH_CHECK(
       !is_nested || max_seqlen_batch_q > 128 ||
-          sdp::is_cudnn_varlen_924_or_later(),
+          at::detail::getCUDAHooks().versionRuntimeCuDNN() >= 92400,
       "cuDNN varlen attention requires cuDNN >= 9.24 for query sequence length <= 128.");
   TORCH_CHECK(
       is_nested || !has_kv_cache,
