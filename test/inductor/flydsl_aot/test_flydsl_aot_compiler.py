@@ -214,14 +214,12 @@ class FlyDSLAOTCompilerTest(TestCase):
             [{"kind": "pointer", "ctype": "pointer", "size": 8, "alignment": 8}],
             _argument_abi(pointer),
         )
-        self.assertEqual(
-            "float16_bits",
-            _argument_abi(fx.Float16(1.0))[0]["encoding"],
-        )
-        self.assertEqual(
-            "bfloat16_bits",
-            _argument_abi(fx.BFloat16(1.0))[0]["encoding"],
-        )
+        float16 = _argument_abi(fx.Float16(1.0))[0]
+        bfloat16 = _argument_abi(fx.BFloat16(1.0))[0]
+        self.assertEqual("uint16", float16["ctype"])
+        self.assertEqual("float16_bits", float16["encoding"])
+        self.assertEqual("uint16", bfloat16["ctype"])
+        self.assertEqual("bfloat16_bits", bfloat16["encoding"])
         self.assertEqual("float", _argument_abi(fx.Float32(1.0))[0]["ctype"])
         self.assertEqual("double", _argument_abi(fx.Float64(1.0))[0]["ctype"])
 
@@ -242,11 +240,20 @@ class FlyDSLAOTCompilerTest(TestCase):
         ):
             _argument_abi(fx.Int32(1))
 
-    def test_compile_aot_does_not_dispatch_launcher(self):
+    def test_unsupported_custom_jit_argument_is_rejected(self):
+        class CustomJitArgument:
+            def __c_abi_spec__(self):
+                return []
+
+        with self.assertRaisesRegex(NotImplementedError, "unsupported JIT argument"):
+            _argument_abi(CustomJitArgument())
+
+    def test_compile_aot_supports_positional_only_and_constexpr_arguments(self):
         @flyc.jit
         def launcher(
             inp: fx.Tensor,
             block_dim: fx.Constexpr[int],
+            /,
             *,
             rows: fx.Int32,
         ):

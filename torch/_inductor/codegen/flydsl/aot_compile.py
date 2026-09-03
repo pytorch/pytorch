@@ -463,8 +463,23 @@ def compile_aot(launcher: Any, *args, **kwargs) -> CompiledAOTLauncher:
                     dsl_args = protocol.construct_from_ir_values(
                         dsl_types, user_jit_args, ir_args
                     )
-                    named_args = dict(zip(param_names, dsl_args))
-                    named_args.update(constexpr_values)
+                    resolved_args = dict(zip(param_names, dsl_args))
+                    resolved_args.update(constexpr_values)
+                    positional_args = []
+                    keyword_args = {}
+                    for parameter in sig.parameters.values():
+                        value = resolved_args[parameter.name]
+                        if parameter.kind is inspect.Parameter.POSITIONAL_ONLY:
+                            positional_args.append(value)
+                        elif parameter.kind in (
+                            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                            inspect.Parameter.KEYWORD_ONLY,
+                        ):
+                            keyword_args[parameter.name] = value
+                        else:
+                            raise TypeError(
+                                "FlyDSL AOT does not support variadic launcher parameters"
+                            )
                     fastmath_flag = kernel_function.effective_fastmath_hint(
                         kernel_function.CompilationContext.get_compile_hints()
                     )
@@ -475,9 +490,9 @@ def compile_aot(launcher: Any, *args, **kwargs) -> CompiledAOTLauncher:
                     )
                     with meta.tracing_context(launcher.func), fastmath_scope:
                         if bound_self is not None:
-                            launcher.func(bound_self, **named_args)
+                            launcher.func(bound_self, *positional_args, **keyword_args)
                         else:
-                            launcher.func(**named_args)
+                            launcher.func(*positional_args, **keyword_args)
                     func.ReturnOp([])
 
         link_libs = list(comp_ctx.link_libs) if comp_ctx.link_libs else None
