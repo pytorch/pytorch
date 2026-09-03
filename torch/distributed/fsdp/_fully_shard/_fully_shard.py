@@ -28,6 +28,7 @@ from ._fsdp_init import (
     _get_post_forward_mesh_info,
     _init_default_mesh,
     _init_param_group,
+    _resolve_param_mp_policies,
     _validate_mesh,
     _validate_module,
 )
@@ -219,8 +220,9 @@ def fully_shard(
             i.e. the tensor dim size on that dim must be divisible by the FSDP
             shard mesh size.
         mp_policy (MixedPrecisionPolicy): This controls the mixed precision
-            policy, which offers parameter/reduction mixed precision for this
-            module. See :class:`MixedPrecisionPolicy` for details.
+            policy, including optional per-parameter compute dtypes. Forward
+            input and output casting remain module-level. See
+            :class:`MixedPrecisionPolicy` for details.
         offload_policy (OffloadPolicy): This controls the offloading policy,
             which offers parameter/gradient/optimizer state offloading. See
             :class:`OffloadPolicy` and its subclasses for details.
@@ -266,6 +268,7 @@ def fully_shard(
     arg_module, modules, managed_modules, params, buffers = _get_modules_and_states(
         module, device, ignored_params
     )
+    mp_policy, param_mp_policies = _resolve_param_mp_policies(params, mp_policy)
     state = fully_shard.state(modules[0])  # type: ignore[attr-defined]
     state.init(modules, device, mp_policy, auto_reshard_after_forward)
 
@@ -282,6 +285,7 @@ def fully_shard(
         reshard_after_forward=reshard_after_forward
         if not auto_reshard_after_forward
         else True,
+        param_mp_policies=param_mp_policies,
     )
 
     # For Dynamo
@@ -346,8 +350,8 @@ class FSDPModule:
         """
         Unshards the module's parameters by allocating memory and all-gathering
         the parameters. This method is *not* recursive. The unshard follows the
-        :class:`MixedPrecisionPolicy`, so it will all-gather following
-        ``param_dtype`` if set.
+        :class:`MixedPrecisionPolicy`, so it will all-gather each parameter in
+        its resolved ``param_dtype`` if set.
 
         Args:
             async_op (bool): If ``True``, then returns a :class:`UnshardHandle`

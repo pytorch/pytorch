@@ -19,6 +19,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_init import (
     _get_modules_and_states,
     _init_default_mesh,
     _init_param_group,
+    _resolve_param_mp_policies,
     _validate_mesh as _validate_mesh_common,
     _validate_module as _validate_module_common,
 )
@@ -152,6 +153,7 @@ def replicate(
         is_composable_fn=is_composable_with_replicate,
         get_state_fn=_get_module_replicate_state,
     )
+    mp_policy, param_mp_policies = _resolve_param_mp_policies(params, mp_policy)
     state = replicate.state(modules[0])  # type: ignore[attr-defined]
     state.init(modules, device, mp_policy)
 
@@ -165,6 +167,7 @@ def replicate(
         None,  # shard_placement_fn
         mp_policy,
         offload_policy,
+        param_mp_policies=param_mp_policies,
     )
 
     # Place Replicate leftmost for highest priority in the method resolution order

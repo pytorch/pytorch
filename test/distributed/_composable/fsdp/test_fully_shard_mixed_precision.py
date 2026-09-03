@@ -5,15 +5,18 @@ import dataclasses
 import functools
 import unittest
 from typing import Any, NamedTuple
+from unittest import mock
 
 import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
+import torch.distributed.fsdp._fully_shard._fsdp_collectives as fsdp_collectives
 import torch.nn as nn
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _get_gradient_divide_factors,
+    foreach_reduce_scatter_copy_in,
 )
 from torch.distributed.tensor import Shard
 from torch.testing._internal.common_distributed import (
@@ -28,6 +31,7 @@ from torch.testing._internal.common_fsdp import (
     FSDPTestMultiThread,
     get_devtype,
     MLP,
+    patch_all_gather,
     patch_reduce_scatter,
     reduce_scatter_with_assert,
 )
@@ -258,6 +262,452 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
 
             self.assertEqual(fsdp_loss, ref_loss)
             check_sharded_parity(self, ref_model, model)
+
+    @skipIfRocmVersionLessThan((7, 0))
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(DISTRIBUTED_BACKEND != "nccl", "Requires NCCL backend")
+    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
+    def test_per_param_compute_dtypes(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w0 = nn.Parameter(torch.randn(13, 13))
+                self.w1 = nn.Parameter(torch.randn(13, 13))
+                self.w2 = nn.Parameter(torch.randn(13, 13))
+                self.param_dtypes: tuple[torch.dtype, ...] = ()
+
+            def forward(self, inp: torch.Tensor) -> torch.Tensor:
+                weights = (self.w0, self.w1, self.w2)
+                self.param_dtypes = tuple(weight.dtype for weight in weights)
+                outputs = [
+                    (inp.to(weight.dtype) @ weight).float() for weight in weights
+                ]
+                return outputs[0] + outputs[1] + outputs[2]
+
+        torch.manual_seed(42)
+        model = Model()
+        ref_model = copy.deepcopy(model).to(device_type)
+        compute_dtypes = (torch.bfloat16, torch.float16, torch.float32)
+        param_dtype_overrides = dict(
+            zip(
+                (id(param) for param in model.parameters()),
+                (None, torch.float16, torch.float32),
+                strict=True,
+            )
+        )
+        selector_calls = 0
+
+        def param_dtype_fn(param: nn.Parameter) -> torch.dtype | None:
+            nonlocal selector_calls
+            selector_calls += 1
+            return param_dtype_overrides[id(param)]
+
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16,
+            reduce_dtype=torch.float32,
+            cast_forward_inputs=False,
+            param_dtype_fn=param_dtype_fn,
+        )
+        fully_shard(model, mp_policy=mp_policy, reshard_after_forward=False)
+        self.assertEqual(selector_calls, 3)
+        state = fully_shard.state(model)
+        self.assertIsNone(state._mp_policy.param_dtype_fn)
+        param_group = state._fsdp_param_group
+        if param_group is None:
+            raise AssertionError("Expected an FSDP parameter group")
+        self.assertEqual(
+            tuple(param.mp_policy.param_dtype for param in param_group.fsdp_params),
+            compute_dtypes,
+        )
+        for param in param_group.fsdp_params:
+            self.assertIsNone(param.mp_policy.param_dtype_fn)
+
+        torch.manual_seed(1 + self.rank)
+        inp = torch.randn(4, 13, device=device_type)
+        ref_weights = tuple(ref_model.parameters())
+
+        def ref_forward() -> torch.Tensor:
+            return sum(
+                (inp.to(dtype) @ weight.to(dtype)).float()
+                for weight, dtype in zip(ref_weights, compute_dtypes, strict=True)
+            )
+
+        all_gather_calls = 0
+        reduce_scatter_calls = 0
+        orig_all_gather = dist.all_gather_single
+        orig_reduce_scatter = dist.reduce_scatter_single
+
+        def all_gather(output_tensor, input_tensor, *args, **kwargs):
+            nonlocal all_gather_calls
+            all_gather_calls += 1
+            self.assertEqual(input_tensor.dtype, torch.uint8)
+            self.assertEqual(output_tensor.dtype, torch.uint8)
+            return orig_all_gather(output_tensor, input_tensor, *args, **kwargs)
+
+        def reduce_scatter(output, input, *args, **kwargs):
+            nonlocal reduce_scatter_calls
+            reduce_scatter_calls += 1
+            self.assertEqual(input.dtype, torch.float32)
+            self.assertEqual(output.dtype, torch.float32)
+            return orig_reduce_scatter(output, input, *args, **kwargs)
+
+        with (
+            patch_all_gather(all_gather),
+            patch_reduce_scatter(reduce_scatter),
+        ):
+            ref_out = ref_forward()
+            out = model(inp)
+            self.assertEqual(out, ref_out)
+            ref_out.sum().backward()
+            dtype_casts = []
+            orig_to_dtype_if_needed = fsdp_collectives._to_dtype_if_needed
+
+            def to_dtype_if_needed(tensor, dtype):
+                if dtype is not None and tensor.dtype != dtype:
+                    dtype_casts.append((tensor.dtype, dtype, tensor.numel()))
+                return orig_to_dtype_if_needed(tensor, dtype)
+
+            with mock.patch.object(
+                fsdp_collectives, "_to_dtype_if_needed", to_dtype_if_needed
+            ):
+                out.sum().backward()
+            self.assertEqual(dtype_casts, [])
+            for param in ref_model.parameters():
+                dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
+            check_sharded_parity(self, ref_model, model)
+            self.assertEqual(all_gather_calls, 1)
+            self.assertEqual(reduce_scatter_calls, 1)
+
+            ref_model.zero_grad(set_to_none=True)
+            model.zero_grad(set_to_none=True)
+            for sync_gradients in (False, True):
+                model.set_requires_gradient_sync(sync_gradients)
+                model.set_reshard_after_backward(sync_gradients)
+                ref_out = ref_forward()
+                out = model(inp)
+                self.assertEqual(out, ref_out)
+                ref_out.sum().backward()
+                out.sum().backward()
+
+        for param in ref_model.parameters():
+            dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
+
+        self.assertEqual(model.param_dtypes, compute_dtypes)
+        self.assertEqual(selector_calls, 3)
+        self.assertEqual(all_gather_calls, 2)
+        self.assertEqual(reduce_scatter_calls, 2)
+        check_sharded_parity(self, ref_model, model)
+
+    @skip_if_lt_x_gpu(2)
+    def test_param_dtype_fn_invalid_return(self):
+        model = nn.Linear(4, 4)
+
+        def invalid_param_dtype_fn(_param: nn.Parameter) -> Any:
+            return "float16"
+
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16,
+            param_dtype_fn=invalid_param_dtype_fn,
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "param_dtype_fn must return a torch.dtype or None",
+        ):
+            fully_shard(model, mp_policy=mp_policy)
+
+    @skip_if_lt_x_gpu(2)
+    def test_per_param_compute_dtypes_require_common_reduce_dtype(self):
+        model = nn.Sequential(
+            nn.Linear(4, 4, bias=False),
+            nn.Linear(4, 4, bias=False),
+        )
+        param_ids = tuple(id(param) for param in model.parameters())
+        param_dtype_overrides = {param_ids[1]: torch.float16}
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16,
+            param_dtype_fn=lambda param: param_dtype_overrides.get(id(param)),
+        )
+        fully_shard(model, mp_policy=mp_policy)
+        with self.assertRaisesRegex(
+            AssertionError,
+            "requires a common reduce dtype",
+        ):
+            model.unshard()
+
+    @skip_if_lt_x_gpu(2)
+    def test_per_param_compute_dtype_preserves_all_gather_fast_path(self):
+        model = nn.Linear(8, 8)
+        param_ids = tuple(id(param) for param in model.parameters())
+        param_dtype_overrides = {param_ids[1]: torch.float32}
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16,
+            reduce_dtype=torch.float32,
+            param_dtype_fn=lambda param: param_dtype_overrides.get(id(param)),
+        )
+        fully_shard(model, mp_policy=mp_policy)
+
+        foreach_copy_dtypes = []
+        orig_foreach_copy = torch._foreach_copy_
+
+        def foreach_copy(dst_tensors, src_tensors, *args, **kwargs):
+            foreach_copy_dtypes.append(
+                (
+                    tuple(tensor.dtype for tensor in dst_tensors),
+                    tuple(tensor.dtype for tensor in src_tensors),
+                )
+            )
+            return orig_foreach_copy(dst_tensors, src_tensors, *args, **kwargs)
+
+        with mock.patch.object(torch, "_foreach_copy_", foreach_copy):
+            model.unshard()
+        self.assertEqual(
+            foreach_copy_dtypes,
+            [
+                ((torch.bfloat16,), (torch.float32,)),
+                (
+                    (torch.uint8, torch.uint8),
+                    (torch.uint8, torch.uint8),
+                ),
+            ],
+        )
+        self.assertEqual(model.weight.dtype, torch.bfloat16)
+        self.assertEqual(model.bias.dtype, torch.float32)
+
+    @skipIfRocmVersionLessThan((7, 0))
+    @skip_if_lt_x_gpu(2)
+    def test_mixed_dtype_reduce_scatter_copy_in(self):
+        world_size = 3
+        grads = [
+            torch.randn(
+                (world_size + 2, 2), device=device_type, dtype=torch.bfloat16
+            ),
+            torch.randn(
+                (world_size * 2, 3), device=device_type, dtype=torch.float32
+            ),
+            torch.randn((1, 4), device=device_type, dtype=torch.bfloat16),
+            torch.randn(
+                (5, world_size * 2), device=device_type, dtype=torch.float16
+            ).T,
+        ]
+        expected = torch._chunk_cat(
+            [grad.to(torch.float32) for grad in grads],
+            dim=0,
+            num_chunks=world_size,
+        )
+        reduce_scatter_input = torch.full_like(expected.flatten(), torch.nan)
+        foreach_copy_dtypes = []
+        orig_foreach_copy = torch._foreach_copy_
+
+        def foreach_copy(dst_tensors, src_tensors, *args, **kwargs):
+            foreach_copy_dtypes.append(
+                (
+                    {tensor.dtype for tensor in dst_tensors},
+                    {tensor.dtype for tensor in src_tensors},
+                )
+            )
+            return orig_foreach_copy(dst_tensors, src_tensors, *args, **kwargs)
+
+        with mock.patch.object(torch, "_foreach_copy_", foreach_copy):
+            foreach_reduce_scatter_copy_in(
+                grads, reduce_scatter_input, world_size
+            )
+
+        self.assertEqual(reduce_scatter_input.view_as(expected), expected)
+        self.assertEqual(
+            foreach_copy_dtypes,
+            [
+                ({torch.float32}, {torch.bfloat16}),
+                ({torch.float32}, {torch.float32}),
+            ],
+        )
+
+    @skipIfRocmVersionLessThan((7, 0))
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(DISTRIBUTED_BACKEND != "nccl", "Requires NCCL backend")
+    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
+    def test_per_param_compute_dtype_after_frozen_first_forward(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w0 = nn.Parameter(torch.randn(8, 8))
+                self.w1 = nn.Parameter(torch.randn(8, 8))
+
+            def forward(self, inp: torch.Tensor) -> torch.Tensor:
+                return (inp.to(self.w0.dtype) @ self.w0).float() + (
+                    inp.to(self.w1.dtype) @ self.w1
+                ).float()
+
+        model = Model()
+        param_ids = tuple(id(param) for param in model.parameters())
+        param_dtype_overrides = {param_ids[1]: torch.float16}
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16,
+            cast_forward_inputs=False,
+            param_dtype_fn=lambda param: param_dtype_overrides.get(id(param)),
+        )
+        fully_shard(model, mp_policy=mp_policy, reshard_after_forward=False)
+        model.requires_grad_(False)
+
+        inp = torch.randn(4, 8, device=device_type)
+        with torch.no_grad():
+            model(inp)
+        param_group = fully_shard.state(model)._fsdp_param_group
+        if param_group is None:
+            raise AssertionError("Expected an FSDP parameter group")
+        self.assertEqual(param_group._orig_dtype, torch.float32)
+        self.assertIsNone(param_group._reduce_dtype)
+
+        model.w0.requires_grad_(True)
+        model(inp).sum().backward()
+        self.assertEqual(model.w0.grad.dtype, torch.float32)
+        self.assertIsNone(model.w1.grad)
+
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(DISTRIBUTED_BACKEND != "nccl", "Requires NCCL backend")
+    def test_per_param_compute_dtype_after_partial_freeze(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w0 = nn.Parameter(torch.randn(8, 8))
+                self.w1 = nn.Parameter(torch.randn(8, 8))
+
+            def forward(self, inp: torch.Tensor) -> torch.Tensor:
+                return (inp.to(self.w0.dtype) @ self.w0).float() + (
+                    inp.to(self.w1.dtype) @ self.w1
+                ).float()
+
+        model = Model()
+        w1_id = id(model.w1)
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.float32,
+            reduce_dtype=torch.float32,
+            cast_forward_inputs=False,
+            param_dtype_fn=lambda param: (
+                torch.float16 if id(param) == w1_id else None
+            ),
+        )
+        model.w1.requires_grad_(False)
+        fully_shard(model, mp_policy=mp_policy, reshard_after_forward=False)
+
+        inp = torch.randn(4, 8, device=device_type)
+        with torch.no_grad():
+            model(inp)
+        param_group = fully_shard.state(model)._fsdp_param_group
+        if param_group is None:
+            raise AssertionError("Expected an FSDP parameter group")
+        self.assertEqual(param_group._orig_dtype, torch.float32)
+        self.assertEqual(param_group._reduce_dtype, torch.float32)
+
+        model.w1.requires_grad_(True)
+        model(inp).sum().backward()
+        self.assertEqual(model.w0.grad.dtype, torch.float32)
+        self.assertEqual(model.w1.grad.dtype, torch.float32)
+
+    @skipIfRocmVersionLessThan((7, 0))
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(DISTRIBUTED_BACKEND != "nccl", "Requires NCCL backend")
+    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
+    def test_reduce_dtype_after_frozen_mixed_original_dtypes(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w0 = nn.Parameter(torch.randn(8, 8))
+                self.w1 = nn.Parameter(torch.randn(8, 8, dtype=torch.bfloat16))
+
+            def forward(self, inp: torch.Tensor) -> torch.Tensor:
+                return inp @ self.w0 + (inp.to(self.w1.dtype) @ self.w1).float()
+
+        model = Model()
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16,
+            reduce_dtype=torch.float32,
+        )
+        fully_shard(model, mp_policy=mp_policy, reshard_after_forward=False)
+        model.requires_grad_(False)
+
+        inp = torch.randn(4, 8, device=device_type)
+        with torch.no_grad():
+            model(inp)
+        param_group = fully_shard.state(model)._fsdp_param_group
+        if param_group is None:
+            raise AssertionError("Expected an FSDP parameter group")
+        self.assertIsNone(param_group._orig_dtype)
+        self.assertEqual(param_group._reduce_dtype, torch.float32)
+
+        model.requires_grad_(True)
+        orig_reduce_scatter = dist.reduce_scatter_single
+
+        def assert_fn(output: torch.Tensor):
+            self.assertEqual(output.dtype, torch.float32)
+
+        reduce_scatter = functools.partial(
+            reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
+        )
+        with patch_reduce_scatter(reduce_scatter):
+            model(inp).sum().backward()
+        self.assertEqual(model.w0.grad.dtype, torch.float32)
+        self.assertEqual(model.w1.grad.dtype, torch.bfloat16)
+
+    @skipIfRocmVersionLessThan((7, 0))
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(DISTRIBUTED_BACKEND != "nccl", "Requires NCCL backend")
+    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
+    def test_unexpected_fresh_gradient_dtype(self):
+        model = nn.Linear(8, 8).to(device_type)
+        fully_shard(
+            model,
+            mp_policy=MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16,
+                reduce_dtype=torch.float32,
+            ),
+            reshard_after_forward=False,
+        )
+        inp = torch.randn(4, 8, device=device_type)
+        loss = model(inp).sum()
+        model.weight.grad_dtype = torch.float32
+
+        with self.assertRaisesRegex(
+            AssertionError,
+            "expected gradient dtype torch.bfloat16.*got torch.float32",
+        ):
+            loss.backward()
+        model.reset_iter_state()
+
+    @skipIfRocmVersionLessThan((7, 0))
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(DISTRIBUTED_BACKEND != "nccl", "Requires NCCL backend")
+    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
+    def test_unexpected_accumulated_gradient_dtype(self):
+        model = nn.Linear(8, 8).to(device_type)
+        fully_shard(
+            model,
+            mp_policy=MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16,
+                reduce_dtype=torch.float32,
+            ),
+            reshard_after_forward=False,
+        )
+        model.set_requires_gradient_sync(False)
+        inp = torch.randn(4, 8, device=device_type)
+        model(inp).sum().backward()
+        param_group = fully_shard.state(model)._fsdp_param_group
+        if param_group is None:
+            raise AssertionError("Expected an FSDP parameter group")
+        fsdp_param = param_group.fsdp_params[0]
+        accumulated_grad = fsdp_param.unsharded_accumulated_grad
+        if accumulated_grad is None:
+            raise AssertionError("Expected an accumulated gradient")
+        self.assertEqual(accumulated_grad.dtype, torch.float32)
+        fsdp_param.unsharded_accumulated_grad = accumulated_grad.to(torch.bfloat16)
+
+        model.set_requires_gradient_sync(True)
+        with self.assertRaisesRegex(
+            AssertionError,
+            "expected accumulated gradient dtype torch.float32.*got torch.bfloat16",
+        ):
+            model(inp).sum().backward()
+        fsdp_param.unsharded_accumulated_grad = None
+        model.reset_iter_state()
 
     @skipIfRocmVersionLessThan((7, 0))
     @skip_if_lt_x_gpu(2)

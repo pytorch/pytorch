@@ -1076,6 +1076,30 @@ class FSDPParam:
         unsharded_param.grad = None
         self.unsharded_accumulated_grad = unsharded_grad.to(self.reduce_dtype)
 
+    def _validate_unsharded_grad_dtypes(self) -> None:
+        compute_dtype = self.param_dtype or self.orig_dtype
+        unsharded_param = getattr(self, "_unsharded_param", None)
+        # A fresh autograd gradient has not passed through FSDP's reduction
+        # cast, while a saved accumulator has.
+        if (
+            unsharded_param is not None
+            and (grad := unsharded_param.grad) is not None
+            and grad.dtype != compute_dtype
+        ):
+            _raise_assert_with_print(
+                f"FSDP expected gradient dtype {compute_dtype} for "
+                f"{self._param_fqn}, but got {grad.dtype}"
+            )
+        reduce_dtype = self.reduce_dtype or compute_dtype
+        if (
+            (accumulated_grad := self.unsharded_accumulated_grad) is not None
+            and accumulated_grad.dtype != reduce_dtype
+        ):
+            _raise_assert_with_print(
+                f"FSDP expected accumulated gradient dtype {reduce_dtype} for "
+                f"{self._param_fqn}, but got {accumulated_grad.dtype}"
+            )
+
     def accumulate_unsharded_grad_if_needed(self) -> None:
         if (
             self.unsharded_accumulated_grad is not None

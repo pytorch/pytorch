@@ -13,6 +13,7 @@ from torch.distributed.tensor import DTensor
 
 from ._fsdp_api import _ReduceOp
 from ._fsdp_common import (
+    _chunk_with_empty,
     _get_dim0_padded_size,
     _raise_assert_with_print,
     _to_dtype_if_needed,
@@ -396,12 +397,18 @@ def _get_param_all_gather_inputs(
     foreach_copy_indices: list[int] = []
     foreach_copy_inputs: list[torch.Tensor] = []
     foreach_copy_input_numels: list[int] = []
+    foreach_copy_dtype: torch.dtype | None = None
+    foreach_copy_dtypes_are_uniform = True
 
     # 1st pass: for foreach-copy parameters, get inputs and metadata for the
     # foreach copy, and for the others, actually get their all-gather inputs
     for i, fsdp_param in enumerate(fsdp_params):
         if use_foreach_copy(fsdp_param):
             foreach_copy_indices.append(i)
+            if foreach_copy_dtype is None:
+                foreach_copy_dtype = fsdp_param.param_dtype
+            elif fsdp_param.param_dtype != foreach_copy_dtype:
+                foreach_copy_dtypes_are_uniform = False
             all_gather_input = (
                 fsdp_param._sharded_param_data
                 if fsdp_param.sharded_state == ShardedState.SHARDED
@@ -413,6 +420,12 @@ def _get_param_all_gather_inputs(
             param_all_gather_inputs[i] = fsdp_param.all_gather_inputs
 
     # 2nd pass: use foreach copy to compute the remaining all-gather inputs
+    if not foreach_copy_dtypes_are_uniform:
+        # The flat foreach destination has one dtype, so use the per-parameter
+        # cast path when parameters request different compute dtypes.
+        for i in foreach_copy_indices:
+            param_all_gather_inputs[i] = fsdp_params[i].all_gather_inputs
+        return param_all_gather_inputs
     if foreach_copy_inputs:
         fsdp_param_0 = fsdp_params[foreach_copy_indices[0]]
         param_dtype, device = fsdp_param_0.param_dtype, fsdp_param_0.device
@@ -549,15 +562,7 @@ def foreach_reduce(
     autograd, so clearing the list frees the gradients.
     """
 
-    grad_dtypes = {grad.dtype for grad in unsharded_grads}
-    if len(grad_dtypes) != 1:
-        # Check this at runtime since it could be a real runtime error if e.g.
-        # fp8 weights do not produce the correct higher precision gradients
-        _raise_assert_with_print(
-            f"FSDP reduce-scatter expects uniform gradient dtype but got {grad_dtypes}"
-        )
-    grad_dtype = unsharded_grads[0].dtype
-    reduce_dtype = reduce_dtype or grad_dtype
+    reduce_dtype = reduce_dtype or unsharded_grads[0].dtype
     (predivide_factor, postdivide_factor, reduce_scatter_op, all_reduce_op) = (
         _get_gradient_divide_factors(
             reduce_scatter_group,
@@ -684,15 +689,15 @@ def foreach_reduce(
 
     with device_handle.stream(post_reduce_stream):
         _div_if_needed(reduce_output, postdivide_factor)
-        # Rebinds to a new orig_dtype tensor when reduce_dtype !=
-        # orig_dtype. Do NOT rely on this stream-scoped rebind to manage
-        # the old reduce-dtype buffer's lifetime: the rebind orders the
-        # cast before the free-event on AR stream, but the freed block
-        # lands on the caching allocator's free list and the next layer's
-        # RS on RS stream can reuse it without waiting for this layer's
+        # Rebinds to a new orig_dtype tensor when every parameter has the same
+        # original dtype and it differs from reduce_dtype. Do NOT rely on this
+        # stream-scoped rebind to manage the old reduce-dtype buffer's lifetime:
+        # the rebind orders the cast before the free-event on AR stream, but the
+        # freed block lands on the caching allocator's free list and the next
+        # layer's RS on RS stream can reuse it without waiting for this layer's
         # AR to finish. The reduce-dtype buffer is held across layers by
-        # FSDPParamGroup._all_reduce_state (captured above) to prevent
-        # this. See PR #140044, regression test PR #180900.
+        # FSDPParamGroup._all_reduce_state (captured above) to prevent this. See
+        # PR #140044, regression test PR #180900.
         reduce_output = _to_dtype_if_needed(reduce_output, orig_dtype)
         # View out and accumulate sharded gradients
         flat_grad_offset = 0  # [0, reduce_scatter_output_numel - 1]
@@ -707,6 +712,10 @@ def foreach_reduce(
                 stride=fsdp_param.contiguous_sharded_stride,
                 storage_offset=flat_grad_offset,
             )
+            if orig_dtype is None:
+                new_sharded_grad = _to_dtype_if_needed(
+                    new_sharded_grad, fsdp_param.orig_dtype
+                )
             to_accumulate_grad = fsdp_param.sharded_param.grad is not None
             if fsdp_param.offload_to_cpu:
                 # Only overlap the D2H copy (copying to pinned memory) when no
@@ -781,9 +790,49 @@ def foreach_reduce_scatter_copy_in(
     world_size: int,
 ) -> None:
     reduce_scatter_input = reduce_scatter_input.view(world_size, -1)
-    torch.ops.fsdp.chunk_cat(
-        unsharded_grads, dim=0, num_chunks=world_size, out=reduce_scatter_input
-    )
+    if len({grad.dtype for grad in unsharded_grads}) == 1:
+        torch.ops.fsdp.chunk_cat(
+            unsharded_grads, dim=0, num_chunks=world_size, out=reduce_scatter_input
+        )
+        return
+
+    # CUDA foreach-copy requires a uniform source dtype for its fused path.
+    copy_groups: dict[
+        torch.dtype, tuple[list[torch.Tensor], list[torch.Tensor]]
+    ] = {}
+    padding_outputs: list[torch.Tensor] = []
+    output_offset = 0
+    for grad in unsharded_grads:
+        padded_size = _get_dim0_padded_size(grad.size(), world_size)
+        padded_chunk_numel = padded_size.numel() // world_size
+        for rank, input_chunk in enumerate(
+            _chunk_with_empty(grad, world_size, dim=0)
+        ):
+            output_chunk = reduce_scatter_input[rank].narrow(
+                0, output_offset, padded_chunk_numel
+            )
+            input_numel = input_chunk.numel()
+            if input_numel > 0:
+                copy_output = output_chunk.narrow(0, 0, input_numel).view(
+                    input_chunk.shape
+                )
+                if input_chunk.is_contiguous():
+                    outputs, inputs = copy_groups.setdefault(grad.dtype, ([], []))
+                    outputs.append(copy_output)
+                    inputs.append(input_chunk)
+                else:
+                    copy_output.copy_(input_chunk)
+            padding_numel = padded_chunk_numel - input_numel
+            if padding_numel > 0:
+                padding_outputs.append(
+                    output_chunk.narrow(0, input_numel, padding_numel)
+                )
+        output_offset += padded_chunk_numel
+
+    for outputs, inputs in copy_groups.values():
+        torch._foreach_copy_(outputs, inputs)
+    if padding_outputs:
+        torch._foreach_zero_(padding_outputs)
 
 
 def _get_all_gather_input_metadatas(
