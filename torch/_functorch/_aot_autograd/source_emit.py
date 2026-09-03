@@ -80,8 +80,31 @@ def _emit_importable(obj: Any, imports: set[str]) -> str:
             f"compile_to_python cannot reference {qualname} from {module}: it does "
             "not round-trip to the same object."
         )
+    # Anything AOTAutograd re-exports on its stable surface is referenced from
+    # there (by identity of the root object, so ``Cls.staticmethod`` routes
+    # through the re-exported ``Cls``), never by its internal module path.
+    root_name, _, attr_path = qualname.partition(".")
+    root = getattr(importlib.import_module(module), root_name, None)
+    exported = _standalone_runtime_exports().get(id(root))
+    if exported is not None:
+        imports.add(f"{_STANDALONE_RUNTIME_IMPORT} {exported}")
+        return f"{exported}.{attr_path}" if attr_path else exported
     imports.add(f"import {module}")
     return f"{module}.{qualname}"
+
+
+_STANDALONE_RUNTIME_IMPORT = (
+    "from torch._functorch._aot_autograd.standalone_runtime import"
+)
+
+
+def _standalone_runtime_exports() -> dict[int, str]:
+    # Lazy so that importing source_emit on its own does not pull in
+    # standalone_runtime's torch._dynamo import chain; nothing needs the table
+    # before an object is actually emitted.
+    from . import standalone_runtime as rt
+
+    return {id(getattr(rt, name)): name for name in rt.__all__}
 
 
 def _reject_shared_mutable(obj: Any, _seen: set[_ObjId]) -> None:

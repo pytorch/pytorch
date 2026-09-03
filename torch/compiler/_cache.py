@@ -3,7 +3,7 @@ import dataclasses
 import logging
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from collections.abc import Generator
+from collections.abc import Generator, Iterable
 from contextlib import contextmanager
 from itertools import chain
 from typing import Any
@@ -314,6 +314,31 @@ class CacheArtifactManager:
             return None
 
         return artifacts
+
+    @staticmethod
+    def merge(serialized_artifacts: Iterable[bytes | None]) -> bytes | None:
+        """Combine serialized cache bundles, deduplicating identical artifacts."""
+        merged: CacheArtifactsResult = defaultdict(list)
+        seen: OrderedSet[CacheArtifact] = OrderedSet()
+        for serialized in serialized_artifacts:
+            if serialized is None:
+                continue
+            artifacts = CacheArtifactManager.deserialize(serialized)
+            if artifacts is None:
+                # The cache is only an accelerator; drop the unreadable bundle
+                # (deserialize already logged it) and keep the others.
+                continue
+            for artifact_type, values in artifacts.items():
+                for artifact in values:
+                    if artifact in seen:
+                        continue
+                    merged[artifact_type].append(artifact)
+                    seen.add(artifact)
+        if not merged:
+            return None
+        serializer = AppendingByteSerializer(serialize_fn=_serialize_single_cache)
+        serializer.extend(merged.items())
+        return serializer.to_bytes()
 
     @staticmethod
     def populate_caches(artifacts: CacheArtifactsResult) -> CacheInfo:
