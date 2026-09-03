@@ -9,7 +9,11 @@
 #define NCCL_HAS_SYMMEM_SUPPORT
 #endif
 
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
+// 2.28.4 is the first release with the usable symmetric-memory device API: the
+// device-side LSA barrier (ncclLsaBarrierSession) landed in 2.28.4, alongside
+// ncclGetLsaPointer and the device communicator. Earlier 2.28.x ship an
+// incomplete nccl_device.h, so gate on 2.28.4.
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 4)
 #if !defined(USE_ROCM)
 #define NCCL_HAS_SYMMEM_DEVICE_SUPPORT
 #include <nccl_device.h>
@@ -34,5 +38,16 @@
 #if defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT) && \
     NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 7)
 #define NCCL_DEVICE_HAS_REDUCE_COPY
+#endif
+
+// Host-side CFT (Compute Fabric Transport) logical-endpoint queries:
+// ncclGetPeerDeviceLeInfo / ncclGetMultimemDeviceLeInfo. They resolve a window
+// offset into the `(leId, leOffset)` pair that the device-side `ncclCft`
+// put/get/red family consumes, so a custom kernel can drive CFT without
+// building a ncclDevComm. The LEs only exist if the communicator was created
+// with `ncclConfig_t::hostCftMode` enabled (see NCCL_HAS_HOST_CFT_MODE).
+#if defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT) && \
+    NCCL_VERSION_CODE >= NCCL_VERSION(2, 31, 2)
+#define NCCL_HAS_HOST_CFT
 #endif
 #endif // USE_NCCL

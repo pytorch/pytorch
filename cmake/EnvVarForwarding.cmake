@@ -54,6 +54,7 @@
 #   USE_ROCM_KERNEL_ASSERT=1 enables kernel assert on ROCm
 #   USE_ROCM_CK_GEMM=1       builds the CK GEMM backend on ROCm
 #   USE_ROCM_CK_SDPA=1       builds the CK SDPA backend on ROCm
+#   USE_ROCM_CK_SDPA_GFX12=1 enables CK SDPA for targeted gfx12 architectures
 #   USE_LAYERNORM_FAST_RECIPROCAL  fast reciprocals for layer norm (default on)
 #   USE_MIMALLOC             static-link mimalloc into c10 (default: Windows/AArch64)
 #   USE_CUSTOM_DEBINFO="a.cpp;b.cpp"  build debug info only for the listed files
@@ -105,6 +106,8 @@
 #                            debug flags (may OOM nvcc). This was always a CMake
 #                            option; the setup.py comment that listed it as an env
 #                            var was inaccurate -- it was never forwarded.
+#   CUDA_DEVICE_DEBUG        build CUDA device code with -g -G (read in
+#                            cmake/public/cuda.cmake; no effect on MSVC)
 #
 # Removed with setup.py (no longer available):
 #   CMAKE_FRESH              force a fresh configure. Delete the build/ directory
