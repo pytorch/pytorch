@@ -886,6 +886,10 @@ class _HolderWithGenerators:
         self.cfg = {"a": 1}
 
 
+class _PrecompileLockHolder:
+    """Local classes cannot be packaged, so the lock fixture lives here."""
+
+
 class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
     # Pickler-level: these drive GuardsStatePickler directly rather than
     # through a capture, so none of TestGuardSerialization's setup applies.
@@ -1054,6 +1058,25 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertFalse(_cell_is_empty(out.__closure__[0]))
         self.assertIsNone(out())
 
+    def test_retained_grad_non_leaf_survives_pickle(self):
+        # .grad is dropped from the pickle for plain non-leafs (reading it
+        # warns and is None), but a RETAINED-grad non-leaf -- which torch.optim
+        # explicitly permits as a param -- has a real .grad that a guard can
+        # chain through; dropping it breaks such a load with an AttributeError.
+        base = torch.randn(4, requires_grad=True)
+        x = base * 1
+        x.retain_grad()
+        x.sum().backward()
+        grad = x.grad
+        self.assertIsNotNone(grad)
+        buf = io.BytesIO()
+        gtv = {id(x): x, id(grad): grad}
+        pickler = GuardsStatePickler(gtv, {}, {}, buf)
+        pickler.dump(x)
+        out = pickle.loads(buf.getvalue())
+        self.assertIsNotNone(out.grad)
+        self.assertEqual(out.grad.shape, grad.shape)
+
     def test_function_reaching_itself_through_its_dict(self):
         # wrapper.me = wrapper, and wrapper is its own free variable; identity
         # has to survive the round trip through both.
@@ -1206,6 +1229,35 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             _offending_value_path(_Exploding(), object()),
             "",
         )
+
+    def test_a_served_handle_does_not_lose_the_frame(self):
+        # The pruning walks the top-level leaves of local_scope; the pickler
+        # walks everything under them. An artifact a previous load installed on
+        # a guarded object is therefore never pruned, and walking into it hits
+        # the session's condition variable -- "cannot pickle '_thread.RLock'",
+        # frame lost to eager. Seen on a real capture, where the path was
+        # local_scope['pipeline']._precompiled_fwd_loss_bwd._compiled._inner
+        # ._state._lock: precompile's own, and nothing the caller could change.
+        from torch._dynamo.guards import _is_precompile_handle
+        from torch._precompile import PrecompiledCallable
+
+        handle = PrecompiledCallable.__new__(PrecompiledCallable)
+        handle._state = threading.Condition()
+        self.assertTrue(_is_precompile_handle(handle))
+        # Narrow on purpose: a lock in the CALLER's model still fails loudly
+        # with its path named, which the offending-value tests depend on.
+        self.assertFalse(_is_precompile_handle(threading.RLock()))
+
+        holder = _PrecompileLockHolder()
+        holder.installed = handle
+        holder.scale = 2.0
+
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump(holder)
+        back = pickle.loads(buf.getvalue())
+        self.assertIsInstance(back.installed, _Missing)
+        # Everything around it survives, which is the point: the frame is kept.
+        self.assertEqual(back.scale, 2.0)
 
 
 # NB config.patch subclasses the class it decorates, so it has to go outermost:
@@ -1506,6 +1558,47 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ref, loaded, {"x": torch.randn(2, dtype=torch.float64)}, False
         )
         self._test_check_fn(ref, loaded, {"x": None}, False)
+
+    def test_tensor_subclass_requires_grad_survives(self):
+        # A wrapper subclass is rebuilt by __tensor_unflatten__, which derives
+        # the outer's requires_grad from its inners -- so a subclass carrying
+        # autograd metadata of its own reloaded as requires_grad=False and the
+        # rebuilt guard then rejected every training input, permanently.
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        def f(x: torch.Tensor):
+            return x + 1
+
+        tt = TwoTensor(torch.randn(3), torch.randn(3)).requires_grad_(True)
+        self.assertFalse(tt.a.requires_grad)
+        ref, loaded = self._test_serialization("TENSOR_MATCH", f, tt)
+        self._test_check_fn(ref, loaded, {"x": tt}, True)
+        self._test_check_fn(
+            ref, loaded, {"x": TwoTensor(torch.randn(3), torch.randn(3))}, False
+        )
+
+    def test_tensor_match_through_a_python_attribute(self):
+        # A tensor is reconstructed from its metadata, which does not include a
+        # plain Python attribute someone assigned onto it -- so a guard whose
+        # SOURCE traverses one could not be rebuilt at all, and the whole state
+        # failed to load with AttributeError.
+        def f(x: torch.Tensor):
+            return x + x.companion
+
+        x = torch.ones(2)
+        x.companion = torch.ones(2)
+        ref, loaded = self._test_serialization("TENSOR_MATCH", f, x)
+
+        def with_companion(companion):
+            t = torch.randn(2)
+            t.companion = companion
+            return {"x": t}
+
+        self._test_check_fn(ref, loaded, with_companion(torch.randn(2)), True)
+        self._test_check_fn(ref, loaded, with_companion(torch.randn(3)), False)
+        self._test_check_fn(
+            ref, loaded, with_companion(torch.randn(2, dtype=torch.float64)), False
+        )
 
     def test_not_present_in_generic_dict(self):
         class Module(torch.nn.Module):

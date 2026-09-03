@@ -263,7 +263,7 @@ class FunctionPicklerBase(pickle.Pickler):
         # gets an empty scope: a guard never calls the rebuilt function.
         f_globals: dict[str, Any]
         try:
-            f_globals = importlib.import_module(module).__dict__
+            f_globals: dict[str, Any] = importlib.import_module(module).__dict__
         except ImportError:
             f_globals = {}
         return cls._build_function(f_globals, module, code, qualname, name, closure)
