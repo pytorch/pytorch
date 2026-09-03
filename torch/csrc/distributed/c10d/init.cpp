@@ -1009,7 +1009,19 @@ This class does not support ``__members__`` property.)");
             }
             return py::cast(preMulSupplement->tensor_factor);
           },
-          R"(The factor of the PREMUL_SUM ReduceOp.)");
+          R"(The factor of the PREMUL_SUM ReduceOp.)")
+      .def(
+          "boxed",
+          [](const ::c10d::ReduceOp& self) {
+            return torch::jit::toPyObject(
+                c10::IValue(c10::make_intrusive<::c10d::ReduceOp>(self)));
+          })
+      .def_static("unbox", [](py::object obj) {
+        auto typePtr =
+            torch::getCustomClass("__torch__.torch.classes.c10d.ReduceOp");
+        auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
+        return *ivalue.toCustomClass<::c10d::ReduceOp>();
+      });
 
   py::enum_<::c10d::ReduceOp::RedOpType>(reduce_op, "RedOpType")
       .value("SUM", ::c10d::ReduceOp::RedOpType::SUM)

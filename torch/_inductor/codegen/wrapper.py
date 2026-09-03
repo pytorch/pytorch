@@ -2582,6 +2582,18 @@ class PythonWrapperCodegen(CodeGen):
                 wrapper_name = kernel
             self.writeline(f"{wrapper_name}({', '.join(args)})")
 
+    def _tma_descriptor_tensor_ref(self, desc, in_autotune_block):
+        """Reference to the descriptor's source tensor.
+
+        The compile-time autotune block is Python even when the wrapper emits C++,
+        and it already materializes an example tensor in the descriptor tensor's
+        own layout. Referring to that buffer by name keeps the block valid Python;
+        codegen_reference() would emit a C++ reinterpret (e.g. a `0L` literal).
+        """
+        if in_autotune_block:
+            return desc.get_tensor().get_name()
+        return desc.tensor.codegen_reference()
+
     def _generate_tma_descriptor_call_experimental(self, desc, apply_size_hints=False):
         dims = desc.dims
         block_dims = desc.block_dims
@@ -2589,7 +2601,7 @@ class PythonWrapperCodegen(CodeGen):
             dims = V.graph.sizevars.optimization_hint(dims)
             block_dims = V.graph.sizevars.optimization_hints(block_dims)
 
-        ptr = f"{desc.tensor.codegen_reference()}.data_ptr()"
+        ptr = f"{self._tma_descriptor_tensor_ref(desc, apply_size_hints)}.data_ptr()"
         # Explicitly call the Python version of val_to_arg_str
         dims = ", ".join(PythonWrapperCodegen.val_to_arg_str(self, dim) for dim in dims)
         block_dims = ", ".join(
@@ -2609,7 +2621,8 @@ class PythonWrapperCodegen(CodeGen):
 
         prefix = "triton.tools.tensor_descriptor.TensorDescriptor"
         fn = f"{prefix}.from_tensor"
-        args = f"{desc.tensor.codegen_reference()}, {block_shape}"
+        tensor_ref = self._tma_descriptor_tensor_ref(desc, apply_size_hints)
+        args = f"{tensor_ref}, {block_shape}"
         call = f"{fn}({args})"
         return call
 
