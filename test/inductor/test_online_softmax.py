@@ -703,6 +703,17 @@ class TestScalarOnlineSoftmax(TestCase):
         act_error = rmse(ref_fp64[1], act[1]).item()
         self.assertLessEqual(act_error, ref_error + 0.1)
 
+    @inductor_config.patch(strict_signed_zero=True)
+    def test_strict_signed_zero_stays_vector(self):
+        # The scalar path's signed zero depends on the autotuned block size, so
+        # strict mode keeps the vector path and matches a plain amax bitwise.
+        x = torch.zeros(2, 8193, device=GPU_TYPE)
+        x[0, 1::2] = -0.0
+        x[1, ::2] = -0.0
+        ref_max = torch.compile(lambda t: t.amax(dim=-1, keepdim=True))(x)
+        act, _ = self.check_codegen(_prepare_softmax, x, -1, uses_scalar=False)
+        self.assertEqual(ref_max.view(torch.int32), act[0].view(torch.int32))
+
     @inductor_config.patch({"triton.max_tiles": 3, "triton.prefer_nd_tiling": True})
     def test_3d_tiling(self):
         def f(x, y):

@@ -5360,6 +5360,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # Split-reduction combines pass partial (max, sum) tuples.
             isinstance(value, tuple)
             or not config.triton.scalar_online_softmax_accumulators
+            # Which signed zero wins a strict max depends on the reduction
+            # block, so strict mode keeps the single-config vector path.
+            or config.strict_signed_zero
             or self.is_combo_kernel
             or self.cooperative_reduction
             # Nested and sub-parent reductions emit extra nodes into the grid.
@@ -7298,8 +7301,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "num_load": self.num_load,
             "num_store": self.num_store,
             "num_reduction": self.num_reduction,
-            # Triton will not accept an OrderedSet for autotune_hints
-            "autotune_hints": set(self.autotune_hints),  # noqa: set_linter
+            # Sorted so the generated source does not depend on set ordering.
+            "autotune_hints": tuple(
+                sorted(self.autotune_hints, key=lambda hint: hint.value)
+            ),
         }
         if self.mix_order_reduction:
             out["RSPLIT_SIZE"] = self.rsplit_size
