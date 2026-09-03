@@ -81,7 +81,8 @@ __global__ void multilabel_margin_loss_forward_kernel(
   // mark targets in is_target
   if (threadIdx.x == 0) {
     for (int dt = 0; dt < dim; dt++) {
-      int target_idx = target_k[dt];
+      int64_t target_idx = target_k[dt];
+      CUDA_KERNEL_ASSERT(target_idx >= -1 && target_idx < dim && "target index is out of bounds");
       if (target_idx < 0) {
         break;
       }
@@ -94,7 +95,8 @@ __global__ void multilabel_margin_loss_forward_kernel(
   accscalar_t sum = 0;
   for (int dt = 0; dt < dim; dt++) {
     // next target:
-    int target_idx = target_k[dt];
+    int64_t target_idx = target_k[dt];
+    CUDA_KERNEL_ASSERT(target_idx >= -1 && target_idx < dim && "target index is out of bounds");
     if (target_idx < 0) {
       break;
     }
@@ -164,7 +166,8 @@ __global__ void multilabel_margin_loss_backward_kernel(
   // iterate over targets
   for (int dt = 0; dt < dim; dt++) {
     // next target:
-    int target_idx = static_cast<int>(target_k[dt]);
+    int64_t target_idx = target_k[dt];
+    CUDA_KERNEL_ASSERT(target_idx >= -1 && target_idx < dim && "target index is out of bounds");
     if (target_idx < 0) {
       break;
     }
