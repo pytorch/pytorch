@@ -1174,10 +1174,6 @@ class TestOldViewOps(TestCase):
 class TestOldViewOpsDeviceType(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @skipXPUIf(
-        True,
-        "NotImplementedError with test_ravel, https://github.com/intel/torch-xpu-ops/issues/2358",
-    )
     def test_ravel(self, device):
         def _test_ravel(tensors, size, nc=False):
             for src in tensors:
