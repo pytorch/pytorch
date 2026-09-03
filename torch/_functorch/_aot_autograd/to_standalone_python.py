@@ -116,8 +116,7 @@ _COMPILE_LOCK = threading.RLock()
 # We do NOT reimplement any of this. We CAPTURE AOTAutograd's exact codegen'd wrapper
 # source together with the (pre-exec) globals dict each wrapper closed over: a
 # thread-local sink in codegen.py records one GeneratedSource per wrapper.
-# To trigger the capture we run AOTAutograd ourselves (under no_grad, the inference path --
-# see compile_to_python's ``grad_enabled`` for the one graph shape that needs grad on)
+# To trigger the capture we run AOTAutograd ourselves (under no_grad, the inference path)
 # with a capture-only inner compiler: it grabs the dense inner graph and returns a
 # placeholder callable, so AOTAutograd still codegen's the runtime-wrapper chain AROUND
 # that placeholder -- which is what the sink records. Inductor does not run in that pass;
@@ -856,25 +855,85 @@ def _graph_has_dynamic_shapes(gm: GraphModule) -> bool:
     return False
 
 
+def namespace_module_names(sources: Sequence[str]) -> list[str]:
+    """Suffix every top-level name each module DEFINES, per module.
+
+    Splicing several Inductor modules into ONE namespace is only safe if their
+    top-level names are disjoint, because the code inside a module resolves its
+    siblings as late-bound globals: a module's ``call`` looks up its kernels and
+    its ``_runtime_wrapper`` when INVOKED, not when defined. Two modules of the
+    same computation -- a forward and its backward, or two shape variants of one
+    frame -- otherwise define the same names, and the first silently runs the
+    second's code. Snapshotting each module's entry is not enough for the same
+    reason.
+
+    Rewriting is driven by AST positions rather than a text match, which is what
+    keeps three lookalikes out of it: an attribute (``runner.call`` is an
+    ``Attribute``, not a ``Name``), a nested binding (``def call`` inside
+    ``class Runner`` is not module-level), and an import (``async_compile`` is
+    both a local binding and part of ``torch._inductor.async_compile``).
+    """
+    out: list[str] = []
+    for slot, source in enumerate(sources):
+        tree = ast.parse(source)
+        imported = {
+            (alias.asname or alias.name).split(".")[0]
+            for node in tree.body
+            if isinstance(node, (ast.Import, ast.ImportFrom))
+            for alias in node.names
+        }
+        targets = _module_level_names(tree) - imported
+        if not targets:
+            out.append(source)
+            continue
+        suffix = f"_s{slot}"
+        # AST column offsets are UTF-8 byte offsets, so splice on the encoded line.
+        lines = [line.encode("utf-8") for line in source.split("\n")]
+        edits: dict[int, set[tuple[int, int, str]]] = {}
+
+        def _edit(lineno: int, begin: int, end: int, name: str) -> None:
+            edits.setdefault(lineno, set()).add((begin, end, name + suffix))
+
+        def _edit_first_match(lineno: int, begin: int, name: str) -> None:
+            # A def/class name and a global/nonlocal declaration have no Name node
+            # of their own; each is the first whole word matching ``name`` after
+            # the statement's start column.
+            found = re.search(
+                rb"\b%s\b" % re.escape(name.encode()), lines[lineno - 1][begin:]
+            )
+            if found is not None:
+                _edit(lineno, begin + found.start(), begin + found.end(), name)
+
+        for node in tree.body:
+            if (
+                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                and node.name in targets
+            ):
+                _edit_first_match(node.lineno, node.col_offset, node.name)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name):
+                if node.id in targets and node.end_col_offset is not None:
+                    _edit(node.lineno, node.col_offset, node.end_col_offset, node.id)
+            elif isinstance(node, (ast.Global, ast.Nonlocal)):
+                for name in node.names:
+                    if name in targets:
+                        _edit_first_match(node.lineno, node.col_offset, name)
+        for lineno, spans in edits.items():
+            line = lines[lineno - 1]
+            for begin, end, text in sorted(spans, reverse=True):
+                line = line[:begin] + text.encode("utf-8") + line[end:]
+            lines[lineno - 1] = line
+        out.append(b"\n".join(lines).decode("utf-8"))
+    return out
+
+
 def compile_to_python(
     gm: GraphModule,
     example_inputs: Sequence[Any],
     *,
     options: dict[str, Any] | None = None,
-    grad_enabled: bool = False,
 ) -> tuple[str, bytes | None]:
     """Compile ``gm`` to ``(python_code, cache)``; see the module docstring.
-
-    ``grad_enabled`` runs the AOTAutograd capture pass under ``enable_grad`` instead of the
-    default ``no_grad``. Pass it ONLY for a graph that performs autograd INTERNALLY -- a
-    Dynamo graph captured with ``trace_autograd_ops``, whose traced ``torch.autograd.grad``
-    call needs a live autograd graph to differentiate and otherwise fails the capture pass
-    with "element 0 of tensors does not require grad". Such a graph is still an INFERENCE
-    graph at the AOT boundary (its backward lives inside the traced call, so AOTAutograd
-    still emits exactly one forward module). Do NOT pass it for an ordinary graph whose
-    INPUTS require grad: ``no_grad`` is what pins AOTAutograd to the inference path there,
-    and enabling grad would make it emit a joint forward+backward the standalone composer
-    cannot compose.
 
     THREADING: serialized by a process-global lock (``_COMPILE_LOCK``). The wrapper-source
     capture is thread-local, but the AOTAutograd pass and the inner inductor compile both
@@ -970,7 +1029,7 @@ def compile_to_python(
             "from_graph" if _graph_has_dynamic_shapes(gm) else "from_example_inputs"
         )
         with (
-            torch.enable_grad() if grad_enabled else torch.no_grad(),
+            torch.no_grad(),
             _standalone_context(gm, shapes_mode, aot=False),
             capture_generated_sources(captured),
         ):
