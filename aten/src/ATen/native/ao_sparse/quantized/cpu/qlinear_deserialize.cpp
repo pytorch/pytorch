@@ -98,8 +98,8 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::deserialize(
     weight_origin = at::_empty_affine_quantized(
         {output_channels, input_channels},
         at::device(c10::kCPU).dtype(c10::kQInt8),
-        std::get<weight_scales_index>(serialized).data_ptr<float>()[0],
-        weight_zero_points.data_ptr<int8_t>()[0]);
+        std::get<weight_scales_index>(serialized).const_data_ptr<float>()[0],
+        weight_zero_points.const_data_ptr<int8_t>()[0]);
   } else if (q_scheme == c10::kPerChannelAffine) {
     weight_origin = at::_empty_per_channel_affine_quantized(
         {output_channels, input_channels},
@@ -132,7 +132,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::deserialize(
   // Unpack as non backend specific untiled BCSR then pack as Fbgemm tiled BCSR
   // because untiled Fbgemm BCSR currently doesn't exist
   unpack_bcsr(
-      reinterpret_cast<int8_t*>(weight_origin.data_ptr<c10::qint8>()),
+      reinterpret_cast<int8_t*>(weight_origin.mutable_data_ptr<c10::qint8>()),
       AT_DISPATCH_INTEGRAL_TYPES(
           row_block_indices.scalar_type(),
           "packed_linear_weight_fbgemm_setup_bcsr",
@@ -148,7 +148,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::deserialize(
       input_channels,
       out_features_block_size,
       in_features_block_size,
-      weight_zero_points.data_ptr<int8_t>(),
+      weight_zero_points.const_data_ptr<int8_t>(),
       q_scheme == c10::kPerTensorAffine);
 
   return PackedLinearWeight::prepack(
@@ -297,10 +297,10 @@ PackedLinearWeightQnnp::PackedLinearWeightQnnp(
         using unsigned_t = UnsignedIndicesTypeTrait<scalar_t>::t;
         return qnnpack::generateBlockCSRMatrix<unsigned_t>(
             reinterpret_cast<unsigned_t*>(
-                deserialized_bcsr_col_block_indices_.data_ptr<scalar_t>()),
+                deserialized_bcsr_col_block_indices_.mutable_data_ptr<scalar_t>()),
             reinterpret_cast<unsigned_t*>(
-                deserialized_bcsr_row_block_indices_.data_ptr<scalar_t>()),
-            deserialized_bcsr_weight_values_.data_ptr<uint8_t>(),
+                deserialized_bcsr_row_block_indices_.mutable_data_ptr<scalar_t>()),
+            deserialized_bcsr_weight_values_.mutable_data_ptr<uint8_t>(),
             deserialized_bcsr_col_block_indices_.numel(),
             deserialized_bcsr_row_block_indices_.numel(),
             deserialized_bcsr_weight_values_.numel(),
