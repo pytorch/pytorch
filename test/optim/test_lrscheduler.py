@@ -96,19 +96,28 @@ class TestLRScheduler(TestCase):
             self.step_kwargs.append(kwargs)
             super().step(epoch)
 
-    class MetricsUpdateScheduler(LRScheduler):
-        """A scheduler using the metrics-aware private update hook."""
+    class LegacyUpdateScheduler(LRScheduler):
+        """A third-party scheduler overriding the previous private hook."""
+
+        def get_lr(self):
+            return [group["lr"] for group in self.optimizer.param_groups]
+
+        def _update_lr(self, epoch=None):
+            super()._update_lr(epoch)
+
+    class KwargsUpdateScheduler(LRScheduler):
+        """A third-party scheduler consuming kwargs in the update hook."""
 
         def __init__(self, optimizer):
-            self.metrics = []
+            self.update_kwargs = []
             super().__init__(optimizer)
 
         def get_lr(self):
             return [group["lr"] for group in self.optimizer.param_groups]
 
-        def _update_lr(self, epoch=None, *, metrics=None):
-            self.metrics.append(metrics)
-            super()._update_lr(epoch, metrics=metrics)
+        def _update_lr(self, epoch=None, **kwargs):
+            self.update_kwargs.append(kwargs)
+            super()._update_lr(epoch)
 
     exact_dtype = True
 
@@ -765,12 +774,41 @@ class TestLRScheduler(TestCase):
         with self.assertWarnsRegex(FutureWarning, "PlateauLR"):
             ReduceLROnPlateau(self.opt)
 
-    def test_lrscheduler_forwards_metrics_to_update_hook(self):
-        scheduler = self.MetricsUpdateScheduler(self.opt)
+    def test_lrscheduler_kwargs_support_legacy_update_hook(self):
+        scheduler = self.LegacyUpdateScheduler(self.opt)
         self.opt.step()
         scheduler.step(metrics=1.0)
 
-        self.assertEqual(scheduler.metrics, [None, 1.0])
+        self.assertEqual(scheduler.last_epoch, 1)
+
+    def test_sequentiallr_kwargs_support_legacy_update_hook_at_handoff(self):
+        legacy = self.LegacyUpdateScheduler(self.opt)
+        scheduler = SequentialLR(
+            self.opt,
+            schedulers=[ConstantLR(self.opt), legacy],
+            milestones=[1],
+        )
+
+        self.opt.step()
+        scheduler.step(metrics=1.0)
+
+        self.assertEqual(legacy.last_epoch, 0)
+
+    def test_kwargs_reach_update_hook_directly_and_at_handoff(self):
+        direct = self.KwargsUpdateScheduler(self.opt)
+        self.opt.step()
+        direct.step(metrics=1.0)
+        self.assertEqual(direct.update_kwargs[-1], {"metrics": 1.0})
+
+        handoff = self.KwargsUpdateScheduler(self.opt)
+        scheduler = SequentialLR(
+            self.opt,
+            schedulers=[ConstantLR(self.opt), handoff],
+            milestones=[1],
+        )
+        self.opt.step()
+        scheduler.step(metrics=2.0)
+        self.assertEqual(handoff.update_kwargs[-1], {"metrics": 2.0})
 
     # PlateauLR is ReduceLROnPlateau's composable replacement (properly
     # implements get_lr(), so it can be used inside SequentialLR/
@@ -1248,14 +1286,14 @@ class TestLRScheduler(TestCase):
         with self.assertRaisesRegex(ValueError, "requires the metric it monitors"):
             scheduler.step(metric=1.0)
 
-    def test_chained_scheduler_forwards_metrics_to_update_hook(self):
-        child = self.MetricsUpdateScheduler(self.opt)
+    def test_chained_scheduler_forwards_kwargs_to_update_hook(self):
+        child = self.KwargsUpdateScheduler(self.opt)
         scheduler = ChainedScheduler([child], optimizer=self.opt)
 
         self.opt.step()
         scheduler.step(metrics=1.0)
 
-        self.assertEqual(child.metrics, [None, 1.0])
+        self.assertEqual(child.update_kwargs[-1], {"metrics": 1.0})
 
     def test_chained_scheduler_supports_duck_typed_children(self):
         class DuckTypedScheduler:

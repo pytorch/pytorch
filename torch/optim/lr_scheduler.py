@@ -94,17 +94,11 @@ def _update_param_group_val(
         param_group[key] = val
 
 
-def _step_accepts_kwargs(scheduler: LRScheduler) -> bool:
-    """Whether ``scheduler.step`` collects arbitrary keyword arguments.
-
-    Every scheduler in this module does. A third-party scheduler still written
-    against the older API, ``def step(self)`` or ``def step(self, epoch=None)``,
-    does not, and this function helps us tell them apart.
-    """
-    # The bound method, so that `self` is not one of the parameters.
+def _accepts_kwargs(method: Callable[..., Any]) -> bool:
+    """Whether a bound method collects arbitrary keyword arguments."""
     return any(
         parameter.kind is inspect.Parameter.VAR_KEYWORD
-        for parameter in inspect.signature(scheduler.step).parameters.values()
+        for parameter in inspect.signature(method).parameters.values()
     )
 
 
@@ -297,7 +291,10 @@ class LRScheduler:
         self._step_count += 1
         if epoch is not None:
             warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning, stacklevel=2)
-        self._update_lr(epoch, **kwargs)
+        if kwargs and _accepts_kwargs(self._update_lr):
+            self._update_lr(epoch, **kwargs)
+        else:
+            self._update_lr(epoch)
 
     def _update_lr(self, epoch: int | None = None, **kwargs: Any) -> None:
         with _enable_get_lr_call(self):
@@ -1185,7 +1182,7 @@ class SequentialLR(LRScheduler):
                 f"number of milestones to be equal to {len(milestones)}"
             )
         self._schedulers = schedulers
-        self._schedulers_accept_kwargs = [_step_accepts_kwargs(s) for s in schedulers]
+        self._schedulers_accept_kwargs = [_accepts_kwargs(s.step) for s in schedulers]
         self._milestones = milestones
         self.last_epoch = last_epoch + 1
         self.optimizer = optimizer
@@ -1228,7 +1225,10 @@ class SequentialLR(LRScheduler):
         idx = bisect_right(self._milestones, self.last_epoch)
         scheduler = self._schedulers[idx]
         if idx > 0 and self._milestones[idx - 1] == self.last_epoch:
-            scheduler._update_lr(0, **kwargs)
+            if kwargs and _accepts_kwargs(scheduler._update_lr):
+                scheduler._update_lr(0, **kwargs)
+            else:
+                scheduler._update_lr(0)
         else:
             if self._schedulers_accept_kwargs[idx]:
                 scheduler.step(**kwargs)
@@ -1588,7 +1588,7 @@ class ChainedScheduler(LRScheduler):
                 )
         self._schedulers = schedulers
         self._schedulers_accept_kwargs = [
-            _step_accepts_kwargs(scheduler) for scheduler in schedulers
+            _accepts_kwargs(scheduler.step) for scheduler in schedulers
         ]
         self.optimizer = optimizer
         self._last_lr = _param_groups_val_list(self._schedulers[-1].optimizer, "lr")
