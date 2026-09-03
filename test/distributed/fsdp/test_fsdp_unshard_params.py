@@ -21,9 +21,7 @@ from torch.distributed.fsdp._flat_param import FlatParameter
 from torch.distributed.fsdp.fully_sharded_data_parallel import FLAT_PARAM
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
@@ -779,8 +777,14 @@ class TestUnshardParamsErrors(TestUnshardParamsBase):
                 pass
 
 
-instantiate_device_type_tests(TestUnshardParams, globals(), except_for="cpu")
-instantiate_device_type_tests(TestUnshardParamsNoShard, globals(), except_for="cpu")
-instantiate_device_type_tests(TestUnshardParamsErrors, globals(), except_for="cpu")
+instantiate_device_type_tests(
+    TestUnshardParams, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestUnshardParamsNoShard, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestUnshardParamsErrors, globals(), except_for="cpu", allow_xpu=True
+)
 if __name__ == "__main__":
     run_tests()
